@@ -1,3 +1,4 @@
+// Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 import {
   DatasetMetadata,
   fetchParquetFile,
@@ -5,6 +6,7 @@ import {
   readParquetAsObjects,
 } from "@/utils/parquetUtils";
 import { pick } from "@/utils/pick";
+import { authHeaders } from "@/utils/auth";
 import {
   getDatasetVersionAndInfo,
   buildVersionedUrl,
@@ -349,7 +351,7 @@ export async function getEpisodeData(
 
     console.time(`[perf] getEpisodeData (${version})`);
     const [result, progressBuilder, stats] = await Promise.all([
-      version === "v3.0"
+      version.startsWith("v3.")
         ? getEpisodeDataV3(repoId, version, info, episodeId)
         : getEpisodeDataV2(repoId, version, info, episodeId),
       loadEpisodeProgressGroup(repoId, version, episodeId),
@@ -426,7 +428,7 @@ export async function getAdjacentEpisodesVideoInfo(
         try {
           let videosInfo: VideoInfo[] = [];
 
-          if (version === "v3.0") {
+          if (version.startsWith("v3.")) {
             const episodeMetadata = await loadEpisodeMetadataV3Simple(
               repoId,
               version,
@@ -1583,7 +1585,7 @@ export function computeColumnMinMax(
 }
 
 /**
- * Load all episode lengths from the episodes metadata parquet files (v3.0).
+ * Load episode lengths from v2 JSONL or all v3 metadata parquet chunks.
  * Returns min/max/mean/median/std and a histogram, or null if unavailable.
  */
 export async function loadAllEpisodeLengthsV3(
@@ -1593,26 +1595,38 @@ export async function loadAllEpisodeLengthsV3(
 ): Promise<EpisodeLengthStats | null> {
   try {
     const allEpisodes: { index: number; length: number }[] = [];
-    let fileIndex = 0;
-    const chunkIndex = 0;
-
-    while (true) {
-      const path = `meta/episodes/chunk-${chunkIndex.toString().padStart(3, "0")}/file-${fileIndex.toString().padStart(3, "0")}.parquet`;
-      const url = buildVersionedUrl(repoId, version, path);
-      try {
-        const buf = await fetchParquetFile(url);
-        const rows = await readParquetAsObjects(buf, []);
-        if (rows.length === 0 && fileIndex > 0) break;
+    if (!Number.isFinite(fps) || fps <= 0) return null;
+    const append = (index: number, length: number) => {
+      if (
+        Number.isInteger(index) &&
+        index >= 0 &&
+        Number.isInteger(length) &&
+        length >= 0
+      )
+        allEpisodes.push({ index, length });
+    };
+    if (version.startsWith("v2.")) {
+      const response = await fetch(
+        buildVersionedUrl(repoId, version, "meta/episodes.jsonl"),
+        {
+          headers: authHeaders(),
+        },
+      );
+      if (!response.ok) return null;
+      for (const line of (await response.text()).split("\n")) {
+        if (!line.trim()) continue;
+        const row = JSON.parse(line) as {
+          episode_index: number;
+          length: number;
+        };
+        append(row.episode_index, row.length);
+      }
+    } else {
+      for await (const rows of iterateEpisodeMetadataFilesV3(repoId, version)) {
         for (const row of rows) {
           const parsed = parseEpisodeRowSimple(row);
-          allEpisodes.push({
-            index: parsed.episode_index,
-            length: parsed.length,
-          });
+          append(parsed.episode_index, parsed.length);
         }
-        fileIndex++;
-      } catch {
-        break;
       }
     }
 
@@ -1735,7 +1749,7 @@ export async function loadAllEpisodeFrameInfo(
     MAX_FRAMES_OVERVIEW_EPISODES,
   );
 
-  if (version === "v3.0") {
+  if (version.startsWith("v3.")) {
     for await (const rows of iterateEpisodeMetadataFilesV3(repoId, version)) {
       for (const row of rows) {
         const epIdx = Number(row["episode_index"] ?? 0);
@@ -1905,7 +1919,7 @@ export async function loadCrossEpisodeActionVariance(
   };
   const allEps: EpMeta[] = [];
 
-  if (version === "v3.0") {
+  if (version.startsWith("v3.")) {
     for await (const rows of iterateEpisodeMetadataFilesV3(repoId, version)) {
       for (const row of rows) {
         const parsed = parseEpisodeRowSimple(row);
@@ -1950,7 +1964,7 @@ export async function loadCrossEpisodeActionVariance(
   const episodeActions: { index: number; actions: number[][] }[] = [];
   const episodeStates: (number[][] | null)[] = [];
 
-  if (version === "v3.0") {
+  if (version.startsWith("v3.")) {
     const byFile = new Map<string, EpMeta[]>();
     for (const ep of sampled) {
       const key = `${ep.chunkIdx}-${ep.fileIdx}`;

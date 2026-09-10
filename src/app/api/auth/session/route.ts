@@ -1,3 +1,4 @@
+// Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 import { NextRequest, NextResponse } from "next/server";
 
 // Mirror of Hugging Face's default OAuth token lifetime so the cookie expires
@@ -29,7 +30,7 @@ export async function POST(req: NextRequest) {
   // on subresource requests inside the iframe while remaining isolated to
   // the (top-frame, this-domain) pair.
   const res = new NextResponse(null, { status: 204 });
-  const isProd = process.env.NODE_ENV === "production";
+  const isProd = process.env.LEVI_SECURE_COOKIES === "1";
   res.cookies.set(COOKIE_NAME, token, {
     httpOnly: true,
     secure: isProd,
@@ -47,7 +48,7 @@ export async function DELETE() {
   // jar than the one we're trying to clear. Mirror the same attributes used
   // when setting it, with maxAge=0 so it expires immediately.
   const res = new NextResponse(null, { status: 204 });
-  const isProd = process.env.NODE_ENV === "production";
+  const isProd = process.env.LEVI_SECURE_COOKIES === "1";
   res.cookies.set(COOKIE_NAME, "", {
     httpOnly: true,
     secure: isProd,

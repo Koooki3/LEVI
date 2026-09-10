@@ -1,4 +1,6 @@
+// Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import { T } from "@/components/levi-locale";
 
 import React, {
   createContext,
@@ -9,11 +11,11 @@ import React, {
   useEffect,
 } from "react";
 
-const STORAGE_KEY = "flagged-episodes";
+const STORAGE_KEY = "levi-flags:";
 
-function saveToStorage(s: Set<number>) {
+function saveToStorage(s: Set<number>, repoId: string) {
   try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify([...s]));
+    localStorage.setItem(STORAGE_KEY + repoId, JSON.stringify([...s]));
   } catch {
     /* ignore */
   }
@@ -43,27 +45,46 @@ export function useFlaggedEpisodes() {
 
 export const FlaggedEpisodesProvider: React.FC<{
   children: React.ReactNode;
-}> = ({ children }) => {
+  repoId: string;
+}> = ({ children, repoId }) => {
   const [flagged, setFlagged] = useState<Set<number>>(new Set());
   const [hydrated, setHydrated] = useState(false);
 
-  // Hydrate from sessionStorage after mount (avoids SSR/client mismatch)
+  // Dataset-scoped local draft; explicit exports are also persisted on the backend.
   useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      if (raw) setFlagged(new Set(JSON.parse(raw) as number[]));
-    } catch {
-      /* ignore */
-    }
-    setHydrated(true);
-  }, []);
+    let cancelled = false;
+    setHydrated(false);
+    const hydrate = async () => {
+      let ids: number[] = [];
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY + repoId);
+        if (raw) ids = JSON.parse(raw);
+        else {
+          const response = await fetch(
+            `/api/levi/review?repo_id=${encodeURIComponent(repoId)}`,
+          );
+          if (response.ok) ids = (await response.json()).flagged || [];
+        }
+      } catch {
+        /* local operation remains available when backend is offline */
+      }
+      if (!cancelled) {
+        setFlagged(new Set(ids));
+        setHydrated(true);
+      }
+    };
+    void hydrate();
+    return () => {
+      cancelled = true;
+    };
+  }, [repoId]);
 
   // Only persist after hydration so the initial empty set doesn't
   // overwrite stored flags when the component remounts.
   useEffect(() => {
     if (!hydrated) return;
-    saveToStorage(flagged);
-  }, [flagged, hydrated]);
+    saveToStorage(flagged, repoId);
+  }, [flagged, hydrated, repoId]);
 
   const toggle = useCallback((id: number) => {
     setFlagged((prev) => {
@@ -99,8 +120,12 @@ export const FlaggedEpisodesProvider: React.FC<{
   );
 
   return (
-    <FlaggedEpisodesContext.Provider value={value}>
-      {children}
-    </FlaggedEpisodesContext.Provider>
+    <T>
+      {
+        <FlaggedEpisodesContext.Provider value={value}>
+          <T>{children}</T>
+        </FlaggedEpisodesContext.Provider>
+      }
+    </T>
   );
 };

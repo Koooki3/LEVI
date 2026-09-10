@@ -1,14 +1,14 @@
 {
-  "name": "lerobot-viewer",
-  "version": "0.1.0",
+  "name": "levi-workbench",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "lint": "eslint src --max-warnings 999",
+    "format": "prettier --write src next.config.ts package.json",
+    "format:check": "prettier --check src next.config.ts package.json",
     "type-check": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
     "type-check:watch": "tsc --noEmit --watch",
     "test": "bun test",
@@ -19,7 +19,7 @@
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
     "hyparquet": "^1.12.1",
-    "next": "15.3.6",
+    "next": "15.5.25",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-icons": "^5.5.0",
@@ -36,9 +36,18 @@
     "@types/react-dom": "^19",
     "@types/three": "^0.182.0",
     "eslint": "^9",
-    "eslint-config-next": "15.3.1",
+    "eslint-config-next": "15.5.25",
     "prettier": "3.8.2",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Koooki3/LEVI.git"
+  },
+  "homepage": "https://github.com/Koooki3/LEVI#readme",
+  "bugs": {
+    "url": "https://github.com/Koooki3/LEVI/issues"
   }
 }

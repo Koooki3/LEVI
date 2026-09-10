@@ -1,3 +1,5 @@
+# Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
+# LEVI modifications: v2 annotations, workspace boundaries, durable sidecars, non-overwriting complete exports.
 """LeRobot dataset visualizer — annotation backend.
 
 A small FastAPI service that lets the Next.js visualizer write the v3.1
@@ -35,6 +37,11 @@ import json
 import logging
 import os
 import shutil
+import uuid
+import re
+from levi.paths import inside, CACHE, EXPORTS, STATE
+from levi.catalog import local_root, atomic
+from levi.auth import token
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -51,8 +58,8 @@ from pydantic import BaseModel
 logger = logging.getLogger("lerobot-annotate")
 logging.basicConfig(level=logging.INFO)
 
-CACHE_ROOT = Path(os.environ.get("LEROBOT_ANNOTATE_CACHE", "/tmp/lerobot_visualizer_annotate_cache"))
-EXPORT_ROOT = Path(os.environ.get("LEROBOT_ANNOTATE_EXPORT", "/tmp/lerobot_visualizer_annotate_exports"))
+CACHE_ROOT = CACHE
+EXPORT_ROOT = EXPORTS
 
 # --- Schema mirrors src/lerobot/datasets/language.py --------------------------
 
@@ -70,7 +77,10 @@ SAY_TOOL_SCHEMA: dict[str, Any] = {
         "parameters": {
             "type": "object",
             "properties": {
-                "text": {"type": "string", "description": "The verbatim text to speak."},
+                "text": {
+                    "type": "string",
+                    "description": "The verbatim text to speak.",
+                },
             },
             "required": ["text"],
         },
@@ -154,7 +164,14 @@ class DatasetState:
 
     @property
     def annotations_path(self) -> Path:
-        return self.root / "meta" / "lerobot_annotations.json"
+        return (
+            STATE
+            / "annotations"
+            / (
+                __import__("hashlib").sha256(str(self.root).encode()).hexdigest()
+                + ".json"
+            )
+        )
 
 
 _states: dict[str, DatasetState] = {}
@@ -169,6 +186,10 @@ def _state_key(req: DatasetRef) -> str:
 
 
 def _ensure_state(req: DatasetRef) -> DatasetState:
+    if req.repo_id and req.repo_id.startswith("local/"):
+        req = DatasetRef(local_path=str(local_root(req.repo_id)))
+    if req.local_path:
+        req.local_path = str(inside(req.local_path))
     key = _state_key(req)
     if key in _states:
         return _states[key]
@@ -179,15 +200,25 @@ def _load_state(req: DatasetRef, key: str) -> DatasetState:
     if req.local_path:
         root = Path(req.local_path).expanduser().resolve()
         if not root.exists():
-            raise HTTPException(status_code=404, detail=f"Dataset path not found: {root}")
+            raise HTTPException(
+                status_code=404, detail=f"Dataset path not found: {root}"
+            )
     elif req.repo_id:
         CACHE_ROOT.mkdir(parents=True, exist_ok=True)
-        slug = req.repo_id.replace("/", "__") + (f"@{req.revision}" if req.revision else "")
-        root = CACHE_ROOT / slug
+        if not re.fullmatch(r"[\w.-]+/[\w.-]+", req.repo_id):
+            raise HTTPException(400, "Invalid Hub dataset ID")
+        revision_key = (
+            __import__("hashlib").sha256(req.revision.encode()).hexdigest()[:12]
+            if req.revision
+            else "main"
+        )
+        slug = req.repo_id.replace("/", "__") + "@" + revision_key
+        root = inside(CACHE_ROOT / slug)
         root.mkdir(parents=True, exist_ok=True)
         snapshot_download(
             req.repo_id,
             repo_type="dataset",
+            token=token(),
             revision=req.revision,
             local_dir=root,
             allow_patterns=["meta/*"],
@@ -195,22 +226,31 @@ def _load_state(req: DatasetRef, key: str) -> DatasetState:
     else:
         raise HTTPException(status_code=400, detail="need repo_id or local_path")
 
-    info_path = root / "meta" / "info.json"
+    info_path = inside("meta/info.json", root)
     if not info_path.exists():
         raise HTTPException(status_code=404, detail=f"Missing meta/info.json at {root}")
     info = json.loads(info_path.read_text())
 
     episodes_root = root / "meta" / "episodes"
-    if not episodes_root.exists():
-        raise HTTPException(status_code=404, detail="Missing meta/episodes/ directory")
-    files = sorted(episodes_root.rglob("*.parquet"))
-    if not files:
-        raise HTTPException(status_code=404, detail="No episodes parquet files found")
-    episodes_df = (
-        pd.concat([pd.read_parquet(p) for p in files], ignore_index=True)
-        .sort_values("episode_index")
-        .reset_index(drop=True)
-    )
+    if str(info.get("codebase_version", "")).startswith("v2."):
+        metadata = root / "meta/episodes.jsonl"
+        if metadata.exists():
+            episodes_df = pd.read_json(metadata, lines=True)
+        else:
+            episodes_df = pd.DataFrame(
+                {"episode_index": range(int(info["total_episodes"]))}
+            )
+    else:
+        files = sorted(episodes_root.rglob("*.parquet"))
+        if not files:
+            raise HTTPException(
+                status_code=404, detail="No episodes parquet files found"
+            )
+        episodes_df = (
+            pd.concat([pd.read_parquet(p) for p in files], ignore_index=True)
+            .sort_values("episode_index")
+            .reset_index(drop=True)
+        )
 
     state = DatasetState(
         repo_id=req.repo_id,
@@ -271,7 +311,9 @@ def _load_existing_annotations(state: DatasetState) -> None:
                                     "type": "function",
                                     "function": {
                                         "name": "say",
-                                        "arguments": {"text": str(seg["robot_utterance"])},
+                                        "arguments": {
+                                            "text": str(seg["robot_utterance"])
+                                        },
                                     },
                                 }
                             ],
@@ -289,9 +331,11 @@ def _save_annotations(state: DatasetState) -> None:
             "persistent_styles": sorted(PERSISTENT_STYLES),
             "event_styles": sorted(EVENT_ONLY_STYLES),
         },
-        "episodes": {str(ep): {"atoms": ann.atoms} for ep, ann in state.annotations.items()},
+        "episodes": {
+            str(ep): {"atoms": ann.atoms} for ep, ann in state.annotations.items()
+        },
     }
-    path.write_text(json.dumps(payload, indent=2))
+    atomic(path, payload)
 
 
 # --- Frame-timestamp helpers --------------------------------------------------
@@ -302,15 +346,20 @@ def _episode_data_path(state: DatasetState, episode_index: int) -> Path | None:
     if rows.empty:
         return None
     row = rows.iloc[0]
-    chunk_col = "data/chunk_index"
-    file_col = "data/file_index"
-    if chunk_col not in row or file_col not in row:
-        return None
-    chunk_index = int(row[chunk_col])
-    file_index = int(row[file_col])
-    rel = state.info.get("data_path") or "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet"
-    rel = rel.format(chunk_index=chunk_index, file_index=file_index)
-    full = (state.root / rel).resolve()
+    if str(state.info.get("codebase_version", "")).startswith("v2."):
+        rel = state.info["data_path"].format(
+            episode_index=episode_index,
+            episode_chunk=episode_index // int(state.info.get("chunks_size", 1000)),
+        )
+    else:
+        chunk_col, file_col = "data/chunk_index", "data/file_index"
+        if chunk_col not in row or file_col not in row:
+            return None
+        rel = (
+            state.info.get("data_path")
+            or "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet"
+        ).format(chunk_index=int(row[chunk_col]), file_index=int(row[file_col]))
+    full = inside(rel, state.root)
     if full.exists():
         return full
     if state.repo_id:
@@ -318,6 +367,7 @@ def _episode_data_path(state: DatasetState, episode_index: int) -> Path | None:
             hf_hub_download(
                 repo_id=state.repo_id,
                 repo_type="dataset",
+                token=token(),
                 filename=rel,
                 revision=state.revision,
                 local_dir=state.root,
@@ -339,7 +389,9 @@ def _frame_timestamps(state: DatasetState, episode_index: int) -> list[float]:
     except Exception as e:  # noqa: BLE001
         logger.warning("frame_ts read failed for ep %s: %s", episode_index, e)
         return []
-    ts = df.loc[df["episode_index"] == episode_index, "timestamp"].astype(float).tolist()
+    ts = (
+        df.loc[df["episode_index"] == episode_index, "timestamp"].astype(float).tolist()
+    )
     ts.sort()
     state.frame_ts_cache[episode_index] = ts
     return ts
@@ -383,7 +435,9 @@ def _coerce_existing_atom(
     }
 
 
-def _extract_existing_atoms_from_table(table: pa.Table, episode_index: int) -> list[dict[str, Any]]:
+def _extract_existing_atoms_from_table(
+    table: pa.Table, episode_index: int
+) -> list[dict[str, Any]]:
     if "episode_index" not in table.column_names:
         return []
 
@@ -436,7 +490,9 @@ def _extract_existing_atoms_from_table(table: pa.Table, episode_index: int) -> l
             row_ts = float(ts_col[row_idx]) if ts_col is not None else None
             add_many(events_col[row_idx], fallback_ts=row_ts)
 
-    atoms.sort(key=lambda a: (a["timestamp"], a.get("style") or "", a.get("role") or ""))
+    atoms.sort(
+        key=lambda a: (a["timestamp"], a.get("style") or "", a.get("role") or "")
+    )
     return atoms
 
 
@@ -452,13 +508,19 @@ VIEW_DEPENDENT_STYLES = {"vqa", "trace"}
 def _validate_atom(atom: dict[str, Any]) -> None:
     style = atom.get("style")
     if style is not None and style not in KNOWN_STYLES:
-        raise HTTPException(status_code=400, detail=f"Unknown language style: {style!r}")
+        raise HTTPException(
+            status_code=400, detail=f"Unknown language style: {style!r}"
+        )
     has_content = atom.get("content") is not None
     has_tools = bool(atom.get("tool_calls"))
     if not (has_content or has_tools):
-        raise HTTPException(status_code=400, detail="atom must have content or tool_calls")
+        raise HTTPException(
+            status_code=400, detail="atom must have content or tool_calls"
+        )
     if style is None and not has_tools:
-        raise HTTPException(status_code=400, detail="style=None requires tool_calls (speech atom)")
+        raise HTTPException(
+            status_code=400, detail="style=None requires tool_calls (speech atom)"
+        )
     camera = atom.get("camera")
     if camera is not None and not isinstance(camera, str):
         raise HTTPException(status_code=400, detail="camera must be a string or null")
@@ -468,11 +530,7 @@ def _validate_atom(atom: dict[str, Any]) -> None:
     # camera yet — the writer (or the next save round-trip) will surface
     # the missing tag. We DO reject camera-on-non-view-dependent so the
     # field can't drift onto task_aug/subtask/plan/memory rows.
-    if (
-        camera is not None
-        and style is not None
-        and style not in VIEW_DEPENDENT_STYLES
-    ):
+    if camera is not None and style is not None and style not in VIEW_DEPENDENT_STYLES:
         raise HTTPException(
             status_code=400,
             detail=f"camera must be null for style={style!r} (only vqa/trace are view-dependent)",
@@ -508,8 +566,13 @@ def _normalize_atom(atom: dict[str, Any], *, with_timestamp: bool) -> dict[str, 
 # --- Export -------------------------------------------------------------------
 
 
-def _materialize_table(table: pa.Table, atoms_by_ep: dict[int, list[dict[str, Any]]]) -> tuple[pa.Table, int, int]:
-    if "episode_index" not in table.column_names or "timestamp" not in table.column_names:
+def _materialize_table(
+    table: pa.Table, atoms_by_ep: dict[int, list[dict[str, Any]]]
+) -> tuple[pa.Table, int, int]:
+    if (
+        "episode_index" not in table.column_names
+        or "timestamp" not in table.column_names
+    ):
         raise HTTPException(
             status_code=400,
             detail="data parquet missing 'episode_index' or 'timestamp' columns",
@@ -531,7 +594,9 @@ def _materialize_table(table: pa.Table, atoms_by_ep: dict[int, list[dict[str, An
         if atoms is None:
             atoms = _extract_existing_atoms_from_table(table, int(ep_idx))
         persistent_rows: list[dict[str, Any]] = []
-        frame_ts = sorted({ts_col[i] for i in range(n_rows) if episode_col[i] == ep_idx})
+        frame_ts = sorted(
+            {ts_col[i] for i in range(n_rows) if episode_col[i] == ep_idx}
+        )
 
         buckets: dict[float, list[dict[str, Any]]] = {}
         for atom in atoms:
@@ -546,7 +611,9 @@ def _materialize_table(table: pa.Table, atoms_by_ep: dict[int, list[dict[str, An
                 ts = float(atom.get("timestamp", 0.0))
                 if frame_ts:
                     ts = _snap(ts, frame_ts)
-                buckets.setdefault(ts, []).append(_normalize_atom(atom, with_timestamp=False))
+                buckets.setdefault(ts, []).append(
+                    _normalize_atom(atom, with_timestamp=False)
+                )
 
         persistent_rows.sort(
             key=lambda r: (r["timestamp"], r.get("style") or "", r.get("role") or "")
@@ -560,9 +627,12 @@ def _materialize_table(table: pa.Table, atoms_by_ep: dict[int, list[dict[str, An
         n_persistent_total += len(persistent_rows)
         n_event_total += sum(len(v) for v in buckets.values())
 
-    per_row_persistent = [persistent_by_ep.get(episode_col[i], []) for i in range(n_rows)]
+    per_row_persistent = [
+        persistent_by_ep.get(episode_col[i], []) for i in range(n_rows)
+    ]
     per_row_events = [
-        events_by_ep_ts.get(episode_col[i], {}).get(ts_col[i], []) for i in range(n_rows)
+        events_by_ep_ts.get(episode_col[i], {}).get(ts_col[i], [])
+        for i in range(n_rows)
     ]
 
     keep_names: list[str] = []
@@ -586,7 +656,11 @@ def _materialize_table(table: pa.Table, atoms_by_ep: dict[int, list[dict[str, An
     # column is stripped in the keep-loop above.
     new_names = keep_names + [LANGUAGE_PERSISTENT, LANGUAGE_EVENTS]
     new_cols = keep_cols + [persistent_arr, events_arr]
-    return pa.Table.from_arrays(new_cols, names=new_names), n_persistent_total, n_event_total
+    return (
+        pa.Table.from_arrays(new_cols, names=new_names),
+        n_persistent_total,
+        n_event_total,
+    )
 
 
 def _materialize_tree(src: Path, dst: Path, *, force_copy: bool) -> None:
@@ -610,15 +684,25 @@ def _materialize_tree(src: Path, dst: Path, *, force_copy: bool) -> None:
     shutil.copytree(src, dst, copy_function=_copy_file)
 
 
-def _do_export(state: DatasetState, output_dir: str | None, copy_videos: bool) -> dict[str, Any]:
+def _do_export(
+    state: DatasetState, output_dir: str | None, copy_videos: bool
+) -> dict[str, Any]:
+    for folder in ("meta", "data", "videos"):
+        for entry in (state.root / folder).rglob("*"):
+            if entry.is_symlink():
+                inside(entry, state.root)
     if output_dir:
-        out_root = Path(output_dir).expanduser().resolve()
+        out_root = inside(output_dir)
     else:
         EXPORT_ROOT.mkdir(parents=True, exist_ok=True)
         name = (state.repo_id or Path(state.root).name or "dataset").replace("/", "__")
-        out_root = EXPORT_ROOT / f"{name}_annotated"
+        out_root = EXPORT_ROOT / f"{name}_annotated_{uuid.uuid4().hex[:10]}"
 
-    out_root.mkdir(parents=True, exist_ok=True)
+    if out_root.exists() or out_root.is_relative_to(state.root):
+        raise HTTPException(
+            409, "Export must use a new directory outside the source dataset"
+        )
+    out_root.mkdir(parents=True, exist_ok=False)
 
     # Copy meta/
     src_meta = state.root / "meta"
@@ -631,8 +715,16 @@ def _do_export(state: DatasetState, output_dir: str | None, copy_videos: bool) -
     info = json.loads(info_path.read_text())
     info.setdefault("features", {})
     info["features"].pop("subtask_index", None)
-    info["features"][LANGUAGE_PERSISTENT] = {"dtype": "language", "shape": [1], "names": None}
-    info["features"][LANGUAGE_EVENTS] = {"dtype": "language", "shape": [1], "names": None}
+    info["features"][LANGUAGE_PERSISTENT] = {
+        "dtype": "language",
+        "shape": [1],
+        "names": None,
+    }
+    info["features"][LANGUAGE_EVENTS] = {
+        "dtype": "language",
+        "shape": [1],
+        "names": None,
+    }
     # The ``say`` tool schema is dataset-level metadata, stored at the top of
     # info.json under "tools" (NOT as a per-frame feature). Mirrors the
     # lerobot#3471 pipeline's ``_ensure_annotation_metadata_in_info``: merge
@@ -641,7 +733,9 @@ def _do_export(state: DatasetState, output_dir: str | None, copy_videos: bool) -
     info["features"].pop("tools", None)
     existing_tools = info.get("tools") or []
     tool_names = {
-        (t.get("function") or {}).get("name") for t in existing_tools if isinstance(t, dict)
+        (t.get("function") or {}).get("name")
+        for t in existing_tools
+        if isinstance(t, dict)
     }
     if SAY_TOOL_SCHEMA["function"]["name"] not in tool_names:
         info["tools"] = [*existing_tools, SAY_TOOL_SCHEMA]
@@ -661,10 +755,11 @@ def _do_export(state: DatasetState, output_dir: str | None, copy_videos: bool) -
     # which annotates a full local snapshot in place.
     data_dir = state.root / "data"
     data_files = sorted(data_dir.rglob("*.parquet"))
-    if not data_files and state.repo_id:
+    if state.repo_id:
         snapshot_download(
             state.repo_id,
             repo_type="dataset",
+            token=token(),
             revision=state.revision,
             local_dir=state.root,
             allow_patterns=["data/**/*.parquet", "videos/**"],
@@ -704,7 +799,11 @@ def _do_export(state: DatasetState, output_dir: str | None, copy_videos: bool) -
                 shutil.rmtree(dst_videos)
         _materialize_tree(src_videos, dst_videos, force_copy=copy_videos)
 
-    return {"output_dir": str(out_root), "persistent_rows": n_persistent, "event_rows": n_events}
+    return {
+        "output_dir": str(out_root),
+        "persistent_rows": n_persistent,
+        "event_rows": n_events,
+    }
 
 
 # --- FastAPI app --------------------------------------------------------------
@@ -712,7 +811,7 @@ def _do_export(state: DatasetState, output_dir: str | None, copy_videos: bool) -
 app = FastAPI(title="LeRobot dataset visualizer — annotation backend")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -754,7 +853,9 @@ def get_episode_atoms(
     revision: str | None = None,
     local_path: str | None = None,
 ) -> JSONResponse:
-    state = _ensure_state(DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path))
+    state = _ensure_state(
+        DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path)
+    )
     ann = state.annotations.get(episode_index)
     if ann is None:
         path = _episode_data_path(state, episode_index)
@@ -771,16 +872,15 @@ def get_episode_atoms(
                     columns.append(LANGUAGE_PERSISTENT)
                 if LANGUAGE_EVENTS in schema.names:
                     columns.append(LANGUAGE_EVENTS)
-                if (
-                    LANGUAGE_PERSISTENT in columns
-                    or LANGUAGE_EVENTS in columns
-                ):
+                if LANGUAGE_PERSISTENT in columns or LANGUAGE_EVENTS in columns:
                     atoms = _extract_existing_atoms_from_table(
                         pq.read_table(path, columns=columns),
                         episode_index,
                     )
             except Exception as e:  # noqa: BLE001
-                logger.warning("language column read failed for ep %s: %s", episode_index, e)
+                logger.warning(
+                    "language column read failed for ep %s: %s", episode_index, e
+                )
         ann = EpisodeAnnotations(atoms=atoms)
         if atoms:
             state.annotations[episode_index] = ann
@@ -791,8 +891,10 @@ def get_episode_atoms(
 def set_episode_atoms(episode_index: int, payload: EpisodeAtomsPayload) -> JSONResponse:
     if episode_index != payload.episode_index:
         raise HTTPException(status_code=400, detail="episode index mismatch")
-    state = _ensure_state(DatasetRef(repo_id=payload.repo_id, local_path=payload.local_path))
-    atoms = [a.dict() for a in payload.atoms]
+    state = _ensure_state(
+        DatasetRef(repo_id=payload.repo_id, local_path=payload.local_path)
+    )
+    atoms = [a.model_dump() for a in payload.atoms]
     for atom in atoms:
         _validate_atom(atom)
     # Snap event timestamps to exact frame timestamps (matches lerobot#3471).
@@ -814,7 +916,9 @@ def episode_frame_timestamps(
     revision: str | None = None,
     local_path: str | None = None,
 ) -> JSONResponse:
-    state = _ensure_state(DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path))
+    state = _ensure_state(
+        DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path)
+    )
     ts = _frame_timestamps(state, episode_index)
     return JSONResponse({"episode_index": episode_index, "timestamps": ts})
 
@@ -836,6 +940,7 @@ def push_to_hub(req: PushToHubRequest) -> JSONResponse:
         snapshot_download(
             state.repo_id,
             repo_type="dataset",
+            token=token(),
             revision=state.revision,
             local_dir=state.root,
             allow_patterns=["data/**/*.parquet", "videos/**/*.mp4"],

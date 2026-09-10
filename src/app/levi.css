@@ -1,0 +1,576 @@
+/* LEVI original art direction: graphite, parchment and acid-lime instrument accents. */
+:root {
+  --bg: #101510;
+  --surface-0: #161d17;
+  --surface-1: #1d251e;
+  --surface-2: #283228;
+  --text-primary: #f1efdf;
+  --text-muted: #afb7a8;
+  --text-faint: #89927f;
+  --accent: #d4f779;
+  --accent-soft: #d4f77920;
+  --accent-ring: #d4f77970;
+  --font-geist-sans: Arial, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-geist-mono: "SFMono-Regular", Consolas, monospace;
+}
+@theme inline {
+  --color-cyan-200: #e5fbb6;
+  --color-cyan-300: #d4f779;
+  --color-cyan-400: #c7ed66;
+  --color-cyan-500: #9ec345;
+  --color-slate-100: #f1efdf;
+  --color-slate-200: #dedfcf;
+  --color-slate-300: #c7caba;
+  --color-slate-400: #adb5a4;
+  --color-slate-500: #8f9a84;
+  --color-slate-600: #68765e;
+  --color-slate-700: #3c4934;
+  --color-slate-800: #252f23;
+  --color-slate-900: #161d17;
+}
+html {
+  font-size: 16px;
+}
+body {
+  font-family: Arial, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+}
+.levi-header {
+  height: 72px;
+  border-bottom: 1px solid #ffffff14;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4%;
+  background: #101510;
+  position: relative;
+  z-index: 45;
+}
+.levi-wordmark {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 25px;
+  letter-spacing: 3px;
+  font-weight: 800;
+}
+.levi-mark {
+  background: #d4f779;
+  color: #162011;
+  padding: 3px 5px;
+  font-size: 21px;
+  border-radius: 4px;
+  letter-spacing: -3px;
+}
+.levi-wordmark-caption {
+  border-left: 1px solid #ffffff30;
+  margin-left: 8px;
+  padding-left: 16px;
+  font: 9px/1.6 monospace;
+  letter-spacing: 2px;
+  max-width: 130px;
+  color: #aab3a0;
+}
+.levi-header nav {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  font-size: 13px;
+  color: #bec5b5;
+}
+.levi-header a:hover {
+  color: #d4f779;
+}
+.levi-language {
+  border: 1px solid #ffffff2a;
+  border-radius: 5px;
+  padding: 7px 12px;
+  font-size: 11px;
+}
+.levi-home {
+  max-width: 1370px;
+  margin: auto;
+  padding: 0 5%;
+}
+.levi-hero {
+  display: grid;
+  grid-template-columns: 1.45fr 1fr;
+  gap: 6%;
+  padding: 70px 0 64px;
+}
+.levi-eyebrow {
+  font: 10px/1.8 monospace;
+  letter-spacing: 2.2px;
+  color: #a7b397;
+}
+.levi-hero h1 {
+  font-size: clamp(42px, 4.2vw, 67px);
+  line-height: 1.22;
+  letter-spacing: -2px;
+  margin: 23px 0;
+}
+.levi-hero h1 em {
+  font-style: normal;
+  color: #d4f779;
+}
+.levi-intro {
+  color: #aeb8a4;
+  line-height: 1.9;
+  font-size: 14px;
+  max-width: 550px;
+  margin: 20px 0 27px;
+}
+.levi-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #626f4b;
+  border-radius: 7px;
+  padding: 7px;
+  background: #1b2218;
+  position: relative;
+}
+.levi-search > span {
+  font-size: 24px;
+  margin-left: 7px;
+}
+.levi-search input {
+  min-width: 0;
+  flex: 1;
+  background: transparent;
+  outline: none;
+  font-size: 12px;
+  padding: 8px 0;
+}
+.levi-search button,
+.levi-primary {
+  background: #d4f779;
+  color: #17220e;
+  border-radius: 4px;
+  padding: 11px 17px;
+  font-weight: 600;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.levi-suggestions {
+  background: #242d20;
+  border: 1px solid #526044;
+  border-radius: 4px;
+}
+.levi-suggestions button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  font: 12px monospace;
+}
+.levi-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-top: 16px;
+  font-size: 12px;
+  color: #c9d7b5;
+}
+.levi-orbit {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 330px;
+  background-image: radial-gradient(#c2d3a329 1px, transparent 1px);
+  background-size: 18px 18px;
+  overflow: hidden;
+  border-radius: 50%;
+  mask-image: radial-gradient(circle, black 45%, transparent 74%);
+}
+.levi-orbit-ring {
+  width: 280px;
+  height: 280px;
+  border: 1px solid #9cae6c70;
+  border-radius: 50%;
+  position: absolute;
+  transform: rotate(-35deg) scaleY(0.56);
+}
+.ring-two {
+  transform: rotate(40deg) scaleY(0.65);
+  width: 340px;
+  height: 340px;
+}
+.levi-orbit-core {
+  font:
+    italic 130px Georgia,
+    serif;
+  line-height: 1;
+  color: #d4f779;
+  transform: rotate(-10deg);
+  text-shadow: 8px 16px 1px #283818;
+}
+.levi-orbit-core span {
+  font: 70px Arial;
+  position: absolute;
+  right: -55px;
+  top: -8px;
+}
+.levi-orbit-note {
+  position: absolute;
+  bottom: 17%;
+  left: 8%;
+  font: 9px/1.7 monospace;
+  color: #a8b991;
+  letter-spacing: 2px;
+}
+.levi-orbit-coordinate {
+  position: absolute;
+  right: 6%;
+  top: 20%;
+  font: 9px/1.6 monospace;
+  color: #a8b991;
+}
+.levi-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  margin-bottom: 23px;
+  border-top: 1px solid #ffffff1c;
+  padding-top: 27px;
+}
+.levi-section-heading h2 {
+  font-size: 22px;
+  margin-top: 7px;
+  font-weight: 500;
+}
+.levi-section-heading > a {
+  font-size: 12px;
+  color: #c9d7b5;
+}
+.levi-demo-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+.levi-demo {
+  background: #1c241c;
+  border: 1px solid #ffffff15;
+  border-radius: 9px;
+  overflow: hidden;
+  transition:
+    transform 0.2s,
+    border-color 0.2s;
+}
+.levi-demo:hover {
+  transform: translateY(-4px);
+  border-color: #b7d978;
+}
+.levi-demo-video {
+  aspect-ratio: 1.94;
+  position: relative;
+  background: #293225;
+}
+.levi-demo-video video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.levi-demo-badge {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  background: #11180ddd;
+  border: 1px solid #ffffff3a;
+  border-radius: 3px;
+  padding: 6px 9px;
+  font: 9px monospace;
+  letter-spacing: 1.5px;
+  color: #d4f779;
+}
+.levi-demo-arrow {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  background: #d4f779;
+  color: #182011;
+  font-size: 24px;
+  width: 40px;
+  height: 40px;
+  text-align: center;
+  border-radius: 50%;
+}
+.levi-demo-caption {
+  padding: 20px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.levi-demo-caption h3 {
+  font-size: 17px;
+  margin-bottom: 7px;
+}
+.levi-demo-caption p {
+  font: 10px monospace;
+  color: #a4af98;
+  overflow-wrap: anywhere;
+}
+.levi-demo-caption > span {
+  text-align: right;
+  color: #a4af98;
+  font: 10px/1.6 monospace;
+  flex-shrink: 0;
+}
+.levi-workflow {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 0.8fr;
+  gap: 28px;
+  padding: 38px 0;
+  margin-top: 35px;
+  border-top: 1px solid #ffffff20;
+}
+.levi-workflow > div > span {
+  font: 10px monospace;
+  color: #d4f779;
+}
+.levi-workflow h3 {
+  font-size: 15px;
+  margin: 9px 0;
+}
+.levi-workflow p {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #a1ad94;
+}
+.levi-workflow > a {
+  align-self: center;
+  color: #d4f779;
+  font-size: 13px;
+  text-align: right;
+}
+.levi-footer {
+  border-top: 1px solid #ffffff16;
+  padding: 24px 0;
+  display: flex;
+  justify-content: space-between;
+  font: 9px monospace;
+  letter-spacing: 1px;
+  color: #859077;
+}
+.h-screen {
+  height: calc(100dvh - 72px);
+}
+.max-h-screen {
+  max-height: calc(100dvh - 72px);
+}
+.panel,
+.panel-raised {
+  border-color: #ffffff15;
+  border-radius: 9px;
+}
+.levi-workbench {
+  max-width: 1250px;
+  margin: auto;
+  padding: 45px 5%;
+}
+.levi-workbench h1 {
+  font-size: 32px;
+  font-weight: 500;
+  margin: 10px 0 14px;
+}
+.levi-workbench h2 {
+  font-size: 19px;
+  margin-bottom: 15px;
+}
+.levi-workbench p {
+  font-size: 13px;
+  color: #b3bfaa;
+  line-height: 1.8;
+}
+.levi-box {
+  background: #1b231b;
+  border: 1px solid #ffffff20;
+  border-radius: 10px;
+  padding: 24px;
+  margin: 22px 0;
+}
+.levi-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.levi-input {
+  background: #11180f;
+  border: 1px solid #ffffff30;
+  border-radius: 5px;
+  padding: 10px 12px;
+  min-width: 0;
+  font-size: 13px;
+  color: #e5ebdc;
+}
+.levi-input.grow {
+  flex: 1;
+}
+.levi-secondary {
+  border: 1px solid #a7be7880;
+  border-radius: 4px;
+  padding: 9px 14px;
+  font-size: 12px;
+  color: #d4f779;
+}
+.levi-workbench pre,
+.levi-code {
+  background: #0f150d;
+  padding: 16px;
+  border: 1px solid #ffffff15;
+  border-radius: 5px;
+  font: 11px/1.7 monospace;
+  overflow: auto;
+  max-height: 380px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-top: 14px;
+}
+.levi-status {
+  border: 1px solid #ffffff30;
+  padding: 4px 9px;
+  border-radius: 3px;
+  font: 11px monospace;
+}
+.levi-status.fail {
+  color: #ff9c94;
+}
+.levi-status.warn {
+  color: #f1c677;
+}
+.levi-status.pass {
+  color: #d4f779;
+}
+.levi-error {
+  color: #ffaaa3;
+  padding: 12px;
+  border: 1px solid #ffaaa350;
+  border-radius: 5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.levi-table {
+  width: 100%;
+  font-size: 12px;
+  border-collapse: collapse;
+}
+.levi-table td,
+.levi-table th {
+  padding: 13px 10px;
+  text-align: left;
+  border-bottom: 1px solid #ffffff12;
+}
+.levi-diagnostic {
+  padding: 24px;
+  max-width: 1200px;
+  margin: auto;
+  width: 100%;
+}
+.levi-diagnostic h2 {
+  font-size: 24px;
+}
+.levi-checks {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 18px 0;
+}
+.levi-checks label {
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+input[type="checkbox"] {
+  accent-color: #c7ed66;
+}
+.levi-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin: 20px 0;
+}
+.levi-metrics > div {
+  padding: 15px;
+  border: 1px solid #ffffff20;
+  border-radius: 6px;
+}
+.levi-metrics strong {
+  display: block;
+  font: 26px monospace;
+  margin-top: 5px;
+}
+.levi-tabs-scroll {
+  overflow-x: auto;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+a,
+button,
+input,
+select,
+textarea {
+  outline-offset: 4px;
+}
+*:focus-visible {
+  outline: 2px solid #d4f779;
+}
+@media (max-width: 800px) {
+  .levi-wordmark-caption {
+    display: none;
+  }
+  .levi-header {
+    padding: 0 5%;
+    height: 64px;
+  }
+  .levi-header nav {
+    gap: 13px;
+    font-size: 11px;
+  }
+  .levi-hero {
+    grid-template-columns: 1fr;
+    padding: 40px 0;
+  }
+  .levi-orbit {
+    display: none;
+  }
+  .levi-demo-grid {
+    grid-template-columns: 1fr;
+  }
+  .levi-workflow {
+    grid-template-columns: 1fr 1fr;
+  }
+  .levi-hero h1 {
+    font-size: 44px;
+  }
+  .levi-footer {
+    gap: 20px;
+  }
+  .levi-demo-caption p {
+    font-size: 9px;
+  }
+  .h-screen {
+    height: calc(100dvh - 64px);
+  }
+  .levi-metrics {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .levi-section-heading {
+    gap: 15px;
+  }
+  .levi-section-heading h2 {
+    font-size: 19px;
+  }
+  .levi-search button {
+    padding: 10px;
+  }
+  .levi-hero-actions {
+    flex-wrap: wrap;
+  }
+}

@@ -1,4 +1,6 @@
+// Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import { T } from "@/components/levi-locale";
 
 import React, {
   useState,
@@ -629,9 +631,15 @@ function RobotScene({
   // since the overlay doesn't have an error path.
   if (error)
     return (
-      <Html center>
-        <span className="text-red-400">Failed to load URDF</span>
-      </Html>
+      <T>
+        {
+          <Html center>
+            <span className="text-red-400">
+              <T>Failed to load URDF</T>
+            </span>
+          </Html>
+        }
+      </T>
     );
   return null;
 }
@@ -918,220 +926,245 @@ export default function URDFViewer({
 
   if (data.flatChartData.length === 0) {
     return (
-      <div className="text-slate-400 p-8 text-center">
-        No trajectory data available.
-      </div>
+      <T>
+        {
+          <div className="text-slate-400 p-8 text-center">
+            <T>No trajectory data available.</T>
+          </div>
+        }
+      </T>
     );
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      {/* 3D Viewport */}
-      <div className="flex-1 min-h-0 bg-[var(--surface-0)] rounded-lg overflow-hidden border border-white/10 relative">
-        {(episodeLoading || urdfLoading) && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--bg)]/80">
-            <span className="text-white text-lg animate-pulse">
-              {urdfLoading
-                ? "Loading 3D model…"
-                : `Loading episode ${selectedEpisode}…`}
-            </span>
-          </div>
-        )}
-        <Canvas
-          shadows
-          camera={{
-            position: isG1
-              ? [1.5, 1.0, 1.5]
-              : isOpenArm
-                ? [0.95 * scale, 0.8 * scale, 0.95 * scale]
-                : [0.3 * scale, 0.25 * scale, 0.3 * scale],
-            fov: 45,
-            near: 0.01,
-            far: 100,
-          }}
-          gl={{
-            toneMapping: THREE.ACESFilmicToneMapping,
-            toneMappingExposure: 0.9,
-          }}
-        >
-          <color attach="background" args={["#1a2433"]} />
-          {/* IBL: PMREM studio env gives mesh highlights somewhere to bounce */}
-          <Environment preset="studio" background={false} />
-          {/* 3-point studio rig — key is the only shadow caster */}
-          <ambientLight intensity={0.12} />
-          <directionalLight
-            color="#fff2e3"
-            position={[3, 5, 3]}
-            intensity={1.0}
-            castShadow
-            shadow-mapSize-width={2048}
-            shadow-mapSize-height={2048}
-            shadow-camera-near={0.1}
-            shadow-camera-far={15}
-            shadow-camera-left={-3}
-            shadow-camera-right={3}
-            shadow-camera-top={3}
-            shadow-camera-bottom={-3}
-            shadow-bias={-0.0005}
-          />
-          <directionalLight
-            color="#bfd9ff"
-            position={[-4, 2, -2]}
-            intensity={0.25}
-          />
-          <directionalLight
-            color="#ffffff"
-            position={[0, 3, -4]}
-            intensity={0.4}
-          />
-          {/* Ground-shadow catcher — invisible plane receives key-light shadow */}
-          <mesh
-            rotation={[-Math.PI / 2, 0, 0]}
-            position={[0, 0.001, 0]}
-            receiveShadow
-          >
-            <planeGeometry args={[10, 10]} />
-            <shadowMaterial opacity={0.35} />
-          </mesh>
-          <RobotScene
-            urdfUrl={urdfUrl}
-            jointValues={jointValues}
-            onJointsLoaded={onJointsLoaded}
-            trailEnabled={trailEnabled}
-            trailResetKey={selectedEpisode}
-            scale={scale}
-          />
-          <Grid
-            args={[10, 10]}
-            cellSize={isG1 ? 0.5 : 0.2}
-            cellThickness={0.5}
-            cellColor="#334155"
-            sectionSize={isG1 ? 2 : 1}
-            sectionThickness={1}
-            sectionColor="#475569"
-            fadeDistance={isG1 ? 20 : 10}
-            position={[0, 0, 0]}
-          />
-          <OrbitControls
-            makeDefault
-            target={isG1 ? [0, 0.5, 0] : [0, 0.8, 0]}
-          />
-          <PlaybackDriver
-            playing={playing}
-            fps={fps}
-            totalFrames={totalFrames}
-            frameRef={frameRef}
-            setFrame={setFrame}
-          />
-        </Canvas>
-      </div>
-
-      {/* Controls */}
-      <div className="bg-[var(--surface-1)]/90 border-t border-white/10 p-3 space-y-3 shrink-0">
-        <UrdfPlaybackBar
-          frame={frame}
-          totalFrames={totalFrames}
-          fps={fps}
-          playing={playing}
-          onPlayPause={handlePlayPause}
-          trailEnabled={trailEnabled}
-          onTrailToggle={() => setTrailEnabled((v) => !v)}
-          onFrameChange={handleFrameChange}
-          disabled={urdfLoading}
-        />
-
-        {/* Collapsible joint mapping */}
-        <button
-          onClick={() => setShowMapping((v) => !v)}
-          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors"
-        >
-          <span
-            className={`transition-transform ${showMapping ? "rotate-90" : ""}`}
-          >
-            ▶
-          </span>
-          Joint Mapping
-          <span className="text-slate-600">
-            ({Object.keys(mapping).filter((k) => mapping[k]).length}/
-            {displayJointNames.length} mapped)
-          </span>
-        </button>
-
-        {showMapping && (
-          <div className="flex gap-4 items-start">
-            <div className="space-y-1 shrink-0">
-              <label className="text-xs text-slate-400">Data source</label>
-              <div className="flex gap-1 flex-wrap">
-                {groupNames.map((name) => (
-                  <button
-                    key={name}
-                    onClick={() => setSelectedGroup(name)}
-                    className={`px-2 py-1 text-xs rounded transition-colors ${
-                      selectedGroup === name
-                        ? "bg-cyan-500 text-white"
-                        : "bg-white/5 text-slate-300 hover:bg-white/5"
-                    }`}
-                  >
-                    {name}
-                  </button>
-                ))}
+    <T>
+      {
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* 3D Viewport */}
+          <div className="flex-1 min-h-0 bg-[var(--surface-0)] rounded-lg overflow-hidden border border-white/10 relative">
+            {(episodeLoading || urdfLoading) && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--bg)]/80">
+                <span className="text-white text-lg animate-pulse">
+                  <T>
+                    {urdfLoading
+                      ? "Loading 3D model…"
+                      : `Loading episode ${selectedEpisode}…`}
+                  </T>
+                </span>
               </div>
-            </div>
-
-            <div className="flex-1 overflow-x-auto max-h-48 overflow-y-auto">
-              <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-[var(--surface-1)]">
-                  <tr className="text-slate-500">
-                    <th className="text-left font-normal px-1">URDF Joint</th>
-                    <th className="text-left font-normal px-1">→</th>
-                    <th className="text-left font-normal px-1">
-                      Dataset Column
-                    </th>
-                    <th className="text-right font-normal px-1">Value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayJointNames.map((jointName) => (
-                    <tr key={jointName} className="border-t border-white/10/50">
-                      <td className="px-1 py-0.5 text-slate-300 font-mono">
-                        {jointName}
-                      </td>
-                      <td className="px-1 text-slate-600">→</td>
-                      <td className="px-1 py-0.5">
-                        <select
-                          value={mapping[jointName] ?? ""}
-                          onChange={(e) =>
-                            setMapping((m) => ({
-                              ...m,
-                              [jointName]: e.target.value,
-                            }))
-                          }
-                          className="bg-[var(--surface-0)] text-slate-200 text-xs rounded px-1 py-0.5 border border-white/10 w-full max-w-[200px]"
-                        >
-                          <option value="">-- unmapped --</option>
-                          {selectedColumns.map((col) => {
-                            const label = col.split(SERIES_DELIM).pop() ?? col;
-                            return (
-                              <option key={col} value={col}>
-                                {label}
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </td>
-                      <td className="px-1 py-0.5 text-right tabular-nums text-slate-400 font-mono">
-                        {jointValues[jointName] !== undefined
-                          ? jointValues[jointName].toFixed(3)
-                          : "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            )}
+            <Canvas
+              shadows
+              camera={{
+                position: isG1
+                  ? [1.5, 1.0, 1.5]
+                  : isOpenArm
+                    ? [0.95 * scale, 0.8 * scale, 0.95 * scale]
+                    : [0.3 * scale, 0.25 * scale, 0.3 * scale],
+                fov: 45,
+                near: 0.01,
+                far: 100,
+              }}
+              gl={{
+                toneMapping: THREE.ACESFilmicToneMapping,
+                toneMappingExposure: 0.9,
+              }}
+            >
+              <color attach="background" args={["#1a2433"]} />
+              {/* IBL: PMREM studio env gives mesh highlights somewhere to bounce */}
+              <Environment preset="studio" background={false} />
+              {/* 3-point studio rig — key is the only shadow caster */}
+              <ambientLight intensity={0.12} />
+              <directionalLight
+                color="#fff2e3"
+                position={[3, 5, 3]}
+                intensity={1.0}
+                castShadow
+                shadow-mapSize-width={2048}
+                shadow-mapSize-height={2048}
+                shadow-camera-near={0.1}
+                shadow-camera-far={15}
+                shadow-camera-left={-3}
+                shadow-camera-right={3}
+                shadow-camera-top={3}
+                shadow-camera-bottom={-3}
+                shadow-bias={-0.0005}
+              />
+              <directionalLight
+                color="#bfd9ff"
+                position={[-4, 2, -2]}
+                intensity={0.25}
+              />
+              <directionalLight
+                color="#ffffff"
+                position={[0, 3, -4]}
+                intensity={0.4}
+              />
+              {/* Ground-shadow catcher — invisible plane receives key-light shadow */}
+              <mesh
+                rotation={[-Math.PI / 2, 0, 0]}
+                position={[0, 0.001, 0]}
+                receiveShadow
+              >
+                <planeGeometry args={[10, 10]} />
+                <shadowMaterial opacity={0.35} />
+              </mesh>
+              <RobotScene
+                urdfUrl={urdfUrl}
+                jointValues={jointValues}
+                onJointsLoaded={onJointsLoaded}
+                trailEnabled={trailEnabled}
+                trailResetKey={selectedEpisode}
+                scale={scale}
+              />
+              <Grid
+                args={[10, 10]}
+                cellSize={isG1 ? 0.5 : 0.2}
+                cellThickness={0.5}
+                cellColor="#334155"
+                sectionSize={isG1 ? 2 : 1}
+                sectionThickness={1}
+                sectionColor="#475569"
+                fadeDistance={isG1 ? 20 : 10}
+                position={[0, 0, 0]}
+              />
+              <OrbitControls
+                makeDefault
+                target={isG1 ? [0, 0.5, 0] : [0, 0.8, 0]}
+              />
+              <PlaybackDriver
+                playing={playing}
+                fps={fps}
+                totalFrames={totalFrames}
+                frameRef={frameRef}
+                setFrame={setFrame}
+              />
+            </Canvas>
           </div>
-        )}
-      </div>
-    </div>
+
+          {/* Controls */}
+          <div className="bg-[var(--surface-1)]/90 border-t border-white/10 p-3 space-y-3 shrink-0">
+            <UrdfPlaybackBar
+              frame={frame}
+              totalFrames={totalFrames}
+              fps={fps}
+              playing={playing}
+              onPlayPause={handlePlayPause}
+              trailEnabled={trailEnabled}
+              onTrailToggle={() => setTrailEnabled((v) => !v)}
+              onFrameChange={handleFrameChange}
+              disabled={urdfLoading}
+            />
+
+            {/* Collapsible joint mapping */}
+            <button
+              onClick={() => setShowMapping((v) => !v)}
+              className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+            >
+              <span
+                className={`transition-transform ${showMapping ? "rotate-90" : ""}`}
+              >
+                ▶
+              </span>
+              <T>Joint Mapping</T>
+              <span className="text-slate-600">
+                (<T>{Object.keys(mapping).filter((k) => mapping[k]).length}</T>/
+                <T>{displayJointNames.length}</T>
+                <T> mapped)</T>
+              </span>
+            </button>
+
+            {showMapping && (
+              <div className="flex gap-4 items-start">
+                <div className="space-y-1 shrink-0">
+                  <label className="text-xs text-slate-400">
+                    <T>Data source</T>
+                  </label>
+                  <div className="flex gap-1 flex-wrap">
+                    {groupNames.map((name) => (
+                      <button
+                        key={name}
+                        onClick={() => setSelectedGroup(name)}
+                        className={`px-2 py-1 text-xs rounded transition-colors ${
+                          selectedGroup === name
+                            ? "bg-cyan-500 text-white"
+                            : "bg-white/5 text-slate-300 hover:bg-white/5"
+                        }`}
+                      >
+                        <T>{name}</T>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-x-auto max-h-48 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-[var(--surface-1)]">
+                      <tr className="text-slate-500">
+                        <th className="text-left font-normal px-1">
+                          <T>URDF Joint</T>
+                        </th>
+                        <th className="text-left font-normal px-1">→</th>
+                        <th className="text-left font-normal px-1">
+                          <T>Dataset Column</T>
+                        </th>
+                        <th className="text-right font-normal px-1">
+                          <T>Value</T>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {displayJointNames.map((jointName) => (
+                        <tr
+                          key={jointName}
+                          className="border-t border-white/10/50"
+                        >
+                          <td className="px-1 py-0.5 text-slate-300 font-mono">
+                            <T>{jointName}</T>
+                          </td>
+                          <td className="px-1 text-slate-600">→</td>
+                          <td className="px-1 py-0.5">
+                            <select
+                              value={mapping[jointName] ?? ""}
+                              onChange={(e) =>
+                                setMapping((m) => ({
+                                  ...m,
+                                  [jointName]: e.target.value,
+                                }))
+                              }
+                              className="bg-[var(--surface-0)] text-slate-200 text-xs rounded px-1 py-0.5 border border-white/10 w-full max-w-[200px]"
+                            >
+                              <option value="">
+                                <T>-- unmapped --</T>
+                              </option>
+                              {selectedColumns.map((col) => {
+                                const label =
+                                  col.split(SERIES_DELIM).pop() ?? col;
+                                return (
+                                  <option key={col} value={col}>
+                                    <T>{label}</T>
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          </td>
+                          <td className="px-1 py-0.5 text-right tabular-nums text-slate-400 font-mono">
+                            <T>
+                              {jointValues[jointName] !== undefined
+                                ? jointValues[jointName].toFixed(3)
+                                : "—"}
+                            </T>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      }
+    </T>
   );
 }

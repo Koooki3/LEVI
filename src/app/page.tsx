@@ -1,333 +1,239 @@
+// Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
-import { useEffect, useRef, useState, useCallback, Suspense } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useSearchParams } from "next/navigation";
-import { authHeaders } from "@/utils/auth";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import HfAuthButton from "@/components/hf-auth-button";
-
+import { T, useLocale } from "@/components/levi-locale";
+const DEMOS = [
+  "samanthalhy/so100_strawberry_2",
+  "samanthalhy/eval_so100_smol_strawberry_2",
+];
 export default function Home() {
   return (
-    <Suspense fallback={null}>
-      <HomeInner />
+    <Suspense>
+      <Landing />
     </Suspense>
   );
 }
-
-const EXAMPLE_DATASETS = [
-  "lerobot/high_quality_folding",
-  "lerobot/aloha_static_cups_open",
-  "imstevenpmwork/thanos_picking_power_gem",
-];
-
-function HomeInner() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
-
-  // Handle redirects with useEffect instead of direct redirect
-  useEffect(() => {
-    // Redirect to the first episode of the dataset if REPO_ID is defined
-    if (process.env.REPO_ID) {
-      const episodeN =
-        process.env.EPISODES?.split(/\s+/)
-          .map((x) => parseInt(x.trim(), 10))
-          .filter((x) => !isNaN(x))[0] ?? 0;
-
-      router.push(`/${process.env.REPO_ID}/episode_${episodeN}`);
-      return;
-    }
-
-    // sync with hf.co/spaces URL params
-    if (searchParams.get("path")) {
-      router.push(searchParams.get("path")!);
-      return;
-    }
-
-    // legacy sync with hf.co/spaces URL params
-    let redirectUrl: string | null = null;
-    if (searchParams.get("dataset") && searchParams.get("episode")) {
-      redirectUrl = `/${searchParams.get("dataset")}/episode_${searchParams.get("episode")}`;
-    } else if (searchParams.get("dataset")) {
-      redirectUrl = `/${searchParams.get("dataset")}`;
-    }
-
-    if (redirectUrl && searchParams.get("t")) {
-      redirectUrl += `?t=${searchParams.get("t")}`;
-    }
-
-    if (redirectUrl) {
-      router.push(redirectUrl);
-      return;
-    }
-  }, [searchParams, router]);
-
-  const videoRef = useRef<HTMLVideoElement>(null);
-  useEffect(() => {
-    if (videoRef.current) videoRef.current.playbackRate = 1.5;
-  }, []);
-
+function Landing() {
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(-1);
-  const [isLoading, setIsLoading] = useState(false);
-  const [hasFetched, setHasFetched] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
+  const router = useRouter();
+  const params = useSearchParams();
+  const { t } = useLocale();
   useEffect(() => {
+    const path = params.get("path");
+    const dataset = params.get("dataset");
+    if (path?.startsWith("/") && !path.startsWith("//")) router.replace(path);
+    else if (dataset && /^[\w.-]+\/[\w.-]+$/.test(dataset))
+      router.replace(
+        `/${dataset}${params.get("episode") ? `/episode_${Number(params.get("episode"))}` : ""}${params.get("t") ? `?t=${Number(params.get("t"))}` : ""}`,
+      );
+  }, [params, router]);
+  useEffect(() => {
+    const controller = new AbortController();
     if (!query.trim()) {
       setSuggestions([]);
-      setShowSuggestions(false);
-      setIsLoading(false);
-      setHasFetched(false);
       return;
     }
-    setIsLoading(true);
-    setHasFetched(false);
-    setShowSuggestions(true);
-    const timer = setTimeout(async () => {
-      try {
-        const res = await fetch(
-          `https://huggingface.co/api/quicksearch?q=${encodeURIComponent(query)}&type=dataset`,
-          { cache: "no-store", headers: authHeaders() },
-        );
-        const data = await res.json();
-        const ids: string[] = (
-          (data.datasets as { id: string }[] | undefined) ?? []
-        ).map((d) => d.id);
-        setSuggestions(ids);
-        setActiveIndex(-1);
-      } catch {
-        setSuggestions([]);
-      } finally {
-        setIsLoading(false);
-        setHasFetched(true);
-      }
-    }, 150);
-    return () => clearTimeout(timer);
-  }, [query]);
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
-        setShowSuggestions(false);
-      }
+    const timer = setTimeout(
+      () =>
+        fetch(
+          `https://huggingface.co/api/datasets?search=${encodeURIComponent(query)}&limit=5`,
+          { signal: controller.signal },
+        )
+          .then((r) => r.json())
+          .then((data) =>
+            setSuggestions(
+              Array.isArray(data) ? data.map((d: { id: string }) => d.id) : [],
+            ),
+          )
+          .catch(() => {}),
+      250,
+    );
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const navigate = useCallback(
-    (value: string) => {
-      setShowSuggestions(false);
-      router.push(value);
-    },
-    [router],
-  );
-
-  const handleSubmit = (e: { preventDefault: () => void }) => {
-    e.preventDefault();
-    const target =
-      activeIndex >= 0 && suggestions[activeIndex]
-        ? suggestions[activeIndex]
-        : query.trim();
-    if (target) navigate(target);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!showSuggestions) return;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setActiveIndex((prev) => (prev >= suggestions.length - 1 ? 0 : prev + 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setActiveIndex((prev) => (prev <= 0 ? suggestions.length - 1 : prev - 1));
-    } else if (e.key === "Escape") {
-      setShowSuggestions(false);
-      setActiveIndex(-1);
-    }
-  };
-
+  }, [query]);
+  function open(id: string) {
+    if (/^[\w.-]+\/[\w.-]+$/.test(id.trim())) router.push(`/${id.trim()}`);
+  }
   return (
-    <div className="relative h-screen w-screen overflow-hidden">
-      {/* Video Background */}
-      <div className="video-background">
-        <video
-          ref={videoRef}
-          src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/lerobot/level2.mp4"
-          autoPlay
-          muted
-          loop
-          playsInline
-        />
-      </div>
-
-      {/* Gradient overlay */}
-      <div className="fixed inset-0 -z-0 bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0.35)_0%,rgba(0,0,0,0.80)_100%)]" />
-
-      {/* Centered Content */}
-      <div className="relative z-10 h-screen flex flex-col items-center justify-center text-white text-center animate-fade-in-up px-4">
-        {/* Title */}
-        <h1 className="text-4xl md:text-5xl font-bold mb-2 drop-shadow-lg tracking-tight">
-          LeRobot{" "}
-          <span className="bg-gradient-to-r from-cyan-400 to-sky-300 bg-clip-text text-transparent">
-            Dataset
-          </span>{" "}
-          Visualizer
-        </h1>
-
-        {/* Subtitle */}
-        <p className="text-white/55 text-base md:text-lg mb-8 max-w-md">
-          Explore and visualize robot learning datasets from Hugging Face
-        </p>
-
-        {/* Search form */}
-        <form onSubmit={handleSubmit} className="flex gap-2 justify-center">
-          <div ref={containerRef} className="relative">
-            {/* Search icon */}
-            <svg
-              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40 pointer-events-none"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"
-              />
-            </svg>
-
+    <main className="levi-home">
+      <section className="levi-hero">
+        <div>
+          <div className="levi-eyebrow">
+            <T>EXPLORATION / VALIDATION / INTEGRATION</T>
+          </div>
+          <h1>
+            <T>Every motion.</T>
+            <br />
+            <em>
+              <T>A clearer story.</T>
+            </em>
+          </h1>
+          <p className="levi-intro">
+            <T>
+              A considered workspace for robot learning data. Observe every
+              frame, understand every action, and curate what comes next.
+            </T>
+          </p>
+          <form
+            className="levi-search"
+            onSubmit={(e) => {
+              e.preventDefault();
+              open(query);
+            }}
+          >
+            <span>⌕</span>
             <input
-              type="text"
+              aria-label={t("Dataset ID")}
+              placeholder={t("Search or enter a Hugging Face dataset ID")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onFocus={() => query.trim() && setShowSuggestions(true)}
-              placeholder="Enter dataset id (e.g. lerobot/pusht)"
-              className="pl-10 pr-4 py-2.5 rounded-md text-base text-white bg-white/10 backdrop-blur-sm border border-white/30 focus:outline-none focus:border-cyan-400 focus:bg-white/15 w-[380px] shadow-md placeholder:text-white/40 transition-colors"
-              autoComplete="off"
+              required
+              pattern="[\w.\-]+/[\w.\-]+"
             />
-
-            {/* Suggestions dropdown */}
-            {showSuggestions && (
-              <ul className="absolute left-0 right-0 top-full mt-1 rounded-md bg-[var(--surface-1)]/95 backdrop-blur-sm border border-white/10 shadow-xl overflow-hidden z-50 max-h-64 overflow-y-auto">
-                {isLoading ? (
-                  <li className="flex items-center gap-2.5 px-4 py-3 text-sm text-white/50">
-                    <svg
-                      className="animate-spin w-4 h-4 shrink-0"
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8v8H4z"
-                      />
-                    </svg>
-                    Searching…
-                  </li>
-                ) : suggestions.length > 0 ? (
-                  suggestions.map((id, i) => (
-                    <li key={id}>
-                      <button
-                        type="button"
-                        className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
-                          i === activeIndex
-                            ? "bg-cyan-500 text-white"
-                            : "text-slate-200 hover:bg-white/10"
-                        }`}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          navigate(id);
-                        }}
-                        onMouseEnter={() => setActiveIndex(i)}
-                      >
-                        {id}
-                      </button>
-                    </li>
-                  ))
-                ) : (
-                  hasFetched && (
-                    <li className="px-4 py-3 text-sm text-white/40">
-                      No datasets found
-                    </li>
-                  )
-                )}
-              </ul>
-            )}
+            <button>
+              <T>Open dataset</T> ↗
+            </button>
+          </form>
+          {suggestions.length > 0 && (
+            <div className="levi-suggestions">
+              {suggestions.map((id) => (
+                <button key={id} onClick={() => open(id)}>
+                  <T>{id}</T> ↗
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="levi-hero-actions">
+            <Link href="/workbench">
+              <T>Open a local dataset</T> ↗
+            </Link>
+            <HfAuthButton variant="ghost" />
           </div>
-
-          <button
-            type="submit"
-            className="px-5 py-2.5 rounded-md bg-cyan-500 text-white font-semibold text-base hover:bg-cyan-400 active:scale-95 transition-all shadow-md flex items-center gap-2"
-          >
-            Go
-            <kbd className="text-xs font-mono bg-white/20 rounded px-1 py-0.5 leading-tight">
-              ↵
-            </kbd>
-          </button>
-        </form>
-
-        <div className="mt-3 animate-fade-in-late">
-          <HfAuthButton variant="ghost" />
         </div>
-
-        {/* Example Datasets */}
-        <div className="mt-8">
-          <p className="text-white/40 text-xs uppercase tracking-widest mb-3 font-medium">
-            Example Datasets
+        <div className="levi-orbit" aria-hidden="true">
+          <div className="levi-orbit-ring" />
+          <div className="levi-orbit-ring ring-two" />
+          <div className="levi-orbit-core">
+            L<span>↗</span>
+          </div>
+          <span className="levi-orbit-note">
+            <T>OBSERVE.</T>
+            <br />
+            <T>UNDERSTAND.</T>
+            <br />
+            <T>REFINE.</T>
+          </span>
+          <span className="levi-orbit-coordinate">
+            x 0.032
+            <br />y 0.618
+            <br />z 0.974
+          </span>
+        </div>
+      </section>
+      <section>
+        <div className="levi-section-heading">
+          <div>
+            <span className="levi-eyebrow">
+              <T>01 / CURATED STARTING POINTS</T>
+            </span>
+            <h2>
+              <T>Small strawberries. Rich trajectories.</T>
+            </h2>
+          </div>
+          <Link href="/explore">
+            <T>Explore all datasets</T> ↗
+          </Link>
+        </div>
+        <div className="levi-demo-grid">
+          {DEMOS.map((id, i) => (
+            <Link className="levi-demo" href={`/${id}`} key={id}>
+              <div className="levi-demo-video">
+                <video
+                  src={`/api/proxy/datasets/${id}/resolve/main/videos/chunk-000/observation.images.front/episode_000000.mp4#t=0.1`}
+                  muted
+                  playsInline
+                  preload="metadata"
+                  onMouseEnter={(e) =>
+                    void e.currentTarget.play().catch(() => {})
+                  }
+                  onMouseLeave={(e) => e.currentTarget.pause()}
+                />
+                <span className="levi-demo-badge">
+                  0{i + 1} / <T>{i === 0 ? "TRAIN" : "EVALUATE"}</T>
+                </span>
+                <span className="levi-demo-arrow">↗</span>
+              </div>
+              <div className="levi-demo-caption">
+                <div>
+                  <h3>
+                    <T>
+                      {i === 0
+                        ? "Demonstration collection"
+                        : "Policy evaluation"}
+                    </T>
+                  </h3>
+                  <p>
+                    <T>{id}</T>
+                  </p>
+                </div>
+                <span>
+                  <T>SO-100</T>
+                  <br />
+                  <T>3 cameras</T>
+                </span>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </section>
+      <section className="levi-workflow">
+        <div>
+          <span>01</span>
+          <h3>
+            <T>Observe</T>
+          </h3>
+          <p>
+            <T>Synchronized cameras, signals and 3D robot replay.</T>
           </p>
-          <div className="flex flex-row flex-wrap gap-2 justify-center max-w-xl">
-            {EXAMPLE_DATASETS.map((ds) => (
-              <button
-                key={ds}
-                type="button"
-                className="px-3 py-1.5 rounded-full border border-white/20 text-sm text-cyan-200/80 hover:border-cyan-400 hover:text-white hover:bg-cyan-500/15 active:scale-95 transition-all backdrop-blur-sm"
-                onClick={() => navigate(ds)}
-              >
-                {ds}
-              </button>
-            ))}
-          </div>
         </div>
-
-        {/* Explore CTA */}
-        <Link
-          href="/explore"
-          className="inline-flex items-center gap-2 px-6 py-3 mt-8 rounded-md bg-cyan-500/90 backdrop-blur-sm text-white font-semibold text-lg shadow-lg hover:bg-cyan-400 active:scale-95 transition-all"
-        >
-          Explore Open Datasets
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="w-5 h-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"
-            />
-          </svg>
+        <div>
+          <span>02</span>
+          <h3>
+            <T>Understand</T>
+          </h3>
+          <p>
+            <T>Temporal alignment, action quality and grounded annotations.</T>
+          </p>
+        </div>
+        <div>
+          <span>03</span>
+          <h3>
+            <T>Refine</T>
+          </h3>
+          <p>
+            <T>
+              Convert with the built-in pipeline. Review, diagnose and export.
+            </T>
+          </p>
+        </div>
+        <Link href="/workbench">
+          <T>Enter the workbench</T> ↗
         </Link>
-      </div>
-    </div>
+      </section>
+      <footer className="levi-footer">
+        <span>
+          <T>LEVI / ROBOT DATA ATELIER</T>
+        </span>
+        <span>
+          <T>Built on LeRobot Dataset Visualizer · Apache-2.0</T>
+        </span>
+      </footer>
+    </main>
   );
 }

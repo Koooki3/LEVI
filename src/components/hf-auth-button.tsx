@@ -1,4 +1,6 @@
+// Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import { T, useLocale } from "@/components/levi-locale";
 
 import React, { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/context/auth-context";
@@ -39,10 +41,8 @@ export default function HfAuthButton({ variant = "badge" }: HfAuthButtonProps) {
   // localStorage rehydrate), so the rendered control changes from
   // null → signed-out → signed-in. Reserve the height so the surrounding
   // layout doesn't reflow each time.
-  if (!isAuthAvailable) {
-    return (
-      <span aria-hidden className={`inline-block ${SLOT_HEIGHT[variant]}`} />
-    );
+  if (!isAuthAvailable && !oauth) {
+    return <TokenLogin />;
   }
 
   if (oauth) {
@@ -67,7 +67,9 @@ export default function HfAuthButton({ variant = "badge" }: HfAuthButtonProps) {
         className="cursor-pointer inline-flex items-center h-7 gap-1.5 text-sm tracking-wide text-cyan-300/85 hover:text-cyan-200 transition-colors rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400/60"
       >
         <span aria-hidden>🤗</span>
-        <span>Sign in for private datasets</span>
+        <span>
+          <T>Sign in for private datasets</T>
+        </span>
         <span aria-hidden className="opacity-60">
           →
         </span>
@@ -83,7 +85,9 @@ export default function HfAuthButton({ variant = "badge" }: HfAuthButtonProps) {
         className="cursor-pointer inline-flex items-center h-10 gap-1.5 px-5 text-[11px] font-medium tracking-wide uppercase text-slate-400 hover:text-cyan-300 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400/60"
       >
         <span aria-hidden>🤗</span>
-        <span>Sign in</span>
+        <span>
+          <T>Sign in</T>
+        </span>
       </button>
     );
   }
@@ -160,7 +164,9 @@ function SignedInMenu({
             className="rounded-full ring-1 ring-white/10"
           />
         )}
-        <span className="tabular max-w-[10rem] truncate">{name}</span>
+        <span className="tabular max-w-[10rem] truncate">
+          <T>{name}</T>
+        </span>
         <svg
           aria-hidden
           width="9"
@@ -185,10 +191,92 @@ function SignedInMenu({
             }}
             className="cursor-pointer w-full text-left px-2 py-1.5 rounded text-slate-300 hover:bg-white/5 hover:text-slate-100 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400/60"
           >
-            Sign out
+            <T>Sign out</T>
           </button>
         </div>
       )}
     </div>
+  );
+}
+
+function TokenLogin() {
+  const [open, setOpen] = useState(false),
+    [token, setToken] = useState(""),
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false);
+  const { tokenSignIn } = useAuth();
+  const { t } = useLocale();
+  return (
+    <>
+      <button
+        className="text-xs text-cyan-300 whitespace-nowrap"
+        onClick={() => setOpen(true)}
+      >
+        <T>Connect Hugging Face</T> ↗
+      </button>
+      {open && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("Connect Hugging Face")}
+        >
+          <form
+            className="levi-box w-[min(500px,90vw)]"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setBusy(true);
+              setError("");
+              try {
+                await tokenSignIn(token);
+                setToken("");
+                setOpen(false);
+              } catch (e) {
+                setError(String(e));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <h2 className="text-lg mb-4">
+              <T>Connect Hugging Face</T>
+            </h2>
+            <p className="text-xs text-slate-400 mb-4">
+              <T>
+                Your token is stored in this browser for private dataset access.
+                Sign out to clear it.
+              </T>
+            </p>
+            <input
+              autoFocus
+              className="levi-input w-full"
+              type="password"
+              autoComplete="off"
+              aria-label="Hugging Face token"
+              placeholder="hf_…"
+              required
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+            />
+            {error && <p className="levi-error mt-3">{error}</p>}
+            <div className="levi-row mt-5">
+              <button className="levi-primary" disabled={busy}>
+                <T>Connect</T>
+              </button>
+              <button
+                type="button"
+                className="levi-secondary"
+                onClick={() => {
+                  setOpen(false);
+                  setToken("");
+                }}
+              >
+                <T>Cancel</T>
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </>
   );
 }

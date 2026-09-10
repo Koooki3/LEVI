@@ -1,10 +1,17 @@
-node_modules
-.next
+# Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 .git
-.gitignore
-README.md
-.env*.local
+.next
+node_modules
+.venv
+.runtime
+.state
+.env
+.env.local
+__pycache__
+.pytest_cache
 *.log
-.DS_Store
-.vscode
-.idea
+
+.env*
+.ruff_cache
+.cache
+*.tsbuildinfo

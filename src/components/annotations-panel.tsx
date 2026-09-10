@@ -1,4 +1,6 @@
+// Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import { T } from "@/components/levi-locale";
 
 import "./annotations-skin.css";
 
@@ -43,7 +45,9 @@ function fmtTime(s: number): string {
 
 function StylePill({ style }: { style: string | null }) {
   const cls = style ?? "speech";
-  return <span className={`style-pill ${cls}`}>{style ?? "speech"}</span>;
+  return (
+    <T>{<span className={`style-pill ${cls}`}>{style ?? "speech"}</span>}</T>
+  );
 }
 
 /**
@@ -539,6 +543,8 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
     }
     setExportStatus("Saving dataset…");
     try {
+      const saved = await save();
+      if (!saved.ok) throw new Error(saved.error || "Save failed");
       const r = await apiExport(ident);
       setExportStatus(
         `Saved dataset to ${r.output_dir} (persistent: ${r.persistent_rows}, events: ${r.event_rows}).`,
@@ -557,161 +563,198 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
 
   // ============ Render ============
   return (
-    <div className="annotation-workbench">
-      <div className="annotation-actionbar">
-        <div>
-          <h3>
-            Language annotations
-            {dirty && <span className="dirty-pill">unsaved</span>}
-          </h3>
-          <p>
-            Select an atom from the timeline or list, then edit it in the
-            inspector.
-          </p>
-        </div>
-        <div className="actionbar-actions">
-          {!backendEnabled && (
-            <span className="backend-offline">
-              backend offline — edits saved to sessionStorage only
-            </span>
-          )}
-          <button
-            disabled={saving || !dirty}
-            onClick={handleSave}
-            className="text-xs h-7 px-3 rounded border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-40"
-          >
-            {saving ? "Saving…" : "Save episode"}
-          </button>
-          <button
-            disabled={!backendEnabled}
-            onClick={handleSaveDataset}
-            className="text-xs h-7 px-3 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40"
-          >
-            Save dataset
-          </button>
-        </div>
-      </div>
-
-      {exportStatus && <div className="save-status">{exportStatus}</div>}
-
-      <section className="annotation-composer">
-        <div className="composer-copy">
-          <span className="section-kicker">Add text annotation</span>
-          <p>
-            Adds task phrasing, subtask, plan, memory, speech, or non-spatial
-            VQA atoms. Task phrasings are saved at episode start.
-          </p>
-        </div>
-        <div className="quick-add">
-          <span className="ts-pill">
-            t = {qaDef.atEpisodeStart ? fmtTime(0) : fmtTime(currentTime)}
-          </span>
-          <select
-            value={qaKind}
-            onChange={(e) => {
-              setQaKind(e.target.value as QuickAddKind);
-              setQaValues({});
-            }}
-          >
-            {QUICK_ADD_DEFS.map((d) => (
-              <option key={d.kind} value={d.kind}>
-                {d.label}
-              </option>
-            ))}
-          </select>
-          {qaDef.fields.map((f, i) => (
-            <input
-              key={f.name}
-              type={f.type === "number" ? "number" : "text"}
-              placeholder={f.placeholder}
-              className={f.grow ? "grow" : undefined}
-              style={f.width ? { width: f.width } : undefined}
-              value={qaValues[f.name] ?? ""}
-              onChange={(e) =>
-                setQaValues((v) => ({ ...v, [f.name]: e.target.value }))
-              }
-              onKeyDown={
-                i === qaDef.fields.length - 1
-                  ? (e) => e.key === "Enter" && handleQuickAdd()
-                  : undefined
-              }
-            />
-          ))}
-          <button className="add-btn" onClick={handleQuickAdd}>
-            + Add at frame
-          </button>
-        </div>
-      </section>
-
-      <div className="workspace inspector-workspace">
-        <div className="rail annotation-list">
-          <div className="list-head">
+    <T>
+      {
+        <div className="annotation-workbench">
+          <div className="annotation-actionbar">
             <div>
-              <span className="section-kicker">Annotations</span>
-              <p>{atoms.length} atoms in this episode</p>
-            </div>
-            <span className="ts-pill">{fmtTime(currentTime)}</span>
-          </div>
-          {atoms.length === 0 && (
-            <div className="rail-empty">
-              No annotations yet.
-              <br />
-              Add text above or draw on the active video.
-            </div>
-          )}
-          {(["persistent", "events"] as const).map((column) => {
-            const colGroups = groups.filter(({ def }) => def.column === column);
-            const total = colGroups.reduce(
-              (n, { entries }) => n + entries.length,
-              0,
-            );
-            if (total === 0) return null;
-            return (
-              <div className="rail-column" key={column}>
-                <div className={`rail-column-head ${column}`}>
-                  <span className="rail-column-title">
-                    {column === "persistent" ? "Persistent" : "Events"}
+              <h3>
+                <T>Language annotations</T>
+                {dirty && (
+                  <span className="dirty-pill">
+                    <T>unsaved</T>
                   </span>
-                  <span className="rail-column-sub">
-                    {column === "persistent"
-                      ? "language_persistent · broadcast across every frame"
-                      : "language_events · fire on a single frame"}
-                  </span>
-                </div>
-                {colGroups.map(({ def, entries }) => (
-                  <RailGroup
-                    key={def.key}
-                    title={def.title}
-                    dotClass={def.dotClass}
-                    entries={entries}
-                    currentTime={currentTime}
-                  />
-                ))}
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="editor inspector">
-          {selectedAtom == null ? (
-            <div className="editor-empty">
-              <span className="section-kicker">Inspector</span>
+                )}
+              </h3>
               <p>
-                Select an annotation from the list or timeline, or draw a new
-                bbox/keypoint on the video.
+                <T>
+                  Select an atom from the timeline or list, then edit it in the
+                  inspector.
+                </T>
               </p>
             </div>
-          ) : (
-            <AtomEditor
-              atom={selectedAtom}
-              cameraKeys={cameraKeys}
-              onChange={(updates) => updateAtom(selectedIdx as number, updates)}
-              onDelete={() => deleteAtom(selectedAtom)}
-            />
+            <div className="actionbar-actions">
+              {!backendEnabled && (
+                <span className="backend-offline">
+                  <T>backend offline — edits saved to sessionStorage only</T>
+                </span>
+              )}
+              <button
+                disabled={saving || !dirty}
+                onClick={handleSave}
+                className="text-xs h-7 px-3 rounded border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-40"
+              >
+                <T>{saving ? "Saving…" : "Save episode"}</T>
+              </button>
+              <button
+                disabled={!backendEnabled}
+                onClick={handleSaveDataset}
+                className="text-xs h-7 px-3 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40"
+              >
+                <T>Save dataset</T>
+              </button>
+            </div>
+          </div>
+
+          {exportStatus && (
+            <div className="save-status">
+              <T>{exportStatus}</T>
+            </div>
           )}
+
+          <section className="annotation-composer">
+            <div className="composer-copy">
+              <span className="section-kicker">
+                <T>Add text annotation</T>
+              </span>
+              <p>
+                <T>
+                  Adds task phrasing, subtask, plan, memory, speech, or
+                  non-spatial VQA atoms. Task phrasings are saved at episode
+                  start.
+                </T>
+              </p>
+            </div>
+            <div className="quick-add">
+              <span className="ts-pill">
+                t ={" "}
+                <T>
+                  {qaDef.atEpisodeStart ? fmtTime(0) : fmtTime(currentTime)}
+                </T>
+              </span>
+              <select
+                value={qaKind}
+                onChange={(e) => {
+                  setQaKind(e.target.value as QuickAddKind);
+                  setQaValues({});
+                }}
+              >
+                {QUICK_ADD_DEFS.map((d) => (
+                  <option key={d.kind} value={d.kind}>
+                    <T>{d.label}</T>
+                  </option>
+                ))}
+              </select>
+              {qaDef.fields.map((f, i) => (
+                <input
+                  key={f.name}
+                  type={f.type === "number" ? "number" : "text"}
+                  placeholder={f.placeholder}
+                  className={f.grow ? "grow" : undefined}
+                  style={f.width ? { width: f.width } : undefined}
+                  value={qaValues[f.name] ?? ""}
+                  onChange={(e) =>
+                    setQaValues((v) => ({ ...v, [f.name]: e.target.value }))
+                  }
+                  onKeyDown={
+                    i === qaDef.fields.length - 1
+                      ? (e) => e.key === "Enter" && handleQuickAdd()
+                      : undefined
+                  }
+                />
+              ))}
+              <button className="add-btn" onClick={handleQuickAdd}>
+                <T>+ Add at frame</T>
+              </button>
+            </div>
+          </section>
+
+          <div className="workspace inspector-workspace">
+            <div className="rail annotation-list">
+              <div className="list-head">
+                <div>
+                  <span className="section-kicker">
+                    <T>Annotations</T>
+                  </span>
+                  <p>
+                    <T>{atoms.length}</T>
+                    <T> atoms in this episode</T>
+                  </p>
+                </div>
+                <span className="ts-pill">{fmtTime(currentTime)}</span>
+              </div>
+              {atoms.length === 0 && (
+                <div className="rail-empty">
+                  <T>No annotations yet.</T>
+                  <br />
+                  <T>Add text above or draw on the active video.</T>
+                </div>
+              )}
+              {(["persistent", "events"] as const).map((column) => {
+                const colGroups = groups.filter(
+                  ({ def }) => def.column === column,
+                );
+                const total = colGroups.reduce(
+                  (n, { entries }) => n + entries.length,
+                  0,
+                );
+                if (total === 0) return null;
+                return (
+                  <div className="rail-column" key={column}>
+                    <div className={`rail-column-head ${column}`}>
+                      <span className="rail-column-title">
+                        <T>
+                          {column === "persistent" ? "Persistent" : "Events"}
+                        </T>
+                      </span>
+                      <span className="rail-column-sub">
+                        <T>
+                          {column === "persistent"
+                            ? "language_persistent · broadcast across every frame"
+                            : "language_events · fire on a single frame"}
+                        </T>
+                      </span>
+                    </div>
+                    {colGroups.map(({ def, entries }) => (
+                      <RailGroup
+                        key={def.key}
+                        title={def.title}
+                        dotClass={def.dotClass}
+                        entries={entries}
+                        currentTime={currentTime}
+                      />
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="editor inspector">
+              <T>
+                {selectedAtom == null ? (
+                  <div className="editor-empty">
+                    <span className="section-kicker">Inspector</span>
+                    <p>
+                      Select an annotation from the list or timeline, or draw a
+                      new bbox/keypoint on the video.
+                    </p>
+                  </div>
+                ) : (
+                  <AtomEditor
+                    atom={selectedAtom}
+                    cameraKeys={cameraKeys}
+                    onChange={(updates) =>
+                      updateAtom(selectedIdx as number, updates)
+                    }
+                    onDelete={() => deleteAtom(selectedAtom)}
+                  />
+                )}
+              </T>
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
+      }
+    </T>
   );
 };
 
@@ -729,32 +772,42 @@ const RailGroup: React.FC<{
   const jump = useJump();
   if (entries.length === 0) return null;
   return (
-    <div className="rail-group">
-      <div className="rail-group-head">
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <span className={`style-dot ${dotClass}`} />
-          {title}
-        </span>
-        <span className="count">{entries.length}</span>
-      </div>
-      {entries.map(({ atom, idx, label }) => {
-        const sel = idx === selectedIdx;
-        const active = isActiveAt(atom.timestamp, currentTime);
-        return (
-          <div
-            key={idx}
-            className={`rail-row ${sel ? "selected" : ""} ${active ? "active-now" : ""}`}
-            onClick={() => {
-              selectAtom(idx);
-              jump(atom.timestamp);
-            }}
-          >
-            <span className="ts">{fmtTime(atom.timestamp)}</span>
-            <span className="body">{label}</span>
+    <T>
+      {
+        <div className="rail-group">
+          <div className="rail-group-head">
+            <span
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              <span className={`style-dot ${dotClass}`} />
+              <T>{title}</T>
+            </span>
+            <span className="count">
+              <T>{entries.length}</T>
+            </span>
           </div>
-        );
-      })}
-    </div>
+          {entries.map(({ atom, idx, label }) => {
+            const sel = idx === selectedIdx;
+            const active = isActiveAt(atom.timestamp, currentTime);
+            return (
+              <div
+                key={idx}
+                className={`rail-row ${sel ? "selected" : ""} ${active ? "active-now" : ""}`}
+                onClick={() => {
+                  selectAtom(idx);
+                  jump(atom.timestamp);
+                }}
+              >
+                <span className="ts">{fmtTime(atom.timestamp)}</span>
+                <span className="body">
+                  <T>{label}</T>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      }
+    </T>
   );
 };
 
@@ -802,141 +855,154 @@ const AtomEditor: React.FC<{
   };
 
   return (
-    <div className="inspector-body">
-      <div className="editor-head inspector-head">
-        <div className="inspector-title">
-          <StylePill style={atom.style} />
-          <div>
-            <strong>{fmtTime(atom.timestamp)}</strong>
-            <span>
-              {roleLabel} · {cameraLabel}
-            </span>
+    <T>
+      {
+        <div className="inspector-body">
+          <div className="editor-head inspector-head">
+            <div className="inspector-title">
+              <StylePill style={atom.style} />
+              <div>
+                <strong>{fmtTime(atom.timestamp)}</strong>
+                <span>
+                  <T>{roleLabel}</T> · <T>{cameraLabel}</T>
+                </span>
+              </div>
+            </div>
+            <div className="right">
+              <button
+                className="icon-btn"
+                title="Jump to this atom's frame"
+                onClick={() => jump(atom.timestamp)}
+              >
+                ▶
+              </button>
+              <button
+                className="icon-btn danger"
+                title="Delete this atom"
+                onClick={onDelete}
+              >
+                ×
+              </button>
+            </div>
           </div>
-        </div>
-        <div className="right">
-          <button
-            className="icon-btn"
-            title="Jump to this atom's frame"
-            onClick={() => jump(atom.timestamp)}
-          >
-            ▶
-          </button>
-          <button
-            className="icon-btn danger"
-            title="Delete this atom"
-            onClick={onDelete}
-          >
-            ×
-          </button>
-        </div>
-      </div>
 
-      <div className="field">
-        <label className="field-label">Timestamp (s)</label>
-        <div className="ts-row">
-          <input
-            type="text"
-            inputMode="decimal"
-            value={timestampDraft}
-            onChange={(e) => setTimestampDraft(e.target.value)}
-            onBlur={() => commitTimestamp()}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commitTimestamp();
-              if (e.key === "Escape") setTimestampDraft(String(atom.timestamp));
-            }}
-          />
-          <button
-            type="button"
-            className="frame-pill"
-            onPointerDown={(e) => {
-              e.preventDefault();
-              commitSnappedTimestamp();
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                commitSnappedTimestamp();
-              }
-            }}
-          >
-            snap to frame
-          </button>
-        </div>
-      </div>
+          <div className="field">
+            <label className="field-label">
+              <T>Timestamp (s)</T>
+            </label>
+            <div className="ts-row">
+              <input
+                type="text"
+                inputMode="decimal"
+                value={timestampDraft}
+                onChange={(e) => setTimestampDraft(e.target.value)}
+                onBlur={() => commitTimestamp()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitTimestamp();
+                  if (e.key === "Escape")
+                    setTimestampDraft(String(atom.timestamp));
+                }}
+              />
+              <button
+                type="button"
+                className="frame-pill"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  commitSnappedTimestamp();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    commitSnappedTimestamp();
+                  }
+                }}
+              >
+                <T>snap to frame</T>
+              </button>
+            </div>
+          </div>
 
-      {/* Content / role-specific fields */}
-      {(atom.style === "task_aug" ||
-        atom.style === "subtask" ||
-        atom.style === "plan" ||
-        atom.style === "memory" ||
-        atom.style === "interjection") && (
-        <div className="field">
-          <label className="field-label">
-            {atom.style === "subtask"
-              ? "Subtask"
-              : atom.style === "task_aug"
-                ? "Task augmentation"
-                : atom.style === "plan"
-                  ? "Plan"
-                  : atom.style === "memory"
-                    ? "Memory"
-                    : "Interjection"}
-          </label>
-          {atom.style === "task_aug" ||
-          atom.style === "subtask" ||
-          atom.style === "interjection" ? (
-            <textarea
-              rows={3}
-              value={atom.content || ""}
-              onChange={(e) => onChange({ content: e.target.value })}
-            />
-          ) : (
-            <textarea
-              rows={4}
-              value={atom.content || ""}
-              onChange={(e) => onChange({ content: e.target.value })}
-            />
+          {/* Content / role-specific fields */}
+          {(atom.style === "task_aug" ||
+            atom.style === "subtask" ||
+            atom.style === "plan" ||
+            atom.style === "memory" ||
+            atom.style === "interjection") && (
+            <div className="field">
+              <label className="field-label">
+                <T>
+                  {atom.style === "subtask"
+                    ? "Subtask"
+                    : atom.style === "task_aug"
+                      ? "Task augmentation"
+                      : atom.style === "plan"
+                        ? "Plan"
+                        : atom.style === "memory"
+                          ? "Memory"
+                          : "Interjection"}
+                </T>
+              </label>
+              <T>
+                {atom.style === "task_aug" ||
+                atom.style === "subtask" ||
+                atom.style === "interjection" ? (
+                  <textarea
+                    rows={3}
+                    value={atom.content || ""}
+                    onChange={(e) => onChange({ content: e.target.value })}
+                  />
+                ) : (
+                  <textarea
+                    rows={4}
+                    value={atom.content || ""}
+                    onChange={(e) => onChange({ content: e.target.value })}
+                  />
+                )}
+              </T>
+            </div>
+          )}
+
+          {isSpeech && atom.tool_calls && (
+            <div className="field">
+              <label className="field-label">
+                <T>Robot speech (say tool call)</T>
+              </label>
+              <input
+                type="text"
+                value={speechText(atom) || ""}
+                onChange={(e) => {
+                  const next = atom.tool_calls
+                    ? atom.tool_calls.map((tc, i) =>
+                        i === 0
+                          ? {
+                              ...tc,
+                              function: {
+                                ...tc.function,
+                                arguments: { text: e.target.value },
+                              },
+                            }
+                          : tc,
+                      )
+                    : null;
+                  onChange({ tool_calls: next });
+                }}
+              />
+            </div>
+          )}
+
+          {atom.style === "vqa" && (
+            <>
+              <CameraField
+                atom={atom}
+                cameraKeys={cameraKeys}
+                onChange={onChange}
+              />
+              <VqaEditorFields atom={atom} onChange={onChange} />
+            </>
           )}
         </div>
-      )}
-
-      {isSpeech && atom.tool_calls && (
-        <div className="field">
-          <label className="field-label">Robot speech (say tool call)</label>
-          <input
-            type="text"
-            value={speechText(atom) || ""}
-            onChange={(e) => {
-              const next = atom.tool_calls
-                ? atom.tool_calls.map((tc, i) =>
-                    i === 0
-                      ? {
-                          ...tc,
-                          function: {
-                            ...tc.function,
-                            arguments: { text: e.target.value },
-                          },
-                        }
-                      : tc,
-                  )
-                : null;
-              onChange({ tool_calls: next });
-            }}
-          />
-        </div>
-      )}
-
-      {atom.style === "vqa" && (
-        <>
-          <CameraField
-            atom={atom}
-            cameraKeys={cameraKeys}
-            onChange={onChange}
-          />
-          <VqaEditorFields atom={atom} onChange={onChange} />
-        </>
-      )}
-    </div>
+      }
+    </T>
   );
 };
 
@@ -953,22 +1019,32 @@ const CameraField: React.FC<{
   if (cameraKeys.length === 0) return null;
   const value = atom.camera ?? "";
   return (
-    <div className="field">
-      <label className="field-label">Camera</label>
-      <select
-        value={value}
-        onChange={(e) =>
-          onChange({ camera: e.target.value === "" ? null : e.target.value })
-        }
-      >
-        <option value="">(any — renders on every camera)</option>
-        {cameraKeys.map((k) => (
-          <option key={k} value={k}>
-            {k}
-          </option>
-        ))}
-      </select>
-    </div>
+    <T>
+      {
+        <div className="field">
+          <label className="field-label">
+            <T>Camera</T>
+          </label>
+          <select
+            value={value}
+            onChange={(e) =>
+              onChange({
+                camera: e.target.value === "" ? null : e.target.value,
+              })
+            }
+          >
+            <option value="">
+              <T>(any — renders on every camera)</T>
+            </option>
+            {cameraKeys.map((k) => (
+              <option key={k} value={k}>
+                <T>{k}</T>
+              </option>
+            ))}
+          </select>
+        </div>
+      }
+    </T>
   );
 };
 
@@ -981,41 +1057,56 @@ const VqaEditorFields: React.FC<{
 
   if (atom.role === "user") {
     return (
-      <div className="field">
-        <label className="field-label">Question</label>
-        <input
-          type="text"
-          value={atom.content || ""}
-          onChange={(e) => onChange({ content: e.target.value })}
-        />
-      </div>
+      <T>
+        {
+          <div className="field">
+            <label className="field-label">
+              <T>Question</T>
+            </label>
+            <input
+              type="text"
+              value={atom.content || ""}
+              onChange={(e) => onChange({ content: e.target.value })}
+            />
+          </div>
+        }
+      </T>
     );
   }
 
   // Assistant atom — answer JSON (raw + structured viewer)
   return (
-    <div className="field">
-      <label className="field-label">Answer ({kind || "unknown"})</label>
-      <textarea
-        rows={5}
-        style={{
-          fontFamily:
-            "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-        }}
-        value={atom.content || ""}
-        onChange={(e) => onChange({ content: e.target.value })}
-      />
-      {parsed && kind === "bbox" && (
-        <p className="text-[11px] text-slate-400 mt-1">
-          Tip: bbox values are 0..1 image-relative (xyxy). Edit on the video
-          itself by deleting this and re-drawing.
-        </p>
-      )}
-      {parsed && kind === "keypoint" && (
-        <p className="text-[11px] text-slate-400 mt-1">
-          Tip: point values are 0..1 image-relative (xy).
-        </p>
-      )}
-    </div>
+    <T>
+      {
+        <div className="field">
+          <label className="field-label">
+            <T>Answer (</T>
+            {kind || "unknown"})
+          </label>
+          <textarea
+            rows={5}
+            style={{
+              fontFamily:
+                "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+            }}
+            value={atom.content || ""}
+            onChange={(e) => onChange({ content: e.target.value })}
+          />
+          {parsed && kind === "bbox" && (
+            <p className="text-[11px] text-slate-400 mt-1">
+              <T>
+                Tip: bbox values are 0..1 image-relative (xyxy). Edit on the
+                video itself by deleting this and re-drawing.
+              </T>
+            </p>
+          )}
+          {parsed && kind === "keypoint" && (
+            <p className="text-[11px] text-slate-400 mt-1">
+              <T>Tip: point values are 0..1 image-relative (xy).</T>
+            </p>
+          )}
+        </div>
+      }
+    </T>
   );
 };

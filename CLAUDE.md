@@ -1,4 +1,13 @@
-# CLAUDE.md — LeRobot Dataset Visualizer
+# CLAUDE.md — LEVI
+
+Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
+
+LEVI is a standalone bilingual workbench derived from LeRobot Dataset Visualizer.
+Read README.md (Chinese), README.en.md and docs/CONVERSION.md before changing data workflows.
+Python dependencies are managed by uv; use `uv run levi check`, `uv run pytest` and `uv run levi build`.
+Use only LEVI_WORKSPACE for runtime data (default checkout `.state/`). Never hardcode a developer path or require a sibling conversion repository.
+Preserve source captures: conversion and annotation export write to new output directories.
+Frontend text belongs in both locale catalogs; Chinese is the default.
 
 ## Package manager
 
@@ -11,7 +20,7 @@ After making any code changes, always run these commands in order and fix any er
 ```
 bun run format        # auto-fix formatting (prettier)
 bun run type-check    # TypeScript: app + test files
-bun run lint          # ESLint (next lint)
+bun run lint          # ESLint
 bun test              # unit tests
 ```
 
@@ -29,30 +38,30 @@ bun run format && bun run validate
 bun dev              # Next.js dev server
 bun test             # Run all unit tests (bun:test)
 bun run type-check   # tsc --noEmit (app) + tsc -p tsconfig.test.json --noEmit (tests)
-bun run lint         # next lint
-bun run validate     # type-check + lint + format:check
+bun run lint         # eslint src
+bun run validate     # type-check + lint + format:check + tests
 ```
 
 ## Architecture
 
 ### Dataset version support
 
-Three versions are supported. Version is detected from `meta/info.json` → `codebase_version`.
+Video-based v2.0, v2.1, v3.0 and v3.1 are supported. Version is detected from `meta/info.json` → `codebase_version`.
 
 | Version  | Path pattern                                                      | Episode metadata                           | Video                                          |
 | -------- | ----------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------- |
-| **v2.0** | `data/{episode_chunk:03d}/episode_{episode_index:06d}.parquet`    | None (computed from `chunks_size`)         | Full file per episode                          |
-| **v2.1** | Same as v2.0                                                      | None                                       | Full file per episode                          |
-| **v3.0** | `data/chunk-{N:03d}/file-{N:03d}.parquet` (via `buildV3DataPath`) | `meta/episodes/chunk-{N}/file-{N}.parquet` | Segmented (timestamps per episode, per camera) |
+| **v2.0** | `data/{episode_chunk:03d}/episode_{episode_index:06d}.parquet`    | `meta/episodes.jsonl` when available         | Full file per episode                          |
+| **v2.1** | Same as v2.0                                                      | `meta/episodes.jsonl`                       | Full file per episode                          |
+| **v3.0/v3.1** | `data/chunk-{N:03d}/file-{N:03d}.parquet` (via `buildV3DataPath`) | `meta/episodes/chunk-{N}/file-{N}.parquet` | Segmented (timestamps per episode, per camera) |
 
 ### Routing to parsers
 
 `src/app/[org]/[dataset]/[episode]/fetch-data.ts` → `getEpisodeData()` dispatches to:
 
 - `getEpisodeDataV2()` for v2.0 and v2.1
-- `getEpisodeDataV3()` for v3.0
+- `getEpisodeDataV3()` for v3.0 and v3.1
 
-### v3.0 specifics
+### v3.x specifics
 
 - Episode metadata row has named keys (`episode_index`, `data/chunk_index`, `data/file_index`, `dataset_from_index`, `dataset_to_index`, `videos/{key}/chunk_index`, etc.)
 - Integer columns from parquet come out as **BigInt** — always use `bigIntToNumber()` from `src/utils/typeGuards.ts`
@@ -101,11 +110,12 @@ Series keys use `" | "` as delimiter (e.g. `observation.state | 0`).
 - BigInt literals (`42n`) require `tsconfig.test.json` (target ES2020) — test files are excluded from `tsconfig.json`
 - `@types/bun` is installed as a devDependency for `bun:test` type resolution
 - Mocking fetch: `globalThis.fetch = mock(() => Promise.resolve(new Response(...))) as unknown as typeof fetch`
-- CI: `.github/workflows/test.yml` runs `bun test` on push/PR to main
+- Python tests are in `tests/`; use `uv run pytest`.
+- CI: `.github/workflows/test.yml` runs frontend validation, backend/conversion tests and production build on push/PR.
 
 ## URL structure
 
-All dataset URLs:
+Remote dataset URLs (local datasets use the same-origin LEVI file service):
 
 ```
 https://huggingface.co/datasets/{org}/{dataset}/resolve/main/{path}
@@ -131,10 +141,17 @@ Reserved/bookkeeping columns from lerobot — see `EXCLUDED_COLUMNS` in `src/uti
 
 ## Design system
 
-CSS tokens in `src/app/globals.css` (Tailwind v4 `@theme inline`):
+`src/app/globals.css` retains upstream base styles. LEVI overrides live in
+`src/app/levi.css`: graphite green surfaces, parchment text and lime accents.
+`src/components/levi-locale.tsx` and `src/i18n/` supply the Chinese/English UI.
+Preserve the LEVI theme, keyboard access and responsive layouts when editing inherited components.
 
-- Surfaces: `--bg #0a0e17`, `--surface-0`, `--surface-1`, `--surface-2`
-- Text: `--text-primary`, `--text-muted`, `--text-faint`
-- Accent: `--accent #38bdf8` (cyan) — primary interactive color across UI
-- Helpers: `.panel`, `.panel-raised`, `.tabular` (tabular-nums)
-- **Color semantics**: cyan = primary/active, orange (`orange-400/500`) is reserved for **flagged-episode** UI only — don't reuse it for generic accents.
+## Built-in conversion and service
+
+- `levi/conversion/`: strict CSV/video alignment, independent snapshots, filtering, v2.1 output and validation.
+- `levi/jobs.py`: allowlisted worker processes, immutable plans, timeouts and recovery.
+- `levi/service.py`: local API, catalog, diagnostics and dataset file serving.
+- `src/app/api/levi/` and `src/app/api/annotation/`: runtime proxies to the loopback backend.
+- `levi/maintenance.py`: bounded cache cleanup; preserve registered datasets, results and environments.
+
+See docs/AUDIT.md and docs/VALIDATION.md for guarantees and verified limits.

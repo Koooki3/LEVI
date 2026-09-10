@@ -1,9 +1,10 @@
+// Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 import type { NextConfig } from "next";
 import packageJson from "./package.json";
 
 const nextConfig: NextConfig = {
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
   eslint: {
     ignoreDuringBuilds: true,

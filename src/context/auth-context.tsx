@@ -1,4 +1,6 @@
+// Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import { T } from "@/components/levi-locale";
 
 import React, {
   createContext,
@@ -28,6 +30,7 @@ interface AuthContextValue {
   isAuthAvailable: boolean;
   signIn: () => Promise<void>;
   signOut: () => void;
+  tokenSignIn: (token: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue>({
@@ -35,6 +38,7 @@ const AuthContext = createContext<AuthContextValue>({
   isAuthAvailable: false,
   signIn: async () => {},
   signOut: () => {},
+  tokenSignIn: async () => {},
 });
 
 // Mirror the access token into an HttpOnly cookie so the same-origin
@@ -88,7 +92,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     fetchOAuthConfig().then((cfg) => {
-      if (cancelled || !cfg) return;
+      if (cancelled) return;
       setConfig(cfg);
 
       const stored = window.localStorage.getItem(AUTH_STORAGE_KEY);
@@ -108,6 +112,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
+      if (!cfg) return;
       oauthHandleRedirectIfPresent()
         .then((result) => {
           if (cancelled || !result) return;
@@ -134,6 +139,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.location.href = url + "&prompt=consent";
   }, [config]);
 
+  const tokenSignIn = useCallback(async (token: string) => {
+    const response = await fetch("https://huggingface.co/api/whoami-v2", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) throw new Error("Hugging Face token rejected");
+    const user = await response.json();
+    const result = {
+      accessToken: token,
+      userInfo: {
+        preferred_username: user.name,
+        name: user.name,
+        picture: user.avatarUrl,
+      },
+    } as OAuthResult;
+    window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(result));
+    await setSessionCookie(token);
+    setOauth(result);
+  }, []);
+
   const signOut = useCallback(() => {
     window.localStorage.removeItem(AUTH_STORAGE_KEY);
     setOauth(null);
@@ -146,16 +170,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider
-      value={{
-        oauth,
-        isAuthAvailable: !!config,
-        signIn,
-        signOut,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+    <T>
+      {
+        <AuthContext.Provider
+          value={{
+            oauth,
+            isAuthAvailable: !!config,
+            signIn,
+            signOut,
+            tokenSignIn,
+          }}
+        >
+          <T>{children}</T>
+        </AuthContext.Provider>
+      }
+    </T>
   );
 }
 

@@ -1,10 +1,11 @@
+// Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 /**
  * Dataset type definitions for LeRobot datasets
  * Based on the LeRobot dataset format (v2.0, v2.1, v3.0)
  */
 
 // Version management
-export type DatasetVersion = "v2.0" | "v2.1" | "v3.0";
+export type DatasetVersion = "v2.0" | "v2.1" | "v3.0" | "v3.1";
 
 // Feature data types
 export type FeatureDType = "video" | "float32" | "int32" | "int64" | "bool";

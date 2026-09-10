@@ -1,3 +1,4 @@
+// Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 /**
  * Client for the FastAPI annotation backend in `backend/`.
  *
@@ -9,13 +10,13 @@
 
 import type { LanguageAtom } from "../types/language.types";
 
-const ENV_URL = (() => {
-  const v =
-    typeof process !== "undefined"
-      ? process.env.NEXT_PUBLIC_ANNOTATE_BACKEND_URL
-      : undefined;
-  return (v || "").trim() || null;
-})();
+const ENV_URL = "LEVI";
+function endpoint(path: string): string {
+  return new URL(
+    "/api/annotation/" + path.replace(/^\/api\//, ""),
+    window.location.origin,
+  ).toString();
+}
 
 export function isAnnotateBackendEnabled(): boolean {
   return !!ENV_URL;
@@ -33,7 +34,7 @@ interface DatasetIdent {
 
 function buildUrl(path: string, ident: DatasetIdent): string {
   if (!ENV_URL) throw new Error("Annotate backend not configured");
-  const url = new URL(path, ENV_URL);
+  const url = new URL(endpoint(path));
   if (ident.repoId) url.searchParams.set("repo_id", ident.repoId);
   if (ident.revision) url.searchParams.set("revision", ident.revision);
   if (ident.localPath) url.searchParams.set("local_path", ident.localPath);
@@ -43,7 +44,7 @@ function buildUrl(path: string, ident: DatasetIdent): string {
 export async function pingBackend(): Promise<boolean> {
   if (!ENV_URL) return false;
   try {
-    const res = await fetch(new URL("/api/health", ENV_URL).toString());
+    const res = await fetch(endpoint("/api/health"));
     return res.ok;
   } catch {
     return false;
@@ -54,7 +55,7 @@ export async function loadDataset(
   ident: DatasetIdent,
 ): Promise<{ ok: boolean }> {
   if (!ENV_URL) return { ok: false };
-  const res = await fetch(new URL("/api/dataset/load", ENV_URL).toString(), {
+  const res = await fetch(endpoint("/api/dataset/load"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -86,19 +87,16 @@ export async function saveEpisodeAtoms(
   atoms: LanguageAtom[],
 ): Promise<{ path: string | null }> {
   if (!ENV_URL) return { path: null };
-  const res = await fetch(
-    new URL(`/api/episodes/${episodeId}/atoms`, ENV_URL).toString(),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        episode_index: episodeId,
-        repo_id: ident.repoId || null,
-        local_path: ident.localPath || null,
-        atoms,
-      }),
-    },
-  );
+  const res = await fetch(endpoint(`/api/episodes/${episodeId}/atoms`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      episode_index: episodeId,
+      repo_id: ident.repoId || null,
+      local_path: ident.localPath || null,
+      atoms,
+    }),
+  });
   if (!res.ok) {
     const text = await res.text().catch(() => `${res.status}`);
     throw new Error(text || `save atoms: ${res.status}`);
@@ -130,7 +128,7 @@ export async function exportDataset(
   event_rows: number;
 }> {
   if (!ENV_URL) throw new Error("Annotate backend not configured");
-  const res = await fetch(new URL("/api/export", ENV_URL).toString(), {
+  const res = await fetch(endpoint("/api/export"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -164,7 +162,7 @@ export async function pushToHub(
   commitMessage: string,
 ): Promise<PushToHubResult> {
   if (!ENV_URL) throw new Error("Annotate backend not configured");
-  const res = await fetch(new URL("/api/push_to_hub", ENV_URL).toString(), {
+  const res = await fetch(endpoint("/api/push_to_hub"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

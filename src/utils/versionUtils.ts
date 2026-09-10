@@ -1,3 +1,4 @@
+// Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 /**
  * Utility functions for checking dataset version compatibility
  */
@@ -75,7 +76,7 @@ export async function getDatasetInfo(repoId: string): Promise<DatasetInfo> {
   console.log(`[perf] getDatasetInfo cache MISS for ${repoId} — fetching`);
 
   try {
-    const testUrl = `${DATASET_URL}/${repoId}/resolve/main/meta/info.json`;
+    const testUrl = buildVersionedUrl(repoId, "", "meta/info.json");
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
@@ -135,7 +136,7 @@ export async function getDatasetStats(
 
   let data: Record<string, unknown> | null = null;
   try {
-    const url = `${DATASET_URL}/${repoId}/resolve/main/meta/stats.json`;
+    const url = buildVersionedUrl(repoId, "", "meta/stats.json");
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
     const response = await fetch(url, {
@@ -159,7 +160,7 @@ export async function getDatasetStats(
   return data;
 }
 
-const SUPPORTED_VERSIONS = ["v3.0", "v2.1", "v2.0"];
+const SUPPORTED_VERSIONS = ["v3.1", "v3.0", "v2.1", "v2.0"];
 
 /**
  * Returns both the validated version string and the dataset info in one call,
@@ -193,5 +194,12 @@ export function buildVersionedUrl(
   version: string,
   path: string,
 ): string {
+  if (repoId.startsWith("local/")) {
+    const prefix =
+      typeof window === "undefined"
+        ? `${process.env.LEVI_BACKEND_URL || "http://127.0.0.1:7861"}`
+        : "";
+    return `${prefix}/api/levi/files/${repoId.slice(6)}/${path}`;
+  }
   return `${DATASET_URL}/${repoId}/resolve/main/${path}`;
 }

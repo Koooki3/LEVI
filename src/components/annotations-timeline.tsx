@@ -1,4 +1,6 @@
+// Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import { T } from "@/components/levi-locale";
 
 /**
  * Multi-track timeline for v3.1 language atoms — like a video-editing
@@ -468,351 +470,393 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
   if (!duration) return null;
 
   return (
-    <div className="tl">
-      <div className="tl-head">
-        <span>Annotations timeline</span>
-        <span className="ts-display">
-          {currentTime.toFixed(2)}s / {duration.toFixed(2)}s
-        </span>
-      </div>
+    <T>
+      {
+        <div className="tl">
+          <div className="tl-head">
+            <span>
+              <T>Annotations timeline</T>
+            </span>
+            <span className="ts-display">
+              {currentTime.toFixed(2)}s / {duration.toFixed(2)}s
+            </span>
+          </div>
 
-      {/* Time-axis ruler — clicking it scrubs */}
-      <div
-        className="tl-ruler"
-        data-role="ruler"
-        onClick={(e) => {
-          const ts = trackXToTs(e.clientX);
-          seek(ts, "external");
-          setIsPlaying(false);
-        }}
-      >
-        {Array.from({ length: Math.floor(duration / 5) + 1 }).map((_, i) => {
-          const t = i * 5;
-          const left = (t / duration) * 100;
-          return (
-            <div key={i} className="tick-mark" style={{ left: `${left}%` }}>
-              {t}s
-            </div>
-          );
-        })}
-      </div>
+          {/* Time-axis ruler — clicking it scrubs */}
+          <div
+            className="tl-ruler"
+            data-role="ruler"
+            onClick={(e) => {
+              const ts = trackXToTs(e.clientX);
+              seek(ts, "external");
+              setIsPlaying(false);
+            }}
+          >
+            {Array.from({ length: Math.floor(duration / 5) + 1 }).map(
+              (_, i) => {
+                const t = i * 5;
+                const left = (t / duration) * 100;
+                return (
+                  <div
+                    key={i}
+                    className="tick-mark"
+                    style={{ left: `${left}%` }}
+                  >
+                    <T>{t}</T>s
+                  </div>
+                );
+              },
+            )}
+          </div>
 
-      {/* Tracks, grouped into Persistent / Events sections that mirror the
+          {/* Tracks, grouped into Persistent / Events sections that mirror the
            two language columns. The whole region is position:relative so the
            playhead can span its full height via top/bottom (no brittle
            per-track pixel math that section headers would throw off). The
            playhead's x uses calc() to start at the track band's left edge
            (after the LABEL_WIDTH label column + 10px gap). */}
-      {(() => {
-        const bandLeft = `${LABEL_WIDTH + 10}px`;
-        const playheadLeft = `calc(${bandLeft} + ${
-          duration ? currentTime / duration : 0
-        } * (100% - ${bandLeft}))`;
-        return (
-          <div className="tl-tracks" style={{ position: "relative" }}>
-            {TRACK_GROUPS.map((group) => (
-              <div className="tl-section" key={group.column}>
-                <div className={`tl-section-head ${group.column}`}>
-                  <span className="tl-section-title">{group.title}</span>
-                  <span className="tl-section-sub">{group.sub}</span>
-                </div>
-                {group.tracks.map((tk) => (
-                  <div className="tl-row" key={tk.key}>
-                    <div className="label">
-                      <span className={`style-dot dot-${tk.key}`} />
-                      {tk.label}
+          {(() => {
+            const bandLeft = `${LABEL_WIDTH + 10}px`;
+            const playheadLeft = `calc(${bandLeft} + ${
+              duration ? currentTime / duration : 0
+            } * (100% - ${bandLeft}))`;
+            return (
+              <div className="tl-tracks" style={{ position: "relative" }}>
+                {TRACK_GROUPS.map((group) => (
+                  <div className="tl-section" key={group.column}>
+                    <div className={`tl-section-head ${group.column}`}>
+                      <span className="tl-section-title">
+                        <T>{group.title}</T>
+                      </span>
+                      <span className="tl-section-sub">
+                        <T>{group.sub}</T>
+                      </span>
                     </div>
-                    <div
-                      className={`track ${
-                        tk.key === "subtask" && drag?.kind === "create"
-                          ? "creating"
-                          : ""
-                      }`}
-                      ref={tk.key === "subtask" ? trackBandRef : undefined}
-                      onClick={
-                        tk.render === "span-edit" ? undefined : onTrackBandClick
-                      }
-                      onPointerDown={
-                        tk.key === "subtask" ? onSubtaskTrackDown : undefined
-                      }
-                    >
-                      {/* Editable subtask spans (resize + drag-to-create) */}
-                      {tk.render === "span-edit" &&
-                        lanes.subtask.map((s, k) => {
-                          const left = (s.start / duration) * 100;
-                          const width = Math.max(
-                            0.3,
-                            ((s.end - s.start) / duration) * 100,
-                          );
-                          return (
-                            <div
-                              key={k}
-                              className={`tl-seg subtask ${drag?.kind === "edge" && drag.atomIdx === s.atomIdx ? "dragging" : ""}`}
-                              style={{ left: `${left}%`, width: `${width}%` }}
-                              onClick={(e) =>
-                                onSpanBodyClick(e, s.atomIdx, s.start)
-                              }
-                              onMouseEnter={(e) =>
-                                showTip(
-                                  e,
-                                  `subtask · ${s.start.toFixed(2)}s → ${s.end.toFixed(2)}s`,
-                                  s.label,
-                                )
-                              }
-                              onMouseMove={moveTip}
-                              onMouseLeave={hideTip}
-                            >
-                              <span style={{ opacity: 0.7, fontSize: 10 }}>
-                                {k}
-                              </span>
-                              <span
-                                style={{
-                                  whiteSpace: "nowrap",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                }}
-                              >
-                                {s.label}
-                              </span>
-                              <div
-                                className="resize l"
-                                onPointerDown={(e) => onEdgeDown(e, "l", k)}
-                              />
-                              {k + 1 < lanes.subtask.length && (
-                                <div
-                                  className="resize r"
-                                  onPointerDown={(e) => onEdgeDown(e, "r", k)}
-                                />
-                              )}
-                            </div>
-                          );
-                        })}
-
-                      {/* Drag-to-create preview rectangle (subtask only) */}
-                      {tk.render === "span-edit" && drag?.kind === "create" && (
+                    {group.tracks.map((tk) => (
+                      <div className="tl-row" key={tk.key}>
+                        <div className="label">
+                          <span className={`style-dot dot-${tk.key}`} />
+                          <T>{tk.label}</T>
+                        </div>
                         <div
-                          className="tl-create-preview"
-                          style={{
-                            left: `${(Math.min(drag.startTs ?? 0, drag.endTs ?? 0) / duration) * 100}%`,
-                            width: `${(Math.abs((drag.endTs ?? 0) - (drag.startTs ?? 0)) / duration) * 100}%`,
-                          }}
-                        />
-                      )}
+                          className={`track ${
+                            tk.key === "subtask" && drag?.kind === "create"
+                              ? "creating"
+                              : ""
+                          }`}
+                          ref={tk.key === "subtask" ? trackBandRef : undefined}
+                          onClick={
+                            tk.render === "span-edit"
+                              ? undefined
+                              : onTrackBandClick
+                          }
+                          onPointerDown={
+                            tk.key === "subtask"
+                              ? onSubtaskTrackDown
+                              : undefined
+                          }
+                        >
+                          {/* Editable subtask spans (resize + drag-to-create) */}
+                          {tk.render === "span-edit" &&
+                            lanes.subtask.map((s, k) => {
+                              const left = (s.start / duration) * 100;
+                              const width = Math.max(
+                                0.3,
+                                ((s.end - s.start) / duration) * 100,
+                              );
+                              return (
+                                <div
+                                  key={k}
+                                  className={`tl-seg subtask ${drag?.kind === "edge" && drag.atomIdx === s.atomIdx ? "dragging" : ""}`}
+                                  style={{
+                                    left: `${left}%`,
+                                    width: `${width}%`,
+                                  }}
+                                  onClick={(e) =>
+                                    onSpanBodyClick(e, s.atomIdx, s.start)
+                                  }
+                                  onMouseEnter={(e) =>
+                                    showTip(
+                                      e,
+                                      `subtask · ${s.start.toFixed(2)}s → ${s.end.toFixed(2)}s`,
+                                      s.label,
+                                    )
+                                  }
+                                  onMouseMove={moveTip}
+                                  onMouseLeave={hideTip}
+                                >
+                                  <span style={{ opacity: 0.7, fontSize: 10 }}>
+                                    <T>{k}</T>
+                                  </span>
+                                  <span
+                                    style={{
+                                      whiteSpace: "nowrap",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                    }}
+                                  >
+                                    <T>{s.label}</T>
+                                  </span>
+                                  <div
+                                    className="resize l"
+                                    onPointerDown={(e) => onEdgeDown(e, "l", k)}
+                                  />
+                                  {k + 1 < lanes.subtask.length && (
+                                    <div
+                                      className="resize r"
+                                      onPointerDown={(e) =>
+                                        onEdgeDown(e, "r", k)
+                                      }
+                                    />
+                                  )}
+                                </div>
+                              );
+                            })}
 
-                      {/* Collapsed task-augmentation bar: one full-width bar
+                          {/* Drag-to-create preview rectangle (subtask only) */}
+                          {tk.render === "span-edit" &&
+                            drag?.kind === "create" && (
+                              <div
+                                className="tl-create-preview"
+                                style={{
+                                  left: `${(Math.min(drag.startTs ?? 0, drag.endTs ?? 0) / duration) * 100}%`,
+                                  width: `${(Math.abs((drag.endTs ?? 0) - (drag.startTs ?? 0)) / duration) * 100}%`,
+                                }}
+                              />
+                            )}
+
+                          {/* Collapsed task-augmentation bar: one full-width bar
                           (rephrasings carry no temporal info), with a ×N badge
                           when there is more than one. Click selects the single
                           phrasing, or opens the rewordings popover. */}
-                      {tk.render === "task-aug" &&
-                        lanes.task_aug.length > 0 &&
-                        (() => {
-                          const augs = lanes.task_aug;
-                          const primary = augs[0];
-                          const count = augs.length;
-                          return (
-                            <div
-                              className="tl-seg task_aug"
-                              style={{ left: "0%", width: "100%" }}
-                              onClick={onTaskAugClick}
-                              onMouseEnter={(e) =>
-                                showTip(
-                                  e,
-                                  `task aug · ${count} phrasing${count > 1 ? "s" : ""}`,
-                                  count > 1
-                                    ? augs.map((s) => `• ${s.label}`).join("\n")
-                                    : primary.label,
-                                )
-                              }
-                              onMouseMove={moveTip}
-                              onMouseLeave={hideTip}
-                            >
-                              <span
-                                style={{
-                                  whiteSpace: "nowrap",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                }}
-                              >
-                                {primary.label}
-                              </span>
-                              {count > 1 && (
-                                <span className="aug-count">×{count}</span>
-                              )}
-                            </div>
-                          );
-                        })()}
+                          {tk.render === "task-aug" &&
+                            lanes.task_aug.length > 0 &&
+                            (() => {
+                              const augs = lanes.task_aug;
+                              const primary = augs[0];
+                              const count = augs.length;
+                              return (
+                                <div
+                                  className="tl-seg task_aug"
+                                  style={{ left: "0%", width: "100%" }}
+                                  onClick={onTaskAugClick}
+                                  onMouseEnter={(e) =>
+                                    showTip(
+                                      e,
+                                      `task aug · ${count} phrasing${count > 1 ? "s" : ""}`,
+                                      count > 1
+                                        ? augs
+                                            .map((s) => `• ${s.label}`)
+                                            .join("\n")
+                                        : primary.label,
+                                    )
+                                  }
+                                  onMouseMove={moveTip}
+                                  onMouseLeave={hideTip}
+                                >
+                                  <span
+                                    style={{
+                                      whiteSpace: "nowrap",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                    }}
+                                  >
+                                    <T>{primary.label}</T>
+                                  </span>
+                                  {count > 1 && (
+                                    <span className="aug-count">
+                                      ×<T>{count}</T>
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })()}
 
-                      {/* Read-only persistent spans (plan is active until its
+                          {/* Read-only persistent spans (plan is active until its
                           next refresh). Click seeks + selects; no resize. */}
-                      {tk.render === "span-ro" &&
-                        (
-                          lanes[tk.key as "plan"] as Array<{
-                            kind: "span";
-                            start: number;
-                            end: number;
-                            label: string;
-                            atom: LanguageAtom;
-                            atomIdx: number;
-                          }>
-                        ).map((s, k) => {
-                          const left = (s.start / duration) * 100;
-                          const width = Math.max(
-                            0.3,
-                            ((s.end - s.start) / duration) * 100,
-                          );
-                          return (
-                            <div
-                              key={k}
-                              className={`tl-seg ${tk.key}`}
-                              style={{ left: `${left}%`, width: `${width}%` }}
-                              onClick={(e) =>
-                                onSpanBodyClick(e, s.atomIdx, s.start)
-                              }
-                              onMouseEnter={(e) =>
-                                showTip(
-                                  e,
-                                  `${tk.label} · ${s.start.toFixed(2)}s → ${s.end.toFixed(2)}s`,
-                                  s.label,
-                                )
-                              }
-                              onMouseMove={moveTip}
-                              onMouseLeave={hideTip}
-                            >
-                              <span
-                                style={{
-                                  whiteSpace: "nowrap",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                }}
-                              >
-                                {s.label}
-                              </span>
-                            </div>
-                          );
-                        })}
+                          {tk.render === "span-ro" &&
+                            (
+                              lanes[tk.key as "plan"] as Array<{
+                                kind: "span";
+                                start: number;
+                                end: number;
+                                label: string;
+                                atom: LanguageAtom;
+                                atomIdx: number;
+                              }>
+                            ).map((s, k) => {
+                              const left = (s.start / duration) * 100;
+                              const width = Math.max(
+                                0.3,
+                                ((s.end - s.start) / duration) * 100,
+                              );
+                              return (
+                                <div
+                                  key={k}
+                                  className={`tl-seg ${tk.key}`}
+                                  style={{
+                                    left: `${left}%`,
+                                    width: `${width}%`,
+                                  }}
+                                  onClick={(e) =>
+                                    onSpanBodyClick(e, s.atomIdx, s.start)
+                                  }
+                                  onMouseEnter={(e) =>
+                                    showTip(
+                                      e,
+                                      `${tk.label} · ${s.start.toFixed(2)}s → ${s.end.toFixed(2)}s`,
+                                      s.label,
+                                    )
+                                  }
+                                  onMouseMove={moveTip}
+                                  onMouseLeave={hideTip}
+                                >
+                                  <span
+                                    style={{
+                                      whiteSpace: "nowrap",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                    }}
+                                  >
+                                    <T>{s.label}</T>
+                                  </span>
+                                </div>
+                              );
+                            })}
 
-                      {/* Point-in-time tick markers (task_aug / memory /
+                          {/* Point-in-time tick markers (task_aug / memory /
                           interjection / vqa) */}
-                      {tk.render === "tick" &&
-                        (
-                          lanes[
-                            tk.key as "memory" | "interjection" | "vqa"
-                          ] as Array<{
-                            kind: "tick";
-                            t: number;
-                            label: string;
-                            atom: LanguageAtom;
-                            atomIdx: number;
-                            subtype?: string;
-                          }>
-                        ).map((m, i) => {
-                          const left = (m.t / duration) * 100;
-                          return (
-                            <div
-                              key={i}
-                              className={`tl-tick ${tk.key}`}
-                              style={{ left: `${left}%` }}
-                              onClick={(e) => onTickClick(e, m.atomIdx, m.t)}
-                              onMouseEnter={(e) =>
-                                showTip(
-                                  e,
-                                  `${tk.label}${m.subtype ? ` · ${m.subtype}` : ""} · ${m.t.toFixed(3)}s`,
-                                  m.label,
-                                )
-                              }
-                              onMouseMove={moveTip}
-                              onMouseLeave={hideTip}
-                            />
-                          );
-                        })}
-                    </div>
+                          {tk.render === "tick" &&
+                            (
+                              lanes[
+                                tk.key as "memory" | "interjection" | "vqa"
+                              ] as Array<{
+                                kind: "tick";
+                                t: number;
+                                label: string;
+                                atom: LanguageAtom;
+                                atomIdx: number;
+                                subtype?: string;
+                              }>
+                            ).map((m, i) => {
+                              const left = (m.t / duration) * 100;
+                              return (
+                                <div
+                                  key={i}
+                                  className={`tl-tick ${tk.key}`}
+                                  style={{ left: `${left}%` }}
+                                  onClick={(e) =>
+                                    onTickClick(e, m.atomIdx, m.t)
+                                  }
+                                  onMouseEnter={(e) =>
+                                    showTip(
+                                      e,
+                                      `${tk.label}${m.subtype ? ` · ${m.subtype}` : ""} · ${m.t.toFixed(3)}s`,
+                                      m.label,
+                                    )
+                                  }
+                                  onMouseMove={moveTip}
+                                  onMouseLeave={hideTip}
+                                />
+                              );
+                            })}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ))}
+
+                {/* Playhead — spans the full tracks region via top/bottom. */}
+                <div className="tl-playhead" style={{ left: playheadLeft }} />
+                <div
+                  className="tl-playhead-handle"
+                  style={{ left: playheadLeft, top: -6 }}
+                  onPointerDown={onPlayheadDown}
+                  title="Drag to scrub"
+                />
               </div>
-            ))}
+            );
+          })()}
 
-            {/* Playhead — spans the full tracks region via top/bottom. */}
-            <div className="tl-playhead" style={{ left: playheadLeft }} />
+          {/* Tooltip */}
+          {tooltip && (
             <div
-              className="tl-playhead-handle"
-              style={{ left: playheadLeft, top: -6 }}
-              onPointerDown={onPlayheadDown}
-              title="Drag to scrub"
-            />
-          </div>
-        );
-      })()}
+              className="tl-tooltip"
+              style={{ left: tooltip.x, top: tooltip.y }}
+            >
+              <div className="meta">
+                <T>{tooltip.meta}</T>
+              </div>
+              <T>{tooltip.text}</T>
+            </div>
+          )}
 
-      {/* Tooltip */}
-      {tooltip && (
-        <div className="tl-tooltip" style={{ left: tooltip.x, top: tooltip.y }}>
-          <div className="meta">{tooltip.meta}</div>
-          {tooltip.text}
-        </div>
-      )}
-
-      {/* Drag-to-create label popup */}
-      {pendingCreate && (
-        <div
-          className="quick-popup"
-          style={{
-            left: pendingCreate.anchorX,
-            top: pendingCreate.anchorY,
-            position: "fixed",
-          }}
-        >
-          <div className="quick-popup-head">
-            <span className="style-pill subtask">subtask</span>
-            <span style={{ marginLeft: "auto", fontFamily: "monospace" }}>
-              {pendingCreate.start.toFixed(2)}s → {pendingCreate.end.toFixed(2)}
-              s
-            </span>
-          </div>
-          <input
-            type="text"
-            placeholder="label (e.g. grasp the sponge)"
-            autoFocus
-            value={createLabel}
-            onChange={(e) => setCreateLabel(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commitPendingCreate();
-              if (e.key === "Escape") cancelPendingCreate();
-            }}
-          />
-          <div className="quick-popup-actions">
-            <button
-              onClick={cancelPendingCreate}
+          {/* Drag-to-create label popup */}
+          {pendingCreate && (
+            <div
+              className="quick-popup"
               style={{
-                fontSize: 11,
-                padding: "4px 8px",
-                borderRadius: 6,
-                border: "1px solid rgba(255,255,255,0.12)",
-                background: "transparent",
-                color: "var(--fg-2, #cbd5e1)",
-                cursor: "pointer",
+                left: pendingCreate.anchorX,
+                top: pendingCreate.anchorY,
+                position: "fixed",
               }}
             >
-              cancel
-            </button>
-            <button
-              onClick={commitPendingCreate}
-              disabled={!createLabel.trim()}
-              style={{
-                fontSize: 11,
-                padding: "4px 8px",
-                borderRadius: 6,
-                border: "1px solid #5b8cff",
-                background: "rgba(91,140,255,0.15)",
-                color: "#c7d6ff",
-                cursor: "pointer",
-                opacity: createLabel.trim() ? 1 : 0.4,
-              }}
-            >
-              add ↵
-            </button>
-          </div>
+              <div className="quick-popup-head">
+                <span className="style-pill subtask">
+                  <T>subtask</T>
+                </span>
+                <span style={{ marginLeft: "auto", fontFamily: "monospace" }}>
+                  {pendingCreate.start.toFixed(2)}s →{" "}
+                  {pendingCreate.end.toFixed(2)}s
+                </span>
+              </div>
+              <input
+                type="text"
+                placeholder="label (e.g. grasp the sponge)"
+                autoFocus
+                value={createLabel}
+                onChange={(e) => setCreateLabel(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitPendingCreate();
+                  if (e.key === "Escape") cancelPendingCreate();
+                }}
+              />
+              <div className="quick-popup-actions">
+                <button
+                  onClick={cancelPendingCreate}
+                  style={{
+                    fontSize: 11,
+                    padding: "4px 8px",
+                    borderRadius: 6,
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    background: "transparent",
+                    color: "var(--fg-2, #cbd5e1)",
+                    cursor: "pointer",
+                  }}
+                >
+                  <T>cancel</T>
+                </button>
+                <button
+                  onClick={commitPendingCreate}
+                  disabled={!createLabel.trim()}
+                  style={{
+                    fontSize: 11,
+                    padding: "4px 8px",
+                    borderRadius: 6,
+                    border: "1px solid #5b8cff",
+                    background: "rgba(91,140,255,0.15)",
+                    color: "#c7d6ff",
+                    cursor: "pointer",
+                    opacity: createLabel.trim() ? 1 : 0.4,
+                  }}
+                >
+                  <T>add ↵</T>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
-      )}
-    </div>
+      }
+    </T>
   );
 };

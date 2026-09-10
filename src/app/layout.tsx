@@ -1,24 +1,29 @@
+// Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
+import "./levi.css";
 import { AuthProvider } from "@/context/auth-context";
-
-const inter = Inter({ subsets: ["latin"] });
-
+import { LocaleProvider } from "@/components/levi-locale";
+import LeviHeader from "@/components/levi-header";
 export const metadata: Metadata = {
-  title: "LeRobot Dataset Tool and Visualizer",
-  description: "Tool and Visualizer for LeRobot Datasets",
+  title: "LEVI · 机器人数据工坊",
+  description:
+    "LeRobot Exploration, Validation & Integration — bilingual robotics dataset workbench",
 };
-
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
-        <AuthProvider>{children}</AuthProvider>
+    <html lang="zh-CN">
+      <body>
+        <LocaleProvider>
+          <AuthProvider>
+            <LeviHeader />
+            {children}
+          </AuthProvider>
+        </LocaleProvider>
       </body>
     </html>
   );

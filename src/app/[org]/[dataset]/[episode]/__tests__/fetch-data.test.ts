@@ -1,6 +1,8 @@
-import { describe, expect, test } from "bun:test";
+// Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
+import { describe, expect, test, spyOn } from "bun:test";
 import {
   computeColumnMinMax,
+  loadAllEpisodeLengthsV3,
   extractLanguageAtoms,
 } from "@/app/[org]/[dataset]/[episode]/fetch-data";
 import type { ChartRow } from "@/app/[org]/[dataset]/[episode]/fetch-data";
@@ -452,5 +454,31 @@ describe("v3.0 episode metadata row parsing helpers", () => {
         5,
       );
     }
+  });
+});
+
+describe("LEVI episode lengths", () => {
+  test("v2 metadata supplies the histogram and ranked durations", async () => {
+    const request = spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        '{"episode_index":0,"length":30}\n{"episode_index":1,"length":90}\n{"episode_index":2,"length":60}\n',
+      ),
+    );
+    try {
+      const result = await loadAllEpisodeLengthsV3("local/test", "v2.1", 30);
+      expect(String(request.mock.calls[0][0])).toContain("meta/episodes.jsonl");
+      expect(result?.meanEpisodeLength).toBe(2);
+      expect(result?.medianEpisodeLength).toBe(2);
+      expect(result?.shortestEpisodes[0].episodeIndex).toBe(0);
+      expect(result?.longestEpisodes[0].episodeIndex).toBe(1);
+      expect(
+        result?.episodeLengthHistogram.reduce((sum, bin) => sum + bin.count, 0),
+      ).toBe(3);
+    } finally {
+      request.mockRestore();
+    }
+  });
+  test("invalid FPS cannot produce an infinite duration", async () => {
+    expect(await loadAllEpisodeLengthsV3("local/test", "v2.1", 0)).toBeNull();
   });
 });

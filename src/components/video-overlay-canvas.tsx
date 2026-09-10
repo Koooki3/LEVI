@@ -1,4 +1,6 @@
+// Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import { T } from "@/components/levi-locale";
 
 /**
  * Canvas overlay rendered on top of a single `<video>` element. Two roles:
@@ -663,38 +665,42 @@ export const VideoOverlayCanvas: React.FC<Props> = ({ videoEl, cameraKey }) => {
   }, [finalizing, closeFinalize]);
 
   return (
-    <>
-      <canvas
-        ref={canvasRef}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerCancel}
-        style={{
-          position: "absolute",
-          inset: 0,
-          pointerEvents: drawMode === "off" ? "none" : "auto",
-          cursor:
-            drawMode === "off"
-              ? "default"
-              : drawMode === "keypoint"
-                ? "pointer"
-                : "crosshair",
-        }}
-      />
-      {finalizing && (
-        <QuickLabelPopup
-          anchor={finalizing.anchor}
-          kind={finalizing.draw.kind}
-          questionKind={questionKind}
-          onQuestionKindChange={setQuestionKind}
-          label={labelInput}
-          onLabelChange={setLabelInput}
-          onSubmit={submitFinalize}
-          onCancel={closeFinalize}
-        />
-      )}
-    </>
+    <T>
+      {
+        <>
+          <canvas
+            ref={canvasRef}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerCancel}
+            style={{
+              position: "absolute",
+              inset: 0,
+              pointerEvents: drawMode === "off" ? "none" : "auto",
+              cursor:
+                drawMode === "off"
+                  ? "default"
+                  : drawMode === "keypoint"
+                    ? "pointer"
+                    : "crosshair",
+            }}
+          />
+          {finalizing && (
+            <QuickLabelPopup
+              anchor={finalizing.anchor}
+              kind={finalizing.draw.kind}
+              questionKind={questionKind}
+              onQuestionKindChange={setQuestionKind}
+              label={labelInput}
+              onLabelChange={setLabelInput}
+              onSubmit={submitFinalize}
+              onCancel={closeFinalize}
+            />
+          )}
+        </>
+      }
+    </T>
   );
 };
 
@@ -751,49 +757,59 @@ const QuickLabelPopup: React.FC<{
     popup.style.top = `${finalTop}px`;
   }, [anchor.x, anchor.y]);
   return (
-    <div
-      ref={popupRef}
-      className="quick-popup"
-      onPointerDown={(e) => e.stopPropagation()}
-    >
-      <div className="quick-popup-head">
-        <span className={`kind-pill ${kind}`}>{kind}</span>
-        <select
-          value={questionKind}
-          onChange={(e) =>
-            onQuestionKindChange(e.target.value as "detect" | "point")
-          }
-          style={{ marginLeft: "auto" }}
+    <T>
+      {
+        <div
+          ref={popupRef}
+          className="quick-popup"
+          onPointerDown={(e) => e.stopPropagation()}
         >
-          <option value="detect">where is …?</option>
-          <option value="point">point to …</option>
-        </select>
-      </div>
-      <input
-        ref={inputRef}
-        type="text"
-        placeholder={
-          kind === "bbox" ? "label (e.g. carrot)" : "label (e.g. handle)"
-        }
-        value={label}
-        onChange={(e) => onLabelChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") onSubmit();
-          if (e.key === "Escape") onCancel();
-        }}
-      />
-      <div className="quick-popup-actions">
-        <button onClick={onCancel} className="popup-btn">
-          cancel
-        </button>
-        <button
-          onClick={onSubmit}
-          disabled={!label.trim()}
-          className="popup-btn primary"
-        >
-          add ↵
-        </button>
-      </div>
-    </div>
+          <div className="quick-popup-head">
+            <span className={`kind-pill ${kind}`}>
+              <T>{kind}</T>
+            </span>
+            <select
+              value={questionKind}
+              onChange={(e) =>
+                onQuestionKindChange(e.target.value as "detect" | "point")
+              }
+              style={{ marginLeft: "auto" }}
+            >
+              <option value="detect">
+                <T>where is …?</T>
+              </option>
+              <option value="point">
+                <T>point to …</T>
+              </option>
+            </select>
+          </div>
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder={
+              kind === "bbox" ? "label (e.g. carrot)" : "label (e.g. handle)"
+            }
+            value={label}
+            onChange={(e) => onLabelChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onSubmit();
+              if (e.key === "Escape") onCancel();
+            }}
+          />
+          <div className="quick-popup-actions">
+            <button onClick={onCancel} className="popup-btn">
+              <T>cancel</T>
+            </button>
+            <button
+              onClick={onSubmit}
+              disabled={!label.trim()}
+              className="popup-btn primary"
+            >
+              <T>add ↵</T>
+            </button>
+          </div>
+        </div>
+      }
+    </T>
   );
 };

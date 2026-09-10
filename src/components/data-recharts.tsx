@@ -1,4 +1,6 @@
+// Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import { T } from "@/components/levi-locale";
 
 import React, {
   useCallback,
@@ -82,69 +84,77 @@ export const DataRecharts = React.memo(
     if (!Array.isArray(data) || data.length === 0) return null;
 
     return (
-      <div>
-        {data.length > 1 && (
-          <div className="flex justify-end mb-2">
-            <button
-              onClick={() => setExpanded((v) => !v)}
-              className={`text-xs px-2.5 py-1 rounded transition-colors flex items-center gap-1.5 ${
-                expanded
-                  ? "bg-cyan-400/15 text-cyan-300 border border-cyan-400/40"
-                  : "bg-[var(--surface-1)]/60 text-slate-400 hover:text-slate-200 border border-white/10/50"
-              }`}
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                {expanded ? (
-                  <>
-                    <polyline points="4 14 10 14 10 20" />
-                    <polyline points="20 10 14 10 14 4" />
-                    <line x1="14" y1="10" x2="21" y2="3" />
-                    <line x1="3" y1="21" x2="10" y2="14" />
-                  </>
-                ) : (
-                  <>
-                    <polyline points="15 3 21 3 21 9" />
-                    <polyline points="9 21 3 21 3 15" />
-                    <line x1="21" y1="3" x2="14" y2="10" />
-                    <line x1="3" y1="21" x2="10" y2="14" />
-                  </>
-                )}
-              </svg>
-              {expanded ? "Split charts" : "Combine all"}
-            </button>
-          </div>
-        )}
+      <T>
+        {
+          <div>
+            {data.length > 1 && (
+              <div className="flex justify-end mb-2">
+                <button
+                  onClick={() => setExpanded((v) => !v)}
+                  className={`text-xs px-2.5 py-1 rounded transition-colors flex items-center gap-1.5 ${
+                    expanded
+                      ? "bg-cyan-400/15 text-cyan-300 border border-cyan-400/40"
+                      : "bg-[var(--surface-1)]/60 text-slate-400 hover:text-slate-200 border border-white/10/50"
+                  }`}
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <T>
+                      {expanded ? (
+                        <>
+                          <polyline points="4 14 10 14 10 20" />
+                          <polyline points="20 10 14 10 14 4" />
+                          <line x1="14" y1="10" x2="21" y2="3" />
+                          <line x1="3" y1="21" x2="10" y2="14" />
+                        </>
+                      ) : (
+                        <>
+                          <polyline points="15 3 21 3 21 9" />
+                          <polyline points="9 21 3 21 3 15" />
+                          <line x1="21" y1="3" x2="14" y2="10" />
+                          <line x1="3" y1="21" x2="10" y2="14" />
+                        </>
+                      )}
+                    </T>
+                  </svg>
+                  <T>{expanded ? "Split charts" : "Combine all"}</T>
+                </button>
+              </div>
+            )}
 
-        {expanded ? (
-          <SingleDataGraph
-            data={combinedData}
-            hoveredTime={hoveredTime}
-            setHoveredTime={setHoveredTime}
-            tall
-          />
-        ) : (
-          <div className="grid md:grid-cols-2 grid-cols-1 gap-4">
-            {data.map((group, idx) => (
-              <SingleDataGraph
-                key={idx}
-                data={group}
-                hoveredTime={hoveredTime}
-                setHoveredTime={setHoveredTime}
-              />
-            ))}
+            <T>
+              {expanded ? (
+                <SingleDataGraph
+                  data={combinedData}
+                  hoveredTime={hoveredTime}
+                  setHoveredTime={setHoveredTime}
+                  tall
+                />
+              ) : (
+                <div className="grid md:grid-cols-2 grid-cols-1 gap-4">
+                  {data.map((group, idx) => (
+                    <SingleDataGraph
+                      key={idx}
+                      data={group}
+                      hoveredTime={hoveredTime}
+                      setHoveredTime={setHoveredTime}
+                    />
+                  ))}
+                </div>
+              )}
+            </T>
           </div>
-        )}
-      </div>
+        }
+      </T>
     );
   },
 );
@@ -301,90 +311,100 @@ const SingleDataGraph = React.memo(
       };
 
       return (
-        <div className="flex flex-wrap gap-x-5 gap-y-2 px-1 pt-2">
-          {Object.entries(groups).map(([group, children]) => {
-            const color = groupColorMap[group];
-            return (
-              <div key={group}>
-                <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={isGroupChecked(group)}
-                    ref={(el) => {
-                      if (el) el.indeterminate = isGroupIndeterminate(group);
-                    }}
-                    onChange={() => handleGroupCheckboxChange(group)}
-                    className="size-3"
-                    style={{ accentColor: color }}
-                  />
-                  <span className="text-xs font-semibold text-slate-200">
-                    {group}
-                  </span>
-                </label>
-                <div className="pl-5 flex flex-col gap-0.5 mt-0.5">
-                  {children.map((key) => {
-                    const label = key.split(SERIES_NAME_DELIMITER).pop() ?? key;
-                    return (
-                      <label
-                        key={key}
-                        className="flex items-center gap-1.5 cursor-pointer select-none"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={visibleKeys.includes(key)}
-                          onChange={() => handleCheckboxChange(key)}
-                          className="size-2.5"
-                          style={{ accentColor: color }}
-                        />
-                        <span
-                          className={`text-xs ${visibleKeys.includes(key) ? "text-slate-300" : "text-slate-500"}`}
-                        >
-                          {label}
-                        </span>
-                        <span
-                          className={`text-xs font-mono tabular-nums ml-1 ${visibleKeys.includes(key) ? "text-cyan-200/80" : "text-slate-600"}`}
-                        >
-                          {typeof currentData[key] === "number"
-                            ? currentData[key].toFixed(2)
-                            : "–"}
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-          {singles.map((key) => {
-            const color = groupColorMap[key];
-            return (
-              <label
-                key={key}
-                className="flex items-center gap-1.5 cursor-pointer select-none"
-              >
-                <input
-                  type="checkbox"
-                  checked={visibleKeys.includes(key)}
-                  onChange={() => handleCheckboxChange(key)}
-                  className="size-3"
-                  style={{ accentColor: color }}
-                />
-                <span
-                  className={`text-xs ${visibleKeys.includes(key) ? "text-slate-200" : "text-slate-500"}`}
-                >
-                  {key}
-                </span>
-                <span
-                  className={`text-xs font-mono tabular-nums ml-1 ${visibleKeys.includes(key) ? "text-cyan-200/80" : "text-slate-600"}`}
-                >
-                  {typeof currentData[key] === "number"
-                    ? currentData[key].toFixed(2)
-                    : "–"}
-                </span>
-              </label>
-            );
-          })}
-        </div>
+        <T>
+          {
+            <div className="flex flex-wrap gap-x-5 gap-y-2 px-1 pt-2">
+              {Object.entries(groups).map(([group, children]) => {
+                const color = groupColorMap[group];
+                return (
+                  <div key={group}>
+                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={isGroupChecked(group)}
+                        ref={(el) => {
+                          if (el)
+                            el.indeterminate = isGroupIndeterminate(group);
+                        }}
+                        onChange={() => handleGroupCheckboxChange(group)}
+                        className="size-3"
+                        style={{ accentColor: color }}
+                      />
+                      <span className="text-xs font-semibold text-slate-200">
+                        <T>{group}</T>
+                      </span>
+                    </label>
+                    <div className="pl-5 flex flex-col gap-0.5 mt-0.5">
+                      {children.map((key) => {
+                        const label =
+                          key.split(SERIES_NAME_DELIMITER).pop() ?? key;
+                        return (
+                          <label
+                            key={key}
+                            className="flex items-center gap-1.5 cursor-pointer select-none"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={visibleKeys.includes(key)}
+                              onChange={() => handleCheckboxChange(key)}
+                              className="size-2.5"
+                              style={{ accentColor: color }}
+                            />
+                            <span
+                              className={`text-xs ${visibleKeys.includes(key) ? "text-slate-300" : "text-slate-500"}`}
+                            >
+                              <T>{label}</T>
+                            </span>
+                            <span
+                              className={`text-xs font-mono tabular-nums ml-1 ${visibleKeys.includes(key) ? "text-cyan-200/80" : "text-slate-600"}`}
+                            >
+                              <T>
+                                {typeof currentData[key] === "number"
+                                  ? currentData[key].toFixed(2)
+                                  : "–"}
+                              </T>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+              {singles.map((key) => {
+                const color = groupColorMap[key];
+                return (
+                  <label
+                    key={key}
+                    className="flex items-center gap-1.5 cursor-pointer select-none"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={visibleKeys.includes(key)}
+                      onChange={() => handleCheckboxChange(key)}
+                      className="size-3"
+                      style={{ accentColor: color }}
+                    />
+                    <span
+                      className={`text-xs ${visibleKeys.includes(key) ? "text-slate-200" : "text-slate-500"}`}
+                    >
+                      <T>{key}</T>
+                    </span>
+                    <span
+                      className={`text-xs font-mono tabular-nums ml-1 ${visibleKeys.includes(key) ? "text-cyan-200/80" : "text-slate-600"}`}
+                    >
+                      <T>
+                        {typeof currentData[key] === "number"
+                          ? currentData[key].toFixed(2)
+                          : "–"}
+                      </T>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          }
+        </T>
       );
     };
 
@@ -402,112 +422,118 @@ const SingleDataGraph = React.memo(
     }, [groups, singles]);
 
     return (
-      <div className="w-full bg-[var(--surface-1)]/40 rounded-lg border border-white/10/50 p-3">
-        {chartTitle && (
-          <p
-            className="text-xs font-medium text-slate-300 mb-1 px-1 truncate"
-            title={chartTitle}
-          >
-            {chartTitle}
-          </p>
-        )}
-        <div
-          className={`w-full ${tall ? "h-[500px]" : "h-72"}`}
-          onMouseLeave={handleMouseLeave}
-        >
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart
-              data={chartData}
-              syncId="episode-sync"
-              margin={{ top: 12, right: 12, left: -8, bottom: 8 }}
-              onClick={handleClick}
-              onMouseMove={(state) => {
-                const payload = state?.activePayload?.[0]?.payload as
-                  | { timestamp?: number }
-                  | undefined;
-                setHoveredTime(payload?.timestamp ?? null);
-              }}
+      <T>
+        {
+          <div className="w-full bg-[var(--surface-1)]/40 rounded-lg border border-white/10/50 p-3">
+            {chartTitle && (
+              <p
+                className="text-xs font-medium text-slate-300 mb-1 px-1 truncate"
+                title={chartTitle}
+              >
+                <T>{chartTitle}</T>
+              </p>
+            )}
+            <div
+              className={`w-full ${tall ? "h-[500px]" : "h-72"}`}
               onMouseLeave={handleMouseLeave}
             >
-              <CartesianGrid
-                strokeDasharray="3 3"
-                stroke="#334155"
-                strokeOpacity={0.6}
-              />
-              <XAxis
-                dataKey="timestamp"
-                domain={[
-                  chartData.at(0)?.timestamp ?? 0,
-                  chartData.at(-1)?.timestamp ?? 0,
-                ]}
-                tickFormatter={(v: number) => `${v.toFixed(1)}s`}
-                stroke="#64748b"
-                tick={{ fontSize: 12, fill: "#94a3b8" }}
-                minTickGap={30}
-                allowDataOverflow={true}
-              />
-              <YAxis
-                domain={["auto", "auto"]}
-                stroke="#64748b"
-                tick={{ fontSize: 12, fill: "#94a3b8" }}
-                width={55}
-                allowDataOverflow={true}
-                tickFormatter={(v: number) => {
-                  if (v === 0) return "0";
-                  const abs = Math.abs(v);
-                  if (abs < 0.01 || abs >= 10000) return v.toExponential(1);
-                  return Number(v.toFixed(2)).toString();
-                }}
-              />
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart
+                  data={chartData}
+                  syncId="episode-sync"
+                  margin={{ top: 12, right: 12, left: -8, bottom: 8 }}
+                  onClick={handleClick}
+                  onMouseMove={(state) => {
+                    const payload = state?.activePayload?.[0]?.payload as
+                      | { timestamp?: number }
+                      | undefined;
+                    setHoveredTime(payload?.timestamp ?? null);
+                  }}
+                  onMouseLeave={handleMouseLeave}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="#334155"
+                    strokeOpacity={0.6}
+                  />
+                  <XAxis
+                    dataKey="timestamp"
+                    domain={[
+                      chartData.at(0)?.timestamp ?? 0,
+                      chartData.at(-1)?.timestamp ?? 0,
+                    ]}
+                    tickFormatter={(v: number) => `${v.toFixed(1)}s`}
+                    stroke="#64748b"
+                    tick={{ fontSize: 12, fill: "#94a3b8" }}
+                    minTickGap={30}
+                    allowDataOverflow={true}
+                  />
+                  <YAxis
+                    domain={["auto", "auto"]}
+                    stroke="#64748b"
+                    tick={{ fontSize: 12, fill: "#94a3b8" }}
+                    width={55}
+                    allowDataOverflow={true}
+                    tickFormatter={(v: number) => {
+                      if (v === 0) return "0";
+                      const abs = Math.abs(v);
+                      if (abs < 0.01 || abs >= 10000) return v.toExponential(1);
+                      return Number(v.toFixed(2)).toString();
+                    }}
+                  />
 
-              <Tooltip
-                content={() => null}
-                active={true}
-                isAnimationActive={false}
-                defaultIndex={
-                  !hoveredTime ? findClosestDataIndex(currentTime) : undefined
-                }
-              />
+                  <Tooltip
+                    content={() => null}
+                    active={true}
+                    isAnimationActive={false}
+                    defaultIndex={
+                      !hoveredTime
+                        ? findClosestDataIndex(currentTime)
+                        : undefined
+                    }
+                  />
 
-              <ReferenceLine
-                x={currentTime}
-                stroke="#f97316"
-                strokeWidth={1.5}
-                strokeOpacity={0.7}
-              />
+                  <ReferenceLine
+                    x={currentTime}
+                    stroke="#f97316"
+                    strokeWidth={1.5}
+                    strokeOpacity={0.7}
+                  />
 
-              {dataKeys.map((key) => {
-                const group = key.includes(SERIES_NAME_DELIMITER)
-                  ? key.split(SERIES_NAME_DELIMITER)[0]
-                  : key;
-                const color = groupColorMap[group];
-                let strokeDasharray: string | undefined = undefined;
-                if (groups[group] && groups[group].length > 1) {
-                  const idxInGroup = groups[group].indexOf(key);
-                  if (idxInGroup > 0) strokeDasharray = "5 5";
-                }
-                return (
-                  visibleKeys.includes(key) && (
-                    <Line
-                      key={key}
-                      type="monotone"
-                      dataKey={key}
-                      name={key}
-                      stroke={color}
-                      strokeDasharray={strokeDasharray}
-                      dot={false}
-                      activeDot={false}
-                      strokeWidth={1.5}
-                      isAnimationActive={false}
-                    />
-                  )
-                );
-              })}
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-        <CustomLegend />
-      </div>
+                  {dataKeys.map((key) => {
+                    const group = key.includes(SERIES_NAME_DELIMITER)
+                      ? key.split(SERIES_NAME_DELIMITER)[0]
+                      : key;
+                    const color = groupColorMap[group];
+                    let strokeDasharray: string | undefined = undefined;
+                    if (groups[group] && groups[group].length > 1) {
+                      const idxInGroup = groups[group].indexOf(key);
+                      if (idxInGroup > 0) strokeDasharray = "5 5";
+                    }
+                    return (
+                      visibleKeys.includes(key) && (
+                        <Line
+                          key={key}
+                          type="monotone"
+                          dataKey={key}
+                          name={key}
+                          stroke={color}
+                          strokeDasharray={strokeDasharray}
+                          dot={false}
+                          activeDot={false}
+                          strokeWidth={1.5}
+                          isAnimationActive={false}
+                        />
+                      )
+                    );
+                  })}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <CustomLegend />
+          </div>
+        }
+      </T>
     );
   },
 ); // End React.memo

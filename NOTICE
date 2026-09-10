@@ -1,0 +1,19 @@
+LEVI — LeRobot Exploration, Validation & Integration
+
+This product includes software developed by the contributors to:
+Hugging Face LeRobot Dataset Visualizer
+https://github.com/huggingface/lerobot-dataset-visualizer
+Upstream revision: dc59887796fd41f37040c0df6b10e6f6a30a1854
+License: Apache License, Version 2.0 (see LICENSE).
+Original application credited upstream to @Mishig25 and LeRobot PR #1055.
+
+LEVI additions and modifications (2026): original visual design and navigation,
+Chinese/English interface, isolated uv runtime and launcher, local dataset file
+service, durable review manifests, built-in capture conversion, native diagnostics,
+v2 annotation support, export/path protections, tests and documentation.
+Modified upstream files are identified by git history and docs/UPSTREAM.md.
+
+Hugging Face, LeRobot and their marks belong to their respective owners.
+LEVI is an independent derivative project and does not imply endorsement.
+Demo datasets and externally hosted robot models retain their own licenses;
+the LEVI code license does not relicense or redistribute these assets.

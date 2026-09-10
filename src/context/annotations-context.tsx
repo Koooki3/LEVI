@@ -1,4 +1,6 @@
+// Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import { T } from "@/components/levi-locale";
 
 /**
  * Per-episode annotation state for the v3.1 language schema.
@@ -159,6 +161,8 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
   // Track the last saved snapshot to detect dirtiness honestly.
   const savedSnapshotRef = useRef<string>("[]");
 
+  const loadGeneration = useRef(0);
+
   // Hydrate from sessionStorage when episode/ident changes; if the backend
   // is enabled, also fetch authoritative atoms + frame timestamps.
   const setEpisode = useCallback(
@@ -168,6 +172,7 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
       initialAtoms?: LanguageAtom[],
       initialFrameTimestamps?: number[],
     ) => {
+      const generation = ++loadGeneration.current;
       setEpisodeId(newEpisodeId);
       setIdent(newIdent);
       setPendingDrawState(null);
@@ -200,19 +205,27 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
           .then((remoteAtoms) => {
             // Prefer backend if it has anything; otherwise keep session-cached
             // edits the user made before the backend came online.
-            if (remoteAtoms && remoteAtoms.length > 0) {
-              setAtoms(remoteAtoms);
+            if (generation !== loadGeneration.current) return;
+            setAtoms((current) => {
+              if (JSON.stringify(current) !== JSON.stringify(initial))
+                return current;
               savedSnapshotRef.current = JSON.stringify(remoteAtoms);
               setDirty(false);
-            }
+              return remoteAtoms;
+            });
           })
           .catch(() => {
             /* backend offline — silent fallback to sessionStorage */
           });
 
         fetchFrameTimestamps(newEpisodeId, newIdent)
-          .then(setFrameTimestamps)
-          .catch(() => setFrameTimestamps([]));
+          .then((ts) => {
+            if (generation === loadGeneration.current && ts.length)
+              setFrameTimestamps(ts);
+          })
+          .catch(() => {
+            /* retain timestamps already loaded from parquet */
+          });
       }
     },
     [],
@@ -397,8 +410,12 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 
   return (
-    <AnnotationsContext.Provider value={value}>
-      {children}
-    </AnnotationsContext.Provider>
+    <T>
+      {
+        <AnnotationsContext.Provider value={value}>
+          <T>{children}</T>
+        </AnnotationsContext.Provider>
+      }
+    </T>
   );
 };
