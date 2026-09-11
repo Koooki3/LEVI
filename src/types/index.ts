@@ -34,3 +34,14 @@ export type {
   SeriesColumn,
   GroupStats,
 } from "./chart.types";
+
+// Object-level SAM3 sidecar types
+export type {
+  ObjectAnnotation,
+  ObjectTrack,
+  ObjectEdit as Sam3Edit,
+  ReviewStatus,
+  Sam3Plan,
+  Sam3Capabilities,
+  Sam3Revision,
+} from "./object-annotation.types";

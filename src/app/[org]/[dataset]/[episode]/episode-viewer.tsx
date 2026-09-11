@@ -14,6 +14,7 @@ import {
   useAnnotations,
 } from "@/context/annotations-context";
 import { AnnotationsPanel } from "@/components/annotations-panel";
+import ObjectAnnotationPanel from "@/components/object-annotation-panel";
 import { AnnotationsTimeline } from "@/components/annotations-timeline";
 import Sidebar from "@/components/side-nav";
 import StatsPanel from "@/components/stats-panel";
@@ -803,6 +804,8 @@ function EpisodeViewerInner({
                     <SimpleVideosPlayer
                       videosInfo={videosInfo}
                       onVideosReady={() => setVideosReady(true)}
+                      annotationEpisodeId={episodeId}
+                      annotationRepoId={datasetInfo.repoId}
                     />
                   )}
 
@@ -853,6 +856,8 @@ function EpisodeViewerInner({
                     <SimpleVideosPlayer
                       videosInfo={videosInfo}
                       onVideosReady={() => setVideosReady(true)}
+                      annotationEpisodeId={episodeId}
+                      annotationRepoId={datasetInfo.repoId}
                     />
                   )}
                   <div className="grounding-intro">
@@ -883,6 +888,11 @@ function EpisodeViewerInner({
                     </ul>
                   </div>
                   <PlaybackBar />
+                  <ObjectAnnotationPanel
+                    episodeId={episodeId}
+                    ident={{ repoId: datasetInfo.repoId }}
+                    cameraKeys={videosInfo.map((v) => v.filename)}
+                  />
                   <AnnotationsTimeline duration={data.duration} />
                   <AnnotationsPanel
                     cameraKeys={videosInfo.map((v) => v.filename)}

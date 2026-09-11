@@ -4,7 +4,7 @@
 
 [![Checks](https://github.com/Koooki3/LEVI/actions/workflows/test.yml/badge.svg)](https://github.com/Koooki3/LEVI/actions/workflows/test.yml) [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) [![Version](https://img.shields.io/badge/LEVI-0.2.0-9bd654.svg)](CHANGELOG.md)
 
-[English](README.en.md) · [转换教程](docs/CONVERSION.md) · [功能对照](docs/FEATURES.md) · [API](docs/API.md) · [审查与验证](docs/VALIDATION.md) · [许可](docs/UPSTREAM.md) · [第三方清单](THIRD_PARTY_NOTICES.md)
+[English](README.en.md) · [转换教程](docs/CONVERSION.md) · [功能对照](docs/FEATURES.md) · [API](docs/API.md) · [审查与验证](docs/VALIDATION.md) · [许可](docs/UPSTREAM.md) · [第三方清单](THIRD_PARTY_NOTICES.md) · [SAM3 对象标注](docs/SAM3.md)
 
 LEVI 是用于浏览、标注、转换和审核机器人数据的独立工作台。基于 [LeRobot Dataset Visualizer](https://github.com/huggingface/lerobot-dataset-visualizer)，保留多相机与信号同步、视觉问答、动作分析和三维回放，提供默认中文与英文切换，以及**完全内置的采集数据转换流程**。无需另行下载转换项目或安装训练环境。
 
@@ -68,7 +68,7 @@ uv run levi clean --apply               # 删除预览列表内的可再生成�
 | --- | --- |
 | 首页 / 探索 | Hub 搜索、分页浏览、默认演示、本地数据集入口 |
 | 片段 | 多相机同步、播放/拖动/快捷键、隐藏/恢复/全屏、状态/动作曲线和数值；多任务数据集可按任务筛选片段列表 |
-| 标注 | 持续任务扩写、子任务、计划、记忆；插话、语音和 VQA；视频拖框/点选、时间轴和检查器 |
+| 标注 | 持续任务扩写、子任务、计划、记忆；插话、语音和 VQA；SAM3 对象/轨迹 sidecar；视频拖框/点选、时间轴和检查器 |
 | 统计 | 元数据、分辨率、总时长、片段长度分布及最短/最长片段 |
 | 筛选 / 帧概览 | 运动量、突变、长度排序；首帧/末帧相机网格；单个/批量标记与审核导出 |
 | 动作洞察 | 自相关、动作块长度、状态动作时序对齐、示范速度与跨片段方差；分析范围可选全数据集、片段区间或单个任务，采样上限可设为「全部」做全量审查 |
@@ -77,6 +77,10 @@ uv run levi clean --apply               # 删除预览列表内的可再生成�
 | 转换与审核 | 内置全流程、独立阶段、参数、计划预览、日志/退出码、自动登记产物 |
 
 浏览器支持视频型 LeRobot v2.0/v2.1/v3.0/v3.1。沿用上游对图片直接嵌入 Parquet 的限制；可先转换为视频数据集。原始任务内容、特征标识和关节名称保留原文。
+
+### SAM3 对象标注（可选）
+
+标注页提供对象/轨迹 sidecar 和 CPU 演示。选择相机与文本提示即可生成可重复的建议，再逐条接受或拒绝；原生 LeRobot 文件保持只读。真实 SAM3 需要单独的 Python 3.12 uv 环境、Hugging Face checkpoint 权限和显式 `LEVI_SAM3_ENABLED=1`，详见 [SAM3 指南](docs/SAM3.md)。核心 LEVI 测试不导入 Torch、探测 CUDA 或运行模型。
 
 默认演示：
 

@@ -4,7 +4,7 @@
 
 [![Checks](https://github.com/Koooki3/LEVI/actions/workflows/test.yml/badge.svg)](https://github.com/Koooki3/LEVI/actions/workflows/test.yml) [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) [![Version](https://img.shields.io/badge/LEVI-0.2.0-9bd654.svg)](CHANGELOG.md)
 
-[中文](README.md) · [Conversion guide](docs/CONVERSION.md) · [Features](docs/FEATURES.md) · [API](docs/API.md) · [Validation](docs/VALIDATION.md) · [Attribution](docs/UPSTREAM.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
+[中文](README.md) · [Conversion guide](docs/CONVERSION.md) · [Features](docs/FEATURES.md) · [API](docs/API.md) · [Validation](docs/VALIDATION.md) · [Attribution](docs/UPSTREAM.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [SAM3 object annotation](docs/SAM3.md)
 
 LEVI is an independent robotics dataset browser, annotation editor, converter and review workbench derived from [LeRobot Dataset Visualizer](https://github.com/huggingface/lerobot-dataset-visualizer). Chinese is the default; English is available through the language switch. **The complete capture conversion pipeline is bundled** and requires no sibling repository or training environment.
 
@@ -61,7 +61,7 @@ Place captures under the workspace, or point the workspace to their common paren
 
 - Hub search, pagination, public/private access and local dataset registration.
 - Synchronized multi-camera playback, timeline, shortcuts, fullscreen, visibility controls and state/action charts; multi-task datasets can filter the episode list by task.
-- Language timelines: persistent task augmentation/subtask/plan/memory; speech/interjection/VQA; bounding boxes and points on video, count/attribute/spatial answers.
+- Language timelines: persistent task augmentation/subtask/plan/memory; speech/interjection/VQA; SAM3 object/track sidecars; bounding boxes and points on video, count/attribute/spatial answers.
 - Statistics and episode lengths; movement/smoothness/length filtering; first/last camera frames and per-dataset review flags.
 - Action autocorrelation/chunk suggestions, state-action alignment, demonstrator speed and cross-episode variance, scoped to the full dataset, an episode range or a single task, with an optional full-coverage (unsampled) pass.
 - Upstream-supported 3D robot playback, joint mapping and end-effector trails.
@@ -69,6 +69,10 @@ Place captures under the workspace, or point the workspace to their common paren
 - Built-in conversion stages and full pipeline, editable options, immutable plans, job logs/exit codes, structured results and automatic dataset registration.
 
 Video-based LeRobot v2.0/v2.1/v3.0/v3.1 can be browsed. Embedded-image Parquet playback retains the upstream limitation. Original dataset text and feature/joint identifiers remain unchanged.
+
+### Optional SAM3 object annotation
+
+The annotation tab includes a revisioned object/track sidecar and a deterministic CPU demo. Choose a camera and text prompts, then accept or reject suggestions without changing native LeRobot files. Real SAM3 requires a separate Python 3.12 uv environment, Hugging Face checkpoint access and explicit `LEVI_SAM3_ENABLED=1`; see the [SAM3 guide](docs/SAM3.md). Core LEVI checks never import Torch, probe CUDA or run the model.
 
 Default live demonstrations:
 

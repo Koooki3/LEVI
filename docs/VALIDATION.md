@@ -1,16 +1,16 @@
 # 验证记录 / Validation record
 
-验证日期：2026-09-10。环境：Linux x86_64、Python 3.11.16（独立 uv `.venv`）、Bun 1.3.10、Next.js 15.5.25、Playwright Chromium。参考版本见 [UPSTREAM.md](UPSTREAM.md)。
+验证日期：2026-09-12。环境：Linux x86_64、Python 3.11.16（独立 uv `.venv`）、Bun 1.3.10、Next.js 15.5.25、Playwright Chromium。参考版本见 [UPSTREAM.md](UPSTREAM.md)。
 
 ## 0.2.0 独立发行检查 / Standalone release check
 
-A source-only copy was installed under a renamed checkout with a separate workspace containing a space in its path. Its own uv environment passed all **19 Python tests**, and a fresh frontend dependency install and production build succeeded. With `LEVI_WORKSPACE` unset, the default was that checkout's `.state`; an unrelated environment variable did not change it. No sibling conversion repository was present.
+A source-only copy was installed under a renamed checkout with a separate workspace containing a space in its path. Its own uv environment passed all **37 Python tests**, and a fresh frontend dependency install and production build succeeded. With `LEVI_WORKSPACE` unset, the default was that checkout's `.state`; an unrelated environment variable did not change it. No sibling conversion repository was present.
 
 The production web workbench was also exercised: advanced JSON selected quaternion orientation and state-as-action, the immutable plan ran the complete built-in pipeline, the result was automatically registered, and both 640×480 videos reached readyState 4. Browser page errors: **0**. A second integration run used the default Euler/next-state configuration successfully.
 
 The publication scan excludes local `.env`, environments and generated artifacts. Public source/docs contain no machine-specific workspace names or absolute personal paths. Cleanup targets are explicit; registered datasets, durable outputs and shared runtimes/caches are preserved.
 
-Cache cleanup was applied after validation: 351,011,647 bytes of LEVI cache files were removed. The disposable relocated checkout/build was removed separately; its verification log and result record were retained. Datasets, annotations, reports, installed runtimes and the production build were preserved.
+Cache cleanup was applied after validation: generated Next.js output, test/ruff caches, uv marker caches and source `__pycache__` directories were removed. Environments, installed runtimes, datasets, annotations and durable outputs were preserved.
 
 ## 自动检查 / Automated checks
 
@@ -19,13 +19,15 @@ Cache cleanup was applied after validation: 351,011,647 bytes of LEVI cache file
 | Frontend type checks, app and tests | Passed |
 | ESLint | 0 errors; 3 retained upstream React Hook dependency warnings |
 | Prettier | Passed |
-| Bun unit tests | **159 passed, 0 failed** |
-| Python / FastAPI tests | **19 passed**; 2 dependency deprecation warnings |
+| Bun unit tests | **165 passed, 0 failed** |
+| Python / FastAPI tests | **37 passed**; 2 dependency deprecation warnings |
 | Production Next.js build | Passed |
 | Ruff fatal Python checks | Passed |
 | `git diff --check` | Passed |
 
 Python tests additionally cover the complete bundled pipeline, image/FPS resampling, source byte preservation, quaternion geometry, measured image statistics, metadata repairs, task maps, immutable job plans, changed-source rejection and cache cleanup boundaries.
+
+SAM3 CPU-only coverage includes RLE losslessness, Sidecar revisions and human edits, API plan/run/export source safety, response path redaction, v3 shared-video metadata resolution, invalid refinement rejection, capability checks, and the disabled worker CLI. No test imported Torch, probed CUDA or ran a SAM3 model.
 
 Python tests cover dataset registration, byte-range video reads, path/symlink boundaries, cross-origin writes, dataset-scoped review persistence, v2 annotation export without source modification, exact frame snapping, v3.1 episode metadata, diagnostics and rejected invalid jobs. Frontend tests include v2 JSONL episode-length statistics and invalid FPS handling, alongside the retained upstream math/parsing suite.
 
@@ -71,6 +73,7 @@ The browser script reads public datasets and writes screenshots/results to `outp
 - The Dockerfile is provided, but a Docker build/run was not verified because this session had no permission to access the local Docker daemon.
 - Linux x86_64 was tested. macOS, ARM64, WSL2 and multi-user deployment were not tested.
 - The checks above do not establish behavior on every dataset, camera codec or training loader. Image-only datasets retain the upstream limitation.
+- The optional SAM3 worker, model checkpoint, CUDA runtime and real GPU inference were intentionally not exercised; only its model-free CPU configuration checks and adapter metadata tests ran.
 
 ## 界面 / Screenshots
 

@@ -69,3 +69,8 @@ dist/
 # Local lint/build caches
 .ruff_cache/
 .cache/
+
+# Optional SAM3 model environment and private checkpoints
+integrations/sam3/.venv/
+integrations/sam3/.cache/
+integrations/sam3/checkpoints/

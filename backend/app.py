@@ -33,15 +33,14 @@ Then in another terminal:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
-import shutil
-import uuid
 import re
-from levi.paths import inside, CACHE, EXPORTS, STATE
-from levi.catalog import local_root, atomic
-from levi.auth import token
+import shutil
+import subprocess
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -55,6 +54,15 @@ from fastapi.responses import JSONResponse
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from pydantic import BaseModel
 
+from levi.annotations import ObjectAnnotation, ObjectEdit, Sam3Plan, SidecarStore
+from levi.annotations.sam3_protocol import (
+    fake_annotations,
+    validate_annotations_for_plan,
+)
+from levi.auth import token
+from levi.catalog import atomic, local_root
+from levi.paths import CACHE, EXPORTS, STATE, inside
+
 logger = logging.getLogger("lerobot-annotate")
 logging.basicConfig(level=logging.INFO)
 
@@ -63,8 +71,8 @@ EXPORT_ROOT = EXPORTS
 
 # --- Schema mirrors src/lerobot/datasets/language.py --------------------------
 
-PERSISTENT_STYLES = {"task_aug", "subtask", "plan", "memory"}
-EVENT_ONLY_STYLES = {"interjection", "vqa"}
+PERSISTENT_STYLES = {"task_aug", "subtask", "plan", "memory", "motion"}
+EVENT_ONLY_STYLES = {"interjection", "vqa", "trace"}
 KNOWN_STYLES = PERSISTENT_STYLES | EVENT_ONLY_STYLES
 LANGUAGE_PERSISTENT = "language_persistent"
 LANGUAGE_EVENTS = "language_events"
@@ -130,6 +138,18 @@ class EpisodeAtomsPayload(BaseModel):
     atoms: list[LanguageAtom] = []
 
 
+class Sam3PlanRequest(Sam3Plan):
+    """A model-neutral SAM3 plan accepted by the annotation control plane."""
+
+
+class Sam3RunRequest(Sam3PlanRequest):
+    """Request used by the CPU fake provider and the optional real worker."""
+
+
+class Sam3EditRequest(ObjectEdit):
+    """A revision-checked human edit to an object sidecar."""
+
+
 class ExportRequest(DatasetRef):
     output_dir: str | None = None
     copy_videos: bool = False
@@ -173,6 +193,22 @@ class DatasetState:
             )
         )
 
+    @property
+    def object_annotations_path(self) -> Path:
+        """Workspace sidecar root, independent from the source dataset tree."""
+        identity = json.dumps(
+            {
+                "repo_id": self.repo_id,
+                "revision": self.revision or "main",
+                "local_path": self.local_path,
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        return (
+            STATE / "object_annotations" / hashlib.sha256(identity.encode()).hexdigest()
+        )
+
 
 _states: dict[str, DatasetState] = {}
 
@@ -194,6 +230,184 @@ def _ensure_state(req: DatasetRef) -> DatasetState:
     if key in _states:
         return _states[key]
     return _load_state(req, key)
+
+
+def _sidecar(state: DatasetState) -> SidecarStore:
+    identity = {
+        "repo_id": state.repo_id,
+        "revision": state.revision or "main",
+        "local_path": state.local_path,
+        "codebase_version": state.info.get("codebase_version"),
+        "fps": state.info.get("fps"),
+    }
+    return SidecarStore(state.object_annotations_path, identity=identity)
+
+
+def _validate_sam3_plan(state: DatasetState, request: Sam3PlanRequest) -> None:
+    available_episodes = {
+        int(value) for value in state.episodes_df["episode_index"].tolist()
+    }
+    missing = set(request.episode_indices) - available_episodes
+    if missing:
+        raise HTTPException(400, f"Unknown episode indices: {sorted(missing)}")
+    feature_keys = set((state.info.get("features") or {}).keys())
+    camera_keys = {key for key in feature_keys if key.startswith("observation.images.")}
+    if camera_keys and not set(request.camera_keys).issubset(camera_keys):
+        raise HTTPException(
+            400, "camera_keys must reference observation.images.* features"
+        )
+    if request.accept_threshold < request.review_threshold:
+        raise HTTPException(400, "accept_threshold must be >= review_threshold")
+
+
+_SAM3_ENABLED_VALUES = {"1", "true", "yes", "on"}
+_SAM3_PROCESSES: dict[str, subprocess.Popen[bytes]] = {}
+
+
+def _sam3_enabled() -> bool:
+    return os.environ.get("LEVI_SAM3_ENABLED", "0").lower() in _SAM3_ENABLED_VALUES
+
+
+def _public_sam3_plan(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return plan metadata without exposing managed filesystem paths."""
+    plan_keys = (
+        "repo_id",
+        "revision",
+        "episode_indices",
+        "camera_keys",
+        "prompts",
+        "start_frame",
+        "max_frames",
+        "review_threshold",
+        "accept_threshold",
+        "provider",
+    )
+    dataset = payload.get("dataset") or {}
+    return {
+        "plan_id": payload.get("plan_id"),
+        "status": payload.get("status"),
+        "dataset": {
+            "repo_id": dataset.get("repo_id"),
+            "revision": dataset.get("revision"),
+        },
+        **{key: payload[key] for key in plan_keys if key in payload},
+    }
+
+
+def _public_sam3_job(job: dict[str, Any]) -> dict[str, Any]:
+    """Return job state without leaking worker paths, PIDs or command details."""
+    public_keys = (
+        "job_id",
+        "status",
+        "provider",
+        "plan_id",
+        "created_at",
+        "started_at",
+        "finished_at",
+        "revision_id",
+        "annotation_count",
+        "error",
+    )
+    return {key: job[key] for key in public_keys if key in job}
+
+
+def _sam3_plan_payload(
+    state: DatasetState, request: Sam3PlanRequest
+) -> tuple[SidecarStore, Path, dict[str, Any]]:
+    store = _sidecar(state)
+    store.initialize()
+    plan_id = uuid.uuid4().hex
+    plan_path = store.root / "staging" / "plans" / f"{plan_id}.json"
+    payload = {
+        "plan_id": plan_id,
+        "status": "planned",
+        "dataset": {
+            "repo_id": state.repo_id,
+            "local_path": state.local_path,
+            "revision": state.revision or "main",
+        },
+        "dataset_root": str(state.root),
+        **request.model_dump(),
+    }
+    atomic(plan_path, payload)
+    return store, plan_path, payload
+
+
+def _sam3_job_path(store: SidecarStore, job_id: str) -> Path:
+    if not re.fullmatch(r"[a-f0-9]{16,64}", job_id):
+        raise HTTPException(400, "Invalid SAM3 job ID")
+    return store.root / "staging" / "jobs" / f"{job_id}.json"
+
+
+def _sam3_process_alive(job: dict[str, Any]) -> bool:
+    process = _SAM3_PROCESSES.get(str(job.get("job_id")))
+    if process is not None:
+        return process.poll() is None
+    pid = job.get("pid")
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _forget_sam3_process(job_id: str) -> None:
+    process = _SAM3_PROCESSES.pop(job_id, None)
+    if process is not None:
+        # poll() reaps an already finished child without blocking.
+        process.poll()
+
+
+def _collect_sam3_job(state: DatasetState, job: dict[str, Any]) -> dict[str, Any]:
+    """Reconcile a worker result into a sidecar revision exactly once."""
+    if job.get("status") in {"succeeded", "failed", "cancelled"}:
+        _forget_sam3_process(str(job.get("job_id", "")))
+        return job
+    result_path = Path(str(job["result_path"]))
+    process = _SAM3_PROCESSES.get(str(job.get("job_id")))
+    return_code = process.poll() if process is not None else None
+    if result_path.is_file():
+        try:
+            result = json.loads(result_path.read_text())
+            if result.get("status") != "succeeded":
+                raise ValueError(
+                    result.get("error") or "worker returned an unsuccessful result"
+                )
+            annotations = [
+                ObjectAnnotation.model_validate(item)
+                for item in result.get("annotations", [])
+            ]
+            plan_payload = json.loads(Path(str(job["plan_path"])).read_text())
+            plan_fields = set(Sam3Plan.model_fields)
+            plan = Sam3Plan.model_validate(
+                {key: plan_payload[key] for key in plan_fields if key in plan_payload}
+            )
+            validate_annotations_for_plan(plan, annotations)
+            sidecar = _sidecar(state)
+            revision = sidecar.publish(
+                annotations,
+                parent_revision=sidecar.current_revision(),
+                model=result.get("model") or {"provider": "sam3"},
+            )
+            job.update(
+                status="succeeded",
+                finished_at=pd.Timestamp.utcnow().isoformat(),
+                revision_id=revision["revision_id"],
+                annotation_count=len(annotations),
+            )
+        except (OSError, ValueError, TypeError) as exc:
+            job.update(status="failed", error=f"Invalid SAM3 worker result: {exc}")
+    elif return_code is not None or not _sam3_process_alive(job):
+        job.update(
+            status="failed",
+            error=f"SAM3 worker exited without a result (code {return_code})",
+        )
+    else:
+        job["status"] = "running"
+    atomic(_sam3_job_path(_sidecar(state), str(job["job_id"])), job)
+    return job
 
 
 def _load_state(req: DatasetRef, key: str) -> DatasetState:
@@ -620,8 +834,8 @@ def _materialize_table(
         )
         persistent_by_ep[ep_idx] = persistent_rows
 
-        for ts in buckets:
-            buckets[ts].sort(key=lambda r: (r.get("style") or "", r.get("role") or ""))
+        for rows in buckets.values():
+            rows.sort(key=lambda r: (r.get("style") or "", r.get("role") or ""))
         events_by_ep_ts[ep_idx] = buckets
 
         n_persistent_total += len(persistent_rows)
@@ -682,6 +896,18 @@ def _materialize_tree(src: Path, dst: Path, *, force_copy: bool) -> None:
         shutil.copy2(s, d)
 
     shutil.copytree(src, dst, copy_function=_copy_file)
+
+
+def _copy_object_sidecar(store: SidecarStore, destination: Path) -> None:
+    """Copy publishable sidecar records while excluding staging/job caches."""
+    destination.mkdir(parents=True, exist_ok=True)
+    for name in ("meta.json", "current.json"):
+        source = store.root / name
+        if source.is_file():
+            shutil.copy2(source, destination / name)
+    revisions = store.root / "revisions"
+    if revisions.is_dir():
+        shutil.copytree(revisions, destination / "revisions")
 
 
 def _do_export(
@@ -799,10 +1025,20 @@ def _do_export(
                 shutil.rmtree(dst_videos)
         _materialize_tree(src_videos, dst_videos, force_copy=copy_videos)
 
+    # Carry the current object sidecar into the exported dataset without
+    # changing the source tree.  The sidecar is optional, so language-only
+    # exports remain backwards compatible.
+    object_store = _sidecar(state)
+    object_revision = object_store.current_revision()
+    if object_revision:
+        dst_sidecar = out_root / "annotations" / "sam3"
+        _copy_object_sidecar(object_store, dst_sidecar)
+
     return {
         "output_dir": str(out_root),
         "persistent_rows": n_persistent,
         "event_rows": n_events,
+        "object_annotation_revision": object_revision,
     }
 
 
@@ -907,6 +1143,248 @@ def set_episode_atoms(episode_index: int, payload: EpisodeAtomsPayload) -> JSONR
     return JSONResponse(
         {"ok": True, "saved": len(atoms), "path": str(state.annotations_path)}
     )
+
+
+@app.get("/api/sam3/capabilities")
+def sam3_capabilities() -> JSONResponse:
+    """Report availability without importing torch or probing CUDA."""
+    worker_project = (
+        Path(__file__).resolve().parents[1] / "integrations" / "sam3" / "pyproject.toml"
+    )
+    worker_python = Path(
+        os.environ.get(
+            "LEVI_SAM3_WORKER_PYTHON",
+            str(worker_project.parent / ".venv/bin/python"),
+        )
+    ).expanduser()
+    enabled = _sam3_enabled()
+    return JSONResponse(
+        {
+            "provider": "sam3",
+            "enabled": enabled,
+            "worker_project_present": worker_project.is_file(),
+            "worker_python_present": worker_python.is_file(),
+            "requires_user_checkpoint_access": True,
+            "gpu_probe_performed": False,
+            "manual_annotation_available": True,
+            "message": (
+                "SAM3 is disabled; use the CPU-safe fake provider for tests."
+                if not enabled
+                else "SAM3 is explicitly enabled; the optional worker must be installed and authenticated."
+            ),
+        }
+    )
+
+
+@app.post("/api/sam3/plan")
+def sam3_plan(request: Sam3PlanRequest) -> JSONResponse:
+    state = _ensure_state(DatasetRef.model_validate(request.model_dump()))
+    _validate_sam3_plan(state, request)
+    _, _, payload = _sam3_plan_payload(state, request)
+    return JSONResponse(_public_sam3_plan(payload))
+
+
+@app.post("/api/sam3/run")
+def sam3_run(request: Sam3RunRequest) -> JSONResponse:
+    state = _ensure_state(DatasetRef.model_validate(request.model_dump()))
+    _validate_sam3_plan(state, request)
+    store, plan_path, plan_payload = _sam3_plan_payload(state, request)
+    if request.provider == "fake":
+        annotations = fake_annotations(request)
+        revision = store.publish(
+            annotations,
+            parent_revision=store.current_revision(),
+            model={"provider": "fake", "model_version": "fixture", "cpu_only": True},
+        )
+        return JSONResponse(
+            {
+                "ok": True,
+                "provider": "fake",
+                "revision_id": revision["revision_id"],
+                "count": len(annotations),
+                "review_status": "suggested",
+                "plan_id": plan_payload["plan_id"],
+            }
+        )
+    if not _sam3_enabled():
+        raise HTTPException(
+            503,
+            "SAM3 is disabled; set LEVI_SAM3_ENABLED=1 to enable the optional worker",
+        )
+    worker_project = Path(__file__).resolve().parents[1] / "integrations" / "sam3"
+    worker_python = Path(
+        os.environ.get(
+            "LEVI_SAM3_WORKER_PYTHON", str(worker_project / ".venv/bin/python")
+        )
+    ).expanduser()
+    if not (worker_project / "levi_sam3_worker" / "worker.py").is_file():
+        raise HTTPException(
+            503, "SAM3 worker source is missing from this LEVI checkout"
+        )
+    if not worker_python.is_file():
+        raise HTTPException(
+            503,
+            f"SAM3 worker environment not found at {worker_python}; see integrations/sam3/README.md",
+        )
+    job_id = uuid.uuid4().hex
+    result_path = store.root / "staging" / "results" / f"{job_id}.json"
+    log_path = store.root / "staging" / "jobs" / f"{job_id}.log"
+    job = {
+        "job_id": job_id,
+        "status": "queued",
+        "provider": "sam3",
+        "plan_id": plan_payload["plan_id"],
+        "plan_path": str(plan_path),
+        "result_path": str(result_path),
+        "log_path": str(log_path),
+        "created_at": pd.Timestamp.utcnow().isoformat(),
+    }
+    atomic(_sam3_job_path(store, job_id), job)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_stream = log_path.open("ab")
+    try:
+        process = subprocess.Popen(
+            [
+                str(worker_python),
+                "-m",
+                "levi_sam3_worker.cli",
+                "--plan",
+                str(plan_path),
+                "--output",
+                str(result_path),
+            ],
+            cwd=worker_project,
+            env={**os.environ, "LEVI_SAM3_ENABLED": "1"},
+            stdin=subprocess.DEVNULL,
+            stdout=log_stream,
+            stderr=subprocess.STDOUT,
+            start_new_session=(os.name == "posix"),
+        )
+    except OSError as exc:
+        log_stream.close()
+        job.update(status="failed", error=f"Unable to start SAM3 worker: {exc}")
+        atomic(_sam3_job_path(store, job_id), job)
+        raise HTTPException(503, job["error"]) from exc
+    finally:
+        if "process" in locals():
+            log_stream.close()
+    _SAM3_PROCESSES[job_id] = process
+    job.update(status="running", pid=process.pid)
+    atomic(_sam3_job_path(store, job_id), job)
+    return JSONResponse({"ok": True, **_public_sam3_job(job)}, status_code=202)
+
+
+@app.get("/api/sam3/revisions")
+def sam3_revisions(
+    repo_id: str | None = None,
+    revision: str | None = None,
+    local_path: str | None = None,
+) -> JSONResponse:
+    state = _ensure_state(
+        DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path)
+    )
+    store = _sidecar(state)
+    return JSONResponse(
+        {"current": store.current_revision(), "revisions": store.list_revisions()}
+    )
+
+
+@app.get("/api/sam3/episodes/{episode_index}/objects")
+def sam3_episode_objects(
+    episode_index: int,
+    repo_id: str | None = None,
+    revision: str | None = None,
+    local_path: str | None = None,
+    camera_key: str | None = None,
+    frame_index: int | None = None,
+    annotation_revision: str | None = None,
+) -> JSONResponse:
+    state = _ensure_state(
+        DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path)
+    )
+    store = _sidecar(state)
+    rows = store.read_episode(episode_index, annotation_revision)
+    if camera_key:
+        rows = [row for row in rows if row["camera_key"] == camera_key]
+    if frame_index is not None:
+        rows = [row for row in rows if row["frame_index"] == frame_index]
+    return JSONResponse(
+        {
+            "episode_index": episode_index,
+            "revision": annotation_revision or store.current_revision(),
+            "objects": rows,
+        }
+    )
+
+
+@app.get("/api/sam3/jobs/{job_id}")
+def sam3_job_status(
+    job_id: str,
+    repo_id: str | None = None,
+    revision: str | None = None,
+    local_path: str | None = None,
+) -> JSONResponse:
+    state = _ensure_state(
+        DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path)
+    )
+    store = _sidecar(state)
+    path = _sam3_job_path(store, job_id)
+    if not path.is_file():
+        raise HTTPException(404, "SAM3 job not found")
+    job = _collect_sam3_job(state, json.loads(path.read_text()))
+    return JSONResponse(_public_sam3_job(job))
+
+
+@app.post("/api/sam3/jobs/{job_id}/cancel")
+def sam3_job_cancel(
+    job_id: str,
+    repo_id: str | None = None,
+    revision: str | None = None,
+    local_path: str | None = None,
+) -> JSONResponse:
+    state = _ensure_state(
+        DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path)
+    )
+    store = _sidecar(state)
+    path = _sam3_job_path(store, job_id)
+    if not path.is_file():
+        raise HTTPException(404, "SAM3 job not found")
+    job = json.loads(path.read_text())
+    if job.get("status") in {"succeeded", "failed", "cancelled"}:
+        _forget_sam3_process(job_id)
+        return JSONResponse(_public_sam3_job(job))
+    process = _SAM3_PROCESSES.get(job_id)
+    if process is not None and process.poll() is None:
+        if os.name == "posix":
+            os.killpg(process.pid, __import__("signal").SIGTERM)
+        else:
+            process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2)
+    _forget_sam3_process(job_id)
+    job.update(status="cancelled", finished_at=pd.Timestamp.utcnow().isoformat())
+    atomic(path, job)
+    return JSONResponse(_public_sam3_job(job))
+
+
+@app.post("/api/sam3/edits")
+def sam3_edit(
+    request: Sam3EditRequest,
+    repo_id: str | None = None,
+    revision: str | None = None,
+    local_path: str | None = None,
+) -> JSONResponse:
+    state = _ensure_state(
+        DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path)
+    )
+    store = _sidecar(state)
+    if request.base_revision and request.base_revision != store.current_revision():
+        raise HTTPException(409, "annotation revision is stale; reload before editing")
+    result = store.apply_edit(request)
+    return JSONResponse({"ok": True, **result})
 
 
 @app.get("/api/episodes/{episode_index}/frame_timestamps")

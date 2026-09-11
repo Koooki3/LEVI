@@ -10,6 +10,7 @@ jobs:
       LEVI_WORKSPACE: ${{ github.workspace }}/.state
       UV_CACHE_DIR: ${{ github.workspace }}/.state/.cache/uv
       NEXT_TELEMETRY_DISABLED: "1"
+      CUDA_VISIBLE_DEVICES: ""
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
