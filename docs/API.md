@@ -62,3 +62,9 @@ Diagnostic calls are synchronous and can take time to download remote shards. Co
 Plans capture source size/mtime fingerprints. Execution fails if the source changes before or during processing. The worker is always `python -m levi.conversion`; old external-script plans cannot run. Job results include `exit_code`, structured `result`, `output_exists`, and an automatically registered `dataset` when successful. `pipeline` updates the job output to its nested validated `dataset/` directory. Intermediate captures remain in the run directory.
 
 Read-only stages have no output dataset. A failing report exits with code 2 and is recorded as failed; exceptions exit nonzero. Interrupted jobs are marked on service restart; partial output is retained, never resumed automatically.
+
+## Service entry points / 服务入口
+
+The browser workbench is served on `http://127.0.0.1:7860`. Backend port `7861` serves the API: `/` returns a bilingual entry guide, `/favicon.ico` returns the LEVI icon, and `GET /api/levi/health` returns `{"service":"levi-api","status":"ok"}` for startup checks. The launcher supplies the guide with the selected frontend address/port. These entry routes do not expose datasets or credentials.
+
+网页入口为 7860；7861 是内部 API。完整启动使用 `uv run levi` 或 `uv run levi serve`。远程访问时，应把本机网页端口转发到服务器的网页端口。

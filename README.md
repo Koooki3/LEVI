@@ -29,7 +29,7 @@ uv run levi build
 uv run levi serve
 ```
 
-访问 **http://127.0.0.1:7860**，`Ctrl+C` 停止服务。转换所需的 Python 依赖已包含在 `uv.lock` 中；不需要其他项目的 Python 环境。`setup` 将 Bun 1.3.10 下载到 `.runtime/`，校验官方 SHA-256 清单并安装 `bun.lock` 中的依赖。
+`uv run levi` 等同于 `uv run levi serve`，会同时启动网页和 API。看到 **已就绪 / Ready** 后，访问 **http://127.0.0.1:7860**；`Ctrl+C` 停止两个服务。转换所需的 Python 依赖已包含在 `uv.lock` 中；不需要其他项目的 Python 环境。`setup` 将 Bun 1.3.10 下载到 `.runtime/`，校验官方 SHA-256 清单并安装 `bun.lock` 中的依赖。
 
 已测试 Linux x86_64。安装器支持 Linux/macOS x86_64 与 ARM64；Windows 推荐 WSL2。Ubuntu/Debian 可用 `sudo apt install ffmpeg`，macOS 可用 `brew install ffmpeg`。浏览器支持取决于视频编码，内置转换器输出 H.264/yuv420p。
 
@@ -43,7 +43,7 @@ uv run levi clean                      # 预览可清理缓存
 uv run levi clean --apply               # 删除预览列表内的可再生成缓存
 ```
 
-从远程服务器访问时，在自己的电脑运行 `ssh -L 7860:127.0.0.1:7860 USER@SERVER`，然后访问本机上述地址。默认前端绑定本机 7860，后端绑定本机 7861；前端通过同源代理访问后端。
+从远程服务器访问时，在自己的电脑运行 `ssh -L 7860:127.0.0.1:7860 USER@SERVER`，然后访问本机上述地址。默认前端绑定本机 **7860（网页入口）**，后端绑定本机 **7861（内部 API）**；前端通过同源代理访问后端。不要把本机 7860 转发到服务器 7861。误开后端根路径会显示入口说明及网页链接；`uv run levi backend` 只启动 API。启动器会检查端口冲突，并等待前后端均就绪后才输出网页入口。
 
 ## 工作目录与数据位置
 
@@ -147,6 +147,7 @@ uv run python scripts/verify_conversion.py
 
 ## 常见问题
 
+- **看到 `{"detail":"Not Found"}` 或 API 说明页**：说明请求可能进入了 7861；打开 7860，并核对 SSH / 编辑器端口转发目标是否为服务器 7860。不要将终端中 Uvicorn 的监听地址当作网页入口。
 - **无法访问网页**：核对终端日志、端口和 SSH 转发；浏览器的 localhost 指自己的电脑。
 - **Hub 视频加载失败**：检查网络、仓库 ID、访问权限与编码支持；首次获取大视频和模型需要时间。
 - **本地路径被拒绝**：登记根目录必须包含 `meta/info.json`，真实路径必须处于 `LEVI_WORKSPACE` 内。

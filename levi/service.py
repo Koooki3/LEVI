@@ -1,19 +1,22 @@
 """Local HTTP service for datasets, review, conversion, diagnostics and annotations."""
 
-import re
 import os
+import re
 import shutil
 from contextlib import asynccontextmanager
-from .conversion.options import Options
+from html import escape
 from urllib.parse import urlsplit
+
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
-from .paths import ROOT, STATE, CACHE, configure, inside
-from .catalog import DEMOS, atomic, datasets, local_root, read, register, review_path
+
 from . import jobs
 from .auth import hub_token, token
+from .catalog import DEMOS, atomic, datasets, local_root, read, register, review_path
+from .conversion.options import Options
 from .diagnostics import CHECKS, diagnose
+from .paths import CACHE, PROJECT, ROOT, STATE, configure, inside
 
 configure()
 from backend.app import app as annotation_app  # noqa: E402
@@ -33,6 +36,46 @@ async def lifespan(app):
 
 
 app = FastAPI(title="LEVI", version="0.2.0", lifespan=lifespan)
+
+
+@app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+def api_landing():
+    # A fixed launcher-provided destination avoids trusting Host/forwarded headers.
+    target = os.environ.get("LEVI_FRONTEND_URL", "http://127.0.0.1:7860")
+    parsed = urlsplit(target)
+    if (
+        parsed.scheme not in ("http", "https")
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+    ):
+        target = "http://127.0.0.1:7860"
+    target = escape(target, quote=True)
+    return HTMLResponse(f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LEVI · API 服务 / API service</title><link rel="icon" href="/favicon.ico">
+<style>body{{margin:0;background:#10211c;color:#eeeadd;font:17px/1.65 system-ui,sans-serif;display:grid;min-height:100vh;place-items:center}}
+main{{max-width:680px;margin:24px;padding:36px;border:1px solid #496153;border-radius:20px}}
+a{{display:inline-block;background:#c4ec78;color:#10211c;padding:12px 20px;border-radius:10px;overflow-wrap:anywhere}}
+code{{color:#c4ec78}}small{{color:#bdc9bc}}</style></head>
+<body><main><small>LEVI / ROBOT DATA ATELIER</small>
+<h1>这里是 API 服务</h1><p>This is the API service, not the dataset workbench.</p>
+<p>请打开网页入口浏览、标注和转换数据：<br>Open the Web UI to browse, annotate and convert datasets:</p>
+<a href="{target}">打开 LEVI / Open LEVI · {target}</a>
+<p>完整启动 / Start both services: <code>uv run levi</code></p>
+<small>远程访问请将网页端口转发到前端，而非 API 端口。<br>
+For remote access, forward the Web UI port to the frontend, not the API port.</small>
+</main></body></html>""")
+
+
+@app.api_route("/favicon.ico", methods=["GET", "HEAD"], include_in_schema=False)
+def api_icon():
+    return FileResponse(PROJECT / "src/app/icon.svg", media_type="image/svg+xml")
+
+
+@app.get("/api/levi/health")
+def health():
+    return {"service": "levi-api", "status": "ok"}
 
 
 @app.middleware("http")
