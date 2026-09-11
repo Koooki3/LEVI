@@ -60,10 +60,10 @@ Place captures under the workspace, or point the workspace to their common paren
 ## Features
 
 - Hub search, pagination, public/private access and local dataset registration.
-- Synchronized multi-camera playback, timeline, shortcuts, fullscreen, visibility controls and state/action charts.
+- Synchronized multi-camera playback, timeline, shortcuts, fullscreen, visibility controls and state/action charts; multi-task datasets can filter the episode list by task.
 - Language timelines: persistent task augmentation/subtask/plan/memory; speech/interjection/VQA; bounding boxes and points on video, count/attribute/spatial answers.
 - Statistics and episode lengths; movement/smoothness/length filtering; first/last camera frames and per-dataset review flags.
-- Action autocorrelation/chunk suggestions, state-action alignment, demonstrator speed and cross-episode variance.
+- Action autocorrelation/chunk suggestions, state-action alignment, demonstrator speed and cross-episode variance, scoped to the full dataset, an episode range or a single task, with an optional full-coverage (unsampled) pass.
 - Upstream-supported 3D robot playback, joint mapping and end-effector trails.
 - Native Doctor with optional sampled video checks and JSON reports; external original Doctor link.
 - Built-in conversion stages and full pipeline, editable options, immutable plans, job logs/exit codes, structured results and automatic dataset registration.

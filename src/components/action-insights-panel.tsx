@@ -16,6 +16,8 @@ import { useFlaggedEpisodes } from "@/context/flagged-episodes-context";
 import { CHART_CONFIG } from "@/utils/constants";
 import type {
   CrossEpisodeVarianceData,
+  CrossEpisodeRequest,
+  CrossEpisodeScope,
   AggVelocityStat,
   AggAutocorrelation,
   SpeedDistEntry,
@@ -991,7 +993,7 @@ function VarianceHeatmap({
                   d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                 />
               </svg>
-              <T>Loading cross-episode data (sampled up to 500 episodes)…</T>
+              <T>Loading cross-episode data…</T>
             </div>
           </div>
         }
@@ -1801,6 +1803,236 @@ function StateActionAlignmentSection({
   );
 }
 
+// ─── Cross-Episode Scope Controls ────────────────────────────────
+
+const SAMPLE_PRESETS = [120, 300, 600, 1200, 3000];
+
+function clampEpisode(value: number, totalEpisodes: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(
+    0,
+    Math.min(Math.round(value), Math.max(0, totalEpisodes - 1)),
+  );
+}
+
+function describeScope(scope: CrossEpisodeScope): string {
+  if (scope.kind === "range") return `Episodes ${scope.from}–${scope.to}`;
+  if (scope.kind === "task") return scope.task;
+  return "Full dataset";
+}
+
+/**
+ * Chooses which episodes the dataset-wide analysis covers. The sample cap is
+ * separate from the scope on purpose: reviewing one task or one range at full
+ * coverage is usually cheaper — and more honest — than an even sample over
+ * everything.
+ */
+function ScopeControls({
+  totalEpisodes,
+  tasks,
+  request,
+  onRequestChange,
+  loading,
+  progress,
+  data,
+}: {
+  totalEpisodes: number;
+  tasks: string[];
+  request: CrossEpisodeRequest;
+  onRequestChange: (request: CrossEpisodeRequest) => void;
+  loading: boolean;
+  progress: { loaded: number; total: number } | null;
+  data: CrossEpisodeVarianceData | null;
+}) {
+  const multiTask = tasks.length > 1;
+  const lastEpisode = Math.max(0, totalEpisodes - 1);
+  const [kind, setKind] = useState<CrossEpisodeScope["kind"]>(
+    request.scope.kind,
+  );
+  const [from, setFrom] = useState(
+    request.scope.kind === "range" ? String(request.scope.from) : "0",
+  );
+  const [to, setTo] = useState(
+    request.scope.kind === "range"
+      ? String(request.scope.to)
+      : String(lastEpisode),
+  );
+  const [task, setTask] = useState(
+    request.scope.kind === "task" ? request.scope.task : (tasks[0] ?? ""),
+  );
+  const [maxEpisodes, setMaxEpisodes] = useState<number | null>(
+    request.maxEpisodes,
+  );
+
+  const draft = useMemo<CrossEpisodeRequest>(() => {
+    if (kind === "range") {
+      const lo = clampEpisode(Number(from), totalEpisodes);
+      const hi = clampEpisode(Number(to), totalEpisodes);
+      return {
+        scope: { kind: "range", from: Math.min(lo, hi), to: Math.max(lo, hi) },
+        maxEpisodes,
+      };
+    }
+    if (kind === "task" && task) {
+      return { scope: { kind: "task", task }, maxEpisodes };
+    }
+    return { scope: { kind: "all" }, maxEpisodes };
+  }, [kind, from, to, task, maxEpisodes, totalEpisodes]);
+
+  const dirty = JSON.stringify(draft) !== JSON.stringify(request);
+  // A cap at or above the episode count is full coverage, so show it as "All"
+  // rather than leaving the select on a value it has no option for.
+  const shownSample =
+    maxEpisodes !== null && maxEpisodes >= totalEpisodes ? null : maxEpisodes;
+  const sampleOptions = useMemo(() => {
+    const values = new Set(SAMPLE_PRESETS.filter((n) => n < totalEpisodes));
+    if (shownSample !== null) values.add(shownSample);
+    return [...[...values].sort((a, b) => a - b), null];
+  }, [totalEpisodes, shownSample]);
+
+  const kinds: { value: CrossEpisodeScope["kind"]; label: string }[] = [
+    { value: "all", label: "Full dataset" },
+    { value: "range", label: "Episode range" },
+    ...(multiTask ? [{ value: "task" as const, label: "By task" }] : []),
+  ];
+
+  return (
+    <T>
+      {
+        <div className="bg-[var(--surface-1)]/60 rounded-lg p-4 border border-white/10 space-y-3">
+          <div className="flex items-center flex-wrap gap-x-4 gap-y-2">
+            <span className="text-[10px] uppercase tracking-wide text-slate-500">
+              <T>Analysis scope</T>
+            </span>
+            <div className="flex items-center gap-1 rounded-md border border-white/10 p-0.5">
+              {kinds.map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => setKind(option.value)}
+                  className={`px-2.5 py-1 text-xs rounded transition-colors ${
+                    kind === option.value
+                      ? "bg-cyan-400/15 text-cyan-300"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <T>{option.label}</T>
+                </button>
+              ))}
+            </div>
+
+            {kind === "range" && (
+              <div className="flex items-center gap-2 text-xs text-slate-400">
+                <label className="flex items-center gap-1">
+                  <T>From</T>
+                  <input
+                    type="number"
+                    min={0}
+                    max={lastEpisode}
+                    value={from}
+                    onChange={(e) => setFrom(e.target.value)}
+                    className="w-20 bg-[var(--surface-0)] border border-white/10 rounded px-2 py-1 text-slate-200 tabular-nums"
+                  />
+                </label>
+                <label className="flex items-center gap-1">
+                  <T>To</T>
+                  <input
+                    type="number"
+                    min={0}
+                    max={lastEpisode}
+                    value={to}
+                    onChange={(e) => setTo(e.target.value)}
+                    className="w-20 bg-[var(--surface-0)] border border-white/10 rounded px-2 py-1 text-slate-200 tabular-nums"
+                  />
+                </label>
+                <span className="text-slate-600">
+                  <T>{`0–${lastEpisode}`}</T>
+                </span>
+              </div>
+            )}
+
+            {kind === "task" && (
+              <select
+                value={task}
+                onChange={(e) => setTask(e.target.value)}
+                className="max-w-xs bg-[var(--surface-0)] border border-white/10 rounded px-2 py-1 text-xs text-slate-200"
+                aria-label="Select a task"
+              >
+                {tasks.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            <label className="flex items-center gap-1 text-xs text-slate-400">
+              <T>Sample</T>
+              <select
+                value={shownSample === null ? "all" : String(shownSample)}
+                onChange={(e) =>
+                  setMaxEpisodes(
+                    e.target.value === "all" ? null : Number(e.target.value),
+                  )
+                }
+                className="bg-[var(--surface-0)] border border-white/10 rounded px-2 py-1 text-slate-200 tabular-nums"
+                aria-label="Episode sample size"
+              >
+                {sampleOptions.map((n) => (
+                  <option
+                    key={n ?? "all"}
+                    value={n === null ? "all" : String(n)}
+                  >
+                    {n === null ? "All" : String(n)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button
+              onClick={() => onRequestChange(draft)}
+              disabled={loading || !dirty}
+              className={`ml-auto px-3 py-1 text-xs rounded-md border transition-colors ${
+                loading || !dirty
+                  ? "border-white/10 text-slate-600 cursor-not-allowed"
+                  : "border-cyan-400/40 text-cyan-300 hover:bg-cyan-400/10"
+              }`}
+            >
+              <T>{loading ? "Analyzing…" : dirty ? "Analyze" : "Analyzed"}</T>
+            </button>
+          </div>
+
+          <p className="text-xs text-slate-400">
+            {loading && progress ? (
+              <T>{`Loading ${progress.loaded} / ${progress.total} episodes…`}</T>
+            ) : data ? (
+              <>
+                <span className="text-slate-300">
+                  <T>{describeScope(data.scope)}</T>
+                </span>
+                <T> · </T>
+                <T>
+                  {`Analysed ${data.numEpisodes} of ${data.scopeEpisodes} episodes in scope`}
+                </T>
+                <T> · </T>
+                <T>
+                  {data.sampled
+                    ? "Evenly sampled from the scope."
+                    : "Full coverage — every episode in scope was analysed."}
+                </T>
+              </>
+            ) : (
+              <T>
+                Nothing to show for this scope — it needs at least two episodes
+                with action data.
+              </T>
+            )}
+          </p>
+        </div>
+      }
+    </T>
+  );
+}
+
 // ─── Main Panel ──────────────────────────────────────────────────
 
 interface ActionInsightsPanelProps {
@@ -1808,6 +2040,12 @@ interface ActionInsightsPanelProps {
   fps: number;
   crossEpisodeData: CrossEpisodeVarianceData | null;
   crossEpisodeLoading: boolean;
+  totalEpisodes: number;
+  /** Dataset task strings; a second entry unlocks the by-task scope. */
+  tasks: string[];
+  crossEpisodeRequest: CrossEpisodeRequest;
+  onCrossEpisodeRequestChange: (request: CrossEpisodeRequest) => void;
+  crossEpisodeProgress: { loaded: number; total: number } | null;
 }
 
 function ActionInsightsPanel({
@@ -1815,6 +2053,11 @@ function ActionInsightsPanel({
   fps,
   crossEpisodeData,
   crossEpisodeLoading,
+  totalEpisodes,
+  tasks,
+  crossEpisodeRequest,
+  onCrossEpisodeRequestChange,
+  crossEpisodeProgress,
 }: ActionInsightsPanelProps) {
   const [mode, setMode] = useState<"episode" | "dataset">("dataset");
   const showAgg = mode === "dataset" && !!crossEpisodeData;
@@ -1862,6 +2105,18 @@ function ActionInsightsPanel({
               </span>
             </div>
           </div>
+
+          {mode === "dataset" && (
+            <ScopeControls
+              totalEpisodes={totalEpisodes}
+              tasks={tasks}
+              request={crossEpisodeRequest}
+              onRequestChange={onCrossEpisodeRequestChange}
+              loading={crossEpisodeLoading}
+              progress={crossEpisodeProgress}
+              data={crossEpisodeData}
+            />
+          )}
 
           <FullscreenWrapper>
             <AutocorrelationSection

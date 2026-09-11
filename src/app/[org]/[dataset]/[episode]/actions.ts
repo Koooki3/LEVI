@@ -10,6 +10,7 @@ import {
   type EpisodeLengthStats,
   type EpisodeFramesData,
   type CrossEpisodeVarianceData,
+  type CrossEpisodeRequest,
 } from "./fetch-data";
 
 export async function fetchEpisodeLengthStats(
@@ -38,6 +39,7 @@ export async function fetchEpisodeFrames(
 export async function fetchCrossEpisodeVariance(
   org: string,
   dataset: string,
+  request?: CrossEpisodeRequest,
 ): Promise<CrossEpisodeVarianceData | null> {
   const repoId = `${org}/${dataset}`;
   const { version, info } = await getDatasetVersionAndInfo(repoId);
@@ -46,6 +48,7 @@ export async function fetchCrossEpisodeVariance(
     version,
     info as unknown as DatasetMetadata,
     info.fps,
+    request,
   );
 }
 

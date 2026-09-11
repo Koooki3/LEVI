@@ -2,7 +2,7 @@
 "use client";
 import { T } from "@/components/levi-locale";
 
-import { useState, useEffect, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { postParentMessageWithParams } from "@/utils/postParentMessage";
 import { SimpleVideosPlayer } from "@/components/simple-videos-player";
@@ -30,11 +30,15 @@ import {
   loadAllEpisodeLengthsV3,
   loadAllEpisodeFrameInfo,
   loadCrossEpisodeActionVariance,
+  loadDatasetTaskIndex,
+  CROSS_EPISODE_DEFAULTS,
   type EpisodeData,
   type ColumnMinMax,
   type EpisodeLengthStats,
   type EpisodeFramesData,
   type CrossEpisodeVarianceData,
+  type CrossEpisodeRequest,
+  type DatasetTaskIndex,
 } from "./fetch-data";
 import { getDatasetVersionAndInfo } from "@/utils/versionUtils";
 import type { DatasetMetadata } from "@/utils/parquetUtils";
@@ -337,7 +341,22 @@ function EpisodeViewerInner({
   const [crossEpData, setCrossEpData] =
     useState<CrossEpisodeVarianceData | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
-  const insightsLoadedRef = useRef(false);
+  const [insightsRequest, setInsightsRequest] = useState<CrossEpisodeRequest>({
+    scope: { kind: "all" },
+    maxEpisodes: CROSS_EPISODE_DEFAULTS.sampleSize,
+  });
+  const [insightsProgress, setInsightsProgress] = useState<{
+    loaded: number;
+    total: number;
+  } | null>(null);
+  // Key of the request already loaded (or in flight), so revisiting the tab
+  // doesn't refetch but changing the scope does.
+  const insightsLoadedRef = useRef<string | null>(null);
+  // Only the newest request may write state — a wide scope started first must
+  // not overwrite a narrow one the user asked for afterwards.
+  const insightsRunRef = useRef(0);
+  const [taskIndex, setTaskIndex] = useState<DatasetTaskIndex | null>(null);
+  const [taskFilter, setTaskFilter] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -350,11 +369,30 @@ function EpisodeViewerInner({
   useEffect(() => {
     statsLoadedRef.current = false;
     framesLoadedRef.current = false;
-    insightsLoadedRef.current = false;
+    insightsLoadedRef.current = null;
     setEpisodeLengthStats(null);
     setEpisodeFramesData(null);
     setCrossEpData(null);
+    setTaskIndex(null);
+    setTaskFilter(null);
   }, [datasetInfo.repoId]);
+
+  // Task metadata drives both the sidebar filter and the by-task insights
+  // scope, so load it once per dataset rather than per panel.
+  useEffect(() => {
+    if (!org || !dataset) return;
+    const repoId = `${org}/${dataset}`;
+    let cancelled = false;
+    getDatasetVersionAndInfo(repoId)
+      .then(({ version }) => loadDatasetTaskIndex(repoId, version))
+      .then((result) => {
+        if (!cancelled && mountedRef.current) setTaskIndex(result);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [org, dataset]);
 
   // Eagerly load the URDFViewer bundle + warm the STL geometry cache while
   // the user is on the Episodes tab, so the 3D Replay tab opens faster.
@@ -426,10 +464,14 @@ function EpisodeViewerInner({
       });
   };
 
-  const loadInsights = () => {
-    if (insightsLoadedRef.current || !org || !dataset) return;
-    insightsLoadedRef.current = true;
+  const loadInsights = (request: CrossEpisodeRequest = insightsRequest) => {
+    if (!org || !dataset) return;
+    const requestKey = JSON.stringify(request);
+    if (insightsLoadedRef.current === requestKey) return;
+    insightsLoadedRef.current = requestKey;
+    const runId = ++insightsRunRef.current;
     setInsightsLoading(true);
+    setInsightsProgress({ loaded: 0, total: 0 });
     const repoId = `${org}/${dataset}`;
     getDatasetVersionAndInfo(repoId)
       .then(({ version, info }) =>
@@ -438,16 +480,37 @@ function EpisodeViewerInner({
           version,
           info as unknown as DatasetMetadata,
           info.fps,
+          {
+            ...request,
+            onProgress: (loaded, total) => {
+              if (mountedRef.current && insightsRunRef.current === runId) {
+                setInsightsProgress({ loaded, total });
+              }
+            },
+          },
         ),
       )
       .then((result) => {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || insightsRunRef.current !== runId) return;
         setCrossEpData(result);
       })
-      .catch((err) => console.error("[cross-ep] Failed:", err))
+      .catch((err) => {
+        console.error("[cross-ep] Failed:", err);
+        // Let the user retry the same scope after a failure.
+        if (insightsLoadedRef.current === requestKey) {
+          insightsLoadedRef.current = null;
+        }
+      })
       .finally(() => {
-        if (mountedRef.current) setInsightsLoading(false);
+        if (!mountedRef.current || insightsRunRef.current !== runId) return;
+        setInsightsLoading(false);
+        setInsightsProgress(null);
       });
+  };
+
+  const applyInsightsRequest = (request: CrossEpisodeRequest) => {
+    setInsightsRequest(request);
+    loadInsights(request);
   };
 
   // Re-trigger data loading for the restored tab on mount
@@ -486,11 +549,19 @@ function EpisodeViewerInner({
   const [urdfEpisode, setUrdfEpisode] = useState(episodeId);
   useEffect(() => setUrdfEpisode(episodeId), [episodeId]);
 
+  // Episode list, narrowed to the selected task on multi-task datasets.
+  const visibleEpisodes = useMemo(() => {
+    if (!taskFilter || !taskIndex) return episodes;
+    return episodes.filter((ep) =>
+      (taskIndex.episodeTasks[ep] ?? []).includes(taskFilter),
+    );
+  }, [episodes, taskFilter, taskIndex]);
+
   // Pagination state
   const pageSize = 100;
   const [currentPage, setCurrentPage] = useState(1);
-  const totalPages = Math.ceil(episodes.length / pageSize);
-  const paginatedEpisodes = episodes.slice(
+  const totalPages = Math.max(1, Math.ceil(visibleEpisodes.length / pageSize));
+  const paginatedEpisodes = visibleEpisodes.slice(
     (currentPage - 1) * pageSize,
     currentPage * pageSize,
   );
@@ -540,12 +611,13 @@ function EpisodeViewerInner({
 
   // Initialize page based on the current episode. Splitting this out from
   // the keyboard listener effect lets the listener attach exactly once.
+  // When a task filter hides the current episode, fall back to page 1.
   useEffect(() => {
-    const episodeIndex = episodes.indexOf(episodeId);
-    if (episodeIndex !== -1) {
-      setCurrentPage(Math.floor(episodeIndex / pageSize) + 1);
-    }
-  }, [episodes, episodeId, pageSize]);
+    const episodeIndex = visibleEpisodes.indexOf(episodeId);
+    setCurrentPage(
+      episodeIndex === -1 ? 1 : Math.floor(episodeIndex / pageSize) + 1,
+    );
+  }, [visibleEpisodes, episodeId, pageSize]);
 
   // Mirror the values the keydown handler needs into a ref. Without this,
   // `useCallback` would produce a new handler whenever `activeTab` /
@@ -670,6 +742,10 @@ function EpisodeViewerInner({
                 nextPage={nextPage}
                 showFlaggedOnly={sidebarFlaggedOnly}
                 onShowFlaggedOnlyChange={setSidebarFlaggedOnly}
+                tasks={taskIndex?.tasks ?? []}
+                taskFilter={taskFilter}
+                onTaskFilterChange={setTaskFilter}
+                filteredEpisodeCount={visibleEpisodes.length}
                 onEpisodeSelect={
                   activeTab === "urdf"
                     ? (ep) => {
@@ -838,6 +914,11 @@ function EpisodeViewerInner({
                     fps={datasetInfo.fps}
                     crossEpisodeData={crossEpData}
                     crossEpisodeLoading={insightsLoading}
+                    totalEpisodes={datasetInfo.total_episodes}
+                    tasks={taskIndex?.tasks ?? []}
+                    crossEpisodeRequest={insightsRequest}
+                    onCrossEpisodeRequestChange={applyInsightsRequest}
+                    crossEpisodeProgress={insightsProgress}
                   />
                 </Suspense>
               )}

@@ -3,9 +3,13 @@ import { describe, expect, test, spyOn } from "bun:test";
 import {
   computeColumnMinMax,
   loadAllEpisodeLengthsV3,
+  loadCrossEpisodeActionVariance,
+  loadDatasetTaskIndex,
   extractLanguageAtoms,
+  CROSS_EPISODE_DEFAULTS,
 } from "@/app/[org]/[dataset]/[episode]/fetch-data";
 import type { ChartRow } from "@/app/[org]/[dataset]/[episode]/fetch-data";
+import type { DatasetMetadata } from "@/utils/parquetUtils";
 
 // ---------------------------------------------------------------------------
 // computeColumnMinMax
@@ -480,5 +484,126 @@ describe("LEVI episode lengths", () => {
   });
   test("invalid FPS cannot produce an infinite duration", async () => {
     expect(await loadAllEpisodeLengthsV3("local/test", "v2.1", 0)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task metadata + Action Insights scoping
+// ---------------------------------------------------------------------------
+
+function mockFetchByPath(bodies: Record<string, string>) {
+  return spyOn(globalThis, "fetch").mockImplementation((async (
+    input: RequestInfo | URL,
+  ) => {
+    const url = String(input);
+    for (const [suffix, body] of Object.entries(bodies)) {
+      if (url.includes(suffix)) return new Response(body);
+    }
+    return new Response("", { status: 404 });
+  }) as unknown as typeof fetch);
+}
+
+function actionDatasetInfo(totalEpisodes: number): DatasetMetadata {
+  return {
+    codebase_version: "v2.1",
+    total_episodes: totalEpisodes,
+    chunks_size: 1000,
+    data_path:
+      "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
+    features: {
+      action: { dtype: "float32", shape: [2], names: ["x", "y"] },
+    },
+  } as unknown as DatasetMetadata;
+}
+
+describe("loadDatasetTaskIndex", () => {
+  test("v2 orders tasks by task_index and maps every episode", async () => {
+    const request = mockFetchByPath({
+      "meta/tasks.jsonl":
+        '{"task_index":1,"task":"place cube"}\n{"task_index":0,"task":"pour water"}\n',
+      "meta/episodes.jsonl":
+        '{"episode_index":0,"tasks":["pour water"],"length":30}\n' +
+        '{"episode_index":1,"tasks":["place cube"],"length":40}\n' +
+        '{"episode_index":2,"tasks":["place cube","pour water"],"length":50}\n',
+    });
+    try {
+      const result = await loadDatasetTaskIndex("local/tasks-order", "v2.1");
+      expect(result?.tasks).toEqual(["pour water", "place cube"]);
+      expect(result?.episodeTasks[2]).toEqual(["place cube", "pour water"]);
+      expect(Object.keys(result?.episodeTasks ?? {})).toHaveLength(3);
+    } finally {
+      request.mockRestore();
+    }
+  });
+
+  test("a task string declared under two task_index values is listed once", async () => {
+    const request = mockFetchByPath({
+      "meta/tasks.jsonl":
+        '{"task_index":0,"task":"pour water"}\n{"task_index":1,"task":"pour water"}\n',
+      "meta/episodes.jsonl": '{"episode_index":0,"tasks":["pour water"]}\n',
+    });
+    try {
+      const result = await loadDatasetTaskIndex("local/tasks-dupe", "v2.1");
+      expect(result?.tasks).toEqual(["pour water"]);
+    } finally {
+      request.mockRestore();
+    }
+  });
+
+  test("returns null when the dataset records no task strings", async () => {
+    const request = mockFetchByPath({
+      "meta/episodes.jsonl": '{"episode_index":0,"length":30}\n',
+    });
+    try {
+      expect(await loadDatasetTaskIndex("local/tasks-none", "v2.1")).toBeNull();
+    } finally {
+      request.mockRestore();
+    }
+  });
+});
+
+describe("loadCrossEpisodeActionVariance scoping", () => {
+  test("a range scope narrower than two episodes reads no parquet files", async () => {
+    const request = spyOn(globalThis, "fetch");
+    try {
+      const result = await loadCrossEpisodeActionVariance(
+        "local/scope-range",
+        "v2.1",
+        actionDatasetInfo(500),
+        30,
+        { scope: { kind: "range", from: 12, to: 12 }, maxEpisodes: null },
+      );
+      expect(result).toBeNull();
+      expect(request).not.toHaveBeenCalled();
+    } finally {
+      request.mockRestore();
+    }
+  });
+
+  test("a task scope nobody recorded yields no analysis", async () => {
+    const request = mockFetchByPath({
+      "meta/tasks.jsonl": '{"task_index":0,"task":"pour water"}\n',
+      "meta/episodes.jsonl":
+        '{"episode_index":0,"tasks":["pour water"]}\n' +
+        '{"episode_index":1,"tasks":["pour water"]}\n',
+    });
+    try {
+      const result = await loadCrossEpisodeActionVariance(
+        "local/scope-task",
+        "v2.1",
+        actionDatasetInfo(2),
+        30,
+        { scope: { kind: "task", task: "fold towel" }, maxEpisodes: null },
+      );
+      expect(result).toBeNull();
+    } finally {
+      request.mockRestore();
+    }
+  });
+
+  test("the default sample size stays below the runaway ceiling", () => {
+    expect(CROSS_EPISODE_DEFAULTS.sampleSize).toBeLessThan(
+      CROSS_EPISODE_DEFAULTS.ceiling,
+    );
   });
 });

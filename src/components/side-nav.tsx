@@ -19,6 +19,13 @@ interface SidebarProps {
   showFlaggedOnly: boolean;
   onShowFlaggedOnlyChange: (v: boolean) => void;
   onEpisodeSelect?: (ep: number) => void;
+  /** Dataset task strings; the filter appears once there are at least two. */
+  tasks?: string[];
+  /** Active task filter, or null for every task. */
+  taskFilter?: string | null;
+  onTaskFilterChange?: (task: string | null) => void;
+  /** Episodes left after the task filter, across all pages. */
+  filteredEpisodeCount?: number;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -32,6 +39,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   showFlaggedOnly,
   onShowFlaggedOnlyChange,
   onEpisodeSelect,
+  tasks = [],
+  taskFilter = null,
+  onTaskFilterChange,
+  filteredEpisodeCount,
 }) => {
   const [mobileVisible, setMobileVisible] = useState(false);
   const { flagged, count, toggle } = useFlaggedEpisodes();
@@ -72,9 +83,35 @@ const Sidebar: React.FC<SidebarProps> = ({
               </dd>
             </dl>
 
+            {tasks.length > 1 && onTaskFilterChange && (
+              <div className="mt-5">
+                <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                  <T>Task filter</T>
+                </p>
+                <select
+                  value={taskFilter ?? ""}
+                  onChange={(e) => onTaskFilterChange(e.target.value || null)}
+                  className="mt-1 w-full bg-[var(--surface-1)] border border-white/10 rounded-md px-2 py-1 text-xs text-slate-200"
+                  aria-label="Filter episodes by task"
+                >
+                  <option value="">{`All tasks (${tasks.length})`}</option>
+                  {tasks.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <div className="mt-5 flex items-center justify-between">
               <p className="text-[10px] uppercase tracking-wide text-slate-500">
                 <T>Episodes</T>
+                {taskFilter && filteredEpisodeCount !== undefined && (
+                  <span className="ml-1 text-slate-400 tabular">
+                    <T>{`· ${filteredEpisodeCount}`}</T>
+                  </span>
+                )}
               </p>
               {count > 0 && (
                 <button
@@ -90,6 +127,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </button>
               )}
             </div>
+
+            {displayEpisodes.length === 0 && (
+              <p className="mt-2 text-xs text-slate-500 italic">
+                <T>No episodes match this task.</T>
+              </p>
+            )}
 
             <ul className="mt-2 space-y-px">
               {displayEpisodes.map((episode) => {

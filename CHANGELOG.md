@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Action Insights now scopes to the full dataset, an episode-index range or a single task, with a sample cap that can be set to "All" for full coverage; the panel reports how many of the in-scope episodes were analysed.
+- Added a task filter to the episode sidebar for multi-task datasets, backed by a shared dataset-wide task ↔ episode index.
+- Replaced the fixed 120-episode ceiling with a configurable budget, concurrency-limited parquet reads and load progress.
+- Autocorrelation now sizes its lag horizon from the 25th-percentile episode length instead of the shortest episode, so one truncated episode no longer blanks the chart on a full-dataset pass.
+
 ## 0.2.0 — First public release
 
 - Bundled the complete capture pipeline with strict alignment, source-safe snapshots, configurable maps/thresholds, H.264 encoding and measured statistics.

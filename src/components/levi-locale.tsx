@@ -72,6 +72,13 @@ export function useLocale() {
       [/^Save dataset failed: (.*)$/, "数据集导出失败：$1"],
       [/^Task metadata: (.*)$/, "任务元数据：$1"],
       [/^Sampled (\d+) of (\d+) episodes$/, "采样 $1 / $2 个片段"],
+      [
+        /^Analysed (\d+) of (\d+) episodes in scope$/,
+        "已分析范围内 $1 / $2 个片段",
+      ],
+      [/^Loading (\d+) \/ (\d+) episodes…$/, "正在加载片段 $1 / $2…"],
+      [/^Episodes (\d+)–(\d+)$/, "片段 $1–$2"],
+      [/^All tasks \((\d+)\)$/, "全部任务（$1）"],
       [/^(.*): decoding not requested$/, "$1：未请求解码检查"],
       [
         /^Constant actuator dimensions \(may be intentional\): (.*)$/,
