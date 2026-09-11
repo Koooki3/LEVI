@@ -10,7 +10,7 @@ LEVI is an independent derivative of:
 
 上游 Git 历史保留在本地仓库中。`NOTICE` 记录来源与 LEVI 改造范围。发布时应保留许可证、来源声明及适用的版权通知；不要把上游代码署名为完全原创。
 
-Modified upstream source files carry a LEVI modification notice. The upstream history and notices are retained. The default remote was renamed to `upstream`; its push URL is disabled in this checkout. Add your own `origin` when publishing. There is no implication of Hugging Face endorsement.
+Modified upstream source files that support stable comment headers carry a LEVI modification notice; structured/generated-file records are described below. The upstream history and notices are retained. The default remote was renamed to `upstream`; its push URL is disabled in this checkout. Add your own `origin` when publishing. There is no implication of Hugging Face endorsement.
 
 ## LEVI changes
 
@@ -26,8 +26,32 @@ Modified upstream source files carry a LEVI modification notice. The upstream hi
 For the exact modified-file list, run:
 
 ```bash
-git diff --name-status dc59887796fd41f37040c0df6b10e6f6a30a1854
+git diff --name-status dc59887796fd41f37040c0df6b10e6f6a30a1854 HEAD
 ```
+
+## Structured and generated files / 结构化与生成文件
+
+Strict JSON cannot contain comment headers, and some machine-generated files lose manually inserted headers when regenerated. For these files, LEVI keeps a modification record through the **pinned upstream commit + Git diff/history + [NOTICE](../NOTICE)**, together with the file-specific entries below. Do not add invalid syntax or unstable fields merely to insert a header. Preserve existing copyright, license and attribution notices wherever the format supports them.
+
+严格 JSON 或无法稳定保留注释的机器生成文件，采用 **固定上游提交 + Git 差异及历史 + NOTICE** 记录修改。下表明确文件来源及修改范围；支持稳定注释的源码仍保留文件内变更说明。
+
+| File / 文件 | Record relative to the imported commit / 相对上游的记录 |
+| --- | --- |
+| `package.json` | Modified: LEVI identity, scripts, dependency updates, repository and license metadata. / 修改项目身份、脚本、依赖与发布元数据。 |
+| `bun.lock` | Modified/generated: LEVI workspace identity and the dependency resolution resulting from the frontend manifest. / 更新工作区身份及前端依赖解析。 |
+| `uv.lock`, `src/i18n/en.json`, `src/i18n/zh.json` | Added by LEVI; absent from the imported baseline. Git records their introduction and subsequent changes. / LEVI 新增，并非原上游文件的改名署名。 |
+
+Audit the committed tree, rather than unrelated uncommitted edits:
+
+```bash
+git diff --name-status dc59887796fd41f37040c0df6b10e6f6a30a1854 HEAD
+git diff dc59887796fd41f37040c0df6b10e6f6a30a1854 HEAD -- package.json bun.lock
+git log --oneline -- package.json bun.lock uv.lock src/i18n
+```
+
+Replace `HEAD` with the exact release tag or commit when auditing a distribution. The initial public release can also be inspected through the [v0.2.0 comparison](https://github.com/Koooki3/LEVI/compare/dc59887796fd41f37040c0df6b10e6f6a30a1854...v0.2.0); the [original source snapshot](https://github.com/huggingface/lerobot-dataset-visualizer/tree/dc59887796fd41f37040c0df6b10e6f6a30a1854) remains available independently. Source archives without `.git` retain this document, `LICENSE` and `NOTICE`. Future packaged distributions must also carry their applicable notices; this record does not replace those license requirements. See [Apache-2.0 redistribution terms](https://www.apache.org/licenses/LICENSE-2.0).
+
+第三方依赖、随附素材与未来构建产物的清单维护见 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
 
 ## External material
 

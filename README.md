@@ -4,7 +4,7 @@
 
 [![Checks](https://github.com/Koooki3/LEVI/actions/workflows/test.yml/badge.svg)](https://github.com/Koooki3/LEVI/actions/workflows/test.yml) [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) [![Version](https://img.shields.io/badge/LEVI-0.2.0-9bd654.svg)](CHANGELOG.md)
 
-[English](README.en.md) · [转换教程](docs/CONVERSION.md) · [功能对照](docs/FEATURES.md) · [API](docs/API.md) · [审查与验证](docs/VALIDATION.md) · [许可](docs/UPSTREAM.md)
+[English](README.en.md) · [转换教程](docs/CONVERSION.md) · [功能对照](docs/FEATURES.md) · [API](docs/API.md) · [审查与验证](docs/VALIDATION.md) · [许可](docs/UPSTREAM.md) · [第三方清单](THIRD_PARTY_NOTICES.md)
 
 LEVI 是用于浏览、标注、转换和审核机器人数据的独立工作台。基于 [LeRobot Dataset Visualizer](https://github.com/huggingface/lerobot-dataset-visualizer)，保留多相机与信号同步、视觉问答、动作分析和三维回放，提供默认中文与英文切换，以及**完全内置的采集数据转换流程**。无需另行下载转换项目或安装训练环境。
 
