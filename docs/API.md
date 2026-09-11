@@ -21,6 +21,14 @@ Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge fo
 | GET | `/api/annotation/episodes/{id}/frame_timestamps?repo_id=…` | Exact source timestamps |
 | POST | `/api/annotation/export` | New annotated tree; optional `output_dir`, `copy_videos` |
 | POST | `/api/annotation/push_to_hub` | Explicit export and upload using the upstream backend implementation |
+| GET | `/api/annotation/sam3/capabilities` | CPU-safe capability report; no Torch import or CUDA probe |
+| POST | `/api/annotation/sam3/plan` | Validate and stage a model-neutral object annotation plan |
+| POST | `/api/annotation/sam3/run` | Run `provider=fake` on CPU or queue the explicitly enabled SAM3 worker |
+| GET | `/api/annotation/sam3/jobs/{id}` | Poll a worker job and publish its validated sidecar revision |
+| POST | `/api/annotation/sam3/jobs/{id}/cancel` | Cancel a queued/running optional worker |
+| GET | `/api/annotation/sam3/revisions` | List object annotation revisions |
+| GET | `/api/annotation/sam3/episodes/{id}/objects` | Read object masks/bboxes, with `camera_key`, `frame_index` and `annotation_revision` filters |
+| POST | `/api/annotation/sam3/edits` | Revision-checked accept/reject/relabel/occlusion/delete/refine |
 
 For the `local/<slug>` repo IDs returned by registration, the annotation API resolves the registered directory automatically. Direct `local_path` also works if it remains inside the configured workspace.
 
@@ -68,3 +76,9 @@ Read-only stages have no output dataset. A failing report exits with code 2 and 
 The browser workbench is served on `http://127.0.0.1:7860`. Backend port `7861` serves the API: `/` returns a bilingual entry guide, `/favicon.ico` returns the LEVI icon, and `GET /api/levi/health` returns `{"service":"levi-api","status":"ok"}` for startup checks. The launcher supplies the guide with the selected frontend address/port. These entry routes do not expose datasets or credentials.
 
 网页入口为 7860；7861 是内部 API。完整启动使用 `uv run levi` 或 `uv run levi serve`。远程访问时，应把本机网页端口转发到服务器的网页端口。
+
+### SAM3 object annotation
+
+Object annotations are stored outside the source dataset. A plan uses `episode_indices`, `camera_keys`, `prompts`, optional `start_frame`/`max_frames`, review thresholds and `provider` (`fake` or `sam3`). The fake provider is deterministic and CPU-only. Real provider requests return `202` with a `job_id`; poll it until `succeeded`, then use the returned `revision_id`.
+
+Read rows with `annotation_revision=<id>`; the dataset `revision` query parameter remains reserved for the source dataset revision. Send `base_revision` in edits so a stale browser cannot overwrite a newer review. See [SAM3.md](SAM3.md) for the sidecar schema, optional environment and staged PR plan.

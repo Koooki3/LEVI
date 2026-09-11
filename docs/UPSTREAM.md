@@ -63,3 +63,9 @@ The two default strawberry datasets are owned by `samanthalhy`. Their Hub cards 
 Videos are streamed rather than bundled. Any LEVI screenshots showing those datasets should credit these sources. External robot URDFs/meshes are loaded from the upstream `lerobot/robot-urdfs` bucket; their own source licenses apply. The HF login badge and brand marks remain their owners' marks. The external `lerobot-doctor` app is linked, not vendored or relicensed.
 
 The built-in `levi/conversion/` module reimplements the capture workflow requested by the project owner. It replaces the former external-script adapter. No private task mappings, collector deployments, datasets or credentials are distributed. Hardware-specific collection helpers are not runtime dependencies. See [conversion guide](CONVERSION.md) and [audit](AUDIT.md).
+
+## Optional SAM3 integration / 可选 SAM3 集成
+
+`integrations/sam3/` is a LEVI-authored adapter boundary, not a vendored copy of the SAM3 source. It pins the official Meta repository commit `660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b` as a user-installed Git dependency. The core package contains only protocol/schema/RLE code and never bundles checkpoints. SAM3 code, weights, model access and redistribution terms remain subject to the official [SAM License](https://github.com/facebookresearch/sam3/blob/main/LICENSE).
+
+The worker is loaded in a separate uv project only after `LEVI_SAM3_ENABLED=1`; its source and result JSON are recorded through the plan/job files and sidecar revision metadata. Because `pyproject.toml`, lockfiles and JSON are machine-generated or structured files, the modification record is this pinned commit, the Git diff/history and `NOTICE`; no invalid header is inserted. See [SAM3.md](SAM3.md) for the API contract and CPU-only verification policy.

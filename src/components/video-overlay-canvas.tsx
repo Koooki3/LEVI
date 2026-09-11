@@ -3,14 +3,17 @@
 import { T } from "@/components/levi-locale";
 
 /**
- * Canvas overlay rendered on top of a single `<video>` element. Two roles:
+ * Canvas overlay rendered on top of a single `<video>` element. Three roles:
  *
  * 1. Display VQA bbox/keypoint atoms whose `timestamp` matches the current
  *    video time (within ~one frame) and whose optional `camera` field matches
  *    this video's camera key (or has no camera, which we treat as
  *    "render on every camera").
  *
- * 2. When the user is in "draw mode" — bbox or keypoint — capture mouse input
+ * 2. Display reviewed SAM3 object masks and track bboxes at the current
+ *    episode-local frame.
+ *
+ * 3. When the user is in "draw mode" — bbox or keypoint — capture mouse input
  *    and stage a `pendingDraw` in the AnnotationsContext so the AnnotationsPanel
  *    can pick it up and persist it as a VQA atom.
  *
@@ -32,10 +35,12 @@ import {
   type LanguageAtom,
   type VqaAnswer,
 } from "../types/language.types";
+import type { ObjectAnnotation } from "../types/object-annotation.types";
 
 interface Props {
   videoEl: HTMLVideoElement | null;
   cameraKey: string;
+  objectAnnotations?: ObjectAnnotation[];
 }
 
 interface RenderedRect {
@@ -222,6 +227,94 @@ function vqaMatchesCamera(answer: VqaAnswer, cameraKey: string): boolean {
   return false; // other VQA kinds aren't drawn
 }
 
+const OBJECT_COLORS = [
+  "#22d3ee",
+  "#a78bfa",
+  "#34d399",
+  "#fbbf24",
+  "#fb7185",
+  "#60a5fa",
+];
+
+function objectColor(trackId: number): string {
+  return OBJECT_COLORS[Math.abs(trackId) % OBJECT_COLORS.length];
+}
+
+function drawObjectMask(
+  ctx: CanvasRenderingContext2D,
+  rect: RenderedRect,
+  annotation: ObjectAnnotation,
+  cache: Map<string, HTMLCanvasElement>,
+  color: string,
+) {
+  const key = `${annotation.object_id}:${annotation.frame_index}`;
+  let maskCanvas = cache.get(key);
+  if (!maskCanvas) {
+    const [height, width] = annotation.mask_rle.size;
+    if (!height || !width || annotation.mask_rle.counts.length === 0) return;
+    maskCanvas = document.createElement("canvas");
+    maskCanvas.width = width;
+    maskCanvas.height = height;
+    const maskContext = maskCanvas.getContext("2d");
+    if (!maskContext) return;
+    const image = maskContext.createImageData(width, height);
+    let cursor = 0;
+    let foreground = false;
+    for (const count of annotation.mask_rle.counts) {
+      if (foreground) {
+        for (let offset = 0; offset < count; offset += 1) {
+          const linear = cursor + offset;
+          const y = linear % height;
+          const x = Math.floor(linear / height);
+          if (x >= width) continue;
+          const pixel = (y * width + x) * 4;
+          // Use a translucent fill so the underlying RGB frame remains
+          // readable while the mask boundary and label stay prominent.
+          const hex = color.slice(1);
+          image.data[pixel] = Number.parseInt(hex.slice(0, 2), 16);
+          image.data[pixel + 1] = Number.parseInt(hex.slice(2, 4), 16);
+          image.data[pixel + 2] = Number.parseInt(hex.slice(4, 6), 16);
+          image.data[pixel + 3] = 92;
+        }
+      }
+      cursor += count;
+      foreground = !foreground;
+    }
+    maskContext.putImageData(image, 0, 0);
+    cache.set(key, maskCanvas);
+  }
+  ctx.drawImage(maskCanvas, rect.left, rect.top, rect.width, rect.height);
+}
+
+function drawObjectBbox(
+  ctx: CanvasRenderingContext2D,
+  rect: RenderedRect,
+  annotation: ObjectAnnotation,
+  color: string,
+) {
+  const [height, width] = annotation.image_size;
+  if (!height || !width) return;
+  const [x1, y1, x2, y2] = annotation.bbox_xyxy;
+  const px1 = rect.left + (x1 / width) * rect.width;
+  const py1 = rect.top + (y1 / height) * rect.height;
+  const px2 = rect.left + (x2 / width) * rect.width;
+  const py2 = rect.top + (y2 / height) * rect.height;
+  ctx.save();
+  ctx.lineWidth = annotation.status === "suggested" ? 2 : 2.5;
+  ctx.setLineDash(annotation.status === "needs_review" ? [6, 4] : []);
+  ctx.strokeStyle = color;
+  ctx.strokeRect(px1, py1, px2 - px1, py2 - py1);
+  const label = `#${annotation.track_id} ${annotation.concept}`;
+  ctx.font = "12px ui-sans-serif, system-ui";
+  const metrics = ctx.measureText(label);
+  const labelTop = Math.max(0, py1 - 18);
+  ctx.fillStyle = "#0b0e14e6";
+  ctx.fillRect(px1, labelTop, metrics.width + 8, 18);
+  ctx.fillStyle = color;
+  ctx.fillText(label, px1 + 4, labelTop + 13);
+  ctx.restore();
+}
+
 /** Pixel distance below which a pointer up counts as a click, not a drag. */
 const CLICK_THRESHOLD_PX = 4;
 
@@ -234,8 +327,13 @@ interface FinalizingState {
     | Pick<PendingPointDraw, "kind" | "point">;
 }
 
-export const VideoOverlayCanvas: React.FC<Props> = ({ videoEl, cameraKey }) => {
+export const VideoOverlayCanvas: React.FC<Props> = ({
+  videoEl,
+  cameraKey,
+  objectAnnotations = [],
+}) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const objectMaskCacheRef = useRef<Map<string, HTMLCanvasElement>>(new Map());
   const {
     atoms,
     setPendingDraw,
@@ -309,6 +407,10 @@ export const VideoOverlayCanvas: React.FC<Props> = ({ videoEl, cameraKey }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoEl]);
 
+  useEffect(() => {
+    objectMaskCacheRef.current.clear();
+  }, [objectAnnotations]);
+
   const redraw = React.useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || !videoEl) return;
@@ -323,6 +425,34 @@ export const VideoOverlayCanvas: React.FC<Props> = ({ videoEl, cameraKey }) => {
       canvas.clientHeight || canvas.height,
     );
     const rect = computeRenderedRect(canvas, videoEl);
+
+    // Object sidecars use the same episode-local clock as VQA atoms. Select
+    // the nearest frame per track so a paused frame does not draw duplicate
+    // masks when the browser time falls between source timestamps.
+    const nearestObjects = new Map<string, ObjectAnnotation>();
+    for (const annotation of objectAnnotations) {
+      if (
+        annotation.camera_key !== cameraKey ||
+        annotation.status === "rejected"
+      ) {
+        continue;
+      }
+      const distance = Math.abs(annotation.timestamp - (currentTime || 0));
+      if (distance > 0.08) continue;
+      const key = `${annotation.object_id}:${annotation.track_id}`;
+      const previous = nearestObjects.get(key);
+      if (
+        !previous ||
+        distance < Math.abs(previous.timestamp - (currentTime || 0))
+      ) {
+        nearestObjects.set(key, annotation);
+      }
+    }
+    for (const annotation of nearestObjects.values()) {
+      const color = objectColor(annotation.track_id);
+      drawObjectMask(ctx, rect, annotation, objectMaskCacheRef.current, color);
+      drawObjectBbox(ctx, rect, annotation, color);
+    }
 
     // Saved VQA atoms within ~one frame of currentTime. We compare against
     // the episode-local `currentTime` from useTime(), not the <video>'s
@@ -406,6 +536,7 @@ export const VideoOverlayCanvas: React.FC<Props> = ({ videoEl, cameraKey }) => {
     }
   }, [
     atoms,
+    objectAnnotations,
     pendingDraw,
     cameraKey,
     videoEl,

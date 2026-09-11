@@ -1042,3 +1042,182 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   line-height: 14px;
 }
+
+/* ----- SAM3 object annotation sidecar ----- */
+.annotations-skin .object-annotation-panel {
+  border: 1px solid rgba(45, 212, 191, 0.28);
+  border-radius: 16px;
+  padding: 18px;
+  background: linear-gradient(
+    135deg,
+    rgba(13, 38, 48, 0.92),
+    rgba(15, 23, 42, 0.96)
+  );
+  box-shadow: 0 16px 48px rgba(8, 15, 28, 0.3);
+}
+.annotations-skin .object-annotation-head,
+.annotations-skin .object-annotation-controls,
+.annotations-skin .object-annotation-runtime,
+.annotations-skin .object-annotation-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.annotations-skin .object-annotation-head {
+  justify-content: space-between;
+}
+.annotations-skin .object-annotation-head h2 {
+  margin: 4px 0 0;
+  color: #f8fafc;
+  font-size: 18px;
+  font-weight: 600;
+}
+.annotations-skin .object-annotation-badge {
+  border: 1px solid rgba(45, 212, 191, 0.32);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: #99f6e4;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.annotations-skin .object-annotation-copy,
+.annotations-skin .object-annotation-empty,
+.annotations-skin .object-annotation-message {
+  margin: 10px 0 14px;
+  color: #94a3b8;
+  font-size: 13px;
+}
+.annotations-skin .object-annotation-controls {
+  flex-wrap: wrap;
+  align-items: end;
+  margin-top: 14px;
+}
+.annotations-skin .object-annotation-controls label {
+  display: grid;
+  gap: 5px;
+  color: #94a3b8;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+.annotations-skin .object-annotation-controls .object-annotation-prompt {
+  flex: 1 1 260px;
+}
+.annotations-skin .object-annotation-controls select,
+.annotations-skin .object-annotation-controls input {
+  min-height: 36px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.75);
+  color: #e2e8f0;
+  padding: 0 10px;
+  font: inherit;
+}
+.annotations-skin .object-annotation-run,
+.annotations-skin .object-annotation-actions button {
+  min-height: 36px;
+  border: 1px solid rgba(45, 212, 191, 0.42);
+  border-radius: 8px;
+  background: rgba(13, 148, 136, 0.2);
+  color: #99f6e4;
+  cursor: pointer;
+  padding: 0 12px;
+  font-size: 12px;
+}
+.annotations-skin .object-annotation-run.sam3 {
+  border-color: rgba(129, 140, 248, 0.46);
+  color: #c7d2fe;
+}
+.annotations-skin .object-annotation-run:hover,
+.annotations-skin .object-annotation-actions button:hover {
+  background: rgba(20, 184, 166, 0.32);
+}
+.annotations-skin .object-annotation-run:disabled,
+.annotations-skin .object-annotation-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.annotations-skin .object-annotation-runtime {
+  flex-wrap: wrap;
+  margin: 14px 0 2px;
+  color: #64748b;
+  font-size: 11px;
+}
+.annotations-skin .object-annotation-runtime .ready {
+  color: #86efac;
+}
+.annotations-skin .object-annotation-runtime .muted {
+  color: #fbbf24;
+}
+.annotations-skin .object-annotation-runtime code {
+  margin-left: auto;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.annotations-skin .object-annotation-message {
+  color: #67e8f9;
+}
+.annotations-skin .object-annotation-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+.annotations-skin .object-annotation-row {
+  justify-content: space-between;
+  min-width: 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  padding: 9px 0 3px;
+}
+.annotations-skin .object-annotation-main {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #cbd5e1;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+.annotations-skin .object-annotation-main:hover .object-concept {
+  color: #67e8f9;
+}
+.annotations-skin .object-track-id {
+  color: #5eead4;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.annotations-skin .object-concept {
+  overflow: hidden;
+  color: #f8fafc;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.annotations-skin .object-score,
+.annotations-skin .object-frame {
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+.annotations-skin .object-annotation-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+.annotations-skin .object-annotation-actions button {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+@media (max-width: 720px) {
+  .annotations-skin .object-annotation-head,
+  .annotations-skin .object-annotation-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .annotations-skin .object-annotation-badge {
+    align-self: flex-start;
+  }
+  .annotations-skin .object-annotation-actions {
+    align-self: flex-end;
+  }
+}

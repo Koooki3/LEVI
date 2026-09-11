@@ -19,6 +19,7 @@ This is the source-release inventory for LEVI v0.2.0, checked on 2026-09-10 agai
 | Studio environment HDRI | [Studio Small 03 by Greg Zaal / Poly Haven](https://polyhaven.com/a/studio_small_03), [CC0](https://polyhaven.com/license); [Drei asset revision](https://github.com/pmndrs/drei-assets/blob/456060a26bbeb8fdf79326f224b6d99b8bcce736/hdri/studio_small_03_1k.hdr) | Loaded remotely by `Environment preset="studio"` in URDF playback; not included in the source archive. |
 | Hugging Face sign-in badge | [Hugging Face badges](https://huggingface.co/datasets/huggingface/badges); respective source and trademark terms | Loaded remotely by the sign-in button. It is not relicensed by LEVI; record applicable terms before bundling a copy. |
 | External lerobot-doctor service | External service linked from the workbench; see [UPSTREAM](docs/UPSTREAM.md) | Linked rather than vendored; LEVI's own diagnostics are separate source code. |
+| Optional Meta SAM3 worker | [facebookresearch/sam3](https://github.com/facebookresearch/sam3/tree/660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b), pinned Git dependency; [SAM License](https://github.com/facebookresearch/sam3/blob/main/LICENSE) | Installed only in `integrations/sam3`; source and checkpoints are not bundled. Preserve the official license and checkpoint access/redistribution terms in any future artifact. |
 
 The react-icons package's MIT license does **not** replace the individual icon collections' licenses. Its installed `LICENSE` and `README.md` list those collections. If an artifact contains the entire react-icons package, inventory all included collections, not just the icons imported by LEVI.
 
@@ -110,3 +111,7 @@ Before a Docker, PyPI (sdist/wheel), executable or other bundled release:
 未来正式分发前，按实际产物逐一生成机器可读清单，核对传递依赖及原生库，并将完整许可证和适用 NOTICE 随产物交付。对扫描器无法识别的条目保留待核对状态，不能只凭直接依赖表宣称分发清单完整。
 
 This procedure is a release requirement documented in [RELEASING](docs/RELEASING.md); it is not an automated license gate in the current CI. No Docker/PyPI/binary redistribution inventory is claimed complete by this source-only update.
+
+### Optional SAM3 dependencies
+
+The SAM3 worker declares its own uv environment and is intentionally absent from the core `uv.lock`. Its exact Torch/torchvision wheels, CUDA runtime, transitive dependencies, native libraries and model checkpoint must be inventoried from the actual environment before publishing a Docker/PyPI/binary artifact. The source release does not claim that inventory is complete.

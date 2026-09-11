@@ -101,6 +101,11 @@ def stop_children(children):
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "sam3":
+        from .sam3_cli import main as sam3
+
+        sys.argv.pop(1)
+        return sam3()
     if len(sys.argv) > 1 and sys.argv[1] == "clean":
         from .maintenance import main as clean
 
@@ -242,3 +247,7 @@ def main():
         raise SystemExit(1) from exc
     finally:
         stop_children(children)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

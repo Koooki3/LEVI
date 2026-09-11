@@ -6,6 +6,8 @@ import React, { useEffect, useRef } from "react";
 import { useTime } from "../context/time-context";
 import { FaExpand, FaCompress, FaTimes, FaEye } from "react-icons/fa";
 import type { VideoInfo } from "@/types";
+import type { ObjectAnnotation } from "@/types/object-annotation.types";
+import { fetchObjectAnnotations } from "@/utils/annotationsClient";
 import { proxyHfUrl } from "@/utils/auth";
 import { VideoOverlayCanvas } from "./video-overlay-canvas";
 import { ColormappedVideo } from "./colormapped-video";
@@ -20,6 +22,9 @@ const VIDEO_READY_TIMEOUT_MS = 10_000;
 type VideoPlayerProps = {
   videosInfo: VideoInfo[];
   onVideosReady?: () => void;
+  /** Optional current episode identity used to render object sidecar overlays. */
+  annotationEpisodeId?: number;
+  annotationRepoId?: string | null;
 };
 
 const videoEventCleanup = new WeakMap<HTMLVideoElement, () => void>();
@@ -27,6 +32,8 @@ const videoEventCleanup = new WeakMap<HTMLVideoElement, () => void>();
 export const SimpleVideosPlayer = ({
   videosInfo,
   onVideosReady,
+  annotationEpisodeId,
+  annotationRepoId,
 }: VideoPlayerProps) => {
   const { currentTime, seek, externalSeekVersion, isPlaying, setIsPlaying } =
     useTime();
@@ -60,6 +67,34 @@ export const SimpleVideosPlayer = ({
   const [enlargedVideo, setEnlargedVideo] = React.useState<string | null>(null);
   const [showHiddenMenu, setShowHiddenMenu] = React.useState(false);
   const [videosReady, setVideosReady] = React.useState(false);
+  const [objectAnnotations, setObjectAnnotations] = React.useState<
+    ObjectAnnotation[]
+  >([]);
+
+  const loadObjectAnnotations = React.useCallback(async () => {
+    if (annotationEpisodeId == null || !annotationRepoId) {
+      setObjectAnnotations([]);
+      return;
+    }
+    try {
+      const result = await fetchObjectAnnotations(annotationEpisodeId, {
+        repoId: annotationRepoId,
+      });
+      setObjectAnnotations(result.objects);
+    } catch {
+      // The API is optional; video playback and native VQA stay available when
+      // no annotation backend is running.
+      setObjectAnnotations([]);
+    }
+  }, [annotationEpisodeId, annotationRepoId]);
+
+  useEffect(() => {
+    void loadObjectAnnotations();
+    const onAnnotationsUpdated = () => void loadObjectAnnotations();
+    window.addEventListener("levi:sam3-updated", onAnnotationsUpdated);
+    return () =>
+      window.removeEventListener("levi:sam3-updated", onAnnotationsUpdated);
+  }, [loadObjectAnnotations]);
 
   const hiddenSet = React.useMemo(() => new Set(hiddenVideos), [hiddenVideos]);
 
@@ -433,6 +468,7 @@ export const SimpleVideosPlayer = ({
                     <VideoOverlayCanvas
                       videoEl={videoEls[idx] ?? null}
                       cameraKey={info.filename}
+                      objectAnnotations={objectAnnotations}
                     />
                   </div>
                 </div>

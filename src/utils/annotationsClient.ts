@@ -9,6 +9,13 @@
  */
 
 import type { LanguageAtom } from "../types/language.types";
+import type {
+  ObjectAnnotation,
+  Sam3Capabilities,
+  Sam3Edit,
+  Sam3Plan,
+  Sam3Revision,
+} from "../types/object-annotation.types";
 
 const ENV_URL = "LEVI";
 function endpoint(path: string): string {
@@ -26,7 +33,7 @@ export function getAnnotateBackendUrl(): string | null {
   return ENV_URL;
 }
 
-interface DatasetIdent {
+export interface DatasetIdent {
   repoId?: string | null;
   localPath?: string | null;
   revision?: string | null;
@@ -181,4 +188,146 @@ export async function pushToHub(
     throw new Error(text || `push: ${res.status}`);
   }
   return res.json();
+}
+
+export async function getSam3Capabilities(): Promise<Sam3Capabilities> {
+  const response = await fetch(endpoint("/api/sam3/capabilities"), {
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(`SAM3 capabilities: ${response.status}`);
+  return response.json() as Promise<Sam3Capabilities>;
+}
+
+export async function planSam3(
+  ident: DatasetIdent,
+  plan: Omit<Sam3Plan, "repo_id" | "local_path" | "revision">,
+): Promise<Sam3Plan & { plan_id: string; status: string }> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const response = await fetch(endpoint("/api/sam3/plan"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...plan,
+      repo_id: ident.repoId || null,
+      local_path: ident.localPath || null,
+      revision: ident.revision || null,
+    }),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => `${response.status}`);
+    throw new Error(text || `SAM3 plan: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function runSam3(
+  ident: DatasetIdent,
+  plan: Omit<Sam3Plan, "repo_id" | "local_path" | "revision">,
+): Promise<{
+  ok: boolean;
+  provider: "fake" | "sam3";
+  revision_id?: string;
+  count?: number;
+  status?: string;
+  job_id?: string;
+}> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const response = await fetch(endpoint("/api/sam3/run"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...plan,
+      repo_id: ident.repoId || null,
+      local_path: ident.localPath || null,
+      revision: ident.revision || null,
+    }),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => `${response.status}`);
+    throw new Error(text || `SAM3 run: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function fetchSam3Revisions(
+  ident: DatasetIdent,
+): Promise<{ current: string | null; revisions: Sam3Revision[] }> {
+  if (!ENV_URL) return { current: null, revisions: [] };
+  const response = await fetch(buildUrl("/api/sam3/revisions", ident), {
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(`SAM3 revisions: ${response.status}`);
+  return response.json();
+}
+
+export async function fetchObjectAnnotations(
+  episodeId: number,
+  ident: DatasetIdent,
+  options: {
+    cameraKey?: string;
+    frameIndex?: number;
+    annotationRevision?: string;
+  } = {},
+): Promise<{ revision: string | null; objects: ObjectAnnotation[] }> {
+  if (!ENV_URL) return { revision: null, objects: [] };
+  const url = new URL(
+    buildUrl(`/api/sam3/episodes/${episodeId}/objects`, ident),
+  );
+  if (options.cameraKey) url.searchParams.set("camera_key", options.cameraKey);
+  if (options.frameIndex !== undefined)
+    url.searchParams.set("frame_index", String(options.frameIndex));
+  if (options.annotationRevision)
+    url.searchParams.set("annotation_revision", options.annotationRevision);
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) throw new Error(`SAM3 objects: ${response.status}`);
+  const data = (await response.json()) as {
+    revision?: string | null;
+    objects?: ObjectAnnotation[];
+  };
+  return { revision: data.revision ?? null, objects: data.objects ?? [] };
+}
+
+export async function editObjectAnnotation(
+  ident: DatasetIdent,
+  edit: Sam3Edit,
+): Promise<{ ok: boolean; revision_id: string; annotation_count: number }> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const response = await fetch(buildUrl("/api/sam3/edits", ident), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(edit),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => `${response.status}`);
+    throw new Error(text || `SAM3 edit: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function fetchSam3Job(
+  jobId: string,
+  ident: DatasetIdent,
+): Promise<Record<string, unknown>> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const response = await fetch(buildUrl(`/api/sam3/jobs/${jobId}`, ident), {
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(`SAM3 job: ${response.status}`);
+  return response.json();
+}
+
+export async function cancelSam3Job(
+  jobId: string,
+  ident: DatasetIdent,
+): Promise<Record<string, unknown>> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const response = await fetch(
+    buildUrl(`/api/sam3/jobs/${jobId}/cancel`, ident),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+  if (!response.ok) throw new Error(`SAM3 cancel: ${response.status}`);
+  return response.json();
 }
