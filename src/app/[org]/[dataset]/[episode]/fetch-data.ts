@@ -82,6 +82,18 @@ export type EpisodeFramesData = {
   framesByCamera: Record<string, EpisodeFrameInfo[]>;
 };
 
+/**
+ * Task ↔ episode mapping for the whole dataset. Multi-task captures (lerobot
+ * allows several task strings per episode) use this to filter the episode list
+ * and to scope Action Insights to one task.
+ */
+export type DatasetTaskIndex = {
+  /** Unique task strings, ordered by `task_index` when the dataset ships one. */
+  tasks: string[];
+  /** `episode_index` → the task strings recorded for that episode. */
+  episodeTasks: Record<number, string[]>;
+};
+
 export type EpisodeData = {
   datasetInfo: DatasetDisplayInfo;
   episodeId: number;
@@ -147,16 +159,44 @@ const MAX_FRAMES_OVERVIEW_EPISODES = parsePositiveIntEnv(
   3000,
   100,
 );
-const MAX_CROSS_EPISODE_SAMPLE = parsePositiveIntEnv(
+/**
+ * Episodes analysed when the Action Insights panel first opens. A starting
+ * point, not a ceiling — the panel can widen the sample or ask for every
+ * episode in scope (bounded only by `CROSS_EPISODE_SAMPLE_CEILING`).
+ */
+const DEFAULT_CROSS_EPISODE_SAMPLE = parsePositiveIntEnv(
   process.env.MAX_CROSS_EPISODE_SAMPLE,
   120,
   10,
+);
+/**
+ * Hard upper bound for a single analysis run. This exists to stop a runaway
+ * request on a very large capture, not to cap ordinary reviews — a full-dataset
+ * pass over a few thousand episodes stays well under it.
+ */
+const CROSS_EPISODE_SAMPLE_CEILING = parsePositiveIntEnv(
+  process.env.MAX_CROSS_EPISODE_TOTAL,
+  20000,
+  10,
+);
+/** Parallel parquet reads while collecting episodes for one analysis run. */
+const CROSS_EPISODE_FETCH_CONCURRENCY = parsePositiveIntEnv(
+  process.env.CROSS_EPISODE_FETCH_CONCURRENCY,
+  12,
+  1,
 );
 const MAX_CROSS_EPISODE_FRAMES_PER_EPISODE = parsePositiveIntEnv(
   process.env.MAX_CROSS_EPISODE_FRAMES_PER_EPISODE,
   2500,
   100,
 );
+
+export const CROSS_EPISODE_DEFAULTS = {
+  /** Initial sample size offered by the Action Insights scope controls. */
+  sampleSize: DEFAULT_CROSS_EPISODE_SAMPLE,
+  /** Largest sample a single run will accept. */
+  ceiling: CROSS_EPISODE_SAMPLE_CEILING,
+} as const;
 const PROGRESS_PARQUET_CANDIDATES = [
   "sarm_progress.parquet",
   "srm_progress.parquet",
@@ -190,6 +230,32 @@ function evenlySampleIndices(length: number, target: number): number[] {
 function evenlySampleArray<T>(items: T[], maxCount: number): T[] {
   if (items.length <= maxCount) return items;
   return evenlySampleIndices(items.length, maxCount).map((idx) => items[idx]);
+}
+
+/**
+ * `Promise.all(items.map(...))` with a ceiling on in-flight work. A
+ * full-dataset insights run touches one parquet file per episode, so firing
+ * every request at once would queue thousands of fetches and hold every
+ * response in memory at the same time.
+ */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const runnerCount = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(
+    Array.from({ length: runnerCount }, async () => {
+      for (;;) {
+        const index = cursor++;
+        if (index >= items.length) return;
+        results[index] = await worker(items[index], index);
+      }
+    }),
+  );
+  return results;
 }
 
 function toFiniteNumber(value: unknown): number | null {
@@ -1584,6 +1650,116 @@ export function computeColumnMinMax(
   }));
 }
 
+function normalizeTaskList(raw: unknown): string[] {
+  if (typeof raw === "string") {
+    return raw.trim().length > 0 ? [raw] : [];
+  }
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (task): task is string =>
+      typeof task === "string" && task.trim().length > 0,
+  );
+}
+
+const taskIndexCache = new Map<
+  string,
+  { data: DatasetTaskIndex | null; expiry: number }
+>();
+const TASK_INDEX_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Build the dataset-wide task ↔ episode mapping.
+ *
+ * v2.x reads `meta/tasks.jsonl` (for `task_index` ordering) plus the `tasks`
+ * field on every `meta/episodes.jsonl` row; v3.x walks the episode metadata
+ * parquet chunks, whose rows carry `tasks` as `list[str]`.
+ *
+ * Returns null when the dataset records no task strings at all — callers treat
+ * that as "task filtering unavailable" rather than as an error.
+ */
+export async function loadDatasetTaskIndex(
+  repoId: string,
+  version: string,
+): Promise<DatasetTaskIndex | null> {
+  const cacheKey = `${repoId}@${version}`;
+  const cached = taskIndexCache.get(cacheKey);
+  if (cached && Date.now() < cached.expiry) return cached.data;
+
+  let data: DatasetTaskIndex | null = null;
+  try {
+    const episodeTasks: Record<number, string[]> = {};
+    const ordered: string[] = [];
+    const seen = new Set<string>();
+    const addTask = (task: string) => {
+      if (seen.has(task)) return;
+      seen.add(task);
+      ordered.push(task);
+    };
+
+    if (version.startsWith("v2.")) {
+      // tasks.jsonl first so the dropdown follows task_index order; episodes
+      // that reference a task missing from it still get appended below.
+      const tasksResponse = await fetch(
+        buildVersionedUrl(repoId, version, "meta/tasks.jsonl"),
+        { headers: authHeaders() },
+      );
+      if (tasksResponse.ok) {
+        const declared = (await tasksResponse.text())
+          .split("\n")
+          .filter((line) => line.trim().length > 0)
+          .map(
+            (line) =>
+              JSON.parse(line) as { task_index?: number; task?: unknown },
+          )
+          .filter((row) => typeof row.task === "string")
+          .sort((a, b) => (a.task_index ?? 0) - (b.task_index ?? 0));
+        for (const row of declared) addTask(row.task as string);
+      }
+
+      const episodesResponse = await fetch(
+        buildVersionedUrl(repoId, version, "meta/episodes.jsonl"),
+        { headers: authHeaders() },
+      );
+      if (episodesResponse.ok) {
+        for (const line of (await episodesResponse.text()).split("\n")) {
+          if (!line.trim()) continue;
+          const row = JSON.parse(line) as {
+            episode_index?: unknown;
+            tasks?: unknown;
+            task?: unknown;
+          };
+          const index = row.episode_index;
+          if (typeof index !== "number" || !Number.isInteger(index)) continue;
+          const tasks = normalizeTaskList(row.tasks ?? row.task);
+          if (tasks.length === 0) continue;
+          episodeTasks[index] = tasks;
+          tasks.forEach(addTask);
+        }
+      }
+    } else {
+      for await (const rows of iterateEpisodeMetadataFilesV3(repoId, version)) {
+        for (const row of rows) {
+          const parsed = parseEpisodeRowSimple(row);
+          const tasks = normalizeTaskList(parsed.tasks);
+          if (tasks.length === 0) continue;
+          episodeTasks[parsed.episode_index] = tasks;
+          tasks.forEach(addTask);
+        }
+      }
+    }
+
+    data = ordered.length > 0 ? { tasks: ordered, episodeTasks } : null;
+  } catch {
+    data = null;
+  }
+
+  taskIndexCache.set(cacheKey, {
+    data,
+    expiry: Date.now() + TASK_INDEX_TTL_MS,
+  });
+  return data;
+}
+
 /**
  * Load episode lengths from v2 JSONL or all v3 metadata parquet chunks.
  * Returns min/max/mean/median/std and a histogram, or null if unavailable.
@@ -1828,6 +2004,8 @@ export type AggAutocorrelation = {
   chartData: Record<string, number>[];
   suggestedChunk: number | null;
   shortKeys: string[];
+  /** Episodes long enough to contribute to the averaged ACF. */
+  episodesUsed: number;
 };
 
 export type SpeedDistEntry = {
@@ -1853,6 +2031,29 @@ export type JerkyEpisode = {
   meanAbsDelta: number;
 };
 
+/**
+ * Which episodes an Action Insights run covers.
+ * - `all`: every episode in the dataset
+ * - `range`: an inclusive episode-index window
+ * - `task`: every episode whose metadata lists this task string
+ */
+export type CrossEpisodeScope =
+  | { kind: "all" }
+  | { kind: "range"; from: number; to: number }
+  | { kind: "task"; task: string };
+
+export type CrossEpisodeRequest = {
+  scope: CrossEpisodeScope;
+  /** null → analyse every episode in scope (still bounded by the ceiling). */
+  maxEpisodes: number | null;
+};
+
+export type CrossEpisodeLoadOptions = Partial<CrossEpisodeRequest> & {
+  numTimeBins?: number;
+  /** Reports parquet-read progress; only meaningful for client-side calls. */
+  onProgress?: (loaded: number, total: number) => void;
+};
+
 export type CrossEpisodeVarianceData = {
   actionNames: string[];
   timeBins: number[];
@@ -1864,6 +2065,14 @@ export type CrossEpisodeVarianceData = {
   speedDistribution: SpeedDistEntry[];
   jerkyEpisodes: JerkyEpisode[];
   aggAlignment: AggAlignment | null;
+  /** The scope this run covered, echoed back for display. */
+  scope: CrossEpisodeScope;
+  /** Episodes matching the scope, before any sampling. */
+  scopeEpisodes: number;
+  /** Episodes selected after applying the sample cap. */
+  requestedEpisodes: number;
+  /** True when the cap forced an even subsample of the scope. */
+  sampled: boolean;
 };
 
 export async function loadCrossEpisodeActionVariance(
@@ -1871,10 +2080,19 @@ export async function loadCrossEpisodeActionVariance(
   version: string,
   info: DatasetMetadata,
   fps: number,
-  maxEpisodes = MAX_CROSS_EPISODE_SAMPLE,
-  numTimeBins = 50,
+  options: CrossEpisodeLoadOptions = {},
 ): Promise<CrossEpisodeVarianceData | null> {
-  const cappedMaxEpisodes = Math.min(maxEpisodes, MAX_CROSS_EPISODE_SAMPLE);
+  const {
+    scope = { kind: "all" },
+    maxEpisodes = DEFAULT_CROSS_EPISODE_SAMPLE,
+    numTimeBins = 50,
+    onProgress,
+  } = options;
+  // `null` means "every episode in scope"; the ceiling is only a runaway guard.
+  const episodeBudget = Math.min(
+    maxEpisodes ?? CROSS_EPISODE_SAMPLE_CEILING,
+    CROSS_EPISODE_SAMPLE_CEILING,
+  );
   const actionEntry = Object.entries(info.features).find(
     ([key, f]) => key === "action" && f.shape.length === 1,
   );
@@ -1944,21 +2162,42 @@ export async function loadCrossEpisodeActionVariance(
     );
     return null;
   }
+
+  // Narrow to the requested scope before sampling, so a range or a task gets
+  // the full episode budget instead of whatever survives a dataset-wide sample.
+  const taskIndex =
+    scope.kind === "task" ? await loadDatasetTaskIndex(repoId, version) : null;
+  const rangeLo =
+    scope.kind === "range" ? Math.min(scope.from, scope.to) : -Infinity;
+  const rangeHi =
+    scope.kind === "range" ? Math.max(scope.from, scope.to) : Infinity;
+  const inScope = allEps.filter((ep) => {
+    if (scope.kind === "range") {
+      return ep.index >= rangeLo && ep.index <= rangeHi;
+    }
+    if (scope.kind === "task") {
+      return (taskIndex?.episodeTasks[ep.index] ?? []).includes(scope.task);
+    }
+    return true;
+  });
+
+  if (inScope.length < 2) {
+    console.warn(
+      `[cross-ep] Scope ${JSON.stringify(scope)} matched ${inScope.length} episode(s) out of ${allEps.length}, need ≥2`,
+    );
+    return null;
+  }
   console.log(
-    `[cross-ep] Found ${allEps.length} episodes in metadata, sampling up to ${cappedMaxEpisodes}`,
+    `[cross-ep] Scope ${JSON.stringify(scope)} matched ${inScope.length}/${allEps.length} episodes, analysing up to ${episodeBudget}`,
   );
 
-  // Sample episodes evenly
-  const sampled =
-    allEps.length <= cappedMaxEpisodes
-      ? allEps
-      : Array.from(
-          { length: cappedMaxEpisodes },
-          (_, i) =>
-            allEps[
-              Math.round((i * (allEps.length - 1)) / (cappedMaxEpisodes - 1))
-            ],
-        );
+  // Sample episodes evenly across the scope when it exceeds the budget.
+  const sampled = evenlySampleArray(inScope, episodeBudget);
+  let loadedCount = 0;
+  const reportProgress = (delta: number) => {
+    loadedCount += delta;
+    onProgress?.(loadedCount, sampled.length);
+  };
 
   // Load action (and state) data per episode
   const episodeActions: { index: number; actions: number[][] }[] = [];
@@ -1972,8 +2211,10 @@ export async function loadCrossEpisodeActionVariance(
       byFile.get(key)!.push(ep);
     }
 
-    const fileResults = await Promise.all(
-      [...byFile.values()].map(async (eps) => {
+    const fileResults = await mapWithConcurrency(
+      [...byFile.values()],
+      CROSS_EPISODE_FETCH_CONCURRENCY,
+      async (eps) => {
         const ep0 = eps[0];
         const dataPath = `data/chunk-${ep0.chunkIdx.toString().padStart(3, "0")}/file-${ep0.fileIdx.toString().padStart(3, "0")}.parquet`;
         const fileEpActions: { index: number; actions: number[][] }[] = [];
@@ -2021,8 +2262,9 @@ export async function loadCrossEpisodeActionVariance(
         } catch {
           /* skip file */
         }
+        reportProgress(eps.length);
         return { fileEpActions, fileEpStates };
-      }),
+      },
     );
     for (const { fileEpActions, fileEpStates } of fileResults) {
       episodeActions.push(...fileEpActions);
@@ -2030,8 +2272,10 @@ export async function loadCrossEpisodeActionVariance(
     }
   } else {
     const chunkSize = info.chunks_size || 1000;
-    const epResults = await Promise.all(
-      sampled.map(async (ep) => {
+    const epResults = await mapWithConcurrency(
+      sampled,
+      CROSS_EPISODE_FETCH_CONCURRENCY,
+      async (ep) => {
         const chunk = Math.floor(ep.index / chunkSize);
         const dataPath = formatStringWithVars(info.data_path, {
           episode_chunk: chunk.toString().padStart(3, "0"),
@@ -2082,9 +2326,11 @@ export async function loadCrossEpisodeActionVariance(
           }
         } catch {
           /* skip */
+        } finally {
+          reportProgress(1);
         }
         return null;
-      }),
+      },
     );
     for (const result of epResults) {
       if (result !== null) {
@@ -2304,15 +2550,15 @@ export async function loadCrossEpisodeActionVariance(
 
   // Aggregated autocorrelation: average per-episode ACFs
   const aggAutocorrelation: AggAutocorrelation | null = (() => {
-    const maxLag = Math.min(
-      100,
-      Math.floor(
-        episodeActions.reduce(
-          (min, e) => Math.min(min, e.actions.length),
-          Infinity,
-        ) / 2,
-      ),
-    );
+    // Lag horizon comes from the 25th-percentile episode length, not the
+    // shortest one: over a full dataset a single truncated episode would
+    // otherwise drive maxLag below 2 and blank the chart entirely. Episodes
+    // shorter than 2·maxLag are skipped below, so ~75% still contribute.
+    const lengths = episodeActions
+      .map((e) => e.actions.length)
+      .sort((a, b) => a - b);
+    const p25 = lengths[Math.floor(lengths.length * 0.25)] ?? 0;
+    const maxLag = Math.min(100, Math.floor(p25 / 2));
     if (maxLag < 2) return null;
 
     const avgAcf: number[][] = Array.from({ length: actionDim }, () =>
@@ -2367,7 +2613,7 @@ export async function loadCrossEpisodeActionVariance(
         ? lags.sort((a, b) => a - b)[Math.floor(lags.length / 2)]
         : null;
 
-    return { chartData, suggestedChunk, shortKeys };
+    return { chartData, suggestedChunk, shortKeys, episodesUsed: epCount };
   })();
 
   // Per-episode jerkiness: mean |Δa| across dimensions active in that episode, normalized by motor range
@@ -2545,6 +2791,10 @@ export async function loadCrossEpisodeActionVariance(
     speedDistribution,
     jerkyEpisodes,
     aggAlignment,
+    scope,
+    scopeEpisodes: inScope.length,
+    requestedEpisodes: sampled.length,
+    sampled: sampled.length < inScope.length,
   };
 }
 

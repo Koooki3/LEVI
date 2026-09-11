@@ -98,6 +98,26 @@ formatStringWithVars(info.data_path, {
 | `src/utils/constants.ts`                          | `PADDING`, `EXCLUDED_COLUMNS`, `CHART_CONFIG`, `THRESHOLDS`                                                                              |
 | `src/types/`                                      | TypeScript types: `DatasetVersion`, `EpisodeMetadataV3`, `VideoInfo`, `ChartDataGroup`, etc.                                             |
 
+## Action Insights scope
+
+`loadCrossEpisodeActionVariance(repoId, version, info, fps, options)` takes a
+`CrossEpisodeRequest`: a `scope` (`all` | `range` | `task`) plus `maxEpisodes`,
+where `null` means "every episode in scope". The scope filter runs **before**
+sampling, so a range or task gets the whole budget.
+`CROSS_EPISODE_DEFAULTS.sampleSize` is only the panel's starting sample size;
+`CROSS_EPISODE_DEFAULTS.ceiling` is the runaway guard. Note the `process.env`
+reads in this module are inert in the browser (no `NEXT_PUBLIC_` prefix and no
+`env` block in `next.config.ts`) — the episode-viewer path always gets the
+fallback values. Parquet reads are concurrency-limited (`mapWithConcurrency`);
+`onProgress` only fires for client-side calls.
+
+`loadDatasetTaskIndex(repoId, version)` builds the dataset-wide task ↔ episode
+map (v2: `meta/tasks.jsonl` + the `tasks` field on `meta/episodes.jsonl` rows;
+v3: the `tasks` list on episode-metadata rows) and caches it for 5 minutes. It
+powers both the by-task insights scope and the sidebar task filter, and
+de-duplicates task strings — a dataset may declare the same instruction under
+two `task_index` values.
+
 ## Chart data pipeline
 
 Series keys use `" | "` as delimiter (e.g. `observation.state | 0`).
