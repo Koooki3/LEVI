@@ -1,12 +1,21 @@
 # Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
-# LEVI modifications: v2 annotations, workspace boundaries, durable sidecars, non-overwriting complete exports.
+# LEVI modifications: v2 annotations, workspace boundaries, durable sidecars,
+# idempotent per-dataset exports (one directory per source dataset, reused
+# and refreshed in place — never a directory LEVI didn't create itself).
 """LeRobot dataset visualizer — annotation backend.
 
 A small FastAPI service that lets the Next.js visualizer write the v3.1
 language schema introduced in lerobot#3467 (PR1) and used by the steerable
 annotation pipeline in lerobot#3471 (PR2). Specifically it owns:
 
-- per-episode annotation state, persisted to ``meta/lerobot_annotations.json``
+- per-episode annotation state, persisted to a workbench-side sidecar
+  directory named after the dataset itself (not an opaque hash — see
+  ``dataset_display_slug``/``DatasetState.display_slug``), one JSON file
+  per episode named ``episode_{index:06d}.json`` to match that episode's
+  own data/video file (``DatasetState.annotations_dir`` / ``annotation_file``).
+  The directory is deliberately name-only, not hash-suffixed, so several
+  LEVI processes on one host annotating the same dataset share the exact
+  same files (see ``_lookup_episode_annotations``).
 - snapping event-style atom timestamps to exact source-frame timestamps
   (the writer in lerobot#3471 enforces exact match)
 - exporting the annotated dataset by rewriting ``data/chunk-*/file-*.parquet``
@@ -14,7 +23,9 @@ annotation pipeline in lerobot#3471 (PR2). Specifically it owns:
     * ``language_persistent`` — broadcast per-episode (subtask/plan/memory)
     * ``language_events``     — per-frame (interjection/vqa, plus speech
       tool-call atoms with style=None)
-  and a dataset-level ``tools`` column carrying the JSON schema for ``say``.
+  and a dataset-level ``tools`` column carrying the JSON schema for ``say``,
+  plus a write-only ``annotations/language/`` per-episode JSON mirror for
+  portability/audit (LEVI itself never reads it back — see ``_do_export``).
 - pushing the result back to the Hugging Face Hub.
 
 The frontend can run without this backend (read-only browsing). Annotation
@@ -109,6 +120,26 @@ SAY_TOOL_SCHEMA: dict[str, Any] = {
 }
 
 
+def dataset_display_slug(repo_id: str | None, local_path: str | None) -> str:
+    """Human-first identifier for on-disk sidecar/report directory and file
+    names — the dataset's own name (its local folder name, or
+    ``org__dataset`` for a Hub repo) instead of an opaque hash. Callers
+    append a short identity hash for uniqueness (two different local
+    datasets can share a folder basename, e.g. two capture sessions both
+    named "dataset" in different parent directories) — this only returns
+    the readable part, matching the ``{name}_{hash}`` shape already used for
+    export directory names (see ``DatasetState.export_identity_hash``).
+    """
+    if local_path:
+        name = Path(local_path).name
+    elif repo_id:
+        name = repo_id.replace("/", "__")
+    else:
+        name = "dataset"
+    safe = re.sub(r"[^\w.-]+", "_", name).strip("_")
+    return safe or "dataset"
+
+
 def column_for_style(style: str | None) -> str:
     if style is None:
         return LANGUAGE_EVENTS
@@ -137,6 +168,12 @@ class LanguageAtom(BaseModel):
     content: str | None = None
     style: str | None = None
     timestamp: float
+    # Optional end of an explicitly authored range (drag-to-select in the
+    # timeline). LEVI-only editorial metadata for humans reviewing the
+    # timeline — deliberately excluded from the exported struct by
+    # ``_normalize_atom``'s explicit field allow-list, so it never touches
+    # the lerobot#3467/#3471 schema. See that function for why.
+    to: float | None = None
     # ``observation.images.*`` feature key for view-dependent atoms
     # (vqa / trace). ``None`` for camera-agnostic atoms. Mirrors the
     # row-level ``camera`` field added in lerobot PR 3467.
@@ -192,6 +229,13 @@ class PushToHubRequest(DatasetRef):
 @dataclass
 class EpisodeAnnotations:
     atoms: list[dict[str, Any]] = field(default_factory=list)
+    # mtime of the on-disk per-episode file this cache entry was read from,
+    # or None when it was derived some other way (a parquet-column fallback,
+    # or no file exists yet). Lets ``_lookup_episode_annotations`` tell a
+    # still-fresh cache entry from one another process on the same host has
+    # since made stale, with a cheap stat() instead of re-parsing the file
+    # on every request.
+    mtime: float | None = None
 
 
 # --- Per-dataset state cache --------------------------------------------------
@@ -209,20 +253,12 @@ class DatasetState:
     annotations: dict[int, EpisodeAnnotations] = field(default_factory=dict)
     frame_ts_cache: dict[int, list[float]] = field(default_factory=dict)
 
-    @property
-    def annotations_path(self) -> Path:
-        return (
-            STATE
-            / "annotations"
-            / (
-                __import__("hashlib").sha256(str(self.root).encode()).hexdigest()
-                + ".json"
-            )
-        )
-
-    @property
-    def object_annotations_path(self) -> Path:
-        """Workspace sidecar root, independent from the source dataset tree."""
+    def _identity_hash(self, *, short: bool = False) -> str:
+        """Deterministic hash of this dataset's identity — shared by every
+        on-disk path below so they all key off the exact same notion of
+        "which dataset is this" (repo/revision/local path, plus a
+        credential scope for private Hub repos, so an account change can't
+        reuse a previous account's private cache)."""
         identity_value = {
             "repo_id": self.repo_id,
             "revision": self.revision or "main",
@@ -231,9 +267,56 @@ class DatasetState:
         if self.repo_id:
             identity_value["credential_scope"] = self.credential_scope
         identity = json.dumps(identity_value, sort_keys=True, ensure_ascii=False)
-        return (
-            STATE / "object_annotations" / hashlib.sha256(identity.encode()).hexdigest()
-        )
+        digest = hashlib.sha256(identity.encode()).hexdigest()
+        return digest[:10] if short else digest
+
+    @property
+    def display_slug(self) -> str:
+        """Bare dataset-name identifier for the *live, shared* annotation
+        sidecars (``annotations_dir`` / ``object_annotations_path``).
+        Deliberately NOT hash-suffixed, unlike ``export_identity_hash`` and
+        the diagnostics report name: several LEVI processes on the same host
+        — different collaborators, or the same person on two ports — must
+        resolve the same dataset name to the exact same directory so their
+        edits land in the same per-episode files and stay in sync (see
+        ``_lookup_episode_annotations`` for how concurrent readers/writers
+        stay correct without a lock). The tradeoff is that two genuinely
+        different local datasets sharing a folder basename would collide
+        here — keep local dataset folder names distinct."""
+        return dataset_display_slug(self.repo_id, self.local_path)
+
+    @property
+    def annotations_dir(self) -> Path:
+        """Per-episode language-annotation sidecar directory — one JSON
+        file per episode, named to match that episode's own file identifier
+        (``episode_{index:06d}``, exactly like the corresponding
+        ``data/.../episode_{index:06d}.parquet``/``.mp4``) rather than one
+        opaque blob for the whole dataset. Lets a user (or another tool) add,
+        replace or delete a single episode's annotations directly on disk.
+        """
+        return STATE / "annotations" / self.display_slug
+
+    def annotation_file(self, episode_index: int) -> Path:
+        return self.annotations_dir / f"episode_{episode_index:06d}.json"
+
+    @property
+    def legacy_annotations_path(self) -> Path:
+        """Pre-refactor single-file sidecar (every episode in one JSON,
+        keyed by index, named by a bare identity hash) — read once to
+        migrate into ``annotations_dir`` and never written again."""
+        return STATE / "annotations" / (self._identity_hash() + ".json")
+
+    @property
+    def object_annotations_path(self) -> Path:
+        """Workspace sidecar root, independent from the source dataset tree."""
+        return STATE / "object_annotations" / self.display_slug
+
+    @property
+    def export_identity_hash(self) -> str:
+        """Deterministic short hash identifying this source dataset, reused
+        across repeated exports so the same dataset always resolves to the
+        same export directory."""
+        return self._identity_hash(short=True)
 
 
 _states: dict[str, DatasetState] = {}
@@ -602,77 +685,186 @@ def _load_state(req: DatasetRef, key: str) -> DatasetState:
     return state
 
 
-def _load_existing_annotations(state: DatasetState) -> None:
-    path = state.annotations_path
-    if not path.exists():
+def _coerce_v1_atoms(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """v1 format from older lerobot-annotate (subtasks/high_levels segments,
+    predating the v3.1 atom schema) — used only by the legacy migration."""
+    atoms: list[dict[str, Any]] = []
+    for seg in payload.get("subtasks", []):
+        if "label" in seg and "start" in seg:
+            atoms.append(
+                {
+                    "role": "assistant",
+                    "content": str(seg["label"]),
+                    "style": "subtask",
+                    "timestamp": float(seg["start"]),
+                    "tool_calls": None,
+                }
+            )
+    for seg in payload.get("high_levels", []):
+        ts = float(seg.get("start", 0.0))
+        if seg.get("user_prompt"):
+            atoms.append(
+                {
+                    "role": "user",
+                    "content": str(seg["user_prompt"]),
+                    "style": "interjection",
+                    "timestamp": ts,
+                    "tool_calls": None,
+                }
+            )
+        if seg.get("robot_utterance"):
+            atoms.append(
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "style": None,
+                    "timestamp": ts,
+                    "tool_calls": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "say",
+                                "arguments": {"text": str(seg["robot_utterance"])},
+                            },
+                        }
+                    ],
+                }
+            )
+    return atoms
+
+
+def _write_episode_annotations(
+    state: DatasetState, episode_index: int, atoms: list[dict[str, Any]]
+) -> Path:
+    """Write (or overwrite) one episode's annotation file. An empty atoms
+    list still writes a file — recording "reviewed, nothing to annotate" is
+    a different, deliberate state from "never touched". To remove the
+    record entirely, use ``_delete_episode_annotations``.
+    """
+    state.annotations_dir.mkdir(parents=True, exist_ok=True)
+    path = state.annotation_file(episode_index)
+    atomic(path, {"episode_index": episode_index, "atoms": atoms})
+    # Record the mtime of the write we just made so this process's own next
+    # read of this episode is a cache hit instead of an immediate self-reread.
+    state.annotations[episode_index] = EpisodeAnnotations(
+        atoms=atoms, mtime=path.stat().st_mtime
+    )
+    return path
+
+
+def _delete_episode_annotations(state: DatasetState, episode_index: int) -> bool:
+    """Delete one episode's annotation file entirely. Returns whether a file
+    actually existed to delete."""
+    path = state.annotation_file(episode_index)
+    existed = path.exists()
+    if existed:
+        path.unlink()
+    state.annotations.pop(episode_index, None)
+    return existed
+
+
+def _migrate_legacy_annotations(state: DatasetState) -> None:
+    """One-time upgrade from the old single-blob sidecar (every episode in
+    one JSON file, named by a bare identity hash) to the new per-episode
+    file layout. The legacy file is left in place afterward — inert, never
+    read again — rather than deleted: it's user data, and there's no reason
+    to remove it once migrated.
+    """
+    legacy_path = state.legacy_annotations_path
+    if not legacy_path.exists() or state.annotations_dir.exists():
         return
-    data = json.loads(path.read_text())
+    try:
+        data = json.loads(legacy_path.read_text())
+    except (OSError, ValueError) as e:
+        logger.warning("legacy annotations migration failed for %s: %s", legacy_path, e)
+        return
     for ep_str, payload in data.get("episodes", {}).items():
-        ep_idx = int(ep_str)
+        try:
+            ep_idx = int(ep_str)
+        except ValueError:
+            continue
         atoms = payload.get("atoms")
         if atoms is None:
-            # v1 format from older lerobot-annotate (legacy)
-            atoms = []
-            for seg in payload.get("subtasks", []):
-                if "label" in seg and "start" in seg:
-                    atoms.append(
-                        {
-                            "role": "assistant",
-                            "content": str(seg["label"]),
-                            "style": "subtask",
-                            "timestamp": float(seg["start"]),
-                            "tool_calls": None,
-                        }
-                    )
-            for seg in payload.get("high_levels", []):
-                ts = float(seg.get("start", 0.0))
-                if seg.get("user_prompt"):
-                    atoms.append(
-                        {
-                            "role": "user",
-                            "content": str(seg["user_prompt"]),
-                            "style": "interjection",
-                            "timestamp": ts,
-                            "tool_calls": None,
-                        }
-                    )
-                if seg.get("robot_utterance"):
-                    atoms.append(
-                        {
-                            "role": "assistant",
-                            "content": None,
-                            "style": None,
-                            "timestamp": ts,
-                            "tool_calls": [
-                                {
-                                    "type": "function",
-                                    "function": {
-                                        "name": "say",
-                                        "arguments": {
-                                            "text": str(seg["robot_utterance"])
-                                        },
-                                    },
-                                }
-                            ],
-                        }
-                    )
-        state.annotations[ep_idx] = EpisodeAnnotations(atoms=[dict(a) for a in atoms])
+            atoms = _coerce_v1_atoms(payload)
+        _write_episode_annotations(state, ep_idx, [dict(a) for a in atoms])
 
 
-def _save_annotations(state: DatasetState) -> None:
-    path = state.annotations_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "version": 2,
-        "schema": {
-            "persistent_styles": sorted(PERSISTENT_STYLES),
-            "event_styles": sorted(EVENT_ONLY_STYLES),
-        },
-        "episodes": {
-            str(ep): {"atoms": ann.atoms} for ep, ann in state.annotations.items()
-        },
-    }
-    atomic(path, payload)
+def _reload_annotations_from_disk(state: DatasetState) -> None:
+    """Full resync of every per-episode file into ``state.annotations``.
+    Cheap enough to call again right before export (``_do_export``) so the
+    exported dataset always reflects the very latest state written by *any*
+    LEVI process sharing this workspace — not just this process's own edits
+    plus whatever a handful of GETs happened to warm into its cache."""
+    ann_dir = state.annotations_dir
+    if not ann_dir.is_dir():
+        return
+    for path in sorted(ann_dir.glob("episode_*.json")):
+        try:
+            ep_idx = int(path.stem.removeprefix("episode_"))
+        except ValueError:
+            continue
+        try:
+            payload = json.loads(path.read_text())
+        except (OSError, ValueError) as e:
+            logger.warning("annotation file read failed for %s: %s", path, e)
+            continue
+        atoms = payload.get("atoms", [])
+        state.annotations[ep_idx] = EpisodeAnnotations(
+            atoms=[dict(a) for a in atoms], mtime=path.stat().st_mtime
+        )
+
+
+def _load_existing_annotations(state: DatasetState) -> None:
+    _migrate_legacy_annotations(state)
+    _reload_annotations_from_disk(state)
+
+
+def _lookup_episode_annotations(
+    state: DatasetState, episode_index: int
+) -> EpisodeAnnotations | None:
+    """Mtime-validated read of one episode's per-episode annotation file.
+
+    Multiple LEVI processes on the same host may share this workspace (a
+    second collaborator's own ``levi serve``, or the same person on two
+    ports) and write to the same ``annotations_dir`` (see
+    ``DatasetState.display_slug``). A plain in-memory cache would keep
+    serving whatever this process last saw, hiding another process's saves.
+    A ``stat()`` call is cheap — far cheaper than re-parsing the file — so
+    doing one on every read and only re-parsing when the mtime actually
+    changed keeps concurrent edits visible in near real time without a lock
+    or a full directory rescan per request.
+
+    Returns ``None`` (and leaves the cache untouched) only when there is no
+    on-disk file for this episode and nothing usable was cached before —
+    the caller should then fall back to deriving atoms from the exported
+    parquet's language columns, exactly as before.
+    """
+    path = state.annotation_file(episode_index)
+    try:
+        disk_mtime = path.stat().st_mtime
+    except OSError:
+        disk_mtime = None
+    cached = state.annotations.get(episode_index)
+    if disk_mtime is None:
+        # No sidecar file (yet, or not anymore — e.g. another process just
+        # deleted it). A cache entry with mtime=None came from the parquet
+        # fallback and is still valid; one with a real mtime is now stale.
+        if cached is not None and cached.mtime is None:
+            return cached
+        state.annotations.pop(episode_index, None)
+        return None
+    if cached is not None and cached.mtime == disk_mtime:
+        return cached
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, ValueError) as e:
+        logger.warning("annotation file read failed for %s: %s", path, e)
+        return cached
+    ann = EpisodeAnnotations(
+        atoms=[dict(a) for a in payload.get("atoms", [])], mtime=disk_mtime
+    )
+    state.annotations[episode_index] = ann
+    return ann
 
 
 # --- Frame-timestamp helpers --------------------------------------------------
@@ -872,6 +1064,11 @@ def _validate_atom(atom: dict[str, Any]) -> None:
             status_code=400,
             detail=f"camera must be null for style={style!r} (only vqa/trace are view-dependent)",
         )
+    to = atom.get("to")
+    if to is not None and float(to) < float(atom.get("timestamp", 0.0)):
+        raise HTTPException(
+            status_code=400, detail="to must be >= timestamp when set"
+        )
 
 
 def _normalize_atom(atom: dict[str, Any], *, with_timestamp: bool) -> dict[str, Any]:
@@ -884,6 +1081,12 @@ def _normalize_atom(atom: dict[str, Any], *, with_timestamp: bool) -> dict[str, 
     the parquet frame's ``timestamp`` column IS the event's firing time, so a
     per-row ``timestamp`` field would be redundant (matches lerobot#3471's
     ``language_event_row_arrow_type``, which omits it).
+
+    Deliberately an explicit field allow-list, not a dict spread: this is
+    what keeps LEVI-only editorial fields (e.g. ``to``, the timeline's
+    optional range end) from ever leaking into the exported struct. Do not
+    change this to spread ``atom`` — that would silently widen the schema
+    lerobot#3467/#3471 pin down.
     """
     camera = atom.get("camera")
     if isinstance(camera, str) and not camera:
@@ -905,7 +1108,11 @@ def _normalize_atom(atom: dict[str, Any], *, with_timestamp: bool) -> dict[str, 
 
 def _materialize_table(
     table: pa.Table, atoms_by_ep: dict[int, list[dict[str, Any]]]
-) -> tuple[pa.Table, int, int]:
+) -> tuple[pa.Table, int, int, dict[int, list[dict[str, Any]]]]:
+    """Returns the rewritten table plus the raw (un-normalized, as-authored —
+    including LEVI-only fields like ``to``) atoms actually used per episode,
+    for the caller's write-only ``annotations/language/`` export mirror.
+    """
     if (
         "episode_index" not in table.column_names
         or "timestamp" not in table.column_names
@@ -924,12 +1131,14 @@ def _materialize_table(
 
     n_persistent_total = 0
     n_event_total = 0
+    atoms_used_by_ep: dict[int, list[dict[str, Any]]] = {}
 
     unique_eps = sorted(set(episode_col))
     for ep_idx in unique_eps:
         atoms = atoms_by_ep.get(int(ep_idx))
         if atoms is None:
             atoms = _extract_existing_atoms_from_table(table, int(ep_idx))
+        atoms_used_by_ep[int(ep_idx)] = atoms
         persistent_rows: list[dict[str, Any]] = []
         frame_ts = sorted(
             {ts_col[i] for i in range(n_rows) if episode_col[i] == ep_idx}
@@ -997,6 +1206,7 @@ def _materialize_table(
         pa.Table.from_arrays(new_cols, names=new_names),
         n_persistent_total,
         n_event_total,
+        atoms_used_by_ep,
     )
 
 
@@ -1033,6 +1243,17 @@ def _copy_object_sidecar(store: SidecarStore, destination: Path) -> None:
         shutil.copytree(revisions, destination / "revisions")
 
 
+EXPORT_MARKER_NAME = ".levi-export.json"
+
+
+def _is_levi_export(path: Path) -> bool:
+    """True only for a directory carrying the marker this function itself
+    writes on a successful export — the one case where re-exporting into an
+    already-existing directory in place is safe. Never treat a directory as
+    reusable just because it happens to already exist."""
+    return (path / EXPORT_MARKER_NAME).is_file()
+
+
 def _do_export(
     state: DatasetState, output_dir: str | None, copy_videos: bool
 ) -> dict[str, Any]:
@@ -1044,16 +1265,33 @@ def _do_export(
         out_root = inside(output_dir)
     else:
         EXPORT_ROOT.mkdir(parents=True, exist_ok=True)
-        name = (state.repo_id or Path(state.root).name or "dataset").replace("/", "__")
-        out_root = EXPORT_ROOT / f"{name}_annotated_{uuid.uuid4().hex[:10]}"
+        # Deterministic, not random: the same source dataset always resolves
+        # to the same export directory, so repeated "导出标注数据集" clicks
+        # update one dataset copy in place instead of piling up abandoned
+        # full copies (videos + parquet + meta) on every click.
+        name = dataset_display_slug(state.repo_id, state.local_path)
+        out_root = EXPORT_ROOT / f"{name}_annotated_{state.export_identity_hash}"
 
-    if out_root.exists() or out_root.is_relative_to(state.root):
+    if out_root.is_relative_to(state.root):
         raise HTTPException(
             409, "Export must use a new directory outside the source dataset"
         )
-    out_root.mkdir(parents=True, exist_ok=False)
+    reuse = out_root.exists()
+    if reuse and not _is_levi_export(out_root):
+        raise HTTPException(
+            409,
+            "Export directory already exists and wasn't created by a LEVI "
+            "export — refusing to overwrite it",
+        )
+    out_root.mkdir(parents=True, exist_ok=True)
+    created_at = (
+        json.loads((out_root / EXPORT_MARKER_NAME).read_text())["created_at"]
+        if reuse
+        else pd.Timestamp.utcnow().isoformat()
+    )
 
-    # Copy meta/
+    # Copy meta/ (always refreshed on every export — cheap relative to video,
+    # and keeps the feature/tool declarations authoritative even on reuse).
     src_meta = state.root / "meta"
     dst_meta = out_root / "meta"
     if dst_meta.exists():
@@ -1117,19 +1355,65 @@ def _do_export(
     if not data_files:
         raise HTTPException(status_code=404, detail="No data parquet files found")
 
+    # Force a fresh full resync right before materializing — other LEVI
+    # processes sharing this workspace (a collaborator's own instance, or
+    # this same person on another port) may have saved episodes this
+    # process's cache never saw, and the export must reflect every one of
+    # them, not just what happened to already be cached.
+    _reload_annotations_from_disk(state)
     atoms_by_ep = {ep: ann.atoms for ep, ann in state.annotations.items()}
 
     n_persistent = 0
     n_events = 0
+    atoms_used: dict[int, list[dict[str, Any]]] = {}
     for src_path in data_files:
         rel_path = src_path.relative_to(state.root)
         dst_path = out_root / rel_path
         dst_path.parent.mkdir(parents=True, exist_ok=True)
         table = pq.read_table(src_path)
-        new_table, np_n, ne_n = _materialize_table(table, atoms_by_ep)
+        new_table, np_n, ne_n, per_ep_atoms = _materialize_table(table, atoms_by_ep)
         n_persistent += np_n
         n_events += ne_n
+        atoms_used.update(per_ep_atoms)
         pq.write_table(new_table, dst_path)
+
+    # Write-only per-episode language annotation mirror + manifest — a
+    # portability/audit artifact with the exact same "one file per episode"
+    # convention SAM3 already uses (``annotations/sam3/masks/episode-*``).
+    # LEVI never reads this back: reload correctness already comes from the
+    # ``language_persistent``/``language_events`` columns just baked into
+    # data/*.parquet above (``get_episode_atoms``'s parquet-column fallback),
+    # so there is exactly one source of truth and nothing here can drift out
+    # of sync with it. Includes LEVI-only fields (e.g. ``to``) that the
+    # exported struct itself deliberately omits.
+    lang_dir = out_root / "annotations" / "language"
+    if lang_dir.exists():
+        shutil.rmtree(lang_dir)
+    annotated_eps = {ep: atoms for ep, atoms in atoms_used.items() if atoms}
+    if annotated_eps:
+        lang_dir.mkdir(parents=True, exist_ok=True)
+        manifest: dict[str, Any] = {
+            "version": 1,
+            "source_root": str(state.root),
+            "episodes": {},
+        }
+        for ep_idx in sorted(annotated_eps):
+            ep_atoms = annotated_eps[ep_idx]
+            rel = f"episode_{ep_idx:06d}.json"
+            (lang_dir / rel).write_text(
+                json.dumps({"episode_index": ep_idx, "atoms": ep_atoms}, indent=2)
+            )
+            n_persistent_ep = sum(
+                1
+                for a in ep_atoms
+                if column_for_style(a.get("style")) == LANGUAGE_PERSISTENT
+            )
+            manifest["episodes"][str(ep_idx)] = {
+                "path": rel,
+                "persistent_count": n_persistent_ep,
+                "event_count": len(ep_atoms) - n_persistent_ep,
+            }
+        (lang_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
     # Carry over the video shards so the export is self-contained. We
     # materialize *real* files (hardlink where the filesystem allows it, else
@@ -1138,14 +1422,14 @@ def _do_export(
     # ``HfApi.upload_folder``, which is exactly the "downloaded dataset isn't
     # usable" problem. ``copy_videos=True`` forces a full byte copy (used by
     # the push-to-hub path, where the upload reads the bytes anyway).
+    #
+    # Skipped entirely once ``dst_videos`` already exists: source captures
+    # are immutable (see CLAUDE.md — "Preserve source captures"), so a
+    # reused export directory's videos never need refreshing, and video is
+    # the dominant cost this whole reuse scheme exists to avoid repeating.
     src_videos = state.root / "videos"
     dst_videos = out_root / "videos"
-    if src_videos.exists():
-        if dst_videos.exists() or dst_videos.is_symlink():
-            if dst_videos.is_symlink():
-                dst_videos.unlink()
-            else:
-                shutil.rmtree(dst_videos)
+    if src_videos.exists() and not dst_videos.exists():
         _materialize_tree(src_videos, dst_videos, force_copy=copy_videos)
 
     # Carry the current object sidecar into the exported dataset without
@@ -1157,11 +1441,25 @@ def _do_export(
         dst_sidecar = out_root / "annotations" / "sam3"
         _copy_object_sidecar(object_store, dst_sidecar)
 
+    (out_root / EXPORT_MARKER_NAME).write_text(
+        json.dumps(
+            {
+                "source_root": str(state.root),
+                "repo_id": state.repo_id,
+                "revision": state.revision,
+                "created_at": created_at,
+                "updated_at": pd.Timestamp.utcnow().isoformat(),
+            },
+            indent=2,
+        )
+    )
+
     return {
         "output_dir": str(out_root),
         "persistent_rows": n_persistent,
         "event_rows": n_events,
         "object_annotation_revision": object_revision,
+        "reused_existing_export": reuse,
     }
 
 
@@ -1222,6 +1520,73 @@ def load_dataset(req: LoadRequest) -> JSONResponse:
     )
 
 
+@app.get("/api/episodes/annotation-summary")
+def episode_annotation_summary(
+    repo_id: str | None = None,
+    revision: str | None = None,
+    local_path: str | None = None,
+) -> JSONResponse:
+    """Per-episode language/vision annotation presence for the sidebar's
+    annotated-vs-unannotated indicator. Language reuses the exact same
+    parquet-column fallback as ``get_episode_atoms`` (batched by shared v3
+    file so a multi-episode chunk is read once, not once per episode) and
+    caches results into ``state.annotations`` as a side effect, same as that
+    endpoint. Vision only stats the SAM3 sidecar's per-episode mask
+    directory — cheap, and avoids ``SidecarStore.read_annotations`` re-globbing
+    + re-reading the whole revision once per episode.
+    """
+    state = _ensure_state(
+        DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path)
+    )
+    episode_indices = sorted(
+        int(i) for i in state.episodes_df["episode_index"].tolist()
+    )
+
+    language: dict[str, bool] = {}
+    by_path: dict[Path, list[int]] = {}
+    for ep in episode_indices:
+        ann = _lookup_episode_annotations(state, ep)
+        if ann is not None:
+            language[str(ep)] = bool(ann.atoms)
+            continue
+        path = _episode_data_path(state, ep)
+        if path is None:
+            language[str(ep)] = False
+            continue
+        by_path.setdefault(path, []).append(ep)
+
+    for path, eps in by_path.items():
+        table: pa.Table | None = None
+        try:
+            schema = pq.read_schema(path)
+            columns = ["episode_index"]
+            if "timestamp" in schema.names:
+                columns.append("timestamp")
+            if LANGUAGE_PERSISTENT in schema.names:
+                columns.append(LANGUAGE_PERSISTENT)
+            if LANGUAGE_EVENTS in schema.names:
+                columns.append(LANGUAGE_EVENTS)
+            if LANGUAGE_PERSISTENT in columns or LANGUAGE_EVENTS in columns:
+                table = pq.read_table(path, columns=columns)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("annotation summary read failed for %s: %s", path, e)
+        for ep in eps:
+            atoms = _extract_existing_atoms_from_table(table, ep) if table else []
+            if atoms:
+                state.annotations[ep] = EpisodeAnnotations(atoms=atoms)
+            language[str(ep)] = bool(atoms)
+
+    vision: dict[str, bool] = {}
+    store = _sidecar(state)
+    revision_id = store.current_revision()
+    masks_root = store.revision_path(revision_id) / "masks" if revision_id else None
+    for ep in episode_indices:
+        ep_dir = masks_root / f"episode-{ep:06d}" if masks_root else None
+        vision[str(ep)] = bool(ep_dir and ep_dir.is_dir() and any(ep_dir.iterdir()))
+
+    return JSONResponse({"language": language, "vision": vision})
+
+
 @app.get("/api/episodes/{episode_index}/atoms")
 def get_episode_atoms(
     episode_index: int,
@@ -1232,7 +1597,7 @@ def get_episode_atoms(
     state = _ensure_state(
         DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path)
     )
-    ann = state.annotations.get(episode_index)
+    ann = _lookup_episode_annotations(state, episode_index)
     if ann is None:
         path = _episode_data_path(state, episode_index)
         atoms: list[dict[str, Any]] = []
@@ -1278,11 +1643,26 @@ def set_episode_atoms(episode_index: int, payload: EpisodeAtomsPayload) -> JSONR
     for atom in atoms:
         if column_for_style(atom.get("style")) == LANGUAGE_EVENTS and frame_ts:
             atom["timestamp"] = _snap(float(atom["timestamp"]), frame_ts)
-    state.annotations[episode_index] = EpisodeAnnotations(atoms=atoms)
-    _save_annotations(state)
-    return JSONResponse(
-        {"ok": True, "saved": len(atoms), "path": str(state.annotations_path)}
+    path = _write_episode_annotations(state, episode_index, atoms)
+    return JSONResponse({"ok": True, "saved": len(atoms), "path": str(path)})
+
+
+@app.delete("/api/episodes/{episode_index}/atoms")
+def delete_episode_atoms(
+    episode_index: int,
+    repo_id: str | None = None,
+    revision: str | None = None,
+    local_path: str | None = None,
+) -> JSONResponse:
+    """Delete an episode's annotation file entirely — distinct from saving
+    an empty atoms list (which still records "reviewed, nothing to
+    annotate"). Reverts the episode to its pristine, never-annotated state.
+    """
+    state = _ensure_state(
+        DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path)
     )
+    existed = _delete_episode_annotations(state, episode_index)
+    return JSONResponse({"ok": True, "deleted": existed})
 
 
 def _prepare_sam3_media(state: DatasetState) -> None:

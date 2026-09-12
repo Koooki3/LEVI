@@ -43,6 +43,11 @@ import {
 } from "./fetch-data";
 import { getDatasetVersionAndInfo } from "@/utils/versionUtils";
 import type { DatasetMetadata } from "@/utils/parquetUtils";
+import {
+  fetchAnnotationSummary,
+  isAnnotateBackendEnabled,
+  type AnnotationSummary,
+} from "@/utils/annotationsClient";
 
 const URDFViewer = lazy(() => import("@/components/urdf-viewer"));
 const ActionInsightsPanel = lazy(
@@ -311,6 +316,23 @@ function EpisodeViewerInner({
     }
     return "episodes";
   });
+  // Sub-tab within "Annotations": language/event annotation is a fully
+  // decoupled system from SAM3 object/track/mask annotation. sessionStorage
+  // (not local-only state) because episode navigation goes through
+  // Next.js's dynamic `[episode]` route segment, which remounts this whole
+  // component on every episode switch (confirmed: a lazy-init random id
+  // stamped here differs before/after a same-dataset episode navigation) —
+  // plain useState would silently reset every time you switch episodes.
+  // Same reasoning and pattern as `activeTab` above.
+  const [annotationsSubTab, setAnnotationsSubTab] = useState<
+    "language" | "vision"
+  >(() => {
+    if (typeof window !== "undefined") {
+      const stored = sessionStorage.getItem("annotationsSubTab");
+      if (stored === "language" || stored === "vision") return stored;
+    }
+    return "language";
+  });
   const isLoading = activeTab === "episodes" && (!videosReady || !chartsReady);
 
   useEffect(() => {
@@ -357,7 +379,19 @@ function EpisodeViewerInner({
   // not overwrite a narrow one the user asked for afterwards.
   const insightsRunRef = useRef(0);
   const [taskIndex, setTaskIndex] = useState<DatasetTaskIndex | null>(null);
-  const [taskFilter, setTaskFilter] = useState<string | null>(null);
+  // sessionStorage-backed for the same reason as annotationsSubTab above —
+  // this component remounts on every episode navigation. Scoped by dataset
+  // (unlike activeTab/annotationsSubTab, which are pure UI preferences):
+  // a task name from one dataset is meaningless — possibly not even a valid
+  // option — in another, so a filter shouldn't leak across datasets.
+  const [taskFilter, setTaskFilter] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      return sessionStorage.getItem(`taskFilter:${org}/${dataset}`);
+    }
+    return null;
+  });
+  const [annotationSummary, setAnnotationSummary] =
+    useState<AnnotationSummary | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -375,7 +409,14 @@ function EpisodeViewerInner({
     setEpisodeFramesData(null);
     setCrossEpData(null);
     setTaskIndex(null);
-    setTaskFilter(null);
+    setAnnotationSummary(null);
+    // taskFilter reset moved to the outer EpisodeViewer, keyed on org/dataset
+    // instead of datasetInfo.repoId: this effect lives inside a component
+    // that fully remounts on every episode navigation (see EpisodeViewer's
+    // fetch effect), so a `datasetInfo.repoId` dependency looks "new" on
+    // every single remount, not just on a genuine dataset switch — it would
+    // silently null the now-lifted taskFilter right after every episode
+    // change if it stayed here.
   }, [datasetInfo.repoId]);
 
   // Task metadata drives both the sidebar filter and the by-task insights
@@ -395,6 +436,21 @@ function EpisodeViewerInner({
     };
   }, [org, dataset]);
 
+  // Sidebar's per-episode annotated/unannotated indicator. No-op without an
+  // annotation backend configured.
+  useEffect(() => {
+    if (!org || !dataset || !isAnnotateBackendEnabled()) return;
+    let cancelled = false;
+    fetchAnnotationSummary({ repoId: `${org}/${dataset}` })
+      .then((result) => {
+        if (!cancelled && mountedRef.current) setAnnotationSummary(result);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [org, dataset]);
+
   // Eagerly load the URDFViewer bundle + warm the STL geometry cache while
   // the user is on the Episodes tab, so the 3D Replay tab opens faster.
   useEffect(() => {
@@ -407,13 +463,29 @@ function EpisodeViewerInner({
   }, [datasetInfo.robot_type, datasetInfo.codebase_version]);
 
   // Persist UI state across episode navigations. One effect instead of
-  // three near-identical writes — fewer commit hooks per render and the
-  // intent (mirror three primitives to sessionStorage) reads as one unit.
+  // several near-identical writes — fewer commit hooks per render and the
+  // intent (mirror these primitives to sessionStorage) reads as one unit.
+  // Needed because this component remounts on every episode navigation
+  // (Next.js recreates the subtree under a dynamic `[episode]` route
+  // segment on every param change) — without this, plain useState for any
+  // of these would silently reset on every episode switch.
   useEffect(() => {
     sessionStorage.setItem("activeTab", activeTab);
     sessionStorage.setItem("sidebarFlaggedOnly", String(sidebarFlaggedOnly));
     sessionStorage.setItem("framesFlaggedOnly", String(framesFlaggedOnly));
-  }, [activeTab, sidebarFlaggedOnly, framesFlaggedOnly]);
+    sessionStorage.setItem("annotationsSubTab", annotationsSubTab);
+    const taskFilterKey = `taskFilter:${org}/${dataset}`;
+    if (taskFilter) sessionStorage.setItem(taskFilterKey, taskFilter);
+    else sessionStorage.removeItem(taskFilterKey);
+  }, [
+    activeTab,
+    sidebarFlaggedOnly,
+    framesFlaggedOnly,
+    annotationsSubTab,
+    taskFilter,
+    org,
+    dataset,
+  ]);
 
   const loadStats = () => {
     if (statsLoadedRef.current) return;
@@ -558,9 +630,18 @@ function EpisodeViewerInner({
     );
   }, [episodes, taskFilter, taskIndex]);
 
-  // Pagination state
+  // Pagination state. Lazily computed from the CURRENT episode's position
+  // (not just `useState(1)`) so a fresh mount — which happens on every
+  // episode navigation, see the sessionStorage comment above — starts on
+  // the right page immediately instead of flashing page 1 before the
+  // correction effect below catches up. Doesn't need sessionStorage itself:
+  // it's a pure derivation of already-available data, so there's nothing to
+  // persist independently of that data.
   const pageSize = 100;
-  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(() => {
+    const idx = visibleEpisodes.indexOf(episodeId);
+    return idx === -1 ? 1 : Math.floor(idx / pageSize) + 1;
+  });
   const totalPages = Math.max(1, Math.ceil(visibleEpisodes.length / pageSize));
   const paginatedEpisodes = visibleEpisodes.slice(
     (currentPage - 1) * pageSize,
@@ -618,7 +699,7 @@ function EpisodeViewerInner({
     setCurrentPage(
       episodeIndex === -1 ? 1 : Math.floor(episodeIndex / pageSize) + 1,
     );
-  }, [visibleEpisodes, episodeId, pageSize]);
+  }, [visibleEpisodes, episodeId, pageSize, setCurrentPage]);
 
   // Mirror the values the keydown handler needs into a ref. Without this,
   // `useCallback` would produce a new handler whenever `activeTab` /
@@ -747,6 +828,7 @@ function EpisodeViewerInner({
                 taskFilter={taskFilter}
                 onTaskFilterChange={setTaskFilter}
                 filteredEpisodeCount={visibleEpisodes.length}
+                annotationSummary={annotationSummary ?? undefined}
                 onEpisodeSelect={
                   activeTab === "urdf"
                     ? (ep) => {
@@ -860,45 +942,75 @@ function EpisodeViewerInner({
                       annotationRepoId={datasetInfo.repoId}
                     />
                   )}
-                  <div className="grounding-intro">
-                    <span className="section-kicker">
-                      <T>Grounded VQA</T>
-                    </span>
-                    <ul>
-                      <li>
-                        <T>
-                          Draw directly on the active video to create visual
-                          questions. Drag for a bounding box, click for a point.
-                          The camera is detected from the video you draw on.
-                        </T>
-                      </li>
-                      <li>
-                        <T>
-                          Drag on any video to add a bbox question. Click any
-                          video to add a keypoint question. Confirm the popup
-                          with{" "}
-                        </T>
-                        <kbd>↵</kbd>
-                        <T>, or cancel with </T>
-                        <kbd>
-                          <T>Esc</T>
-                        </kbd>
-                        .
-                      </li>
-                    </ul>
-                  </div>
                   <PlaybackBar />
-                  <ObjectAnnotationPanel
-                    episodeId={episodeId}
-                    ident={{ repoId: datasetInfo.repoId }}
-                    cameraKeys={videosInfo.map((v) => v.filename)}
-                    allEpisodes={episodes}
-                    taskIndex={taskIndex}
-                  />
-                  <AnnotationsTimeline duration={data.duration} />
-                  <AnnotationsPanel
-                    cameraKeys={videosInfo.map((v) => v.filename)}
-                  />
+
+                  {/* Sub-tabs: language/event annotation vs. SAM3 object
+                  annotation are fully independent systems — keep the video
+                  player + scrubber shared above (both need it, and keeping
+                  it mounted across sub-tab switches avoids a reload), but
+                  split everything else so users always know which system
+                  they're working in. */}
+                  <div className="flex items-center border-b border-white/5 -mx-1">
+                    <TabButton
+                      active={annotationsSubTab === "language"}
+                      onClick={() => setAnnotationsSubTab("language")}
+                      label="Language & Events"
+                      title="Task augmentation, subtask, plan, memory, interjection, VQA"
+                    />
+                    <TabButton
+                      active={annotationsSubTab === "vision"}
+                      onClick={() => setAnnotationsSubTab("vision")}
+                      label="Objects & Tracking"
+                      title="SAM3 object detection, tracking and mask review"
+                    />
+                  </div>
+
+                  {annotationsSubTab === "language" && (
+                    <>
+                      <div className="grounding-intro">
+                        <span className="section-kicker">
+                          <T>Grounded VQA</T>
+                        </span>
+                        <ul>
+                          <li>
+                            <T>
+                              Draw directly on the active video to create visual
+                              questions. Drag for a bounding box, click for a
+                              point. The camera is detected from the video you
+                              draw on.
+                            </T>
+                          </li>
+                          <li>
+                            <T>
+                              Drag on any video to add a bbox question. Click
+                              any video to add a keypoint question. Confirm the
+                              popup with{" "}
+                            </T>
+                            <kbd>↵</kbd>
+                            <T>, or cancel with </T>
+                            <kbd>
+                              <T>Esc</T>
+                            </kbd>
+                            .
+                          </li>
+                        </ul>
+                      </div>
+                      <AnnotationsTimeline duration={data.duration} />
+                      <AnnotationsPanel
+                        cameraKeys={videosInfo.map((v) => v.filename)}
+                      />
+                    </>
+                  )}
+
+                  {annotationsSubTab === "vision" && (
+                    <ObjectAnnotationPanel
+                      episodeId={episodeId}
+                      ident={{ repoId: datasetInfo.repoId }}
+                      cameraKeys={videosInfo.map((v) => v.filename)}
+                      allEpisodes={episodes}
+                      taskIndex={taskIndex}
+                    />
+                  )}
                 </div>
               )}
 

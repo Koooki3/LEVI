@@ -30,6 +30,7 @@ import { snapToFrame } from "../types/language.types";
 import {
   fetchEpisodeAtoms,
   saveEpisodeAtoms,
+  deleteEpisodeAtoms,
   fetchFrameTimestamps,
   isAnnotateBackendEnabled,
 } from "../utils/annotationsClient";
@@ -115,11 +116,32 @@ interface AnnotationsContextType {
   updateAtom: (index: number, updates: Partial<LanguageAtom>) => void;
   deleteAtom: (atom: LanguageAtom) => void;
   resetAtoms: () => void;
+  /**
+   * Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) are already wired globally while this
+   * provider is mounted — these are exposed mainly so a future undo/redo
+   * button could call them directly. Scoped to the current episode: the
+   * stacks reset on `setEpisode`. No-ops when there's nothing to undo/redo.
+   */
+  undo: () => void;
+  redo: () => void;
 
   setPendingDraw: (draw: PendingDraw) => void;
   clearPendingDraw: () => void;
 
   save: () => Promise<{ ok: boolean; error?: string; path?: string | null }>;
+  /**
+   * Delete this episode's annotation file entirely and reset local atoms
+   * to empty — distinct from `save()` with an empty array (see its doc).
+   */
+  deleteEpisodeFile: () => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Flush every OTHER episode's sessionStorage-cached edits for this dataset
+   * to the backend. Call before exporting: `save()` only ever persists the
+   * currently open episode, so edits made to other episodes earlier in the
+   * session — and never explicitly "Save episode"'d — would otherwise be
+   * silently absent from the export. No-op without a backend.
+   */
+  flushAllEpisodes: () => Promise<void>;
   // Snap an arbitrary timestamp to the nearest source frame (when known).
   snap: (ts: number) => number;
 }
@@ -163,6 +185,58 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const loadGeneration = useRef(0);
 
+  // ---- Undo/redo -----------------------------------------------------
+  // Scoped to the current episode: switching episodes clears both stacks
+  // (see setEpisode below) rather than letting Ctrl+Z reach across episode
+  // boundaries. Two-stack model: undo pops `history` and pushes the
+  // superseded state onto `redo`; redo does the reverse. Refs, not state —
+  // nothing here needs to trigger a render on its own; `atoms` changing is
+  // what drives re-renders.
+  const HISTORY_LIMIT = 50;
+  const historyRef = useRef<LanguageAtom[][]>([]);
+  const redoRef = useRef<LanguageAtom[][]>([]);
+  // Rapid consecutive edits to the same thing (typing into a content
+  // textarea commits on every keystroke via updateAtom) are grouped into
+  // one undo step instead of one per character: the first edit in a burst
+  // opens a pending group holding the state from *before* the burst; each
+  // further edit within the group extends its timeout instead of pushing
+  // its own entry; the group closes (and finally lands on the stack) after
+  // a short pause.
+  const pendingGroupRef = useRef<{
+    baseline: LanguageAtom[];
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
+
+  const flushPendingGroup = useCallback(() => {
+    const pending = pendingGroupRef.current;
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    historyRef.current.push(pending.baseline);
+    if (historyRef.current.length > HISTORY_LIMIT) historyRef.current.shift();
+    pendingGroupRef.current = null;
+  }, []);
+
+  // Every mutator calls this with the atoms value as it stood immediately
+  // before the change it's about to make (read inside its own setAtoms
+  // updater, so it's always the true pre-change state even under rapid
+  // calls). A new edit always invalidates redo, same as any other editor.
+  const recordBeforeChange = useCallback(
+    (before: LanguageAtom[]) => {
+      redoRef.current = [];
+      const pending = pendingGroupRef.current;
+      if (pending) {
+        clearTimeout(pending.timer);
+        pending.timer = setTimeout(flushPendingGroup, 600);
+      } else {
+        pendingGroupRef.current = {
+          baseline: before,
+          timer: setTimeout(flushPendingGroup, 600),
+        };
+      }
+    },
+    [flushPendingGroup],
+  );
+
   // Hydrate from sessionStorage when episode/ident changes; if the backend
   // is enabled, also fetch authoritative atoms + frame timestamps.
   const setEpisode = useCallback(
@@ -177,6 +251,11 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
       setIdent(newIdent);
       setPendingDrawState(null);
       setSelectedIdxState(null);
+      // Undo history doesn't reach across episodes.
+      if (pendingGroupRef.current) clearTimeout(pendingGroupRef.current.timer);
+      pendingGroupRef.current = null;
+      historyRef.current = [];
+      redoRef.current = [];
 
       // Hydrate from session first (so user edits survive episode toggles).
       // If session is empty, fall back to initialAtoms (parquet-extracted).
@@ -251,48 +330,135 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
     [frameTimestamps],
   );
 
-  const addAtom = useCallback((atom: LanguageAtom) => {
-    setAtoms((prev) => [...prev, atom]);
-  }, []);
+  const addAtom = useCallback(
+    (atom: LanguageAtom) => {
+      setAtoms((prev) => {
+        recordBeforeChange(prev);
+        return [...prev, atom];
+      });
+    },
+    [recordBeforeChange],
+  );
 
-  const addAtoms = useCallback((newAtoms: LanguageAtom[]) => {
-    setAtoms((prev) => [...prev, ...newAtoms]);
-  }, []);
+  const addAtoms = useCallback(
+    (newAtoms: LanguageAtom[]) => {
+      setAtoms((prev) => {
+        recordBeforeChange(prev);
+        return [...prev, ...newAtoms];
+      });
+    },
+    [recordBeforeChange],
+  );
 
   const updateAtom = useCallback(
     (index: number, updates: Partial<LanguageAtom>) => {
       setAtoms((prev) => {
         if (index < 0 || index >= prev.length) return prev;
+        recordBeforeChange(prev);
         const next = prev.slice();
         next[index] = { ...next[index], ...updates };
         return next;
       });
     },
-    [],
+    [recordBeforeChange],
   );
 
-  const deleteAtom = useCallback((atom: LanguageAtom) => {
-    setAtoms((prev) => {
-      const next = prev.filter((a) => a !== atom);
-      // If the deleted index was selected (or the selected index was after the
-      // deleted one), nudge selection so it remains pointing at a valid atom
-      // — or null when the list is empty.
-      setSelectedIdxState((cur) => {
-        if (cur == null) return null;
-        const oldIdx = prev.indexOf(atom);
-        if (oldIdx < 0) return cur;
-        if (cur === oldIdx) return null;
-        if (cur > oldIdx) return cur - 1;
-        return cur;
+  const deleteAtom = useCallback(
+    (atom: LanguageAtom) => {
+      setAtoms((prev) => {
+        recordBeforeChange(prev);
+        const next = prev.filter((a) => a !== atom);
+        // If the deleted index was selected (or the selected index was after
+        // the deleted one), nudge selection so it remains pointing at a
+        // valid atom — or null when the list is empty.
+        setSelectedIdxState((cur) => {
+          if (cur == null) return null;
+          const oldIdx = prev.indexOf(atom);
+          if (oldIdx < 0) return cur;
+          if (cur === oldIdx) return null;
+          if (cur > oldIdx) return cur - 1;
+          return cur;
+        });
+        return next;
       });
-      return next;
-    });
-  }, []);
+    },
+    [recordBeforeChange],
+  );
 
   const resetAtoms = useCallback(() => {
-    setAtoms([]);
+    setAtoms((prev) => {
+      recordBeforeChange(prev);
+      return [];
+    });
     setSelectedIdxState(null);
+  }, [recordBeforeChange]);
+
+  // Undo/redo replace the atoms array wholesale — they bypass the mutators
+  // above entirely (calling setAtoms directly), so they never re-enter
+  // recordBeforeChange/redo-clearing themselves. Selection is kept when the
+  // restored array is still long enough for it to resolve (the common case:
+  // undoing a content/timestamp/`to` edit reverts an atom in place at the
+  // same index, so the editor should stay open on it, not snap closed) and
+  // dropped only when it can't possibly still mean anything.
+  const undo = useCallback(() => {
+    flushPendingGroup();
+    const prev = historyRef.current.pop();
+    if (prev === undefined) return;
+    setAtoms((current) => {
+      redoRef.current.push(current);
+      if (redoRef.current.length > HISTORY_LIMIT) redoRef.current.shift();
+      return prev;
+    });
+    // Most undos are a content/timestamp/`to` edit reverting in place — the
+    // index is unchanged and still points at the same atom, so keep the
+    // editor open on it rather than snapping it closed. Only drop the
+    // selection when the restored array is too short for it to still mean
+    // anything (e.g. undoing an add that was the last atom).
+    setSelectedIdxState((cur) =>
+      cur != null && cur < prev.length ? cur : null,
+    );
+  }, [flushPendingGroup]);
+
+  const redo = useCallback(() => {
+    const next = redoRef.current.pop();
+    if (next === undefined) return;
+    setAtoms((current) => {
+      historyRef.current.push(current);
+      if (historyRef.current.length > HISTORY_LIMIT) historyRef.current.shift();
+      return next;
+    });
+    setSelectedIdxState((cur) =>
+      cur != null && cur < next.length ? cur : null,
+    );
   }, []);
+
+  // Ctrl+Z / Cmd+Z undo, Ctrl+Shift+Z / Cmd+Shift+Z / Ctrl+Y redo — global
+  // to the whole annotation surface (not scoped to one field's focus) and
+  // always intercepted: controlled React inputs don't have a working
+  // native undo history of their own to preserve (React overwrites the
+  // DOM value on every keystroke), so there's nothing worth falling back
+  // to — this app-level stack is a strict upgrade, and it's what keeps
+  // sessionStorage/dirty tracking consistent with whatever the shortcut
+  // just changed (those already react to `atoms`, so undo/redo need no
+  // extra wiring there).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === "z" && e.shiftKey) {
+        e.preventDefault();
+        redo();
+      } else if (key === "z") {
+        e.preventDefault();
+        undo();
+      } else if (key === "y") {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [undo, redo]);
 
   const setPendingDraw = useCallback((draw: PendingDraw) => {
     setPendingDrawState(draw);
@@ -346,6 +512,65 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, [atoms, episodeId, ident]);
 
+  /**
+   * Delete this episode's annotation file entirely and reset the in-memory
+   * atoms back to empty — distinct from `save()` with an empty array, which
+   * still records "reviewed, nothing to annotate". Reverts to the episode's
+   * pristine, never-annotated state.
+   */
+  const deleteEpisodeFile = useCallback(async (): Promise<{
+    ok: boolean;
+    error?: string;
+  }> => {
+    if (episodeId == null) return { ok: false, error: "no episode" };
+    setSaving(true);
+    try {
+      if (isAnnotateBackendEnabled()) {
+        await deleteEpisodeAtoms(episodeId, ident);
+      }
+      try {
+        sessionStorage.removeItem(storageKey(identKey(ident), episodeId));
+      } catch {
+        /* ignore */
+      }
+      setAtoms([]);
+      setSelectedIdxState(null);
+      savedSnapshotRef.current = "[]";
+      setDirty(false);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    } finally {
+      setSaving(false);
+    }
+  }, [episodeId, ident]);
+
+  const flushAllEpisodes = useCallback(async (): Promise<void> => {
+    if (!isAnnotateBackendEnabled()) return;
+    const prefix = `${STORAGE_PREFIX}${identKey(ident)}::`;
+    const pending: Promise<unknown>[] = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (!key || !key.startsWith(prefix)) continue;
+      const epIdx = Number(key.slice(prefix.length));
+      // The currently open episode is already flushed by save() itself.
+      if (!Number.isInteger(epIdx) || epIdx === episodeId) continue;
+      let parsed: LanguageAtom[];
+      try {
+        parsed = JSON.parse(
+          sessionStorage.getItem(key) || "[]",
+        ) as LanguageAtom[];
+      } catch {
+        continue;
+      }
+      // Idempotent — a harmless no-op overwrite if the backend already has
+      // this episode's current atoms — so no per-episode dirty tracking is
+      // needed across navigations.
+      pending.push(saveEpisodeAtoms(epIdx, ident, parsed).catch(() => {}));
+    }
+    await Promise.all(pending);
+  }, [ident, episodeId]);
+
   const value = useMemo<AnnotationsContextType>(
     () => ({
       episodeId,
@@ -375,6 +600,10 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
       setPendingDraw,
       clearPendingDraw,
       save,
+      deleteEpisodeFile,
+      flushAllEpisodes,
+      undo,
+      redo,
       snap,
     }),
     [
@@ -405,6 +634,10 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
       setPendingDraw,
       clearPendingDraw,
       save,
+      deleteEpisodeFile,
+      flushAllEpisodes,
+      undo,
+      redo,
       snap,
     ],
   );

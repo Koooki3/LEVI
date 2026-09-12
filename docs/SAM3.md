@@ -182,7 +182,7 @@ uv run levi serve
 ## Sidecar layout / Sidecar 目录
 
 ~~~text
-<LEVI_WORKSPACE>/outputs/LEVI/workbench/object_annotations/<dataset-hash>/
+<LEVI_WORKSPACE>/outputs/LEVI/workbench/object_annotations/<dataset-name>/
 ├── meta.json
 ├── current.json
 ├── revisions/<revision-id>/

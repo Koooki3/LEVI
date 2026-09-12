@@ -42,6 +42,8 @@ import {
   isSpeechAtom,
   parseVqaAnswer,
   type LanguageAtom,
+  type LanguageStyle,
+  type Role,
 } from "../types/language.types";
 
 const LABEL_WIDTH = 84;
@@ -93,6 +95,27 @@ const TRACK_GROUPS = [
   },
 ] as const;
 
+type TrackKey = (typeof TRACK_GROUPS)[number]["tracks"][number]["key"];
+
+/**
+ * Styles the timeline can create directly via drag-to-select, with the
+ * `role` each one is authored as. `vqa` is deliberately excluded: a VQA
+ * atom needs a camera plus a structured bbox/keypoint/count/attribute/
+ * spatial answer, which a bare text popup can't produce correctly — VQA
+ * atoms are created by drawing on the video (see the "Grounded VQA" intro
+ * in episode-viewer.tsx) and only reviewed/re-timed here. `task_aug` is
+ * excluded too: it's a whole-episode rephrasing with no temporal freedom
+ * (always `[0, duration]`), created via the quick-add form.
+ */
+const CREATE_ATOM_DEFAULTS: Partial<
+  Record<TrackKey, { role: Role; style: LanguageStyle }>
+> = {
+  subtask: { role: "assistant", style: "subtask" },
+  plan: { role: "assistant", style: "plan" },
+  memory: { role: "assistant", style: "memory" },
+  interjection: { role: "user", style: "interjection" },
+};
+
 interface Props {
   /** Episode duration in seconds. */
   duration: number;
@@ -106,19 +129,25 @@ interface Tooltip {
 }
 
 interface DragState {
-  kind: "edge" | "playhead" | "create";
-  /** Atom index whose timestamp is being moved (edge / create). */
+  /**
+   * "edge" moves an atom's `timestamp`; "edge-end" moves an atom's explicit
+   * `to` (only reachable once an atom has one — see `onEdgeDown`).
+   */
+  kind: "edge" | "edge-end" | "playhead" | "create";
+  /** Atom index whose timestamp/`to` is being moved (edge / edge-end). */
   atomIdx?: number;
   /** Episode-second timestamps captured at drag start (for cancel/clamp). */
   origTs?: number;
-  prevTs?: number; // previous subtask's timestamp (lower bound)
-  nextTs?: number; // next subtask's timestamp (upper bound, exclusive)
+  prevTs?: number; // lower bound
+  nextTs?: number; // upper bound (exclusive)
   /** For drag-to-create only. */
+  trackKey?: TrackKey;
   startTs?: number;
   endTs?: number;
 }
 
 interface PendingCreate {
+  trackKey: TrackKey;
   start: number;
   end: number;
   /** Anchor for the label popup (canvas-relative px). */
@@ -132,6 +161,11 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
   const trackBandRef = useRef<HTMLDivElement | null>(null);
 
   const [tooltip, setTooltip] = useState<Tooltip | null>(null);
+  // Precise time readout under the cursor, updated continuously while
+  // hovering any track (not just markers/spans) — helps pick exact left/right
+  // range bounds by eye before committing to a drag. `null` while the mouse
+  // isn't over the track area.
+  const [hoverTs, setHoverTs] = useState<number | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [pendingCreate, setPendingCreate] = useState<PendingCreate | null>(
     null,
@@ -182,8 +216,15 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
       .sort((x, y) => x.a.timestamp - y.a.timestamp);
     subWithIdx.forEach(({ a, i }, k) => {
       const start = a.timestamp;
+      // An explicit `to` (drag-authored range) always wins; otherwise fall
+      // back to "active until the next subtask" for every atom saved before
+      // this feature existed.
       const end =
-        k + 1 < subWithIdx.length ? subWithIdx[k + 1].a.timestamp : duration;
+        a.to != null
+          ? a.to
+          : k + 1 < subWithIdx.length
+            ? subWithIdx[k + 1].a.timestamp
+            : duration;
       subtask.push({
         kind: "span",
         start,
@@ -205,7 +246,11 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
     planWithIdx.forEach(({ a, i }, k) => {
       const start = a.timestamp;
       const end =
-        k + 1 < planWithIdx.length ? planWithIdx[k + 1].a.timestamp : duration;
+        a.to != null
+          ? a.to
+          : k + 1 < planWithIdx.length
+            ? planWithIdx[k + 1].a.timestamp
+            : duration;
       plan.push({
         kind: "span",
         start,
@@ -277,6 +322,14 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
     return frac * duration;
   };
 
+  // ============ Continuous hover time readout ============
+  // Attached to every track div (not just markers) so moving the mouse
+  // anywhere over any lane always shows the precise underlying time.
+  const onTrackHoverMove = (e: React.MouseEvent) => {
+    setHoverTs(trackXToTs(e.clientX));
+  };
+  const onTrackHoverLeave = () => setHoverTs(null);
+
   // ============ Event-track click → seek + select ============
   const onTickClick = (e: React.MouseEvent, atomIdx: number, t: number) => {
     e.stopPropagation();
@@ -313,15 +366,40 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
     e.stopPropagation();
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    // The drag now seeks the video to follow the edge (see the pointermove
+    // handler) — pause first so that doesn't fight ongoing playback.
+    setIsPlaying(false);
     const sub = lanes.subWithIdx;
+    // Right edge of a span that owns an explicit `to` (drag-authored range):
+    // resize THIS atom's `to`, never touch the neighbor.
+    if (side === "r" && sub[spanK]?.a.to != null) {
+      const self = sub[spanK];
+      const lower = self.a.timestamp;
+      const upper =
+        spanK + 1 < sub.length ? sub[spanK + 1].a.timestamp : duration;
+      setDrag({
+        kind: "edge-end",
+        atomIdx: self.i,
+        origTs: self.a.to ?? undefined,
+        prevTs: lower,
+        nextTs: upper,
+      });
+      return;
+    }
     // Left edge of span k → moves sub[k] timestamp.
-    // Right edge of span k → moves sub[k+1] timestamp (if exists).
+    // Right edge of span k with no explicit `to` (legacy) → moves sub[k+1]
+    // timestamp, since that neighbor's start *is* this span's implied end.
     const idxToMove = side === "l" ? spanK : spanK + 1;
     if (idxToMove < 0 || idxToMove >= sub.length) return;
     const target = sub[idxToMove];
     const lower = idxToMove > 0 ? sub[idxToMove - 1].a.timestamp : 0;
-    const upper =
+    const rawUpper =
       idxToMove + 1 < sub.length ? sub[idxToMove + 1].a.timestamp : duration;
+    // Moving this atom's own start can never cross its own explicit end.
+    const upper =
+      side === "l" && target.a.to != null
+        ? Math.min(rawUpper, target.a.to)
+        : rawUpper;
     setDrag({
       kind: "edge",
       atomIdx: target.i,
@@ -331,15 +409,20 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
     });
   };
 
-  // ============ Drag-to-create new subtask span ============
-  const onSubtaskTrackDown = (e: React.PointerEvent) => {
+  // ============ Drag-to-create a new atom on any creatable track ============
+  const onTrackDown = (e: React.PointerEvent, trackKey: TrackKey) => {
     // Only fire when the mousedown lands on the track itself, not on a
     // child span/edge (those stop propagation in their own handlers).
     if (drag || pendingCreate) return;
     if (e.button !== 0) return;
+    if (!(trackKey in CREATE_ATOM_DEFAULTS)) return;
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    // The drag now seeks the video to follow the range's end (see the
+    // pointermove handler) — pause first so that doesn't fight ongoing
+    // playback.
+    setIsPlaying(false);
     const ts = snap(trackXToTs(e.clientX));
-    setDrag({ kind: "create", startTs: ts, endTs: ts });
+    setDrag({ kind: "create", trackKey, startTs: ts, endTs: ts });
   };
 
   // ============ Playhead drag ============
@@ -377,17 +460,43 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
         const clamped = Math.max(lower + 0.001, Math.min(upper - 0.001, ts));
         const snapped = snap(clamped);
         updateAtom(drag.atomIdx, { timestamp: snapped });
+        // Follow the edge being dragged with the playhead/video so the user
+        // can see the frame they're landing the boundary on, same as
+        // dragging the playhead handle itself.
+        seek(snapped, "external");
+        return;
+      }
+      if (drag.kind === "edge-end" && drag.atomIdx != null) {
+        const lower = drag.prevTs ?? 0;
+        const upper = drag.nextTs ?? duration;
+        const clamped = Math.max(lower + 0.001, Math.min(upper - 0.001, ts));
+        const snapped = snap(clamped);
+        updateAtom(drag.atomIdx, { to: snapped });
+        seek(snapped, "external");
         return;
       }
       if (drag.kind === "create") {
         const snapped = snap(Math.max(0, Math.min(duration, ts)));
         setDrag((d) => (d ? { ...d, endTs: snapped } : d));
+        // Follow the end of the range being drawn — lets the user watch the
+        // video land on whichever frame they're currently dragging over,
+        // same reasoning as the edge-drag case above.
+        seek(snapped, "external");
       }
     };
     const up = (e: PointerEvent) => {
-      if (drag.kind === "create") {
-        const a = Math.min(drag.startTs ?? 0, drag.endTs ?? 0);
-        const b = Math.max(drag.startTs ?? 0, drag.endTs ?? 0);
+      if (drag.kind === "create" && drag.trackKey) {
+        // Read the release position straight from the event rather than
+        // `drag.endTs` — `move`'s setDrag is async, so on a very fast
+        // drag-and-release the `up` closure can still be holding the
+        // *previous* render's stale `endTs` (equal to `startTs`) when this
+        // fires, which would wrongly fall through to the tap/seek branch
+        // below instead of opening the create-label popup.
+        const liveEndTs = snap(
+          Math.max(0, Math.min(duration, trackXToTs(e.clientX))),
+        );
+        const a = Math.min(drag.startTs ?? 0, liveEndTs);
+        const b = Math.max(drag.startTs ?? 0, liveEndTs);
         const distFrac = Math.abs(b - a) / Math.max(0.001, duration);
         // Need at least a few px of drag to count, otherwise treat as click.
         const trackWidth =
@@ -398,6 +507,7 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
           if (r) {
             const xFrac = b / Math.max(0.001, duration);
             setPendingCreate({
+              trackKey: drag.trackKey,
               start: a,
               end: b,
               anchorX: r.left + xFrac * r.width + 4,
@@ -443,21 +553,24 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
   const commitPendingCreate = () => {
     if (!pendingCreate) return;
     const text = createLabel.trim();
-    if (!text) {
+    const defaults = CREATE_ATOM_DEFAULTS[pendingCreate.trackKey];
+    if (!text || !defaults) {
       setPendingCreate(null);
       setCreateLabel("");
       return;
     }
+    // Reaching the popup already required a real drag (see the `up` handler
+    // above — a tap seeks immediately and never opens this), so start/end
+    // always differ: record the authored range explicitly.
     addAtom({
-      role: "assistant",
+      role: defaults.role,
       content: text,
-      style: "subtask",
+      style: defaults.style,
       timestamp: snap(pendingCreate.start),
+      to: snap(pendingCreate.end),
       camera: null,
       tool_calls: null,
     });
-    // The next subtask boundary is implicit (next sibling's timestamp); if
-    // the user wants a different end they can drag the right edge afterwards.
     setPendingCreate(null);
     setCreateLabel("");
   };
@@ -540,7 +653,9 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                         </div>
                         <div
                           className={`track ${
-                            tk.key === "subtask" && drag?.kind === "create"
+                            (drag?.kind === "create" &&
+                              drag.trackKey === tk.key) ||
+                            pendingCreate?.trackKey === tk.key
                               ? "creating"
                               : ""
                           }`}
@@ -551,10 +666,12 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                               : onTrackBandClick
                           }
                           onPointerDown={
-                            tk.key === "subtask"
-                              ? onSubtaskTrackDown
+                            tk.key in CREATE_ATOM_DEFAULTS
+                              ? (e) => onTrackDown(e, tk.key)
                               : undefined
                           }
+                          onMouseMove={onTrackHoverMove}
+                          onMouseLeave={onTrackHoverLeave}
                         >
                           {/* Editable subtask spans (resize + drag-to-create) */}
                           {tk.render === "span-edit" &&
@@ -567,7 +684,7 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                               return (
                                 <div
                                   key={k}
-                                  className={`tl-seg subtask ${drag?.kind === "edge" && drag.atomIdx === s.atomIdx ? "dragging" : ""}`}
+                                  className={`tl-seg subtask ${(drag?.kind === "edge" || drag?.kind === "edge-end") && drag.atomIdx === s.atomIdx ? "dragging" : ""}`}
                                   style={{
                                     left: `${left}%`,
                                     width: `${width}%`,
@@ -601,7 +718,12 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                                     className="resize l"
                                     onPointerDown={(e) => onEdgeDown(e, "l", k)}
                                   />
-                                  {k + 1 < lanes.subtask.length && (
+                                  {/* Right handle: legacy adjacency-resize
+                                  needs a next span to move; a span with its
+                                  own explicit `to` can always resize itself,
+                                  even as the last (or only) span. */}
+                                  {(s.atom.to != null ||
+                                    k + 1 < lanes.subtask.length) && (
                                     <div
                                       className="resize r"
                                       onPointerDown={(e) =>
@@ -613,17 +735,44 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                               );
                             })}
 
-                          {/* Drag-to-create preview rectangle (subtask only) */}
-                          {tk.render === "span-edit" &&
-                            drag?.kind === "create" && (
+                          {/* Drag-to-create preview rectangle, on whichever
+                          track the drag started on. Stays visible through
+                          the label popup too (pendingCreate) — without this,
+                          releasing the mouse made the whole range vanish
+                          from the timeline right when the popup asking you
+                          to name it appeared, which is exactly the moment
+                          you most want to still see it. */}
+                          {(() => {
+                            const preview =
+                              drag?.kind === "create" &&
+                              drag.trackKey === tk.key
+                                ? {
+                                    start: Math.min(
+                                      drag.startTs ?? 0,
+                                      drag.endTs ?? 0,
+                                    ),
+                                    end: Math.max(
+                                      drag.startTs ?? 0,
+                                      drag.endTs ?? 0,
+                                    ),
+                                  }
+                                : pendingCreate?.trackKey === tk.key
+                                  ? {
+                                      start: pendingCreate.start,
+                                      end: pendingCreate.end,
+                                    }
+                                  : null;
+                            if (!preview) return null;
+                            return (
                               <div
                                 className="tl-create-preview"
                                 style={{
-                                  left: `${(Math.min(drag.startTs ?? 0, drag.endTs ?? 0) / duration) * 100}%`,
-                                  width: `${(Math.abs((drag.endTs ?? 0) - (drag.startTs ?? 0)) / duration) * 100}%`,
+                                  left: `${(preview.start / duration) * 100}%`,
+                                  width: `${((preview.end - preview.start) / duration) * 100}%`,
                                 }}
                               />
-                            )}
+                            );
+                          })()}
 
                           {/* Collapsed task-augmentation bar: one full-width bar
                           (rephrasings carry no temporal info), with a ×N badge
@@ -740,24 +889,39 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                               }>
                             ).map((m, i) => {
                               const left = (m.t / duration) * 100;
+                              const to = m.atom.to;
+                              const hasRange = to != null && to > m.t;
                               return (
-                                <div
-                                  key={i}
-                                  className={`tl-tick ${tk.key}`}
-                                  style={{ left: `${left}%` }}
-                                  onClick={(e) =>
-                                    onTickClick(e, m.atomIdx, m.t)
-                                  }
-                                  onMouseEnter={(e) =>
-                                    showTip(
-                                      e,
-                                      `${tk.label}${m.subtype ? ` · ${m.subtype}` : ""} · ${m.t.toFixed(3)}s`,
-                                      m.label,
-                                    )
-                                  }
-                                  onMouseMove={moveTip}
-                                  onMouseLeave={hideTip}
-                                />
+                                <React.Fragment key={i}>
+                                  {hasRange && (
+                                    <div
+                                      className={`tl-seg tick-range ${tk.key}`}
+                                      style={{
+                                        left: `${left}%`,
+                                        width: `${Math.max(0.3, ((to - m.t) / duration) * 100)}%`,
+                                      }}
+                                      onClick={(e) =>
+                                        onTickClick(e, m.atomIdx, m.t)
+                                      }
+                                    />
+                                  )}
+                                  <div
+                                    className={`tl-tick ${tk.key}`}
+                                    style={{ left: `${left}%` }}
+                                    onClick={(e) =>
+                                      onTickClick(e, m.atomIdx, m.t)
+                                    }
+                                    onMouseEnter={(e) =>
+                                      showTip(
+                                        e,
+                                        `${tk.label}${m.subtype ? ` · ${m.subtype}` : ""} · ${m.t.toFixed(3)}s${hasRange ? ` → ${to.toFixed(3)}s` : ""}`,
+                                        m.label,
+                                      )
+                                    }
+                                    onMouseMove={moveTip}
+                                    onMouseLeave={hideTip}
+                                  />
+                                </React.Fragment>
                               );
                             })}
                         </div>
@@ -774,6 +938,31 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                   onPointerDown={onPlayheadDown}
                   title="Drag to scrub"
                 />
+
+                {/* Continuous hover-time readout — shown for any mouse
+                position over any track, including while dragging (the drag
+                already keeps the video/playhead synced to this same value;
+                this is the precise decimal-seconds number to go with it). */}
+                {hoverTs != null &&
+                  (() => {
+                    const hoverLeft = `calc(${bandLeft} + ${
+                      duration ? hoverTs / duration : 0
+                    } * (100% - ${bandLeft}))`;
+                    return (
+                      <>
+                        <div
+                          className="tl-hover-line"
+                          style={{ left: hoverLeft }}
+                        />
+                        <div
+                          className="tl-hover-time"
+                          style={{ left: hoverLeft }}
+                        >
+                          {hoverTs.toFixed(3)}s
+                        </div>
+                      </>
+                    );
+                  })()}
               </div>
             );
           })()}
@@ -802,8 +991,8 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
               }}
             >
               <div className="quick-popup-head">
-                <span className="style-pill subtask">
-                  <T>subtask</T>
+                <span className={`style-pill ${pendingCreate.trackKey}`}>
+                  <T>{pendingCreate.trackKey}</T>
                 </span>
                 <span style={{ marginLeft: "auto", fontFamily: "monospace" }}>
                   {pendingCreate.start.toFixed(2)}s →{" "}

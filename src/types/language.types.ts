@@ -44,6 +44,18 @@ export interface LanguageAtom {
   style: LanguageStyle | null;
   timestamp: number;
   /**
+   * Optional end of an explicitly authored range (drag-to-select in the
+   * timeline). LEVI-only editorial metadata — never written into the
+   * exported `language_persistent`/`language_events` struct, which mirrors
+   * lerobot's fixed row schema (see `_normalize_atom` in `backend/app.py`).
+   * Persistent atoms are broadcast to every frame regardless of any
+   * span/range, so `to` changes nothing about what gets exported per frame;
+   * it only changes how the timeline displays/edits the atom for humans.
+   * `undefined`/`null` means "point in time", same as before this field
+   * existed — every atom saved before this feature keeps working unchanged.
+   */
+  to?: number | null;
+  /**
    * `observation.images.*` feature key when this atom is grounded against a
    * specific camera view (`vqa`, `trace`). `null` for camera-agnostic atoms
    * (`task_aug`, `subtask`, `plan`, `memory`, `motion`, `interjection`, speech).

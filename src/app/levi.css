@@ -1,5 +1,9 @@
 /* LEVI original art direction: graphite, parchment and acid-lime instrument accents. */
 :root {
+  /* LEVI has no light mode — tell the browser so native controls (select
+     option lists, scrollbars, checkboxes) default to dark chrome instead of
+     the OS light theme clashing with the app's dark surfaces. */
+  color-scheme: dark;
   --bg: #101510;
   --surface-0: #161d17;
   --surface-1: #1d251e;
@@ -518,14 +522,14 @@ select,
 textarea {
   outline-offset: 4px;
 }
-/* Native option popovers inherit the dark visualizer foreground in Chromium
-   and become almost invisible on their light popup surface. Keep the closed
-   control on the graphite theme while forcing every option/optgroup to use a
-   readable dark ink on a light native menu. */
+/* `color-scheme: dark` above gets native popovers (select option lists,
+   scrollbars) most of the way there, but Chromium still needs the option
+   background/foreground spelled out explicitly to pick up the graphite
+   theme instead of its own default. */
 select option,
 select optgroup {
-  color: #17220e !important;
-  background-color: #f1efdf !important;
+  color: var(--text-primary) !important;
+  background-color: #242d20 !important;
 }
 *:focus-visible {
   outline: 2px solid #d4f779;

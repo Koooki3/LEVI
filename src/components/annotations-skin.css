@@ -49,13 +49,13 @@
   font-size: 13px;
   padding: 6px 9px;
 }
-/* Keep native dropdown options legible even though annotation controls use a
-   dark closed state. The option list is rendered by the browser and does not
-   reliably inherit the surrounding dark-mode foreground. */
+/* `color-scheme: dark` on :root gets native option popovers most of the way
+   there, but Chromium still needs the colors spelled out explicitly — match
+   the graphite theme rather than the browser's own default. */
 .annotations-skin select option,
 .annotations-skin select optgroup {
-  color: #17220e !important;
-  background-color: #f1efdf !important;
+  color: var(--fg-1) !important;
+  background-color: #242d20 !important;
 }
 .annotations-skin input::placeholder,
 .annotations-skin textarea::placeholder {
@@ -428,6 +428,24 @@
   background: rgba(183, 139, 255, 0.25);
   border: 1px solid var(--hf-purple);
   color: #e3d4ff;
+}
+.annotations-skin .tl-seg.interjection {
+  background: rgba(239, 83, 80, 0.25);
+  border: 1px solid var(--hf-red);
+  color: #ffd6d4;
+}
+.annotations-skin .tl-seg.vqa {
+  background: rgba(52, 211, 153, 0.25);
+  border: 1px solid var(--hf-green);
+  color: #c8f7e4;
+}
+/* Range highlight drawn under a tick when the atom carries an explicit
+   `to` — thinner than a normal span so the dot on top still reads clearly. */
+.annotations-skin .tl-seg.tick-range {
+  top: 5px;
+  bottom: 5px;
+  padding: 0;
+  opacity: 0.8;
 }
 .annotations-skin .tl-tick {
   position: absolute;
@@ -999,6 +1017,33 @@
   border-radius: 2px;
   pointer-events: none;
   z-index: 4;
+}
+/* Continuous hover-time readout: a thin line + floating decimal-seconds
+   badge that follows the cursor across any track, distinct from the solid
+   yellow playhead (which tracks the actual video position, not the mouse). */
+.annotations-skin .tl-hover-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+  z-index: 4;
+}
+.annotations-skin .tl-hover-time {
+  position: absolute;
+  top: -22px;
+  transform: translateX(-50%);
+  background: #11180ddd;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--fg-1);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 7;
 }
 .annotations-skin .tl-playhead-handle {
   position: absolute;

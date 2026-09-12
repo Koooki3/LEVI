@@ -114,6 +114,45 @@ export async function saveEpisodeAtoms(
   return { path: data.path ?? null };
 }
 
+/**
+ * Delete an episode's annotation file entirely — distinct from saving an
+ * empty atoms list (which still records "reviewed, nothing to annotate").
+ * Reverts the episode to its pristine, never-annotated state.
+ */
+export async function deleteEpisodeAtoms(
+  episodeId: number,
+  ident: DatasetIdent,
+): Promise<{ deleted: boolean }> {
+  if (!ENV_URL) return { deleted: false };
+  const res = await fetch(buildUrl(`/api/episodes/${episodeId}/atoms`, ident), {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => `${res.status}`);
+    throw new Error(text || `delete atoms: ${res.status}`);
+  }
+  const data = (await res.json().catch(() => ({}))) as { deleted?: boolean };
+  return { deleted: !!data.deleted };
+}
+
+export interface AnnotationSummary {
+  /** `episode_index` → has non-empty language_persistent/language_events atoms. */
+  language: Record<string, boolean>;
+  /** `episode_index` → has any published SAM3 object/track annotation. */
+  vision: Record<string, boolean>;
+}
+
+/** Powers the sidebar's per-episode annotated/unannotated indicator dots. */
+export async function fetchAnnotationSummary(
+  ident: DatasetIdent,
+): Promise<AnnotationSummary> {
+  if (!ENV_URL) return { language: {}, vision: {} };
+  const res = await fetch(buildUrl("/api/episodes/annotation-summary", ident));
+  if (!res.ok) return { language: {}, vision: {} };
+  const data = (await res.json()) as Partial<AnnotationSummary>;
+  return { language: data.language || {}, vision: data.vision || {} };
+}
+
 export async function fetchFrameTimestamps(
   episodeId: number,
   ident: DatasetIdent,
@@ -135,6 +174,7 @@ export async function exportDataset(
   output_dir: string;
   persistent_rows: number;
   event_rows: number;
+  reused_existing_export: boolean;
 }> {
   if (!ENV_URL) throw new Error("Annotate backend not configured");
   const res = await fetch(endpoint("/api/export"), {

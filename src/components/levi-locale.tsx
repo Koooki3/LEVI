@@ -69,7 +69,12 @@ export function useLocale() {
         /^Saved dataset to (.*) \(persistent: (\d+), events: (\d+)\)\.$/,
         "数据集已导出至 $1（持续标注行：$2；事件标注行：$3）。",
       ],
+      [
+        /^Updated existing export at (.*) \(persistent: (\d+), events: (\d+)\)\.$/,
+        "已更新现有导出 $1（持续标注行：$2；事件标注行：$3）。",
+      ],
       [/^Save dataset failed: (.*)$/, "数据集导出失败：$1"],
+      [/^Delete failed: (.*)$/, "删除失败：$1"],
       [/^Task metadata: (.*)$/, "任务元数据：$1"],
       [/^Sampled (\d+) of (\d+) episodes$/, "采样 $1 / $2 个片段"],
       [

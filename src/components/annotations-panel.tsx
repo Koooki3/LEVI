@@ -1,6 +1,6 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
-import { T } from "@/components/levi-locale";
+import { T, useLocale } from "@/components/levi-locale";
 
 import "./annotations-skin.css";
 
@@ -440,6 +440,46 @@ function useJump(): (ts: number) => void {
   );
 }
 
+/**
+ * Ctrl+S commits one in-progress annotation draft — the quick-add form's
+ * typed-but-not-added fields, or a selected atom's pending field edits —
+ * into the local `atoms` array. Deliberately local-only: it never makes a
+ * network request. Persisting to the backend stays the separate, explicit
+ * "Save episode" button (`useAnnotations().save()`).
+ *
+ * Escape discards the draft the same way.
+ *
+ * Both the quick-add form and the atom editor register this independently.
+ * In the common case only one ever has a draft (quick-add fields empty
+ * while an atom is being edited, or vice versa); if both happen to have one
+ * at once, both fire — an accepted edge case rather than a focus-tracking
+ * system that adds real complexity for a rare case.
+ */
+function useAnnotationDraftShortcuts({
+  hasDraft,
+  onCommit,
+  onCancel,
+}: {
+  hasDraft: boolean;
+  onCommit: () => void;
+  onCancel: () => void;
+}): void {
+  React.useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (hasDraft) onCommit();
+        return;
+      }
+      if (e.key === "Escape" && hasDraft) {
+        onCancel();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [hasDraft, onCommit, onCancel]);
+}
+
 export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
   const {
     atoms,
@@ -448,6 +488,8 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
     deleteAtom,
     snap,
     save,
+    deleteEpisodeFile,
+    flushAllEpisodes,
     saving,
     dirty,
     backendEnabled,
@@ -459,6 +501,7 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
     ident,
   } = useAnnotations();
   const { currentTime } = useTime();
+  const { t } = useLocale();
 
   // ============ Inline quick-add state ============
   const [qaKind, setQaKind] = useState<QuickAddKind>("subtask");
@@ -520,6 +563,13 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
     setQaValues({});
   };
 
+  const qaHasDraft = Object.values(qaValues).some((v) => v.trim() !== "");
+  useAnnotationDraftShortcuts({
+    hasDraft: qaHasDraft,
+    onCommit: handleQuickAdd,
+    onCancel: () => setQaValues({}),
+  });
+
   // ============ Save / export ============
   const handleSave = async () => {
     const r = await save();
@@ -545,15 +595,39 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
     try {
       const saved = await save();
       if (!saved.ok) throw new Error(saved.error || "Save failed");
+      // Other episodes edited earlier this session but never explicitly
+      // "Save episode"'d would otherwise be silently absent from the export
+      // — only the currently open episode is guaranteed fresh by save().
+      await flushAllEpisodes();
       const r = await apiExport(ident);
       setExportStatus(
-        `Saved dataset to ${r.output_dir} (persistent: ${r.persistent_rows}, events: ${r.event_rows}).`,
+        r.reused_existing_export
+          ? `Updated existing export at ${r.output_dir} (persistent: ${r.persistent_rows}, events: ${r.event_rows}).`
+          : `Saved dataset to ${r.output_dir} (persistent: ${r.persistent_rows}, events: ${r.event_rows}).`,
       );
     } catch (e) {
       setExportStatus(
         `Save dataset failed: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
+  };
+
+  const handleDeleteFile = async () => {
+    if (
+      !window.confirm(
+        t(
+          "Delete this episode's annotation file? This removes every saved atom for this episode and cannot be undone.",
+        ),
+      )
+    ) {
+      return;
+    }
+    const r = await deleteEpisodeFile();
+    setExportStatus(
+      r.ok
+        ? "Deleted this episode's annotation file."
+        : `Delete failed: ${r.error || "unknown"}`,
+    );
   };
 
   const selectedAtom =
@@ -602,6 +676,14 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                 className="text-xs h-7 px-3 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40"
               >
                 <T>Save dataset</T>
+              </button>
+              <button
+                disabled={!backendEnabled || saving}
+                onClick={handleDeleteFile}
+                title="Delete this episode's saved annotation file (not just the current draft)"
+                className="text-xs h-7 px-3 rounded border border-red-500/40 bg-red-500/10 text-red-200 hover:bg-red-500/20 disabled:opacity-40"
+              >
+                <T>Delete file</T>
               </button>
             </div>
           </div>
@@ -829,10 +911,16 @@ const AtomEditor: React.FC<{
   const [timestampDraft, setTimestampDraft] = useState(() =>
     String(atom.timestamp),
   );
+  const [toDraft, setToDraft] = useState(() =>
+    atom.to != null ? String(atom.to) : "",
+  );
 
   React.useEffect(() => {
     setTimestampDraft(String(atom.timestamp));
   }, [atom.timestamp]);
+  React.useEffect(() => {
+    setToDraft(atom.to != null ? String(atom.to) : "");
+  }, [atom.to]);
 
   const commitTimestamp = React.useCallback(
     (raw = timestampDraft) => {
@@ -854,6 +942,54 @@ const AtomEditor: React.FC<{
     setTimestampDraft(String(next));
   };
 
+  // Optional range end — LEVI-only editorial metadata (never exported into
+  // the lerobot struct, see `LanguageAtom.to`). Blank clears the range back
+  // to a point-in-time atom.
+  const commitTo = React.useCallback(
+    (raw = toDraft) => {
+      const trimmed = raw.trim();
+      if (trimmed === "") {
+        onChange({ to: null });
+        setToDraft("");
+        return;
+      }
+      const next = Number(trimmed);
+      if (!Number.isFinite(next) || next < atom.timestamp) {
+        setToDraft(atom.to != null ? String(atom.to) : "");
+        return;
+      }
+      onChange({ to: next });
+      setToDraft(String(next));
+    },
+    [atom.timestamp, atom.to, onChange, toDraft],
+  );
+
+  const commitSnappedTo = () => {
+    const parsed = Number(toDraft);
+    const base = Number.isFinite(parsed) ? parsed : (atom.to ?? atom.timestamp);
+    const next = Math.max(atom.timestamp, snap(base));
+    onChange({ to: next });
+    setToDraft(String(next));
+  };
+
+  // Content edits (the textarea below) commit on every keystroke — there's
+  // nothing pending there. Timestamp/`to` are the only fields with a
+  // draft-then-commit pattern, so they're the only ones a Ctrl+S/Escape
+  // shortcut needs to resolve.
+  const committedToStr = atom.to != null ? String(atom.to) : "";
+  useAnnotationDraftShortcuts({
+    hasDraft:
+      timestampDraft !== String(atom.timestamp) || toDraft !== committedToStr,
+    onCommit: () => {
+      commitTimestamp();
+      commitTo();
+    },
+    onCancel: () => {
+      setTimestampDraft(String(atom.timestamp));
+      setToDraft(committedToStr);
+    },
+  });
+
   return (
     <T>
       {
@@ -862,7 +998,12 @@ const AtomEditor: React.FC<{
             <div className="inspector-title">
               <StylePill style={atom.style} />
               <div>
-                <strong>{fmtTime(atom.timestamp)}</strong>
+                <strong>
+                  {fmtTime(atom.timestamp)}
+                  {atom.to != null && atom.to > atom.timestamp
+                    ? ` → ${fmtTime(atom.to)}`
+                    : ""}
+                </strong>
                 <span>
                   <T>{roleLabel}</T> · <T>{cameraLabel}</T>
                 </span>
@@ -921,6 +1062,47 @@ const AtomEditor: React.FC<{
               </button>
             </div>
           </div>
+
+          {/* Optional range end. task_aug always spans the whole episode, so
+          a range is meaningless there. */}
+          {atom.style !== "task_aug" && (
+            <div className="field">
+              <label className="field-label">
+                <T>To (s) — optional range end</T>
+              </label>
+              <div className="ts-row">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="point in time"
+                  value={toDraft}
+                  onChange={(e) => setToDraft(e.target.value)}
+                  onBlur={() => commitTo()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commitTo();
+                    if (e.key === "Escape")
+                      setToDraft(atom.to != null ? String(atom.to) : "");
+                  }}
+                />
+                <button
+                  type="button"
+                  className="frame-pill"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    commitSnappedTo();
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      commitSnappedTo();
+                    }
+                  }}
+                >
+                  <T>snap to frame</T>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Content / role-specific fields */}
           {(atom.style === "task_aug" ||

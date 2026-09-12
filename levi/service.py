@@ -1,5 +1,6 @@
 """Local HTTP service for datasets, review, conversion, diagnostics and annotations."""
 
+import hashlib
 import os
 import re
 import shutil
@@ -19,7 +20,8 @@ from .diagnostics import CHECKS, diagnose
 from .paths import CACHE, PROJECT, ROOT, STATE, configure, inside
 
 configure()
-from backend.app import app as annotation_app  # noqa: E402
+from backend.app import app as annotation_app
+from backend.app import dataset_display_slug
 
 
 @asynccontextmanager
@@ -258,9 +260,17 @@ def diagnostics(payload: Diagnostic):
         )
     report = diagnose(root, payload.max_episodes, payload.checks, payload.decode_video)
     report["repo_id"] = payload.repo_id
-    atomic(
-        STATE / "diagnostics" / (payload.repo_id.replace("/", "__") + ".json"), report
-    )
+    if payload.repo_id.startswith("local/"):
+        # The catalog slug ("local/<hash>") is opaque — name the report file
+        # after the dataset's own folder instead, like every other sidecar
+        # path (see dataset_display_slug). A short hash suffix disambiguates
+        # two different local datasets that happen to share a folder name.
+        digest = hashlib.sha256(str(root).encode()).hexdigest()[:10]
+        slug = f"{dataset_display_slug(None, str(root))}_{digest}"
+    else:
+        # Hub repo_ids are already globally unique and human-readable.
+        slug = payload.repo_id.replace("/", "__")
+    atomic(STATE / "diagnostics" / (slug + ".json"), report)
     return report
 
 

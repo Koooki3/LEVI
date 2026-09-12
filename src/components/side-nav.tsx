@@ -7,6 +7,39 @@ import React, { useMemo, useState } from "react";
 import { useFlaggedEpisodes } from "@/context/flagged-episodes-context";
 
 import type { DatasetDisplayInfo } from "@/app/[org]/[dataset]/[episode]/fetch-data";
+import type { AnnotationSummary } from "@/utils/annotationsClient";
+
+/** Small status dots distinguishing language/event annotations from SAM3
+ * object/vision annotations — deliberately two separate marks, not one
+ * combined dot, so multi-track annotation work stays visually distinct. */
+function AnnotationDots({
+  episode,
+  summary,
+}: {
+  episode: number;
+  summary: AnnotationSummary;
+}) {
+  const key = String(episode);
+  const hasLanguage = !!summary.language[key];
+  const hasVision = !!summary.vision[key];
+  if (!hasLanguage && !hasVision) return null;
+  return (
+    <span className="flex items-center gap-1 shrink-0">
+      {hasLanguage && (
+        <span
+          className="w-1.5 h-1.5 rounded-full bg-cyan-400"
+          title="Has language/event annotations"
+        />
+      )}
+      {hasVision && (
+        <span
+          className="w-1.5 h-1.5 rounded-full bg-lime-400"
+          title="Has object/vision (SAM3) annotations"
+        />
+      )}
+    </span>
+  );
+}
 
 interface SidebarProps {
   datasetInfo: DatasetDisplayInfo;
@@ -26,6 +59,8 @@ interface SidebarProps {
   onTaskFilterChange?: (task: string | null) => void;
   /** Episodes left after the task filter, across all pages. */
   filteredEpisodeCount?: number;
+  /** Per-episode language/vision annotation presence, for the status dots. */
+  annotationSummary?: AnnotationSummary;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -43,6 +78,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   taskFilter = null,
   onTaskFilterChange,
   filteredEpisodeCount,
+  annotationSummary,
 }) => {
   const [mobileVisible, setMobileVisible] = useState(false);
   const { flagged, count, toggle } = useFlaggedEpisodes();
@@ -153,6 +189,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                           >
                             Episode {episode}
                           </button>
+                          {annotationSummary && (
+                            <AnnotationDots
+                              episode={episode}
+                              summary={annotationSummary}
+                            />
+                          )}
                           <button
                             onClick={() => toggle(episode)}
                             className={`text-xs leading-none transition-colors ${
@@ -173,6 +215,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                           >
                             Episode {episode}
                           </Link>
+                          {annotationSummary && (
+                            <AnnotationDots
+                              episode={episode}
+                              summary={annotationSummary}
+                            />
+                          )}
                           <button
                             onClick={() => toggle(episode)}
                             className={`text-xs leading-none transition-colors ${

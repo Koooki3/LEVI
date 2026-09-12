@@ -461,5 +461,17 @@
   "SAM3 checkpoint is not ready; download it from the annotation page before running": "SAM3 checkpoint 尚未就绪，请先在标注页面下载后再运行",
   "SAM3 is disabled; set LEVI_SAM3_ENABLED=1 to enable it": "SAM3 已禁用，请设置 LEVI_SAM3_ENABLED=1 后启用",
   "LEVI_SAM3_CHECKPOINT points to a missing local file; place the checkpoint there or unset the override": "LEVI_SAM3_CHECKPOINT 指向不存在的本地文件，请放置 checkpoint 或取消该覆盖配置",
-  "Text prompts (comma, semicolon or newline separated)": "文本提示（逗号、分号或换行分隔）"
+  "Text prompts (comma, semicolon or newline separated)": "文本提示（逗号、分号或换行分隔）",
+  "To (s) — optional range end": "结束时间（秒，可选区间）",
+  "point in time": "时间点（留空）",
+  "Has language/event annotations": "含语言/事件标注",
+  "Has object/vision (SAM3) annotations": "含物体/视觉（SAM3）标注",
+  "Language & Events": "语言与事件标注",
+  "Objects & Tracking": "物体标注（SAM3）",
+  "Task augmentation, subtask, plan, memory, interjection, VQA": "任务扩写、子任务、计划、记忆、插话、视觉问答",
+  "SAM3 object detection, tracking and mask review": "SAM3 物体检测、跟踪与掩码审核",
+  "Delete file": "删除标注文件",
+  "Delete this episode's saved annotation file (not just the current draft)": "删除该片段已保存的标注文件（不只是当前草稿）",
+  "Delete this episode's annotation file? This removes every saved atom for this episode and cannot be undone.": "删除该片段的标注文件？这会移除该片段所有已保存的标注，且无法撤销。",
+  "Deleted this episode's annotation file.": "已删除该片段的标注文件。"
 }
