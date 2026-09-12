@@ -49,6 +49,14 @@
   font-size: 13px;
   padding: 6px 9px;
 }
+/* Keep native dropdown options legible even though annotation controls use a
+   dark closed state. The option list is rendered by the browser and does not
+   reliably inherit the surrounding dark-mode foreground. */
+.annotations-skin select option,
+.annotations-skin select optgroup {
+  color: #17220e !important;
+  background-color: #f1efdf !important;
+}
 .annotations-skin input::placeholder,
 .annotations-skin textarea::placeholder {
   color: var(--fg-3);
@@ -1045,13 +1053,13 @@
 
 /* ----- SAM3 object annotation sidecar ----- */
 .annotations-skin .object-annotation-panel {
-  border: 1px solid rgba(45, 212, 191, 0.28);
+  border: 1px solid rgba(212, 247, 121, 0.28);
   border-radius: 16px;
   padding: 18px;
   background: linear-gradient(
     135deg,
-    rgba(13, 38, 48, 0.92),
-    rgba(15, 23, 42, 0.96)
+    rgba(29, 37, 30, 0.94),
+    rgba(16, 21, 16, 0.98)
   );
   box-shadow: 0 16px 48px rgba(8, 15, 28, 0.3);
 }
@@ -1073,10 +1081,10 @@
   font-weight: 600;
 }
 .annotations-skin .object-annotation-badge {
-  border: 1px solid rgba(45, 212, 191, 0.32);
+  border: 1px solid rgba(212, 247, 121, 0.32);
   border-radius: 999px;
   padding: 5px 9px;
-  color: #99f6e4;
+  color: #d4f779;
   font-size: 11px;
   white-space: nowrap;
 }
@@ -1129,7 +1137,7 @@
   min-height: 36px;
   border: 1px solid rgba(148, 163, 184, 0.25);
   border-radius: 8px;
-  background: rgba(15, 23, 42, 0.75);
+  background: rgba(22, 29, 23, 0.92);
   color: #e2e8f0;
   padding: 0 10px;
   font: inherit;
@@ -1195,21 +1203,26 @@
 .annotations-skin .object-annotation-run,
 .annotations-skin .object-annotation-actions button {
   min-height: 36px;
-  border: 1px solid rgba(45, 212, 191, 0.42);
+  border: 1px solid rgba(212, 247, 121, 0.42);
   border-radius: 8px;
-  background: rgba(13, 148, 136, 0.2);
-  color: #99f6e4;
+  background: rgba(212, 247, 121, 0.14);
+  color: #d4f779;
   cursor: pointer;
   padding: 0 12px;
   font-size: 12px;
 }
 .annotations-skin .object-annotation-run.sam3 {
-  border-color: rgba(129, 140, 248, 0.46);
-  color: #c7d2fe;
+  border-color: rgba(212, 247, 121, 0.62);
+  background: #d4f779;
+  color: #17220e;
+  font-weight: 700;
 }
 .annotations-skin .object-annotation-run:hover,
 .annotations-skin .object-annotation-actions button:hover {
-  background: rgba(20, 184, 166, 0.32);
+  background: rgba(212, 247, 121, 0.26);
+}
+.annotations-skin .object-annotation-run.sam3:hover {
+  background: #e5fbb6;
 }
 .annotations-skin .object-annotation-run:disabled,
 .annotations-skin .object-annotation-actions button:disabled {
@@ -1307,9 +1320,9 @@
   gap: 10px;
   margin: 16px 0;
   padding: 12px 14px;
-  border: 1px solid rgba(129, 140, 248, 0.24);
+  border: 1px solid rgba(212, 247, 121, 0.24);
   border-radius: 12px;
-  background: rgba(15, 23, 42, 0.58);
+  background: rgba(22, 29, 23, 0.74);
 }
 .annotations-skin .object-annotation-status-head,
 .annotations-skin .object-annotation-status-grid,
@@ -1320,7 +1333,7 @@
 }
 .annotations-skin .object-annotation-status-head {
   justify-content: space-between;
-  color: #e0e7ff;
+  color: #f1efdf;
   font-size: 12px;
 }
 .annotations-skin .object-annotation-status-grid {
@@ -1332,7 +1345,7 @@
 .annotations-skin .object-annotation-path {
   max-width: min(100%, 520px);
   overflow: hidden;
-  color: #c4b5fd;
+  color: #d4f779;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1350,7 +1363,7 @@
 }
 .annotations-skin .object-annotation-progress-label {
   justify-content: space-between;
-  color: #a5b4fc;
+  color: #d4f779;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -1361,18 +1374,204 @@
   border: 0;
   border-radius: 999px;
   background: rgba(51, 65, 85, 0.8);
-  accent-color: #818cf8;
+  accent-color: #d4f779;
 }
 .annotations-skin .object-annotation-progress progress::-webkit-progress-bar {
   background: rgba(51, 65, 85, 0.8);
   border-radius: 999px;
 }
 .annotations-skin .object-annotation-progress progress::-webkit-progress-value {
-  background: linear-gradient(90deg, #14b8a6, #818cf8);
+  background: linear-gradient(90deg, #9ec345, #d4f779);
   border-radius: 999px;
 }
 @media (max-width: 720px) {
   .annotations-skin .object-annotation-status-grid > span:nth-of-type(odd) {
     min-width: 100%;
+  }
+}
+
+/* SAM3 workflow layers: keep the model setup, plan and review phases visually
+   distinct while using the same graphite/parchment/lime language as LEVI. */
+.annotations-skin .object-annotation-status-head > div {
+  display: grid;
+  gap: 3px;
+}
+.annotations-skin .object-annotation-status-subtitle {
+  color: #afb7a8;
+  font-size: 10px;
+  font-weight: 400;
+}
+.annotations-skin .object-annotation-gates {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.annotations-skin .object-annotation-gates > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid rgba(175, 183, 168, 0.2);
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: #afb7a8;
+  font-size: 10px;
+}
+.annotations-skin .object-annotation-gates > span.ready {
+  border-color: rgba(212, 247, 121, 0.35);
+  color: #d4f779;
+}
+.annotations-skin .object-annotation-gates > span.muted {
+  color: #e4b96b;
+}
+.annotations-skin .object-annotation-gates i {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: rgba(175, 183, 168, 0.16);
+  font-style: normal;
+  font-size: 9px;
+}
+.annotations-skin .object-annotation-gates > span.ready i {
+  background: rgba(212, 247, 121, 0.18);
+}
+.annotations-skin .object-annotation-status-note {
+  margin: 0;
+  color: #89927f;
+  font-size: 11px;
+  line-height: 1.55;
+}
+.annotations-skin .object-annotation-step {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(175, 183, 168, 0.14);
+  border-radius: 12px;
+  background: rgba(22, 29, 23, 0.5);
+}
+.annotations-skin .object-annotation-step-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+.annotations-skin .object-annotation-step-head > div {
+  display: grid;
+  gap: 3px;
+}
+.annotations-skin .object-annotation-step-head strong {
+  color: #f1efdf;
+  font-size: 12px;
+}
+.annotations-skin .object-annotation-step-head > div > span {
+  color: #89927f;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.annotations-skin .object-annotation-step-number {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(212, 247, 121, 0.38);
+  border-radius: 7px;
+  color: #d4f779;
+  font:
+    700 10px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+.annotations-skin .object-annotation-step .object-annotation-controls,
+.annotations-skin .object-annotation-step .object-annotation-batch {
+  margin-top: 10px;
+}
+.annotations-skin .object-annotation-range {
+  align-items: end;
+}
+.annotations-skin .object-annotation-range label,
+.annotations-skin .object-annotation-task-select {
+  display: grid;
+  gap: 5px;
+}
+.annotations-skin .object-annotation-range label > span,
+.annotations-skin .object-annotation-task-select > span {
+  color: #89927f;
+  font-size: 10px;
+}
+.annotations-skin .object-annotation-range-dash {
+  padding-bottom: 9px;
+}
+.annotations-skin .object-annotation-selection-summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: #afb7a8;
+  font-size: 11px;
+}
+.annotations-skin .object-annotation-runbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(212, 247, 121, 0.2);
+  border-radius: 10px;
+  background: rgba(212, 247, 121, 0.05);
+}
+.annotations-skin .object-annotation-plan-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+  color: #afb7a8;
+  font-size: 11px;
+}
+.annotations-skin .object-annotation-plan-state small {
+  color: #89927f;
+}
+.annotations-skin .object-annotation-plan-state code {
+  color: #d4f779;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.annotations-skin .object-annotation-review-summary {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  color: #afb7a8;
+  font-size: 11px;
+}
+.annotations-skin .object-annotation-review-summary strong {
+  color: #f1efdf;
+  font-size: 12px;
+}
+.annotations-skin .object-annotation-review-summary .ready {
+  color: #86efac;
+}
+.annotations-skin .object-annotation-review-summary .muted {
+  color: #e4b96b;
+}
+.annotations-skin .object-annotation-review-summary .rejected {
+  color: #fca5a5;
+}
+@media (max-width: 720px) {
+  .annotations-skin .object-annotation-runbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .annotations-skin .object-annotation-runbar .object-annotation-run {
+    width: 100%;
+  }
+  .annotations-skin .object-annotation-selection-summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .annotations-skin .object-annotation-selection-summary > span:nth-child(2) {
+    display: none;
   }
 }

@@ -76,7 +76,7 @@ uv run levi build
 uv run levi serve
 ~~~
 
-After Ready appears, open http://127.0.0.1:7860. In any dataset annotation page, verify the account, model and checkpoint path, then click Run SAM3 annotation. The first job downloads sam3.pt to $LEVI_WORKSPACE/checkpoints/sam3 and reports progress; later jobs reuse it. Changing the Hugging Face account or workspace creates separate Hub snapshots and sidecars using account and workspace scopes. Set LEVI_SAM3_ENABLED=0 only when you want to hide the real worker. Never commit tokens, checkpoints or workspace data.
+After Ready appears, open http://127.0.0.1:7860. On any dataset annotation page, complete the Hub access, CUDA worker and checkpoint gates, then choose prompts, scope and cameras before clicking Run SAM3 annotation. LEVI validates the model-neutral plan before starting the worker. The first job downloads sam3.pt to $LEVI_WORKSPACE/checkpoints/sam3 and reports progress; later jobs reuse it. Changing the Hugging Face account or workspace creates separate Hub snapshots and sidecars using account and workspace scopes. Set LEVI_SAM3_ENABLED=0 only when you want to hide the real worker. Never commit tokens, checkpoints or workspace data.
 
 ## Portable workspace
 
@@ -108,7 +108,7 @@ Video-based LeRobot v2.0/v2.1/v3.0/v3.1 can be browsed. Embedded-image Parquet p
 
 ### SAM3 object annotation (global)
 
-The annotation tab provides the same SAM3 object/track sidecar for built-in demos, Hub datasets and registered local datasets. Choose a camera and text prompts to start a real job; model suggestions are stored as lossless RLE sidecar data and native LeRobot files stay read-only. The page shows the current Hugging Face account, worker state, checkpoint download progress and workspace path. The default model is sam3.pt from 1038lab/sam3. Real jobs need the isolated Python 3.12 uv worker on a CUDA host; core CPU checks never import Torch, probe CUDA, download a model or run inference. See the SAM3 guide for the complete sequence.
+The annotation tab provides the same SAM3 object/track sidecar for built-in demos, Hub datasets and registered local datasets. The UI checks Hub access, the CUDA worker and the checkpoint first, then builds and validates a plan across an episode range, task selection or the full dataset and selected cameras. Each episode/camera pair is processed independently; model suggestions are stored as lossless RLE sidecar data and native LeRobot files stay read-only. The page shows the current Hugging Face account, worker state, checkpoint download progress and workspace path, and exposes track-level frame ranges with accept/reject review. The default model is sam3.pt from 1038lab/sam3. Real jobs need the isolated Python 3.12 uv worker on a CUDA host; core CPU checks never import Torch, probe CUDA, download a model or run inference. See the SAM3 guide for the complete sequence.
 
 Default live demonstrations:
 

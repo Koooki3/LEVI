@@ -79,7 +79,7 @@ uv run levi build
 uv run levi serve
 ~~~
 
-看到 Ready 后访问 http://127.0.0.1:7860，在任意数据集的标注页面确认账号、模型和 checkpoint 保存位置，再点击“运行 SAM3 标注”。首次作业会把 sam3.pt 下载到 $LEVI_WORKSPACE/checkpoints/sam3，并显示进度；后续作业复用该文件。切换 Hugging Face 账号或工作区时，LEVI 会按账号 digest 和工作区重新隔离 Hub 快照与 sidecar。可设置 LEVI_SAM3_ENABLED=0 暂时隐藏真实 worker。不要提交 token、checkpoint 或工作区数据。
+看到 Ready 后访问 http://127.0.0.1:7860，在任意数据集的标注页面按状态卡完成 Hub access、CUDA worker、Checkpoint 三项检查；然后设置 prompt、范围和相机，点击“运行 SAM3 标注”。LEVI 会先校验计划，再启动 worker；首次作业会把 sam3.pt 下载到 $LEVI_WORKSPACE/checkpoints/sam3，并显示进度，后续作业复用该文件。切换 Hugging Face 账号或工作区时，LEVI 会按账号 digest 和工作区重新隔离 Hub 快照与 sidecar。可设置 LEVI_SAM3_ENABLED=0 暂时隐藏真实 worker。不要提交 token、checkpoint 或工作区数据。
 
 ## 工作目录与数据位置
 
@@ -116,7 +116,7 @@ uv run levi serve
 
 ### SAM3 对象标注（全局）
 
-标注页对演示集、Hub 数据集和登记的本地数据集统一提供 SAM3 对象/轨迹 sidecar。选择相机与文本提示即可启动真实标注；模型建议写入独立的无损 RLE sidecar，原生 LeRobot 文件保持只读。页面会显示当前 Hugging Face 账号、worker 状态、checkpoint 下载进度和工作区保存位置。默认模型为 1038lab/sam3 的 sam3.pt；首次真实作业需要独立 Python 3.12 uv worker 和 CUDA 主机，核心 CPU 检查不会导入 Torch、探测 CUDA、下载模型或执行推理。完整顺序见 SAM3 指南。
+标注页对演示集、Hub 数据集和登记的本地数据集统一提供 SAM3 对象/轨迹 sidecar。界面先检查 Hub 访问、CUDA worker 和 checkpoint 三道门槛，再按片段范围／任务／全量及相机组合生成并校验标注计划；每个 episode/camera 组合独立处理，模型建议写入独立的无损 RLE sidecar，原生 LeRobot 文件保持只读。页面会显示当前 Hugging Face 账号、worker 状态、checkpoint 下载进度和工作区保存位置，并按轨迹提供帧区间与接受／拒绝审核。默认模型为 1038lab/sam3 的 sam3.pt；首次真实作业需要独立 Python 3.12 uv worker 和 CUDA 主机，核心 CPU 检查不会导入 Torch、探测 CUDA、下载模型或执行推理。完整顺序见 SAM3 指南。
 
 默认演示：
 

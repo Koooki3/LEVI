@@ -518,6 +518,15 @@ select,
 textarea {
   outline-offset: 4px;
 }
+/* Native option popovers inherit the dark visualizer foreground in Chromium
+   and become almost invisible on their light popup surface. Keep the closed
+   control on the graphite theme while forcing every option/optgroup to use a
+   readable dark ink on a light native menu. */
+select option,
+select optgroup {
+  color: #17220e !important;
+  background-color: #f1efdf !important;
+}
 *:focus-visible {
   outline: 2px solid #d4f779;
 }

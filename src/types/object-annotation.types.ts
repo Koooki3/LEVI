@@ -42,6 +42,8 @@ export interface ObjectTrack {
 }
 
 export interface Sam3Plan {
+  /** Set only on a run request to reuse the plan returned by preflight. */
+  plan_id?: string | null;
   repo_id?: string | null;
   local_path?: string | null;
   revision?: string | null;

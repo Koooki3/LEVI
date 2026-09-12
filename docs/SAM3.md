@@ -136,16 +136,22 @@ uv run levi serve
 
 ### 7. 在 UI 中完成首次模型准备
 
-1. 打开任意演示数据集或登记的本地数据集，进入一个 episode 的“标注”页面。
-2. 在 SAM3 运行状态卡确认账号。若显示“未登录”，点击 Connect Hugging Face；
-   已通过 CLI 登录的账号会显示为 environment/cache。
+1. 打开任意演示数据集、Hub 数据集或登记的本地数据集，进入一个 episode 的“标注”页面。
+2. 在 SAM3 运行状态卡依次确认 **Hub access、CUDA worker、Checkpoint** 三个门槛。
+   若账号显示“未登录”，点击 Connect Hugging Face；已通过 CLI 登录的账号会显示为
+   environment/cache。已有 checkpoint 时可直接复用缓存。
 3. 确认模型为 1038lab/sam3 / sam3.pt，保存位置为当前工作区下的
-   checkpoints/sam3/sam3.pt。
-4. 选择相机，输入逗号分隔的文本 prompt，例如 cup, plate, robot gripper。
-5. 点击“运行 SAM3 标注”。第一次真实作业会下载 checkpoint，状态卡显示已下载字节、
-   总字节（若 Hub 提供元数据）和进度条；完成后显示“Checkpoint 已就绪”。
-6. 作业完成后，列表中的对象建议保持 suggested。逐条接受或拒绝；每次操作都会
-   创建新的 revision，随后可在同一页面继续复核。
+   checkpoints/sam3/sam3.pt。首次需要下载时，状态卡会显示已下载字节、总字节（若 Hub
+   提供元数据）和进度条。
+4. 在第 1 步选择用于审核的相机，输入逗号、分号或换行分隔的文本 prompt，例如
+   cup, plate, robot gripper；可保存和复用 prompt 预设。
+5. 在第 2 步选择片段范围、按任务筛选或全部片段，再勾选要运行的相机。每个
+   episode/camera 组合独立处理，原生帧索引和 track ID 不跨相机混用。
+6. 点击“运行 SAM3 标注”。LEVI 会先提交 model-neutral plan 做 episode、相机、prompt
+   和阈值校验，计划通过后才启动 worker；进度条显示已完成的组合数。页面不会显示视频预览，
+   审核入口是按相机汇总的轨迹清单。
+7. 作业完成后，建议保持 suggested。点击每条轨迹可跳到首帧；确认帧区间、帧数和均值后逐条
+   接受或拒绝。每次操作都会创建新的 sidecar revision，审核完成后再导出或交给后续流程。
 
 页面不要求数据集属于某个固定账号。Hub 数据集使用当前账号作用域缓存；本地数据集
 使用真实本地路径和当前 LEVI_WORKSPACE 作用域。切换账号、revision 或工作区不会
@@ -203,7 +209,7 @@ revision 可分别备份和比较。
 | GET | /api/sam3/status | 返回全局开关、worker 文件、模型配置、账号用户名、checkpoint 路径和下载进度；不导入 Torch、不探测 CUDA |
 | GET | /api/sam3/capabilities | /status 的兼容别名 |
 | POST | /api/sam3/plan | 校验 episode、相机、prompt 并写入 staged plan |
-| POST | /api/sam3/run | provider=sam3 启动真实 worker；provider=fake 仅供 CPU 合约测试 |
+| POST | /api/sam3/run | provider=sam3 启动真实 worker；provider=fake 仅供 CPU 合约测试；可携带 `/plan` 返回的 `plan_id` 绑定已校验计划 |
 | GET | /api/sam3/jobs/{id} | 轮询作业并在成功时发布 sidecar revision |
 | POST | /api/sam3/jobs/{id}/cancel | 取消作业 |
 | GET | /api/sam3/revisions | 列出对象标注 revision |

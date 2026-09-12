@@ -204,11 +204,18 @@ def test_api_cpu_fake_provider_and_export_are_sidecar_only(client, dataset, tmp_
     # Internal worker paths are kept in staging files, never exposed to the UI.
     assert "dataset_root" not in plan.json()
     assert "local_path" not in plan.json()
-    run = client.post("/annotations/api/sam3/run", json=payload)
+    run_payload = {**payload, "plan_id": plan.json()["plan_id"]}
+    run = client.post("/annotations/api/sam3/run", json=run_payload)
     assert run.status_code == 200, run.text
     result = run.json()
     assert result["provider"] == "fake" and result["count"] == 6
+    assert result["plan_id"] == plan.json()["plan_id"]
     assert result["review_status"] == "suggested"
+    changed_plan = client.post(
+        "/annotations/api/sam3/run",
+        json={**run_payload, "prompts": ["plate"]},
+    )
+    assert changed_plan.status_code == 409, changed_plan.text
     objects = client.get(
         "/annotations/api/sam3/episodes/0/objects",
         params={"repo_id": repo, "camera_key": "observation.images.front"},

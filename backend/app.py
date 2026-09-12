@@ -154,7 +154,13 @@ class Sam3PlanRequest(Sam3Plan):
 
 
 class Sam3RunRequest(Sam3PlanRequest):
-    """Request used by the CPU fake provider and the optional real worker."""
+    """Request used by the CPU fake provider and the optional real worker.
+
+    plan_id lets the UI reuse the exact staged plan that passed preflight.
+    It is deliberately kept out of the worker's model-neutral Sam3Plan.
+    """
+
+    plan_id: str | None = None
 
 
 class Sam3EditRequest(ObjectEdit):
@@ -340,6 +346,39 @@ def _public_sam3_job(job: dict[str, Any]) -> dict[str, Any]:
     return {key: job[key] for key in public_keys if key in job}
 
 
+def _reuse_sam3_plan(
+    state: DatasetState,
+    store: SidecarStore,
+    request: Sam3RunRequest,
+) -> tuple[Path, dict[str, Any]]:
+    """Load a preflighted plan and reject edits between plan and run."""
+    plan_id = request.plan_id
+    if not plan_id:
+        raise ValueError("plan_id is required")
+    if not re.fullmatch(r"[a-f0-9]{16,64}", plan_id):
+        raise HTTPException(400, "Invalid SAM3 plan ID")
+    plan_path = store.root / "staging" / "plans" / f"{plan_id}.json"
+    if not plan_path.is_file():
+        raise HTTPException(404, "SAM3 plan not found")
+    try:
+        payload = json.loads(plan_path.read_text())
+        plan_fields = set(Sam3Plan.model_fields)
+        staged = Sam3Plan.model_validate(
+            {key: payload[key] for key in plan_fields if key in payload}
+        )
+        current = Sam3Plan.model_validate(request.model_dump(exclude={"plan_id"}))
+    except (OSError, ValueError, TypeError) as exc:
+        raise HTTPException(400, "Invalid staged SAM3 plan") from exc
+    if staged.model_dump() != current.model_dump():
+        raise HTTPException(
+            409,
+            "SAM3 plan changed after preflight; create a new plan before running",
+        )
+    payload["status"] = "queued"
+    atomic(plan_path, payload)
+    return plan_path, payload
+
+
 def _sam3_plan_payload(
     state: DatasetState, request: Sam3PlanRequest
 ) -> tuple[SidecarStore, Path, dict[str, Any]]:
@@ -356,7 +395,7 @@ def _sam3_plan_payload(
             "revision": state.revision or "main",
         },
         "dataset_root": str(state.root),
-        **request.model_dump(),
+        **request.model_dump(exclude={"plan_id"}),
     }
     atomic(plan_path, payload)
     return store, plan_path, payload
@@ -1439,7 +1478,11 @@ def sam3_plan(request: Sam3PlanRequest) -> JSONResponse:
 def sam3_run(request: Sam3RunRequest) -> JSONResponse:
     state = _ensure_state(DatasetRef.model_validate(request.model_dump()))
     _validate_sam3_plan(state, request)
-    store, plan_path, plan_payload = _sam3_plan_payload(state, request)
+    store = _sidecar(state)
+    if request.plan_id:
+        plan_path, plan_payload = _reuse_sam3_plan(state, store, request)
+    else:
+        store, plan_path, plan_payload = _sam3_plan_payload(state, request)
     if request.provider == "fake":
         annotations = fake_annotations(request)
         revision = store.publish(
