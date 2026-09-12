@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def _enabled() -> bool:
-    return os.environ.get("LEVI_SAM3_ENABLED", "0").lower() in {
+    return os.environ.get("LEVI_SAM3_ENABLED", "1").lower() in {
         "1",
         "true",
         "yes",
@@ -17,7 +17,7 @@ def _enabled() -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="LEVI optional SAM3 worker")
+    parser = argparse.ArgumentParser(description="LEVI SAM3 worker")
     parser.add_argument("--check", action="store_true", help="check configuration without loading Torch")
     parser.add_argument("--plan", type=Path, help="plan JSON created by LEVI")
     parser.add_argument("--output", type=Path, help="result JSON path")
@@ -28,14 +28,14 @@ def main(argv: list[str] | None = None) -> int:
         print("  model_imported=0")
         print("  cuda_probe_performed=0")
         if not _enabled():
-            print("  status=disabled (set LEVI_SAM3_ENABLED=1 only on an explicitly configured CUDA host)")
+            print("  status=disabled (set LEVI_SAM3_ENABLED=1 to enable the global integration)")
         else:
-            print("  status=enabled (runtime will validate the optional checkpoint and CUDA device)")
+            print("  status=enabled (runtime will validate the configured checkpoint and CUDA device)")
         return 0
     if not args.plan or not args.output:
         parser.error("--plan and --output are required unless --check is used")
     if not _enabled():
-        parser.error("SAM3 is disabled; set LEVI_SAM3_ENABLED=1 explicitly")
+        parser.error("SAM3 is disabled; set LEVI_SAM3_ENABLED=1 to enable it")
     from .worker import run_plan
 
     run_plan(args.plan, args.output)

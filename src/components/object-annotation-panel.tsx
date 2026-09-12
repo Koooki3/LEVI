@@ -1,13 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import HfAuthButton from "@/components/hf-auth-button";
 import { T, useLocale } from "@/components/levi-locale";
+import { useAuth } from "@/context/auth-context";
 import { useTime } from "@/context/time-context";
 import {
   editObjectAnnotation,
   fetchObjectAnnotations,
   fetchSam3Job,
-  getSam3Capabilities,
+  getSam3Status,
   runSam3,
   type DatasetIdent,
 } from "@/utils/annotationsClient";
@@ -38,12 +40,23 @@ function statusLabel(status: ObjectAnnotation["status"]): string {
   }[status];
 }
 
+function formatBytes(value: number | undefined): string {
+  if (!value || value < 1) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(
+    units.length - 1,
+    Math.floor(Math.log(value) / Math.log(1024)),
+  );
+  return (value / 1024 ** index).toFixed(index ? 1 : 0) + " " + units[index];
+}
+
 export default function ObjectAnnotationPanel({
   episodeId,
   ident,
   cameraKeys,
 }: Props) {
   const { language } = useLocale();
+  const { oauth } = useAuth();
   const { seek } = useTime();
   const stableIdent = useMemo(
     () => ({
@@ -69,6 +82,12 @@ export default function ObjectAnnotationPanel({
     );
   }, [cameraKeys]);
 
+  useEffect(() => {
+    setObjects([]);
+    setRevision(null);
+    setMessage(null);
+  }, [stableIdent]);
+
   const refresh = useCallback(async () => {
     if (!cameraKey) return;
     try {
@@ -82,26 +101,40 @@ export default function ObjectAnnotationPanel({
     }
   }, [cameraKey, episodeId, stableIdent]);
 
+  const refreshStatus = useCallback(async () => {
+    try {
+      const result = await getSam3Status();
+      setCapabilities(result);
+      return result;
+    } catch (error) {
+      setCapabilities(null);
+      setMessage(error instanceof Error ? error.message : String(error));
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
   useEffect(() => {
-    getSam3Capabilities()
-      .then(setCapabilities)
-      .catch(() => setCapabilities(null));
-  }, []);
+    void refreshStatus();
+    const timer = window.setInterval(() => {
+      void refreshStatus();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [refreshStatus]);
 
   const tracks = useMemo(() => {
     const values = new Map<string, ObjectAnnotation>();
     for (const object of objects) {
-      const key = `${object.object_id}:${object.track_id}`;
+      const key = object.object_id + ":" + object.track_id;
       if (!values.has(key)) values.set(key, object);
     }
     return [...values.values()].sort((a, b) => a.track_id - b.track_id);
   }, [objects]);
 
-  const runProvider = async (provider: "fake" | "sam3") => {
+  const runSam3Annotation = async () => {
     const prompts = promptText
       .split(",")
       .map((item) => item.trim())
@@ -115,36 +148,33 @@ export default function ObjectAnnotationPanel({
         camera_keys: [cameraKey],
         prompts,
         start_frame: 0,
-        max_frames: provider === "fake" ? 24 : null,
+        max_frames: null,
         review_threshold: 0.6,
         accept_threshold: 0.9,
-        provider,
+        provider: "sam3",
       });
-      if (provider === "fake") {
-        setMessage(
-          language === "zh"
-            ? `CPU 演示已生成 ${result.count ?? 0} 条建议`
-            : `CPU demo created ${result.count ?? 0} suggestions`,
-        );
-      } else if (result.job_id) {
-        setMessage(
-          language === "zh" ? "SAM3 作业运行中…" : "SAM3 job is running…",
-        );
-        for (let attempt = 0; attempt < 180; attempt += 1) {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-          const job = await fetchSam3Job(result.job_id, ident);
-          if (job.status === "succeeded") {
-            setMessage(
-              language === "zh"
-                ? "SAM3 建议已保存，请开始审核"
-                : "SAM3 suggestions saved; review them now",
-            );
-            break;
-          }
-          if (job.status === "failed" || job.status === "cancelled") {
-            throw new Error(String(job.error || `SAM3 job ${job.status}`));
-          }
+      if (!result.job_id) throw new Error("SAM3 did not return a job ID");
+      setMessage(
+        language === "zh"
+          ? "SAM3 作业已启动，正在准备模型和标注…"
+          : "SAM3 job started; preparing the model and annotations…",
+      );
+      for (let attempt = 0; attempt < 180; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const job = await fetchSam3Job(result.job_id, stableIdent);
+        await refreshStatus();
+        if (job.status === "succeeded") {
+          setMessage(
+            language === "zh"
+              ? "SAM3 建议已保存，请开始审核"
+              : "SAM3 suggestions saved; review them now",
+          );
+          break;
         }
+        if (job.status === "failed" || job.status === "cancelled") {
+          throw new Error(String(job.error || "SAM3 job " + job.status));
+        }
+        if (attempt === 179) throw new Error("SAM3 job timed out");
       }
       await refresh();
       window.dispatchEvent(new Event("levi:sam3-updated"));
@@ -152,11 +182,9 @@ export default function ObjectAnnotationPanel({
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
+      void refreshStatus();
     }
   };
-
-  const runCpuDemo = () => void runProvider("fake");
-  const runRealSam3 = () => void runProvider("sam3");
 
   const edit = async (
     object: ObjectAnnotation,
@@ -182,6 +210,17 @@ export default function ObjectAnnotationPanel({
     }
   };
 
+  const download = capabilities?.download;
+  const downloadPercent =
+    typeof download?.percent === "number"
+      ? Math.max(0, Math.min(100, download.percent))
+      : null;
+  const account = capabilities?.hf_auth;
+  const workerReady =
+    !!capabilities?.enabled &&
+    !!capabilities.worker_project_present &&
+    !!capabilities.worker_python_present;
+
   return (
     <section className="object-annotation-panel panel-raised">
       <div className="object-annotation-head">
@@ -203,6 +242,88 @@ export default function ObjectAnnotationPanel({
           track here to create a new annotation revision.
         </T>
       </p>
+
+      <div className="object-annotation-status">
+        <div className="object-annotation-status-head">
+          <strong>
+            <T>SAM3 runtime</T>
+          </strong>
+          <span className={workerReady ? "ready" : "muted"}>
+            {workerReady ? <T>Ready</T> : <T>Setup required</T>}
+          </span>
+        </div>
+        <div className="object-annotation-status-grid">
+          <span>
+            <T>Model</T>
+          </span>
+          <code>
+            {capabilities?.model_repo || "1038lab/sam3"} /{" "}
+            {capabilities?.model_filename || "sam3.pt"}
+          </code>
+          <span>
+            <T>Hugging Face account</T>
+          </span>
+          <span className={account?.authenticated ? "ready" : "muted"}>
+            {account?.authenticated
+              ? account.username ||
+                (oauth ? "signed in" : "environment account")
+              : "not signed in"}
+          </span>
+          {!account?.authenticated && <HfAuthButton variant="ghost" />}
+          <span>
+            <T>Checkpoint location</T>
+          </span>
+          <code className="object-annotation-path">
+            {capabilities?.checkpoint_path ||
+              "workspace/checkpoints/sam3/sam3.pt"}
+          </code>
+        </div>
+        {download && download.phase === "downloading" && (
+          <div className="object-annotation-progress">
+            <div className="object-annotation-progress-label">
+              <span>
+                <T>Downloading checkpoint</T>
+              </span>
+              <span>
+                {downloadPercent === null
+                  ? "…"
+                  : downloadPercent.toFixed(1) + "%"}
+                {" · "}
+                {formatBytes(download.bytes)}
+                {download.total_bytes
+                  ? " / " + formatBytes(download.total_bytes)
+                  : ""}
+              </span>
+            </div>
+            <progress
+              max={100}
+              value={downloadPercent === null ? undefined : downloadPercent}
+              aria-label="SAM3 checkpoint download progress"
+            />
+          </div>
+        )}
+        {download?.phase === "ready" && (
+          <p className="object-annotation-runtime">
+            <span className="ready">
+              <T>Checkpoint ready</T>
+            </span>
+            <span>{formatBytes(download.bytes)}</span>
+          </p>
+        )}
+        {download?.phase === "error" && (
+          <p className="object-annotation-runtime muted">
+            {download.message || "Checkpoint download failed"}
+          </p>
+        )}
+        {!account?.authenticated && (
+          <p className="object-annotation-runtime muted">
+            <T>
+              Sign in to Hugging Face to download the gated checkpoint. A local
+              hf CLI login or HF_TOKEN is also accepted.
+            </T>
+          </p>
+        )}
+      </div>
 
       <div className="object-annotation-controls">
         <label>
@@ -232,41 +353,28 @@ export default function ObjectAnnotationPanel({
         </label>
         <button
           type="button"
-          className="object-annotation-run"
-          onClick={runCpuDemo}
-          disabled={busy || !cameraKey || !promptText.trim()}
-        >
-          {busy ? <T>Working…</T> : <T>CPU demo</T>}
-        </button>
-        <button
-          type="button"
           className="object-annotation-run sam3"
-          onClick={runRealSam3}
-          disabled={
-            busy ||
-            !cameraKey ||
-            !promptText.trim() ||
-            !capabilities?.enabled ||
-            !capabilities.worker_project_present ||
-            !capabilities.worker_python_present
-          }
-          title="Requires the optional SAM3 uv environment"
+          onClick={() => void runSam3Annotation()}
+          disabled={busy || !cameraKey || !promptText.trim() || !workerReady}
+          title="Uses the configured CUDA worker and 1038lab/sam3 checkpoint"
         >
-          <T>Run SAM3 worker</T>
+          {busy ? <T>Working…</T> : <T>Run SAM3 annotation</T>}
         </button>
       </div>
 
       <div className="object-annotation-runtime">
         <span className={capabilities?.enabled ? "ready" : "muted"}>
-          <T>
-            {capabilities?.enabled
-              ? "SAM3 worker enabled"
-              : "SAM3 worker disabled"}
-          </T>
+          {capabilities?.enabled ? (
+            <T>SAM3 is globally enabled</T>
+          ) : (
+            <T>SAM3 is disabled</T>
+          )}
         </span>
-        <span>
-          <T>CPU demo is deterministic and safe for local review.</T>
-        </span>
+        {capabilities?.model_revision && (
+          <span>
+            <T>revision</T> {capabilities.model_revision}
+          </span>
+        )}
         {revision && <code>{revision.slice(0, 16)}</code>}
       </div>
 
@@ -280,7 +388,7 @@ export default function ObjectAnnotationPanel({
           {tracks.map((object) => (
             <article
               className="object-annotation-row"
-              key={`${object.object_id}:${object.track_id}`}
+              key={object.object_id + ":" + object.track_id}
             >
               <button
                 type="button"

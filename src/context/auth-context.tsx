@@ -14,7 +14,7 @@ import {
   oauthHandleRedirectIfPresent,
   type OAuthResult,
 } from "@huggingface/hub";
-import { AUTH_STORAGE_KEY } from "@/utils/auth";
+import { AUTH_STORAGE_KEY, clearLegacyAuthStorage } from "@/utils/auth";
 
 interface OAuthAppConfig {
   clientId: string;
@@ -45,14 +45,11 @@ const AuthContext = createContext<AuthContextValue>({
 // /api/proxy route can attach it to <video> requests, which can't carry an
 // Authorization header from JS.
 async function setSessionCookie(accessToken: string): Promise<void> {
-  try {
-    await fetch("/api/auth/session", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-  } catch (err) {
-    console.error("Failed to set session cookie", err);
-  }
+  const response = await fetch("/api/auth/session", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) throw new Error("LEVI session could not be established");
 }
 
 async function clearSessionCookie(): Promise<void> {
@@ -90,6 +87,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    // Remove the previous visualizer's namespace before any async request so
+    // a failed/offline config fetch cannot leave the old account selected.
+    clearLegacyAuthStorage();
 
     fetchOAuthConfig().then((cfg) => {
       if (cancelled) return;
@@ -104,7 +104,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             clearSessionCookie();
           } else {
             setOauth(parsed);
-            setSessionCookie(parsed.accessToken);
+            void setSessionCookie(parsed.accessToken).catch((err) => {
+              if (cancelled) return;
+              console.error("Stored Hugging Face session is invalid", err);
+              window.localStorage.removeItem(AUTH_STORAGE_KEY);
+              setOauth(null);
+            });
             return;
           }
         } catch {
@@ -116,9 +121,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       oauthHandleRedirectIfPresent()
         .then((result) => {
           if (cancelled || !result) return;
-          window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(result));
-          setOauth(result);
-          setSessionCookie(result.accessToken);
+          return setSessionCookie(result.accessToken).then(() => {
+            if (cancelled) return;
+            window.localStorage.setItem(
+              AUTH_STORAGE_KEY,
+              JSON.stringify(result),
+            );
+            setOauth(result);
+          });
         })
         .catch((err) => {
           console.error("OAuth redirect handling failed", err);
@@ -139,27 +149,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.location.href = url + "&prompt=consent";
   }, [config]);
 
-  const tokenSignIn = useCallback(async (token: string) => {
+  const tokenSignIn = useCallback(async (value: string) => {
+    const accessToken = value.trim();
+    if (!accessToken) throw new Error("Enter a Hugging Face token");
     const response = await fetch("https://huggingface.co/api/whoami-v2", {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!response.ok) throw new Error("Hugging Face token rejected");
     const user = await response.json();
     const result = {
-      accessToken: token,
+      accessToken,
       userInfo: {
         preferred_username: user.name,
         name: user.name,
         picture: user.avatarUrl,
       },
     } as OAuthResult;
+    await setSessionCookie(accessToken);
+    clearLegacyAuthStorage();
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(result));
-    await setSessionCookie(token);
     setOauth(result);
   }, []);
 
   const signOut = useCallback(() => {
     window.localStorage.removeItem(AUTH_STORAGE_KEY);
+    clearLegacyAuthStorage();
     setOauth(null);
     clearSessionCookie();
     // Strip ?code=... left in the URL by the OAuth redirect, if any.

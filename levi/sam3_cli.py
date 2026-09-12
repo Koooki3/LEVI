@@ -1,4 +1,4 @@
-"""CPU-safe discovery commands for the optional SAM3 integration."""
+"""CPU-safe discovery commands for the SAM3 integration."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from .paths import PROJECT
 
 
 def _enabled() -> bool:
-    return os.environ.get("LEVI_SAM3_ENABLED", "0").lower() in {
+    return os.environ.get("LEVI_SAM3_ENABLED", "1").lower() in {
         "1",
         "true",
         "yes",
@@ -32,7 +32,7 @@ def check() -> int:
     print("  model_imported=0")
     print("  cuda_probe_performed=0")
     if not _enabled():
-        print("  status=disabled; CPU fake provider and manual edits remain available")
+        print("  status=disabled; manual edits remain available")
     elif not python.is_file():
         print("  status=enabled but worker environment is missing")
         return 1

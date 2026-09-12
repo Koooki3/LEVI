@@ -27,7 +27,7 @@ Cache cleanup was applied after validation: generated Next.js output, test/ruff 
 
 Python tests additionally cover the complete bundled pipeline, image/FPS resampling, source byte preservation, quaternion geometry, measured image statistics, metadata repairs, task maps, immutable job plans, changed-source rejection and cache cleanup boundaries.
 
-SAM3 CPU-only coverage includes RLE losslessness, Sidecar revisions and human edits, API plan/run/export source safety, response path redaction, v3 shared-video metadata resolution, invalid refinement rejection, capability checks, and the disabled worker CLI. No test imported Torch, probed CUDA or ran a SAM3 model.
+SAM3 CPU-only coverage includes RLE losslessness, Sidecar revisions and human edits, API plan/run/export source safety, response path redaction, v3 shared-video metadata resolution, invalid refinement rejection, global status checks, and the explicitly disabled worker CLI. No test imported Torch, probed CUDA or ran a SAM3 model.
 
 Python tests cover dataset registration, byte-range video reads, path/symlink boundaries, cross-origin writes, dataset-scoped review persistence, v2 annotation export without source modification, exact frame snapping, v3.1 episode metadata, diagnostics and rejected invalid jobs. Frontend tests include v2 JSONL episode-length statistics and invalid FPS handling, alongside the retained upstream math/parsing suite.
 
@@ -73,7 +73,7 @@ The browser script reads public datasets and writes screenshots/results to `outp
 - The Dockerfile is provided, but a Docker build/run was not verified because this session had no permission to access the local Docker daemon.
 - Linux x86_64 was tested. macOS, ARM64, WSL2 and multi-user deployment were not tested.
 - The checks above do not establish behavior on every dataset, camera codec or training loader. Image-only datasets retain the upstream limitation.
-- The optional SAM3 worker, model checkpoint, CUDA runtime and real GPU inference were intentionally not exercised; only its model-free CPU configuration checks and adapter metadata tests ran.
+- The SAM3 worker, model checkpoint, CUDA runtime and real GPU inference were intentionally not exercised; only its model-free CPU configuration/status checks and adapter metadata tests ran. Deployment instructions for a CUDA host are documented separately and do not claim local GPU validation.
 
 ## 界面 / Screenshots
 

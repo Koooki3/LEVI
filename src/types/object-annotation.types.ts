@@ -55,6 +55,27 @@ export interface Sam3Plan {
   provider?: "sam3" | "fake";
 }
 
+export type Sam3DownloadPhase = "idle" | "downloading" | "ready" | "error";
+
+export interface Sam3DownloadStatus {
+  phase: Sam3DownloadPhase | string;
+  repo_id?: string;
+  filename?: string;
+  revision?: string;
+  bytes?: number;
+  total_bytes?: number | null;
+  percent?: number | null;
+  path?: string;
+  message?: string;
+  updated_at?: number;
+}
+
+export interface Sam3AuthStatus {
+  authenticated: boolean;
+  username: string | null;
+  source: "browser" | "environment/cache" | "none" | string;
+}
+
 export interface Sam3Capabilities {
   provider: "sam3";
   enabled: boolean;
@@ -63,7 +84,30 @@ export interface Sam3Capabilities {
   requires_user_checkpoint_access: boolean;
   gpu_probe_performed: false;
   manual_annotation_available: boolean;
+  model_repo?: string;
+  model_filename?: string;
+  model_revision?: string;
+  checkpoint_dir?: string;
+  checkpoint_path?: string;
+  checkpoint_cached?: boolean;
+  checkpoint_size_bytes?: number;
+  download?: Sam3DownloadStatus;
+  hf_auth?: Sam3AuthStatus;
   message: string;
+}
+
+export interface Sam3JobStatus {
+  job_id?: string;
+  status?: string;
+  provider?: "sam3" | "fake" | string;
+  plan_id?: string;
+  created_at?: string;
+  started_at?: string;
+  finished_at?: string;
+  revision_id?: string;
+  annotation_count?: number;
+  error?: string;
+  progress?: Sam3DownloadStatus;
 }
 
 export interface Sam3Revision {

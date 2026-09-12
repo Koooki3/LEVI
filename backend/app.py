@@ -40,6 +40,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -59,15 +60,24 @@ from levi.annotations.sam3_protocol import (
     fake_annotations,
     validate_annotations_for_plan,
 )
-from levi.auth import token
+from levi.auth import credential_scope, hub_token, token
 from levi.catalog import atomic, local_root
-from levi.paths import CACHE, EXPORTS, STATE, inside
+from levi.paths import CACHE, EXPORTS, SAM3_CHECKPOINT_DIR, STATE, inside
 
 logger = logging.getLogger("lerobot-annotate")
 logging.basicConfig(level=logging.INFO)
 
 CACHE_ROOT = CACHE
 EXPORT_ROOT = EXPORTS
+
+# The mirror contains the PyTorch checkpoint layout expected by the pinned
+# official SAM3 adapter. Keep these values configurable for future model
+# revisions, while making the supported default explicit for every workspace.
+SAM3_MODEL_REPO = os.getenv("LEVI_SAM3_MODEL_REPO", "1038lab/sam3")
+SAM3_MODEL_FILENAME = os.getenv("LEVI_SAM3_MODEL_FILENAME", "sam3.pt")
+SAM3_MODEL_REVISION = os.getenv("LEVI_SAM3_MODEL_REVISION", "main")
+SAM3_PROGRESS_FILENAME = "download-progress.json"
+_SAM3_AUTH_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 # --- Schema mirrors src/lerobot/datasets/language.py --------------------------
 
@@ -176,6 +186,7 @@ class DatasetState:
     repo_id: str | None
     local_path: str | None
     revision: str | None
+    credential_scope: str
     root: Path
     info: dict[str, Any]
     episodes_df: pd.DataFrame
@@ -196,15 +207,14 @@ class DatasetState:
     @property
     def object_annotations_path(self) -> Path:
         """Workspace sidecar root, independent from the source dataset tree."""
-        identity = json.dumps(
-            {
-                "repo_id": self.repo_id,
-                "revision": self.revision or "main",
-                "local_path": self.local_path,
-            },
-            sort_keys=True,
-            ensure_ascii=False,
-        )
+        identity_value = {
+            "repo_id": self.repo_id,
+            "revision": self.revision or "main",
+            "local_path": self.local_path,
+        }
+        if self.repo_id:
+            identity_value["credential_scope"] = self.credential_scope
+        identity = json.dumps(identity_value, sort_keys=True, ensure_ascii=False)
         return (
             STATE / "object_annotations" / hashlib.sha256(identity.encode()).hexdigest()
         )
@@ -217,7 +227,13 @@ def _state_key(req: DatasetRef) -> str:
     if req.local_path:
         return f"local::{Path(req.local_path).expanduser().resolve()}"
     if req.repo_id:
-        return f"hf::{req.repo_id}@{req.revision or 'main'}"
+        # Hub permissions affect the resolved dataset. Namespace the in-memory
+        # state and sidecar by a one-way token digest so account changes cannot
+        # reuse a previous account's private cache.
+        return (
+            f"hf::{req.repo_id}@{req.revision or 'main'}"
+            f"::{credential_scope()}"
+        )
     raise HTTPException(status_code=400, detail="need repo_id or local_path")
 
 
@@ -240,6 +256,8 @@ def _sidecar(state: DatasetState) -> SidecarStore:
         "codebase_version": state.info.get("codebase_version"),
         "fps": state.info.get("fps"),
     }
+    if state.repo_id:
+        identity["credential_scope"] = state.credential_scope
     return SidecarStore(state.object_annotations_path, identity=identity)
 
 
@@ -265,7 +283,7 @@ _SAM3_PROCESSES: dict[str, subprocess.Popen[bytes]] = {}
 
 
 def _sam3_enabled() -> bool:
-    return os.environ.get("LEVI_SAM3_ENABLED", "0").lower() in _SAM3_ENABLED_VALUES
+    return os.environ.get("LEVI_SAM3_ENABLED", "1").lower() in _SAM3_ENABLED_VALUES
 
 
 def _public_sam3_plan(payload: dict[str, Any]) -> dict[str, Any]:
@@ -307,6 +325,7 @@ def _public_sam3_job(job: dict[str, Any]) -> dict[str, Any]:
         "revision_id",
         "annotation_count",
         "error",
+        "progress",
     )
     return {key: job[key] for key in public_keys if key in job}
 
@@ -426,7 +445,13 @@ def _load_state(req: DatasetRef, key: str) -> DatasetState:
             if req.revision
             else "main"
         )
-        slug = req.repo_id.replace("/", "__") + "@" + revision_key
+        slug = (
+            req.repo_id.replace("/", "__")
+            + "@"
+            + revision_key
+            + "--"
+            + credential_scope()
+        )
         root = inside(CACHE_ROOT / slug)
         root.mkdir(parents=True, exist_ok=True)
         snapshot_download(
@@ -435,7 +460,8 @@ def _load_state(req: DatasetRef, key: str) -> DatasetState:
             token=token(),
             revision=req.revision,
             local_dir=root,
-            allow_patterns=["meta/*"],
+            # v3 stores episode metadata in nested meta/episodes shards.
+            allow_patterns=["meta/**"],
         )
     else:
         raise HTTPException(status_code=400, detail="need repo_id or local_path")
@@ -470,6 +496,7 @@ def _load_state(req: DatasetRef, key: str) -> DatasetState:
         repo_id=req.repo_id,
         local_path=str(root) if req.local_path else None,
         revision=req.revision,
+        credential_scope=credential_scope() if req.repo_id else "local",
         root=root,
         info=info,
         episodes_df=episodes_df,
@@ -1145,9 +1172,116 @@ def set_episode_atoms(episode_index: int, payload: EpisodeAtomsPayload) -> JSONR
     )
 
 
-@app.get("/api/sam3/capabilities")
-def sam3_capabilities() -> JSONResponse:
-    """Report availability without importing torch or probing CUDA."""
+def _prepare_sam3_media(state: DatasetState) -> None:
+    """Ensure a Hub-backed worker has video assets beside its metadata."""
+    if not state.repo_id or state.local_path:
+        return
+    if os.environ.get("LEVI_SAM3_DOWNLOAD_VIDEOS", "1").lower() not in _SAM3_ENABLED_VALUES:
+        return
+    try:
+        # A Hub state is initially metadata-only so browsing remains cheap.
+        # Real SAM3 needs local video bytes; keep the snapshot in the
+        # account/revision-scoped cache selected by _load_state.
+        snapshot_download(
+            state.repo_id,
+            repo_type="dataset",
+            token=token(),
+            revision=state.revision,
+            local_dir=state.root,
+            allow_patterns=["videos/**"],
+        )
+    except Exception as exc:
+        logger.warning("SAM3 Hub video preparation failed: %s", exc)
+        raise HTTPException(
+            502,
+            "Unable to prepare Hub video assets for SAM3; check dataset access and the current Hugging Face account.",
+        ) from exc
+
+
+def _sam3_checkpoint_dir() -> Path:
+    configured = os.environ.get("LEVI_SAM3_CHECKPOINT_DIR")
+    if not configured:
+        return SAM3_CHECKPOINT_DIR
+    try:
+        return inside(configured)
+    except ValueError:
+        logger.warning("Ignoring SAM3 checkpoint directory outside LEVI_WORKSPACE")
+        return SAM3_CHECKPOINT_DIR
+
+
+def _sam3_checkpoint_path() -> Path:
+    configured = os.environ.get("LEVI_SAM3_CHECKPOINT")
+    if configured:
+        return Path(configured).expanduser()
+    return _sam3_checkpoint_dir() / SAM3_MODEL_FILENAME
+
+
+def _read_sam3_download() -> dict[str, Any]:
+    path = _sam3_checkpoint_dir() / SAM3_PROGRESS_FILENAME
+    if not path.is_file():
+        return {}
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, ValueError, TypeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _sam3_auth_status() -> dict[str, Any]:
+    """Return account identity without returning a token or profile payload."""
+    active = token()
+    scope = credential_scope(active)
+    now = time.monotonic()
+    cached = _SAM3_AUTH_CACHE.get(scope)
+    if cached and now - cached[0] < 30:
+        return dict(cached[1])
+    result: dict[str, Any] = {
+        "authenticated": False,
+        "username": None,
+        "source": "none",
+    }
+    try:
+        user = HfApi(token=active).whoami()
+        username = (
+            (user.get("name") or user.get("username"))
+            if isinstance(user, dict)
+            else None
+        )
+        if username:
+            result.update(
+                authenticated=True,
+                username=str(username),
+                source=("browser" if hub_token.get() else "environment/cache"),
+            )
+    except Exception as exc:  # noqa: BLE001
+        # Public model metadata remains usable when a token is absent or expired.
+        logger.debug("Hugging Face account status unavailable: %s", exc)
+    _SAM3_AUTH_CACHE[scope] = (now, result)
+    return dict(result)
+
+
+def _sam3_status_payload() -> dict[str, Any]:
+    checkpoint = _sam3_checkpoint_path()
+    download = _read_sam3_download()
+    checkpoint_ready = checkpoint.is_file()
+    if checkpoint_ready and download.get("phase") not in {"downloading", "error"}:
+        download = {
+            **download,
+            "phase": "ready",
+            "bytes": checkpoint.stat().st_size,
+            "path": str(checkpoint),
+        }
+    elif not download:
+        download = {
+            "phase": "ready" if checkpoint_ready else "idle",
+            "bytes": checkpoint.stat().st_size if checkpoint_ready else 0,
+            "total_bytes": checkpoint.stat().st_size if checkpoint_ready else None,
+            "percent": 100.0 if checkpoint_ready else 0.0,
+            "path": str(checkpoint),
+        }
+    else:
+        download.setdefault("path", str(checkpoint))
+    size = checkpoint.stat().st_size if checkpoint_ready else 0
     worker_project = (
         Path(__file__).resolve().parents[1] / "integrations" / "sam3" / "pyproject.toml"
     )
@@ -1157,23 +1291,41 @@ def sam3_capabilities() -> JSONResponse:
             str(worker_project.parent / ".venv/bin/python"),
         )
     ).expanduser()
-    enabled = _sam3_enabled()
-    return JSONResponse(
-        {
-            "provider": "sam3",
-            "enabled": enabled,
-            "worker_project_present": worker_project.is_file(),
-            "worker_python_present": worker_python.is_file(),
-            "requires_user_checkpoint_access": True,
-            "gpu_probe_performed": False,
-            "manual_annotation_available": True,
-            "message": (
-                "SAM3 is disabled; use the CPU-safe fake provider for tests."
-                if not enabled
-                else "SAM3 is explicitly enabled; the optional worker must be installed and authenticated."
-            ),
-        }
-    )
+    return {
+        "provider": "sam3",
+        "enabled": _sam3_enabled(),
+        "worker_project_present": worker_project.is_file(),
+        "worker_python_present": worker_python.is_file(),
+        "requires_user_checkpoint_access": True,
+        "gpu_probe_performed": False,
+        "manual_annotation_available": True,
+        "model_repo": SAM3_MODEL_REPO,
+        "model_filename": SAM3_MODEL_FILENAME,
+        "model_revision": SAM3_MODEL_REVISION,
+        "checkpoint_dir": str(_sam3_checkpoint_dir()),
+        "checkpoint_path": str(checkpoint),
+        "checkpoint_cached": checkpoint_ready,
+        "checkpoint_size_bytes": size,
+        "download": download,
+        "hf_auth": _sam3_auth_status(),
+        "message": (
+            "SAM3 is disabled; set LEVI_SAM3_ENABLED=1 to enable it."
+            if not _sam3_enabled()
+            else "SAM3 is globally available; install the CUDA worker and sign in to Hugging Face before the first run."
+        ),
+    }
+
+
+@app.get("/api/sam3/status")
+def sam3_status() -> JSONResponse:
+    """Report model/account/download state without importing Torch or probing CUDA."""
+    return JSONResponse(_sam3_status_payload())
+
+
+@app.get("/api/sam3/capabilities")
+def sam3_capabilities() -> JSONResponse:
+    """Backward-compatible alias for the global SAM3 status payload."""
+    return JSONResponse(_sam3_status_payload())
 
 
 @app.post("/api/sam3/plan")
@@ -1209,7 +1361,7 @@ def sam3_run(request: Sam3RunRequest) -> JSONResponse:
     if not _sam3_enabled():
         raise HTTPException(
             503,
-            "SAM3 is disabled; set LEVI_SAM3_ENABLED=1 to enable the optional worker",
+            "SAM3 is disabled; set LEVI_SAM3_ENABLED=1 to enable it",
         )
     worker_project = Path(__file__).resolve().parents[1] / "integrations" / "sam3"
     worker_python = Path(
@@ -1226,6 +1378,7 @@ def sam3_run(request: Sam3RunRequest) -> JSONResponse:
             503,
             f"SAM3 worker environment not found at {worker_python}; see integrations/sam3/README.md",
         )
+    _prepare_sam3_media(state)
     job_id = uuid.uuid4().hex
     result_path = store.root / "staging" / "results" / f"{job_id}.json"
     log_path = store.root / "staging" / "jobs" / f"{job_id}.log"
@@ -1254,7 +1407,14 @@ def sam3_run(request: Sam3RunRequest) -> JSONResponse:
                 str(result_path),
             ],
             cwd=worker_project,
-            env={**os.environ, "LEVI_SAM3_ENABLED": "1"},
+            env={
+                **os.environ,
+                "LEVI_SAM3_ENABLED": "1",
+                "LEVI_SAM3_CHECKPOINT_DIR": str(_sam3_checkpoint_dir()),
+                # Pass the current browser account only for this child process.
+                # It is never written to the plan, job record, or log.
+                **({"HF_TOKEN": token()} if token() else {}),
+            },
             stdin=subprocess.DEVNULL,
             stdout=log_stream,
             stderr=subprocess.STDOUT,

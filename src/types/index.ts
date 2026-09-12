@@ -43,5 +43,8 @@ export type {
   ReviewStatus,
   Sam3Plan,
   Sam3Capabilities,
+  Sam3DownloadStatus,
+  Sam3AuthStatus,
+  Sam3JobStatus,
   Sam3Revision,
 } from "./object-annotation.types";

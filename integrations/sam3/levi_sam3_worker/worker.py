@@ -1,9 +1,9 @@
 """Lazy SAM3 video adapter.
 
 The module intentionally imports no Torch, NumPy, or SAM3 at import time. The
-optional runtime is only reached from ``run_plan`` after the caller has opted
-in with ``LEVI_SAM3_ENABLED=1``. All output is plain JSON so the LEVI control
-plane remains independent from model packages.
+heavy runtime is only reached from ``run_plan`` after the caller has enabled the
+global integration with ``LEVI_SAM3_ENABLED=1``. All output is plain JSON so the
+LEVI control plane remains independent from model packages.
 """
 
 from __future__ import annotations
@@ -11,15 +11,22 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
+import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any
 
 SAM3_COMMIT = "660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b"
+SAM3_MODEL_REPO = os.environ.get("LEVI_SAM3_MODEL_REPO", "1038lab/sam3")
+SAM3_MODEL_FILENAME = os.environ.get("LEVI_SAM3_MODEL_FILENAME", "sam3.pt")
+SAM3_MODEL_REVISION = os.environ.get("LEVI_SAM3_MODEL_REVISION", "main")
+SAM3_PROGRESS_FILENAME = "download-progress.json"
 
 
 def _enabled() -> bool:
-    return os.environ.get("LEVI_SAM3_ENABLED", "0").lower() in {
+    return os.environ.get("LEVI_SAM3_ENABLED", "1").lower() in {
         "1",
         "true",
         "yes",
@@ -32,6 +39,179 @@ def _atomic_json(path: Path, value: Any) -> None:
     temp = path.with_name(path.name + f".{uuid.uuid4().hex}.tmp")
     temp.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False))
     os.replace(temp, path)
+
+
+def _checkpoint_dir() -> Path:
+    configured = os.environ.get("LEVI_SAM3_CHECKPOINT_DIR")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return Path.cwd() / ".state" / "checkpoints" / "sam3"
+
+
+def _progress_path() -> Path:
+    return _checkpoint_dir() / SAM3_PROGRESS_FILENAME
+
+
+def _safe_progress_message(value: object) -> str:
+    # Download errors can echo signed Hub URLs. Persist only a redacted,
+    # human-readable message in the workspace progress file.
+    message = str(value)
+    return re.sub(
+        r"(?i)(token|authorization|x-amz-signature|x-amz-credential)=[^&\s]+",
+        r"\1=<redacted>",
+        message,
+    )
+
+
+def _write_checkpoint_progress(
+    phase: str,
+    *,
+    bytes_downloaded: int = 0,
+    total_bytes: int | None = None,
+    percent: float | None = None,
+    path: Path | None = None,
+    message: str | None = None,
+) -> None:
+    payload: dict[str, Any] = {
+        "phase": phase,
+        "repo_id": SAM3_MODEL_REPO,
+        "filename": SAM3_MODEL_FILENAME,
+        "revision": SAM3_MODEL_REVISION,
+        "bytes": max(0, int(bytes_downloaded)),
+        "total_bytes": total_bytes,
+        "percent": percent,
+        "path": str(path or (_checkpoint_dir() / SAM3_MODEL_FILENAME)),
+        "updated_at": time.time(),
+    }
+    if message:
+        payload["message"] = _safe_progress_message(message)
+    try:
+        _atomic_json(_progress_path(), payload)
+    except OSError:
+        # Checkpoint download must not fail solely because progress telemetry
+        # cannot be written.
+        return
+
+
+def _remote_checkpoint_size(token_value: str | None) -> int | None:
+    """Read the model file size without downloading model bytes."""
+    try:
+        from huggingface_hub import HfApi
+
+        api = HfApi(token=token_value)
+        try:
+            info = api.model_info(
+                SAM3_MODEL_REPO,
+                revision=SAM3_MODEL_REVISION,
+                files_metadata=True,
+            )
+        except TypeError:
+            info = api.model_info(SAM3_MODEL_REPO, revision=SAM3_MODEL_REVISION)
+        for sibling in getattr(info, "siblings", []) or []:
+            name = getattr(sibling, "rfilename", None)
+            size = getattr(sibling, "size", None)
+            if name == SAM3_MODEL_FILENAME and isinstance(size, int):
+                return size
+    except Exception as exc:  # noqa: BLE001
+        # A missing metadata HEAD request should only make the UI progress bar
+        # indeterminate; hf_hub_download remains the source of truth.
+        _ = exc
+    return None
+
+
+def _incomplete_bytes(root: Path) -> int:
+    total = 0
+    try:
+        for path in root.rglob("*.incomplete"):
+            if path.is_file():
+                total = max(total, path.stat().st_size)
+    except OSError:
+        pass
+    return total
+
+
+def _ensure_checkpoint() -> tuple[Path, str]:
+    """Resolve a local checkpoint or download the configured mirror once."""
+    configured = os.environ.get("LEVI_SAM3_CHECKPOINT")
+    if configured:
+        checkpoint = Path(configured).expanduser().resolve()
+        if not checkpoint.is_file():
+            raise FileNotFoundError(f"LEVI_SAM3_CHECKPOINT not found: {checkpoint}")
+        _write_checkpoint_progress(
+            "ready", bytes_downloaded=checkpoint.stat().st_size, total_bytes=checkpoint.stat().st_size, percent=100.0, path=checkpoint
+        )
+        return checkpoint, "local"
+
+    target_dir = _checkpoint_dir()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / SAM3_MODEL_FILENAME
+    if target.is_file():
+        size = target.stat().st_size
+        _write_checkpoint_progress(
+            "ready", bytes_downloaded=size, total_bytes=size, percent=100.0, path=target
+        )
+        return target, "huggingface"
+
+    token_value = os.environ.get("HF_TOKEN") or None
+    total_bytes = _remote_checkpoint_size(token_value)
+    _write_checkpoint_progress(
+        "downloading",
+        total_bytes=total_bytes,
+        percent=0.0 if total_bytes else None,
+        path=target,
+        message=f"Downloading {SAM3_MODEL_REPO}/{SAM3_MODEL_FILENAME}",
+    )
+    stop = threading.Event()
+
+    def monitor() -> None:
+        while not stop.is_set():
+            current = _incomplete_bytes(target_dir)
+            percent = (
+                min(100.0, current * 100.0 / total_bytes)
+                if total_bytes
+                else None
+            )
+            _write_checkpoint_progress(
+                "downloading",
+                bytes_downloaded=current,
+                total_bytes=total_bytes,
+                percent=percent,
+                path=target,
+            )
+            stop.wait(0.5)
+
+    thread = threading.Thread(target=monitor, name="sam3-checkpoint-progress", daemon=True)
+    thread.start()
+    try:
+        from huggingface_hub import hf_hub_download
+
+        downloaded = Path(
+            hf_hub_download(
+                repo_id=SAM3_MODEL_REPO,
+                filename=SAM3_MODEL_FILENAME,
+                revision=SAM3_MODEL_REVISION,
+                token=token_value,
+                local_dir=str(target_dir),
+            )
+        )
+    except Exception as exc:
+        _write_checkpoint_progress(
+            "error",
+            bytes_downloaded=_incomplete_bytes(target_dir),
+            total_bytes=total_bytes,
+            percent=None,
+            path=target,
+            message=str(exc),
+        )
+        raise
+    finally:
+        stop.set()
+        thread.join(timeout=2)
+    size = downloaded.stat().st_size
+    _write_checkpoint_progress(
+        "ready", bytes_downloaded=size, total_bytes=size, percent=100.0, path=downloaded
+    )
+    return downloaded, "huggingface"
 
 
 def _rle(mask: Any) -> dict[str, object]:
@@ -217,6 +397,7 @@ def _append_outputs(
     concepts: dict[int, str],
     fps: float,
     np: Any,
+    frame_offset: int = 0,
 ) -> None:
     ids, masks, boxes, scores = _normalise_outputs(outputs, np)
     for index, (object_id, mask) in enumerate(zip(ids, masks, strict=False)):
@@ -224,7 +405,12 @@ def _append_outputs(
         bbox = _bbox_xywh(boxes, index, mask, np)
         if bbox is None:
             continue
-        frame_index = int(outputs.get("frame_index", 0)) if isinstance(outputs, dict) else 0
+        source_frame_index = (
+            int(outputs.get("frame_index", 0)) if isinstance(outputs, dict) else 0
+        )
+        frame_index = source_frame_index - frame_offset
+        if frame_index < 0:
+            continue
         score = max(0.0, min(1.0, _value_at(scores, index, 1.0)))
         rows.append(
             {
@@ -266,10 +452,36 @@ def _run_episode_camera(
     camera_key: str,
     np: Any,
 ) -> list[dict[str, Any]]:
-    video, _segment_start = _episode_video(root, info, episode_index, camera_key)
+    video, segment_start = _episode_video(root, info, episode_index, camera_key)
     fps = float(info.get("fps", 30) or 30)
-    start_frame = int(plan.get("start_frame", 0))
-    max_frames = plan.get("max_frames")
+    episode = _episode_metadata(root, episode_index)
+    # v3 video shards may contain multiple episodes. Predictor frame indices
+    # are relative to the shared file, while the sidecar contract is episode
+    # local, so carry the metadata timestamp offset through the whole run.
+    segment_start_frame = max(0, round(segment_start * fps))
+    local_start_frame = max(0, int(plan.get("start_frame", 0)))
+    source_start_frame = segment_start_frame + local_start_frame
+    episode_length = int(episode.get("length", 0) or 0)
+    if episode_length <= 0:
+        segment_end = float(
+            episode.get(
+                f"videos/{camera_key}/to_timestamp",
+                episode.get("video_to_timestamp", 0),
+            )
+            or 0
+        )
+        if segment_end > segment_start:
+            episode_length = max(0, round((segment_end - segment_start) * fps))
+    requested_max_frames = plan.get("max_frames")
+    remaining_frames = max(0, episode_length - local_start_frame)
+    if requested_max_frames is None:
+        max_frames = remaining_frames or None
+    else:
+        max_frames = (
+            min(int(requested_max_frames), remaining_frames)
+            if remaining_frames
+            else int(requested_max_frames)
+        )
     session = predictor.handle_request({"type": "start_session", "resource_path": str(video)})
     session_id = session["session_id"]
     concepts: dict[int, str] = {}
@@ -280,7 +492,7 @@ def _run_episode_camera(
                 {
                     "type": "add_prompt",
                     "session_id": session_id,
-                    "frame_index": start_frame,
+                    "frame_index": source_start_frame,
                     "text": prompt,
                     "output_prob_thresh": float(plan.get("review_threshold", 0.6)),
                 }
@@ -293,7 +505,7 @@ def _run_episode_camera(
                     concepts.setdefault(int(object_id), prompt)
                 if "frame_index" not in outputs:
                     outputs = dict(outputs)
-                    outputs["frame_index"] = response.get("frame_index", start_frame)
+                    outputs["frame_index"] = response.get("frame_index", source_start_frame)
                 _append_outputs(
                     rows,
                     outputs,
@@ -302,12 +514,13 @@ def _run_episode_camera(
                     concepts=concepts,
                     fps=fps,
                     np=np,
+                    frame_offset=segment_start_frame,
                 )
         request = {
             "type": "propagate_in_video",
             "session_id": session_id,
             "propagation_direction": "forward",
-            "start_frame_index": start_frame,
+            "start_frame_index": source_start_frame,
             "output_prob_thresh": float(plan.get("review_threshold", 0.6)),
         }
         if max_frames is not None:
@@ -316,7 +529,7 @@ def _run_episode_camera(
             outputs = response.get("outputs", {})
             if isinstance(outputs, dict):
                 outputs = dict(outputs)
-                outputs["frame_index"] = response.get("frame_index", outputs.get("frame_index", start_frame))
+                outputs["frame_index"] = response.get("frame_index", outputs.get("frame_index", source_start_frame))
                 _append_outputs(
                     rows,
                     outputs,
@@ -325,6 +538,7 @@ def _run_episode_camera(
                     concepts=concepts,
                     fps=fps,
                     np=np,
+                    frame_offset=segment_start_frame,
                 )
     finally:
         predictor.handle_request({"type": "close_session", "session_id": session_id})
@@ -338,7 +552,7 @@ def _run_episode_camera(
 
 def run_plan(plan_path: Path, output_path: Path) -> None:
     if not _enabled():
-        raise RuntimeError("SAM3 is disabled; set LEVI_SAM3_ENABLED=1 explicitly")
+        raise RuntimeError("SAM3 is disabled; set LEVI_SAM3_ENABLED=1 to enable it")
     plan = json.loads(plan_path.read_text())
     root = Path(plan["dataset_root"]).expanduser().resolve()
     if not root.is_dir():
@@ -351,12 +565,11 @@ def run_plan(plan_path: Path, output_path: Path) -> None:
 
     if not torch.cuda.is_available():
         raise RuntimeError("SAM3 worker requires a CUDA device; LEVI core remains CPU-safe")
-    checkpoint = os.environ.get("LEVI_SAM3_CHECKPOINT")
-    kwargs: dict[str, Any] = {}
-    if checkpoint:
-        kwargs["checkpoint_path"] = checkpoint
-        kwargs["load_from_HF"] = False
-    predictor = build_sam3_video_predictor(**kwargs)
+    checkpoint, checkpoint_source = _ensure_checkpoint()
+    # Passing an explicit path prevents the pinned official builder from
+    # looking up facebook/sam3. The mirror is resolved above with the user's
+    # current Hugging Face credential.
+    predictor = build_sam3_video_predictor(checkpoint_path=str(checkpoint))
     annotations: list[dict[str, Any]] = []
     try:
         for episode_index in plan["episode_indices"]:
@@ -384,7 +597,11 @@ def run_plan(plan_path: Path, output_path: Path) -> None:
             "model": {
                 "provider": "sam3",
                 "model_version": f"sam3@{SAM3_COMMIT}",
-                "checkpoint": "local" if checkpoint else "huggingface",
+                "checkpoint": checkpoint_source,
+                "checkpoint_path": str(checkpoint),
+                "model_repo": SAM3_MODEL_REPO,
+                "model_filename": SAM3_MODEL_FILENAME,
+                "model_revision": SAM3_MODEL_REVISION,
             },
         },
     )

@@ -165,8 +165,22 @@ def test_api_cpu_fake_provider_and_export_are_sidecar_only(client, dataset, tmp_
     assert (dataset / "data/chunk-000/episode_000000.parquet").read_bytes() == before
 
 
+def test_sam3_status_reports_global_model_without_cuda(client, monkeypatch):
+    import backend.app as annotations
+
+    monkeypatch.setattr(annotations.HfApi, "whoami", lambda self: {"name": "fixture"})
+    response = client.get("/annotations/api/sam3/status")
+    assert response.status_code == 200, response.text
+    value = response.json()
+    assert value["model_repo"] == "1038lab/sam3"
+    assert value["model_filename"] == "sam3.pt"
+    assert value["gpu_probe_performed"] is False
+    assert value["hf_auth"]["username"] == "fixture"
+    assert "HF_TOKEN" not in response.text
+
+
 def test_api_rejects_real_provider_when_disabled(client, dataset, monkeypatch):
-    monkeypatch.delenv("LEVI_SAM3_ENABLED", raising=False)
+    monkeypatch.setenv("LEVI_SAM3_ENABLED", "0")
     response = client.post(
         "/annotations/api/sam3/run",
         json={
@@ -233,6 +247,80 @@ def test_v3_worker_resolves_shared_video_metadata(tmp_path):
     )
     assert resolved == video
     assert start == 4.5
+
+
+def test_v3_worker_uses_episode_local_frame_window(tmp_path):
+    import numpy as np
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    worker_root = Path(__file__).resolve().parents[1] / "integrations" / "sam3"
+    sys.path.insert(0, str(worker_root))
+    try:
+        from levi_sam3_worker.worker import _run_episode_camera
+    finally:
+        sys.path.pop(0)
+
+    (tmp_path / "meta/episodes/chunk-000").mkdir(parents=True)
+    (tmp_path / "videos/chunk-002/observation.images.front").mkdir(parents=True)
+    (tmp_path / "videos/chunk-002/observation.images.front/file-003.mp4").write_bytes(
+        b"fixture"
+    )
+    pq.write_table(
+        pa.Table.from_pylist(
+            [
+                {
+                    "episode_index": 7,
+                    "length": 3,
+                    "videos/observation.images.front/chunk_index": 2,
+                    "videos/observation.images.front/file_index": 3,
+                    "videos/observation.images.front/from_timestamp": 4.5,
+                }
+            ]
+        ),
+        tmp_path / "meta/episodes/chunk-000/file-000.parquet",
+    )
+
+    def output(frame_index: int) -> dict[str, object]:
+        return {
+            "frame_index": frame_index,
+            "out_obj_ids": np.array([2]),
+            "out_binary_masks": np.array([[[True, False], [True, True]]]),
+            "out_boxes_xywh": np.array([[0.0, 0.0, 1.0, 1.0]]),
+            "out_probs": np.array([0.9]),
+        }
+
+    class Predictor:
+        def __init__(self):
+            self.calls: list[dict[str, object]] = []
+
+        def handle_request(self, request):
+            self.calls.append(request)
+            if request["type"] == "start_session":
+                return {"session_id": "session"}
+            if request["type"] == "add_prompt":
+                return {"frame_index": 136, "outputs": output(136)}
+            return {}
+
+        def handle_stream_request(self, request):
+            self.calls.append(request)
+            yield {"frame_index": 137, "outputs": output(137)}
+
+    predictor = Predictor()
+    rows = _run_episode_camera(
+        predictor,
+        tmp_path,
+        {"fps": 30, "video_path": "videos/chunk-{video_chunk_index:03d}/{video_key}/file-{video_file_index:03d}.mp4"},
+        plan={"prompts": ["cup"], "start_frame": 1, "max_frames": None},
+        episode_index=7,
+        camera_key="observation.images.front",
+        np=np,
+    )
+    assert [row["frame_index"] for row in rows] == [1, 2]
+    assert rows[0]["timestamp"] == 1 / 30
+    assert predictor.calls[1]["frame_index"] == 136
+    assert predictor.calls[2]["start_frame_index"] == 136
+    assert predictor.calls[2]["max_frame_num_to_track"] == 2
 
 
 def test_worker_timestamps_are_episode_local():

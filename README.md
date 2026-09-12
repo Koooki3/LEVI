@@ -21,6 +21,7 @@ git clone https://github.com/Koooki3/LEVI.git
 cd LEVI
 # 仓库所在目录及其父目录可以任意命名
 export LEVI_WORKSPACE="$PWD/.state"
+cp .env.example .env
 export UV_CACHE_DIR="$LEVI_WORKSPACE/.cache/uv"
 export UV_PYTHON_INSTALL_DIR="$PWD/.runtime/python"
 uv sync --locked
@@ -44,6 +45,41 @@ uv run levi clean --apply               # 删除预览列表内的可再生成�
 ```
 
 从远程服务器访问时，在自己的电脑运行 `ssh -L 7860:127.0.0.1:7860 USER@SERVER`，然后访问本机上述地址。默认前端绑定本机 **7860（网页入口）**，后端绑定本机 **7861（内部 API）**；前端通过同源代理访问后端。不要把本机 7860 转发到服务器 7861。误开后端根路径会显示入口说明及网页链接；`uv run levi backend` 只启动 API。启动器会检查端口冲突，并等待前后端均就绪后才输出网页入口。
+
+## SAM3 首次部署顺序
+
+在克隆后的 LEVI 根目录按以下顺序执行；目录名称和工作区绝对路径可任意：
+
+~~~bash
+# 1) 设置工作区并安装核心依赖
+export LEVI_WORKSPACE="$PWD/.state"
+cp .env.example .env
+uv sync --locked
+uv run levi setup
+
+# 2) 登录可读取 1038lab/sam3 的 Hugging Face 账号
+hf auth login
+hf auth whoami
+# 没有全局 hf 时使用：
+# uvx hf auth login
+# uvx hf auth whoami
+
+# 3) 在 CUDA 主机安装独立 worker
+uv venv --python 3.12 integrations/sam3/.venv
+uv sync --project integrations/sam3
+export LEVI_SAM3_WORKER_PYTHON="$PWD/integrations/sam3/.venv/bin/python"
+export LEVI_SAM3_ENABLED=1
+
+# 4) 只做无模型配置检查
+uv run --project integrations/sam3 levi-sam3-worker --check
+uv run levi sam3 check
+
+# 5) 构建并启动网页
+uv run levi build
+uv run levi serve
+~~~
+
+看到 Ready 后访问 http://127.0.0.1:7860，在任意数据集的标注页面确认账号、模型和 checkpoint 保存位置，再点击“运行 SAM3 标注”。首次作业会把 sam3.pt 下载到 $LEVI_WORKSPACE/checkpoints/sam3，并显示进度；后续作业复用该文件。切换 Hugging Face 账号或工作区时，LEVI 会按账号 digest 和工作区重新隔离 Hub 快照与 sidecar。可设置 LEVI_SAM3_ENABLED=0 暂时隐藏真实 worker。不要提交 token、checkpoint 或工作区数据。
 
 ## 工作目录与数据位置
 
@@ -78,9 +114,9 @@ uv run levi clean --apply               # 删除预览列表内的可再生成�
 
 浏览器支持视频型 LeRobot v2.0/v2.1/v3.0/v3.1。沿用上游对图片直接嵌入 Parquet 的限制；可先转换为视频数据集。原始任务内容、特征标识和关节名称保留原文。
 
-### SAM3 对象标注（可选）
+### SAM3 对象标注（全局）
 
-标注页提供对象/轨迹 sidecar 和 CPU 演示。选择相机与文本提示即可生成可重复的建议，再逐条接受或拒绝；原生 LeRobot 文件保持只读。真实 SAM3 需要单独的 Python 3.12 uv 环境、Hugging Face checkpoint 权限和显式 `LEVI_SAM3_ENABLED=1`，详见 [SAM3 指南](docs/SAM3.md)。核心 LEVI 测试不导入 Torch、探测 CUDA 或运行模型。
+标注页对演示集、Hub 数据集和登记的本地数据集统一提供 SAM3 对象/轨迹 sidecar。选择相机与文本提示即可启动真实标注；模型建议写入独立的无损 RLE sidecar，原生 LeRobot 文件保持只读。页面会显示当前 Hugging Face 账号、worker 状态、checkpoint 下载进度和工作区保存位置。默认模型为 1038lab/sam3 的 sam3.pt；首次真实作业需要独立 Python 3.12 uv worker 和 CUDA 主机，核心 CPU 检查不会导入 Torch、探测 CUDA、下载模型或执行推理。完整顺序见 SAM3 指南。
 
 默认演示：
 

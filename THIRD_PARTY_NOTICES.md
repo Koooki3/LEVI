@@ -2,7 +2,7 @@
 
 ## Scope and baseline / 范围与基线
 
-This is the source-release inventory for LEVI v0.2.0, checked on 2026-09-10 against commit `72489de837ce4caa6bc0eb7109f876584f665290`. It records upstream source, included/used assets, all direct Python and JavaScript runtime/development dependencies, and the build/runtime tools declared by the project. Dependency versions below were verified against `uv.lock` / `bun.lock` and installed package metadata; license labels come from those packages' metadata and license files.
+This is the source-release inventory for LEVI v0.2.0, refreshed on 2026-09-12. The dependency baseline remains the v0.2.0 lock and source commit; this update adds the global SAM3 mirror and worker dependency notes.
 
 当前清单覆盖源码来源、随附或使用的素材、直接依赖及构建/运行工具。它不是尚未发布的 Docker、PyPI 或二进制产物的完整传递依赖清单；当前正式发行提供源码，不包含安装后的环境、依赖目录或数据集视频。未来发布这些产物前，必须按下文流程生成并维护实际分发清单与许可证文本。
 
@@ -19,7 +19,8 @@ This is the source-release inventory for LEVI v0.2.0, checked on 2026-09-10 agai
 | Studio environment HDRI | [Studio Small 03 by Greg Zaal / Poly Haven](https://polyhaven.com/a/studio_small_03), [CC0](https://polyhaven.com/license); [Drei asset revision](https://github.com/pmndrs/drei-assets/blob/456060a26bbeb8fdf79326f224b6d99b8bcce736/hdri/studio_small_03_1k.hdr) | Loaded remotely by `Environment preset="studio"` in URDF playback; not included in the source archive. |
 | Hugging Face sign-in badge | [Hugging Face badges](https://huggingface.co/datasets/huggingface/badges); respective source and trademark terms | Loaded remotely by the sign-in button. It is not relicensed by LEVI; record applicable terms before bundling a copy. |
 | External lerobot-doctor service | External service linked from the workbench; see [UPSTREAM](docs/UPSTREAM.md) | Linked rather than vendored; LEVI's own diagnostics are separate source code. |
-| Optional Meta SAM3 worker | [facebookresearch/sam3](https://github.com/facebookresearch/sam3/tree/660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b), pinned Git dependency; [SAM License](https://github.com/facebookresearch/sam3/blob/main/LICENSE) | Installed only in `integrations/sam3`; source and checkpoints are not bundled. Preserve the official license and checkpoint access/redistribution terms in any future artifact. |
+| SAM3 adapter source | [facebookresearch/sam3](https://github.com/facebookresearch/sam3/tree/660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b), pinned Git dependency; [SAM License](https://github.com/facebookresearch/sam3/blob/main/LICENSE) | Installed only in integrations/sam3; adapter code and checkpoints are not bundled. |
+| SAM3 checkpoint mirror | [1038lab/sam3](https://huggingface.co/1038lab/sam3), sam3.pt; mirror/model-page terms apply | Downloaded at runtime after the user authenticates; never committed or included in source release. |
 
 The react-icons package's MIT license does **not** replace the individual icon collections' licenses. Its installed `LICENSE` and `README.md` list those collections. If an artifact contains the entire react-icons package, inventory all included collections, not just the icons imported by LEVI.
 
@@ -112,6 +113,6 @@ Before a Docker, PyPI (sdist/wheel), executable or other bundled release:
 
 This procedure is a release requirement documented in [RELEASING](docs/RELEASING.md); it is not an automated license gate in the current CI. No Docker/PyPI/binary redistribution inventory is claimed complete by this source-only update.
 
-### Optional SAM3 dependencies
+### SAM3 integration dependencies
 
-The SAM3 worker declares its own uv environment and is intentionally absent from the core `uv.lock`. Its exact Torch/torchvision wheels, CUDA runtime, transitive dependencies, native libraries and model checkpoint must be inventoried from the actual environment before publishing a Docker/PyPI/binary artifact. The source release does not claim that inventory is complete.
+The SAM3 worker declares its own uv environment and is intentionally absent from the core uv.lock. It adds huggingface-hub for runtime download from the 1038lab/sam3 mirror. Its exact Torch/torchvision wheels, CUDA runtime, transitive dependencies, native libraries and model checkpoint must be inventoried from the actual environment before publishing a Docker/PyPI/binary artifact. The source release does not claim that inventory is complete.

@@ -21,11 +21,12 @@ Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge fo
 | GET | `/api/annotation/episodes/{id}/frame_timestamps?repo_id=…` | Exact source timestamps |
 | POST | `/api/annotation/export` | New annotated tree; optional `output_dir`, `copy_videos` |
 | POST | `/api/annotation/push_to_hub` | Explicit export and upload using the upstream backend implementation |
-| GET | `/api/annotation/sam3/capabilities` | CPU-safe capability report; no Torch import or CUDA probe |
+| GET | /api/annotation/sam3/status | Global SAM3 model/account/checkpoint/download status; no Torch import or CUDA probe |
+| GET | /api/annotation/sam3/capabilities | Compatibility alias for the status report |
 | POST | `/api/annotation/sam3/plan` | Validate and stage a model-neutral object annotation plan |
-| POST | `/api/annotation/sam3/run` | Run `provider=fake` on CPU or queue the explicitly enabled SAM3 worker |
+| POST | /api/annotation/sam3/run | Queue the globally available provider=sam3 worker; provider=fake remains CPU-only test support |
 | GET | `/api/annotation/sam3/jobs/{id}` | Poll a worker job and publish its validated sidecar revision |
-| POST | `/api/annotation/sam3/jobs/{id}/cancel` | Cancel a queued/running optional worker |
+| POST | `/api/annotation/sam3/jobs/{id}/cancel` | Cancel a queued/running SAM3 worker |
 | GET | `/api/annotation/sam3/revisions` | List object annotation revisions |
 | GET | `/api/annotation/sam3/episodes/{id}/objects` | Read object masks/bboxes, with `camera_key`, `frame_index` and `annotation_revision` filters |
 | POST | `/api/annotation/sam3/edits` | Revision-checked accept/reject/relabel/occlusion/delete/refine |
@@ -81,4 +82,18 @@ The browser workbench is served on `http://127.0.0.1:7860`. Backend port `7861` 
 
 Object annotations are stored outside the source dataset. A plan uses `episode_indices`, `camera_keys`, `prompts`, optional `start_frame`/`max_frames`, review thresholds and `provider` (`fake` or `sam3`). The fake provider is deterministic and CPU-only. Real provider requests return `202` with a `job_id`; poll it until `succeeded`, then use the returned `revision_id`.
 
-Read rows with `annotation_revision=<id>`; the dataset `revision` query parameter remains reserved for the source dataset revision. Send `base_revision` in edits so a stale browser cannot overwrite a newer review. See [SAM3.md](SAM3.md) for the sidecar schema, optional environment and staged PR plan.
+Read rows with `annotation_revision=<id>`; the dataset `revision` query parameter remains reserved for the source dataset revision. Send `base_revision` in edits so a stale browser cannot overwrite a newer review. See [SAM3.md](SAM3.md) for the sidecar schema, global environment and ordered deployment sequence.
+
+## SAM3 runtime status
+
+The global status route reports the configured model mirror (1038lab/sam3,
+sam3.pt, main), current Hugging Face account identity, workspace checkpoint path
+and download progress. It never returns a token and does not import Torch or
+probe CUDA. The real worker receives a browser token only for its child process;
+the local hf CLI cache or HF_TOKEN can be used as a fallback.
+
+Object annotation requests accept either a Hub repo_id or a registered local
+dataset. Hub state and sidecars are scoped by a one-way credential digest, while
+local datasets are scoped by their resolved path and LEVI_WORKSPACE. This prevents
+account changes from reusing another account's private snapshot or revision.
+See SAM3.md for the ordered setup sequence and sidecar schema.

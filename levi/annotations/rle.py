@@ -3,7 +3,7 @@
 COCO's mask API accepts an uncompressed RLE object with ``size`` and a list of
 run lengths.  Keeping the counts as an Arrow list avoids a compiled image
 dependency in LEVI's core environment while retaining lossless mask storage.
-The optional SAM3 worker may use pycocotools for compressed transport later;
+The isolated SAM3 worker may use pycocotools for compressed transport later;
 the sidecar contract remains compatible with both representations.
 """
 

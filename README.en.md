@@ -20,6 +20,7 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and `ffmpe
 git clone https://github.com/Koooki3/LEVI.git
 cd LEVI
 export LEVI_WORKSPACE="$PWD/.state"
+cp .env.example .env
 export UV_CACHE_DIR="$LEVI_WORKSPACE/.cache/uv"
 export UV_PYTHON_INSTALL_DIR="$PWD/.runtime/python"
 uv sync --locked
@@ -41,6 +42,41 @@ uv run levi clean --apply     # remove the listed caches
 ```
 
 For a remote server, keep `ssh -L 7860:127.0.0.1:7860 USER@SERVER` running on your computer. The frontend defaults to loopback port **7860 (Web UI)** and proxies requests to **7861 (internal API)**. Forward local 7860 to server 7860, not server 7861. If you see `{"detail":"Not Found"}` or the API landing page, check the destination port. The API root now explains the distinction and links to the configured Web UI. `uv run levi backend` starts only the API. The launcher checks port conflicts and announces Ready only after both services respond.
+
+## SAM3 first-deployment sequence
+
+Run these commands from the cloned LEVI root. The checkout name and workspace path are unrestricted:
+
+~~~bash
+# 1) Select a workspace and install the core
+export LEVI_WORKSPACE="$PWD/.state"
+cp .env.example .env
+uv sync --locked
+uv run levi setup
+
+# 2) Sign in to an account that can read 1038lab/sam3
+hf auth login
+hf auth whoami
+# Without a global hf command:
+# uvx hf auth login
+# uvx hf auth whoami
+
+# 3) Install the isolated worker on the CUDA host
+uv venv --python 3.12 integrations/sam3/.venv
+uv sync --project integrations/sam3
+export LEVI_SAM3_WORKER_PYTHON="$PWD/integrations/sam3/.venv/bin/python"
+export LEVI_SAM3_ENABLED=1
+
+# 4) Run model-free configuration checks
+uv run --project integrations/sam3 levi-sam3-worker --check
+uv run levi sam3 check
+
+# 5) Build and start the web workbench
+uv run levi build
+uv run levi serve
+~~~
+
+After Ready appears, open http://127.0.0.1:7860. In any dataset annotation page, verify the account, model and checkpoint path, then click Run SAM3 annotation. The first job downloads sam3.pt to $LEVI_WORKSPACE/checkpoints/sam3 and reports progress; later jobs reuse it. Changing the Hugging Face account or workspace creates separate Hub snapshots and sidecars using account and workspace scopes. Set LEVI_SAM3_ENABLED=0 only when you want to hide the real worker. Never commit tokens, checkpoints or workspace data.
 
 ## Portable workspace
 
@@ -70,9 +106,9 @@ Place captures under the workspace, or point the workspace to their common paren
 
 Video-based LeRobot v2.0/v2.1/v3.0/v3.1 can be browsed. Embedded-image Parquet playback retains the upstream limitation. Original dataset text and feature/joint identifiers remain unchanged.
 
-### Optional SAM3 object annotation
+### SAM3 object annotation (global)
 
-The annotation tab includes a revisioned object/track sidecar and a deterministic CPU demo. Choose a camera and text prompts, then accept or reject suggestions without changing native LeRobot files. Real SAM3 requires a separate Python 3.12 uv environment, Hugging Face checkpoint access and explicit `LEVI_SAM3_ENABLED=1`; see the [SAM3 guide](docs/SAM3.md). Core LEVI checks never import Torch, probe CUDA or run the model.
+The annotation tab provides the same SAM3 object/track sidecar for built-in demos, Hub datasets and registered local datasets. Choose a camera and text prompts to start a real job; model suggestions are stored as lossless RLE sidecar data and native LeRobot files stay read-only. The page shows the current Hugging Face account, worker state, checkpoint download progress and workspace path. The default model is sam3.pt from 1038lab/sam3. Real jobs need the isolated Python 3.12 uv worker on a CUDA host; core CPU checks never import Torch, probe CUDA, download a model or run inference. See the SAM3 guide for the complete sequence.
 
 Default live demonstrations:
 

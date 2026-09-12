@@ -30,9 +30,21 @@ def inside(path: str | Path, base: Path = ROOT) -> Path:
 STATE = inside(ROOT / "outputs/LEVI/workbench")
 CACHE = inside(ROOT / ".cache/levi")
 EXPORTS = inside(ROOT / "outputs/LEVI/exports")
+CHECKPOINTS = inside(ROOT / "checkpoints")
+SAM3_CHECKPOINT_DIR = inside(CHECKPOINTS / "sam3")
 
 
 def configure() -> None:
+    configured_checkpoint_dir = os.getenv("LEVI_SAM3_CHECKPOINT_DIR")
+    if configured_checkpoint_dir:
+        try:
+            checkpoint_dir = inside(configured_checkpoint_dir)
+        except ValueError as exc:
+            raise ValueError(
+                "LEVI_SAM3_CHECKPOINT_DIR must remain inside LEVI_WORKSPACE"
+            ) from exc
+    else:
+        checkpoint_dir = SAM3_CHECKPOINT_DIR
     values = {
         "UV_CACHE_DIR": ROOT / ".cache/uv",
         "HF_HOME": ROOT / ".cache/huggingface",
@@ -42,6 +54,8 @@ def configure() -> None:
         "TMPDIR": ROOT / "tmp/runtime/levi",
         "LEROBOT_ANNOTATE_CACHE": CACHE,
         "LEROBOT_ANNOTATE_EXPORT": EXPORTS,
+        # Model weights are workspace-local and never part of the repository.
+        "LEVI_SAM3_CHECKPOINT_DIR": checkpoint_dir,
     }
     for key, value in values.items():
         # LEVI subprocesses keep all managed data within their workspace.

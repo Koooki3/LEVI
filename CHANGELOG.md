@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Added an optional SAM3 object annotation integration: revisioned lossless RLE mask/bbox/track sidecars, CPU deterministic demo, human review edits, visual overlays, and source-safe export. The real worker is pinned and isolated in a separate uv environment; core CI never imports Torch or probes CUDA.
+- Added global SAM3 object annotation for demos, Hub and registered local datasets. The 1038lab/sam3 checkpoint is downloaded into the active workspace with account status, progress and path reporting; browser/CLI account scopes prevent stale private-data reuse, and native LeRobot files remain read-only.
 - Action Insights now scopes to the full dataset, an episode-index range or a single task, with a sample cap that can be set to "All" for full coverage; the panel reports how many of the in-scope episodes were analysed.
 - Added a task filter to the episode sidebar for multi-task datasets, backed by a shared dataset-wide task ↔ episode index.
 - Replaced the fixed 120-episode ceiling with a configurable budget, concurrency-limited parquet reads and load progress.

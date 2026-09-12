@@ -20,7 +20,7 @@ Baseline: `huggingface/lerobot-dataset-visualizer@dc59887796fd41f37040c0df6b10e6
 | Doctor | Native version-aware local checks + external original doctor entry | Synthetic anomalies, full 10-episode real reference report |
 | Annotation export / Hub push | Retained backend API; source-safe new exports | Export round-trip tested; no Hub upload performed |
 | Built-in conversion | Full capture workflow, configurable stages and automatic registration | Real CSV/image/video integration tests |
-| SAM3 object annotation | Revisioned mask/bbox/track sidecar, CPU fake provider, optional pinned worker, human accept/reject/refine and source-safe export | RLE round-trip, API fake flow, revision/edit/export tests; real model intentionally not run in CPU CI |
+| SAM3 object annotation | Global mask/bbox/track sidecar for demos, Hub and local datasets, pinned worker with 1038lab/sam3 checkpoint, account/progress UI, human accept/reject/refine and source-safe export | RLE round-trip, API fake flow, revision/edit/export tests; real model intentionally not run in CPU CI |
 | Chinese / English | Added React locale boundaries, catalogs, live switch | Both languages and viewport checks |
 | Independent environment / distribution | uv.lock, .venv, local Bun, launcher, Dockerfile, CI, bilingual docs | Python suite, frontend suite and production build |
 

@@ -13,6 +13,7 @@ import type {
   ObjectAnnotation,
   Sam3Capabilities,
   Sam3Edit,
+  Sam3JobStatus,
   Sam3Plan,
   Sam3Revision,
 } from "../types/object-annotation.types";
@@ -190,12 +191,18 @@ export async function pushToHub(
   return res.json();
 }
 
-export async function getSam3Capabilities(): Promise<Sam3Capabilities> {
-  const response = await fetch(endpoint("/api/sam3/capabilities"), {
+export async function getSam3Status(): Promise<Sam3Capabilities> {
+  const response = await fetch(endpoint("/api/sam3/status"), {
     cache: "no-store",
   });
-  if (!response.ok) throw new Error(`SAM3 capabilities: ${response.status}`);
+  if (!response.ok) throw new Error("SAM3 status: " + response.status);
   return response.json() as Promise<Sam3Capabilities>;
+}
+
+export async function getSam3Capabilities(): Promise<Sam3Capabilities> {
+  // Keep the old client name for extensions while using the richer global
+  // status response.
+  return getSam3Status();
 }
 
 export async function planSam3(
@@ -307,13 +314,13 @@ export async function editObjectAnnotation(
 export async function fetchSam3Job(
   jobId: string,
   ident: DatasetIdent,
-): Promise<Record<string, unknown>> {
+): Promise<Sam3JobStatus> {
   if (!ENV_URL) throw new Error("Annotate backend not configured");
-  const response = await fetch(buildUrl(`/api/sam3/jobs/${jobId}`, ident), {
+  const response = await fetch(buildUrl("/api/sam3/jobs/" + jobId, ident), {
     cache: "no-store",
   });
-  if (!response.ok) throw new Error(`SAM3 job: ${response.status}`);
-  return response.json();
+  if (!response.ok) throw new Error("SAM3 job: " + response.status);
+  return response.json() as Promise<Sam3JobStatus>;
 }
 
 export async function cancelSam3Job(

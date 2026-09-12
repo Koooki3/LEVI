@@ -1,13 +1,14 @@
 [project]
 name = "levi-sam3-worker"
 version = "0.1.0"
-description = "Optional SAM3 video annotation worker for LEVI"
+description = "Isolated SAM3 video annotation worker for LEVI"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
   "numpy>=1.26,<2",
   "pyarrow>=19,<24",
   "pillow>=10,<13",
+  "huggingface-hub>=0.30,<2",
   "torch>=2.7,<2.11",
   "torchvision>=0.22,<0.26",
   "sam3 @ git+https://github.com/facebookresearch/sam3.git@660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b",
