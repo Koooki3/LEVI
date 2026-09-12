@@ -58,11 +58,11 @@ uv sync --locked
 uv run levi setup
 
 # 2) 登录可读取 1038lab/sam3 的 Hugging Face 账号
-hf auth login
-hf auth whoami
+HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" hf auth login
+HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" hf auth whoami
 # 没有全局 hf 时使用：
-# uvx hf auth login
-# uvx hf auth whoami
+# HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" uvx hf auth login
+# HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" uvx hf auth whoami
 
 # 3) 在 CUDA 主机安装独立 worker
 uv venv --python 3.12 integrations/sam3/.venv
@@ -79,7 +79,7 @@ uv run levi build
 uv run levi serve
 ~~~
 
-看到 Ready 后访问 http://127.0.0.1:7860，在任意数据集的标注页面按状态卡完成 Hub access、CUDA worker、Checkpoint 三项检查；然后设置 prompt、范围和相机，点击“运行 SAM3 标注”。LEVI 会先校验计划，再启动 worker；首次作业会把 sam3.pt 下载到 $LEVI_WORKSPACE/checkpoints/sam3，并显示进度，后续作业复用该文件。切换 Hugging Face 账号或工作区时，LEVI 会按账号 digest 和工作区重新隔离 Hub 快照与 sidecar。可设置 LEVI_SAM3_ENABLED=0 暂时隐藏真实 worker。不要提交 token、checkpoint 或工作区数据。
+看到 Ready 后访问 http://127.0.0.1:7860，在任意数据集的标注页面按状态卡完成 Hub access、CUDA worker、Checkpoint 三项检查。登录后若 checkpoint 尚未缓存，页面会显示明确的下载提示、保存路径、进度条和“下载 checkpoint”按钮；点击后等待状态变为“Checkpoint 已就绪”，再设置 prompt、范围和相机并运行 SAM3。下载使用当前 Hugging Face 会话并保存到 $LEVI_WORKSPACE/checkpoints/sam3，后续数据集复用该文件；失败时可直接重试。切换 Hugging Face 账号或工作区时，LEVI 会按账号 digest 和工作区重新隔离 Hub 快照与 sidecar。可设置 LEVI_SAM3_ENABLED=0 暂时隐藏真实 worker。不要提交 token、checkpoint 或工作区数据。
 
 ## 工作目录与数据位置
 

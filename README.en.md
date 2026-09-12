@@ -55,11 +55,11 @@ uv sync --locked
 uv run levi setup
 
 # 2) Sign in to an account that can read 1038lab/sam3
-hf auth login
-hf auth whoami
+HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" hf auth login
+HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" hf auth whoami
 # Without a global hf command:
-# uvx hf auth login
-# uvx hf auth whoami
+# HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" uvx hf auth login
+# HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" uvx hf auth whoami
 
 # 3) Install the isolated worker on the CUDA host
 uv venv --python 3.12 integrations/sam3/.venv
@@ -76,7 +76,7 @@ uv run levi build
 uv run levi serve
 ~~~
 
-After Ready appears, open http://127.0.0.1:7860. On any dataset annotation page, complete the Hub access, CUDA worker and checkpoint gates, then choose prompts, scope and cameras before clicking Run SAM3 annotation. LEVI validates the model-neutral plan before starting the worker. The first job downloads sam3.pt to $LEVI_WORKSPACE/checkpoints/sam3 and reports progress; later jobs reuse it. Changing the Hugging Face account or workspace creates separate Hub snapshots and sidecars using account and workspace scopes. Set LEVI_SAM3_ENABLED=0 only when you want to hide the real worker. Never commit tokens, checkpoints or workspace data.
+After Ready appears, open http://127.0.0.1:7860. On any dataset annotation page, complete the Hub access, CUDA worker and checkpoint gates. After sign-in, a missing checkpoint shows an explicit download prompt, workspace path, progress bar and Download checkpoint button; click it and wait for Checkpoint ready before choosing prompts, scope and cameras and starting annotation. The download uses the active Hugging Face session, saves sam3.pt to $LEVI_WORKSPACE/checkpoints/sam3 and can be retried after an error; later datasets reuse the workspace copy. LEVI validates the model-neutral plan before starting the worker. Changing the Hugging Face account or workspace creates separate Hub snapshots and sidecars using account and workspace scopes. Set LEVI_SAM3_ENABLED=0 only when you want to hide the real worker. Never commit tokens, checkpoints or workspace data.
 
 ## Portable workspace
 

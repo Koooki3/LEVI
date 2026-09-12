@@ -169,8 +169,9 @@ def test_prompt_presets_save_list_and_delete(tmp_path: Path, monkeypatch):
 
 
 def test_prompt_presets_reject_empty_name_or_prompts(tmp_path: Path, monkeypatch):
-    import backend.app as backend_app
     from fastapi import HTTPException
+
+    import backend.app as backend_app
 
     monkeypatch.setattr(backend_app, "_SAM3_PROMPT_PRESETS_PATH", tmp_path / "presets.json")
 
@@ -261,6 +262,87 @@ def test_sam3_status_reports_global_model_without_cuda(client, monkeypatch):
     assert value["gpu_probe_performed"] is False
     assert value["hf_auth"]["username"] == "fixture"
     assert "HF_TOKEN" not in response.text
+
+
+def test_checkpoint_download_requires_hf_session(client, tmp_path, monkeypatch):
+    import backend.app as annotations
+
+    monkeypatch.delenv("LEVI_SAM3_CHECKPOINT_DIR", raising=False)
+    monkeypatch.delenv("LEVI_SAM3_CHECKPOINT", raising=False)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.setattr("huggingface_hub.get_token", lambda: None)
+    monkeypatch.setattr(annotations, "SAM3_CHECKPOINT_DIR", tmp_path / "checkpoints")
+    response = client.post("/annotations/api/sam3/checkpoint/download")
+    assert response.status_code == 401, response.text
+    assert "token" not in response.text.lower()
+
+
+def test_checkpoint_download_uses_browser_token_and_workspace_path(
+    client, tmp_path, monkeypatch
+):
+    import backend.app as annotations
+
+    checkpoint_dir = tmp_path / "checkpoints"
+    monkeypatch.delenv("LEVI_SAM3_CHECKPOINT_DIR", raising=False)
+    monkeypatch.delenv("LEVI_SAM3_CHECKPOINT", raising=False)
+    monkeypatch.setattr(annotations, "SAM3_CHECKPOINT_DIR", checkpoint_dir)
+    annotations._SAM3_AUTH_CACHE.clear()
+    monkeypatch.setattr(annotations.HfApi, "whoami", lambda self: {"name": "fixture"})
+    monkeypatch.setattr(annotations, "_sam3_remote_checkpoint_size", lambda _token: 4)
+
+    def fake_download(*, repo_id, filename, revision, token, local_dir):
+        assert repo_id == "1038lab/sam3"
+        assert filename == "sam3.pt"
+        assert revision == "main"
+        assert token == "hf-browser-test"
+        target = Path(local_dir) / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"test")
+        return str(target)
+
+    monkeypatch.setattr(annotations, "hf_hub_download", fake_download)
+    client.cookies.set("hf_access_token", "hf-browser-test")
+    response = client.post("/annotations/api/sam3/checkpoint/download")
+    assert response.status_code == 202, response.text
+    assert response.json()["download_started"] is True
+
+    key = str((checkpoint_dir / "sam3.pt").resolve())
+    thread = annotations._SAM3_DOWNLOAD_THREADS.get(key)
+    # The fixture download is intentionally instantaneous; the daemon may
+    # already have finished and removed itself before the response is asserted.
+    if thread is not None:
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+    assert (checkpoint_dir / "sam3.pt").is_file()
+
+    status = client.get("/annotations/api/sam3/status")
+    assert status.status_code == 200, status.text
+    value = status.json()
+    assert value["checkpoint_cached"] is True
+    assert value["checkpoint_path"] == str(checkpoint_dir / "sam3.pt")
+    assert value["download"]["phase"] == "ready"
+    assert value["download"]["bytes"] == 4
+    assert "hf-browser-test" not in status.text
+
+
+def test_real_sam3_run_requires_explicit_checkpoint_download(client, dataset, monkeypatch):
+    import backend.app as annotations
+
+    monkeypatch.delenv("LEVI_SAM3_CHECKPOINT_DIR", raising=False)
+    monkeypatch.delenv("LEVI_SAM3_CHECKPOINT", raising=False)
+    monkeypatch.setattr(annotations, "SAM3_CHECKPOINT_DIR", dataset / "checkpoints")
+    response = client.post(
+        "/annotations/api/sam3/run",
+        json={
+            "local_path": str(dataset),
+            "episode_indices": [0],
+            "camera_keys": ["observation.images.front"],
+            "prompts": ["cup"],
+            "provider": "sam3",
+        },
+    )
+    assert response.status_code == 409, response.text
+    assert "checkpoint" in response.text.lower()
 
 
 def test_api_rejects_real_provider_when_disabled(client, dataset, monkeypatch):

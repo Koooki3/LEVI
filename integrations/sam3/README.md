@@ -5,8 +5,8 @@ globally by the core application, while the worker itself runs in its own uv
 environment so the CPU-safe workbench never imports Torch or probes CUDA.
 
 The default model is the checkpoint mirror 1038lab/sam3, file sam3.pt. Model
-weights are downloaded only when the first real SAM3 job starts and are saved
-under the active LEVI_WORKSPACE:
+weights are downloaded from the annotation page after the Hugging Face account is
+confirmed and are saved under the active LEVI_WORKSPACE:
 
 ~~~text
 $LEVI_WORKSPACE/checkpoints/sam3/sam3.pt
@@ -18,19 +18,25 @@ Hub datasets and registered local datasets.
 
 ## Install on the CUDA host
 
-From the cloned LEVI root:
+From the cloned LEVI root. If no workspace was exported yet, set one before
+logging in so the account cache migrates with the checkout:
+
+~~~bash
+export LEVI_WORKSPACE="${LEVI_WORKSPACE:-$PWD/.state}"
+~~~
 
 1. Open <https://huggingface.co/1038lab/sam3>. Request access if the model page
    is gated.
 2. Authenticate as the account that can read the model:
 
 ~~~bash
-hf auth login
-hf auth whoami
+HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" hf auth login
+HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" hf auth whoami
 ~~~
 
-   When hf is not installed globally, use uvx hf auth login and uvx hf auth
-   whoami. A browser token can also be entered through LEVI's Connect Hugging
+   When hf is not installed globally, prefix the uvx commands with the same
+   `HF_HOME="$LEVI_WORKSPACE/.cache/huggingface"` setting. A browser token can
+   also be entered through LEVI's Connect Hugging
    Face dialog.
 3. Create and sync the isolated worker:
 
@@ -52,9 +58,11 @@ uv run levi sam3 check
 ~~~
 
 The checks print model_imported=0 and cuda_probe_performed=0. They do not
-download a checkpoint or run inference. The real worker loads Torch, checks
-CUDA and downloads the checkpoint only when a SAM3 annotation job is started
-on the configured host.
+download a checkpoint or run inference. Open the annotation page after starting
+LEVI, sign in, and click Download checkpoint. The control plane performs the
+Hub download with the active browser/CLI credential, writes progress beside the
+checkpoint and enables Run SAM3 annotation only after the file is ready. The
+worker then loads Torch and checks CUDA on the configured host.
 
 ## Start LEVI
 
@@ -64,10 +72,12 @@ uv run levi serve
 ~~~
 
 Open http://127.0.0.1:7860. Select an episode from either a demo or local
-dataset, open the annotation tab, verify the account in the SAM3 runtime card,
-choose a camera and enter prompts such as cup, plate, robot gripper. Click
-Run SAM3 annotation. The first job downloads the checkpoint; later jobs reuse
-the workspace file.
+dataset, open the annotation tab and verify the account in the SAM3 runtime card.
+When the checkpoint is missing, the page shows its workspace path, a progress bar
+and Download checkpoint. Click it, wait for Checkpoint ready, then choose a camera
+and enter prompts such as cup, plate, robot gripper before clicking Run SAM3
+annotation. Later datasets reuse the workspace file; a failed download can be
+retried from the same card.
 
 The worker receives the current browser cookie token for one subprocess only.
 A CLI login or HF_TOKEN is used as a fallback. Tokens are never written to
@@ -87,11 +97,14 @@ plan JSON, job JSON, logs, sidecars or Git.
 | LEVI_SAM3_DOWNLOAD_VIDEOS | 1 | Prepare Hub video assets before a real job; set 0 only when prepared externally |
 | HF_TOKEN | empty | Optional server-side read token |
 
-The worker downloads with huggingface_hub.hf_hub_download and monitors
-Hugging Face's incomplete file while it writes a JSON progress record named
+The CLI examples scope HF_HOME to the active LEVI workspace so a migrated checkout
+uses the same account cache. The control plane and worker both use huggingface_hub.hf_hub_download and
+monitor Hugging Face's incomplete file while writing a JSON progress record named
 download-progress.json beside the checkpoint. The control plane reads that
-record without importing Torch. The initial size is fetched from model
-metadata when available; otherwise the UI uses an indeterminate progress bar.
+record without importing Torch and exposes an authenticated download endpoint;
+the worker keeps a direct-CLI fallback for standalone operation. The initial size
+is fetched from model metadata when available; otherwise the UI uses an
+indeterminate progress bar. A non-empty file is required before a real API run.
 
 The official SAM3 predictor is called with an explicit checkpoint_path. This
 prevents the upstream builder from silently looking up facebook/sam3 and makes

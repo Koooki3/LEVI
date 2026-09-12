@@ -135,8 +135,8 @@ def _ensure_checkpoint() -> tuple[Path, str]:
     configured = os.environ.get("LEVI_SAM3_CHECKPOINT")
     if configured:
         checkpoint = Path(configured).expanduser().resolve()
-        if not checkpoint.is_file():
-            raise FileNotFoundError(f"LEVI_SAM3_CHECKPOINT not found: {checkpoint}")
+        if not checkpoint.is_file() or checkpoint.stat().st_size <= 0:
+            raise FileNotFoundError(f"LEVI_SAM3_CHECKPOINT not found or empty: {checkpoint}")
         _write_checkpoint_progress(
             "ready", bytes_downloaded=checkpoint.stat().st_size, total_bytes=checkpoint.stat().st_size, percent=100.0, path=checkpoint
         )
@@ -145,7 +145,7 @@ def _ensure_checkpoint() -> tuple[Path, str]:
     target_dir = _checkpoint_dir()
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / SAM3_MODEL_FILENAME
-    if target.is_file():
+    if target.is_file() and target.stat().st_size > 0:
         size = target.stat().st_size
         _write_checkpoint_progress(
             "ready", bytes_downloaded=size, total_bytes=size, percent=100.0, path=target

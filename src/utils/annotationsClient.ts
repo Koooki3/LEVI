@@ -206,6 +206,29 @@ export async function getSam3Capabilities(): Promise<Sam3Capabilities> {
   return getSam3Status();
 }
 
+export async function startSam3CheckpointDownload(): Promise<
+  Sam3Capabilities & { download_started?: boolean }
+> {
+  const response = await fetch(endpoint("/api/sam3/checkpoint/download"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => `${response.status}`);
+    let detail = "";
+    try {
+      const payload = JSON.parse(text) as { detail?: unknown };
+      if (typeof payload.detail === "string") detail = payload.detail.trim();
+    } catch {
+      // Keep the raw body as a fallback for non-JSON proxy errors.
+    }
+    throw new Error(
+      detail || text || `SAM3 checkpoint download: ${response.status}`,
+    );
+  }
+  return response.json();
+}
+
 export async function planSam3(
   ident: DatasetIdent,
   plan: Omit<Sam3Plan, "repo_id" | "local_path" | "revision">,

@@ -17,6 +17,7 @@ import {
   planSam3,
   runSam3,
   saveSam3PromptPreset,
+  startSam3CheckpointDownload,
   type DatasetIdent,
 } from "@/utils/annotationsClient";
 import type {
@@ -135,6 +136,7 @@ export default function ObjectAnnotationPanel({
     null,
   );
   const [busy, setBusy] = useState(false);
+  const [downloadBusy, setDownloadBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [scope, setScope] = useState<AnnotationScope>({
@@ -221,6 +223,23 @@ export default function ObjectAnnotationPanel({
     }, 5000);
     return () => window.clearInterval(timer);
   }, [refreshStatus]);
+
+  useEffect(() => {
+    const onAuthChanged = () => {
+      void refreshStatus();
+    };
+    window.addEventListener("levi:hf-auth-changed", onAuthChanged);
+    return () =>
+      window.removeEventListener("levi:hf-auth-changed", onAuthChanged);
+  }, [refreshStatus]);
+
+  useEffect(() => {
+    if (capabilities?.download?.phase !== "downloading") return;
+    const timer = window.setInterval(() => {
+      void refreshStatus();
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [capabilities?.download?.phase, refreshStatus]);
 
   const episodeUniverse = useMemo(() => {
     const values = allEpisodes?.length ? allEpisodes : [episodeId];
@@ -387,6 +406,33 @@ export default function ObjectAnnotationPanel({
     }
   };
 
+  const downloadCheckpoint = async () => {
+    setDownloadBusy(true);
+    setMessage(null);
+    try {
+      const result = await startSam3CheckpointDownload();
+      setCapabilities(result);
+      setMessage(
+        language === "zh"
+          ? result.download_started
+            ? "Checkpoint 下载已启动；状态卡会持续更新进度。"
+            : result.checkpoint_cached
+              ? "Checkpoint 已存在于当前工作区。"
+              : "Checkpoint 下载正在进行中。"
+          : result.download_started
+            ? "Checkpoint download started; progress will update in the status card."
+            : result.checkpoint_cached
+              ? "The checkpoint is already available in this workspace."
+              : "Checkpoint download is already in progress.",
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+      await refreshStatus();
+    } finally {
+      setDownloadBusy(false);
+    }
+  };
+
   const applyPreset = (name: string) => {
     const preset = presets.find((item) => item.name === name);
     if (preset) setPromptText(preset.prompts.join(", "));
@@ -458,8 +504,20 @@ export default function ObjectAnnotationPanel({
     !!capabilities.worker_project_present &&
     !!capabilities.worker_python_present;
   const checkpointReady = !!capabilities?.checkpoint_cached;
-  const accountReady = !!account?.authenticated || checkpointReady;
-  const runtimeReady = workerReady && accountReady;
+  const hubReady = !!account?.authenticated;
+  const accountReady = hubReady || checkpointReady;
+  const runtimeReady = workerReady && checkpointReady;
+  const checkpointDownloadAvailable =
+    capabilities?.checkpoint_download_available !== false;
+  const downloadActive =
+    download?.phase === "downloading" ||
+    !!capabilities?.checkpoint_download_in_progress;
+  const downloadCanStart =
+    hubReady &&
+    checkpointDownloadAvailable &&
+    !downloadActive &&
+    !downloadBusy &&
+    !checkpointReady;
   const reviewCounts = useMemo(
     () =>
       trackSummaries.reduce(
@@ -560,31 +618,7 @@ export default function ObjectAnnotationPanel({
               "workspace/checkpoints/sam3/sam3.pt"}
           </code>
         </div>
-        {download && download.phase === "downloading" && (
-          <div className="object-annotation-progress">
-            <div className="object-annotation-progress-label">
-              <span>
-                <T>Downloading checkpoint</T>
-              </span>
-              <span>
-                {downloadPercent === null
-                  ? "…"
-                  : downloadPercent.toFixed(1) + "%"}
-                {" · "}
-                {formatBytes(download.bytes)}
-                {download.total_bytes
-                  ? " / " + formatBytes(download.total_bytes)
-                  : ""}
-              </span>
-            </div>
-            <progress
-              max={100}
-              value={downloadPercent === null ? undefined : downloadPercent}
-              aria-label="SAM3 checkpoint download progress"
-            />
-          </div>
-        )}
-        {download?.phase === "ready" && (
+        {checkpointReady && download?.phase === "ready" && (
           <p className="object-annotation-runtime">
             <span className="ready">
               <T>Checkpoint ready</T>
@@ -592,10 +626,94 @@ export default function ObjectAnnotationPanel({
             <span>{formatBytes(download.bytes)}</span>
           </p>
         )}
-        {download?.phase === "error" && (
-          <p className="object-annotation-runtime muted">
-            {download.message || "Checkpoint download failed"}
-          </p>
+        {!checkpointReady && capabilities?.enabled && (
+          <div className="object-annotation-checkpoint-card">
+            <div className="object-annotation-checkpoint-head">
+              <div>
+                <strong>
+                  <T>SAM3 checkpoint required</T>
+                </strong>
+                <span>
+                  {hubReady ? (
+                    <T>
+                      Your Hugging Face session is ready. Download the
+                      checkpoint once; future datasets reuse this workspace
+                      copy.
+                    </T>
+                  ) : (
+                    <T>
+                      Sign in to Hugging Face, then download the checkpoint into
+                      this workspace before running SAM3.
+                    </T>
+                  )}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="object-annotation-download"
+                onClick={() => void downloadCheckpoint()}
+                disabled={!downloadCanStart}
+              >
+                {downloadActive ? (
+                  <T>Downloading…</T>
+                ) : download?.phase === "error" ? (
+                  <T>Retry download</T>
+                ) : (
+                  <T>Download checkpoint</T>
+                )}
+              </button>
+            </div>
+            <div className="object-annotation-progress">
+              <div className="object-annotation-progress-label">
+                <span>
+                  {downloadActive ? (
+                    <T>Downloading checkpoint</T>
+                  ) : (
+                    <T>Checkpoint is required before a real SAM3 run.</T>
+                  )}
+                </span>
+                <span>
+                  {downloadPercent === null
+                    ? downloadActive
+                      ? "…"
+                      : "0.0%"
+                    : downloadPercent.toFixed(1) + "%"}
+                  {" · "}
+                  {formatBytes(download?.bytes)}
+                  {download?.total_bytes
+                    ? " / " + formatBytes(download.total_bytes)
+                    : ""}
+                </span>
+              </div>
+              <progress
+                max={100}
+                value={
+                  downloadActive && downloadPercent === null
+                    ? undefined
+                    : (downloadPercent ?? 0)
+                }
+                aria-label="SAM3 checkpoint download progress"
+              />
+            </div>
+            {download?.phase === "error" && (
+              <p className="object-annotation-runtime muted">
+                {download.message || "Checkpoint download failed"}
+              </p>
+            )}
+            {!hubReady && !checkpointReady && (
+              <p className="object-annotation-checkpoint-hint">
+                <T>Sign in first to enable checkpoint download.</T>
+              </p>
+            )}
+            {!checkpointDownloadAvailable && (
+              <p className="object-annotation-checkpoint-hint">
+                <T>
+                  Checkpoint download is disabled because LEVI_SAM3_CHECKPOINT
+                  is set. Place the file at the path above.
+                </T>
+              </p>
+            )}
+          </div>
         )}
         {!accountReady && (
           <p className="object-annotation-runtime muted">
@@ -647,7 +765,7 @@ export default function ObjectAnnotationPanel({
           </label>
           <label className="object-annotation-prompt">
             <span>
-              <T>Text prompts (comma separated)</T>
+              <T>Text prompts (comma, semicolon or newline separated)</T>
             </span>
             <input
               value={promptText}

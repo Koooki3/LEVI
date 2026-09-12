@@ -50,7 +50,7 @@ from typing import Any
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
@@ -79,6 +79,8 @@ SAM3_MODEL_FILENAME = os.getenv("LEVI_SAM3_MODEL_FILENAME", "sam3.pt")
 SAM3_MODEL_REVISION = os.getenv("LEVI_SAM3_MODEL_REVISION", "main")
 SAM3_PROGRESS_FILENAME = "download-progress.json"
 _SAM3_AUTH_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_SAM3_DOWNLOAD_LOCK = threading.Lock()
+_SAM3_DOWNLOAD_THREADS: dict[str, threading.Thread] = {}
 
 # --- Schema mirrors src/lerobot/datasets/language.py --------------------------
 
@@ -1174,6 +1176,23 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def sam3_request_credentials(request: Request, call_next):
+    """Keep direct and mounted backend deployments on the same auth path."""
+    cookie = request.cookies.get("hf_access_token")
+    authorization = request.headers.get("authorization", "")
+    bearer = (
+        authorization[7:].strip()
+        if authorization.lower().startswith("bearer ")
+        else None
+    )
+    context = hub_token.set(cookie or bearer)
+    try:
+        return await call_next(request)
+    finally:
+        hub_token.reset(context)
+
+
 @app.get("/api/health")
 def health() -> JSONResponse:
     return JSONResponse(
@@ -1310,6 +1329,14 @@ def _sam3_checkpoint_path() -> Path:
     return _sam3_checkpoint_dir() / SAM3_MODEL_FILENAME
 
 
+def _is_sam3_checkpoint(path: Path) -> bool:
+    """Treat only a non-empty regular file as a usable checkpoint."""
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
 def _read_sam3_download() -> dict[str, Any]:
     path = _sam3_checkpoint_dir() / SAM3_PROGRESS_FILENAME
     if not path.is_file():
@@ -1319,6 +1346,218 @@ def _read_sam3_download() -> dict[str, Any]:
     except (OSError, ValueError, TypeError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _safe_sam3_download_message(value: object) -> str:
+    """Keep signed Hub URLs and raw credentials out of persisted status."""
+    return re.sub(
+        r"(?i)(token|authorization|x-amz-signature|x-amz-credential)=[^&\s]+",
+        r"\1=<redacted>",
+        str(value),
+    )
+
+
+def _write_sam3_download(
+    phase: str,
+    *,
+    bytes_downloaded: int = 0,
+    total_bytes: int | None = None,
+    percent: float | None = None,
+    path: Path | None = None,
+    message: str | None = None,
+) -> None:
+    """Persist the status consumed by the browser while a download runs."""
+    payload: dict[str, Any] = {
+        "phase": phase,
+        "repo_id": SAM3_MODEL_REPO,
+        "filename": SAM3_MODEL_FILENAME,
+        "revision": SAM3_MODEL_REVISION,
+        "bytes": max(0, int(bytes_downloaded)),
+        "total_bytes": total_bytes,
+        "percent": percent,
+        "path": str(path or (_sam3_checkpoint_dir() / SAM3_MODEL_FILENAME)),
+        "updated_at": time.time(),
+    }
+    if message:
+        payload["message"] = _safe_sam3_download_message(message)
+    try:
+        atomic(_sam3_checkpoint_dir() / SAM3_PROGRESS_FILENAME, payload)
+    except OSError:
+        # Telemetry must never turn a valid Hub download into a failed one.
+        return
+
+
+def _sam3_incomplete_bytes(root: Path, target: Path) -> int:
+    """Return the largest partial file size visible in the local download dir."""
+    current = 0
+    try:
+        for path in root.rglob("*.incomplete"):
+            if path.is_file():
+                current = max(current, path.stat().st_size)
+        if target.is_file():
+            current = max(current, target.stat().st_size)
+    except OSError:
+        pass
+    return current
+
+
+def _sam3_remote_checkpoint_size(active_token: str) -> int | None:
+    """Read Hub metadata for a determinate progress bar without model bytes."""
+    try:
+        api = HfApi(token=active_token)
+        try:
+            info = api.model_info(
+                SAM3_MODEL_REPO,
+                revision=SAM3_MODEL_REVISION,
+                files_metadata=True,
+            )
+        except TypeError:
+            info = api.model_info(SAM3_MODEL_REPO, revision=SAM3_MODEL_REVISION)
+        siblings = (
+            info.get("siblings", [])
+            if isinstance(info, dict)
+            else getattr(info, "siblings", [])
+        ) or []
+        for sibling in siblings:
+            name = (
+                sibling.get("rfilename")
+                if isinstance(sibling, dict)
+                else getattr(sibling, "rfilename", None)
+            )
+            size = (
+                sibling.get("size")
+                if isinstance(sibling, dict)
+                else getattr(sibling, "size", None)
+            )
+            if name == SAM3_MODEL_FILENAME and isinstance(size, int):
+                return size
+    except Exception as exc:  # noqa: BLE001
+        # Metadata is optional; the actual download remains authoritative.
+        logger.debug("SAM3 checkpoint metadata unavailable: %s", exc)
+    return None
+
+
+def _sam3_download_thread_alive(key: str) -> bool:
+    thread = _SAM3_DOWNLOAD_THREADS.get(key)
+    return bool(thread and thread.is_alive())
+
+
+def _download_sam3_checkpoint(active_token: str, target: Path) -> None:
+    """Download one checkpoint into the configured workspace path."""
+    key = str(target.expanduser().resolve())
+    target_dir = target.parent
+    stop = threading.Event()
+    monitor_thread: threading.Thread | None = None
+    temporary: Path | None = None
+    total_bytes: int | None = None
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        total_bytes = _sam3_remote_checkpoint_size(active_token)
+        _write_sam3_download(
+            "downloading",
+            total_bytes=total_bytes,
+            percent=0.0 if total_bytes else None,
+            path=target,
+            message=f"Downloading {SAM3_MODEL_REPO}/{SAM3_MODEL_FILENAME}",
+        )
+
+        def monitor() -> None:
+            while not stop.is_set():
+                current = _sam3_incomplete_bytes(target_dir, target)
+                percent = (
+                    min(100.0, current * 100.0 / total_bytes)
+                    if total_bytes
+                    else None
+                )
+                _write_sam3_download(
+                    "downloading",
+                    bytes_downloaded=current,
+                    total_bytes=total_bytes,
+                    percent=percent,
+                    path=target,
+                )
+                stop.wait(0.5)
+
+        monitor_thread = threading.Thread(
+            target=monitor,
+            name="sam3-checkpoint-progress",
+            daemon=True,
+        )
+        monitor_thread.start()
+        downloaded = Path(
+            hf_hub_download(
+                repo_id=SAM3_MODEL_REPO,
+                filename=SAM3_MODEL_FILENAME,
+                revision=SAM3_MODEL_REVISION,
+                token=active_token,
+                local_dir=str(target_dir),
+            )
+        )
+        if not _is_sam3_checkpoint(downloaded):
+            raise FileNotFoundError(
+                f"Hugging Face returned no usable checkpoint at {downloaded}"
+            )
+        # ``local_dir`` normally returns target directly. Keep an atomic copy
+        # fallback for Hub/cache versions that return a different local path.
+        if downloaded.resolve() != target.resolve():
+            temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+            with downloaded.open("rb") as source, temporary.open("wb") as dest:
+                shutil.copyfileobj(source, dest, length=8 * 1024 * 1024)
+                dest.flush()
+                os.fsync(dest.fileno())
+            os.replace(temporary, target)
+            temporary = None
+        size = target.stat().st_size
+        _write_sam3_download(
+            "ready",
+            bytes_downloaded=size,
+            total_bytes=total_bytes or size,
+            percent=100.0,
+            path=target,
+        )
+    except Exception as exc:  # noqa: BLE001
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
+        _write_sam3_download(
+            "error",
+            bytes_downloaded=_sam3_incomplete_bytes(target_dir, target),
+            total_bytes=total_bytes,
+            percent=None,
+            path=target,
+            message=str(exc),
+        )
+    finally:
+        stop.set()
+        if monitor_thread is not None:
+            monitor_thread.join(timeout=2)
+        with _SAM3_DOWNLOAD_LOCK:
+            current = _SAM3_DOWNLOAD_THREADS.get(key)
+            if current is threading.current_thread():
+                _SAM3_DOWNLOAD_THREADS.pop(key, None)
+
+
+def _start_sam3_checkpoint_download(active_token: str) -> bool:
+    """Start a resumable background download; return whether a new thread ran."""
+    target = _sam3_checkpoint_path()
+    key = str(target.expanduser().resolve())
+    with _SAM3_DOWNLOAD_LOCK:
+        if _is_sam3_checkpoint(target):
+            return False
+        if _sam3_download_thread_alive(key):
+            return False
+        _write_sam3_download("downloading", path=target, percent=0.0)
+        thread = threading.Thread(
+            target=_download_sam3_checkpoint,
+            args=(active_token, target),
+            name="sam3-checkpoint-download",
+            daemon=True,
+        )
+        _SAM3_DOWNLOAD_THREADS[key] = thread
+        thread.start()
+    return True
 
 
 def _sam3_auth_status() -> dict[str, Any]:
@@ -1357,25 +1596,50 @@ def _sam3_auth_status() -> dict[str, Any]:
 def _sam3_status_payload() -> dict[str, Any]:
     checkpoint = _sam3_checkpoint_path()
     download = _read_sam3_download()
-    checkpoint_ready = checkpoint.is_file()
-    if checkpoint_ready and download.get("phase") not in {"downloading", "error"}:
+    checkpoint_ready = _is_sam3_checkpoint(checkpoint)
+    size = 0
+    if checkpoint_ready:
+        try:
+            size = checkpoint.stat().st_size
+        except OSError:
+            checkpoint_ready = False
+    if checkpoint_ready:
+        try:
+            recorded_total = max(0, int(download.get("total_bytes") or 0))
+        except (TypeError, ValueError):
+            recorded_total = 0
         download = {
             **download,
             "phase": "ready",
-            "bytes": checkpoint.stat().st_size,
+            "bytes": size,
+            "total_bytes": max(size, recorded_total) or size,
+            "percent": 100.0,
             "path": str(checkpoint),
         }
-    elif not download:
+    elif not download or download.get("phase") == "ready":
         download = {
-            "phase": "ready" if checkpoint_ready else "idle",
-            "bytes": checkpoint.stat().st_size if checkpoint_ready else 0,
-            "total_bytes": checkpoint.stat().st_size if checkpoint_ready else None,
-            "percent": 100.0 if checkpoint_ready else 0.0,
+            **download,
+            "phase": "idle",
+            "bytes": 0,
+            "total_bytes": download.get("total_bytes") if download else None,
+            "percent": 0.0,
             "path": str(checkpoint),
         }
     else:
         download.setdefault("path", str(checkpoint))
-    size = checkpoint.stat().st_size if checkpoint_ready else 0
+    download_in_progress = download.get("phase") == "downloading"
+    if download_in_progress:
+        key = str(checkpoint.expanduser().resolve())
+        if not _sam3_download_thread_alive(key):
+            # A daemon thread cannot survive a service restart. Do not leave
+            # the UI disabled for a stale progress record; expose retry now.
+            download = {
+                **download,
+                "phase": "error",
+                "percent": None,
+                "message": "Checkpoint download stopped; retry from the annotation page.",
+            }
+            download_in_progress = False
     worker_project = (
         Path(__file__).resolve().parents[1] / "integrations" / "sam3" / "pyproject.toml"
     )
@@ -1385,6 +1649,21 @@ def _sam3_status_payload() -> dict[str, Any]:
             str(worker_project.parent / ".venv/bin/python"),
         )
     ).expanduser()
+    auth = _sam3_auth_status()
+    checkpoint_override = bool(os.environ.get("LEVI_SAM3_CHECKPOINT"))
+    download_available = not checkpoint_override
+    if not _sam3_enabled():
+        message = "SAM3 is disabled; set LEVI_SAM3_ENABLED=1 to enable it."
+    elif checkpoint_ready:
+        message = "SAM3 checkpoint is ready in the active LEVI workspace."
+    elif checkpoint_override:
+        message = "LEVI_SAM3_CHECKPOINT is configured but the file is not available."
+    elif not auth.get("authenticated"):
+        message = "Sign in to Hugging Face to download the SAM3 checkpoint."
+    elif download_in_progress:
+        message = "SAM3 checkpoint download is in progress."
+    else:
+        message = "SAM3 checkpoint is not cached; start the download from the annotation page."
     return {
         "provider": "sam3",
         "enabled": _sam3_enabled(),
@@ -1400,13 +1679,12 @@ def _sam3_status_payload() -> dict[str, Any]:
         "checkpoint_path": str(checkpoint),
         "checkpoint_cached": checkpoint_ready,
         "checkpoint_size_bytes": size,
+        "checkpoint_download_available": download_available,
+        "checkpoint_download_requires_auth": not bool(auth.get("authenticated")),
+        "checkpoint_download_in_progress": download_in_progress,
         "download": download,
-        "hf_auth": _sam3_auth_status(),
-        "message": (
-            "SAM3 is disabled; set LEVI_SAM3_ENABLED=1 to enable it."
-            if not _sam3_enabled()
-            else "SAM3 is globally available; install the CUDA worker and sign in to Hugging Face before the first run."
-        ),
+        "hf_auth": auth,
+        "message": message,
     }
 
 
@@ -1420,6 +1698,48 @@ def sam3_status() -> JSONResponse:
 def sam3_capabilities() -> JSONResponse:
     """Backward-compatible alias for the global SAM3 status payload."""
     return JSONResponse(_sam3_status_payload())
+
+
+@app.post("/api/sam3/checkpoint/download")
+def sam3_checkpoint_download() -> JSONResponse:
+    """Start or resume the global SAM3 checkpoint download.
+
+    The browser session token is read from the request-scoped context and is
+    passed only to the background Hub call. It is never persisted in the
+    progress file, job plan or response.
+    """
+    if not _sam3_enabled():
+        raise HTTPException(
+            503,
+            "SAM3 is disabled; set LEVI_SAM3_ENABLED=1 to enable it",
+        )
+    if os.environ.get("LEVI_SAM3_CHECKPOINT"):
+        if _is_sam3_checkpoint(_sam3_checkpoint_path()):
+            return JSONResponse({**_sam3_status_payload(), "download_started": False})
+        raise HTTPException(
+            409,
+            "LEVI_SAM3_CHECKPOINT points to a missing local file; place the checkpoint there or unset the override",
+        )
+    active_token = token()
+    if not active_token:
+        raise HTTPException(
+            401,
+            "Sign in to Hugging Face before downloading the SAM3 checkpoint",
+        )
+    auth = _sam3_auth_status()
+    if not auth.get("authenticated"):
+        raise HTTPException(
+            401,
+            "The current Hugging Face session cannot access the configured SAM3 model",
+        )
+    started = _start_sam3_checkpoint_download(active_token)
+    status = _sam3_status_payload()
+    return JSONResponse(
+        {**status, "download_started": started},
+        status_code=202
+        if started or status["download"].get("phase") == "downloading"
+        else 200,
+    )
 
 
 _SAM3_PROMPT_PRESETS_PATH = STATE / "sam3_prompt_presets.json"
@@ -1504,6 +1824,11 @@ def sam3_run(request: Sam3RunRequest) -> JSONResponse:
         raise HTTPException(
             503,
             "SAM3 is disabled; set LEVI_SAM3_ENABLED=1 to enable it",
+        )
+    if not _is_sam3_checkpoint(_sam3_checkpoint_path()):
+        raise HTTPException(
+            409,
+            "SAM3 checkpoint is not ready; download it from the annotation page before running",
         )
     worker_project = Path(__file__).resolve().parents[1] / "integrations" / "sam3"
     worker_python = Path(

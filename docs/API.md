@@ -55,12 +55,14 @@ The upstream VQA answer JSON and `tool_calls` structures are preserved; use the 
 ### Error handling
 
 - `400`: invalid source, stage, check name or workspace boundary.
+- `401`: the Hugging Face session is missing or cannot read the configured SAM3 model.
 - `403`: disallowed asset or browser cross-origin write.
 - `404`: unknown plan, missing file or dataset metadata.
 - `409`: output already exists, or export would overlap the source.
 - `413`: frontend bridge request body exceeds 16 MiB.
 - `422`: typed request validation failed.
 - `502`: local backend is unavailable; start both services with the uv launcher.
+- `503`: SAM3 is disabled or its worker configuration is unavailable.
 
 Diagnostic calls are synchronous and can take time to download remote shards. Conversion calls return a background job. Concurrent editing of the same dataset by multiple users is outside the single-user model; deploy separate workspaces/processes when isolation is needed.
 
@@ -88,9 +90,11 @@ Read rows with `annotation_revision=<id>`; the dataset `revision` query paramete
 
 The global status route reports the configured model mirror (1038lab/sam3,
 sam3.pt, main), current Hugging Face account identity, workspace checkpoint path
-and download progress. It never returns a token and does not import Torch or
-probe CUDA. The real worker receives a browser token only for its child process;
-the local hf CLI cache or HF_TOKEN can be used as a fallback.
+and download progress. `POST /api/annotation/sam3/checkpoint/download` uses the
+request's browser, CLI-cache or `HF_TOKEN` credential, starts one resumable
+background download and returns the same status shape. It never returns a token
+or imports Torch/probes CUDA. The real worker receives the active credential only
+for its child process; the local hf CLI cache or HF_TOKEN can be used as a fallback.
 
 Object annotation requests accept either a Hub repo_id or a registered local
 dataset. Hub state and sidecars are scoped by a one-way credential digest, while

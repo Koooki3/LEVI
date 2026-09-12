@@ -93,6 +93,9 @@ export interface Sam3Capabilities {
   checkpoint_path?: string;
   checkpoint_cached?: boolean;
   checkpoint_size_bytes?: number;
+  checkpoint_download_available?: boolean;
+  checkpoint_download_requires_auth?: boolean;
+  checkpoint_download_in_progress?: boolean;
   download?: Sam3DownloadStatus;
   hf_auth?: Sam3AuthStatus;
   message: string;

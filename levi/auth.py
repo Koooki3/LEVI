@@ -10,12 +10,25 @@ hub_token = ContextVar("levi_hub_token", default=None)
 
 
 def token() -> str | None:
-    """Return the current browser token, falling back to HF_TOKEN.
+    """Return the active browser, environment or local HF CLI token.
 
-    The raw token is intentionally request-scoped and must never be included in
-    persisted plans, job records, logs, or workspace memory.
+    Browser credentials always win for the current request, followed by the
+    explicit ``HF_TOKEN`` deployment setting. The final fallback reads the
+    Hugging Face CLI cache so ``hf auth login`` works for both checkpoint
+    downloads and dataset access. The raw token is never persisted.
     """
-    return hub_token.get() or os.getenv("HF_TOKEN") or None
+    scoped = hub_token.get()
+    if scoped:
+        return scoped
+    configured = os.getenv("HF_TOKEN")
+    if configured:
+        return configured
+    try:
+        from huggingface_hub import get_token
+
+        return get_token() or None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def credential_scope(value: str | None = None) -> str:

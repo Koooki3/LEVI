@@ -60,6 +60,11 @@ async function clearSessionCookie(): Promise<void> {
   }
 }
 
+function notifyAuthChanged(): void {
+  if (typeof window !== "undefined")
+    window.dispatchEvent(new Event("levi:hf-auth-changed"));
+}
+
 function isExpired(result: OAuthResult): boolean {
   const exp = result.accessTokenExpiresAt;
   if (!exp) return false;
@@ -101,19 +106,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const parsed = JSON.parse(stored) as OAuthResult;
           if (isExpired(parsed)) {
             window.localStorage.removeItem(AUTH_STORAGE_KEY);
-            clearSessionCookie();
+            void clearSessionCookie().finally(notifyAuthChanged);
           } else {
             setOauth(parsed);
-            void setSessionCookie(parsed.accessToken).catch((err) => {
-              if (cancelled) return;
-              console.error("Stored Hugging Face session is invalid", err);
-              window.localStorage.removeItem(AUTH_STORAGE_KEY);
-              setOauth(null);
-            });
+            void setSessionCookie(parsed.accessToken)
+              .then(() => {
+                if (!cancelled) notifyAuthChanged();
+              })
+              .catch((err) => {
+                if (cancelled) return;
+                console.error("Stored Hugging Face session is invalid", err);
+                window.localStorage.removeItem(AUTH_STORAGE_KEY);
+                setOauth(null);
+                notifyAuthChanged();
+              });
             return;
           }
         } catch {
           window.localStorage.removeItem(AUTH_STORAGE_KEY);
+          void clearSessionCookie().finally(notifyAuthChanged);
         }
       }
 
@@ -128,6 +139,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               JSON.stringify(result),
             );
             setOauth(result);
+            notifyAuthChanged();
           });
         })
         .catch((err) => {
@@ -169,13 +181,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     clearLegacyAuthStorage();
     window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(result));
     setOauth(result);
+    notifyAuthChanged();
   }, []);
 
   const signOut = useCallback(() => {
     window.localStorage.removeItem(AUTH_STORAGE_KEY);
     clearLegacyAuthStorage();
     setOauth(null);
-    clearSessionCookie();
+    void clearSessionCookie().finally(notifyAuthChanged);
     // Strip ?code=... left in the URL by the OAuth redirect, if any.
     const cleanUrl = window.location.href.replace(/\?.*$/, "");
     if (cleanUrl !== window.location.href) {

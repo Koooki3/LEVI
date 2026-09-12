@@ -4,7 +4,7 @@
 
 ## 0.2.0 独立发行检查 / Standalone release check
 
-A source-only copy was installed under a renamed checkout with a separate workspace containing a space in its path. Its own uv environment passed all **37 Python tests**, and a fresh frontend dependency install and production build succeeded. With `LEVI_WORKSPACE` unset, the default was that checkout's `.state`; an unrelated environment variable did not change it. No sibling conversion repository was present.
+A source-only copy was installed under a renamed checkout with a separate workspace containing a space in its path. Its own uv environment passed all **46 Python tests**, and a fresh frontend dependency install and production build succeeded. With `LEVI_WORKSPACE` unset, the default was that checkout's `.state`; an unrelated environment variable did not change it. No sibling conversion repository was present.
 
 The production web workbench was also exercised: advanced JSON selected quaternion orientation and state-as-action, the immutable plan ran the complete built-in pipeline, the result was automatically registered, and both 640×480 videos reached readyState 4. Browser page errors: **0**. A second integration run used the default Euler/next-state configuration successfully.
 
@@ -20,14 +20,14 @@ Cache cleanup was applied after validation: generated Next.js output, test/ruff 
 | ESLint | 0 errors; 3 retained upstream React Hook dependency warnings |
 | Prettier | Passed |
 | Bun unit tests | **165 passed, 0 failed** |
-| Python / FastAPI tests | **37 passed**; 2 dependency deprecation warnings |
+| Python / FastAPI tests | **46 passed**; 2 dependency deprecation warnings |
 | Production Next.js build | Passed |
 | Ruff fatal Python checks | Passed |
 | `git diff --check` | Passed |
 
 Python tests additionally cover the complete bundled pipeline, image/FPS resampling, source byte preservation, quaternion geometry, measured image statistics, metadata repairs, task maps, immutable job plans, changed-source rejection and cache cleanup boundaries.
 
-SAM3 CPU-only coverage includes RLE losslessness, Sidecar revisions and human edits, API plan/run/export source safety, response path redaction, v3 shared-video metadata resolution, invalid refinement rejection, global status checks, and the explicitly disabled worker CLI. No test imported Torch, probed CUDA or ran a SAM3 model.
+SAM3 CPU-only coverage includes RLE losslessness, Sidecar revisions and human edits, API plan/run/export source safety, response path redaction, v3 shared-video metadata resolution, invalid refinement rejection, global status checks, authenticated workspace checkpoint download/progress and the real-run checkpoint gate, and the explicitly disabled worker CLI. No test imported Torch, probed CUDA or ran a SAM3 model.
 
 Python tests cover dataset registration, byte-range video reads, path/symlink boundaries, cross-origin writes, dataset-scoped review persistence, v2 annotation export without source modification, exact frame snapping, v3.1 episode metadata, diagnostics and rejected invalid jobs. Frontend tests include v2 JSONL episode-length statistics and invalid FPS handling, alongside the retained upstream math/parsing suite.
 

@@ -1575,3 +1575,68 @@
     display: none;
   }
 }
+
+.annotations-skin .object-annotation-checkpoint-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(228, 185, 107, 0.38);
+  border-radius: 10px;
+  background: rgba(228, 185, 107, 0.07);
+}
+.annotations-skin .object-annotation-checkpoint-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.annotations-skin .object-annotation-checkpoint-head > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.annotations-skin .object-annotation-checkpoint-head strong {
+  color: #f1efdf;
+  font-size: 12px;
+}
+.annotations-skin .object-annotation-checkpoint-head span {
+  color: #afb7a8;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.annotations-skin .object-annotation-download {
+  min-height: 34px;
+  flex: none;
+  border: 1px solid rgba(212, 247, 121, 0.6);
+  border-radius: 8px;
+  background: #d4f779;
+  color: #17220e;
+  cursor: pointer;
+  padding: 0 12px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.annotations-skin .object-annotation-download:hover {
+  background: #e5fbb6;
+}
+.annotations-skin .object-annotation-download:disabled {
+  border-color: rgba(175, 183, 168, 0.25);
+  background: rgba(175, 183, 168, 0.13);
+  color: #89927f;
+  cursor: not-allowed;
+}
+.annotations-skin .object-annotation-checkpoint-hint {
+  margin: 0;
+  color: #e4b96b;
+  font-size: 10px;
+  line-height: 1.45;
+}
+@media (max-width: 720px) {
+  .annotations-skin .object-annotation-checkpoint-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .annotations-skin .object-annotation-download {
+    width: 100%;
+  }
+}

@@ -79,21 +79,21 @@ LEVI_WORKSPACE 只保存数据集登记、sidecar、报告、checkpoint 和运�
 
 ~~~bash
 # 推荐：浏览器/设备流程，token 不出现在 shell 历史中
-hf auth login
-hf auth whoami
+HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" hf auth login
+HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" hf auth whoami
 ~~~
 
 如果系统没有全局 hf 命令，也可以使用：
 
 ~~~bash
-uvx hf auth login
-uvx hf auth whoami
+HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" uvx hf auth login
+HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" uvx hf auth whoami
 ~~~
 
 登录账号需要能读取 1038lab/sam3。也可以直接打开 LEVI，点击页面中的 Connect
 Hugging Face，输入只读 token；浏览器会把当前 token 放入 HttpOnly 会话 cookie，
 真实 worker 只在当前作业进程中使用它。若不希望浏览器保存 token，可只使用本机
-hf auth login 或运行环境中的 HF_TOKEN。
+按上述工作区 HF_HOME 设置执行 hf auth login，或使用运行环境中的 HF_TOKEN。
 
 ### 4. 安装独立 SAM3 worker
 
@@ -139,18 +139,21 @@ uv run levi serve
 1. 打开任意演示数据集、Hub 数据集或登记的本地数据集，进入一个 episode 的“标注”页面。
 2. 在 SAM3 运行状态卡依次确认 **Hub access、CUDA worker、Checkpoint** 三个门槛。
    若账号显示“未登录”，点击 Connect Hugging Face；已通过 CLI 登录的账号会显示为
-   environment/cache。已有 checkpoint 时可直接复用缓存。
+   environment/cache。浏览器登录成功后，状态卡会立即刷新。
 3. 确认模型为 1038lab/sam3 / sam3.pt，保存位置为当前工作区下的
-   checkpoints/sam3/sam3.pt。首次需要下载时，状态卡会显示已下载字节、总字节（若 Hub
-   提供元数据）和进度条。
-4. 在第 1 步选择用于审核的相机，输入逗号、分号或换行分隔的文本 prompt，例如
+   checkpoints/sam3/sam3.pt。若 checkpoint 尚未缓存，页面会出现“下载 checkpoint”按钮、
+   0% 进度条和当前路径；点击按钮后会用当前 Hugging Face 会话启动后台下载，状态卡每秒
+   更新已下载字节、总字节（若 Hub 提供元数据）和进度。失败时可点击“重试下载”。
+4. 等待 Checkpoint 变为“已就绪”后再运行标注；真实 worker 不会在未准备好时静默启动隐藏下载。
+   CLI 登录、浏览器登录和 HF_TOKEN 都会使用同一工作区保存位置。
+5. 在第 1 步选择用于审核的相机，输入逗号、分号或换行分隔的文本 prompt，例如
    cup, plate, robot gripper；可保存和复用 prompt 预设。
-5. 在第 2 步选择片段范围、按任务筛选或全部片段，再勾选要运行的相机。每个
+6. 在第 2 步选择片段范围、按任务筛选或全部片段，再勾选要运行的相机。每个
    episode/camera 组合独立处理，原生帧索引和 track ID 不跨相机混用。
-6. 点击“运行 SAM3 标注”。LEVI 会先提交 model-neutral plan 做 episode、相机、prompt
+7. 点击“运行 SAM3 标注”。LEVI 会先提交 model-neutral plan 做 episode、相机、prompt
    和阈值校验，计划通过后才启动 worker；进度条显示已完成的组合数。页面不会显示视频预览，
    审核入口是按相机汇总的轨迹清单。
-7. 作业完成后，建议保持 suggested。点击每条轨迹可跳到首帧；确认帧区间、帧数和均值后逐条
+8. 作业完成后，建议保持 suggested。点击每条轨迹可跳到首帧；确认帧区间、帧数和均值后逐条
    接受或拒绝。每次操作都会创建新的 sidecar revision，审核完成后再导出或交给后续流程。
 
 页面不要求数据集属于某个固定账号。Hub 数据集使用当前账号作用域缓存；本地数据集
@@ -208,16 +211,18 @@ revision 可分别备份和比较。
 | --- | --- | --- |
 | GET | /api/sam3/status | 返回全局开关、worker 文件、模型配置、账号用户名、checkpoint 路径和下载进度；不导入 Torch、不探测 CUDA |
 | GET | /api/sam3/capabilities | /status 的兼容别名 |
+| POST | /api/sam3/checkpoint/download | 使用当前 Hugging Face 会话启动或恢复工作区 checkpoint 下载；返回状态和 `download_started` |
 | POST | /api/sam3/plan | 校验 episode、相机、prompt 并写入 staged plan |
-| POST | /api/sam3/run | provider=sam3 启动真实 worker；provider=fake 仅供 CPU 合约测试；可携带 `/plan` 返回的 `plan_id` 绑定已校验计划 |
+| POST | /api/sam3/run | 仅在 checkpoint 已就绪时启动真实 worker；provider=fake 仅供 CPU 合约测试；可携带 `/plan` 返回的 `plan_id` 绑定已校验计划 |
 | GET | /api/sam3/jobs/{id} | 轮询作业并在成功时发布 sidecar revision |
 | POST | /api/sam3/jobs/{id}/cancel | 取消作业 |
 | GET | /api/sam3/revisions | 列出对象标注 revision |
 | GET | /api/sam3/episodes/{id}/objects | 按相机、帧或 revision 读取对象记录 |
 | POST | /api/sam3/edits | 带 base_revision 的接受/拒绝/重标/遮挡/删除/精修 |
 
-provider=sam3 的响应为 202 和 job_id。worker 先解析已有 checkpoint 或下载
-1038lab/sam3/sam3.pt，随后逐个读取 episode/camera，最后写入结果 JSON。结果必须
+provider=sam3 的响应为 202 和 job_id。worker 只读取已经由状态卡下载并校验过的
+checkpoint（直接运行 worker 时仍保留自身的 Hub fallback），随后逐个读取 episode/camera，
+最后写入结果 JSON。结果必须
 通过 schema、计划范围和 RLE coverage 校验，失败时不会产生半成品 revision。
 
 ## 兼容原生 LeRobot
@@ -241,7 +246,7 @@ add_features/modify_features 复制工具，并在导出报告中记录来源 re
 - **页面仍显示旧账号**：退出 LEVI，在浏览器开发者工具中确认
   levi-hf-auth-v1；旧的 lerobot-viz-oauth 会被自动删除；重新使用目标账号登录。
 - **状态卡显示未登录，但 CLI 已登录**：确认启动 LEVI 的同一用户可以读取
-  HF_HOME/HF_HUB_CACHE；状态卡会把 CLI 凭据显示为 environment/cache。
+  HF_HOME/HF_HUB_CACHE；状态卡会把 CLI 凭据显示为 environment/cache；若在 LEVI 启动前登录，请把 HF_HOME 指向当前工作区的 .cache/huggingface（第 3 步命令已这样设置）。
 - **模型下载到了旧目录**：停止 LEVI，设置新的 LEVI_WORKSPACE 后重新执行
   uv run levi serve。不要手动把另一个工作区的 sidecar 复制到新数据集。
 - **提示 checkpoint 访问失败**：在模型页申请访问，执行 hf auth whoami，然后刷新
