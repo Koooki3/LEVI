@@ -12,6 +12,26 @@ dependencies = [
   "torch>=2.7,<2.11",
   "torchvision>=0.22,<0.26",
   "sam3 @ git+https://github.com/facebookresearch/sam3.git@660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b",
+  # sam3's model_builder.py does `import pkg_resources` without declaring the
+  # dependency; setuptools>=82 dropped that module entirely, which crashes the
+  # worker before it ever reaches the checkpoint download step. Pin below 82
+  # until upstream fixes it.
+  "setuptools>=70,<82",
+  # sam3's core sam/rope.py imports einops unconditionally, but upstream only
+  # lists it under the optional "notebooks" extra. Declare it explicitly.
+  "einops>=0.7,<1",
+  # `import sam3` transitively pulls in sam3.train.data.* (via
+  # sam1_task_predictor -> sam3_tracker_base -> BatchedDatapoint) even for
+  # pure inference use, which needs pycocotools. Only declared under "dev".
+  "pycocotools>=2.0,<3",
+  # sam3_video_predictor.py imports psutil directly; not declared anywhere
+  # upstream (not even under an extra).
+  "psutil>=5.9,<8",
+  # io_utils.py's cv2-based video-frame loader is on the core inference path
+  # (load_resource_as_video_frames), but opencv is only declared under the
+  # "dev"/"notebooks" extras. Headless avoids pulling in GUI/Qt libs on a
+  # worker host with no display.
+  "opencv-python-headless>=4.8,<5",
 ]
 
 [project.scripts]
@@ -20,6 +40,9 @@ levi-sam3-worker = "levi_sam3_worker.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["levi_sam3_worker"]

@@ -15,6 +15,7 @@ import type {
   Sam3Edit,
   Sam3JobStatus,
   Sam3Plan,
+  Sam3PromptPreset,
   Sam3Revision,
 } from "../types/object-annotation.types";
 
@@ -337,4 +338,47 @@ export async function cancelSam3Job(
   );
   if (!response.ok) throw new Error(`SAM3 cancel: ${response.status}`);
   return response.json();
+}
+
+// Prompt presets are workspace-scoped (reusable across every dataset), not
+// tied to one dataset's DatasetIdent like the endpoints above.
+
+export async function fetchSam3PromptPresets(): Promise<Sam3PromptPreset[]> {
+  if (!ENV_URL) return [];
+  const response = await fetch(endpoint("/api/sam3/prompt-presets"), {
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(`SAM3 prompt presets: ${response.status}`);
+  const data = (await response.json()) as { presets?: Sam3PromptPreset[] };
+  return data.presets ?? [];
+}
+
+export async function saveSam3PromptPreset(
+  preset: Sam3PromptPreset,
+): Promise<Sam3PromptPreset[]> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const response = await fetch(endpoint("/api/sam3/prompt-presets"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(preset),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => `${response.status}`);
+    throw new Error(text || `SAM3 save preset: ${response.status}`);
+  }
+  const data = (await response.json()) as { presets?: Sam3PromptPreset[] };
+  return data.presets ?? [];
+}
+
+export async function deleteSam3PromptPreset(
+  name: string,
+): Promise<Sam3PromptPreset[]> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const response = await fetch(
+    endpoint(`/api/sam3/prompt-presets/${encodeURIComponent(name)}`),
+    { method: "DELETE" },
+  );
+  if (!response.ok) throw new Error(`SAM3 delete preset: ${response.status}`);
+  const data = (await response.json()) as { presets?: Sam3PromptPreset[] };
+  return data.presets ?? [];
 }

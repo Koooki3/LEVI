@@ -892,6 +892,8 @@ function EpisodeViewerInner({
                     episodeId={episodeId}
                     ident={{ repoId: datasetInfo.repoId }}
                     cameraKeys={videosInfo.map((v) => v.filename)}
+                    allEpisodes={episodes}
+                    taskIndex={taskIndex}
                   />
                   <AnnotationsTimeline duration={data.duration} />
                   <AnnotationsPanel

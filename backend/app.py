@@ -40,6 +40,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -61,7 +62,7 @@ from levi.annotations.sam3_protocol import (
     validate_annotations_for_plan,
 )
 from levi.auth import credential_scope, hub_token, token
-from levi.catalog import atomic, local_root
+from levi.catalog import atomic, local_root, read
 from levi.paths import CACHE, EXPORTS, SAM3_CHECKPOINT_DIR, STATE, inside
 
 logger = logging.getLogger("lerobot-annotate")
@@ -158,6 +159,13 @@ class Sam3RunRequest(Sam3PlanRequest):
 
 class Sam3EditRequest(ObjectEdit):
     """A revision-checked human edit to an object sidecar."""
+
+
+class Sam3PromptPresetRequest(BaseModel):
+    """A named, reusable set of SAM3 text prompts, shared across datasets."""
+
+    name: str
+    prompts: list[str]
 
 
 class ExportRequest(DatasetRef):
@@ -325,7 +333,9 @@ def _public_sam3_job(job: dict[str, Any]) -> dict[str, Any]:
         "revision_id",
         "annotation_count",
         "error",
+        "error_detail",
         "progress",
+        "item_errors",
     )
     return {key: job[key] for key in public_keys if key in job}
 
@@ -356,6 +366,45 @@ def _sam3_job_path(store: SidecarStore, job_id: str) -> Path:
     if not re.fullmatch(r"[a-f0-9]{16,64}", job_id):
         raise HTTPException(400, "Invalid SAM3 job ID")
     return store.root / "staging" / "jobs" / f"{job_id}.json"
+
+
+_SAM3_LOG_TAIL_BYTES = 4000
+
+
+def _sam3_log_tail(job: dict[str, Any]) -> str | None:
+    """Read the last lines of a crashed worker's stdout/stderr log.
+
+    The worker never prints credentials (progress messages already redact
+    Hub URLs), but we redact defensively since this text reaches the browser.
+    """
+    log_path = job.get("log_path")
+    if not log_path:
+        return None
+    try:
+        data = Path(str(log_path)).read_bytes()
+    except OSError:
+        return None
+    if not data:
+        return None
+    tail = data[-_SAM3_LOG_TAIL_BYTES:].decode("utf-8", errors="replace")
+    if len(data) > _SAM3_LOG_TAIL_BYTES:
+        tail = "...(truncated)...\n" + tail
+    return re.sub(
+        r"(?i)(token|authorization|x-amz-signature|x-amz-credential)=[^&\s]+",
+        r"\1=<redacted>",
+        tail,
+    ).strip()
+
+
+def _read_sam3_batch_progress(job: dict[str, Any]) -> dict[str, Any] | None:
+    """Read the worker's episode/camera batch progress while a job runs."""
+    progress_path = job.get("progress_path")
+    if not progress_path:
+        return None
+    try:
+        return json.loads(Path(str(progress_path)).read_text())
+    except (OSError, ValueError):
+        return None
 
 
 def _sam3_process_alive(job: dict[str, Any]) -> bool:
@@ -415,16 +464,22 @@ def _collect_sam3_job(state: DatasetState, job: dict[str, Any]) -> dict[str, Any
                 finished_at=pd.Timestamp.utcnow().isoformat(),
                 revision_id=revision["revision_id"],
                 annotation_count=len(annotations),
+                item_errors=result.get("item_errors", []),
             )
         except (OSError, ValueError, TypeError) as exc:
             job.update(status="failed", error=f"Invalid SAM3 worker result: {exc}")
     elif return_code is not None or not _sam3_process_alive(job):
+        detail = _sam3_log_tail(job)
         job.update(
             status="failed",
             error=f"SAM3 worker exited without a result (code {return_code})",
+            error_detail=detail,
         )
     else:
         job["status"] = "running"
+        progress = _read_sam3_batch_progress(job)
+        if progress is not None:
+            job["progress"] = progress
     atomic(_sam3_job_path(_sidecar(state), str(job["job_id"])), job)
     return job
 
@@ -1328,6 +1383,50 @@ def sam3_capabilities() -> JSONResponse:
     return JSONResponse(_sam3_status_payload())
 
 
+_SAM3_PROMPT_PRESETS_PATH = STATE / "sam3_prompt_presets.json"
+_SAM3_PROMPT_PRESET_LIMIT = 200
+_SAM3_PROMPT_PRESET_LOCK = threading.Lock()
+
+
+def _sam3_prompt_presets() -> list[dict[str, Any]]:
+    """Reusable named prompt sets, shared across every dataset in this workspace."""
+    data = read(_SAM3_PROMPT_PRESETS_PATH, {"presets": []})
+    presets = data.get("presets") if isinstance(data, dict) else None
+    return presets if isinstance(presets, list) else []
+
+
+@app.get("/api/sam3/prompt-presets")
+def sam3_list_prompt_presets() -> JSONResponse:
+    return JSONResponse({"presets": _sam3_prompt_presets()})
+
+
+@app.post("/api/sam3/prompt-presets")
+def sam3_save_prompt_preset(request: Sam3PromptPresetRequest) -> JSONResponse:
+    name = request.name.strip()
+    if not name:
+        raise HTTPException(400, "Preset name must not be empty")
+    prompts = list(dict.fromkeys(item.strip() for item in request.prompts if item.strip()))
+    if not prompts:
+        raise HTTPException(400, "Preset must include at least one non-empty prompt")
+    with _SAM3_PROMPT_PRESET_LOCK:
+        presets = [item for item in _sam3_prompt_presets() if item.get("name") != name]
+        if len(presets) >= _SAM3_PROMPT_PRESET_LIMIT:
+            raise HTTPException(
+                400, f"Prompt preset limit reached ({_SAM3_PROMPT_PRESET_LIMIT})"
+            )
+        presets.append({"name": name, "prompts": prompts})
+        atomic(_SAM3_PROMPT_PRESETS_PATH, {"presets": presets})
+    return JSONResponse({"ok": True, "presets": presets})
+
+
+@app.delete("/api/sam3/prompt-presets/{name}")
+def sam3_delete_prompt_preset(name: str) -> JSONResponse:
+    with _SAM3_PROMPT_PRESET_LOCK:
+        presets = [item for item in _sam3_prompt_presets() if item.get("name") != name]
+        atomic(_SAM3_PROMPT_PRESETS_PATH, {"presets": presets})
+    return JSONResponse({"ok": True, "presets": presets})
+
+
 @app.post("/api/sam3/plan")
 def sam3_plan(request: Sam3PlanRequest) -> JSONResponse:
     state = _ensure_state(DatasetRef.model_validate(request.model_dump()))
@@ -1382,6 +1481,7 @@ def sam3_run(request: Sam3RunRequest) -> JSONResponse:
     job_id = uuid.uuid4().hex
     result_path = store.root / "staging" / "results" / f"{job_id}.json"
     log_path = store.root / "staging" / "jobs" / f"{job_id}.log"
+    progress_path = store.root / "staging" / "jobs" / f"{job_id}.progress.json"
     job = {
         "job_id": job_id,
         "status": "queued",
@@ -1390,6 +1490,7 @@ def sam3_run(request: Sam3RunRequest) -> JSONResponse:
         "plan_path": str(plan_path),
         "result_path": str(result_path),
         "log_path": str(log_path),
+        "progress_path": str(progress_path),
         "created_at": pd.Timestamp.utcnow().isoformat(),
     }
     atomic(_sam3_job_path(store, job_id), job)
@@ -1405,6 +1506,8 @@ def sam3_run(request: Sam3RunRequest) -> JSONResponse:
                 str(plan_path),
                 "--output",
                 str(result_path),
+                "--progress",
+                str(progress_path),
             ],
             cwd=worker_project,
             env={

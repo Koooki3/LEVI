@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -105,6 +106,82 @@ def test_sidecar_rejects_invalid_human_refinement(tmp_path: Path):
             )
         )
     assert store.current_revision() == first["revision_id"]
+
+
+def test_sidecar_publish_partitions_multi_episode_multi_camera_batch(tmp_path: Path):
+    """A batch spanning many episodes/cameras (as worker.py's run_plan now
+    produces in one publish() call) must partition masks per (episode,
+    camera) pair rather than merging or dropping rows across pairs."""
+    from levi.annotations.sam3_protocol import fake_annotations
+
+    plan = Sam3Plan(
+        episode_indices=[0, 1],
+        camera_keys=["observation.images.front", "observation.images.hand"],
+        prompts=["cup"],
+        provider="fake",
+    )
+    annotations = fake_annotations(plan)
+    assert len(annotations) == 2 * 2 * 1 * 4  # episodes x cameras x prompts x frames
+
+    store = SidecarStore(tmp_path / "annotations", identity={"repo_id": "demo/batch"})
+    revision = store.publish(annotations)
+    assert revision["annotation_count"] == len(annotations)
+
+    for episode_index in (0, 1):
+        rows = store.read_episode(episode_index)
+        assert len(rows) == 2 * 1 * 4
+        assert {row["camera_key"] for row in rows} == {
+            "observation.images.front",
+            "observation.images.hand",
+        }
+
+
+def test_prompt_presets_save_list_and_delete(tmp_path: Path, monkeypatch):
+    import backend.app as backend_app
+
+    monkeypatch.setattr(backend_app, "_SAM3_PROMPT_PRESETS_PATH", tmp_path / "presets.json")
+
+    def body(response):
+        return json.loads(response.body)
+
+    assert body(backend_app.sam3_list_prompt_presets())["presets"] == []
+
+    saved = body(
+        backend_app.sam3_save_prompt_preset(
+            backend_app.Sam3PromptPresetRequest(
+                name="kitchen", prompts=["cup", "cup", "  plate  ", ""]
+            )
+        )
+    )
+    assert saved["presets"] == [{"name": "kitchen", "prompts": ["cup", "plate"]}]
+
+    # Saving the same name again replaces rather than duplicates it.
+    body(
+        backend_app.sam3_save_prompt_preset(
+            backend_app.Sam3PromptPresetRequest(name="kitchen", prompts=["gripper"])
+        )
+    )
+    listed = body(backend_app.sam3_list_prompt_presets())["presets"]
+    assert listed == [{"name": "kitchen", "prompts": ["gripper"]}]
+
+    deleted = body(backend_app.sam3_delete_prompt_preset("kitchen"))
+    assert deleted["presets"] == []
+
+
+def test_prompt_presets_reject_empty_name_or_prompts(tmp_path: Path, monkeypatch):
+    import backend.app as backend_app
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(backend_app, "_SAM3_PROMPT_PRESETS_PATH", tmp_path / "presets.json")
+
+    with pytest.raises(HTTPException):
+        backend_app.sam3_save_prompt_preset(
+            backend_app.Sam3PromptPresetRequest(name="  ", prompts=["cup"])
+        )
+    with pytest.raises(HTTPException):
+        backend_app.sam3_save_prompt_preset(
+            backend_app.Sam3PromptPresetRequest(name="x", prompts=["  ", ""])
+        )
 
 
 def test_api_cpu_fake_provider_and_export_are_sidecar_only(client, dataset, tmp_path):

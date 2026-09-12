@@ -550,7 +550,81 @@ def _run_episode_camera(
     return list(unique.values())
 
 
-def run_plan(plan_path: Path, output_path: Path) -> None:
+def _write_batch_progress(
+    path: Path | None,
+    *,
+    done: int,
+    total: int,
+    episode_index: int | None,
+    camera_key: str | None,
+) -> None:
+    if path is None:
+        return
+    payload = {
+        "done": done,
+        "total": total,
+        "current_episode": episode_index,
+        "current_camera": camera_key,
+        "updated_at": time.time(),
+    }
+    try:
+        _atomic_json(path, payload)
+    except OSError:
+        # Progress telemetry must not fail an otherwise-successful batch item.
+        return
+
+
+def _run_batch(
+    predictor: Any,
+    root: Path,
+    info: dict[str, Any],
+    *,
+    plan: dict[str, Any],
+    np: Any,
+    progress_path: Path | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Run every (episode, camera) pair, isolating one bad pair from the rest.
+
+    A single missing video or malformed episode must not discard annotations
+    already computed for the rest of a large batch.
+    """
+    pairs = [
+        (int(episode_index), camera_key)
+        for episode_index in plan["episode_indices"]
+        for camera_key in plan["camera_keys"]
+    ]
+    total = len(pairs)
+    annotations: list[dict[str, Any]] = []
+    item_errors: list[dict[str, Any]] = []
+    _write_batch_progress(progress_path, done=0, total=total, episode_index=None, camera_key=None)
+    for done, (episode_index, camera_key) in enumerate(pairs, start=1):
+        try:
+            annotations.extend(
+                _run_episode_camera(
+                    predictor,
+                    root,
+                    info,
+                    plan=plan,
+                    episode_index=episode_index,
+                    camera_key=camera_key,
+                    np=np,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - one bad pair must not sink the batch
+            item_errors.append(
+                {
+                    "episode_index": episode_index,
+                    "camera_key": camera_key,
+                    "error": str(exc),
+                }
+            )
+        _write_batch_progress(
+            progress_path, done=done, total=total, episode_index=episode_index, camera_key=camera_key
+        )
+    return annotations, item_errors
+
+
+def run_plan(plan_path: Path, output_path: Path, progress_path: Path | None = None) -> None:
     if not _enabled():
         raise RuntimeError("SAM3 is disabled; set LEVI_SAM3_ENABLED=1 to enable it")
     plan = json.loads(plan_path.read_text())
@@ -570,38 +644,45 @@ def run_plan(plan_path: Path, output_path: Path) -> None:
     # looking up facebook/sam3. The mirror is resolved above with the user's
     # current Hugging Face credential.
     predictor = build_sam3_video_predictor(checkpoint_path=str(checkpoint))
-    annotations: list[dict[str, Any]] = []
     try:
-        for episode_index in plan["episode_indices"]:
-            for camera_key in plan["camera_keys"]:
-                annotations.extend(
-                    _run_episode_camera(
-                        predictor,
-                        root,
-                        info,
-                        plan=plan,
-                        episode_index=int(episode_index),
-                        camera_key=camera_key,
-                        np=np,
-                    )
-                )
+        annotations, item_errors = _run_batch(
+            predictor, root, info, plan=plan, np=np, progress_path=progress_path
+        )
     finally:
         shutdown = getattr(predictor, "shutdown", None)
         if callable(shutdown):
             shutdown()
+    model = {
+        "provider": "sam3",
+        "model_version": f"sam3@{SAM3_COMMIT}",
+        "checkpoint": checkpoint_source,
+        "checkpoint_path": str(checkpoint),
+        "model_repo": SAM3_MODEL_REPO,
+        "model_filename": SAM3_MODEL_FILENAME,
+        "model_revision": SAM3_MODEL_REVISION,
+    }
+    if not annotations and item_errors:
+        first = item_errors[0]
+        _atomic_json(
+            output_path,
+            {
+                "status": "failed",
+                "error": (
+                    f"All {len(item_errors)} episode/camera item(s) failed; "
+                    f"first error (episode {first['episode_index']}, "
+                    f"{first['camera_key']}): {first['error']}"
+                ),
+                "item_errors": item_errors,
+                "model": model,
+            },
+        )
+        return
     _atomic_json(
         output_path,
         {
             "status": "succeeded",
             "annotations": annotations,
-            "model": {
-                "provider": "sam3",
-                "model_version": f"sam3@{SAM3_COMMIT}",
-                "checkpoint": checkpoint_source,
-                "checkpoint_path": str(checkpoint),
-                "model_repo": SAM3_MODEL_REPO,
-                "model_filename": SAM3_MODEL_FILENAME,
-                "model_revision": SAM3_MODEL_REVISION,
-            },
+            "item_errors": item_errors,
+            "model": model,
         },
     )

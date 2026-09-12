@@ -21,6 +21,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true", help="check configuration without loading Torch")
     parser.add_argument("--plan", type=Path, help="plan JSON created by LEVI")
     parser.add_argument("--output", type=Path, help="result JSON path")
+    parser.add_argument(
+        "--progress",
+        type=Path,
+        default=None,
+        help="optional path to write batch progress JSON (episode/camera done-of-total)",
+    )
     args = parser.parse_args(argv)
     if args.check:
         print("LEVI SAM3 worker configuration")
@@ -38,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("SAM3 is disabled; set LEVI_SAM3_ENABLED=1 to enable it")
     from .worker import run_plan
 
-    run_plan(args.plan, args.output)
+    run_plan(args.plan, args.output, args.progress)
     return 0
 
 

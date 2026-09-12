@@ -1,28 +1,69 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { DatasetTaskIndex } from "@/app/[org]/[dataset]/[episode]/fetch-data";
 import HfAuthButton from "@/components/hf-auth-button";
 import { T, useLocale } from "@/components/levi-locale";
 import { useAuth } from "@/context/auth-context";
 import { useTime } from "@/context/time-context";
 import {
+  cancelSam3Job,
+  deleteSam3PromptPreset,
   editObjectAnnotation,
   fetchObjectAnnotations,
   fetchSam3Job,
+  fetchSam3PromptPresets,
   getSam3Status,
   runSam3,
+  saveSam3PromptPreset,
   type DatasetIdent,
 } from "@/utils/annotationsClient";
 import type {
   ObjectAnnotation,
   Sam3Capabilities,
+  Sam3ItemError,
+  Sam3JobProgress,
+  Sam3PromptPreset,
 } from "@/types/object-annotation.types";
 
 type Props = {
   episodeId: number;
   ident: DatasetIdent;
   cameraKeys: string[];
+  /** Every episode index in the dataset — powers the "all"/"range" scopes. */
+  allEpisodes?: number[];
+  /** Powers the "episodes matching the current task" scope. */
+  taskIndex?: DatasetTaskIndex | null;
 };
+
+/** Which episodes a SAM3 run should cover, mirroring the scope pattern
+ * already used by Action Insights (`CrossEpisodeScope` in fetch-data.ts). */
+type AnnotationScope =
+  | { kind: "range"; from: number; to: number }
+  | { kind: "task"; task: string }
+  | { kind: "all" };
+
+function resolveScopeEpisodes(
+  scope: AnnotationScope,
+  allEpisodes: number[],
+  taskIndex: DatasetTaskIndex | null | undefined,
+): number[] {
+  if (scope.kind === "all") return allEpisodes;
+  if (scope.kind === "task") {
+    if (!taskIndex) return [];
+    return allEpisodes.filter((episode) =>
+      (taskIndex.episodeTasks[episode] ?? []).includes(scope.task),
+    );
+  }
+  const lo = Math.min(scope.from, scope.to);
+  const hi = Math.max(scope.from, scope.to);
+  if (!allEpisodes.length) {
+    const range: number[] = [];
+    for (let episode = lo; episode <= hi; episode += 1) range.push(episode);
+    return range;
+  }
+  return allEpisodes.filter((episode) => episode >= lo && episode <= hi);
+}
 
 const statusColor: Record<ObjectAnnotation["status"], string> = {
   suggested: "text-cyan-300",
@@ -54,6 +95,8 @@ export default function ObjectAnnotationPanel({
   episodeId,
   ident,
   cameraKeys,
+  allEpisodes,
+  taskIndex,
 }: Props) {
   const { language } = useLocale();
   const { oauth } = useAuth();
@@ -75,18 +118,50 @@ export default function ObjectAnnotationPanel({
   );
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const [scope, setScope] = useState<AnnotationScope>({
+    kind: "range",
+    from: episodeId,
+    to: episodeId,
+  });
+  const [runCameras, setRunCameras] = useState<Set<string>>(
+    () => new Set(cameraKeys[0] ? [cameraKeys[0]] : []),
+  );
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobProgress, setJobProgress] = useState<Sam3JobProgress | null>(null);
+  const [itemErrors, setItemErrors] = useState<Sam3ItemError[]>([]);
+  const [presets, setPresets] = useState<Sam3PromptPreset[]>([]);
+  const [presetNameDraft, setPresetNameDraft] = useState("");
+  const [selectedPresetName, setSelectedPresetName] = useState("");
 
   useEffect(() => {
     setCameraKey((current) =>
       cameraKeys.includes(current) ? current : cameraKeys[0] || "",
     );
+    setRunCameras((current) => {
+      const valid = [...current].filter((key) => cameraKeys.includes(key));
+      if (valid.length) return new Set(valid);
+      return new Set(cameraKeys[0] ? [cameraKeys[0]] : []);
+    });
   }, [cameraKeys]);
+
+  useEffect(() => {
+    setScope({ kind: "range", from: episodeId, to: episodeId });
+  }, [episodeId]);
 
   useEffect(() => {
     setObjects([]);
     setRevision(null);
     setMessage(null);
+    setErrorDetail(null);
+    setItemErrors([]);
   }, [stableIdent]);
+
+  useEffect(() => {
+    fetchSam3PromptPresets()
+      .then(setPresets)
+      .catch(() => setPresets([]));
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!cameraKey) return;
@@ -134,18 +209,27 @@ export default function ObjectAnnotationPanel({
     return [...values.values()].sort((a, b) => a.track_id - b.track_id);
   }, [objects]);
 
+  const scopeEpisodes = useMemo(
+    () => resolveScopeEpisodes(scope, allEpisodes ?? [], taskIndex),
+    [scope, allEpisodes, taskIndex],
+  );
+
   const runSam3Annotation = async () => {
     const prompts = promptText
       .split(",")
       .map((item) => item.trim())
       .filter(Boolean);
-    if (!prompts.length || !cameraKey) return;
+    const cameras = [...runCameras];
+    if (!prompts.length || !cameras.length || !scopeEpisodes.length) return;
     setBusy(true);
     setMessage(null);
+    setErrorDetail(null);
+    setItemErrors([]);
+    setJobProgress(null);
     try {
       const result = await runSam3(stableIdent, {
-        episode_indices: [episodeId],
-        camera_keys: [cameraKey],
+        episode_indices: scopeEpisodes,
+        camera_keys: cameras,
         prompts,
         start_frame: 0,
         max_frames: null,
@@ -154,27 +238,42 @@ export default function ObjectAnnotationPanel({
         provider: "sam3",
       });
       if (!result.job_id) throw new Error("SAM3 did not return a job ID");
+      setJobId(result.job_id);
       setMessage(
         language === "zh"
           ? "SAM3 作业已启动，正在准备模型和标注…"
           : "SAM3 job started; preparing the model and annotations…",
       );
-      for (let attempt = 0; attempt < 180; attempt += 1) {
+      // A batch over many episodes/cameras needs more than the ~3 minutes a
+      // single-item run gets — scale the timeout with the batch size.
+      const maxAttempts = Math.max(
+        180,
+        scopeEpisodes.length * cameras.length * 12,
+      );
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         const job = await fetchSam3Job(result.job_id, stableIdent);
         await refreshStatus();
+        setJobProgress(job.progress ?? null);
         if (job.status === "succeeded") {
+          setItemErrors(job.item_errors ?? []);
           setMessage(
-            language === "zh"
-              ? "SAM3 建议已保存，请开始审核"
-              : "SAM3 suggestions saved; review them now",
+            job.item_errors?.length
+              ? language === "zh"
+                ? `SAM3 建议已保存（${job.item_errors.length} 个片段/相机组合失败，见下方详情）`
+                : `SAM3 suggestions saved (${job.item_errors.length} episode/camera pair(s) failed — see details below)`
+              : language === "zh"
+                ? "SAM3 建议已保存，请开始审核"
+                : "SAM3 suggestions saved; review them now",
           );
           break;
         }
         if (job.status === "failed" || job.status === "cancelled") {
+          if (job.error_detail) setErrorDetail(job.error_detail);
+          setItemErrors(job.item_errors ?? []);
           throw new Error(String(job.error || "SAM3 job " + job.status));
         }
-        if (attempt === 179) throw new Error("SAM3 job timed out");
+        if (attempt === maxAttempts - 1) throw new Error("SAM3 job timed out");
       }
       await refresh();
       window.dispatchEvent(new Event("levi:sam3-updated"));
@@ -182,8 +281,57 @@ export default function ObjectAnnotationPanel({
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
+      setJobId(null);
       void refreshStatus();
     }
+  };
+
+  const cancelRun = async () => {
+    if (!jobId) return;
+    try {
+      await cancelSam3Job(jobId, stableIdent);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const applyPreset = (name: string) => {
+    const preset = presets.find((item) => item.name === name);
+    if (preset) setPromptText(preset.prompts.join(", "));
+  };
+
+  const saveCurrentAsPreset = async () => {
+    const name = presetNameDraft.trim();
+    const prompts = promptText
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (!name || !prompts.length) return;
+    try {
+      const updated = await saveSam3PromptPreset({ name, prompts });
+      setPresets(updated);
+      setPresetNameDraft("");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const deletePreset = async (name: string) => {
+    try {
+      setPresets(await deleteSam3PromptPreset(name));
+      setSelectedPresetName("");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const toggleRunCamera = (key: string) => {
+    setRunCameras((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
 
   const edit = async (
@@ -351,16 +499,196 @@ export default function ObjectAnnotationPanel({
             disabled={busy}
           />
         </label>
-        <button
-          type="button"
-          className="object-annotation-run sam3"
-          onClick={() => void runSam3Annotation()}
-          disabled={busy || !cameraKey || !promptText.trim() || !workerReady}
-          title="Uses the configured CUDA worker and 1038lab/sam3 checkpoint"
-        >
-          {busy ? <T>Working…</T> : <T>Run SAM3 annotation</T>}
-        </button>
+        <div className="object-annotation-presets">
+          <select
+            value={selectedPresetName}
+            onChange={(event) => {
+              setSelectedPresetName(event.target.value);
+              if (event.target.value) applyPreset(event.target.value);
+            }}
+            disabled={busy || !presets.length}
+          >
+            <option value="">
+              {language === "zh" ? "加载 prompt 预设…" : "Load prompt preset…"}
+            </option>
+            {presets.map((preset) => (
+              <option key={preset.name} value={preset.name}>
+                {preset.name}
+              </option>
+            ))}
+          </select>
+          {selectedPresetName && (
+            <button
+              type="button"
+              onClick={() => void deletePreset(selectedPresetName)}
+              disabled={busy}
+              title="Delete this preset"
+            >
+              ×
+            </button>
+          )}
+          <input
+            value={presetNameDraft}
+            onChange={(event) => setPresetNameDraft(event.target.value)}
+            placeholder={language === "zh" ? "预设名称" : "preset name"}
+            disabled={busy}
+          />
+          <button
+            type="button"
+            onClick={() => void saveCurrentAsPreset()}
+            disabled={busy || !presetNameDraft.trim() || !promptText.trim()}
+          >
+            <T>Save preset</T>
+          </button>
+        </div>
+        {busy && jobId ? (
+          <button
+            type="button"
+            className="object-annotation-run"
+            onClick={() => void cancelRun()}
+          >
+            <T>Cancel</T>
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="object-annotation-run sam3"
+            onClick={() => void runSam3Annotation()}
+            disabled={
+              busy ||
+              !runCameras.size ||
+              !scopeEpisodes.length ||
+              !promptText.trim() ||
+              !workerReady
+            }
+            title="Uses the configured CUDA worker and 1038lab/sam3 checkpoint"
+          >
+            <T>Run SAM3 annotation</T>
+          </button>
+        )}
       </div>
+
+      <div className="object-annotation-batch">
+        <div className="object-annotation-batch-row">
+          <label>
+            <span>
+              <T>Annotation scope</T>
+            </span>
+            <select
+              value={scope.kind}
+              onChange={(event) => {
+                const kind = event.target.value as AnnotationScope["kind"];
+                if (kind === "all") setScope({ kind: "all" });
+                else if (kind === "task")
+                  setScope({ kind: "task", task: taskIndex?.tasks[0] ?? "" });
+                else
+                  setScope({ kind: "range", from: episodeId, to: episodeId });
+              }}
+              disabled={busy}
+            >
+              <option value="range">
+                {language === "zh" ? "片段范围" : "Episode range"}
+              </option>
+              {!!taskIndex?.tasks.length && (
+                <option value="task">
+                  {language === "zh" ? "按当前任务" : "By task"}
+                </option>
+              )}
+              <option value="all">
+                {language === "zh" ? "全部片段" : "All episodes"}
+              </option>
+            </select>
+          </label>
+          {scope.kind === "range" && (
+            <div className="object-annotation-range">
+              <input
+                type="number"
+                min={0}
+                value={scope.from}
+                onChange={(event) =>
+                  setScope({
+                    kind: "range",
+                    from: Number(event.target.value),
+                    to: scope.to,
+                  })
+                }
+                disabled={busy}
+              />
+              <span>–</span>
+              <input
+                type="number"
+                min={0}
+                value={scope.to}
+                onChange={(event) =>
+                  setScope({
+                    kind: "range",
+                    from: scope.from,
+                    to: Number(event.target.value),
+                  })
+                }
+                disabled={busy}
+              />
+            </div>
+          )}
+          {scope.kind === "task" && (
+            <select
+              value={scope.task}
+              onChange={(event) =>
+                setScope({ kind: "task", task: event.target.value })
+              }
+              disabled={busy}
+            >
+              {(taskIndex?.tasks ?? []).map((task) => (
+                <option key={task} value={task}>
+                  {task}
+                </option>
+              ))}
+            </select>
+          )}
+          <span className="object-annotation-scope-count">
+            {scopeEpisodes.length} <T>episode(s)</T>
+          </span>
+        </div>
+        {cameraKeys.length > 1 && (
+          <div className="object-annotation-camera-checks">
+            <span>
+              <T>Run on cameras</T>
+            </span>
+            {cameraKeys.map((key) => (
+              <label key={key} className="object-annotation-checkbox">
+                <input
+                  type="checkbox"
+                  checked={runCameras.has(key)}
+                  onChange={() => toggleRunCamera(key)}
+                  disabled={busy}
+                />
+                {key}
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {busy && jobProgress && jobProgress.total > 1 && (
+        <div className="object-annotation-progress">
+          <div className="object-annotation-progress-label">
+            <span>
+              <T>Annotating batch</T>
+            </span>
+            <span>
+              {jobProgress.done}/{jobProgress.total}
+              {jobProgress.current_episode != null &&
+                ` · episode ${jobProgress.current_episode}`}
+              {jobProgress.current_camera && ` · ${jobProgress.current_camera}`}
+            </span>
+          </div>
+          <progress
+            max={jobProgress.total}
+            value={jobProgress.done}
+            aria-label="SAM3 batch annotation progress"
+          />
+        </div>
+      )}
 
       <div className="object-annotation-runtime">
         <span className={capabilities?.enabled ? "ready" : "muted"}>
@@ -379,6 +707,30 @@ export default function ObjectAnnotationPanel({
       </div>
 
       {message && <p className="object-annotation-message">{message}</p>}
+      {errorDetail && (
+        <details className="object-annotation-error-detail">
+          <summary>
+            <T>Show worker log</T>
+          </summary>
+          <pre>{errorDetail}</pre>
+        </details>
+      )}
+      {itemErrors.length > 0 && (
+        <details className="object-annotation-error-detail">
+          <summary>
+            {itemErrors.length}{" "}
+            <T>episode/camera pair(s) failed in this batch</T>
+          </summary>
+          <pre>
+            {itemErrors
+              .map(
+                (item) =>
+                  `episode ${item.episode_index} · ${item.camera_key}: ${item.error}`,
+              )
+              .join("\n")}
+          </pre>
+        </details>
+      )}
       {!tracks.length ? (
         <p className="object-annotation-empty">
           <T>No object suggestions for this camera yet.</T>

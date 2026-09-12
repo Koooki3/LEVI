@@ -96,6 +96,22 @@ export interface Sam3Capabilities {
   message: string;
 }
 
+/** Episode/camera-pair progress through a running batch annotation job. */
+export interface Sam3JobProgress {
+  done: number;
+  total: number;
+  current_episode?: number | null;
+  current_camera?: string | null;
+  updated_at?: number;
+}
+
+/** One (episode, camera) pair that failed inside an otherwise-successful batch. */
+export interface Sam3ItemError {
+  episode_index: number;
+  camera_key: string;
+  error: string;
+}
+
 export interface Sam3JobStatus {
   job_id?: string;
   status?: string;
@@ -107,7 +123,17 @@ export interface Sam3JobStatus {
   revision_id?: string;
   annotation_count?: number;
   error?: string;
-  progress?: Sam3DownloadStatus;
+  // Tail of the worker's stdout/stderr log when it exited without writing a
+  // result (e.g. a Python traceback for an unhandled crash such as CUDA OOM).
+  error_detail?: string;
+  progress?: Sam3JobProgress;
+  item_errors?: Sam3ItemError[];
+}
+
+/** A named, reusable set of SAM3 text prompts, shared across datasets. */
+export interface Sam3PromptPreset {
+  name: string;
+  prompts: string[];
 }
 
 export interface Sam3Revision {
