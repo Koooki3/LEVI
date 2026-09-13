@@ -4,11 +4,13 @@
 
 [![Checks](https://github.com/Koooki3/LEVI/actions/workflows/test.yml/badge.svg)](https://github.com/Koooki3/LEVI/actions/workflows/test.yml) [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) [![Version](https://img.shields.io/badge/LEVI-0.3.0-9bd654.svg)](CHANGELOG.md)
 
-[中文](README.md) · [Conversion guide](docs/CONVERSION.md) · [Features](docs/FEATURES.md) · [API](docs/API.md) · [Validation](docs/VALIDATION.md) · [Attribution](docs/UPSTREAM.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [SAM3 object annotation](docs/SAM3.md)
+[简体中文](README.zh-CN.md) · [Conversion guide](docs/CONVERSION.md) · [Features](docs/FEATURES.md) · [API](docs/API.md) · [Validation](docs/VALIDATION.md) · [Attribution](docs/UPSTREAM.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [SAM3 object annotation](docs/SAM3.md)
 
-LEVI is an independent robotics dataset browser, annotation editor, converter and review workbench derived from [LeRobot Dataset Visualizer](https://github.com/huggingface/lerobot-dataset-visualizer). Chinese is the default; English is available through the language switch. **The complete capture conversion pipeline is bundled** and requires no sibling repository or training environment.
+LEVI is an independent robotics dataset browser, annotation editor, converter and review workbench derived from [LeRobot Dataset Visualizer](https://github.com/huggingface/lerobot-dataset-visualizer). English is the default; Chinese is available through the language switch. **The complete capture conversion pipeline is bundled** and requires no sibling repository or training environment.
 
-![LEVI interface](docs/assets/home-zh.png)
+The interface is designed for both standalone browsers and Hugging Face Space embeds. Language preference is kept per browser when storage is available, and the annotation workbench handles Ctrl/Cmd+S, Ctrl/Cmd+Z and playback keys without opening the browser's native Save Page dialog.
+
+![LEVI interface](docs/assets/home-en.png)
 
 Demo footage: the two `samanthalhy` datasets linked below, whose cards declare Apache-2.0. LEVI uses an original graphite, parchment and lime interface.
 

@@ -1,4 +1,4 @@
-# 转换流程审查 / Conversion audit
+# Conversion audit / 转换流程审查
 
 The former external capture-script adapter has been replaced by the self-contained `levi/conversion/` package. The original capture workflow was inspected before this rewrite; private paths, task correction tables and training-environment assumptions were not copied into the distribution.
 

@@ -1,6 +1,6 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
-import { T } from "@/components/levi-locale";
+import { T, useLocale } from "@/components/levi-locale";
 
 /**
  * Canvas overlay rendered on top of a single `<video>` element. Three roles:
@@ -843,6 +843,7 @@ const QuickLabelPopup: React.FC<{
   onSubmit,
   onCancel,
 }) => {
+  const { t } = useLocale();
   const inputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     inputRef.current?.focus();
@@ -880,9 +881,9 @@ const QuickLabelPopup: React.FC<{
           <input
             ref={inputRef}
             type="text"
-            placeholder={
-              kind === "bbox" ? "label (e.g. carrot)" : "label (e.g. handle)"
-            }
+            placeholder={t(
+              kind === "bbox" ? "label (e.g. carrot)" : "label (e.g. handle)",
+            )}
             value={label}
             onChange={(e) => onLabelChange(e.target.value)}
             onKeyDown={(e) => {

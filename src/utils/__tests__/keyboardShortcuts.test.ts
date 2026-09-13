@@ -21,9 +21,18 @@ describe("isSaveShortcut", () => {
     ).toBe(true);
   });
 
-  test("does not treat Alt+S or an unrelated key as Save", () => {
+  test("does not treat Alt+S, IME composition or an unrelated key as Save", () => {
     expect(
       isSaveShortcut({ ctrlKey: true, metaKey: false, altKey: true, key: "s" }),
+    ).toBe(false);
+    expect(
+      isSaveShortcut({
+        ctrlKey: true,
+        metaKey: false,
+        altKey: false,
+        isComposing: true,
+        key: "s",
+      }),
     ).toBe(false);
     expect(
       isSaveShortcut({

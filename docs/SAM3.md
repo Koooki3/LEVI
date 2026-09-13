@@ -1,9 +1,9 @@
-# SAM3 对象标注 / SAM3 object annotation
+# SAM3 object annotation / SAM3 对象标注
 
 LEVI 将 SAM3 作为全局对象级标注能力。核心工作台保持 CPU 安全：原生 LeRobot
 数据只读，模型结果写入独立的 annotation sidecar。演示数据集、Hub 数据集和登记的
 本地数据集共用同一套流程；sidecar、模型缓存和作业状态都由当前 LEVI_WORKSPACE
-隔离。默认中文，可通过界面右上角切换英文。
+隔离。The English UI is the default; use the language switch in the upper-right corner to switch to Chinese.
 
 ## 支持范围
 

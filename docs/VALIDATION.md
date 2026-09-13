@@ -1,4 +1,4 @@
-# 验证记录 / Validation record
+# Validation record / 验证记录
 
 验证日期：2026-09-13。环境：Linux x86_64、Python 3.11.16（独立 uv `.venv`）、Bun 1.3.10、Next.js 15.5.25、Playwright Chromium。参考版本见 [UPSTREAM.md](UPSTREAM.md)。
 
@@ -13,14 +13,14 @@ This release focused on dataset-version recognition, task counting/filtering, me
 | Frontend type checks | Passed |
 | ESLint | 0 errors; 0 warnings |
 | Prettier | Passed |
-| Bun unit tests | **172 passed, 0 failed** across 8 files; 1,797 expect calls |
+| Bun unit tests | **176 passed, 0 failed** across 10 files; 1,812 expect calls |
 | Python / FastAPI tests | **55 passed**; 2 dependency deprecation warnings |
 | `uv run levi check` | Passed |
 | `uv lock --check` | Passed |
 | Production Next.js build | Passed |
 | `git diff --check` | Passed |
 
-The new tests cover canonical version aliases/rejection, string and shuffled task indices, multi-task metadata, v2/v3 task-index mappings, invalid FPS, exact episode-length statistics, finite chart values, language instruction extraction, and scoped Action Insights behavior.
+The new tests cover canonical version aliases/rejection, string and shuffled task indices, multi-task metadata, v2/v3 task-index mappings, invalid FPS, exact episode-length statistics, finite chart values, language instruction extraction, scoped Action Insights behavior, bilingual catalog parity, storage-safe browser fallbacks, and platform shortcut handling.
 
 ## 0.2.0 独立发行检查 / Standalone release check
 
@@ -55,7 +55,7 @@ Python tests cover dataset registration, byte-range video reads, path/symlink bo
 
 | Scenario | Observed result |
 | --- | --- |
-| Chinese landing and live English switch | Both rendered; English choice survived reload |
+| English landing and live Chinese switch (standalone browser) | Both rendered; English choice survived reload |
 | Mobile, 390 × 844 | No horizontal page overflow |
 | Frontend 7860 → backend 7871 | Runtime proxy worked with a different backend port after build |
 | Default evaluation collection | 10 episodes, 32,033 frames, 30 FPS; three 640 × 480 videos ready |
@@ -69,7 +69,8 @@ Python tests cover dataset registration, byte-range video reads, path/symlink bo
 | Bundled conversion worker | Full generated CSV/H.264 pipeline and API job succeeded; output automatically registered |
 | Converted dataset | Two 640 × 480 videos loaded; native video diagnosis had no failures |
 | v3.1 synthetic shared-file dataset | Episode 1 video began around 1.5 s; metadata across two chunks; statistics and annotations loaded |
-| Browser page errors | **0** in both final smoke checks |
+| Standalone Chromium / external-browser interaction | `window.parent === window`; Ctrl/Cmd+S/Z/Y were canceled before native browser defaults; the annotation popup opened centered and dragged successfully |
+| Browser page errors | **0** in the final standalone smoke check |
 
 The reference dataset's native diagnostic run inspected all 10 episodes: **8 pass / 15 warn / 0 fail / 3 skip**. Skipped results were video decode checks. These are individual result counts and intentionally do not replicate the external Doctor's counts. See [FEATURES.md](FEATURES.md) for exact check scope.
 
@@ -96,6 +97,8 @@ The browser script reads public datasets and writes screenshots/results to `outp
 - The SAM3 worker, model checkpoint, CUDA runtime and real GPU inference were intentionally not exercised; only its model-free CPU configuration/status checks and adapter metadata tests ran. Deployment instructions for a CUDA host are documented separately and do not claim local GPU validation.
 
 ## 界面 / Screenshots
+
+![LEVI English home](assets/home-en.png)
 
 ![LEVI 中文首页](assets/home-zh.png)
 

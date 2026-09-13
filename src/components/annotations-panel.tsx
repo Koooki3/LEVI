@@ -468,6 +468,7 @@ function useAnnotationDraftShortcuts({
 }): void {
   React.useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       if (isSaveShortcut(e)) {
         if (!hasDraft) return;
         e.preventDefault();
@@ -841,7 +842,9 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
               <T>
                 {selectedAtom == null ? (
                   <div className="editor-empty">
-                    <span className="section-kicker">Inspector</span>
+                    <span className="section-kicker">
+                      <T>Inspector</T>
+                    </span>
                     <p>
                       Select an annotation from the list or timeline, or draw a
                       new bbox/keypoint on the video.

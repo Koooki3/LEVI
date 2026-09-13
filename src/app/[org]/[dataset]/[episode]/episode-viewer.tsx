@@ -42,6 +42,11 @@ import {
   type DatasetTaskIndex,
 } from "./fetch-data";
 import { getDatasetVersionAndInfo, isDatasetV3 } from "@/utils/versionUtils";
+import {
+  readBrowserStorage,
+  removeBrowserStorage,
+  writeBrowserStorage,
+} from "@/utils/browserStorage";
 import type { DatasetMetadata } from "@/utils/parquetUtils";
 import {
   fetchAnnotationSummary,
@@ -305,7 +310,7 @@ function EpisodeViewerInner({
   // Safe because EpisodeViewerInner only mounts client-side (behind a loading gate).
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window !== "undefined") {
-      const stored = sessionStorage.getItem("activeTab");
+      const stored = readBrowserStorage("session", "activeTab");
       if (
         stored &&
         [
@@ -336,7 +341,7 @@ function EpisodeViewerInner({
     "language" | "vision"
   >(() => {
     if (typeof window !== "undefined") {
-      const stored = sessionStorage.getItem("annotationsSubTab");
+      const stored = readBrowserStorage("session", "annotationsSubTab");
       if (stored === "language" || stored === "vision") return stored;
     }
     return "language";
@@ -361,12 +366,12 @@ function EpisodeViewerInner({
   const framesLoadedRef = useRef(false);
   const [framesFlaggedOnly, setFramesFlaggedOnly] = useState(() =>
     typeof window !== "undefined"
-      ? sessionStorage.getItem("framesFlaggedOnly") === "true"
+      ? readBrowserStorage("session", "framesFlaggedOnly") === "true"
       : false,
   );
   const [sidebarFlaggedOnly, setSidebarFlaggedOnly] = useState(() =>
     typeof window !== "undefined"
-      ? sessionStorage.getItem("sidebarFlaggedOnly") === "true"
+      ? readBrowserStorage("session", "sidebarFlaggedOnly") === "true"
       : false,
   );
   const [crossEpData, setCrossEpData] =
@@ -395,7 +400,7 @@ function EpisodeViewerInner({
   // option — in another, so a filter shouldn't leak across datasets.
   const [taskFilter, setTaskFilter] = useState<string | null>(() => {
     if (typeof window !== "undefined") {
-      return sessionStorage.getItem(`taskFilter:${org}/${dataset}`);
+      return readBrowserStorage("session", `taskFilter:${org}/${dataset}`);
     }
     return null;
   });
@@ -489,13 +494,21 @@ function EpisodeViewerInner({
   // segment on every param change) — without this, plain useState for any
   // of these would silently reset on every episode switch.
   useEffect(() => {
-    sessionStorage.setItem("activeTab", activeTab);
-    sessionStorage.setItem("sidebarFlaggedOnly", String(sidebarFlaggedOnly));
-    sessionStorage.setItem("framesFlaggedOnly", String(framesFlaggedOnly));
-    sessionStorage.setItem("annotationsSubTab", annotationsSubTab);
+    writeBrowserStorage("session", "activeTab", activeTab);
+    writeBrowserStorage(
+      "session",
+      "sidebarFlaggedOnly",
+      String(sidebarFlaggedOnly),
+    );
+    writeBrowserStorage(
+      "session",
+      "framesFlaggedOnly",
+      String(framesFlaggedOnly),
+    );
+    writeBrowserStorage("session", "annotationsSubTab", annotationsSubTab);
     const taskFilterKey = `taskFilter:${org}/${dataset}`;
-    if (taskFilter) sessionStorage.setItem(taskFilterKey, taskFilter);
-    else sessionStorage.removeItem(taskFilterKey);
+    if (taskFilter) writeBrowserStorage("session", taskFilterKey, taskFilter);
+    else removeBrowserStorage("session", taskFilterKey);
   }, [
     activeTab,
     sidebarFlaggedOnly,

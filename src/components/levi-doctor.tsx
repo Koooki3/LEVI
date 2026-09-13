@@ -61,7 +61,9 @@ export default function LeviDoctor({ repoId }: { repoId: string }) {
   }
   return (
     <section className="levi-diagnostic">
-      <span className="levi-eyebrow">LEVI / DATASET DOCTOR</span>
+      <span className="levi-eyebrow">
+        <T>LEVI / DATASET DOCTOR</T>
+      </span>
       <h2>
         <T>Dataset quality diagnostics</T>
       </h2>

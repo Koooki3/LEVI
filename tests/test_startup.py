@@ -17,7 +17,8 @@ def test_backend_root_guides_to_ui_without_host_header_redirect(client, monkeypa
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert 'href="http://127.0.0.1:7860"' in response.text
-    assert "这里是 API 服务" in response.text
+    assert "This is the LEVI API service" in response.text
+    assert "这是 LEVI 的内部 API 服务" in response.text
     assert "untrusted.example" not in response.text
     assert client.head("/").status_code == 200
     icon = client.get("/favicon.ico")

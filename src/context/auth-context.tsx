@@ -15,6 +15,11 @@ import {
   type OAuthResult,
 } from "@huggingface/hub";
 import { AUTH_STORAGE_KEY, clearLegacyAuthStorage } from "@/utils/auth";
+import {
+  readBrowserStorage,
+  removeBrowserStorage,
+  writeBrowserStorage,
+} from "@/utils/browserStorage";
 
 interface OAuthAppConfig {
   clientId: string;
@@ -100,12 +105,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (cancelled) return;
       setConfig(cfg);
 
-      const stored = window.localStorage.getItem(AUTH_STORAGE_KEY);
+      const stored = readBrowserStorage("local", AUTH_STORAGE_KEY);
       if (stored) {
         try {
           const parsed = JSON.parse(stored) as OAuthResult;
           if (isExpired(parsed)) {
-            window.localStorage.removeItem(AUTH_STORAGE_KEY);
+            removeBrowserStorage("local", AUTH_STORAGE_KEY);
             void clearSessionCookie().finally(notifyAuthChanged);
           } else {
             setOauth(parsed);
@@ -116,14 +121,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               .catch((err) => {
                 if (cancelled) return;
                 console.error("Stored Hugging Face session is invalid", err);
-                window.localStorage.removeItem(AUTH_STORAGE_KEY);
+                removeBrowserStorage("local", AUTH_STORAGE_KEY);
                 setOauth(null);
                 notifyAuthChanged();
               });
             return;
           }
         } catch {
-          window.localStorage.removeItem(AUTH_STORAGE_KEY);
+          removeBrowserStorage("local", AUTH_STORAGE_KEY);
           void clearSessionCookie().finally(notifyAuthChanged);
         }
       }
@@ -134,7 +139,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (cancelled || !result) return;
           return setSessionCookie(result.accessToken).then(() => {
             if (cancelled) return;
-            window.localStorage.setItem(
+            writeBrowserStorage(
+              "local",
               AUTH_STORAGE_KEY,
               JSON.stringify(result),
             );
@@ -179,13 +185,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } as OAuthResult;
     await setSessionCookie(accessToken);
     clearLegacyAuthStorage();
-    window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(result));
+    writeBrowserStorage("local", AUTH_STORAGE_KEY, JSON.stringify(result));
     setOauth(result);
     notifyAuthChanged();
   }, []);
 
   const signOut = useCallback(() => {
-    window.localStorage.removeItem(AUTH_STORAGE_KEY);
+    removeBrowserStorage("local", AUTH_STORAGE_KEY);
     clearLegacyAuthStorage();
     setOauth(null);
     void clearSessionCookie().finally(notifyAuthChanged);

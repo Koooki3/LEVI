@@ -1,4 +1,4 @@
-# 发布指南 / Releasing
+# Releasing / 发布指南
 
 Repository: https://github.com/Koooki3/LEVI
 
@@ -6,12 +6,12 @@ Repository: https://github.com/Koooki3/LEVI
 
 About description:
 
-> A bilingual LeRobot dataset workbench for visualization, annotation, conversion and quality review. Chinese by default, with a self-contained uv-managed pipeline.
+> A bilingual LeRobot dataset workbench for visualization, annotation, conversion and quality review. English by default, with Chinese available from the language switch and a self-contained uv-managed pipeline.
 
 Topics: `lerobot`, `robotics`, `robot-learning`, `dataset-visualization`, `data-annotation`, `dataset-conversion`, `data-quality`, `imitation-learning`, `huggingface`, `nextjs`, `fastapi`, `uv`.
 
-The README is the project landing page. No hosted demo or deployment URL is claimed.
-README 即项目入口；没有将本地服务地址用作公开演示网址。
+README.md is the English project landing page; `README.zh-CN.md` is the Chinese companion and `README.en.md` remains an English mirror. No hosted demo or deployment URL is claimed.
+README.md 是英文项目入口；README.zh-CN.md 提供中文版本；没有将本地服务地址用作公开演示网址。
 
 ## Release checklist
 

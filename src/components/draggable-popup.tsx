@@ -3,6 +3,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { isSaveShortcut } from "../utils/keyboardShortcuts";
+import { useLocale } from "./levi-locale";
 
 interface DraggablePopupProps {
   children: React.ReactNode;
@@ -34,6 +35,7 @@ export const DraggablePopup: React.FC<DraggablePopupProps> = ({
   className = "quick-popup",
   ariaLabel = "Annotation input",
 }) => {
+  const { t } = useLocale();
   const popupRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{
     pointerId: number;
@@ -152,7 +154,7 @@ export const DraggablePopup: React.FC<DraggablePopupProps> = ({
           : undefined
       }
       role="dialog"
-      aria-label={ariaLabel}
+      aria-label={t(ariaLabel)}
       aria-keyshortcuts="Control+S Meta+S Escape"
       onPointerDown={(event) => event.stopPropagation()}
       onKeyDownCapture={onKeyDownCapture}
@@ -160,7 +162,7 @@ export const DraggablePopup: React.FC<DraggablePopupProps> = ({
       <div
         className="quick-popup-head quick-popup-drag-handle"
         onPointerDown={beginDrag}
-        title="Drag to move"
+        title={t("Drag to move")}
       >
         {header}
         <span className="quick-popup-grip" aria-hidden="true">

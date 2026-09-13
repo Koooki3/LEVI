@@ -1,6 +1,6 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
-import { T } from "@/components/levi-locale";
+import { T, useLocale } from "@/components/levi-locale";
 
 /**
  * Multi-track timeline for v3.1 language atoms — like a video-editing
@@ -161,6 +161,7 @@ interface PendingCreate {
 
 export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
   const { atoms, addAtom, updateAtom, snap, selectAtom } = useAnnotations();
+  const { t } = useLocale();
   const { currentTime, seek, setIsPlaying } = useTime();
   const trackBandRef = useRef<HTMLDivElement | null>(null);
 
@@ -999,7 +1000,7 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
             >
               <input
                 type="text"
-                placeholder="label (e.g. grasp the sponge)"
+                placeholder={t("label (e.g. grasp the sponge)")}
                 autoFocus
                 value={createLabel}
                 onChange={(e) => setCreateLabel(e.target.value)}

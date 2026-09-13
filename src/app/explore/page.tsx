@@ -51,7 +51,14 @@ export default async function ExplorePage({
     const endIdx = startIdx + perPage;
     datasets = allDatasets.slice(startIdx, endIdx);
   } catch {
-    return <div className="p-8 text-red-600">Failed to load datasets.</div>;
+    return (
+      <ExploreGrid
+        datasets={[]}
+        currentPage={1}
+        totalPages={1}
+        error="Failed to load datasets."
+      />
+    );
   }
 
   // Fetch episode 0 data for each dataset

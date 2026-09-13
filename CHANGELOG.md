@@ -11,6 +11,9 @@
 
 ## Unreleased
 
+- English is now the default UI and repository landing language; the 602-key English/Chinese catalogs stay in parity, and the welcome page, CLI and documentation expose a professional bilingual path.
+- Hardened standalone-browser behavior: parent-frame messaging is best-effort, browser storage failures fall back to in-memory state, and Ctrl/Cmd+S, undo/redo and playback shortcuts remain inside the workbench.
+- Annotation label popups now open at the viewport center, stay within the viewport while dragging, and expose localized dialog names and drag affordances.
 - Added global SAM3 object annotation for demos, Hub and registered local datasets. The 1038lab/sam3 checkpoint now has an authenticated browser/CLI download action with resumable workspace progress, retry handling and an explicit ready gate before real jobs; browser/CLI account scopes prevent stale private-data reuse, and native LeRobot files remain read-only.
 - Action Insights now scopes to the full dataset, an episode-index range or a single task, with a sample cap that can be set to "All" for full coverage; the panel reports how many of the in-scope episodes were analysed.
 - Added a task filter to the episode sidebar for multi-task datasets, backed by a shared dataset-wide task ↔ episode index.

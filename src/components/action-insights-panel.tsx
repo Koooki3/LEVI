@@ -1,6 +1,6 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
-import { T } from "@/components/levi-locale";
+import { T, useLocale } from "@/components/levi-locale";
 
 import React, { useMemo, useState, useEffect } from "react";
 import {
@@ -528,6 +528,7 @@ function ActionVelocitySection({
   numEpisodes?: number;
   jerkyEpisodes?: JerkyEpisode[];
 }) {
+  const { t } = useLocale();
   const actionKeys = useMemo(
     () => (data.length > 0 ? getActionKeys(data[0]) : []),
     [data],
@@ -815,7 +816,7 @@ function ActionVelocitySection({
                     viewBox={`0 0 ${s.bins.length} ${barH}`}
                     preserveAspectRatio="none"
                     className="h-7 rounded"
-                    aria-label={`Δa distribution for ${s.name}`}
+                    aria-label={t("Δa distribution for") + " " + s.name}
                   >
                     {[...s.bins].map((count, bi) => {
                       const h =

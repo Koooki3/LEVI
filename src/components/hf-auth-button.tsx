@@ -36,6 +36,7 @@ interface HfAuthButtonProps {
 
 export default function HfAuthButton({ variant = "badge" }: HfAuthButtonProps) {
   const { oauth, isAuthAvailable, signIn, signOut } = useAuth();
+  const { t } = useLocale();
 
   // Stable slot — auth state resolves async on mount (config fetch, then
   // localStorage rehydrate), so the rendered control changes from
@@ -63,7 +64,7 @@ export default function HfAuthButton({ variant = "badge" }: HfAuthButtonProps) {
     return (
       <button
         onClick={signIn}
-        title="Sign in to access your private datasets"
+        title={t("Sign in to access your private datasets")}
         className="cursor-pointer inline-flex items-center h-7 gap-1.5 text-sm tracking-wide text-cyan-300/85 hover:text-cyan-200 transition-colors rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400/60"
       >
         <span aria-hidden>🤗</span>
@@ -81,7 +82,7 @@ export default function HfAuthButton({ variant = "badge" }: HfAuthButtonProps) {
     return (
       <button
         onClick={signIn}
-        title="Sign in to access your private datasets"
+        title={t("Sign in to access your private datasets")}
         className="cursor-pointer inline-flex items-center h-10 gap-1.5 px-5 text-[11px] font-medium tracking-wide uppercase text-slate-400 hover:text-cyan-300 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400/60"
       >
         <span aria-hidden>🤗</span>
@@ -95,14 +96,16 @@ export default function HfAuthButton({ variant = "badge" }: HfAuthButtonProps) {
   return (
     <button
       onClick={signIn}
-      title="Sign in with Hugging Face to access your private datasets"
-      aria-label="Sign in with Hugging Face to access your private datasets"
+      title={t("Sign in with Hugging Face to access your private datasets")}
+      aria-label={t(
+        "Sign in with Hugging Face to access your private datasets",
+      )}
       className="cursor-pointer inline-flex items-center h-8 rounded-md transition-all duration-150 hover:opacity-90 motion-safe:hover:-translate-y-px focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400/60"
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={SIGNIN_BADGE_URL}
-        alt="Sign in with Hugging Face"
+        alt={t("Sign in with Hugging Face")}
         height={32}
         className="h-8 w-auto"
       />
@@ -123,6 +126,7 @@ function SignedInMenu({
 }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const { t } = useLocale();
 
   useEffect(() => {
     if (!open) return;
@@ -152,7 +156,7 @@ function SignedInMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         className={`cursor-pointer inline-flex items-center ${SLOT_HEIGHT[variant]} gap-2 panel-raised bg-[var(--surface-0)]/85 backdrop-blur px-2 text-xs text-slate-300 hover:bg-white/[0.04] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400/60`}
-        title={`Signed in as ${name}`}
+        title={t("Signed in as") + " " + name}
       >
         {avatar && (
           // eslint-disable-next-line @next/next/no-img-element
@@ -252,13 +256,17 @@ function TokenLogin() {
               className="levi-input w-full"
               type="password"
               autoComplete="off"
-              aria-label="Hugging Face token"
+              aria-label={t("Hugging Face token")}
               placeholder="hf_…"
               required
               value={token}
               onChange={(e) => setToken(e.target.value)}
             />
-            {error && <p className="levi-error mt-3">{error}</p>}
+            {error && (
+              <p className="levi-error mt-3">
+                <T>{error}</T>
+              </p>
+            )}
             <div className="levi-row mt-5">
               <button className="levi-primary" disabled={busy}>
                 <T>Connect</T>

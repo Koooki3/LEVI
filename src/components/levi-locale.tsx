@@ -2,17 +2,33 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import zh from "@/i18n/zh.json";
 import en from "@/i18n/en.json";
+import {
+  readBrowserStorage,
+  writeBrowserStorage,
+} from "@/utils/browserStorage";
 
-const Locale = createContext({
-  language: "zh",
-  setLanguage: (value: string) => {
+export type AppLanguage = "en" | "zh";
+
+const DEFAULT_LANGUAGE: AppLanguage = "en";
+
+function normalizeLanguage(value: string | null | undefined): AppLanguage {
+  return value === "zh" ? "zh" : DEFAULT_LANGUAGE;
+}
+
+const Locale = createContext<{
+  language: AppLanguage;
+  setLanguage: (value: AppLanguage) => void;
+}>({
+  language: DEFAULT_LANGUAGE,
+  setLanguage: (value: AppLanguage) => {
     void value;
   },
 });
 export function LocaleProvider({ children }: { children: React.ReactNode }) {
-  const [language, setLanguage] = useState("zh");
+  const [language, setLanguage] = useState<AppLanguage>(DEFAULT_LANGUAGE);
   useEffect(() => {
-    setLanguage(localStorage.getItem("levi-language") || "zh");
+    const stored = readBrowserStorage("local", "levi-language");
+    if (stored) setLanguage(normalizeLanguage(stored));
   }, []);
   useEffect(() => {
     document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
@@ -22,8 +38,9 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
       value={{
         language,
         setLanguage: (value) => {
-          localStorage.setItem("levi-language", value);
-          setLanguage(value);
+          const next = normalizeLanguage(value);
+          writeBrowserStorage("local", "levi-language", next);
+          setLanguage(next);
         },
       }}
     >
@@ -34,11 +51,14 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
 export function useLocale() {
   const { language, setLanguage } = useContext(Locale);
   const t = (text: string) => {
-    if (language !== "zh")
-      return (en as Record<string, string>)[text.trim()] || text;
     const key = text.replace(/\s+/g, " ").trim();
-    const translated = (zh as Record<string, string>)[key];
-    if (translated) return text.replace(text.trim(), translated);
+    const catalog = language === "zh" ? zh : en;
+    const translated = (catalog as Record<string, string>)[key];
+    if (translated) {
+      const trimmed = text.trim();
+      return trimmed ? text.replace(trimmed, translated) : translated;
+    }
+    if (language !== "zh") return text;
     const patterns: [RegExp, string][] = [
       [/^Episode (\d+)$/, "片段 $1"],
       [/^ep (\d+)$/, "片段 $1"],
@@ -93,6 +113,24 @@ export function useLocale() {
         /^(.*): (\d+) values beyond 10 standard deviations$/,
         "$1：存在 $2 个超出 10 倍标准差的值",
       ],
+      [/^Show top (\d+)$/, "显示前 $1 个"],
+      [/^Show all (\d+)$/, "显示全部 $1 个"],
+      [
+        /^Speed (.*): (\d+) ep \((.*)× median\)$/,
+        "速度 $1：$2 个片段（中位数的 $3 倍）",
+      ],
+      [
+        /^(\d+) discrete \((.*)\); (\d+) inactive \((.*)\) — excluded from verdict$/,
+        "$1 个离散维度（$2）；$3 个非活动维度（$4），已从判断中排除",
+      ],
+      [
+        /^(\d+) discrete \((.*)\) — excluded from verdict$/,
+        "$1 个离散维度（$2），已从判断中排除",
+      ],
+      [
+        /^(\d+) inactive \((.*)\) — excluded from verdict$/,
+        "$1 个非活动维度（$2），已从判断中排除",
+      ],
     ];
     for (const [pattern, replacement] of patterns)
       if (pattern.test(key))
@@ -140,12 +178,17 @@ export function T({ children }: { children: React.ReactNode }) {
   return <>{translate(children)}</>;
 }
 export function LanguageSwitch() {
-  const { language, setLanguage } = useLocale();
+  const { language, setLanguage, t } = useLocale();
+  const nextLanguage: AppLanguage = language === "zh" ? "en" : "zh";
+  const switchLabel = t(
+    language === "zh" ? "Switch to English" : "Switch to Chinese",
+  );
   return (
     <button
       className="levi-language"
-      aria-label="Switch language / 切换语言"
-      onClick={() => setLanguage(language === "zh" ? "en" : "zh")}
+      aria-label={switchLabel}
+      title={switchLabel}
+      onClick={() => setLanguage(nextLanguage)}
     >
       {language === "zh" ? "EN / 中文" : "中文 / EN"}
     </button>

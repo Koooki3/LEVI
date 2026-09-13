@@ -3,11 +3,11 @@
 Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 
 LEVI is a standalone bilingual workbench derived from LeRobot Dataset Visualizer.
-Read README.md (Chinese), README.en.md and docs/CONVERSION.md before changing data workflows.
+Read README.md (English primary), README.zh-CN.md and docs/CONVERSION.md before changing data workflows.
 Python dependencies are managed by uv; use `uv run levi check`, `uv run pytest` and `uv run levi build`.
 Use only LEVI_WORKSPACE for runtime data (default checkout `.state/`). Never hardcode a developer path or require a sibling conversion repository.
 Preserve source captures: conversion and annotation export write to new output directories.
-Frontend text belongs in both locale catalogs; Chinese is the default.
+Frontend text belongs in both locale catalogs; English is the default and Chinese is available from the language switch.
 
 ## Package manager
 

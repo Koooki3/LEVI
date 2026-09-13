@@ -34,6 +34,12 @@ import {
   fetchFrameTimestamps,
   isAnnotateBackendEnabled,
 } from "../utils/annotationsClient";
+import {
+  listBrowserStorageKeys,
+  readBrowserStorage,
+  removeBrowserStorage,
+  writeBrowserStorage,
+} from "../utils/browserStorage";
 
 const STORAGE_PREFIX = "lerobot-annotations:v2:";
 
@@ -261,7 +267,8 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
       // If session is empty, fall back to initialAtoms (parquet-extracted).
       let initial: LanguageAtom[] = [];
       try {
-        const raw = sessionStorage.getItem(
+        const raw = readBrowserStorage(
+          "session",
           storageKey(identKey(newIdent), newEpisodeId),
         );
         if (raw) initial = JSON.parse(raw) as LanguageAtom[];
@@ -314,7 +321,8 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => {
     if (episodeId == null) return;
     try {
-      sessionStorage.setItem(
+      writeBrowserStorage(
+        "session",
         storageKey(identKey(ident), episodeId),
         JSON.stringify(atoms),
       );
@@ -529,7 +537,7 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
         await deleteEpisodeAtoms(episodeId, ident);
       }
       try {
-        sessionStorage.removeItem(storageKey(identKey(ident), episodeId));
+        removeBrowserStorage("session", storageKey(identKey(ident), episodeId));
       } catch {
         /* ignore */
       }
@@ -549,16 +557,15 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
     if (!isAnnotateBackendEnabled()) return;
     const prefix = `${STORAGE_PREFIX}${identKey(ident)}::`;
     const pending: Promise<unknown>[] = [];
-    for (let i = 0; i < sessionStorage.length; i++) {
-      const key = sessionStorage.key(i);
-      if (!key || !key.startsWith(prefix)) continue;
+    for (const key of listBrowserStorageKeys("session", prefix)) {
+      if (!key.startsWith(prefix)) continue;
       const epIdx = Number(key.slice(prefix.length));
       // The currently open episode is already flushed by save() itself.
       if (!Number.isInteger(epIdx) || epIdx === episodeId) continue;
       let parsed: LanguageAtom[];
       try {
         parsed = JSON.parse(
-          sessionStorage.getItem(key) || "[]",
+          readBrowserStorage("session", key) || "[]",
         ) as LanguageAtom[];
       } catch {
         continue;

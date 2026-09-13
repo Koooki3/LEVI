@@ -54,19 +54,19 @@ def api_landing():
         target = "http://127.0.0.1:7860"
     target = escape(target, quote=True)
     return HTMLResponse(f"""<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LEVI · API 服务 / API service</title><link rel="icon" href="/favicon.ico">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LEVI · API service</title><link rel="icon" href="/favicon.ico">
 <style>body{{margin:0;background:#10211c;color:#eeeadd;font:17px/1.65 system-ui,sans-serif;display:grid;min-height:100vh;place-items:center}}
 main{{max-width:680px;margin:24px;padding:36px;border:1px solid #496153;border-radius:20px}}
 a{{display:inline-block;background:#c4ec78;color:#10211c;padding:12px 20px;border-radius:10px;overflow-wrap:anywhere}}
 code{{color:#c4ec78}}small{{color:#bdc9bc}}</style></head>
 <body><main><small>LEVI / ROBOT DATA ATELIER</small>
-<h1>这里是 API 服务</h1><p>This is the API service, not the dataset workbench.</p>
-<p>请打开网页入口浏览、标注和转换数据：<br>Open the Web UI to browse, annotate and convert datasets:</p>
-<a href="{target}">打开 LEVI / Open LEVI · {target}</a>
-<p>完整启动 / Start both services: <code>uv run levi</code></p>
-<small>远程访问请将网页端口转发到前端，而非 API 端口。<br>
-For remote access, forward the Web UI port to the frontend, not the API port.</small>
+<h1>This is the LEVI API service</h1><p>这是 LEVI 的内部 API 服务，不是数据集工作台。</p>
+<p>Open the Web UI to browse, annotate and convert datasets:<br>请打开网页入口浏览、标注和转换数据：</p>
+<a href="{target}">Open LEVI / 打开 LEVI · {target}</a>
+<p>Start both services / 完整启动：<code>uv run levi</code></p>
+<small>For remote access, forward the Web UI port, not the API port.<br>
+远程访问请将网页端口转发到前端，而非 API 端口。</small>
 </main></body></html>""")
 
 

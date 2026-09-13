@@ -1,4 +1,4 @@
-# 功能对照 / Feature parity
+# Feature parity / 功能对照
 
 Baseline: `huggingface/lerobot-dataset-visualizer@dc59887796fd41f37040c0df6b10e6f6a30a1854`.
 

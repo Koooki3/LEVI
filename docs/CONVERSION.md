@@ -1,4 +1,4 @@
-# 内置转换 / Built-in conversion
+# Built-in conversion / 内置转换
 
 LEVI includes the complete capture workflow. All stages run in its uv environment through `uv run levi convert`; no external scripts or training framework are required.
 

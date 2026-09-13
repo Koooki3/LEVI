@@ -1,25 +1,26 @@
-# LEVI · 机器人数据工坊
+# LEVI · Robot Data Atelier
 
 **LeRobot Exploration, Validation & Integration**
 
 [![Checks](https://github.com/Koooki3/LEVI/actions/workflows/test.yml/badge.svg)](https://github.com/Koooki3/LEVI/actions/workflows/test.yml) [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) [![Version](https://img.shields.io/badge/LEVI-0.3.0-9bd654.svg)](CHANGELOG.md)
 
-[English](README.en.md) · [转换教程](docs/CONVERSION.md) · [功能对照](docs/FEATURES.md) · [API](docs/API.md) · [审查与验证](docs/VALIDATION.md) · [许可](docs/UPSTREAM.md) · [第三方清单](THIRD_PARTY_NOTICES.md) · [SAM3 对象标注](docs/SAM3.md)
+[简体中文](README.zh-CN.md) · [Conversion guide](docs/CONVERSION.md) · [Features](docs/FEATURES.md) · [API](docs/API.md) · [Validation](docs/VALIDATION.md) · [Attribution](docs/UPSTREAM.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [SAM3 object annotation](docs/SAM3.md)
 
-LEVI 是用于浏览、标注、转换和审核机器人数据的独立工作台。基于 [LeRobot Dataset Visualizer](https://github.com/huggingface/lerobot-dataset-visualizer)，保留多相机与信号同步、视觉问答、动作分析和三维回放，提供默认中文与英文切换，以及**完全内置的采集数据转换流程**。无需另行下载转换项目或安装训练环境。
+LEVI is an independent robotics dataset browser, annotation editor, converter and review workbench derived from [LeRobot Dataset Visualizer](https://github.com/huggingface/lerobot-dataset-visualizer). English is the default; Chinese is available through the language switch. **The complete capture conversion pipeline is bundled** and requires no sibling repository or training environment.
 
-![LEVI 中文首页](docs/assets/home-zh.png)
+The interface is designed for both standalone browsers and Hugging Face Space embeds. Language preference is kept per browser when storage is available, and the annotation workbench handles Ctrl/Cmd+S, Ctrl/Cmd+Z and playback keys without opening the browser's native Save Page dialog.
 
-演示画面来自下文列出的 `samanthalhy` 数据集（数据卡标注 Apache-2.0）；界面采用 LEVI 的石墨绿、米白与青柠配色。
+![LEVI interface](docs/assets/home-en.png)
 
-## 安装与启动
+Demo footage: the two `samanthalhy` datasets linked below, whose cards declare Apache-2.0. LEVI uses an original graphite, parchment and lime interface.
 
-准备 [uv](https://docs.astral.sh/uv/getting-started/installation/) 和 `ffmpeg` / `ffprobe`。Python、前端依赖与本地 Bun 由项目管理。克隆仓库后，在其根目录运行：
+## Install and run
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and `ffmpeg`/`ffprobe`. From your cloned repository, whose name and location are unrestricted:
 
 ```bash
 git clone https://github.com/Koooki3/LEVI.git
 cd LEVI
-# 仓库所在目录及其父目录可以任意命名
 export LEVI_WORKSPACE="$PWD/.state"
 cp .env.example .env
 export UV_CACHE_DIR="$LEVI_WORKSPACE/.cache/uv"
@@ -30,104 +31,97 @@ uv run levi build
 uv run levi serve
 ```
 
-`uv run levi` 等同于 `uv run levi serve`，会同时启动网页和 API。看到 **已就绪 / Ready** 后，访问 **http://127.0.0.1:7860**；`Ctrl+C` 停止两个服务。转换所需的 Python 依赖已包含在 `uv.lock` 中；不需要其他项目的 Python 环境。`setup` 将 Bun 1.3.10 下载到 `.runtime/`，校验官方 SHA-256 清单并安装 `bun.lock` 中的依赖。
+`uv run levi` is equivalent to `uv run levi serve` and starts both services. Wait for **Ready**, then open **http://127.0.0.1:7860**. Ctrl+C stops both services. Setup installs checksum-verified Bun 1.3.10 in `.runtime/` and locked frontend dependencies. Python dependencies, including the converter, live in `.venv/` and `uv.lock`.
 
-已测试 Linux x86_64。安装器支持 Linux/macOS x86_64 与 ARM64；Windows 推荐 WSL2。Ubuntu/Debian 可用 `sudo apt install ffmpeg`，macOS 可用 `brew install ffmpeg`。浏览器支持取决于视频编码，内置转换器输出 H.264/yuv420p。
-
-常用命令：
+Linux x86_64 is tested. The installer also selects Linux/macOS ARM64 and macOS x86_64 binaries; use WSL2 for Windows. Install FFmpeg through your OS package manager, e.g. `sudo apt install ffmpeg` or `brew install ffmpeg`.
 
 ```bash
-uv run levi dev                         # 前端热更新；Python 改动后重启
+uv run levi dev
 uv run levi serve --port 7870 --backend-port 7871
-uv run levi convert --help              # 不启动网页也能使用转换器
-uv run levi clean                      # 预览可清理缓存
-uv run levi clean --apply               # 删除预览列表内的可再生成缓存
+uv run levi convert --help
+uv run levi clean             # preview regenerable caches
+uv run levi clean --apply     # remove the listed caches
 ```
 
-从远程服务器访问时，在自己的电脑运行 `ssh -L 7860:127.0.0.1:7860 USER@SERVER`，然后访问本机上述地址。默认前端绑定本机 **7860（网页入口）**，后端绑定本机 **7861（内部 API）**；前端通过同源代理访问后端。不要把本机 7860 转发到服务器 7861。误开后端根路径会显示入口说明及网页链接；`uv run levi backend` 只启动 API。启动器会检查端口冲突，并等待前后端均就绪后才输出网页入口。
+For a remote server, keep `ssh -L 7860:127.0.0.1:7860 USER@SERVER` running on your computer. The frontend defaults to loopback port **7860 (Web UI)** and proxies requests to **7861 (internal API)**. Forward local 7860 to server 7860, not server 7861. If you see `{"detail":"Not Found"}` or the API landing page, check the destination port. The API root now explains the distinction and links to the configured Web UI. `uv run levi backend` starts only the API. The launcher checks port conflicts and announces Ready only after both services respond.
 
-## SAM3 首次部署顺序
+## SAM3 first-deployment sequence
 
-在克隆后的 LEVI 根目录按以下顺序执行；目录名称和工作区绝对路径可任意：
+Run these commands from the cloned LEVI root. The checkout name and workspace path are unrestricted:
 
 ~~~bash
-# 1) 设置工作区并安装核心依赖
+# 1) Select a workspace and install the core
 export LEVI_WORKSPACE="$PWD/.state"
 cp .env.example .env
 uv sync --locked
 uv run levi setup
 
-# 2) 登录可读取 1038lab/sam3 的 Hugging Face 账号
+# 2) Sign in to an account that can read 1038lab/sam3
 HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" hf auth login
 HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" hf auth whoami
-# 没有全局 hf 时使用：
+# Without a global hf command:
 # HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" uvx hf auth login
 # HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" uvx hf auth whoami
 
-# 3) 在 CUDA 主机安装独立 worker
+# 3) Install the isolated worker on the CUDA host
 uv venv --python 3.12 integrations/sam3/.venv
 uv sync --project integrations/sam3
 export LEVI_SAM3_WORKER_PYTHON="$PWD/integrations/sam3/.venv/bin/python"
 export LEVI_SAM3_ENABLED=1
 
-# 4) 只做无模型配置检查
+# 4) Run model-free configuration checks
 uv run --project integrations/sam3 levi-sam3-worker --check
 uv run levi sam3 check
 
-# 5) 构建并启动网页
+# 5) Build and start the web workbench
 uv run levi build
 uv run levi serve
 ~~~
 
-看到 Ready 后访问 http://127.0.0.1:7860，在任意数据集的标注页面按状态卡完成 Hub access、CUDA worker、Checkpoint 三项检查。登录后若 checkpoint 尚未缓存，页面会显示明确的下载提示、保存路径、进度条和“下载 checkpoint”按钮；点击后等待状态变为“Checkpoint 已就绪”，再设置 prompt、范围和相机并运行 SAM3。下载使用当前 Hugging Face 会话并保存到 $LEVI_WORKSPACE/checkpoints/sam3，后续数据集复用该文件；失败时可直接重试。切换 Hugging Face 账号或工作区时，LEVI 会按账号 digest 和工作区重新隔离 Hub 快照与 sidecar。可设置 LEVI_SAM3_ENABLED=0 暂时隐藏真实 worker。不要提交 token、checkpoint 或工作区数据。
+After Ready appears, open http://127.0.0.1:7860. On any dataset annotation page, complete the Hub access, CUDA worker and checkpoint gates. After sign-in, a missing checkpoint shows an explicit download prompt, workspace path, progress bar and Download checkpoint button; click it and wait for Checkpoint ready before choosing prompts, scope and cameras and starting annotation. The download uses the active Hugging Face session, saves sam3.pt to $LEVI_WORKSPACE/checkpoints/sam3 and can be retried after an error; later datasets reuse the workspace copy. LEVI validates the model-neutral plan before starting the worker. Changing the Hugging Face account or workspace creates separate Hub snapshots and sidecars using account and workspace scopes. Set LEVI_SAM3_ENABLED=0 only when you want to hide the real worker. Never commit tokens, checkpoints or workspace data.
 
-## 工作目录与数据位置
+## Portable workspace
 
-`LEVI_WORKSPACE` 是**数据工作目录**，可以与 Git 仓库分开放在任意磁盘位置。未设置时使用仓库内 `.state/`；相对路径按启动时的当前目录解析。配置可写入不提交 Git 的 `.env`，参见 `.env.example`。项目不识别任何特定机器名称、父目录标记或其他项目环境变量。
+`LEVI_WORKSPACE` is the data workspace, separate from the Git checkout if desired. It defaults to `.state/` inside the repository. Relative values resolve against the startup directory. Set it in your shell or untracked `.env` (see `.env.example`). No machine-specific parent marker or unrelated project variable is consulted.
 
-| 内容 | 位置 |
+| Item | Location |
 | --- | --- |
-| 源码与锁文件 | 克隆的仓库 |
-| Python / Bun /前端依赖 | 仓库内 `.venv/`、`.runtime/`、`node_modules/` |
-| 本地登记、标注、审核、任务与报告 | 工作目录内 `outputs/LEVI/workbench/` |
-| 转换产物 | 工作目录内 `datasets/levi_<时间>_<ID>/` |
-| 标注导出 | 工作目录内 `outputs/LEVI/exports/` |
-| 下载与运行缓存 | 工作目录内 `.cache/`、`tmp/` |
+| Code, lockfiles | Git checkout |
+| Python, Bun, frontend dependencies | Checkout `.venv/`, `.runtime/`, `node_modules/` |
+| Catalog, annotations, reviews, jobs, reports | Workspace `outputs/LEVI/workbench/` |
+| Converted datasets | Workspace `datasets/levi_<timestamp>_<id>/` |
+| Annotation exports | Workspace `outputs/LEVI/exports/` |
+| Downloads/runtime caches | Workspace `.cache/` and `tmp/` |
 
-把采集数据放在工作目录内，例如 `$LEVI_WORKSPACE/captures/session-a/`，或将工作目录设置为已有数据的共同父目录。本地登记和转换都会检查真实路径边界。转换输入不接受符号链接，防止快照随外部文件变化。已有目录不会被转换器覆盖，输入数据不会被修改。
+Place captures under the workspace, or point the workspace to their common parent. Local registration and conversion enforce the resolved path boundary. Conversion rejects symlink inputs and existing output directories. Migration from older LEVI installations requires explicitly setting the previous data workspace in `.env`; data is not moved. Recreate old external conversion plans.
 
-已有 LEVI 安装迁移时，在 `.env` 中明确设置原有数据工作目录，即可继续访问原登记、标注与产物。旧版外部转换计划不能执行，需重新创建内置计划；旧数据不会自动移动。
+## Features
 
-## 浏览、标注与审核
+- Hub search, pagination, public/private access and local dataset registration.
+- Synchronized multi-camera playback, timeline, shortcuts, fullscreen, visibility controls and state/action charts; multi-task datasets can filter the episode list by task.
+- Language timelines: persistent task augmentation/subtask/plan/memory; speech/interjection/VQA; SAM3 object/track sidecars; bounding boxes and points on video, count/attribute/spatial answers.
+- Statistics and episode lengths; movement/smoothness/length filtering; first/last camera frames and per-dataset review flags.
+- Action autocorrelation/chunk suggestions, state-action alignment, demonstrator speed and cross-episode variance, scoped to the full dataset, an episode range or a single task, with an optional full-coverage (unsampled) pass.
+- Upstream-supported 3D robot playback, joint mapping and end-effector trails.
+- Native Doctor with optional sampled video checks and JSON reports; external original Doctor link.
+- Built-in conversion stages and full pipeline, editable options, immutable plans, job logs/exit codes, structured results and automatic dataset registration.
 
-| 页面 | 功能 |
-| --- | --- |
-| 首页 / 探索 | Hub 搜索、分页浏览、默认演示、本地数据集入口 |
-| 片段 | 多相机同步、播放/拖动/快捷键、隐藏/恢复/全屏、状态/动作曲线和数值；多任务数据集可按任务筛选片段列表 |
-| 标注 | 持续任务扩写、子任务、计划、记忆；插话、语音和 VQA；SAM3 对象/轨迹 sidecar；视频拖框/点选、时间轴和检查器 |
-| 统计 | 元数据、分辨率、总时长、片段长度分布及最短/最长片段 |
-| 筛选 / 帧概览 | 运动量、突变、长度排序；首帧/末帧相机网格；单个/批量标记与审核导出 |
-| 动作洞察 | 自相关、动作块长度、状态动作时序对齐、示范速度与跨片段方差；分析范围可选全数据集、片段区间或单个任务，采样上限可设为「全部」做全量审查 |
-| 三维回放 | 上游支持的机器人模型、关节映射、末端轨迹 |
-| 数据诊断 | 版本感知的检查、视频抽样解码、报告/JSON、外部原始 Doctor 入口 |
-| 转换与审核 | 内置全流程、独立阶段、参数、计划预览、日志/退出码、自动登记产物 |
+Video-based LeRobot v2.0/v2.1/v3.0/v3.1 can be browsed. Embedded-image Parquet playback retains the upstream limitation. Original dataset text and feature/joint identifiers remain unchanged.
 
-浏览器支持视频型 LeRobot v2.0/v2.1/v3.0/v3.1。沿用上游对图片直接嵌入 Parquet 的限制；可先转换为视频数据集。原始任务内容、特征标识和关节名称保留原文。
+### SAM3 object annotation (global)
 
-### SAM3 对象标注（全局）
+The annotation tab provides the same SAM3 object/track sidecar for built-in demos, Hub datasets and registered local datasets. The UI checks Hub access, the CUDA worker and the checkpoint first, then builds and validates a plan across an episode range, task selection or the full dataset and selected cameras. Each episode/camera pair is processed independently; model suggestions are stored as lossless RLE sidecar data and native LeRobot files stay read-only. The page shows the current Hugging Face account, worker state, checkpoint download progress and workspace path, and exposes track-level frame ranges with accept/reject review. The default model is sam3.pt from 1038lab/sam3. Real jobs need the isolated Python 3.12 uv worker on a CUDA host; core CPU checks never import Torch, probe CUDA, download a model or run inference. See the SAM3 guide for the complete sequence.
 
-标注页对演示集、Hub 数据集和登记的本地数据集统一提供 SAM3 对象/轨迹 sidecar。界面先检查 Hub 访问、CUDA worker 和 checkpoint 三道门槛，再按片段范围／任务／全量及相机组合生成并校验标注计划；每个 episode/camera 组合独立处理，模型建议写入独立的无损 RLE sidecar，原生 LeRobot 文件保持只读。页面会显示当前 Hugging Face 账号、worker 状态、checkpoint 下载进度和工作区保存位置，并按轨迹提供帧区间与接受／拒绝审核。默认模型为 1038lab/sam3 的 sam3.pt；首次真实作业需要独立 Python 3.12 uv worker 和 CUDA 主机，核心 CPU 检查不会导入 Torch、探测 CUDA、下载模型或执行推理。完整顺序见 SAM3 指南。
-
-默认演示：
+Default live demonstrations:
 
 - [samanthalhy/so100_strawberry_2](https://huggingface.co/datasets/samanthalhy/so100_strawberry_2)
 - [samanthalhy/eval_so100_smol_strawberry_2](https://huggingface.co/datasets/samanthalhy/eval_so100_smol_strawberry_2)
 
-视频按需联网读取，不打包进 Git。评估集包含 10 片段、32,033 帧、30 FPS、front/top/hand 三路相机。
+The evaluation collection has 10 episodes, 32,033 frames, 30 FPS and three 640×480 cameras. Videos are streamed, not bundled.
 
-## 内置转换：采集 → 过滤 → LeRobot → 验证
+## Built-in conversion
 
-「转换与审核」选择输入采集目录和「完整流程」，先预览计划，再执行。流程会准备独立副本、按需处理图像/FPS、质量预检、过滤静止帧、转换为 **LeRobot v2.1**、完整解码验证并登记。高级参数支持相机映射、任务文本映射、排除采集路径、旋转表示、动作语义及质量阈值。
+Select a capture directory and Full pipeline in Conversion & review, preview the plan, then run it. The pipeline prepares an independent copy, handles images/FPS as needed, checks quality, filters static frames, writes **LeRobot v2.1**, fully decodes output videos for validation, then registers the dataset.
 
 ```bash
 uv run levi convert pipeline \
@@ -136,25 +130,25 @@ uv run levi convert pipeline \
   --fps 10 --source-fps 30
 ```
 
-这里输入/输出相对 `LEVI_WORKSPACE`；输出必须不存在。CSV、视频与图像必须有明确一一对应关系，不能通过设置 FPS 修复已经错位的数据。源帧 ID 和采集时间保存在转换来源清单中。
+Paths are relative to `LEVI_WORKSPACE` or absolute within it. Advanced JSON config includes camera/task maps, excluded capture paths, rotation representation, action mode and quality thresholds. See the bilingual [conversion guide](docs/CONVERSION.md) for schemas, all stages, formulas, source provenance and exit codes.
 
-详细输入格式、所有阶段、参数 JSON、数学语义、质量门槛与退出码见 [转换教程](docs/CONVERSION.md)。数值状态采用绝对位置（米）和旋转（默认连续 Euler 弧度，可选四元数）；默认 `action[t] = state[t+1]`，最后一帧复用末态。夹爪为命令开合值，**不是测得的夹爪宽度**。这些语义必须与训练策略一致。
+Default state is absolute XYZ in metres, continuous Euler rotation in radians and binary gripper command (open=1, close=0). Quaternion rotation is optional. Default action is the next state, with the final state repeated. Gripper command is not measured aperture; these semantics must match your policy.
 
-网页「数据诊断」使用抽样视频检查；内置转换的 `validate` 阶段逐视频完整解码并验证结构与对齐。两者均是明确范围的数据检查，不等同于某个训练框架的加载或训练成功保证。
+The viewer's Doctor samples video frames. The pipeline's `validate` stage fully decodes local videos and checks schema/alignment. Neither promises compatibility with every training framework.
 
-## 保存与导出
+## Save, export and review
 
-- 「保存当前片段」写入工作目录的独立标注文件，不改动源数据集。离线时浏览器会话暂存需要恢复服务后再保存。
-- 「导出标注数据集」先保存当前编辑，再创建新目录，将语言列写入 Parquet 并携带元数据/视频；不隐式升级数据格式。
-- 标注导出的视频默认硬链接，不可用时复制；API 的 `copy_videos=true` 可强制复制。内置转换的快照和输出均使用独立文件。
-- 片段标记按数据集隔离；审核 JSON 包含数据集 ID、排除片段 ID 和备注。`meta/levi_provenance.jsonl` 提供内置转换产生的片段到原采集路径的映射，供人工核对后填入 `exclude_demos`。标记不会删除输入数据。
-- Hub 上传保留在 API，需要显式目标仓库与令牌。普通保存/转换不会上传，详见 [API](docs/API.md)。
+Saving an episode writes a workspace annotation sidecar without changing source files. Offline edits remain in browser session storage until the backend is restored and saved. Dataset export saves current edits first, then writes language columns into a new dataset, preserving its container version.
 
-## Hugging Face 与部署
+Annotation export uses video hardlinks where possible; use API `copy_videos=true` for independent copies. Built-in conversion outputs use independent files. Review manifests contain dataset IDs, excluded episode IDs and notes; converted `meta/levi_provenance.jsonl` maps episodes to capture paths. Review that mapping before configuring `exclude_demos`. Flags never delete source data.
 
-本地使用右上角入口填写 HF 读取令牌；也可配置 OAuth。浏览器令牌保存在本地存储，并设置供视频代理使用的 HttpOnly Cookie，退出时清除。服务器批量读取可设置 `HF_TOKEN`。不要提交令牌或 `.env`。
+Hub upload is an explicit API action requiring a target repository and token; normal conversion and saving do not upload. See [API](docs/API.md).
 
-LEVI 是具备本地文件处理能力的单用户工作台。HF 登录用于 Hub 权限，不是 LEVI 用户管理。共享部署需放在有访问控制的反向代理后；HTTPS/HF iframe 部署设置 `LEVI_SECURE_COOKIES=1`。
+## Accounts and deployment
+
+Token sign-in validates with HF, stores the token in browser local storage and a video-proxy HttpOnly cookie, and clears both on sign-out. OAuth and backend `HF_TOKEN` are also supported. Never commit credentials or `.env`. Use `LEVI_SECURE_COOKIES=1` for HTTPS/Space iframe deployments.
+
+This is a single-user local workbench with file access. HF sign-in controls Hub access, not LEVI user permissions. Put shared deployments behind an authenticated reverse proxy.
 
 ```bash
 docker build -t levi:local .
@@ -162,34 +156,27 @@ docker run --rm -p 127.0.0.1:7860:7860 \
   -v "$HOME/levi-data:/workspace" levi:local
 ```
 
-容器包括内置转换器、独立 Python 环境及 ffmpeg，无需挂载额外代码项目。仅挂载要交给 LEVI 管理的数据目录。
+The container includes the converter, Python environment and FFmpeg. No additional code repository is mounted.
 
-## 开发、精简与发布
+## Develop and publish
 
 ```bash
-# 延用安装部分设置的 LEVI_WORKSPACE 和缓存变量
+# Keep the workspace/cache variables from installation
 uv sync --locked --group dev
 uv run levi check
 mkdir -p "$LEVI_WORKSPACE/tmp/build"
 uv run pytest --basetemp="$LEVI_WORKSPACE/tmp/build/pytest"
 uv run levi build
-# 服务启动后，可选真实浏览器检查
+# Optional: start the service, then run live checks
 PLAYWRIGHT_BROWSERS_PATH="$LEVI_WORKSPACE/.cache/playwright" uv run playwright install chromium
 uv run python scripts/verify_browser.py
 uv run python scripts/verify_conversion.py
 ```
 
-发布前执行 `uv run levi clean` 预览，再执行 `uv run levi clean --apply`。只清理 LEVI 的可再生成缓存；已登记数据集、标注、审核、转换报告、`.env`、环境与生产构建保留。不要对共享工作目录使用 `git clean -xfd`。
+Before publishing, preview `uv run levi clean`, then apply with `--apply`. It removes LEVI's regenerable caches and preserves datasets, annotations, review/job reports, `.env`, dependencies and production output. Avoid `git clean -xfd` against a data workspace.
 
-项目仓库：[Koooki3/LEVI](https://github.com/Koooki3/LEVI)。通过 [Issues](https://github.com/Koooki3/LEVI/issues) 报告问题或建议；参与开发前请阅读 [贡献指南](CONTRIBUTING.md)。维护者发布流程见 [发布指南](docs/RELEASING.md)。
+Repository: [Koooki3/LEVI](https://github.com/Koooki3/LEVI). Report reproducible problems and suggestions in [Issues](https://github.com/Koooki3/LEVI/issues). Read [CONTRIBUTING](CONTRIBUTING.md) before submitting changes and [RELEASING](docs/RELEASING.md) for the maintainer release procedure.
 
-保留 Apache-2.0 `LICENSE`、`NOTICE` 和 [来源说明](docs/UPSTREAM.md)。CI 包含格式、类型、单元/内置转换测试和生产构建。已验证范围与限制见 [验证记录](docs/VALIDATION.md)。
+Preserve Apache-2.0 `LICENSE`, `NOTICE` and [attribution](docs/UPSTREAM.md). CI runs type/format checks, frontend tests, built-in conversion tests and a production build. See the [validation record](docs/VALIDATION.md) for tested scope and limitations.
 
-## 常见问题
-
-- **看到 `{"detail":"Not Found"}` 或 API 说明页**：说明请求可能进入了 7861；打开 7860，并核对 SSH / 编辑器端口转发目标是否为服务器 7860。不要将终端中 Uvicorn 的监听地址当作网页入口。
-- **无法访问网页**：核对终端日志、端口和 SSH 转发；浏览器的 localhost 指自己的电脑。
-- **Hub 视频加载失败**：检查网络、仓库 ID、访问权限与编码支持；首次获取大视频和模型需要时间。
-- **本地路径被拒绝**：登记根目录必须包含 `meta/info.json`，真实路径必须处于 `LEVI_WORKSPACE` 内。
-- **转换失败**：阅读结构化报告和日志；重复/缺失帧 ID、未知夹爪命令、视频计数不符会阻止转换。使用任务映射和明确的排除路径修正输入范围。
-- **服务重启后任务中断**：任务标记为 interrupted，部分产物保留供检查。新计划使用新目录，不自动续写失败产物。
+If a conversion fails, inspect its structured report and logs. Duplicate/missing frame IDs, unknown gripper commands or video count mismatches stop processing. Interrupted jobs are marked on restart, and partial outputs remain available for review; a retry uses a new directory.

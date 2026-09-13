@@ -1,4 +1,4 @@
-# 上游、版权和变更 / Upstream, copyright and changes
+# Upstream, copyright and changes / 上游、版权和变更
 
 LEVI is an independent derivative of:
 

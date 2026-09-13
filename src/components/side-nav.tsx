@@ -1,6 +1,6 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
-import { T } from "@/components/levi-locale";
+import { T, useLocale } from "@/components/levi-locale";
 
 import Link from "next/link";
 import React, { useMemo, useState } from "react";
@@ -19,6 +19,7 @@ function AnnotationDots({
   episode: number;
   summary: AnnotationSummary;
 }) {
+  const { t } = useLocale();
   const key = String(episode);
   const hasLanguage = !!summary.language[key];
   const hasVision = !!summary.vision[key];
@@ -28,13 +29,13 @@ function AnnotationDots({
       {hasLanguage && (
         <span
           className="w-1.5 h-1.5 rounded-full bg-cyan-400"
-          title="Has language/event annotations"
+          title={t("Has language/event annotations")}
         />
       )}
       {hasVision && (
         <span
           className="w-1.5 h-1.5 rounded-full bg-lime-400"
-          title="Has object/vision (SAM3) annotations"
+          title={t("Has object/vision (SAM3) annotations")}
         />
       )}
     </span>

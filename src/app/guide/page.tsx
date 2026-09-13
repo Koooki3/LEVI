@@ -30,7 +30,7 @@ export default function Guide() {
             ],
             [
               "05 / Share",
-              "README.md and README.en.md contain installation, SSH access, deployment, API, troubleshooting and GitHub release instructions. LEVI preserves the upstream Apache-2.0 license and attribution.",
+              "README.md and README.zh-CN.md contain installation, SSH access, deployment, API, troubleshooting and GitHub release instructions. LEVI preserves the upstream Apache-2.0 license and attribution.",
             ],
           ].map(([heading, body]) => (
             <section className="levi-box" key={heading}>

@@ -11,12 +11,14 @@ type ExploreGridProps = {
   datasets: Array<{ id: string; videoUrl: string | null }>;
   currentPage: number;
   totalPages: number;
+  error?: string;
 };
 
 export default function ExploreGrid({
   datasets,
   currentPage,
   totalPages,
+  error,
 }: ExploreGridProps) {
   // sync with parent window hf.co/spaces
   useEffect(() => {
@@ -46,6 +48,14 @@ export default function ExploreGrid({
               <HfAuthButton />
             </div>
           </div>
+          {error && (
+            <div
+              className="mb-4 p-4 rounded-md border border-red-400/30 text-red-300"
+              role="alert"
+            >
+              <T>{error}</T>
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {datasets.map((ds, idx) => (
               <Link

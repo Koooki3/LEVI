@@ -6,9 +6,9 @@ import { AuthProvider } from "@/context/auth-context";
 import { LocaleProvider } from "@/components/levi-locale";
 import LeviHeader from "@/components/levi-header";
 export const metadata: Metadata = {
-  title: "LEVI · 机器人数据工坊",
+  title: "LEVI · Robot Data Atelier",
   description:
-    "LeRobot Exploration, Validation & Integration — bilingual robotics dataset workbench",
+    "A bilingual LeRobot workbench for dataset exploration, validation, annotation and conversion.",
 };
 export default function RootLayout({
   children,
@@ -16,7 +16,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="zh-CN">
+    <html lang="en">
       <body>
         <LocaleProvider>
           <AuthProvider>

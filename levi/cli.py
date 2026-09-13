@@ -30,7 +30,7 @@ def port_number(value):
 
 def check_ports(host, port, backend_port, backend_only=False):
     if not backend_only and port == backend_port:
-        raise ValueError("网页与 API 必须使用不同端口 / UI and API ports must differ")
+        raise ValueError("UI and API ports must differ / 网页与 API 必须使用不同端口")
     addresses = [("API", "127.0.0.1", backend_port)]
     if not backend_only:
         addresses.insert(0, ("Web UI", host, port))
@@ -42,8 +42,8 @@ def check_ports(host, port, backend_port, backend_only=False):
                 listener.bind((address, number))
         except OSError as exc:
             raise ValueError(
-                f"{role} 无法绑定 / cannot bind {address}:{number}: {exc}. "
-                "请检查已有服务或更换端口 / Check existing services or select another port."
+                f"{role} cannot bind {address}:{number} / 无法绑定: {exc}. "
+                "Check existing services or select another port. / 请检查已有服务或更换端口。"
             ) from exc
 
 
@@ -57,7 +57,7 @@ def wait_ready(children, ui_url, api_url, timeout=120):
             code = child.poll()
             if code is not None:
                 raise RuntimeError(
-                    f"LEVI 服务在就绪前退出 / service exited before ready (code {code})"
+                    f"Service exited before ready (code {code}) / LEVI 服务在就绪前退出"
                 )
         for role, url in list(pending.items()):
             try:
@@ -75,7 +75,7 @@ def wait_ready(children, ui_url, api_url, timeout=120):
         if pending:
             time.sleep(0.2)
     if pending:
-        raise RuntimeError("启动超时 / Startup timed out: " + ", ".join(pending))
+        raise RuntimeError("Startup timed out / 启动超时: " + ", ".join(pending))
 
 
 def stop_children(children):
@@ -132,13 +132,13 @@ def main():
         "--port",
         type=port_number,
         default=7860,
-        help="网页 / Web UI port (default: 7860)",
+        help="Web UI port / 网页端口 (default: 7860)",
     )
     parser.add_argument(
         "--backend-port",
         type=port_number,
         default=7861,
-        help="内部 API / Internal API port (default: 7861)",
+        help="Internal API port / 内部 API 端口 (default: 7861)",
     )
     args = parser.parse_args()
     configure()
@@ -160,7 +160,7 @@ def main():
         import uvicorn
 
         print(
-            "[LEVI] 仅启动 API / API only. 完整网页启动命令 / Start the UI with: uv run levi",
+            "[LEVI] API only / 仅启动 API. Start the UI with: uv run levi / 完整网页启动命令：uv run levi",
             flush=True,
         )
         uvicorn.run("levi.service:app", host="127.0.0.1", port=args.backend_port)
@@ -187,10 +187,10 @@ def main():
             )
         )
     if args.command == "serve" and not (PROJECT / ".next/BUILD_ID").is_file():
-        parser.error("缺少生产构建 / Missing production build. Run: uv run levi build")
+        parser.error("Missing production build. Run: uv run levi build / 缺少生产构建")
     children = []
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    print("[LEVI] 正在启动网页与 API / Starting Web UI and API…", flush=True)
+    print("[LEVI] Starting Web UI and API… / 正在启动网页与 API…", flush=True)
     try:
         children.append(
             subprocess.Popen(
@@ -226,11 +226,11 @@ def main():
         )
         wait_ready(children, ui_url, os.environ["LEVI_BACKEND_URL"])
         print(
-            f"\n[LEVI] 已就绪 / Ready\n"
-            f"  网页入口 / Open Web UI: {ui_url}\n"
-            f"  内部接口 / API only: 127.0.0.1:{args.backend_port}\n"
-            "  请在浏览器打开网页入口；API 端口不是数据浏览页面。\n"
-            "  Open the Web UI above; the API port does not serve the workbench.\n",
+            f"\n[LEVI] Ready / 已就绪\n"
+            f"  Open Web UI / 网页入口: {ui_url}\n"
+            f"  API only / 内部接口: 127.0.0.1:{args.backend_port}\n"
+            "  Open the Web UI above; the API port does not serve the workbench.\n"
+            "  请在浏览器打开网页入口；API 端口不是数据浏览页面。\n",
             flush=True,
         )
         while all(child.poll() is None for child in children):

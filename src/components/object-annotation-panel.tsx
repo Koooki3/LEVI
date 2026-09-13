@@ -117,7 +117,7 @@ export default function ObjectAnnotationPanel({
   allEpisodes,
   taskIndex,
 }: Props) {
-  const { language } = useLocale();
+  const { t } = useLocale();
   const { oauth } = useAuth();
   const { seek } = useTime();
   const stableIdent = useMemo(
@@ -327,29 +327,25 @@ export default function ObjectAnnotationPanel({
       setPlanId(staged.plan_id);
       setPlanState("ready");
       setMessage(
-        language === "zh"
-          ? "计划已校验：" +
-              plan.episode_indices.length +
-              " 个片段 × " +
-              plan.camera_keys.length +
-              " 个相机；正在启动 SAM3…"
-          : "Plan validated: " +
-              plan.episode_indices.length +
-              " episode(s) × " +
-              plan.camera_keys.length +
-              " camera(s); starting SAM3…",
+        t("Plan validated:") +
+          " " +
+          plan.episode_indices.length +
+          " " +
+          t("episode(s)") +
+          " × " +
+          plan.camera_keys.length +
+          " " +
+          t("camera(s)") +
+          "; " +
+          t("starting SAM3…"),
       );
       const result = await runSam3(stableIdent, {
         ...plan,
         plan_id: staged.plan_id,
       });
-      if (!result.job_id) throw new Error("SAM3 did not return a job ID");
+      if (!result.job_id) throw new Error(t("SAM3 did not return a job ID"));
       setJobId(result.job_id);
-      setMessage(
-        language === "zh"
-          ? "SAM3 作业已启动，正在准备模型和标注…"
-          : "SAM3 job started; preparing the model and annotations…",
-      );
+      setMessage(t("SAM3 job started; preparing the model and annotations…"));
       // Scale the client wait with the number of independent
       // (episode, camera) items. Status is already refreshed by the global
       // five-second timer, so avoid making an auth request every second.
@@ -366,25 +362,24 @@ export default function ObjectAnnotationPanel({
           setItemErrors(job.item_errors ?? []);
           setMessage(
             job.item_errors?.length
-              ? language === "zh"
-                ? "SAM3 建议已保存（" +
-                  job.item_errors.length +
-                  " 个片段/相机组合失败，见下方详情）"
-                : "SAM3 suggestions saved (" +
-                  job.item_errors.length +
-                  " episode/camera pair(s) failed — see details below)"
-              : language === "zh"
-                ? "SAM3 建议已保存，请审核每条轨迹后再导出"
-                : "SAM3 suggestions saved; review every track before export",
+              ? t(
+                  "SAM3 suggestions saved; {count} episode/camera pair(s) failed — see details below",
+                ).replace("{count}", String(job.item_errors.length))
+              : t("SAM3 suggestions saved; review every track before export"),
           );
           break;
         }
         if (job.status === "failed" || job.status === "cancelled") {
           if (job.error_detail) setErrorDetail(job.error_detail);
           setItemErrors(job.item_errors ?? []);
-          throw new Error(String(job.error || "SAM3 job " + job.status));
+          const fallback =
+            job.status === "cancelled"
+              ? t("SAM3 job cancelled")
+              : t("SAM3 job failed");
+          throw new Error(String(job.error || fallback));
         }
-        if (attempt === maxAttempts - 1) throw new Error("SAM3 job timed out");
+        if (attempt === maxAttempts - 1)
+          throw new Error(t("SAM3 job timed out"));
       }
       await refresh();
       window.dispatchEvent(new Event("levi:sam3-updated"));
@@ -413,17 +408,13 @@ export default function ObjectAnnotationPanel({
       const result = await startSam3CheckpointDownload();
       setCapabilities(result);
       setMessage(
-        language === "zh"
-          ? result.download_started
-            ? "Checkpoint 下载已启动；状态卡会持续更新进度。"
-            : result.checkpoint_cached
-              ? "Checkpoint 已存在于当前工作区。"
-              : "Checkpoint 下载正在进行中。"
-          : result.download_started
-            ? "Checkpoint download started; progress will update in the status card."
-            : result.checkpoint_cached
-              ? "The checkpoint is already available in this workspace."
-              : "Checkpoint download is already in progress.",
+        result.download_started
+          ? t(
+              "Checkpoint download started; progress will update in the status card.",
+            )
+          : result.checkpoint_cached
+            ? t("The checkpoint is already available in this workspace.")
+            : t("Checkpoint download is already in progress."),
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -538,619 +529,631 @@ export default function ObjectAnnotationPanel({
   );
 
   return (
-    <section className="object-annotation-panel panel-raised">
-      <div className="object-annotation-head">
-        <div>
-          <p className="section-kicker">
-            <T>SAM3 object annotations</T>
-          </p>
-          <h2>
-            <T>Objects, tracks and review</T>
-          </h2>
-        </div>
-        <span className="object-annotation-badge">
-          <T>sidecar · lossless RLE</T>
-        </span>
-      </div>
-      <p className="object-annotation-copy">
-        <T>
-          Model suggestions stay separate from native LeRobot data. Review a
-          track here to create a new annotation revision.
-        </T>
-      </p>
-
-      <div className="object-annotation-status">
-        <div className="object-annotation-status-head">
-          <div>
-            <strong>
-              <T>SAM3 runtime</T>
-            </strong>
-            <span className="object-annotation-status-subtitle">
-              <T>Global worker · LeRobot sidecar workflow</T>
+    <T>
+      {
+        <section className="object-annotation-panel panel-raised">
+          <div className="object-annotation-head">
+            <div>
+              <p className="section-kicker">
+                <T>SAM3 object annotations</T>
+              </p>
+              <h2>
+                <T>Objects, tracks and review</T>
+              </h2>
+            </div>
+            <span className="object-annotation-badge">
+              <T>sidecar · lossless RLE</T>
             </span>
           </div>
-          <span className={runtimeReady ? "ready" : "muted"}>
-            {runtimeReady ? <T>Ready</T> : <T>Setup required</T>}
-          </span>
-        </div>
-        <div className="object-annotation-gates" aria-label="SAM3 setup gates">
-          <span className={accountReady ? "ready" : "muted"}>
-            <i aria-hidden="true">{accountReady ? "✓" : "1"}</i>
-            <T>Hub access</T>
-          </span>
-          <span className={workerReady ? "ready" : "muted"}>
-            <i aria-hidden="true">{workerReady ? "✓" : "2"}</i>
-            <T>CUDA worker</T>
-          </span>
-          <span className={checkpointReady ? "ready" : "muted"}>
-            <i aria-hidden="true">{checkpointReady ? "✓" : "3"}</i>
-            <T>Checkpoint</T>
-          </span>
-        </div>
-        <div className="object-annotation-status-grid">
-          <span>
-            <T>Model</T>
-          </span>
-          <code>
-            {capabilities?.model_repo || "1038lab/sam3"} /{" "}
-            {capabilities?.model_filename || "sam3.pt"}
-          </code>
-          <span>
-            <T>Hugging Face account</T>
-          </span>
-          <span className={accountReady ? "ready" : "muted"}>
-            {account?.authenticated ? (
-              account.username || (oauth ? "signed in" : "environment account")
-            ) : checkpointReady ? (
-              <T>Checkpoint cached</T>
-            ) : (
-              <T>not signed in</T>
-            )}
-          </span>
-          {!account?.authenticated && !checkpointReady && (
-            <HfAuthButton variant="ghost" />
-          )}
-          <span>
-            <T>Checkpoint location</T>
-          </span>
-          <code className="object-annotation-path">
-            {capabilities?.checkpoint_path ||
-              "workspace/checkpoints/sam3/sam3.pt"}
-          </code>
-        </div>
-        {checkpointReady && download?.phase === "ready" && (
-          <p className="object-annotation-runtime">
-            <span className="ready">
-              <T>Checkpoint ready</T>
-            </span>
-            <span>{formatBytes(download.bytes)}</span>
+          <p className="object-annotation-copy">
+            <T>
+              Model suggestions stay separate from native LeRobot data. Review a
+              track here to create a new annotation revision.
+            </T>
           </p>
-        )}
-        {!checkpointReady && capabilities?.enabled && (
-          <div className="object-annotation-checkpoint-card">
-            <div className="object-annotation-checkpoint-head">
+
+          <div className="object-annotation-status">
+            <div className="object-annotation-status-head">
               <div>
                 <strong>
-                  <T>SAM3 checkpoint required</T>
+                  <T>SAM3 runtime</T>
                 </strong>
-                <span>
-                  {hubReady ? (
-                    <T>
-                      Your Hugging Face session is ready. Download the
-                      checkpoint once; future datasets reuse this workspace
-                      copy.
-                    </T>
-                  ) : (
-                    <T>
-                      Sign in to Hugging Face, then download the checkpoint into
-                      this workspace before running SAM3.
-                    </T>
-                  )}
+                <span className="object-annotation-status-subtitle">
+                  <T>Global worker · LeRobot sidecar workflow</T>
                 </span>
               </div>
-              <button
-                type="button"
-                className="object-annotation-download"
-                onClick={() => void downloadCheckpoint()}
-                disabled={!downloadCanStart}
-              >
-                {downloadActive ? (
-                  <T>Downloading…</T>
-                ) : download?.phase === "error" ? (
-                  <T>Retry download</T>
+              <span className={runtimeReady ? "ready" : "muted"}>
+                {runtimeReady ? <T>Ready</T> : <T>Setup required</T>}
+              </span>
+            </div>
+            <div
+              className="object-annotation-gates"
+              aria-label="SAM3 setup gates"
+            >
+              <span className={accountReady ? "ready" : "muted"}>
+                <i aria-hidden="true">{accountReady ? "✓" : "1"}</i>
+                <T>Hub access</T>
+              </span>
+              <span className={workerReady ? "ready" : "muted"}>
+                <i aria-hidden="true">{workerReady ? "✓" : "2"}</i>
+                <T>CUDA worker</T>
+              </span>
+              <span className={checkpointReady ? "ready" : "muted"}>
+                <i aria-hidden="true">{checkpointReady ? "✓" : "3"}</i>
+                <T>Checkpoint</T>
+              </span>
+            </div>
+            <div className="object-annotation-status-grid">
+              <span>
+                <T>Model</T>
+              </span>
+              <code>
+                {capabilities?.model_repo || "1038lab/sam3"} /{" "}
+                {capabilities?.model_filename || "sam3.pt"}
+              </code>
+              <span>
+                <T>Hugging Face account</T>
+              </span>
+              <span className={accountReady ? "ready" : "muted"}>
+                {account?.authenticated ? (
+                  account.username ||
+                  (oauth ? t("signed in") : t("environment account"))
+                ) : checkpointReady ? (
+                  <T>Checkpoint cached</T>
                 ) : (
-                  <T>Download checkpoint</T>
+                  <T>not signed in</T>
                 )}
-              </button>
+              </span>
+              {!account?.authenticated && !checkpointReady && (
+                <HfAuthButton variant="ghost" />
+              )}
+              <span>
+                <T>Checkpoint location</T>
+              </span>
+              <code className="object-annotation-path">
+                {capabilities?.checkpoint_path ||
+                  "workspace/checkpoints/sam3/sam3.pt"}
+              </code>
             </div>
-            <div className="object-annotation-progress">
-              <div className="object-annotation-progress-label">
-                <span>
-                  {downloadActive ? (
-                    <T>Downloading checkpoint</T>
-                  ) : (
-                    <T>Checkpoint is required before a real SAM3 run.</T>
-                  )}
+            {checkpointReady && download?.phase === "ready" && (
+              <p className="object-annotation-runtime">
+                <span className="ready">
+                  <T>Checkpoint ready</T>
                 </span>
-                <span>
-                  {downloadPercent === null
-                    ? downloadActive
-                      ? "…"
-                      : "0.0%"
-                    : downloadPercent.toFixed(1) + "%"}
-                  {" · "}
-                  {formatBytes(download?.bytes)}
-                  {download?.total_bytes
-                    ? " / " + formatBytes(download.total_bytes)
-                    : ""}
-                </span>
+                <span>{formatBytes(download.bytes)}</span>
+              </p>
+            )}
+            {!checkpointReady && capabilities?.enabled && (
+              <div className="object-annotation-checkpoint-card">
+                <div className="object-annotation-checkpoint-head">
+                  <div>
+                    <strong>
+                      <T>SAM3 checkpoint required</T>
+                    </strong>
+                    <span>
+                      {hubReady ? (
+                        <T>
+                          Your Hugging Face session is ready. Download the
+                          checkpoint once; future datasets reuse this workspace
+                          copy.
+                        </T>
+                      ) : (
+                        <T>
+                          Sign in to Hugging Face, then download the checkpoint
+                          into this workspace before running SAM3.
+                        </T>
+                      )}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="object-annotation-download"
+                    onClick={() => void downloadCheckpoint()}
+                    disabled={!downloadCanStart}
+                  >
+                    {downloadActive ? (
+                      <T>Downloading…</T>
+                    ) : download?.phase === "error" ? (
+                      <T>Retry download</T>
+                    ) : (
+                      <T>Download checkpoint</T>
+                    )}
+                  </button>
+                </div>
+                <div className="object-annotation-progress">
+                  <div className="object-annotation-progress-label">
+                    <span>
+                      {downloadActive ? (
+                        <T>Downloading checkpoint</T>
+                      ) : (
+                        <T>Checkpoint is required before a real SAM3 run.</T>
+                      )}
+                    </span>
+                    <span>
+                      {downloadPercent === null
+                        ? downloadActive
+                          ? "…"
+                          : "0.0%"
+                        : downloadPercent.toFixed(1) + "%"}
+                      {" · "}
+                      {formatBytes(download?.bytes)}
+                      {download?.total_bytes
+                        ? " / " + formatBytes(download.total_bytes)
+                        : ""}
+                    </span>
+                  </div>
+                  <progress
+                    max={100}
+                    value={
+                      downloadActive && downloadPercent === null
+                        ? undefined
+                        : (downloadPercent ?? 0)
+                    }
+                    aria-label="SAM3 checkpoint download progress"
+                  />
+                </div>
+                {download?.phase === "error" && (
+                  <p className="object-annotation-runtime muted">
+                    {download.message || t("Checkpoint download failed")}
+                  </p>
+                )}
+                {!hubReady && !checkpointReady && (
+                  <p className="object-annotation-checkpoint-hint">
+                    <T>Sign in first to enable checkpoint download.</T>
+                  </p>
+                )}
+                {!checkpointDownloadAvailable && (
+                  <p className="object-annotation-checkpoint-hint">
+                    <T>
+                      Checkpoint download is disabled because
+                      LEVI_SAM3_CHECKPOINT is set. Place the file at the path
+                      above.
+                    </T>
+                  </p>
+                )}
               </div>
-              <progress
-                max={100}
-                value={
-                  downloadActive && downloadPercent === null
-                    ? undefined
-                    : (downloadPercent ?? 0)
-                }
-                aria-label="SAM3 checkpoint download progress"
-              />
-            </div>
-            {download?.phase === "error" && (
+            )}
+            {!accountReady && (
               <p className="object-annotation-runtime muted">
-                {download.message || "Checkpoint download failed"}
-              </p>
-            )}
-            {!hubReady && !checkpointReady && (
-              <p className="object-annotation-checkpoint-hint">
-                <T>Sign in first to enable checkpoint download.</T>
-              </p>
-            )}
-            {!checkpointDownloadAvailable && (
-              <p className="object-annotation-checkpoint-hint">
                 <T>
-                  Checkpoint download is disabled because LEVI_SAM3_CHECKPOINT
-                  is set. Place the file at the path above.
+                  Sign in to Hugging Face or place an existing checkpoint in the
+                  workspace before starting a real SAM3 job.
                 </T>
               </p>
             )}
-          </div>
-        )}
-        {!accountReady && (
-          <p className="object-annotation-runtime muted">
-            <T>
-              Sign in to Hugging Face or place an existing checkpoint in the
-              workspace before starting a real SAM3 job.
-            </T>
-          </p>
-        )}
-        <p className="object-annotation-status-note">
-          <T>
-            SAM3 reads native LeRobot frames and writes lossless RLE masks to a
-            separate sidecar. Track IDs are scoped to each episode and camera.
-          </T>
-        </p>
-      </div>
-
-      <div className="object-annotation-step">
-        <div className="object-annotation-step-head">
-          <span className="object-annotation-step-number">01</span>
-          <div>
-            <strong>
-              <T>Define object prompts</T>
-            </strong>
-            <span>
+            <p className="object-annotation-status-note">
               <T>
-                Use text concepts for SAM3 to detect and track in the selected
+                SAM3 reads native LeRobot frames and writes lossless RLE masks
+                to a separate sidecar. Track IDs are scoped to each episode and
                 camera.
               </T>
-            </span>
+            </p>
           </div>
-        </div>
-        <div className="object-annotation-controls">
-          <label>
-            <span>
-              <T>Review camera</T>
-            </span>
-            <select
-              value={cameraKey}
-              onChange={(event) => setCameraKey(event.target.value)}
-              disabled={!cameraKeys.length || busy}
-            >
-              {cameraKeys.map((key) => (
-                <option key={key} value={key}>
-                  {key}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="object-annotation-prompt">
-            <span>
-              <T>Text prompts (comma, semicolon or newline separated)</T>
-            </span>
-            <input
-              value={promptText}
-              onChange={(event) => setPromptText(event.target.value)}
-              placeholder="cup, plate, gripper"
-              disabled={busy}
-            />
-          </label>
-          <div className="object-annotation-presets">
-            <select
-              value={selectedPresetName}
-              onChange={(event) => {
-                setSelectedPresetName(event.target.value);
-                if (event.target.value) applyPreset(event.target.value);
-              }}
-              disabled={busy || !presets.length}
-            >
-              <option value="">
-                {language === "zh"
-                  ? "加载 prompt 预设…"
-                  : "Load prompt preset…"}
-              </option>
-              {presets.map((preset) => (
-                <option key={preset.name} value={preset.name}>
-                  {preset.name}
-                </option>
-              ))}
-            </select>
-            {selectedPresetName && (
-              <button
-                type="button"
-                onClick={() => void deletePreset(selectedPresetName)}
-                disabled={busy}
-                title="Delete this preset"
-              >
-                ×
-              </button>
-            )}
-            <input
-              value={presetNameDraft}
-              onChange={(event) => setPresetNameDraft(event.target.value)}
-              placeholder={language === "zh" ? "预设名称" : "preset name"}
-              disabled={busy}
-            />
-            <button
-              type="button"
-              onClick={() => void saveCurrentAsPreset()}
-              disabled={busy || !presetNameDraft.trim() || !promptText.trim()}
-            >
-              <T>Save preset</T>
-            </button>
-          </div>
-        </div>
-      </div>
 
-      <div className="object-annotation-step">
-        <div className="object-annotation-step-head">
-          <span className="object-annotation-step-number">02</span>
-          <div>
-            <strong>
-              <T>Choose annotation scope</T>
-            </strong>
-            <span>
-              <T>
-                Each episode/camera pair is processed independently so native
-                frame indices stay aligned.
-              </T>
-            </span>
-          </div>
-        </div>
-        <div className="object-annotation-batch">
-          <div className="object-annotation-batch-row">
-            <label>
-              <span>
-                <T>Annotation scope</T>
-              </span>
-              <select
-                value={scope.kind}
-                onChange={(event) => {
-                  const kind = event.target.value as AnnotationScope["kind"];
-                  if (kind === "all") setScope({ kind: "all" });
-                  else if (kind === "task")
-                    setScope({
-                      kind: "task",
-                      task: taskIndex?.tasks[0] ?? "",
-                    });
-                  else
-                    setScope({
-                      kind: "range",
-                      from: episodeId,
-                      to: episodeId,
-                    });
-                }}
-                disabled={busy}
-              >
-                <option value="range">
-                  {language === "zh" ? "片段范围" : "Episode range"}
-                </option>
-                {!!taskIndex?.tasks.length && (
-                  <option value="task">
-                    {language === "zh" ? "按任务筛选" : "By task"}
-                  </option>
-                )}
-                <option value="all">
-                  {language === "zh" ? "全部片段" : "All episodes"}
-                </option>
-              </select>
-            </label>
-            {scope.kind === "range" && (
-              <div className="object-annotation-range">
-                <label>
-                  <span>
-                    <T>From</T>
-                  </span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={scope.from}
-                    onChange={(event) =>
-                      setScope({
-                        kind: "range",
-                        from: Number(event.target.value),
-                        to: scope.to,
-                      })
-                    }
-                    disabled={busy}
-                    aria-label="First episode"
-                  />
-                </label>
-                <span className="object-annotation-range-dash">–</span>
-                <label>
-                  <span>
-                    <T>To</T>
-                  </span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={scope.to}
-                    onChange={(event) =>
-                      setScope({
-                        kind: "range",
-                        from: scope.from,
-                        to: Number(event.target.value),
-                      })
-                    }
-                    disabled={busy}
-                    aria-label="Last episode"
-                  />
-                </label>
-              </div>
-            )}
-            {scope.kind === "task" && (
-              <label className="object-annotation-task-select">
+          <div className="object-annotation-step">
+            <div className="object-annotation-step-head">
+              <span className="object-annotation-step-number">01</span>
+              <div>
+                <strong>
+                  <T>Define object prompts</T>
+                </strong>
                 <span>
-                  <T>Task</T>
+                  <T>
+                    Use text concepts for SAM3 to detect and track in the
+                    selected camera.
+                  </T>
+                </span>
+              </div>
+            </div>
+            <div className="object-annotation-controls">
+              <label>
+                <span>
+                  <T>Review camera</T>
                 </span>
                 <select
-                  value={scope.task}
-                  onChange={(event) =>
-                    setScope({ kind: "task", task: event.target.value })
-                  }
-                  disabled={busy}
+                  value={cameraKey}
+                  onChange={(event) => setCameraKey(event.target.value)}
+                  disabled={!cameraKeys.length || busy}
                 >
-                  {(taskIndex?.tasks ?? []).map((task) => (
-                    <option key={task} value={task}>
-                      {task}
+                  {cameraKeys.map((key) => (
+                    <option key={key} value={key}>
+                      {key}
                     </option>
                   ))}
                 </select>
               </label>
-            )}
-            <span className="object-annotation-scope-count">
-              {scopeEpisodes.length} <T>episode(s) selected</T>
-            </span>
-          </div>
-          {cameraKeys.length > 1 && (
-            <div className="object-annotation-camera-checks">
-              <span>
-                <T>Run on cameras</T>
-              </span>
-              {cameraKeys.map((key) => (
-                <label key={key} className="object-annotation-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={runCameras.has(key)}
-                    onChange={() => toggleRunCamera(key)}
-                    disabled={busy}
-                  />
-                  {key}
-                </label>
-              ))}
-            </div>
-          )}
-          <div className="object-annotation-selection-summary">
-            <span>
-              {scopeEpisodes.length} <T>episode(s) selected</T>
-            </span>
-            <span>·</span>
-            <span>
-              {selectedCameras.length} <T>camera(s) selected</T>
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div className="object-annotation-runbar">
-        <div className="object-annotation-plan-state">
-          <span className={planState === "ready" ? "ready" : "muted"}>
-            {planState === "checking" ? (
-              <T>Validating plan…</T>
-            ) : planState === "ready" ? (
-              <T>Plan validated</T>
-            ) : (
-              <T>Plan not validated</T>
-            )}
-          </span>
-          {planId && <code>{planId.slice(0, 12)}</code>}
-          {!runtimeReady && (
-            <small>
-              <T>Complete Hub access, worker and checkpoint setup above.</T>
-            </small>
-          )}
-        </div>
-        {busy && jobId ? (
-          <button
-            type="button"
-            className="object-annotation-run"
-            onClick={() => void cancelRun()}
-          >
-            <T>Cancel</T>
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="object-annotation-run sam3"
-            onClick={() => void runSam3Annotation()}
-            disabled={
-              busy ||
-              !selectedCameras.length ||
-              !scopeEpisodes.length ||
-              !promptValues.length ||
-              !runtimeReady
-            }
-            title="Uses the configured CUDA worker and 1038lab/sam3 checkpoint"
-          >
-            <T>Run SAM3 annotation</T>
-          </button>
-        )}
-      </div>
-
-      {busy && jobProgress && (
-        <div className="object-annotation-progress">
-          <div className="object-annotation-progress-label">
-            <span>
-              <T>Annotating batch</T>
-            </span>
-            <span>
-              {jobProgress.done}/{jobProgress.total}
-              {jobProgress.current_episode != null &&
-                ` · episode ${jobProgress.current_episode}`}
-              {jobProgress.current_camera && ` · ${jobProgress.current_camera}`}
-            </span>
-          </div>
-          <progress
-            max={jobProgress.total}
-            value={jobProgress.done}
-            aria-label="SAM3 batch annotation progress"
-          />
-        </div>
-      )}
-
-      <div className="object-annotation-runtime">
-        <span className={capabilities?.enabled ? "ready" : "muted"}>
-          {capabilities?.enabled ? (
-            <T>SAM3 is globally enabled</T>
-          ) : (
-            <T>SAM3 is disabled</T>
-          )}
-        </span>
-        {capabilities?.model_revision && (
-          <span>
-            <T>revision</T> {capabilities.model_revision}
-          </span>
-        )}
-        {revision && <code>{revision.slice(0, 16)}</code>}
-      </div>
-
-      {message && <p className="object-annotation-message">{message}</p>}
-      {errorDetail && (
-        <details className="object-annotation-error-detail">
-          <summary>
-            <T>Show worker log</T>
-          </summary>
-          <pre>{errorDetail}</pre>
-        </details>
-      )}
-      {itemErrors.length > 0 && (
-        <details className="object-annotation-error-detail">
-          <summary>
-            {itemErrors.length}{" "}
-            <T>episode/camera pair(s) failed in this batch</T>
-          </summary>
-          <pre>
-            {itemErrors
-              .map(
-                (item) =>
-                  `episode ${item.episode_index} · ${item.camera_key}: ${item.error}`,
-              )
-              .join("\n")}
-          </pre>
-        </details>
-      )}
-      {!trackSummaries.length ? (
-        <p className="object-annotation-empty">
-          <T>No object suggestions for this camera yet.</T>
-        </p>
-      ) : (
-        <>
-          <div className="object-annotation-review-summary">
-            <strong>
-              <T>Tracks in this camera</T>
-            </strong>
-            <span>
-              {reviewCounts.total} <T>track(s)</T>
-            </span>
-            <span className="ready">
-              {reviewCounts.accepted} <T>accepted</T>
-            </span>
-            <span className="muted">
-              {reviewCounts.suggested + reviewCounts.needs_review}{" "}
-              <T>to review</T>
-            </span>
-            <span className="rejected">
-              {reviewCounts.rejected} <T>rejected</T>
-            </span>
-          </div>
-          <div className="object-annotation-list">
-            {trackSummaries.map((summary) => {
-              const object = summary.object;
-              return (
-                <article
-                  className="object-annotation-row"
-                  key={object.object_id + ":" + object.track_id}
+              <label className="object-annotation-prompt">
+                <span>
+                  <T>Text prompts (comma, semicolon or newline separated)</T>
+                </span>
+                <input
+                  value={promptText}
+                  onChange={(event) => setPromptText(event.target.value)}
+                  placeholder={t("cup, plate, gripper")}
+                  disabled={busy}
+                />
+              </label>
+              <div className="object-annotation-presets">
+                <select
+                  value={selectedPresetName}
+                  onChange={(event) => {
+                    setSelectedPresetName(event.target.value);
+                    if (event.target.value) applyPreset(event.target.value);
+                  }}
+                  disabled={busy || !presets.length}
                 >
+                  <option value="">{t("Load prompt preset…")}</option>
+                  {presets.map((preset) => (
+                    <option key={preset.name} value={preset.name}>
+                      {preset.name}
+                    </option>
+                  ))}
+                </select>
+                {selectedPresetName && (
                   <button
                     type="button"
-                    className="object-annotation-main"
-                    onClick={() => seek(object.timestamp)}
-                    title="Jump to first frame"
+                    onClick={() => void deletePreset(selectedPresetName)}
+                    disabled={busy}
+                    title={t("Delete this preset")}
                   >
-                    <span className="object-track-id">#{object.track_id}</span>
-                    <span className="object-concept">{object.concept}</span>
-                    <span className={statusColor[object.status]}>
-                      <T>{statusLabel(object.status)}</T>
-                    </span>
-                    <span className="object-score">
-                      {(summary.meanScore * 100).toFixed(0)}% <T>mean</T>
-                    </span>
-                    <span className="object-frame">
-                      f{summary.startFrame}–{summary.endFrame} ·{" "}
-                      {summary.frameCount} <T>frames</T>
-                    </span>
+                    ×
                   </button>
-                  <div className="object-annotation-actions">
-                    <button
-                      type="button"
-                      onClick={() => void edit(object, "accept")}
-                      disabled={busy}
-                    >
-                      <T>Accept</T>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void edit(object, "reject")}
-                      disabled={busy}
-                    >
-                      <T>Reject</T>
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
+                )}
+                <input
+                  value={presetNameDraft}
+                  onChange={(event) => setPresetNameDraft(event.target.value)}
+                  placeholder={t("Preset name")}
+                  disabled={busy}
+                />
+                <button
+                  type="button"
+                  onClick={() => void saveCurrentAsPreset()}
+                  disabled={
+                    busy || !presetNameDraft.trim() || !promptText.trim()
+                  }
+                >
+                  <T>Save preset</T>
+                </button>
+              </div>
+            </div>
           </div>
-        </>
-      )}
-    </section>
+
+          <div className="object-annotation-step">
+            <div className="object-annotation-step-head">
+              <span className="object-annotation-step-number">02</span>
+              <div>
+                <strong>
+                  <T>Choose annotation scope</T>
+                </strong>
+                <span>
+                  <T>
+                    Each episode/camera pair is processed independently so
+                    native frame indices stay aligned.
+                  </T>
+                </span>
+              </div>
+            </div>
+            <div className="object-annotation-batch">
+              <div className="object-annotation-batch-row">
+                <label>
+                  <span>
+                    <T>Annotation scope</T>
+                  </span>
+                  <select
+                    value={scope.kind}
+                    onChange={(event) => {
+                      const kind = event.target
+                        .value as AnnotationScope["kind"];
+                      if (kind === "all") setScope({ kind: "all" });
+                      else if (kind === "task")
+                        setScope({
+                          kind: "task",
+                          task: taskIndex?.tasks[0] ?? "",
+                        });
+                      else
+                        setScope({
+                          kind: "range",
+                          from: episodeId,
+                          to: episodeId,
+                        });
+                    }}
+                    disabled={busy}
+                  >
+                    <option value="range">{t("Episode range")}</option>
+                    {!!taskIndex?.tasks.length && (
+                      <option value="task">{t("By task")}</option>
+                    )}
+                    <option value="all">{t("All episodes")}</option>
+                  </select>
+                </label>
+                {scope.kind === "range" && (
+                  <div className="object-annotation-range">
+                    <label>
+                      <span>
+                        <T>From</T>
+                      </span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={scope.from}
+                        onChange={(event) =>
+                          setScope({
+                            kind: "range",
+                            from: Number(event.target.value),
+                            to: scope.to,
+                          })
+                        }
+                        disabled={busy}
+                        aria-label={t("First episode")}
+                      />
+                    </label>
+                    <span className="object-annotation-range-dash">–</span>
+                    <label>
+                      <span>
+                        <T>To</T>
+                      </span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={scope.to}
+                        onChange={(event) =>
+                          setScope({
+                            kind: "range",
+                            from: scope.from,
+                            to: Number(event.target.value),
+                          })
+                        }
+                        disabled={busy}
+                        aria-label={t("Last episode")}
+                      />
+                    </label>
+                  </div>
+                )}
+                {scope.kind === "task" && (
+                  <label className="object-annotation-task-select">
+                    <span>
+                      <T>Task</T>
+                    </span>
+                    <select
+                      value={scope.task}
+                      onChange={(event) =>
+                        setScope({ kind: "task", task: event.target.value })
+                      }
+                      disabled={busy}
+                    >
+                      {(taskIndex?.tasks ?? []).map((task) => (
+                        <option key={task} value={task}>
+                          {task}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <span className="object-annotation-scope-count">
+                  {scopeEpisodes.length} <T>episode(s) selected</T>
+                </span>
+              </div>
+              {cameraKeys.length > 1 && (
+                <div className="object-annotation-camera-checks">
+                  <span>
+                    <T>Run on cameras</T>
+                  </span>
+                  {cameraKeys.map((key) => (
+                    <label key={key} className="object-annotation-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={runCameras.has(key)}
+                        onChange={() => toggleRunCamera(key)}
+                        disabled={busy}
+                      />
+                      {key}
+                    </label>
+                  ))}
+                </div>
+              )}
+              <div className="object-annotation-selection-summary">
+                <span>
+                  {scopeEpisodes.length} <T>episode(s) selected</T>
+                </span>
+                <span>·</span>
+                <span>
+                  {selectedCameras.length} <T>camera(s) selected</T>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="object-annotation-runbar">
+            <div className="object-annotation-plan-state">
+              <span className={planState === "ready" ? "ready" : "muted"}>
+                {planState === "checking" ? (
+                  <T>Validating plan…</T>
+                ) : planState === "ready" ? (
+                  <T>Plan validated</T>
+                ) : (
+                  <T>Plan not validated</T>
+                )}
+              </span>
+              {planId && <code>{planId.slice(0, 12)}</code>}
+              {!runtimeReady && (
+                <small>
+                  <T>Complete Hub access, worker and checkpoint setup above.</T>
+                </small>
+              )}
+            </div>
+            {busy && jobId ? (
+              <button
+                type="button"
+                className="object-annotation-run"
+                onClick={() => void cancelRun()}
+              >
+                <T>Cancel</T>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="object-annotation-run sam3"
+                onClick={() => void runSam3Annotation()}
+                disabled={
+                  busy ||
+                  !selectedCameras.length ||
+                  !scopeEpisodes.length ||
+                  !promptValues.length ||
+                  !runtimeReady
+                }
+                title={t(
+                  "Uses the configured CUDA worker and 1038lab/sam3 checkpoint",
+                )}
+              >
+                <T>Run SAM3 annotation</T>
+              </button>
+            )}
+          </div>
+
+          {busy && jobProgress && (
+            <div className="object-annotation-progress">
+              <div className="object-annotation-progress-label">
+                <span>
+                  <T>Annotating batch</T>
+                </span>
+                <span>
+                  {jobProgress.done}/{jobProgress.total}
+                  {jobProgress.current_episode != null &&
+                    " · " + t("episode") + " " + jobProgress.current_episode}
+                  {jobProgress.current_camera &&
+                    ` · ${jobProgress.current_camera}`}
+                </span>
+              </div>
+              <progress
+                max={jobProgress.total}
+                value={jobProgress.done}
+                aria-label={t("SAM3 batch annotation progress")}
+              />
+            </div>
+          )}
+
+          <div className="object-annotation-runtime">
+            <span className={capabilities?.enabled ? "ready" : "muted"}>
+              {capabilities?.enabled ? (
+                <T>SAM3 is globally enabled</T>
+              ) : (
+                <T>SAM3 is disabled</T>
+              )}
+            </span>
+            {capabilities?.model_revision && (
+              <span>
+                <T>revision</T> {capabilities.model_revision}
+              </span>
+            )}
+            {revision && <code>{revision.slice(0, 16)}</code>}
+          </div>
+
+          {message && (
+            <p className="object-annotation-message">
+              <T>{message}</T>
+            </p>
+          )}
+          {errorDetail && (
+            <details className="object-annotation-error-detail">
+              <summary>
+                <T>Show worker log</T>
+              </summary>
+              <pre>{errorDetail}</pre>
+            </details>
+          )}
+          {itemErrors.length > 0 && (
+            <details className="object-annotation-error-detail">
+              <summary>
+                {itemErrors.length}{" "}
+                <T>episode/camera pair(s) failed in this batch</T>
+              </summary>
+              <pre>
+                {itemErrors
+                  .map(
+                    (item) =>
+                      `episode ${item.episode_index} · ${item.camera_key}: ${item.error}`,
+                  )
+                  .join("\n")}
+              </pre>
+            </details>
+          )}
+          {!trackSummaries.length ? (
+            <p className="object-annotation-empty">
+              <T>No object suggestions for this camera yet.</T>
+            </p>
+          ) : (
+            <>
+              <div className="object-annotation-review-summary">
+                <strong>
+                  <T>Tracks in this camera</T>
+                </strong>
+                <span>
+                  {reviewCounts.total} <T>track(s)</T>
+                </span>
+                <span className="ready">
+                  {reviewCounts.accepted} <T>accepted</T>
+                </span>
+                <span className="muted">
+                  {reviewCounts.suggested + reviewCounts.needs_review}{" "}
+                  <T>to review</T>
+                </span>
+                <span className="rejected">
+                  {reviewCounts.rejected} <T>rejected</T>
+                </span>
+              </div>
+              <div className="object-annotation-list">
+                {trackSummaries.map((summary) => {
+                  const object = summary.object;
+                  return (
+                    <article
+                      className="object-annotation-row"
+                      key={object.object_id + ":" + object.track_id}
+                    >
+                      <button
+                        type="button"
+                        className="object-annotation-main"
+                        onClick={() => seek(object.timestamp)}
+                        title={t("Jump to first frame")}
+                      >
+                        <span className="object-track-id">
+                          #{object.track_id}
+                        </span>
+                        <span className="object-concept">{object.concept}</span>
+                        <span className={statusColor[object.status]}>
+                          <T>{statusLabel(object.status)}</T>
+                        </span>
+                        <span className="object-score">
+                          {(summary.meanScore * 100).toFixed(0)}% <T>mean</T>
+                        </span>
+                        <span className="object-frame">
+                          f{summary.startFrame}–{summary.endFrame} ·{" "}
+                          {summary.frameCount} <T>frames</T>
+                        </span>
+                      </button>
+                      <div className="object-annotation-actions">
+                        <button
+                          type="button"
+                          onClick={() => void edit(object, "accept")}
+                          disabled={busy}
+                        >
+                          <T>Accept</T>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void edit(object, "reject")}
+                          disabled={busy}
+                        >
+                          <T>Reject</T>
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </section>
+      }
+    </T>
   );
 }

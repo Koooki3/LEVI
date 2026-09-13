@@ -1,6 +1,10 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
 import { T } from "@/components/levi-locale";
+import {
+  readBrowserStorage,
+  writeBrowserStorage,
+} from "@/utils/browserStorage";
 
 import React, {
   createContext,
@@ -15,7 +19,7 @@ const STORAGE_KEY = "levi-flags:";
 
 function saveToStorage(s: Set<number>, repoId: string) {
   try {
-    localStorage.setItem(STORAGE_KEY + repoId, JSON.stringify([...s]));
+    writeBrowserStorage("local", STORAGE_KEY + repoId, JSON.stringify([...s]));
   } catch {
     /* ignore */
   }
@@ -57,7 +61,7 @@ export const FlaggedEpisodesProvider: React.FC<{
     const hydrate = async () => {
       let ids: number[] = [];
       try {
-        const raw = localStorage.getItem(STORAGE_KEY + repoId);
+        const raw = readBrowserStorage("local", STORAGE_KEY + repoId);
         if (raw) ids = JSON.parse(raw);
         else {
           const response = await fetch(
