@@ -11,6 +11,8 @@ import {
   getDatasetVersionAndInfo,
   buildVersionedUrl,
   getDatasetStats,
+  isDatasetV3,
+  normalizeDatasetVersion,
 } from "@/utils/versionUtils";
 import { PADDING, CHART_CONFIG, EXCLUDED_COLUMNS } from "@/utils/constants";
 import {
@@ -23,6 +25,7 @@ import {
   buildV3EpisodesMetadataPath,
 } from "@/utils/stringFormatting";
 import { bigIntToNumber } from "@/utils/typeGuards";
+import { extractLanguageInstructions } from "@/utils/languageInstructions";
 import {
   isGrayscaleShape,
   depthColormapRange,
@@ -132,6 +135,7 @@ type EpisodeMetadataV3 = {
   video_to_timestamp: number;
   length: number;
   tasks?: string[];
+  task_index?: number;
   [key: string]: string | number | string[] | undefined;
 };
 
@@ -258,12 +262,35 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+const CHART_NUMERIC_DTYPES = new Set([
+  "float16",
+  "float32",
+  "float64",
+  "int8",
+  "int16",
+  "int32",
+  "int64",
+  "uint8",
+  "uint16",
+  "uint32",
+  "uint64",
+  "bool",
+  "boolean",
+]);
+
+function isChartNumericDType(dtype: unknown): boolean {
+  return (
+    typeof dtype === "string" && CHART_NUMERIC_DTYPES.has(dtype.toLowerCase())
+  );
+}
+
 function toFiniteNumber(value: unknown): number | null {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null;
   }
   if (typeof value === "bigint") {
-    return Number(value);
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
   }
   if (typeof value === "string" && value.trim().length > 0) {
     const parsed = Number(value);
@@ -397,7 +424,26 @@ export async function getEpisodeData(
     console.timeEnd(`[perf] getDatasetVersionAndInfo`);
     const info = rawInfo as unknown as DatasetMetadata;
 
-    if (info.video_path === null) {
+    const normalizedVersion = normalizeDatasetVersion(version);
+    if (!normalizedVersion)
+      throw new Error("Unsupported dataset version: " + version);
+    if (
+      !Number.isInteger(info.total_episodes) ||
+      episodeId < 0 ||
+      episodeId >= info.total_episodes
+    ) {
+      throw new Error("Episode " + episodeId + " is outside the dataset range");
+    }
+    if (!Number.isFinite(info.fps) || info.fps <= 0) {
+      throw new Error("Dataset metadata has an invalid FPS");
+    }
+    const hasVideoFeature = Object.values(info.features).some(
+      (feature) => feature.dtype === "video",
+    );
+    if (
+      !hasVideoFeature ||
+      (!isDatasetV3(normalizedVersion) && info.video_path === null)
+    ) {
       throw new Error(
         "Only videos datasets are supported in this visualizer.\nPlease use Rerun visualizer for images datasets.",
       );
@@ -417,7 +463,7 @@ export async function getEpisodeData(
 
     console.time(`[perf] getEpisodeData (${version})`);
     const [result, progressBuilder, stats] = await Promise.all([
-      version.startsWith("v3.")
+      isDatasetV3(normalizedVersion)
         ? getEpisodeDataV3(repoId, version, info, episodeId)
         : getEpisodeDataV2(repoId, version, info, episodeId),
       loadEpisodeProgressGroup(repoId, version, episodeId),
@@ -494,7 +540,7 @@ export async function getAdjacentEpisodesVideoInfo(
         try {
           let videosInfo: VideoInfo[] = [];
 
-          if (version.startsWith("v3.")) {
+          if (isDatasetV3(version)) {
             const episodeMetadata = await loadEpisodeMetadataV3Simple(
               repoId,
               version,
@@ -553,6 +599,9 @@ async function getEpisodeDataV2(
   info: DatasetMetadata,
   episodeId: number,
 ): Promise<EpisodeData> {
+  if (!info.data_path) {
+    throw new Error("v2 dataset metadata is missing data_path");
+  }
   const chunkSize = Math.max(1, info.chunks_size || 1000);
   const episode_chunk = Math.floor(episodeId / chunkSize);
 
@@ -571,14 +620,19 @@ async function getEpisodeDataV2(
   // Generate list of episodes
   const episodes =
     process.env.EPISODES === undefined
-      ? Array.from(
-          { length: datasetInfo.total_episodes },
-          // episode id starts from 0
-          (_, i) => i,
-        )
-      : process.env.EPISODES.split(/\s+/)
-          .map((x) => parseInt(x.trim(), 10))
-          .filter((x) => !isNaN(x));
+      ? Array.from({ length: datasetInfo.total_episodes }, (_, i) => i)
+      : [
+          ...new Set(
+            process.env.EPISODES.split(/\s+/)
+              .map((value) => Number(value.trim()))
+              .filter(
+                (value) =>
+                  Number.isInteger(value) &&
+                  value >= 0 &&
+                  value < datasetInfo.total_episodes,
+              ),
+          ),
+        ].sort((a, b) => a - b);
 
   // Videos information
   const videosInfo =
@@ -607,7 +661,7 @@ async function getEpisodeDataV2(
   const columnNames = Object.entries(info.features)
     .filter(
       ([, value]) =>
-        ["float32", "int32"].includes(value.dtype) && value.shape.length === 1,
+        isChartNumericDType(value.dtype) && value.shape.length === 1,
     )
     .map(([key, { shape }]) => ({ key, length: shape[0] }));
 
@@ -669,75 +723,38 @@ async function getEpisodeDataV2(
   // to exact frames. v3.1 language atoms are broadcast in `language_persistent`
   // and fired per-row in `language_events`; extract them so annotations written
   // onto v2.x datasets render in the panel/timeline just like on v3.0.
-  const frameTimestamps = allData
-    .map((r) => {
-      const t = r.timestamp;
-      return typeof t === "number"
-        ? t
-        : typeof t === "bigint"
-          ? Number(t)
-          : Number.NaN;
-    })
-    .filter((t) => Number.isFinite(t))
-    .sort((a, b) => a - b);
+  const frameTimestamps = [
+    ...new Set(
+      allData
+        .map((row) => toFiniteNumber(row.timestamp))
+        .filter((value): value is number => value !== null),
+    ),
+  ].sort((a, b) => a - b);
   const languageAtoms = extractLanguageAtoms(allData);
 
   // Extract task from language_instruction fields, task field, or tasks.jsonl
   let task: string | undefined;
 
   if (allData.length > 0) {
-    const firstRow = allData[0];
-    const languageInstructions: string[] = [];
-
-    if (typeof firstRow.language_instruction === "string") {
-      languageInstructions.push(firstRow.language_instruction);
-    }
-
-    let instructionNum = 2;
-    while (
-      typeof firstRow[`language_instruction_${instructionNum}`] === "string"
-    ) {
-      languageInstructions.push(
-        firstRow[`language_instruction_${instructionNum}`] as string,
-      );
-      instructionNum++;
-    }
-
-    if (languageInstructions.length > 0) {
-      task = languageInstructions.join("\n");
-    }
+    task = extractLanguageInstructions(allData, [
+      0,
+      Math.floor(allData.length / 2),
+      allData.length - 1,
+    ]);
   }
 
-  if (!task && allData.length > 0 && typeof allData[0].task === "string") {
-    task = allData[0].task;
+  if (!task && allData.length > 0) {
+    const tasks = normalizeTaskList(allData[0].task ?? allData[0].tasks);
+    if (tasks.length > 0) task = tasks.join("\n");
   }
 
   if (!task && allData.length > 0) {
     try {
-      const tasksUrl = buildVersionedUrl(repoId, version, "meta/tasks.jsonl");
-      const tasksResponse = await fetch(tasksUrl, { cache: "no-store" });
-
-      if (tasksResponse.ok) {
-        const tasksText = await tasksResponse.text();
-        const tasksData = tasksText
-          .split("\n")
-          .filter((line) => line.trim())
-          .map((line) => JSON.parse(line));
-
-        if (tasksData && tasksData.length > 0) {
-          const taskIndex = allData[0].task_index;
-          const taskIndexNum =
-            typeof taskIndex === "bigint" ? Number(taskIndex) : taskIndex;
-          const taskData = tasksData.find(
-            (t: Record<string, unknown>) => t.task_index === taskIndexNum,
-          );
-          if (taskData) {
-            task = taskData.task;
-          }
-        }
-      }
+      const definitions = await loadTaskDefinitions(repoId, version);
+      const taskIndex = taskIndexNumber(allData[0].task_index);
+      if (taskIndex !== null) task = definitions.byIndex.get(taskIndex);
     } catch {
-      // No tasks metadata file for this v2.x dataset
+      // Task metadata is optional for legacy datasets.
     }
   }
 
@@ -749,15 +766,19 @@ async function getEpisodeDataV2(
 
   const chartData = allData.map((row) => {
     const obj: Record<string, number> = {};
-    obj["timestamp"] = Number(row.timestamp);
+    obj["timestamp"] = toFiniteNumber(row.timestamp) ?? 0;
     for (const col of columns) {
       const rawVal = row[col.key];
       if (Array.isArray(rawVal)) {
         rawVal.forEach((v: unknown, i: number) => {
-          if (i < col.value.length) obj[col.value[i]] = Number(v);
+          const value = toFiniteNumber(v);
+          if (i < col.value.length && value !== null) {
+            obj[col.value[i]] = value;
+          }
         });
       } else if (rawVal !== undefined) {
-        obj[col.value[0]] = Number(rawVal);
+        const value = toFiniteNumber(rawVal);
+        if (value !== null) obj[col.value[0]] = value;
       }
     }
     return obj;
@@ -767,8 +788,7 @@ async function getEpisodeDataV2(
   // List of columns that are ignored (e.g., 2D or 3D data)
   const ignoredColumns = Object.entries(info.features)
     .filter(
-      ([, value]) =>
-        ["float32", "int32"].includes(value.dtype) && value.shape.length > 1,
+      ([, value]) => isChartNumericDType(value.dtype) && value.shape.length > 1,
     )
     .map(([key]) => key);
 
@@ -911,6 +931,7 @@ async function loadEpisodeDataV3(
             const dtype = feature.dtype.toLowerCase();
             const isNumericOrBool = [
               "float32",
+              "float16",
               "float64",
               "int8",
               "int16",
@@ -945,10 +966,7 @@ async function loadEpisodeDataV3(
       });
       const startIndexValue = indexPreview[0]?.index;
       if (startIndexValue !== undefined && startIndexValue !== null) {
-        const fileStartIndex =
-          typeof startIndexValue === "bigint"
-            ? Number(startIndexValue)
-            : Number(startIndexValue);
+        const fileStartIndex = toFiniteNumber(startIndexValue) ?? 0;
         const localFromIndex = Math.max(0, fromIndex - fileStartIndex);
         const localToIndex = Math.max(localFromIndex, toIndex - fileStartIndex);
         episodeRows = await readParquetAsObjects(parquetFile, v3DataColumns, {
@@ -967,17 +985,13 @@ async function loadEpisodeDataV3(
 
     // Extract frame timestamps from the *full* (non-sampled) row set so the
     // annotations editor can snap to the exact frame the user is on.
-    const frameTimestamps = episodeRows
-      .map((r) => {
-        const t = r.timestamp;
-        return typeof t === "number"
-          ? t
-          : typeof t === "bigint"
-            ? Number(t)
-            : Number.NaN;
-      })
-      .filter((t) => Number.isFinite(t))
-      .sort((a, b) => a - b);
+    const frameTimestamps = [
+      ...new Set(
+        episodeRows
+          .map((row) => toFiniteNumber(row.timestamp))
+          .filter((value): value is number => value !== null),
+      ),
+    ].sort((a, b) => a - b);
 
     const episodeData = evenlySampleArray(episodeRows, MAX_EPISODE_POINTS);
 
@@ -1005,69 +1019,31 @@ async function loadEpisodeDataV3(
 
     // Fall back to per-frame language_instruction fields
     if (!task && episodeData.length > 0) {
-      const languageInstructions: string[] = [];
-
-      const extractInstructions = (row: Record<string, unknown>) => {
-        if (typeof row.language_instruction === "string") {
-          languageInstructions.push(row.language_instruction);
-        }
-        let num = 2;
-        while (typeof row[`language_instruction_${num}`] === "string") {
-          languageInstructions.push(
-            row[`language_instruction_${num}`] as string,
-          );
-          num++;
-        }
-      };
-
-      extractInstructions(episodeData[0]);
-
-      // If no instructions in first row, check middle and last rows
-      if (languageInstructions.length === 0 && episodeData.length > 1) {
-        for (const idx of [
-          Math.floor(episodeData.length / 2),
-          episodeData.length - 1,
-        ]) {
-          extractInstructions(episodeData[idx]);
-          if (languageInstructions.length > 0) break;
-        }
-      }
-
-      if (languageInstructions.length > 0) {
-        task = languageInstructions.join("\n");
-      }
+      task = extractLanguageInstructions(episodeRows, [
+        0,
+        Math.floor(episodeRows.length / 2),
+        episodeRows.length - 1,
+      ]);
     }
 
-    // Fall back to tasks metadata parquet
+    // Fall back to the authoritative task_index in the frame data. The task
+    // table may be Parquet or JSONL and its rows are not guaranteed to be
+    // ordered by task_index.
     if (!task && episodeData.length > 0) {
       try {
-        const tasksUrl = buildVersionedUrl(
-          repoId,
-          version,
-          "meta/tasks.parquet",
-        );
-        const tasksArrayBuffer = await fetchParquetFile(tasksUrl);
-        const tasksData = await readParquetAsObjects(tasksArrayBuffer, []);
-
-        if (tasksData.length > 0) {
-          const taskIndexNum = bigIntToNumber(episodeData[0].task_index, -1);
-
-          if (taskIndexNum >= 0) {
-            // lerobot writes tasks.parquet from a DataFrame with the task
-            // string as the (possibly named) index and `task_index` as a
-            // column. Row order is not guaranteed to match task_index, so
-            // match on the column value.
-            const taskData = tasksData.find(
-              (row) => bigIntToNumber(row.task_index, -1) === taskIndexNum,
-            );
-            if (taskData) {
-              const rawTask = taskData.__index_level_0__ ?? taskData.task;
-              task = typeof rawTask === "string" ? rawTask : undefined;
-            }
-          }
+        const definitions = await loadTaskDefinitions(repoId, version);
+        const indexes = new Set<number>();
+        for (const row of episodeData) {
+          const index = taskIndexNumber(row.task_index);
+          if (index !== null) indexes.add(index);
         }
+        const names = [...indexes]
+          .sort((a, b) => a - b)
+          .map((index) => definitions.byIndex.get(index))
+          .filter((name): name is string => !!name);
+        if (names.length > 0) task = [...new Set(names)].join("\n");
       } catch {
-        // Could not load tasks metadata
+        // Could not load optional task metadata.
       }
     }
 
@@ -1119,12 +1095,7 @@ export function extractLanguageAtoms(
     const style =
       typeof r.style === "string" ? (r.style as LanguageAtom["style"]) : null;
     const content = typeof r.content === "string" ? r.content : null;
-    const timestamp =
-      typeof r.timestamp === "number"
-        ? r.timestamp
-        : typeof r.timestamp === "bigint"
-          ? Number(r.timestamp)
-          : (fallbackTs ?? 0);
+    const timestamp = toFiniteNumber(r.timestamp) ?? fallbackTs ?? 0;
     const tool_calls = Array.isArray(r.tool_calls)
       ? (r.tool_calls as LanguageAtom["tool_calls"])
       : null;
@@ -1155,12 +1126,7 @@ export function extractLanguageAtoms(
   for (const row of episodeRows) {
     const list = row["language_events"];
     if (!Array.isArray(list) || list.length === 0) continue;
-    const rowTs =
-      typeof row.timestamp === "number"
-        ? row.timestamp
-        : typeof row.timestamp === "bigint"
-          ? Number(row.timestamp)
-          : 0;
+    const rowTs = toFiniteNumber(row.timestamp) ?? 0;
     for (const raw of list) {
       const atom = coerce(raw, rowTs);
       if (atom) atoms.push(atom);
@@ -1218,7 +1184,7 @@ function processEpisodeDataForCharts(
   const columns: ColumnDef[] = Object.entries(info.features)
     .filter(
       ([key, value]) =>
-        ["float32", "int32"].includes(value.dtype) &&
+        isChartNumericDType(value.dtype) &&
         value.shape.length === 1 &&
         !excludedColumns.includes(key),
     )
@@ -1267,12 +1233,12 @@ function processEpisodeDataForCharts(
             allKeys.push(seriesName);
           }
         });
-      } else if (typeof value === "number" && !isNaN(value)) {
-        // For scalar numeric values
-        allKeys.push(featureName);
-      } else if (typeof value === "bigint") {
-        // For BigInt values
-        allKeys.push(featureName);
+      } else {
+        const numericValue = toFiniteNumber(value);
+        if (numericValue !== null || typeof value === "boolean") {
+          // For scalar numeric values
+          allKeys.push(featureName);
+        }
       }
     });
 
@@ -1322,16 +1288,20 @@ function processEpisodeDataForCharts(
           value.forEach((val, idx) => {
             if (idx < columnDef.value.length) {
               const seriesName = columnDef.value[idx];
-              obj[seriesName] = typeof val === "number" ? val : Number(val);
+              const numericValue = toFiniteNumber(val);
+              if (numericValue !== null) {
+                obj[seriesName] = numericValue;
+              }
             }
           });
-        } else if (typeof value === "number" && !isNaN(value)) {
-          obj[featureName] = value;
-        } else if (typeof value === "bigint") {
-          obj[featureName] = Number(value);
-        } else if (typeof value === "boolean") {
-          // Convert boolean to number for charts
-          obj[featureName] = value ? 1 : 0;
+        } else {
+          const numericValue = toFiniteNumber(value);
+          if (numericValue !== null) {
+            obj[featureName] = numericValue;
+          } else if (typeof value === "boolean") {
+            // Convert boolean to number for charts
+            obj[featureName] = value ? 1 : 0;
+          }
         }
       });
     }
@@ -1344,7 +1314,7 @@ function processEpisodeDataForCharts(
     ...Object.entries(info.features)
       .filter(
         ([, value]) =>
-          ["float32", "int32"].includes(value.dtype) && value.shape.length > 2, // Only ignore 3D+ data
+          isChartNumericDType(value.dtype) && value.shape.length > 2, // Only ignore 3D+ data
       )
       .map(([key]) => key),
     ...excludedColumns, // Also include the manually excluded columns
@@ -1392,9 +1362,7 @@ function extractVideoInfoV3WithSegmentation(
       segmentEnd: number;
 
     const toNum = (v: string | number | string[] | undefined): number => {
-      if (typeof v === "string") return parseFloat(v) || 0;
-      if (typeof v === "number") return v;
-      return 0;
+      return toFiniteNumber(v) ?? 0;
     };
 
     if (cameraSpecificKeys.length > 0) {
@@ -1482,126 +1450,118 @@ async function loadEpisodeMetadataV3Simple(
 ): Promise<EpisodeMetadataV3> {
   for await (const rows of iterateEpisodeMetadataFilesV3(repoId, version)) {
     for (const row of rows) {
-      if (parseEpisodeRowSimple(row).episode_index === episodeId) {
-        return parseEpisodeRowSimple(row);
+      const parsed = parseEpisodeRowSimple(row);
+      if (parsed.episode_index === episodeId) {
+        return parsed;
       }
     }
   }
   throw new Error(`Episode ${episodeId} not found in metadata`);
 }
 
-// Simple parser for episode row - focuses on key fields for episodes
+// Simple parser for episode row - focuses on key fields for episodes.
+// Parquet readers may return numbers, BigInts or numeric strings depending on
+// the physical schema, so every index/timestamp goes through one converter.
 function parseEpisodeRowSimple(
   row: Record<string, unknown>,
 ): EpisodeMetadataV3 {
-  // v3.0 uses named keys in the episode metadata
-  if (row && typeof row === "object") {
-    // Check if this is v3.0 format with named keys
-    if ("episode_index" in row) {
-      // v3.0 format - use named keys
-      // Convert BigInt values to numbers
-      const toBigIntSafe = (value: unknown): number => {
-        if (typeof value === "bigint") return Number(value);
-        if (typeof value === "number") return value;
-        if (typeof value === "string") return parseInt(value) || 0;
-        return 0;
-      };
+  const numberOr = (value: unknown, fallback = 0): number => {
+    const converted = toFiniteNumber(value);
+    return converted === null ? fallback : converted;
+  };
+  const integerOr = (value: unknown, fallback = 0): number =>
+    Math.trunc(numberOr(value, fallback));
 
-      const toNumSafe = (value: unknown): number => {
-        if (typeof value === "number") return value;
-        if (typeof value === "bigint") return Number(value);
-        if (typeof value === "string") return parseFloat(value) || 0;
-        return 0;
-      };
-
-      // Handle video metadata - look for video-specific keys
-      const videoKeys = Object.keys(row).filter(
-        (key) => key.includes("videos/") && key.includes("/chunk_index"),
-      );
-      let videoChunkIndex = 0,
-        videoFileIndex = 0,
-        videoFromTs = 0,
-        videoToTs = 30;
-      if (videoKeys.length > 0) {
-        const videoBaseName = videoKeys[0].replace("/chunk_index", "");
-        videoChunkIndex = toBigIntSafe(row[`${videoBaseName}/chunk_index`]);
-        videoFileIndex = toBigIntSafe(row[`${videoBaseName}/file_index`]);
-        videoFromTs = toNumSafe(row[`${videoBaseName}/from_timestamp`]);
-        videoToTs = toNumSafe(row[`${videoBaseName}/to_timestamp`]) || 30;
-      }
-
-      // lerobot writes episode.tasks as list[str] (v3.0 multi-task support).
-      const rawTasks = row["tasks"];
-      const tasks = Array.isArray(rawTasks)
-        ? rawTasks.filter((t): t is string => typeof t === "string")
-        : undefined;
-
-      const episodeData: EpisodeMetadataV3 = {
-        episode_index: toBigIntSafe(row["episode_index"]),
-        data_chunk_index: toBigIntSafe(row["data/chunk_index"]),
-        data_file_index: toBigIntSafe(row["data/file_index"]),
-        dataset_from_index: toBigIntSafe(row["dataset_from_index"]),
-        dataset_to_index: toBigIntSafe(row["dataset_to_index"]),
-        length: toBigIntSafe(row["length"]),
-        video_chunk_index: videoChunkIndex,
-        video_file_index: videoFileIndex,
-        video_from_timestamp: videoFromTs,
-        video_to_timestamp: videoToTs,
-        ...(tasks && tasks.length > 0 ? { tasks } : {}),
-      };
-
-      // Store per-camera metadata for extractVideoInfoV3WithSegmentation
-      Object.keys(row).forEach((key) => {
-        if (key.startsWith("videos/")) {
-          const val = row[key];
-          episodeData[key] =
-            typeof val === "bigint"
-              ? Number(val)
-              : typeof val === "number" || typeof val === "string"
-                ? val
-                : 0;
-        }
-      });
-
-      return episodeData as EpisodeMetadataV3;
-    } else {
-      // Fallback to numeric keys for compatibility
-      const toNum = (v: unknown, fallback = 0): number =>
-        typeof v === "number"
-          ? v
-          : typeof v === "bigint"
-            ? Number(v)
-            : fallback;
-      return {
-        episode_index: toNum(row["0"]),
-        data_chunk_index: toNum(row["1"]),
-        data_file_index: toNum(row["2"]),
-        dataset_from_index: toNum(row["3"]),
-        dataset_to_index: toNum(row["4"]),
-        video_chunk_index: toNum(row["5"]),
-        video_file_index: toNum(row["6"]),
-        video_from_timestamp: toNum(row["7"]),
-        video_to_timestamp: toNum(row["8"], 30),
-        length: toNum(row["9"], 30),
-      };
-    }
+  if (!row || typeof row !== "object") {
+    return {
+      episode_index: 0,
+      data_chunk_index: 0,
+      data_file_index: 0,
+      dataset_from_index: 0,
+      dataset_to_index: 0,
+      video_chunk_index: 0,
+      video_file_index: 0,
+      video_from_timestamp: 0,
+      video_to_timestamp: 30,
+      length: 30,
+    };
   }
 
-  // Fallback if parsing fails
-  const fallback = {
-    episode_index: 0,
-    data_chunk_index: 0,
-    data_file_index: 0,
-    dataset_from_index: 0,
-    dataset_to_index: 0,
-    video_chunk_index: 0,
-    video_file_index: 0,
-    video_from_timestamp: 0,
-    video_to_timestamp: 30,
-    length: 30,
+  const named = "episode_index" in row;
+  const episodeIndex = named
+    ? integerOr(row.episode_index)
+    : integerOr(row["0"]);
+  const dataChunkIndex = named
+    ? integerOr(row["data/chunk_index"] ?? row.data_chunk_index)
+    : integerOr(row["1"]);
+  const dataFileIndex = named
+    ? integerOr(row["data/file_index"] ?? row.data_file_index)
+    : integerOr(row["2"]);
+  const fromIndex = named
+    ? integerOr(row.dataset_from_index)
+    : integerOr(row["3"]);
+  const toIndex = named ? integerOr(row.dataset_to_index) : integerOr(row["4"]);
+  const length = named
+    ? integerOr(row.length, Math.max(0, toIndex - fromIndex))
+    : integerOr(row["9"], 30);
+
+  const videoKeys = Object.keys(row).filter(
+    (key) => key.includes("videos/") && key.includes("/chunk_index"),
+  );
+  let videoChunkIndex = named
+    ? integerOr(row.video_chunk_index)
+    : integerOr(row["5"]);
+  let videoFileIndex = named
+    ? integerOr(row.video_file_index)
+    : integerOr(row["6"]);
+  let videoFromTs = named
+    ? numberOr(row.video_from_timestamp)
+    : numberOr(row["7"]);
+  let videoToTs = named
+    ? numberOr(row.video_to_timestamp, 30)
+    : numberOr(row["8"], 30);
+  if (videoKeys.length > 0) {
+    const base = videoKeys[0].replace("/chunk_index", "");
+    videoChunkIndex = integerOr(row[`${base}/chunk_index`], videoChunkIndex);
+    videoFileIndex = integerOr(row[`${base}/file_index`], videoFileIndex);
+    videoFromTs = numberOr(row[`${base}/from_timestamp`], videoFromTs);
+    videoToTs = numberOr(row[`${base}/to_timestamp`], videoToTs);
+  }
+
+  const tasks = [
+    ...normalizeTaskList(row.tasks),
+    ...normalizeTaskList(row.task),
+  ].filter((task, index, values) => values.indexOf(task) === index);
+  const taskIndex = toFiniteNumber(row.task_index);
+  const episodeData: EpisodeMetadataV3 = {
+    episode_index: episodeIndex,
+    data_chunk_index: dataChunkIndex,
+    data_file_index: dataFileIndex,
+    dataset_from_index: fromIndex,
+    dataset_to_index: toIndex,
+    length,
+    video_chunk_index: videoChunkIndex,
+    video_file_index: videoFileIndex,
+    video_from_timestamp: videoFromTs,
+    video_to_timestamp: videoToTs,
+    ...(tasks.length > 0 ? { tasks } : {}),
+    ...(taskIndex !== null && Number.isInteger(taskIndex)
+      ? { task_index: taskIndex }
+      : {}),
   };
 
-  return fallback;
+  // Preserve per-camera metadata needed for segmented video playback.
+  for (const key of Object.keys(row)) {
+    if (!key.startsWith("videos/")) continue;
+    const value = row[key];
+    episodeData[key] =
+      typeof value === "bigint"
+        ? Number(value)
+        : typeof value === "number" || typeof value === "string"
+          ? value
+          : 0;
+  }
+  return episodeData;
 }
 
 // ─── Stats computation ───────────────────────────────────────────
@@ -1652,13 +1612,373 @@ export function computeColumnMinMax(
 
 function normalizeTaskList(raw: unknown): string[] {
   if (typeof raw === "string") {
-    return raw.trim().length > 0 ? [raw] : [];
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    // Some Parquet writers serialize list[str] as a JSON string.
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        return normalizeTaskList(JSON.parse(trimmed));
+      } catch {
+        // Treat malformed JSON as the literal task text below.
+      }
+    }
+    return [trimmed];
   }
   if (!Array.isArray(raw)) return [];
-  return raw.filter(
-    (task): task is string =>
-      typeof task === "string" && task.trim().length > 0,
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    for (const task of normalizeTaskList(item)) {
+      if (seen.has(task)) continue;
+      seen.add(task);
+      result.push(task);
+    }
+  }
+  return result;
+}
+
+function taskIndexNumber(value: unknown): number | null {
+  const number = toFiniteNumber(value);
+  return number !== null && Number.isInteger(number) && number >= 0
+    ? number
+    : null;
+}
+
+function normalizeTaskIndices(raw: unknown): number[] {
+  const values = Array.isArray(raw) ? raw : [raw];
+  const result: number[] = [];
+  const seen = new Set<number>();
+  for (const value of values) {
+    const index = taskIndexNumber(value);
+    if (index === null || seen.has(index)) continue;
+    seen.add(index);
+    result.push(index);
+  }
+  return result;
+}
+
+function taskTextFromRow(row: Record<string, unknown>): string | null {
+  for (const key of [
+    "task",
+    "tasks",
+    "task_name",
+    "__index_level_0__",
+    "name",
+    "instruction",
+    "language_instruction",
+  ]) {
+    const task = normalizeTaskList(row[key])[0];
+    if (task) return task;
+  }
+  return null;
+}
+
+type TaskDefinition = { taskIndex: number | null; task: string; order: number };
+type TaskDefinitions = {
+  ordered: string[];
+  byIndex: Map<number, string>;
+};
+
+/** Build a stable task list without assuming Parquet row order is task_index. */
+export function buildTaskDefinitions(
+  rows: Record<string, unknown>[],
+): TaskDefinitions {
+  const definitions: TaskDefinition[] = [];
+  rows.forEach((row, order) => {
+    const task = taskTextFromRow(row);
+    if (!task) return;
+    definitions.push({
+      taskIndex: taskIndexNumber(row.task_index),
+      task,
+      order,
+    });
+  });
+
+  const hasExplicitIndices = definitions.some(
+    (definition) => definition.taskIndex !== null,
   );
+  if (!hasExplicitIndices) {
+    // Old tasks tables used the dataframe index as the task index. Preserve
+    // that compatibility only when no authoritative task_index column exists.
+    definitions.forEach((definition, index) => {
+      definition.taskIndex = index;
+    });
+  }
+
+  const byIndex = new Map<number, string>();
+  for (const definition of [...definitions].sort(
+    (a, b) =>
+      (a.taskIndex ?? Number.MAX_SAFE_INTEGER) -
+        (b.taskIndex ?? Number.MAX_SAFE_INTEGER) || a.order - b.order,
+  )) {
+    if (definition.taskIndex !== null && !byIndex.has(definition.taskIndex)) {
+      byIndex.set(definition.taskIndex, definition.task);
+    }
+  }
+
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  for (const definition of [...definitions].sort(
+    (a, b) =>
+      (a.taskIndex ?? Number.MAX_SAFE_INTEGER) -
+        (b.taskIndex ?? Number.MAX_SAFE_INTEGER) || a.order - b.order,
+  )) {
+    if (seen.has(definition.task)) continue;
+    seen.add(definition.task);
+    ordered.push(definition.task);
+  }
+  return { ordered, byIndex };
+}
+
+function parseJsonlRows(text: string): Record<string, unknown>[] {
+  const rows: Record<string, unknown>[] = [];
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const value: unknown = JSON.parse(trimmed);
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        rows.push(value as Record<string, unknown>);
+      }
+    } catch {
+      // A single corrupt line should not hide all valid task definitions.
+    }
+  }
+  return rows;
+}
+
+async function loadTaskDefinitions(
+  repoId: string,
+  version: string,
+): Promise<TaskDefinitions> {
+  const normalizedVersion = normalizeDatasetVersion(version);
+  if (!normalizedVersion) return { ordered: [], byIndex: new Map() };
+  const v3 = isDatasetV3(normalizedVersion);
+  const paths = v3
+    ? ["meta/tasks.parquet", "meta/tasks.jsonl"]
+    : ["meta/tasks.jsonl", "meta/tasks.parquet"];
+  for (const path of paths) {
+    try {
+      let rows: Record<string, unknown>[];
+      if (path.endsWith(".parquet")) {
+        const buffer = await fetchParquetFile(
+          buildVersionedUrl(repoId, normalizedVersion, path),
+        );
+        rows = await readParquetAsObjects(buffer, []);
+      } else {
+        const response = await fetch(
+          buildVersionedUrl(repoId, normalizedVersion, path),
+          {
+            cache: "no-store",
+            headers: authHeaders(),
+          },
+        );
+        if (!response.ok) continue;
+        rows = parseJsonlRows(await response.text());
+      }
+      const definitions = buildTaskDefinitions(rows);
+      if (definitions.ordered.length > 0) return definitions;
+    } catch {
+      // Try the alternate metadata representation.
+    }
+  }
+  return { ordered: [], byIndex: new Map() };
+}
+
+function addEpisodeTasks(
+  episodeTasks: Record<number, string[]>,
+  episodeIndex: number,
+  tasks: string[],
+): void {
+  if (
+    !Number.isInteger(episodeIndex) ||
+    episodeIndex < 0 ||
+    tasks.length === 0
+  ) {
+    return;
+  }
+  const current = episodeTasks[episodeIndex] ?? [];
+  const seen = new Set(current);
+  for (const task of tasks) {
+    if (seen.has(task)) continue;
+    seen.add(task);
+    current.push(task);
+  }
+  episodeTasks[episodeIndex] = current;
+}
+
+function tasksFromDataRows(
+  rows: Record<string, unknown>[],
+  definitions: TaskDefinitions,
+  episodeIndex?: number,
+): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const add = (task: string | null) => {
+    if (!task || seen.has(task)) return;
+    seen.add(task);
+    names.push(task);
+  };
+  for (const row of rows) {
+    if (
+      episodeIndex !== undefined &&
+      taskIndexNumber(row.episode_index) !== null &&
+      taskIndexNumber(row.episode_index) !== episodeIndex
+    ) {
+      continue;
+    }
+    for (const task of normalizeTaskList(row.task ?? row.tasks)) add(task);
+    const index = taskIndexNumber(row.task_index);
+    if (index !== null) add(definitions.byIndex.get(index) ?? null);
+  }
+  return names;
+}
+
+async function readTaskRowsFromParquet(
+  url: string,
+): Promise<Record<string, unknown>[]> {
+  const buffer = await fetchParquetFile(url);
+  // hyparquet rejects projections containing a missing column. Try the
+  // smallest useful projections first so datasets without an optional
+  // episode_index/task column still expose their authoritative task_index.
+  const projections = [
+    ["index", "episode_index", "task_index", "task"],
+    ["index", "task_index"],
+    ["episode_index", "task_index"],
+    ["task_index"],
+    ["index", "episode_index", "task"],
+    ["index", "task"],
+    ["episode_index", "task"],
+    ["task"],
+  ];
+  for (const columns of projections) {
+    try {
+      return await readParquetAsObjects(buffer, columns);
+    } catch {
+      // Try a projection with fewer optional columns.
+    }
+  }
+  return [];
+}
+
+async function loadV3FrameTaskMappings(
+  repoId: string,
+  version: string,
+  refs: Array<{ episode: EpisodeMetadataV3; hasTasks: boolean }>,
+  definitions: TaskDefinitions,
+  episodeTasks: Record<number, string[]>,
+): Promise<void> {
+  const unresolved = refs.filter(
+    ({ episode, hasTasks }) =>
+      !hasTasks &&
+      (episode.dataset_to_index > episode.dataset_from_index ||
+        definitions.ordered.length > 0),
+  );
+  if (unresolved.length === 0) return;
+
+  const byFile = new Map<
+    string,
+    Array<{ episode: EpisodeMetadataV3; hasTasks: boolean }>
+  >();
+  for (const ref of unresolved) {
+    const key = `${ref.episode.data_chunk_index}-${ref.episode.data_file_index}`;
+    const bucket = byFile.get(key) ?? [];
+    bucket.push(ref);
+    byFile.set(key, bucket);
+  }
+
+  const fileResults = await mapWithConcurrency(
+    [...byFile.values()],
+    Math.min(CROSS_EPISODE_FETCH_CONCURRENCY, 8),
+    async (fileRefs) => {
+      const first = fileRefs[0].episode;
+      const path = buildV3DataPath(
+        first.data_chunk_index,
+        first.data_file_index,
+      );
+      try {
+        const rows = await readTaskRowsFromParquet(
+          buildVersionedUrl(repoId, version, path),
+        );
+        return fileRefs.map((ref) => {
+          const episode = ref.episode;
+          const from = episode.dataset_from_index;
+          const to = episode.dataset_to_index;
+          const indexedRows = rows.filter((row) => {
+            const rowEpisode = taskIndexNumber(row.episode_index);
+            if (rowEpisode !== null)
+              return rowEpisode === episode.episode_index;
+            const rowIndex = toFiniteNumber(row.index);
+            return rowIndex !== null && rowIndex >= from && rowIndex < to;
+          });
+          const selected =
+            indexedRows.length > 0
+              ? indexedRows
+              : rows.slice(
+                  Math.max(0, from - (toFiniteNumber(rows[0]?.index) ?? from)),
+                  Math.max(0, to - (toFiniteNumber(rows[0]?.index) ?? from)),
+                );
+          return {
+            episodeIndex: episode.episode_index,
+            tasks: tasksFromDataRows(
+              selected,
+              definitions,
+              episode.episode_index,
+            ),
+          };
+        });
+      } catch {
+        return [];
+      }
+    },
+  );
+  for (const mappings of fileResults) {
+    for (const mapping of mappings) {
+      addEpisodeTasks(episodeTasks, mapping.episodeIndex, mapping.tasks);
+    }
+  }
+}
+
+async function loadV2FrameTaskMappings(
+  repoId: string,
+  version: string,
+  info: DatasetMetadata | undefined,
+  episodeIds: number[],
+  definitions: TaskDefinitions,
+  episodeTasks: Record<number, string[]>,
+): Promise<void> {
+  if (!info?.data_path || episodeIds.length === 0) return;
+  const chunkSize = Math.max(1, toFiniteNumber(info.chunks_size) ?? 1000);
+  const paths = episodeIds.map((episodeIndex) => {
+    const episodeChunk = Math.floor(episodeIndex / chunkSize);
+    return {
+      episodeIndex,
+      path: formatStringWithVars(info.data_path!, {
+        episode_chunk: episodeChunk.toString().padStart(3, "0"),
+        episode_index: episodeIndex.toString().padStart(6, "0"),
+      }),
+    };
+  });
+  const results = await mapWithConcurrency(
+    paths,
+    Math.min(CROSS_EPISODE_FETCH_CONCURRENCY, 8),
+    async ({ episodeIndex, path }) => {
+      try {
+        const rows = await readTaskRowsFromParquet(
+          buildVersionedUrl(repoId, version, path),
+        );
+        return {
+          episodeIndex,
+          tasks: tasksFromDataRows(rows, definitions, episodeIndex),
+        };
+      } catch {
+        return { episodeIndex, tasks: [] };
+      }
+    },
+  );
+  for (const result of results) {
+    addEpisodeTasks(episodeTasks, result.episodeIndex, result.tasks);
+  }
 }
 
 const taskIndexCache = new Map<
@@ -1666,88 +1986,143 @@ const taskIndexCache = new Map<
   { data: DatasetTaskIndex | null; expiry: number }
 >();
 const TASK_INDEX_TTL_MS = 5 * 60 * 1000;
+const MAX_TASK_INDEX_CACHE_ENTRIES = 64;
+function pruneTaskIndexCache(now: number): void {
+  for (const [key, value] of taskIndexCache) {
+    if (now >= value.expiry) taskIndexCache.delete(key);
+  }
+  while (taskIndexCache.size > MAX_TASK_INDEX_CACHE_ENTRIES) {
+    const oldestKey = taskIndexCache.keys().next().value;
+    if (!oldestKey) break;
+    taskIndexCache.delete(oldestKey);
+  }
+}
+function clearTaskIndexCache(): void {
+  taskIndexCache.clear();
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("levi:hf-auth-changed", clearTaskIndexCache);
+}
 
 /**
  * Build the dataset-wide task ↔ episode mapping.
  *
- * v2.x reads `meta/tasks.jsonl` (for `task_index` ordering) plus the `tasks`
- * field on every `meta/episodes.jsonl` row; v3.x walks the episode metadata
- * parquet chunks, whose rows carry `tasks` as `list[str]`.
- *
- * Returns null when the dataset records no task strings at all — callers treat
- * that as "task filtering unavailable" rather than as an error.
+ * The mapping accepts all LeRobot layouts: v2 JSONL metadata, v3 episode
+ * metadata with a `tasks` list, and v3 datasets (for example Libero) where the
+ * only authoritative association is each frame's `task_index`. Task tables are
+ * matched by their task_index column; physical row order is used only when the
+ * column is absent. The raw dataset remains read-only.
  */
 export async function loadDatasetTaskIndex(
   repoId: string,
   version: string,
+  info?: DatasetMetadata,
 ): Promise<DatasetTaskIndex | null> {
-  const cacheKey = `${repoId}@${version}`;
+  const normalizedVersion = normalizeDatasetVersion(version);
+  if (!normalizedVersion) return null;
+  const now = Date.now();
+  pruneTaskIndexCache(now);
+  const cacheKey = `${repoId}@${normalizedVersion}@${info?.total_episodes ?? "unknown"}@${info?.data_path ?? ""}`;
   const cached = taskIndexCache.get(cacheKey);
-  if (cached && Date.now() < cached.expiry) return cached.data;
+  if (cached && now < cached.expiry) {
+    taskIndexCache.delete(cacheKey);
+    taskIndexCache.set(cacheKey, cached);
+    return cached.data;
+  }
 
   let data: DatasetTaskIndex | null = null;
   try {
+    const definitions = await loadTaskDefinitions(repoId, normalizedVersion);
     const episodeTasks: Record<number, string[]> = {};
-    const ordered: string[] = [];
-    const seen = new Set<string>();
+    const ordered = [...definitions.ordered];
+    const seen = new Set(ordered);
     const addTask = (task: string) => {
-      if (seen.has(task)) return;
-      seen.add(task);
-      ordered.push(task);
+      if (!seen.has(task)) {
+        seen.add(task);
+        ordered.push(task);
+      }
     };
 
-    if (version.startsWith("v2.")) {
-      // tasks.jsonl first so the dropdown follows task_index order; episodes
-      // that reference a task missing from it still get appended below.
-      const tasksResponse = await fetch(
-        buildVersionedUrl(repoId, version, "meta/tasks.jsonl"),
-        { headers: authHeaders() },
-      );
-      if (tasksResponse.ok) {
-        const declared = (await tasksResponse.text())
-          .split("\n")
-          .filter((line) => line.trim().length > 0)
-          .map(
-            (line) =>
-              JSON.parse(line) as { task_index?: number; task?: unknown },
-          )
-          .filter((row) => typeof row.task === "string")
-          .sort((a, b) => (a.task_index ?? 0) - (b.task_index ?? 0));
-        for (const row of declared) addTask(row.task as string);
-      }
-
-      const episodesResponse = await fetch(
-        buildVersionedUrl(repoId, version, "meta/episodes.jsonl"),
-        { headers: authHeaders() },
-      );
-      if (episodesResponse.ok) {
-        for (const line of (await episodesResponse.text()).split("\n")) {
-          if (!line.trim()) continue;
-          const row = JSON.parse(line) as {
-            episode_index?: unknown;
-            tasks?: unknown;
-            task?: unknown;
-          };
-          const index = row.episode_index;
-          if (typeof index !== "number" || !Number.isInteger(index)) continue;
-          const tasks = normalizeTaskList(row.tasks ?? row.task);
-          if (tasks.length === 0) continue;
-          episodeTasks[index] = tasks;
-          tasks.forEach(addTask);
-        }
-      }
-    } else {
-      for await (const rows of iterateEpisodeMetadataFilesV3(repoId, version)) {
+    if (isDatasetV3(normalizedVersion)) {
+      const refs: Array<{ episode: EpisodeMetadataV3; hasTasks: boolean }> = [];
+      for await (const rows of iterateEpisodeMetadataFilesV3(
+        repoId,
+        normalizedVersion,
+      )) {
         for (const row of rows) {
-          const parsed = parseEpisodeRowSimple(row);
-          const tasks = normalizeTaskList(parsed.tasks);
-          if (tasks.length === 0) continue;
-          episodeTasks[parsed.episode_index] = tasks;
+          const episode = parseEpisodeRowSimple(row);
+          if (
+            !Number.isInteger(episode.episode_index) ||
+            episode.episode_index < 0
+          ) {
+            continue;
+          }
+          const explicit = normalizeTaskList(episode.tasks);
+          const indexed = normalizeTaskIndices(episode.task_index);
+          const fromIndices = indexed
+            .map((index) => definitions.byIndex.get(index))
+            .filter((task): task is string => !!task);
+          const tasks = [...new Set([...explicit, ...fromIndices])];
+          addEpisodeTasks(episodeTasks, episode.episode_index, tasks);
           tasks.forEach(addTask);
+          refs.push({ episode, hasTasks: tasks.length > 0 });
         }
       }
+      await loadV3FrameTaskMappings(
+        repoId,
+        normalizedVersion,
+        refs,
+        definitions,
+        episodeTasks,
+      );
+    } else {
+      const episodesResponse = await fetch(
+        buildVersionedUrl(repoId, normalizedVersion, "meta/episodes.jsonl"),
+        { headers: authHeaders(), cache: "no-store" },
+      );
+      const episodeRows = episodesResponse.ok
+        ? parseJsonlRows(await episodesResponse.text())
+        : [];
+      const episodeIds: number[] = [];
+      for (const row of episodeRows) {
+        const episodeIndex = taskIndexNumber(row.episode_index);
+        if (episodeIndex === null) continue;
+        episodeIds.push(episodeIndex);
+        const explicit = [
+          ...normalizeTaskList(row.tasks),
+          ...normalizeTaskList(row.task),
+        ].filter((task, index, values) => values.indexOf(task) === index);
+        const indexed = normalizeTaskIndices(
+          row.task_index ?? row.task_indices ?? row.tasks_index,
+        );
+        const fromIndices = indexed
+          .map((index) => definitions.byIndex.get(index))
+          .filter((task): task is string => !!task);
+        const tasks = [...new Set([...explicit, ...fromIndices])];
+        addEpisodeTasks(episodeTasks, episodeIndex, tasks);
+        tasks.forEach(addTask);
+      }
+      const ids =
+        episodeIds.length > 0
+          ? [...new Set(episodeIds)]
+          : Array.from(
+              { length: Math.max(0, info?.total_episodes ?? 0) },
+              (_, i) => i,
+            );
+      const unresolved = ids.filter(
+        (episodeIndex) => !episodeTasks[episodeIndex]?.length,
+      );
+      await loadV2FrameTaskMappings(
+        repoId,
+        normalizedVersion,
+        info,
+        unresolved,
+        definitions,
+        episodeTasks,
+      );
     }
 
+    for (const tasks of Object.values(episodeTasks)) tasks.forEach(addTask);
     data = ordered.length > 0 ? { tasks: ordered, episodeTasks } : null;
   } catch {
     data = null;
@@ -1757,6 +2132,7 @@ export async function loadDatasetTaskIndex(
     data,
     expiry: Date.now() + TASK_INDEX_TTL_MS,
   });
+  pruneTaskIndexCache(Date.now());
   return data;
 }
 
@@ -1769,36 +2145,43 @@ export async function loadAllEpisodeLengthsV3(
   version: string,
   fps: number,
 ): Promise<EpisodeLengthStats | null> {
+  const normalizedVersion = normalizeDatasetVersion(version);
+  if (!normalizedVersion) return null;
   try {
     const allEpisodes: { index: number; length: number }[] = [];
+    const seenEpisodes = new Set<number>();
     if (!Number.isFinite(fps) || fps <= 0) return null;
-    const append = (index: number, length: number) => {
+    const append = (indexValue: unknown, lengthValue: unknown) => {
+      const index = taskIndexNumber(indexValue);
+      const lengthNumber = toFiniteNumber(lengthValue);
       if (
-        Number.isInteger(index) &&
-        index >= 0 &&
-        Number.isInteger(length) &&
-        length >= 0
-      )
-        allEpisodes.push({ index, length });
+        index === null ||
+        lengthNumber === null ||
+        !Number.isInteger(lengthNumber) ||
+        lengthNumber < 0 ||
+        seenEpisodes.has(index)
+      ) {
+        return;
+      }
+      seenEpisodes.add(index);
+      allEpisodes.push({ index, length: lengthNumber });
     };
-    if (version.startsWith("v2.")) {
+    if (!isDatasetV3(normalizedVersion)) {
       const response = await fetch(
-        buildVersionedUrl(repoId, version, "meta/episodes.jsonl"),
+        buildVersionedUrl(repoId, normalizedVersion, "meta/episodes.jsonl"),
         {
           headers: authHeaders(),
         },
       );
       if (!response.ok) return null;
-      for (const line of (await response.text()).split("\n")) {
-        if (!line.trim()) continue;
-        const row = JSON.parse(line) as {
-          episode_index: number;
-          length: number;
-        };
+      for (const row of parseJsonlRows(await response.text())) {
         append(row.episode_index, row.length);
       }
     } else {
-      for await (const rows of iterateEpisodeMetadataFilesV3(repoId, version)) {
+      for await (const rows of iterateEpisodeMetadataFilesV3(
+        repoId,
+        normalizedVersion,
+      )) {
         for (const row of rows) {
           const parsed = parseEpisodeRowSimple(row);
           append(parsed.episode_index, parsed.length);
@@ -1822,7 +2205,8 @@ export async function loadAllEpisodeLengthsV3(
 
     const lengths = withSeconds.map((e) => e.lengthSeconds);
     const sum = lengths.reduce((a, b) => a + b, 0);
-    const mean = Math.round((sum / lengths.length) * 100) / 100;
+    const exactMean = sum / lengths.length;
+    const mean = Math.round(exactMean * 100) / 100;
 
     const sorted = [...lengths].sort((a, b) => a - b);
     const mid = Math.floor(sorted.length / 2);
@@ -1832,7 +2216,8 @@ export async function loadAllEpisodeLengthsV3(
         : sorted[mid];
 
     const variance =
-      lengths.reduce((acc, l) => acc + (l - mean) ** 2, 0) / lengths.length;
+      lengths.reduce((acc, l) => acc + (l - exactMean) ** 2, 0) /
+      lengths.length;
     const std = Math.round(Math.sqrt(variance) * 100) / 100;
 
     // Build histogram
@@ -1912,6 +2297,8 @@ export async function loadAllEpisodeFrameInfo(
   version: string,
   info: DatasetMetadata,
 ): Promise<EpisodeFramesData> {
+  const normalizedVersion = normalizeDatasetVersion(version);
+  if (!normalizedVersion) return { cameras: [], framesByCamera: {} };
   const videoFeatures = Object.entries(info.features).filter(
     ([, f]) => f.dtype === "video",
   );
@@ -1925,32 +2312,40 @@ export async function loadAllEpisodeFrameInfo(
     MAX_FRAMES_OVERVIEW_EPISODES,
   );
 
-  if (version.startsWith("v3.")) {
-    for await (const rows of iterateEpisodeMetadataFilesV3(repoId, version)) {
+  if (isDatasetV3(normalizedVersion)) {
+    for await (const rows of iterateEpisodeMetadataFilesV3(
+      repoId,
+      normalizedVersion,
+    )) {
       for (const row of rows) {
-        const epIdx = Number(row["episode_index"] ?? 0);
+        const epIdx = taskIndexNumber(row["episode_index"]);
+        if (epIdx === null || epIdx >= info.total_episodes) continue;
         if (sampledEpisodeSet && !sampledEpisodeSet.has(epIdx)) continue;
         for (const cam of cameras) {
-          const cIdx = Number(
-            row[`videos/${cam}/chunk_index`] ?? row["video_chunk_index"] ?? 0,
-          );
-          const fIdx = Number(
-            row[`videos/${cam}/file_index`] ?? row["video_file_index"] ?? 0,
-          );
-          const fromTs = Number(
-            row[`videos/${cam}/from_timestamp`] ??
-              row["video_from_timestamp"] ??
-              0,
-          );
-          const toTs = Number(
-            row[`videos/${cam}/to_timestamp`] ??
-              row["video_to_timestamp"] ??
-              30,
-          );
+          if (framesByCamera[cam].some((frame) => frame.episodeIndex === epIdx))
+            continue;
+          const cIdx =
+            taskIndexNumber(
+              row[`videos/${cam}/chunk_index`] ?? row["video_chunk_index"],
+            ) ?? 0;
+          const fIdx =
+            taskIndexNumber(
+              row[`videos/${cam}/file_index`] ?? row["video_file_index"],
+            ) ?? 0;
+          const fromTs =
+            toFiniteNumber(
+              row[`videos/${cam}/from_timestamp`] ??
+                row["video_from_timestamp"],
+            ) ?? 0;
+          const toTs =
+            toFiniteNumber(
+              row[`videos/${cam}/to_timestamp`] ?? row["video_to_timestamp"],
+            ) ?? 30;
+          if (toTs < fromTs) continue;
           const videoPath = `videos/${cam}/chunk-${cIdx.toString().padStart(3, "0")}/file-${fIdx.toString().padStart(3, "0")}.mp4`;
           framesByCamera[cam].push({
             episodeIndex: epIdx,
-            videoUrl: buildVersionedUrl(repoId, version, videoPath),
+            videoUrl: buildVersionedUrl(repoId, normalizedVersion, videoPath),
             firstFrameTime: fromTs,
             lastFrameTime: Math.max(0, toTs - 0.05),
           });
@@ -1961,6 +2356,7 @@ export async function loadAllEpisodeFrameInfo(
   }
 
   // v2.x — construct URLs from template
+  if (!info.video_path) return { cameras, framesByCamera };
   for (let i = 0; i < info.total_episodes; i++) {
     if (sampledEpisodeSet && !sampledEpisodeSet.has(i)) continue;
     const chunk = Math.floor(i / (info.chunks_size || 1000));
@@ -2089,10 +2485,24 @@ export async function loadCrossEpisodeActionVariance(
     onProgress,
   } = options;
   // `null` means "every episode in scope"; the ceiling is only a runaway guard.
+  const normalizedVersion = normalizeDatasetVersion(version);
+  if (!normalizedVersion) return null;
+  if (!Number.isFinite(fps) || fps <= 0) return null;
+  if (!isDatasetV3(normalizedVersion) && !info.data_path) return null;
+  const requestedEpisodeBudget =
+    maxEpisodes === null
+      ? CROSS_EPISODE_SAMPLE_CEILING
+      : typeof maxEpisodes === "number" && Number.isFinite(maxEpisodes)
+        ? Math.trunc(maxEpisodes)
+        : DEFAULT_CROSS_EPISODE_SAMPLE;
   const episodeBudget = Math.min(
-    maxEpisodes ?? CROSS_EPISODE_SAMPLE_CEILING,
+    Math.max(2, requestedEpisodeBudget),
     CROSS_EPISODE_SAMPLE_CEILING,
   );
+  const timeBinCount =
+    typeof numTimeBins === "number" && Number.isFinite(numTimeBins)
+      ? Math.max(2, Math.trunc(numTimeBins))
+      : 50;
   const actionEntry = Object.entries(info.features).find(
     ([key, f]) => key === "action" && f.shape.length === 1,
   );
@@ -2136,11 +2546,24 @@ export async function loadCrossEpisodeActionVariance(
     to: number;
   };
   const allEps: EpMeta[] = [];
+  const seenEpisodeIndices = new Set<number>();
 
-  if (version.startsWith("v3.")) {
-    for await (const rows of iterateEpisodeMetadataFilesV3(repoId, version)) {
+  if (isDatasetV3(normalizedVersion)) {
+    for await (const rows of iterateEpisodeMetadataFilesV3(
+      repoId,
+      normalizedVersion,
+    )) {
       for (const row of rows) {
         const parsed = parseEpisodeRowSimple(row);
+        if (
+          parsed.episode_index < 0 ||
+          parsed.episode_index >= info.total_episodes ||
+          parsed.dataset_to_index <= parsed.dataset_from_index ||
+          seenEpisodeIndices.has(parsed.episode_index)
+        ) {
+          continue;
+        }
+        seenEpisodeIndices.add(parsed.episode_index);
         allEps.push({
           index: parsed.episode_index,
           chunkIdx: parsed.data_chunk_index,
@@ -2156,6 +2579,7 @@ export async function loadCrossEpisodeActionVariance(
     }
   }
 
+  allEps.sort((a, b) => a.index - b.index);
   if (allEps.length < 2) {
     console.warn(
       `[cross-ep] Only ${allEps.length} episode(s) found in metadata, need ≥2`,
@@ -2166,7 +2590,9 @@ export async function loadCrossEpisodeActionVariance(
   // Narrow to the requested scope before sampling, so a range or a task gets
   // the full episode budget instead of whatever survives a dataset-wide sample.
   const taskIndex =
-    scope.kind === "task" ? await loadDatasetTaskIndex(repoId, version) : null;
+    scope.kind === "task"
+      ? await loadDatasetTaskIndex(repoId, normalizedVersion, info)
+      : null;
   const rangeLo =
     scope.kind === "range" ? Math.min(scope.from, scope.to) : -Infinity;
   const rangeHi =
@@ -2203,7 +2629,7 @@ export async function loadCrossEpisodeActionVariance(
   const episodeActions: { index: number; actions: number[][] }[] = [];
   const episodeStates: (number[][] | null)[] = [];
 
-  if (version.startsWith("v3.")) {
+  if (isDatasetV3(normalizedVersion)) {
     const byFile = new Map<string, EpMeta[]>();
     for (const ep of sampled) {
       const key = `${ep.chunkIdx}-${ep.fileIdx}`;
@@ -2221,7 +2647,7 @@ export async function loadCrossEpisodeActionVariance(
         const fileEpStates: (number[][] | null)[] = [];
         try {
           const buf = await fetchParquetFile(
-            buildVersionedUrl(repoId, version, dataPath),
+            buildVersionedUrl(repoId, normalizedVersion, dataPath),
           );
           const rows = await readParquetAsObjects(
             buf,
@@ -2229,7 +2655,7 @@ export async function loadCrossEpisodeActionVariance(
           );
           const fileStart =
             rows.length > 0 && rows[0].index !== undefined
-              ? Number(rows[0].index)
+              ? (toFiniteNumber(rows[0].index) ?? 0)
               : 0;
 
           for (const ep of eps) {
@@ -2239,10 +2665,12 @@ export async function loadCrossEpisodeActionVariance(
             const states: number[][] = [];
             for (let r = localFrom; r < localTo; r++) {
               const raw = rows[r]?.[actionKey];
-              if (Array.isArray(raw)) actions.push(raw.map(Number));
+              if (Array.isArray(raw))
+                actions.push(raw.map((value) => toFiniteNumber(value) ?? 0));
               if (stateKey) {
                 const sRaw = rows[r]?.[stateKey];
-                if (Array.isArray(sRaw)) states.push(sRaw.map(Number));
+                if (Array.isArray(sRaw))
+                  states.push(sRaw.map((value) => toFiniteNumber(value) ?? 0));
               }
             }
             if (actions.length > 0) {
@@ -2283,7 +2711,7 @@ export async function loadCrossEpisodeActionVariance(
         });
         try {
           const buf = await fetchParquetFile(
-            buildVersionedUrl(repoId, version, dataPath),
+            buildVersionedUrl(repoId, normalizedVersion, dataPath),
           );
           const rows = await readParquetAsObjects(
             buf,
@@ -2294,18 +2722,19 @@ export async function loadCrossEpisodeActionVariance(
           for (const row of rows) {
             const raw = row[actionKey];
             if (Array.isArray(raw)) {
-              actions.push(raw.map(Number));
+              actions.push(raw.map((value) => toFiniteNumber(value) ?? 0));
             } else {
               const vec: number[] = [];
               for (let d = 0; d < actionDim; d++) {
                 const v = row[`${actionKey}.${d}`] ?? row[d];
-                vec.push(typeof v === "number" ? v : Number(v) || 0);
+                vec.push(toFiniteNumber(v) ?? 0);
               }
               actions.push(vec);
             }
             if (stateKey) {
               const sRaw = row[stateKey];
-              if (Array.isArray(sRaw)) states.push(sRaw.map(Number));
+              if (Array.isArray(sRaw))
+                states.push(sRaw.map((value) => toFiniteNumber(value) ?? 0));
             }
           }
           if (actions.length > 0) {
@@ -2352,22 +2781,22 @@ export async function loadCrossEpisodeActionVariance(
 
   // Resample each episode to numTimeBins and compute variance
   const timeBins = Array.from(
-    { length: numTimeBins },
-    (_, i) => i / (numTimeBins - 1),
+    { length: timeBinCount },
+    (_, i) => i / (timeBinCount - 1),
   );
   const sums = Array.from(
-    { length: numTimeBins },
+    { length: timeBinCount },
     () => new Float64Array(actionDim),
   );
   const sumsSq = Array.from(
-    { length: numTimeBins },
+    { length: timeBinCount },
     () => new Float64Array(actionDim),
   );
-  const counts = new Uint32Array(numTimeBins);
+  const counts = new Uint32Array(timeBinCount);
 
   for (const { actions: epActions } of episodeActions) {
     const T = epActions.length;
-    for (let b = 0; b < numTimeBins; b++) {
+    for (let b = 0; b < timeBinCount; b++) {
       const srcIdx = Math.min(Math.round(timeBins[b] * (T - 1)), T - 1);
       const row = epActions[srcIdx];
       for (let d = 0; d < actionDim; d++) {
@@ -2380,7 +2809,7 @@ export async function loadCrossEpisodeActionVariance(
   }
 
   const variance: number[][] = [];
-  for (let b = 0; b < numTimeBins; b++) {
+  for (let b = 0; b < timeBinCount; b++) {
     const row: number[] = [];
     const n = counts[b];
     for (let d = 0; d < actionDim; d++) {
@@ -2805,14 +3234,25 @@ export async function loadEpisodeFlatChartData(
   info: DatasetMetadata,
   episodeId: number,
 ): Promise<Record<string, number>[]> {
+  const normalizedVersion = normalizeDatasetVersion(version);
+  if (!normalizedVersion) return [];
+  if (!isDatasetV3(normalizedVersion)) {
+    const result = await getEpisodeDataV2(
+      repoId,
+      normalizedVersion,
+      info,
+      episodeId,
+    );
+    return result.flatChartData;
+  }
   const episodeMetadata = await loadEpisodeMetadataV3Simple(
     repoId,
-    version,
+    normalizedVersion,
     episodeId,
   );
   const { flatChartData } = await loadEpisodeDataV3(
     repoId,
-    version,
+    normalizedVersion,
     info,
     episodeMetadata,
   );

@@ -54,8 +54,8 @@
    the graphite theme rather than the browser's own default. */
 .annotations-skin select option,
 .annotations-skin select optgroup {
-  color: var(--fg-1) !important;
-  background-color: #242d20 !important;
+  color: #172018 !important;
+  background-color: #f4f7ed !important;
 }
 .annotations-skin input::placeholder,
 .annotations-skin textarea::placeholder {

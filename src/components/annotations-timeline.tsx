@@ -34,7 +34,13 @@ import { T } from "@/components/levi-locale";
  *   - Hover over any marker → custom tooltip shows the atom's content.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTime } from "../context/time-context";
 import { useAnnotations } from "../context/annotations-context";
 import {
@@ -315,12 +321,15 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
   // ============ Pixel <-> time mapping ============
   // The full-width track band (no label margin) is `trackBandRef`. Convert
   // mouse client.x to a 0..duration timestamp.
-  const trackXToTs = (clientX: number): number => {
-    const r = trackBandRef.current?.getBoundingClientRect();
-    if (!r || !duration) return 0;
-    const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
-    return frac * duration;
-  };
+  const trackXToTs = useCallback(
+    (clientX: number): number => {
+      const r = trackBandRef.current?.getBoundingClientRect();
+      if (!r || !duration) return 0;
+      const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+      return frac * duration;
+    },
+    [duration],
+  );
 
   // ============ Continuous hover time readout ============
   // Attached to every track div (not just markers) so moving the mouse
@@ -533,7 +542,7 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
-  }, [drag, duration, seek, setIsPlaying, snap, updateAtom]);
+  }, [drag, duration, seek, setIsPlaying, snap, trackXToTs, updateAtom]);
 
   // ============ Tooltip helpers ============
   const showTip = (e: React.MouseEvent, meta: string, text: string) => {

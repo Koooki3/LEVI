@@ -7,6 +7,11 @@ import pandas as pd
 import pyarrow.parquet as pq
 from .paths import inside
 
+from .versions import SUPPORTED_DATASET_VERSIONS, normalize_dataset_version
+
+SUPPORTED_VERSIONS = set(SUPPORTED_DATASET_VERSIONS)
+
+
 CHECKS = [
     "metadata",
     "temporal",
@@ -21,10 +26,83 @@ CHECKS = [
 ]
 
 
+def _finite_number(value, fallback=0.0):
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+    return number if np.isfinite(number) else fallback
+
+
+def _task_texts(value):
+    if isinstance(value, str):
+        value = value.strip()
+        return [value] if value else []
+    if isinstance(value, (list, tuple, set)):
+        output = []
+        for item in value:
+            output.extend(_task_texts(item))
+        return output
+    return []
+
+
+def _task_metadata_summary(path):
+    """Return unique task labels and indices from either metadata encoding."""
+    if not path.exists():
+        return set(), set()
+    try:
+        if path.suffix == ".parquet":
+            rows = pq.read_table(path).to_pylist()
+        else:
+            rows = []
+            for line in path.read_text().splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    row = json.loads(line)
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(row, dict):
+                    rows.append(row)
+    except Exception:  # noqa: BLE001
+        return set(), set()
+
+    labels = set()
+    indices = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for key in (
+            "task",
+            "tasks",
+            "task_name",
+            "name",
+            "instruction",
+            "__index_level_0__",
+        ):
+            labels.update(_task_texts(row.get(key)))
+        value = row.get("task_index")
+        if value is not None:
+            try:
+                index = int(value)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if index >= 0:
+                indices.add(index)
+    return labels, indices
+
+
 def diagnose(root: Path, max_episodes=20, checks=None, decode_video=False):
     chosen = checks or CHECKS
     info = json.loads(inside("meta/info.json", root).read_text())
-    fps = float(info.get("fps", 0))
+    fps = _finite_number(info.get("fps", 0))
+    total_episodes = max(0, int(_finite_number(info.get("total_episodes", 0))))
+    total_frames = max(0, int(_finite_number(info.get("total_frames", 0))))
+    total_tasks = max(0, int(_finite_number(info.get("total_tasks", 0))))
+    try:
+        episode_limit = max(0, int(max_episodes or 0))
+    except (TypeError, ValueError, OverflowError):
+        episode_limit = 0
     results = []
     frames = 0
     episodes = {}
@@ -43,22 +121,53 @@ def diagnose(root: Path, max_episodes=20, checks=None, decode_video=False):
             if episode is not None and status in ("warn", "fail"):
                 flagged.add(int(episode))
 
-    version = str(info.get("codebase_version", ""))
+    raw_version = info.get("codebase_version", "")
+    version = normalize_dataset_version(raw_version)
+    display_version = str(raw_version)
     add(
         "metadata",
-        "pass" if version.startswith(("v2.", "v3.")) else "fail",
-        f"codebase_version = {version}",
+        "pass" if version else "fail",
+        f"codebase_version = {display_version}"
+        + (
+            f" (normalized {version})" if version and display_version != version else ""
+        ),
     )
     if fps <= 0:
         add("metadata", "fail", "fps must be positive")
-    task_path = root / (
-        "meta/tasks.parquet" if version.startswith("v3.") else "meta/tasks.jsonl"
-    )
+    task_candidates = [
+        root / "meta/tasks.parquet",
+        root / "meta/tasks.jsonl",
+    ]
+    task_summaries = [
+        (path, *_task_metadata_summary(path))
+        for path in task_candidates
+        if path.exists()
+    ]
+    if task_summaries:
+        task_path, task_labels, task_indices = max(
+            task_summaries,
+            key=lambda item: len(item[1]) or len(item[2]),
+        )
+    else:
+        task_path = task_candidates[0]
+        task_labels, task_indices = set(), set()
+    task_count = len(task_labels) or len(task_indices)
     add(
         "metadata",
-        "pass" if task_path.exists() or not info.get("total_tasks") else "fail",
-        f"Task metadata: {task_path.name}",
+        "pass"
+        if task_path.exists() and (task_count > 0 or total_tasks == 0)
+        else "fail"
+        if total_tasks > 0
+        else "pass",
+        f"Task metadata: {task_path.name}"
+        + (f" ({task_count} unique task(s))" if task_count else ""),
     )
+    if task_path.exists() and total_tasks > 0 and task_count != total_tasks:
+        add(
+            "metadata",
+            "fail",
+            f"Task total: read {task_count}, metadata {total_tasks}",
+        )
     files = sorted((root / "data").rglob("*.parquet"))
     if not files:
         add("metadata", "fail", "No data parquet files")
@@ -73,12 +182,24 @@ def diagnose(root: Path, max_episodes=20, checks=None, decode_video=False):
         if "episode_index" not in data:
             add("features", "fail", f"{path.name}: missing episode_index")
             continue
+        episode_values = pd.to_numeric(data["episode_index"], errors="coerce")
+        invalid_episode = (
+            episode_values.isna()
+            | (~np.isfinite(episode_values.to_numpy(dtype=float)))
+            | (episode_values % 1 != 0)
+            | (episode_values < 0)
+        )
+        if invalid_episode.any():
+            add("features", "fail", f"{path.name}: invalid episode_index values")
+        valid = ~invalid_episode
+        data = data.loc[valid].copy()
+        data["episode_index"] = episode_values.loc[valid].astype("int64")
         for ep, part in data.groupby("episode_index", sort=True):
             ep = int(ep)
-            if max_episodes and ep not in episodes and len(episodes) >= max_episodes:
+            if episode_limit and ep not in episodes and len(episodes) >= episode_limit:
                 continue
             episodes.setdefault(ep, []).append(part)
-        if max_episodes and len(episodes) >= max_episodes:
+        if episode_limit and len(episodes) >= episode_limit:
             # v3 episodes may cross shards: continue scanning to finish selected episodes.
             continue
     for ep, parts in episodes.items():
@@ -97,7 +218,7 @@ def diagnose(root: Path, max_episodes=20, checks=None, decode_video=False):
                 "features", "fail", "Missing columns: " + ", ".join(sorted(missing)), ep
             )
         if "timestamp" in data:
-            ts = data.timestamp.to_numpy(dtype=float)
+            ts = pd.to_numeric(data["timestamp"], errors="coerce").to_numpy(dtype=float)
             delta = np.diff(ts)
             if not np.isfinite(ts).all() or (delta <= 0).any():
                 add(
@@ -115,8 +236,12 @@ def diagnose(root: Path, max_episodes=20, checks=None, decode_video=False):
                 )
         else:
             add("temporal", "fail", "Missing timestamp column", ep)
-        if "frame_index" in data and (np.diff(data.frame_index.to_numpy()) != 1).any():
-            add("temporal", "warn", "Non-consecutive frame indices", ep)
+        if "frame_index" in data:
+            frame_index = pd.to_numeric(data["frame_index"], errors="coerce").to_numpy(
+                dtype=float
+            )
+            if not np.isfinite(frame_index).all() or (np.diff(frame_index) != 1).any():
+                add("temporal", "warn", "Non-consecutive frame indices", ep)
         for key in ("action", "observation.state"):
             if key not in data:
                 continue
@@ -126,7 +251,12 @@ def diagnose(root: Path, max_episodes=20, checks=None, decode_video=False):
                 add("features", "fail", f"{key}: inconsistent numeric shape", ep)
                 continue
             shape = info.get("features", {}).get(key, {}).get("shape")
-            if shape and int(np.prod(shape)) != values.shape[1]:
+            try:
+                expected_size = int(np.prod(shape)) if shape else None
+            except (TypeError, ValueError, OverflowError):
+                expected_size = None
+                add("features", "fail", f"{key}: invalid shape metadata", ep)
+            if expected_size is not None and expected_size != values.shape[1]:
                 add("features", "fail", f"{key}: shape disagrees with metadata", ep)
             if not np.isfinite(values).all():
                 add("distribution", "fail", f"{key}: NaN or infinity", ep)
@@ -177,7 +307,7 @@ def diagnose(root: Path, max_episodes=20, checks=None, decode_video=False):
         videos = [p for p in videos if key in p.parts]
         if not videos:
             add("video", "fail", f"{key}: no local video files")
-        for path in videos[: max_episodes or None]:
+        for path in videos[: episode_limit or None]:
             inside(path, root)
             cap = cv2.VideoCapture(str(path))
             count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -217,26 +347,24 @@ def diagnose(root: Path, max_episodes=20, checks=None, decode_video=False):
             and (value.startswith("/") or ".." in Path(value).parts)
         ):
             add("portability", "fail", f"{key}: non-portable path")
-    complete = len(episodes) == info.get("total_episodes")
-    if complete and frames != info.get("total_frames"):
+    complete = len(episodes) == total_episodes
+    if complete and frames != total_frames:
         add(
             "metadata",
             "fail",
-            f"Frame total: read {frames}, metadata {info.get('total_frames')}",
+            f"Frame total: read {frames}, metadata {total_frames}",
         )
-    if not complete and (
-        not max_episodes or max_episodes >= int(info.get("total_episodes", 0))
-    ):
+    if not complete and (not episode_limit or episode_limit >= total_episodes):
         add(
             "metadata",
             "fail",
-            f"Episode total: read {len(episodes)}, metadata {info.get('total_episodes')}",
+            f"Episode total: read {len(episodes)}, metadata {total_episodes}",
         )
     if not complete:
         add(
             "episodes",
             "skip",
-            f"Sampled {len(episodes)} of {info.get('total_episodes')} episodes",
+            f"Sampled {len(episodes)} of {total_episodes} episodes",
         )
     for check in chosen:
         if not any(r["check"] == check for r in results):
@@ -248,7 +376,7 @@ def diagnose(root: Path, max_episodes=20, checks=None, decode_video=False):
     # results is a JSON report field, not an output directory.
     return {
         "version": 1,
-        "dataset_version": version,
+        "dataset_version": version or display_version,
         "episodes": len(episodes),
         "frames": frames,
         "fps": fps,

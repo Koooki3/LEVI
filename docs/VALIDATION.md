@@ -1,6 +1,26 @@
 # 验证记录 / Validation record
 
-验证日期：2026-09-12。环境：Linux x86_64、Python 3.11.16（独立 uv `.venv`）、Bun 1.3.10、Next.js 15.5.25、Playwright Chromium。参考版本见 [UPSTREAM.md](UPSTREAM.md)。
+验证日期：2026-09-13。环境：Linux x86_64、Python 3.11.16（独立 uv `.venv`）、Bun 1.3.10、Next.js 15.5.25、Playwright Chromium。参考版本见 [UPSTREAM.md](UPSTREAM.md)。
+
+## 0.3.0 独立发行检查 / Standalone release check
+
+This release focused on dataset-version recognition, task counting/filtering, metadata validation, and cache isolation across LeRobot v2.0/v2.1/v3.0/v3.1 layouts. No source dataset or generated workspace output was modified by the validation.
+
+### 自动检查 / Automated checks
+
+| Check | Result |
+| --- | --- |
+| Frontend type checks | Passed |
+| ESLint | 0 errors; 0 warnings |
+| Prettier | Passed |
+| Bun unit tests | **172 passed, 0 failed** across 8 files; 1,797 expect calls |
+| Python / FastAPI tests | **55 passed**; 2 dependency deprecation warnings |
+| `uv run levi check` | Passed |
+| `uv lock --check` | Passed |
+| Production Next.js build | Passed |
+| `git diff --check` | Passed |
+
+The new tests cover canonical version aliases/rejection, string and shuffled task indices, multi-task metadata, v2/v3 task-index mappings, invalid FPS, exact episode-length statistics, finite chart values, language instruction extraction, and scoped Action Insights behavior.
 
 ## 0.2.0 独立发行检查 / Standalone release check
 

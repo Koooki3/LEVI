@@ -45,6 +45,7 @@ Then in another terminal:
 from __future__ import annotations
 
 import hashlib
+import math
 import json
 import logging
 import os
@@ -58,6 +59,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -75,12 +77,31 @@ from levi.annotations.sam3_protocol import (
 from levi.auth import credential_scope, hub_token, token
 from levi.catalog import atomic, local_root, read
 from levi.paths import CACHE, EXPORTS, SAM3_CHECKPOINT_DIR, STATE, inside
+from levi.versions import is_dataset_v2, is_dataset_v3, normalize_dataset_version
 
 logger = logging.getLogger("lerobot-annotate")
 logging.basicConfig(level=logging.INFO)
 
 CACHE_ROOT = CACHE
 EXPORT_ROOT = EXPORTS
+
+
+def _is_v2_version(value: object) -> bool:
+    """Accept both ``v2.1`` and the unprefixed aliases found in old exports."""
+    if not isinstance(value, str):
+        return False
+    return is_dataset_v2(value)
+
+
+def _finite_integer(value: object) -> int | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(number) or not number.is_integer():
+        return None
+    return int(number)
+
 
 # The mirror contains the PyTorch checkpoint layout expected by the pinned
 # official SAM3 adapter. Keep these values configurable for future model
@@ -329,10 +350,7 @@ def _state_key(req: DatasetRef) -> str:
         # Hub permissions affect the resolved dataset. Namespace the in-memory
         # state and sidecar by a one-way token digest so account changes cannot
         # reuse a previous account's private cache.
-        return (
-            f"hf::{req.repo_id}@{req.revision or 'main'}"
-            f"::{credential_scope()}"
-        )
+        return f"hf::{req.repo_id}@{req.revision or 'main'}::{credential_scope()}"
     raise HTTPException(status_code=400, detail="need repo_id or local_path")
 
 
@@ -648,29 +666,83 @@ def _load_state(req: DatasetRef, key: str) -> DatasetState:
     info_path = inside("meta/info.json", root)
     if not info_path.exists():
         raise HTTPException(status_code=404, detail=f"Missing meta/info.json at {root}")
-    info = json.loads(info_path.read_text())
+    try:
+        info = json.loads(info_path.read_text())
+    except (OSError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid meta/info.json") from exc
+    if not isinstance(info, dict):
+        raise HTTPException(status_code=400, detail="meta/info.json must be an object")
+    version = normalize_dataset_version(info.get("codebase_version"))
+    if version is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported or missing codebase_version in meta/info.json",
+        )
 
     episodes_root = root / "meta" / "episodes"
-    if str(info.get("codebase_version", "")).startswith("v2."):
+    declared_total_episodes = max(
+        0, _finite_integer(info.get("total_episodes", 0)) or 0
+    )
+
+    try:
+        fps = float(info.get("fps", 0))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid dataset fps") from exc
+    if not math.isfinite(fps) or fps <= 0:
+        raise HTTPException(status_code=400, detail="Dataset fps must be positive")
+    info = {**info, "codebase_version": version, "fps": fps}
+    if is_dataset_v2(version):
         metadata = root / "meta/episodes.jsonl"
         if metadata.exists():
-            episodes_df = pd.read_json(metadata, lines=True)
+            try:
+                episodes_df = pd.read_json(metadata, lines=True)
+            except (OSError, ValueError, TypeError) as exc:
+                raise HTTPException(
+                    status_code=400, detail="Invalid v2 episode metadata"
+                ) from exc
         else:
             episodes_df = pd.DataFrame(
-                {"episode_index": range(int(info["total_episodes"]))}
+                {"episode_index": range(declared_total_episodes)}
             )
-    else:
+    elif is_dataset_v3(version):
         files = sorted(episodes_root.rglob("*.parquet"))
         if not files:
             raise HTTPException(
                 status_code=404, detail="No episodes parquet files found"
             )
-        episodes_df = (
-            pd.concat([pd.read_parquet(p) for p in files], ignore_index=True)
-            .sort_values("episode_index")
-            .reset_index(drop=True)
-        )
+        try:
+            episodes_df = (
+                pd.concat([pd.read_parquet(p) for p in files], ignore_index=True)
+                .sort_values("episode_index")
+                .reset_index(drop=True)
+            )
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(
+                status_code=400, detail="Invalid v3 episode metadata"
+            ) from exc
 
+    if "episode_index" not in episodes_df:
+        raise HTTPException(
+            status_code=400,
+            detail="Episode metadata is missing episode_index",
+        )
+    episodes_df = episodes_df.copy()
+    episode_values = pd.to_numeric(episodes_df["episode_index"], errors="coerce")
+    valid_episode = (
+        episode_values.notna()
+        & (np.isfinite(episode_values.to_numpy(dtype=float)))
+        & (episode_values % 1 == 0)
+        & (episode_values >= 0)
+    )
+    episodes_df = episodes_df.loc[valid_episode].copy()
+    episodes_df["episode_index"] = episode_values.loc[valid_episode].astype("int64")
+    episodes_df = (
+        episodes_df.drop_duplicates(subset=["episode_index"])
+        .sort_values("episode_index")
+        .reset_index(drop=True)
+    )
+    if declared_total_episodes > 0 and episodes_df.empty:
+        raise HTTPException(status_code=400, detail="Episode metadata is empty")
     state = DatasetState(
         repo_id=req.repo_id,
         local_path=str(root) if req.local_path else None,
@@ -875,20 +947,47 @@ def _episode_data_path(state: DatasetState, episode_index: int) -> Path | None:
     if rows.empty:
         return None
     row = rows.iloc[0]
-    if str(state.info.get("codebase_version", "")).startswith("v2."):
-        rel = state.info["data_path"].format(
-            episode_index=episode_index,
-            episode_chunk=episode_index // int(state.info.get("chunks_size", 1000)),
-        )
+    if _is_v2_version(state.info.get("codebase_version")):
+        data_template = state.info.get("data_path")
+        if not isinstance(data_template, str) or not data_template.strip():
+            return None
+        chunk_size = _finite_integer(state.info.get("chunks_size", 1000)) or 1000
+        if chunk_size <= 0:
+            chunk_size = 1000
+        chunk_index = episode_index // chunk_size
+        try:
+            rel = data_template.format(
+                episode_index=episode_index,
+                episode_chunk=chunk_index,
+                chunk_index=chunk_index,
+                data_chunk_index=chunk_index,
+            )
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return None
     else:
         chunk_col, file_col = "data/chunk_index", "data/file_index"
         if chunk_col not in row or file_col not in row:
             return None
-        rel = (
-            state.info.get("data_path")
-            or "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet"
-        ).format(chunk_index=int(row[chunk_col]), file_index=int(row[file_col]))
-    full = inside(rel, state.root)
+        chunk_index = _finite_integer(row[chunk_col])
+        file_index = _finite_integer(row[file_col])
+        if chunk_index is None or file_index is None:
+            return None
+        data_template = state.info.get("data_path")
+        if not isinstance(data_template, str) or not data_template.strip():
+            data_template = "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet"
+        try:
+            rel = data_template.format(
+                chunk_index=chunk_index,
+                file_index=file_index,
+                data_chunk_index=chunk_index,
+                data_file_index=file_index,
+            )
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return None
+    try:
+        full = inside(rel, state.root)
+    except ValueError:
+        return None
     if full.exists():
         return full
     if state.repo_id:
@@ -914,14 +1013,20 @@ def _frame_timestamps(state: DatasetState, episode_index: int) -> list[float]:
     if path is None:
         return []
     try:
-        df = pd.read_parquet(path, columns=["episode_index", "timestamp"])
+        schema = pq.read_schema(path)
+        columns = ["timestamp"]
+        if "episode_index" in schema.names:
+            columns.insert(0, "episode_index")
+        df = pd.read_parquet(path, columns=columns)
     except Exception as e:  # noqa: BLE001
         logger.warning("frame_ts read failed for ep %s: %s", episode_index, e)
         return []
-    ts = (
-        df.loc[df["episode_index"] == episode_index, "timestamp"].astype(float).tolist()
-    )
-    ts.sort()
+    if "episode_index" in df:
+        episode_values = pd.to_numeric(df["episode_index"], errors="coerce")
+        df = df[episode_values == episode_index]
+    values = pd.to_numeric(df["timestamp"], errors="coerce")
+    values = values[np.isfinite(values.to_numpy(dtype=float))]
+    ts = sorted(set(values.astype(float).tolist()))
     state.frame_ts_cache[episode_index] = ts
     return ts
 
@@ -945,15 +1050,18 @@ def _coerce_existing_atom(
     if isinstance(camera, str) and not camera:
         camera = None
     raw_ts = raw.get("timestamp")
-    if raw_ts is None:
-        # v3.1 event rows don't carry a ``timestamp`` field in the struct —
-        # the writer drops it because the parquet row's frame timestamp is
-        # already the event's firing time. Use the caller-provided fallback
-        # so dedup doesn't collapse every event atom into one (timestamp=0.0)
-        # entry.
-        timestamp = float(fallback_ts) if fallback_ts is not None else 0.0
-    else:
-        timestamp = float(raw_ts)
+    try:
+        timestamp = (
+            float(fallback_ts)
+            if raw_ts is None and fallback_ts is not None
+            else 0.0
+            if raw_ts is None
+            else float(raw_ts)
+        )
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(timestamp):
+        return None
     return {
         "role": str(raw["role"]),
         "content": None if raw.get("content") is None else str(raw.get("content")),
@@ -1010,13 +1118,22 @@ def _extract_existing_atoms_from_table(
             atoms.append(atom)
 
     for row_idx, ep_value in enumerate(episode_col):
-        if int(ep_value) != int(episode_index):
+        current_episode = _finite_integer(ep_value)
+        if current_episode is None:
+            continue
+        if current_episode != int(episode_index):
             continue
         if persistent_col is not None and not persistent_loaded:
             add_many(persistent_col[row_idx])
             persistent_loaded = True
         if events_col is not None:
-            row_ts = float(ts_col[row_idx]) if ts_col is not None else None
+            row_ts = None
+            if ts_col is not None:
+                try:
+                    candidate = float(ts_col[row_idx])
+                    row_ts = candidate if math.isfinite(candidate) else None
+                except (TypeError, ValueError, OverflowError):
+                    pass
             add_many(events_col[row_idx], fallback_ts=row_ts)
 
     atoms.sort(
@@ -1064,10 +1181,18 @@ def _validate_atom(atom: dict[str, Any]) -> None:
             status_code=400,
             detail=f"camera must be null for style={style!r} (only vqa/trace are view-dependent)",
         )
-    to = atom.get("to")
-    if to is not None and float(to) < float(atom.get("timestamp", 0.0)):
+    try:
+        timestamp = float(atom.get("timestamp", 0.0))
+        to_value = float(atom["to"]) if atom.get("to") is not None else None
+    except (TypeError, ValueError, OverflowError) as exc:
         raise HTTPException(
-            status_code=400, detail="to must be >= timestamp when set"
+            status_code=400, detail="atom timestamps must be numeric"
+        ) from exc
+    if not math.isfinite(timestamp) or (
+        to_value is not None and (not math.isfinite(to_value) or to_value < timestamp)
+    ):
+        raise HTTPException(
+            status_code=400, detail="atom timestamps must be finite and ordered"
         )
 
 
@@ -1122,8 +1247,23 @@ def _materialize_table(
             detail="data parquet missing 'episode_index' or 'timestamp' columns",
         )
 
-    episode_col = table.column("episode_index").to_pylist()
-    ts_col = [float(x) for x in table.column("timestamp").to_pylist()]
+    try:
+        episode_col = [
+            _finite_integer(x) for x in table.column("episode_index").to_pylist()
+        ]
+        if any(value is None for value in episode_col):
+            raise HTTPException(
+                status_code=400, detail="data parquet has invalid episode indices"
+            )
+        ts_col = [float(x) for x in table.column("timestamp").to_pylist()]
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise HTTPException(
+            status_code=400, detail="data parquet has invalid indices or timestamps"
+        ) from exc
+    if not all(math.isfinite(value) for value in ts_col):
+        raise HTTPException(
+            status_code=400, detail="data parquet has non-finite timestamps"
+        )
     n_rows = table.num_rows
 
     persistent_by_ep: dict[int, list[dict[str, Any]]] = {}
@@ -1669,7 +1809,10 @@ def _prepare_sam3_media(state: DatasetState) -> None:
     """Ensure a Hub-backed worker has video assets beside its metadata."""
     if not state.repo_id or state.local_path:
         return
-    if os.environ.get("LEVI_SAM3_DOWNLOAD_VIDEOS", "1").lower() not in _SAM3_ENABLED_VALUES:
+    if (
+        os.environ.get("LEVI_SAM3_DOWNLOAD_VIDEOS", "1").lower()
+        not in _SAM3_ENABLED_VALUES
+    ):
         return
     try:
         # A Hub state is initially metadata-only so browsing remains cheap.
@@ -1845,9 +1988,7 @@ def _download_sam3_checkpoint(active_token: str, target: Path) -> None:
             while not stop.is_set():
                 current = _sam3_incomplete_bytes(target_dir, target)
                 percent = (
-                    min(100.0, current * 100.0 / total_bytes)
-                    if total_bytes
-                    else None
+                    min(100.0, current * 100.0 / total_bytes) if total_bytes else None
                 )
                 _write_sam3_download(
                     "downloading",
@@ -2144,7 +2285,9 @@ def sam3_save_prompt_preset(request: Sam3PromptPresetRequest) -> JSONResponse:
     name = request.name.strip()
     if not name:
         raise HTTPException(400, "Preset name must not be empty")
-    prompts = list(dict.fromkeys(item.strip() for item in request.prompts if item.strip()))
+    prompts = list(
+        dict.fromkeys(item.strip() for item in request.prompts if item.strip())
+    )
     if not prompts:
         raise HTTPException(400, "Preset must include at least one non-empty prompt")
     with _SAM3_PROMPT_PRESET_LOCK:

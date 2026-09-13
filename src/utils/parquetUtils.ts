@@ -54,19 +54,76 @@ export function formatStringWithVars(
 // Fetch and parse the Parquet file
 type ParquetFile = ArrayBuffer | AsyncBuffer;
 
-const parquetFileCache = new Map<string, AsyncBuffer>();
+type ParquetCacheEntry = {
+  data: AsyncBuffer;
+  generation: number;
+};
+
+const parquetFileCache = new Map<string, ParquetCacheEntry>();
+const parquetFileInflight = new Map<
+  string,
+  { generation: number; promise: Promise<AsyncBuffer> }
+>();
+let parquetCacheGeneration = 0;
+const parsedParquetCacheLimit = Number.parseInt(
+  process.env.MAX_PARQUET_CACHE_ENTRIES ?? "64",
+  10,
+);
+const MAX_PARQUET_CACHE_ENTRIES =
+  Number.isFinite(parsedParquetCacheLimit) && parsedParquetCacheLimit >= 8
+    ? parsedParquetCacheLimit
+    : 64;
+
+function pruneParquetFileCache(): void {
+  while (parquetFileCache.size > MAX_PARQUET_CACHE_ENTRIES) {
+    const oldestKey = parquetFileCache.keys().next().value;
+    if (!oldestKey) break;
+    parquetFileCache.delete(oldestKey);
+  }
+}
+
+export function clearParquetFileCache(): void {
+  parquetCacheGeneration += 1;
+  parquetFileCache.clear();
+  parquetFileInflight.clear();
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("levi:hf-auth-changed", clearParquetFileCache);
+}
 
 export async function fetchParquetFile(url: string): Promise<ParquetFile> {
+  const generation = parquetCacheGeneration;
   const cached = parquetFileCache.get(url);
-  if (cached) return cached;
+  if (cached?.generation === generation) {
+    parquetFileCache.delete(url);
+    parquetFileCache.set(url, cached);
+    return cached.data;
+  }
 
-  const file = await asyncBufferFromUrl({
-    url,
-    requestInit: { cache: "no-store", headers: authHeaders() },
-  });
-  const wrapped = cachedAsyncBuffer(file);
-  parquetFileCache.set(url, wrapped);
-  return wrapped;
+  const pending = parquetFileInflight.get(url);
+  if (pending?.generation === generation) return pending.promise;
+
+  const request = (async () => {
+    const file = await asyncBufferFromUrl({
+      url,
+      requestInit: { cache: "no-store", headers: authHeaders() },
+    });
+    const wrapped = cachedAsyncBuffer(file);
+    if (generation === parquetCacheGeneration) {
+      parquetFileCache.set(url, { data: wrapped, generation });
+      pruneParquetFileCache();
+    }
+    return wrapped;
+  })();
+  parquetFileInflight.set(url, { generation, promise: request });
+  try {
+    return await request;
+  } finally {
+    if (parquetFileInflight.get(url)?.promise === request) {
+      parquetFileInflight.delete(url);
+    }
+  }
 }
 
 // Read specific columns from the Parquet file

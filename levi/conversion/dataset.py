@@ -9,6 +9,7 @@ import pyarrow.parquet as pq
 from ..catalog import atomic
 from ..diagnostics import diagnose
 from ..paths import inside
+from ..versions import is_dataset_v2
 from . import media, raw
 
 
@@ -230,7 +231,7 @@ def validate(root: Path):
             videos += 1
             if abs(v["fps"] - info["fps"]) > 0.01:
                 failures.append(f"Video FPS mismatch: {path.relative_to(root)}")
-            if info["codebase_version"].startswith("v2."):
+            if is_dataset_v2(info.get("codebase_version")):
                 ep = int(path.stem.rsplit("_", 1)[-1])
                 data = inside(
                     info["data_path"].format(
@@ -249,7 +250,7 @@ def validate(root: Path):
                     )
         except Exception as exc:
             failures.append(str(exc))
-    if info["codebase_version"].startswith("v2."):
+    if is_dataset_v2(info.get("codebase_version")):
         task_rows = read_jsonl(root / "meta/tasks.jsonl")
         tasks = {r["task_index"] for r in task_rows}
         eps = read_jsonl(root / "meta/episodes.jsonl")
@@ -306,7 +307,7 @@ def validate(root: Path):
 
 def repair(source, target, options, stage):
     info = json.loads((source / "meta/info.json").read_text())
-    if not info["codebase_version"].startswith("v2."):
+    if not is_dataset_v2(info.get("codebase_version")):
         raise ValueError(
             "Metadata repair currently accepts v2 datasets; v3 can be viewed and validated"
         )

@@ -2,7 +2,7 @@
 
 ## Scope and baseline / 范围与基线
 
-This is the source-release inventory for LEVI v0.2.0, refreshed on 2026-09-12. The dependency baseline remains the v0.2.0 lock and source commit; this update adds the global SAM3 mirror and worker dependency notes.
+This is the source-release inventory for LEVI v0.3.0, refreshed on 2026-09-13. The dependency baseline remains the v0.3.0 lock and source commit; this release adds canonical dataset-version handling, task indexing/filtering, and cache-isolation hardening.
 
 当前清单覆盖源码来源、随附或使用的素材、直接依赖及构建/运行工具。它不是尚未发布的 Docker、PyPI 或二进制产物的完整传递依赖清单；当前正式发行提供源码，不包含安装后的环境、依赖目录或数据集视频。未来发布这些产物前，必须按下文流程生成并维护实际分发清单与许可证文本。
 

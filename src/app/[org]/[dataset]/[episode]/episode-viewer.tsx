@@ -41,7 +41,7 @@ import {
   type CrossEpisodeRequest,
   type DatasetTaskIndex,
 } from "./fetch-data";
-import { getDatasetVersionAndInfo } from "@/utils/versionUtils";
+import { getDatasetVersionAndInfo, isDatasetV3 } from "@/utils/versionUtils";
 import type { DatasetMetadata } from "@/utils/parquetUtils";
 import {
   fetchAnnotationSummary,
@@ -169,6 +169,13 @@ export default function EpisodeViewer({
   const [data, setData] = useState<EpisodeData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+  const [authRevision, setAuthRevision] = useState(0);
+  useEffect(() => {
+    const onAuthChanged = () => setAuthRevision((value) => value + 1);
+    window.addEventListener("levi:hf-auth-changed", onAuthChanged);
+    return () =>
+      window.removeEventListener("levi:hf-auth-changed", onAuthChanged);
+  }, []);
 
   useEffect(() => {
     if (Number.isNaN(episodeId)) {
@@ -195,7 +202,7 @@ export default function EpisodeViewer({
         setError(message || "Unknown error");
         setData(null);
       });
-  }, [org, dataset, episodeId]);
+  }, [org, dataset, episodeId, authRevision]);
 
   if (error) {
     return (
@@ -309,6 +316,7 @@ function EpisodeViewerInner({
           "insights",
           "filtering",
           "urdf",
+          "doctor",
         ].includes(stored)
       ) {
         return stored as ActiveTab;
@@ -372,6 +380,7 @@ function EpisodeViewerInner({
     loaded: number;
     total: number;
   } | null>(null);
+  const [taskIndexLoaded, setTaskIndexLoaded] = useState(false);
   // Key of the request already loaded (or in flight), so revisiting the tab
   // doesn't refetch but changing the scope does.
   const insightsLoadedRef = useRef<string | null>(null);
@@ -423,14 +432,24 @@ function EpisodeViewerInner({
   // scope, so load it once per dataset rather than per panel.
   useEffect(() => {
     if (!org || !dataset) return;
+    setTaskIndexLoaded(false);
     const repoId = `${org}/${dataset}`;
     let cancelled = false;
     getDatasetVersionAndInfo(repoId)
-      .then(({ version }) => loadDatasetTaskIndex(repoId, version))
+      .then(({ version, info }) =>
+        loadDatasetTaskIndex(
+          repoId,
+          version,
+          info as unknown as DatasetMetadata,
+        ),
+      )
       .then((result) => {
         if (!cancelled && mountedRef.current) setTaskIndex(result);
+        if (!cancelled) setTaskIndexLoaded(true);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setTaskIndexLoaded(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -456,7 +475,7 @@ function EpisodeViewerInner({
   useEffect(() => {
     if (
       hasURDFSupport(datasetInfo.robot_type) &&
-      datasetInfo.codebase_version >= "v3.0"
+      isDatasetV3(datasetInfo.codebase_version)
     ) {
       void import("@/components/urdf-viewer");
     }
@@ -622,13 +641,59 @@ function EpisodeViewerInner({
   const [urdfEpisode, setUrdfEpisode] = useState(episodeId);
   useEffect(() => setUrdfEpisode(episodeId), [episodeId]);
 
+  // Prefer episode indices observed in metadata when it is available. Some
+  // exports have stale total_episodes values or non-contiguous IDs; keeping
+  // the declared range as a fallback preserves browsing for datasets whose
+  // metadata does not expose an episode table.
+  const availableEpisodes = useMemo(() => {
+    if (!taskIndex) return episodes;
+    const observed = Object.keys(taskIndex.episodeTasks)
+      .map(Number)
+      .filter((episode) => Number.isInteger(episode) && episode >= 0);
+    return [...new Set([...episodes, ...observed])].sort((a, b) => a - b);
+  }, [episodes, taskIndex]);
+
   // Episode list, narrowed to the selected task on multi-task datasets.
   const visibleEpisodes = useMemo(() => {
-    if (!taskFilter || !taskIndex) return episodes;
-    return episodes.filter((ep) =>
+    if (!taskFilter || !taskIndexLoaded) return availableEpisodes;
+    if (!taskIndex) return [];
+    return availableEpisodes.filter((ep) =>
       (taskIndex.episodeTasks[ep] ?? []).includes(taskFilter),
     );
-  }, [episodes, taskFilter, taskIndex]);
+  }, [availableEpisodes, taskFilter, taskIndex, taskIndexLoaded]);
+
+  // A filter restored from sessionStorage can belong to an older dataset or a
+  // renamed task. Clear it as soon as authoritative metadata arrives.
+  useEffect(() => {
+    if (
+      taskFilter &&
+      taskIndexLoaded &&
+      (!taskIndex || !taskIndex.tasks.includes(taskFilter))
+    ) {
+      setTaskFilter(null);
+    }
+  }, [taskFilter, taskIndex, taskIndexLoaded]);
+
+  // Keep the route and the selected task in sync. Without this, choosing a
+  // task that excludes the current episode leaves the sidebar empty and the
+  // arrow shortcuts continue to walk hidden episode IDs.
+  useEffect(() => {
+    if (
+      taskFilter &&
+      taskIndexLoaded &&
+      visibleEpisodes.length > 0 &&
+      !visibleEpisodes.includes(episodeId)
+    ) {
+      router.replace(`./episode_${visibleEpisodes[0]}`);
+    }
+  }, [
+    episodeId,
+    router,
+    taskFilter,
+    taskIndex,
+    taskIndexLoaded,
+    visibleEpisodes,
+  ]);
 
   // Pagination state. Lazily computed from the CURRENT episode's position
   // (not just `useState(1)`) so a fresh mount — which happens on every
@@ -707,8 +772,22 @@ function EpisodeViewerInner({
   // detach + reattach the listener each time. Now the listener attaches
   // once and reads the latest state via the ref.
   // Vercel rule: advanced-event-handler-refs.
-  const keyStateRef = useRef({ activeTab, episodeId, episodes, urdfEpisode });
-  keyStateRef.current = { activeTab, episodeId, episodes, urdfEpisode };
+  const keyStateRef = useRef({
+    activeTab,
+    episodeId,
+    episodes,
+    taskFilter,
+    visibleEpisodes,
+    urdfEpisode,
+  });
+  keyStateRef.current = {
+    activeTab,
+    episodeId,
+    episodes,
+    taskFilter,
+    visibleEpisodes,
+    urdfEpisode,
+  };
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -727,26 +806,28 @@ function EpisodeViewerInner({
       } else if (key === "ArrowDown" || key === "ArrowUp") {
         if (inTextEntry) return;
         e.preventDefault();
+        if (s.taskFilter && s.visibleEpisodes.length === 0) return;
+        const navigationEpisodes = s.taskFilter
+          ? s.visibleEpisodes
+          : s.visibleEpisodes.length > 0
+            ? s.visibleEpisodes
+            : s.episodes;
+        const current = s.activeTab === "urdf" ? s.urdfEpisode : s.episodeId;
+        const currentIndex = navigationEpisodes.indexOf(current);
+        const delta = key === "ArrowDown" ? 1 : -1;
+        const nextIndex =
+          currentIndex === -1
+            ? delta > 0
+              ? 0
+              : navigationEpisodes.length - 1
+            : currentIndex + delta;
+        const nextEp = navigationEpisodes[nextIndex];
+        if (nextEp === undefined) return;
         if (s.activeTab === "urdf") {
-          const nextEp =
-            key === "ArrowDown" ? s.urdfEpisode + 1 : s.urdfEpisode - 1;
-          const lowest = s.episodes[0];
-          const highest = s.episodes[s.episodes.length - 1];
-          if (nextEp >= lowest && nextEp <= highest) {
-            setUrdfEpisode(nextEp);
-            urdfChangerRef.current?.(nextEp);
-          }
+          setUrdfEpisode(nextEp);
+          urdfChangerRef.current?.(nextEp);
         } else {
-          const nextEpisodeId =
-            key === "ArrowDown" ? s.episodeId + 1 : s.episodeId - 1;
-          const lowestEpisodeId = s.episodes[0];
-          const highestEpisodeId = s.episodes[s.episodes.length - 1];
-          if (
-            nextEpisodeId >= lowestEpisodeId &&
-            nextEpisodeId <= highestEpisodeId
-          ) {
-            router.push(`./episode_${nextEpisodeId}`);
-          }
+          router.push(`./episode_${nextEp}`);
         }
       }
     };
@@ -817,6 +898,7 @@ function EpisodeViewerInner({
               <Sidebar
                 datasetInfo={datasetInfo}
                 paginatedEpisodes={paginatedEpisodes}
+                allVisibleEpisodes={visibleEpisodes}
                 episodeId={activeTab === "urdf" ? urdfEpisode : episodeId}
                 totalPages={totalPages}
                 currentPage={currentPage}
@@ -1007,7 +1089,7 @@ function EpisodeViewerInner({
                       episodeId={episodeId}
                       ident={{ repoId: datasetInfo.repoId }}
                       cameraKeys={videosInfo.map((v) => v.filename)}
-                      allEpisodes={episodes}
+                      allEpisodes={availableEpisodes}
                       taskIndex={taskIndex}
                     />
                   )}
@@ -1017,6 +1099,7 @@ function EpisodeViewerInner({
               {activeTab === "statistics" && (
                 <StatsPanel
                   datasetInfo={datasetInfo}
+                  taskCount={taskIndex?.tasks.length}
                   episodeLengthStats={episodeLengthStats}
                   loading={statsLoading}
                 />

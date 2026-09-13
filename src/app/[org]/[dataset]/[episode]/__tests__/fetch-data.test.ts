@@ -5,6 +5,7 @@ import {
   loadAllEpisodeLengthsV3,
   loadCrossEpisodeActionVariance,
   loadDatasetTaskIndex,
+  buildTaskDefinitions,
   extractLanguageAtoms,
   CROSS_EPISODE_DEFAULTS,
 } from "@/app/[org]/[dataset]/[episode]/fetch-data";
@@ -515,6 +516,47 @@ function actionDatasetInfo(totalEpisodes: number): DatasetMetadata {
     },
   } as unknown as DatasetMetadata;
 }
+
+describe("task metadata normalization", () => {
+  test("orders by task_index even when rows are shuffled and IDs are strings", () => {
+    const definitions = buildTaskDefinitions([
+      { task_index: "4", task: "place cube" },
+      { task_index: 1n, task: "pour water" },
+      { task_index: 3, task: "pick cube" },
+    ]);
+    expect(definitions.ordered).toEqual([
+      "pour water",
+      "pick cube",
+      "place cube",
+    ]);
+    expect(definitions.byIndex.get(1)).toBe("pour water");
+    expect(definitions.byIndex.get(4)).toBe("place cube");
+  });
+
+  test("parses JSON-encoded multi-task fields and removes duplicates", async () => {
+    const request = mockFetchByPath({
+      "meta/tasks.jsonl":
+        '{"task_index":"1","task":"place cube"}\n' +
+        "broken line\n" +
+        '{"task_index":"0","task":"pour water"}\n',
+      "meta/episodes.jsonl":
+        JSON.stringify({
+          episode_index: "7",
+          tasks: ["place cube", "place cube"],
+        }) + "\n",
+    });
+    try {
+      const result = await loadDatasetTaskIndex(
+        "local/tasks-normalized",
+        "v2.1",
+      );
+      expect(result?.tasks).toEqual(["pour water", "place cube"]);
+      expect(result?.episodeTasks[7]).toEqual(["place cube"]);
+    } finally {
+      request.mockRestore();
+    }
+  });
+});
 
 describe("loadDatasetTaskIndex", () => {
   test("v2 orders tasks by task_index and maps every episode", async () => {

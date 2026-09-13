@@ -37,7 +37,7 @@ async def lifespan(app):
             marker.unlink()
 
 
-app = FastAPI(title="LEVI", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="LEVI", version="0.3.0", lifespan=lifespan)
 
 
 @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)

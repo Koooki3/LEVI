@@ -559,7 +559,7 @@ function RobotScene({
       }
       tipLinksRef.current = [];
     };
-  }, [urdfUrl, scale, scene, onJointsLoaded, ensureTrails]);
+  }, [urdfUrl, scale, scene, camera, controls, onJointsLoaded, ensureTrails]);
 
   const tipWorldPos = useMemo(() => new THREE.Vector3(), []);
 

@@ -23,10 +23,15 @@ export function isBigInt(value: unknown): value is bigint {
  */
 export function bigIntToNumber(value: unknown, fallback: number = 0): number {
   if (typeof value === "bigint") {
-    return Number(value);
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
-  if (typeof value === "number") {
+  if (typeof value === "number" && Number.isFinite(value)) {
     return value;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
   }
   return fallback;
 }
@@ -38,7 +43,10 @@ export function bigIntToNumber(value: unknown, fallback: number = 0): number {
  * @returns True if value is a number or BigInt
  */
 export function isNumeric(value: unknown): value is number | bigint {
-  return typeof value === "number" || typeof value === "bigint";
+  return (
+    (typeof value === "number" && Number.isFinite(value)) ||
+    typeof value === "bigint"
+  );
 }
 
 /**

@@ -1,5 +1,9 @@
 import { describe, expect, test, mock, afterEach } from "bun:test";
-import { buildVersionedUrl } from "@/utils/versionUtils";
+import {
+  buildVersionedUrl,
+  normalizeDatasetVersion,
+  SUPPORTED_DATASET_VERSIONS,
+} from "@/utils/versionUtils";
 
 // ---------------------------------------------------------------------------
 // buildVersionedUrl — pure function, no mocking needed
@@ -54,6 +58,20 @@ describe("buildVersionedUrl", () => {
     expect(url).toBe(
       "https://huggingface.co/datasets/myorg/mydataset/resolve/main/meta/info.json",
     );
+  });
+});
+
+describe("normalizeDatasetVersion", () => {
+  test("canonicalizes common LeRobot aliases", () => {
+    expect(normalizeDatasetVersion("3.0")).toBe("v3.0");
+    expect(normalizeDatasetVersion("v3.1.0")).toBe("v3.1");
+    expect(normalizeDatasetVersion(" V2.1 ")).toBe("v2.1");
+  });
+
+  test("rejects unsupported or incomplete versions", () => {
+    expect(normalizeDatasetVersion("v1.0")).toBeNull();
+    expect(normalizeDatasetVersion("v3")).toBeNull();
+    expect(SUPPORTED_DATASET_VERSIONS).toContain("v3.1");
   });
 });
 
@@ -186,6 +204,36 @@ describe("getDatasetVersionAndInfo", () => {
     );
     expect(result.version).toBe("v3.0");
     expect(result.info.total_episodes).toBe(200);
+  });
+
+  test("canonicalizes an unprefixed version and normalizes numeric metadata", async () => {
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            codebase_version: "3.0.0",
+            total_episodes: "4",
+            total_frames: "40",
+            total_tasks: "2",
+            fps: "10",
+            chunks_size: "2",
+            data_path: null,
+            video_path: null,
+            features: {
+              action: { dtype: "float32", shape: [2], names: null },
+            },
+          }),
+          { status: 200 },
+        ),
+      ),
+    ) as unknown as typeof fetch;
+
+    const { getDatasetVersionAndInfo } = await import("@/utils/versionUtils");
+    const result = await getDatasetVersionAndInfo("aliases/v30");
+    expect(result.version).toBe("v3.0");
+    expect(result.info.codebase_version).toBe("v3.0");
+    expect(result.info.total_tasks).toBe(2);
+    expect(result.info.total_episodes).toBe(4);
   });
 
   test("throws for unsupported version", async () => {

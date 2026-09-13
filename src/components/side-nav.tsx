@@ -44,6 +44,8 @@ function AnnotationDots({
 interface SidebarProps {
   datasetInfo: DatasetDisplayInfo;
   paginatedEpisodes: number[];
+  /** Complete task-filtered list, used to intersect the flagged view. */
+  allVisibleEpisodes?: number[];
   episodeId: number;
   totalPages: number;
   currentPage: number;
@@ -66,6 +68,7 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({
   datasetInfo,
   paginatedEpisodes,
+  allVisibleEpisodes = paginatedEpisodes,
   episodeId,
   totalPages,
   currentPage,
@@ -85,8 +88,11 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const displayEpisodes = useMemo(() => {
     if (!showFlaggedOnly || count === 0) return paginatedEpisodes;
-    return [...flagged].sort((a, b) => a - b);
-  }, [paginatedEpisodes, showFlaggedOnly, flagged, count]);
+    const visible = new Set(allVisibleEpisodes);
+    return [...flagged]
+      .filter((episode) => visible.has(episode))
+      .sort((a, b) => a - b);
+  }, [allVisibleEpisodes, paginatedEpisodes, showFlaggedOnly, flagged, count]);
 
   return (
     <T>
@@ -127,12 +133,18 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <select
                   value={taskFilter ?? ""}
                   onChange={(e) => onTaskFilterChange(e.target.value || null)}
-                  className="mt-1 w-full bg-[var(--surface-1)] border border-white/10 rounded-md px-2 py-1 text-xs text-slate-200"
+                  className="mt-1 w-full bg-[var(--surface-1)] border border-white/10 rounded-md px-2 py-1 text-xs text-slate-100 [color-scheme:dark]"
                   aria-label="Filter episodes by task"
                 >
-                  <option value="">{`All tasks (${tasks.length})`}</option>
+                  <option value="" className="bg-[#f4f7ed] text-[#172018]">
+                    {`All tasks (${tasks.length})`}
+                  </option>
                   {tasks.map((name) => (
-                    <option key={name} value={name}>
+                    <option
+                      key={name}
+                      value={name}
+                      className="bg-[#f4f7ed] text-[#172018]"
+                    >
                       {name}
                     </option>
                   ))}

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 — Dataset indexing and review hardening
+
+- Canonicalized LeRobot dataset-version detection for supported v2.0/v2.1/v3.0/v3.1 metadata and rejected malformed or unsupported versions consistently across the frontend and backend.
+- Rebuilt dataset task indexing around authoritative task indices, JSONL/Parquet fallbacks, episode metadata, and frame-level mappings so task counts and sidebar/insights filtering use the actual dataset contents.
+- Hardened episode metadata, data-path resolution, timestamp snapping, numeric chart values, and diagnostics against malformed, fractional, non-finite, duplicate, or stale records.
+- Added bounded LRU-style caches, in-flight Parquet request sharing, and authentication-change invalidation to prevent private-data leakage and unbounded browser memory growth.
+- Fixed task-filter navigation, empty-result handling, statistics counts, v3 episode-length support, language-instruction extraction, and review-tab state restoration.
+- Updated release metadata, validation records, and source notices for the v0.3.0 source release.
+
 ## Unreleased
 
 - Added global SAM3 object annotation for demos, Hub and registered local datasets. The 1038lab/sam3 checkpoint now has an authenticated browser/CLI download action with resumable workspace progress, retry handling and an explicit ready gate before real jobs; browser/CLI account scopes prevent stale private-data reuse, and native LeRobot files remain read-only.

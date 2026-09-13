@@ -528,8 +528,8 @@ textarea {
    theme instead of its own default. */
 select option,
 select optgroup {
-  color: var(--text-primary) !important;
-  background-color: #242d20 !important;
+  color: #172018 !important;
+  background-color: #f4f7ed !important;
 }
 *:focus-visible {
   outline: 2px solid #d4f779;

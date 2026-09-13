@@ -10,6 +10,8 @@ import type {
 
 interface StatsPanelProps {
   datasetInfo: DatasetDisplayInfo;
+  /** Actual unique task count from task_index metadata, when available. */
+  taskCount?: number;
   episodeLengthStats: EpisodeLengthStats | null;
   loading: boolean;
 }
@@ -129,6 +131,7 @@ function Card({ label, value }: { label: string; value: string | number }) {
 
 function StatsPanel({
   datasetInfo,
+  taskCount,
   episodeLengthStats,
   loading,
 }: StatsPanelProps) {
@@ -160,7 +163,7 @@ function StatsPanel({
               label="Dataset Version"
               value={datasetInfo.codebase_version}
             />
-            <Card label="Tasks" value={datasetInfo.total_tasks} />
+            <Card label="Tasks" value={taskCount ?? datasetInfo.total_tasks} />
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

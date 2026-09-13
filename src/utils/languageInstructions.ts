@@ -21,39 +21,33 @@ export function extractLanguageInstructions(
 ): string | undefined {
   if (episodeData.length === 0) return undefined;
 
-  const languageInstructions: string[] = [];
-
-  // Check specified rows for instructions
   for (const idx of sampleIndices) {
-    if (idx >= episodeData.length) continue;
-
+    if (idx < 0 || idx >= episodeData.length) continue;
     const row = episodeData[idx];
-
-    // Check for primary language_instruction field
-    if (
-      "language_instruction" in row &&
-      typeof row.language_instruction === "string" &&
-      row.language_instruction
-    ) {
-      languageInstructions.push(row.language_instruction);
-
-      // Check for numbered fields (language_instruction_2, _3, etc.)
-      let instructionNum = 2;
-      let key = `language_instruction_${instructionNum}`;
-      while (key in row && typeof row[key] === "string") {
-        languageInstructions.push(row[key] as string);
-        instructionNum++;
-        key = `language_instruction_${instructionNum}`;
-      }
-
-      // If we found instructions, stop searching other indices
-      if (languageInstructions.length > 0) break;
-    }
+    const keys = Object.keys(row)
+      .filter(
+        (key) =>
+          key === "language_instruction" ||
+          /^language_instruction_\d+$/.test(key),
+      )
+      .sort((a, b) => {
+        const number = (key: string) =>
+          key === "language_instruction"
+            ? 1
+            : Number(key.slice("language_instruction_".length));
+        return number(a) - number(b);
+      });
+    const instructions = keys
+      .map((key) => row[key])
+      .filter(
+        (value): value is string =>
+          typeof value === "string" && value.trim().length > 0,
+      )
+      .map((value) => value.trim());
+    if (instructions.length > 0) return instructions.join("\n");
   }
 
-  return languageInstructions.length > 0
-    ? languageInstructions.join("\n")
-    : undefined;
+  return undefined;
 }
 
 /**
@@ -68,38 +62,38 @@ export function extractTaskFromMetadata(
   taskIndex: unknown,
   tasksData: Record<string, unknown>[],
 ): string | undefined {
-  // Convert BigInt to number for comparison
-  const taskIndexNum =
+  const index =
     typeof taskIndex === "bigint"
       ? Number(taskIndex)
       : typeof taskIndex === "number"
         ? taskIndex
-        : undefined;
+        : typeof taskIndex === "string" && taskIndex.trim().length > 0
+          ? Number(taskIndex)
+          : Number.NaN;
+  if (!Number.isInteger(index) || index < 0) return undefined;
 
-  if (taskIndexNum === undefined || taskIndexNum < 0) {
-    return undefined;
+  // The task_index column is authoritative. A dataframe row's physical
+  // position is only a compatibility fallback for old files that omit it.
+  const indexed = tasksData.find((row) => {
+    const value = row.task_index;
+    const candidate =
+      typeof value === "bigint"
+        ? Number(value)
+        : typeof value === "number"
+          ? value
+          : typeof value === "string"
+            ? Number(value)
+            : Number.NaN;
+    return Number.isInteger(candidate) && candidate === index;
+  });
+  const taskData = indexed ?? tasksData[index];
+  if (!taskData) return undefined;
+
+  for (const key of ["task", "__index_level_0__", "name", "instruction"]) {
+    const value = taskData[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
   }
-
-  if (taskIndexNum >= tasksData.length) {
-    return undefined;
-  }
-
-  const taskData = tasksData[taskIndexNum];
-
-  // Extract task from various possible fields
-  if (
-    taskData &&
-    "__index_level_0__" in taskData &&
-    typeof taskData.__index_level_0__ === "string"
-  ) {
-    return taskData.__index_level_0__;
-  } else if (
-    taskData &&
-    "task" in taskData &&
-    typeof taskData.task === "string"
-  ) {
-    return taskData.task;
-  }
-
   return undefined;
 }
