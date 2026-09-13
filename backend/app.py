@@ -45,9 +45,9 @@ Then in another terminal:
 from __future__ import annotations
 
 import hashlib
-import math
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -250,13 +250,12 @@ class PushToHubRequest(DatasetRef):
 @dataclass
 class EpisodeAnnotations:
     atoms: list[dict[str, Any]] = field(default_factory=list)
-    # mtime of the on-disk per-episode file this cache entry was read from,
-    # or None when it was derived some other way (a parquet-column fallback,
-    # or no file exists yet). Lets ``_lookup_episode_annotations`` tell a
-    # still-fresh cache entry from one another process on the same host has
-    # since made stale, with a cheap stat() instead of re-parsing the file
-    # on every request.
-    mtime: float | None = None
+    # True when this came from the on-disk per-episode file, which must be
+    # dropped (not resurrected) once that file disappears; False when
+    # derived from the exported parquet's language columns instead, which
+    # has no backing file to go stale against and stays safe to cache for
+    # the rest of the process's life. See ``_lookup_episode_annotations``.
+    from_file: bool = False
 
 
 # --- Per-dataset state cache --------------------------------------------------
@@ -816,11 +815,7 @@ def _write_episode_annotations(
     state.annotations_dir.mkdir(parents=True, exist_ok=True)
     path = state.annotation_file(episode_index)
     atomic(path, {"episode_index": episode_index, "atoms": atoms})
-    # Record the mtime of the write we just made so this process's own next
-    # read of this episode is a cache hit instead of an immediate self-reread.
-    state.annotations[episode_index] = EpisodeAnnotations(
-        atoms=atoms, mtime=path.stat().st_mtime
-    )
+    state.annotations[episode_index] = EpisodeAnnotations(atoms=atoms, from_file=True)
     return path
 
 
@@ -882,7 +877,7 @@ def _reload_annotations_from_disk(state: DatasetState) -> None:
             continue
         atoms = payload.get("atoms", [])
         state.annotations[ep_idx] = EpisodeAnnotations(
-            atoms=[dict(a) for a in atoms], mtime=path.stat().st_mtime
+            atoms=[dict(a) for a in atoms], from_file=True
         )
 
 
@@ -894,49 +889,49 @@ def _load_existing_annotations(state: DatasetState) -> None:
 def _lookup_episode_annotations(
     state: DatasetState, episode_index: int
 ) -> EpisodeAnnotations | None:
-    """Mtime-validated read of one episode's per-episode annotation file.
+    """Always-fresh read of one episode's per-episode annotation file.
 
     Multiple LEVI processes on the same host may share this workspace (a
     second collaborator's own ``levi serve``, or the same person on two
     ports) and write to the same ``annotations_dir`` (see
     ``DatasetState.display_slug``). A plain in-memory cache would keep
     serving whatever this process last saw, hiding another process's saves.
-    A ``stat()`` call is cheap — far cheaper than re-parsing the file — so
-    doing one on every read and only re-parsing when the mtime actually
-    changed keeps concurrent edits visible in near real time without a lock
-    or a full directory rescan per request.
 
-    Returns ``None`` (and leaves the cache untouched) only when there is no
-    on-disk file for this episode and nothing usable was cached before —
-    the caller should then fall back to deriving atoms from the exported
-    parquet's language columns, exactly as before.
+    An earlier version tried to short-circuit this with an mtime check
+    (skip the re-read when the file's mtime matches what was last cached).
+    That is unsound on this filesystem: two back-to-back writes — exactly
+    the close-together-edits case this function exists to handle — can
+    land on the *identical* mtime (confirmed empirically; see
+    ``test_episode_atoms_stay_in_sync_across_concurrent_processes``), which
+    would silently keep serving the first write's content forever. These
+    files are at most a few KB, so just re-reading on every call is both
+    simpler and actually correct — there is no meaningful cost to trade
+    away the shortcut for.
+
+    Returns ``None`` only when there is no on-disk file for this episode
+    and nothing was previously derived from the exported parquet's
+    language columns either — the caller should then compute that
+    fallback itself.
     """
     path = state.annotation_file(episode_index)
     try:
-        disk_mtime = path.stat().st_mtime
-    except OSError:
-        disk_mtime = None
-    cached = state.annotations.get(episode_index)
-    if disk_mtime is None:
-        # No sidecar file (yet, or not anymore — e.g. another process just
-        # deleted it). A cache entry with mtime=None came from the parquet
-        # fallback and is still valid; one with a real mtime is now stale.
-        if cached is not None and cached.mtime is None:
+        payload = json.loads(path.read_text())
+    except FileNotFoundError:
+        cached = state.annotations.get(episode_index)
+        # A cached entry derived from the parquet fallback has no backing
+        # file to go stale against and is still valid; one that came from
+        # an actual file is stale now that the file is gone (deleted by
+        # this or another process) and must not be resurrected.
+        if cached is not None and not cached.from_file:
             return cached
         state.annotations.pop(episode_index, None)
         return None
-    if cached is not None and cached.mtime == disk_mtime:
-        return cached
-    try:
-        payload = json.loads(path.read_text())
     except (OSError, ValueError) as e:
         logger.warning("annotation file read failed for %s: %s", path, e)
-        return cached
-    ann = EpisodeAnnotations(
-        atoms=[dict(a) for a in payload.get("atoms", [])], mtime=disk_mtime
+        return state.annotations.get(episode_index)
+    return EpisodeAnnotations(
+        atoms=[dict(a) for a in payload.get("atoms", [])], from_file=True
     )
-    state.annotations[episode_index] = ann
-    return ann
 
 
 # --- Frame-timestamp helpers --------------------------------------------------

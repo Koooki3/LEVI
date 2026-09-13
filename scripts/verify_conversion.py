@@ -3,9 +3,11 @@
 import json
 import subprocess
 import time
+
+import httpx
 import numpy as np
 import pandas as pd
-import httpx
+
 from levi.paths import ROOT, inside
 
 run = inside(ROOT / "tmp/build/levi-conversion-fixture")

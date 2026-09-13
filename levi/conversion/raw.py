@@ -4,12 +4,14 @@ import json
 import re
 import shutil
 from pathlib import Path
+
+import cv2
 import numpy as np
 import pandas as pd
-import cv2
+
+from ..catalog import atomic
 from . import media
 from .options import Options
-from ..catalog import atomic
 
 POSE = [
     "timestamp_sec",
@@ -179,7 +181,7 @@ def camera_path(demo, key):
 def audit(demo: Path, options: Options):
     rec = {"demo": demo.name, "errors": [], "warnings": [], "cameras": {}}
     try:
-        pose, grip, xyz, q, command = load(demo)
+        pose, _grip, xyz, q, command = load(demo)
         rec["frames"] = len(pose)
         rec["retained_frames"] = len(keep_positions(xyz, q, command, options))
         if not (np.diff(command) != 0).any():
@@ -224,7 +226,7 @@ def audit(demo: Path, options: Options):
                 rec["errors"].append("Missing stop_demo event")
         elif options.require_complete:
             rec["errors"].append("Missing events.csv")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         rec["errors"].append(str(exc))
     rec["ok"] = not rec["errors"]
     return rec

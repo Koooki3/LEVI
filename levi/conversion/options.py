@@ -1,6 +1,7 @@
 """One validated options schema shared by CLI, service, plans and worker."""
 
 from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 STAGES = (

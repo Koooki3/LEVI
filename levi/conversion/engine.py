@@ -3,11 +3,13 @@
 import json
 import shutil
 from pathlib import Path
+
 import numpy as np
-from .options import Options, STAGES
-from . import raw, media, dataset
+
 from ..catalog import atomic
 from ..paths import inside
+from . import dataset, media, raw
+from .options import STAGES, Options
 
 
 def fingerprint(source: Path):

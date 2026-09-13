@@ -1,4 +1,5 @@
 import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -70,11 +71,10 @@ def dataset(tmp_path):
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
-    import levi.catalog as catalog
-    import levi.service as service
-    import levi.jobs as jobs
-    import backend.app as annotations
     from fastapi.testclient import TestClient
+
+    import backend.app as annotations
+    from levi import catalog, jobs, service
 
     state = tmp_path / "outputs"
     monkeypatch.setattr(catalog, "STATE", state)

@@ -3,9 +3,11 @@
 import json
 import shutil
 from pathlib import Path
+
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+
 from ..catalog import atomic
 from ..diagnostics import diagnose
 from ..paths import inside
@@ -248,7 +250,7 @@ def validate(root: Path):
                     failures.append(
                         f"Video resolution mismatch: {path.relative_to(root)}"
                     )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             failures.append(str(exc))
     if is_dataset_v2(info.get("codebase_version")):
         task_rows = read_jsonl(root / "meta/tasks.jsonl")
@@ -293,7 +295,7 @@ def validate(root: Path):
                         if not video.is_file():
                             failures.append(f"Episode {i}: missing camera {key}")
                 cursor += n
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 failures.append(str(exc))
     failures += [r["message"] for r in report["results"] if r["status"] == "fail"]
     return {

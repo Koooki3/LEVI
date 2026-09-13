@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 from pathlib import Path
+
 from .paths import PROJECT, ROOT, STATE
 
 
@@ -33,7 +34,7 @@ def candidates(project=PROJECT, root=ROOT):
             )
         )
 
-    return sorted(set(p for p in paths if safe(p)))
+    return sorted({p for p in paths if safe(p)})
 
 
 def size(path):

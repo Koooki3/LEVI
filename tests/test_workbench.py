@@ -434,12 +434,12 @@ def test_episode_atoms_stay_in_sync_across_concurrent_processes(client, dataset)
     """Two collaborators, each running their own ``levi serve`` on the same
     host against the same dataset, must see each other's saves without
     restarting: annotations_dir has no hash suffix (see display_slug) so
-    both resolve to the identical directory, and reads must be validated
-    against the file's mtime rather than trusting an in-process cache
+    both resolve to the identical directory, and every lookup re-reads the
+    per-episode file from disk rather than trusting an in-process cache
     forever — otherwise one process's edit is invisible to the other."""
     import dataclasses
 
-    from backend.app import DatasetRef, EpisodeAnnotations, _ensure_state
+    from backend.app import DatasetRef, _ensure_state
 
     repo = client.post("/api/levi/catalog", json={"path": str(dataset)}).json()["id"]
     state_a = _ensure_state(DatasetRef(local_path=str(dataset)))
@@ -488,10 +488,10 @@ def test_episode_atoms_stay_in_sync_across_concurrent_processes(client, dataset)
     seen_by_a = _lookup_episode_annotations(state_a, 0)
     assert seen_by_a is not None
     assert seen_by_a.atoms[0]["content"] == "from process B"
-    # And a plain dict entry stuck in state_a's cache should have been
-    # replaced, not merely shadowed.
-    assert state_a.annotations[0] is seen_by_a
-    assert isinstance(state_a.annotations[0], EpisodeAnnotations)
+    # state_a's own cache from its earlier write is still sitting there
+    # (nothing evicts it proactively) — the point is that a *lookup* never
+    # trusts it once a different, real file exists on disk.
+    assert state_a.annotations[0].atoms[0]["content"] == "from process A"
 
 
 def test_diagnostics_report_named_after_local_dataset_not_catalog_hash(

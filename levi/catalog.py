@@ -6,6 +6,7 @@ import os
 import threading
 import uuid
 from pathlib import Path
+
 from .paths import STATE, inside
 
 LOCK = threading.RLock()

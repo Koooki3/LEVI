@@ -6,6 +6,7 @@ import platform
 import subprocess
 import urllib.request
 import zipfile
+
 from .paths import PROJECT, ROOT, inside
 
 BUN_VERSION = "1.3.10"

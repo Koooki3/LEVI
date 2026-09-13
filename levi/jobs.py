@@ -6,13 +6,14 @@ import subprocess
 import sys
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+
 from .catalog import atomic, read, register
-from .paths import ROOT, PROJECT, STATE, inside
-from .conversion.options import Options, STAGES
 from .conversion.engine import fingerprint
+from .conversion.options import STAGES, Options
 from .conversion.raw import check_tree
+from .paths import PROJECT, ROOT, STATE, inside
 
 LOCK = threading.Lock()
 WORKERS = threading.BoundedSemaphore(2)
@@ -30,7 +31,7 @@ def plan(stage, source, fps=10, source_fps=30, options=None):
         {**(options or {}), "fps": fps, "source_fps": source_fps}
     )
     job_id = (
-        datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
         + "_"
         + uuid.uuid4().hex[:8]
     )
@@ -119,7 +120,7 @@ def launch(job):
                     job["dataset"] = register(result["dataset_path"])["id"]
                     job["output"] = result["dataset_path"]
                 job["output_exists"] = Path(job["output"]).is_dir()
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 job["status"] = "failed"
                 job["error"] = str(exc)
             finally:

@@ -2,11 +2,12 @@
 
 import json
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
-from .paths import inside
 
+from .paths import inside
 from .versions import SUPPORTED_DATASET_VERSIONS, normalize_dataset_version
 
 SUPPORTED_VERSIONS = set(SUPPORTED_DATASET_VERSIONS)
@@ -176,7 +177,7 @@ def diagnose(root: Path, max_episodes=20, checks=None, decode_video=False):
         try:
             table = pq.read_table(path)
             data = table.to_pandas()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             add("portability", "fail", f"{path.name}: {exc}")
             continue
         if "episode_index" not in data:

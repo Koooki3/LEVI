@@ -2,10 +2,11 @@
 
 import argparse
 import json
-from .engine import execute, fingerprint
-from .options import Options, STAGES
-from ..paths import configure, inside
+
 from ..catalog import atomic
+from ..paths import configure, inside
+from .engine import execute, fingerprint
+from .options import STAGES, Options
 
 
 def main():
