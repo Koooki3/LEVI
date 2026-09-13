@@ -34,6 +34,7 @@ import {
   exportDataset as apiExport,
   isAnnotateBackendEnabled,
 } from "../utils/annotationsClient";
+import { isSaveShortcut } from "../utils/keyboardShortcuts";
 
 interface Props {
   cameraKeys: string[];
@@ -443,9 +444,10 @@ function useJump(): (ts: number) => void {
 /**
  * Ctrl+S commits one in-progress annotation draft — the quick-add form's
  * typed-but-not-added fields, or a selected atom's pending field edits —
- * into the local `atoms` array. Deliberately local-only: it never makes a
- * network request. Persisting to the backend stays the separate, explicit
- * "Save episode" button (`useAnnotations().save()`).
+ * into the local `atoms` array. When there is no local draft, the panel-level
+ * handler calls save() instead, so Ctrl/Cmd+S persists committed edits and
+ * prevents the browser's Save Page dialog. Draft commits remain separate
+ * from backend writes.
  *
  * Escape discards the draft the same way.
  *
@@ -466,12 +468,14 @@ function useAnnotationDraftShortcuts({
 }): void {
   React.useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+      if (isSaveShortcut(e)) {
+        if (!hasDraft) return;
         e.preventDefault();
-        if (hasDraft) onCommit();
+        onCommit();
         return;
       }
       if (e.key === "Escape" && hasDraft) {
+        e.preventDefault();
         onCancel();
       }
     };
@@ -571,7 +575,7 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
   });
 
   // ============ Save / export ============
-  const handleSave = async () => {
+  const handleSave = React.useCallback(async () => {
     const r = await save();
     if (!r.ok) {
       setExportStatus(`Save failed: ${r.error || "unknown"}`);
@@ -582,7 +586,25 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
           : "Saved episode (backend did not report a path — update/restart backend/app.py).",
       );
     }
-  };
+  }, [save]);
+
+  // Ctrl/Cmd+S saves the current episode when no field has a local draft.
+  React.useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!isSaveShortcut(e) || e.defaultPrevented) return;
+      const target = e.target;
+      if (
+        target instanceof HTMLElement &&
+        target.closest('[data-annotation-draft-active="true"], .quick-popup')
+      ) {
+        return;
+      }
+      e.preventDefault();
+      if (!saving) void handleSave();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleSave, saving]);
 
   const handleSaveDataset = async () => {
     if (!isAnnotateBackendEnabled()) {
@@ -666,6 +688,7 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
               <button
                 disabled={saving || !dirty}
                 onClick={handleSave}
+                title="Save episode (Ctrl/Cmd+S)"
                 className="text-xs h-7 px-3 rounded border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-40"
               >
                 <T>{saving ? "Saving…" : "Save episode"}</T>
@@ -707,7 +730,10 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                 </T>
               </p>
             </div>
-            <div className="quick-add">
+            <div
+              className="quick-add"
+              data-annotation-draft-active={qaHasDraft ? "true" : "false"}
+            >
               <span className="ts-pill">
                 t ={" "}
                 <T>
@@ -977,9 +1003,10 @@ const AtomEditor: React.FC<{
   // draft-then-commit pattern, so they're the only ones a Ctrl+S/Escape
   // shortcut needs to resolve.
   const committedToStr = atom.to != null ? String(atom.to) : "";
+  const hasDraft =
+    timestampDraft !== String(atom.timestamp) || toDraft !== committedToStr;
   useAnnotationDraftShortcuts({
-    hasDraft:
-      timestampDraft !== String(atom.timestamp) || toDraft !== committedToStr,
+    hasDraft,
     onCommit: () => {
       commitTimestamp();
       commitTo();
@@ -993,7 +1020,10 @@ const AtomEditor: React.FC<{
   return (
     <T>
       {
-        <div className="inspector-body">
+        <div
+          className="inspector-body"
+          data-annotation-draft-active={hasDraft ? "true" : "false"}
+        >
           <div className="editor-head inspector-head">
             <div className="inspector-title">
               <StylePill style={atom.style} />

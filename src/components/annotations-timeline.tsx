@@ -28,7 +28,7 @@ import { T } from "@/components/levi-locale";
  *   - Drag a subtask span's right edge → retime the *next* subtask's start
  *     (since the right edge of subtask[i] *is* the start of subtask[i+1]).
  *   - Drag from empty area on the subtask track → create a new subtask span;
- *     a label popup appears at the draw end so you can name it.
+ *     a centered label popup appears so you can name it.
  *   - Drag the playhead handle (or click anywhere on the track band) → scrub
  *     the video time. Pauses the player while dragging.
  *   - Hover over any marker → custom tooltip shows the atom's content.
@@ -51,6 +51,7 @@ import {
   type LanguageStyle,
   type Role,
 } from "../types/language.types";
+import { DraggablePopup } from "./draggable-popup";
 
 const LABEL_WIDTH = 84;
 const DRAG_THRESHOLD_PX = 4;
@@ -156,9 +157,6 @@ interface PendingCreate {
   trackKey: TrackKey;
   start: number;
   end: number;
-  /** Anchor for the label popup (canvas-relative px). */
-  anchorX: number;
-  anchorY: number;
 }
 
 export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
@@ -511,18 +509,9 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
         const trackWidth =
           trackBandRef.current?.getBoundingClientRect().width ?? 1;
         if (distFrac * trackWidth >= DRAG_THRESHOLD_PX) {
-          // Anchor the label popup at the upper-right of the new span.
-          const r = trackBandRef.current?.getBoundingClientRect();
-          if (r) {
-            const xFrac = b / Math.max(0.001, duration);
-            setPendingCreate({
-              trackKey: drag.trackKey,
-              start: a,
-              end: b,
-              anchorX: r.left + xFrac * r.width + 4,
-              anchorY: r.top - 8,
-            });
-          }
+          // The label popup opens in the viewport centre so the input stays
+          // reachable even when the range ends at a track edge.
+          setPendingCreate({ trackKey: drag.trackKey, start: a, end: b });
         } else {
           // Tap, not drag — treat as a seek to that point.
           seek(a, "external");
@@ -991,23 +980,23 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
 
           {/* Drag-to-create label popup */}
           {pendingCreate && (
-            <div
-              className="quick-popup"
-              style={{
-                left: pendingCreate.anchorX,
-                top: pendingCreate.anchorY,
-                position: "fixed",
-              }}
+            <DraggablePopup
+              header={
+                <>
+                  <span className={`style-pill ${pendingCreate.trackKey}`}>
+                    <T>{pendingCreate.trackKey}</T>
+                  </span>
+                  <span style={{ marginLeft: "auto", fontFamily: "monospace" }}>
+                    {pendingCreate.start.toFixed(2)}s →{" "}
+                    {pendingCreate.end.toFixed(2)}s
+                  </span>
+                </>
+              }
+              ariaLabel="Create annotation"
+              canSubmit={createLabel.trim().length > 0}
+              onSubmit={commitPendingCreate}
+              onCancel={cancelPendingCreate}
             >
-              <div className="quick-popup-head">
-                <span className={`style-pill ${pendingCreate.trackKey}`}>
-                  <T>{pendingCreate.trackKey}</T>
-                </span>
-                <span style={{ marginLeft: "auto", fontFamily: "monospace" }}>
-                  {pendingCreate.start.toFixed(2)}s →{" "}
-                  {pendingCreate.end.toFixed(2)}s
-                </span>
-              </div>
               <input
                 type="text"
                 placeholder="label (e.g. grasp the sponge)"
@@ -1016,7 +1005,6 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                 onChange={(e) => setCreateLabel(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") commitPendingCreate();
-                  if (e.key === "Escape") cancelPendingCreate();
                 }}
               />
               <div className="quick-popup-actions">
@@ -1051,7 +1039,7 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                   <T>add ↵</T>
                 </button>
               </div>
-            </div>
+            </DraggablePopup>
           )}
         </div>
       }

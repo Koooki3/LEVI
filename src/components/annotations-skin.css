@@ -557,7 +557,11 @@
 
 /* ----- Quick label popup over the video ----- */
 .annotations-skin .quick-popup {
-  position: absolute;
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  box-sizing: border-box;
   z-index: 30;
   background: rgba(15, 23, 42, 0.96);
   border: 1px solid var(--border-2);
@@ -565,11 +569,29 @@
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
   padding: 8px;
   min-width: 220px;
+  max-width: min(360px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 6px;
   pointer-events: auto;
   backdrop-filter: blur(6px);
+}
+.annotations-skin .quick-popup-drag-handle {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.annotations-skin .quick-popup.is-dragging .quick-popup-drag-handle {
+  cursor: grabbing;
+}
+.annotations-skin .quick-popup-grip {
+  color: var(--fg-3);
+  opacity: 0.7;
+  font-size: 12px;
+  letter-spacing: -0.2em;
+  margin-left: 4px;
 }
 .annotations-skin .quick-popup-head {
   display: flex;

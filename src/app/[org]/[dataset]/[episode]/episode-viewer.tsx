@@ -1069,6 +1069,8 @@ function EpisodeViewerInner({
                               popup with{" "}
                             </T>
                             <kbd>↵</kbd>
+                            <T> or </T>
+                            <kbd>Ctrl/Cmd+S</kbd>
                             <T>, or cancel with </T>
                             <kbd>
                               <T>Esc</T>

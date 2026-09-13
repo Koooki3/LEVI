@@ -23,6 +23,7 @@ import { T } from "@/components/levi-locale";
  */
 
 import React, { useEffect, useRef, useState } from "react";
+import { DraggablePopup } from "./draggable-popup";
 import {
   useAnnotations,
   type PendingBboxDraw,
@@ -319,8 +320,6 @@ function drawObjectBbox(
 const CLICK_THRESHOLD_PX = 4;
 
 interface FinalizingState {
-  /** Where the popup anchors itself, in canvas-relative pixels (top-right of bbox / right of point). */
-  anchor: { x: number; y: number };
   /** What the user just drew (label/camera filled in on submit). */
   draw:
     | Pick<PendingBboxDraw, "kind" | "bbox">
@@ -658,20 +657,13 @@ export const VideoOverlayCanvas: React.FC<Props> = ({
         Math.max(start[0], x),
         Math.max(start[1], y),
       ];
-      // Anchor popup at the bbox top-right in canvas-px space.
       setPendingDraw({
         kind: "bbox",
         bbox,
         label: drawLabel || "",
         camera: cameraKey,
       });
-      setFinalizing({
-        anchor: {
-          x: rect.left + bbox[2] * rect.width,
-          y: rect.top + bbox[1] * rect.height,
-        },
-        draw: { kind: "bbox", bbox },
-      });
+      setFinalizing({ draw: { kind: "bbox", bbox } });
       setQuestionKind("detect");
     } else {
       // Click → keypoint at the up position.
@@ -684,13 +676,7 @@ export const VideoOverlayCanvas: React.FC<Props> = ({
         label: drawLabel || "",
         camera: cameraKey,
       });
-      setFinalizing({
-        anchor: {
-          x: rect.left + point[0] * rect.width + 14,
-          y: rect.top + point[1] * rect.height,
-        },
-        draw: { kind: "keypoint", point },
-      });
+      setFinalizing({ draw: { kind: "keypoint", point } });
       setQuestionKind("point");
     }
     dragOriginRef.current = null;
@@ -819,7 +805,6 @@ export const VideoOverlayCanvas: React.FC<Props> = ({
           />
           {finalizing && (
             <QuickLabelPopup
-              anchor={finalizing.anchor}
               kind={finalizing.draw.kind}
               questionKind={questionKind}
               onQuestionKindChange={setQuestionKind}
@@ -836,13 +821,12 @@ export const VideoOverlayCanvas: React.FC<Props> = ({
 };
 
 /**
- * Floating "what is this?" popup that appears next to a freshly drawn bbox or
- * keypoint. The label gets templated into a question — bbox → "Where is the X
+ * Centered "what is this?" popup for a freshly drawn bbox or keypoint.
+ * The label gets templated into a question — bbox → "Where is the X
  * in the image?", keypoint → "Point to the X." — and the assistant message
  * carries the JSON answer the steerable validator expects.
  */
 const QuickLabelPopup: React.FC<{
-  anchor: { x: number; y: number };
   kind: "bbox" | "keypoint";
   questionKind: "detect" | "point";
   onQuestionKindChange: (k: "detect" | "point") => void;
@@ -851,7 +835,6 @@ const QuickLabelPopup: React.FC<{
   onSubmit: () => void;
   onCancel: () => void;
 }> = ({
-  anchor,
   kind,
   questionKind,
   onQuestionKindChange,
@@ -861,59 +844,39 @@ const QuickLabelPopup: React.FC<{
   onCancel,
 }) => {
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const popupRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
-  // Position the popup just to the right of the bbox/point anchor, but flip
-  // to the left when it would overflow the parent's right edge so it stays
-  // visible for bboxes drawn near the right side of the video. Uses
-  // useLayoutEffect so the measurement + reposition happens before the
-  // browser paints — no flicker.
-  React.useLayoutEffect(() => {
-    const popup = popupRef.current;
-    const parent = popup?.parentElement;
-    if (!popup || !parent) return;
-    const popW = popup.offsetWidth;
-    const popH = popup.offsetHeight;
-    const parW = parent.clientWidth;
-    const parH = parent.clientHeight;
-    const desiredLeft = anchor.x + 6;
-    const overflowsRight = desiredLeft + popW > parW - 4;
-    const finalLeft = overflowsRight
-      ? Math.max(4, anchor.x - popW - 6)
-      : Math.max(4, desiredLeft);
-    const finalTop = Math.max(4, Math.min(parH - popH - 4, anchor.y - 4));
-    popup.style.left = `${finalLeft}px`;
-    popup.style.top = `${finalTop}px`;
-  }, [anchor.x, anchor.y]);
   return (
     <T>
       {
-        <div
-          ref={popupRef}
-          className="quick-popup"
-          onPointerDown={(e) => e.stopPropagation()}
+        <DraggablePopup
+          header={
+            <>
+              <span className={"kind-pill " + kind}>
+                <T>{kind}</T>
+              </span>
+              <select
+                value={questionKind}
+                onChange={(e) =>
+                  onQuestionKindChange(e.target.value as "detect" | "point")
+                }
+                style={{ marginLeft: "auto" }}
+              >
+                <option value="detect">
+                  <T>where is …?</T>
+                </option>
+                <option value="point">
+                  <T>point to …</T>
+                </option>
+              </select>
+            </>
+          }
+          ariaLabel="Create visual annotation"
+          canSubmit={label.trim().length > 0}
+          onSubmit={onSubmit}
+          onCancel={onCancel}
         >
-          <div className="quick-popup-head">
-            <span className={`kind-pill ${kind}`}>
-              <T>{kind}</T>
-            </span>
-            <select
-              value={questionKind}
-              onChange={(e) =>
-                onQuestionKindChange(e.target.value as "detect" | "point")
-              }
-              style={{ marginLeft: "auto" }}
-            >
-              <option value="detect">
-                <T>where is …?</T>
-              </option>
-              <option value="point">
-                <T>point to …</T>
-              </option>
-            </select>
-          </div>
           <input
             ref={inputRef}
             type="text"
@@ -924,7 +887,6 @@ const QuickLabelPopup: React.FC<{
             onChange={(e) => onLabelChange(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") onSubmit();
-              if (e.key === "Escape") onCancel();
             }}
           />
           <div className="quick-popup-actions">
@@ -939,7 +901,7 @@ const QuickLabelPopup: React.FC<{
               <T>add ↵</T>
             </button>
           </div>
-        </div>
+        </DraggablePopup>
       }
     </T>
   );
