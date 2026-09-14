@@ -40,6 +40,33 @@ def execute(stage: str, source: Path, target: Path, options: Options):
         return dataset.repair(source, target, options, stage)
     selected = raw.demos(source, options)
     if stage == "pipeline":
+        # Real capture rigs commonly run a little under their nominal rate
+        # (9.5 Hz measured for a "10 Hz" capture is typical, not an error),
+        # so requiring the caller to already know and pass the exact right
+        # target FPS makes the common case fail every time. Detect it
+        # instead: a cheap ffprobe metadata read (media.probe, no decode)
+        # across every video-mode demo's cameras finds the batch's real
+        # ceiling before any staging/copy work starts, and the target FPS is
+        # lowered to match — visibly (fps_note in the result), never
+        # silently, and applied once so every stage below (staging,
+        # filtering, the final convert) sees one consistent value, matching
+        # the single FPS every lerobot dataset declares in info.json.
+        measured_fps = [
+            media.probe(raw.camera_path(demo, camera))["fps"]
+            for demo in selected
+            if not all((demo / c).is_dir() for c in options.cameras)
+            for camera in options.cameras
+        ]
+        fps_note = None
+        if measured_fps and options.fps > min(measured_fps) + 0.01:
+            detected = min(measured_fps)
+            fps_note = (
+                f"Requested output FPS {options.fps:g} exceeds the measured "
+                f"capture FPS ({detected:g} min across {len(selected)} demos); "
+                f"automatically lowered to {detected:g} for this conversion."
+            )
+            options = options.model_copy(update={"fps": detected})
+            print(fps_note, flush=True)
         # Staging is a real copy, never a symlink view of a changing recording.
         target.mkdir(parents=True)
         prep = target / "capture"
@@ -95,6 +122,7 @@ def execute(stage: str, source: Path, target: Path, options: Options):
             "dataset_path": str(converted),
             "validation": report,
             "excluded_demos": options.exclude_demos,
+            **({"fps_note": fps_note} if fps_note else {}),
         }
     if stage in (
         "summary",

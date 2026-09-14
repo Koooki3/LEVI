@@ -134,6 +134,101 @@ def test_no_silent_row_join_or_unknown_commands(capture):
         raw.load(demo)
 
 
+def test_success_flag_zero_throughout_is_accepted_not_corruption(capture):
+    # A demo the operator never marked (teleoperation) or a policy rollout
+    # that failed the task both have success_flag == 0 for every row — that
+    # is real, common data, not a corrupted capture. Only an inconsistent
+    # (mixed 0/1) flag within one demo indicates an actual problem.
+    demo = next(capture.rglob("demo_*"))
+    for name in ["end_effector_pose.csv", "gripper_state.csv"]:
+        path = demo / name
+        frame = pd.read_csv(path)
+        frame["success_flag"] = 0
+        frame.to_csv(path, index=False)
+    raw.load(demo)  # must not raise
+
+
+def test_mixed_success_flag_within_demo_is_rejected(capture):
+    demo = next(capture.rglob("demo_*"))
+    path = demo / "gripper_state.csv"
+    frame = pd.read_csv(path)
+    frame.loc[0, "success_flag"] = 0
+    frame.to_csv(path, index=False)
+    with pytest.raises(ValueError, match="inconsistent success_flag"):
+        raw.load(demo)
+
+
+def test_demo_outcome_reads_eval_metadata_and_ignores_teleoperation(tmp_path):
+    demo = tmp_path / "demo_0000"
+    demo.mkdir()
+    assert raw.demo_outcome(demo) is None  # no metadata.json at all
+
+    demo_meta = demo / "metadata.json"
+    demo_meta.write_text(json.dumps({"success_flag_final": 0}))
+    assert raw.demo_outcome(demo) is None  # teleoperation: no data_source
+
+    demo_meta.write_text(
+        json.dumps(
+            {
+                "data_source": "policy_rollout",
+                "success_flag_final": 1,
+                "eval": {"outcome": "success"},
+            }
+        )
+    )
+    assert raw.demo_outcome(demo) == "success"
+
+    demo_meta.write_text(
+        json.dumps({"data_source": "policy_rollout", "success_flag_final": 0})
+    )
+    assert raw.demo_outcome(demo) == "failure"  # falls back to success_flag_final
+
+
+def test_policy_rollout_failure_demo_converts_and_carries_outcome_label(
+    capture, tmp_path
+):
+    demo = next(capture.rglob("demo_*"))
+    for name in ["end_effector_pose.csv", "gripper_state.csv"]:
+        path = demo / name
+        frame = pd.read_csv(path)
+        frame["success_flag"] = 0
+        frame.to_csv(path, index=False)
+    (demo / "metadata.json").write_text(
+        json.dumps(
+            {
+                "data_source": "policy_rollout",
+                "success_flag_final": 0,
+                "eval": {"outcome": "failure"},
+            }
+        )
+    )
+    target = tmp_path / "policy_rollout_dataset"
+    result = execute("pipeline", capture, target, Options())
+    assert result["ok"], result
+    episodes = [
+        json.loads(line)
+        for line in (Path(result["dataset_path"]) / "meta/episodes.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    assert episodes[0]["levi_outcome"] == "failure"
+
+
+def test_teleoperation_demo_has_no_outcome_label(capture, tmp_path):
+    # No metadata.json at all in the shared `capture` fixture — matches the
+    # real data_collection_robotiq captures, which must stay byte-for-byte
+    # unaffected (no levi_outcome key at all, not levi_outcome=None).
+    target = tmp_path / "teleop_dataset"
+    result = execute("pipeline", capture, target, Options())
+    assert result["ok"], result
+    episode = json.loads(
+        (Path(result["dataset_path"]) / "meta/episodes.jsonl")
+        .read_text()
+        .splitlines()[0]
+    )
+    assert "levi_outcome" not in episode
+
+
 def test_geodesic_static_filter_preserves_slow_motion_and_grasps():
     xyz = np.zeros((30, 3))
     xyz[:, 0] = np.arange(30) * 0.001
@@ -159,6 +254,56 @@ def test_video_mismatch_rejected_before_writing(capture, tmp_path):
     with pytest.raises(ValueError, match="preflight"):
         execute("convert", capture, tmp_path / "bad", Options())
     assert not (tmp_path / "bad").exists()
+
+
+def test_pipeline_auto_lowers_fps_to_the_measured_capture_rate(capture, tmp_path):
+    # The fixture's cameras are encoded at 10 fps; requesting a higher target
+    # FPS must not hard-fail — real capture rigs routinely run a little under
+    # their nominal rate, so requiring the caller to already know the exact
+    # right number makes the common case fail every time. Detected up front
+    # (before any staging work) and applied consistently, not silently: the
+    # result reports the adjustment, and the written dataset actually
+    # declares the adjusted FPS, not the originally requested one.
+    target = tmp_path / "auto-lowered"
+    result = execute("pipeline", capture, target, Options(fps=15))
+    assert result["ok"], result
+    assert "10" in result["fps_note"] and "15" in result["fps_note"]
+    info = json.loads((Path(result["dataset_path"]) / "meta/info.json").read_text())
+    assert info["fps"] == 10
+
+
+def test_audit_recognizes_both_collectors_stall_and_terminal_event_schemas(
+    capture,
+):
+    # Two real, still-in-use collectors report the same two concepts under
+    # different keys/values: teleoperation sets a flat `camera_stalled` bool
+    # and ends every demo with a "stop_demo" event; the policy-rollout
+    # collector nests the stall flag as `cameras.stall_detection.stalled`
+    # (a list) and ends with "episode_end" instead. audit() must catch a
+    # real stall and accept a real, complete demo either way.
+    demo = next(capture.rglob("demo_*"))
+    metadata = demo / "metadata.json"
+    events = demo / "events.csv"
+
+    # Policy-rollout-style stall marker, no flat `camera_stalled` key at all.
+    metadata.write_text(
+        json.dumps(
+            {
+                "frame_count": 30,
+                "cameras": {"stall_detection": {"stalled": [[3, 5]]}},
+            }
+        )
+    )
+    rec = raw.audit(demo, Options())
+    assert not rec["ok"]
+    assert any("stall" in e for e in rec["errors"])
+
+    # A real, complete policy-rollout demo (no stall, "episode_end" instead
+    # of "stop_demo") must not be flagged as incomplete when required.
+    metadata.write_text(json.dumps({"frame_count": 30, "stopped_at": "now"}))
+    events.write_text("timestamp_sec,event,detail,success_flag\n0,episode_end,ok,1\n")
+    rec = raw.audit(demo, Options(require_complete=True))
+    assert not any("Missing" in e for e in rec["errors"]), rec["errors"]
 
 
 def test_images_and_fps_resample_all_rows(capture, tmp_path):
@@ -276,6 +421,35 @@ def test_builtin_web_job_and_changed_source(client, capture):
             break
         time.sleep(0.05)
     assert "changed" in changed["error"]
+
+
+def test_web_job_supports_a_custom_output_directory(client, capture, tmp_path):
+    chosen = tmp_path / "my-exports" / "screws-attempt-1"
+    plan = client.post(
+        "/api/levi/jobs/plan",
+        json={
+            "stage": "pipeline",
+            "source": str(capture),
+            "fps": 10,
+            "output": str(chosen),
+        },
+    )
+    assert plan.status_code == 200, plan.text
+    job = plan.json()
+    # Chosen path used verbatim, not folded into the auto-generated
+    # datasets/levi_<job id> layout.
+    assert job["output"] == str(chosen.resolve())
+
+    # A second plan against the same chosen path is rejected before running
+    # anything — same "never silently overwrite" guarantee as the auto-named
+    # case, just surfaced at plan time instead of only at run time.
+    chosen.mkdir(parents=True)
+    conflict = client.post(
+        "/api/levi/jobs/plan",
+        json={"stage": "pipeline", "source": str(capture), "output": str(chosen)},
+    )
+    assert conflict.status_code == 400
+    assert "already exists" in conflict.json()["detail"]
 
 
 def test_cache_cleanup_allowlist_preserves_durable_data(tmp_path, monkeypatch):

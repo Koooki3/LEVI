@@ -122,6 +122,10 @@ class JobPlan(BaseModel):
     fps: int = Field(default=10, ge=1, le=240)
     source_fps: int = Field(default=30, ge=1, le=240)
     options: Options = Field(default_factory=Options)
+    # Optional caller-chosen output directory (still confined to
+    # LEVI_WORKSPACE); omit to keep the auto-generated `datasets/levi_<job
+    # id>` path.
+    output: str | None = None
 
 
 class Diagnostic(BaseModel):
@@ -206,6 +210,7 @@ def plan(payload: JobPlan):
         payload.fps,
         payload.source_fps,
         payload.options.model_dump(),
+        payload.output,
     )
     atomic(STATE / "jobs" / (job["id"] + ".json"), job)
     return job

@@ -20,7 +20,7 @@ WORKERS = threading.BoundedSemaphore(2)
 ACTIVE = {}
 
 
-def plan(stage, source, fps=10, source_fps=30, options=None):
+def plan(stage, source, fps=10, source_fps=30, options=None, output=None):
     if stage not in STAGES:
         raise ValueError("Unsupported conversion stage")
     source_path = inside(source)
@@ -35,9 +35,14 @@ def plan(stage, source, fps=10, source_fps=30, options=None):
         + "_"
         + uuid.uuid4().hex[:8]
     )
-    target = inside(ROOT / "datasets" / ("levi_" + job_id))
+    # A caller-chosen output directory, still confined to LEVI_WORKSPACE by
+    # `inside()` — the CLI (`--output`) already allowed this; expose the same
+    # freedom to the web UI/API instead of always auto-naming by job ID.
+    target = inside(output) if output else inside(ROOT / "datasets" / ("levi_" + job_id))
     if target.is_relative_to(source_path):
         raise ValueError("Output cannot be nested inside source")
+    if target.exists():
+        raise ValueError(f"Output directory already exists: {target}")
     option_path = STATE / "jobs" / (job_id + ".options.json")
     result_path = STATE / "jobs" / (job_id + ".result.json")
     signature = fingerprint(source_path)

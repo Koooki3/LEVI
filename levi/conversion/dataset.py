@@ -95,6 +95,7 @@ def convert(source: Path, target: Path, options):
         task = raw.task_text(demo, options)
         tasks.setdefault(task, len(tasks))
         task_id = tasks[task]
+        outcome = raw.demo_outcome(demo)
         cols = {
             "timestamp": np.arange(n, dtype=np.float32) / options.fps,
             "frame_index": np.arange(n, dtype=np.int64),
@@ -160,7 +161,10 @@ def convert(source: Path, target: Path, options):
         )
         for k in ["action", "observation.state"]:
             features[k] = {"dtype": "float32", "shape": [len(names)], "names": names}
-        episodes.append({"episode_index": ep, "tasks": [task], "length": n})
+        episode_row = {"episode_index": ep, "tasks": [task], "length": n}
+        if outcome is not None:
+            episode_row["levi_outcome"] = outcome
+        episodes.append(episode_row)
         epstats.append({"episode_index": ep, "stats": eps})
         frame_map = demo / "levi_frames.json"
         provenance.append(

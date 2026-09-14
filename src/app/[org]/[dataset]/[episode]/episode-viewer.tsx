@@ -32,6 +32,7 @@ import {
   loadAllEpisodeFrameInfo,
   loadCrossEpisodeActionVariance,
   loadDatasetTaskIndex,
+  loadEpisodeOutcomes,
   CROSS_EPISODE_DEFAULTS,
   type EpisodeData,
   type ColumnMinMax,
@@ -40,6 +41,7 @@ import {
   type CrossEpisodeVarianceData,
   type CrossEpisodeRequest,
   type DatasetTaskIndex,
+  type EpisodeOutcome,
 } from "./fetch-data";
 import { getDatasetVersionAndInfo, isDatasetV3 } from "@/utils/versionUtils";
 import {
@@ -374,6 +376,11 @@ function EpisodeViewerInner({
       ? readBrowserStorage("session", "sidebarFlaggedOnly") === "true"
       : false,
   );
+  const [sidebarFailuresOnly, setSidebarFailuresOnly] = useState(() =>
+    typeof window !== "undefined"
+      ? readBrowserStorage("session", "sidebarFailuresOnly") === "true"
+      : false,
+  );
   const [crossEpData, setCrossEpData] =
     useState<CrossEpisodeVarianceData | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
@@ -406,6 +413,10 @@ function EpisodeViewerInner({
   });
   const [annotationSummary, setAnnotationSummary] =
     useState<AnnotationSummary | null>(null);
+  const [episodeOutcomes, setEpisodeOutcomes] = useState<Record<
+    string,
+    EpisodeOutcome
+  > | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -475,6 +486,24 @@ function EpisodeViewerInner({
     };
   }, [org, dataset]);
 
+  // Sidebar's per-episode success/failure badge — dataset-native metadata
+  // (from meta/episodes.jsonl, written by LEVI's converter for policy-eval
+  // rollout captures), not a LEVI annotation sidecar, so no backend check.
+  useEffect(() => {
+    if (!org || !dataset) return;
+    const repoId = `${org}/${dataset}`;
+    let cancelled = false;
+    getDatasetVersionAndInfo(repoId)
+      .then(({ version }) => loadEpisodeOutcomes(repoId, version))
+      .then((result) => {
+        if (!cancelled && mountedRef.current) setEpisodeOutcomes(result);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [org, dataset]);
+
   // Eagerly load the URDFViewer bundle + warm the STL geometry cache while
   // the user is on the Episodes tab, so the 3D Replay tab opens faster.
   useEffect(() => {
@@ -502,6 +531,11 @@ function EpisodeViewerInner({
     );
     writeBrowserStorage(
       "session",
+      "sidebarFailuresOnly",
+      String(sidebarFailuresOnly),
+    );
+    writeBrowserStorage(
+      "session",
       "framesFlaggedOnly",
       String(framesFlaggedOnly),
     );
@@ -512,6 +546,7 @@ function EpisodeViewerInner({
   }, [
     activeTab,
     sidebarFlaggedOnly,
+    sidebarFailuresOnly,
     framesFlaggedOnly,
     annotationsSubTab,
     taskFilter,
@@ -919,11 +954,14 @@ function EpisodeViewerInner({
                 nextPage={nextPage}
                 showFlaggedOnly={sidebarFlaggedOnly}
                 onShowFlaggedOnlyChange={setSidebarFlaggedOnly}
+                showFailuresOnly={sidebarFailuresOnly}
+                onShowFailuresOnlyChange={setSidebarFailuresOnly}
                 tasks={taskIndex?.tasks ?? []}
                 taskFilter={taskFilter}
                 onTaskFilterChange={setTaskFilter}
                 filteredEpisodeCount={visibleEpisodes.length}
                 annotationSummary={annotationSummary ?? undefined}
+                episodeOutcomes={episodeOutcomes ?? undefined}
                 onEpisodeSelect={
                   activeTab === "urdf"
                     ? (ep) => {

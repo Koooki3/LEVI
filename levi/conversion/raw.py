@@ -94,8 +94,15 @@ def load(demo: Path):
             values = pd.to_numeric(frame[col], errors="raise").to_numpy(float)
             if not np.isfinite(values).all() or (np.diff(values) < 0).any():
                 raise ValueError(f"{label}: invalid {col}")
-        if not (pd.to_numeric(frame.success_flag, errors="raise") == 1).all():
-            raise ValueError(f"{label}: failed source samples")
+        # success_flag is an episode-level outcome marker (operator-toggled
+        # for teleoperation, policy-graded for eval rollouts), broadcast to
+        # every row at capture time — not a per-sample sensor-quality flag.
+        # Real captures are legitimately 0 throughout (a demo the operator
+        # never marked, or a policy rollout that failed the task), so the
+        # only genuine corruption signal is a MIX of values within one demo
+        # (e.g. from a bad merge), not the value itself. See demo_outcome().
+        if pd.to_numeric(frame.success_flag, errors="raise").nunique() != 1:
+            raise ValueError(f"{label}: inconsistent success_flag within one demo")
     if len(pose) < 2 or not np.array_equal(pose.frame_index, grip.frame_index):
         raise ValueError("Pose/gripper frame IDs must match exactly (no silent join)")
     if not np.allclose(pose.timestamp_sec, grip.timestamp_sec, rtol=0, atol=1e-3):
@@ -209,7 +216,16 @@ def audit(demo: Path, options: Options):
         events = demo / "events.csv"
         if metadata.exists():
             m = json.loads(metadata.read_text())
-            if m.get("camera_stalled"):
+            # Two collectors, two schemas for the same signal: the
+            # teleoperation collector sets a flat `camera_stalled` bool; the
+            # policy-rollout collector instead reports a nested
+            # `cameras.stall_detection.stalled` list of stalled spans (real
+            # teleop demos have hit this — 9 of 1527 in data_collection_robotiq
+            # carry camera_stalled=true). Recognize both, not just whichever
+            # one this function happened to be written against first.
+            if m.get("camera_stalled") or m.get("cameras", {}).get(
+                "stall_detection", {}
+            ).get("stalled"):
                 rec["errors"].append("Capture metadata records camera stall")
             if m.get("frame_count", len(pose)) != len(pose):
                 rec["errors"].append("Capture metadata frame_count mismatch")
@@ -222,8 +238,12 @@ def audit(demo: Path, options: Options):
             names = set(ev.get("event", []))
             if "camera_stalled" in names:
                 rec["errors"].append("Capture contains camera_stalled event")
-            if options.require_complete and "stop_demo" not in names:
-                rec["errors"].append("Missing stop_demo event")
+            # Terminal event name also differs by collector: "stop_demo" for
+            # teleoperation, "episode_end" for policy rollouts.
+            if options.require_complete and not (
+                names & {"stop_demo", "episode_end"}
+            ):
+                rec["errors"].append("Missing stop_demo/episode_end event")
         elif options.require_complete:
             rec["errors"].append("Missing events.csv")
     except Exception as exc:  # noqa: BLE001
@@ -255,11 +275,20 @@ def read_images(files, positions):
         yield frame
 
 
-def sample_positions(n, source_fps, target_fps):
+def check_fps_supported(source_fps, target_fps):
     if target_fps > source_fps + 0.01:
         raise ValueError(
-            "Upsampling capture frames is not supported; choose target FPS <= source FPS"
+            f"Upsampling capture frames is not supported: requested output FPS "
+            f"{target_fps:g} exceeds the measured capture FPS {source_fps:g}. "
+            f"Set fps <= {source_fps:g} in the conversion options and retry — "
+            "e.g. real captures often run a little under their nominal rate "
+            "(9.5 Hz measured for a 10 Hz nominal capture is common), so the "
+            "default target FPS may need lowering to match."
         )
+
+
+def sample_positions(n, source_fps, target_fps):
+    check_fps_supported(source_fps, target_fps)
     positions = np.arange(0, n, source_fps / target_fps).astype(int)
     if len(positions) < 2:
         raise ValueError("Resampling leaves fewer than two frames")
@@ -339,6 +368,30 @@ def task_text(demo, options):
         path.read_text(encoding="utf-8").strip() if path.exists() else demo.parent.name
     )
     return options.task_map.get(text, text)
+
+
+def demo_outcome(demo: Path) -> str | None:
+    """Success/failure label for a policy-rollout demo, or None for anything
+    else (teleoperation captures included — their success_flag is an
+    unpressed toggle defaulting to 0, not a real outcome, so they never get
+    a label). Read directly from metadata.json's own `eval` block rather
+    than the CSV success_flag column: it's the more authoritative source
+    and carries this signal regardless of how raw2lerobot-style pipelines
+    might one day change the CSV schema.
+    """
+    path = demo / "metadata.json"
+    if not path.exists():
+        return None
+    try:
+        meta = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    if meta.get("data_source") != "policy_rollout":
+        return None
+    outcome = meta.get("eval", {}).get("outcome")
+    if outcome in ("success", "failure"):
+        return outcome
+    return "success" if meta.get("success_flag_final") == 1 else "failure"
 
 
 def copy_task(source, destination, options):

@@ -5,6 +5,7 @@ import {
   loadAllEpisodeLengthsV3,
   loadCrossEpisodeActionVariance,
   loadDatasetTaskIndex,
+  loadEpisodeOutcomes,
   buildTaskDefinitions,
   extractLanguageAtoms,
   CROSS_EPISODE_DEFAULTS,
@@ -601,6 +602,40 @@ describe("loadDatasetTaskIndex", () => {
     } finally {
       request.mockRestore();
     }
+  });
+});
+
+describe("loadEpisodeOutcomes", () => {
+  test("maps levi_outcome per episode, from a policy-eval rollout conversion", async () => {
+    const request = mockFetchByPath({
+      "meta/episodes.jsonl":
+        '{"episode_index":0,"tasks":["pick screws"],"length":30,"levi_outcome":"failure"}\n' +
+        '{"episode_index":1,"tasks":["pick screws"],"length":40,"levi_outcome":"success"}\n',
+    });
+    try {
+      const result = await loadEpisodeOutcomes("local/eval-outcomes", "v2.1");
+      expect(result).toEqual({ "0": "failure", "1": "success" });
+    } finally {
+      request.mockRestore();
+    }
+  });
+
+  test("returns an empty map for a dataset with no levi_outcome field", async () => {
+    const request = mockFetchByPath({
+      "meta/episodes.jsonl":
+        '{"episode_index":0,"tasks":["pick plate"],"length":30}\n',
+    });
+    try {
+      const result = await loadEpisodeOutcomes("local/no-outcomes", "v2.1");
+      expect(result).toEqual({});
+    } finally {
+      request.mockRestore();
+    }
+  });
+
+  test("returns an empty map for v3 datasets", async () => {
+    const result = await loadEpisodeOutcomes("local/v3-dataset", "v3.0");
+    expect(result).toEqual({});
   });
 });
 

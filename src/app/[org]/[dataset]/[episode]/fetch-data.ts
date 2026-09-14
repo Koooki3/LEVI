@@ -2136,6 +2136,85 @@ export async function loadDatasetTaskIndex(
   return data;
 }
 
+export type EpisodeOutcome = "success" | "failure";
+
+const episodeOutcomesCache = new Map<
+  string,
+  { data: Record<string, EpisodeOutcome>; expiry: number }
+>();
+function pruneEpisodeOutcomesCache(now: number): void {
+  for (const [key, value] of episodeOutcomesCache) {
+    if (now >= value.expiry) episodeOutcomesCache.delete(key);
+  }
+  while (episodeOutcomesCache.size > MAX_TASK_INDEX_CACHE_ENTRIES) {
+    const oldestKey = episodeOutcomesCache.keys().next().value;
+    if (!oldestKey) break;
+    episodeOutcomesCache.delete(oldestKey);
+  }
+}
+function clearEpisodeOutcomesCache(): void {
+  episodeOutcomesCache.clear();
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("levi:hf-auth-changed", clearEpisodeOutcomesCache);
+}
+
+/**
+ * Per-episode success/failure label for datasets converted from a
+ * policy-eval rollout capture (LEVI's built-in converter writes it as
+ * `levi_outcome` on each `meta/episodes.jsonl` row — see
+ * `levi/conversion/raw.py:demo_outcome`). Dataset-native metadata, not a
+ * LEVI annotation-layer sidecar, so this reads the dataset's own files
+ * directly and needs no annotation backend. v3 datasets (LEVI's converter
+ * only ever emits v2.1) and datasets without the field both simply return
+ * an empty map.
+ */
+export async function loadEpisodeOutcomes(
+  repoId: string,
+  version: string,
+): Promise<Record<string, EpisodeOutcome>> {
+  const normalizedVersion = normalizeDatasetVersion(version);
+  if (!normalizedVersion || isDatasetV3(normalizedVersion)) return {};
+  const now = Date.now();
+  pruneEpisodeOutcomesCache(now);
+  const cacheKey = `${repoId}@${normalizedVersion}`;
+  const cached = episodeOutcomesCache.get(cacheKey);
+  if (cached && now < cached.expiry) {
+    episodeOutcomesCache.delete(cacheKey);
+    episodeOutcomesCache.set(cacheKey, cached);
+    return cached.data;
+  }
+
+  let data: Record<string, EpisodeOutcome> = {};
+  try {
+    const response = await fetch(
+      buildVersionedUrl(repoId, normalizedVersion, "meta/episodes.jsonl"),
+      { headers: authHeaders(), cache: "no-store" },
+    );
+    if (response.ok) {
+      for (const row of parseJsonlRows(await response.text())) {
+        const episodeIndex = taskIndexNumber(row.episode_index);
+        const outcome = row.levi_outcome;
+        if (
+          episodeIndex !== null &&
+          (outcome === "success" || outcome === "failure")
+        ) {
+          data[String(episodeIndex)] = outcome;
+        }
+      }
+    }
+  } catch {
+    data = {};
+  }
+
+  episodeOutcomesCache.set(cacheKey, {
+    data,
+    expiry: Date.now() + TASK_INDEX_TTL_MS,
+  });
+  pruneEpisodeOutcomesCache(Date.now());
+  return data;
+}
+
 /**
  * Load episode lengths from v2 JSONL or all v3 metadata parquet chunks.
  * Returns min/max/mean/median/std and a histogram, or null if unavailable.

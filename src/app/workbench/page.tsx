@@ -40,6 +40,7 @@ export default function Workbench() {
   const [stage, setStage] = useState("pipeline");
   const [fps, setFps] = useState(10);
   const [sourceFps, setSourceFps] = useState(30);
+  const [output, setOutput] = useState("");
   const [options, setOptions] = useState("{}");
   const [plan, setPlan] = useState<Job | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -198,6 +199,7 @@ export default function Workbench() {
                   fps,
                   source_fps: sourceFps,
                   options: JSON.parse(options),
+                  ...(output.trim() ? { output: output.trim() } : {}),
                 }),
               ),
             );
@@ -214,6 +216,20 @@ export default function Workbench() {
               }}
               required
               placeholder={t("Raw capture or previous stage output directory")}
+            />
+          </label>
+          <label className="block mt-4 text-xs">
+            <T>Output directory (optional)</T>
+            <input
+              className="levi-input w-full mt-2"
+              value={output}
+              onChange={(e) => {
+                setOutput(e.target.value);
+                setPlan(null);
+              }}
+              placeholder={t(
+                "Leave blank to auto-name by job ID under LEVI_WORKSPACE/datasets",
+              )}
             />
           </label>
           <div className="levi-row mt-4">

@@ -6,7 +6,10 @@ import Link from "next/link";
 import React, { useMemo, useState } from "react";
 import { useFlaggedEpisodes } from "@/context/flagged-episodes-context";
 
-import type { DatasetDisplayInfo } from "@/app/[org]/[dataset]/[episode]/fetch-data";
+import type {
+  DatasetDisplayInfo,
+  EpisodeOutcome,
+} from "@/app/[org]/[dataset]/[episode]/fetch-data";
 import type { AnnotationSummary } from "@/utils/annotationsClient";
 
 /** Small status dots distinguishing language/event annotations from SAM3
@@ -42,6 +45,23 @@ function AnnotationDots({
   );
 }
 
+/** Success/failure dot for datasets converted from a policy-eval rollout
+ * capture (see EpisodeOutcome / levi_outcome). Absent (renders nothing) for
+ * an episode with no recorded outcome, so ordinary teleoperation-sourced
+ * datasets show no extra marks. */
+function OutcomeBadge({ outcome }: { outcome: EpisodeOutcome | undefined }) {
+  const { t } = useLocale();
+  if (!outcome) return null;
+  return (
+    <span
+      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+        outcome === "success" ? "bg-emerald-400" : "bg-red-400"
+      }`}
+      title={t(outcome === "success" ? "Episode succeeded" : "Episode failed")}
+    />
+  );
+}
+
 interface SidebarProps {
   datasetInfo: DatasetDisplayInfo;
   paginatedEpisodes: number[];
@@ -54,6 +74,10 @@ interface SidebarProps {
   nextPage: () => void;
   showFlaggedOnly: boolean;
   onShowFlaggedOnlyChange: (v: boolean) => void;
+  /** Restrict the list to episodes with a recorded "failure" outcome — only
+   * meaningful (and only rendered) when episodeOutcomes has entries. */
+  showFailuresOnly?: boolean;
+  onShowFailuresOnlyChange?: (v: boolean) => void;
   onEpisodeSelect?: (ep: number) => void;
   /** Dataset task strings; the filter appears once there are at least two. */
   tasks?: string[];
@@ -64,6 +88,8 @@ interface SidebarProps {
   filteredEpisodeCount?: number;
   /** Per-episode language/vision annotation presence, for the status dots. */
   annotationSummary?: AnnotationSummary;
+  /** Per-episode success/failure label, for policy-eval rollout datasets. */
+  episodeOutcomes?: Record<string, EpisodeOutcome>;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -77,23 +103,55 @@ const Sidebar: React.FC<SidebarProps> = ({
   nextPage,
   showFlaggedOnly,
   onShowFlaggedOnlyChange,
+  showFailuresOnly = false,
+  onShowFailuresOnlyChange,
   onEpisodeSelect,
   tasks = [],
   taskFilter = null,
   onTaskFilterChange,
   filteredEpisodeCount,
   annotationSummary,
+  episodeOutcomes,
 }) => {
   const [mobileVisible, setMobileVisible] = useState(false);
   const { flagged, count, toggle } = useFlaggedEpisodes();
 
+  const failureEpisodes = useMemo(() => {
+    if (!episodeOutcomes) return null;
+    return new Set(
+      Object.entries(episodeOutcomes)
+        .filter(([, outcome]) => outcome === "failure")
+        .map(([episode]) => Number(episode)),
+    );
+  }, [episodeOutcomes]);
+  const failureCount = failureEpisodes?.size ?? 0;
+
   const displayEpisodes = useMemo(() => {
-    if (!showFlaggedOnly || count === 0) return paginatedEpisodes;
-    const visible = new Set(allVisibleEpisodes);
-    return [...flagged]
-      .filter((episode) => visible.has(episode))
-      .sort((a, b) => a - b);
-  }, [allVisibleEpisodes, paginatedEpisodes, showFlaggedOnly, flagged, count]);
+    // Either filter switches the base from "current page only" to "every
+    // task-filtered episode" (matching the pre-existing flagged-only
+    // behavior), then both apply as an intersection.
+    const anyFilterActive =
+      (showFlaggedOnly && count > 0) || (showFailuresOnly && failureCount > 0);
+    let base = anyFilterActive
+      ? [...allVisibleEpisodes].sort((a, b) => a - b)
+      : paginatedEpisodes;
+    if (showFlaggedOnly && count > 0) {
+      base = base.filter((episode) => flagged.has(episode));
+    }
+    if (showFailuresOnly && failureEpisodes && failureCount > 0) {
+      base = base.filter((episode) => failureEpisodes.has(episode));
+    }
+    return base;
+  }, [
+    allVisibleEpisodes,
+    paginatedEpisodes,
+    showFlaggedOnly,
+    flagged,
+    count,
+    showFailuresOnly,
+    failureEpisodes,
+    failureCount,
+  ]);
 
   return (
     <T>
@@ -162,19 +220,34 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </span>
                 )}
               </p>
-              {count > 0 && (
-                <button
-                  onClick={() => onShowFlaggedOnlyChange(!showFlaggedOnly)}
-                  className={`text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-md transition-colors ${
-                    showFlaggedOnly
-                      ? "bg-orange-500/15 text-orange-300 border border-orange-500/30"
-                      : "text-slate-500 hover:text-slate-300 border border-white/10"
-                  }`}
-                >
-                  <T>Flagged · </T>
-                  <T>{count}</T>
-                </button>
-              )}
+              <div className="flex items-center gap-1.5">
+                {failureCount > 0 && onShowFailuresOnlyChange && (
+                  <button
+                    onClick={() => onShowFailuresOnlyChange(!showFailuresOnly)}
+                    className={`text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-md transition-colors ${
+                      showFailuresOnly
+                        ? "bg-red-500/15 text-red-300 border border-red-500/30"
+                        : "text-slate-500 hover:text-slate-300 border border-white/10"
+                    }`}
+                  >
+                    <T>Failures · </T>
+                    <T>{failureCount}</T>
+                  </button>
+                )}
+                {count > 0 && (
+                  <button
+                    onClick={() => onShowFlaggedOnlyChange(!showFlaggedOnly)}
+                    className={`text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-md transition-colors ${
+                      showFlaggedOnly
+                        ? "bg-orange-500/15 text-orange-300 border border-orange-500/30"
+                        : "text-slate-500 hover:text-slate-300 border border-white/10"
+                    }`}
+                  >
+                    <T>Flagged · </T>
+                    <T>{count}</T>
+                  </button>
+                )}
+              </div>
             </div>
 
             {displayEpisodes.length === 0 && (
@@ -208,6 +281,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                               summary={annotationSummary}
                             />
                           )}
+                          <OutcomeBadge
+                            outcome={episodeOutcomes?.[String(episode)]}
+                          />
                           <button
                             onClick={() => toggle(episode)}
                             className={`text-xs leading-none transition-colors ${
@@ -234,6 +310,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                               summary={annotationSummary}
                             />
                           )}
+                          <OutcomeBadge
+                            outcome={episodeOutcomes?.[String(episode)]}
+                          />
                           <button
                             onClick={() => toggle(episode)}
                             className={`text-xs leading-none transition-colors ${

@@ -16,12 +16,15 @@ captures/session-a/
 ```
 
 - Pose columns: `timestamp_sec, frame_index, success_flag, source_stamp_sec, px, py, pz, qx, qy, qz, qw`.
-- Gripper columns: `timestamp_sec, frame_index, success_flag, source_stamp_sec, finger_left, finger_right, gripper_width, last_gripper_command`.
-- Quaternion order: XYZW. Position: metres. Timestamps: seconds. Commands: `open` / `close` only. Successful source samples have `success_flag=1`.
+- Gripper columns: `timestamp_sec, frame_index, success_flag, source_stamp_sec, finger_left, finger_right, gripper_width, last_gripper_command`. Extra columns (e.g. a collector-specific `commanded_width_m`) are read into the frame but otherwise ignored.
+- Quaternion order: XYZW. Position: metres. Timestamps: seconds. Commands: `open` / `close` only.
+- `success_flag` is a demo-level outcome marker broadcast to every row, not a per-sample sensor-quality flag — it must be internally **consistent** within one demo (every row the same value), not `1`. Two real collectors use it two different ways: teleoperation captures leave it at its default `0` (an operator-toggled "mark this a keeper" flag that is, in practice, rarely pressed); policy-rollout/eval captures set it to the actual task outcome (`0`=failure, `1`=success) and also record the richer form in `metadata.json`'s `eval.outcome`. Either way, a *mixed* 0/1 value within a single demo indicates real corruption and is rejected.
+- `metadata.json`'s `data_source: "policy_rollout"` marks an eval/RL-rollout capture (as opposed to teleoperation, which omits `data_source`). When present, the `pipeline` stage carries the episode outcome through as `levi_outcome: "success" | "failure"` on that episode's `meta/episodes.jsonl` row — see "输出 / Output format" below.
+- Camera-stall and demo-completion markers also differ by collector and are both recognized: a stall is either a flat `metadata.json["camera_stalled"]` boolean (teleoperation) or a nested `metadata.json["cameras"]["stall_detection"]["stalled"]` list (eval/rollout); a complete demo's terminal `events.csv` row is either `stop_demo` (teleoperation) or `episode_end` (eval/rollout) — `require_complete` accepts either.
 - Each CSV row corresponds to the same ordered video/image frame. Frame IDs must be unique, integer and increasing; pose/gripper IDs and capture timestamps must agree. Headerless CSV is accepted only when its numeric leading row and column count match the documented schema.
 - Image input uses `wrist_camera/` and `side_camera/` directories with naturally sorted PNG/JPEG files. Set `source_fps` to their actual capture rate. AVI fallback is named `<camera>_raw.avi`.
 - Additional CSVs with `frame_index` must use the same row IDs. Events with `frame_index` map to the next retained frame during filtering; original frame/time fields are preserved. Unindexed event rows retain their original timing semantics.
-- Task text comes from `task_description.txt`, falling back to the task directory name. No project-specific language corrections are bundled.
+- Task text comes from `task_description.txt`, falling back to the task directory name. No project-specific language corrections are bundled. `task_description.txt` lives at the *task* directory, one level above `demo_*`, and is looked up per demo — a source tree with several task subdirectories under one root converts them all in a single run, each demo correctly labeled by its own parent folder.
 
 必须先确认输入本来已同步。设置 FPS 只改变采样或规范输出时间轴，不能修复相机与机器人状态的未知错位。缺失帧、重复帧编号、未知夹爪指令不会被静默忽略。输出不会覆盖已有目录。
 
@@ -102,6 +105,8 @@ The static filter compares each sample with the **last retained frame**, avoidin
 
 Image/FPS normalization selects ordered samples at `source_fps / target_fps`; upsampling is rejected. Camera frame count, order and rate must agree before resampling. Output geometry must be even-sized for yuv420p. Videos are sequentially decoded and streamed to FFmpeg using bounded frame memory; no whole-video frame array is stored.
 
+The `pipeline` stage does not require the caller to already know the exact achievable FPS: before any staging work starts, it probes every selected demo's cameras (metadata only, no decode — cheap even across a large batch) and, if the requested `fps` exceeds the batch's measured minimum, lowers it to that minimum for the whole run — real capture rigs commonly run a little under their nominal declared rate, so requiring an exact match would fail the common case every time. This is reported, not silent: the result's `fps_note` names both the requested and the actually-used value, and the written dataset's `info.json` always declares the FPS actually used.
+
 Conversion writes float32 action/state vectors and timestamp, int64 indices, truthful camera shape/codec/FPS and measured RGB statistics over **all decoded output pixels**. Per-episode and aggregate statistics use weighted population moments. H.264 encoding is lossy (CRF 18); original footage remains unchanged.
 
 Default state is `[x,y,z,rx,ry,rz,gripper_command]`; next-state action is `[state[t+1]]`, repeating the final state. Gripper command is open=1 / close=0 and does not describe measured jaw width. The collector's hardware-specific knuckle-angle helper is not required for this representation and is not imported.
@@ -109,6 +114,8 @@ Default state is `[x,y,z,rx,ry,rz,gripper_command]`; next-state action is `[stat
 ## 审核交接 / Review handoff
 
 `meta/levi_provenance.jsonl` records `episode_index`, relative `source_demo`, original `source_frame_ids` and source capture timestamps. `meta/levi_conversion.json` records options and units. Use these to map flagged episodes to capture paths, review them, then configure `exclude_demos`; never assume episode N equals `demo_N`.
+
+For eval/rollout captures (`data_source: "policy_rollout"` in the source `metadata.json`), `meta/episodes.jsonl` additionally carries `levi_outcome: "success" | "failure"` per episode — omitted entirely for teleoperation-sourced conversions, where the field has no meaning. LEVI's sidebar (episode list) shows this as a colored dot per episode plus a "Failures · N" filter once any episode in the loaded dataset carries the field, so review/annotation work can be pointed straight at the failures.
 
 Task corrections are user-supplied mappings. Preview lists edits and unknown slug-like instructions; applying unknown mappings fails before creating an output. Chinese and other language task contents are preserved unless explicitly mapped.
 
