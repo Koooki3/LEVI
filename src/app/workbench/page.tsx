@@ -228,7 +228,7 @@ export default function Workbench() {
                 setPlan(null);
               }}
               placeholder={t(
-                "Leave blank to auto-name by job ID under LEVI_WORKSPACE/datasets",
+                "Leave blank to auto-name by job ID under LEVI_WORKSPACE",
               )}
             />
           </label>

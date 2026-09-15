@@ -38,7 +38,19 @@ def plan(stage, source, fps=10, source_fps=30, options=None, output=None):
     # A caller-chosen output directory, still confined to LEVI_WORKSPACE by
     # `inside()` — the CLI (`--output`) already allowed this; expose the same
     # freedom to the web UI/API instead of always auto-naming by job ID.
-    target = inside(output) if output else inside(ROOT / "datasets" / ("levi_" + job_id))
+    # Auto-named runs land directly under LEVI_WORKSPACE, one folder per job
+    # (`levi_<job id>/`) — the same flat layout as every registered dataset,
+    # not nested under a separate "datasets" directory: a uniform, flat
+    # workspace is simpler to browse and to point the catalog's "register a
+    # local dataset" path picker at.
+    # `base=ROOT` is passed explicitly (not left to inside()'s own default
+    # parameter, which is bound once when paths.py is first imported and
+    # can't be redirected afterward) so tests can monkeypatch this module's
+    # own `ROOT` to keep auto-named job outputs inside an isolated tmp_path
+    # instead of the real, live LEVI_WORKSPACE.
+    target = (
+        inside(output, base=ROOT) if output else inside(ROOT / ("levi_" + job_id), base=ROOT)
+    )
     if target.is_relative_to(source_path):
         raise ValueError("Output cannot be nested inside source")
     if target.exists():

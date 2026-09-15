@@ -83,12 +83,14 @@ Remove the example exclusion if that path does not exist; unknown paths are reje
 
 ```bash
 uv run levi convert stage-preview --source captures/session-a \
-  --output datasets/unused-preview --options configs/conversion.json
+  --output unused-preview --options configs/conversion.json
 uv run levi convert pipeline --source captures/session-a \
-  --output datasets/run-a --options configs/conversion.json
-uv run levi convert validate --source datasets/run-a/dataset \
-  --output datasets/unused-validation
+  --output run-a --options configs/conversion.json
+uv run levi convert validate --source run-a/dataset \
+  --output unused-validation
 ```
+
+`--output` accepts any path inside `LEVI_WORKSPACE`, relative or absolute — organize it however you like. The web UI's auto-generated default (when the output field is left blank) names it `levi_<job id>` and places it directly under `LEVI_WORKSPACE`, the same flat layout as every registered dataset — not nested under a separate `datasets/` subfolder.
 
 - `xyz_threshold`: retained-frame displacement in metres; default 5 mm.
 - `rotation_threshold`: quaternion geodesic distance in radians; default 0.01 rad. `q` and `-q` are the same rotation.

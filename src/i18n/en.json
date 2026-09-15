@@ -196,7 +196,7 @@
   "Input directory": "Input directory",
   "Raw capture or previous stage output directory": "Raw capture or previous stage output directory",
   "Output directory (optional)": "Output directory (optional)",
-  "Leave blank to auto-name by job ID under LEVI_WORKSPACE/datasets": "Leave blank to auto-name by job ID under LEVI_WORKSPACE/datasets",
+  "Leave blank to auto-name by job ID under LEVI_WORKSPACE": "Leave blank to auto-name by job ID under LEVI_WORKSPACE",
   "Conversion stage": "Conversion stage",
   "Preview command": "Preview command",
   "Review this plan": "Review this plan",

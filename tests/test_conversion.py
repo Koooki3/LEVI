@@ -378,7 +378,7 @@ def test_validation_detects_metadata_lies(capture, tmp_path):
     assert not report["ok"] and any("resolution" in x for x in report["failures"])
 
 
-def test_builtin_web_job_and_changed_source(client, capture):
+def test_builtin_web_job_and_changed_source(client, capture, tmp_path):
     import time
 
     body = {
@@ -391,6 +391,13 @@ def test_builtin_web_job_and_changed_source(client, capture):
     assert plan.status_code == 200, plan.text
     job = plan.json()
     assert job["engine"] == "levi.builtin.v1" and "levi.conversion" in job["argv"]
+    # Auto-named output: flat, directly under the (test-isolated) workspace
+    # root — no separate "datasets" subfolder, and never leaking into the
+    # real, live LEVI_WORKSPACE.
+    output = Path(job["output"])
+    assert output.parent == tmp_path.resolve()
+    assert "datasets" not in output.parts
+    assert output.name.startswith("levi_")
     assert (
         client.post("/api/levi/jobs/" + job["id"] + "/run", json={}).status_code == 200
     )
@@ -437,7 +444,7 @@ def test_web_job_supports_a_custom_output_directory(client, capture, tmp_path):
     assert plan.status_code == 200, plan.text
     job = plan.json()
     # Chosen path used verbatim, not folded into the auto-generated
-    # datasets/levi_<job id> layout.
+    # levi_<job id> layout.
     assert job["output"] == str(chosen.resolve())
 
     # A second plan against the same chosen path is rejected before running

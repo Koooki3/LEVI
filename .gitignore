@@ -50,8 +50,11 @@ backend/.venv/
 backend/__pycache__/
 **/__pycache__/
 
-# claude code local settings
-.claude/
+# claude code local settings (personal session state, permissions, etc.)
+.claude/*
+# ...except repo-level skills, which are meant to be committed and shared —
+# see .claude/skills/systematic-test-audit/SKILL.md
+!.claude/skills/
 
 # LEVI: private runtime, credentials, generated artifacts
 .venv/

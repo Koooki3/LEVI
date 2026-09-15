@@ -123,8 +123,8 @@ class JobPlan(BaseModel):
     source_fps: int = Field(default=30, ge=1, le=240)
     options: Options = Field(default_factory=Options)
     # Optional caller-chosen output directory (still confined to
-    # LEVI_WORKSPACE); omit to keep the auto-generated `datasets/levi_<job
-    # id>` path.
+    # LEVI_WORKSPACE); omit to keep the auto-generated `levi_<job id>` path,
+    # directly under LEVI_WORKSPACE like every other dataset.
     output: str | None = None
 
 

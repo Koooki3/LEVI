@@ -80,6 +80,12 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(catalog, "STATE", state)
     monkeypatch.setattr(service, "STATE", state)
     monkeypatch.setattr(jobs, "STATE", state)
+    # Auto-named conversion job outputs land directly under this module's
+    # own ROOT (see jobs.plan's explicit base=ROOT) — without this, a plain
+    # "/api/levi/jobs/plan" call with no custom output writes into the real,
+    # live LEVI_WORKSPACE (.state/levi_<job id>/) instead of the test's own
+    # tmp_path, leaking real directories on every test run.
+    monkeypatch.setattr(jobs, "ROOT", tmp_path)
     monkeypatch.setattr(annotations, "STATE", state)
     monkeypatch.setattr(annotations, "EXPORT_ROOT", tmp_path / "exports")
     # Keep boundary validation enabled; test temp dirs live under the workspace.

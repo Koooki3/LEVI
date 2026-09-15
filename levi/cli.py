@@ -179,13 +179,17 @@ def main():
     os.environ["NEXT_TELEMETRY_DISABLED"] = "1"
     if not Path(bun).exists():
         parser.error("Bun is required: see README installation instructions")
-    if args.command in ("build", "check"):
-        raise SystemExit(
-            subprocess.call(
-                [bun, "run", "build" if args.command == "build" else "validate"],
-                cwd=PROJECT,
-            )
-        )
+    if args.command == "build":
+        raise SystemExit(subprocess.call([bun, "run", "build"], cwd=PROJECT))
+    if args.command == "check":
+        # Frontend (type-check/lint/format/tests) and the Python lint, in one
+        # command — CI runs both too (see .github/workflows/test.yml); this
+        # is the local equivalent so `ruff` drift doesn't go unnoticed
+        # between CI runs the way it once did (29 accumulated issues, none
+        # caught locally, because nothing ran it here).
+        frontend = subprocess.call([bun, "run", "validate"], cwd=PROJECT)
+        backend = subprocess.call(["ruff", "check", "."], cwd=PROJECT)
+        raise SystemExit(frontend or backend)
     if args.command == "serve" and not (PROJECT / ".next/BUILD_ID").is_file():
         parser.error("Missing production build. Run: uv run levi build / 缺少生产构建")
     children = []

@@ -196,7 +196,7 @@
   "Input directory": "输入目录",
   "Raw capture or previous stage output directory": "原始采集目录或上一步的输出目录",
   "Output directory (optional)": "输出目录（可选）",
-  "Leave blank to auto-name by job ID under LEVI_WORKSPACE/datasets": "留空则在 LEVI_WORKSPACE/datasets 下按任务 ID 自动命名",
+  "Leave blank to auto-name by job ID under LEVI_WORKSPACE": "留空则直接在 LEVI_WORKSPACE 下按任务 ID 自动命名",
   "Conversion stage": "转换步骤",
   "Preview command": "预览命令",
   "Review this plan": "核对执行计划",
