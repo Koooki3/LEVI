@@ -35,6 +35,8 @@ import {
   isAnnotateBackendEnabled,
 } from "../utils/annotationsClient";
 import { isSaveShortcut } from "../utils/keyboardShortcuts";
+import { useDatasetSource } from "../context/dataset-source-context";
+import { RawCaptureNotice } from "./raw-capture-notice";
 
 interface Props {
   cameraKeys: string[];
@@ -512,6 +514,8 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
   const [qaKind, setQaKind] = useState<QuickAddKind>("subtask");
   const [qaValues, setQaValues] = useState<Record<string, string>>({});
   const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const { isRaw } = useDatasetSource();
+  const [showExportHint, setShowExportHint] = useState(false);
   const qaDef = QUICK_ADD_DEFS_BY_KIND[qaKind];
 
   // Initialize active camera once cameras arrive.
@@ -608,6 +612,11 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
   }, [handleSave, saving]);
 
   const handleSaveDataset = async () => {
+    if (isRaw) {
+      // A raw capture's view is not a dataset to export: explain instead.
+      setShowExportHint(true);
+      return;
+    }
     if (!isAnnotateBackendEnabled()) {
       setExportStatus(
         "Backend not configured. Set NEXT_PUBLIC_ANNOTATE_BACKEND_URL and run backend/app.py.",
@@ -712,6 +721,7 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
             </div>
           </div>
 
+          {isRaw && showExportHint && <RawCaptureNotice feature="export" />}
           {exportStatus && (
             <div className="save-status">
               <T>{exportStatus}</T>

@@ -203,9 +203,7 @@ def test_annotation_rejects_invalid_repo_before_creating_cache(client):
     assert result.status_code == 400
 
 
-def test_export_reuses_deterministic_dir_and_writes_language_mirror(
-    client, dataset
-):
+def test_export_reuses_deterministic_dir_and_writes_language_mirror(client, dataset):
     """Two "导出标注数据集" clicks on the same dataset (no explicit
     output_dir) must resolve to the same directory, refresh the annotation
     payload, and never touch videos or the marker's created_at a second
@@ -237,9 +235,7 @@ def test_export_reuses_deterministic_dir_and_writes_language_mirror(
     marker = json.loads((out_dir / ".levi-export.json").read_text())
     created_at = marker["created_at"]
 
-    manifest = json.loads(
-        (out_dir / "annotations/language/manifest.json").read_text()
-    )
+    manifest = json.loads((out_dir / "annotations/language/manifest.json").read_text())
     assert manifest["episodes"]["0"]["persistent_count"] == 1
     episode_atoms = json.loads(
         (out_dir / "annotations/language/episode_000000.json").read_text()
@@ -303,10 +299,7 @@ def test_annotation_summary_reports_language_presence_per_episode(client, datase
     assert body["vision"]["1"] is False
 
 
-
-def test_annotation_files_are_per_episode_and_named_by_episode_index(
-    client, dataset
-):
+def test_annotation_files_are_per_episode_and_named_by_episode_index(client, dataset):
     """Every saved episode gets its own file named episode_{index:06d}.json
     inside a human-named sidecar directory (the dataset's own folder name,
     with no hash suffix — see ``DatasetState.display_slug``) — not one
@@ -345,9 +338,7 @@ def test_annotation_files_are_per_episode_and_named_by_episode_index(
     assert Path(result1.json()["path"]).name == "episode_000001.json"
 
 
-def test_legacy_single_blob_annotations_migrate_to_per_episode_files(
-    client, dataset
-):
+def test_legacy_single_blob_annotations_migrate_to_per_episode_files(client, dataset):
     """A pre-refactor single-file sidecar (all episodes in one JSON, named
     by a bare identity hash) is transparently split into per-episode files
     the first time the dataset loads — and left in place afterward, unread.
@@ -382,9 +373,7 @@ def test_legacy_single_blob_annotations_migrate_to_per_episode_files(
     # (the fixture already loaded — and cached — state without it).
     annotations_module._states.clear()
 
-    result = client.get(
-        "/annotations/api/episodes/0/atoms", params={"repo_id": repo}
-    )
+    result = client.get("/annotations/api/episodes/0/atoms", params={"repo_id": repo})
     assert result.status_code == 200, result.text
     assert result.json()["atoms"][0]["content"] == "legacy atom"
     assert state.annotation_file(0).exists()
@@ -418,15 +407,11 @@ def test_delete_episode_annotation_file(client, dataset):
 
     # Re-reading now finds nothing (source parquet has no baked-in atoms
     # for this fixture either).
-    reread = client.get(
-        "/annotations/api/episodes/0/atoms", params={"repo_id": repo}
-    )
+    reread = client.get("/annotations/api/episodes/0/atoms", params={"repo_id": repo})
     assert reread.json()["atoms"] == []
 
     # Deleting again is a safe no-op, not an error.
-    again = client.delete(
-        "/annotations/api/episodes/0/atoms", params={"repo_id": repo}
-    )
+    again = client.delete("/annotations/api/episodes/0/atoms", params={"repo_id": repo})
     assert again.json() == {"ok": True, "deleted": False}
 
 
@@ -494,27 +479,27 @@ def test_episode_atoms_stay_in_sync_across_concurrent_processes(client, dataset)
     assert state_a.annotations[0].atoms[0]["content"] == "from process A"
 
 
-def test_diagnostics_report_named_after_local_dataset_not_catalog_hash(
-    client, dataset
-):
+def test_diagnostics_report_named_after_dataset_without_hash(client, dataset):
     from backend.app import STATE
 
     repo = client.post("/api/levi/catalog", json={"path": str(dataset)}).json()["id"]
+    # Catalog ids are the dataset's own name now, not a hash.
+    assert repo == f"local/{dataset.name}"
     result = client.post(
         "/api/levi/diagnostics", json={"repo_id": repo, "checks": ["metadata"]}
     )
     assert result.status_code == 200, result.text
 
     diagnostics_dir = STATE / "diagnostics"
-    matches = sorted(diagnostics_dir.glob(f"{dataset.name}_*.json"))
-    assert len(matches) == 1, list(diagnostics_dir.glob("*.json"))
-    assert matches[0].name != f"{repo.split('/')[1]}.json"
+    assert sorted(p.name for p in diagnostics_dir.glob("*.json")) == [
+        f"{dataset.name}.json"
+    ]
 
     # Re-running updates the same file in place, not a second one.
-    client.post(
-        "/api/levi/diagnostics", json={"repo_id": repo, "checks": ["metadata"]}
-    )
-    assert sorted(diagnostics_dir.glob(f"{dataset.name}_*.json")) == matches
+    client.post("/api/levi/diagnostics", json={"repo_id": repo, "checks": ["metadata"]})
+    assert sorted(p.name for p in diagnostics_dir.glob("*.json")) == [
+        f"{dataset.name}.json"
+    ]
 
 
 def test_object_annotations_dir_named_after_dataset_not_bare_hash(client, dataset):

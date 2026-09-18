@@ -1,43 +1,31 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { T, useLocale } from "@/components/levi-locale";
 import { leviApi } from "@/components/levi-api";
-type Local = {
-  id: string;
-  name: string;
-  path: string;
-  info: {
-    total_episodes: number;
-    total_frames: number;
-    codebase_version: string;
-  };
-};
+import { ConversionWizard } from "@/components/conversion/conversion-wizard";
+import { FormatsTable } from "@/components/conversion/formats-table";
+import { JobProgress } from "@/components/conversion/job-progress";
+import type { Job } from "@/components/conversion/types";
+import { DatasetFormatBadge } from "@/components/dataset-format";
+import type { CatalogEntry } from "@/types/dataset-format.types";
+type Local = CatalogEntry;
 type Catalog = {
   local: Local[];
   workspace: string;
   conversion_available: boolean;
   stages: string[];
 };
-type Job = {
-  id: string;
-  stage: string;
-  source: string;
-  output: string;
-  argv: string[];
-  status: string;
-  log?: string;
-  error?: string;
-  dataset?: string;
-  exit_code?: number;
-  output_exists?: boolean;
-  result?: Record<string, unknown>;
-};
 export default function Workbench() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [path, setPath] = useState("");
   const [source, setSource] = useState("");
-  const [stage, setStage] = useState("pipeline");
+  // "Convert in the Workbench" links from the viewer pass ?source=<path>.
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get("source");
+    if (wanted) setSource(wanted);
+  }, []);
+  const [stage, setStage] = useState("summary");
   const [fps, setFps] = useState(10);
   const [sourceFps, setSourceFps] = useState(30);
   const [output, setOutput] = useState("");
@@ -47,19 +35,28 @@ export default function Workbench() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const { t } = useLocale();
-  async function refresh() {
+  const refresh = useCallback(async () => {
     const [c, j] = await Promise.all([
       leviApi<Catalog>("catalog"),
       leviApi<Job[]>("jobs"),
     ]);
     setCatalog(c);
     setJobs(j);
-  }
+  }, []);
+  // Poll every second while anything runs (live progress), else every 4 s.
+  const active = jobs.some(
+    (j) => j.status === "running" || j.status === "queued",
+  );
   useEffect(() => {
     refresh().catch((e) => setError(String(e)));
-    const timer = setInterval(() => refresh().catch(() => {}), 4000);
+  }, [refresh]);
+  useEffect(() => {
+    const timer = setInterval(
+      () => refresh().catch(() => {}),
+      active ? 1000 : 4000,
+    );
     return () => clearInterval(timer);
-  }, []);
+  }, [refresh, active]);
   async function action(fn: () => Promise<unknown>) {
     setError("");
     setBusy(true);
@@ -108,7 +105,9 @@ export default function Workbench() {
           <input
             className="levi-input grow"
             aria-label={t("Dataset directory")}
-            placeholder={t("Dataset directory containing meta/info.json")}
+            placeholder={t(
+              "LeRobot dataset (meta/info.json) or raw capture directory",
+            )}
             value={path}
             required
             onChange={(e) => setPath(e.target.value)}
@@ -127,7 +126,7 @@ export default function Workbench() {
                 <T>Dataset</T>
               </th>
               <th>
-                <T>Version</T>
+                <T>Format & version</T>
               </th>
               <th>
                 <T>Episodes</T>
@@ -139,22 +138,27 @@ export default function Workbench() {
             {catalog?.local.map((d) => (
               <tr key={d.id}>
                 <td>
-                  <Link className="text-cyan-300" href={`/${d.id}`}>
-                    <T>{d.name}</T> ↗
-                  </Link>
+                  {d.kind !== "raw" || d.view_status === "ready" ? (
+                    <Link className="text-cyan-300" href={`/${d.id}`}>
+                      <T>{d.name}</T> ↗
+                    </Link>
+                  ) : (
+                    <span>{d.name}</span>
+                  )}
+                  {d.view_status === "failed" && d.view_error && (
+                    <p className="text-xs levi-fix">{t(d.view_error)}</p>
+                  )}
                   <p className="text-xs break-all">
                     <T>{d.path}</T>
                   </p>
                 </td>
-                <td>
-                  <T>{d.info.codebase_version}</T>
+                <td className="levi-format-cell">
+                  <DatasetFormatBadge format={d.format} />
                 </td>
-                <td>
-                  <T>{d.info.total_episodes}</T>
-                </td>
+                <td>{d.info?.total_episodes ?? "—"}</td>
                 <td>
                   <button
-                    className="levi-secondary"
+                    className="levi-secondary whitespace-nowrap"
                     onClick={() => setSource(d.path)}
                   >
                     <T>Use as input</T>
@@ -184,155 +188,181 @@ export default function Workbench() {
         </div>
         <p>
           <T>
-            Run one stage at a time. Review diagnostics and logs before
-            continuing. Timestamp and task fixes create a full copy first.
+            Inspect an input to see which requirements it meets and which
+            exports it supports, then choose an export and run it. Sources are
+            never modified.
           </T>
         </p>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void action(async () =>
-              setPlan(
-                await leviApi<Job>("jobs/plan", {
-                  source,
-                  stage,
-                  fps,
-                  source_fps: sourceFps,
-                  options: JSON.parse(options),
-                  ...(output.trim() ? { output: output.trim() } : {}),
-                }),
-              ),
-            );
-          }}
-        >
-          <label className="block mt-5 text-xs">
-            <T>Input directory</T>
-            <input
-              className="levi-input w-full mt-2"
-              value={source}
-              onChange={(e) => {
-                setSource(e.target.value);
-                setPlan(null);
-              }}
-              required
-              placeholder={t("Raw capture or previous stage output directory")}
-            />
-          </label>
-          <label className="block mt-4 text-xs">
-            <T>Output directory (optional)</T>
-            <input
-              className="levi-input w-full mt-2"
-              value={output}
-              onChange={(e) => {
-                setOutput(e.target.value);
-                setPlan(null);
-              }}
-              placeholder={t(
-                "Leave blank to auto-name by job ID under LEVI_WORKSPACE",
+        <FormatsTable />
+        <ConversionWizard
+          jobs={jobs}
+          refresh={refresh}
+          available={!!catalog?.conversion_available}
+          source={source}
+          onSourceChange={setSource}
+        />
+      </section>
+      <section className="levi-box">
+        <details>
+          <summary className="cursor-pointer">
+            <T>Single stages (advanced)</T>
+          </summary>
+          <p>
+            <T>
+              Run one stage at a time. Review diagnostics and logs before
+              continuing. Timestamp and task fixes create a full copy first.
+            </T>
+          </p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void action(async () =>
+                setPlan(
+                  await leviApi<Job>("jobs/plan", {
+                    source,
+                    stage,
+                    fps,
+                    source_fps: sourceFps,
+                    options: JSON.parse(options),
+                    ...(output.trim() ? { output: output.trim() } : {}),
+                  }),
+                ),
+              );
+            }}
+          >
+            <label className="block mt-5 text-xs">
+              <T>Input directory</T>
+              <input
+                className="levi-input w-full mt-2"
+                value={source}
+                onChange={(e) => {
+                  setSource(e.target.value);
+                  setPlan(null);
+                }}
+                required
+                placeholder={t(
+                  "Raw capture or previous stage output directory",
+                )}
+              />
+            </label>
+            <label className="block mt-4 text-xs">
+              <T>Output directory (optional)</T>
+              <input
+                className="levi-input w-full mt-2"
+                value={output}
+                onChange={(e) => {
+                  setOutput(e.target.value);
+                  setPlan(null);
+                }}
+                placeholder={t(
+                  "Leave blank to auto-name by job ID under LEVI_WORKSPACE",
+                )}
+              />
+            </label>
+            <div className="levi-row mt-4">
+              <select
+                aria-label={t("Conversion stage")}
+                className="levi-input grow"
+                value={stage}
+                onChange={(e) => {
+                  setStage(e.target.value);
+                  setPlan(null);
+                }}
+              >
+                {(catalog?.stages || ["stage-preview"])
+                  .filter((s) => s !== "pipeline" && s !== "inspect")
+                  .map((s) => (
+                    <option key={s} value={s}>
+                      {t(s)}
+                    </option>
+                  ))}
+              </select>
+              {["images", "pipeline", "fps"].includes(stage) && (
+                <label className="text-xs">
+                  <T>Source FPS</T>{" "}
+                  <input
+                    className="levi-input w-20"
+                    type="number"
+                    min="1"
+                    max="240"
+                    value={sourceFps}
+                    onChange={(e) => {
+                      setSourceFps(Number(e.target.value));
+                      setPlan(null);
+                    }}
+                  />
+                </label>
               )}
-            />
-          </label>
-          <div className="levi-row mt-4">
-            <select
-              aria-label={t("Conversion stage")}
-              className="levi-input grow"
-              value={stage}
-              onChange={(e) => {
-                setStage(e.target.value);
-                setPlan(null);
-              }}
-            >
-              {(catalog?.stages || ["stage-preview"]).map((s) => (
-                <option key={s} value={s}>
-                  {t(s)}
-                </option>
-              ))}
-            </select>
-            {["images", "pipeline", "fps"].includes(stage) && (
               <label className="text-xs">
-                <T>Source FPS</T>{" "}
+                <T>FPS </T>
                 <input
                   className="levi-input w-20"
                   type="number"
                   min="1"
                   max="240"
-                  value={sourceFps}
+                  value={fps}
                   onChange={(e) => {
-                    setSourceFps(Number(e.target.value));
+                    setFps(Number(e.target.value));
                     setPlan(null);
                   }}
                 />
               </label>
-            )}
-            <label className="text-xs">
-              <T>FPS </T>
-              <input
-                className="levi-input w-20"
-                type="number"
-                min="1"
-                max="240"
-                value={fps}
+              <button
+                disabled={busy || !catalog?.conversion_available}
+                className="levi-primary"
+              >
+                <T>Preview command</T>
+              </button>
+            </div>
+            <details className="mt-5">
+              <summary className="cursor-pointer">
+                <T>Advanced conversion options</T>
+              </summary>
+              <p className="my-3 text-xs">
+                <T>
+                  JSON options: camera mapping, task mapping, excluded demo
+                  paths, orientation, action mode and quality thresholds.
+                </T>{" "}
+                <Link href="/guide">
+                  <T>Guide</T> ↗
+                </Link>
+              </p>
+              <textarea
+                aria-label={t("Conversion options JSON")}
+                className="levi-input w-full font-mono text-xs"
+                rows={8}
+                value={options}
                 onChange={(e) => {
-                  setFps(Number(e.target.value));
+                  setOptions(e.target.value);
                   setPlan(null);
                 }}
               />
-            </label>
-            <button
-              disabled={busy || !catalog?.conversion_available}
-              className="levi-primary"
-            >
-              <T>Preview command</T>
-            </button>
-          </div>
-          <details className="mt-5">
-            <summary className="cursor-pointer">
-              <T>Advanced conversion options</T>
-            </summary>
-            <p className="my-3 text-xs">
-              <T>
-                JSON options: camera mapping, task mapping, excluded demo paths,
-                orientation, action mode and quality thresholds.
-              </T>{" "}
-              <Link href="/guide">
-                <T>Guide</T> ↗
-              </Link>
-            </p>
-            <textarea
-              aria-label={t("Conversion options JSON")}
-              className="levi-input w-full font-mono text-xs"
-              rows={8}
-              value={options}
-              onChange={(e) => {
-                setOptions(e.target.value);
-                setPlan(null);
-              }}
-            />
-          </details>
-        </form>
-        {plan && (
-          <div className="mt-6">
-            <h3>
-              <T>Review this plan</T>
-            </h3>
-            <pre>{plan.argv.map((arg) => JSON.stringify(arg)).join(" ")}</pre>
-            <p className="my-3">
-              <T>New output</T>: <T>{plan.output}</T>
-            </p>
-            <button
-              className="levi-primary"
-              disabled={busy}
-              onClick={() =>
-                void action(async () => {
-                  await leviApi(`jobs/${plan.id}/run`, {});
-                  setPlan(null);
-                })
-              }
-            >
-              <T>Run this plan</T> ↗
-            </button>
-          </div>
-        )}
+            </details>
+          </form>
+          {plan && (
+            <div className="mt-6">
+              <h3>
+                <T>Review this plan</T>
+              </h3>
+              <pre>{plan.argv.map((arg) => JSON.stringify(arg)).join(" ")}</pre>
+              <p className="my-3">
+                <T>New output</T>: <T>{plan.output}</T>
+              </p>
+              <button
+                className="levi-primary"
+                disabled={busy}
+                onClick={() =>
+                  void action(async () => {
+                    await leviApi(`jobs/${plan.id}/run`, {});
+                    setPlan(null);
+                  })
+                }
+              >
+                <T>Run this plan</T> ↗
+              </button>
+            </div>
+          )}
+        </details>
       </section>
       <section className="levi-box">
         <h2>
@@ -351,7 +381,18 @@ export default function Workbench() {
                   <T>{j.id}</T>
                 </code>
               </summary>
-              <pre>{j.log || j.error || t("Waiting for logs…")}</pre>
+              <JobProgress job={j} />
+              {j.error && (
+                <p className="levi-error" role="alert">
+                  {t(j.error)}
+                </p>
+              )}
+              <details>
+                <summary className="cursor-pointer text-xs">
+                  <T>Log</T>
+                </summary>
+                <pre>{j.log || t("Waiting for logs…")}</pre>
+              </details>
               {j.exit_code !== undefined && (
                 <p>
                   <T>Exit code</T>: {j.exit_code}

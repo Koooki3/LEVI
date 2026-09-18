@@ -12,6 +12,7 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from ..naming import timestamp_id
 from .rle import validate_rle
 from .schema import ObjectAnnotation, ObjectEdit, ObjectTrack, ReviewStatus
 
@@ -182,9 +183,9 @@ class SidecarStore:
             validate_rle(row.mask_rle)
             if row.mask_rle["size"] != row.image_size:
                 raise ValueError("RLE size must match image_size")
-        revision_id = (
-            datetime.now(UTC).strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
-        )
+        # Claimed by creating the revision directory itself, so two writers
+        # sharing this workspace can never pick the same id.
+        revision_id = timestamp_id(self.root / "revisions", create_dir=True)
         revision = self.revision_path(revision_id)
         masks_root = revision / "masks"
         object_rows = self._objects(annotations)

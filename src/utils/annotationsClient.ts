@@ -153,6 +153,49 @@ export async function fetchAnnotationSummary(
   return { language: data.language || {}, vision: data.vision || {} };
 }
 
+export type OutcomeValue = "success" | "failure";
+
+export interface OutcomeLabel {
+  outcome: OutcomeValue;
+  source: "human";
+  updated_at?: string;
+}
+
+/** Human success/failure labels (override the dataset's `levi_outcome`). */
+export async function fetchOutcomeLabels(
+  ident: DatasetIdent,
+): Promise<Record<string, OutcomeLabel>> {
+  if (!ENV_URL) return {};
+  const res = await fetch(buildUrl("/api/episodes/outcomes", ident), {
+    cache: "no-store",
+  });
+  if (!res.ok) return {};
+  const data = (await res.json()) as { labels?: Record<string, OutcomeLabel> };
+  return data.labels || {};
+}
+
+/** Set, or with `null` clear, one episode's human outcome label. */
+export async function saveOutcomeLabel(
+  episodeId: number,
+  ident: DatasetIdent,
+  outcome: OutcomeValue | null,
+): Promise<void> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const res = await fetch(endpoint(`/api/episodes/${episodeId}/outcome`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      repo_id: ident.repoId || null,
+      local_path: ident.localPath || null,
+      outcome,
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => `${res.status}`);
+    throw new Error(text || `save outcome: ${res.status}`);
+  }
+}
+
 export async function fetchFrameTimestamps(
   episodeId: number,
   ident: DatasetIdent,

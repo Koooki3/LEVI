@@ -147,7 +147,7 @@ Built by `buildVersionedUrl(repoId, version, path)`. The `version` param is acce
 
 Reserved/bookkeeping columns from lerobot — see `EXCLUDED_COLUMNS` in `src/utils/constants.ts`:
 
-- v2.x: `timestamp`, `frame_index`, `episode_index`, `index`, `task_index`, `next.reward`, `next.done`, `next.truncated`
+- v2.x: `timestamp`, `frame_index`, `episode_index`, `index`, `task_index`, `next.reward`, `next.done`, `next.truncated`, `is_success`
 - v3.0: `index`, `task_index`, `episode_index`, `frame_index`, `next.reward`, `next.done`, `next.truncated`, `subtask_index`
 
 ## 3D URDF viewer (`src/components/urdf-viewer.tsx`)
@@ -168,7 +168,9 @@ Preserve the LEVI theme, keyboard access and responsive layouts when editing inh
 
 ## Built-in conversion and service
 
-- `levi/conversion/`: strict CSV/video alignment, independent snapshots, filtering, v2.1 output and validation.
+- `levi/conversion/`: modular conversion. `registry.py` lists input formats (`inputs/`: `robot_capture`, `image_sequence`, `lerobot`) and export targets (`outputs/`: `lerobot_v21`, `recap_value`); `pipeline.py` is the single-pass converter (parent plans from CSVs, spawn pool does one decode + one encode per camera, or a lossless remux in `retime` mode), `report.py` the inspection/compatibility models the Workbench renders. `raw.py`/`media.py`/`dataset.py` are the tested primitives. Timestamps are always `frame_index / fps`. See docs/CONVERSION.md and docs/RECAP.md.
+- `levi/views.py`: browsing views of raw captures; `levi/annotations/carryover.py` moves annotations into conversions by `source_demo`; `levi/annotations/outcomes.py` stores human success/failure labels.
+- Naming (`levi/naming.py`): per-dataset artifacts use the catalog name, per-run artifacts a timestamp — never a hash. `uv run levi migrate` upgrades older workspaces. See `.state.md`.
 - `levi/jobs.py`: allowlisted worker processes, immutable plans, timeouts and recovery.
 - `levi/service.py`: local API, catalog, diagnostics and dataset file serving.
 - `src/app/api/levi/` and `src/app/api/annotation/`: runtime proxies to the loopback backend.

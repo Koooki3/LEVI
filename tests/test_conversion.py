@@ -397,7 +397,11 @@ def test_builtin_web_job_and_changed_source(client, capture, tmp_path):
     output = Path(job["output"])
     assert output.parent == tmp_path.resolve()
     assert "datasets" not in output.parts
-    assert output.name.startswith("levi_")
+    # <source name>_<target>_<timestamp id>, never a hash.
+    from levi.naming import is_timestamp_id
+
+    assert is_timestamp_id(job["id"])
+    assert output.name == f"capture_lerobot_{job['id']}"
     assert (
         client.post("/api/levi/jobs/" + job["id"] + "/run", json={}).status_code == 200
     )

@@ -111,6 +111,11 @@ def main():
 
         sys.argv.pop(1)
         return clean()
+    if len(sys.argv) > 1 and sys.argv[1] == "migrate":
+        from .migrations import main as migrate
+
+        sys.argv.pop(1)
+        return migrate()
     if len(sys.argv) > 1 and sys.argv[1] == "convert":
         from .conversion.__main__ import main as convert
 

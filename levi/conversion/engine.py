@@ -8,8 +8,9 @@ import numpy as np
 
 from ..catalog import atomic
 from ..paths import inside
-from . import dataset, media, raw
+from . import dataset, media, raw, registry
 from .options import STAGES, Options
+from .progress import Progress
 
 
 def fingerprint(source: Path):
@@ -24,7 +25,14 @@ def fingerprint(source: Path):
     return hashlib.sha256(json.dumps(rows).encode()).hexdigest()
 
 
-def execute(stage: str, source: Path, target: Path, options: Options):
+def execute(
+    stage: str,
+    source: Path,
+    target: Path,
+    options: Options,
+    progress: Path | None = None,
+    intermediate: Path | None = None,
+):
     if stage not in STAGES:
         raise ValueError("Unknown pipeline stage")
     source = inside(source)
@@ -36,94 +44,28 @@ def execute(stage: str, source: Path, target: Path, options: Options):
     raw.check_tree(source)
     if stage == "validate":
         return dataset.validate(source)
+    if stage == "inspect":
+        report = registry.inspect(source, options, Progress(progress, ["Inspect"]))
+        # The inspection itself succeeded even when requirements fail.
+        return {"ok": True, "report": report.model_dump()}
+    if stage == "view":
+        from ..views import build
+
+        return build(source, target, options, progress)
+    if stage == "pipeline":
+        # Any registered input → options.target (LeRobot v2.1 by default);
+        # see pipeline.py for the single-pass flow and registry.py for the
+        # supported combinations.
+        return registry.export(
+            source,
+            target,
+            options,
+            progress,
+            intermediate if options.keep_intermediates else None,
+        )
     if stage in ("timestamps", "tasks", "tasks-preview"):
         return dataset.repair(source, target, options, stage)
     selected = raw.demos(source, options)
-    if stage == "pipeline":
-        # Real capture rigs commonly run a little under their nominal rate
-        # (9.5 Hz measured for a "10 Hz" capture is typical, not an error),
-        # so requiring the caller to already know and pass the exact right
-        # target FPS makes the common case fail every time. Detect it
-        # instead: a cheap ffprobe metadata read (media.probe, no decode)
-        # across every video-mode demo's cameras finds the batch's real
-        # ceiling before any staging/copy work starts, and the target FPS is
-        # lowered to match — visibly (fps_note in the result), never
-        # silently, and applied once so every stage below (staging,
-        # filtering, the final convert) sees one consistent value, matching
-        # the single FPS every lerobot dataset declares in info.json.
-        measured_fps = [
-            media.probe(raw.camera_path(demo, camera))["fps"]
-            for demo in selected
-            if not all((demo / c).is_dir() for c in options.cameras)
-            for camera in options.cameras
-        ]
-        fps_note = None
-        if measured_fps and options.fps > min(measured_fps) + 0.01:
-            detected = min(measured_fps)
-            fps_note = (
-                f"Requested output FPS {options.fps:g} exceeds the measured "
-                f"capture FPS ({detected:g} min across {len(selected)} demos); "
-                f"automatically lowered to {detected:g} for this conversion."
-            )
-            options = options.model_copy(update={"fps": detected})
-            print(fps_note, flush=True)
-        # Staging is a real copy, never a symlink view of a changing recording.
-        target.mkdir(parents=True)
-        prep = target / "capture"
-        prep.mkdir()
-        for demo in selected:
-            out = prep / demo.relative_to(source)
-            pose, *_ = raw.load(demo)
-            image_mode = all((demo / c).is_dir() for c in options.cameras)
-            if image_mode:
-                positions = raw.sample_positions(
-                    len(pose), options.source_fps, options.fps
-                )
-                raw.transform_demo(demo, out, positions, options, True)
-            else:
-                rates = [
-                    media.inspect(raw.camera_path(demo, c)) for c in options.cameras
-                ]
-                if any(v["frames"] != len(pose) for v in rates):
-                    raise ValueError(
-                        "Video and CSV counts must agree before resampling"
-                    )
-                if max(v["fps"] for v in rates) - min(v["fps"] for v in rates) > 0.01:
-                    raise ValueError(
-                        "Camera FPS differs; synchronize capture inputs first"
-                    )
-                positions = raw.sample_positions(
-                    len(pose), rates[0]["fps"], options.fps
-                )
-                raw.transform_demo(demo, out, positions, options)
-            raw.copy_task(demo, out, options)
-        # Exclusions have already been applied to the staged copy.
-        opts = options.model_copy(update={"exclude_demos": []})
-        audit = execute("stage-preview", prep, target / "unused-audit", opts)
-        atomic(target / "preflight.json", audit)
-        if not audit["ok"]:
-            raise ValueError(
-                "Preflight failed; inspect preflight.json. Source captures remain unchanged."
-            )
-        conversion_source = prep
-        if opts.filter_static:
-            filtered = target / "filtered"
-            execute("filter", prep, filtered, opts)
-            conversion_source = filtered
-        converted = dataset.convert(conversion_source, target / "dataset", opts)
-        report = dataset.validate(converted)
-        atomic(target / "validation.json", report)
-        if not report["ok"]:
-            raise ValueError(
-                "Converted dataset failed validation; inspect validation.json"
-            )
-        return {
-            "ok": True,
-            "dataset_path": str(converted),
-            "validation": report,
-            "excluded_demos": options.exclude_demos,
-            **({"fps_note": fps_note} if fps_note else {}),
-        }
     if stage in (
         "summary",
         "frozen",

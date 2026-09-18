@@ -61,6 +61,32 @@ export function useLocale() {
     if (language !== "zh") return text;
     const patterns: [RegExp, string][] = [
       [/^Episode (\d+)$/, "片段 $1"],
+      // Conversion inspection (levi/conversion/*): dynamic details.
+      [/^Exclude the (\d+) unlabeled episode\(s\)$/, "排除 $1 个无标签片段"],
+      [
+        /^Exclude the (\d+) failing episode\(s\)$/,
+        "排除 $1 个未通过检查的片段",
+      ],
+      [
+        /^(\d+) of (\d+) episodes have no success\/failure label; RECAP rewards need one per episode$/,
+        "$2 个片段中有 $1 个没有成功/失败标签；RECAP 奖励要求每个片段都有标签",
+      ],
+      [
+        /^(\d+) success \/ (\d+) failure \/ (\d+) unlabeled$/,
+        "成功 $1 / 失败 $2 / 无标签 $3",
+      ],
+      [/^(\d+) success \/ (\d+) failure$/, "成功 $1 / 失败 $2"],
+      [
+        /^(\d+) demos in (\d+) task folder\(s\)(.*)$/,
+        "$2 个任务文件夹中共 $1 个 demo$3",
+      ],
+      [/^(\d+) task\(s\)$/, "$1 个任务"],
+      [/^(\d+) demo\(s\): (.*)$/, "$1 个 demo：$2"],
+      [
+        /^Requested output FPS (.*) exceeds the measured capture FPS \((.*) min\); automatically lowered to (.*)\.$/,
+        "请求的输出 FPS $1 高于实测采集帧率（最低 $2），已自动降为 $3。",
+      ],
+      [/^codebase_version (.*)$/, "codebase_version $1"],
       [/^ep (\d+)$/, "片段 $1"],
       [/^(\d+) episodes sampled$/, "$1 段采样"],
       [/^\((\d+) episodes sampled\)$/, "（$1 段采样）"],

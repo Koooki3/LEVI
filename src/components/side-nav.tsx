@@ -45,20 +45,63 @@ function AnnotationDots({
   );
 }
 
-/** Success/failure dot for datasets converted from a policy-eval rollout
- * capture (see EpisodeOutcome / levi_outcome). Absent (renders nothing) for
- * an episode with no recorded outcome, so ordinary teleoperation-sourced
- * datasets show no extra marks. */
-function OutcomeBadge({ outcome }: { outcome: EpisodeOutcome | undefined }) {
+/** Success/failure dot. Metadata outcomes (`levi_outcome`, from a
+ * policy-eval rollout capture) show as a plain dot; human labels get a ring.
+ * With `onChange`, the dot is a button cycling the human label
+ * success → failure → cleared (back to the metadata outcome, if any); an
+ * episode with no outcome shows a hollow dot on hover to start labeling. */
+function OutcomeBadge({
+  outcome,
+  human,
+  onChange,
+}: {
+  outcome: EpisodeOutcome | undefined;
+  human?: boolean;
+  onChange?: (next: EpisodeOutcome | null) => void;
+}) {
   const { t } = useLocale();
-  if (!outcome) return null;
+  if (!outcome && !onChange) return null;
+  const color = !outcome
+    ? "border border-slate-500 opacity-0 group-hover:opacity-100"
+    : outcome === "success"
+      ? "bg-emerald-400"
+      : "bg-red-400";
+  const ring = human
+    ? " ring-1 ring-offset-1 ring-offset-slate-900 ring-white/70"
+    : "";
+  const label = !outcome
+    ? t("No outcome")
+    : t(outcome === "success" ? "Episode succeeded" : "Episode failed");
+  const dot = (
+    <span className={`block w-1.5 h-1.5 rounded-full ${color}${ring}`} />
+  );
+  if (!onChange) {
+    return (
+      <span className="shrink-0" title={label}>
+        {dot}
+      </span>
+    );
+  }
+  const next: EpisodeOutcome | null = !human
+    ? "success"
+    : outcome === "success"
+      ? "failure"
+      : null;
   return (
-    <span
-      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-        outcome === "success" ? "bg-emerald-400" : "bg-red-400"
-      }`}
-      title={t(outcome === "success" ? "Episode succeeded" : "Episode failed")}
-    />
+    <button
+      type="button"
+      className="shrink-0 p-1 -m-1 rounded hover:bg-white/10"
+      title={`${label}${human ? ` (${t("labelled by a person")})` : ""} — ${t(
+        "click to cycle success / failure / clear",
+      )}`}
+      aria-label={label}
+      onClick={(event) => {
+        event.stopPropagation();
+        onChange(next);
+      }}
+    >
+      {dot}
+    </button>
   );
 }
 
@@ -90,6 +133,10 @@ interface SidebarProps {
   annotationSummary?: AnnotationSummary;
   /** Per-episode success/failure label, for policy-eval rollout datasets. */
   episodeOutcomes?: Record<string, EpisodeOutcome>;
+  /** Episodes whose outcome is a human label rather than metadata. */
+  humanOutcomes?: Set<string>;
+  /** Makes the outcome dot editable (annotation backend available). */
+  onOutcomeChange?: (episode: number, outcome: EpisodeOutcome | null) => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -112,6 +159,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   filteredEpisodeCount,
   annotationSummary,
   episodeOutcomes,
+  humanOutcomes,
+  onOutcomeChange,
 }) => {
   const [mobileVisible, setMobileVisible] = useState(false);
   const { flagged, count, toggle } = useFlaggedEpisodes();
@@ -283,6 +332,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                           )}
                           <OutcomeBadge
                             outcome={episodeOutcomes?.[String(episode)]}
+                            human={humanOutcomes?.has(String(episode))}
+                            onChange={
+                              onOutcomeChange
+                                ? (next) => onOutcomeChange(episode, next)
+                                : undefined
+                            }
                           />
                           <button
                             onClick={() => toggle(episode)}
@@ -312,6 +367,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                           )}
                           <OutcomeBadge
                             outcome={episodeOutcomes?.[String(episode)]}
+                            human={humanOutcomes?.has(String(episode))}
+                            onChange={
+                              onOutcomeChange
+                                ? (next) => onOutcomeChange(episode, next)
+                                : undefined
+                            }
                           />
                           <button
                             onClick={() => toggle(episode)}

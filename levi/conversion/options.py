@@ -1,11 +1,13 @@
 """One validated options schema shared by CLI, service, plans and worker."""
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 STAGES = (
     "pipeline",
+    "inspect",
+    "view",
     "summary",
     "images",
     "fps-preview",
@@ -46,6 +48,25 @@ class Options(BaseModel):
     )
     task_map: dict[str, str] = Field(default_factory=dict)
     exclude_demos: list[str] = Field(default_factory=list)
+    # "resample": drop frames down to `fps` (lowered automatically to the
+    # slowest measured camera). "retime": keep every captured frame and
+    # declare them uniformly at `fps` — one row per executed step, which is
+    # what RECAP-style per-step rewards assume.
+    timing: Literal["resample", "retime"] = "resample"
+    # Parallel episode workers; None = automatic (see pipeline.auto_workers).
+    workers: int | None = Field(None, ge=1, le=64)
+    # Also write the staged and filtered intermediate captures (slower; for
+    # auditing). Off by default: provenance already records every kept frame.
+    keep_intermediates: bool = False
+    # Output format id (see registry.OUTPUT_FORMATS) and its own settings,
+    # validated by that format's options model when a job is planned.
+    target: str = Field("lerobot_v21", pattern=r"^[a-z0-9_]+$")
+    target_options: dict[str, Any] = Field(default_factory=dict)
+    # Human outcome labels (source episode id -> success/failure), snapshotted
+    # into the plan; they override outcomes read from capture metadata.
+    outcome_labels: dict[str, Literal["success", "failure"]] = Field(
+        default_factory=dict
+    )
 
     @field_validator("cameras")
     @classmethod

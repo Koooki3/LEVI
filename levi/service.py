@@ -1,6 +1,5 @@
 """Local HTTP service for datasets, review, conversion, diagnostics and annotations."""
 
-import hashlib
 import os
 import re
 import shutil
@@ -14,14 +13,26 @@ from pydantic import BaseModel, Field
 
 from . import jobs
 from .auth import hub_token, token
-from .catalog import DEMOS, atomic, datasets, local_root, read, register, review_path
+from .catalog import (
+    DEMOS,
+    aliases,
+    atomic,
+    canonical_id,
+    datasets,
+    display_name,
+    local_root,
+    read,
+    register,
+    review_path,
+)
+from .conversion import registry
 from .conversion.options import Options
+from .describe import describe
 from .diagnostics import CHECKS, diagnose
 from .paths import CACHE, PROJECT, ROOT, STATE, configure, inside
 
 configure()
 from backend.app import app as annotation_app
-from backend.app import dataset_display_slug
 
 
 @asynccontextmanager
@@ -119,12 +130,12 @@ class Review(BaseModel):
 class JobPlan(BaseModel):
     stage: str
     source: str
-    fps: int = Field(default=10, ge=1, le=240)
-    source_fps: int = Field(default=30, ge=1, le=240)
+    fps: float = Field(default=10, ge=1, le=240)
+    source_fps: float = Field(default=30, ge=1, le=240)
     options: Options = Field(default_factory=Options)
     # Optional caller-chosen output directory (still confined to
-    # LEVI_WORKSPACE); omit to keep the auto-generated `levi_<job id>` path,
-    # directly under LEVI_WORKSPACE like every other dataset.
+    # LEVI_WORKSPACE); omit for `<source>_<target>_<timestamp>/` directly
+    # under LEVI_WORKSPACE, like every other dataset.
     output: str | None = None
 
 
@@ -139,7 +150,11 @@ class Diagnostic(BaseModel):
 def catalog():
     return {
         "demos": DEMOS,
-        "local": list(datasets().values()),
+        # Each entry with what it is and what LEVI can do with it.
+        "local": [{**item, "format": describe(item)} for item in datasets().values()],
+        # Legacy hash ids → current names, so the UI can carry over state
+        # (e.g. flagged episodes) stored under an old id.
+        "aliases": aliases(),
         "workspace": str(ROOT),
         "conversion_available": bool(
             shutil.which("ffmpeg") and shutil.which("ffprobe")
@@ -151,7 +166,14 @@ def catalog():
 
 @app.post("/api/levi/catalog")
 def add_dataset(payload: Register):
-    return register(payload.path)
+    """A LeRobot dataset is registered directly; a raw capture gets a
+    browsing view built in the background (``view_status``)."""
+    root = inside(payload.path)
+    if (root / "meta/info.json").exists():
+        return register(payload.path)
+    from .views import request
+
+    return request(root)
 
 
 @app.api_route("/api/levi/files/{slug}/{path:path}", methods=["GET", "HEAD"])
@@ -209,7 +231,8 @@ def plan(payload: JobPlan):
         payload.source,
         payload.fps,
         payload.source_fps,
-        payload.options.model_dump(),
+        # Only what the caller set, so the target's defaults fill the rest.
+        payload.options.model_dump(exclude_unset=True),
         payload.output,
     )
     atomic(STATE / "jobs" / (job["id"] + ".json"), job)
@@ -231,7 +254,16 @@ def list_jobs():
     result = []
     paths = [p for p in (STATE / "jobs").glob("*.json") if p.name.count(".") == 1]
     for path in sorted(paths, reverse=True)[:50]:
-        value = read(path, {})
+        try:
+            value = read(path, {})
+        except ValueError:
+            continue  # a just-reserved id whose plan isn't written yet
+        progress = path.with_suffix(".progress.json")
+        if progress.exists():
+            try:
+                value["progress"] = read(progress, None)
+            except ValueError:
+                pass  # replaced atomically; a failed read is only a race
         log = path.with_suffix(".log")
         if log.exists():
             with log.open("rb") as stream:
@@ -239,6 +271,34 @@ def list_jobs():
                 value["log"] = stream.read().decode("utf-8", errors="replace")
         result.append(value)
     return result
+
+
+@app.get("/api/levi/convert/formats")
+def convert_formats():
+    """Supported inputs, outputs, their combinations, and known gaps."""
+    return registry.capabilities()
+
+
+class Inspect(BaseModel):
+    source: str
+    options: Options = Field(default_factory=Options)
+
+
+@app.post("/api/levi/convert/inspect")
+def convert_inspect(payload: Inspect):
+    """Start an inspection job: format detection, the requirement checklist
+    and per-target compatibility, with progress (hundreds of ffprobe calls
+    on a large capture). Poll /api/levi/jobs for the result."""
+    options = payload.options.model_dump(exclude_unset=True)
+    job = jobs.plan(
+        "inspect",
+        payload.source,
+        payload.options.fps,
+        payload.options.source_fps,
+        options,
+    )
+    atomic(STATE / "jobs" / (job["id"] + ".json"), job)
+    return jobs.launch(job)
 
 
 @app.post("/api/levi/diagnostics")
@@ -264,17 +324,9 @@ def diagnostics(payload: Diagnostic):
             allow_patterns=patterns,
         )
     report = diagnose(root, payload.max_episodes, payload.checks, payload.decode_video)
-    report["repo_id"] = payload.repo_id
-    if payload.repo_id.startswith("local/"):
-        # The catalog slug ("local/<hash>") is opaque — name the report file
-        # after the dataset's own folder instead, like every other sidecar
-        # path (see dataset_display_slug). A short hash suffix disambiguates
-        # two different local datasets that happen to share a folder name.
-        digest = hashlib.sha256(str(root).encode()).hexdigest()[:10]
-        slug = f"{dataset_display_slug(None, str(root))}_{digest}"
-    else:
-        # Hub repo_ids are already globally unique and human-readable.
-        slug = payload.repo_id.replace("/", "__")
+    report["repo_id"] = canonical_id(payload.repo_id)
+    # One report per dataset, named after it and overwritten on re-run.
+    slug = display_name(payload.repo_id, None)
     atomic(STATE / "diagnostics" / (slug + ".json"), report)
     return report
 

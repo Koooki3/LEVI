@@ -25,6 +25,8 @@ def main():
     parser.add_argument("--fps", type=float)
     parser.add_argument("--source-fps", type=float)
     parser.add_argument("--result", help=argparse.SUPPRESS)
+    parser.add_argument("--progress", help=argparse.SUPPRESS)
+    parser.add_argument("--intermediate", help=argparse.SUPPRESS)
     parser.add_argument("--expected-source", help=argparse.SUPPRESS)
     args = parser.parse_args()
     configure()
@@ -39,7 +41,14 @@ def main():
     before = fingerprint(source)
     if args.expected_source and args.expected_source != before:
         raise ValueError("Capture changed after planning; create a new plan")
-    result = execute(args.stage, source, target, options)
+    result = execute(
+        args.stage,
+        source,
+        target,
+        options,
+        inside(args.progress) if args.progress else None,
+        inside(args.intermediate) if args.intermediate else None,
+    )
     if fingerprint(source) != before:
         raise ValueError("Source changed during conversion; output requires review")
     if args.result:

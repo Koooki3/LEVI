@@ -57,7 +57,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -69,13 +69,20 @@ from fastapi.responses import JSONResponse
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from pydantic import BaseModel
 
-from levi.annotations import ObjectAnnotation, ObjectEdit, Sam3Plan, SidecarStore
+from levi import naming
+from levi.annotations import (
+    ObjectAnnotation,
+    ObjectEdit,
+    Sam3Plan,
+    SidecarStore,
+    outcomes,
+)
 from levi.annotations.sam3_protocol import (
     fake_annotations,
     validate_annotations_for_plan,
 )
 from levi.auth import credential_scope, hub_token, token
-from levi.catalog import atomic, local_root, read
+from levi.catalog import atomic, display_name, local_root, read
 from levi.paths import CACHE, EXPORTS, SAM3_CHECKPOINT_DIR, STATE, inside
 from levi.versions import is_dataset_v2, is_dataset_v3, normalize_dataset_version
 
@@ -110,6 +117,8 @@ SAM3_MODEL_REPO = os.getenv("LEVI_SAM3_MODEL_REPO", "1038lab/sam3")
 SAM3_MODEL_FILENAME = os.getenv("LEVI_SAM3_MODEL_FILENAME", "sam3.pt")
 SAM3_MODEL_REVISION = os.getenv("LEVI_SAM3_MODEL_REVISION", "main")
 SAM3_PROGRESS_FILENAME = "download-progress.json"
+# New ids are timestamps (levi.naming); legacy hex ids still validate.
+SAM3_ID_PATTERN = r"[a-f0-9]{16,64}|" + naming.TIMESTAMP_PATTERN
 _SAM3_AUTH_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _SAM3_DOWNLOAD_LOCK = threading.Lock()
 _SAM3_DOWNLOAD_THREADS: dict[str, threading.Thread] = {}
@@ -142,23 +151,10 @@ SAY_TOOL_SCHEMA: dict[str, Any] = {
 
 
 def dataset_display_slug(repo_id: str | None, local_path: str | None) -> str:
-    """Human-first identifier for on-disk sidecar/report directory and file
-    names — the dataset's own name (its local folder name, or
-    ``org__dataset`` for a Hub repo) instead of an opaque hash. Callers
-    append a short identity hash for uniqueness (two different local
-    datasets can share a folder basename, e.g. two capture sessions both
-    named "dataset" in different parent directories) — this only returns
-    the readable part, matching the ``{name}_{hash}`` shape already used for
-    export directory names (see ``DatasetState.export_identity_hash``).
-    """
-    if local_path:
-        name = Path(local_path).name
-    elif repo_id:
-        name = repo_id.replace("/", "__")
-    else:
-        name = "dataset"
-    safe = re.sub(r"[^\w.-]+", "_", name).strip("_")
-    return safe or "dataset"
+    """On-disk key for a dataset's sidecars and exports: its unique catalog
+    name when registered (see ``levi.catalog.display_name``), otherwise its
+    folder name or ``org__name``. Never a hash."""
+    return display_name(repo_id, local_path)
 
 
 def column_for_style(style: str | None) -> str:
@@ -207,6 +203,12 @@ class EpisodeAtomsPayload(BaseModel):
     local_path: str | None = None
     episode_index: int
     atoms: list[LanguageAtom] = []
+
+
+class OutcomePayload(BaseModel):
+    repo_id: str | None = None
+    local_path: str | None = None
+    outcome: Literal["success", "failure"] | None = None
 
 
 class Sam3PlanRequest(Sam3Plan):
@@ -272,6 +274,7 @@ class DatasetState:
     episodes_df: pd.DataFrame
     annotations: dict[int, EpisodeAnnotations] = field(default_factory=dict)
     frame_ts_cache: dict[int, list[float]] = field(default_factory=dict)
+    info_signature: tuple[int, int, int] | None = None
 
     def _identity_hash(self, *, short: bool = False) -> str:
         """Deterministic hash of this dataset's identity — shared by every
@@ -292,17 +295,13 @@ class DatasetState:
 
     @property
     def display_slug(self) -> str:
-        """Bare dataset-name identifier for the *live, shared* annotation
-        sidecars (``annotations_dir`` / ``object_annotations_path``).
-        Deliberately NOT hash-suffixed, unlike ``export_identity_hash`` and
-        the diagnostics report name: several LEVI processes on the same host
-        — different collaborators, or the same person on two ports — must
-        resolve the same dataset name to the exact same directory so their
-        edits land in the same per-episode files and stay in sync (see
-        ``_lookup_episode_annotations`` for how concurrent readers/writers
-        stay correct without a lock). The tradeoff is that two genuinely
-        different local datasets sharing a folder basename would collide
-        here — keep local dataset folder names distinct."""
+        """Dataset-name key for the *live, shared* annotation sidecars
+        (``annotations_dir`` / ``object_annotations_path``), exports and
+        reviews: the unique catalog name, never a hash. Several LEVI
+        processes on the same host must resolve the same dataset to the exact
+        same directory so their edits land in the same per-episode files (see
+        ``_lookup_episode_annotations``). Uniqueness comes from the catalog,
+        which disambiguates two datasets sharing a folder basename."""
         return dataset_display_slug(self.repo_id, self.local_path)
 
     @property
@@ -331,13 +330,6 @@ class DatasetState:
         """Workspace sidecar root, independent from the source dataset tree."""
         return STATE / "object_annotations" / self.display_slug
 
-    @property
-    def export_identity_hash(self) -> str:
-        """Deterministic short hash identifying this source dataset, reused
-        across repeated exports so the same dataset always resolves to the
-        same export directory."""
-        return self._identity_hash(short=True)
-
 
 _states: dict[str, DatasetState] = {}
 
@@ -359,9 +351,29 @@ def _ensure_state(req: DatasetRef) -> DatasetState:
     if req.local_path:
         req.local_path = str(inside(req.local_path))
     key = _state_key(req)
-    if key in _states:
-        return _states[key]
+    cached = _states.get(key)
+    # A raw capture's browsing view is rebuilt in place when the capture
+    # changes (levi/views.py); a replaced meta/info.json means the cached
+    # episode table is stale. Inode + mtime + size, not mtime alone: a
+    # rebuilt file is a new inode even within one mtime tick.
+    if (
+        cached is not None
+        and cached.local_path
+        and _info_signature(cached.root) != cached.info_signature
+    ):
+        _states.pop(key, None)
+        cached = None
+    if cached is not None:
+        return cached
     return _load_state(req, key)
+
+
+def _info_signature(root: Path) -> tuple[int, int, int] | None:
+    try:
+        st = (root / "meta/info.json").stat()
+    except OSError:
+        return None
+    return (st.st_ino, st.st_mtime_ns, st.st_size)
 
 
 def _sidecar(state: DatasetState) -> SidecarStore:
@@ -457,7 +469,7 @@ def _reuse_sam3_plan(
     plan_id = request.plan_id
     if not plan_id:
         raise ValueError("plan_id is required")
-    if not re.fullmatch(r"[a-f0-9]{16,64}", plan_id):
+    if not re.fullmatch(SAM3_ID_PATTERN, plan_id):
         raise HTTPException(400, "Invalid SAM3 plan ID")
     plan_path = store.root / "staging" / "plans" / f"{plan_id}.json"
     if not plan_path.is_file():
@@ -486,7 +498,7 @@ def _sam3_plan_payload(
 ) -> tuple[SidecarStore, Path, dict[str, Any]]:
     store = _sidecar(state)
     store.initialize()
-    plan_id = uuid.uuid4().hex
+    plan_id = naming.timestamp_id(store.root / "staging" / "plans", ".json")
     plan_path = store.root / "staging" / "plans" / f"{plan_id}.json"
     payload = {
         "plan_id": plan_id,
@@ -504,7 +516,7 @@ def _sam3_plan_payload(
 
 
 def _sam3_job_path(store: SidecarStore, job_id: str) -> Path:
-    if not re.fullmatch(r"[a-f0-9]{16,64}", job_id):
+    if not re.fullmatch(SAM3_ID_PATTERN, job_id):
         raise HTTPException(400, "Invalid SAM3 job ID")
     return store.root / "staging" / "jobs" / f"{job_id}.json"
 
@@ -636,11 +648,10 @@ def _load_state(req: DatasetRef, key: str) -> DatasetState:
         CACHE_ROOT.mkdir(parents=True, exist_ok=True)
         if not re.fullmatch(r"[\w.-]+/[\w.-]+", req.repo_id):
             raise HTTPException(400, "Invalid Hub dataset ID")
-        revision_key = (
-            __import__("hashlib").sha256(req.revision.encode()).hexdigest()[:12]
-            if req.revision
-            else "main"
-        )
+        # The revision itself (a branch, tag or commit), made path-safe — not
+        # a hash of it. The trailing credential-scope digest stays: it keeps
+        # one HF account's private download from being reused by another.
+        revision_key = naming.catalog_name(req.revision) if req.revision else "main"
         slug = (
             req.repo_id.replace("/", "__")
             + "@"
@@ -750,6 +761,7 @@ def _load_state(req: DatasetRef, key: str) -> DatasetState:
         root=root,
         info=info,
         episodes_df=episodes_df,
+        info_signature=_info_signature(root) if req.local_path else None,
     )
     _load_existing_annotations(state)
     _states[key] = state
@@ -1389,13 +1401,29 @@ def _is_levi_export(path: Path) -> bool:
     return (path / EXPORT_MARKER_NAME).is_file()
 
 
+def _export_source(path: Path) -> str | None:
+    """``source_root`` recorded in an export's marker, or None if unmarked."""
+    try:
+        return json.loads((path / EXPORT_MARKER_NAME).read_text()).get("source_root")
+    except (OSError, ValueError):
+        return None
+
+
 def _do_export(
     state: DatasetState, output_dir: str | None, copy_videos: bool
 ) -> dict[str, Any]:
+    if (state.root / "meta/levi_view.json").is_file():
+        raise HTTPException(
+            409,
+            "This is a browsing view of a raw capture, not a dataset to "
+            "export. Convert the capture in the Workbench instead — its "
+            "annotations carry over to the converted dataset.",
+        )
     for folder in ("meta", "data", "videos"):
         for entry in (state.root / folder).rglob("*"):
             if entry.is_symlink():
                 inside(entry, state.root)
+    reserved = False
     if output_dir:
         out_root = inside(output_dir)
     else:
@@ -1403,15 +1431,22 @@ def _do_export(
         # Deterministic, not random: the same source dataset always resolves
         # to the same export directory, so repeated "导出标注数据集" clicks
         # update one dataset copy in place instead of piling up abandoned
-        # full copies (videos + parquet + meta) on every click.
+        # full copies (videos + parquet + meta) on every click. Only if that
+        # name is already owned by a *different* source does it get a
+        # timestamp suffix.
         name = dataset_display_slug(state.repo_id, state.local_path)
-        out_root = EXPORT_ROOT / f"{name}_annotated_{state.export_identity_hash}"
+        out_root = EXPORT_ROOT / f"{name}_annotated"
+        if out_root.exists() and _export_source(out_root) != str(state.root):
+            prefix = f"{name}_annotated_"
+            stamp = naming.timestamp_id(EXPORT_ROOT, prefix=prefix, create_dir=True)
+            out_root = EXPORT_ROOT / f"{prefix}{stamp}"
+            reserved = True
 
     if out_root.is_relative_to(state.root):
         raise HTTPException(
             409, "Export must use a new directory outside the source dataset"
         )
-    reuse = out_root.exists()
+    reuse = out_root.exists() and not reserved
     if reuse and not _is_levi_export(out_root):
         raise HTTPException(
             409,
@@ -1462,6 +1497,27 @@ def _do_export(
     if SAY_TOOL_SCHEMA["function"]["name"] not in tool_names:
         info["tools"] = [*existing_tools, SAY_TOOL_SCHEMA]
     info_path.write_text(json.dumps(info, indent=2))
+
+    # Human outcome labels travel with the export as dataset metadata
+    # (``levi_outcome`` + ``levi_outcome_source``), where RECAP and the
+    # viewer read them. v2 only: v3 episode metadata is parquet.
+    labels = outcomes.read_labels(state.annotations_dir)
+    episodes_path = dst_meta / "episodes.jsonl"
+    if labels and episodes_path.exists():
+        rows = [
+            json.loads(line)
+            for line in episodes_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        for row in rows:
+            label = labels.get(int(row.get("episode_index", -1)))
+            if label:
+                row["levi_outcome"] = label["outcome"]
+                row["levi_outcome_source"] = "human"
+        episodes_path.write_text(
+            "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+            encoding="utf-8",
+        )
 
     # Drop legacy meta files if present
     for legacy in ("subtasks.parquet", "tasks_high_level.parquet"):
@@ -1798,6 +1854,32 @@ def delete_episode_atoms(
     )
     existed = _delete_episode_annotations(state, episode_index)
     return JSONResponse({"ok": True, "deleted": existed})
+
+
+@app.get("/api/episodes/outcomes")
+def get_outcome_labels(
+    repo_id: str | None = None,
+    revision: str | None = None,
+    local_path: str | None = None,
+) -> JSONResponse:
+    """Human success/failure labels; they override ``levi_outcome``."""
+    state = _ensure_state(
+        DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path)
+    )
+    labels = outcomes.read_labels(state.annotations_dir)
+    return JSONResponse({"labels": {str(k): v for k, v in labels.items()}})
+
+
+@app.post("/api/episodes/{episode_index}/outcome")
+def set_outcome_label(episode_index: int, payload: OutcomePayload) -> JSONResponse:
+    state = _ensure_state(
+        DatasetRef(repo_id=payload.repo_id, local_path=payload.local_path)
+    )
+    known = {int(i) for i in state.episodes_df["episode_index"].tolist()}
+    if episode_index not in known:
+        raise HTTPException(status_code=404, detail="Unknown episode")
+    value = outcomes.write_label(state.annotations_dir, episode_index, payload.outcome)
+    return JSONResponse({"ok": True, "label": value})
 
 
 def _prepare_sam3_media(state: DatasetState) -> None:
@@ -2364,7 +2446,7 @@ def sam3_run(request: Sam3RunRequest) -> JSONResponse:
             f"SAM3 worker environment not found at {worker_python}; see integrations/sam3/README.md",
         )
     _prepare_sam3_media(state)
-    job_id = uuid.uuid4().hex
+    job_id = naming.timestamp_id(store.root / "staging" / "jobs", ".json")
     result_path = store.root / "staging" / "results" / f"{job_id}.json"
     log_path = store.root / "staging" / "jobs" / f"{job_id}.log"
     progress_path = store.root / "staging" / "jobs" / f"{job_id}.progress.json"

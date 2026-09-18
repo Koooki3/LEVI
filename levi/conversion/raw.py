@@ -38,6 +38,16 @@ GRIP = [
 ]
 
 
+class CaptureError(ValueError):
+    """A capture-schema violation with a stable ``code`` naming the
+    requirement it breaks, so inspection reports can map failures to
+    checklist items without parsing messages."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
 def check_tree(root: Path):
     # Reject links for conversion: source snapshots and copies must be self-contained.
     if root.is_symlink() or any(p.is_symlink() for p in root.rglob("*")):
@@ -67,12 +77,14 @@ def read_csv(path: Path, columns=None):
             float(first[0])
             float(first[1])
         except (ValueError, IndexError):
-            raise ValueError(f"Missing required columns in {path.name}") from None
+            raise CaptureError(
+                "csv_schema", f"Missing required columns in {path.name}"
+            ) from None
         if len(first) != len(columns):
-            raise ValueError(f"Wrong column count in {path.name}")
+            raise CaptureError("csv_schema", f"Wrong column count in {path.name}")
         frame = pd.read_csv(path, header=None, names=columns)
     if frame.empty:
-        raise ValueError(f"Empty CSV: {path.name}")
+        raise CaptureError("csv_schema", f"Empty CSV: {path.name}")
     return frame
 
 
@@ -87,13 +99,14 @@ def load(demo: Path):
             or (ids != np.floor(ids)).any()
             or (np.diff(ids) <= 0).any()
         ):
-            raise ValueError(
-                f"{label}: frame IDs must be finite, integer, unique and increasing"
+            raise CaptureError(
+                "frame_ids",
+                f"{label}: frame IDs must be finite, integer, unique and increasing",
             )
         for col in ["timestamp_sec", "source_stamp_sec"]:
             values = pd.to_numeric(frame[col], errors="raise").to_numpy(float)
             if not np.isfinite(values).all() or (np.diff(values) < 0).any():
-                raise ValueError(f"{label}: invalid {col}")
+                raise CaptureError("timestamps", f"{label}: invalid {col}")
         # success_flag is an episode-level outcome marker (operator-toggled
         # for teleoperation, policy-graded for eval rollouts), broadcast to
         # every row at capture time — not a per-sample sensor-quality flag.
@@ -102,20 +115,28 @@ def load(demo: Path):
         # only genuine corruption signal is a MIX of values within one demo
         # (e.g. from a bad merge), not the value itself. See demo_outcome().
         if pd.to_numeric(frame.success_flag, errors="raise").nunique() != 1:
-            raise ValueError(f"{label}: inconsistent success_flag within one demo")
+            raise CaptureError(
+                "success_flag", f"{label}: inconsistent success_flag within one demo"
+            )
     if len(pose) < 2 or not np.array_equal(pose.frame_index, grip.frame_index):
-        raise ValueError("Pose/gripper frame IDs must match exactly (no silent join)")
+        raise CaptureError(
+            "alignment", "Pose/gripper frame IDs must match exactly (no silent join)"
+        )
     if not np.allclose(pose.timestamp_sec, grip.timestamp_sec, rtol=0, atol=1e-3):
-        raise ValueError("Pose/gripper capture timestamps are not aligned")
+        raise CaptureError(
+            "alignment", "Pose/gripper capture timestamps are not aligned"
+        )
     xyz = pose[["px", "py", "pz"]].to_numpy(float)
     q = pose[["qx", "qy", "qz", "qw"]].to_numpy(float)
     norm = np.linalg.norm(q, axis=1)
     if not np.isfinite(xyz).all() or not np.isfinite(q).all() or (norm < 1e-8).any():
-        raise ValueError("Nonfinite pose or zero quaternion")
+        raise CaptureError("pose_values", "Nonfinite pose or zero quaternion")
     q = q / norm[:, None]
     command = grip.last_gripper_command.astype(str).str.strip().str.lower()
     if not command.isin(["open", "close"]).all():
-        raise ValueError("Unknown gripper command; expected open or close")
+        raise CaptureError(
+            "gripper_commands", "Unknown gripper command; expected open or close"
+        )
     for extra in demo.glob("*.csv"):
         if extra.name in ("end_effector_pose.csv", "gripper_state.csv", "events.csv"):
             continue
@@ -123,7 +144,7 @@ def load(demo: Path):
         if "frame_index" in frame and not np.array_equal(
             frame.frame_index, pose.frame_index
         ):
-            raise ValueError(f"Frame alignment mismatch: {extra.name}")
+            raise CaptureError("alignment", f"Frame alignment mismatch: {extra.name}")
     return pose, grip, xyz, q, (command == "open").to_numpy(float)
 
 
@@ -177,7 +198,7 @@ def camera_path(demo, key):
         path = demo / name
         if path.exists():
             try:
-                media.probe(path)
+                media.probe_cached(path)
                 return path
             except Exception as exc:
                 if name.endswith("_raw.avi"):
@@ -240,9 +261,7 @@ def audit(demo: Path, options: Options):
                 rec["errors"].append("Capture contains camera_stalled event")
             # Terminal event name also differs by collector: "stop_demo" for
             # teleoperation, "episode_end" for policy rollouts.
-            if options.require_complete and not (
-                names & {"stop_demo", "episode_end"}
-            ):
+            if options.require_complete and not (names & {"stop_demo", "episode_end"}):
                 rec["errors"].append("Missing stop_demo/episode_end event")
         elif options.require_complete:
             rec["errors"].append("Missing events.csv")

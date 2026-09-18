@@ -51,6 +51,8 @@ export const EXCLUDED_COLUMNS = {
     "next.reward",
     "next.done",
     "next.truncated",
+    // RECAP value datasets: terminal success flag (levi/conversion/outputs/recap_value.py).
+    "is_success",
   ],
   V3: [
     "index",

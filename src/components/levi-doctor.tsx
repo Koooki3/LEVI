@@ -3,6 +3,7 @@ import { useState } from "react";
 import { T, useLocale } from "./levi-locale";
 import { leviApi, downloadJson } from "./levi-api";
 import { useFlaggedEpisodes } from "@/context/flagged-episodes-context";
+import { RawCaptureNotice } from "@/components/raw-capture-notice";
 const CHECKS = [
   "metadata",
   "temporal",
@@ -31,6 +32,7 @@ type Report = {
   flagged_episodes: number[];
   method: string;
 };
+
 export default function LeviDoctor({ repoId }: { repoId: string }) {
   const [checks, setChecks] = useState(CHECKS);
   const [max, setMax] = useState(20);
@@ -74,6 +76,9 @@ export default function LeviDoctor({ repoId }: { repoId: string }) {
           configurable heuristics.
         </T>
       </p>
+      <div className="mt-4">
+        <RawCaptureNotice feature="doctor" />
+      </div>
       <div className="levi-box">
         <div className="levi-row">
           <code className="grow text-xs">{repoId}</code>

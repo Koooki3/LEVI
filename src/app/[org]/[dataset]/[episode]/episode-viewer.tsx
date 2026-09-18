@@ -2,13 +2,23 @@
 "use client";
 import { T } from "@/components/levi-locale";
 
-import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  lazy,
+  Suspense,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { postParentMessageWithParams } from "@/utils/postParentMessage";
 import { SimpleVideosPlayer } from "@/components/simple-videos-player";
 import PlaybackBar from "@/components/playback-bar";
 import { TimeProvider, useTime } from "@/context/time-context";
 import { FlaggedEpisodesProvider } from "@/context/flagged-episodes-context";
+import { DatasetSourceProvider } from "@/context/dataset-source-context";
+import { RawCaptureNotice } from "@/components/raw-capture-notice";
 import {
   AnnotationsProvider,
   useAnnotations,
@@ -52,7 +62,9 @@ import {
 import type { DatasetMetadata } from "@/utils/parquetUtils";
 import {
   fetchAnnotationSummary,
+  fetchOutcomeLabels,
   isAnnotateBackendEnabled,
+  saveOutcomeLabel,
   type AnnotationSummary,
 } from "@/utils/annotationsClient";
 
@@ -177,6 +189,32 @@ export default function EpisodeViewer({
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
   const [authRevision, setAuthRevision] = useState(0);
+  const legacyRouter = useRouter();
+  // Local datasets were once addressed by a hash (`/local/<hash>`); the
+  // catalog keeps those as aliases of the current name. Redirect, carrying
+  // this browser's flagged episodes over once.
+  useEffect(() => {
+    if (org !== "local") return;
+    let cancelled = false;
+    fetch("/api/levi/catalog", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((catalog: { aliases?: Record<string, string> } | null) => {
+        const target = catalog?.aliases?.[dataset];
+        if (cancelled || !target || target === dataset) return;
+        const oldKey = `levi-flags:local/${dataset}`;
+        const newKey = `levi-flags:local/${target}`;
+        const flags = readBrowserStorage("local", oldKey);
+        if (flags && !readBrowserStorage("local", newKey))
+          writeBrowserStorage("local", newKey, flags);
+        legacyRouter.replace(
+          `/local/${target}/episode_${episodeId}${window.location.search}`,
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [org, dataset, episodeId, legacyRouter]);
   useEffect(() => {
     const onAuthChanged = () => setAuthRevision((value) => value + 1);
     window.addEventListener("levi:hf-auth-changed", onAuthChanged);
@@ -246,15 +284,17 @@ export default function EpisodeViewer({
     <T>
       {
         <TimeProvider duration={data!.duration}>
-          <FlaggedEpisodesProvider
-            key={`${org}/${dataset}`}
-            repoId={`${org}/${dataset}`}
-          >
-            <AnnotationsProvider>
-              <EpisodeBootstrap data={data!} />
-              <EpisodeViewerInner data={data!} org={org} dataset={dataset} />
-            </AnnotationsProvider>
-          </FlaggedEpisodesProvider>
+          <DatasetSourceProvider org={org} dataset={dataset}>
+            <FlaggedEpisodesProvider
+              key={`${org}/${dataset}`}
+              repoId={`${org}/${dataset}`}
+            >
+              <AnnotationsProvider>
+                <EpisodeBootstrap data={data!} />
+                <EpisodeViewerInner data={data!} org={org} dataset={dataset} />
+              </AnnotationsProvider>
+            </FlaggedEpisodesProvider>
+          </DatasetSourceProvider>
         </TimeProvider>
       }
     </T>
@@ -417,6 +457,22 @@ function EpisodeViewerInner({
     string,
     EpisodeOutcome
   > | null>(null);
+  // Human labels (annotation backend) layered over the metadata outcomes.
+  const [humanOutcomes, setHumanOutcomes] = useState<Record<
+    string,
+    EpisodeOutcome
+  > | null>(null);
+  const mergedOutcomes = useMemo(
+    () =>
+      episodeOutcomes || humanOutcomes
+        ? { ...(episodeOutcomes ?? {}), ...(humanOutcomes ?? {}) }
+        : null,
+    [episodeOutcomes, humanOutcomes],
+  );
+  const humanOutcomeKeys = useMemo(
+    () => new Set(Object.keys(humanOutcomes ?? {})),
+    [humanOutcomes],
+  );
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -503,6 +559,44 @@ function EpisodeViewerInner({
       cancelled = true;
     };
   }, [org, dataset]);
+
+  useEffect(() => {
+    if (!org || !dataset || !isAnnotateBackendEnabled()) return;
+    let cancelled = false;
+    fetchOutcomeLabels({ repoId: `${org}/${dataset}` })
+      .then((labels) => {
+        if (cancelled || !mountedRef.current) return;
+        setHumanOutcomes(
+          Object.fromEntries(
+            Object.entries(labels).map(([ep, label]) => [ep, label.outcome]),
+          ),
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [org, dataset]);
+
+  const changeOutcome = useCallback(
+    (episode: number, outcome: EpisodeOutcome | null) => {
+      const key = String(episode);
+      const previous = humanOutcomes;
+      // Optimistic; restored if the save fails.
+      setHumanOutcomes((current) => {
+        const next = { ...(current ?? {}) };
+        if (outcome) next[key] = outcome;
+        else delete next[key];
+        return next;
+      });
+      saveOutcomeLabel(episode, { repoId: `${org}/${dataset}` }, outcome).catch(
+        () => {
+          if (mountedRef.current) setHumanOutcomes(previous);
+        },
+      );
+    },
+    [org, dataset, humanOutcomes],
+  );
 
   // Eagerly load the URDFViewer bundle + warm the STL geometry cache while
   // the user is on the Episodes tab, so the 3D Replay tab opens faster.
@@ -961,7 +1055,11 @@ function EpisodeViewerInner({
                 onTaskFilterChange={setTaskFilter}
                 filteredEpisodeCount={visibleEpisodes.length}
                 annotationSummary={annotationSummary ?? undefined}
-                episodeOutcomes={episodeOutcomes ?? undefined}
+                episodeOutcomes={mergedOutcomes ?? undefined}
+                humanOutcomes={humanOutcomeKeys}
+                onOutcomeChange={
+                  isAnnotateBackendEnabled() ? changeOutcome : undefined
+                }
                 onEpisodeSelect={
                   activeTab === "urdf"
                     ? (ep) => {
@@ -1013,6 +1111,8 @@ function EpisodeViewerInner({
                       </p>
                     </div>
                   </div>
+
+                  <RawCaptureNotice compact />
 
                   {/* Videos */}
                   {videosInfo.length > 0 && (

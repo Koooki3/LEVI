@@ -61,171 +61,37 @@ def read_jsonl(path):
 
 
 def convert(source: Path, target: Path, options):
-    if target.exists():
-        raise ValueError("Dataset destination already exists")
-    selected = raw.demos(source, options)
-    audits = [raw.audit(d, options) for d in selected]
-    bad = [r for r in audits if not r["ok"]]
-    if bad:
-        raise ValueError(
-            "Capture preflight failed: " + json.dumps(bad, ensure_ascii=False)
-        )
-    target.mkdir(parents=True)
-    tasks = {}
-    episodes = []
-    epstats = []
-    provenance = []
-    total = 0
-    features = {}
-    camera_shapes = {}
-    for ep, demo in enumerate(selected):
-        pose, _, xyz, q, command = raw.load(demo)
-        orientation = (
-            raw.euler(q)
-            if options.orientation == "euler"
-            else raw.quaternion_continuous(q)
-        )
-        state = np.column_stack([xyz, orientation, command]).astype(np.float32)
-        action = (
-            np.vstack([state[1:], state[-1:]])
-            if options.action_mode == "next_state"
-            else state.copy()
-        )
-        n = len(state)
-        task = raw.task_text(demo, options)
-        tasks.setdefault(task, len(tasks))
-        task_id = tasks[task]
-        outcome = raw.demo_outcome(demo)
-        cols = {
-            "timestamp": np.arange(n, dtype=np.float32) / options.fps,
-            "frame_index": np.arange(n, dtype=np.int64),
-            "episode_index": np.full(n, ep, dtype=np.int64),
-            "index": np.arange(total, total + n, dtype=np.int64),
-            "task_index": np.full(n, task_id, dtype=np.int64),
-        }
-        table = pa.table(
-            {
-                **cols,
-                "action": pa.array(action.tolist(), type=pa.list_(pa.float32())),
-                "observation.state": pa.array(
-                    state.tolist(), type=pa.list_(pa.float32())
-                ),
-            }
-        )
-        part = target / f"data/chunk-{ep // 1000:03d}/episode_{ep:06d}.parquet"
-        part.parent.mkdir(parents=True, exist_ok=True)
-        pq.write_table(table, part, compression="snappy")
-        eps = {k: stats(v.reshape(-1, 1)) for k, v in cols.items()}
-        eps.update({"action": stats(action), "observation.state": stats(state)})
-        for camera, key in options.cameras.items():
-            dst = target / f"videos/chunk-{ep // 1000:03d}/{key}/episode_{ep:06d}.mp4"
-            # Always encode the selected sequence: no codec/FPS metadata guesses.
-            media.encode(
-                media.decode(raw.camera_path(demo, camera)), dst, options.fps, n
-            )
-            v = media.inspect(dst, pixels=True)
-            shape = [v["height"], v["width"], 3]
-            if key in camera_shapes and shape != camera_shapes[key]:
-                raise ValueError("Camera resolution changes between episodes")
-            camera_shapes[key] = shape
-            eps[key] = v["stats"]
-            features[key] = {
-                "dtype": "video",
-                "shape": shape,
-                "names": ["height", "width", "channels"],
-                "info": {
-                    "video.height": v["height"],
-                    "video.width": v["width"],
-                    "video.codec": v["codec"],
-                    "video.pix_fmt": v["pixel_format"],
-                    "video.fps": v["fps"],
-                    "video.channels": 3,
-                    "video.is_depth_map": False,
-                    "has_audio": False,
-                },
-            }
-        for k in cols:
-            features[k] = {
-                "dtype": "float32" if k == "timestamp" else "int64",
-                "shape": [1],
-                "names": None,
-            }
-        names = (
-            ["x", "y", "z"]
-            + (
-                ["rx", "ry", "rz"]
-                if options.orientation == "euler"
-                else ["qx", "qy", "qz", "qw"]
-            )
-            + ["gripper"]
-        )
-        for k in ["action", "observation.state"]:
-            features[k] = {"dtype": "float32", "shape": [len(names)], "names": names}
-        episode_row = {"episode_index": ep, "tasks": [task], "length": n}
-        if outcome is not None:
-            episode_row["levi_outcome"] = outcome
-        episodes.append(episode_row)
-        epstats.append({"episode_index": ep, "stats": eps})
-        frame_map = demo / "levi_frames.json"
-        provenance.append(
-            {
-                "episode_index": ep,
-                "source_demo": demo.relative_to(source).as_posix(),
-                "source_frame_ids": json.loads(frame_map.read_text())[
-                    "source_frame_ids"
-                ]
-                if frame_map.exists()
-                else pose.frame_index.tolist(),
-                "source_capture_timestamps": pose.get(
-                    "source_timestamp_sec", pose.timestamp_sec
-                ).tolist(),
-            }
-        )
-        total += n
-        print(f"Converted episode {ep}: {n} frames", flush=True)
-    info = {
-        "codebase_version": "v2.1",
-        "robot_type": options.robot_type,
-        "fps": options.fps,
-        "total_episodes": len(episodes),
-        "total_frames": total,
-        "total_tasks": len(tasks),
-        "total_videos": len(episodes) * len(options.cameras),
-        "total_chunks": (len(episodes) + 999) // 1000,
-        "chunks_size": 1000,
-        "splits": {"train": f"0:{len(episodes)}"},
-        "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
-        "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
-        "features": features,
-    }
-    atomic(target / "meta/info.json", info)
-    jsonl(target / "meta/episodes.jsonl", episodes)
-    jsonl(target / "meta/episodes_stats.jsonl", epstats)
-    jsonl(
-        target / "meta/tasks.jsonl",
-        [{"task_index": i, "task": text} for text, i in tasks.items()],
+    """Convert an already-staged capture (every frame at ``options.fps``)
+    into a dataset at ``target``: every row kept, no filtering. Runs the
+    single-pass pipeline, so H.264 videos are stream-copied, not re-encoded."""
+    from . import registry
+    from .inputs.robot_capture import camera_info
+
+    options = options.model_copy(
+        update={"timing": "retime", "filter_static": False, "target": "lerobot_v21"}
     )
-    atomic(target / "meta/stats.json", aggregate(epstats))
-    jsonl(target / "meta/levi_provenance.jsonl", provenance)
-    atomic(
-        target / "meta/levi_conversion.json",
-        {
-            "schema": "levi.conversion.v1",
-            "options": options.model_dump(),
-            "action_semantics": options.action_mode,
-            "rotation_units": "radians"
-            if options.orientation == "euler"
-            else "unit quaternion xyzw",
-            "position_units": "metres",
-            "gripper": "command: open=1, close=0; not measured aperture",
-            "image_statistics": "all decoded output pixels, RGB normalized to [0,1]",
-        },
-    )
-    return target
+    for demo in raw.demos(source, options):
+        for camera in options.cameras:
+            try:
+                rate = camera_info(demo, camera, options)["fps"]
+            except ValueError:
+                continue  # reported by the preflight
+            if abs(rate - options.fps) > 0.01:
+                raise ValueError(
+                    f"Capture preflight failed: {demo.name}/{camera} video FPS "
+                    f"{rate:g} differs from target {options.fps:g}; run fps normalization"
+                )
+    return Path(registry.export(source, target, options)["dataset_path"])
 
 
-def validate(root: Path):
-    """Native checks plus full video decoding and v2 row/media/metadata contracts."""
+def validate(root: Path, measured: dict | None = None):
+    """Native checks plus full video decoding and v2 row/media/metadata contracts.
+
+    ``measured`` maps a video's path relative to ``root`` to the result of a
+    full ``media.inspect`` decode already done by the caller (the conversion
+    pipeline decodes every output once for its statistics); those files are
+    not decoded a second time."""
+    measured = measured or {}
     report = diagnose(root, max_episodes=0, decode_video=False)
     info = json.loads((root / "meta/info.json").read_text())
     failures = []
@@ -233,9 +99,14 @@ def validate(root: Path):
     for path in sorted((root / "videos").rglob("*.mp4")):
         try:
             inside(path, root)
-            v = media.inspect(path)
+            v = measured.get(path.relative_to(root).as_posix()) or media.inspect(path)
             videos += 1
-            if abs(v["fps"] - info["fps"]) > 0.01:
+            # Measured from packet timestamps: the container's average rate
+            # also counts the last frame's display time, which a lossless
+            # retime cannot rescale.
+            interval = media.frame_interval(path)
+            measured_fps = 1 / interval if interval else v["fps"]
+            if abs(measured_fps - info["fps"]) > 0.01:
                 failures.append(f"Video FPS mismatch: {path.relative_to(root)}")
             if is_dataset_v2(info.get("codebase_version")):
                 ep = int(path.stem.rsplit("_", 1)[-1])

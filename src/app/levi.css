@@ -587,3 +587,191 @@ select optgroup {
     flex-wrap: wrap;
   }
 }
+
+/* Conversion wizard (src/components/conversion/) */
+.levi-workbench h3 {
+  font-size: 15px;
+  margin-bottom: 8px;
+  color: #e5ebdc;
+}
+.levi-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+.levi-summary div {
+  border: 1px solid #ffffff18;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.levi-summary dt {
+  font-size: 11px;
+  color: #8f9b86;
+}
+.levi-summary dd {
+  font: 14px/1.5 monospace;
+  color: #e5ebdc;
+}
+.levi-checklist td {
+  vertical-align: top;
+  padding: 7px 8px;
+}
+.levi-checklist tr.fail td {
+  background: #ff9c9408;
+}
+.levi-fix {
+  color: #f1c677 !important;
+}
+.levi-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+.levi-card {
+  border: 1px solid #ffffff20;
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+}
+.levi-card.selected {
+  border-color: #d4f779;
+  box-shadow: 0 0 0 1px #d4f77940;
+}
+.levi-card > .levi-primary {
+  align-self: flex-start;
+  margin-top: auto;
+}
+.levi-reasons {
+  margin: 10px 0 4px;
+  padding-left: 18px;
+  list-style: disc;
+  font-size: 12px;
+  color: #c9d3bf;
+  line-height: 1.6;
+}
+.levi-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 14px 18px;
+}
+.levi-options label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #b3bfaa;
+}
+.levi-options label.levi-check {
+  flex-direction: row;
+  align-items: center;
+}
+.levi-options .levi-wide {
+  grid-column: 1 / -1;
+}
+.levi-progress {
+  margin-top: 14px;
+}
+.levi-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  margin-bottom: 10px;
+}
+.levi-steps li {
+  border: 1px solid #ffffff25;
+  border-radius: 999px;
+  padding: 3px 10px;
+  color: #8f9b86;
+}
+.levi-steps li.done {
+  color: #d4f779;
+  border-color: #d4f77960;
+}
+.levi-steps li.active {
+  color: #11180f;
+  background: #d4f779;
+  border-color: #d4f779;
+}
+.levi-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #ffffff15;
+  overflow: hidden;
+}
+.levi-bar span {
+  display: block;
+  height: 100%;
+  background: #d4f779;
+  transition: width 0.4s ease;
+}
+.levi-warnings {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #f1c677;
+  list-style: disc;
+  padding-left: 18px;
+}
+@media (max-width: 640px) {
+  .levi-box {
+    padding: 16px;
+  }
+  .levi-cards,
+  .levi-options {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Dataset format badges (src/components/dataset-format.tsx) */
+.levi-format p {
+  margin: 4px 0 0;
+  line-height: 1.5;
+}
+.levi-format-cell {
+  min-width: 240px;
+  max-width: 420px;
+}
+.levi-raw-notice {
+  border: 1px solid #f1c67755;
+  background: #f1c67710;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: #d9dfd0;
+}
+.levi-raw-notice-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.levi-raw-notice p {
+  color: #b3bfaa;
+  line-height: 1.7;
+}
+.levi-raw-notice.compact {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+.levi-raw-notice.compact .levi-raw-link,
+.levi-raw-notice .levi-secondary {
+  color: #d4f779;
+  white-space: nowrap;
+}
+.levi-raw-notice .levi-status {
+  border: 1px solid #ffffff30;
+  padding: 3px 8px;
+  border-radius: 3px;
+  font: 11px monospace;
+}
+.levi-raw-notice .levi-status.warn {
+  color: #f1c677;
+}

@@ -60,8 +60,9 @@ at running the existing suite. Before declaring the work done:
 - **Workspace/filesystem invariants**: anything that creates, moves, or
   names a directory under `.state` — confirm it matches the conventions in
   [`.state.md`](../../.state.md) (flat layout, no incidental subfolders,
-  correct choice between hash-suffixed and bare-name sidecars) and doesn't
-  leave orphaned or half-written state behind on failure.
+  per-dataset artifacts named by catalog name and per-run artifacts by
+  timestamp — never a hash) and doesn't leave orphaned or half-written state
+  behind on failure (outputs are staged and renamed into place).
 
 ## 3. Fix what's found, then re-verify
 
