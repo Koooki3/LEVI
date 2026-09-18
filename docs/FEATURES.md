@@ -19,7 +19,9 @@ Baseline: `huggingface/lerobot-dataset-visualizer@dc59887796fd41f37040c0df6b10e6
 | 3D URDF replay | Retained upstream models, mapping, controls, end-effector trails; enabled for compatible v2 robots too | Real SO-100 model loaded in Chromium |
 | Doctor | Native version-aware local checks + external original doctor entry | Synthetic anomalies, full 10-episode real reference report |
 | Annotation export / Hub push | Retained backend API; source-safe new exports | Export round-trip tested; no Hub upload performed |
-| Built-in conversion | Full capture workflow, configurable stages and automatic registration | Real CSV/image/video integration tests |
+| Built-in conversion | Format registry (robot capture teleop/rollout, image sequence, LeRobot v2.x → LeRobot v2.1, RECAP value), input inspection with requirement checklist and per-target compatibility, single-pass parallel pipeline with lossless retime, live progress, automatic registration; legacy single stages retained | Contract tests over every registered input/output pair, equivalence test against the stage chain, real 171-demo inspection (2 s) and remux checks |
+| RECAP value dataset (LEVI addition) | `is_success`, `next.reward`, `next.done`, RLinf `meta/returns.parquet`, LeRobot-proposal `episode_labels.csv`, manifest; from raw captures or existing LeRobot datasets | Conformance test reproducing RLinf's `compute_returns.py` (commit `db66ac56`) |
+| Raw captures and outcome labels (LEVI addition) | Browsing view of raw captures, annotation carry-over by source demo, human success/failure labels, format/version/origin in the dataset list | View/carry-over/rebuild tests; real screws capture registered and browsed in Chromium |
 | SAM3 object annotation | Global mask/bbox/track sidecar for demos, Hub and local datasets, pinned worker with 1038lab/sam3 checkpoint, account/progress UI, human accept/reject/refine and source-safe export | RLE round-trip, API fake flow, revision/edit/export tests; real model intentionally not run in CPU CI |
 | Chinese / English | Added React locale boundaries, catalogs, live switch | Both languages and viewport checks |
 | Independent environment / distribution | uv.lock, .venv, local Bun, launcher, Dockerfile, CI, bilingual docs | Python suite, frontend suite and production build |
@@ -45,4 +47,5 @@ Status counts count individual results, not just category headings. Sampling sco
 - Hub video, OAuth, external doctor, URDF meshes and research-paper links require network access. Their text is not translated by LEVI.
 - Auto chunk suggestions and alignment estimates preserve upstream mathematical behavior, not universal training prescriptions.
 - Runtime is a source checkout, not a standalone frontend bundled inside a PyPI wheel. Use the documented source install or Docker image.
-- Stopping the service terminates conversion workers; interrupted jobs and partial outputs remain for inspection. Restart never automatically resumes writes.
+- Stopping the service terminates conversion workers; interrupted jobs are marked for inspection and outputs are only published on success. Restart never automatically resumes writes.
+- A raw capture's browsing view is for viewing and annotation, not training: it carries no pixel statistics and cannot be exported directly.

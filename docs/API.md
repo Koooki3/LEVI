@@ -4,22 +4,26 @@ Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge fo
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| GET | `/api/levi/catalog` | Local registrations, demo IDs, workspace and available conversion stages |
-| POST | `/api/levi/catalog` | Register `{ "path": "/workspace/dataset" }` |
+| GET | `/api/levi/catalog` | Local registrations (each with a `format` descriptor: kind, origin, version, fps, source, capabilities), legacy-id `aliases`, demo IDs, workspace and conversion stages |
+| POST | `/api/levi/catalog` | Register `{ "path": "/workspace/dataset" }`: a LeRobot dataset directly; a raw capture returns `kind: "raw"`, `view_status: "building"` and the `view_job` building its browsing view |
+| GET | `/api/levi/convert/formats` | Input and output formats, the input → output matrix and known unsupported formats with workarounds |
+| POST | `/api/levi/convert/inspect` | Start an inspection job `{ "source": "captures/session-a", "options": {} }`; its `result.report` holds the detected format, summary, requirement checklist, per-episode findings and per-target compatibility |
 | GET / HEAD | `/api/levi/files/{slug}/{relative_path}` | Registered dataset metadata, Parquet, images or MP4; confined to dataset root |
 | GET | `/api/levi/review?repo_id=org/name` | Restore saved review |
 | POST | `/api/levi/review` | Save `{ "repo_id": "…", "flagged": [0,2], "notes": "…" }` |
 | GET | `/api/levi/review/export?repo_id=org/name` | Download `levi.review.v1` JSON |
-| POST | `/api/levi/jobs/plan` | Preview `{ "stage": "pipeline", "source": "captures/session-a", "fps": 10, "source_fps": 30, "options": {} }` |
+| POST | `/api/levi/jobs/plan` | Preview `{ "stage": "pipeline", "source": "captures/session-a", "fps": 10, "source_fps": 30, "options": {"target": "recap_value"} }` |
 | POST | `/api/levi/jobs/{id}/run` | Consume the stored plan once; body `{}` |
-| GET | `/api/levi/jobs` | Latest 50 plans/jobs and up to 32 KB of each log tail |
+| GET | `/api/levi/jobs` | Latest 50 plans/jobs, structured `progress` (stages, stage, done/total, current item, elapsed, ETA, warnings) and up to 32 KB of each log tail |
 | POST | `/api/levi/diagnostics` | Diagnose `{ "repo_id": "…", "max_episodes": 20, "checks": ["metadata","temporal"], "decode_video": false }` |
 | GET | `/api/annotation/health` | Annotation service availability |
 | POST | `/api/annotation/dataset/load` | Load `{ "repo_id": "…" }` or `{ "local_path": "/workspace/dataset" }` |
 | GET | `/api/annotation/episodes/{id}/atoms?repo_id=…` | Read language atoms |
 | POST | `/api/annotation/episodes/{id}/atoms` | Replace `{ "repo_id": "…", "episode_index": 0, "atoms": [...] }` |
 | GET | `/api/annotation/episodes/{id}/frame_timestamps?repo_id=…` | Exact source timestamps |
-| POST | `/api/annotation/export` | New annotated tree; optional `output_dir`, `copy_videos` |
+| GET | `/api/annotation/episodes/outcomes?repo_id=…` | Human success/failure labels `{ "labels": { "3": {"outcome": "success", "source": "human", "updated_at": "…"} } }` |
+| POST | `/api/annotation/episodes/{id}/outcome` | Set `{ "repo_id": "…", "outcome": "success" \| "failure" }` or clear with `"outcome": null` |
+| POST | `/api/annotation/export` | New annotated tree (`<name>_annotated/`, updated in place on re-export); optional `output_dir`, `copy_videos`; refused (409) for a raw capture's browsing view |
 | POST | `/api/annotation/push_to_hub` | Explicit export and upload using the upstream backend implementation |
 | GET | /api/annotation/sam3/status | Global SAM3 model/account/checkpoint/download status; no Torch import or CUDA probe |
 | GET | /api/annotation/sam3/capabilities | Compatibility alias for the status report |
@@ -68,11 +72,11 @@ Diagnostic calls are synchronous and can take time to download remote shards. Co
 
 ### Built-in conversion plans
 
-`catalog` reports `conversion_engine=levi.builtin.v1`, `conversion_available` (ffmpeg/ffprobe), and all bundled stages. `JobPlan.options` uses the strict schema documented in [CONVERSION.md](CONVERSION.md); unknown keys and invalid values are rejected. Top-level FPS fields override FPS entries in options.
+`catalog` reports `conversion_engine=levi.builtin.v1`, `conversion_available` (ffmpeg/ffprobe), and all bundled stages. `JobPlan.options` uses the strict schema documented in [CONVERSION.md](CONVERSION.md); unknown keys and invalid values are rejected. Top-level FPS fields override FPS entries in options. For `stage: "pipeline"`, `options.target` selects the export (`lerobot_v21` default, `recap_value`) and `options.target_options` its settings (validated at plan time); the target's defaults (RECAP: `timing: "retime"`, `filter_static: false`) apply to options the request does not set. Human outcome labels of the source are snapshotted into `options.outcome_labels`. A plan for an input/target pair the registry does not support is rejected.
 
-Plans capture source size/mtime fingerprints. Execution fails if the source changes before or during processing. The worker is always `python -m levi.conversion`; old external-script plans cannot run. Job results include `exit_code`, structured `result`, `output_exists`, and an automatically registered `dataset` when successful. `pipeline` updates the job output to its nested validated `dataset/` directory. Intermediate captures remain in the run directory.
+Plans capture source size/mtime fingerprints. Execution fails if the source changes before or during processing. The worker is always `python -m levi.conversion`. Job results include `exit_code`, structured `result` (with `video_modes`, `fps`, optional `fps_note`), `output_exists`, the automatically registered `dataset` and, when the source had annotations, a `carryover` report. The output directory is the dataset itself; the default name is `<source>_<lerobot|recap>_<timestamp>`, and a job id is the same timestamp. Stage `view` builds a raw capture's browsing view and updates its catalog entry.
 
-Read-only stages have no output dataset. A failing report exits with code 2 and is recorded as failed; exceptions exit nonzero. Interrupted jobs are marked on service restart; partial output is retained, never resumed automatically.
+Read-only stages (`inspect`, `summary`, …) have no output dataset. A failing report exits with code 2 and is recorded as failed; exceptions exit nonzero. Nothing is published unless the whole run succeeds. Interrupted jobs are marked on service restart and never resumed automatically.
 
 ## Service entry points / 服务入口
 

@@ -36,6 +36,12 @@ def main():
     if args.source_fps is not None:
         settings["source_fps"] = args.source_fps
     options = Options.model_validate(settings)
+    if args.stage == "pipeline":
+        # Same rule as web plans: the target's defaults (RECAP keeps every
+        # step) unless the options file sets them explicitly.
+        from .registry import with_defaults
+
+        options = with_defaults(options, options.target, set(settings))
     source = inside(args.source)
     target = inside(args.output)
     before = fingerprint(source)

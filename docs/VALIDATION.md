@@ -2,6 +2,25 @@
 
 验证日期：2026-09-13。环境：Linux x86_64、Python 3.11.16（独立 uv `.venv`）、Bun 1.3.10、Next.js 15.5.25、Playwright Chromium。参考版本见 [UPSTREAM.md](UPSTREAM.md)。
 
+## 2026-09-18 转换框架、RECAP 与原始采集 / Conversion framework, RECAP, raw captures
+
+Scope: modular conversion registry, single-pass pipeline and lossless retime, RECAP value export, input inspection UI, raw-capture browsing views, annotation carry-over, outcome labels, hash-free naming and workspace migration.
+
+| Check | Result |
+| --- | --- |
+| Python / FastAPI tests | **102 passed** (contract tests over every input/output pair, stage-chain equivalence, RLinf `compute_returns.py` conformance, views, carry-over, migration, naming, concurrency) |
+| Bun unit tests | **179 passed**, 0 failed |
+| `uv run levi check` (type-check, lint, format, ruff) | Passed |
+| Production build | Passed |
+| Test isolation | Real workspace listing identical before/after the Python suite |
+| Real capture inspection (`pick_screws…`, 171 demos) | 2.1 s; all requirements pass; 47 success / 124 failure; LeRobot supported, RECAP supported with warnings (single task, no interventions) |
+| Real video retime | 0.11 s per 200-frame video; decoded pixels identical; packet interval exactly 0.1 s |
+| Real browsing view | 171 demos / 342 videos remuxed in 38 s, none excluded; viewer, statistics, frame gallery, annotations and Doctor rendered in Chromium with 0 page errors |
+| Browser end-to-end (isolated port and workspace, 3 real demos) | Inspect → RECAP export (6 videos remuxed) with live progress; raw view registered; outcome labelled from the sidebar; conversion carried 1 atom and 1 label over; Chinese UI checklist |
+| Workspace migration | Dry run, apply, second run a no-op on the real workspace |
+
+Not exercised: a timed full conversion of the 171 real demos against the previous 32-minute baseline (a live robot training session shared the machine), and training a value model in RLinf on the export.
+
 ## 0.3.0 独立发行检查 / Standalone release check
 
 This release focused on dataset-version recognition, task counting/filtering, metadata validation, and cache isolation across LeRobot v2.0/v2.1/v3.0/v3.1 layouts. No source dataset or generated workspace output was modified by the validation.

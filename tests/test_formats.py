@@ -559,3 +559,32 @@ def test_missing_completion_markers_are_not_codec_warnings(tmp_path):
     assert reqs["completion"].status == "warn"
     strict = registry.inspect(root, Options(require_complete=True))
     assert {r.id for r in strict.failed} == {"completion"}
+
+
+def test_cli_applies_target_defaults_unless_set(tmp_path, monkeypatch):
+    import sys
+
+    from levi.conversion import __main__ as cli
+
+    root = capture_fixture(tmp_path / "cap")
+    config = tmp_path / "recap.json"
+    config.write_text(json.dumps({"target": "recap_value"}))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "levi",
+            "pipeline",
+            "--source",
+            str(root),
+            "--output",
+            str(tmp_path / "out"),
+            "--options",
+            str(config),
+        ],
+    )
+    cli.main()
+    conversion = json.loads((tmp_path / "out/meta/levi_conversion.json").read_text())
+    assert conversion["timing"] == "retime"
+    assert conversion["options"]["filter_static"] is False
+    assert (tmp_path / "out/meta/returns.parquet").is_file()

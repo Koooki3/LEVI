@@ -14,11 +14,11 @@ export default function Guide() {
           {[
             [
               "01 / Observe",
-              "Open a Hub dataset or register a local directory. Episodes synchronize camera playback and signal charts. Space toggles playback; arrow keys navigate episodes. Use Frames to compare first and last frames.",
+              "Open a Hub dataset, or register a local LeRobot dataset or a raw capture folder (task/demo_NNNN) — a raw capture is shown through a lossless browsing view with every frame. Episodes synchronize camera playback and signal charts. Space toggles playback; arrow keys navigate episodes. Use Frames to compare first and last frames.",
             ],
             [
               "02 / Annotate",
-              "Select Annotations to edit task augmentation, subtask, plan, memory, speech and VQA. Drag on a video for a bounding box or click for a keypoint. Save episode persists edits; Save dataset creates a new annotated export.",
+              "Select Annotations to edit task augmentation, subtask, plan, memory, speech and VQA. Drag on a video for a bounding box or click for a keypoint. Click the dot beside an episode to label it success or failure. Save episode persists edits; Save dataset creates a new annotated export. Annotations made on a raw capture carry over when it is converted.",
             ],
             [
               "03 / Diagnose",
@@ -26,7 +26,7 @@ export default function Guide() {
             ],
             [
               "04 / Refine",
-              "Flag suspicious episodes and export a review manifest. In the conversion workbench, preview a built-in conversion command, run it, inspect its exit status and logs, then use its new output as the next input.",
+              "Flag suspicious episodes and export a review manifest. In the conversion workbench, inspect an input to see which requirements it meets and which exports it supports — LeRobot v2.1 or a RECAP value dataset — then choose options, review the plan and follow the run's live progress.",
             ],
             [
               "05 / Share",

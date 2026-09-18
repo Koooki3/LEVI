@@ -11,6 +11,14 @@
 
 ## Unreleased
 
+- Modular conversion: a format registry (inputs `robot_capture` with teleop/policy-rollout variants, `image_sequence`, `lerobot`; outputs `lerobot_v21`, `recap_value`), an input inspection with a per-requirement checklist and per-target compatibility (reasons and one-click fixes), and contract tests over every pair.
+- Single-pass parallel conversion (2 decodes + 1 encode per camera instead of 9 + 3) with a lossless, exact `retime` mode, staged atomic publishing and structured live progress in the Workbench.
+- RECAP value dataset export (π\*0.6): per-step rewards, terminal `is_success`, RLinf-compatible returns sidecar, LeRobot-proposal episode labels and a manifest; from raw captures or existing LeRobot datasets.
+- Raw captures can be registered, browsed and annotated through a lossless view; annotations, outcome labels and SAM3 masks carry over into conversions by source demo. Features that need a converted dataset show an explanatory note instead.
+- Human success/failure episode labels (click the sidebar dot), used by the Failures filter, RECAP export and annotated exports.
+- The dataset list shows each entry's format, version and origin.
+- Hash-free naming across the workspace (catalog names per dataset, timestamps per run) and `levi migrate` for older workspaces; legacy `/local/<hash>` links redirect.
+
 - English is now the default UI and repository landing language; the 602-key English/Chinese catalogs stay in parity, and the welcome page, CLI and documentation expose a professional bilingual path.
 - Hardened standalone-browser behavior: parent-frame messaging is best-effort, browser storage failures fall back to in-memory state, and Ctrl/Cmd+S, undo/redo and playback shortcuts remain inside the workbench.
 - Annotation label popups now open at the viewport center, stay within the viewport while dragging, and expose localized dialog names and drag affordances.

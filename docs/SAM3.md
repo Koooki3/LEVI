@@ -195,6 +195,15 @@ uv run levi serve
 └── staging/{plans,jobs,results}/
 ~~~
 
+`<dataset-name>` 是数据集在目录中的登记名；`<revision-id>`、plan 与 job id 都是时间戳
+（`YYYYmmdd-HHMMSS-fff`，并发创建时原子占用），不再使用哈希；旧的十六进制 id 仍可读取。
+原始采集在其浏览视图上标注，sidecar 同样以原始采集的登记名保存；转换时，恰好保留下来的帧上的
+掩码会作为新 revision（`model.provider = carry_over`）迁移到转换后的数据集。
+
+`<dataset-name>` is the catalog name; revision, plan and job ids are timestamps (legacy hex ids
+still read). Masks drawn on a raw capture's browsing view carry over to a conversion on exactly
+retained frames, as a new revision with `model.provider = carry_over`.
+
 每行 mask 记录包含 episode_index、frame_index、episode-local timestamp、camera_key、
 object_id、track_id、concept、bbox_xyxy、image_size、rle_size、rle_counts、score、
 visible、occluded、status、source 和 prompt。v3 共享视频 shard 会按

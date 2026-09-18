@@ -258,8 +258,6 @@
   "03 / Diagnose": "03 / 诊断",
   "04 / Refine": "04 / 精修",
   "05 / Share": "05 / 分享",
-  "Open a Hub dataset or register a local directory. Episodes synchronize camera playback and signal charts. Space toggles playback; arrow keys navigate episodes. Use Frames to compare first and last frames.": "打开 Hub 数据集或登记本地目录。「片段」同步播放相机视频与信号图表。空格切换播放，方向键切换片段。在「帧概览」比较首帧与末帧。",
-  "Select Annotations to edit task augmentation, subtask, plan, memory, speech and VQA. Drag on a video for a bounding box or click for a keypoint. Save episode persists edits; Save dataset creates a new annotated export.": "在「标注」编辑任务扩写、子任务、计划、记忆、语音和视觉问答。拖动视频创建边界框，单击创建关键点。「保存当前片段」持久保存编辑，「导出标注数据集」生成新的数据副本。",
   "Statistics describes metadata and episode lengths. Filtering ranks low movement, sudden motion and unusual lengths. Action Insights computes autocorrelation, temporal alignment, speed variance and cross-episode variance. Doctor runs version-aware checks.": "「统计」展示元数据与片段长度。「筛选」定位低运动、突变和长度异常。「动作洞察」计算自相关、时序对齐、速度差异与跨片段方差。「数据诊断」执行与版本匹配的检查。",
   "README.md and README.zh-CN.md contain installation, SSH access, deployment, API, troubleshooting and GitHub release instructions. LEVI preserves the upstream Apache-2.0 license and attribution.": "README.md 和 README.zh-CN.md 包含安装、SSH 访问、部署、API、故障排查及 GitHub 发布说明。LEVI 保留上游 Apache-2.0 许可证和来源声明。",
   "Mean |Δa|": "平均 |Δa|",
@@ -362,7 +360,6 @@
   "JSON options: camera mapping, task mapping, excluded demo paths, orientation, action mode and quality thresholds.": "JSON 参数支持相机映射、任务文本映射、排除采集路径、旋转表示、动作语义与质量阈值。",
   "interrupted": "已中断",
   "Convert with the built-in pipeline. Review, diagnose and export.": "使用内置流程转换数据，完成审核、诊断与导出。",
-  "Flag suspicious episodes and export a review manifest. In the conversion workbench, preview a built-in conversion command, run it, inspect its exit status and logs, then use its new output as the next input.": "标记可疑片段并导出审核清单。在转换工作台预览并执行 内置转换命令，检查退出状态和日志，再把新产物用于下一步。",
   "Full dataset": "全数据集",
   "Episode range": "片段区间",
   "By task": "按任务",
@@ -752,5 +749,8 @@
   "These checks run on the generated view (every frame kept, retimed losslessly). For the capture itself — CSV schema, frame alignment, camera stalls, completion markers — use Inspect input in the Workbench.": "以下检查针对自动生成的浏览视图（保留全部帧、无损重定时）。原始采集本身的检查——CSV 结构、帧对齐、相机断流、结束标记——请在工作台使用“检查输入”。",
   "Every captured frame is shown through a lossless browsing view. Viewing, statistics, annotation, SAM3 objects and outcome labels work here and carry over when you convert; exporting requires converting first.": "所有采集帧都通过无损浏览视图展示。查看、统计、标注、SAM3 目标和结局标签均可在此使用，并会在转换时迁移；导出需要先转换。",
   "Convert in the Workbench": "去工作台转换",
-  "Raw capture shown through a lossless browsing view — every captured frame. Annotations and outcome labels made here carry over when you convert.": "原始采集以无损浏览视图展示（保留全部采集帧）。在此完成的标注与结局标签会在转换时自动迁移。"
+  "Raw capture shown through a lossless browsing view — every captured frame. Annotations and outcome labels made here carry over when you convert.": "原始采集以无损浏览视图展示（保留全部采集帧）。在此完成的标注与结局标签会在转换时自动迁移。",
+  "Open a Hub dataset, or register a local LeRobot dataset or a raw capture folder (task/demo_NNNN) — a raw capture is shown through a lossless browsing view with every frame. Episodes synchronize camera playback and signal charts. Space toggles playback; arrow keys navigate episodes. Use Frames to compare first and last frames.": "打开 Hub 数据集，或登记本地 LeRobot 数据集、原始采集文件夹（task/demo_NNNN）——原始采集会以保留全部帧的无损浏览视图展示。片段页同步播放多路相机和信号曲线；空格键播放/暂停，方向键切换片段；在帧概览中对比首帧与末帧。",
+  "Select Annotations to edit task augmentation, subtask, plan, memory, speech and VQA. Drag on a video for a bounding box or click for a keypoint. Click the dot beside an episode to label it success or failure. Save episode persists edits; Save dataset creates a new annotated export. Annotations made on a raw capture carry over when it is converted.": "在「标注」中编辑任务扩写、子任务、计划、记忆、语音和视觉问答。在视频上拖动绘制边界框，单击添加关键点。点击片段旁的圆点可标注成功或失败。保存当前片段会持久化编辑；导出标注数据集会生成新的标注副本。在原始采集上完成的标注会在转换时自动迁移。",
+  "Flag suspicious episodes and export a review manifest. In the conversion workbench, inspect an input to see which requirements it meets and which exports it supports — LeRobot v2.1 or a RECAP value dataset — then choose options, review the plan and follow the run's live progress.": "标记可疑片段并导出审核清单。在转换工作台中先检查输入，查看各项要求的满足情况和支持的导出格式（LeRobot v2.1 或 RECAP 价值数据集），再选择参数、审阅计划，并跟踪运行的实时进度。"
 }

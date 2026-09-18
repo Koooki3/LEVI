@@ -4,9 +4,9 @@
 
 [![Checks](https://github.com/Koooki3/LEVI/actions/workflows/test.yml/badge.svg)](https://github.com/Koooki3/LEVI/actions/workflows/test.yml) [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) [![Version](https://img.shields.io/badge/LEVI-0.3.0-9bd654.svg)](CHANGELOG.md)
 
-[English](README.md) · [转换教程](docs/CONVERSION.md) · [功能对照](docs/FEATURES.md) · [API](docs/API.md) · [审查与验证](docs/VALIDATION.md) · [许可](docs/UPSTREAM.md) · [第三方清单](THIRD_PARTY_NOTICES.md) · [SAM3 对象标注](docs/SAM3.md)
+[English](README.md) · [转换教程](docs/CONVERSION.md) · [RECAP 导出](docs/RECAP.md) · [工作区结构](.state.md) · [功能对照](docs/FEATURES.md) · [API](docs/API.md) · [审查与验证](docs/VALIDATION.md) · [许可](docs/UPSTREAM.md) · [第三方清单](THIRD_PARTY_NOTICES.md) · [SAM3 对象标注](docs/SAM3.md)
 
-LEVI 是用于浏览、标注、转换和审核机器人数据的独立工作台。基于 [LeRobot Dataset Visualizer](https://github.com/huggingface/lerobot-dataset-visualizer)，保留多相机与信号同步、视觉问答、动作分析和三维回放，默认英文，可在界面中切换中文；并提供**完全内置的采集数据转换流程**。无需另行下载转换项目或安装训练环境。
+LEVI 是用于浏览、标注、转换和审核机器人数据的独立工作台。基于 [LeRobot Dataset Visualizer](https://github.com/huggingface/lerobot-dataset-visualizer)，保留多相机与信号同步、视觉问答、动作分析和三维回放，默认英文，可在界面中切换中文；并提供**完全内置的采集数据转换流程**。无需另行下载转换项目或安装训练环境：先检查输入、列出各项要求的满足情况与支持的导出格式，再导出为 LeRobot v2.1 或 RECAP（π\*0.6）价值数据集。原始机器人采集在转换前即可浏览和标注，标注会随转换自动迁移。
 
 界面同时适配独立浏览器和 Hugging Face Space 嵌入环境。标注工作台支持 Ctrl/Cmd+S 保存、Ctrl/Cmd+Z 撤销及播放快捷键；外部浏览器打开时不会触发浏览器原生的“保存网页”对话框。
 
@@ -44,6 +44,8 @@ uv run levi serve --port 7870 --backend-port 7871
 uv run levi convert --help              # 不启动网页也能使用转换器
 uv run levi clean                      # 预览可清理缓存
 uv run levi clean --apply               # 删除预览列表内的可再生成缓存
+uv run levi migrate                     # 预演：把旧工作区升级到新命名/布局
+uv run levi migrate --apply             # 执行迁移（需先停止服务）
 ```
 
 从远程服务器访问时，在自己的电脑运行 `ssh -L 7860:127.0.0.1:7860 USER@SERVER`，然后访问本机上述地址。默认前端绑定本机 **7860（网页入口）**，后端绑定本机 **7861（内部 API）**；前端通过同源代理访问后端。不要把本机 7860 转发到服务器 7861。误开后端根路径会显示入口说明及网页链接；`uv run levi backend` 只启动 API。启动器会检查端口冲突，并等待前后端均就绪后才输出网页入口。
@@ -91,14 +93,15 @@ uv run levi serve
 | --- | --- |
 | 源码与锁文件 | 克隆的仓库 |
 | Python / Bun /前端依赖 | 仓库内 `.venv/`、`.runtime/`、`node_modules/` |
-| 本地登记、标注、审核、任务与报告 | 工作目录内 `outputs/LEVI/workbench/` |
-| 转换产物 | 工作目录内 `datasets/levi_<时间>_<ID>/` |
-| 标注导出 | 工作目录内 `outputs/LEVI/exports/` |
+| 本地登记、标注、结局标签、审核、任务与报告 | 工作目录内 `outputs/LEVI/workbench/` |
+| 原始采集的浏览视图 | 工作目录内 `outputs/LEVI/workbench/views/<名称>/` |
+| 转换产物（默认） | 工作目录内 `<源名>_<lerobot\|recap>_<时间戳>/`，该目录本身就是数据集 |
+| 标注导出 | 工作目录内 `outputs/LEVI/exports/<名称>_annotated/` |
 | 下载与运行缓存 | 工作目录内 `.cache/`、`tmp/` |
 
 把采集数据放在工作目录内，例如 `$LEVI_WORKSPACE/captures/session-a/`，或将工作目录设置为已有数据的共同父目录。本地登记和转换都会检查真实路径边界。转换输入不接受符号链接，防止快照随外部文件变化。已有目录不会被转换器覆盖，输入数据不会被修改。
 
-已有 LEVI 安装迁移时，在 `.env` 中明确设置原有数据工作目录，即可继续访问原登记、标注与产物。旧版外部转换计划不能执行，需重新创建内置计划；旧数据不会自动移动。
+所有名称都不带哈希后缀：每个数据集一份的产物（标注、审核、诊断、导出）以数据集的登记名命名，每次运行一份的产物（任务、转换输出、SAM3 修订）以时间戳命名。从旧版 LEVI 升级时，在 `.env` 中设置原工作目录、停止服务后运行 `uv run levi migrate` 预演，再加 `--apply` 执行；旧的 `/local/<哈希>` 链接会自动跳转。详见 [工作区结构](.state.md)。
 
 ## 浏览、标注与审核
 
@@ -112,7 +115,8 @@ uv run levi serve
 | 动作洞察 | 自相关、动作块长度、状态动作时序对齐、示范速度与跨片段方差；分析范围可选全数据集、片段区间或单个任务，采样上限可设为「全部」做全量审查 |
 | 三维回放 | 上游支持的机器人模型、关节映射、末端轨迹 |
 | 数据诊断 | 版本感知的检查、视频抽样解码、报告/JSON、外部原始 Doctor 入口 |
-| 转换与审核 | 内置全流程、独立阶段、参数、计划预览、日志/退出码、自动登记产物 |
+| 转换与审核 | 输入检查与要求清单、各导出格式的兼容性（原因与一键解决）、LeRobot v2.1 / RECAP 导出、单遍并行转换与无损重定时、实时进度、自动登记；数据集列表显示格式、版本与来源 |
+| 原始采集 | 登记后生成无损浏览视图，可查看、统计、标注、SAM3、结局标签；导出需先转换，标注随转换迁移 |
 
 浏览器支持视频型 LeRobot v2.0/v2.1/v3.0/v3.1。沿用上游对图片直接嵌入 Parquet 的限制；可先转换为视频数据集。原始任务内容、特征标识和关节名称保留原文。
 
@@ -127,27 +131,38 @@ uv run levi serve
 
 视频按需联网读取，不打包进 Git。评估集包含 10 片段、32,033 帧、30 FPS、front/top/hand 三路相机。
 
-## 内置转换：采集 → 过滤 → LeRobot → 验证
+## 内置转换：检查 → 选择导出 → 运行
 
-「转换与审核」选择输入采集目录和「完整流程」，先预览计划，再执行。流程会准备独立副本、按需处理图像/FPS、质量预检、过滤静止帧、转换为 **LeRobot v2.1**、完整解码验证并登记。高级参数支持相机映射、任务文本映射、排除采集路径、旋转表示、动作语义及质量阈值。
+在「转换与审核」中输入原始采集目录（`task/demo_NNNN`，含位姿/夹爪 CSV 及每路相机的视频或图像文件夹）或 LeRobot v2.x 数据集，点击「检查输入」。LEVI 自动识别格式（遥操作或策略 rollout 采集、图像序列、LeRobot），逐项列出要求及其状态——需要完整解码才能判断的项目标为「转换时检查」，不会显示为已通过——并评估每种导出：
+
+| 导出 | 用途 | 默认帧时间处理 |
+| --- | --- | --- |
+| LeRobot v2.1 | 模仿学习、openpi、LEVI 查看器 | `resample`：重采样到目标 FPS（自动降到实测帧率），过滤静止帧 |
+| RECAP 价值数据集（π\*0.6） | 训练 RECAP 价值函数；兼容 RLinf 的 `meta/returns.parquet`、`is_success`、逐步奖励 | `retime`：保留每个采集帧，视频无损流拷贝 |
+
+某种导出不可用时（例如遥操作数据缺少成功/失败标签而无法导出 RECAP），卡片会说明原因并给出解决办法：在 LEVI 中标注结局、排除相关片段，或作为示教数据导出。选择导出、调整参数、审阅计划后运行；任务会显示阶段、进度、当前片段和剩余时间。结果先写入隐藏的暂存目录，只有全部片段通过预检且数据集校验通过才会发布。
 
 ```bash
-uv run levi convert pipeline \
-  --source captures/session-a \
-  --output datasets/session-a-reviewed \
-  --fps 10 --source-fps 30
+uv run levi convert inspect  --source captures/session-a --output unused
+uv run levi convert pipeline --source captures/session-a --output session-a-lerobot
+uv run levi convert pipeline --source captures/session-a --output session-a-recap \
+  --options configs/recap.json   # {"target": "recap_value"}
 ```
 
-这里输入/输出相对 `LEVI_WORKSPACE`；输出必须不存在。CSV、视频与图像必须有明确一一对应关系，不能通过设置 FPS 修复已经错位的数据。源帧 ID 和采集时间保存在转换来源清单中。
+这里输入/输出相对 `LEVI_WORKSPACE`；输出必须不存在。每路相机只处理一遍：源视频解码一次，同时完成预检扫描和唯一一次 H.264 编码；`retime` 模式下视频只做重封装，时间戳精确为 `i / fps`，像素逐位一致。转换在多个工作进程中并行执行。CSV、视频与图像必须有明确一一对应关系，不能通过设置 FPS 修复已经错位的数据。RECAP 的格式依据（论文、RLinf、LeRobot 提案）及使用方法见 [RECAP.md](docs/RECAP.md)。
+
+### 原始采集：浏览、标注、转换
+
+在「本地数据集」中像登记普通数据集一样登记原始采集目录。LEVI 在后台构建浏览视图（只做视频重封装，数秒完成），之后即可在查看器中逐帧浏览。查看、统计、筛选、帧概览、动作洞察、语言/事件标注、SAM3、结局标签和审核标记均可使用；数据诊断针对浏览视图；导出会提示先转换。转换时，标注、结局标签和 SAM3 掩码会迁移到新数据集的对应帧（报告见 `meta/levi_annotation_carryover.json`）。
 
 详细输入格式、所有阶段、参数 JSON、数学语义、质量门槛与退出码见 [转换教程](docs/CONVERSION.md)。数值状态采用绝对位置（米）和旋转（默认连续 Euler 弧度，可选四元数）；默认 `action[t] = state[t+1]`，最后一帧复用末态。夹爪为命令开合值，**不是测得的夹爪宽度**。这些语义必须与训练策略一致。
 
-网页「数据诊断」使用抽样视频检查；内置转换的 `validate` 阶段逐视频完整解码并验证结构与对齐。两者均是明确范围的数据检查，不等同于某个训练框架的加载或训练成功保证。
+网页「数据诊断」使用抽样视频检查；内置转换会核对每个视频的帧数、帧率、分辨率与 parquet 及元数据是否一致。两者均是明确范围的数据检查，不等同于某个训练框架的加载或训练成功保证。
 
 ## 保存与导出
 
 - 「保存当前片段」写入工作目录的独立标注文件，不改动源数据集。离线时浏览器会话暂存需要恢复服务后再保存。
-- 「导出标注数据集」先保存当前编辑，再创建新目录，将语言列写入 Parquet 并携带元数据/视频；不隐式升级数据格式。
+- 「导出标注数据集」先保存当前编辑，再创建新目录，将语言列写入 Parquet 并携带元数据/视频；不隐式升级数据格式。人工结局标签以 `levi_outcome` 写入 `meta/episodes.jsonl`。原始采集的浏览视图不能导出，请先转换。
 - 标注导出的视频默认硬链接，不可用时复制；API 的 `copy_videos=true` 可强制复制。内置转换的快照和输出均使用独立文件。
 - 片段标记按数据集隔离；审核 JSON 包含数据集 ID、排除片段 ID 和备注。`meta/levi_provenance.jsonl` 提供内置转换产生的片段到原采集路径的映射，供人工核对后填入 `exclude_demos`。标记不会删除输入数据。
 - Hub 上传保留在 API，需要显式目标仓库与令牌。普通保存/转换不会上传，详见 [API](docs/API.md)。
@@ -192,6 +207,6 @@ uv run python scripts/verify_conversion.py
 - **看到 `{"detail":"Not Found"}` 或 API 说明页**：说明请求可能进入了 7861；打开 7860，并核对 SSH / 编辑器端口转发目标是否为服务器 7860。不要将终端中 Uvicorn 的监听地址当作网页入口。
 - **无法访问网页**：核对终端日志、端口和 SSH 转发；浏览器的 localhost 指自己的电脑。
 - **Hub 视频加载失败**：检查网络、仓库 ID、访问权限与编码支持；首次获取大视频和模型需要时间。
-- **本地路径被拒绝**：登记根目录必须包含 `meta/info.json`，真实路径必须处于 `LEVI_WORKSPACE` 内。
-- **转换失败**：阅读结构化报告和日志；重复/缺失帧 ID、未知夹爪命令、视频计数不符会阻止转换。使用任务映射和明确的排除路径修正输入范围。
-- **服务重启后任务中断**：任务标记为 interrupted，部分产物保留供检查。新计划使用新目录，不自动续写失败产物。
+- **本地路径被拒绝**：登记目录必须是 LEVI 数据集（含 `meta/info.json`）或可识别的原始采集（`task/demo_NNNN`），真实路径必须处于 `LEVI_WORKSPACE` 内。
+- **转换失败**：先看「检查输入」的要求清单和任务日志；重复/缺失帧 ID、未知夹爪命令、视频计数不符会在发布任何结果之前阻止转换，源数据不会被修改。可使用任务映射和明确的排除路径修正输入范围。
+- **服务重启后任务中断**：任务标记为 interrupted，不自动续写；重新规划会使用新目录。

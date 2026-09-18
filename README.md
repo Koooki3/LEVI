@@ -4,9 +4,9 @@
 
 [![Checks](https://github.com/Koooki3/LEVI/actions/workflows/test.yml/badge.svg)](https://github.com/Koooki3/LEVI/actions/workflows/test.yml) [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) [![Version](https://img.shields.io/badge/LEVI-0.3.0-9bd654.svg)](CHANGELOG.md)
 
-[简体中文](README.zh-CN.md) · [Conversion guide](docs/CONVERSION.md) · [Features](docs/FEATURES.md) · [API](docs/API.md) · [Validation](docs/VALIDATION.md) · [Attribution](docs/UPSTREAM.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [SAM3 object annotation](docs/SAM3.md)
+[简体中文](README.zh-CN.md) · [Conversion guide](docs/CONVERSION.md) · [RECAP export](docs/RECAP.md) · [Workspace layout](.state.md) · [Features](docs/FEATURES.md) · [API](docs/API.md) · [Validation](docs/VALIDATION.md) · [Attribution](docs/UPSTREAM.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [SAM3 object annotation](docs/SAM3.md)
 
-LEVI is an independent robotics dataset browser, annotation editor, converter and review workbench derived from [LeRobot Dataset Visualizer](https://github.com/huggingface/lerobot-dataset-visualizer). English is the default; Chinese is available through the language switch. **The complete capture conversion pipeline is bundled** and requires no sibling repository or training environment.
+LEVI is an independent robotics dataset browser, annotation editor, converter and review workbench derived from [LeRobot Dataset Visualizer](https://github.com/huggingface/lerobot-dataset-visualizer). English is the default; Chinese is available through the language switch. **The complete capture conversion pipeline is bundled** and requires no sibling repository or training environment: it inspects an input, reports which requirements it meets and which exports it supports, and writes LeRobot v2.1 or a RECAP (π\*0.6) value dataset. Raw robot captures can be browsed and annotated before conversion; their annotations carry over into the converted dataset.
 
 The interface is designed for both standalone browsers and Hugging Face Space embeds. Language preference is kept per browser when storage is available, and the annotation workbench handles Ctrl/Cmd+S, Ctrl/Cmd+Z and playback keys without opening the browser's native Save Page dialog.
 
@@ -41,6 +41,8 @@ uv run levi serve --port 7870 --backend-port 7871
 uv run levi convert --help
 uv run levi clean             # preview regenerable caches
 uv run levi clean --apply     # remove the listed caches
+uv run levi migrate           # preview upgrading an older workspace's names/layout
+uv run levi migrate --apply   # apply it (service stopped)
 ```
 
 For a remote server, keep `ssh -L 7860:127.0.0.1:7860 USER@SERVER` running on your computer. The frontend defaults to loopback port **7860 (Web UI)** and proxies requests to **7861 (internal API)**. Forward local 7860 to server 7860, not server 7861. If you see `{"detail":"Not Found"}` or the API landing page, check the destination port. The API root now explains the distinction and links to the configured Web UI. `uv run levi backend` starts only the API. The launcher checks port conflicts and announces Ready only after both services respond.
@@ -88,12 +90,15 @@ After Ready appears, open http://127.0.0.1:7860. On any dataset annotation page,
 | --- | --- |
 | Code, lockfiles | Git checkout |
 | Python, Bun, frontend dependencies | Checkout `.venv/`, `.runtime/`, `node_modules/` |
-| Catalog, annotations, reviews, jobs, reports | Workspace `outputs/LEVI/workbench/` |
-| Converted datasets | Workspace `datasets/levi_<timestamp>_<id>/` |
-| Annotation exports | Workspace `outputs/LEVI/exports/` |
+| Catalog, annotations, outcome labels, reviews, jobs, reports | Workspace `outputs/LEVI/workbench/` |
+| Browsing views of raw captures | Workspace `outputs/LEVI/workbench/views/<name>/` |
+| Converted datasets (default) | Workspace `<source>_<lerobot\|recap>_<timestamp>/` — the directory is the dataset |
+| Annotation exports | Workspace `outputs/LEVI/exports/<name>_annotated/` |
 | Downloads/runtime caches | Workspace `.cache/` and `tmp/` |
 
-Place captures under the workspace, or point the workspace to their common parent. Local registration and conversion enforce the resolved path boundary. Conversion rejects symlink inputs and existing output directories. Migration from older LEVI installations requires explicitly setting the previous data workspace in `.env`; data is not moved. Recreate old external conversion plans.
+Place captures under the workspace, or point the workspace to their common parent. Local registration and conversion enforce the resolved path boundary. Conversion rejects symlink inputs and existing output directories.
+
+Names never carry hash suffixes: per-dataset artifacts (annotations, reviews, diagnostics, exports) use the dataset's catalog name, per-run artifacts (jobs, conversion outputs, SAM3 revisions) a timestamp. To upgrade a workspace from an older LEVI, set it in `.env`, stop the service and run `uv run levi migrate` (dry run) then `--apply`; old `/local/<hash>` links keep working. See the [workspace reference](.state.md).
 
 ## Features
 
@@ -104,7 +109,9 @@ Place captures under the workspace, or point the workspace to their common paren
 - Action autocorrelation/chunk suggestions, state-action alignment, demonstrator speed and cross-episode variance, scoped to the full dataset, an episode range or a single task, with an optional full-coverage (unsampled) pass.
 - Upstream-supported 3D robot playback, joint mapping and end-effector trails.
 - Native Doctor with optional sampled video checks and JSON reports; external original Doctor link.
-- Built-in conversion stages and full pipeline, editable options, immutable plans, job logs/exit codes, structured results and automatic dataset registration.
+- Built-in conversion: input inspection with a per-requirement checklist, per-target compatibility with reasons and one-click fixes, LeRobot v2.1 and RECAP value exports, single-pass parallel conversion with lossless retime, live progress, immutable plans and automatic registration.
+- Raw captures register as datasets: a lossless browsing view makes viewing, statistics, annotation, SAM3 and outcome labels available before conversion; annotations carry over by source demo.
+- Per-episode success/failure labels (click the sidebar dot); the dataset list describes each entry's format, version and origin (raw capture, LEVI conversion, RECAP, annotated export, external).
 
 Video-based LeRobot v2.0/v2.1/v3.0/v3.1 can be browsed. Embedded-image Parquet playback retains the upstream limitation. Original dataset text and feature/joint identifiers remain unchanged.
 
@@ -121,24 +128,35 @@ The evaluation collection has 10 episodes, 32,033 frames, 30 FPS and three 640×
 
 ## Built-in conversion
 
-Select a capture directory and Full pipeline in Conversion & review, preview the plan, then run it. The pipeline prepares an independent copy, handles images/FPS as needed, checks quality, filters static frames, writes **LeRobot v2.1**, fully decodes output videos for validation, then registers the dataset.
+In **Conversion & review**: enter a raw capture folder (`task/demo_NNNN` with pose/gripper CSVs and one video or image folder per camera) or a LeRobot v2.x dataset and click **Inspect input**. LEVI detects the format (teleoperation or policy-rollout capture, image sequence, LeRobot), lists every requirement with its status — decode-only checks are marked "checked while converting", never shown as passed — and rates each export:
+
+| Export | For | Default timing |
+| --- | --- | --- |
+| LeRobot v2.1 | imitation learning, openpi, the LEVI viewer | `resample` to the target FPS (lowered to the measured rate), static frames filtered |
+| RECAP value dataset (π\*0.6) | training a RECAP value function; RLinf-compatible `meta/returns.parquet`, `is_success`, per-step rewards | `retime`: every captured frame kept, videos stream-copied losslessly |
+
+An export can be unsupported (for example RECAP on teleoperation data without success/failure labels); the card says why and offers fixes — label outcomes in LEVI, exclude the affected episodes, or export as demonstrations. Choose an export, adjust options, review the plan and run it; the job shows stages, progress, current episode and time remaining. Output is written to a hidden staging directory and published only if every episode passed the preflight and the dataset validated.
 
 ```bash
-uv run levi convert pipeline \
-  --source captures/session-a \
-  --output datasets/session-a-reviewed \
-  --fps 10 --source-fps 30
+uv run levi convert inspect  --source captures/session-a --output unused
+uv run levi convert pipeline --source captures/session-a --output session-a-lerobot
+uv run levi convert pipeline --source captures/session-a --output session-a-recap \
+  --options configs/recap.json   # {"target": "recap_value"}
 ```
 
-Paths are relative to `LEVI_WORKSPACE` or absolute within it. Advanced JSON config includes camera/task maps, excluded capture paths, rotation representation, action mode and quality thresholds. See the bilingual [conversion guide](docs/CONVERSION.md) for schemas, all stages, formulas, source provenance and exit codes.
+Paths are relative to `LEVI_WORKSPACE` or absolute within it. One pass per camera: the source is decoded once while the preflight scans it and the single H.264 encode runs; in `retime` mode videos are remuxed with exact `i / fps` timestamps and bit-identical pixels. Work runs in parallel worker processes. See the [conversion guide](docs/CONVERSION.md) for schemas, the formats table, options, timing modes and provenance, and [RECAP.md](docs/RECAP.md) for the RECAP format, its references (paper, RLinf, LeRobot proposal) and how to consume it.
 
 Default state is absolute XYZ in metres, continuous Euler rotation in radians and binary gripper command (open=1, close=0). Quaternion rotation is optional. Default action is the next state, with the final state repeated. Gripper command is not measured aperture; these semantics must match your policy.
 
-The viewer's Doctor samples video frames. The pipeline's `validate` stage fully decodes local videos and checks schema/alignment. Neither promises compatibility with every training framework.
+The viewer's Doctor samples video frames. Conversion validation checks every video's frame count, rate and resolution against the parquet and metadata. Neither promises compatibility with every training framework.
+
+### Raw captures: browse, annotate, convert
+
+Register a raw capture folder under **Local datasets** like any dataset. LEVI builds a browsing view in the background (seconds: videos are only remuxed) and the capture opens in the viewer with every frame. Viewing, statistics, filtering, frame gallery, Action Insights, language/event annotation, SAM3 objects, outcome labels and review flags work; Doctor checks the view; exporting asks you to convert first. When the capture is converted, its annotations, outcome labels and SAM3 masks move to the matching frames of the new dataset (report in `meta/levi_annotation_carryover.json`).
 
 ## Save, export and review
 
-Saving an episode writes a workspace annotation sidecar without changing source files. Offline edits remain in browser session storage until the backend is restored and saved. Dataset export saves current edits first, then writes language columns into a new dataset, preserving its container version.
+Saving an episode writes a workspace annotation sidecar without changing source files. Offline edits remain in browser session storage until the backend is restored and saved. Dataset export saves current edits first, then writes language columns into a new dataset, preserving its container version; human outcome labels are written as `levi_outcome` in `meta/episodes.jsonl`. A raw capture's browsing view cannot be exported — convert it instead.
 
 Annotation export uses video hardlinks where possible; use API `copy_videos=true` for independent copies. Built-in conversion outputs use independent files. Review manifests contain dataset IDs, excluded episode IDs and notes; converted `meta/levi_provenance.jsonl` maps episodes to capture paths. Review that mapping before configuring `exclude_demos`. Flags never delete source data.
 
@@ -179,4 +197,4 @@ Repository: [Koooki3/LEVI](https://github.com/Koooki3/LEVI). Report reproducible
 
 Preserve Apache-2.0 `LICENSE`, `NOTICE` and [attribution](docs/UPSTREAM.md). CI runs type/format checks, frontend tests, built-in conversion tests and a production build. See the [validation record](docs/VALIDATION.md) for tested scope and limitations.
 
-If a conversion fails, inspect its structured report and logs. Duplicate/missing frame IDs, unknown gripper commands or video count mismatches stop processing. Interrupted jobs are marked on restart, and partial outputs remain available for review; a retry uses a new directory.
+If a conversion fails, inspect its structured report and logs. Duplicate/missing frame IDs, unknown gripper commands or video count mismatches stop processing before anything is published; the source is never modified. Interrupted jobs are marked on restart; a retry uses a new directory.

@@ -19,6 +19,11 @@ The former external capture-script adapter has been replaced by the self-contain
 | Task processes could survive service shutdown | Dedicated process groups, timeout termination and restart interruption status | Worker integration; lifecycle source review |
 | Private parent markers and workspace variables selected output paths | `LEVI_WORKSPACE` or checkout `.state` only | Relocated-checkout verification |
 | Cleanup risked deleting data or shared environments | Explicit cache allowlist, ancestor symlink checks, service-running guard; registered datasets, dependencies and data preserved | Cleanup boundary test |
+| The pipeline decoded each camera 9 times and encoded it 3 times, serially (32 min for 171 real demos) | Single pass: parent plans from CSVs once; spawn worker pool; one decode feeds preflight and the only encode; validation reuses measured decodes; `retime` remuxes losslessly | Equivalence test against the stage chain; remux pixel/timestamp test; real-video remux 0.11 s, bit-identical |
+| `-itsscale` retiming drifts (timestamps rescaled in the input time base, truncated) | Stream-copy into a time base where both frame durations are whole ticks, then rescale; verify packet timestamps; re-encode if not CFR; validation measures FPS from packet timestamps | Short-video and real-video checks: interval exactly `1/fps` |
+| Every conversion was registered as `dataset` (nested `<run>/dataset`), so sidecars of different conversions collided | Output directory is the dataset; catalog names unique; per-dataset artifacts keyed by catalog name, per-run by timestamp, never a hash; `levi migrate` upgrades old state | Naming, concurrent-reservation and migration tests; applied to the real workspace |
+| Inspection counted "No stop_demo/episode_end event" as a codec warning (substring match) | Findings tracked by requirement id, never parsed from messages | Regression test |
+| A rebuilt raw-capture view left the annotation backend serving a stale episode table | Cached dataset state invalidated when `meta/info.json` changes (inode + mtime + size) | Rebuild test reloads 3 episodes after 2 |
 
 ## Workflow coverage
 
@@ -29,9 +34,10 @@ Hardware collector/ROS utilities are not needed to process the documented captur
 ## Performance and tradeoffs
 
 - Pose math and statistics use NumPy arrays. Filtering performs one sequential pass and retains accumulated displacement.
-- Video processing stores a single frame at a time and pipes selected frames to FFmpeg. Encoding is limited to two threads; web workers are limited to two simultaneous jobs.
-- Quality preflight and final verification intentionally decode video again. They cost CPU/I/O but detect count mismatches and broken output. H.264 outputs are not byte-identical to source footage.
-- Intermediates are independent snapshots; storage is higher than symlink staging. They remain reviewable outputs and are not removed by cache cleanup.
+- Each camera of each episode is one worker task: one source decode (preflight scan + selected frames streamed to FFmpeg, one frame in memory at a time) and one output decode for statistics; `retime` needs no encode at all. Default workers `min(4, cpus/4)`; each encoder uses two threads; at most two conversion jobs run at once.
+- Validation reuses the conversion's own decodes; it still checks every video's frame count, rate and resolution.
+- Browsing views of raw captures decode nothing (remux only), so they carry no pixel statistics.
+- Intermediate audit copies are opt-in (`keep_intermediates`) and go to `jobs/<timestamp>/intermediate/`.
 - Fingerprints detect ordinary recording edits; they are not tamper-proof content hashes. Use stopped, stable captures.
 - Euler unwrap handles branch crossings, not gimbal lock. Quaternion mode is available and changes the policy feature width.
 - Raw conversion and metadata repair write v2.1; browsing accepts v2/v3. Native validation is scoped, not certification by a training loader.
