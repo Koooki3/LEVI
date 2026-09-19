@@ -5,6 +5,7 @@ import re
 import shutil
 from contextlib import asynccontextmanager
 from html import escape
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
@@ -23,6 +24,8 @@ from .catalog import (
     local_root,
     read,
     register,
+    remove_entry,
+    resolve_name,
     review_path,
 )
 from .conversion import registry
@@ -30,6 +33,8 @@ from .conversion.options import Options
 from .describe import describe
 from .diagnostics import CHECKS, diagnose
 from .paths import CACHE, PROJECT, ROOT, STATE, configure, inside
+from .revision import dataset_revision
+from .sync import SYNC
 
 configure()
 from backend.app import app as annotation_app
@@ -40,9 +45,11 @@ async def lifespan(app):
     jobs.recover_interrupted()
     marker = STATE / "server.pid"
     marker.write_text(str(os.getpid()))
+    SYNC.start()
     try:
         yield
     finally:
+        SYNC.stop()
         jobs.stop_workers()
         if marker.exists() and marker.read_text() == str(os.getpid()):
             marker.unlink()
@@ -151,7 +158,8 @@ def catalog():
     return {
         "demos": DEMOS,
         # Each entry with what it is and what LEVI can do with it.
-        "local": [{**item, "format": describe(item)} for item in datasets().values()],
+        "local": [_entry(item) for item in datasets().values()],
+        "sync": {"enabled": SYNC.interval > 0, "last_scan": SYNC.last_scan},
         # Legacy hash ids → current names, so the UI can carry over state
         # (e.g. flagged episodes) stored under an old id.
         "aliases": aliases(),
@@ -176,6 +184,47 @@ def add_dataset(payload: Register):
     return request(root)
 
 
+def _entry(item: dict) -> dict:
+    """A catalog entry as the UI sees it: what it is, and its live revision
+    (read from disk now, so it is current even between sync scans)."""
+    root = item.get("view") if item.get("kind") == "raw" else item.get("path")
+    live = dataset_revision(Path(root)) if root and Path(root).exists() else None
+    return {**item, "format": describe(item), "revision": live}
+
+
+@app.get("/api/levi/catalog/{name}")
+def catalog_entry(name: str):
+    """One dataset; polled by an open viewer to notice changes on disk."""
+    try:
+        resolved = resolve_name("local/" + name)
+    except ValueError:
+        resolved = None
+    item = datasets().get(resolved) if resolved else None
+    if item is None:
+        raise HTTPException(404, "Dataset is not registered (it may have been removed)")
+    return _entry(item)
+
+
+@app.delete("/api/levi/catalog/{name}")
+def remove_dataset(name: str):
+    """Unregister a dataset. Files on disk, annotations and reviews stay."""
+    removed = remove_entry(name)
+    if removed is None:
+        raise HTTPException(404, "Dataset is not registered")
+    return {"removed": name}
+
+
+@app.get("/api/levi/sync")
+def sync_status():
+    return SYNC.status()
+
+
+@app.post("/api/levi/sync")
+def sync_now():
+    """Scan the workspace now instead of waiting for the next interval."""
+    return {"changes": SYNC.scan(), **SYNC.status()}
+
+
 @app.api_route("/api/levi/files/{slug}/{path:path}", methods=["GET", "HEAD"])
 def dataset_file(slug: str, path: str):
     root = local_root("local/" + slug)
@@ -194,8 +243,10 @@ def dataset_file(slug: str, path: str):
         raise HTTPException(403, "Not a dataset asset")
     if not full.is_file():
         raise HTTPException(404, "Asset not found")
-    # Starlette FileResponse implements HEAD and byte Range requests.
-    return FileResponse(full)
+    # Starlette FileResponse implements HEAD and byte Range requests. Files
+    # can change while LEVI runs (levi/sync.py): browsers must revalidate
+    # (cheap, via ETag/Last-Modified) instead of reusing a stale copy.
+    return FileResponse(full, headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/levi/review")

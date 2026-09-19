@@ -19,6 +19,7 @@ import { TimeProvider, useTime } from "@/context/time-context";
 import { FlaggedEpisodesProvider } from "@/context/flagged-episodes-context";
 import { DatasetSourceProvider } from "@/context/dataset-source-context";
 import { RawCaptureNotice } from "@/components/raw-capture-notice";
+import { DatasetUpdateNotice } from "@/components/dataset-update-notice";
 import {
   AnnotationsProvider,
   useAnnotations,
@@ -292,6 +293,7 @@ export default function EpisodeViewer({
               <AnnotationsProvider>
                 <EpisodeBootstrap data={data!} />
                 <EpisodeViewerInner data={data!} org={org} dataset={dataset} />
+                <DatasetUpdateNotice />
               </AnnotationsProvider>
             </FlaggedEpisodesProvider>
           </DatasetSourceProvider>

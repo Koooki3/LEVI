@@ -23,7 +23,8 @@ def _read(path: Path) -> dict:
 def describe(entry: dict) -> dict[str, Any]:
     raw = entry.get("kind") == "raw"
     root = Path(entry.get("view") or entry["path"]) if raw else Path(entry["path"])
-    info = entry.get("info") or _read(root / "meta/info.json")
+    # Read now: the dataset may have changed since it was registered.
+    info = _read(root / "meta/info.json") or entry.get("info") or {}
     result: dict[str, Any] = {
         "kind": "raw" if raw else "lerobot",
         "version": info.get("codebase_version"),

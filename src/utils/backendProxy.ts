@@ -27,6 +27,7 @@ export async function backendProxy(
     "content-type",
     "range",
     "if-none-match",
+    "if-modified-since",
     "cookie",
     "authorization",
   ]) {
@@ -62,6 +63,9 @@ export async function backendProxy(
       "content-disposition",
       "etag",
       "last-modified",
+      // Dataset files change while LEVI runs (levi/sync.py): keep the
+      // backend's "revalidate before reuse" policy.
+      "cache-control",
     ]) {
       const value = upstream.headers.get(key);
       if (value) responseHeaders.set(key, value);

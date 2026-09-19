@@ -98,6 +98,8 @@ After Ready appears, open http://127.0.0.1:7860. On any dataset annotation page,
 
 Place captures under the workspace, or point the workspace to their common parent. Local registration and conversion enforce the resolved path boundary. Conversion rejects symlink inputs and existing output directories.
 
+LEVI keeps the dataset list in step with the workspace while it runs: datasets copied in are registered, episodes/demos added or removed are picked up (raw captures get their view rebuilt, annotations re-keyed by demo), deleted datasets drop out, and an open viewer offers a reload when its dataset changed. Tune or disable it with `LEVI_SYNC_INTERVAL`, `LEVI_SYNC_SETTLE` and `LEVI_SYNC_DISCOVER` (see `.env.example` and the [workspace reference](.state.md#runtime-sync)).
+
 Names never carry hash suffixes: per-dataset artifacts (annotations, reviews, diagnostics, exports) use the dataset's catalog name, per-run artifacts (jobs, conversion outputs, SAM3 revisions) a timestamp. To upgrade a workspace from an older LEVI, set it in `.env`, stop the service and run `uv run levi migrate` (dry run) then `--apply`; old `/local/<hash>` links keep working. See the [workspace reference](.state.md).
 
 ## Features

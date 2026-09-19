@@ -53,6 +53,9 @@ export interface CatalogEntry {
   view_status?: "building" | "ready" | "failed";
   view_error?: string;
   format?: DatasetFormat;
+  /** Metadata signature; changes when the dataset changes on disk. */
+  revision?: string | null;
+  registered_by?: "sync" | "user";
   info?: {
     total_episodes: number;
     total_frames: number;

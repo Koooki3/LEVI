@@ -231,7 +231,12 @@ def _view_failed(job):
     with contextlib.suppress(Exception):  # the job record keeps the error
         add_entry(
             Path(job["source"]),
-            {"view_status": "failed", "view_error": job.get("error")},
+            {
+                "view_status": "failed",
+                "view_error": job.get("error"),
+                # Not retried by the sync until the capture changes again.
+                "view_failed_fingerprint": job.get("source_fingerprint"),
+            },
         )
 
 

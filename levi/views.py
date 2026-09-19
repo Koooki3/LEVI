@@ -94,7 +94,7 @@ def request(root: Path, options: dict | None = None) -> dict:
     # Serialized in-process so two registrations of one capture start one
     # build; each build still writes its own directory, so even concurrent
     # LEVI processes can only waste work, never corrupt a view.
-    with catalog.LOCK:
+    with catalog.locked():
         existing = catalog.name_for_path(root)
         entry = catalog.datasets().get(existing) if existing else None
         if entry and entry.get("view") and is_view(Path(entry["view"])):
@@ -126,7 +126,7 @@ def publish(source: Path, output: Path) -> dict:
     """After a successful view job: point the catalog at the new view,
     re-key annotations if the episode set changed, drop the old view."""
     info = json.loads((output / "meta/info.json").read_text())
-    with catalog.LOCK:
+    with catalog.locked():
         return _publish(source, output, info)
 
 

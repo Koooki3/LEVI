@@ -171,6 +171,7 @@ Preserve the LEVI theme, keyboard access and responsive layouts when editing inh
 - `levi/conversion/`: modular conversion. `registry.py` lists input formats (`inputs/`: `robot_capture`, `image_sequence`, `lerobot`) and export targets (`outputs/`: `lerobot_v21`, `recap_value`); `pipeline.py` is the single-pass converter (parent plans from CSVs, spawn pool does one decode + one encode per camera, or a lossless remux in `retime` mode), `report.py` the inspection/compatibility models the Workbench renders. `raw.py`/`media.py`/`dataset.py` are the tested primitives. Timestamps are always `frame_index / fps`. See docs/CONVERSION.md and docs/RECAP.md.
 - `levi/views.py`: browsing views of raw captures; `levi/annotations/carryover.py` moves annotations into conversions by `source_demo`; `levi/annotations/outcomes.py` stores human success/failure labels.
 - Naming (`levi/naming.py`): per-dataset artifacts use the catalog name, per-run artifacts a timestamp — never a hash. `uv run levi migrate` upgrades older workspaces. See `.state.md`.
+- `levi/sync.py`: background workspace sync (discover, refresh, rebuild raw views, drop removed datasets); `levi/revision.py` is the stat-only dataset revision shared with the annotation backend and viewer. Catalog writes go through `catalog.locked()` (cross-process).
 - `levi/jobs.py`: allowlisted worker processes, immutable plans, timeouts and recovery.
 - `levi/service.py`: local API, catalog, diagnostics and dataset file serving.
 - `src/app/api/levi/` and `src/app/api/annotation/`: runtime proxies to the loopback backend.

@@ -61,6 +61,10 @@ export function useLocale() {
     if (language !== "zh") return text;
     const patterns: [RegExp, string][] = [
       [/^Episode (\d+)$/, "片段 $1"],
+      // Workspace sync (levi/sync.py): dynamic details.
+      [/^episodes (\S+) → (\S+)$/, "片段 $1 → $2"],
+      [/^lerobot found at (.*)$/, "发现 LeRobot 数据集：$1"],
+      [/^raw found at (.*)$/, "发现原始采集：$1"],
       // Conversion inspection (levi/conversion/*): dynamic details.
       [/^Exclude the (\d+) unlabeled episode\(s\)$/, "排除 $1 个无标签片段"],
       [

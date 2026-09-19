@@ -19,6 +19,8 @@ Scope: modular conversion registry, single-pass pipeline and lossless retime, RE
 | Browser end-to-end (isolated port and workspace, 3 real demos) | Inspect → RECAP export (6 videos remuxed) with live progress; raw view registered; outcome labelled from the sidebar; conversion carried 1 atom and 1 label over; Chinese UI checklist |
 | Workspace migration | Dry run, apply, second run a no-op on the real workspace |
 
+Runtime sync (2026-09-19): **110 Python tests** including discovery with settle timing, in-place episode changes (catalog, backend cache, live revision), removal and annotation re-attachment, raw-capture rebuild on added/removed demos with label re-keying, failed-view retry only after change, skipped LEVI folders, and a three-process catalog write test (120/120 entries). Browser check on an isolated workspace: a demo added while the viewer was open produced the reload notice after 7.4 s and the reloaded sidebar showed the new episode; deleting the capture showed the removed notice and emptied the list; 0 page errors.
+
 Not exercised: a timed full conversion of the 171 real demos against the previous 32-minute baseline (a live robot training session shared the machine), and training a value model in RLinf on the export.
 
 ## 0.3.0 独立发行检查 / Standalone release check

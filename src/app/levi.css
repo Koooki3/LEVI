@@ -775,3 +775,50 @@ select optgroup {
 .levi-raw-notice .levi-status.warn {
   color: #f1c677;
 }
+
+/* Dataset changed on disk (src/components/dataset-update-notice.tsx) */
+.levi-update-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 60;
+  max-width: 360px;
+  background: #1b231b;
+  border: 1px solid #d4f77966;
+  border-radius: 10px;
+  padding: 14px 16px;
+  box-shadow: 0 10px 30px #00000080;
+  font-size: 13px;
+  color: #e5ebdc;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.levi-update-toast p {
+  color: #b3bfaa;
+  line-height: 1.6;
+  margin: 0;
+}
+@media (max-width: 640px) {
+  .levi-update-toast {
+    left: 16px;
+    right: 16px;
+    max-width: none;
+  }
+}
+.levi-sync-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #b3bfaa;
+  margin-top: 8px;
+}
+.levi-sync-changes {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #b3bfaa;
+  line-height: 1.7;
+}

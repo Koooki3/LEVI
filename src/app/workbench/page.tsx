@@ -10,6 +10,21 @@ import type { Job } from "@/components/conversion/types";
 import { DatasetFormatBadge } from "@/components/dataset-format";
 import type { CatalogEntry } from "@/types/dataset-format.types";
 type Local = CatalogEntry;
+type SyncChange = {
+  time: number;
+  kind: "added" | "removed" | "updated" | "rebuilding" | "failed" | "skipped";
+  name: string;
+  detail: string;
+};
+type SyncStatus = {
+  enabled: boolean;
+  running: boolean;
+  interval_seconds: number;
+  last_scan: number | null;
+  last_error: string | null;
+  pending: string[];
+  changes: SyncChange[];
+};
 type Catalog = {
   local: Local[];
   workspace: string;
@@ -35,13 +50,16 @@ export default function Workbench() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const { t } = useLocale();
+  const [sync, setSync] = useState<SyncStatus | null>(null);
   const refresh = useCallback(async () => {
-    const [c, j] = await Promise.all([
+    const [c, j, st] = await Promise.all([
       leviApi<Catalog>("catalog"),
       leviApi<Job[]>("jobs"),
+      leviApi<SyncStatus>("sync").catch(() => null),
     ]);
     setCatalog(c);
     setJobs(j);
+    setSync(st);
   }, []);
   // Poll every second while anything runs (live progress), else every 4 s.
   const active = jobs.some(
@@ -119,6 +137,67 @@ export default function Workbench() {
         <p className="mt-3 text-xs">
           <T>Workspace</T>: <code>{catalog?.workspace || "…"}</code>
         </p>
+        <div className="levi-sync-bar">
+          <span
+            className={`levi-status ${
+              sync?.last_error ? "fail" : sync?.running ? "pass" : "warn"
+            }`}
+          >
+            {t(
+              !sync?.enabled
+                ? "Auto-sync off"
+                : sync.running
+                  ? "Auto-sync on"
+                  : "Auto-sync paused",
+            )}
+          </span>
+          <span>
+            <T>
+              New, changed and removed datasets in the workspace are picked up
+              automatically.
+            </T>
+          </span>
+          {sync?.last_scan && (
+            <span className="tabular">
+              {t("Last checked")}{" "}
+              {new Date(sync.last_scan * 1000).toLocaleTimeString()}
+            </span>
+          )}
+          {sync && sync.pending.length > 0 && (
+            <span>
+              {sync.pending.length} {t("waiting for copying to finish")}
+            </span>
+          )}
+          <button
+            type="button"
+            className="levi-secondary"
+            disabled={busy}
+            onClick={() => void action(() => leviApi("sync", {}))}
+          >
+            <T>Sync now</T>
+          </button>
+        </div>
+        {sync?.last_error && (
+          <p className="levi-error mt-2">{t(sync.last_error)}</p>
+        )}
+        {sync && sync.changes.length > 0 && (
+          <details className="levi-sync-changes">
+            <summary className="cursor-pointer">
+              <T>Recent workspace changes</T> ({sync.changes.length})
+            </summary>
+            <ul>
+              {sync.changes.slice(0, 15).map((c) => (
+                <li key={`${c.time}-${c.name}-${c.kind}`}>
+                  <span className="tabular">
+                    {new Date(c.time * 1000).toLocaleTimeString()}
+                  </span>{" "}
+                  <strong>{t(`sync.${c.kind}`)}</strong> {c.name}
+                  {c.detail ? ` — ${t(c.detail)}` : ""}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
         <table className="levi-table">
           <thead>
             <tr>
@@ -155,14 +234,39 @@ export default function Workbench() {
                 <td className="levi-format-cell">
                   <DatasetFormatBadge format={d.format} />
                 </td>
-                <td>{d.info?.total_episodes ?? "—"}</td>
+                <td>{d.format?.episodes ?? d.info?.total_episodes ?? "—"}</td>
                 <td>
-                  <button
-                    className="levi-secondary whitespace-nowrap"
-                    onClick={() => setSource(d.path)}
-                  >
-                    <T>Use as input</T>
-                  </button>
+                  <div className="flex flex-col gap-2 items-stretch">
+                    <button
+                      className="levi-secondary whitespace-nowrap"
+                      onClick={() => setSource(d.path)}
+                    >
+                      <T>Use as input</T>
+                    </button>
+                    <button
+                      className="text-xs text-slate-400 hover:text-red-300 whitespace-nowrap"
+                      title={t(
+                        "Remove from the list. Files, annotations and review flags are kept.",
+                      )}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            t(
+                              "Remove this dataset from the list? Its files, annotations and review flags stay on disk. If it is still in the workspace, auto-sync will add it back.",
+                            ),
+                          )
+                        )
+                          void action(() =>
+                            fetch(
+                              `/api/levi/catalog/${encodeURIComponent(d.name)}`,
+                              { method: "DELETE" },
+                            ),
+                          );
+                      }}
+                    >
+                      <T>Unregister</T>
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

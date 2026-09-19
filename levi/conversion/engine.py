@@ -1,6 +1,7 @@
 """Execute validated stages; all writes target fresh, independent directories."""
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -17,11 +18,15 @@ def fingerprint(source: Path):
     """Capture size/mtime manifest, used before/after jobs to detect concurrent edits."""
     import hashlib
 
-    rows = [
-        (p.relative_to(source).as_posix(), p.stat().st_size, p.stat().st_mtime_ns)
-        for p in sorted(source.rglob("*"))
-        if p.is_file()
-    ]
+    rows = []
+    for p in sorted(source.rglob("*")):
+        rel = p.relative_to(source).as_posix()
+        if p.is_symlink():
+            # Links matter (conversion refuses them), whatever they point to.
+            rows.append((rel, "link", os.readlink(p)))
+        elif p.is_file():
+            st = p.stat()
+            rows.append((rel, st.st_size, st.st_mtime_ns))
     return hashlib.sha256(json.dumps(rows).encode()).hexdigest()
 
 

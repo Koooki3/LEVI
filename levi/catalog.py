@@ -8,6 +8,8 @@ its existing entry. Ids from before names replaced hashes live on as
 aliases (``dataset_aliases.json``) so old links still resolve.
 """
 
+import contextlib
+import fcntl
 import json
 import os
 import threading
@@ -18,6 +20,7 @@ from .naming import catalog_name, unique_name
 from .paths import STATE, inside
 
 LOCK = threading.RLock()
+_DEPTH = threading.local()
 DEMOS = ["samanthalhy/so100_strawberry_2", "samanthalhy/eval_so100_smol_strawberry_2"]
 GENERIC_FOLDER_NAMES = {"dataset", "data", "output", "outputs"}
 
@@ -31,6 +34,31 @@ def atomic(path: Path, value):
     temp = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
     temp.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False))
     os.replace(temp, path)
+
+
+@contextlib.contextmanager
+def locked():
+    """Exclusive catalog access across threads *and* LEVI processes sharing
+    the workspace (the background sync writes it too). Re-entrant within a
+    thread: only the outermost level takes the file lock."""
+    with LOCK:
+        depth = getattr(_DEPTH, "value", 0)
+        if depth:
+            _DEPTH.value = depth + 1
+            try:
+                yield
+            finally:
+                _DEPTH.value = depth
+            return
+        STATE.mkdir(parents=True, exist_ok=True)
+        with (STATE / ".catalog.lock").open("a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            _DEPTH.value = 1
+            try:
+                yield
+            finally:
+                _DEPTH.value = 0
+                fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def datasets():
@@ -58,7 +86,7 @@ def _entry_for_path(items: dict, root: Path):
 
 def add_entry(root: Path, fields: dict) -> dict:
     """Insert or refresh the catalog entry for ``root`` (idempotent by path)."""
-    with LOCK:
+    with locked():
         items = datasets()
         existing = _entry_for_path(items, root)
         if existing:
@@ -69,6 +97,18 @@ def add_entry(root: Path, fields: dict) -> dict:
             item = {"id": "local/" + name, "name": name, "path": str(root), **fields}
         items[item["name"]] = item
         atomic(STATE / "datasets.json", items)
+    return item
+
+
+def remove_entry(name: str) -> dict | None:
+    """Drop a catalog entry. Its annotations, labels, reviews and SAM3
+    revisions stay on disk under the name, and re-attach if a dataset with
+    that name is registered again."""
+    with locked():
+        items = datasets()
+        item = items.pop(name, None)
+        if item is not None:
+            atomic(STATE / "datasets.json", items)
     return item
 
 

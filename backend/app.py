@@ -84,6 +84,7 @@ from levi.annotations.sam3_protocol import (
 from levi.auth import credential_scope, hub_token, token
 from levi.catalog import atomic, display_name, local_root, read
 from levi.paths import CACHE, EXPORTS, SAM3_CHECKPOINT_DIR, STATE, inside
+from levi.revision import dataset_revision
 from levi.versions import is_dataset_v2, is_dataset_v3, normalize_dataset_version
 
 logger = logging.getLogger("lerobot-annotate")
@@ -274,7 +275,7 @@ class DatasetState:
     episodes_df: pd.DataFrame
     annotations: dict[int, EpisodeAnnotations] = field(default_factory=dict)
     frame_ts_cache: dict[int, list[float]] = field(default_factory=dict)
-    info_signature: tuple[int, int, int] | None = None
+    info_signature: str | None = None
 
     def _identity_hash(self, *, short: bool = False) -> str:
         """Deterministic hash of this dataset's identity — shared by every
@@ -352,10 +353,9 @@ def _ensure_state(req: DatasetRef) -> DatasetState:
         req.local_path = str(inside(req.local_path))
     key = _state_key(req)
     cached = _states.get(key)
-    # A raw capture's browsing view is rebuilt in place when the capture
-    # changes (levi/views.py); a replaced meta/info.json means the cached
-    # episode table is stale. Inode + mtime + size, not mtime alone: a
-    # rebuilt file is a new inode even within one mtime tick.
+    # Datasets change while LEVI runs (episodes added or removed in place, a
+    # raw capture's view rebuilt — see levi/sync.py): a new metadata
+    # revision means the cached episode table is stale.
     if (
         cached is not None
         and cached.local_path
@@ -368,12 +368,10 @@ def _ensure_state(req: DatasetRef) -> DatasetState:
     return _load_state(req, key)
 
 
-def _info_signature(root: Path) -> tuple[int, int, int] | None:
-    try:
-        st = (root / "meta/info.json").stat()
-    except OSError:
-        return None
-    return (st.st_ino, st.st_mtime_ns, st.st_size)
+def _info_signature(root: Path) -> str:
+    """Episode/task metadata signature (levi/revision.py): changes when a
+    dataset gains, loses or rewrites episodes in place."""
+    return dataset_revision(root)
 
 
 def _sidecar(state: DatasetState) -> SidecarStore:

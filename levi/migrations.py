@@ -216,7 +216,7 @@ class Migration:
             self.move(path, EXPORTS / name)
 
     def run(self) -> list[str]:
-        with catalog.LOCK:
+        with catalog.locked():
             items = catalog.datasets()
             self.rehome(items)
             result, aliases, renamed = self.rekey(items)

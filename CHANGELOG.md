@@ -17,6 +17,7 @@
 - Raw captures can be registered, browsed and annotated through a lossless view; annotations, outcome labels and SAM3 masks carry over into conversions by source demo. Features that need a converted dataset show an explanatory note instead.
 - Human success/failure episode labels (click the sidebar dot), used by the Failures filter, RECAP export and annotated exports.
 - The dataset list shows each entry's format, version and origin.
+- Runtime workspace sync: new datasets and raw captures are registered, in-place changes refresh the catalog and the annotation backend, changed raw captures get their view rebuilt with annotations re-keyed by demo, removed datasets drop out (annotations kept), open viewers offer a reload; cross-process catalog lock; `Sync now` and `Unregister` in the Workbench.
 - Hash-free naming across the workspace (catalog names per dataset, timestamps per run) and `levi migrate` for older workspaces; legacy `/local/<hash>` links redirect.
 
 - English is now the default UI and repository landing language; the 602-key English/Chinese catalogs stay in parity, and the welcome page, CLI and documentation expose a professional bilingual path.
