@@ -54,11 +54,30 @@ def build_server():
             request, "tools", {"name": name, "arguments": arguments}
         )
         content = [types.TextContent(type="text", text=json.dumps(value))]
-        if name in {"media.sample", "evidence.read"}:
+        if value.get("mosaic"):
+            # One sheet for the whole page; individual frames stay addressable
+            # by evidence id through a single-layout read.
+            path = (
+                "runs/"
+                + quote(arguments["run_id"], safe="")
+                + "/artifacts/"
+                + quote(value["mosaic"]["artifact"], safe="")
+            )
+            image = await asyncio.to_thread(request, path, binary=True)
+            content.append(
+                types.ImageContent(
+                    type="image",
+                    mimeType="image/png",
+                    data=base64.b64encode(image).decode(),
+                )
+            )
+        elif name in {"media.sample", "evidence.read"}:
             # Return actual images through MCP, not filenames an external Agent
             # cannot resolve. Scope was already checked by the REST dispatcher.
             for item in value["items"]:
-                if item.get("artifact"):
+                # A run whose evidence was cleaned up still returns its ledger;
+                # its rows say so, and there is no image to fetch for them.
+                if item.get("artifact") and item.get("image_available", True):
                     path = (
                         "runs/"
                         + quote(arguments["run_id"], safe="")

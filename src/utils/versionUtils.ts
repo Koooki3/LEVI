@@ -200,6 +200,36 @@ function pruneDatasetInfoCache(now: number) {
   }
 }
 
+/** Say which dataset failed, where it lives, and what the status means.
+ *
+ * A bare "401" reads as a LEVI permission problem. For a Hugging Face repo it
+ * usually means the repo is private or no longer exists -- the Hub answers 401
+ * to anonymous requests for both, so a removed dataset looks like a login
+ * failure to anyone reading the status alone.
+ */
+export function describeInfoFailure(repoId: string, status: number): string {
+  const local = repoId.startsWith("local/");
+  const where = local
+    ? `the local dataset ${repoId.slice(6)}`
+    : `the Hugging Face dataset ${repoId}`;
+  if (local) {
+    return status === 404
+      ? `Cannot read ${where}: meta/info.json is missing from the dataset folder.`
+      : `Cannot read ${where}: the LEVI file service answered ${status}.`;
+  }
+  if (status === 401 || status === 403) {
+    return (
+      `Cannot read ${where}: it is private or no longer exists on the Hub, ` +
+      "which both answer 401 to anonymous requests. Sign in with an account " +
+      "that can see it, or remove it from the list."
+    );
+  }
+  if (status === 404) {
+    return `Cannot read ${where}: it has no meta/info.json on the main revision.`;
+  }
+  return `Cannot read ${where}: Hugging Face answered ${status}.`;
+}
+
 export async function getDatasetInfo(repoId: string): Promise<DatasetInfo> {
   const now = Date.now();
   pruneDatasetInfoCache(now);
@@ -225,14 +255,14 @@ export async function getDatasetInfo(repoId: string): Promise<DatasetInfo> {
       method: "GET",
       cache: "no-store",
       signal: controller.signal,
-      headers: authHeaders(),
+      headers: authHeaders(testUrl),
     });
 
     if (timeoutId) clearTimeout(timeoutId);
     timeoutId = undefined;
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch dataset info: ${response.status}`);
+      throw new Error(describeInfoFailure(repoId, response.status));
     }
 
     const data = await response.json();
@@ -300,7 +330,7 @@ export async function getDatasetStats(
       method: "GET",
       cache: "no-store",
       signal: controller.signal,
-      headers: authHeaders(),
+      headers: authHeaders(url),
     });
     if (timeoutId) clearTimeout(timeoutId);
     timeoutId = undefined;

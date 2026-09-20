@@ -38,7 +38,10 @@ def propose(wb, id):
         )
     undo_run = {
         **run,
-        "id": new_id(),
+        # Second-precision ids collide when an undo follows its commit inside
+        # the same second; an unchecked id silently overwrote the record it
+        # was undoing.
+        "id": new_id({item.split("-", 1)[-1] for item in wb.store.ids("runs")}),
         "status": "waiting_for_review",
         "changes": None,
         "input_run": run.get("input_run", run["id"]),
@@ -56,7 +59,7 @@ def propose(wb, id):
             wb.store.get("evidence", f"{run['id']}:{ep}"),
         )
     change = ChangeSet(
-        id=new_id(),
+        id=new_id(set(wb.store.ids("changes"))),
         run_id=undo_run["id"],
         base_revision=original["published_revision"],
         proposals=[],

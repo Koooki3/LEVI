@@ -1,12 +1,13 @@
 # LEVI · 机器人数据工坊
 
-Codex / Claude Code 无界面工具链、托管会话、终端人工审批和实时追踪见 [Pilot 顺序指南](docs/PILOT.zh-CN.md)。
-
 **LeRobot Exploration, Validation & Integration**
 
 [![Checks](https://github.com/Koooki3/LEVI/actions/workflows/test.yml/badge.svg)](https://github.com/Koooki3/LEVI/actions/workflows/test.yml) [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) [![Version](https://img.shields.io/badge/LEVI-0.3.0-9bd654.svg)](CHANGELOG.md)
 
-[English](README.md) · [转换教程](docs/CONVERSION.md) · [RECAP 导出](docs/RECAP.md) · [工作区结构](.state.md) · [功能对照](docs/FEATURES.md) · [API](docs/API.md) · [审查与验证](docs/VALIDATION.md) · [许可](docs/UPSTREAM.md) · [第三方清单](THIRD_PARTY_NOTICES.md) · [SAM3 对象标注](docs/SAM3.md) · [Agent 工作台](docs/AGENT_WORKBENCH.md)
+[English](README.md)
+
+**指南** — [转换教程](docs/CONVERSION.md) · [RECAP 导出](docs/RECAP.md) · [Agent 工作台](docs/AGENT_WORKBENCH.md) · [Codex / Claude Pilot](docs/PILOT.zh-CN.md) · [SAM3 对象标注](docs/SAM3.md) · [工作区结构](.state.md)
+**参考** — [功能对照](docs/FEATURES.md) · [API](docs/API.md) · [Agent Harness](docs/HARNESS.md) · [审查与验证](docs/VALIDATION.md) · [许可](docs/UPSTREAM.md) · [第三方清单](THIRD_PARTY_NOTICES.md)
 
 LEVI 是用于浏览、标注、转换和审核机器人数据的独立工作台。基于 [LeRobot Dataset Visualizer](https://github.com/huggingface/lerobot-dataset-visualizer)，保留多相机与信号同步、视觉问答、动作分析和三维回放，默认英文，可在界面中切换中文；并提供**完全内置的采集数据转换流程**。无需另行下载转换项目或安装训练环境：先检查输入、列出各项要求的满足情况与支持的导出格式，再导出为 LeRobot v2.1 或 RECAP（π\*0.6）价值数据集。原始机器人采集在转换前即可浏览和标注，标注会随转换自动迁移。
 
@@ -14,7 +15,7 @@ LEVI 是用于浏览、标注、转换和审核机器人数据的独立工作台
 
 ![LEVI 中文首页](docs/assets/home-zh.png)
 
-演示画面来自下文列出的 `samanthalhy` 数据集（数据卡标注 Apache-2.0）；界面采用 LEVI 的石墨绿、米白与青柠配色。
+演示画面来自下文列出的公开 LeRobot 数据集；界面采用 LEVI 的石墨绿、米白与青柠配色。
 
 ## 安装与启动
 
@@ -44,71 +45,121 @@ uv run levi serve
 uv run levi dev                         # 前端热更新；Python 改动后重启
 uv run levi serve --port 7870 --backend-port 7871
 uv run levi convert --help              # 不启动网页也能使用转换器
-uv run levi clean                      # 预览可清理缓存
-uv run levi clean --apply               # 删除预览列表内的可再生成缓存
+uv run levi stop                        # 停止共享服务（清理前必须先停）
+uv run levi clean                       # 预览可再生缓存与孤儿产物
+uv run levi clean --apply               # 终端确认后删除
 uv run levi migrate                     # 预演：把旧工作区升级到新命名/布局
 uv run levi migrate --apply             # 执行迁移（需先停止服务）
 ```
 
 从远程服务器访问时，在自己的电脑运行 `ssh -L 7860:127.0.0.1:7860 USER@SERVER`，然后访问本机上述地址。默认前端绑定本机 **7860（网页入口）**，后端绑定本机 **7861（内部 API）**；前端通过同源代理访问后端。不要把本机 7860 转发到服务器 7861。误开后端根路径会显示入口说明及网页链接；`uv run levi backend` 只启动 API。启动器会检查端口冲突，并等待前后端均就绪后才输出网页入口。
 
-## Agent 辅助审阅与标注（实验性）
+## Agent 辅助审阅与标注
 
-**Agent 工作台**提供基于证据的草稿和集中人工审核队列。SAM3 是其中可选的对象标注工具；原始数据集始终只读。[完整指南、MCP 配置、架构和限制](docs/AGENT_WORKBENCH.md)。
+标注机器人数据,大部分工作是「看」:来回拖动视频,判断一次尝试从哪一帧开始、有没有成功、哪个物体是哪个。LEVI 把「看」交给 agent,把「判断」交给你。
 
-完成普通安装后，依次执行：
+**agent 只能提议,批准和提交始终属于你。** 这条边界写在能力层里,不靠约定:任何 agent 通道都无法批准计划、接受试点、提交变更集、重置或清理工作区。原始数据集始终只读。每条建议都必须引用它实际读过的帧,而且证据账本比图像本身活得更久——几个月后的审阅者仍能看到当时看了什么。
 
 ```bash
-export LEVI_WORKSPACE="$PWD/.state"
 uv sync --locked --extra agent
 uv run --extra agent levi build
 uv run --extra agent levi
 ```
 
-1. 打开 **Accounts & connections（账号与连接）**，配置兼容接口地址、模型 ID，并明确声明图像能力。密钥通过服务端环境变量或仅保留于服务端内存的会话输入提供；卡片支持选择、编辑、断开、重连和移除。HF 账户使用独立的切换／退出菜单，不等同于 Agent 提交权限。
-2. 选择数据集、明确的 episode／相机范围、指令与预算；按需允许证据发送到选定端点，点击 **Inspect & create plan（检查并创建计划）**。远端固定 commit，本地创建有内容摘要的独立快照。
-3. 先 **Run pilot（小范围试运行）**，检查证据后 **Execute remaining（执行剩余）**。恢复时保留已完成分片和人工草稿修改。
-4. 需要对象遮罩时打开 **SAM3 · optional object tool**，规划有限帧范围，再明确启动已配置的 worker。逐帧看叠加遮罩，按轨迹或相机批量接受／拒绝；修订保留在暂存区。此工具只使用已有 checkpoint，不自动下载。
-5. 按待审核、问题或标注类型筛选；使用 J/K 导航，逐项或批量接受／拒绝，修改文本及时间边界。先保存草稿修改，再记录审核决定；跟随证据不会自动离开未保存的编辑页面。
-6. 依次 **Validate & approve（校验并批准）**、**Commit approved changes（提交已批准变更）**。未知结果不会成为人工成功／失败标签，拒绝项不提交；版本冲突须重新审核。**Create undo draft（创建撤销草稿）**也需要人工批准。
-7. 重启后恢复凭据再继续中断任务，或直接审核已完成的部分。使用现有数据集导出入口生成含原生语言列、对象 sidecar 和来源记录的数据；原始采集先转换，按源帧映射迁移标注。
+### 三条驱动路径
 
-产物相对于 `LEVI_WORKSPACE` 存放在 `outputs/LEVI/workbench/agent/datasets/<数据集名称>/`，按可读时间戳组织运行和版本，LEVI 产物名称不使用哈希后缀。MCP 外部 Agent 可读取允许范围并生成草稿，不能自行批准或提交。由界面驱动外部 ACP Agent、HTTP MCP 仍属后续阶段。自动化验证使用固定响应与替身；真实模型质量及 SAM3 GPU 推理需另行人工验收，不在本次自动测试内。
+区别只有一个要紧的:**谁在花 token**。
 
-## SAM3 首次部署顺序
+| 通道 | 模型运行在 | 谁付费 | 配置方式 |
+| --- | --- | --- | --- |
+| **在线** | LEVI 内部,调用你配置的端点 | 你在那个端点付费 —— LEVI 自己计量并记账 | **账号与连接** → 模型配置 |
+| **外部 MCP** | 你自己的 agent(Claude Code、Codex 等) | agent 自己的上下文,由它自报用量 | `levi agent connect` |
+| **托管 Pilot** | LEVI 监督下的 Codex / Claude Code 会话 | 该会话 | [Pilot 指南](docs/PILOT.zh-CN.md) |
 
-在克隆后的 LEVI 根目录按以下顺序执行；目录名称和工作区绝对路径可任意：
+外部 MCP 是最常用的一条,下面的流程按它来写。
 
-~~~bash
-# 1) 设置工作区并安装核心依赖
-export LEVI_WORKSPACE="$PWD/.state"
-cp .env.example .env
-uv sync --locked
-uv run levi setup
+```text
+        你                           LEVI                      你的 agent
+         │                             │                              │
+  ① 建计划 ├──── 片段、相机 ───────────▶│                              │
+         │      任务类型、子任务定义     │                              │
+  ② 批准 ────── 冻结范围 ─────────────▶│    （此时不会自动开跑）        │
+         │                             │◀── runs.list ────────────────┤ ③ 自己接手
+         │                             │─── agent_prepare ───────────▶│
+         │                             │◀── evidence.read（拼图）─────┤
+         │                             │◀── 提交建议 ─────────────────┤
+  ④ 观看 ◀────── 实时动态 ─────────────┤                              │
+  ⑤ 审核 ────── 接受 / 拒绝 ──────────▶│                              │
+     提交 ──────────────────────────────▶ 修订版 + 产物路径
+```
 
-# 2) 登录可读取 1038lab/sam3 的 Hugging Face 账号
-HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" hf auth login
-HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" hf auth whoami
-# 没有全局 hf 时使用：
-# HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" uvx hf auth login
-# HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" uvx hf auth whoami
+### 一个任务的完整流程
 
-# 3) 在 CUDA 主机安装独立 worker
-uv venv --python 3.12 integrations/sam3/.venv
-uv sync --project integrations/sam3
-export LEVI_SAM3_WORKER_PYTHON="$PWD/integrations/sam3/.venv/bin/python"
-export LEVI_SAM3_ENABLED=1
+**1 — 建计划。** 打开 **Agent 工作台 → 任务与审核**。表单直接列出数据集实际声明的内容:点击选片段、按住拖动可连选,相机从列表里挑,任务类型在「数据集审阅 / 视频子任务与事件 / 可见物体掩码」中选。做子任务标注时还要写清楚**什么算一个子任务**:何时开始、何时结束、怎样算成功。这些定义就是 agent 标注时对照的契约。
 
-# 4) 只做无模型配置检查
-uv run --project integrations/sam3 levi-sam3-worker --check
-uv run levi sam3 check
+**2 — 批准。** 批准会**冻结范围**:片段、相机、指令、定义,以及源文件的内容摘要。之后不能再扩大。批准不发布任何东西;在 MCP 通道上它也不会启动任何东西——它只是解锁这个计划。
 
-# 5) 构建并启动网页
-uv run levi build
-uv run levi serve
-~~~
+**3 — 交给 agent。** 让你的 agent 去接最新的 run。它调用 `runs.list`,就能看到作用域内每个 run 以及轮到谁:
 
-看到 Ready 后访问 http://127.0.0.1:7860，在任意数据集的标注页面按状态卡完成 Hub access、CUDA worker、Checkpoint 三项检查。登录后若 checkpoint 尚未缓存，页面会显示明确的下载提示、保存路径、进度条和“下载 checkpoint”按钮；点击后等待状态变为“Checkpoint 已就绪”，再设置 prompt、范围和相机并运行 SAM3。下载使用当前 Hugging Face 会话并保存到 $LEVI_WORKSPACE/checkpoints/sam3，后续数据集复用该文件；失败时可直接重试。切换 Hugging Face 账号或工作区时，LEVI 会按账号 digest 和工作区重新隔离 Hub 快照与 sidecar。可设置 LEVI_SAM3_ENABLED=0 暂时隐藏真实 worker。不要提交 token、checkpoint 或工作区数据。
+```
+human_approval → agent_prepare → agent_propose → human_review → human_commit
+```
+
+不需要你复制 run id。`workspace.get_context` 会把其余的一次性告诉首次接入的 agent:它能做什么、只有你能做什么、按什么顺序工作、以及决定成本的那个习惯。
+
+**4 — 实时观看。** **实时动态**把每个动作即时流式显示:做了什么、针对哪个数据集和片段、耗时多久、被拒绝时的原因。每个 run 还会显示为一张任务卡,带进度和当前在等谁;点击某张卡可把动作流过滤到该任务。
+
+**5 — 审核并提交。** 审核队列逐条显示建议和它引用的帧。接受、拒绝或修改;**unknown 永远不会被悄悄转成人工标签**。提交后,完成提示会给出修订版路径和「查看结果」链接。
+
+### 为什么这些标注值得信任
+
+- **每个结论都引用帧。** 引用了本片段之外证据的建议会被**点名拒绝**,而不是一句笼统报错。
+- **不确定性是一等公民。** 「按 2 秒采样,无法分辨其中的各次尝试」是一个合法且会被记录的答案;覆盖缺口会被报告,而不是被抹平。
+- **冻结快照会被校验。** 如果源数据在已批准的计划下发生变化,任务会停止,而不是去标注另一份数据。
+- **agent 不发布任何东西。** 已提交的修订版带来源记录和逆向补丁,任何一次提交都能经同一条审核路径撤销。
+
+### 成本是实测的,不是猜的
+
+证据就是成本。`evidence.read` 可以每页返回**一张带标注的拼图**而不是每帧一张图,`evidence.refine` 只在 agent 无法判定的边界附近补帧。在一次真实运行中,这两个习惯让 10 个片段的成本相差约 4.3 万 vs 13 万 token。
+
+```bash
+uv run levi agent usage show                            # 各 agent 的历史
+uv run levi agent usage estimate --workflow temporal --episodes 20
+```
+
+`plans.estimate` 在开工前给出区间,并说明依据、样本数、以及是否在向已记录规模之外外推。在线运行无需自报——LEVI 自己计量并记录样本;外部 agent 自报用量,下一次估算随之更准。
+
+### 物体标注:用不用 SAM3 都行
+
+`objects.strategy` 读取本机状态(worker、checkpoint、空闲显存)并给出建议。当 SAM3 跑不起来时,`objects.detect` 不用模型、不用 GPU 就能测量候选区域,返回每个区域的轮廓、位置、形状、中位颜色和一张带标号的叠加图;agent 判读命名后用 `candidate_id` 提交。两条路径最终都进入同一个暂存审核。
+
+掩码只标注在采样帧上,因此**播放条会标出带掩码的帧并支持跳转**;两帧之间会沿用该轨迹最近一次实测的轮廓,以虚线显示并标明来源帧——既有视觉连续性,又不会把没观测过的位置说成观测结果。
+
+### 产物存放在哪
+
+相对 `LEVI_WORKSPACE` 存放在 `outputs/LEVI/workbench/agent/datasets/<数据集名称>/`:每个数据集一个目录,内部的 run 和修订版以**工作类型 + 分钟**命名 —— `temporal-20260920T0926`、`objects-20260920T0940`。没有哈希,没有语义不明的后缀。
+
+```bash
+uv run levi agent clean                    # 释放 runs.prepare 可重建的部分
+uv run levi agent clean --abandon <run-id> # 关闭没人会继续的 run
+uv run levi agent reset --dataset <name>   # 移除某数据集的 agent 历史
+```
+
+`clean` 释放已结束 run 的输入快照、证据图像和拼图,保留已提交修订版、来源记录、逆向补丁、证据账本和未完成草稿。`reset` 是它刻意的对应物:移除某一个数据集的工作记录本身,且绝不触碰其他数据集、你的连接,或非 agent 产生的标注。两者都先预演、再确认。
+
+### 已知边界
+
+界面驱动的外部 ACP 会话与 HTTP MCP 仍属后续阶段。自动化验证使用固定响应与替身模型:真实模型的标注质量和 SAM3 GPU 推理需单独测量,已列在[验证记录](docs/VALIDATION.md)中。**跨帧身份无法从相隔数秒的轮廓中恢复** —— LEVI 会如实说明,而不是编造轨迹。
+
+## SAM3 对象标注（可选）
+
+SAM3 在标注页提供模型辅助的对象遮罩。它是可选的：LEVI 不会自行下载 checkpoint，CPU 侧检查也不会导入 Torch 或探测 CUDA。真实作业需要 CUDA 主机上的独立 Python 3.12 worker、一个能读取 `1038lab/sam3` 的 Hugging Face 账号，以及约 7 GB 空闲显存。当显存被占满或 worker 缺失时，agent 可以自行勾画对象，并走同一条审核队列。
+
+```bash
+uv run levi sam3 check      # 仅检查配置，不加载模型、不探测 CUDA
+```
+
+完整的首次部署顺序、三道门槛、提示词与审核流程见 [SAM3 指南](docs/SAM3.md)。
 
 ## 工作目录与数据位置
 
@@ -147,16 +198,14 @@ LEVI 运行时会持续与工作区同步：拷入的数据集会自动登记；
 
 浏览器支持视频型 LeRobot v2.0/v2.1/v3.0/v3.1。沿用上游对图片直接嵌入 Parquet 的限制；可先转换为视频数据集。原始任务内容、特征标识和关节名称保留原文。
 
-### SAM3 对象标注（全局）
+### 默认演示数据集
 
-标注页对演示集、Hub 数据集和登记的本地数据集统一提供 SAM3 对象/轨迹 sidecar。界面先检查 Hub 访问、CUDA worker 和 checkpoint 三道门槛，再按片段范围／任务／全量及相机组合生成并校验标注计划；每个 episode/camera 组合独立处理，模型建议写入独立的无损 RLE sidecar，原生 LeRobot 文件保持只读。页面会显示当前 Hugging Face 账号、worker 状态、checkpoint 下载进度和工作区保存位置，并按轨迹提供帧区间与接受／拒绝审核。默认模型为 1038lab/sam3 的 sam3.pt；首次真实作业需要独立 Python 3.12 uv worker 和 CUDA 主机，核心 CPU 检查不会导入 Torch、探测 CUDA、下载模型或执行推理。完整顺序见 SAM3 指南。
+公开的 LeRobot 数据集，按需联网读取，不打包进 Git：
 
-默认演示：
+- [lerobot/svla_so101_pickplace](https://huggingface.co/datasets/lerobot/svla_so101_pickplace) —— SO-101 抓放，50 片段、11,939 帧、30 fps、两路 640×480 相机。
+- [lerobot/aloha_static_coffee](https://huggingface.co/datasets/lerobot/aloha_static_coffee) —— 双臂 ALOHA，50 片段、55,000 帧、50 fps、四路 640×480 相机。
 
-- [samanthalhy/so100_strawberry_2](https://huggingface.co/datasets/samanthalhy/so100_strawberry_2)
-- [samanthalhy/eval_so100_smol_strawberry_2](https://huggingface.co/datasets/samanthalhy/eval_so100_smol_strawberry_2)
-
-视频按需联网读取，不打包进 Git。评估集包含 10 片段、32,033 帧、30 FPS、front/top/hand 三路相机。
+两者均为 LeRobot v3.0。若某个演示数据集之后被设为私有或从 Hub 删除，匿名请求会收到 401，查看器会如实说明这一点，而不会报成 LEVI 的权限错误。
 
 ## 内置转换：检查 → 选择导出 → 运行
 
@@ -223,7 +272,7 @@ uv run python scripts/verify_browser.py
 uv run python scripts/verify_conversion.py
 ```
 
-发布前执行 `uv run levi clean` 预览，再执行 `uv run levi clean --apply`。只清理 LEVI 的可再生成缓存；已登记数据集、标注、审核、转换报告、`.env`、环境与生产构建保留。不要对共享工作目录使用 `git clean -xfd`。
+发布前先 `uv run levi stop` 停止服务，执行 `uv run levi clean` 预览，再 `uv run levi clean --apply`。只清理 LEVI 的可再生成缓存；已登记数据集、标注、审核、转换报告、`.env`、环境与生产构建保留。它同时会报告**已不在目录中的数据集留下的产物**：空目录会被删除，仍存有审核成果的目录只列出不删除——数据集退出目录不应连带删掉别人的标注。不要对共享工作目录使用 `git clean -xfd`。
 
 项目仓库：[Koooki3/LEVI](https://github.com/Koooki3/LEVI)。通过 [Issues](https://github.com/Koooki3/LEVI/issues) 报告问题或建议；参与开发前请阅读 [贡献指南](CONTRIBUTING.md)。维护者发布流程见 [发布指南](docs/RELEASING.md)。
 

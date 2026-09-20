@@ -1,4 +1,4 @@
-# Agent Workbench (experimental)
+# Agent Workbench
 
 LEVI combines bounded Agent proposals, optional SAM3 object assistance and human review. The source dataset stays read-only. Model output is never a human label until an exact ChangeSet is approved and committed.
 
@@ -62,13 +62,24 @@ The external MCP client's command is `uv`, with arguments `run --project /absolu
 Discover tools, resources and the `review-dataset` prompt. Read the versioned skill resources explicitly; auto-discovery by arbitrary clients is not assumed. A typical sequence is:
 
 ```text
-workspace.get_context → datasets.inspect → runs.plan (provider="external")
-→ human plans.approve in LEVI → runs.prepare → media.sample (includes actual MCP image content)
+workspace.get_context → datasets.inspect → plans.estimate → runs.plan (provider="external")
+→ human plans.approve in LEVI → runs.prepare
+→ evidence.read (layout="mosaic") → evidence.refine around unclear boundaries
 → annotations.propose_segments / annotations.propose_events → changes.validate
-→ human review/approval/commit in LEVI
+→ human review/approval/commit in LEVI → runs.report_usage
 ```
 
-`TaskContext` requires `repo_id`, `episodes`, `instruction`, `provider`; include cameras and explicit `allow_media_egress` when needed. No local model profile is required for `provider="external"`. Tool schemas come from `capabilities.list`. External credentials grant read/draft on allowlisted datasets only, never human approval/commit or legacy writes. Accounts & connections displays the configured scope and can disconnect/reconnect external access without exposing the token; the disconnect choice persists in the workspace. SAM3 execution remains a human action. REST is versioned at `/api/levi/agent/v1`; MCP currently uses stdio, **not Streamable HTTP**. HTTP transport and UI-driven ACP agents remain later work.
+Object identity is the part frame-by-frame outlining cannot supply: numbering detections per frame makes every id shift as soon as one object enters or leaves. `objects.propose` takes `track_by: "overlap"` to link the same object across annotated frames, and always reports how many tracks each concept ended up with against how many were ever visible at once — more tracks than instances means an object changed identity. When the annotated frames are too far apart for outlines to overlap, linking refuses and says so instead of splitting one object into a track per frame. `levi agent objects relink --dataset <name>` runs the same check over a published revision.
+
+For object masks the middle of that sequence becomes:
+
+```text
+objects.strategy → (SAM3: objects.plan → objects.run)
+                 → (agent: objects.detect → objects.propose citing candidate_id)
+→ objects.inspect / objects.edit → human review/approval/commit
+```
+
+`TaskContext` requires `repo_id`, `episodes`, `instruction`, `provider`; include cameras and explicit `allow_media_egress` when needed. No local model profile is required for `provider="external"`. Tool schemas come from `capabilities.list`. External credentials grant read, draft and bounded local execution on allowlisted datasets only, never human approval/commit or legacy writes. "Execution" here is the isolated SAM3 worker on this machine: it stages results for review and publishes nothing, and it refuses to start when the GPU lacks the headroom it needs (`LEVI_SAM3_MIN_FREE_MIB`, default 7000 MiB) rather than dying mid-run. Accounts & connections displays the configured scope and can disconnect/reconnect external access without exposing the token; the disconnect choice persists in the workspace. SAM3 execution may be triggered by a scoped external connection, but its output is always staged for a human; `objects.strategy` reports whether this machine can run it at all. REST is versioned at `/api/levi/agent/v1`; MCP currently uses stdio, **not Streamable HTTP**. HTTP transport and UI-driven ACP agents remain later work.
 
 ## Architecture and extension contracts
 
@@ -84,6 +95,62 @@ workspace.get_context → datasets.inspect → runs.plan (provider="external")
 | Storage | `levi/agent/store.py` | Immutable directories plus one SQLite transaction for the active bundle pointer and idempotency receipt. |
 
 Legacy language/outcome/object/review writers join the bundle transaction after first activation. They require the revision originally observed by the editor; new Agent work cannot silently replace unsaved human work. Read-only snapshots do not import/migrate annotations or mutate originals.
+
+## The plan form
+
+The form offers what the dataset declares rather than asking you to type it:
+
+| Field | What it means |
+| --- | --- |
+| **Tasks** | Shown only when the dataset declares more than one. A note for the reader; the frozen scope is the episodes. |
+| **Episodes** | Click one, or drag across a run of them. Frozen at approval — it cannot grow later. |
+| **Cameras** | Only the chosen cameras are read. Subtask and object work needs at least one. |
+| **Task instructions** | What to look for and how to judge it, given to the agent with the evidence. |
+| **Task type** | Dataset review, video subtasks and events, or visible object masks. |
+| **Working mode** | *Produce annotations* — it proposes, you review. *Read only* — it may look but not propose. |
+
+Spending limits appear only for a configured model endpoint, where they cap what LEVI itself spends. On the MCP channel your agent reads through its own connection and spends its own tokens, so LEVI sets no limit; the connection's dataset scope is the consent that a model profile asks for with a checkbox.
+
+## Handing a task to an external agent
+
+Nothing starts by itself on the external MCP channel: approving a plan unlocks it, and the agent does the work in its own context. The sequence is
+
+1. Plan the task in **Tasks & review** and approve it.
+2. Tell your agent to pick up the latest run. It calls `runs.list`, which shows every run in its dataset scope and what each is waiting for — `agent_prepare` and `agent_propose` are its turn, everything else is yours.
+3. Watch it in **Live activity**: one card per task with its progress, plus the stream of what the agent is doing.
+4. Review and commit in LEVI. The completion notice carries the revision's path and a link to the result.
+
+`runs.list` reports `evidence_ready` because cleanup frees evidence that `runs.prepare` can rebuild; a run whose frames were removed says so rather than looking ready to read.
+
+## Watching an agent work
+
+Open **Agent Workbench → Live activity**. Everything an agent does passes through one dispatcher, so the panel shows every channel without a second audit path: the action in words, the dataset and episode, how long it took, and the reason when something is refused. A call that fails authorization appears too — a silent permission error is the hardest kind to diagnose.
+
+Artifacts land in the same panel. A commit, an export or a cleanup contributes its path, and clicking one copies it, which is usually the next thing a person needs.
+
+The stream is Server-Sent Events at `/api/levi/agent/v1/activity/stream`, with `/api/levi/agent/v1/activity` for the first paint. Both require the operator credential the web UI holds: an agent can act, but it cannot read the workspace's record of what every agent has been doing. Discovery and polling calls (`capabilities.list`, `runs.get`, `objects.frame`, …) are left out unless they fail, so a busy agent stays readable.
+
+### Sparse masks in the viewer
+
+Objects are annotated on sampled frames. The playback bar marks those frames and steps between them, and between them each track's last measured outline is carried forward, dashed and labelled with its source frame. A dashed outline is a measurement from another frame, never a claim about the current one; the solid, filled mask is the frame that was actually annotated.
+
+## Cost of an annotation run
+
+LEVI cannot meter an external agent's context — Codex, Claude Code or any MCP client spends its own tokens outside this process. What LEVI can do is measure the scope, price it, and remember what each agent actually spent.
+
+- `plans.estimate` prices a scope before you commit to it. It returns a range with its basis stated, never a price, and keeps a run's fixed cost separate from its per-episode and per-frame cost. With no history it uses published defaults and says so; after the first `runs.report_usage` it calibrates to that agent. Scopes far larger than anything recorded are marked as extrapolations.
+- `runs.report_usage` is how an agent closes the loop: it reports its own token use, LEVI attaches what it measured (episodes, evidence frames, whether they were read as sheets or singly) and stores the pair. Estimates for every later run improve from it. A rough figure is worth more than none.
+- Samples are grouped per agent — a mosaic-reading MCP client and a single-frame API model do not cost the same per frame — and `levi agent usage show` prints the per-agent history.
+
+The largest lever is how evidence is read. `evidence.read` with `layout: "mosaic"` returns one labelled contact sheet per page instead of one image per frame, and every tile still maps back to its evidence id, so citations survive the packing. Read coarsely, then call `evidence.refine` only around the boundaries you could not resolve.
+
+## Cleaning up
+
+`levi agent clean` previews what a cleanup would remove; `--apply` performs it after an explicit terminal confirmation. It deletes only what can be regenerated from the dataset — frozen input snapshots, evidence images and contact sheets of runs that have ended — and keeps committed revisions, their provenance and inverse patches, the evidence ledger, and the staged drafts of runs that are still open. A run nobody will finish is closed with `--abandon <run-id>` first, which refuses if that run has anything committed or approved.
+
+Reading a cleaned-up run's evidence still works: the ledger comes back with `images_removed` and a note saying the frames can be rebuilt with `runs.prepare`, which takes the snapshot again from the untouched source and refuses if that source no longer matches what the run was approved against. Evidence whose content changed still fails closed as tampering.
+
+`levi clean` is the separate, workspace-wide cleanup: regenerable caches, plus a report of artifacts and redirects left behind by datasets that are no longer registered. It requires the service to be stopped (`levi stop`).
 
 ## Readable workspace layout
 
@@ -146,7 +213,7 @@ Not yet supported: ACP-driven external sessions, Streamable HTTP MCP, multi-agen
 | AC-16 | Existing native export/carry-over regression plus shared active-bundle resolver; no new dataset format support is implied. |
 | AC-17 | UI/REST/MCP invoke the same capability service; browser smoke and SDK roundtrip are fixture tests. |
 
-The change is intentionally experimental. Passing engineering checks does not mean all acceptance requirements, real-model quality, full coverage or external-runtime support have passed.
+Passing the engineering checks does not by itself establish real-model annotation quality, full coverage or external-runtime support; those are measured separately and are listed as open in the [validation record](VALIDATION.md).
 
 
 The newer [Harness guide](HARNESS.md) specifies executable plan approval, pilot gates, temporal definitions, evidence caching, native player drafts and verified export. Earlier plans without a bound approval must be recreated.

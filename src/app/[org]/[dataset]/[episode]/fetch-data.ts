@@ -1770,7 +1770,9 @@ async function loadTaskDefinitions(
           buildVersionedUrl(repoId, normalizedVersion, path),
           {
             cache: "no-store",
-            headers: authHeaders(),
+            headers: authHeaders(
+              buildVersionedUrl(repoId, normalizedVersion, path),
+            ),
           },
         );
         if (!response.ok) continue;
@@ -2078,7 +2080,12 @@ export async function loadDatasetTaskIndex(
     } else {
       const episodesResponse = await fetch(
         buildVersionedUrl(repoId, normalizedVersion, "meta/episodes.jsonl"),
-        { headers: authHeaders(), cache: "no-store" },
+        {
+          headers: authHeaders(
+            buildVersionedUrl(repoId, normalizedVersion, "meta/episodes.jsonl"),
+          ),
+          cache: "no-store",
+        },
       );
       const episodeRows = episodesResponse.ok
         ? parseJsonlRows(await episodesResponse.text())
@@ -2189,7 +2196,12 @@ export async function loadEpisodeOutcomes(
   try {
     const response = await fetch(
       buildVersionedUrl(repoId, normalizedVersion, "meta/episodes.jsonl"),
-      { headers: authHeaders(), cache: "no-store" },
+      {
+        headers: authHeaders(
+          buildVersionedUrl(repoId, normalizedVersion, "meta/episodes.jsonl"),
+        ),
+        cache: "no-store",
+      },
     );
     if (response.ok) {
       for (const row of parseJsonlRows(await response.text())) {
@@ -2249,7 +2261,9 @@ export async function loadAllEpisodeLengthsV3(
       const response = await fetch(
         buildVersionedUrl(repoId, normalizedVersion, "meta/episodes.jsonl"),
         {
-          headers: authHeaders(),
+          headers: authHeaders(
+            buildVersionedUrl(repoId, normalizedVersion, "meta/episodes.jsonl"),
+          ),
         },
       );
       if (!response.ok) return null;

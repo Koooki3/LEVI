@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { uiToken } from "./serviceToken";
 
 /** Same-origin bridge. Runtime configuration also works after a production build. */
 export async function backendProxy(
@@ -35,8 +36,8 @@ export async function backendProxy(
     const value = request.headers.get(key);
     if (value) headers.set(key, value);
   }
-  if (process.env.LEVI_UI_TOKEN)
-    headers.set("x-levi-ui-token", process.env.LEVI_UI_TOKEN);
+  const token = uiToken();
+  if (token) headers.set("x-levi-ui-token", token);
   const revision = request.headers.get("x-levi-annotation-revision");
   if (revision) headers.set("x-levi-annotation-revision", revision);
   let body: ArrayBuffer | undefined;

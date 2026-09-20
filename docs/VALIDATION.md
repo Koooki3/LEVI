@@ -125,7 +125,7 @@ The browser script reads public datasets and writes screenshots/results to `outp
 
 ![LEVI 动作洞察](assets/insights-zh.png)
 
-Screenshot video content: [samanthalhy/so100_strawberry_2](https://huggingface.co/datasets/samanthalhy/so100_strawberry_2) and [samanthalhy/eval_so100_smol_strawberry_2](https://huggingface.co/datasets/samanthalhy/eval_so100_smol_strawberry_2), whose dataset cards declared Apache-2.0 on the validation date. LEVI interface design and modifications are described in [UPSTREAM.md](UPSTREAM.md).
+Screenshot video content: [samanthalhy/so100_strawberry_2](https://huggingface.co/datasets/samanthalhy/so100_strawberry_2) and [samanthalhy/eval_so100_smol_strawberry_2](https://huggingface.co/datasets/samanthalhy/eval_so100_smol_strawberry_2), whose dataset cards declared Apache-2.0 on the validation date. Both were removed from the Hub before 2026-09-20 and are no longer LEVI's default demonstrations; the screenshots are kept as the record of that validation run. LEVI interface design and modifications are described in [UPSTREAM.md](UPSTREAM.md).
 
 
 ## Agent Workbench — 2026-09-20 local validation

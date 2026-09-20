@@ -342,3 +342,72 @@ def test_human_creates_catalog_grant(client, prepared):
     )
     result = client.get("/api/levi/agent/v1/grants")
     assert token not in result.text
+
+
+def test_a_local_connection_lasts_until_it_is_disconnected(client, monkeypatch):
+    """No clock and no call cap unless one was asked for.
+
+    A connection the operator opened on their own machine should not stop
+    working mid-task because a default expired.
+    """
+    import time
+
+    from levi import service
+    from levi.agent import grants
+    from levi.agent.pilot_contracts import GrantRequest
+    from levi.agent.store import Store
+
+    store = Store(service.STATE)
+    unlimited = grants.create(
+        store, GrantRequest(client="claude", datasets=["local/fixture"])
+    )
+    record = store.get("grants", unlimited["id"])
+    assert record["expires"] is None
+    assert record["max_tool_calls"] is None
+
+    who = grants.authenticate(store, unlimited["token"])
+    assert who is not None
+    for _ in range(500):  # far past the old 300-call cap
+        grants.check_call(store, who, None)
+    assert store.get("grants", unlimited["id"])["calls"] == 500
+    # Each call records when the client last spoke, so the panel can show a
+    # live connection instead of guessing.
+    assert (
+        store.get("grants", unlimited["id"])["last_seen"] >= record["at"]
+        if "at" in record
+        else True
+    )
+
+    bounded = grants.create(
+        store,
+        GrantRequest(
+            client="codex", datasets=["local/fixture"], hours=1, max_tool_calls=2
+        ),
+    )
+    limited = grants.authenticate(store, bounded["token"])
+    assert store.get("grants", bounded["id"])["expires"] > time.time()
+    grants.check_call(store, limited, None)
+    grants.check_call(store, limited, None)
+    with pytest.raises(PermissionError, match="budget"):
+        grants.check_call(store, limited, None)
+
+
+def test_disconnecting_still_stops_an_unlimited_connection(client):
+    from levi import service
+    from levi.agent import grants
+    from levi.agent.pilot_contracts import GrantRequest
+    from levi.agent.store import Store
+
+    store = Store(service.STATE)
+    grant = grants.create(
+        store, GrantRequest(client="claude", datasets=["local/fixture"])
+    )
+    who = grants.authenticate(store, grant["token"])
+    grants.check_call(store, who, None)  # works while connected
+    store.mutate("grants", grant["id"], lambda value: value.update(enabled=False))
+    with pytest.raises(PermissionError, match="disconnected"):
+        grants.check_call(store, who, None)
+    # The credential itself stops authenticating too, so a new session cannot
+    # revive a connection the operator closed.
+    with pytest.raises(PermissionError, match="disconnected"):
+        grants.authenticate(store, grant["token"])

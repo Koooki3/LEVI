@@ -55,8 +55,7 @@ def _export(wb, run):
         source = app._sidecar(state)
         # Native export names are defined by the existing exporter.
         original = [
-            ObjectAnnotation.model_validate(source._from_mask_row(r))
-            for r in source.read_annotations()
+            ObjectAnnotation.model_validate(r) for r in source.read_annotations()
         ]
     candidates = list(directory.rglob("objects.parquet"))
     rows = []
@@ -72,10 +71,7 @@ def _export(wb, run):
         if not roots:
             raise ValueError("Export has no active object revision")
         exported = SidecarStore(roots[0])
-        rows = [
-            ObjectAnnotation.model_validate(exported._from_mask_row(r))
-            for r in exported.read_annotations()
-        ]
+        rows = [ObjectAnnotation.model_validate(r) for r in exported.read_annotations()]
         key = lambda r: (
             r.episode_index,
             r.camera_key,

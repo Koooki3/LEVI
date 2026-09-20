@@ -1,12 +1,13 @@
 # LEVI · Robot Data Atelier
 
-See [Codex / Claude Code Pilot](docs/PILOT.md) for headless MCP, managed sessions, human terminal approval and live tracking.
-
 **LeRobot Exploration, Validation & Integration**
 
 [![Checks](https://github.com/Koooki3/LEVI/actions/workflows/test.yml/badge.svg)](https://github.com/Koooki3/LEVI/actions/workflows/test.yml) [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) [![Version](https://img.shields.io/badge/LEVI-0.3.0-9bd654.svg)](CHANGELOG.md)
 
-[简体中文](README.zh-CN.md) · [Conversion guide](docs/CONVERSION.md) · [RECAP export](docs/RECAP.md) · [Workspace layout](.state.md) · [Features](docs/FEATURES.md) · [API](docs/API.md) · [Validation](docs/VALIDATION.md) · [Attribution](docs/UPSTREAM.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [SAM3 object annotation](docs/SAM3.md) · [Agent Workbench](docs/AGENT_WORKBENCH.md)
+[简体中文](README.zh-CN.md)
+
+**Guides** — [Conversion](docs/CONVERSION.md) · [RECAP export](docs/RECAP.md) · [Agent Workbench](docs/AGENT_WORKBENCH.md) · [Codex / Claude Pilot](docs/PILOT.md) · [SAM3 objects](docs/SAM3.md) · [Workspace layout](.state.md)
+**Reference** — [Features](docs/FEATURES.md) · [API](docs/API.md) · [Agent Harness](docs/HARNESS.md) · [Validation record](docs/VALIDATION.md) · [Attribution](docs/UPSTREAM.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 LEVI is an independent robotics dataset browser, annotation editor, converter and review workbench derived from [LeRobot Dataset Visualizer](https://github.com/huggingface/lerobot-dataset-visualizer). English is the default; Chinese is available through the language switch. **The complete capture conversion pipeline is bundled** and requires no sibling repository or training environment: it inspects an input, reports which requirements it meets and which exports it supports, and writes LeRobot v2.1 or a RECAP (π\*0.6) value dataset. Raw robot captures can be browsed and annotated before conversion; their annotations carry over into the converted dataset.
 
@@ -14,7 +15,7 @@ The interface is designed for both standalone browsers and Hugging Face Space em
 
 ![LEVI interface](docs/assets/home-en.png)
 
-Demo footage: the two `samanthalhy` datasets linked below, whose cards declare Apache-2.0. LEVI uses an original graphite, parchment and lime interface.
+Demo footage: the two public LeRobot datasets linked below. LEVI uses an original graphite, parchment and lime interface.
 
 ## Install and run
 
@@ -41,71 +42,121 @@ Linux x86_64 is tested. The installer also selects Linux/macOS ARM64 and macOS x
 uv run levi dev
 uv run levi serve --port 7870 --backend-port 7871
 uv run levi convert --help
-uv run levi clean             # preview regenerable caches
-uv run levi clean --apply     # remove the listed caches
+uv run levi stop              # stop the shared service (needed before clean)
+uv run levi clean             # preview regenerable caches and orphaned artifacts
+uv run levi clean --apply     # remove them, after confirming in the terminal
 uv run levi migrate           # preview upgrading an older workspace's names/layout
 uv run levi migrate --apply   # apply it (service stopped)
 ```
 
 For a remote server, keep `ssh -L 7860:127.0.0.1:7860 USER@SERVER` running on your computer. The frontend defaults to loopback port **7860 (Web UI)** and proxies requests to **7861 (internal API)**. Forward local 7860 to server 7860, not server 7861. If you see `{"detail":"Not Found"}` or the API landing page, check the destination port. The API root now explains the distinction and links to the configured Web UI. `uv run levi backend` starts only the API. The launcher checks port conflicts and announces Ready only after both services respond.
 
-## Agent-assisted review and annotation (experimental)
+## Agent-assisted review and annotation
 
-The **Agent Workbench** adds evidence-grounded drafts and a focused human review queue. SAM3 is an optional object tool within this workflow; source datasets remain read-only. [Full guide, MCP setup, architecture and limitations](docs/AGENT_WORKBENCH.md).
+Annotating a robot dataset is mostly looking: scrubbing video, deciding when an attempt began, whether it worked, and which object is which. LEVI lets an agent do the looking and hands you the judgement.
 
-After the normal installation, run in order:
+**An agent proposes; you approve and commit.** That boundary lives in the capability layer, not in a convention: no agent channel can approve a plan, accept a pilot, commit a changeset, reset or clean the workspace. Source datasets stay read-only. Every suggestion cites the exact frames it was read from, and the evidence ledger outlives the images themselves — a reviewer months later can still see what was looked at.
 
 ```bash
-export LEVI_WORKSPACE="$PWD/.state"
 uv sync --locked --extra agent
 uv run --extra agent levi build
 uv run --extra agent levi
 ```
 
-1. **Accounts & connections** → create a compatible model profile and declare its image capability. Use a server environment-variable key or a server-memory session key. Profiles show connection state and support select/edit/disconnect/remove; HF identity has its own switch/sign-out menu.
-2. Choose a dataset, explicit episodes/cameras, instructions and budget. Approve media egress only for the chosen endpoint, then **Inspect & create plan**.
-3. **Run pilot**, review its evidence, then **Execute remaining**. Completed shards and human edits survive resumption.
-4. For object masks, open **SAM3 · optional object tool**: plan a bounded scope, explicitly run the configured worker, review overlays and accept/reject tracks. The Agent tool needs an existing checkpoint and does not download one.
-5. Filter pending suggestions or issues; use J/K, accept/reject one or a batch, and edit text/time bounds. Save draft edits before recording decisions. Evidence following preserves the current editor.
-6. **Validate & approve** → **Commit approved changes**. Unknown outcomes are not converted into human labels; rejected suggestions are excluded. Version conflicts require a fresh review. **Create undo draft** also requires approval.
-7. Resume interrupted tasks after restoring credentials, or review the completed subset. Export from the existing dataset controls; native export includes annotations/provenance, while raw-capture conversion carries them using source-frame mappings.
+### Three ways to drive it
 
-Artifacts live under `outputs/LEVI/workbench/agent/datasets/<dataset-name>/` relative to `LEVI_WORKSPACE`, with readable timestamp runs/revisions. No hash suffixes are used for LEVI artifact names. External MCP Agents can prepare evidence and draft suggestions, but cannot approve or commit. ACP-driven external sessions and HTTP MCP are deferred. Automated validation uses fixture models only; real-model quality and SAM3 GPU inference remain separate manual checks.
+They differ in one thing that matters: who spends the tokens.
 
-## SAM3 first-deployment sequence
+| Channel | Where the model runs | Who pays | Set up with |
+| --- | --- | --- | --- |
+| **Online** | inside LEVI, against an endpoint you configure | you, at that endpoint — LEVI meters it and records the cost itself | **Accounts & connections** → model profile |
+| **External MCP** | in your own agent (Claude Code, Codex, any MCP client) | your agent's own context; it reports what it spent | `levi agent connect` |
+| **Managed Pilot** | in a Codex or Claude Code session LEVI supervises | that session | [Pilot guide](docs/PILOT.md) |
 
-Run these commands from the cloned LEVI root. The checkout name and workspace path are unrestricted:
+The external MCP channel is the one most people use, so the walkthrough below follows it.
 
-~~~bash
-# 1) Select a workspace and install the core
-export LEVI_WORKSPACE="$PWD/.state"
-cp .env.example .env
-uv sync --locked
-uv run levi setup
+```text
+        you                          LEVI                        your agent
+         │                             │                              │
+  ① plan ├───── episodes, cameras ────▶│                              │
+         │      task type, definitions │                              │
+  ② approve ───── freeze scope ───────▶│   (nothing starts yet)       │
+         │                             │◀── runs.list ────────────────┤ ③ picks it up
+         │                             │─── agent_prepare ───────────▶│
+         │                             │◀── evidence.read (mosaic) ───┤
+         │                             │◀── propose ──────────────────┤
+  ④ watch ◀──── live activity ─────────┤                              │
+  ⑤ review ──── accept / reject ──────▶│                              │
+     commit ───────────────────────────▶ revision + artifact path
+```
 
-# 2) Sign in to an account that can read 1038lab/sam3
-HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" hf auth login
-HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" hf auth whoami
-# Without a global hf command:
-# HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" uvx hf auth login
-# HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" uvx hf auth whoami
+### A task, end to end
 
-# 3) Install the isolated worker on the CUDA host
-uv venv --python 3.12 integrations/sam3/.venv
-uv sync --project integrations/sam3
-export LEVI_SAM3_WORKER_PYTHON="$PWD/integrations/sam3/.venv/bin/python"
-export LEVI_SAM3_ENABLED=1
+**1 — Plan it.** Open **Agent Workbench → Tasks & review**. The form offers what the dataset actually declares: click an episode or drag across a run of them, pick cameras from the list, and choose a task type — dataset review, video subtasks and events, or visible object masks. For subtask work you also write what a subtask *is*: when it starts, when it ends, and what counts as success. Those definitions are the contract the agent annotates against.
 
-# 4) Run model-free configuration checks
-uv run --project integrations/sam3 levi-sam3-worker --check
-uv run levi sam3 check
+**2 — Approve it.** Approval freezes the scope: the episodes, the cameras, the instructions, the definitions and a digest of the source files. Nothing widens later. Approving does not publish anything, and on the MCP channel it does not start anything either — it unlocks the run.
 
-# 5) Build and start the web workbench
-uv run levi build
-uv run levi serve
-~~~
+**3 — Hand it over.** Tell your agent to pick up the latest run. It calls `runs.list`, which shows every run in its dataset scope and whose turn each one is:
 
-After Ready appears, open http://127.0.0.1:7860. On any dataset annotation page, complete the Hub access, CUDA worker and checkpoint gates. After sign-in, a missing checkpoint shows an explicit download prompt, workspace path, progress bar and Download checkpoint button; click it and wait for Checkpoint ready before choosing prompts, scope and cameras and starting annotation. The download uses the active Hugging Face session, saves sam3.pt to $LEVI_WORKSPACE/checkpoints/sam3 and can be retried after an error; later datasets reuse the workspace copy. LEVI validates the model-neutral plan before starting the worker. Changing the Hugging Face account or workspace creates separate Hub snapshots and sidecars using account and workspace scopes. Set LEVI_SAM3_ENABLED=0 only when you want to hide the real worker. Never commit tokens, checkpoints or workspace data.
+```
+human_approval → agent_prepare → agent_propose → human_review → human_commit
+```
+
+No run id to copy across. `workspace.get_context` gives a first-time agent the rest in one call: what it may do, what only you may do, the order to work in, and the habit that decides what the job costs.
+
+**4 — Watch it.** **Live activity** streams every action as it happens — what the agent did, to which dataset and episode, how long it took, and the reason when something is refused. Each run also appears as a task card with its progress and what it is waiting for; clicking one filters the stream to that task.
+
+**5 — Review and commit.** The queue shows each suggestion with the frames it cites. Accept, reject or edit; unknown outcomes are never quietly turned into labels. When you commit, the completion notice carries the revision's path and a link to the result.
+
+### What makes the annotations trustworthy
+
+- **Every claim cites frames.** A suggestion that references evidence outside its episode is refused by name, not with a generic error.
+- **Uncertainty is first class.** "Sampled every 2 s, so the individual attempts cannot be separated" is a valid, recorded answer. Coverage gaps are reported rather than papered over.
+- **The frozen snapshot is verified.** If the source moves under an approved plan, the run stops instead of annotating different data.
+- **Nothing is published by an agent.** Committed revisions carry provenance and an inverse patch, so any commit can be undone through the same review path.
+
+### Cost, measured rather than guessed
+
+Evidence is what a task costs. `evidence.read` can return one labelled contact sheet per page instead of one image per frame, and `evidence.refine` adds frames only around boundaries the agent could not resolve. On one real run those two habits were the difference between roughly 43,000 and 130,000 tokens for ten episodes.
+
+```bash
+uv run levi agent usage show                            # per-agent history
+uv run levi agent usage estimate --workflow temporal --episodes 20
+```
+
+`plans.estimate` prices a scope before you commit to it and states its basis, its sample count, and whether it is extrapolating beyond anything recorded. An online run needs no self-report — LEVI meters it and records the sample itself; an external agent reports its own, and the next estimate improves.
+
+### Objects, with or without SAM3
+
+`objects.strategy` reads this machine — worker, checkpoint, free GPU memory — and recommends a path. When SAM3 cannot run, `objects.detect` measures candidate regions with no model and no GPU, returning each one's outline, position, shape and median colour plus a labelled overlay; the agent names the ones that are objects and submits them by `candidate_id`. Both paths end in the same staged review.
+
+Masks are annotated on sampled frames, so the playback bar marks the frames that carry one and steps between them; between those frames a track's last measured outline is carried forward, dashed and labelled with the frame it came from — visible continuity without claiming a position nobody measured.
+
+### Where the work lands
+
+Under `outputs/LEVI/workbench/agent/datasets/<dataset-name>/` relative to `LEVI_WORKSPACE`: one directory per dataset, and inside it runs and revisions named for the work and the minute — `temporal-20260920T0926`, `objects-20260920T0940`. Never a hash, never an opaque suffix.
+
+```bash
+uv run levi agent clean                    # free what runs.prepare can rebuild
+uv run levi agent clean --abandon <run-id> # close a run nobody will finish
+uv run levi agent reset --dataset <name>   # remove a dataset's agent history
+```
+
+`clean` frees input snapshots, evidence images and contact sheets of finished runs and keeps committed revisions, provenance, inverse patches, the evidence ledger and open drafts. `reset` is the deliberate counterpart: it removes the record of the work itself for one dataset, and never touches another dataset, your connections, or annotations no agent produced. Both preview first and ask before applying.
+
+### Known limits
+
+ACP-driven external sessions and HTTP MCP are deferred. Automated validation uses fixture and stub models: real-model annotation quality and SAM3 GPU inference are measured separately and are listed as open in the [validation record](docs/VALIDATION.md). Identity across frames cannot be recovered from outlines sampled seconds apart — LEVI says so rather than inventing tracks.
+
+## SAM3 objects (optional)
+
+SAM3 adds model-assisted object masks inside the annotation tab. It is optional: LEVI never downloads a checkpoint by itself, and the CPU checks never import Torch or probe CUDA. It needs an isolated Python 3.12 worker on a CUDA host, a Hugging Face account that can read `1038lab/sam3`, and about 7 GB of free GPU memory. When the GPU is busy or the worker is missing, an agent can outline the objects itself through the same review queue.
+
+```bash
+uv run levi sam3 check      # configuration only; no model, no CUDA
+```
+
+The complete first-deployment sequence, gates, prompts and review flow are in the [SAM3 guide](docs/SAM3.md).
 
 ## Portable workspace
 
@@ -142,16 +193,14 @@ Names never carry hash suffixes: per-dataset artifacts (annotations, reviews, di
 
 Video-based LeRobot v2.0/v2.1/v3.0/v3.1 can be browsed. Embedded-image Parquet playback retains the upstream limitation. Original dataset text and feature/joint identifiers remain unchanged.
 
-### SAM3 object annotation (global)
+### Default live demonstrations
 
-The annotation tab provides the same SAM3 object/track sidecar for built-in demos, Hub datasets and registered local datasets. The UI checks Hub access, the CUDA worker and the checkpoint first, then builds and validates a plan across an episode range, task selection or the full dataset and selected cameras. Each episode/camera pair is processed independently; model suggestions are stored as lossless RLE sidecar data and native LeRobot files stay read-only. The page shows the current Hugging Face account, worker state, checkpoint download progress and workspace path, and exposes track-level frame ranges with accept/reject review. The default model is sam3.pt from 1038lab/sam3. Real jobs need the isolated Python 3.12 uv worker on a CUDA host; core CPU checks never import Torch, probe CUDA, download a model or run inference. See the SAM3 guide for the complete sequence.
+Public LeRobot datasets, streamed rather than bundled:
 
-Default live demonstrations:
+- [lerobot/svla_so101_pickplace](https://huggingface.co/datasets/lerobot/svla_so101_pickplace) — SO-101 pick and place, 50 episodes, 11,939 frames, 30 fps, two 640×480 cameras.
+- [lerobot/aloha_static_coffee](https://huggingface.co/datasets/lerobot/aloha_static_coffee) — bimanual ALOHA, 50 episodes, 55,000 frames, 50 fps, four 640×480 cameras.
 
-- [samanthalhy/so100_strawberry_2](https://huggingface.co/datasets/samanthalhy/so100_strawberry_2)
-- [samanthalhy/eval_so100_smol_strawberry_2](https://huggingface.co/datasets/samanthalhy/eval_so100_smol_strawberry_2)
-
-The evaluation collection has 10 episodes, 32,033 frames, 30 FPS and three 640×480 cameras. Videos are streamed, not bundled.
+Both are LeRobot v3.0. A demo that is later made private or removed upstream answers 401 to an anonymous request, which the viewer reports as such rather than as a LEVI permission error.
 
 ## Built-in conversion
 
@@ -218,7 +267,7 @@ uv run python scripts/verify_browser.py
 uv run python scripts/verify_conversion.py
 ```
 
-Before publishing, preview `uv run levi clean`, then apply with `--apply`. It removes LEVI's regenerable caches and preserves datasets, annotations, review/job reports, `.env`, dependencies and production output. Avoid `git clean -xfd` against a data workspace.
+Before publishing, stop the service with `uv run levi stop`, preview `uv run levi clean`, then apply with `--apply`. It removes LEVI's regenerable caches and preserves datasets, annotations, review/job reports, `.env`, dependencies and production output. It also reports artifacts left behind by datasets that are no longer registered — empty directories are removed, anything holding review work is only listed, because a dataset leaving the catalog must not delete someone's annotations. Avoid `git clean -xfd` against a data workspace.
 
 Repository: [Koooki3/LEVI](https://github.com/Koooki3/LEVI). Report reproducible problems and suggestions in [Issues](https://github.com/Koooki3/LEVI/issues). Read [CONTRIBUTING](CONTRIBUTING.md) before submitting changes and [RELEASING](docs/RELEASING.md) for the maintainer release procedure.
 

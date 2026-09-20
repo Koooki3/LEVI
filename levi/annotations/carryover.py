@@ -160,8 +160,7 @@ def _carry_over(
             ].items()
             if f.get("dtype") == "video"
         }
-        for raw in store.read_annotations(revision):
-            row = SidecarStore._from_mask_row(raw)
+        for row in store.read_annotations(revision):
             ep = row["episode_index"]
             if ep not in pairs or row["camera_key"] not in cameras:
                 report["sam3"]["dropped_frames"] += 1
@@ -251,15 +250,23 @@ def _rekey_view(name: str, old_view: Path, new_view: Path) -> dict:
     return {"moved": moved, "orphaned": orphaned}
 
 
-def carry_over(source_name: str, source_root: Path, output: Path, output_name: str) -> dict:
+def carry_over(
+    source_name: str, source_root: Path, output: Path, output_name: str
+) -> dict:
     from levi.agent.legacy import transaction
     from levi.agent.store import Store, dataset_lock
+
     store = Store(catalog.STATE)
-    with dataset_lock(catalog.STATE, output_name), transaction(catalog.STATE, source_name, read_only=True), transaction(catalog.STATE, output_name, expected=store.head(output_name)):
+    with (
+        dataset_lock(catalog.STATE, output_name),
+        transaction(catalog.STATE, source_name, read_only=True),
+        transaction(catalog.STATE, output_name, expected=store.head(output_name)),
+    ):
         result = _carry_over(source_name, source_root, output, output_name)
         source = store.bundle(source_name) / "agent-provenance.json"
         if source.exists():
             import shutil
+
             shutil.copyfile(source, output / "meta/levi_agent_provenance.json")
         return result
 
@@ -267,6 +274,10 @@ def carry_over(source_name: str, source_root: Path, output: Path, output_name: s
 def rekey_view(name: str, old_view: Path, new_view: Path) -> dict:
     from levi.agent.legacy import transaction
     from levi.agent.store import Store, dataset_lock
+
     store = Store(catalog.STATE)
-    with dataset_lock(catalog.STATE, name), transaction(catalog.STATE, name, expected=store.head(name)):
+    with (
+        dataset_lock(catalog.STATE, name),
+        transaction(catalog.STATE, name, expected=store.head(name)),
+    ):
         return _rekey_view(name, old_view, new_view)

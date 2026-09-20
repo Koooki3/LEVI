@@ -110,6 +110,11 @@ def main():
 
         sys.argv.pop(1)
         return sam3()
+    if len(sys.argv) > 1 and sys.argv[1] == "stop":
+        from .agent.core import stop
+
+        print(json.dumps(stop(), ensure_ascii=False))
+        return 0
     if len(sys.argv) > 1 and sys.argv[1] == "clean":
         from .maintenance import main as clean
 
@@ -125,7 +130,17 @@ def main():
 
         sys.argv.pop(1)
         return convert()
-    parser = argparse.ArgumentParser(description="LEVI · LeRobot dataset workbench")
+    parser = argparse.ArgumentParser(
+        description="LEVI · LeRobot dataset workbench",
+        # These are dispatched before parsing, so argparse cannot list them and
+        # someone reading --help would not know they exist.
+        epilog=(
+            "Also available: stop (stop the shared service), clean (bounded "
+            "cache cleanup), migrate, convert, agent, sam3. Each takes its own "
+            "--help."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "command",
         choices=["setup", "dev", "serve", "build", "backend", "check"],
@@ -168,6 +183,9 @@ def main():
         os.environ["LEVI_FRONTEND_URL"] = ui_url
         core = ensure(args.backend_port)
         args.backend_port = core["port"]
+        # The token itself, and where it lives: the frontend re-reads the file
+        # so a Core restart does not strand it with a stale credential.
+        os.environ["LEVI_CORE_DIR"] = str(directory())
         os.environ["LEVI_UI_TOKEN"] = (directory() / "human.key").read_text()
         os.environ["LEVI_FRONTEND_URL"] = ui_url
     bun = str(bun_path()) if bun_path().exists() else shutil.which("bun")

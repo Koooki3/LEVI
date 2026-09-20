@@ -139,7 +139,9 @@ def test_sidecar_publish_partitions_multi_episode_multi_camera_batch(tmp_path: P
 def test_prompt_presets_save_list_and_delete(tmp_path: Path, monkeypatch):
     import backend.app as backend_app
 
-    monkeypatch.setattr(backend_app, "_SAM3_PROMPT_PRESETS_PATH", tmp_path / "presets.json")
+    monkeypatch.setattr(
+        backend_app, "_SAM3_PROMPT_PRESETS_PATH", tmp_path / "presets.json"
+    )
 
     def body(response):
         return json.loads(response.body)
@@ -173,7 +175,9 @@ def test_prompt_presets_reject_empty_name_or_prompts(tmp_path: Path, monkeypatch
 
     import backend.app as backend_app
 
-    monkeypatch.setattr(backend_app, "_SAM3_PROMPT_PRESETS_PATH", tmp_path / "presets.json")
+    monkeypatch.setattr(
+        backend_app, "_SAM3_PROMPT_PRESETS_PATH", tmp_path / "presets.json"
+    )
 
     with pytest.raises(HTTPException):
         backend_app.sam3_save_prompt_preset(
@@ -325,7 +329,9 @@ def test_checkpoint_download_uses_browser_token_and_workspace_path(
     assert "hf-browser-test" not in status.text
 
 
-def test_real_sam3_run_requires_explicit_checkpoint_download(client, dataset, monkeypatch):
+def test_real_sam3_run_requires_explicit_checkpoint_download(
+    client, dataset, monkeypatch
+):
     import backend.app as annotations
 
     monkeypatch.delenv("LEVI_SAM3_CHECKPOINT_DIR", raising=False)
@@ -476,7 +482,10 @@ def test_v3_worker_uses_episode_local_frame_window(tmp_path):
     rows = _run_episode_camera(
         predictor,
         tmp_path,
-        {"fps": 30, "video_path": "videos/chunk-{video_chunk_index:03d}/{video_key}/file-{video_file_index:03d}.mp4"},
+        {
+            "fps": 30,
+            "video_path": "videos/chunk-{video_chunk_index:03d}/{video_key}/file-{video_file_index:03d}.mp4",
+        },
         plan={"prompts": ["cup"], "start_frame": 1, "max_frames": None},
         episode_index=7,
         camera_key="observation.images.front",
@@ -539,3 +548,47 @@ def test_plan_rejects_unknown_episode(client, dataset):
         },
     )
     assert response.status_code == 400
+
+
+def test_stored_rows_are_read_back_as_annotations(tmp_path: Path):
+    """The parquet layout must not reach a reader.
+
+    Masks are stored as flat ``rle_size``/``rle_counts`` columns because that
+    is what parquet holds well, but every reader -- including the endpoint the
+    viewer calls -- wants ``mask_rle``. Serving the raw columns left the
+    overlay with no mask and threw on ``mask_rle.size``.
+    """
+    store = SidecarStore(tmp_path / "annotations", identity={"repo_id": "demo/a"})
+    original = make_annotation(0)
+    store.publish([original])
+
+    for row in (store.read_episode(0)[0], store.read_annotations()[0]):
+        assert "mask_rle" in row, "reader leaked the storage columns"
+        assert row["mask_rle"]["size"] == original.image_size
+        assert row["mask_rle"]["counts"] == original.mask_rle["counts"]
+        assert "rle_size" not in row and "rle_counts" not in row
+        # Round-trips through the model the rest of LEVI shares.
+        assert ObjectAnnotation.model_validate(row).mask_rle == original.mask_rle
+
+
+def test_episode_objects_endpoint_serves_drawable_masks(tmp_path, client, monkeypatch):
+    """What the browser receives must be what the overlay can draw."""
+    import types
+
+    from backend import app
+
+    store = SidecarStore(tmp_path / "sidecar", identity={"repo_id": "demo/a"})
+    store.publish([make_annotation(0)])
+    monkeypatch.setattr(app, "_sidecar", lambda state: store)
+    monkeypatch.setattr(
+        app,
+        "_ensure_state",
+        lambda ref: types.SimpleNamespace(display_slug="demo__a", root=tmp_path),
+    )
+
+    payload = client.get(
+        "/annotations/api/sam3/episodes/0/objects", params={"repo_id": "demo/a"}
+    ).json()
+    served = payload["objects"][0]
+    assert served["mask_rle"]["size"] and served["mask_rle"]["counts"]
+    assert "rle_size" not in served and "rle_counts" not in served

@@ -6,6 +6,10 @@ type Profile = {
   id: string;
   installed: boolean;
   version: string;
+  adapter_installed?: boolean;
+  adapter_version?: string;
+  cli_installed?: boolean;
+  cli_version?: string | null;
   authentication: string;
   login_command: string;
   logout_command: string;
@@ -53,12 +57,26 @@ export default function AgentRuntimeConnections() {
       <button onClick={() => void refresh()}>{t("Refresh status")}</button>
       {profiles.map((p) => (
         <article key={p.id}>
-          <h4>
-            {p.id} · {p.version}
-          </h4>
+          <h4>{p.id}</h4>
           <p>
-            {t(p.installed ? "Adapter installed" : "Adapter not installed")} ·{" "}
-            {t("Login status")}: {t(p.authentication)}
+            {t("This machine")}:{" "}
+            {p.cli_installed
+              ? p.cli_version
+              : t("command not found on the service's PATH")}
+          </p>
+          <p>
+            {t("LEVI adapter")}:{" "}
+            {t(
+              (p.adapter_installed ?? p.installed)
+                ? "installed"
+                : "not installed",
+            )}{" "}
+            · {t("pinned")} {p.adapter_version ?? p.version}
+          </p>
+          <p className="levi-agent-muted">
+            {t(
+              "Login is checked by the official client, not by LEVI, so it is not reported here.",
+            )}
           </p>
           <p>
             {t("Official login / switch account")}:{" "}

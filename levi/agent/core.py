@@ -55,10 +55,26 @@ def request(path, payload=None, *, token=None, human=False, binary=False):
         if len(data) > 16 * 1024 * 1024:
             raise ValueError("Response exceeds 16 MiB; use bounded evidence pages")
         if response.status >= 400:
-            raise ValueError(json.loads(data).get("detail", "LEVI request failed"))
-        return data if binary else json.loads(data)
+            raise ValueError(_detail(response.status, path, data))
+        if binary:
+            return data
+        try:
+            return json.loads(data)
+        except json.JSONDecodeError:
+            raise ValueError(_detail(response.status, path, data)) from None
     finally:
         conn.close()
+
+
+def _detail(status, path, data):
+    """A readable failure: an empty or non-JSON body is still an answer."""
+    try:
+        return json.loads(data).get("detail", "LEVI request failed")
+    except (json.JSONDecodeError, AttributeError):
+        text = data.decode("utf-8", "replace").strip()
+        if not text:
+            text = "empty response body"
+        return f"{path} returned HTTP {status}: {text[:400]}"
 
 
 def status():

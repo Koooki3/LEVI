@@ -55,12 +55,14 @@ Replace `HEAD` with the exact release tag or commit when auditing a distribution
 
 ## External material
 
-The two default strawberry datasets are owned by `samanthalhy`. Their Hub cards declared `apache-2.0` when checked on 2026-09-10. Links:
+The default demonstration datasets are public LeRobot datasets, checked reachable on 2026-09-20:
 
-- https://huggingface.co/datasets/samanthalhy/so100_strawberry_2
-- https://huggingface.co/datasets/samanthalhy/eval_so100_smol_strawberry_2
+- https://huggingface.co/datasets/lerobot/svla_so101_pickplace
+- https://huggingface.co/datasets/lerobot/aloha_static_coffee
 
-Videos are streamed rather than bundled. Any LEVI screenshots showing those datasets should credit these sources. External robot URDFs/meshes are loaded from the upstream `lerobot/robot-urdfs` bucket; their own source licenses apply. The HF login badge and brand marks remain their owners' marks. The external `lerobot-doctor` app is linked, not vendored or relicensed.
+They replace the two `samanthalhy` strawberry datasets, which were the defaults until 2026-09-20 and have since been removed from the Hub. Existing screenshots still show that footage and continue to credit `samanthalhy`, whose cards declared `apache-2.0` when checked on 2026-09-10.
+
+Videos are streamed rather than bundled. Any LEVI screenshots showing a dataset should credit its source. External robot URDFs/meshes are loaded from the upstream `lerobot/robot-urdfs` bucket; their own source licenses apply. The HF login badge and brand marks remain their owners' marks. The external `lerobot-doctor` app is linked, not vendored or relicensed.
 
 The built-in `levi/conversion/` module reimplements the capture workflow requested by the project owner. It replaces the former external-script adapter. No private task mappings, collector deployments, datasets or credentials are distributed. Hardware-specific collection helpers are not runtime dependencies. See [conversion guide](CONVERSION.md) and [audit](AUDIT.md).
 

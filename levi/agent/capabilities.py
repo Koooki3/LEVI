@@ -18,6 +18,12 @@ class RunRef(Contract):
     run_id: str
 
 
+class RunList(Contract):
+    repo_id: str | None = None
+    include_finished: bool = False
+    limit: int = Field(default=25, ge=1, le=200)
+
+
 class PlanApproval(RunRef):
     revision: int = Field(ge=1)
 
@@ -66,6 +72,84 @@ class Recall(RunRef):
     episode: int = Field(ge=0)
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=8, ge=1, le=32)
+    # "mosaic" returns one labelled contact sheet of this page instead of one
+    # image per frame: the same evidence, an order of magnitude fewer tokens.
+    layout: str = Field(default="single", pattern="^(single|mosaic)$")
+    tile_width: int = Field(default=320, ge=96, le=640)
+
+
+class AgentObject(Contract):
+    evidence_id: str
+    concept: str = Field(min_length=1, max_length=120)
+    # Either name a candidate from objects.detect -- a dozen tokens -- or send
+    # the outline directly.
+    candidate_id: str | None = None
+    bbox_xyxy: list[float] = Field(default_factory=list, max_length=4)
+    polygon: list[list[float]] = Field(default_factory=list, max_length=200)
+    category: str | None = None
+    score: float = Field(default=0.6, ge=0, le=1)
+    track_id: int | None = Field(default=None, ge=0)
+    object_id: str | None = None
+    visible: bool = True
+    occluded: bool = False
+
+
+class Detect(RunRef):
+    evidence_ids: list[str] = Field(min_length=1, max_length=8)
+    max_candidates: int = Field(default=12, ge=1, le=40)
+    min_area_fraction: float = Field(default=0.002, gt=0, le=0.5)
+    colours: int = Field(default=6, ge=2, le=12)
+    overlay: bool = True
+
+
+class ProposeObjects(RunRef):
+    objects: list[AgentObject] = Field(min_length=1, max_length=400)
+    inspected_episodes: list[int] = Field(min_length=1)
+    # "agent" keeps the object_ids as sent; "overlap" lets LEVI link the same
+    # object across annotated frames, which is what frame-by-frame outlining
+    # cannot do for itself.
+    track_by: Literal["agent", "overlap"] = "agent"
+
+
+class UsageReport(RunRef):
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    tokens: int | None = Field(default=None, ge=0)
+    requests: int | None = Field(default=None, ge=0)
+    seconds: float | None = Field(default=None, ge=0)
+    model: str | None = None
+    note: str = Field(default="", max_length=2000)
+
+
+class Abandon(RunRef):
+    reason: str = Field(default="", max_length=500)
+
+
+class Reset(Contract):
+    dataset: str
+    apply: bool = False
+
+
+class Cleanup(Contract):
+    dataset: str | None = None
+    older_than_days: int = Field(default=0, ge=0, le=3650)
+    include_open_runs: bool = False
+    apply: bool = False
+
+
+class Estimate(Contract):
+    run_id: str | None = None
+    workflow: str | None = None
+    episodes: int = Field(default=1, ge=1, le=10000)
+    evidence_frames: int | None = Field(default=None, ge=1, le=100000)
+    reads: Literal["mosaic", "single"] | None = None
+    agent_key: str | None = None
+
+
+class Refine(RunRef):
+    episode: int = Field(ge=0)
+    around_seconds: list[float] = Field(min_length=1, max_length=8)
+    cameras: list[str] = Field(default_factory=list, max_length=8)
 
 
 class ObjectJob(Contract):
@@ -124,7 +208,37 @@ SPECS = {
     "evidence.read": (
         Recall,
         "read",
-        "Read a bounded page of exact evidence; images resolve via authenticated artifacts",
+        "Read a bounded page of exact evidence; layout='mosaic' returns one labelled sheet instead of one image per frame",
+    ),
+    "evidence.refine": (
+        Refine,
+        "draft",
+        "Add bounded extra frames around candidate boundaries, within the approved window and frame cap",
+    ),
+    "runs.report_usage": (
+        UsageReport,
+        "draft",
+        "Report this agent's own token/request use for the run; feeds cost estimates",
+    ),
+    "runs.abandon": (
+        Abandon,
+        "approve",
+        "Close a run nobody will finish, so its evidence can be cleaned up",
+    ),
+    "workspace.reset": (
+        Reset,
+        "approve",
+        "Remove one dataset's agent history: runs, records and published revisions",
+    ),
+    "workspace.clean": (
+        Cleanup,
+        "approve",
+        "Remove regenerable run snapshots and evidence; keeps committed revisions",
+    ),
+    "plans.estimate": (
+        Estimate,
+        "read",
+        "Estimate the agent tokens a scope will cost, from recorded runs of this agent",
     ),
     "runs.quality": (
         RunRef,
@@ -183,6 +297,21 @@ SPECS = {
         "Check configured worker/checkpoint without probing CUDA",
     ),
     "objects.plan": (ObjectRequest, "draft", "Plan SAM3 against the frozen snapshot"),
+    "objects.strategy": (
+        RunRef,
+        "read",
+        "Recommend SAM3 or agent-authored object annotation for this machine and scope",
+    ),
+    "objects.detect": (
+        Detect,
+        "read",
+        "Measure candidate object regions in evidence frames; no model, no GPU",
+    ),
+    "objects.propose": (
+        ProposeObjects,
+        "draft",
+        "Stage agent-authored object outlines for the same human review as worker output",
+    ),
     "objects.run": (
         ObjectJob,
         "execute",
@@ -202,6 +331,11 @@ SPECS = {
     ),
     "runs.plan": (TaskContext, "draft", "Persist an immutable run plan; no model call"),
     "runs.get": (RunRef, "read", "Read a durable run"),
+    "runs.list": (
+        RunList,
+        "read",
+        "List runs in scope and what each one is waiting for",
+    ),
     "runs.events": (Events, "read", "Replay sequenced run events"),
     "runs.execute": (
         Start,
@@ -246,6 +380,11 @@ SPECS = {
         "Validate source, evidence, range and annotation revision",
     ),
     "changes.approve": (Review, "approve", "Human approval of an exact draft revision"),
+    "changes.rebase": (
+        Review,
+        "approve",
+        "Move a staged draft onto the current published revision; clears approval",
+    ),
     "changes.commit": (
         Review,
         "commit",
@@ -291,7 +430,7 @@ def _invoke(
     elif hasattr(args, "changeset_id"):
         change = store.get("changes", args.changeset_id)
         run = store.get("runs", change["run_id"])
-    elif hasattr(args, "run_id"):
+    elif getattr(args, "run_id", None):
         run = store.get("runs", args.run_id)
     repo = (
         args.repo_id
@@ -332,7 +471,124 @@ def _invoke(
     if name == "evidence.read":
         from .observations import recall
 
-        return recall(workbench, run, args.episode, args.offset, args.limit)
+        return recall(
+            workbench,
+            run,
+            args.episode,
+            args.offset,
+            args.limit,
+            args.layout,
+            args.tile_width,
+        )
+    if name == "evidence.refine":
+        from .observations import refine
+
+        return refine(workbench, run, args.episode, args.around_seconds, args.cameras)
+    if name == "runs.report_usage":
+        from .usage import record
+
+        sample = record(store, run, args.model_dump())
+        store.event(run["id"], "usage_reported", tokens=sample.get("tokens"))
+        return sample
+    if name == "runs.list":
+        from .tracking import waiting_for
+
+        rows = []
+        # Newest first by creation time; the store's order is not chronological.
+        for record in sorted(
+            store.list("runs"),
+            key=lambda item: item.get("created_at", 0),
+            reverse=True,
+        ):
+            dataset = record["context"]["repo_id"]
+            if args.repo_id and dataset != args.repo_id:
+                continue
+            if not principal.human and dataset not in principal.datasets:
+                continue
+            state = waiting_for(store, record)
+            if state["finished"] and not args.include_finished:
+                continue
+            rows.append(
+                {
+                    "run_id": record["id"],
+                    "dataset": dataset,
+                    "workflow": record["context"]["workflow"]["kind"],
+                    "episodes": record["context"]["episodes"],
+                    "cameras": record["context"]["cameras"],
+                    "instruction": record["context"]["instruction"],
+                    "provider": record["provider_config"]["name"],
+                    "status": record["status"],
+                    "created_at": record["created_at"],
+                    "completed": record["completed"],
+                    **state,
+                }
+            )
+            if len(rows) >= args.limit:
+                break
+        return {
+            "runs": rows,
+            "reading": (
+                "waiting_for says whose turn it is. An agent acts on "
+                "agent_prepare and agent_propose; everything else needs a "
+                "human in LEVI. evidence_ready false means runs.prepare has "
+                "to rebuild the frames before they can be read."
+            ),
+        }
+    if name == "runs.abandon":
+        if run["changes"]:
+            change = store.get("changes", run["changes"])
+            if change["status"] == "committed":
+                raise Conflict("This run is committed; it cannot be abandoned")
+            if change["status"] != "draft" or change.get("approval"):
+                raise Conflict(
+                    "Reject or commit the staged changes before abandoning the run"
+                )
+        store.mutate(
+            "runs",
+            args.run_id,
+            lambda record: record.update(
+                status="cancelled",
+                reason=args.reason or "Abandoned from the human terminal",
+            ),
+        )
+        store.event(args.run_id, "run_abandoned", reason=args.reason)
+        return {
+            "run_id": args.run_id,
+            "status": "cancelled",
+            "note": "Staged drafts are kept; workspace.clean can now free its evidence",
+        }
+    if name == "workspace.reset":
+        from .housekeeping import reset as reset_dataset
+
+        return reset_dataset(
+            store, workbench.store.run_dir, args.dataset, apply=args.apply
+        )
+    if name == "workspace.clean":
+        from .housekeeping import apply as clean_apply
+        from .housekeeping import plan as clean_plan
+
+        action = clean_apply if args.apply else clean_plan
+        return action(
+            store,
+            workbench.store.run_dir,
+            dataset=args.dataset,
+            older_than_days=args.older_than_days,
+            include_drafts=args.include_open_runs,
+        )
+    if name == "plans.estimate":
+        from .usage import estimate
+
+        target = store.get("runs", args.run_id) if args.run_id else None
+        return estimate(
+            store,
+            target,
+            key=args.agent_key,
+            workflow=args.workflow,
+            episodes=args.episodes,
+            frames=args.evidence_frames,
+            reads=args.reads,
+            principal=principal,
+        )
     if name == "runs.quality":
         reports = []
         for ep in run["completed"]:
@@ -406,7 +662,7 @@ def _invoke(
             "episodes": run["context"]["episodes"],
             "cameras": run["context"]["cameras"],
         }
-    if name.startswith("annotations.propose_"):
+    if name in {"annotations.propose_segments", "annotations.propose_events"}:
         if run["status"] in {"running", "queued", "succeeded", "cancelled"}:
             raise Conflict("Stop execution before staging suggestions")
         if set(args.inspected_episodes) & set(run["completed"]):
@@ -475,6 +731,34 @@ def _invoke(
         from .objects import readiness
 
         return readiness()
+    if name == "objects.strategy":
+        from .objects import readiness
+
+        state = readiness()
+        frames = sum(
+            len(store.get("evidence", f"{run['id']}:{ep}")["items"])
+            for ep in sorted(set(run.get("prepared", []) + run.get("completed", [])))
+        )
+        return {
+            **state["strategy"],
+            "readiness": {k: v for k, v in state.items() if k != "strategy"},
+            "prepared_evidence_frames": frames,
+            "note": "Advisory: both paths stage suggestions for the same human review",
+        }
+    if name == "objects.detect":
+        from .objects import detect
+
+        return detect(workbench, run, args)
+    if name == "objects.propose":
+        from .objects import propose
+
+        return propose(
+            workbench,
+            run,
+            args.objects,
+            args.inspected_episodes,
+            args.track_by,
+        )
     if name == "objects.plan":
         from .objects import plan
 
@@ -484,7 +768,18 @@ def _invoke(
 
         return launch(workbench, args.job_id)
     if name == "objects.get":
-        return {k: v for k, v in job.items() if k not in {"plan", "dataset_root"}}
+        plan = job.get("plan") or {}
+        return {
+            **{k: v for k, v in job.items() if k not in {"plan", "dataset_root"}},
+            # Enough scope for a client to review or correct without reading
+            # the frozen plan document itself.
+            "scope": {
+                "episodes": plan.get("episode_indices", []),
+                "cameras": plan.get("camera_keys", []),
+                "prompts": plan.get("prompts", []),
+                "provider": plan.get("provider"),
+            },
+        }
     if name == "capabilities.list":
         return {
             "schema_version": "levi.agent.capabilities.v1",
@@ -507,10 +802,80 @@ def _invoke(
         from levi.catalog import DEMOS, datasets
 
         ids = [r["id"] for r in datasets().values()] + DEMOS
+        reachable = [r for r in ids if principal.human or r in principal.datasets]
+        # An agent's first call should leave it able to work. Everything it
+        # needs to know that is not discoverable from a tool schema lives here:
+        # what it may do, what only a person may do, what is already waiting,
+        # and the one habit that decides what the job costs.
+        from .tracking import waiting_for
+
+        pending = []
+        for record in sorted(
+            store.list("runs"),
+            key=lambda item: item.get("created_at", 0),
+            reverse=True,
+        ):
+            dataset = record["context"]["repo_id"]
+            if not principal.human and dataset not in principal.datasets:
+                continue
+            state = waiting_for(store, record)
+            if state["waiting_for"].startswith("agent_"):
+                pending.append(
+                    {
+                        "run_id": record["id"],
+                        "dataset": dataset,
+                        "workflow": record["context"]["workflow"]["kind"],
+                        "episodes": record["context"]["episodes"],
+                        "waiting_for": state["waiting_for"],
+                        "evidence_ready": state["evidence_ready"],
+                    }
+                )
         return {
-            "datasets": [r for r in ids if principal.human or r in principal.datasets],
+            "datasets": reachable,
             "mode": "draft",
-            "experimental": True,
+            "you_may": [
+                "read datasets in scope, plan runs and prepare evidence",
+                "propose annotations and object masks for human review",
+                "run the local SAM3 worker when this machine can host it",
+            ],
+            "only_a_person_may": [
+                "approve a plan, accept a pilot, commit or undo annotations",
+                "clean the workspace or abandon a run",
+            ],
+            "start_here": [
+                (
+                    "runs.list — the runs in scope and whose turn each one is; "
+                    "'agent_prepare' and 'agent_propose' are yours"
+                ),
+                (
+                    "runs.plan, then wait for a person to approve it, when "
+                    "nothing is waiting for you"
+                ),
+                "runs.prepare — build the evidence for the approved scope",
+                (
+                    "evidence.read with layout='mosaic' — one labelled contact "
+                    "sheet per page instead of one image per frame"
+                ),
+                "evidence.refine — extra frames only where a boundary is unclear",
+                (
+                    "annotations.propose_segments / objects.propose — cite the "
+                    "evidence ids you actually read"
+                ),
+                (
+                    "runs.report_usage — report your own token use when you "
+                    "stop; LEVI cannot see it, and the next estimate depends on it"
+                ),
+            ],
+            "waiting_for_you": pending,
+            "skills": (
+                "Read levi://skills/levi-overview first, then the one for your "
+                "workflow. They are short and they are the contract."
+            ),
+            "cost": (
+                "Evidence dominates what a task costs. Read pages as mosaics, "
+                "refine only unclear boundaries, and call plans.estimate "
+                "before committing to a large scope."
+            ),
         }
     if name == "datasets.inspect":
         from .formats import DATASETS
@@ -526,7 +891,7 @@ def _invoke(
             "within_budget": sum(files.values()) <= ctx.budget.max_snapshot_bytes,
         }
     if name == "runs.plan":
-        return public_run(workbench.plan(args))
+        return public_run(workbench.plan(args, principal))
     if name == "runs.get":
         return public_run(run)
     if name == "runs.events":
@@ -596,6 +961,8 @@ def _invoke(
             value["provenance"]["reviewer"] = principal.id
 
         return store.mutate("changes", args.changeset_id, approve)
+    if name == "changes.rebase":
+        return workbench.rebase(args.changeset_id, args.revision)
     if name == "changes.commit":
         if not key:
             raise ValueError("Commit requires an idempotency key")
@@ -619,6 +986,7 @@ def invoke(workbench, principal, name, arguments, key=None):
     """All channels share authorization, schema validation and core-owned audit."""
     import time
 
+    from . import activity
     from .grants import check_call
     from .runtime import new_id
     from .tracking import scope
@@ -626,21 +994,35 @@ def invoke(workbench, principal, name, arguments, key=None):
     if name not in SPECS:
         raise ValueError("Unknown capability")
     schema, permission, _ = SPECS[name]
-    principal.require(permission)
-    args = schema.model_validate(arguments)
-    if not principal.human and name == "runs.plan" and args.provider != "external":
-        raise PermissionError(
-            "External Pilot connections cannot dispatch API-model plans"
+    # Authorization, validation and scope resolution can all refuse the call.
+    # Those refusals are exactly what someone watching the panel needs to see,
+    # so they are recorded here rather than only inside the dispatch below.
+    try:
+        principal.require(permission)
+        args = schema.model_validate(arguments)
+        if not principal.human and name == "runs.plan" and args.provider != "external":
+            raise PermissionError(
+                "External Pilot connections cannot dispatch API-model plans"
+            )
+        arguments = args.model_dump()
+        run = scope(workbench.store, arguments)
+        repo = arguments.get("repo_id") or (run["context"]["repo_id"] if run else None)
+        principal.require(permission, repo)
+        if not principal.human and name not in {
+            "capabilities.list",
+            "workspace.get_context",
+        }:
+            check_call(workbench.store, principal, run["id"] if run else None)
+    except Exception as exc:
+        activity.record(
+            workbench.store,
+            name=name,
+            principal=principal,
+            status="failed",
+            detail={"stage": "authorization"},
+            error=f"{type(exc).__name__}: {exc}"[:300],
         )
-    arguments = args.model_dump()
-    run = scope(workbench.store, arguments)
-    repo = arguments.get("repo_id") or (run["context"]["repo_id"] if run else None)
-    principal.require(permission, repo)
-    if not principal.human and name not in {
-        "capabilities.list",
-        "workspace.get_context",
-    }:
-        check_call(workbench.store, principal, run["id"] if run else None)
+        raise
     noisy = name in {
         "runs.events",
         "runs.get",
@@ -683,11 +1065,24 @@ def invoke(workbench, principal, name, arguments, key=None):
             "limit",
             "decision",
             "indices",
+            "dataset",
+            "apply",
+            "workflow",
+            "layout",
         }
     }
     if "proposals" in arguments:
         parameters["proposal_count"] = len(arguments["proposals"])
     event("action.started", parameters=parameters)
+    activity.record(
+        workbench.store,
+        name=name,
+        principal=principal,
+        status="started",
+        dataset=repo,
+        run=run,
+        detail=parameters,
+    )
     try:
         value = _invoke(workbench, principal, name, arguments, key)
         if name == "runs.plan":
@@ -707,11 +1102,33 @@ def invoke(workbench, principal, name, arguments, key=None):
                 else {}
             ),
         )
+        activity.record(
+            workbench.store,
+            name=name,
+            principal=principal,
+            status="completed",
+            dataset=repo,
+            run=run,
+            detail=parameters,
+            elapsed=time.monotonic() - started,
+            value=value,
+        )
         return value
     except Exception as exc:
         event(
             "action.failed",
             error_type=type(exc).__name__,
             elapsed_seconds=time.monotonic() - started,
+        )
+        activity.record(
+            workbench.store,
+            name=name,
+            principal=principal,
+            status="failed",
+            dataset=repo,
+            run=run,
+            detail=parameters,
+            elapsed=time.monotonic() - started,
+            error=f"{type(exc).__name__}: {exc}"[:300],
         )
         raise

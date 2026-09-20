@@ -37,14 +37,18 @@ def check() -> int:
         print("  status=enabled but worker environment is missing")
         return 1
     else:
-        print("  status=enabled; the worker will validate checkpoint access at run time")
+        print(
+            "  status=enabled; the worker will validate checkpoint access at run time"
+        )
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="LEVI SAM3 integration tools")
     subparsers = parser.add_subparsers(dest="command")
-    subparsers.add_parser("check", help="check integration files without importing Torch")
+    subparsers.add_parser(
+        "check", help="check integration files without importing Torch"
+    )
     args = parser.parse_args(argv)
     if args.command in (None, "check"):
         return check()

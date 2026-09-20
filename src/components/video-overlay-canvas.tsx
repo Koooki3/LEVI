@@ -23,7 +23,7 @@ import { T, useLocale } from "@/components/levi-locale";
  * letterboxing into account).
  */
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { DraggablePopup } from "./draggable-popup";
 import {
   useAnnotations,
@@ -313,6 +313,7 @@ function drawObjectBbox(
   rect: RenderedRect,
   annotation: ObjectAnnotation,
   color: string,
+  carried = false,
 ) {
   const [height, width] = annotation.image_size;
   if (!height || !width) return;
@@ -323,10 +324,17 @@ function drawObjectBbox(
   const py2 = rect.top + (y2 / height) * rect.height;
   ctx.save();
   ctx.lineWidth = annotation.status === "suggested" ? 2 : 2.5;
-  ctx.setLineDash(annotation.status === "needs_review" ? [6, 4] : []);
+  // A carried outline is dashed and dimmed: it says "this object, as measured
+  // at that frame", never "this is where it is now".
+  ctx.setLineDash(
+    carried ? [3, 4] : annotation.status === "needs_review" ? [6, 4] : [],
+  );
+  if (carried) ctx.globalAlpha = 0.7;
   ctx.strokeStyle = color;
   ctx.strokeRect(px1, py1, px2 - px1, py2 - py1);
-  const label = `#${annotation.track_id} ${annotation.concept}`;
+  const label = carried
+    ? `#${annotation.track_id} ${annotation.concept} · f${annotation.frame_index}`
+    : `#${annotation.track_id} ${annotation.concept}`;
   ctx.font = "12px ui-sans-serif, system-ui";
   const metrics = ctx.measureText(label);
   const labelTop = Math.max(0, py1 - 18);
@@ -380,9 +388,12 @@ export const VideoOverlayCanvas: React.FC<Props> = ({
   const drawMode = ctxDrawMode;
   const { currentTime, isPlaying } = useTime();
   const draftMasks = useAgentMaskPreview(cameraKey, currentTime || 0);
-  const displayedObjects = draftMasks.active
-    ? draftMasks.rows || []
-    : objectAnnotations;
+  // Memoised so the draw callback below keeps a stable identity: a new array
+  // on every render would redraw the overlay on every frame tick.
+  const displayedObjects = useMemo(
+    () => (draftMasks.active ? draftMasks.rows || [] : objectAnnotations),
+    [draftMasks.active, draftMasks.rows, objectAnnotations],
+  );
   // Pointer-down origin in canvas pixels and 0..1 image-relative coords.
   const dragOriginRef = useRef<{
     px: [number, number];
@@ -453,41 +464,63 @@ export const VideoOverlayCanvas: React.FC<Props> = ({
     // Object sidecars use the same episode-local clock as VQA atoms. Select
     // the nearest frame per track so a paused frame does not draw duplicate
     // masks when the browser time falls between source timestamps.
+    // Objects are annotated on sampled frames, not on every frame, so between
+    // them there is nothing to draw. Dropping the mask makes an object look
+    // like it vanished; drawing it as if it were measured here would claim a
+    // position nobody observed. So a mask outside its own frame is carried
+    // from the nearest annotated frame within the same track's span and drawn
+    // as an outline labelled with the frame it came from.
     const nearestObjects = new Map<string, ObjectAnnotation>();
-    for (const annotation of displayedObjects) {
-      if (
-        annotation.camera_key !== cameraKey ||
-        annotation.status === "rejected" ||
-        !annotation.visible ||
-        draftMasks.options.hidden.includes(annotation.track_id)
-      ) {
-        continue;
-      }
-      const distance = Math.abs(annotation.timestamp - (currentTime || 0));
-      if (!draftMasks.active && distance > 0.08) continue;
+    const spans = new Map<string, { first: number; last: number }>();
+    const candidates = displayedObjects.filter(
+      (annotation) =>
+        annotation.camera_key === cameraKey &&
+        annotation.status !== "rejected" &&
+        annotation.visible &&
+        !draftMasks.options.hidden.includes(annotation.track_id),
+    );
+    for (const annotation of candidates) {
       const key = `${annotation.object_id}:${annotation.track_id}`;
+      const span = spans.get(key);
+      spans.set(key, {
+        first: Math.min(
+          span?.first ?? annotation.timestamp,
+          annotation.timestamp,
+        ),
+        last: Math.max(
+          span?.last ?? annotation.timestamp,
+          annotation.timestamp,
+        ),
+      });
+    }
+    const time = currentTime || 0;
+    for (const annotation of candidates) {
+      const key = `${annotation.object_id}:${annotation.track_id}`;
+      const span = spans.get(key);
+      const distance = Math.abs(annotation.timestamp - time);
+      const inside =
+        span != null && time >= span.first - 0.08 && time <= span.last + 0.08;
+      if (!draftMasks.active && distance > 0.08 && !inside) continue;
       const previous = nearestObjects.get(key);
-      if (
-        !previous ||
-        distance < Math.abs(previous.timestamp - (currentTime || 0))
-      ) {
+      if (!previous || distance < Math.abs(previous.timestamp - time)) {
         nearestObjects.set(key, annotation);
       }
     }
     for (const annotation of nearestObjects.values()) {
       const color = objectColor(annotation.track_id);
+      const carried = Math.abs(annotation.timestamp - time) > 0.08;
       ctx.save();
-      ctx.globalAlpha = draftMasks.options.opacity;
+      ctx.globalAlpha = draftMasks.options.opacity * (carried ? 0.55 : 1);
       drawObjectMask(
         ctx,
         rect,
         annotation,
         objectMaskCacheRef.current,
         color,
-        draftMasks.options.outline,
+        draftMasks.options.outline || carried,
       );
       ctx.restore();
-      drawObjectBbox(ctx, rect, annotation, color);
+      drawObjectBbox(ctx, rect, annotation, color, carried);
     }
 
     // Saved VQA atoms within ~one frame of currentTime. We compare against

@@ -1,9 +1,11 @@
 import { describe, expect, test, mock, afterEach } from "bun:test";
 import {
   buildVersionedUrl,
+  describeInfoFailure,
   normalizeDatasetVersion,
   SUPPORTED_DATASET_VERSIONS,
 } from "@/utils/versionUtils";
+import { authHeaders } from "@/utils/auth";
 
 // ---------------------------------------------------------------------------
 // buildVersionedUrl — pure function, no mocking needed
@@ -276,5 +278,90 @@ describe("getDatasetVersionAndInfo", () => {
     await expect(
       getDatasetVersionAndInfo("nonexistent/repo"),
     ).rejects.toThrow();
+  });
+});
+
+describe("describeInfoFailure", () => {
+  test("tells a removed Hub dataset apart from a login problem", () => {
+    const message = describeInfoFailure("samanthalhy/so100_strawberry_2", 401);
+    expect(message).toContain("samanthalhy/so100_strawberry_2");
+    expect(message).toContain("private or no longer exists");
+    expect(message).toContain("Sign in");
+  });
+
+  test("points a local failure at the workspace, not at credentials", () => {
+    const message = describeInfoFailure("local/my_capture", 404);
+    expect(message).toContain("local dataset my_capture");
+    expect(message).toContain("meta/info.json");
+    expect(message).not.toContain("Sign in");
+  });
+
+  test("still reports an unexpected status verbatim", () => {
+    expect(describeInfoFailure("org/name", 503)).toContain("503");
+  });
+});
+
+describe("authHeaders", () => {
+  const backend = "http://127.0.0.1:7861";
+  afterEach(() => {
+    delete process.env.LEVI_BACKEND_URL;
+    delete process.env.LEVI_UI_TOKEN;
+  });
+
+  test("authorises server-side reads of LEVI's own file service", () => {
+    process.env.LEVI_BACKEND_URL = backend;
+    process.env.LEVI_UI_TOKEN = "secret-ui-token";
+    const headers = authHeaders(
+      `${backend}/api/levi/files/capture/meta/info.json`,
+    );
+    expect(headers["x-levi-ui-token"]).toBe("secret-ui-token");
+  });
+
+  test("never sends LEVI's internal token to the Hub", () => {
+    process.env.LEVI_BACKEND_URL = backend;
+    process.env.LEVI_UI_TOKEN = "secret-ui-token";
+    const headers = authHeaders(
+      "https://huggingface.co/datasets/org/name/resolve/main/meta/info.json",
+    );
+    expect(headers["x-levi-ui-token"]).toBeUndefined();
+  });
+
+  test("never sends a Hugging Face credential to LEVI's own service", () => {
+    // Signing in to the Hub must not change what LEVI's loopback API receives.
+    const stored = JSON.stringify({ accessToken: "hf_example_token" });
+    const storage = {
+      getItem: () => stored,
+      setItem: () => {},
+      removeItem: () => {},
+    };
+    const original = (globalThis as { window?: unknown }).window;
+    Object.defineProperty(globalThis, "window", {
+      value: { localStorage: storage, sessionStorage: storage },
+      configurable: true,
+    });
+    try {
+      expect(
+        authHeaders("/api/levi/files/capture/meta/info.json").Authorization,
+      ).toBeUndefined();
+      expect(
+        authHeaders("/annotations/api/episodes/0/atoms").Authorization,
+      ).toBeUndefined();
+      // The Hub still gets it.
+      expect(
+        authHeaders("https://huggingface.co/datasets/org/name/resolve/main/x")
+          .Authorization,
+      ).toBe("Bearer hf_example_token");
+    } finally {
+      Object.defineProperty(globalThis, "window", {
+        value: original,
+        configurable: true,
+      });
+    }
+  });
+
+  test("adds nothing when no URL is given", () => {
+    process.env.LEVI_BACKEND_URL = backend;
+    process.env.LEVI_UI_TOKEN = "secret-ui-token";
+    expect(authHeaders()["x-levi-ui-token"]).toBeUndefined();
   });
 });

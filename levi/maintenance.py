@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
 
 from .paths import PROJECT, ROOT, STATE
@@ -49,15 +50,68 @@ def size(path):
     )
 
 
+# Artifact trees keyed by catalog name; each entry is one dataset's sidecars.
+PER_DATASET = ("annotations", "object_annotations", "views", "agent/datasets")
+
+
+def orphans():
+    """Artifacts and links left behind by datasets that are no longer registered.
+
+    Removing a dataset from the catalog deliberately keeps its annotations --
+    nobody's review work is deleted because a path moved. The cost is that the
+    leftovers become invisible: an empty shell directory, or a redirect that
+    now leads nowhere. Reporting them is the point; only the empty shells are
+    ever offered for removal.
+    """
+    from .catalog import aliases, datasets
+
+    known = set(datasets())
+    stale_links = {
+        old: target for old, target in aliases().items() if target not in known
+    }
+    empty, occupied = [], []
+    for family in PER_DATASET:
+        root = STATE / family
+        if not root.is_dir():
+            continue
+        for child in sorted(root.iterdir()):
+            if not child.is_dir() or child.name in known:
+                continue
+            entry = {
+                "path": str(child),
+                "dataset": child.name,
+                "bytes": size(child),
+                "files": sum(1 for p in child.rglob("*") if p.is_file()),
+            }
+            (empty if entry["files"] == 0 else occupied).append(entry)
+    return {
+        "removable_empty": empty,
+        "keeps_content": occupied,
+        "stale_aliases": stale_links,
+        "note": (
+            "Artifacts with content are never removed automatically: register "
+            "the dataset again to reach them, or delete the directory yourself."
+        ),
+    }
+
+
 def clean(apply=False):
     marker = STATE / "server.pid"
     if marker.exists():
         try:
-            os.kill(int(marker.read_text()), 0)
-        except ProcessLookupError:
+            pid = int(marker.read_text())
+            os.kill(pid, 0)
+        except (ProcessLookupError, ValueError):
             pass
         else:
-            raise ValueError("Stop the LEVI service before cleaning caches")
+            # Name the process and how to stop it: "the LEVI service" is often
+            # the shared Agent Core, which outlives the web UI and has no
+            # obvious owner in the terminal that hit this.
+            raise ValueError(
+                f"Stop the LEVI service before cleaning caches. It is running "
+                f"as PID {pid}; stop it with: uv run levi stop"
+            )
+    leftovers = orphans()
     from .catalog import read
 
     registered = [
@@ -82,10 +136,21 @@ def clean(apply=False):
                 shutil.rmtree(path)
             else:
                 path.unlink()
+    if apply:
+        for row in leftovers["removable_empty"]:
+            shell = Path(row["path"])
+            # Only ever an empty directory, and only under the workbench.
+            if (
+                shell.is_dir()
+                and shell.is_relative_to(STATE)
+                and not any(shell.rglob("*"))
+            ):
+                shell.rmdir()
     return {
         "applied": apply,
         "bytes": sum(r["bytes"] for r in entries),
         "entries": entries,
+        "orphans": leftovers,
         "preserved": [
             "datasets",
             "annotations",
@@ -105,4 +170,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
-    print(json.dumps(clean(args.apply), ensure_ascii=False, indent=2))
+    try:
+        report = clean(args.apply)
+    except ValueError as exc:
+        # A precondition someone can act on is not a crash.
+        print(f"[LEVI] {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0

@@ -19,8 +19,21 @@ _ACTIVE = {}
 _LOCK = threading.Lock()
 
 
-def new_id():
-    return datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
+def new_id(taken=()):
+    """A ``YYYYmmddTHHMM`` id, with ``-2``, ``-3``… only on a real clash.
+
+    Precision stops at the minute on purpose: finer digits read as an opaque
+    suffix, and several ids in one minute are readable when they are spelled
+    out as -2, -3 rather than as a timestamp tail nobody can parse.
+    """
+    base = datetime.now(UTC).strftime("%Y%m%dT%H%M")
+    if base not in taken:
+        return base
+    for attempt in range(2, 1000):
+        candidate = f"{base}-{attempt}"
+        if candidate not in taken:
+            return candidate
+    raise RuntimeError("Could not allocate an unused identifier")
 
 
 class Workbench:
@@ -28,7 +41,7 @@ class Workbench:
         self.store = Store(state)
         self.provider = provider or CompatibleProvider()
 
-    def plan(self, context: TaskContext):
+    def plan(self, context: TaskContext, principal=None):
         if context.provider in {"external", "local-tools"}:
             config = None
             if (
@@ -64,7 +77,12 @@ class Workbench:
             raise ValueError(
                 "Snapshot exceeds configured budget; select fewer episodes/cameras"
             )
-        id = new_id()
+        # dataset (the parent directory) + task kind + timestamp, so a run
+        # directory says what it is without opening it. Never a digest.
+        # The kind prefixes the id, so compare against the timestamp part or
+        # the check never matches and a second run overwrites the first.
+        stamps = {existing.split("-", 1)[-1] for existing in self.store.ids("runs")}
+        id = f"{context.workflow['kind']}-{new_id(stamps)}"
         run = {
             "id": id,
             "status": RunStatus.PLANNED,
@@ -73,6 +91,9 @@ class Workbench:
             "provider_config": config.model_dump()
             if config
             else {"kind": context.provider, "name": context.provider},
+            # Who asked for this run, so its cost can later be attributed to the
+            # right agent rather than averaged over every agent that ever ran.
+            "principal": getattr(principal, "id", None),
             "dataset_key": state.display_slug,
             "base_revision": self.store.head(state.display_slug),
             "base_content": annotation_digest(self.store.state, state.display_slug),
@@ -198,8 +219,10 @@ class Workbench:
             context = TaskContext.model_validate(run["context"])
             directory = self.store.run_dir(id)
             directory.mkdir(parents=True, exist_ok=True)
-            if "manifest" not in run:
-                # Incomplete snapshot is never reused after interruption.
+            if "manifest" not in run or not (directory / "input").is_dir():
+                # Incomplete snapshot is never reused after interruption, and a
+                # snapshot removed by workspace.clean is taken again from the
+                # source -- which is what makes that cleanup non-destructive.
                 import shutil
 
                 shutil.rmtree(directory / "input", ignore_errors=True)
@@ -209,6 +232,15 @@ class Workbench:
                     run["files"],
                     run.get("planned_hashes"),
                 )
+                if (
+                    run.get("manifest")
+                    and manifest["sha256"] != run["manifest"]["sha256"]
+                ):
+                    raise ValueError(
+                        "The source no longer matches this run's cleaned-up "
+                        "snapshot; create a new run rather than annotating "
+                        "different data under an approved plan"
+                    )
                 self.store.mutate("runs", id, lambda r: r.update(manifest=manifest))
             config = ProviderConfig.model_validate(run["provider_config"])
             remaining = [ep for ep in context.episodes if ep not in run["completed"]]
@@ -318,6 +350,12 @@ class Workbench:
                 )
             self.prepare_changes(id)
             self.store.mutate("runs", id, lambda r: r.update(status=RunStatus.WAITING))
+            # A model run is billed through LEVI, so its cost is recorded here
+            # rather than waited for from the agent.
+            from .usage import measure_run
+
+            if sample := measure_run(self.store, id):
+                self.store.event(id, "usage_measured", tokens=sample["tokens"])
             self.store.event(id, "waiting_for_review", coverage="sampled")
         except Exception as exc:  # noqa: BLE001 - worker boundary; no raw provider errors persisted
             # Never persist provider exception messages: HTTP libraries may include
@@ -499,11 +537,21 @@ class Workbench:
                 or proposal.episode_index != summary["episode_index"]
             ):
                 raise ValueError("Proposal escapes episode scope")
-            if any(
-                id not in known or known[id]["episode_index"] != proposal.episode_index
-                for id in proposal.evidence_ids
-            ):
-                raise ValueError("Proposal cites unknown evidence")
+            # Name the citation that failed and why: a model told only that
+            # "evidence is unknown" has to resend everything to find out which.
+            for id in proposal.evidence_ids:
+                if id not in known:
+                    raise ValueError(
+                        f"Proposal cites unknown evidence {id!r}; cite only ids "
+                        f"from the evidence supplied for episode "
+                        f"{summary['episode_index']}"
+                    )
+                if known[id]["episode_index"] != proposal.episode_index:
+                    raise ValueError(
+                        f"Proposal for episode {proposal.episode_index} cites "
+                        f"evidence {id!r} from episode "
+                        f"{known[id]['episode_index']}"
+                    )
             if proposal.start < summary["start"] or proposal.start > summary["end"]:
                 raise ValueError("Proposal begins outside episode")
             if proposal.end is not None and proposal.end > summary["end"]:
@@ -526,7 +574,7 @@ class Workbench:
                 p for p in proposals if p["episode_index"] not in known
             ]
         change = ChangeSet(
-            id=existing or new_id(),
+            id=existing or new_id(set(self.store.ids("changes"))),
             run_id=id,
             base_revision=run["base_revision"],
             proposals=proposals,
@@ -547,6 +595,65 @@ class Workbench:
         self.store.put("changes", change["id"], change)
         self.store.mutate("runs", id, lambda r: r.update(changes=change["id"]))
         return change
+
+    def rebase(self, id, revision):
+        """Move a reviewed draft onto the current published revision.
+
+        Two runs on one dataset (say language segments and object masks) are
+        normal; whichever commits first would otherwise force the other to be
+        produced again. Rebasing keeps the staged work, re-reads what is now
+        published, and drops the approval so a human decides again.
+        """
+        from .store import Conflict, annotation_digest, dataset_lock
+
+        change = self.store.get("changes", id)
+        run = self.store.get("runs", change["run_id"])
+        with dataset_lock(self.store.state, run["dataset_key"]):
+            change = self.store.get("changes", id)
+            if change["status"] == "committed":
+                raise Conflict("Published changes cannot be rebased")
+            if change["revision"] != revision:
+                raise Conflict("Reload the changeset: its revision moved")
+            head = self.store.head(run["dataset_key"])
+            if head == change["base_revision"]:
+                return {"changeset_id": id, "base_revision": head, "rebased": False}
+            # The frozen source must still be the one the suggestions were read
+            # from; only the annotation bundle is allowed to have moved.
+            context = TaskContext.model_validate(run["context"])
+            DATASETS[context.dataset_adapter].verify(context, run["manifest"])
+            previous = change["base_revision"]
+            self.store.mutate(
+                "changes",
+                id,
+                lambda c: c.update(
+                    base_revision=head,
+                    status="draft",
+                    revision=c["revision"] + 1,
+                    provenance={
+                        **c["provenance"],
+                        "rebased_from": previous,
+                        "rebased_at": time.time(),
+                    },
+                ),
+            )
+            self.store.mutate(
+                "runs",
+                run["id"],
+                lambda r: r.update(
+                    base_revision=head,
+                    base_content=annotation_digest(
+                        self.store.state, run["dataset_key"]
+                    ),
+                ),
+            )
+            self.store.event(run["id"], "changes_rebased", changeset=id, onto=head)
+            return {
+                "changeset_id": id,
+                "base_revision": head,
+                "rebased": True,
+                "previous_base": previous,
+                "note": "Approval was cleared; review the draft against the new revision",
+            }
 
     def validate(self, change):
         run = self.store.get("runs", change["run_id"])
@@ -641,7 +748,9 @@ class Workbench:
         app = media.backend()
         context = TaskContext.model_validate(run["context"])
         state = DATASETS[context.dataset_adapter].publication_state(context)
-        base, revision, folder = self.store.prepare(run["dataset_key"])
+        base, revision, folder = self.store.prepare(
+            run["dataset_key"], run["context"]["workflow"]["kind"]
+        )
         if base != change["base_revision"]:
             raise Conflict("Annotations changed before commit")
         from .undo import apply, capture
@@ -674,8 +783,7 @@ class Workbench:
 
                 store = app._sidecar(state)
                 existing = [
-                    ObjectAnnotation.model_validate(store._from_mask_row(r))
-                    for r in store.read_annotations()
+                    ObjectAnnotation.model_validate(r) for r in store.read_annotations()
                 ]
                 additions = []
                 for job_id in change["object_jobs"]:
@@ -767,13 +875,22 @@ def prepare_evidence(wb, id):
         ctx = TaskContext.model_validate(run["context"])
         directory = wb.store.run_dir(id)
         directory.mkdir(parents=True, exist_ok=True)
-        if not run.get("manifest"):
+        if not run.get("manifest") or not (directory / "input").is_dir():
+            # A snapshot removed by workspace.clean is taken again here, which
+            # is what makes that cleanup non-destructive; a source that moved
+            # since the plan was approved stops the run instead.
             import shutil
 
             shutil.rmtree(directory / "input", ignore_errors=True)
             manifest = DATASETS[ctx.dataset_adapter].snapshot(
                 ctx, directory / "input", run["files"], run.get("planned_hashes")
             )
+            if run.get("manifest") and manifest["sha256"] != run["manifest"]["sha256"]:
+                raise ValueError(
+                    "The source no longer matches this run's cleaned-up "
+                    "snapshot; create a new run rather than annotating "
+                    "different data under an approved plan"
+                )
             wb.store.mutate("runs", id, lambda r: r.update(manifest=manifest))
         selected = (
             ctx.episodes
@@ -781,12 +898,16 @@ def prepare_evidence(wb, id):
             else [run["plan"]["pilot_episode"]]
         )
         for ep in selected:
-            summary, evidence = DATASETS[ctx.dataset_adapter].sample(
+            # The declared observation policy, not a second uniform sampler:
+            # a temporal plan gets its coarse step, everything else the plan's
+            # sample count. Headless/MCP agents therefore see exactly what the
+            # in-process runtime sees.
+            from .observations import observe, persist
+
+            summary, evidence = observe(
                 ctx, directory / "input", ep, directory / "evidence"
             )
-            wb.store.put(
-                "evidence", f"{id}:{ep}", {"summary": summary, "items": evidence}
-            )
+            persist(wb, id, ep, summary, evidence)
         wb.store.mutate("runs", id, lambda r: r.update(prepared=selected))
         if ctx.workflow["kind"] == "objects":
             for ep in selected:

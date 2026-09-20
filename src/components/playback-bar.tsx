@@ -3,6 +3,7 @@
 import { T } from "./levi-locale";
 import React from "react";
 import { useTime } from "../context/time-context";
+import { nextMark, useObjectMarks } from "./object-marks";
 import {
   FaPlay,
   FaPause,
@@ -11,10 +12,13 @@ import {
   FaUndoAlt,
   FaArrowDown,
   FaArrowUp,
+  FaStepBackward,
+  FaStepForward,
 } from "react-icons/fa";
 
 const PlaybackBar: React.FC = () => {
   const { duration, isPlaying, setIsPlaying, currentTime, seek } = useTime();
+  const objectMarks = useObjectMarks();
 
   const sliderActiveRef = React.useRef(false);
   const wasPlayingRef = React.useRef(false);
@@ -85,20 +89,63 @@ const PlaybackBar: React.FC = () => {
         >
           <FaUndoAlt size={14} />
         </button>
-        <input
-          type="range"
-          min={0}
-          max={duration}
-          step={0.01}
-          value={sliderValue}
-          onChange={handleSliderChange}
-          onMouseDown={handleSliderMouseDown}
-          onMouseUp={handleSliderMouseUp}
-          onTouchStart={handleSliderMouseDown}
-          onTouchEnd={handleSliderMouseUp}
-          className="flex-1 mx-1 h-1 accent-cyan-400 cursor-pointer focus:outline-none focus:ring-0"
-          aria-label="Seek video"
-        />
+        {objectMarks.length > 0 && (
+          <button
+            title="Previous annotated frame"
+            aria-label="Previous annotated frame"
+            onClick={() => {
+              const target = nextMark(currentTime, -1);
+              if (target != null) seek(target);
+            }}
+            className="hidden md:flex h-8 w-8 items-center justify-center rounded-md text-lime-300/80 hover:text-lime-200 hover:bg-white/5 transition-colors"
+          >
+            <FaStepBackward size={12} />
+          </button>
+        )}
+        <span className="relative flex-1 mx-1 flex items-center">
+          <input
+            type="range"
+            min={0}
+            max={duration}
+            step={0.01}
+            value={sliderValue}
+            onChange={handleSliderChange}
+            onMouseDown={handleSliderMouseDown}
+            onMouseUp={handleSliderMouseUp}
+            onTouchStart={handleSliderMouseDown}
+            onTouchEnd={handleSliderMouseUp}
+            className="w-full h-1 accent-cyan-400 cursor-pointer focus:outline-none focus:ring-0"
+            aria-label="Seek video"
+          />
+          {/* Ticks sit under the thumb and ignore the pointer so dragging the
+              slider still works exactly as before. */}
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 h-3"
+          >
+            {duration > 0 &&
+              objectMarks.map((mark) => (
+                <span
+                  key={mark}
+                  className="levi-object-mark"
+                  style={{ left: `${(mark / duration) * 100}%` }}
+                />
+              ))}
+          </span>
+        </span>
+        {objectMarks.length > 0 && (
+          <button
+            title="Next annotated frame"
+            aria-label="Next annotated frame"
+            onClick={() => {
+              const target = nextMark(currentTime, 1);
+              if (target != null) seek(target);
+            }}
+            className="hidden md:flex h-8 w-8 items-center justify-center rounded-md text-lime-300/80 hover:text-lime-200 hover:bg-white/5 transition-colors"
+          >
+            <FaStepForward size={12} />
+          </button>
+        )}
         <span className="w-16 text-right tabular text-[11px] text-slate-400 shrink-0">
           {Math.floor(sliderValue)} / {Math.floor(duration)}
         </span>

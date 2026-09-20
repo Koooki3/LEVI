@@ -80,3 +80,5 @@ integrations/sam3/checkpoints/
 
 # Optional pinned Pilot adapters
 integrations/pilot/node_modules/
+.mcp.json
+levi/agent/skills/levi-overview/SKILL.md

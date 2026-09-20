@@ -343,7 +343,10 @@ def test_named_paths_and_cache_account_isolation(bench, tmp_path):
     run = wb.plan(context)
     directory = wb.store.run_dir(run["id"])
     assert directory.parts[-4:] == ("datasets", run["dataset_key"], "runs", run["id"])
-    assert run["id"].replace("T", "").isdigit()
+    # dataset (the parent) + task kind + timestamp, and never a digest.
+    kind, _, stamp = run["id"].partition("-")
+    assert kind == run["context"]["workflow"]["kind"]
+    assert stamp.split("-")[0].replace("T", "").isdigit()
     first = hub_cache_directory(
         tmp_path, "owner/robot", "main", "account-fingerprint-a"
     )
@@ -1051,15 +1054,153 @@ def test_object_only_plan_has_no_language_model_budget_or_egress(bench):
     assert not ctx.allow_media_egress
 
 
-def test_dataset_adapter_must_declare_temporal_window_support(bench,monkeypatch,tmp_path):
+def test_dataset_adapter_must_declare_temporal_window_support(
+    bench, monkeypatch, tmp_path
+):
     from levi.agent.formats import DATASETS
     from levi.agent.observations import observe
-    _,ctx=bench
+
+    _, ctx = bench
+
     class Reader:
-        def sample(self,*args):return {'fixture':'registered reader'},[]
-    monkeypatch.setitem(DATASETS,'test-reader',Reader())
-    ctx=TaskContext.model_validate({**ctx.model_dump(),'dataset_adapter':'test-reader'})
-    assert observe(ctx,tmp_path,0,tmp_path)[0]['fixture']=='registered reader'
-    ctx.workflow['kind']='temporal'
-    with pytest.raises(ValueError,match='temporal-window'):
-        observe(ctx,tmp_path,0,tmp_path)
+        def sample(self, *args):
+            return {"fixture": "registered reader"}, []
+
+    monkeypatch.setitem(DATASETS, "test-reader", Reader())
+    ctx = TaskContext.model_validate(
+        {**ctx.model_dump(), "dataset_adapter": "test-reader"}
+    )
+    assert observe(ctx, tmp_path, 0, tmp_path)[0]["fixture"] == "registered reader"
+    ctx.workflow["kind"] = "temporal"
+    with pytest.raises(ValueError, match="temporal-window"):
+        observe(ctx, tmp_path, 0, tmp_path)
+
+
+def test_second_run_rebases_onto_the_first_instead_of_being_redone(bench):
+    """Two runs on one dataset: the loser of the race keeps its work."""
+    from levi.agent.planning import pilot_review
+    from levi.agent.store import Conflict
+
+    wb, context = bench
+    human = Principal("tester", human=True)
+
+    def staged(ctx):
+        run = execute(wb, wb.plan(ctx))
+        change = wb.store.get("changes", run["changes"])
+        pilot_review(wb, run["id"], change["revision"], True, "ok", "tester")
+        return wb.store.get("changes", run["changes"])
+
+    first = staged(context)
+    second = staged(context.model_copy(update={"episodes": [1]}))
+    assert second["base_revision"] == first["base_revision"]
+
+    invoke(
+        wb,
+        human,
+        "changes.approve",
+        {"changeset_id": first["id"], "revision": first["revision"]},
+    )
+    invoke(
+        wb,
+        human,
+        "changes.commit",
+        {"changeset_id": first["id"], "revision": first["revision"]},
+        "first",
+    )
+    head = wb.store.head(wb.store.get("runs", first["run_id"])["dataset_key"])
+
+    second = wb.store.get("changes", second["id"])
+    with pytest.raises(Conflict):
+        invoke(
+            wb,
+            human,
+            "changes.approve",
+            {"changeset_id": second["id"], "revision": second["revision"]},
+        )
+
+    moved = invoke(
+        wb,
+        human,
+        "changes.rebase",
+        {"changeset_id": second["id"], "revision": second["revision"]},
+    )
+    assert moved["rebased"] and moved["base_revision"] == head
+    assert moved["previous_base"] == first["base_revision"]
+
+    second = wb.store.get("changes", second["id"])
+    invoke(
+        wb,
+        human,
+        "changes.approve",
+        {"changeset_id": second["id"], "revision": second["revision"]},
+    )
+    receipt = invoke(
+        wb,
+        human,
+        "changes.commit",
+        {"changeset_id": second["id"], "revision": second["revision"]},
+        "second",
+    )
+    # Both runs' work is published, and the second records where it came from.
+    assert receipt["revision"] != head
+    assert (
+        wb.store.get("changes", second["id"])["provenance"]["rebased_from"]
+        == first["base_revision"]
+    )
+
+
+def test_rebase_refuses_when_the_frozen_source_moved(bench, dataset):
+    from levi.agent.planning import pilot_review
+    from levi.agent.store import Conflict
+
+    wb, context = bench
+    run = execute(wb, wb.plan(context))
+    change = wb.store.get("changes", run["changes"])
+    pilot_review(wb, run["id"], change["revision"], True, "ok", "tester")
+    wb.store.mutate("changes", change["id"], lambda c: c.update(base_revision="stale"))
+    # The dataset itself changed under the run: rebasing would silently attach
+    # suggestions to frames nobody read.
+    parquet = dataset / "data/chunk-000/episode_000000.parquet"
+    parquet.write_bytes(parquet.read_bytes() + b"\0")
+    with pytest.raises((Conflict, ValueError)):
+        wb.rebase(change["id"], wb.store.get("changes", change["id"])["revision"])
+
+
+def test_a_hub_credential_does_not_lock_the_ui_out_of_local_datasets(
+    client, monkeypatch
+):
+    """Signing in to Hugging Face must not break LEVI's own file service.
+
+    A signed-in browser attaches its Hub bearer token to dataset requests. LEVI
+    used to read any bearer token as a failed Agent credential and answer 401,
+    so every local dataset stopped loading the moment someone signed in.
+    """
+    monkeypatch.setenv("LEVI_AGENT_TOKEN", "test-scoped-token")
+    monkeypatch.setenv("LEVI_UI_TOKEN", "test-ui-token")
+    ui = {"x-levi-ui-token": "test-ui-token"}
+    hub = {"Authorization": "Bearer hf_a_hugging_face_token", **ui}
+
+    assert client.get("/api/levi/catalog", headers=ui).status_code == 200
+    assert client.get("/api/levi/catalog", headers=hub).status_code == 200
+
+    # A token nobody recognises is still not a way past the UI credential.
+    assert (
+        client.get(
+            "/api/levi/catalog", headers={"Authorization": "Bearer hf_a_token"}
+        ).status_code
+        == 401
+    )
+    # A real Agent credential is still confined to the Agent API...
+    scoped = {"Authorization": "Bearer test-scoped-token"}
+    assert client.get("/api/levi/catalog", headers=scoped).status_code == 403
+    assert (
+        client.get("/api/levi/agent/v1/capabilities", headers=scoped).status_code == 200
+    )
+    # ...and an invalid one is still rejected there.
+    assert (
+        client.get(
+            "/api/levi/agent/v1/capabilities",
+            headers={"Authorization": "Bearer not-the-token"},
+        ).status_code
+        == 401
+    )

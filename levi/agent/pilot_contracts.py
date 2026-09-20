@@ -10,9 +10,12 @@ from .schema import Contract
 class GrantRequest(Contract):
     client: Literal["codex", "claude"]
     datasets: list[str] = Field(min_length=1, max_length=1000)
-    hours: int = Field(default=24, ge=1, le=720)
+    # None means "until it is disconnected": a local connection the operator
+    # opened themselves should not stop working mid-task because a clock ran
+    # out. A bounded grant is still available by giving a number.
+    hours: int | None = Field(default=None, ge=1, le=720)
     run_id: str | None = None
-    max_tool_calls: int = Field(default=300, ge=1, le=10000)
+    max_tool_calls: int | None = Field(default=None, ge=1, le=1000000)
 
 
 class PilotStart(Contract):

@@ -1,5 +1,6 @@
 """Versioned Agent REST endpoints; browser and external requests share policy."""
 
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -11,7 +12,15 @@ from .schema import ProviderConfig, ToolCall
 from .security import Principal, external_principal
 from .store import Conflict
 
-router = APIRouter(prefix="/api/levi/agent/v1", tags=["Agent Workbench (experimental)"])
+router = APIRouter(prefix="/api/levi/agent/v1", tags=["Agent Workbench"])
+
+# When this service process started. A connection is reported as live only
+# once its client has called since then: LEVI cannot detect an MCP client
+# that never speaks to it, and claiming a connection it has not heard from
+# would be a guess.
+import time as _time
+
+STARTED_AT = _time.time()
 
 
 def workbench():
@@ -48,7 +57,18 @@ def call(payload: ToolCall, request: Request):
     except Conflict as exc:
         raise HTTPException(409, str(exc)) from exc
     except KeyError as exc:
-        raise HTTPException(404, "Run or changeset not found") from exc
+        # Name the key: this used to report every internal KeyError as a
+        # missing run, which hid real faults behind a plausible 404.
+        raise HTTPException(404, f"Not found: {exc}") from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # A tool that raises anything else must still answer with a readable
+        # error: an empty body leaves an MCP client guessing.
+        logging.getLogger(__name__).exception("capability %s failed", payload.name)
+        raise HTTPException(
+            500, f"{payload.name} failed: {type(exc).__name__}: {exc}"
+        ) from exc
 
 
 @router.get("/providers")
@@ -133,6 +153,7 @@ def artifact(run_id: str, name: str, request: Request):
     allowed.update(
         e["artifact"] for e in wb.store.list("object_evidence") if e["run_id"] == run_id
     )
+    allowed.update(run.get("sheets", []))  # generated evidence contact sheets
     if name not in allowed or Path(name).name != name:
         raise HTTPException(404)
     return FileResponse(
@@ -217,13 +238,47 @@ def connection_state(request: Request):
         enabled = workbench().store.get("settings", "external-access")["enabled"]
     except KeyError:
         enabled = True
+    import time
+
+    # A scoped connection created with `levi agent connect` lives in the
+    # workspace, not in this process's environment. Reporting only the
+    # environment showed a live MCP client as disconnected, with no scope.
+    store = workbench().store
+    now = time.time()
+    grants = [
+        {
+            "id": grant["id"],
+            "label": grant.get("label") or grant["id"],
+            "datasets": list(grant.get("datasets", [])),
+            "expires": grant["expires"],
+            "expires_in_seconds": (
+                max(0, int(grant["expires"] - now)) if grant["expires"] else None
+            ),
+            "last_seen": grant.get("last_seen"),
+            "live": bool(grant.get("last_seen", 0) >= STARTED_AT),
+            "idle_seconds": (
+                int(now - grant["last_seen"]) if grant.get("last_seen") else None
+            ),
+            "calls": grant.get("calls", 0),
+            "max_calls": grant.get("max_calls"),
+            "run_id": grant.get("run_id"),
+        }
+        for grant in store.list("grants")
+        if grant.get("enabled") and (not grant["expires"] or grant["expires"] > now)
+    ]
+    datasets = sorted(
+        {name for grant in grants for name in grant["datasets"]}
+        | set(filter(None, os.getenv("LEVI_AGENT_DATASETS", "").split(",")))
+    )
     return {
         "external": {
-            "configured": bool(os.getenv("LEVI_AGENT_TOKEN")),
+            "configured": bool(os.getenv("LEVI_AGENT_TOKEN")) or bool(grants),
+            "live": any(row["live"] for row in grants),
+            "service_started_at": STARTED_AT,
             "enabled": enabled,
-            "datasets": list(
-                filter(None, os.getenv("LEVI_AGENT_DATASETS", "").split(","))
-            ),
+            "datasets": datasets,
+            "grants": sorted(grants, key=lambda row: row["expires"] or float("inf")),
+            "shared_token": bool(os.getenv("LEVI_AGENT_TOKEN")),
         }
     }
 
@@ -237,3 +292,154 @@ def external_access(payload: ExternalAccess, request: Request):
     principal(request).require("configure")
     workbench().store.put("settings", "external-access", payload.model_dump())
     return {"ok": True}
+
+
+@router.get("/activity")
+def activity_log(request: Request, after: int = 0, limit: int = 120):
+    """Recent agent actions, newest last, for the first paint of the panel."""
+    from . import activity
+
+    principal(request).require("configure")
+    rows = activity.recent(workbench().store, after, limit)
+    return {"events": rows, "cursor": rows[-1]["seq"] if rows else after}
+
+
+@router.get("/activity/stream")
+async def activity_stream(request: Request, after: int = 0):
+    """Agent actions as they happen, for the human watching the workbench."""
+    import asyncio
+    import json as _json
+
+    from fastapi.responses import StreamingResponse
+
+    from . import activity
+
+    principal(request).require("configure")
+    store = workbench().store
+    cursor = max(0, after, int(request.headers.get("last-event-id", "0")))
+
+    async def events():
+        nonlocal cursor
+        idle = 0
+        while not await request.is_disconnected():
+            # Re-check on every pass: a revoked operator must stop receiving.
+            principal(request).require("configure")
+            rows = store.events(activity.STREAM, cursor)
+            for row in rows:
+                cursor = row["seq"]
+                yield f"id: {cursor}\ndata: {_json.dumps(row)}\n\n"
+            if rows:
+                idle = 0
+            else:
+                idle += 1
+                # A comment keeps proxies from closing an idle stream.
+                if idle % 10 == 0:
+                    yield ": heartbeat\n\n"
+                await asyncio.sleep(0.4)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/activity/tasks")
+def activity_tasks(request: Request, limit: int = 12):
+    """Runs as tasks: what each is waiting for, how far it got, what it made.
+
+    The activity stream shows individual calls; this is the same work seen as
+    the thing a person actually tracks. State comes from the run record, not
+    from the stream, so a task is correct even when the panel was closed while
+    it ran.
+    """
+    from . import activity
+    from .tracking import waiting_for
+
+    principal(request).require("configure")
+    store = workbench().store
+    recent = {}
+    for row in activity.recent(store, 0, activity.KEEP):
+        if row.get("run"):
+            recent[row["run"]] = row
+
+    tasks = []
+    # Newest first, by the time the run was created: the store's own order is
+    # an implementation detail and reversing it is not "most recent".
+    ordered = sorted(
+        store.list("runs"), key=lambda record: record.get("created_at", 0), reverse=True
+    )
+    for run in ordered:
+        state = waiting_for(store, run)
+        context = run["context"]
+        episodes = context["episodes"] or []
+        done = [ep for ep in run.get("completed", []) if ep in episodes]
+        revision = None
+        if state["committed"]:
+            change = store.get("changes", run["changes"])
+            revision = change.get("revision_id") or change.get("published_revision")
+        artifacts = []
+        if state["committed"]:
+            published = store.head(run["dataset_key"])
+            if published:
+                artifacts.append(
+                    {
+                        "label": "committed revision",
+                        "path": "outputs/LEVI/workbench/agent/datasets/"
+                        f"{run['dataset_key']}/revisions/{published}",
+                        "revision": published,
+                    }
+                )
+        # What this task cost, from the sample recorded for it: LEVI meters
+        # its own model runs and external agents report their own.
+        spent = next(
+            (
+                row
+                for row in store.list("usage_samples")
+                if row["run_id"] == run["id"] and row.get("tokens")
+            ),
+            None,
+        )
+        last = recent.get(run["id"])
+        tasks.append(
+            {
+                "run_id": run["id"],
+                "dataset": context["repo_id"],
+                "workflow": context["workflow"]["kind"],
+                "instruction": context["instruction"],
+                "episodes": episodes,
+                "completed": done,
+                "progress": round(len(done) / len(episodes), 3) if episodes else 0.0,
+                "status": run["status"],
+                "created_at": run["created_at"],
+                "provider": run["provider_config"]["name"],
+                "artifacts": artifacts,
+                "revision": revision,
+                "tokens": (spent or {}).get("tokens"),
+                # An external agent spends tokens LEVI cannot see. When a
+                # finished run has no sample, say so: the cost model only
+                # improves if someone notices the gap and asks for a report.
+                "usage_missing": bool(
+                    state["finished"]
+                    and not spent
+                    and run["provider_config"]["kind"] == "external"
+                ),
+                "token_source": (spent or {}).get("source"),
+                "evidence_frames": (spent or {}).get("evidence_frames"),
+                "requests": run.get("requests") or (spent or {}).get("requests"),
+                "last_action": (
+                    {
+                        "action": last["action"],
+                        "status": last["status"],
+                        "at": last["at"],
+                        "tool": last["tool"],
+                    }
+                    if last
+                    else None
+                ),
+                **state,
+            }
+        )
+        if len(tasks) >= limit:
+            break
+    return {"tasks": tasks}

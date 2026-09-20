@@ -225,13 +225,23 @@ class SidecarStore:
         return revision_info
 
     def read_annotations(self, revision_id: str | None = None) -> list[dict[str, Any]]:
+        """Annotations in the shape ``ObjectAnnotation`` declares.
+
+        The parquet columns keep the mask flat (``rle_size``/``rle_counts``)
+        because that is what the format stores well. That is a storage detail:
+        every reader wants ``mask_rle``, and the one reader that forgot to
+        convert -- the endpoint serving the viewer -- shipped the raw columns
+        to the browser, where the overlay found no mask to draw.
+        """
         revision_id = revision_id or self.current_revision()
         if not revision_id:
             return []
         root = self.revision_path(revision_id) / "masks"
         rows: list[dict[str, Any]] = []
         for path in sorted(root.glob("episode-*/**/*.parquet")):
-            rows.extend(pq.read_table(path).to_pylist())
+            rows.extend(
+                self._from_mask_row(row) for row in pq.read_table(path).to_pylist()
+            )
         return rows
 
     def read_episode(
@@ -248,7 +258,7 @@ class SidecarStore:
         if edit.base_revision and edit.base_revision != current:
             raise ValueError("annotation revision is stale; reload before editing")
         rows = [
-            ObjectAnnotation.model_validate(self._from_mask_row(row))
+            ObjectAnnotation.model_validate(row)
             for row in self.read_annotations(current)
         ]
         selected = [
@@ -403,10 +413,16 @@ class SidecarStore:
 
     @staticmethod
     def _from_mask_row(row: dict[str, Any]) -> dict[str, Any]:
+        """Storage row -> annotation. Converting an already-converted row is a
+        no-op, so a caller that still does this by hand cannot break."""
         value = dict(row)
-        value["mask_rle"] = {
-            "size": value.pop("rle_size"),
-            "counts": value.pop("rle_counts"),
-        }
+        if "mask_rle" not in value:
+            value["mask_rle"] = {
+                "size": value.pop("rle_size"),
+                "counts": value.pop("rle_counts"),
+            }
+        else:
+            value.pop("rle_size", None)
+            value.pop("rle_counts", None)
         value["status"] = value.get("status", ReviewStatus.SUGGESTED)
         return value

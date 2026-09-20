@@ -50,7 +50,7 @@ def dispatch_shortcut(page, key, ctrl=False, meta=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:7860")
-    parser.add_argument("--repo", default="samanthalhy/eval_so100_smol_strawberry_2")
+    parser.add_argument("--repo", default="lerobot/svla_so101_pickplace")
     parser.add_argument("--local-repo")
     args = parser.parse_args()
     configure()

@@ -12,9 +12,10 @@ def create(store, spec):
     token = secrets.token_urlsafe(32)
     value = {
         **spec.model_dump(),
-        "id": new_id(),
+        "id": new_id(set(store.ids("grants"))),
         "enabled": True,
-        "expires": time.time() + spec.hours * 3600,
+        # No expiry and no call cap unless one was asked for.
+        "expires": time.time() + spec.hours * 3600 if spec.hours else None,
         "calls": 0,
         "digest": hashlib.sha256(token.encode()).hexdigest(),
     }
@@ -34,8 +35,17 @@ def authenticate(store, token):
     key = hashlib.sha256(token.encode()).hexdigest()
     for item in store.list("grants"):
         if secrets.compare_digest(key, item["digest"]):
-            if not item["enabled"] or item["expires"] <= time.time():
-                raise PermissionError("Connection expired or disconnected")
+            if not item["enabled"]:
+                raise PermissionError("Connection disconnected")
+            if item["expires"] and item["expires"] <= time.time():
+                raise PermissionError("Connection expired")
+            # Every authenticated request marks the connection as heard from,
+            # including the discovery calls that are exempt from the call
+            # count. Liveness is "did this client speak to this LEVI", not
+            # "did it spend budget".
+            store.mutate(
+                "grants", item["id"], lambda value: value.update(last_seen=time.time())
+            )
             return Principal(
                 item["id"],
                 datasets=tuple(item["datasets"]),
@@ -51,11 +61,14 @@ def check_call(store, principal, run_id):
         return
 
     def reserve(value):
-        if not value["enabled"] or value["expires"] <= time.time():
-            raise PermissionError("Connection expired or disconnected")
+        if not value["enabled"]:
+            raise PermissionError("Connection disconnected")
+        if value["expires"] and value["expires"] <= time.time():
+            raise PermissionError("Connection expired")
         if value["run_id"] and value["run_id"] != run_id:
             raise PermissionError("Connection is limited to its approved run")
-        if value["calls"] >= value["max_tool_calls"]:
+        cap = value.get("max_tool_calls")
+        if cap and value["calls"] >= cap:
             raise PermissionError("Connection tool budget exhausted")
         value["calls"] += 1
 
@@ -69,7 +82,7 @@ def require_run(store, principal, run_id):
         value = store.get("grants", principal.id)
     except KeyError:
         return
-    if not value["enabled"] or value["expires"] <= time.time():
+    if not value["enabled"] or (value["expires"] and value["expires"] <= time.time()):
         raise PermissionError("Connection expired or disconnected")
     if value["run_id"] and value["run_id"] != run_id:
         raise PermissionError("Connection is limited to its approved run")

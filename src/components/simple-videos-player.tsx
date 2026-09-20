@@ -1,5 +1,6 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import { setObjectMarks } from "./object-marks";
 import { T } from "@/components/levi-locale";
 
 import React, { useEffect, useRef } from "react";
@@ -95,6 +96,12 @@ export const SimpleVideosPlayer = ({
     return () =>
       window.removeEventListener("levi:sam3-updated", onAnnotationsUpdated);
   }, [loadObjectAnnotations]);
+
+  // Publish the annotated instants so the playback bar can mark and jump to
+  // them: between those frames there is no object annotation to show.
+  useEffect(() => {
+    setObjectMarks(objectAnnotations.map((row) => row.timestamp));
+  }, [objectAnnotations]);
 
   const hiddenSet = React.useMemo(() => new Set(hiddenVideos), [hiddenVideos]);
 

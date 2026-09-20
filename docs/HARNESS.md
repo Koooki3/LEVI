@@ -1,6 +1,6 @@
 # Agent Harness: audit, executable plan and verification
 
-Status: incremental, experimental implementation. No real-model/GPU quality claim.
+Status: the contracts below are implemented and tested. Real-model annotation quality and SAM3 GPU inference are measured separately and are not claimed here.
 
 ## Code audit (2026-09-20)
 
@@ -67,11 +67,51 @@ Input snapshot and evidence-artifact byte limits, model call and observation cap
 
 The real reference set must include failed/repeated picks, drops/recovery, interruptions, reordered subtasks, short events, occlusion, multiple cameras and VFR. Record per-slice segment/event F1, boundary errors, uncovered/unknown duration, mask IoU, track identity switches, correction propagation, reimport fidelity and timed human edits. Freeze thresholds after pilot, then evaluate a separate set. Compare the same observations and validation in baseline and Harness; missing metrics remain **not measured**.
 
+## Measured run (2026-09-20)
+
+The first end-to-end external-MCP annotation on real data: five episodes of a plate-stacking capture, annotated through the stdio bridge by an external agent, reviewed and committed by a human. Thirty-one subtask segments and 114 per-frame object masks (44 object tracks) were published. What the run changed:
+
+| Observed | Change |
+|---|---|
+| Evidence density came from a flat sample count, not the approved plan; a 0.5 s coarse step yielded three frames per episode | `runtime.prepare_evidence` goes through the declared observation policy for temporal **and** object work |
+| One image per evidence frame dominated the agent's context | `evidence.read` gained `layout: "mosaic"` — one labelled contact sheet per page, tiles still addressable by evidence id |
+| Boundary refinement existed only inside the model path | `evidence.refine` exposes the same bounded two-pass refinement to external agents |
+| SAM3 died silently with the GPU at 99.7 % used, reporting only a non-zero exit | GPU preflight before launch, exit-code/signal classification with a log path, and `objects.strategy` recommending the agent path when the machine cannot host the worker |
+| Object outlines had to be written by a throwaway rig-specific script | `objects.detect` measures candidate regions generically (outline, position, shape, median HSV, one overlay) and `objects.propose` accepts `candidate_id` instead of a returned polygon |
+| The second changeset could not be committed because the first had moved the dataset | `changes.rebase` moves a reviewed draft onto the published revision and clears its approval |
+| A capability raising inside the API returned an empty body; the client saw a JSON parse error | Readable 500s on the capability route, and a readable failure for any non-JSON response in the terminal client |
+| Stale runs blocked their own cleanup forever ("resume or cancel it first") with no way to cancel | `runs.abandon`, and `levi agent clean --abandon` |
+| Nothing recorded what the work cost | `runs.report_usage`, `plans.estimate` and `levi agent usage` (see [AGENT_WORKBENCH.md](AGENT_WORKBENCH.md)) |
+
+Measured cost of that run, by the artifacts that crossed the agent's context (image pixel area, JSON bytes; the agent's own reasoning is not visible to LEVI): 94 000 tokens for the temporal work over 208 evidence frames read as 14 contact sheets plus 6 refinement frames, and 32 000 for the object work over 32 frames. Reading those 208 frames singly instead would have cost roughly three times as much by the calibrated model. No percentage saving is claimed beyond these two recorded runs; the estimator states its sample count and widens its range when extrapolating.
+
+## Integration pass (2026-09-20)
+
+After the measured run above, the whole product was exercised end to end against a running instance: browsing every local dataset through the ports the web UI uses, the artifact naming rules, the external MCP toolchain, and an online (API-model) run driven against a local OpenAI-compatible stub so that dispatch, budget, events, artifacts and metering could be checked without paying a provider. What it found:
+
+| Observed | Change |
+|---|---|
+| Every local dataset answered 401 once the browser was signed in to Hugging Face: the Hub's bearer token was read as a failed Agent credential | A bearer token is claimed as an Agent credential only on the Agent API; elsewhere an unrecognised one is ignored and the UI credential still applies. The Hub token is not sent to LEVI's own service |
+| Every local dataset answered 401 while server rendering; the proxy authenticated with a token captured when the frontend started | The token is read from the file the service owns, so a restarted Core does not strand the frontend, and it is attached only to requests aimed at LEVI's own file service |
+| A blocked run reported only "Proposal cites unknown evidence" | The message names the citation and the episode whose evidence was supplied |
+| A rejected subtask id reported only that it was unknown | The message names the id and lists what the plan defines |
+| An interval ending at a float32 episode boundary was reported as an uncovered gap of a millionth of a second | Gaps shorter than a frame are not gaps |
+| Stale runs blocked their own cleanup with no way to close them | `runs.abandon`, surfaced as `levi agent clean --abandon` |
+| `levi clean` raised a traceback when the service was running, and named neither the process nor a way to stop it | A readable refusal, the PID, and a new `levi stop` |
+| Artifacts of a dataset that had left the catalog were invisible | `levi clean` reports them and their dead redirects; empty shells are removed, anything holding review work is only listed |
+| Reading a cleaned-up run's evidence raised `FileNotFoundError` | The ledger is returned with what was removed and how to rebuild it; tampered content still fails closed |
+| "Regenerable" was not true: cleanup removed the frozen input snapshot too | `runs.prepare` takes the snapshot again from the source and refuses if the source no longer matches |
+
+The online path passed its 22 checks: plan, approval, two model requests, live `model_step` events carrying request count, tokens and elapsed time, an automatically recorded cost sample, evidence artifacts, an artifact manifest, pilot review, remaining episodes, approval and a commit to a timestamped revision. A stub is not a model: it proves LEVI's machinery, not annotation quality.
+
 ### Explicit remaining gaps
 
 - No automatic semantic definition-generation before approval; users edit definitions. No real model capability probe or model quality acceptance has been run.
 - Dense refinement observes candidate windows; it cannot prove that coarse observations caught every short event. Unseen intervals require human review or a denser revised plan.
 - No autonomous keyframe reinitialization, learned identity repair, automatic human-mask propagation, cross-camera identity or amodal masks. Existing manual object edits remain authoritative; track changes need re-review.
 - No universal native-video model input, arbitrary external Agent compatibility, public HTTP MCP or native Pi compaction. Optional scoped ACP Pilot integrations are documented in [PILOT.md](PILOT.md).
+- Contact sheets reduce cost on the external-MCP path only. An API-model run still receives one image per evidence frame: sending a sheet to a vision model changes what the model sees, and no measurement of that trade-off exists here, so it is not done silently. Online-mode cost is at least measured exactly, since LEVI meters those runs itself.
+- Token accounting depends on agents reporting honestly; LEVI marks every sample `self_reported` and can only cross-check it against the scope it measured. Two recorded runs are not a cost model — treat early estimates as order-of-magnitude.
+- `objects.detect` measures colour-coherent regions. It has no notion of objects, so a shadow, a table or a human hand can be returned as a candidate; the agent decides, and a human reviews. It is not a substitute for SAM3 on cluttered or textured scenes.
 - No cross-run feature cache or general dependency-graph incremental recomputation. Completed shards and identical interrupted phase results are reused; broader changes require new plans.
 - Export re-read checks do not certify every downstream training consumer. Rich temporal fields live in the documented LEVI provenance extension and must be read explicitly.

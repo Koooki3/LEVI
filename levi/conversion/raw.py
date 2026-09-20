@@ -287,10 +287,27 @@ def image_files(demo, key):
 
 
 def read_images(files, positions):
+    """Decode the selected frames, saying why when one will not decode.
+
+    A decode that returns nothing is either a file the pipeline cannot use or
+    a transient failure under load -- a worker on a busy machine occasionally
+    reads nothing from a file that is perfectly fine. One retry separates the
+    two, and the message then carries what was actually on disk instead of
+    only the name.
+    """
     for i in positions:
-        frame = cv2.imread(str(files[int(i)]))
+        path = files[int(i)]
+        frame = cv2.imread(str(path))
         if frame is None:
-            raise ValueError(f"Unreadable image: {files[int(i)].name}")
+            frame = cv2.imread(str(path))
+        if frame is None:
+            if not path.exists():
+                raise ValueError(f"Image is missing: {path}")
+            size = path.stat().st_size
+            raise ValueError(
+                f"Unreadable image: {path.name} ({size} bytes)"
+                + (" — the file is empty" if size == 0 else "")
+            )
         yield frame
 
 

@@ -340,3 +340,61 @@ def sample(context, root, episode, artifact_dir, *, frame_indices=None):
     if hasattr(summary["tasks"], "tolist"):
         summary["tasks"] = summary["tasks"].tolist()
     return summary, evidence
+
+
+def mosaic(items, evidence_dir, destination, *, tile_width=320, columns=4):
+    """One labelled contact sheet for a page of evidence frames.
+
+    A coarse temporal pass needs to see many frames at once; sending them as
+    separate images costs an order of magnitude more tokens than one sheet at
+    the same effective resolution. Tiles keep their exact evidence id, frame
+    index and timestamp, so a suggestion can still cite the individual frame
+    it was read from.
+    """
+    import cv2
+    import numpy as np
+
+    if not items:
+        raise ValueError("No evidence frames to lay out")
+    tiles, index = [], []
+    for position, item in enumerate(items):
+        if not item.get("artifact"):
+            raise ValueError("Table-only evidence has no image to lay out")
+        image = cv2.imread(str(evidence_dir / item["artifact"]))
+        if image is None:
+            raise ValueError(f"Unreadable evidence artifact: {item['artifact']}")
+        height = max(1, round(image.shape[0] * tile_width / image.shape[1]))
+        image = cv2.resize(image, (tile_width, height))
+        label = f"f{item['frame_index']} {item['timestamp']:.2f}s"
+        cv2.rectangle(image, (0, 0), (8 + 7 * len(label), 17), (0, 0, 0), -1)
+        cv2.putText(
+            image, label, (4, 13), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1
+        )
+        tiles.append(image)
+        index.append(
+            {
+                "evidence_id": item["id"],
+                "row": position // columns,
+                "column": position % columns,
+                "frame_index": item["frame_index"],
+                "timestamp": item["timestamp"],
+                "camera_key": item.get("camera_key"),
+            }
+        )
+    blank = np.zeros_like(tiles[0])
+    rows = [
+        np.hstack(tiles[i : i + columns] + [blank] * ((-len(tiles)) % columns))
+        if i + columns > len(tiles)
+        else np.hstack(tiles[i : i + columns])
+        for i in range(0, len(tiles), columns)
+    ]
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if not cv2.imwrite(str(destination), np.vstack(rows)):
+        raise ValueError("Could not write the evidence sheet")
+    return {
+        "artifact": destination.name,
+        "tile_width": tile_width,
+        "columns": columns,
+        "tiles": index,
+        "reading": "One sheet of the same evidence frames; cite the tile's evidence_id",
+    }

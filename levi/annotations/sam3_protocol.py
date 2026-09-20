@@ -97,7 +97,9 @@ def fake_annotations(plan: Sam3Plan) -> list[ObjectAnnotation]:
         for camera_no, camera_key in enumerate(plan.camera_keys):
             for prompt_no, prompt in enumerate(plan.prompts):
                 object_id = f"fake-{episode_index}-{camera_no}-{prompt_no}"
-                for frame_index in range(plan.start_frame, plan.start_frame + frame_count):
+                for frame_index in range(
+                    plan.start_frame, plan.start_frame + frame_count
+                ):
                     x1 = 4 + frame_index + prompt_no * 10
                     y1 = 5 + camera_no * 8
                     x2 = x1 + 12

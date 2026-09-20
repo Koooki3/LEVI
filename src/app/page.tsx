@@ -5,10 +5,9 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import HfAuthButton from "@/components/hf-auth-button";
 import { T, useLocale } from "@/components/levi-locale";
-const DEMOS = [
-  "samanthalhy/so100_strawberry_2",
-  "samanthalhy/eval_so100_smol_strawberry_2",
-];
+// Public LeRobot datasets, checked reachable on 2026-09-20; keep in step with
+// DEMOS in levi/catalog.py.
+const DEMOS = ["lerobot/svla_so101_pickplace", "lerobot/aloha_static_coffee"];
 export default function Home() {
   return (
     <Suspense>

@@ -130,7 +130,7 @@ Series keys use `" | "` as delimiter (e.g. `observation.state | 0`).
 - BigInt literals (`42n`) require `tsconfig.test.json` (target ES2020) — test files are excluded from `tsconfig.json`
 - `@types/bun` is installed as a devDependency for `bun:test` type resolution
 - Mocking fetch: `globalThis.fetch = mock(() => Promise.resolve(new Response(...))) as unknown as typeof fetch`
-- Python tests are in `tests/`; use `uv run pytest`.
+- Python tests are in `tests/`; use `uv run pytest`. Run one suite at a time: two concurrent runs sharing `--basetemp` leave residue that makes later runs fail in unrelated places (ffprobe on a half-written fixture, `rm_rf` on a non-empty directory). If a run fails oddly, `rm -rf .state/tmp/build/pytest` and try again.
 - CI: `.github/workflows/test.yml` runs frontend validation, backend/conversion tests and production build on push/PR.
 
 ## URL structure
@@ -169,12 +169,17 @@ Preserve the LEVI theme, keyboard access and responsive layouts when editing inh
 ## Built-in conversion and service
 
 - `levi/conversion/`: modular conversion. `registry.py` lists input formats (`inputs/`: `robot_capture`, `image_sequence`, `lerobot`) and export targets (`outputs/`: `lerobot_v21`, `recap_value`); `pipeline.py` is the single-pass converter (parent plans from CSVs, spawn pool does one decode + one encode per camera, or a lossless remux in `retime` mode), `report.py` the inspection/compatibility models the Workbench renders. `raw.py`/`media.py`/`dataset.py` are the tested primitives. Timestamps are always `frame_index / fps`. See docs/CONVERSION.md and docs/RECAP.md.
+- `levi/annotations/sidecar.py`: object annotations. Parquet stores the mask flat (`rle_size`/`rle_counts`); `read_annotations`/`read_episode` return the `mask_rle` shape that `ObjectAnnotation` and the viewer both expect. Do not convert at a call site — that duplication is what once left the overlay with no mask.
 - `levi/views.py`: browsing views of raw captures; `levi/annotations/carryover.py` moves annotations into conversions by `source_demo`; `levi/annotations/outcomes.py` stores human success/failure labels.
 - Naming (`levi/naming.py`): per-dataset artifacts use the catalog name, per-run artifacts a timestamp — never a hash. `uv run levi migrate` upgrades older workspaces. See `.state.md`.
 - `levi/sync.py`: background workspace sync (discover, refresh, rebuild raw views, drop removed datasets); `levi/revision.py` is the stat-only dataset revision shared with the annotation backend and viewer. Catalog writes go through `catalog.locked()` (cross-process).
 - `levi/jobs.py`: allowlisted worker processes, immutable plans, timeouts and recovery.
 - `levi/service.py`: local API, catalog, diagnostics and dataset file serving.
 - `src/app/api/levi/` and `src/app/api/annotation/`: runtime proxies to the loopback backend.
-- `levi/maintenance.py`: bounded cache cleanup; preserve registered datasets, results and environments.
+- `levi/maintenance.py`: bounded cache cleanup and orphan reporting; preserve registered datasets, results and environments. It refuses while the service runs — `levi stop` first.
+- `levi/agent/usage.py`: per-agent cost model (fixed + per-episode + per-frame, priced by reading mode, calibrated from recorded runs). Online runs are metered by LEVI itself; external agents self-report. Never present an estimate as a price.
+- `levi/agent/housekeeping.py`: deletes only what `runs.prepare` can rebuild; committed revisions, provenance, inverse patches and open drafts stay.
+- `levi/agent/detection.py`: model-free candidate regions for object annotation (colour quantisation plus connected components). It measures, it does not recognise.
+- `src/utils/serviceToken.ts`: the UI token for the loopback API, read from the file the service owns so a Core restart does not strand the frontend. `authHeaders(url)` attaches it only to LEVI's own file service — never to a Hugging Face request.
 
 See docs/AUDIT.md and docs/VALIDATION.md for guarantees and verified limits.

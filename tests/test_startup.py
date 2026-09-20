@@ -111,3 +111,91 @@ def test_early_service_exit_fails_startup():
             "http://127.0.0.1:1",
             "http://127.0.0.1:2",
         )
+
+
+def test_clean_refuses_readably_while_the_service_runs(tmp_path, monkeypatch, capsys):
+    """A precondition someone can act on must not arrive as a traceback."""
+    import os
+    import sys
+
+    from levi import maintenance
+
+    monkeypatch.setattr(maintenance, "STATE", tmp_path)
+    (tmp_path / "server.pid").write_text(str(os.getpid()))
+    monkeypatch.setattr(sys, "argv", ["levi-clean"])
+
+    assert maintenance.main() == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Stop the LEVI service" in captured.err
+    # It names the process and the command that stops it.
+    assert str(os.getpid()) in captured.err
+    assert "levi stop" in captured.err
+
+
+def test_clean_runs_once_the_service_is_gone(tmp_path, monkeypatch):
+    import sys
+
+    from levi import maintenance
+
+    monkeypatch.setattr(maintenance, "STATE", tmp_path)
+    # A pid file left behind by a process that has exited is not a service.
+    (tmp_path / "server.pid").write_text("2147483646")
+    monkeypatch.setattr(sys, "argv", ["levi-clean"])
+    assert maintenance.main() == 0
+
+
+def test_clean_survives_a_corrupt_pid_file(tmp_path, monkeypatch):
+    import sys
+
+    from levi import maintenance
+
+    monkeypatch.setattr(maintenance, "STATE", tmp_path)
+    (tmp_path / "server.pid").write_text("not-a-pid\n")
+    monkeypatch.setattr(sys, "argv", ["levi-clean"])
+    assert maintenance.main() == 0
+
+
+def test_clean_reports_artifacts_left_by_a_removed_dataset(tmp_path, monkeypatch):
+    """Nobody's review work is deleted with its dataset, so it must be visible."""
+    import json
+
+    from levi import catalog, maintenance
+
+    monkeypatch.setattr(maintenance, "STATE", tmp_path)
+    monkeypatch.setattr(catalog, "STATE", tmp_path)
+    (tmp_path / "datasets.json").write_text(
+        json.dumps({"kept": {"path": str(tmp_path / "kept")}})
+    )
+    (tmp_path / "dataset_aliases.json").write_text(
+        json.dumps({"0badc0de": "gone", "old": "kept"})
+    )
+    (tmp_path / "annotations/kept").mkdir(parents=True)
+    (tmp_path / "annotations/gone").mkdir(parents=True)
+    (tmp_path / "object_annotations/empty_shell").mkdir(parents=True)
+    (tmp_path / "annotations/gone/episode_000000.json").write_text("{}")
+
+    report = maintenance.orphans()
+    assert [row["dataset"] for row in report["removable_empty"]] == ["empty_shell"]
+    kept = report["keeps_content"]
+    assert [row["dataset"] for row in kept] == ["gone"]
+    assert kept[0]["files"] == 1
+    # A redirect to a dataset nobody has any more leads nowhere.
+    assert report["stale_aliases"] == {"0badc0de": "gone"}
+
+
+def test_clean_removes_only_the_empty_shells(tmp_path, monkeypatch):
+    import json
+
+    from levi import catalog, maintenance
+
+    monkeypatch.setattr(maintenance, "STATE", tmp_path)
+    monkeypatch.setattr(catalog, "STATE", tmp_path)
+    (tmp_path / "datasets.json").write_text(json.dumps({}))
+    (tmp_path / "annotations/empty_shell").mkdir(parents=True)
+    (tmp_path / "annotations/has_work").mkdir(parents=True)
+    (tmp_path / "annotations/has_work/episode_000000.json").write_text("{}")
+
+    maintenance.clean(apply=True)
+    assert not (tmp_path / "annotations/empty_shell").exists()
+    assert (tmp_path / "annotations/has_work/episode_000000.json").is_file()

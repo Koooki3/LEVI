@@ -70,9 +70,7 @@ def decode_rle(rle: dict[str, object]) -> list[list[bool]]:
     expected = height * width
     if len(values) != expected:
         raise ValueError(f"RLE covers {len(values)} pixels; expected {expected}")
-    return [
-        [values[x * height + y] for x in range(width)] for y in range(height)
-    ]
+    return [[values[x * height + y] for x in range(width)] for y in range(height)]
 
 
 def validate_rle(rle: dict[str, object]) -> None:

@@ -33,17 +33,34 @@ export default function AgentConnections({
     configured: boolean;
     enabled: boolean;
     datasets: string[];
+    shared_token?: boolean;
+    live?: boolean;
+    grants?: Array<{
+      id: string;
+      label: string;
+      datasets: string[];
+      calls: number;
+      expires_in_seconds: number | null;
+      idle_seconds: number | null;
+      live: boolean;
+    }>;
   } | null>(null);
   useEffect(() => {
     let cancelled = false;
-    void fetch("/api/levi/agent/v1/connections")
-      .then((r) => r.json())
-      .then((r) => {
-        if (!cancelled) setExternal(r.external || null);
-      })
-      .catch(() => {});
+    // A scoped connection can be created or expire while this panel is open,
+    // so the card follows the server rather than a value read once.
+    const load = () =>
+      fetch("/api/levi/agent/v1/connections")
+        .then((r) => r.json())
+        .then((r) => {
+          if (!cancelled) setExternal(r.external || null);
+        })
+        .catch(() => {});
+    void load();
+    const timer = setInterval(load, 5000);
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
   }, []);
   const { oauth } = useAuth();
@@ -233,9 +250,15 @@ export default function AgentConnections({
               className={`levi-connection-status ${external?.configured && external.enabled ? "ready" : ""}`}
             >
               {t(
-                external?.configured && external.enabled
-                  ? "Configured"
-                  : "Disconnected",
+                !external?.enabled
+                  ? "Disconnected"
+                  : external.live
+                    ? "Connected"
+                    : external.grants?.length
+                      ? "Waiting for the agent to call"
+                      : external.configured
+                        ? "Configured"
+                        : "Disconnected",
               )}
             </span>
           </div>
@@ -248,6 +271,20 @@ export default function AgentConnections({
           ) : (
             <p>No external dataset scope configured.</p>
           )}
+          {external?.grants?.map((grant) => (
+            <p key={grant.id} className="levi-agent-muted">
+              {t("Scoped connection")} · {grant.calls} {t("calls")} ·{" "}
+              {grant.expires_in_seconds == null
+                ? t("no expiry — until you disconnect")
+                : `${t("expires in")} ${Math.max(1, Math.round(grant.expires_in_seconds / 3600))}h`}
+              {grant.idle_seconds != null &&
+                ` · ${t("last call")} ${
+                  grant.idle_seconds < 60
+                    ? t("just now")
+                    : `${Math.round(grant.idle_seconds / 60)}${t("m ago")}`
+                }`}
+            </p>
+          ))}
           <button
             disabled={busy || !external?.configured}
             onClick={async () => {

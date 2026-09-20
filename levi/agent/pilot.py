@@ -27,13 +27,49 @@ def command(runtime):
     return PROJECT / "integrations/pilot/node_modules/.bin" / name
 
 
+def installed_version(runtime):
+    """The version of the runtime's own CLI on this machine, if it is there.
+
+    This is deliberately separate from the pinned adapter version: one is what
+    the person has, the other is what LEVI would install. Reporting only the
+    pin made the panel look like a probe that always failed.
+    """
+    import shutil
+    import subprocess
+
+    binary = shutil.which(runtime)
+    if not binary:
+        return None
+    try:
+        out = subprocess.run(
+            [binary, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "unreadable"
+    text = (out.stdout or out.stderr or "").strip().splitlines()
+    return text[0][:80] if text else "unknown version"
+
+
 def profiles():
     return [
         {
             "id": key,
+            # What LEVI would install to drive this runtime over ACP.
+            "adapter_version": version,
+            "adapter_installed": command(key).exists(),
+            # What is actually on this machine.
+            "cli_version": installed_version(key),
+            "cli_installed": installed_version(key) is not None,
+            # Kept for older clients that read these names.
             "version": version,
             "installed": command(key).exists(),
-            "authentication": "unknown",
+            # LEVI never inspects or stores the runtime's login; the official
+            # client owns it. Saying "unknown" read as a failed check.
+            "authentication": "owned-by-official-client",
             "login_owner": "official-local-client",
             "capabilities": "negotiated-on-connect",
             "login_command": "codex login" if key == "codex" else "claude auth login",
@@ -240,7 +276,7 @@ class Session:
             "fetch",
         }:
             return {"outcome": {"outcome": "cancelled"}}
-        id = new_id()
+        id = new_id(set(self.wb.store.ids("pilot_permissions")))
         value = {
             "id": id,
             "session_id": self.value["id"],
@@ -490,7 +526,7 @@ def start(wb, spec):
         )
         value = {
             **spec.model_dump(),
-            "id": new_id(),
+            "id": new_id(set(wb.store.ids("pilot_sessions"))),
             "grant_id": grant["id"],
             "turns": 0,
             "connection": "connecting",

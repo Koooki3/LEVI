@@ -12,15 +12,25 @@ export default async function ExplorePage({
 }) {
   const params = await searchParams;
   if (params.catalog !== "all") {
+    // Public LeRobot datasets, checked reachable on 2026-09-20; keep in step
+    // with DEMOS in levi/catalog.py. These are v3.0, whose video files live at
+    // videos/<camera>/chunk-NNN/file-NNN.mp4 rather than the v2.x per-episode
+    // path, so the preview is named per dataset instead of guessed.
     const demos = [
-      "samanthalhy/so100_strawberry_2",
-      "samanthalhy/eval_so100_smol_strawberry_2",
+      {
+        id: "lerobot/svla_so101_pickplace",
+        camera: "observation.images.up",
+      },
+      {
+        id: "lerobot/aloha_static_coffee",
+        camera: "observation.images.cam_high",
+      },
     ];
     return (
       <ExploreGrid
-        datasets={demos.map((id) => ({
+        datasets={demos.map(({ id, camera }) => ({
           id,
-          videoUrl: `/api/proxy/datasets/${id}/resolve/main/videos/chunk-000/observation.images.front/episode_000000.mp4`,
+          videoUrl: `/api/proxy/datasets/${id}/resolve/main/videos/${camera}/chunk-000/file-000.mp4`,
         }))}
         currentPage={1}
         totalPages={1}

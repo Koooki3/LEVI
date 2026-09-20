@@ -98,3 +98,53 @@ def manifest(wb, run_id):
         + "\n".join(f"- {a['path']} ({a['bytes']} bytes)" for a in artifacts)
     )
     return result
+
+
+def waiting_for(store, run):
+    """Whose turn it is on this run, and whether its evidence is still on disk.
+
+    An agent asking "what should I pick up" needs one answer, not a status
+    code to interpret. It also needs to know when a run's evidence has been
+    cleaned away: the frames are rebuildable from the source, but only by
+    calling runs.prepare again, and only while that run's approved plan still
+    holds. Reporting a cleaned run as ready would send an agent to read files
+    that are not there.
+    """
+    from .housekeeping import FINISHED
+
+    change = None
+    if run.get("changes"):
+        try:
+            change = store.get("changes", run["changes"])
+        except KeyError:
+            change = None
+    committed = bool(change and change["status"] == "committed")
+    finished = run["status"] in FINISHED or committed
+    evidence_ready = bool(run.get("prepared")) and not run.get("evidence_cleaned")
+
+    if committed:
+        state = "nothing; the annotations are published"
+    elif run["status"] == "cancelled":
+        state = "nothing; this run was abandoned"
+    elif finished:
+        state = "human_review"
+    elif not (run.get("plan") or {}).get("approval"):
+        state = "human_approval"
+    elif change and change["status"] == "approved":
+        state = "human_commit"
+    elif change and change["status"] == "draft":
+        state = "human_review"
+    elif not evidence_ready:
+        state = "agent_prepare"
+    else:
+        state = "agent_propose"
+    return {
+        "waiting_for": state,
+        "finished": finished,
+        "committed": committed,
+        "plan_approved": bool((run.get("plan") or {}).get("approval")),
+        "evidence_ready": evidence_ready,
+        "evidence_cleaned": bool(run.get("evidence_cleaned")),
+        "changeset": run.get("changes"),
+        "changeset_status": change["status"] if change else None,
+    }

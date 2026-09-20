@@ -11,21 +11,24 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-TIMESTAMP_PATTERN = r"\d{8}-\d{6}-\d{3}(?:-\d+)?"
+# Minute precision, with the reservation counter for a same-minute clash.
+# Finer digits read as an opaque suffix and tell a person nothing; several
+# artifacts made in one minute are told apart by -2, -3… which is readable.
+TIMESTAMP_PATTERN = r"\d{8}-\d{4}(?:-\d+)?"
+LEGACY_TIMESTAMP_PATTERN = r"\d{8}-\d{6}(?:-\d{3})?(?:-\d+)?"
 
 
 def _now() -> str:
-    moment = datetime.now(UTC)
-    return moment.strftime("%Y%m%d-%H%M%S-") + f"{moment.microsecond // 1000:03d}"
+    return datetime.now(UTC).strftime("%Y%m%d-%H%M")
 
 
 def timestamp_id(
     directory: Path, suffix: str = "", *, prefix: str = "", create_dir: bool = False
 ) -> str:
-    """A fresh ``YYYYmmdd-HHMMSS-fff`` id, reserved on disk.
+    """A fresh ``YYYYmmdd-HHMM`` id, reserved on disk.
 
     Several LEVI processes may share one workspace, so an in-process counter
-    can't prevent two runs picking the same millisecond. The id is claimed by
+    can't prevent two runs picking the same minute. The id is claimed by
     exclusively creating ``<directory>/<prefix><id><suffix>`` (a file, or a
     directory when ``create_dir``); on a clash ``-1``, ``-2``… is appended.
     Returns only the id part.
@@ -75,7 +78,9 @@ def is_timestamp_id(value: str) -> bool:
     return bool(re.fullmatch(TIMESTAMP_PATTERN, value))
 
 
-def hub_cache_directory(cache_root: Path, repo_id: str, revision: str, scope: str) -> Path:
+def hub_cache_directory(
+    cache_root: Path, repo_id: str, revision: str, scope: str
+) -> Path:
     """Account-isolated cache with readable paths; fingerprints stay in metadata.
 
     Existing digest-named caches are deliberately neither deleted nor shared.
@@ -94,8 +99,8 @@ def hub_cache_directory(cache_root: Path, repo_id: str, revision: str, scope: st
             if row["scope"] == scope and row["revision"] == revision:
                 return root / row["directory"]
         scopes = list(dict.fromkeys(row["scope"] for row in records))
-        account = scopes.index(scope)+1 if scope in scopes else len(scopes)+1
-        version = sum(row["scope"] == scope for row in records)+1
+        account = scopes.index(scope) + 1 if scope in scopes else len(scopes) + 1
+        version = sum(row["scope"] == scope for row in records) + 1
         directory = f"account-{account:04d}/revision-{version:04d}"
         records.append({"scope": scope, "revision": revision, "directory": directory})
         temporary = index.with_suffix(".tmp")

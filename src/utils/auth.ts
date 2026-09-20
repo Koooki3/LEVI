@@ -20,9 +20,46 @@ export function getAuthToken(): string | null {
   }
 }
 
-export function authHeaders(): Record<string, string> {
-  const accessToken = getAuthToken();
-  return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+/** The token LEVI's own file service requires, and only for that service.
+ *
+ * In the browser these requests go through the same-origin /api/levi proxy,
+ * which attaches the token server-side. During server rendering there is no
+ * proxy in front of them: the fetch goes straight to the loopback API, which
+ * rejects it without this header. The URL is checked because the same helper
+ * builds headers for Hugging Face requests, and LEVI's internal token must
+ * never travel to the Hub.
+ */
+function leviServiceToken(url?: string): string | null {
+  if (typeof window !== "undefined" || !url) return null;
+  const backend = process.env.LEVI_BACKEND_URL;
+  if (!backend || !url.startsWith(backend)) return null;
+  return process.env.LEVI_UI_TOKEN || null;
+}
+
+/** Whether this URL is served by LEVI itself rather than by the Hub.
+ *
+ * Local datasets are served from the same origin (through /api/levi) in the
+ * browser and from the loopback API during server rendering.
+ */
+function isLeviService(url?: string): boolean {
+  if (!url) return false;
+  if (url.startsWith("/api/levi") || url.startsWith("/annotations/api"))
+    return true;
+  const backend = process.env.LEVI_BACKEND_URL;
+  return Boolean(backend && url.startsWith(backend));
+}
+
+export function authHeaders(url?: string): Record<string, string> {
+  const headers: Record<string, string> = {};
+  // A Hugging Face credential belongs to the Hub. Sending it to LEVI's own
+  // file service leaks it to a service that has no use for it, and LEVI reads
+  // an unrecognised Bearer token as a failed Agent credential -- which is how
+  // signing in to the Hub used to make every local dataset answer 401.
+  const accessToken = isLeviService(url) ? null : getAuthToken();
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  const internal = leviServiceToken(url);
+  if (internal) headers["x-levi-ui-token"] = internal;
+  return headers;
 }
 
 export const AUTH_STORAGE_KEY = STORAGE_KEY;

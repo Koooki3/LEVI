@@ -59,7 +59,7 @@ at running the existing suite. Before declaring the work done:
   everyone after.
 - **Workspace/filesystem invariants**: anything that creates, moves, or
   names a directory under `.state` — confirm it matches the conventions in
-  [`.state.md`](../../.state.md) (flat layout, no incidental subfolders,
+  [`.state.md`](../../../.state.md) (flat layout, no incidental subfolders,
   per-dataset artifacts named by catalog name and per-run artifacts by
   timestamp — never a hash) and doesn't leave orphaned or half-written state
   behind on failure (outputs are staged and renamed into place).

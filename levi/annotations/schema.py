@@ -33,7 +33,7 @@ class Sam3Plan(BaseModel):
     max_frames: int | None = Field(default=None, ge=1)
     review_threshold: float = Field(default=0.60, ge=0, le=1)
     accept_threshold: float = Field(default=0.90, ge=0, le=1)
-    provider: Literal["sam3", "fake"] = "sam3"
+    provider: Literal["sam3", "agent", "fake"] = "sam3"
 
     @field_validator("episode_indices")
     @classmethod
@@ -79,7 +79,7 @@ class ObjectAnnotation(BaseModel):
     visible: bool = True
     occluded: bool = False
     status: ReviewStatus = ReviewStatus.SUGGESTED
-    source: Literal["sam3", "human", "fake", "import"] = "sam3"
+    source: Literal["sam3", "agent", "human", "fake", "import"] = "sam3"
     prompt: str | None = None
 
     @field_validator("bbox_xyxy")

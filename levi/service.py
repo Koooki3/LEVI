@@ -44,9 +44,11 @@ from backend.app import app as annotation_app
 async def lifespan(app):
     jobs.recover_interrupted()
     from .agent.store import Store
+
     Store(STATE).recover()
     from .agent.pilot import recover
     from .agent.runtime import Workbench
+
     recover(Workbench(STATE))
     marker = STATE / "server.pid"
     marker.write_text(str(os.getpid()))
@@ -56,8 +58,10 @@ async def lifespan(app):
     finally:
         SYNC.stop()
         from .agent.runtime import stop
+
         stop()
         from .agent.pilot import shutdown
+
         shutdown()
         jobs.stop_workers()
         if marker.exists() and marker.read_text() == str(os.getpid()):
@@ -110,7 +114,15 @@ def api_icon():
 
 @app.get("/api/levi/health")
 def health():
-    return {"service": "levi-api", "status": "ok", **({"instance": os.environ["LEVI_CORE_INSTANCE"]} if os.getenv("LEVI_CORE_INSTANCE") else {})}
+    return {
+        "service": "levi-api",
+        "status": "ok",
+        **(
+            {"instance": os.environ["LEVI_CORE_INSTANCE"]}
+            if os.getenv("LEVI_CORE_INSTANCE")
+            else {}
+        ),
+    }
 
 
 @app.middleware("http")
@@ -120,27 +132,57 @@ async def local_request(request: Request, call_next):
     if (
         request.method not in ("GET", "HEAD", "OPTIONS")
         and origin
-        and origin.rstrip("/") not in {os.getenv("LEVI_FRONTEND_URL", "http://127.0.0.1:7860").rstrip("/"), str(request.base_url).rstrip("/")}
+        and origin.rstrip("/")
+        not in {
+            os.getenv("LEVI_FRONTEND_URL", "http://127.0.0.1:7860").rstrip("/"),
+            str(request.base_url).rstrip("/"),
+        }
     ):
         return JSONResponse(
             {"detail": "Cross-origin writes are disabled"}, status_code=403
         )
     from .agent.legacy import expected_revision
     from .agent.security import external_principal
+
     auth = request.headers.get("authorization", "")
+    agent_api = request.url.path.startswith("/api/levi/agent/v1/")
+    # A Bearer token is only claimed to be a LEVI Agent credential on the Agent
+    # API. Everywhere else the browser may be carrying someone else's -- a
+    # signed-in Hugging Face session attaches one to every dataset request --
+    # and refusing those would lock the web UI out of its own local datasets.
+    agent_credential = False
     if auth.startswith("Bearer "):
         try:
             external_principal(auth[7:])
+            agent_credential = True
         except PermissionError:
-            return JSONResponse({"detail": "Invalid LEVI Agent credential"}, status_code=401)
-        if not request.url.path.startswith("/api/levi/agent/v1/"):
-            return JSONResponse({"detail": "External agents must use scoped capabilities"}, status_code=403)
+            if agent_api:
+                return JSONResponse(
+                    {"detail": "Invalid LEVI Agent credential"}, status_code=401
+                )
+        if agent_credential and not agent_api:
+            return JSONResponse(
+                {"detail": "External agents must use scoped capabilities"},
+                status_code=403,
+            )
     ui_secret = os.getenv("LEVI_UI_TOKEN")
-    if ui_secret and not auth.startswith("Bearer ") and request.url.path not in {"/", "/favicon.ico", "/api/levi/health"}:
+    if (
+        ui_secret
+        and not agent_credential
+        and request.url.path not in {"/", "/favicon.ico", "/api/levi/health"}
+    ):
         import secrets
-        if not secrets.compare_digest(request.headers.get("x-levi-ui-token", ""), ui_secret):
-            return JSONResponse({"detail": "Use the LEVI Web UI or a scoped Agent token"}, status_code=401)
-    revision_context = expected_revision.set(request.headers.get("x-levi-annotation-revision"))
+
+        if not secrets.compare_digest(
+            request.headers.get("x-levi-ui-token", ""), ui_secret
+        ):
+            return JSONResponse(
+                {"detail": "Use the LEVI Web UI or a scoped Agent token"},
+                status_code=401,
+            )
+    revision_context = expected_revision.set(
+        request.headers.get("x-levi-annotation-revision")
+    )
     context = hub_token.set(request.cookies.get("hf_access_token"))
     try:
         return await call_next(request)
@@ -168,7 +210,10 @@ from fastapi.exceptions import RequestValidationError
 @app.exception_handler(RequestValidationError)
 async def agent_validation_error(request, exc):
     if request.url.path.startswith("/api/levi/agent/"):
-        return JSONResponse({"detail": "Invalid Agent request; check the capability schema"}, status_code=422)
+        return JSONResponse(
+            {"detail": "Invalid Agent request; check the capability schema"},
+            status_code=422,
+        )
     return await request_validation_exception_handler(request, exc)
 
 
@@ -300,8 +345,13 @@ def dataset_file(slug: str, path: str):
 @app.get("/api/levi/review")
 def get_review(repo_id: str):
     from .agent.store import Store
-    response = JSONResponse(read(review_path(repo_id), {"repo_id": repo_id, "flagged": [], "notes": ""}))
-    response.headers["X-LEVI-Annotation-Revision"] = Store(STATE).head(display_name(repo_id, None))
+
+    response = JSONResponse(
+        read(review_path(repo_id), {"repo_id": repo_id, "flagged": [], "notes": ""})
+    )
+    response.headers["X-LEVI-Annotation-Revision"] = Store(STATE).head(
+        display_name(repo_id, None)
+    )
     return response
 
 
@@ -309,10 +359,14 @@ def get_review(repo_id: str):
 def save_review(payload: Review):
     from .agent.legacy import expected_revision, transaction
     from .agent.store import dataset_lock
+
     if any(ep < 0 for ep in payload.flagged):
         raise ValueError("Episode IDs must be non-negative")
     name = display_name(payload.repo_id, None)
-    with dataset_lock(STATE, name), transaction(STATE, name, expected=expected_revision.get()) as revision:
+    with (
+        dataset_lock(STATE, name),
+        transaction(STATE, name, expected=expected_revision.get()) as revision,
+    ):
         value = {**payload.model_dump(), "repo_id": canonical_id(payload.repo_id)}
         value["flagged"] = sorted(set(value["flagged"]))
         atomic(review_path(payload.repo_id), value)
@@ -324,6 +378,7 @@ def save_review(payload: Review):
 @app.get("/api/levi/review/export")
 def export_review(repo_id: str):
     import json
+
     value = json.loads(get_review(repo_id).body)
     value["schema"] = "levi.review.v1"
     value["excluded_episode_ids"] = value["flagged"]

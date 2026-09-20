@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { usePathname } from "next/navigation";
 import AgentRuntimeConnections from "./agent-runtime-connections";
 import AgentPilot from "./agent-pilot";
@@ -9,6 +9,9 @@ import AgentDefinitions from "./agent-definitions";
 import AgentPlan, { type HarnessPlan } from "./agent-plan";
 import AgentObjectTool from "./agent-object-tool";
 import AgentReviewQueue from "./agent-review-queue";
+import AgentActivity from "./agent-activity";
+import ChipMultiSelect from "./chip-multi-select";
+import { useDatasetFacets } from "./dataset-facets";
 import AgentConnections, { type Connection } from "./agent-connections";
 import {
   readBrowserStorage,
@@ -97,7 +100,12 @@ export default function AgentWorkbench() {
   const { t } = useLocale();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<"task" | "settings">("task");
+  // Three separate areas, because the header offers two different doors into
+  // this panel: landing on "Model settings" after asking for accounts made
+  // them look like the same thing.
+  const [tab, setTab] = useState<"task" | "activity" | "connections" | "model">(
+    "task",
+  );
   const [providers, setProviders] = useState<Provider[]>([]);
   const [provider, setProvider] = useState("");
   const [runs, setRuns] = useState<Run[]>([]);
@@ -126,7 +134,9 @@ export default function AgentWorkbench() {
   const [mode, setMode] = useState("draft");
   const [maxCalls, setMaxCalls] = useState(8);
   const [maxTokens, setMaxTokens] = useState(16000);
-  const [storageMiB, setStorageMiB] = useState(512);
+  // The snapshot cap is a guard against copying an unreasonable amount of a
+  // dataset, not a knob a person tunes per task.
+  const storageMiB = 512;
   const [name, setName] = useState("model");
   const [url, setUrl] = useState("");
   const [model, setModel] = useState("");
@@ -142,6 +152,18 @@ export default function AgentWorkbench() {
   const [follow, setFollow] = useState(false);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [activeEvidence, setActiveEvidence] = useState<Evidence | null>(null);
+  const [tasks, setTasks] = useState<string[]>([]);
+  const facets = useDatasetFacets(repo);
+  const [width, setWidth] = useState<number | null>(null);
+  const dragFrom = useRef<{ x: number; width: number } | null>(null);
+
+  useEffect(() => {
+    const saved = Number(readBrowserStorage("local", "levi-agent-width"));
+    if (saved >= 360) setWidth(saved);
+  }, []);
+  useEffect(() => {
+    if (width) writeBrowserStorage("local", "levi-agent-width", String(width));
+  }, [width]);
 
   useEffect(() => {
     const saved = readBrowserStorage("local", "levi-agent-provider");
@@ -153,7 +175,7 @@ export default function AgentWorkbench() {
   useEffect(() => {
     const toggle = () => setOpen((value) => !value);
     const connections = () => {
-      setTab("settings");
+      setTab("connections");
       setOpen(true);
     };
     window.addEventListener("levi-agent-connections", connections);
@@ -260,7 +282,10 @@ export default function AgentWorkbench() {
     provider: pilotRuntime ? "external" : provider,
     pilot_runtime: pilotRuntime || null,
     mode,
-    allow_media_egress: egress,
+    // On the MCP channel the consent is the connection itself: you created
+    // it, it names the datasets it may touch, and the frames go to your own
+    // agent rather than to a third-party endpoint LEVI uploads to.
+    allow_media_egress: provider === "external" ? true : egress,
     budget: {
       max_calls: maxCalls,
       max_tokens: maxTokens,
@@ -291,7 +316,50 @@ export default function AgentWorkbench() {
   if (!open) return null;
   return (
     <T>
-      <aside className="levi-agent-dock" aria-label="Agent Workbench">
+      <aside
+        className="levi-agent-dock"
+        aria-label="Agent Workbench"
+        style={width ? { width: `${width}px` } : undefined}
+      >
+        {/* Drag the left edge to widen the panel; a long evidence path or a
+            diff is unreadable at a fixed width. The chosen width is kept per
+            browser. */}
+        <div
+          className="levi-agent-grip"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={t("Resize panel")}
+          tabIndex={0}
+          onPointerDown={(event) => {
+            event.currentTarget.setPointerCapture(event.pointerId);
+            dragFrom.current = {
+              x: event.clientX,
+              width: width || event.currentTarget.parentElement!.clientWidth,
+            };
+          }}
+          onPointerMove={(event) => {
+            if (!dragFrom.current) return;
+            const next =
+              dragFrom.current.width + (dragFrom.current.x - event.clientX);
+            setWidth(Math.min(Math.max(360, next), window.innerWidth - 32));
+          }}
+          onPointerUp={(event) => {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+            dragFrom.current = null;
+          }}
+          onKeyDown={(event) => {
+            const step = event.shiftKey ? 80 : 24;
+            if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+              event.preventDefault();
+              setWidth((current) => {
+                const base = current || 490;
+                const next =
+                  event.key === "ArrowLeft" ? base + step : base - step;
+                return Math.min(Math.max(360, next), window.innerWidth - 32);
+              });
+            }
+          }}
+        />
         <header>
           <div>
             <small>LEVI / AGENT LAB</small>
@@ -305,15 +373,27 @@ export default function AgentWorkbench() {
           </button>
         </header>
         <p className="levi-agent-muted">
-          Experimental · sampled evidence · human review required
+          Sampled evidence · every suggestion is reviewed by you
         </p>
         <nav className="levi-agent-tabs">
           <button aria-pressed={tab === "task"} onClick={() => setTab("task")}>
             Tasks & review
           </button>
           <button
-            aria-pressed={tab === "settings"}
-            onClick={() => setTab("settings")}
+            aria-pressed={tab === "activity"}
+            onClick={() => setTab("activity")}
+          >
+            Live activity
+          </button>
+          <button
+            aria-pressed={tab === "connections"}
+            onClick={() => setTab("connections")}
+          >
+            Accounts & connections
+          </button>
+          <button
+            aria-pressed={tab === "model"}
+            onClick={() => setTab("model")}
           >
             Model settings
           </button>
@@ -324,7 +404,9 @@ export default function AgentWorkbench() {
           </p>
         )}
         {notice && <p role="status">{t(notice)}</p>}
-        {tab === "settings" ? (
+        {tab === "activity" ? (
+          <AgentActivity open={open && tab === "activity"} />
+        ) : tab === "connections" ? (
           <>
             <label>
               {t("Execution channel")}
@@ -349,6 +431,7 @@ export default function AgentWorkbench() {
                 setProviders(await api<Provider[]>("/providers"))
               }
               edit={(p) => {
+                setTab("model");
                 setName(p.name);
                 setUrl(p.base_url);
                 setModel(p.model);
@@ -358,6 +441,9 @@ export default function AgentWorkbench() {
                 setAllowLocal(p.allow_localhost);
               }}
             />
+          </>
+        ) : tab === "model" ? (
+          <>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -518,34 +604,87 @@ export default function AgentWorkbench() {
                     required
                   />
                 </label>
-                <label>
-                  Episode indices (comma-separated)
-                  <input
-                    value={episodes}
-                    onChange={(e) => setEpisodes(e.target.value)}
-                    required
-                    pattern="[0-9, ]+"
+                {facets.tasks.length > 1 && (
+                  <div className="levi-agent-field">
+                    <span className="levi-agent-label">{t("Tasks")}</span>
+                    <ChipMultiSelect
+                      options={facets.tasks.map((task) => ({
+                        value: task,
+                        label:
+                          task.length > 46 ? `${task.slice(0, 46)}…` : task,
+                        hint: task,
+                      }))}
+                      selected={tasks}
+                      onChange={setTasks}
+                      columns
+                    />
+                    <p className="levi-agent-tip">
+                      {t(
+                        "This dataset declares several tasks. Choosing some is a note for the reader; the scope that is frozen is the episodes below.",
+                      )}
+                    </p>
+                  </div>
+                )}
+                <div className="levi-agent-field">
+                  <span className="levi-agent-label">{t("Episodes")}</span>
+                  <ChipMultiSelect
+                    options={facets.episodes.map((index) => ({
+                      value: String(index),
+                      label: String(index),
+                    }))}
+                    selected={episodes
+                      .split(",")
+                      .map((part) => part.trim())
+                      .filter(Boolean)}
+                    onChange={(next) => setEpisodes(next.join(","))}
+                    emptyHint={t(
+                      "Enter a dataset ID above to list its episodes.",
+                    )}
                   />
-                </label>
-                <label>
-                  Camera keys (comma-separated)
-                  <input
-                    value={cameras}
-                    onChange={(e) => setCameras(e.target.value)}
-                    placeholder="observation.images.front"
+                  <p className="levi-agent-tip">
+                    {t(
+                      "Click an episode, or drag across several. The chosen set is frozen when the plan is created and cannot grow later.",
+                    )}
+                  </p>
+                </div>
+                <div className="levi-agent-field">
+                  <span className="levi-agent-label">{t("Cameras")}</span>
+                  <ChipMultiSelect
+                    options={facets.cameras.map((key) => ({
+                      value: key,
+                      label: key.replace(/^observation\.images\./, ""),
+                      hint: key,
+                    }))}
+                    selected={cameras
+                      .split(",")
+                      .map((part) => part.trim())
+                      .filter(Boolean)}
+                    onChange={(next) => setCameras(next.join(","))}
+                    emptyHint={t("This dataset declares no video cameras.")}
                   />
-                </label>
+                  <p className="levi-agent-tip">
+                    {t(
+                      "Only frames from the chosen cameras are read. Subtask and object work needs at least one.",
+                    )}
+                  </p>
+                </div>
                 <label>
-                  Task instructions
+                  {t("Task instructions")}
                   <textarea
                     value={instruction}
                     onChange={(e) => setInstruction(e.target.value)}
                     required
-                    rows={3}
+                    rows={4}
+                    placeholder={t("INSTRUCTION_TEMPLATE")}
                   />
                 </label>
+                <p className="levi-agent-tip">
+                  {t(
+                    "Say what to look for and how to judge it. This text is given to the agent with the evidence; it is not a search query.",
+                  )}
+                </p>
                 <label>
-                  Annotation workflow
+                  {t("Task type")}
                   <select
                     value={workflow}
                     onChange={(e) => setWorkflow(e.target.value)}
@@ -632,57 +771,75 @@ export default function AgentWorkbench() {
                   </p>
                 ))}
                 <label>
-                  Operating mode
+                  {t("Working mode")}
                   <select
                     value={mode}
                     onChange={(e) => setMode(e.target.value)}
                   >
-                    <option value="draft">{t("Draft suggestions")}</option>
+                    <option value="draft">{t("Produce annotations")}</option>
                     <option value="read_only">{t("Read only")}</option>
                   </select>
                 </label>
-                <div className="levi-agent-budget">
-                  <label>
-                    Call limit
-                    <input
-                      type="number"
-                      min={1}
-                      max={1000}
-                      value={maxCalls}
-                      onChange={(e) => setMaxCalls(Number(e.target.value))}
-                    />
-                  </label>
-                  <label>
-                    Token limit
-                    <input
-                      type="number"
-                      min={256}
-                      max={1000000}
-                      value={maxTokens}
-                      onChange={(e) => setMaxTokens(Number(e.target.value))}
-                    />
-                  </label>
-                  <label>
-                    Snapshot MiB
-                    <input
-                      type="number"
-                      min={1}
-                      value={storageMiB}
-                      onChange={(e) => setStorageMiB(Number(e.target.value))}
-                    />
-                  </label>
-                </div>
-                <label className="levi-agent-check">
-                  <input
-                    type="checkbox"
-                    checked={egress}
-                    onChange={(e) => setEgress(e.target.checked)}
-                  />
-                  Allow selected evidence to be sent to this model endpoint
-                </label>
-                <p className="levi-agent-muted">
-                  Uses saved annotations only. Unsaved editor changes are never
-                  submitted or overwritten automatically.
+                <p className="levi-agent-tip">
+                  {t(
+                    "Produce annotations: the agent proposes and you review before anything is published. Read only: it may look but not propose.",
+                  )}
+                </p>
+                {provider === "external" ? (
+                  <p className="levi-agent-tip">
+                    {t(
+                      "Your agent reads the evidence through the connection you created, which already names the datasets it may touch, and spends its own tokens — so LEVI sets no call or token limit here. plans.estimate prices a scope before you start.",
+                    )}
+                  </p>
+                ) : (
+                  <details className="levi-agent-advanced">
+                    <summary>{t("Spending limits for this model")}</summary>
+                    <p className="levi-agent-tip">
+                      {t(
+                        "These cap what LEVI itself spends at the model endpoint, and stop the run when reached.",
+                      )}
+                    </p>
+                    <div className="levi-agent-budget">
+                      <label>
+                        {t("Model calls")}
+                        <input
+                          type="number"
+                          min={1}
+                          max={1000}
+                          value={maxCalls}
+                          onChange={(e) => setMaxCalls(Number(e.target.value))}
+                        />
+                      </label>
+                      <label>
+                        {t("Tokens")}
+                        <input
+                          type="number"
+                          min={256}
+                          max={1000000}
+                          value={maxTokens}
+                          onChange={(e) => setMaxTokens(Number(e.target.value))}
+                        />
+                      </label>
+                    </div>
+                    <label className="levi-agent-check">
+                      <input
+                        type="checkbox"
+                        checked={egress}
+                        onChange={(e) => setEgress(e.target.checked)}
+                      />
+                      {t("Send the chosen frames to this model endpoint")}
+                    </label>
+                    <p className="levi-agent-tip">
+                      {t(
+                        "Required before LEVI uploads any frame to a model you configured. Leave it off and the run stays text-only.",
+                      )}
+                    </p>
+                  </details>
+                )}
+                <p className="levi-agent-tip">
+                  {t(
+                    "Saved annotations only. Unsaved changes in the editor are never submitted or overwritten.",
+                  )}
                 </p>
                 <button disabled={busy || !provider}>
                   Inspect & create plan
@@ -690,7 +847,7 @@ export default function AgentWorkbench() {
               </form>
             </details>
             <label>
-              Task center
+              {t("Open an existing task")}
               <select
                 value={selected || ""}
                 onChange={(e) => {

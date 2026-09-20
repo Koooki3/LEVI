@@ -21,7 +21,10 @@ from .paths import STATE, inside
 
 LOCK = threading.RLock()
 _DEPTH = threading.local()
-DEMOS = ["samanthalhy/so100_strawberry_2", "samanthalhy/eval_so100_smol_strawberry_2"]
+# Public LeRobot datasets, checked reachable on 2026-09-20. A demo that has
+# been removed upstream answers 401 to an anonymous fetch, which reads as a
+# LEVI permission error, so these are worth re-checking when they change.
+DEMOS = ["lerobot/svla_so101_pickplace", "lerobot/aloha_static_coffee"]
 GENERIC_FOLDER_NAMES = {"dataset", "data", "output", "outputs"}
 
 

@@ -124,6 +124,41 @@ class Store:
             "INSERT OR REPLACE INTO records VALUES(?,?,?)", (kind, id, dumps(value))
         )
 
+    def ids(self, kind):
+        """Record keys for a kind. The key is not always inside the body."""
+        with self.connect() as db:
+            return [
+                row[0]
+                for row in db.execute(
+                    "SELECT id FROM records WHERE kind=? ORDER BY id", (kind,)
+                )
+            ]
+
+    def drop(self, kind, ids):
+        """Remove records by id. Only explicit, confirmed maintenance calls this."""
+        ids = list(ids)
+        if not ids:
+            return 0
+        with self.connect() as db:
+            marks = ",".join("?" * len(ids))
+            return db.execute(
+                f"DELETE FROM records WHERE kind=? AND id IN ({marks})", (kind, *ids)
+            ).rowcount
+
+    def drop_events(self, run_ids):
+        ids = list(run_ids)
+        if not ids:
+            return 0
+        with self.connect() as db:
+            marks = ",".join("?" * len(ids))
+            return db.execute(
+                f"DELETE FROM events WHERE run_id IN ({marks})", ids
+            ).rowcount
+
+    def drop_head(self, dataset):
+        with self.connect() as db:
+            return db.execute("DELETE FROM heads WHERE dataset=?", (dataset,)).rowcount
+
     def mutate(self, kind, id, fn):
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -179,10 +214,17 @@ class Store:
             raise ValueError("Invalid run ID")
         return self.root / "datasets" / name / "runs" / id
 
-    def prepare(self, dataset):
+    def prepare(self, dataset, kind=None):
         from .runtime import new_id
 
-        revision = new_id()
+        # A revision directory names the dataset's folder it lives in, the
+        # kind of work, and the second it was published.
+        existing = {p.name for p in (self.root / "datasets" / dataset).glob("*")}
+        revisions = self.root / "datasets" / dataset / "revisions"
+        if revisions.is_dir():
+            existing |= {p.name for p in revisions.iterdir()}
+        stamp = new_id({name.split("-", 1)[-1] for name in existing})
+        revision = f"{kind}-{stamp}" if kind else stamp
         target = self.bundle(dataset, revision)
         previous = self.head(dataset)
         if previous == "legacy":
