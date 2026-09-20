@@ -40,6 +40,16 @@ Runtime dependencies (extras such as `uvicorn[standard]` introduce additional tr
 | [numpy](https://pypi.org/project/numpy/2.4.6/) | 2.4.6 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 |
 | [opencv-python-headless](https://pypi.org/project/opencv-python-headless/4.14.0.94/) | 4.14.0.94 | Apache-2.0; bundled components: see LICENSE-3RD-PARTY.txt |
 
+Optional Agent runtime (`uv sync --locked --extra agent`), locked in `uv.lock`:
+
+| Package | Version | Declared license / source |
+| --- | --- | --- |
+| pydantic-ai-slim (openai extra) | 1.107.6 | MIT — https://github.com/pydantic/pydantic-ai |
+| mcp | 1.30.0 | MIT — https://github.com/modelcontextprotocol/python-sdk |
+| openai (adapter import; transitive SDK) | 3.16.2 | Apache-2.0 — https://github.com/openai/openai-python |
+
+These packages are installed, not vendored. LEVI's adapters and skills are project code. Lockfile entries include the transitive dependency versions/artifact hashes; container or binary releases still require the full actual-platform inventory and license texts described below. No checkpoint is included by the Agent extra.
+
 Development/test dependencies:
 
 | Package | Version | Declared license |
@@ -116,3 +126,17 @@ This procedure is a release requirement documented in [RELEASING](docs/RELEASING
 ### SAM3 integration dependencies
 
 The SAM3 worker declares its own uv environment and is intentionally absent from the core uv.lock. It adds huggingface-hub for runtime download from the 1038lab/sam3 mirror. Its exact Torch/torchvision wheels, CUDA runtime, transitive dependencies, native libraries and model checkpoint must be inventoried from the actual environment before publishing a Docker/PyPI/binary artifact. The source release does not claim that inventory is complete.
+
+## Optional Pilot integration
+
+`integrations/pilot/package.json` and `bun.lock` pin
+`@agentclientprotocol/codex-acp` 1.12.0 and
+`@agentclientprotocol/claude-agent-acp` 0.79.0 (Apache-2.0 adapter packages).
+Sources: https://github.com/agentclientprotocol/codex-acp and
+https://github.com/agentclientprotocol/claude-agent-acp.
+Their runtime/SDK dependencies retain their own licenses and service terms;
+the adapter license does not relicense Codex/Claude binaries or model services.
+Dependencies install locally and are not vendored in LEVI. Generate the complete
+locked transitive license inventory before distributing a bundled binary/image.
+Happy and OpenCode were reviewed for interaction/architecture only; no code,
+assets or hosted services from those projects are included.

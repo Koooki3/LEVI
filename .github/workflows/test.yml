@@ -5,6 +5,9 @@ permissions:
   contents: read
 jobs:
   validate:
+    strategy:
+      matrix:
+        agent: [false, true]
     runs-on: ubuntu-latest
     env:
       LEVI_WORKSPACE: ${{ github.workspace }}/.state
@@ -19,9 +22,12 @@ jobs:
           bun-version: "1.3.10"
       - run: mkdir -p .state/tmp/build
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
-      - run: uv sync --locked --group dev
+      - if: ${{ !matrix.agent }}
+        run: uv sync --locked --group dev
+      - if: ${{ matrix.agent }}
+        run: uv sync --locked --group dev --extra agent
       - run: bun install --frozen-lockfile
       - run: bun run validate
-      - run: uv run ruff check .
-      - run: uv run pytest --basetemp=.state/tmp/build/pytest
+      - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync pytest --basetemp=.state/tmp/build/pytest
       - run: bun run build

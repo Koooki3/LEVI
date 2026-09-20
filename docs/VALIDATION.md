@@ -126,3 +126,97 @@ The browser script reads public datasets and writes screenshots/results to `outp
 ![LEVI 动作洞察](assets/insights-zh.png)
 
 Screenshot video content: [samanthalhy/so100_strawberry_2](https://huggingface.co/datasets/samanthalhy/so100_strawberry_2) and [samanthalhy/eval_so100_smol_strawberry_2](https://huggingface.co/datasets/samanthalhy/eval_so100_smol_strawberry_2), whose dataset cards declared Apache-2.0 on the validation date. LEVI interface design and modifications are described in [UPSTREAM.md](UPSTREAM.md).
+
+
+## Agent Workbench — 2026-09-20 local validation
+
+This section concerns the experimental Agent implementation described in
+[AGENT_WORKBENCH.md](AGENT_WORKBENCH.md), not a published release.
+
+- Python regression: **136 passed** with the optional Agent SDKs installed.
+  Includes content-pinned input, atomic publication failure, stale edits,
+  idempotency, inverse ChangeSets, scoped access, credential binding, staged
+  object review and official MCP SDK in-memory roundtrips. A dependency
+  `anyio.abc.BlockingPortal` deprecation warning remains; no worker-thread
+  exception was reported.
+- Frontend: **179 Bun tests passed**, type checks, ESLint, formatting and
+  the production Next.js build passed. Ruff and the offline uv lock check passed.
+- Offline Chromium UI smoke passed: unsaved draft preservation, batch review,
+  approval/commit, session credential save/disconnect, no key in localStorage,
+  bilingual switching, readable select options and mobile layout. External
+  requests were blocked and application APIs mocked; Chromium used `--disable-gpu`.
+  Artifacts are `outputs/LEVI/validation/agent/` relative to `LEVI_WORKSPACE`.
+- Workspace memory refresh/check and directory doctor passed. The heuristic
+  path checker reported dictionary-key and explicitly rooted-path matches;
+  these are not evidence of writes outside `LEVI_WORKSPACE`.
+
+No real model inference, GPU execution, CUDA detection, checkpoint download,
+external account login or publication was performed. SAM3 is exercised through
+a protocol substitute; the compatible provider uses a mock HTTP transport.
+At this earlier increment, ACP and HTTP MCP remained deferred. Engineering tests do not establish annotation
+quality or satisfaction of the separate real-model acceptance gates.
+
+## Harness increment — 2026-09-20
+
+See [HARNESS.md](HARNESS.md) for the source audit, research references,
+contracts and intentionally unsupported automation.
+
+- Full CPU/fixture Python suite: **148 passed**. Additional cases cover plan
+  approval bypass, exact revision/digest binding, rejected/changed pilot,
+  budget revision, content-keyed model reuse, bounded recall, strict observation
+  cap, nonuniform PTS mapping, temporal attempts/outcomes, staged mask preview,
+  and native annotated export roundtrip. Source file hashes remain unchanged.
+- After the final adapter and runtime refinements, the targeted Agent/SDK
+  regression suite passed **39 tests**; these overlap with the full-suite count.
+- Frontend validation: **179 Bun tests passed**, TypeScript, ESLint, formatting
+  and production build passed. Offline Chromium additionally exercises the
+  execution-approval and pilot-acceptance buttons, draft editing, batch review,
+  commit, account switching state, bilingual rendering and mobile layout.
+- Cache regression verifies that an identical repeated fixture phase produces
+  the same structured output without increasing model request/token counters.
+  This is a deterministic cache contract, not a measured real-model saving.
+- `agent/evaluation.py` rejects efficiency comparisons with different input,
+  policy, observation, validation or output digests. Real token efficiency,
+  elapsed provider time, mask/temporal accuracy and human correction time remain
+  **not measured**. No synthetic score is presented as real annotation quality.
+
+The full browser smoke uses mocked APIs; staged video overlays are covered by
+backend frame/sidecar checks and frontend compilation, not a real SAM3 visual
+quality test. One existing Starlette/AnyIO deprecation warning remains.
+No GPU, CUDA probe, real inference, checkpoint download or GitHub publication
+was performed. Owned smoke-test servers exit after verification.
+
+The final workspace doctor reported zero errors and 11 warnings about inherited
+shell environment paths outside the managed workspace; no global environment
+or user configuration was changed. The static path scan reported eight
+`output` dictionary-key matches in Agent modules; those are data fields, not
+relative filesystem destinations. Generated memory refresh/check passed.
+
+## Dual-channel Pilot increment — 2026-09-20
+
+See [PILOT.md](PILOT.md) and [PILOT.zh-CN.md](PILOT.zh-CN.md) for sequential
+installation, connection, terminal approval and recovery instructions.
+
+- Full Python regression: **160 passed**, with one existing Starlette/AnyIO
+  deprecation warning. Ruff passed. New cases exercise scoped/revoked grants,
+  non-API external plans, project configuration preservation, action receipts,
+  private singleton Core Host reuse/stop, runtime binding, and simulated ACP
+  notifications, permissions and managed-session lifecycle.
+- Final frontend validation: **179 Bun tests passed**, TypeScript, ESLint,
+  formatting and production build passed. One existing React Hook dependency
+  warning remains in `video-overlay-canvas.tsx`. Offline Chromium smoke passed
+  with fixture APIs and the owned local frontend, including manifest display,
+  runtime account guidance and the existing approval/review workflow. Evidence
+  navigation compiles; real video/model navigation remains a manual gate.
+  An earlier browser command omitted `--start` and failed to connect; rerunning
+  with the owned test server passed. Browser artifacts are
+  `outputs/LEVI/validation/agent/` relative to `LEVI_WORKSPACE`.
+- Workspace memory refresh/check passed. Directory doctor: zero errors and
+  11 inherited environment-path warnings. The static scan's 12 matches are
+  JSON/dictionary fields and CLI command strings, not output destinations.
+- Optional adapter versions are locked; real Codex/Claude CLI, VS Code, account
+  switching, model/media compatibility and annotation quality remain **unverified**.
+  Managed adapters require Node.js 22+; missing Node blocks execution explicitly.
+  HTTP MCP remains unavailable; stdio is the supported MCP transport.
+- No GPU execution, CUDA probing, model inference, checkpoint downloads, Git
+  commits, pushes or releases were performed.

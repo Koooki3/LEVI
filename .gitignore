@@ -77,3 +77,6 @@ dist/
 integrations/sam3/.venv/
 integrations/sam3/.cache/
 integrations/sam3/checkpoints/
+
+# Optional pinned Pilot adapters
+integrations/pilot/node_modules/

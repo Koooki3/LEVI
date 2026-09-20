@@ -37,6 +37,9 @@ interface HfAuthButtonProps {
 export default function HfAuthButton({ variant = "badge" }: HfAuthButtonProps) {
   const { oauth, isAuthAvailable, signIn, signOut } = useAuth();
   const { t } = useLocale();
+  const [switching, setSwitching] = useState(false);
+  if (switching)
+    return <TokenLogin initiallyOpen onClose={() => setSwitching(false)} />;
 
   // Stable slot — auth state resolves async on mount (config fetch, then
   // localStorage rehydrate), so the rendered control changes from
@@ -55,6 +58,7 @@ export default function HfAuthButton({ variant = "badge" }: HfAuthButtonProps) {
         name={name}
         avatar={avatar}
         onSignOut={signOut}
+        onSwitch={() => setSwitching(true)}
         variant={variant}
       />
     );
@@ -117,11 +121,13 @@ function SignedInMenu({
   name,
   avatar,
   onSignOut,
+  onSwitch,
   variant,
 }: {
   name: string;
   avatar?: string;
   onSignOut: () => void;
+  onSwitch: () => void;
   variant: Variant;
 }) {
   const [open, setOpen] = useState(false);
@@ -189,6 +195,16 @@ function SignedInMenu({
         >
           <button
             role="menuitem"
+            className="w-full text-left px-2 py-2"
+            onClick={() => {
+              setOpen(false);
+              onSwitch();
+            }}
+          >
+            <T>Switch account</T>
+          </button>
+          <button
+            role="menuitem"
             onClick={() => {
               setOpen(false);
               onSignOut();
@@ -203,8 +219,11 @@ function SignedInMenu({
   );
 }
 
-function TokenLogin() {
-  const [open, setOpen] = useState(false),
+function TokenLogin({
+  initiallyOpen = false,
+  onClose,
+}: { initiallyOpen?: boolean; onClose?: () => void } = {}) {
+  const [open, setOpen] = useState(initiallyOpen),
     [token, setToken] = useState(""),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
@@ -235,6 +254,7 @@ function TokenLogin() {
                 await tokenSignIn(token);
                 setToken("");
                 setOpen(false);
+                onClose?.();
               } catch (e) {
                 setError(String(e));
               } finally {
@@ -277,6 +297,7 @@ function TokenLogin() {
                 onClick={() => {
                   setOpen(false);
                   setToken("");
+                  onClose?.();
                 }}
               >
                 <T>Cancel</T>

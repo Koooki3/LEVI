@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — Agent Pilot
+
+- Shared local Core Host for headless MCP and the existing Web UI.
+- Scoped, revocable Codex/Claude connections and human terminal approvals.
+- Optional pinned ACP adapters, public event streaming, task-state recovery and artifact manifests.
+- Real-client/model quality acceptance remains separate from fixture tests.
+
+## Unreleased
+
+- Experimental Agent Harness: executable plan approval, pilot acceptance, budget revisions, workflow-specific skills, content-keyed evidence/model reuse, temporal definitions and boundary refinement, persisted draft masks in the existing player, and native export roundtrip validation. See `docs/HARNESS.md` for limits and manual quality gates.
+
+
+- Experimental Agent Workbench: bounded evidence, optional compatible model adapter, scoped stdio MCP, durable tasks and human-reviewed ChangeSets.
+- Optional SAM3 object assistance with staged mask review; original data and existing object annotations stay preserved.
+- Focused review queue, batch decisions, account profile cards and conflict-checked undo drafts.
+- Dataset/annotation adapter registry and readable dataset-scoped run/version/cache paths.
+- Real-model quality, GPU inference, HTTP MCP and ACP runtime acceptance are not claimed by this source update.
+
 ## 0.3.0 — Dataset indexing and review hardening
 
 - Canonicalized LeRobot dataset-version detection for supported v2.0/v2.1/v3.0/v3.1 metadata and rejected malformed or unsupported versions consistently across the frontend and backend.

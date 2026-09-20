@@ -1,10 +1,12 @@
 # LEVI · 机器人数据工坊
 
+Codex / Claude Code 无界面工具链、托管会话、终端人工审批和实时追踪见 [Pilot 顺序指南](docs/PILOT.zh-CN.md)。
+
 **LeRobot Exploration, Validation & Integration**
 
 [![Checks](https://github.com/Koooki3/LEVI/actions/workflows/test.yml/badge.svg)](https://github.com/Koooki3/LEVI/actions/workflows/test.yml) [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) [![Version](https://img.shields.io/badge/LEVI-0.3.0-9bd654.svg)](CHANGELOG.md)
 
-[English](README.md) · [转换教程](docs/CONVERSION.md) · [RECAP 导出](docs/RECAP.md) · [工作区结构](.state.md) · [功能对照](docs/FEATURES.md) · [API](docs/API.md) · [审查与验证](docs/VALIDATION.md) · [许可](docs/UPSTREAM.md) · [第三方清单](THIRD_PARTY_NOTICES.md) · [SAM3 对象标注](docs/SAM3.md)
+[English](README.md) · [转换教程](docs/CONVERSION.md) · [RECAP 导出](docs/RECAP.md) · [工作区结构](.state.md) · [功能对照](docs/FEATURES.md) · [API](docs/API.md) · [审查与验证](docs/VALIDATION.md) · [许可](docs/UPSTREAM.md) · [第三方清单](THIRD_PARTY_NOTICES.md) · [SAM3 对象标注](docs/SAM3.md) · [Agent 工作台](docs/AGENT_WORKBENCH.md)
 
 LEVI 是用于浏览、标注、转换和审核机器人数据的独立工作台。基于 [LeRobot Dataset Visualizer](https://github.com/huggingface/lerobot-dataset-visualizer)，保留多相机与信号同步、视觉问答、动作分析和三维回放，默认英文，可在界面中切换中文；并提供**完全内置的采集数据转换流程**。无需另行下载转换项目或安装训练环境：先检查输入、列出各项要求的满足情况与支持的导出格式，再导出为 LeRobot v2.1 或 RECAP（π\*0.6）价值数据集。原始机器人采集在转换前即可浏览和标注，标注会随转换自动迁移。
 
@@ -49,6 +51,29 @@ uv run levi migrate --apply             # 执行迁移（需先停止服务）
 ```
 
 从远程服务器访问时，在自己的电脑运行 `ssh -L 7860:127.0.0.1:7860 USER@SERVER`，然后访问本机上述地址。默认前端绑定本机 **7860（网页入口）**，后端绑定本机 **7861（内部 API）**；前端通过同源代理访问后端。不要把本机 7860 转发到服务器 7861。误开后端根路径会显示入口说明及网页链接；`uv run levi backend` 只启动 API。启动器会检查端口冲突，并等待前后端均就绪后才输出网页入口。
+
+## Agent 辅助审阅与标注（实验性）
+
+**Agent 工作台**提供基于证据的草稿和集中人工审核队列。SAM3 是其中可选的对象标注工具；原始数据集始终只读。[完整指南、MCP 配置、架构和限制](docs/AGENT_WORKBENCH.md)。
+
+完成普通安装后，依次执行：
+
+```bash
+export LEVI_WORKSPACE="$PWD/.state"
+uv sync --locked --extra agent
+uv run --extra agent levi build
+uv run --extra agent levi
+```
+
+1. 打开 **Accounts & connections（账号与连接）**，配置兼容接口地址、模型 ID，并明确声明图像能力。密钥通过服务端环境变量或仅保留于服务端内存的会话输入提供；卡片支持选择、编辑、断开、重连和移除。HF 账户使用独立的切换／退出菜单，不等同于 Agent 提交权限。
+2. 选择数据集、明确的 episode／相机范围、指令与预算；按需允许证据发送到选定端点，点击 **Inspect & create plan（检查并创建计划）**。远端固定 commit，本地创建有内容摘要的独立快照。
+3. 先 **Run pilot（小范围试运行）**，检查证据后 **Execute remaining（执行剩余）**。恢复时保留已完成分片和人工草稿修改。
+4. 需要对象遮罩时打开 **SAM3 · optional object tool**，规划有限帧范围，再明确启动已配置的 worker。逐帧看叠加遮罩，按轨迹或相机批量接受／拒绝；修订保留在暂存区。此工具只使用已有 checkpoint，不自动下载。
+5. 按待审核、问题或标注类型筛选；使用 J/K 导航，逐项或批量接受／拒绝，修改文本及时间边界。先保存草稿修改，再记录审核决定；跟随证据不会自动离开未保存的编辑页面。
+6. 依次 **Validate & approve（校验并批准）**、**Commit approved changes（提交已批准变更）**。未知结果不会成为人工成功／失败标签，拒绝项不提交；版本冲突须重新审核。**Create undo draft（创建撤销草稿）**也需要人工批准。
+7. 重启后恢复凭据再继续中断任务，或直接审核已完成的部分。使用现有数据集导出入口生成含原生语言列、对象 sidecar 和来源记录的数据；原始采集先转换，按源帧映射迁移标注。
+
+产物相对于 `LEVI_WORKSPACE` 存放在 `outputs/LEVI/workbench/agent/datasets/<数据集名称>/`，按可读时间戳组织运行和版本，LEVI 产物名称不使用哈希后缀。MCP 外部 Agent 可读取允许范围并生成草稿，不能自行批准或提交。由界面驱动外部 ACP Agent、HTTP MCP 仍属后续阶段。自动化验证使用固定响应与替身；真实模型质量及 SAM3 GPU 推理需另行人工验收，不在本次自动测试内。
 
 ## SAM3 首次部署顺序
 
@@ -212,3 +237,6 @@ uv run python scripts/verify_conversion.py
 - **本地路径被拒绝**：登记目录必须是 LEVI 数据集（含 `meta/info.json`）或可识别的原始采集（`task/demo_NNNN`），真实路径必须处于 `LEVI_WORKSPACE` 内。
 - **转换失败**：先看「检查输入」的要求清单和任务日志；重复/缺失帧 ID、未知夹爪命令、视频计数不符会在发布任何结果之前阻止转换，源数据不会被修改。可使用任务映射和明确的排除路径修正输入范围。
 - **服务重启后任务中断**：任务标记为 interrupted，不自动续写；重新规划会使用新目录。
+
+
+Harness 执行计划批准、试标验收、视频证据、模块接口及当前限制，见 [Agent Harness](docs/HARNESS.md)。

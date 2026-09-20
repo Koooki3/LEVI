@@ -77,7 +77,7 @@ def validate_annotations_for_plan(
             raise ValueError(
                 f"worker frame {row.frame_index} precedes the requested start frame"
             )
-        if last_frame is not None and row.frame_index > last_frame:
+        if last_frame is not None and row.frame_index >= last_frame:
             raise ValueError(
                 f"worker frame {row.frame_index} exceeds the requested frame range"
             )

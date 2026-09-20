@@ -20,6 +20,22 @@ export default function LeviHeader() {
             <Link href="/guide">
               <T>Guide</T>
             </Link>
+            <button
+              className="levi-language"
+              onClick={() =>
+                window.dispatchEvent(new Event("levi-agent-toggle"))
+              }
+            >
+              <T>Agent Workbench</T>
+            </button>
+            <button
+              className="levi-language"
+              onClick={() =>
+                window.dispatchEvent(new CustomEvent("levi-agent-connections"))
+              }
+            >
+              <T>Accounts & connections</T>
+            </button>
             <LanguageSwitch />
           </nav>
         </header>

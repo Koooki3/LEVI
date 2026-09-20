@@ -30,10 +30,15 @@ export async function backendProxy(
     "if-modified-since",
     "cookie",
     "authorization",
+    "last-event-id",
   ]) {
     const value = request.headers.get(key);
     if (value) headers.set(key, value);
   }
+  if (process.env.LEVI_UI_TOKEN)
+    headers.set("x-levi-ui-token", process.env.LEVI_UI_TOKEN);
+  const revision = request.headers.get("x-levi-annotation-revision");
+  if (revision) headers.set("x-levi-annotation-revision", revision);
   let body: ArrayBuffer | undefined;
   if (!["GET", "HEAD"].includes(request.method)) {
     body = await request.arrayBuffer();
@@ -62,6 +67,7 @@ export async function backendProxy(
       "accept-ranges",
       "content-disposition",
       "etag",
+      "x-levi-annotation-revision",
       "last-modified",
       // Dataset files change while LEVI runs (levi/sync.py): keep the
       // backend's "revalidate before reuse" policy.

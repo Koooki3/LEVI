@@ -1,10 +1,12 @@
 # LEVI · Robot Data Atelier
 
+See [Codex / Claude Code Pilot](docs/PILOT.md) for headless MCP, managed sessions, human terminal approval and live tracking.
+
 **LeRobot Exploration, Validation & Integration**
 
 [![Checks](https://github.com/Koooki3/LEVI/actions/workflows/test.yml/badge.svg)](https://github.com/Koooki3/LEVI/actions/workflows/test.yml) [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) [![Version](https://img.shields.io/badge/LEVI-0.3.0-9bd654.svg)](CHANGELOG.md)
 
-[简体中文](README.zh-CN.md) · [Conversion guide](docs/CONVERSION.md) · [RECAP export](docs/RECAP.md) · [Workspace layout](.state.md) · [Features](docs/FEATURES.md) · [API](docs/API.md) · [Validation](docs/VALIDATION.md) · [Attribution](docs/UPSTREAM.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [SAM3 object annotation](docs/SAM3.md)
+[简体中文](README.zh-CN.md) · [Conversion guide](docs/CONVERSION.md) · [RECAP export](docs/RECAP.md) · [Workspace layout](.state.md) · [Features](docs/FEATURES.md) · [API](docs/API.md) · [Validation](docs/VALIDATION.md) · [Attribution](docs/UPSTREAM.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [SAM3 object annotation](docs/SAM3.md) · [Agent Workbench](docs/AGENT_WORKBENCH.md)
 
 LEVI is an independent robotics dataset browser, annotation editor, converter and review workbench derived from [LeRobot Dataset Visualizer](https://github.com/huggingface/lerobot-dataset-visualizer). English is the default; Chinese is available through the language switch. **The complete capture conversion pipeline is bundled** and requires no sibling repository or training environment: it inspects an input, reports which requirements it meets and which exports it supports, and writes LeRobot v2.1 or a RECAP (π\*0.6) value dataset. Raw robot captures can be browsed and annotated before conversion; their annotations carry over into the converted dataset.
 
@@ -46,6 +48,29 @@ uv run levi migrate --apply   # apply it (service stopped)
 ```
 
 For a remote server, keep `ssh -L 7860:127.0.0.1:7860 USER@SERVER` running on your computer. The frontend defaults to loopback port **7860 (Web UI)** and proxies requests to **7861 (internal API)**. Forward local 7860 to server 7860, not server 7861. If you see `{"detail":"Not Found"}` or the API landing page, check the destination port. The API root now explains the distinction and links to the configured Web UI. `uv run levi backend` starts only the API. The launcher checks port conflicts and announces Ready only after both services respond.
+
+## Agent-assisted review and annotation (experimental)
+
+The **Agent Workbench** adds evidence-grounded drafts and a focused human review queue. SAM3 is an optional object tool within this workflow; source datasets remain read-only. [Full guide, MCP setup, architecture and limitations](docs/AGENT_WORKBENCH.md).
+
+After the normal installation, run in order:
+
+```bash
+export LEVI_WORKSPACE="$PWD/.state"
+uv sync --locked --extra agent
+uv run --extra agent levi build
+uv run --extra agent levi
+```
+
+1. **Accounts & connections** → create a compatible model profile and declare its image capability. Use a server environment-variable key or a server-memory session key. Profiles show connection state and support select/edit/disconnect/remove; HF identity has its own switch/sign-out menu.
+2. Choose a dataset, explicit episodes/cameras, instructions and budget. Approve media egress only for the chosen endpoint, then **Inspect & create plan**.
+3. **Run pilot**, review its evidence, then **Execute remaining**. Completed shards and human edits survive resumption.
+4. For object masks, open **SAM3 · optional object tool**: plan a bounded scope, explicitly run the configured worker, review overlays and accept/reject tracks. The Agent tool needs an existing checkpoint and does not download one.
+5. Filter pending suggestions or issues; use J/K, accept/reject one or a batch, and edit text/time bounds. Save draft edits before recording decisions. Evidence following preserves the current editor.
+6. **Validate & approve** → **Commit approved changes**. Unknown outcomes are not converted into human labels; rejected suggestions are excluded. Version conflicts require a fresh review. **Create undo draft** also requires approval.
+7. Resume interrupted tasks after restoring credentials, or review the completed subset. Export from the existing dataset controls; native export includes annotations/provenance, while raw-capture conversion carries them using source-frame mappings.
+
+Artifacts live under `outputs/LEVI/workbench/agent/datasets/<dataset-name>/` relative to `LEVI_WORKSPACE`, with readable timestamp runs/revisions. No hash suffixes are used for LEVI artifact names. External MCP Agents can prepare evidence and draft suggestions, but cannot approve or commit. ACP-driven external sessions and HTTP MCP are deferred. Automated validation uses fixture models only; real-model quality and SAM3 GPU inference remain separate manual checks.
 
 ## SAM3 first-deployment sequence
 
@@ -200,3 +225,6 @@ Repository: [Koooki3/LEVI](https://github.com/Koooki3/LEVI). Report reproducible
 Preserve Apache-2.0 `LICENSE`, `NOTICE` and [attribution](docs/UPSTREAM.md). CI runs type/format checks, frontend tests, built-in conversion tests and a production build. See the [validation record](docs/VALIDATION.md) for tested scope and limitations.
 
 If a conversion fails, inspect its structured report and logs. Duplicate/missing frame IDs, unknown gripper commands or video count mismatches stop processing before anything is published; the source is never modified. Interrupted jobs are marked on restart; a retry uses a new directory.
+
+
+Harness execution approval, pilot gates, video evidence, extension contracts and current limits: [Agent Harness](docs/HARNESS.md).

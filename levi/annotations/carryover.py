@@ -1,3 +1,5 @@
+from levi.agent.store import resolve as bundle_resolve
+
 """Carry annotations from a source dataset into one converted from it.
 
 Typical case: a raw capture was annotated through its browsing view, then
@@ -69,7 +71,7 @@ def _nearest(keys: np.ndarray, value) -> int:
     return j
 
 
-def carry_over(
+def _carry_over(
     source_name: str, source_root: Path, output: Path, output_name: str
 ) -> dict:
     state = catalog.STATE
@@ -103,8 +105,8 @@ def carry_over(
         return _nearest(d_keys, s_keys[i])
 
     # Language atoms
-    src_dir = state / "annotations" / source_name
-    dst_dir = state / "annotations" / output_name
+    src_dir = bundle_resolve(state, source_name, "annotations")
+    dst_dir = bundle_resolve(state, output_name, "annotations")
     for path in sorted(src_dir.glob("episode_*.json")):
         ep = int(path.stem.split("_")[1])
         if ep not in pairs:
@@ -146,7 +148,7 @@ def carry_over(
         report["outcomes"]["labels"] += 1
 
     # SAM3 masks
-    source_store_root = state / "object_annotations" / source_name
+    source_store_root = bundle_resolve(state, source_name, "object_annotations")
     if (source_store_root / "current.json").exists():
         store = SidecarStore(source_store_root)
         revision = store.current_revision()
@@ -185,7 +187,7 @@ def carry_over(
             )
         if rows:
             out_store = SidecarStore(
-                state / "object_annotations" / output_name,
+                bundle_resolve(state, output_name, "object_annotations"),
                 identity={"local_path": str(output), "fps": dst_fps},
             )
             if out_store.current_revision():
@@ -210,7 +212,7 @@ def _save(output: Path, report: dict) -> dict:
     return report
 
 
-def rekey_view(name: str, old_view: Path, new_view: Path) -> dict:
+def _rekey_view(name: str, old_view: Path, new_view: Path) -> dict:
     """A rebuilt view (the raw capture gained or lost demos) renumbers
     episodes; move the raw dataset's own language and outcome files to the
     new numbers, by ``source_demo``. Files of demos no longer present are
@@ -223,7 +225,7 @@ def rekey_view(name: str, old_view: Path, new_view: Path) -> dict:
         r.get("source_demo"): r["episode_index"]
         for r in _jsonl(new_view / "meta/episodes.jsonl")
     }
-    folder = catalog.STATE / "annotations" / name
+    folder = bundle_resolve(catalog.STATE, name, "annotations")
     moved = orphaned = 0
     for sub in (folder, folder / "outcomes"):
         if not sub.is_dir():
@@ -247,3 +249,24 @@ def rekey_view(name: str, old_view: Path, new_view: Path) -> dict:
             temp.unlink()
             moved += 1
     return {"moved": moved, "orphaned": orphaned}
+
+
+def carry_over(source_name: str, source_root: Path, output: Path, output_name: str) -> dict:
+    from levi.agent.legacy import transaction
+    from levi.agent.store import Store, dataset_lock
+    store = Store(catalog.STATE)
+    with dataset_lock(catalog.STATE, output_name), transaction(catalog.STATE, source_name, read_only=True), transaction(catalog.STATE, output_name, expected=store.head(output_name)):
+        result = _carry_over(source_name, source_root, output, output_name)
+        source = store.bundle(source_name) / "agent-provenance.json"
+        if source.exists():
+            import shutil
+            shutil.copyfile(source, output / "meta/levi_agent_provenance.json")
+        return result
+
+
+def rekey_view(name: str, old_view: Path, new_view: Path) -> dict:
+    from levi.agent.legacy import transaction
+    from levi.agent.store import Store, dataset_lock
+    store = Store(catalog.STATE)
+    with dataset_lock(catalog.STATE, name), transaction(catalog.STATE, name, expected=store.head(name)):
+        return _rekey_view(name, old_view, new_view)

@@ -778,6 +778,27 @@ function EpisodeViewerInner({
   // `seek` and `setIsPlaying` are stable references from useCallback /
   // useState — they don't drive renders.
   const { seek, setIsPlaying } = useTime();
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const {
+        repo_id: evidenceRepo,
+        episode_index,
+        timestamp,
+        follow,
+      } = (event as CustomEvent).detail;
+      if (
+        follow &&
+        evidenceRepo === datasetInfo.repoId &&
+        episode_index === episodeId &&
+        Number.isFinite(timestamp)
+      ) {
+        setIsPlaying(false);
+        seek(timestamp);
+      }
+    };
+    window.addEventListener("levi-agent-seek", handler);
+    return () => window.removeEventListener("levi-agent-seek", handler);
+  }, [datasetInfo.repoId, episodeId, seek, setIsPlaying]);
 
   // URDFViewer episode changer and play toggle — populated by URDFViewer on mount
   const urdfChangerRef = useRef<((ep: number) => void) | undefined>(undefined);

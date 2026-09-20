@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import uuid
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -21,7 +21,7 @@ SCHEMA_VERSION = "levi.sam3.sidecar.v1"
 
 def _write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(path.name + f".{uuid.uuid4().hex}.tmp")
+    temp = path.with_name(path.name + f".{time.time_ns()!s}.tmp")
     temp.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False))
     os.replace(temp, path)
 
@@ -29,7 +29,7 @@ def _write_json(path: Path, value: Any) -> None:
 def _write_table(path: Path, rows: list[dict[str, Any]], schema: pa.Schema) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     table = pa.Table.from_pylist(rows, schema=schema)
-    temp = path.with_suffix(path.suffix + f".{uuid.uuid4().hex}.tmp")
+    temp = path.with_suffix(path.suffix + f".{time.time_ns()!s}.tmp")
     pq.write_table(table, temp)
     os.replace(temp, path)
 
@@ -119,6 +119,7 @@ class SidecarStore:
     def __init__(self, root: Path, identity: dict[str, Any] | None = None):
         self.root = root
         self.identity = identity or {}
+        self.staging_root = root / "staging"
         self.root.mkdir(parents=True, exist_ok=True)
 
     @property

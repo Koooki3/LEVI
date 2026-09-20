@@ -4,6 +4,7 @@ import "./globals.css";
 import "./levi.css";
 import { AuthProvider } from "@/context/auth-context";
 import { LocaleProvider } from "@/components/levi-locale";
+import AgentWorkbench from "@/components/agent-workbench";
 import LeviHeader from "@/components/levi-header";
 export const metadata: Metadata = {
   title: "LEVI · Robot Data Atelier",
@@ -22,6 +23,7 @@ export default function RootLayout({
           <AuthProvider>
             <LeviHeader />
             {children}
+            <AgentWorkbench />
           </AuthProvider>
         </LocaleProvider>
       </body>

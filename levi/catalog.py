@@ -13,7 +13,7 @@ import fcntl
 import json
 import os
 import threading
-import uuid
+import time
 from pathlib import Path
 
 from .naming import catalog_name, unique_name
@@ -31,7 +31,7 @@ def read(path: Path, default):
 
 def atomic(path: Path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
+    temp = path.with_name(path.name + "." + str(time.time_ns()) + ".tmp")
     temp.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False))
     os.replace(temp, path)
 
@@ -175,4 +175,6 @@ def display_name(repo_id: str | None, local_path: str | None) -> str:
 
 
 def review_path(repo: str):
-    return STATE / "reviews" / (display_name(repo, None) + ".json")
+    from .agent.store import resolve
+
+    return resolve(STATE, display_name(repo, None), "reviews")

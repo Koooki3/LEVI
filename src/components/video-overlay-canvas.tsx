@@ -1,5 +1,6 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import { useAgentMaskPreview } from "./agent-mask-preview";
 import { T, useLocale } from "@/components/levi-locale";
 
 /**
@@ -247,8 +248,9 @@ function drawObjectMask(
   annotation: ObjectAnnotation,
   cache: Map<string, HTMLCanvasElement>,
   color: string,
+  outline = false,
 ) {
-  const key = `${annotation.object_id}:${annotation.frame_index}`;
+  const key = `${annotation.object_id}:${annotation.frame_index}:${outline}`;
   let maskCanvas = cache.get(key);
   if (!maskCanvas) {
     const [height, width] = annotation.mask_rle.size;
@@ -280,6 +282,25 @@ function drawObjectMask(
       }
       cursor += count;
       foreground = !foreground;
+    }
+    if (outline) {
+      const alpha = new Uint8Array(width * height);
+      for (let i = 0; i < alpha.length; i++) alpha[i] = image.data[i * 4 + 3];
+      for (let y = 0; y < height; y++)
+        for (let x = 0; x < width; x++) {
+          const i = y * width + x;
+          const edge =
+            alpha[i] &&
+            (x === 0 ||
+              y === 0 ||
+              x === width - 1 ||
+              y === height - 1 ||
+              !alpha[i - 1] ||
+              !alpha[i + 1] ||
+              !alpha[i - width] ||
+              !alpha[i + width]);
+          image.data[i * 4 + 3] = edge ? 255 : 0;
+        }
     }
     maskContext.putImageData(image, 0, 0);
     cache.set(key, maskCanvas);
@@ -358,6 +379,10 @@ export const VideoOverlayCanvas: React.FC<Props> = ({
   }, [activeCamera, cameraKey, videoEl, setActiveVideoEl]);
   const drawMode = ctxDrawMode;
   const { currentTime, isPlaying } = useTime();
+  const draftMasks = useAgentMaskPreview(cameraKey, currentTime || 0);
+  const displayedObjects = draftMasks.active
+    ? draftMasks.rows || []
+    : objectAnnotations;
   // Pointer-down origin in canvas pixels and 0..1 image-relative coords.
   const dragOriginRef = useRef<{
     px: [number, number];
@@ -408,7 +433,7 @@ export const VideoOverlayCanvas: React.FC<Props> = ({
 
   useEffect(() => {
     objectMaskCacheRef.current.clear();
-  }, [objectAnnotations]);
+  }, [objectAnnotations, draftMasks.cacheKey]);
 
   const redraw = React.useCallback(() => {
     const canvas = canvasRef.current;
@@ -429,15 +454,17 @@ export const VideoOverlayCanvas: React.FC<Props> = ({
     // the nearest frame per track so a paused frame does not draw duplicate
     // masks when the browser time falls between source timestamps.
     const nearestObjects = new Map<string, ObjectAnnotation>();
-    for (const annotation of objectAnnotations) {
+    for (const annotation of displayedObjects) {
       if (
         annotation.camera_key !== cameraKey ||
-        annotation.status === "rejected"
+        annotation.status === "rejected" ||
+        !annotation.visible ||
+        draftMasks.options.hidden.includes(annotation.track_id)
       ) {
         continue;
       }
       const distance = Math.abs(annotation.timestamp - (currentTime || 0));
-      if (distance > 0.08) continue;
+      if (!draftMasks.active && distance > 0.08) continue;
       const key = `${annotation.object_id}:${annotation.track_id}`;
       const previous = nearestObjects.get(key);
       if (
@@ -449,7 +476,17 @@ export const VideoOverlayCanvas: React.FC<Props> = ({
     }
     for (const annotation of nearestObjects.values()) {
       const color = objectColor(annotation.track_id);
-      drawObjectMask(ctx, rect, annotation, objectMaskCacheRef.current, color);
+      ctx.save();
+      ctx.globalAlpha = draftMasks.options.opacity;
+      drawObjectMask(
+        ctx,
+        rect,
+        annotation,
+        objectMaskCacheRef.current,
+        color,
+        draftMasks.options.outline,
+      );
+      ctx.restore();
       drawObjectBbox(ctx, rect, annotation, color);
     }
 
@@ -535,7 +572,9 @@ export const VideoOverlayCanvas: React.FC<Props> = ({
     }
   }, [
     atoms,
-    objectAnnotations,
+    displayedObjects,
+    draftMasks.active,
+    draftMasks.options,
     pendingDraw,
     cameraKey,
     videoEl,
@@ -785,6 +824,21 @@ export const VideoOverlayCanvas: React.FC<Props> = ({
     <T>
       {
         <>
+          {draftMasks.active && (
+            <span
+              role="status"
+              style={{
+                position: "absolute",
+                top: 4,
+                left: 4,
+                zIndex: 5,
+                background: "#15221a",
+                padding: 4,
+              }}
+            >
+              {draftMasks.error || "Persistent draft masks · not published"}
+            </span>
+          )}
           <canvas
             ref={canvasRef}
             onPointerDown={onPointerDown}

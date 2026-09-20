@@ -7,6 +7,9 @@ requires-python = ">=3.11,<3.14"
 license = "Apache-2.0"
 dependencies = ["python-dotenv>=1,<2", "fastapi>=0.115,<1", "uvicorn[standard]>=0.34,<1", "pydantic>=2.10,<3", "pandas>=2.2,<3", "pyarrow>=19,<24", "huggingface-hub>=0.30,<2", "numpy>=2,<3", "opencv-python-headless>=4.10,<5"]
 
+[project.optional-dependencies]
+agent = ["pydantic-ai-slim[openai]>=1.0,<2", "mcp>=1.12,<2"]
+
 [project.urls]
 Repository = "https://github.com/Koooki3/LEVI"
 Documentation = "https://github.com/Koooki3/LEVI#readme"

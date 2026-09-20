@@ -280,3 +280,7 @@ CPU 主机完成。仓库验证不会导入 Torch、探测 CUDA、下载模型�
 - [COCO mask API](https://github.com/cocodataset/cocoapi/blob/master/PythonAPI/pycocotools/mask.py) — RLE 语义。
 
 LEVI 只借鉴公开 API 和数据格式，不复制参考项目的受版权保护界面或外部资产。
+
+## Agent assistance
+
+SAM3 is also available as an optional ToolProvider in the [Agent Workbench](AGENT_WORKBENCH.md). It runs on a frozen dataset scope and stages results for the shared human review/commit flow. Existing standalone object annotation remains supported. Agent execution requires an existing checkpoint and never initiates a download; all engineering tests use CPU fixtures without CUDA probing or real inference.

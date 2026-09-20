@@ -19,6 +19,45 @@ import type {
   Sam3Revision,
 } from "../types/object-annotation.types";
 
+// Revision tokens belong to the editor's last read, never an automatic pre-save
+// refresh (which would hide concurrent edits). Kept in memory, not credentials.
+const annotationRevisions = new Map<string, string>();
+async function annotationFetch(
+  input: string | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  const url = new URL(input, window.location.origin);
+  let body: Record<string, unknown> = {};
+  if (typeof init?.body === "string") {
+    try {
+      body = JSON.parse(init.body);
+    } catch {
+      /* transport handles bad input */
+    }
+  }
+  const dataset =
+    body.repo_id ||
+    body.local_path ||
+    url.searchParams.get("repo_id") ||
+    url.searchParams.get("local_path");
+  const path = url.pathname;
+  const channel = path.includes("/sam3/")
+    ? "objects"
+    : path.includes("outcome")
+      ? "outcomes"
+      : path;
+  const key = `${dataset}:${channel}`;
+  const headers = new Headers(init?.headers);
+  const revision = annotationRevisions.get(key);
+  if (revision && init?.method && init.method !== "GET")
+    headers.set("x-levi-annotation-revision", revision);
+  const response = await fetch(input, { ...init, headers });
+  const observed = response.headers.get("x-levi-annotation-revision");
+  if (dataset && response.ok && observed)
+    annotationRevisions.set(key, observed);
+  return response;
+}
+
 const ENV_URL = "LEVI";
 function endpoint(path: string): string {
   return new URL(
@@ -53,7 +92,7 @@ function buildUrl(path: string, ident: DatasetIdent): string {
 export async function pingBackend(): Promise<boolean> {
   if (!ENV_URL) return false;
   try {
-    const res = await fetch(endpoint("/api/health"));
+    const res = await annotationFetch(endpoint("/api/health"));
     return res.ok;
   } catch {
     return false;
@@ -64,7 +103,7 @@ export async function loadDataset(
   ident: DatasetIdent,
 ): Promise<{ ok: boolean }> {
   if (!ENV_URL) return { ok: false };
-  const res = await fetch(endpoint("/api/dataset/load"), {
+  const res = await annotationFetch(endpoint("/api/dataset/load"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -82,7 +121,9 @@ export async function fetchEpisodeAtoms(
 ): Promise<LanguageAtom[]> {
   if (!ENV_URL) return [];
   await loadDataset(ident);
-  const res = await fetch(buildUrl(`/api/episodes/${episodeId}/atoms`, ident));
+  const res = await annotationFetch(
+    buildUrl(`/api/episodes/${episodeId}/atoms`, ident),
+  );
   if (!res.ok) {
     throw new Error(`fetch atoms: ${res.status}`);
   }
@@ -96,16 +137,19 @@ export async function saveEpisodeAtoms(
   atoms: LanguageAtom[],
 ): Promise<{ path: string | null }> {
   if (!ENV_URL) return { path: null };
-  const res = await fetch(endpoint(`/api/episodes/${episodeId}/atoms`), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      episode_index: episodeId,
-      repo_id: ident.repoId || null,
-      local_path: ident.localPath || null,
-      atoms,
-    }),
-  });
+  const res = await annotationFetch(
+    endpoint(`/api/episodes/${episodeId}/atoms`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        episode_index: episodeId,
+        repo_id: ident.repoId || null,
+        local_path: ident.localPath || null,
+        atoms,
+      }),
+    },
+  );
   if (!res.ok) {
     const text = await res.text().catch(() => `${res.status}`);
     throw new Error(text || `save atoms: ${res.status}`);
@@ -124,9 +168,12 @@ export async function deleteEpisodeAtoms(
   ident: DatasetIdent,
 ): Promise<{ deleted: boolean }> {
   if (!ENV_URL) return { deleted: false };
-  const res = await fetch(buildUrl(`/api/episodes/${episodeId}/atoms`, ident), {
-    method: "DELETE",
-  });
+  const res = await annotationFetch(
+    buildUrl(`/api/episodes/${episodeId}/atoms`, ident),
+    {
+      method: "DELETE",
+    },
+  );
   if (!res.ok) {
     const text = await res.text().catch(() => `${res.status}`);
     throw new Error(text || `delete atoms: ${res.status}`);
@@ -147,7 +194,9 @@ export async function fetchAnnotationSummary(
   ident: DatasetIdent,
 ): Promise<AnnotationSummary> {
   if (!ENV_URL) return { language: {}, vision: {} };
-  const res = await fetch(buildUrl("/api/episodes/annotation-summary", ident));
+  const res = await annotationFetch(
+    buildUrl("/api/episodes/annotation-summary", ident),
+  );
   if (!res.ok) return { language: {}, vision: {} };
   const data = (await res.json()) as Partial<AnnotationSummary>;
   return { language: data.language || {}, vision: data.vision || {} };
@@ -166,7 +215,7 @@ export async function fetchOutcomeLabels(
   ident: DatasetIdent,
 ): Promise<Record<string, OutcomeLabel>> {
   if (!ENV_URL) return {};
-  const res = await fetch(buildUrl("/api/episodes/outcomes", ident), {
+  const res = await annotationFetch(buildUrl("/api/episodes/outcomes", ident), {
     cache: "no-store",
   });
   if (!res.ok) return {};
@@ -181,15 +230,18 @@ export async function saveOutcomeLabel(
   outcome: OutcomeValue | null,
 ): Promise<void> {
   if (!ENV_URL) throw new Error("Annotate backend not configured");
-  const res = await fetch(endpoint(`/api/episodes/${episodeId}/outcome`), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      repo_id: ident.repoId || null,
-      local_path: ident.localPath || null,
-      outcome,
-    }),
-  });
+  const res = await annotationFetch(
+    endpoint(`/api/episodes/${episodeId}/outcome`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        repo_id: ident.repoId || null,
+        local_path: ident.localPath || null,
+        outcome,
+      }),
+    },
+  );
   if (!res.ok) {
     const text = await res.text().catch(() => `${res.status}`);
     throw new Error(text || `save outcome: ${res.status}`);
@@ -201,7 +253,7 @@ export async function fetchFrameTimestamps(
   ident: DatasetIdent,
 ): Promise<number[]> {
   if (!ENV_URL) return [];
-  const res = await fetch(
+  const res = await annotationFetch(
     buildUrl(`/api/episodes/${episodeId}/frame_timestamps`, ident),
   );
   if (!res.ok) return [];
@@ -220,7 +272,7 @@ export async function exportDataset(
   reused_existing_export: boolean;
 }> {
   if (!ENV_URL) throw new Error("Annotate backend not configured");
-  const res = await fetch(endpoint("/api/export"), {
+  const res = await annotationFetch(endpoint("/api/export"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -254,7 +306,7 @@ export async function pushToHub(
   commitMessage: string,
 ): Promise<PushToHubResult> {
   if (!ENV_URL) throw new Error("Annotate backend not configured");
-  const res = await fetch(endpoint("/api/push_to_hub"), {
+  const res = await annotationFetch(endpoint("/api/push_to_hub"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -276,7 +328,7 @@ export async function pushToHub(
 }
 
 export async function getSam3Status(): Promise<Sam3Capabilities> {
-  const response = await fetch(endpoint("/api/sam3/status"), {
+  const response = await annotationFetch(endpoint("/api/sam3/status"), {
     cache: "no-store",
   });
   if (!response.ok) throw new Error("SAM3 status: " + response.status);
@@ -292,10 +344,13 @@ export async function getSam3Capabilities(): Promise<Sam3Capabilities> {
 export async function startSam3CheckpointDownload(): Promise<
   Sam3Capabilities & { download_started?: boolean }
 > {
-  const response = await fetch(endpoint("/api/sam3/checkpoint/download"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-  });
+  const response = await annotationFetch(
+    endpoint("/api/sam3/checkpoint/download"),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    },
+  );
   if (!response.ok) {
     const text = await response.text().catch(() => `${response.status}`);
     let detail = "";
@@ -317,7 +372,7 @@ export async function planSam3(
   plan: Omit<Sam3Plan, "repo_id" | "local_path" | "revision">,
 ): Promise<Sam3Plan & { plan_id: string; status: string }> {
   if (!ENV_URL) throw new Error("Annotate backend not configured");
-  const response = await fetch(endpoint("/api/sam3/plan"), {
+  const response = await annotationFetch(endpoint("/api/sam3/plan"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -346,7 +401,7 @@ export async function runSam3(
   job_id?: string;
 }> {
   if (!ENV_URL) throw new Error("Annotate backend not configured");
-  const response = await fetch(endpoint("/api/sam3/run"), {
+  const response = await annotationFetch(endpoint("/api/sam3/run"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -367,9 +422,12 @@ export async function fetchSam3Revisions(
   ident: DatasetIdent,
 ): Promise<{ current: string | null; revisions: Sam3Revision[] }> {
   if (!ENV_URL) return { current: null, revisions: [] };
-  const response = await fetch(buildUrl("/api/sam3/revisions", ident), {
-    cache: "no-store",
-  });
+  const response = await annotationFetch(
+    buildUrl("/api/sam3/revisions", ident),
+    {
+      cache: "no-store",
+    },
+  );
   if (!response.ok) throw new Error(`SAM3 revisions: ${response.status}`);
   return response.json();
 }
@@ -392,7 +450,7 @@ export async function fetchObjectAnnotations(
     url.searchParams.set("frame_index", String(options.frameIndex));
   if (options.annotationRevision)
     url.searchParams.set("annotation_revision", options.annotationRevision);
-  const response = await fetch(url, { cache: "no-store" });
+  const response = await annotationFetch(url, { cache: "no-store" });
   if (!response.ok) throw new Error(`SAM3 objects: ${response.status}`);
   const data = (await response.json()) as {
     revision?: string | null;
@@ -406,7 +464,7 @@ export async function editObjectAnnotation(
   edit: Sam3Edit,
 ): Promise<{ ok: boolean; revision_id: string; annotation_count: number }> {
   if (!ENV_URL) throw new Error("Annotate backend not configured");
-  const response = await fetch(buildUrl("/api/sam3/edits", ident), {
+  const response = await annotationFetch(buildUrl("/api/sam3/edits", ident), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(edit),
@@ -423,9 +481,12 @@ export async function fetchSam3Job(
   ident: DatasetIdent,
 ): Promise<Sam3JobStatus> {
   if (!ENV_URL) throw new Error("Annotate backend not configured");
-  const response = await fetch(buildUrl("/api/sam3/jobs/" + jobId, ident), {
-    cache: "no-store",
-  });
+  const response = await annotationFetch(
+    buildUrl("/api/sam3/jobs/" + jobId, ident),
+    {
+      cache: "no-store",
+    },
+  );
   if (!response.ok) throw new Error("SAM3 job: " + response.status);
   return response.json() as Promise<Sam3JobStatus>;
 }
@@ -435,7 +496,7 @@ export async function cancelSam3Job(
   ident: DatasetIdent,
 ): Promise<Record<string, unknown>> {
   if (!ENV_URL) throw new Error("Annotate backend not configured");
-  const response = await fetch(
+  const response = await annotationFetch(
     buildUrl(`/api/sam3/jobs/${jobId}/cancel`, ident),
     {
       method: "POST",
@@ -451,7 +512,7 @@ export async function cancelSam3Job(
 
 export async function fetchSam3PromptPresets(): Promise<Sam3PromptPreset[]> {
   if (!ENV_URL) return [];
-  const response = await fetch(endpoint("/api/sam3/prompt-presets"), {
+  const response = await annotationFetch(endpoint("/api/sam3/prompt-presets"), {
     cache: "no-store",
   });
   if (!response.ok) throw new Error(`SAM3 prompt presets: ${response.status}`);
@@ -463,7 +524,7 @@ export async function saveSam3PromptPreset(
   preset: Sam3PromptPreset,
 ): Promise<Sam3PromptPreset[]> {
   if (!ENV_URL) throw new Error("Annotate backend not configured");
-  const response = await fetch(endpoint("/api/sam3/prompt-presets"), {
+  const response = await annotationFetch(endpoint("/api/sam3/prompt-presets"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(preset),
@@ -480,7 +541,7 @@ export async function deleteSam3PromptPreset(
   name: string,
 ): Promise<Sam3PromptPreset[]> {
   if (!ENV_URL) throw new Error("Annotate backend not configured");
-  const response = await fetch(
+  const response = await annotationFetch(
     endpoint(`/api/sam3/prompt-presets/${encodeURIComponent(name)}`),
     { method: "DELETE" },
   );

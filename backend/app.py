@@ -54,7 +54,6 @@ import shutil
 import subprocess
 import threading
 import time
-import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -70,6 +69,8 @@ from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from pydantic import BaseModel
 
 from levi import naming
+from levi.agent.legacy import editor
+from levi.agent.store import resolve as bundle_resolve
 from levi.annotations import (
     ObjectAnnotation,
     ObjectEdit,
@@ -314,7 +315,7 @@ class DatasetState:
         opaque blob for the whole dataset. Lets a user (or another tool) add,
         replace or delete a single episode's annotations directly on disk.
         """
-        return STATE / "annotations" / self.display_slug
+        return bundle_resolve(STATE, self.display_slug, "annotations")
 
     def annotation_file(self, episode_index: int) -> Path:
         return self.annotations_dir / f"episode_{episode_index:06d}.json"
@@ -329,7 +330,7 @@ class DatasetState:
     @property
     def object_annotations_path(self) -> Path:
         """Workspace sidecar root, independent from the source dataset tree."""
-        return STATE / "object_annotations" / self.display_slug
+        return bundle_resolve(STATE, self.display_slug, "object_annotations")
 
 
 _states: dict[str, DatasetState] = {}
@@ -384,7 +385,10 @@ def _sidecar(state: DatasetState) -> SidecarStore:
     }
     if state.repo_id:
         identity["credential_scope"] = state.credential_scope
-    return SidecarStore(state.object_annotations_path, identity=identity)
+    store = SidecarStore(state.object_annotations_path, identity=identity)
+    # Worker jobs are mutable runtime records, never part of immutable bundles.
+    store.staging_root = STATE / "object_annotations" / state.display_slug / "staging"
+    return store
 
 
 def _validate_sam3_plan(state: DatasetState, request: Sam3PlanRequest) -> None:
@@ -469,7 +473,7 @@ def _reuse_sam3_plan(
         raise ValueError("plan_id is required")
     if not re.fullmatch(SAM3_ID_PATTERN, plan_id):
         raise HTTPException(400, "Invalid SAM3 plan ID")
-    plan_path = store.root / "staging" / "plans" / f"{plan_id}.json"
+    plan_path = store.staging_root / "plans" / f"{plan_id}.json"
     if not plan_path.is_file():
         raise HTTPException(404, "SAM3 plan not found")
     try:
@@ -495,9 +499,8 @@ def _sam3_plan_payload(
     state: DatasetState, request: Sam3PlanRequest
 ) -> tuple[SidecarStore, Path, dict[str, Any]]:
     store = _sidecar(state)
-    store.initialize()
-    plan_id = naming.timestamp_id(store.root / "staging" / "plans", ".json")
-    plan_path = store.root / "staging" / "plans" / f"{plan_id}.json"
+    plan_id = naming.timestamp_id(store.staging_root / "plans", ".json")
+    plan_path = store.staging_root / "plans" / f"{plan_id}.json"
     payload = {
         "plan_id": plan_id,
         "status": "planned",
@@ -516,7 +519,7 @@ def _sam3_plan_payload(
 def _sam3_job_path(store: SidecarStore, job_id: str) -> Path:
     if not re.fullmatch(SAM3_ID_PATTERN, job_id):
         raise HTTPException(400, "Invalid SAM3 job ID")
-    return store.root / "staging" / "jobs" / f"{job_id}.json"
+    return store.staging_root / "jobs" / f"{job_id}.json"
 
 
 _SAM3_LOG_TAIL_BYTES = 4000
@@ -635,7 +638,7 @@ def _collect_sam3_job(state: DatasetState, job: dict[str, Any]) -> dict[str, Any
     return job
 
 
-def _load_state(req: DatasetRef, key: str) -> DatasetState:
+def _load_state(req: DatasetRef, key: str, *, annotations: bool = True) -> DatasetState:
     if req.local_path:
         root = Path(req.local_path).expanduser().resolve()
         if not root.exists():
@@ -646,18 +649,8 @@ def _load_state(req: DatasetRef, key: str) -> DatasetState:
         CACHE_ROOT.mkdir(parents=True, exist_ok=True)
         if not re.fullmatch(r"[\w.-]+/[\w.-]+", req.repo_id):
             raise HTTPException(400, "Invalid Hub dataset ID")
-        # The revision itself (a branch, tag or commit), made path-safe — not
-        # a hash of it. The trailing credential-scope digest stays: it keeps
-        # one HF account's private download from being reused by another.
-        revision_key = naming.catalog_name(req.revision) if req.revision else "main"
-        slug = (
-            req.repo_id.replace("/", "__")
-            + "@"
-            + revision_key
-            + "--"
-            + credential_scope()
-        )
-        root = inside(CACHE_ROOT / slug)
+        root = inside(naming.hub_cache_directory(
+            CACHE_ROOT, req.repo_id, req.revision or "main", credential_scope()))
         root.mkdir(parents=True, exist_ok=True)
         snapshot_download(
             req.repo_id,
@@ -761,8 +754,9 @@ def _load_state(req: DatasetRef, key: str) -> DatasetState:
         episodes_df=episodes_df,
         info_signature=_info_signature(root) if req.local_path else None,
     )
-    _load_existing_annotations(state)
-    _states[key] = state
+    if annotations:
+        _load_existing_annotations(state)
+        _states[key] = state
     return state
 
 
@@ -1465,6 +1459,13 @@ def _do_export(
     if dst_meta.exists():
         shutil.rmtree(dst_meta)
     shutil.copytree(src_meta, dst_meta)
+    from levi.agent.store import Store, current_pin
+    bundle = current_pin(STATE, state.display_slug)
+    if bundle is None:
+        bundle = Store(STATE).bundle(state.display_slug)
+    provenance = bundle / "agent-provenance.json"
+    if provenance.exists():
+        shutil.copyfile(provenance, dst_meta / "levi_agent_provenance.json")
 
     info_path = dst_meta / "info.json"
     info = json.loads(info_path.read_text())
@@ -1710,6 +1711,7 @@ def load_dataset(req: LoadRequest) -> JSONResponse:
 
 
 @app.get("/api/episodes/annotation-summary")
+@editor(read_only=True)
 def episode_annotation_summary(
     repo_id: str | None = None,
     revision: str | None = None,
@@ -1777,6 +1779,7 @@ def episode_annotation_summary(
 
 
 @app.get("/api/episodes/{episode_index}/atoms")
+@editor(read_only=True)
 def get_episode_atoms(
     episode_index: int,
     repo_id: str | None = None,
@@ -1818,6 +1821,7 @@ def get_episode_atoms(
 
 
 @app.post("/api/episodes/{episode_index}/atoms")
+@editor()
 def set_episode_atoms(episode_index: int, payload: EpisodeAtomsPayload) -> JSONResponse:
     if episode_index != payload.episode_index:
         raise HTTPException(status_code=400, detail="episode index mismatch")
@@ -1837,6 +1841,7 @@ def set_episode_atoms(episode_index: int, payload: EpisodeAtomsPayload) -> JSONR
 
 
 @app.delete("/api/episodes/{episode_index}/atoms")
+@editor()
 def delete_episode_atoms(
     episode_index: int,
     repo_id: str | None = None,
@@ -1855,6 +1860,7 @@ def delete_episode_atoms(
 
 
 @app.get("/api/episodes/outcomes")
+@editor(read_only=True)
 def get_outcome_labels(
     repo_id: str | None = None,
     revision: str | None = None,
@@ -1869,6 +1875,7 @@ def get_outcome_labels(
 
 
 @app.post("/api/episodes/{episode_index}/outcome")
+@editor()
 def set_outcome_label(episode_index: int, payload: OutcomePayload) -> JSONResponse:
     state = _ensure_state(
         DatasetRef(repo_id=payload.repo_id, local_path=payload.local_path)
@@ -2096,7 +2103,7 @@ def _download_sam3_checkpoint(active_token: str, target: Path) -> None:
         # ``local_dir`` normally returns target directly. Keep an atomic copy
         # fallback for Hub/cache versions that return a different local path.
         if downloaded.resolve() != target.resolve():
-            temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+            temporary = target.with_name(f".{target.name}.{time.time_ns()}.tmp")
             with downloaded.open("rb") as source, temporary.open("wb") as dest:
                 shutil.copyfileobj(source, dest, length=8 * 1024 * 1024)
                 dest.flush()
@@ -2393,6 +2400,7 @@ def sam3_plan(request: Sam3PlanRequest) -> JSONResponse:
 
 
 @app.post("/api/sam3/run")
+@editor()
 def sam3_run(request: Sam3RunRequest) -> JSONResponse:
     state = _ensure_state(DatasetRef.model_validate(request.model_dump()))
     _validate_sam3_plan(state, request)
@@ -2444,10 +2452,10 @@ def sam3_run(request: Sam3RunRequest) -> JSONResponse:
             f"SAM3 worker environment not found at {worker_python}; see integrations/sam3/README.md",
         )
     _prepare_sam3_media(state)
-    job_id = naming.timestamp_id(store.root / "staging" / "jobs", ".json")
-    result_path = store.root / "staging" / "results" / f"{job_id}.json"
-    log_path = store.root / "staging" / "jobs" / f"{job_id}.log"
-    progress_path = store.root / "staging" / "jobs" / f"{job_id}.progress.json"
+    job_id = naming.timestamp_id(store.staging_root / "jobs", ".json")
+    result_path = store.staging_root / "results" / f"{job_id}.json"
+    log_path = store.staging_root / "jobs" / f"{job_id}.log"
+    progress_path = store.staging_root / "jobs" / f"{job_id}.progress.json"
     job = {
         "job_id": job_id,
         "status": "queued",
@@ -2504,6 +2512,7 @@ def sam3_run(request: Sam3RunRequest) -> JSONResponse:
 
 
 @app.get("/api/sam3/revisions")
+@editor(read_only=True)
 def sam3_revisions(
     repo_id: str | None = None,
     revision: str | None = None,
@@ -2519,6 +2528,7 @@ def sam3_revisions(
 
 
 @app.get("/api/sam3/episodes/{episode_index}/objects")
+@editor(read_only=True)
 def sam3_episode_objects(
     episode_index: int,
     repo_id: str | None = None,
@@ -2547,6 +2557,7 @@ def sam3_episode_objects(
 
 
 @app.get("/api/sam3/jobs/{job_id}")
+@editor(internal=True)
 def sam3_job_status(
     job_id: str,
     repo_id: str | None = None,
@@ -2600,6 +2611,7 @@ def sam3_job_cancel(
 
 
 @app.post("/api/sam3/edits")
+@editor()
 def sam3_edit(
     request: Sam3EditRequest,
     repo_id: str | None = None,
@@ -2631,6 +2643,7 @@ def episode_frame_timestamps(
 
 
 @app.post("/api/export")
+@editor(read_only=True)
 def export_dataset(req: ExportRequest) -> JSONResponse:
     state = _ensure_state(req)
     return JSONResponse(_do_export(state, req.output_dir, req.copy_videos))

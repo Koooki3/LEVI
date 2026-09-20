@@ -1,0 +1,9 @@
+{
+  "name": "levi-pilot-runtimes",
+  "private": true,
+  "version": "0.1.0",
+  "dependencies": {
+    "@agentclientprotocol/codex-acp": "1.12.0",
+    "@agentclientprotocol/claude-agent-acp": "0.79.0"
+  }
+}

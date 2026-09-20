@@ -101,6 +101,10 @@ def stop_children(children):
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "agent":
+        from .agent.control import main as agent_control
+
+        return agent_control(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == "sam3":
         from .sam3_cli import main as sam3
 
@@ -153,23 +157,19 @@ def main():
         setup()
         return
     ui_url = frontend_url(args.host, args.port)
-    if args.command in ("serve", "dev", "backend"):
-        try:
-            check_ports(
-                args.host, args.port, args.backend_port, args.command == "backend"
-            )
-        except ValueError as exc:
-            parser.error(str(exc))
-        os.environ["LEVI_FRONTEND_URL"] = ui_url
     if args.command == "backend":
-        import uvicorn
+        from .agent.core import ensure
 
-        print(
-            "[LEVI] API only / 仅启动 API. Start the UI with: uv run levi / 完整网页启动命令：uv run levi",
-            flush=True,
-        )
-        uvicorn.run("levi.service:app", host="127.0.0.1", port=args.backend_port)
+        print(ensure(args.backend_port))
         return
+    if args.command in ("serve", "dev"):
+        from .agent.core import directory, ensure
+
+        os.environ["LEVI_FRONTEND_URL"] = ui_url
+        core = ensure(args.backend_port)
+        args.backend_port = core["port"]
+        os.environ["LEVI_UI_TOKEN"] = (directory() / "human.key").read_text()
+        os.environ["LEVI_FRONTEND_URL"] = ui_url
     bun = str(bun_path()) if bun_path().exists() else shutil.which("bun")
     if not bun:
         parser.error("Run uv run levi setup first")
@@ -197,26 +197,11 @@ def main():
         raise SystemExit(frontend or backend)
     if args.command == "serve" and not (PROJECT / ".next/BUILD_ID").is_file():
         parser.error("Missing production build. Run: uv run levi build / 缺少生产构建")
+    os.environ.setdefault("LEVI_UI_TOKEN", __import__("secrets").token_urlsafe(32))
     children = []
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     print("[LEVI] Starting Web UI and API… / 正在启动网页与 API…", flush=True)
     try:
-        children.append(
-            subprocess.Popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "uvicorn",
-                    "levi.service:app",
-                    "--host",
-                    "127.0.0.1",
-                    "--port",
-                    str(args.backend_port),
-                ],
-                cwd=PROJECT,
-                start_new_session=(os.name == "posix"),
-            )
-        )
         children.append(
             subprocess.Popen(
                 [

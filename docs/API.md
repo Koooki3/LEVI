@@ -109,3 +109,7 @@ dataset. Hub state and sidecars are scoped by a one-way credential digest, while
 local datasets are scoped by their resolved path and LEVI_WORKSPACE. This prevents
 account changes from reusing another account's private snapshot or revision.
 See SAM3.md for the ordered setup sequence and sidecar schema.
+
+## Agent control plane (experimental)
+
+`/api/levi/agent/v1/capabilities` describes the typed tool registry; `POST /api/levi/agent/v1/tools` accepts `name`, `arguments`, optional `idempotency_key`. Provider profiles and server-memory session credentials are human-only. External requests use `LEVI_AGENT_TOKEN` and `LEVI_AGENT_DATASETS`, can read/draft only, and cannot use legacy write APIs. After Agent version activation, legacy annotation/review writes require the `X-LEVI-Annotation-Revision` returned by their corresponding read. See [Agent Workbench](AGENT_WORKBENCH.md) for schemas, MCP, transaction and migration behavior.

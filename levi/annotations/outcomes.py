@@ -76,7 +76,9 @@ def labels_for_source(source: Path) -> dict[str, str]:
     name = catalog.name_for_path(source)
     if name is None:
         return {}
-    labels = read_labels(catalog.STATE / "annotations" / name)
+    from ..agent.store import resolve
+
+    labels = read_labels(resolve(catalog.STATE, name, "annotations"))
     if not labels:
         return {}
     view = catalog.datasets().get(name, {}).get("view")

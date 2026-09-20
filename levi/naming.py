@@ -73,3 +73,32 @@ def unique_name(base: str, taken) -> str:
 
 def is_timestamp_id(value: str) -> bool:
     return bool(re.fullmatch(TIMESTAMP_PATTERN, value))
+
+
+def hub_cache_directory(cache_root: Path, repo_id: str, revision: str, scope: str) -> Path:
+    """Account-isolated cache with readable paths; fingerprints stay in metadata.
+
+    Existing digest-named caches are deliberately neither deleted nor shared.
+    Slots are allocated under a cross-process lock, with no token stored.
+    """
+    import fcntl
+    import json
+
+    root = cache_root / repo_id.replace("/", "__")
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / ".index.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        index = root / "cache-index.json"
+        records = json.loads(index.read_text()) if index.exists() else []
+        for row in records:
+            if row["scope"] == scope and row["revision"] == revision:
+                return root / row["directory"]
+        scopes = list(dict.fromkeys(row["scope"] for row in records))
+        account = scopes.index(scope)+1 if scope in scopes else len(scopes)+1
+        version = sum(row["scope"] == scope for row in records)+1
+        directory = f"account-{account:04d}/revision-{version:04d}"
+        records.append({"scope": scope, "revision": revision, "directory": directory})
+        temporary = index.with_suffix(".tmp")
+        temporary.write_text(json.dumps(records, indent=2))
+        os.replace(temporary, index)
+        return root / directory
