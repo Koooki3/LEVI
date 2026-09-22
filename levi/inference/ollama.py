@@ -131,6 +131,7 @@ class OllamaClient:
         output_schema: dict,
         max_output_tokens: int,
         context_tokens: int = 8192,
+        think: bool = False,
     ) -> dict:
         if (
             max_output_tokens <= 0
@@ -147,6 +148,9 @@ class OllamaClient:
                 "messages": messages,
                 "format": output_schema,
                 "stream": False,
+                # Reasoning tokens before a schema-bound answer cost time and
+                # tokens the answer rarely needs; opt in per call.
+                "think": think,
                 "options": {
                     "num_predict": max_output_tokens,
                     "num_ctx": context_tokens,
@@ -165,6 +169,7 @@ class OllamaClient:
             "tool_calls": message.get("tool_calls", []),
             "usage": {
                 "tokens": sum(counts) if reported else None,
+                "prompt_tokens": counts[0] if reported else None,
                 "source": "reported" if reported else "unknown",
             },
         }

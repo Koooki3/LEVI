@@ -32,8 +32,16 @@ import {
 } from "../types/language.types";
 import {
   exportDataset as apiExport,
+  fetchVocabulary,
   isAnnotateBackendEnabled,
+  type Vocabulary,
 } from "../utils/annotationsClient";
+import {
+  SubtaskTagFields,
+  VocabularyEditor,
+  withTag,
+  type SubtaskTag,
+} from "./subtask-vocabulary";
 import { isSaveShortcut } from "../utils/keyboardShortcuts";
 import { useDatasetSource } from "../context/dataset-source-context";
 import { RawCaptureNotice } from "./raw-capture-notice";
@@ -517,6 +525,26 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
   const { isRaw } = useDatasetSource();
   const [showExportHint, setShowExportHint] = useState(false);
   const qaDef = QUICK_ADD_DEFS_BY_KIND[qaKind];
+  // The dataset's subtask vocabulary, and the tag the next subtask gets.
+  const [vocabulary, setVocabulary] = useState<Vocabulary>({
+    subtasks: [],
+    updated_at: null,
+  });
+  const [qaTag, setQaTag] = useState<SubtaskTag>({});
+  const identKey = `${ident.repoId ?? ""}|${ident.localPath ?? ""}`;
+  React.useEffect(() => {
+    if (!backendEnabled || (!ident.repoId && !ident.localPath)) return;
+    let cancelled = false;
+    fetchVocabulary(ident)
+      .then((value) => {
+        if (!cancelled) setVocabulary(value);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identKey, backendEnabled]);
 
   // Initialize active camera once cameras arrive.
   React.useEffect(() => {
@@ -564,12 +592,25 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
   const handleQuickAdd = () => {
     const ts = snap(currentTime);
     const vqaCamera = activeCamera ?? cameraKeys[0] ?? null;
-    const newAtoms = qaDef.build(qaValues, { ts, vqaCamera });
+    const tagged = qaKind === "subtask" && (qaTag.subtask_id || qaTag.outcome);
+    // A subtask picked from the vocabulary needs no typed description.
+    const label =
+      qaValues.label?.trim() ||
+      (qaKind === "subtask" && qaTag.subtask_id
+        ? (vocabulary.subtasks.find((s) => s.id === qaTag.subtask_id)?.label ??
+          qaTag.subtask_id)
+        : "");
+    const newAtoms = qaDef.build(
+      { ...qaValues, ...(qaKind === "subtask" ? { label } : {}) },
+      { ts, vqaCamera },
+    );
     if (!newAtoms || !newAtoms.length) return;
+    if (tagged) newAtoms[0] = { ...newAtoms[0], levi: withTag(null, qaTag) };
     addAtoms(newAtoms);
     // Select the freshly added atom (last one added) so the editor opens for it.
     selectAtom(atoms.length + newAtoms.length - 1);
     setQaValues({});
+    setQaTag({});
   };
 
   const qaHasDraft = Object.values(qaValues).some((v) => v.trim() !== "");
@@ -764,6 +805,13 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                   </option>
                 ))}
               </select>
+              {qaKind === "subtask" && (
+                <SubtaskTagFields
+                  vocabulary={vocabulary}
+                  value={qaTag}
+                  onChange={setQaTag}
+                />
+              )}
               {qaDef.fields.map((f, i) => (
                 <input
                   key={f.name}
@@ -786,6 +834,13 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                 <T>+ Add at frame</T>
               </button>
             </div>
+            {backendEnabled && (
+              <VocabularyEditor
+                ident={ident}
+                vocabulary={vocabulary}
+                onSaved={setVocabulary}
+              />
+            )}
           </section>
 
           <div className="workspace inspector-workspace">
@@ -864,6 +919,7 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                   <AtomEditor
                     atom={selectedAtom}
                     cameraKeys={cameraKeys}
+                    vocabulary={vocabulary}
                     onChange={(updates) =>
                       updateAtom(selectedIdx as number, updates)
                     }
@@ -939,9 +995,10 @@ const RailGroup: React.FC<{
 const AtomEditor: React.FC<{
   atom: LanguageAtom;
   cameraKeys: string[];
+  vocabulary: Vocabulary;
   onChange: (updates: Partial<LanguageAtom>) => void;
   onDelete: () => void;
-}> = ({ atom, cameraKeys, onChange, onDelete }) => {
+}> = ({ atom, cameraKeys, vocabulary, onChange, onDelete }) => {
   const jump = useJump();
   const { snap } = useAnnotations();
   const isSpeech = isSpeechAtom(atom);
@@ -1069,6 +1126,26 @@ const AtomEditor: React.FC<{
               </button>
             </div>
           </div>
+
+          {atom.style === "subtask" && vocabulary.subtasks.length > 0 && (
+            <div className="field">
+              <label className="field-label">
+                <T>Subtask and outcome</T>
+              </label>
+              <div className="ts-row">
+                <SubtaskTagFields
+                  vocabulary={vocabulary}
+                  value={{
+                    subtask_id: atom.levi?.subtask_id ?? null,
+                    outcome: atom.levi?.outcome ?? null,
+                  }}
+                  onChange={(tag) =>
+                    onChange({ levi: withTag(atom.levi, tag) })
+                  }
+                />
+              </div>
+            </div>
+          )}
 
           <div className="field">
             <label className="field-label">

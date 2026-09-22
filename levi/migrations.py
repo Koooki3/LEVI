@@ -1,5 +1,5 @@
 """``uv run levi migrate``: move existing workspace state to the hash-free
-naming scheme (see levi/naming.py and .state.md).
+naming scheme (see levi/naming.py and docs/WORKSPACE.md).
 
 - ``datasets.json`` keyed by catalog name, old hash keys kept as aliases
   (``dataset_aliases.json``) so old ``/local/<hash>`` links keep working;

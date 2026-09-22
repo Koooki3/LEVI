@@ -41,6 +41,9 @@ class Conflict(ValueError):
     pass
 
 
+NEW_CALL = "new-call"
+
+
 class Store:
     def __init__(self, state: Path):
         self.state = state
@@ -155,6 +158,22 @@ class Store:
                 f"DELETE FROM events WHERE run_id IN ({marks})", ids
             ).rowcount
 
+    def drop_receipts(self, change_ids):
+        """Publication receipts ("<channel>:<changeset>:...") of these
+        changesets: without their changesets they only block key reuse."""
+        ids = set(change_ids)
+        if not ids:
+            return 0
+        with self.connect() as db:
+            keys = [
+                key
+                for (key,) in db.execute("SELECT key FROM receipts")
+                if ids & set(str(key).split(":"))
+            ]
+            for key in keys:
+                db.execute("DELETE FROM receipts WHERE key=?", (key,))
+        return len(keys)
+
     def drop_head(self, dataset):
         with self.connect() as db:
             return db.execute("DELETE FROM heads WHERE dataset=?", (dataset,)).rowcount
@@ -178,6 +197,15 @@ class Store:
             cursor = db.execute(
                 "INSERT INTO events(run_id,body) VALUES(?,?)", (run_id, dumps(event))
             )
+            if event.get("call_id") == NEW_CALL:
+                # A call is named by the journal position of its first event:
+                # unique across processes and readable, assigned in the same
+                # transaction as the insert.
+                event["call_id"] = f"call-{cursor.lastrowid}"
+                db.execute(
+                    "UPDATE events SET body=? WHERE seq=?",
+                    (dumps(event), cursor.lastrowid),
+                )
             return {"seq": cursor.lastrowid, **event}
 
     def events(self, run_id, after=0):

@@ -76,7 +76,9 @@ def record(store, run, report):
     """Store one completed-task sample; the agent supplies its own token use."""
     sample = {
         "schema": SCHEMA,
-        "id": f"{run['id']}:{int(time.time() * 1000)}",
+        # One readable id per report: run, then how many it has reported.
+        "id": f"{run['id']}:reported-"
+        f"{sum(1 for key in store.ids('usage_samples') if key.startswith(run['id'] + ':reported')) + 1}",
         "run_id": run["id"],
         "agent_key": agent_key(run),
         "dataset": run["context"]["repo_id"],

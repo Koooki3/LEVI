@@ -66,7 +66,9 @@ class OllamaTransport:
             transport=Pinned(retries=0),
             trust_env=False,
             follow_redirects=False,
-            timeout=min(30, self.timeout),
+            # Connect fast; the read may legitimately take as long as the call
+            # (a first request loads the model, a vision answer takes seconds).
+            timeout=httpx.Timeout(self.timeout, connect=min(30, self.timeout)),
         )
 
     def _chunks(self, method, path, payload):
@@ -84,6 +86,7 @@ class OllamaTransport:
                 if response.status_code != 200:
                     raise OllamaError(
                         f"Ollama HTTP request failed ({response.status_code})"
+                        + _known_cause(response)
                     )
                 for chunk in response.iter_bytes():
                     total += len(chunk)
@@ -129,3 +132,25 @@ class OllamaTransport:
             raise OllamaError("Ollama returned invalid progress JSON") from None
         finally:
             chunks.close()
+
+
+def _known_cause(response):
+    """Only recognised, LEVI-rephrased causes: remote bodies are never echoed."""
+    import re
+
+    from httpx import HTTPError
+
+    try:
+        body = response.read()[:4096].decode("utf-8", "replace")
+    except (HTTPError, OSError):
+        return ""
+    found = re.search(
+        r"request \((\d+) tokens\) exceeds the available context size \((\d+) tokens\)",
+        body,
+    )
+    if found:
+        return (
+            f": the request needs {found[1]} tokens but the model context holds "
+            f"{found[2]}; send fewer images or raise context_tokens"
+        )
+    return ""

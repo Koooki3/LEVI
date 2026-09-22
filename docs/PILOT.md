@@ -105,7 +105,7 @@ an unrestricted agent running as the same user**.
 
 Use actual catalog IDs/camera keys. Media consent covers the selected evidence
 sent through your runtime. For temporal definitions or object targets, follow
-[HARNESS.md](HARNESS.md); guessing a camera or omitting definitions is not a
+[Agents](AGENTS.md); guessing a camera or omitting definitions is not a
 substitute for clarification. Use `pilot_runtime: "claude"` for managed Claude.
 
 ```bash

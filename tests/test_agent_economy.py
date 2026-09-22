@@ -1187,3 +1187,111 @@ def test_the_cost_estimate_closes_the_loop_with_what_agents_report(client):
     # A different agent is not credited with this one's history.
     other = usage.estimate(store, **{**scope, "key": "model:something-else"})
     assert "all recorded agents" in other["basis"]
+
+
+def test_reset_removes_files_and_records_together(bench):
+    """Reset shipped untested and dropped the records before locating the
+    directories, leaving the files orphaned. Both must go, files first."""
+    wb, context = bench
+    agent = Principal("conn", datasets=(context.repo_id,))
+    human = Principal("operator", human=True)
+    run = prepared(wb, context, agent)
+    directory = wb.store.run_dir(run["id"])
+    assert directory.exists()
+    tree = directory.parent.parent
+
+    lock = wb.store.root / "locks" / f"run-{run['id']}.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.touch()
+    preview = invoke(wb, human, "workspace.reset", {"dataset": context.repo_id})
+    assert preview["runs"] == [run["id"]] and preview["applied"] is False
+    assert directory.exists(), "a preview must not delete anything"
+
+    done = invoke(
+        wb, human, "workspace.reset", {"dataset": context.repo_id, "apply": True}
+    )
+    assert done["applied"] is True and done["not_removed"] == []
+    assert not directory.exists() and not tree.exists()
+    assert run["id"] not in wb.store.ids("runs")
+    assert not wb.store.events(run["id"])
+    assert not lock.exists(), "a run's lock file goes with the run"
+
+
+def test_reset_leaves_nothing_the_next_task_could_learn_from(bench):
+    """Teaching phases, cached answers, tasks and the harness's files for the
+    dataset go too: kept, they would feed the next learner work that is gone."""
+    from levi.harness import layout
+
+    wb, context = bench
+    agent = Principal("conn", datasets=(context.repo_id,))
+    human = Principal("operator", human=True)
+    run = prepared(wb, context, agent)
+    key = run["dataset_key"]
+    wb.store.put("teaching", f"{run['id']}:0:coarse", {"run_id": run["id"]})
+    wb.store.put("model_cache", f"{run['id']}:0:coarse", {"output": {}})
+    wb.store.put("tasks", "task-1", {"id": "task-1", "dataset_key": key})
+    wb.store.put("tasks", "task-2", {"id": "task-2", "dataset_key": "other"})
+    wb.store.put("changes", "20260101T0000", {"run_id": run["id"]})
+    with wb.store.connect() as db:
+        db.execute("INSERT INTO receipts VALUES('commit:20260101T0000:0','r','{}')")
+        db.execute("INSERT INTO receipts VALUES('commit:20260101T0001:0','r','{}')")
+    files = [
+        layout.dataset_dir(wb.store.state, key) / "teaching" / "note.json",
+        layout.dataset_dir(wb.store.state, key) / "tasks" / "ledger.json",
+        layout.improvements_dir(wb.store.state, key) / "slug.json",
+        layout.memory_path(wb.store.state, key),
+    ]
+    for path in files:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}")
+    done = invoke(
+        wb, human, "workspace.reset", {"dataset": context.repo_id, "apply": True}
+    )
+    assert done["applied"] is True and done["tasks"] == 1
+    assert not wb.store.ids("teaching") and not wb.store.ids("model_cache")
+    assert wb.store.ids("tasks") == ["task-2"]
+    assert not any(path.exists() for path in files)
+    with wb.store.connect() as db:
+        left = [key for (key,) in db.execute("SELECT key FROM receipts")]
+    assert left == ["commit:20260101T0001:0"]
+
+
+def test_reset_keeps_records_when_files_cannot_be_removed(bench, monkeypatch):
+    """A half-removed history is worse than none: records stay if files fail."""
+    import shutil as _shutil
+
+    from levi.agent import housekeeping
+
+    wb, context = bench
+    agent = Principal("conn", datasets=(context.repo_id,))
+    human = Principal("operator", human=True)
+    run = prepared(wb, context, agent)
+
+    def refuse(path, *args, **kwargs):
+        raise OSError("read-only filesystem")
+
+    monkeypatch.setattr(housekeeping.shutil, "rmtree", refuse)
+    report = invoke(
+        wb, human, "workspace.reset", {"dataset": context.repo_id, "apply": True}
+    )
+    monkeypatch.setattr(housekeeping.shutil, "rmtree", _shutil.rmtree)
+    assert report["applied"] is False
+    assert report["not_removed"]
+    # The work is still visible and the reset can simply be retried.
+    assert run["id"] in wb.store.ids("runs")
+
+
+def test_reset_clears_an_orphaned_tree_left_by_an_earlier_failure(bench):
+    """Recovery path: records already gone, files still on disk."""
+    wb, context = bench
+    agent = Principal("conn", datasets=(context.repo_id,))
+    human = Principal("operator", human=True)
+    run = prepared(wb, context, agent)
+    directory = wb.store.run_dir(run["id"])
+    wb.store.drop("runs", [run["id"]])  # simulate the old bug's aftermath
+    assert directory.exists()
+    done = invoke(
+        wb, human, "workspace.reset", {"dataset": context.repo_id, "apply": True}
+    )
+    assert done["applied"] is True
+    assert not directory.exists()

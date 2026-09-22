@@ -53,7 +53,9 @@ class LeRobotAdapter:
 
         return media.sample(context, root, episode, artifacts)
 
-    def sample_temporal(self, context, root, episode, artifacts, proposals=None):
+    def sample_temporal(
+        self, context, root, episode, artifacts, proposals=None, spacing=None
+    ):
         from . import media
         from .observations import frame_scope
 
@@ -62,7 +64,7 @@ class LeRobotAdapter:
             root,
             episode,
             artifacts,
-            frame_indices=frame_scope(context, root, episode, proposals),
+            frame_indices=frame_scope(context, root, episode, proposals, spacing),
         )
 
 
@@ -96,7 +98,7 @@ class AnnotationKind:
             return [f"annotations/outcomes/episode_{ep:06d}.json"]
         return ["review.json"]
 
-    def apply(self, proposal, *, app, state, atoms, folder):
+    def apply(self, proposal, *, app, state, atoms, folder, origin=None):
         """Plugins may override validate/paths/apply together; no runtime branch."""
         ep = proposal["episode_index"]
         if self.layer == "language":
@@ -113,6 +115,23 @@ class AnnotationKind:
                 )
             else:
                 atom["to"] = proposal["end"]
+            # LEVI-only, like ``to``: what the reviewer approved beyond the
+            # text -- which subtask, its outcome, the attempt and the stated
+            # doubt -- and where it came from. The exported lerobot struct is
+            # built from an explicit field list and never carries it.
+            atom["levi"] = {
+                key: proposal.get(key)
+                for key in ("subtask_id", "outcome", "attempt", "uncertainty")
+                if proposal.get(key) not in (None, "")
+            }
+            if origin:
+                from .supersede import atom_key
+
+                atom["levi"]["origin"] = {
+                    **origin,
+                    "kind": "agent",
+                    "written": list(atom_key(atom)),
+                }
             app._validate_atom(atom)
             atoms.append(atom)
         elif self.layer == "outcome":

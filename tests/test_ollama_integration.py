@@ -477,3 +477,172 @@ def test_memory_requests_require_bound_model_and_explicit_human_consent(
         == 200
     )
     assert [r["keep_alive"] for r in requests] == ["5m", 0]
+
+
+def test_an_invalid_learner_answer_is_settled_and_handed_to_the_teacher(
+    client, dataset, native, monkeypatch
+):
+    from levi.agent.capabilities import invoke
+    from levi.agent.planning import approve
+    from levi.agent.runtime import Workbench
+
+    real = Workbench.validate_proposals
+    calls = []
+
+    def first_fails(context, proposals, evidence, summary):
+        calls.append(1)
+        if len(calls) == 1:
+            raise ValueError(
+                "Temporal attempts require success/failure/unknown outcome"
+            )
+        return real(context, proposals, evidence, summary)
+
+    monkeypatch.setattr(Workbench, "validate_proposals", staticmethod(first_fails))
+    wb, context, teacher = supervised_bench(client, dataset)
+    run = wb.plan(context)
+    approve(wb, run["id"], 1, "human")
+    waiting = execute_supervised(wb, run["id"])
+    # The tokens were spent: they are on the run, not lost with the answer.
+    assert waiting["status"] == "blocked" and waiting["tokens"] > 0
+    phase = invoke(wb, teacher, "supervision.pending", {"run_id": run["id"]})["items"][
+        0
+    ]
+    assert "outcome" in phase["learner_error"]
+    payload = {
+        "run_id": run["id"],
+        "teaching_id": phase["id"],
+        "revision": 0,
+        "note": "Every segment states its outcome.",
+    }
+    with pytest.raises(ValueError, match="revise or reject"):
+        invoke(wb, teacher, "supervision.feedback", {**payload, "decision": "accept"})
+    invoke(
+        wb,
+        teacher,
+        "supervision.feedback",
+        {**payload, "decision": "revise", "output": phase["learner_output"]},
+    )
+    resumed = execute_supervised(wb, run["id"])
+    assert resumed["status"] == "waiting_for_review", resumed
+    assert resumed["cache_hits"] == 1
+
+
+def test_an_unparseable_learner_answer_reaches_the_teacher_raw(
+    client, dataset, native, monkeypatch
+):
+    from levi.agent.capabilities import invoke
+    from levi.agent.planning import approve
+    from levi.inference.provider import InvalidAnswer, OllamaProvider
+
+    def unparseable(self, *a, **k):
+        raise InvalidAnswer(
+            "Model output failed validation: proposals.0: no end",
+            '{"proposals": [{"start": 1}]}',
+            {"requests": 1, "tokens": 77, "reported_tokens": 77},
+        )
+
+    monkeypatch.setattr(OllamaProvider, "generate", unparseable)
+    wb, context, teacher = supervised_bench(client, dataset)
+    run = wb.plan(context)
+    approve(wb, run["id"], 1, "human")
+    waiting = execute_supervised(wb, run["id"])
+    assert waiting["tokens"] == 77
+    phase = invoke(wb, teacher, "supervision.pending", {"run_id": run["id"]})["items"][
+        0
+    ]
+    assert phase["learner_raw"].startswith('{"proposals"')
+    assert "no end" in phase["learner_error"]
+
+
+def test_a_failed_or_overspent_call_leaves_honest_accounts(
+    client, dataset, native, monkeypatch
+):
+    from levi.agent.planning import approve
+    from levi.inference.ollama import OllamaError
+    from levi.inference.provider import OllamaProvider
+
+    def refused(self, *a, **k):
+        raise OllamaError("Ollama HTTP request failed (400)")
+
+    monkeypatch.setattr(OllamaProvider, "generate", refused)
+    wb, context, _ = supervised_bench(client, dataset)
+    run = wb.plan(context)
+    approve(wb, run["id"], 1, "human")
+    failed = execute_supervised(wb, run["id"])
+    assert failed["reason"].startswith("Ollama HTTP request failed")
+    assert failed["reserved_tokens"] == 0 and failed["requests"] == 1
+
+    def greedy(self, config, goal, summary, evidence, artifacts, budget):
+        return {"summary": "x"}, {"requests": 1, "tokens": budget.max_tokens + 5}
+
+    monkeypatch.setattr(OllamaProvider, "generate", greedy)
+    wb.store.mutate("runs", run["id"], lambda r: r.update(requests=0))
+    over = execute_supervised(wb, run["id"])
+    assert "exceeded reserved budget" in over["reason"]
+    assert over["reserved_tokens"] == 0 and over["tokens"] > 0
+
+
+def test_a_reviewed_phase_whose_evidence_changed_is_asked_again(
+    client, dataset, native
+):
+    from levi.agent.capabilities import invoke
+    from levi.agent.planning import approve
+
+    wb, context, teacher = supervised_bench(client, dataset)
+    run = wb.plan(context)
+    approve(wb, run["id"], 1, "human")
+    execute_supervised(wb, run["id"])
+    phase = invoke(wb, teacher, "supervision.pending", {"run_id": run["id"]})["items"][
+        0
+    ]
+    # The harness changed what this phase shows after the teacher saw it.
+    wb.store.mutate("teaching", phase["id"], lambda r: r.update(fingerprint="old"))
+    execute_supervised(wb, run["id"])
+    items = invoke(wb, teacher, "supervision.pending", {"run_id": run["id"]})["items"]
+    statuses = sorted(item["status"] for item in items)
+    assert statuses == ["pending", "superseded"]
+
+
+def test_without_a_teacher_the_valid_part_of_an_answer_goes_on(
+    client, dataset, native, monkeypatch
+):
+    from levi.agent.planning import approve
+    from levi.agent.runtime import Workbench
+    from levi.agent.schema import ModelOutput
+    from levi.inference.provider import OllamaProvider
+
+    def seg(content):
+        return {
+            "episode_index": 0,
+            "kind": "segment",
+            "content": content,
+            "start": 0.0,
+            "end": 0.1,
+            "evidence_ids": ["x"],
+            "outcome": "unknown",
+        }
+
+    def answer(self, *a, **k):
+        output = ModelOutput(
+            summary="s", proposals=[seg("good"), seg("bad"), seg("overlaps")]
+        )
+        return output, {"requests": 1, "tokens": 10}
+
+    def check(context, proposals, evidence, summary):
+        if any(p.content == "bad" for p in proposals):
+            raise ValueError("bad proposal")
+        if len(proposals) > 1:
+            raise ValueError("Overlapping segments in an exclusive annotation layer")
+
+    monkeypatch.setattr(OllamaProvider, "generate", answer)
+    monkeypatch.setattr(Workbench, "validate_proposals", staticmethod(check))
+    wb, context, _ = supervised_bench(client, dataset)
+    context = context.model_copy(update={"supervision": "none", "teacher_grant": None})
+    run = wb.plan(context)
+    approve(wb, run["id"], 1, "human")
+    done = execute_supervised(wb, run["id"])
+    assert done["status"] == "waiting_for_review", done["reason"]
+    shard = wb.store.get("shards", f"{run['id']}:0")
+    assert [p["content"] for p in shard["output"]["proposals"]] == ["good"]
+    events = [e for e in wb.store.events(run["id"]) if e["type"] == "answer_salvaged"]
+    assert events and events[0]["dropped"] == 2

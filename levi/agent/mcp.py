@@ -71,7 +71,10 @@ def build_server():
                     data=base64.b64encode(image).decode(),
                 )
             )
-        elif name in {"media.sample", "evidence.read"}:
+        elif (
+            name in {"media.sample", "evidence.read"}
+            and value.get("images") is not False
+        ):
             # Return actual images through MCP, not filenames an external Agent
             # cannot resolve. Scope was already checked by the REST dispatcher.
             for item in value["items"]:

@@ -110,6 +110,11 @@ export default function AgentPlan({
                   Needs plan revision
                 </button>
               </div>
+              {!note.trim() && (
+                <p className="levi-agent-muted">
+                  {t("Write a review note to accept or reject the pilot.")}
+                </p>
+              )}
               {plan.pilot_review && (
                 <p role="status">
                   {t(

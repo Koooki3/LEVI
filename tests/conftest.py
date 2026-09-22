@@ -90,4 +90,27 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(annotations, "EXPORT_ROOT", tmp_path / "exports")
     # Keep boundary validation enabled; test temp dirs live under the workspace.
     annotations._states.clear()
-    return TestClient(service.app)
+    yield TestClient(service.app)
+    # A job thread still running after the test would write through the
+    # module paths once the monkeypatches above are undone -- into the real
+    # workspace. Wait for them while the test's paths are still in place.
+    assert not jobs.wait_idle(120), "a job thread outlived its test"
+
+
+@pytest.fixture(autouse=True)
+def _gpu_is_not_this_machines(monkeypatch):
+    """The off-peak GPU guard reads the real nvidia-smi; a test must not pass
+    or fail depending on who is training on this machine right now."""
+    monkeypatch.setenv("LEVI_GPU_SHARING", "allow")
+
+
+@pytest.fixture(autouse=True)
+def _workspace_files_stay_in_the_test(monkeypatch, tmp_path):
+    """GPU history, learned request costs and evaluation records are written
+    under the live workspace by default; a test must never add to them."""
+    from levi.eval import record
+    from levi.inference import gpu, request_cost
+
+    monkeypatch.setattr(gpu, "_state_dir", lambda: tmp_path / "models")
+    monkeypatch.setattr(request_cost, "_state_dir", lambda: tmp_path / "models")
+    monkeypatch.setattr(record, "eval_dir", lambda: tmp_path / "eval")

@@ -248,6 +248,152 @@ export async function saveOutcomeLabel(
   }
 }
 
+async function postJson<R>(path: string, body: unknown): Promise<R> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const res = await annotationFetch(endpoint(path), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = `${res.status}`;
+    try {
+      const data = (await res.json()) as { detail?: unknown };
+      if (typeof data.detail === "string") detail = data.detail;
+    } catch {
+      /* keep the status */
+    }
+    throw new Error(detail);
+  }
+  return (await res.json()) as R;
+}
+
+function identBody(ident: DatasetIdent) {
+  return { repo_id: ident.repoId || null, local_path: ident.localPath || null };
+}
+
+export interface EpisodeStatus {
+  episode_index: number;
+  done: true;
+  by: string;
+  confirmed_at: number;
+}
+
+/** Episodes a person confirmed as completely annotated. */
+export async function fetchEpisodeStatus(
+  ident: DatasetIdent,
+): Promise<Record<string, EpisodeStatus>> {
+  if (!ENV_URL) return {};
+  const res = await annotationFetch(buildUrl("/api/episodes/status", ident), {
+    cache: "no-store",
+  });
+  if (!res.ok) return {};
+  const data = (await res.json()) as { status?: Record<string, EpisodeStatus> };
+  return data.status || {};
+}
+
+/** Confirm (or undo the confirmation) that an episode is complete. */
+export async function saveEpisodeStatus(
+  episodeId: number,
+  ident: DatasetIdent,
+  done: boolean,
+): Promise<EpisodeStatus | null> {
+  const data = await postJson<{ status: EpisodeStatus | null }>(
+    `/api/episodes/${episodeId}/status`,
+    { ...identBody(ident), done },
+  );
+  return data.status;
+}
+
+export interface SubtaskTerm {
+  id: string;
+  label: string;
+  definition?: string;
+}
+
+export interface Vocabulary {
+  subtasks: SubtaskTerm[];
+  updated_at: number | null;
+  /** The latest agent plan's definitions, offered when there is none. */
+  suggested?: SubtaskTerm[];
+  /** Ids every subtask track accepts besides the defined ones. */
+  special?: string[];
+}
+
+export async function fetchVocabulary(
+  ident: DatasetIdent,
+): Promise<Vocabulary> {
+  if (!ENV_URL) return { subtasks: [], updated_at: null };
+  const res = await annotationFetch(
+    buildUrl("/api/dataset/vocabulary", ident),
+    {
+      cache: "no-store",
+    },
+  );
+  if (!res.ok) return { subtasks: [], updated_at: null };
+  return (await res.json()) as Vocabulary;
+}
+
+export async function saveVocabulary(
+  ident: DatasetIdent,
+  subtasks: SubtaskTerm[],
+): Promise<Vocabulary> {
+  return postJson<Vocabulary>("/api/dataset/vocabulary", {
+    ...identBody(ident),
+    subtasks,
+  });
+}
+
+export interface RecordingSession {
+  dataset: string;
+  started_at: number;
+  by: string;
+}
+
+export interface RecordingResult {
+  path: string;
+  seconds: number;
+  episodes: number;
+  segments: number;
+  coverage_seconds: number;
+  coverage_frames: number;
+}
+
+export async function fetchRecording(
+  ident: DatasetIdent,
+): Promise<RecordingSession | null> {
+  if (!ENV_URL) return null;
+  const res = await annotationFetch(buildUrl("/api/eval/recording", ident), {
+    cache: "no-store",
+  });
+  if (!res.ok) return null;
+  const data = (await res.json()) as { session?: RecordingSession | null };
+  return data.session || null;
+}
+
+export async function startRecording(
+  ident: DatasetIdent,
+): Promise<RecordingSession> {
+  const data = await postJson<{ session: RecordingSession }>(
+    "/api/eval/recording/start",
+    identBody(ident),
+  );
+  return data.session;
+}
+
+export async function stopRecording(
+  ident: DatasetIdent,
+): Promise<RecordingResult> {
+  return postJson<RecordingResult>(
+    "/api/eval/recording/stop",
+    identBody(ident),
+  );
+}
+
+export async function cancelRecording(ident: DatasetIdent): Promise<void> {
+  await postJson("/api/eval/recording/cancel", identBody(ident));
+}
+
 export async function fetchFrameTimestamps(
   episodeId: number,
   ident: DatasetIdent,

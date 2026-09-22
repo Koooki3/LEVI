@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -490,16 +491,16 @@ def test_diagnostics_report_named_after_dataset_without_hash(client, dataset):
     )
     assert result.status_code == 200, result.text
 
-    diagnostics_dir = STATE / "diagnostics"
-    assert sorted(p.name for p in diagnostics_dir.glob("*.json")) == [
-        f"{dataset.name}.json"
-    ]
+    # Analysis reports live with the dataset and carry an hour stamp; a
+    # re-run in the same hour replaces that hour's report.
+    reports = STATE.parent / "datasets" / dataset.name / "reports"
+    names = sorted(p.name for p in reports.glob("*.json"))
+    assert len(names) == 1 and re.fullmatch(r"quality-\d{8}T\d{2}\.json", names[0])
+    assert result.json()["path"].endswith(names[0])
 
-    # Re-running updates the same file in place, not a second one.
     client.post("/api/levi/diagnostics", json={"repo_id": repo, "checks": ["metadata"]})
-    assert sorted(p.name for p in diagnostics_dir.glob("*.json")) == [
-        f"{dataset.name}.json"
-    ]
+    assert sorted(p.name for p in reports.glob("*.json")) == names
+    assert not (STATE / "diagnostics").exists()
 
 
 def test_object_annotations_dir_named_after_dataset_not_bare_hash(client, dataset):

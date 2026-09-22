@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useFlaggedEpisodes } from "@/context/flagged-episodes-context";
 import { T, useLocale } from "./levi-locale";
-import { leviApi, downloadJson } from "./levi-api";
+import { leviApi, downloadJson, exportName } from "./levi-api";
 export default function LeviReview({ repoId }: { repoId: string }) {
   const { flagged } = useFlaggedEpisodes();
   const [busy, setBusy] = useState(false),
@@ -35,7 +35,7 @@ export default function LeviReview({ repoId }: { repoId: string }) {
           schema: "levi.review.v1",
           excluded_episode_ids: [...flagged],
         },
-        "levi-review.json",
+        exportName(repoId, "review"),
       );
       setMessage("Review saved");
       setEditing(false);

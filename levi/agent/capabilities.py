@@ -79,11 +79,16 @@ class Events(RunRef):
 class Recall(RunRef):
     episode: int = Field(ge=0)
     offset: int = Field(default=0, ge=0)
-    limit: int = Field(default=8, ge=1, le=32)
+    # Up to 32 frames per page with images, 200 rows as text only.
+    limit: int = Field(default=8, ge=1, le=200)
     # "mosaic" returns one labelled contact sheet of this page instead of one
     # image per frame: the same evidence, an order of magnitude fewer tokens.
     layout: str = Field(default="single", pattern="^(single|mosaic)$")
-    tile_width: int = Field(default=320, ge=96, le=640)
+    # None: the dataset's published harness value (evidence.mosaic_tile_width).
+    tile_width: int | None = Field(default=None, ge=96, le=640)
+    # False: the ledger rows only (ids, times, frames), no picture at all --
+    # for citing evidence already seen without paying for it again.
+    images: bool = True
 
 
 class AgentObject(Contract):
@@ -190,9 +195,210 @@ class Seek(RunRef):
     evidence_id: str
 
 
+class DatasetRef(Contract):
+    repo_id: str
+
+
+class KnowledgeList(Contract):
+    topic: Literal["annotation", "interpretation", "harness"] | None = None
+    refresh: bool = False
+
+
+class KnowledgeRef(Contract):
+    candidate_id: str = Field(pattern=r"^candidate-\d{3}$")
+
+
+class KnowledgePromote(KnowledgeRef):
+    topic: Literal["annotation", "interpretation", "harness"] | None = None
+    text: str | None = Field(default=None, max_length=600)
+
+
+class QualityInspect(DatasetRef):
+    checks: list[str] = Field(default_factory=list, max_length=20)
+    max_episodes: int = Field(default=0, ge=0, le=100000)
+    decode_video: bool = False
+
+
+class MemoryQuery(DatasetRef):
+    query: str = Field(default="", max_length=200)
+
+
+class ImprovementRef(DatasetRef):
+    slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,80}$")
+
+
+class Probe(Contract):
+    run_id: str
+    episode: int = Field(ge=0)
+    start: float = Field(ge=0)
+    end: float = Field(ge=0)
+    note: str = Field(default="", max_length=300)
+
+
+class ImprovementEvaluate(ImprovementRef):
+    # Required by evaluators that measure against known events.
+    probes: list[Probe] = Field(default_factory=list, max_length=50)
+
+
+class ImprovementMove(ImprovementRef):
+    to: Literal[
+        "evaluating",
+        "qualified",
+        "awaiting_authorization",
+        "published",
+        "retained",
+        "rolled_back",
+        "rejected",
+        "resolved",
+    ]
+    note: str = Field(default="", max_length=1000)
+
+
+class ImprovementRevise(ImprovementRef):
+    value: int
+    note: str = Field(default="", max_length=1000)
+
+
+class TaskRequest(Contract):
+    text: str = Field(min_length=3, max_length=2000)
+    provider: str = Field(min_length=1, max_length=64)
+    supervision: Literal["none", "shadow", "supervised"] = "none"
+    teacher_grant: str | None = Field(default=None, max_length=100)
+
+
+class TaskRef(Contract):
+    task_id: str = Field(pattern=r"^task-\d{8}T\d{4}(-\d+)?$")
+
+
+class TaskFeedback(TaskRef):
+    decision: Literal["accept", "revise", "reject"]
+    note: str = Field(default="", max_length=2000)
+    spec: dict[str, Any] | None = None
+
+
+class EvidenceChanges(RunRef):
+    episode: int = Field(ge=0)
+    top_k: int | None = Field(default=None, ge=1, le=20)
+
+
 from .objects import ObjectRequest
 
 SPECS = {
+    "quality.inspect": (
+        QualityInspect,
+        "draft",
+        (
+            "Check a dataset's structure, timing, media, actions and "
+            "distribution; writes <dataset>/reports/quality-<hour>.json"
+        ),
+    ),
+    "memory.get": (
+        DatasetRef,
+        "read",
+        (
+            "Read this dataset's verified local memory: committed annotations, "
+            "recurring uncertainty, cost and published lessons"
+        ),
+    ),
+    "tasks.interpret": (
+        TaskRequest,
+        "draft",
+        (
+            "Turn a natural-language request into a checked task spec with the "
+            "local model; nothing runs until a person approves it"
+        ),
+    ),
+    "tasks.get": (TaskRef, "read", "Read a natural-language task and its steps"),
+    "tasks.feedback": (
+        TaskFeedback,
+        "draft",
+        "Accept, correct or reject an interpretation; kept as a lesson",
+    ),
+    "tasks.approve": (TaskRef, "approve", "Human approval of a checked task spec"),
+    "tasks.advance": (
+        TaskRef,
+        "execute",
+        "Run the task's next automatic step; stops at every human gate",
+    ),
+    "gpu.status": (
+        Empty,
+        "read",
+        (
+            "What the GPU guardian decides now for local models, why, the "
+            "expected wait, and the window it learned for each workload"
+        ),
+    ),
+    "cost.profile": (
+        DatasetRef,
+        "read",
+        (
+            "Measured token and time cost on this dataset per agent (API, local "
+            "VLM, external MCP), the latest breakdown and advice for the next run"
+        ),
+    ),
+    "knowledge.list": (
+        KnowledgeList,
+        "read",
+        "Built-in knowledge entries, and local notes that could join them",
+    ),
+    "knowledge.promote": (
+        KnowledgePromote,
+        "approve",
+        "Add a local note to built-in knowledge (repository file); a person's call",
+    ),
+    "knowledge.reject": (
+        KnowledgeRef,
+        "approve",
+        "Decline a knowledge candidate; a person's call",
+    ),
+    "memory.rebuild": (
+        DatasetRef,
+        "approve",
+        "Recompute a dataset's memory from its closed runs; a person's call",
+    ),
+    "memory.search": (
+        MemoryQuery,
+        "read",
+        "Search committed segments and lessons in the dataset's local memory",
+    ),
+    "improvements.list": (
+        DatasetRef,
+        "read",
+        (
+            "List harness improvement candidates for a dataset and the "
+            "parameters a new task would run with"
+        ),
+    ),
+    "improvements.get": (ImprovementRef, "read", "Read one improvement candidate"),
+    "improvements.evaluate": (
+        ImprovementEvaluate,
+        "draft",
+        "Let LEVI measure a candidate on stored evidence at named probe cases",
+    ),
+    "improvements.revise": (
+        ImprovementRevise,
+        "draft",
+        (
+            "Change a candidate's value once during evaluation; it must then "
+            "pass a new evaluation"
+        ),
+    ),
+    "improvements.transition": (
+        ImprovementMove,
+        "draft",
+        (
+            "Move a candidate through the state machine; publishing, "
+            "retaining and rolling back need a person"
+        ),
+    ),
+    "evidence.changes": (
+        EvidenceChanges,
+        "read",
+        (
+            "Rank an episode's coarse intervals by how much the picture "
+            "changes; refine the top ones first"
+        ),
+    ),
     "supervision.pending": (
         RunRef,
         "read",
@@ -261,7 +467,10 @@ SPECS = {
     "runs.quality": (
         RunRef,
         "read",
-        "Read per-episode uncertainty and uncovered intervals",
+        (
+            "Read the run's annotation uncertainty and uncovered intervals per "
+            "episode (not dataset quality: that is quality.inspect)"
+        ),
     ),
     "plans.clarify": (
         TaskContext,
@@ -477,6 +686,181 @@ def _invoke(
         raise PermissionError(
             "External agents may only submit teacher feedback for this supervised task"
         )
+    if name == "quality.inspect":
+        from levi.catalog import display_name, local_root
+        from levi.harness.quality import digest, inspect
+
+        root = local_root(args.repo_id)
+        if root is None:
+            raise ValueError("quality.inspect reads registered local datasets")
+        return digest(
+            inspect(
+                store.state,
+                display_name(args.repo_id, None),
+                root,
+                repo_id=args.repo_id,
+                checks=args.checks,
+                max_episodes=args.max_episodes,
+                decode_video=args.decode_video,
+            )
+        )
+    if name.startswith("tasks."):
+        from levi.harness import tasking
+
+        if name == "tasks.interpret":
+            task = tasking.interpret(
+                store, args.text, args.provider, principal=principal
+            )
+            task.update(supervision=args.supervision, teacher_grant=args.teacher_grant)
+            return tasking.save(store, task)
+        task = store.get("tasks", args.task_id)
+        if (
+            not principal.human
+            and f"local/{task['dataset_key']}" not in principal.datasets
+        ):
+            raise PermissionError("Dataset is outside this principal's scope")
+        if name == "tasks.get":
+            return task
+        if name == "tasks.feedback":
+            return tasking.feedback(
+                store,
+                args.task_id,
+                decision=args.decision,
+                note=args.note,
+                spec=args.spec,
+                by=principal.id,
+            )
+        if name == "tasks.approve":
+            return tasking.approve(store, args.task_id, by=principal.id)
+        return tasking.advance(workbench, args.task_id, principal)
+    if name == "gpu.status":
+        from levi.inference.gpu import report
+
+        return report()
+    if name == "cost.profile":
+        from levi.catalog import display_name
+        from levi.harness.layout import memory_path, read_json
+
+        remembered = read_json(
+            memory_path(store.state, display_name(args.repo_id, None))
+        )
+        remembered = remembered or {}
+        return {
+            "profiles": remembered.get("cost_profiles", {}),
+            "hints": remembered.get("cost_hints", []),
+            "latest": remembered.get("cost_latest"),
+            "note": "tokens.source says whether a figure was metered by LEVI, "
+            "reported by the agent, or LEVI's measured lower bound.",
+        }
+    if name in {"memory.get", "memory.search", "memory.rebuild"}:
+        from levi.catalog import display_name
+        from levi.harness import memory
+
+        key = display_name(args.repo_id, None)
+        if name == "memory.rebuild":
+            from levi.harness.layout import harness_lock
+
+            with harness_lock(store.state, key):
+                return memory.rebuild(store, key)
+        if name == "memory.search":
+            return memory.search(store.state, args.query, key)
+        return memory.context(store.state, key) or {
+            "episodes_annotated": 0,
+            "note": "No committed work on this dataset yet; memory starts with "
+            "the first committed task.",
+        }
+    if name.startswith("knowledge."):
+        from levi.harness import knowledge
+
+        if name == "knowledge.promote":
+            return knowledge.promote(
+                store.state, args.candidate_id, args.topic, args.text
+            )
+        if name == "knowledge.reject":
+            return knowledge.reject(store.state, args.candidate_id)
+        if args.refresh:
+            knowledge.refresh(store.state)
+        topics = [args.topic] if args.topic else list(knowledge.TOPICS)
+        return {
+            "built_in": {t: knowledge.load(t) for t in topics},
+            "candidates": [
+                c
+                for c in knowledge.candidates(store.state)
+                if not args.topic or c["topic"] == args.topic
+            ],
+        }
+    if name.startswith("improvements."):
+        from levi.catalog import display_name
+        from levi.harness import improvements
+
+        key = display_name(args.repo_id, None)
+        if name == "improvements.list":
+            return {
+                "candidates": [
+                    {
+                        k: c[k]
+                        for k in (
+                            "slug",
+                            "kind",
+                            "title",
+                            "state",
+                            "target",
+                            "updated_at",
+                        )
+                    }
+                    | {"evidence_runs": [e["run_id"] for e in c["evidence"]]}
+                    for c in improvements.listing(store.state, key)
+                ],
+                "next_task_runs_with": improvements.snapshot(store.state, key),
+                "parameters": {
+                    n: {k: v for k, v in spec.items() if k != "type"}
+                    for n, spec in improvements.PARAMETERS.items()
+                },
+            }
+        if name == "improvements.get":
+            return improvements.load(store.state, key, args.slug)
+        from levi.harness.layout import harness_lock
+
+        if name == "improvements.revise":
+            with harness_lock(store.state, key):
+                return improvements.revise(
+                    store.state,
+                    key,
+                    args.slug,
+                    args.value,
+                    by=principal.id,
+                    note=args.note,
+                )
+        if name == "improvements.evaluate":
+            from levi.harness.evaluation import evaluate
+
+            with harness_lock(store.state, key):
+                candidate = improvements.load(store.state, key, args.slug)
+                if candidate["state"] != "evaluating":
+                    raise Conflict("Move the candidate to evaluating first")
+                result = evaluate(
+                    store, candidate, [p.model_dump() for p in args.probes]
+                )
+                result["by"] = principal.id
+                candidate["evaluation"] = result
+                improvements.write_json(
+                    improvements.path(store.state, key, args.slug), candidate
+                )
+                return result
+        with harness_lock(store.state, key):
+            return improvements.transition(
+                store.state,
+                key,
+                args.slug,
+                args.to,
+                by=principal.id,
+                human=principal.human,
+                note=args.note,
+            )
+    if name == "evidence.changes":
+        from .observations import changes
+
+        return changes(workbench, run, args.episode, args.top_k)
     if name == "supervision.pending":
         from .supervision import pending
 
@@ -514,7 +898,12 @@ def _invoke(
             args.window_seconds,
         )
     if name == "evidence.read":
-        from .observations import recall
+        from .observations import recall, text_page
+
+        if not args.images:
+            return text_page(workbench, run, args.episode, args.offset, args.limit)
+        if args.limit > 32:
+            raise ValueError("A page with images holds at most 32 frames")
 
         return recall(
             workbench,
@@ -523,7 +912,11 @@ def _invoke(
             args.offset,
             args.limit,
             args.layout,
-            args.tile_width,
+            args.tile_width
+            or (run.get("harness") or {})
+            .get("parameters", {})
+            .get("evidence.mosaic_tile_width")
+            or 320,
         )
     if name == "evidence.refine":
         from .observations import refine
@@ -624,7 +1017,7 @@ def _invoke(
         from .usage import estimate
 
         target = store.get("runs", args.run_id) if args.run_id else None
-        return estimate(
+        value = estimate(
             store,
             target,
             key=args.agent_key,
@@ -634,6 +1027,32 @@ def _invoke(
             reads=args.reads,
             principal=principal,
         )
+        # This dataset's own measured cost for the same agent, when there is
+        # one: a local figure beats the cross-dataset calibration.
+        if target:
+            from levi.harness.layout import memory_path, read_json
+
+            from .usage import agent_key
+
+            profile = (
+                (read_json(memory_path(store.state, target["dataset_key"])) or {})
+                .get("cost_profiles", {})
+                .get(agent_key(target))
+            )
+            if profile and profile.get("median", {}).get("tokens_per_episode"):
+                episodes = len(target["context"]["episodes"])
+                value["local"] = {
+                    "basis": f"{len(profile['runs'])} earlier run(s) of this agent "
+                    "on this dataset",
+                    "tokens_per_episode": profile["median"]["tokens_per_episode"],
+                    "seconds_per_episode": profile["median"]["seconds_per_episode"],
+                    "tokens": int(profile["median"]["tokens_per_episode"] * episodes),
+                    "seconds": int(
+                        (profile["median"]["seconds_per_episode"] or 0) * episodes
+                    )
+                    or None,
+                }
+        return value
     if name == "runs.quality":
         reports = []
         for ep in run["completed"]:
@@ -763,7 +1182,30 @@ def _invoke(
         change = workbench.prepare_changes(run["id"])
         change["provenance"]["provider"] = {"external_principal": principal.id}
         store.put("changes", change["id"], change)
-        return change
+        # A receipt, not the ChangeSet: echoing every staged proposal back made
+        # each call cost more than the last (quadratic over a run). The full
+        # draft is one changes.diff away.
+        staged = {}
+        for proposal in change["proposals"]:
+            key = str(proposal["episode_index"])
+            staged[key] = staged.get(key, 0) + 1
+        return {
+            "id": change["id"],
+            "run_id": change["run_id"],
+            "revision": change["revision"],
+            "status": change["status"],
+            "accepted": {
+                str(ep): staged.get(str(ep), 0) for ep in args.inspected_episodes
+            },
+            "staged_proposals": len(change["proposals"]),
+            "staged_episodes": sorted(int(k) for k in staged),
+            "remaining_episodes": sorted(
+                set(run["context"]["episodes"])
+                - set(run["completed"])
+                - set(args.inspected_episodes)
+            ),
+            "full_draft": "changes.diff",
+        }
     if name == "objects.inspect":
         from .objects import inspect_result
 
@@ -845,6 +1287,7 @@ def _invoke(
         }
     if name == "workspace.get_context":
         from levi.catalog import DEMOS, datasets
+        from levi.harness.knowledge import texts as knowledge_texts
 
         ids = [r["id"] for r in datasets().values()] + DEMOS
         reachable = [r for r in ids if principal.human or r in principal.datasets]
@@ -912,6 +1355,8 @@ def _invoke(
                 ),
             ],
             "waiting_for_you": pending,
+            # Dataset-agnostic rules every annotator in LEVI follows.
+            "annotation_rules": knowledge_texts("annotation"),
             "skills": (
                 "Read levi://skills/levi-overview first, then the one for your "
                 "workflow. They are short and they are the contract."
@@ -1027,13 +1472,52 @@ def _invoke(
     raise ValueError("Capability not implemented")
 
 
+def _response_size(name, value):
+    """What this answer costs the agent that reads it, measured here.
+
+    Text is the JSON the bridge sends; a mosaic sheet is sent as one image,
+    counted by its pixel area.
+    """
+    import json
+
+    try:
+        size = {"response_bytes": len(json.dumps(value, ensure_ascii=False))}
+    except (TypeError, ValueError):
+        return {}
+    sheet = value.get("mosaic") if isinstance(value, dict) else None
+    if isinstance(sheet, dict) and sheet.get("width") and sheet.get("height"):
+        size.update(images=1, image_pixels=sheet["width"] * sheet["height"])
+    elif (
+        name in {"media.sample", "evidence.read"}
+        and value.get("images") is not False
+        and isinstance(value.get("items"), list)
+    ):
+        # Single-frame reads send every available frame as its own image.
+        frames = [
+            row
+            for row in value["items"]
+            if isinstance(row, dict)
+            and row.get("artifact")
+            and row.get("image_available", True)
+        ]
+        if frames:
+            size.update(
+                images=len(frames),
+                image_pixels=sum(
+                    int(r["source_size"][0]) * int(r["source_size"][1])
+                    for r in frames
+                    if r.get("source_size")
+                ),
+            )
+    return size
+
+
 def invoke(workbench, principal, name, arguments, key=None):
     """All channels share authorization, schema validation and core-owned audit."""
     import time
 
     from . import activity
     from .grants import check_call
-    from .runtime import new_id
     from .tracking import scope
 
     if name not in SPECS:
@@ -1075,20 +1559,28 @@ def invoke(workbench, principal, name, arguments, key=None):
         "objects.get",
         "objects.frame",
     }
-    call_id = new_id()
+    call_id = None
     started = time.monotonic()
 
     def event(kind, **data):
+        nonlocal call_id
         if run and not noisy:
-            workbench.store.event(
+            from .store import NEW_CALL
+
+            row = workbench.store.event(
                 run["id"],
                 kind,
-                call_id=call_id,
+                call_id=call_id or NEW_CALL,
                 tool=name,
                 principal=principal.id,
+                channel=activity.channel(principal),
                 source="core",
                 **data,
             )
+            # The journal sequence of the call's first event names the call:
+            # unique across processes, unlike a minute-precision timestamp,
+            # which every call in the same minute used to share.
+            call_id = row["call_id"]
 
     parameters = {
         k: v
@@ -1114,6 +1606,8 @@ def invoke(workbench, principal, name, arguments, key=None):
             "apply",
             "workflow",
             "layout",
+            "tile_width",
+            "images",
         }
     }
     if "proposals" in arguments:
@@ -1136,6 +1630,7 @@ def invoke(workbench, principal, name, arguments, key=None):
         event(
             "action.completed",
             elapsed_seconds=time.monotonic() - started,
+            **_response_size(name, value),
             **(
                 {
                     "evidence": {
@@ -1158,6 +1653,13 @@ def invoke(workbench, principal, name, arguments, key=None):
             elapsed=time.monotonic() - started,
             value=value,
         )
+        if run:
+            from levi.harness.closure import close_if_finished, refresh
+
+            if not close_if_finished(workbench.store, run["id"]) and name == (
+                "runs.report_usage"
+            ):
+                refresh(workbench.store, run["id"])
         return value
     except Exception as exc:
         event(

@@ -20,6 +20,8 @@ Modified upstream source files that support stable comment headers carry a LEVI 
 - `backend/app.py`: v2 episode metadata support, new-file exports, managed paths, separate annotation sidecars, request-scoped Hub credentials and complete export downloads.
 - `src/utils/` and API routes: local data sources, backend bridge, local/HTTPS cookie selection and fixed v3.1 detection.
 - Dataset-scoped flags, local HF Token login, safe current-annotation save before export and stale-request protection.
+- Agent workbench and harness (`levi/agent/`, `levi/harness/`): one capability layer for UI, REST, MCP and CLI; plan, pilot and commit gates; evidence ledgers; task closure, measured cost, local memory, improvement candidates, teacher supervision and grading. Local model integration (`levi/inference/`): Ollama provider, owned service and an off-peak GPU guard.
+- Built-in conversion (`levi/conversion/`), raw-capture browsing views, outcome labels and RECAP export.
 - Locked Python/JavaScript dependencies, independent Docker/CI, tests and bilingual documentation.
 - Removed the upstream workflow that pushed automatically to `lerobot/visualize_dataset`.
 
@@ -28,6 +30,46 @@ For the exact modified-file list, run:
 ```bash
 git diff --name-status dc59887796fd41f37040c0df6b10e6f6a30a1854 HEAD
 ```
+
+## Feature parity with the upstream visualizer
+
+Baseline: `huggingface/lerobot-dataset-visualizer@dc59887796fd41f37040c0df6b10e6f6a30a1854`.
+
+| Reference feature | LEVI implementation | Verification |
+| --- | --- | --- |
+| Hub browsing, search, pagination | Retained explore grid; original LEVI landing/search | Real default Hub cards and episode loading |
+| Private datasets / OAuth | Retained OAuth + local Token sign-in + same-origin video proxy | Public proxy and cookie route checks; live private-account login needs the user's credentials |
+| Multi-camera synchronized playback | Retained player, shared time context, keyboard, fullscreen/hide | Three real 640×480 camera feeds loaded in Chromium |
+| Action / state signal charts | Retained chart grouping, toggles, live cursor | Reference episode signal rendering |
+| Language annotations and timeline | Retained upstream schema/editor; v2 backend compatibility added | v2/v3 Parquet round-trip, exact event snapping, original file unchanged |
+| Grounded VQA | Retained drag bbox / click point and overlays; text answer modes | Browser interaction and persisted atoms |
+| Dataset statistics | Retained metadata and episode length panels | v2 length histogram + JSONL tests; v3.1 multi-chunk browser fixture |
+| Filtering and CLI export | Retained movement, smoothness and length filtering | Browser tabs, dataset-scoped flags and export tests |
+| First / last frames | Retained gallery and camera selector | Real 10-episode gallery |
+| Action autocorrelation | Retained upstream normalized analysis | Reference evaluation collection: suggested 31-step chunk |
+| State/action alignment | Retained upstream differential cross-correlation | Reference collection: mean peak at lag 2 |
+| Speed and cross-episode variance | Retained histogram and heatmap | Reference collection charts |
+| 3D URDF replay | Retained upstream models, mapping, controls, end-effector trails; enabled for compatible v2 robots too | Real SO-100 model loaded in Chromium |
+| Doctor | Native version-aware local checks ([Data quality](QUALITY.md)) + external original doctor entry | Synthetic anomalies, full 10-episode real reference report |
+| Annotation export / Hub push | Retained backend API; source-safe new exports | Export round-trip tested; no Hub upload performed |
+| Built-in conversion | Format registry (robot capture teleop/rollout, image sequence, LeRobot v2.x → LeRobot v2.1, RECAP value), input inspection with requirement checklist and per-target compatibility, single-pass parallel pipeline with lossless retime, live progress, automatic registration; legacy single stages retained | Contract tests over every registered input/output pair, equivalence test against the stage chain, real 171-demo inspection (2 s) and remux checks |
+| RECAP value dataset (LEVI addition) | `is_success`, `next.reward`, `next.done`, RLinf `meta/returns.parquet`, LeRobot-proposal `episode_labels.csv`, manifest; from raw captures or existing LeRobot datasets | Conformance test reproducing RLinf's `compute_returns.py` (commit `db66ac56`) |
+| Raw captures and outcome labels (LEVI addition) | Browsing view of raw captures, annotation carry-over by source demo, human success/failure labels, format/version/origin in the dataset list | View/carry-over/rebuild tests; real screws capture registered and browsed in Chromium |
+| SAM3 object annotation | Global mask/bbox/track sidecar for demos, Hub and local datasets, pinned worker with 1038lab/sam3 checkpoint, account/progress UI, human accept/reject/refine and source-safe export | RLE round-trip, API fake flow, revision/edit/export tests; real model intentionally not run in CPU CI |
+| Chinese / English | Added React locale boundaries, catalogs, live switch | Both languages and viewport checks |
+| Independent environment / distribution | uv.lock, .venv, local Bun, launcher, Dockerfile, CI, bilingual docs | Python suite, frontend suite and production build |
+
+## Formats and retained upstream constraints
+
+- v2.0/v2.1: episode-per-file Parquet and video, JSON/JSONL metadata.
+- v3.0/v3.1: shared Parquet/video files and episode metadata Parquet. Multi-chunk metadata iteration is retained; a two-chunk v3.1 shared-video fixture was verified in Chromium.
+- Browser support depends on the video's codec. H.264 and the demonstrated AV1 videos were tested in Chromium. Unsupported camera codecs may require conversion.
+- Embedded-image-only datasets are rejected by the retained upstream loader.
+- Hub video, OAuth, external doctor, URDF meshes and research-paper links require network access. Their text is not translated by LEVI.
+- Auto chunk suggestions and alignment estimates preserve upstream mathematical behavior, not universal training prescriptions.
+- Runtime is a source checkout, not a standalone frontend bundled inside a PyPI wheel. Use the documented source install or Docker image.
+- Stopping the service terminates conversion workers; interrupted jobs are marked for inspection and outputs are only published on success. Restart never automatically resumes writes.
+- A raw capture's browsing view is for viewing and annotation, not training: it carries no pixel statistics and cannot be exported directly.
 
 ## Structured and generated files / 结构化与生成文件
 
@@ -64,7 +106,7 @@ They replace the two `samanthalhy` strawberry datasets, which were the defaults 
 
 Videos are streamed rather than bundled. Any LEVI screenshots showing a dataset should credit its source. External robot URDFs/meshes are loaded from the upstream `lerobot/robot-urdfs` bucket; their own source licenses apply. The HF login badge and brand marks remain their owners' marks. The external `lerobot-doctor` app is linked, not vendored or relicensed.
 
-The built-in `levi/conversion/` module reimplements the capture workflow requested by the project owner. It replaces the former external-script adapter. No private task mappings, collector deployments, datasets or credentials are distributed. Hardware-specific collection helpers are not runtime dependencies. See [conversion guide](CONVERSION.md) and [audit](AUDIT.md).
+The built-in `levi/conversion/` module reimplements the capture workflow requested by the project owner. It replaces the former external-script adapter. No private task mappings, collector deployments, datasets or credentials are distributed. Hardware-specific collection helpers are not runtime dependencies. See the [conversion guide](CONVERSION.md).
 
 ## SAM3 integration / SAM3 集成
 

@@ -109,10 +109,19 @@ def test_usage_missing_is_unknown_not_zero():
     result = client.chat(
         "qwen3.5:4b", "fixture-digest", [], output_schema={}, max_output_tokens=100
     )
-    assert result["usage"] == {"tokens": None, "source": "unknown"}
+    assert result["usage"] == {
+        "tokens": None,
+        "prompt_tokens": None,
+        "source": "unknown",
+    }
     transport.response.update(prompt_eval_count=100, eval_count=20)
     result = client.chat(
         "qwen3.5:4b", "fixture-digest", [], output_schema={}, max_output_tokens=100
     )
-    assert result["usage"] == {"tokens": 120, "source": "reported"}
+    # The prompt's share is kept apart: it is what sizing the next prompt needs.
+    assert result["usage"] == {
+        "tokens": 120,
+        "prompt_tokens": 100,
+        "source": "reported",
+    }
     assert transport.calls[-1][2]["options"]["num_predict"] == 100

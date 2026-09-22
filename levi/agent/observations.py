@@ -11,6 +11,15 @@ from .planning import Workflow
 from .store import digest, file_hash
 
 
+class Overflow(ValueError):
+    """Observation coverage beyond a limit: the plan's frame cap or what the
+    model's context holds."""
+
+
+class ContextOverflow(Overflow):
+    """More images than the model's context window holds."""
+
+
 class Candidate:
     """Boundary-only stand-in for a proposal, used by the refinement policy."""
 
@@ -37,7 +46,9 @@ def skills(context):
     }
 
 
-def frame_scope(context, root, episode, proposals=None):
+def frame_scope(
+    context, root, episode, proposals=None, spacing=None, limit=None, cap=None
+):
     flow = Workflow.model_validate(context.workflow)
     table = media.episode_table(media.snapshot_state(context, root), episode)
     times = table.timestamp.to_numpy(dtype=float)
@@ -57,21 +68,199 @@ def frame_scope(context, root, episode, proposals=None):
                             max(times[0], boundary - flow.boundary_window_seconds),
                             min(times[-1], boundary + flow.boundary_window_seconds)
                             + 1e-8,
-                            flow.boundary_tolerance_seconds / 2,
+                            spacing or flow.boundary_tolerance_seconds / 2,
                         )
                     )
         if not targets:
             targets = [times[0], times[-1]]
     positions = sorted({int(np.abs(times - t).argmin()) for t in targets})
     # Never silently thin a policy that does not fit the approved resource cap.
-    if len(positions) * max(1, len(context.cameras)) > flow.max_evidence_frames:
-        raise ValueError(
+    cap = flow.max_evidence_frames if cap is None else cap
+    if len(positions) * max(1, len(context.cameras)) > cap:
+        raise Overflow(
             "Observation coverage exceeds approved frame cap; revise the plan, do not silently undersample"
+        )
+    images = len(positions) * max(1, len(context.cameras))
+    if limit is not None and images > limit:
+        raise ContextOverflow(
+            f"{images} images exceed the {limit} the model's context holds"
         )
     return [int(table.iloc[i].frame_index) for i in positions]
 
 
-def observe(context, root, episode, folder, proposals=None):
+def image_limit(config, usage, evidence, draft, prompt_chars=None, costs=None):
+    """How many images the next request can carry.
+
+    With ``costs`` -- (tokens per character, tokens per image) fitted from
+    this model's metered requests -- the next prompt is priced directly.
+    Otherwise the last call is split: its reported tokens minus its text
+    (counted at 4 characters a token, so images come out dear) over its image
+    count; the next prompt's text is counted at 3 (so it comes out long).
+    Without reported usage there is nothing to learn from: no limit.
+    ``prompt_chars`` estimates the text of a call made before providers
+    reported it.
+    """
+    tokens = usage.get("reported_tokens")
+    images = sum(1 for row in evidence if row.get("artifact"))
+    chars = usage.get("prompt_chars") or prompt_chars or 0
+    text = chars + len(json.dumps(draft, ensure_ascii=False))
+    from levi.inference.provider import output_allowance
+
+    expected = len(draft.get("proposals", [])) if isinstance(draft, dict) else None
+    room = config.context_tokens * 0.85 - output_allowance(config, expected)
+    if costs:
+        from levi.inference.provider import model_view
+
+        per_char, per_image = costs
+        # Each image also brings its row in the evidence text.
+        row = len(json.dumps(model_view(evidence[:1]), ensure_ascii=False))
+        return max(0, int((room - text * per_char) // (per_image + row * per_char)))
+    if not tokens or not images:
+        return None
+    per_image = max(1.0, (tokens - chars / 4) / images)
+    return max(0, int((room - text / 3) // per_image))
+
+
+def refine_spacings(context):
+    """Boundary sampling from finest to coarsest that still meets tolerance."""
+    tolerance = Workflow.model_validate(context.workflow).boundary_tolerance_seconds
+    return [tolerance / 2, tolerance, tolerance * 2]
+
+
+def fit_refinement(wb, run, episode, proposals, limit, cap=None):
+    """(boundaries, windows, spacing) for a refinement the model can read.
+
+    At each spacing, finest first, change windows are trimmed (least changed
+    first) to fit the plan's frame cap and the model's context; the model's
+    own boundaries are never dropped, and a coarser spacing is logged. When even the
+    coarsest spacing does not fit, the run stops with the numbers.
+    """
+    from .schema import TaskContext
+
+    context = TaskContext.model_validate(run["context"])
+    root = wb.store.run_dir(run["id"]) / "input"
+    for spacing in refine_spacings(context):
+        boundaries, windows = harness_windows(
+            wb, run, episode, proposals, spacing, limit, cap
+        )
+        try:
+            frame_scope(context, root, episode, boundaries, spacing, limit, cap)
+        except Overflow:
+            continue
+        return boundaries, windows, spacing
+    cap = Workflow.model_validate(context.workflow).max_evidence_frames
+    raise ContextOverflow(
+        f"Boundary refinement does not fit the frame cap ({cap}) or the model "
+        f"context ({limit} images) even at {spacing:g} s spacing; revise the "
+        "plan's cap, narrow the episode scope or use a provider with a larger "
+        "context"
+    )
+
+
+class Batch:
+    """One refinement request: the proposals starting in [start, end), the
+    boundaries whose frames it carries and the spacing they are sampled at.
+    ``start`` is None when a single request refines the whole draft."""
+
+    def __init__(self, boundaries, windows, spacing, start=None, end=None):
+        self.boundaries = boundaries
+        self.windows = windows
+        self.spacing = spacing
+        self.start = start
+        self.end = end
+
+
+def plan_refinement(wb, run, episode, proposals, limit, observed):
+    """The requests that refine a draft within the model's context and the
+    plan's frame cap (less the ``observed`` coarse frames already spent).
+
+    One request when the whole draft fits (see ``fit_refinement``). A long
+    episode that does not is refined in consecutive batches: at the finest
+    spacing whose frames fit the cap in total, proposals are grouped in time
+    order while a group's frames fit the context. Each batch costs the prompt
+    text again, so batches are as large as the context allows.
+    """
+    from .schema import TaskContext
+
+    cap = Workflow.model_validate(run["context"]["workflow"]).max_evidence_frames
+    cap = max(0, cap - observed)
+    try:
+        return [Batch(*fit_refinement(wb, run, episode, proposals, limit, cap))]
+    except ContextOverflow:
+        if limit is None:
+            raise
+    context = TaskContext.model_validate(run["context"])
+    root = wb.store.run_dir(run["id"]) / "input"
+    ordered = sorted(proposals, key=lambda p: p.start)
+    for spacing in refine_spacings(context):
+        try:
+            frame_scope(context, root, episode, ordered, spacing, None, cap)
+        except Overflow:
+            continue
+        batches, group = [], []
+        for proposal in ordered:
+            try:
+                frame_scope(context, root, episode, [*group, proposal], spacing, limit)
+                group.append(proposal)
+            except ContextOverflow:
+                if not group:
+                    break
+                batches.append(group)
+                group = [proposal]
+        else:
+            batches.append(group)
+            starts = [group[0].start for group in batches]
+            ends = [*starts[1:], float("inf")]
+            return [
+                Batch(group, [], spacing, start, end)
+                for group, start, end in zip(batches, starts, ends, strict=True)
+            ]
+    raise ContextOverflow(
+        f"Boundary refinement does not fit the frame cap ({cap} after the "
+        f"coarse pass) or, even one attempt at a time, the model context "
+        f"({limit} images); revise the plan's cap or use a provider with a "
+        "larger context"
+    )
+
+
+def seam(proposals):
+    """Batches are refined apart, so an interval can run past where the next
+    batch's first one now starts: within a layer the earlier one ends there."""
+    last = {}
+    out = []
+    for p in proposals:
+        before = last.get(p.layer)
+        if (
+            before is not None
+            and out[before].end is not None
+            and out[before].end > p.start > out[before].start
+        ):
+            out[before] = out[before].model_copy(update={"end": p.start})
+        if p.end is not None:
+            last[p.layer] = len(out)
+        out.append(p)
+    return out
+
+
+def merge(draft, part, batch):
+    """The draft with the proposals of one batch's window replaced by the
+    refined ones."""
+
+    def inside(p):
+        return batch.start <= p.start < batch.end
+
+    proposals = [p for p in draft.proposals if not inside(p)]
+    proposals += [p for p in part.proposals if inside(p)]
+    proposals = seam(sorted(proposals, key=lambda p: p.start))
+    return draft.model_copy(
+        update={
+            "proposals": proposals,
+            "warnings": list(dict.fromkeys(draft.warnings + part.warnings))[:50],
+        }
+    )
+
+
+def observe(context, root, episode, folder, proposals=None, spacing=None):
     """Evidence for one episode, following the plan's declared policy.
 
     Temporal and object work both state a coarse step in their workflow, so
@@ -89,7 +278,7 @@ def observe(context, root, episode, folder, proposals=None):
         raise ValueError(
             "Dataset adapter has no declared temporal-window observation support"
         )
-    return temporal(context, root, episode, folder, proposals)
+    return temporal(context, root, episode, folder, proposals, spacing)
 
 
 def persist(wb, id, episode, summary, evidence):
@@ -117,6 +306,31 @@ def persist(wb, id, episode, summary, evidence):
         json.dumps({"summary": summary, "items": ordered}, ensure_ascii=False)
     )
     return ordered
+
+
+def text_page(wb, run, episode, offset, limit):
+    """A page of the evidence ledger as text only: what each frame is, never
+    the frame. The MCP bridge attaches no image to it."""
+    if episode not in run["context"]["episodes"]:
+        raise ValueError("Episode outside approved scope")
+    record = wb.store.get("evidence", f"{run['id']}:{episode}")
+    rows = record["items"][offset : offset + limit]
+    return {
+        "items": [
+            {
+                "id": row["id"],
+                "timestamp": round(row["timestamp"], 3),
+                "frame_index": row.get("frame_index"),
+                "camera_key": row.get("camera_key"),
+            }
+            for row in rows
+        ],
+        "total": len(record["items"]),
+        "next_offset": offset + len(rows),
+        "ledger_digest": digest(record),
+        "summary": record["summary"],
+        "images": False,
+    }
 
 
 def recall(wb, run, episode, offset, limit, layout="single", tile_width=320):
@@ -190,6 +404,29 @@ def recall(wb, run, episode, offset, limit, layout="single", tile_width=320):
                 sheets=sorted({*record.get("sheets", []), name})
             ),
         )
+        # The sheet shows each tile's frame and time; the hashes and decoder
+        # bookkeeping stay in the ledger (ledger_digest pins it) instead of
+        # being paid for as text on every page.
+        value["items"] = [
+            {
+                key: round(row[key], 3) if key == "timestamp" else row[key]
+                for key in (
+                    "id",
+                    "timestamp",
+                    "frame_index",
+                    "camera_key",
+                    "image_available",
+                )
+                if key in row
+            }
+            for row in rows
+        ]
+        # Tiles say where each item sits on the sheet; what the item is,
+        # the items list already says once.
+        value["mosaic"]["tiles"] = [
+            {k: tile[k] for k in ("evidence_id", "row", "column")}
+            for tile in value["mosaic"]["tiles"]
+        ]
     return value
 
 
@@ -220,7 +457,13 @@ def refine(wb, run, episode, around, cameras=None):
     added = {row["id"] for row in evidence}
     return {
         "episode": episode,
-        "added": [row for row in items if row["id"] in added],
+        # Compact rows, like a mosaic page: the full ledger rows (hashes,
+        # decoder bookkeeping) stay in the ledger and cost nothing to skip.
+        "added": [
+            {k: row[k] for k in ("id", "timestamp", "frame_index", "camera_key")}
+            for row in items
+            if row["id"] in added
+        ],
         "total": len(items),
         "policy": {
             "boundary_window_seconds": context.workflow["boundary_window_seconds"],
@@ -229,6 +472,101 @@ def refine(wb, run, episode, around, cameras=None):
             ],
             "max_evidence_frames": context.workflow["max_evidence_frames"],
         },
+    }
+
+
+def rank_intervals(folder, rows, step):
+    """Coarse intervals ordered by how much the picture changes across them.
+
+    Two frames a coarse step apart that look alike rarely hide an event; two
+    that differ a lot are where a short grasp or release most likely fell.
+    Mean absolute difference of small grayscale thumbnails, per camera, so the
+    ranking measures change and recognises nothing.
+    """
+    import cv2
+
+    # Rebuild the coarse pass exactly as frame_scope took it: per camera, the
+    # frame nearest each grid target plus the last frame. Refinement frames
+    # sit inside the intervals being ranked and must not split them.
+    cameras = {}
+    for row in rows:
+        if row.get("artifact") and (folder / row["artifact"]).exists():
+            cameras.setdefault(row.get("camera_key") or "", []).append(row)
+    coarse = {}
+    for camera, frames in cameras.items():
+        times = np.array([row["timestamp"] for row in frames])
+        targets = list(np.arange(times.min(), times.max(), step)) + [times.max()]
+        picked = {int(np.abs(times - target).argmin()) for target in targets}
+        coarse[camera] = {frames[i]["timestamp"]: frames[i] for i in picked}
+    scores = {}
+    for frames in coarse.values():
+        ordered = [frames[t] for t in sorted(frames)]
+        pictures = []
+        for row in ordered:
+            image = cv2.imread(str(folder / row["artifact"]), cv2.IMREAD_GRAYSCALE)
+            pictures.append(cv2.resize(image, (160, 120), interpolation=cv2.INTER_AREA))
+        for a, b, first, second in zip(pictures, pictures[1:], ordered, ordered[1:]):
+            span = (first["timestamp"], second["timestamp"])
+            change = float(np.abs(a.astype(float) - b.astype(float)).mean())
+            scores[span] = max(scores.get(span, 0.0), change)
+    return [
+        {
+            "from": round(span[0], 3),
+            "to": round(span[1], 3),
+            "change": round(score, 2),
+            "around_seconds": round((span[0] + span[1]) / 2, 3),
+        }
+        for span, score in sorted(scores.items(), key=lambda item: -item[1])
+    ]
+
+
+def harness_windows(wb, run, episode, proposals, spacing=None, limit=None, cap=None):
+    """Refinement targets for the in-process runtime: the model's proposals
+    plus the published top-k change windows, trimmed to the frame cap.
+
+    Returns (boundaries, window_seconds). Windows are dropped from the least
+    changed first until the plan's frame cap holds; the model's own boundaries
+    are never dropped. A run with no published value gets its proposals back.
+    """
+    from .schema import TaskContext
+
+    top_k = (
+        (run.get("harness") or {}).get("parameters", {}).get("evidence.refine_top_k", 0)
+    )
+    if not top_k:
+        return list(proposals), []
+    ranked = changes(wb, run, episode, top_k)["suggested_around_seconds"]
+    context = TaskContext.model_validate(run["context"])
+    root = wb.store.run_dir(run["id"]) / "input"
+    while ranked:
+        boundaries = list(proposals) + [Candidate(t) for t in ranked]
+        try:
+            frame_scope(context, root, episode, boundaries, spacing, limit, cap)
+            return boundaries, ranked
+        except ValueError:
+            ranked = ranked[:-1]
+    return list(proposals), []
+
+
+def changes(wb, run, episode, top_k=None):
+    """Where to refine next: the coarse intervals that changed most."""
+    if episode not in run["context"]["episodes"]:
+        raise ValueError("Episode outside approved scope")
+    record = wb.store.get("evidence", f"{run['id']}:{episode}")
+    folder = wb.store.run_dir(run["id"]) / "evidence"
+    step = run["context"]["workflow"]["coarse_step_seconds"]
+    ranked = rank_intervals(folder, record["items"], step)
+    if top_k is None:
+        top_k = (run.get("harness") or {}).get("parameters", {}).get(
+            "evidence.refine_top_k", 0
+        ) or 3
+    return {
+        "episode": episode,
+        "intervals": ranked,
+        "suggested_around_seconds": [row["around_seconds"] for row in ranked[:top_k]],
+        "top_k": top_k,
+        "method": "mean absolute difference of 160x120 grayscale coarse frames; "
+        "a high score means the scene changed, not that a subtask boundary is there",
     }
 
 

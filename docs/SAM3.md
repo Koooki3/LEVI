@@ -173,6 +173,7 @@ uv run levi serve
 | LEVI_SAM3_CHECKPOINT | 空 | 已存在的本地 checkpoint；设置后跳过 Hub 下载 |
 | LEVI_SAM3_WORKER_PYTHON | integrations/sam3/.venv/bin/python | 独立 worker Python |
 | LEVI_SAM3_DOWNLOAD_VIDEOS | 1 | Hub 作业启动前准备视频资产；设为 0 时由部署者自行准备 |
+| LEVI_SAM3_MIN_FREE_MIB | 7000 | 启动本地 SAM3 worker 所需的最少空闲显存（MiB），不足时拒绝启动 |
 | HF_TOKEN | 空 | 后端/worker 的非浏览器读取凭据，不要提交 |
 
 正常情况下只需设置 LEVI_WORKSPACE 和 worker Python；模型仓库、文件和目录会由
@@ -283,4 +284,4 @@ LEVI 只借鉴公开 API 和数据格式，不复制参考项目的受版权保�
 
 ## Agent assistance
 
-SAM3 is also available as an optional ToolProvider in the [Agent Workbench](AGENT_WORKBENCH.md). It runs on a frozen dataset scope and stages results for the shared human review/commit flow. Existing standalone object annotation remains supported. Agent execution requires an existing checkpoint and never initiates a download; all engineering tests use CPU fixtures without CUDA probing or real inference.
+SAM3 is also available as an optional ToolProvider in the [agent workflow](AGENTS.md#object-masks). It runs on a frozen dataset scope and stages results for the shared human review/commit flow. Existing standalone object annotation remains supported. Agent execution requires an existing checkpoint and never initiates a download; all engineering tests use CPU fixtures without CUDA probing or real inference.

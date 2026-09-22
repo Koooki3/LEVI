@@ -38,7 +38,18 @@ def require_teacher(store, context, run_id=None):
         raise PermissionError("Teacher connection does not cover this task")
 
 
-def gate(wb, run_id, context, summary, evidence, phase, fingerprint, output):
+def gate(
+    wb,
+    run_id,
+    context,
+    summary,
+    evidence,
+    phase,
+    fingerprint,
+    output,
+    error=None,
+    raw=None,
+):
     if context.supervision == "none":
         return output
     require_teacher(wb.store, context, run_id)
@@ -50,7 +61,20 @@ def gate(wb, run_id, context, summary, evidence, phase, fingerprint, output):
         except KeyError:
             record = None
         if record and record["fingerprint"] != fingerprint:
-            raise Conflict("Teaching evidence changed; create a new reviewed task")
+            # What the learner was shown changed (the harness moved on while
+            # this run waited): the old review no longer applies. Keep it,
+            # marked superseded, and ask again for what is shown now.
+            stamp = time.strftime("%Y%m%dT%H%M%S")
+            wb.store.save(
+                db,
+                "teaching",
+                f"{key}:superseded-{stamp}",
+                {**record, "status": "superseded", "superseded_at": time.time()},
+            )
+            wb.store.event(
+                run_id, "supervision.superseded", teaching_id=key, archived=stamp
+            )
+            record = None
         if record is None:
             record = {
                 "id": key,
@@ -63,6 +87,10 @@ def gate(wb, run_id, context, summary, evidence, phase, fingerprint, output):
                 "teacher_grant": context.teacher_grant,
                 "mode": context.supervision,
                 "learner_output": output.model_dump(),
+                # Why LEVI refused the learner's answer, if it did: the
+                # teacher must revise or reject, never accept it as is.
+                **({"learner_error": error} if error else {}),
+                **({"learner_raw": raw} if raw else {}),
                 "summary": summary,
                 "evidence": evidence,
                 "created_at": time.time(),
@@ -108,6 +136,17 @@ def authorized(wb, run_id, who):
 
 
 def pending(wb, run_id, who):
+    run = wb.store.get("runs", run_id)
+    if run["context"].get("supervision", "none") == "none":
+        # Asking is legitimate; the answer is simply that nothing waits here.
+        who.require("read", run["context"]["repo_id"])
+        return {
+            "items": [],
+            "scope": "annotation_phase",
+            "promoted": False,
+            "supervision": "none",
+            "note": "This task has no teacher gate, so no phase waits for review.",
+        }
     authorized(wb, run_id, who)
     return {
         "items": [
@@ -133,6 +172,11 @@ def feedback(wb, run_id, who, teaching_id, revision, decision, note, output):
         )
     elif output is not None:
         raise ValueError("Only a revision may replace model output")
+    elif decision == "accept" and record.get("learner_error"):
+        raise ValueError(
+            f"The learner's answer failed validation ({record['learner_error']}); "
+            "revise or reject it"
+        )
     payload = {
         "decision": decision,
         "note": note,
@@ -172,4 +216,11 @@ def feedback(wb, run_id, who, teaching_id, revision, decision, note, output):
             teacher_usage={"source": "unknown", "tokens": None},
             revision=current["revision"],
         )
+    # Outside the transaction: a file and a memory note the next task's
+    # learner is given (levi/harness/teaching.py).
+    from levi.harness.layout import harness_lock
+    from levi.harness.teaching import record
+
+    with harness_lock(wb.store.state, run["dataset_key"]):
+        record(wb.store, current, run["dataset_key"], context.workflow.get("kind"))
     return current

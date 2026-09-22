@@ -63,6 +63,23 @@ export interface LanguageAtom {
    */
   camera: string | null;
   tool_calls: ToolCall[] | null;
+  /**
+   * LEVI-only metadata an agent commit attaches to a segment: subtask id,
+   * outcome, attempt, stated uncertainty and the originating run. Kept on
+   * save, never exported (same rule as `to`).
+   */
+  levi?: {
+    subtask_id?: string;
+    outcome?: "success" | "failure" | "unknown";
+    attempt?: number;
+    uncertainty?: string;
+    origin?: {
+      kind: "agent";
+      run_id: string;
+      changeset: string;
+      written: [string | null, number, number | null];
+    };
+  } | null;
 }
 
 export const PERSISTENT_STYLES: ReadonlySet<LanguageStyle> = new Set([

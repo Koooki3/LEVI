@@ -1,6 +1,6 @@
 """Human-readable, hash-free names for everything LEVI writes.
 
-Two rules (see .state.md): artifacts kept one-per-dataset and overwritten in
+Two rules (see docs/WORKSPACE.md): artifacts kept one-per-dataset and overwritten in
 place use the bare dataset name; artifacts created once per run use a
 timestamp. A timestamp suffix is appended to a dataset name only when two
 different things would otherwise collide.

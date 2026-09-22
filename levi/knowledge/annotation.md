@@ -1,0 +1,18 @@
+# Built-in knowledge · annotation
+
+General rules for subtask (temporal) and episode-level (review) annotation of robot demonstrations.
+Every model LEVI runs receives them with its task, and `workspace.get_context` gives them to external agents.
+They are dataset-agnostic. A dataset's own facts stay in that dataset's local memory.
+New entries come from local memory through `levi agent knowledge promote` (see `levi/harness/knowledge.py`).
+
+- **annotation-001** · Cover the whole episode with consecutive intervals, from the first to the last frame; intervals in one layer never overlap, and each ends after it starts. _(from: plate-stacking teaching, 2026-09-22)_
+- **annotation-002** · A place, transport or stacking step succeeds only when its goal condition is visibly met (for example the object rests on a target of the required kind); name what was placed and what is under it before writing the outcome. _(from: plate-stacking teaching, 2026-09-22)_
+- **annotation-003** · When the recording ends before a release or result is visible, the outcome is unknown, not success and not failure. _(from: plate-stacking teaching, 2026-09-22)_
+- **annotation-004** · Anything a human hand does is labelled `other` with outcome unknown, never as a robot subtask. _(from: plate-stacking teaching, 2026-09-22)_
+- **annotation-005** · Something not seen in coarse samples may still have happened: lifts, releases and hand entries often last well under a second. Refine that interval with dense frames before judging it a failure. _(from: external-agent annotation audits, 2026-09-22)_
+- **annotation-006** · Read times from each frame's timestamp, never from frame numbers or image order. _(from: plate-stacking teaching, 2026-09-22)_
+- **annotation-007** · A long stretch of repeated attempts that never lifts the object is one grasp interval with outcome unknown (failure only when the attempt visibly ends); a final successful lift is its own short grasp interval. _(from: plate-stacking teaching, 2026-09-22)_
+- **annotation-008** · The description (`content`) is one short sentence of what the robot does. It contains no frame numbers and no reasoning. _(from: plate-stacking teaching, 2026-09-22)_
+- **annotation-009** · Episode-level metadata outcomes and per-subtask outcomes answer different questions: an episode can contain successful subtasks and still fail. Never substitute one for the other. _(from: rollout datasets, 2026-09-22)_
+- **annotation-010** · A dataset can contain demonstrations of other tasks. Judge which task a demo shows from what is on the table (the wide camera), before judging its outcome. _(from: screw-picking review, 2026-09-22)_
+- **annotation-011** · Judge small-part outcomes (a screw seated in a slot) from the wrist camera's last frames; a hand or object entering at the end does not change the outcome by itself. _(from: screw-picking review, 2026-09-22)_

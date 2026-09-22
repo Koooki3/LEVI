@@ -11,6 +11,7 @@ import AgentPlan, { type HarnessPlan } from "./agent-plan";
 import AgentObjectTool from "./agent-object-tool";
 import AgentReviewQueue from "./agent-review-queue";
 import AgentActivity from "./agent-activity";
+import AgentTaskConsole from "./agent-task-console";
 import ChipMultiSelect from "./chip-multi-select";
 import { useDatasetFacets } from "./dataset-facets";
 import AgentConnections, { type Connection } from "./agent-connections";
@@ -610,6 +611,11 @@ export default function AgentWorkbench() {
           </>
         ) : (
           <>
+            <AgentTaskConsole
+              providers={providers}
+              supervision={supervision}
+              teacherGrant={teacherGrant}
+            />
             <details open={!run}>
               <summary>New task · frozen scope</summary>
               <form

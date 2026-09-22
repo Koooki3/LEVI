@@ -31,11 +31,11 @@ def tool(name, args):
     )
 
 
-def confirm(value):
+def confirm(value, question="Approve this exact revision?"):
     print(json.dumps(value, ensure_ascii=False, indent=2))
     if (
         not sys.stdin.isatty()
-        or input("Approve this exact revision? Type approve: ").strip() != "approve"
+        or input(f"{question} Type approve: ").strip() != "approve"
     ):
         raise ValueError("Human approval required; no change applied")
 
@@ -91,7 +91,11 @@ def connect(args):
     from .runtime import new_id
 
     identifier = new_id()
-    credential = STATE / "agent" / "connections" / identifier / "credential"
+    # Readable: which client, and since when. The grant id is recorded in
+    # connection.json once the service has issued it.
+    credential = (
+        STATE / "agent" / "connections" / f"{args.client}-{identifier}" / "credential"
+    )
     project = Path(args.project).expanduser().resolve()
     if not project.is_dir():
         raise ValueError("Project directory must exist")
@@ -131,6 +135,17 @@ def connect(args):
             raise ValueError("Configuration changed while connecting; retry")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(after)
+        # Remembered so disconnect can take back exactly the entry it wrote.
+        (credential.parent / "connection.json").write_text(
+            json.dumps(
+                {
+                    "client": args.client,
+                    "grant_id": result["id"],
+                    "project": str(project),
+                    "config": str(path),
+                }
+            )
+        )
         skill = Path(__file__).parent / "skills" / "levi-overview" / "SKILL.md"
         skill_dir = (
             project
@@ -150,13 +165,72 @@ def connect(args):
     )
 
 
-def main(argv=None):
-    argv = list(sys.argv[1:] if argv is None else argv)
-    if argv == ["mcp"] or not argv:
-        from .mcp import main as serve
+def digest_change(change):
+    """What a reviewer decides on, without the whole ChangeSet: per episode,
+    the segments with time, subtask and outcome; plus revision and base.
+    `levi agent changes show <id>` prints everything."""
+    episodes = {}
+    for index, proposal in enumerate(change["proposals"]):
+        decision = change.get("decisions", {}).get(str(index), "pending")
+        episodes.setdefault(f"episode_{proposal['episode_index']:06d}", []).append(
+            f"{proposal.get('start', 0):.1f}-{proposal.get('end') or 0:.1f}s "
+            f"{proposal.get('subtask_id') or proposal['kind']} "
+            f"{proposal.get('outcome') or ''} [{decision}]".strip()
+        )
+    return {
+        "changeset": change["id"],
+        "run": change["run_id"],
+        "revision": change["revision"],
+        "status": change["status"],
+        "base_revision": change["base_revision"],
+        "proposals": len(change["proposals"]),
+        "episodes": episodes,
+        "full": f"levi agent changes show {change['id']}",
+    }
 
-        sys.argv = [sys.argv[0]]
-        return serve()
+
+def forget_configuration(identifier):
+    """Remove the project MCP entry this connection wrote, and nothing else.
+
+    Only an entry whose grant file is this connection's credential is taken
+    out; one someone edited to point elsewhere is left and reported. Without
+    this, a revoked connection kept its entry and blocked reconnecting.
+    """
+    from levi.paths import STATE
+
+    connections = STATE / "agent" / "connections"
+    folder, info = None, None
+    for candidate in sorted(connections.glob("*/connection.json")):
+        data = json.loads(candidate.read_text())
+        if data.get("grant_id") == identifier:
+            folder, info = candidate.parent, data
+            break
+    if folder is None and (connections / identifier / "connection.json").exists():
+        # Connections made before the grant id was recorded.
+        folder = connections / identifier
+        info = json.loads((folder / "connection.json").read_text())
+    if folder is None:
+        return {"configuration": "no record of a project entry for this connection"}
+    path = Path(info["config"])
+    credential = str(folder / "credential")
+    if info["client"] != "claude":
+        return {
+            "configuration": f"remove [mcp_servers.levi] from {path} by hand; "
+            "LEVI does not rewrite TOML"
+        }
+    if not path.exists():
+        return {"configuration": f"{path} is already gone"}
+    data = json.loads(path.read_text())
+    entry = data.get("mcpServers", {}).get("levi")
+    if not entry or entry.get("env", {}).get("LEVI_AGENT_GRANT_FILE") != credential:
+        return {"configuration": f"{path} has no levi entry for this connection"}
+    del data["mcpServers"]["levi"]
+    path.write_text(json.dumps(data, indent=2) + "\n")
+    return {"configuration": f"removed the levi entry from {path}"}
+
+
+def build_parser():
+    """The ``levi agent`` command line (also read by ``levi docs check``)."""
     p = argparse.ArgumentParser(description="LEVI local Pilot tools; no UI required")
     commands = p.add_subparsers(dest="command", required=True)
     c = commands.add_parser("core")
@@ -200,6 +274,53 @@ def main(argv=None):
     )
     c.add_argument("--dataset", required=True)
     c.add_argument("--apply", action="store_true")
+    c = commands.add_parser(
+        "improvements",
+        help="Harness improvement candidates: review, publish, retain, roll back",
+    )
+    c.add_argument(
+        "action",
+        choices=["list", "show", "publish", "reject", "retain", "rollback", "resolve"],
+    )
+    c.add_argument("slug", nargs="?")
+    c.add_argument("--dataset", required=True, help="catalog id, e.g. local/<name>")
+    c.add_argument("--note", default="")
+    c = commands.add_parser(
+        "task", help="Natural-language task: interpret, approve, advance, show"
+    )
+    c.add_argument("action", choices=["new", "show", "approve", "advance"])
+    c.add_argument("value", help="the request text for new, else the task id")
+    c.add_argument("--provider", default="qwen-local")
+    c.add_argument(
+        "--supervision", default="none", choices=["none", "shadow", "supervised"]
+    )
+    c.add_argument("--teacher")
+    c = commands.add_parser(
+        "gpu", help="GPU guardian: decision, reason, learned windows"
+    )
+    c.add_argument("action", choices=["status"], nargs="?", default="status")
+    c = commands.add_parser("memory", help="A dataset's local memory: show or rebuild")
+    c.add_argument("action", choices=["show", "search", "rebuild"])
+    c.add_argument("--dataset", required=True, help="catalog id, e.g. local/<name>")
+    c.add_argument("--query", default="")
+    c = commands.add_parser(
+        "knowledge",
+        help="Built-in knowledge: list, refresh candidates, promote or reject one",
+    )
+    c.add_argument(
+        "action",
+        choices=["list", "refresh", "promote", "reject"],
+        nargs="?",
+        default="list",
+    )
+    c.add_argument("candidate", nargs="?", help="candidate-NNN")
+    c.add_argument("--topic", choices=["annotation", "interpretation", "harness"])
+    c.add_argument("--text", help="the entry as it should read (dataset-agnostic)")
+    c = commands.add_parser(
+        "eval",
+        help="Write the evaluation record of a committed subtask-annotation run",
+    )
+    c.add_argument("run", help="run id, e.g. temporal-20260922T1507")
     c = commands.add_parser("clean", help="Remove regenerable run evidence/snapshots")
     c.add_argument(
         "--abandon",
@@ -234,6 +355,17 @@ def main(argv=None):
     for name in ["result", "open", "events"]:
         c = commands.add_parser(name)
         c.add_argument("id")
+    return p
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv == ["mcp"] or not argv:
+        from .mcp import main as serve
+
+        sys.argv = [sys.argv[0]]
+        return serve()
+    p = build_parser()
     args = p.parse_args(argv)
     try:
         result = None
@@ -249,6 +381,7 @@ def main(argv=None):
             return connect(args)
         elif args.command == "disconnect":
             result = api(f"grants/{args.id}/revoke", {})
+            result = {**(result or {}), **forget_configuration(args.id)}
         elif args.command == "plan":
             if args.action == "create":
                 context = json.loads(Path(args.value).read_text())
@@ -291,10 +424,15 @@ def main(argv=None):
                 )
                 result = tool("changes.rebase", payload)
             elif args.action == "export":
-                confirm(change)
+                confirm(digest_change(change), "Export this committed revision?")
                 result = tool("export.run", {"run_id": change["run_id"]})
             else:
-                confirm(change)
+                confirm(
+                    digest_change(change),
+                    "Approve this exact revision?"
+                    if args.action == "review"
+                    else "Publish this approved revision?",
+                )
                 result = tool(
                     "changes.approve" if args.action == "review" else "changes.commit",
                     payload,
@@ -352,9 +490,138 @@ def main(argv=None):
                         "published_revisions": preview["published_revisions"],
                         "megabytes": round(preview["bytes"] / 1e6, 1),
                         "action": "permanently remove this dataset's agent history",
-                    }
+                    },
+                    "Remove this history?",
                 )
                 result = tool("workspace.reset", {**payload, "apply": True})
+        elif args.command == "improvements":
+            repo = {"repo_id": args.dataset}
+            if args.action == "list":
+                result = tool("improvements.list", repo)
+            else:
+                if not args.slug:
+                    raise ValueError("Name the candidate slug")
+                candidate = tool("improvements.get", {**repo, "slug": args.slug})
+                if args.action == "show":
+                    result = candidate
+                else:
+                    to = {
+                        "publish": "published",
+                        "reject": "rejected",
+                        "retain": "retained",
+                        "rollback": "rolled_back",
+                        "resolve": "resolved",
+                    }[args.action]
+                    confirm(
+                        {
+                            "candidate": args.slug,
+                            "state": candidate["state"],
+                            "target": candidate["target"],
+                            "evaluation": candidate.get("evaluation"),
+                            "observations": candidate.get("observations"),
+                            "action": f"move to {to}; tasks planned from now on "
+                            "run with the result, running tasks keep theirs",
+                        },
+                        f"Move {args.slug} to {to}?",
+                    )
+                    result = tool(
+                        "improvements.transition",
+                        {**repo, "slug": args.slug, "to": to, "note": args.note},
+                    )
+        elif args.command == "task":
+            if args.action == "new":
+                result = tool(
+                    "tasks.interpret",
+                    {
+                        "text": args.value,
+                        "provider": args.provider,
+                        "supervision": args.supervision,
+                        "teacher_grant": args.teacher,
+                    },
+                )
+            elif args.action == "show":
+                result = tool("tasks.get", {"task_id": args.value})
+            elif args.action == "approve":
+                task = tool("tasks.get", {"task_id": args.value})
+                confirm(
+                    {
+                        "request": task["request"],
+                        "spec": task["spec"],
+                        "problems": task["problems"],
+                    },
+                    "Run this task spec?",
+                )
+                result = tool("tasks.approve", {"task_id": args.value})
+            else:
+                result = tool("tasks.advance", {"task_id": args.value})
+        elif args.command == "gpu":
+            result = tool("gpu.status", {})
+        elif args.command == "eval":
+            # Written automatically for a run over a whole dataset; this is
+            # for any other committed temporal run (a batch, a subset).
+            from levi.eval import record
+            from levi.harness.ledger import build
+            from levi.paths import STATE
+
+            from .runtime import Workbench
+
+            store = Workbench(STATE).store
+            run = store.get("runs", args.run)
+            if run["status"] != "succeeded":
+                p.error(f"{args.run} is {run['status']}; only a committed run")
+            if run["context"]["workflow"].get("kind") != "temporal":
+                p.error("evaluation records are for subtask (temporal) runs")
+            result = {"record": str(record.agent(store, run, build(store, args.run)))}
+        elif args.command == "knowledge":
+            if args.action in {"list", "refresh"}:
+                result = tool(
+                    "knowledge.list",
+                    {"topic": args.topic, "refresh": args.action == "refresh"},
+                )
+            else:
+                if not args.candidate:
+                    p.error("promote and reject need a candidate id")
+                if args.action == "promote":
+                    confirm(
+                        {
+                            "candidate": args.candidate,
+                            "topic": args.topic,
+                            "text": args.text,
+                            "action": "append this to LEVI's built-in knowledge "
+                            "(a repository file every installation receives)",
+                        },
+                        "Promote this entry to built-in knowledge?",
+                    )
+                    result = tool(
+                        "knowledge.promote",
+                        {
+                            "candidate_id": args.candidate,
+                            "topic": args.topic,
+                            "text": args.text,
+                        },
+                    )
+                    # The docs index the entries; keep it in step.
+                    from levi.docs import sync
+
+                    result["docs_updated"] = sync()
+                else:
+                    result = tool("knowledge.reject", {"candidate_id": args.candidate})
+        elif args.command == "memory":
+            repo = {"repo_id": args.dataset}
+            if args.action == "show":
+                result = tool("memory.get", repo)
+            elif args.action == "search":
+                result = tool("memory.search", {**repo, "query": args.query})
+            else:
+                confirm(
+                    {
+                        "dataset": args.dataset,
+                        "action": "recompute this dataset's memory from its closed "
+                        "runs; published lessons are kept",
+                    },
+                    "Rebuild this dataset's memory?",
+                )
+                result = tool("memory.rebuild", repo)
         elif args.command == "clean":
             for run_id in args.abandon:
                 tool("runs.abandon", {"run_id": run_id, "reason": args.reason})

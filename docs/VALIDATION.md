@@ -1,6 +1,25 @@
 # Validation record / 验证记录
 
-验证日期：2026-09-13。环境：Linux x86_64、Python 3.11.16（独立 uv `.venv`）、Bun 1.3.10、Next.js 15.5.25、Playwright Chromium。参考版本见 [UPSTREAM.md](UPSTREAM.md)。
+What has been checked, how, and what has not. Newest first. Each entry states whether it used real data and real models or fixtures and stubs; a passing fixture test is never presented as model quality. Reference versions are in [UPSTREAM.md](UPSTREAM.md).
+
+按时间倒序记录验证内容、方法与未覆盖范围。每条都注明使用的是真实数据/真实模型，还是固定样例与模拟；样例测试通过不等于模型质量达标。
+
+## 2026-09-22 Real-data end-to-end runs, harness and local model / 真实数据端到端、harness 与本地模型
+
+Environment: Linux x86_64, RTX 5060 Ti (shared with robot RL training), Python 3.11 (uv), Bun 1.3.10, Ollama 0.34.2, `qwen3.5:4b` (Q4_K_M).
+
+| Check | Data / model | Result |
+| --- | --- | --- |
+| Quality check + subtask annotation of 10 episodes, started from a terminal script, external MCP agent | Real policy-rollout capture (plate stacking, 112 episodes) | Completed and committed; ~131k input tokens, 741 s wall. Quality: WARN (one constant actuator dimension) |
+| Same task started from the web console (browser automation), external MCP agent | Same | Completed and committed; LEVI-measured 180,206 delivered tokens (client-side measurement within 0.6 %), 948 s wall; placement outcomes agreed with the first run on 15/15 |
+| Self-improvement loop | Same | A triage-filed candidate (`refine-at-coarse-change`) was evaluated by LEVI (k=2: 2/3, one revision, k=3: 3/3), published by a person, observed on the next run (episodes with between-sample warnings 7/10 → 2/10) and retained |
+| Episode-level review of 20 demos | Real rollout capture (screw insertion, 214 episodes) | 7 demos of a different task found that metadata labelled as the screw task; outcomes from the wrist camera agreed with rollout metadata on all 13 screw demos |
+| Off-peak GPU guard | Live robot RL actor on the same GPU | Learner blocked before its first model call with the process named; resident model unloaded within one watch interval |
+| Natural-language interpretation | `qwen3.5:4b` | Spec produced in 24.6 s / 1,704 tokens; dataset, steps, episodes and definitions right; missed the instruction and the token/time report and chose an extra camera — caught by the checker and corrected by the teacher |
+| Python suite | Fixtures, fake models, fake `nvidia-smi` | 309 passed, 1 opt-in browser test skipped |
+| Frontend | Bun | 202 tests; type check, lint, format and production build passed |
+
+Not established: the local model's annotation quality (its supervised annotation rounds were paused waiting for GPU time), OS-level offline isolation, multi-user operation, and datasets beyond a few hundred episodes.
 
 ## 2026-09-22 Local Ollama and supervised annotation increment / 本地模型与监督标注增量
 
@@ -133,7 +152,7 @@ Python tests cover dataset registration, byte-range video reads, path/symlink bo
 | Standalone Chromium / external-browser interaction | `window.parent === window`; Ctrl/Cmd+S/Z/Y were canceled before native browser defaults; the annotation popup opened centered and dragged successfully |
 | Browser page errors | **0** in the final standalone smoke check |
 
-The reference dataset's native diagnostic run inspected all 10 episodes: **8 pass / 15 warn / 0 fail / 3 skip**. Skipped results were video decode checks. These are individual result counts and intentionally do not replicate the external Doctor's counts. See [FEATURES.md](FEATURES.md) for exact check scope.
+The reference dataset's native diagnostic run inspected all 10 episodes: **8 pass / 15 warn / 0 fail / 3 skip**. Skipped results were video decode checks. These are individual result counts and intentionally do not replicate the external Doctor's counts. See [Data quality](QUALITY.md) for the check scope.
 
 ## 重现 / Reproduce
 
@@ -171,7 +190,7 @@ Screenshot video content: [samanthalhy/so100_strawberry_2](https://huggingface.c
 ## Agent Workbench — 2026-09-20 local validation
 
 This section concerns the experimental Agent implementation described in
-[AGENT_WORKBENCH.md](AGENT_WORKBENCH.md), not a published release.
+[Agents](AGENTS.md), not a published release.
 
 - Python regression: **136 passed** with the optional Agent SDKs installed.
   Includes content-pinned input, atomic publication failure, stale edits,
@@ -198,8 +217,7 @@ quality or satisfaction of the separate real-model acceptance gates.
 
 ## Harness increment — 2026-09-20
 
-See [HARNESS.md](HARNESS.md) for the source audit, research references,
-contracts and intentionally unsupported automation.
+The contracts are described in [Agents](AGENTS.md#contracts-for-extension); the source audit of that increment is in the Git history.
 
 - Full CPU/fixture Python suite: **148 passed**. Additional cases cover plan
   approval bypass, exact revision/digest binding, rejected/changed pilot,

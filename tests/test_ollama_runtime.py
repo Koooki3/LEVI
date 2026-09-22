@@ -1,6 +1,7 @@
 """Owned-process lifecycle with fake processes, no Ollama/GPU execution."""
 
 import json
+import os
 import signal
 
 import pytest
@@ -86,7 +87,7 @@ def test_stop_rejects_pid_reuse(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(instance, "identity", lambda _: {"new": True})
     monkeypatch.setattr(
-        runtime.os, "pidfd_open", lambda _: pytest.fail("must not open another process")
+        runtime, "pidfd_open", lambda _: pytest.fail("must not open another process")
     )
     assert not instance.stop()["running"]
 
@@ -101,11 +102,11 @@ def test_pidfd_pins_target_before_second_identity_check(tmp_path, monkeypatch):
     )
     identities = iter([{"owned": True}, {"other": True}])
     monkeypatch.setattr(instance, "identity", lambda _: next(identities))
-    monkeypatch.setattr(runtime.os, "pidfd_open", lambda _: 999)
+    monkeypatch.setattr(runtime, "pidfd_open", lambda _: 999)
     closed = []
     monkeypatch.setattr(runtime.os, "close", closed.append)
     monkeypatch.setattr(
-        signal, "pidfd_send_signal", lambda *args: pytest.fail("identity changed")
+        runtime, "pidfd_send_signal", lambda *args: pytest.fail("identity changed")
     )
     with pytest.raises(ValueError, match="identity changed"):
         instance.stop()
@@ -171,3 +172,39 @@ def test_failed_ownership_record_stops_only_new_child(tmp_path, monkeypatch):
     assert not instance.record.exists()
     assert not instance.record.with_suffix(".pending").exists()
     assert 314 not in runtime._CHILDREN
+
+
+def test_pidfd_works_without_the_interpreter_wrappers():
+    """Some standalone Python builds lack os.pidfd_open; the kernel has it."""
+    import subprocess
+
+    child = subprocess.Popen(["sleep", "30"])
+    try:
+        fd = runtime.pidfd_open(child.pid)
+        try:
+            runtime.pidfd_send_signal(fd, signal.SIGTERM)
+        finally:
+            os.close(fd)
+        assert child.wait(timeout=5) == -signal.SIGTERM
+    finally:
+        child.kill()
+    with pytest.raises(ProcessLookupError):
+        runtime.pidfd_open(2**22 + 12345)
+
+
+def test_a_context_overflow_is_named_without_echoing_the_body():
+    from levi.inference.transport import _known_cause
+
+    class Response:
+        def __init__(self, body):
+            self.body = body
+
+        def read(self):
+            return self.body
+
+    overflow = (
+        b'{"error":"request (57535 tokens) exceeds the available context size '
+        b'(32768 tokens), try increasing it"}'
+    )
+    assert "57535" in _known_cause(Response(overflow))
+    assert _known_cause(Response(b'{"error":"secret prompt text"}')) == ""

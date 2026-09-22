@@ -151,6 +151,8 @@ class ChangeSet(Contract):
     decisions: dict[str, Literal["accepted", "rejected"]] = Field(default_factory=dict)
     status: Literal["draft", "validated", "approved", "committed", "rejected"] = "draft"
     revision: int = 0
+    # Earlier agent atoms a commit replaced, per episode (see supersede.py).
+    replaced: dict[str, int] = Field(default_factory=dict)
 
 
 class ToolCall(Contract):

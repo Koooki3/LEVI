@@ -13,6 +13,54 @@ from pathlib import Path
 _CHILDREN: dict[int, subprocess.Popen] = {}
 
 
+# Linux x86_64/aarch64 syscall numbers, used when the interpreter was built
+# without the os/signal wrappers (some standalone Python builds). The kernel
+# feature is what matters; the wrapper is a convenience.
+_SYSCALLS = {"pidfd_open": 434, "pidfd_send_signal": 424}
+
+
+def _syscall(name, *args):
+    import ctypes
+    import platform
+
+    if platform.system() != "Linux":
+        raise ValueError("Safe process ownership control requires Linux pidfd support")
+    libc = ctypes.CDLL(None, use_errno=True)
+    result = libc.syscall(ctypes.c_long(_SYSCALLS[name]), *args)
+    if result < 0:
+        errno = ctypes.get_errno()
+        if errno == 3:  # ESRCH
+            raise ProcessLookupError(errno, os.strerror(errno))
+        raise ValueError(
+            f"Safe process ownership control requires Linux pidfd support "
+            f"({name}: {os.strerror(errno)})"
+        )
+    return result
+
+
+def pidfd_open(pid):
+    if hasattr(os, "pidfd_open"):
+        return os.pidfd_open(pid)
+    import ctypes
+
+    return _syscall("pidfd_open", ctypes.c_int(pid), ctypes.c_uint(0))
+
+
+def pidfd_send_signal(fd, sig):
+    if hasattr(signal, "pidfd_send_signal"):
+        return signal.pidfd_send_signal(fd, sig)
+    import ctypes
+
+    _syscall(
+        "pidfd_send_signal",
+        ctypes.c_int(fd),
+        ctypes.c_int(int(sig)),
+        ctypes.c_void_p(None),
+        ctypes.c_uint(0),
+    )
+    return None
+
+
 class OllamaRuntimeManager:
     def __init__(self, workspace: Path, state: Path):
         self.workspace = workspace.resolve()
@@ -158,14 +206,8 @@ class OllamaRuntimeManager:
             record = self._record()
             if not record or self.identity(record["pid"]) != record["identity"]:
                 return self.status()
-            if not hasattr(os, "pidfd_open") or not hasattr(
-                signal, "pidfd_send_signal"
-            ):
-                raise ValueError(
-                    "Safe process ownership control requires Linux pidfd support"
-                )
             try:
-                fd = os.pidfd_open(record["pid"])
+                fd = pidfd_open(record["pid"])
             except ProcessLookupError:
                 return self.status()
             try:
@@ -173,7 +215,7 @@ class OllamaRuntimeManager:
                 # PID reuse from delivering SIGTERM to an unrelated process.
                 if self.identity(record["pid"]) != record["identity"]:
                     raise ValueError("Process identity changed; stop was refused")
-                signal.pidfd_send_signal(fd, signal.SIGTERM)
+                pidfd_send_signal(fd, signal.SIGTERM)
             finally:
                 os.close(fd)
             return {**self.status(), "stop_requested": True}

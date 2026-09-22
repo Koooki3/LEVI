@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { T, useLocale } from "./levi-locale";
-import { leviApi, downloadJson } from "./levi-api";
+import { leviApi, downloadJson, exportName } from "./levi-api";
 import { useFlaggedEpisodes } from "@/context/flagged-episodes-context";
 import { RawCaptureNotice } from "@/components/raw-capture-notice";
 const CHECKS = [
@@ -35,8 +35,12 @@ type Report = {
 
 export default function LeviDoctor({ repoId }: { repoId: string }) {
   const [checks, setChecks] = useState(CHECKS);
-  const [max, setMax] = useState(20);
-  const [decode, setDecode] = useState(false);
+  // A local dataset is checked in full, with video decoded, by default, so a
+  // PASS here means what quality.inspect's PASS means. Hub datasets keep a
+  // sample: analysing them downloads data.
+  const local = repoId.startsWith("local/");
+  const [max, setMax] = useState(local ? 0 : 20);
+  const [decode, setDecode] = useState(local);
   const [report, setReport] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -164,7 +168,9 @@ export default function LeviDoctor({ repoId }: { repoId: string }) {
             </button>
             <button
               className="levi-secondary"
-              onClick={() => downloadJson(report, "levi-diagnostics.json")}
+              onClick={() =>
+                downloadJson(report, exportName(repoId, "quality"))
+              }
             >
               <T>Export report</T>
             </button>

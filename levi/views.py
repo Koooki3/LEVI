@@ -17,7 +17,6 @@ and listed in ``meta/levi_view.json`` instead of blocking the whole capture.
 import json
 import shutil
 import statistics
-import time
 from pathlib import Path
 
 from . import catalog, jobs
@@ -112,14 +111,30 @@ def request(root: Path, options: dict | None = None) -> dict:
             "view",
             str(root),
             options=options or {},
-            output=str(
-                jobs.STATE / "views" / f".build-{entry['name']}-{time.time_ns()}"
-            ),
+            output=str(_staging(entry["name"])),
         )
         catalog.atomic(jobs.STATE / "jobs" / (job["id"] + ".json"), job)
         entry = catalog.add_entry(root, {"view_job": job["id"]})
     jobs.launch(job)
     return entry
+
+
+def _staging(name: str) -> Path:
+    """``views/.build-<dataset>-<YYYYmmdd-HHMM>`` (``-2``… on a clash).
+
+    Readable while it exists -- it names the dataset and when the build began --
+    and renamed to the bare dataset name when the build is published. The
+    caller holds the catalog lock, so the existence check cannot race.
+    """
+    from .naming import _now
+
+    folder = jobs.STATE / "views"
+    base = f".build-{name}-{_now()}"
+    candidate, attempt = folder / base, 1
+    while candidate.exists():
+        attempt += 1
+        candidate = folder / f"{base}-{attempt}"
+    return candidate
 
 
 def publish(source: Path, output: Path) -> dict:

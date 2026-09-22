@@ -31,7 +31,7 @@ from .catalog import (
 from .conversion import registry
 from .conversion.options import Options
 from .describe import describe
-from .diagnostics import CHECKS, diagnose
+from .diagnostics import CHECKS
 from .paths import CACHE, PROJECT, ROOT, STATE, configure, inside
 from .revision import dataset_revision
 from .sync import SYNC
@@ -46,6 +46,16 @@ async def lifespan(app):
     from .agent.store import Store
 
     Store(STATE).recover()
+    from .harness.closure import sweep
+
+    # Runs that ended while no process was closing them still get their
+    # ledger, cost profile and triage.
+    try:
+        sweep(Store(STATE))
+    except Exception:
+        import logging
+
+        logging.getLogger("levi").exception("closing finished runs at startup failed")
     from .agent.pilot import recover
     from .agent.runtime import Workbench
 
@@ -53,9 +63,14 @@ async def lifespan(app):
     marker = STATE / "server.pid"
     marker.write_text(str(os.getpid()))
     SYNC.start()
+    from .inference.gpu import Watch
+
+    # Off-peak GPU: unload the local model the moment someone else computes.
+    gpu_watch = Watch(Store(STATE), workbench=Workbench(STATE)).start()
     try:
         yield
     finally:
+        gpu_watch.close()
         SYNC.stop()
         from .agent.runtime import stop
 
@@ -490,12 +505,19 @@ def diagnostics(payload: Diagnostic):
             local_dir=root,
             allow_patterns=patterns,
         )
-    report = diagnose(root, payload.max_episodes, payload.checks, payload.decode_video)
-    report["repo_id"] = canonical_id(payload.repo_id)
-    # One report per dataset, named after it and overwritten on re-run.
-    slug = display_name(payload.repo_id, None)
-    atomic(STATE / "diagnostics" / (slug + ".json"), report)
-    return report
+    from .harness.quality import inspect
+
+    # The same inspection MCP's quality.inspect runs; the report is kept with
+    # the dataset, one per hour, instead of overwriting a single file.
+    return inspect(
+        STATE,
+        display_name(payload.repo_id, None),
+        root,
+        repo_id=canonical_id(payload.repo_id),
+        checks=payload.checks,
+        max_episodes=payload.max_episodes,
+        decode_video=payload.decode_video,
+    )
 
 
 app.mount("/annotations", annotation_app)

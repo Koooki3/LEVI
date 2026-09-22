@@ -389,10 +389,13 @@ def mosaic(items, evidence_dir, destination, *, tile_width=320, columns=4):
         for i in range(0, len(tiles), columns)
     ]
     destination.parent.mkdir(parents=True, exist_ok=True)
-    if not cv2.imwrite(str(destination), np.vstack(rows)):
+    sheet = np.vstack(rows)
+    if not cv2.imwrite(str(destination), sheet):
         raise ValueError("Could not write the evidence sheet")
     return {
         "artifact": destination.name,
+        "width": int(sheet.shape[1]),
+        "height": int(sheet.shape[0]),
         "tile_width": tile_width,
         "columns": columns,
         "tiles": index,

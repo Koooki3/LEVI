@@ -126,6 +126,10 @@ OWNED = (
     "detections",
     "object_evidence",
     "usage_samples",
+    # A supervised run's teaching phases and its cached model answers are
+    # keyed "<run>:<episode>:<phase>"; left behind they outlive the run.
+    "teaching",
+    "model_cache",
 )
 
 
@@ -171,6 +175,22 @@ def reset(store, run_dir_for, dataset, *, apply=False):
 
     key = runs[0]["dataset_key"] if runs else dataset.split("/")[-1]
     tree = store.root / "datasets" / key
+    # Natural-language tasks and what the harness learned from these runs:
+    # task ledgers, teaching files, the dataset's memory and its improvement
+    # candidates. Kept, the next task's brief would cite work that is gone.
+    from levi.harness import layout
+
+    tasks = [
+        record["id"]
+        for record in store.list("tasks")
+        if record.get("dataset_key") == key
+    ]
+    harness = [
+        layout.dataset_dir(store.state, key) / "tasks",
+        layout.dataset_dir(store.state, key) / "teaching",
+        layout.improvements_dir(store.state, key),
+    ]
+    memory = layout.memory_path(store.state, key)
     revisions = (
         sorted(p.name for p in (tree / "revisions").iterdir())
         if (tree / "revisions").is_dir()
@@ -182,20 +202,52 @@ def reset(store, run_dir_for, dataset, *, apply=False):
         "runs": sorted(run_ids),
         "records": {kind: len(ids) for kind, ids in records.items()},
         "published_revisions": revisions,
+        "tasks": len(tasks),
+        "harness": [str(p) for p in [*harness, memory] if p.exists()],
         "bytes": _size(tree) if tree.exists() else 0,
         "path": str(tree),
         "keeps": [
             "other datasets entirely",
             "connection grants, provider profiles and settings",
             "annotations that no agent run produced",
+            "the dataset's quality reports and the workspace-wide memory",
         ],
         "applied": False,
     }
     if not apply:
         return report
 
+    # Order matters. Locating a run's directory reads its record, so every
+    # path is resolved while the records still exist. Files go before records:
+    # if the process stops halfway, what remains is a record pointing at a
+    # missing directory -- visible, and reported as cleaned by evidence.read --
+    # rather than orphaned files that nothing refers to any more. The previous
+    # order dropped the records first and then failed to find the directories.
+    directories = []
+    for run_id in sorted(run_ids):
+        try:
+            directories.append(run_dir_for(run_id))
+        except (KeyError, ValueError):
+            continue
+    failures = []
+    for directory in [*directories, tree, *harness]:
+        if not directory.exists():
+            continue
+        try:
+            shutil.rmtree(directory)
+        except OSError as exc:
+            failures.append(f"{directory}: {exc}")
+    if failures:
+        # Leave the records in place so the work stays visible and the reset
+        # can be retried; a half-removed history is worse than none removed.
+        report["not_removed"] = failures
+        return report
+
+    memory.unlink(missing_ok=True)
+    store.drop_receipts(records.get("changes", []))
     for kind, ids in records.items():
         store.drop(kind, ids)
+    store.drop("tasks", tasks)
     store.drop("runs", sorted(run_ids))
     # The activity journal narrates these runs; leaving its entries would keep
     # the live panel describing work whose record is gone.
@@ -203,20 +255,9 @@ def reset(store, run_dir_for, dataset, *, apply=False):
 
     store.drop_events([*sorted(run_ids), STREAM])
     store.drop_head(key)
-    failures = []
+    # Per-run lock files would otherwise outlive the runs they guarded.
     for run_id in run_ids:
-        directory = run_dir_for(run_id)
-        if directory.exists():
-            try:
-                shutil.rmtree(directory)
-            except OSError as exc:
-                failures.append(f"{directory}: {exc}")
-    if tree.exists():
-        try:
-            shutil.rmtree(tree)
-        except OSError as exc:
-            failures.append(f"{tree}: {exc}")
+        (store.root / "locks" / f"run-{run_id}.lock").unlink(missing_ok=True)
     report["applied"] = True
-    # A cleanup that quietly fails to delete is worse than one that refuses.
-    report["not_removed"] = failures
+    report["not_removed"] = []
     return report

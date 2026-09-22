@@ -19,7 +19,7 @@ Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge fo
 | POST | `/api/levi/jobs/plan` | Preview `{ "stage": "pipeline", "source": "captures/session-a", "fps": 10, "source_fps": 30, "options": {"target": "recap_value"} }` |
 | POST | `/api/levi/jobs/{id}/run` | Consume the stored plan once; body `{}` |
 | GET | `/api/levi/jobs` | Latest 50 plans/jobs, structured `progress` (stages, stage, done/total, current item, elapsed, ETA, warnings) and up to 32 KB of each log tail |
-| POST | `/api/levi/diagnostics` | Diagnose `{ "repo_id": "…", "max_episodes": 20, "checks": ["metadata","temporal"], "decode_video": false }` |
+| POST | `/api/levi/diagnostics` | Structural quality check `{ "repo_id": "…", "max_episodes": 0, "checks": ["metadata","temporal"], "decode_video": true }` (`max_episodes: 0` = all); the report is also kept at `outputs/LEVI/datasets/<name>/reports/quality-<YYYYmmddTHH>.json` and its `path` returned ([Data quality](QUALITY.md)) |
 | GET | `/api/annotation/health` | Annotation service availability |
 | POST | `/api/annotation/dataset/load` | Load `{ "repo_id": "…" }` or `{ "local_path": "/workspace/dataset" }` |
 | GET | `/api/annotation/episodes/{id}/atoms?repo_id=…` | Read language atoms |
@@ -110,31 +110,111 @@ local datasets are scoped by their resolved path and LEVI_WORKSPACE. This preven
 account changes from reusing another account's private snapshot or revision.
 See SAM3.md for the ordered setup sequence and sidecar schema.
 
-## Agent control plane (experimental)
+## Agent capabilities
 
-`/api/levi/agent/v1/capabilities` describes the typed tool registry; `POST /api/levi/agent/v1/tools` accepts `name`, `arguments`, optional `idempotency_key`. Provider profiles and server-memory session credentials are human-only. External requests use `LEVI_AGENT_TOKEN` and `LEVI_AGENT_DATASETS`, can read/draft only, and cannot use legacy write APIs. After Agent version activation, legacy annotation/review writes require the `X-LEVI-Annotation-Revision` returned by their corresponding read. See [Agent Workbench](AGENT_WORKBENCH.md) for schemas, MCP, transaction and migration behavior.
+All agent routes live under `/api/levi/agent/v1`. `GET /capabilities` lists every capability with its input schema, permission and side effects; `POST /tools` runs one: `{ "name": "runs.list", "arguments": {…}, "idempotency_key": "…" }`. The same registry backs the web UI, the stdio MCP bridge (tool names use `__` for `.`) and the `levi agent` CLI, so authorization and audit are identical on every channel.
 
+An external agent authenticates with its scoped connection credential (`Authorization: Bearer …`; see `levi agent connect`) or the legacy `LEVI_AGENT_TOKEN` / `LEVI_AGENT_DATASETS` pair. It may read and draft on its datasets only; plan approval, pilot review, commit, reset, clean, model management and publishing improvements require the operator session. After agent revisions are active, legacy annotation/review writes must send the `X-LEVI-Annotation-Revision` returned by their read.
 
-## Native Ollama and teacher feedback (unreleased)
+Capability groups — orientation, quality, planning, execution, evidence, annotations, objects, natural-language tasks, harness (memory, cost, improvements), supervision, workspace — and who may call each are listed in [Agents → Capability reference](AGENTS.md#capability-reference). Live activity streams as Server-Sent Events at `/activity/stream` (operator only).
 
-All paths below use `/api/levi/agent/v1`. Model management requires a human
-control session; an external Agent cannot approve its own download/start request.
+### Capability reference
+
+Generated from the capability registry by `uv run levi docs sync`. Do not edit by hand.
+
+<!-- levi:generated capabilities -->
+| Capability | Who | What it does |
+| --- | --- | --- |
+| `annotations.propose_events` | agent | Stage event suggestions using the same validators |
+| `annotations.propose_segments` | agent | Stage evidence-grounded suggestions; never approve |
+| `capabilities.list` | agent | Discover schemas, scope and side effects |
+| `changes.approve` | **person** | Human approval of an exact draft revision |
+| `changes.commit` | **person** | Atomically publish all approved annotation changes |
+| `changes.diff` | agent | Read typed suggestions, base version and provenance |
+| `changes.edit` | agent | Replace draft proposals with a revision precondition |
+| `changes.rebase` | **person** | Move a staged draft onto the current published revision; clears approval |
+| `changes.review` | **person** | Accept or reject selected suggestions in one human action |
+| `changes.undo` | agent | Create a conflict-checked inverse draft requiring human review |
+| `changes.validate` | agent | Validate source, evidence, range and annotation revision |
+| `cost.profile` | agent | Measured token and time cost on this dataset per agent (API, local VLM, external MCP), the latest breakdown and advice for the next run |
+| `datasets.inspect` | agent | Inspect fixed dataset scope and snapshot cost |
+| `episodes.query` | agent | Read frozen episode scope |
+| `evidence.changes` | agent | Rank an episode's coarse intervals by how much the picture changes; refine the top ones first |
+| `evidence.read` | agent | Read a bounded page of exact evidence; layout='mosaic' returns one labelled sheet instead of one image per frame |
+| `evidence.refine` | agent | Add bounded extra frames around candidate boundaries, within the approved window and frame cap |
+| `export.plan` | agent | Describe native export constraints; never upload |
+| `export.run` | **person** | Export reviewed native data to a new directory and re-read lossless sidecars |
+| `gpu.status` | agent | What the GPU guardian decides now for local models, why, the expected wait, and the window it learned for each workload |
+| `improvements.evaluate` | agent | Let LEVI measure a candidate on stored evidence at named probe cases |
+| `improvements.get` | agent | Read one improvement candidate |
+| `improvements.list` | agent | List harness improvement candidates for a dataset and the parameters a new task would run with |
+| `improvements.revise` | agent | Change a candidate's value once during evaluation; it must then pass a new evaluation |
+| `improvements.transition` | agent | Move a candidate through the state machine; publishing, retaining and rolling back need a person |
+| `knowledge.list` | agent | Built-in knowledge entries, and local notes that could join them |
+| `knowledge.promote` | **person** | Add a local note to built-in knowledge (repository file); a person's call |
+| `knowledge.reject` | **person** | Decline a knowledge candidate; a person's call |
+| `media.sample` | agent | Read frozen sampled evidence and coverage |
+| `memory.get` | agent | Read this dataset's verified local memory: committed annotations, recurring uncertainty, cost and published lessons |
+| `memory.rebuild` | **person** | Recompute a dataset's memory from its closed runs; a person's call |
+| `memory.search` | agent | Search committed segments and lessons in the dataset's local memory |
+| `objects.detect` | agent | Measure candidate object regions in evidence frames; no model, no GPU |
+| `objects.edit` | **person** | Human correction of staged tracks; invalidates approval |
+| `objects.frame` | agent | Read persistent staged masks for the existing player clock |
+| `objects.get` | agent | Get staged SAM3 progress |
+| `objects.inspect` | agent | Review staged masks against immutable source frames |
+| `objects.plan` | agent | Plan SAM3 against the frozen snapshot |
+| `objects.propose` | agent | Stage agent-authored object outlines for the same human review as worker output |
+| `objects.run` | agent / operator | Run isolated SAM3 worker; stage results for human review |
+| `objects.status` | agent | Check configured worker/checkpoint without probing CUDA |
+| `objects.strategy` | agent | Recommend SAM3 or agent-authored object annotation for this machine and scope |
+| `plans.approve` | **person** | Approve the exact execution contract; does not approve annotation commit |
+| `plans.clarify` | agent | Ask only missing requirements; never calls a model |
+| `plans.estimate` | agent | Estimate the agent tokens a scope will cost, from recorded runs of this agent |
+| `plans.rebudget` | **person** | Revise budget, retain completed shards, revoke execution approval |
+| `plans.review_pilot` | **person** | Accept or reject pilot quality before expanding scope |
+| `quality.inspect` | agent | Check a dataset's structure, timing, media, actions and distribution; writes <dataset>/reports/quality-<hour>.json |
+| `runs.abandon` | **person** | Close a run nobody will finish, so its evidence can be cleaned up |
+| `runs.cancel` | agent / operator | Request cancellation; not an immediate termination claim |
+| `runs.events` | agent | Replay sequenced run events |
+| `runs.execute` | agent / operator | Execute pilot or remaining shards; consumes model budget |
+| `runs.finish` | agent | Freeze completed shards for partial human review without another model call |
+| `runs.get` | agent | Read a durable run |
+| `runs.list` | agent | List runs in scope and what each one is waiting for |
+| `runs.pause` | agent / operator | Request pause at next safe boundary |
+| `runs.plan` | agent | Persist an immutable run plan; no model call |
+| `runs.prepare` | agent | Create bounded immutable evidence artifacts without a model call |
+| `runs.quality` | agent | Read the run's annotation uncertainty and uncovered intervals per episode (not dataset quality: that is quality.inspect) |
+| `runs.report_usage` | agent | Report this agent's own token/request use for the run; feeds cost estimates |
+| `runs.result` | agent | Read the durable artifact manifest and review status |
+| `runs.resume` | agent / operator | Resume uncompleted shards without repeating completed ones |
+| `supervision.feedback` | agent | Accept, revise or reject a learner phase; never approve execution or commit |
+| `supervision.pending` | agent | Read the assigned teacher's evidence and pending annotation phases |
+| `tasks.advance` | agent / operator | Run the task's next automatic step; stops at every human gate |
+| `tasks.approve` | **person** | Human approval of a checked task spec |
+| `tasks.feedback` | agent | Accept, correct or reject an interpretation; kept as a lesson |
+| `tasks.get` | agent | Read a natural-language task and its steps |
+| `tasks.interpret` | agent | Turn a natural-language request into a checked task spec with the local model; nothing runs until a person approves it |
+| `view.seek` | agent | Return evidence navigation; never force browser navigation |
+| `workspace.clean` | **person** | Remove regenerable run snapshots and evidence; keeps committed revisions |
+| `workspace.get_context` | agent | List accessible catalog IDs, never local paths |
+| `workspace.reset` | **person** | Remove one dataset's agent history: runs, records and published revisions |
+<!-- /levi:generated capabilities -->
+
+## Local models (Ollama)
+
+Model management requires the operator session; an external agent cannot approve its own download or start request.
 
 | Method / path | Behavior |
 | --- | --- |
-| `POST /providers` | `kind: ollama`, root loopback `base_url`, model and explicit `allow_localhost`; no key |
+| `POST /providers` | `kind: ollama`, loopback `base_url`, model and explicit `allow_localhost`; no key |
 | `GET /providers/{name}/ollama` | Inspect service-declared metadata; no inference |
-| `POST /providers/{name}/ollama/bind` | Bind installed digest, explicit `structured_output: true`, optional vision |
-| `POST /providers/{name}/ollama/download` | `approve_download: true`, unique `request_id`; returns persisted job, HTTP 202 |
-| `GET /model-downloads[/{id}]` | Read persisted download progress; interrupted lease is reported |
-| `POST /model-downloads/{id}/cancel` | Request stream cancellation, not guaranteed remote shared-download termination |
-| `POST /providers/{name}/ollama/memory` | `operation: load/unload`, `approve_hardware_use: true`; requires bound model |
-| `GET /ollama/runtime` | Installed/owned-process state and actual managed paths; no hardware probe |
-| `POST /ollama/runtime/start` | `port`, `approve_start: true`; only an installed executable, no installer/download |
-| `POST /ollama/runtime/stop` | Stop the recorded owned process; active task/download guard |
+| `POST /providers/{name}/ollama/bind` | Bind the installed digest, explicit `structured_output: true`, optional vision |
+| `POST /providers/{name}/ollama/download` | `approve_download: true`, unique `request_id`; returns a persisted job, HTTP 202 |
+| `GET /model-downloads[/{id}]` | Persisted download progress |
+| `POST /model-downloads/{id}/cancel` | Stop consuming the download stream |
+| `POST /providers/{name}/ollama/memory` | `operation: load/unload`, `approve_hardware_use: true` |
+| `GET /ollama/runtime` | LEVI-owned process state and managed paths |
+| `POST /ollama/runtime/start` | `port`, `approve_start: true`; refused while another process uses the GPU (off-peak guard) |
+| `POST /ollama/runtime/stop` | Stop the recorded owned process |
 
-TaskContext adds `supervision: none|shadow|supervised` and `teacher_grant`.
-`supervision.pending` and `supervision.feedback` are shared Registry/REST/MCP
-tools; feedback is restricted to the human or the assigned live scoped grant.
-Teacher feedback never grants plan/pilot/publication authority. See
-[Ollama workflow](OLLAMA.md) for request examples and explicit unimplemented scope.
+`TaskContext` accepts `supervision: none | shadow | supervised` and `teacher_grant`; `supervision.pending` / `supervision.feedback` are ordinary capabilities restricted to the assigned teacher or the operator. See [Local models](OLLAMA.md).

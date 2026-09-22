@@ -98,6 +98,10 @@ def runtime_status(request: Request):
 @router.post("/ollama/runtime/start")
 def runtime_start(payload: StartRuntime, request: Request):
     human(request)
+    from .gpu import require_free
+
+    # Starting `ollama serve` initialises the GPU too: same off-peak rule.
+    require_free()
     return runtime_manager().start(payload.port)
 
 

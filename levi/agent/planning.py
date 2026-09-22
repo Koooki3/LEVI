@@ -55,7 +55,13 @@ def material(run):
             "skill_fingerprints",
             *(["runtime_binding"] if run.get("runtime_binding") else []),
         )
-    }
+    } | (
+        # The approved plan covers the harness parameters it runs with; the
+        # memory slice is context, not a parameter, and stays out.
+        {"harness": {k: run["harness"][k] for k in ("parameters", "sources")}}
+        if run.get("harness")
+        else {}
+    )
 
 
 def clarify(context):

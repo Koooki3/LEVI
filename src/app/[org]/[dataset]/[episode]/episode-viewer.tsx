@@ -24,6 +24,7 @@ import {
   AnnotationsProvider,
   useAnnotations,
 } from "@/context/annotations-context";
+import AnnotationRecorder from "@/components/annotation-recorder";
 import { AnnotationsPanel } from "@/components/annotations-panel";
 import ObjectAnnotationPanel from "@/components/object-annotation-panel";
 import { AnnotationsTimeline } from "@/components/annotations-timeline";
@@ -1189,6 +1190,7 @@ function EpisodeViewerInner({
                       <T>Episode · </T>
                       <T>{episodeId}</T>
                     </p>
+                    <AnnotationRecorder />
                   </div>
                   {videosInfo.length > 0 && (
                     <SimpleVideosPlayer

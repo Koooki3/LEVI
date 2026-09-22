@@ -150,6 +150,13 @@ Use provenance to map flagged episodes back to capture paths and configure `excl
 - **Output**: subclass `OutputFormat` (usually `LeRobotV21`): `check` (supported / warnings / unsupported with reasons and `Solution`s), `defaults`, an `options_model`, and the writer hooks `episode_columns`, `episode_fields`, `finalize`; `from_dataset` if it can be produced from an existing dataset.
 - Register it in `registry.py` and add a fixture builder to `FIXTURES` in `tests/test_formats.py`: the contract tests then check detection, the report and a validated round trip through every compatible pair.
 
+## 限制 / Known limits
+
+- Source fingerprints (size, mtime, per-file stat) detect ordinary recording edits; they are not tamper-proof content hashes. Convert stopped, stable captures.
+- Euler unwrap handles branch crossings, not gimbal lock. Quaternion output is available and changes the state feature width.
+- The exported gripper channel is the binary command (open=1, close=0), not a measured aperture. Measured aperture or other hardware-specific semantics need their own input adapter rather than a reinterpretation of this channel.
+- Validation is scoped to LEVI's own schema, row and media checks; it does not certify every training framework's loader.
+
 ## 验证范围 / Validation scope
 
 Validation decodes every video (or reuses the conversion's own decode), checks frame counts against parquet rows, frame rate from packet timestamps, resolutions, `timestamp == frame_index / fps`, contiguous indices, task indices and metadata counts. It does not establish simulator or policy compatibility. Metadata repair accepts v2 only.

@@ -36,6 +36,65 @@ def new_id(taken=()):
     raise RuntimeError("Could not allocate an unused identifier")
 
 
+def snap_to_episode(output, summary):
+    """Timestamps are float32 in the data and decimals in an answer: an
+    interval written to end at 11.2 s when the last frame is 11.1999998 s
+    ends at the last frame. Only a sub-millisecond overshoot is snapped."""
+    end = summary.get("end")
+    if end is None:
+        return output
+    proposals = [
+        p.model_copy(update={"end": end})
+        if p.end is not None and end < p.end <= end + 1e-3
+        else p
+        for p in output.proposals
+    ]
+    return output.model_copy(update={"proposals": proposals})
+
+
+def anchor_to_draft(output, summary):
+    """A refinement only sees frames within ``boundary_window_seconds`` of
+    each draft boundary, so a boundary it moves further than that has no
+    evidence behind it: the draft's boundary stands. Applies when the answer
+    keeps the draft's intervals one for one (LEVI pins them)."""
+    from levi.inference.provider import pinned_draft
+
+    draft = pinned_draft(summary)
+    window = (summary.get("workflow") or {}).get("boundary_window_seconds")
+    if not draft or not window or len(draft) != len(output.proposals):
+        return output
+
+    def held(new, old):
+        if new is None or old is None:
+            return new
+        return new if abs(new - old) <= window else old
+
+    starts = [
+        held(new.start, old["start"])
+        for new, old in zip(output.proposals, draft, strict=True)
+    ]
+    ends = [
+        held(new.end, old.get("end"))
+        for new, old in zip(output.proposals, draft, strict=True)
+    ]
+    # Intervals keep their order: a start that jumps before the previous
+    # one's falls back, with the previous one's, to the draft.
+    for i in range(1, len(starts)):
+        if starts[i] < starts[i - 1]:
+            starts[i - 1], starts[i] = draft[i - 1]["start"], draft[i]["start"]
+    # Intervals that met in the draft share one boundary: the later start.
+    for i in range(len(draft) - 1):
+        joined = draft[i].get("end")
+        if joined is not None and abs(joined - draft[i + 1]["start"]) < 1e-6:
+            ends[i] = starts[i + 1]
+    proposals = []
+    for new, old, start, end in zip(output.proposals, draft, starts, ends, strict=True):
+        if end is not None and end <= start:
+            start, end = old["start"], old.get("end")
+        proposals.append(new.model_copy(update={"start": start, "end": end}))
+    return output.model_copy(update={"proposals": proposals})
+
+
 class Workbench:
     def __init__(self, state, provider=None):
         self.store = Store(state)
@@ -130,8 +189,18 @@ class Workbench:
             "coverage": "sampled",
             "changes": None,
         }
+        from levi.harness import improvements, memory
+
         from .planning import attach
 
+        # Frozen here: a candidate published while this run works affects the
+        # next run, never this one.
+        run["harness"] = {
+            **improvements.snapshot(self.store.state, run["dataset_key"]),
+            "memory": memory.context(self.store.state, run["dataset_key"]),
+            # Teacher notes written after this instant reach the next task.
+            "frozen_at": time.time(),
+        }
         attach(run)
         self.store.put("runs", id, run)
         self.store.event(
@@ -310,23 +379,115 @@ class Workbench:
                     id, config, context, summary, evidence, "coarse", started
                 )
                 if context.workflow["kind"] == "temporal":
-                    refined_summary, dense = observations.observe(
-                        context,
-                        directory / "input",
+                    # The model's own boundaries, plus the published harness
+                    # windows where the picture changed most -- the same
+                    # learned policy an external agent gets from refine_first.
+                    # ...all within what the model's context window holds,
+                    # measured from the coarse call it just made.
+                    from levi.inference import request_cost
+
+                    costs = request_cost.fitted(config)
+                    if costs is None and config.kind == "ollama":
+                        costs, spent = request_cost.calibrate(
+                            config,
+                            json.dumps(summary, ensure_ascii=False)[:4000],
+                            [
+                                directory / "evidence" / row["artifact"]
+                                for row in evidence
+                                if row.get("artifact")
+                            ],
+                        )
+                        self.store.mutate(
+                            "runs",
+                            id,
+                            lambda r, spent=spent: r.update(
+                                requests=r["requests"] + 2,
+                                tokens=r["tokens"] + spent,
+                            ),
+                        )
+                        self.store.event(
+                            id, "request_cost_calibrated", tokens=spent, fit=costs
+                        )
+                    limit = observations.image_limit(
+                        config,
+                        usage,
+                        evidence,
+                        output.model_dump(),
+                        sum(map(len, observations.skills(context).values()))
+                        + len(json.dumps(summary, ensure_ascii=False)),
+                        costs,
+                    )
+                    batches = observations.plan_refinement(
+                        self,
+                        self.store.get("runs", id),
                         episode,
-                        directory / "evidence",
                         output.proposals,
+                        limit,
+                        len(evidence),
                     )
-                    refined_summary.update(
-                        workflow=context.workflow,
-                        candidate_draft=output.model_dump(),
-                        phase="boundary_refinement",
-                    )
-                    evidence = observations.persist(self, id, episode, summary, dense)
-                    # Only the requested window images go to refinement; old evidence remains retrievable.
-                    output, usage = self.model_step(
-                        id, config, context, refined_summary, dense, "refine", started
-                    )
+                    finest = observations.refine_spacings(context)[0]
+                    for number, batch in enumerate(batches, 1):
+                        if batch.windows:
+                            self.store.event(
+                                id,
+                                "harness_refinement",
+                                episode=episode,
+                                around=batch.windows,
+                            )
+                        if batch.spacing != finest or len(batches) > 1:
+                            self.store.event(
+                                id,
+                                "refinement_coarsened",
+                                episode=episode,
+                                spacing_seconds=batch.spacing,
+                                image_limit=limit,
+                                batch=number,
+                                batches=len(batches),
+                            )
+                        refined_summary, dense = observations.observe(
+                            context,
+                            directory / "input",
+                            episode,
+                            directory / "evidence",
+                            batch.boundaries,
+                            batch.spacing,
+                        )
+                        refined_summary.update(
+                            workflow=context.workflow,
+                            candidate_draft=output.model_dump(),
+                            phase="boundary_refinement",
+                        )
+                        if batch.start is not None:
+                            count = len(batch.boundaries)
+                            refined_summary["refine_only"] = {
+                                "start": batch.start,
+                                "end": min(batch.end, refined_summary["end"]),
+                                "proposals": count,
+                                "instruction": f"Return all {count} draft "
+                                "proposals that start in [start, end), each with "
+                                "refined boundaries and outcome, and nothing "
+                                "else; the rest of the draft is refined "
+                                "separately.",
+                            }
+                        evidence = observations.persist(
+                            self, id, episode, summary, dense
+                        )
+                        # Only the requested window images go to refinement;
+                        # old evidence remains retrievable.
+                        part, usage = self.model_step(
+                            id,
+                            config,
+                            context,
+                            refined_summary,
+                            dense,
+                            "refine" if len(batches) == 1 else f"refine-{number}",
+                            started,
+                        )
+                        output = (
+                            part
+                            if batch.start is None
+                            else observations.merge(output, part, batch)
+                        )
                 quality = observations.quality(
                     context, output.proposals, evidence, summary
                 )
@@ -368,13 +529,38 @@ class Workbench:
         except Exception as exc:  # noqa: BLE001 - worker boundary; no raw provider errors persisted
             # Never persist provider exception messages: HTTP libraries may include
             # Authorization headers or untrusted response bodies.
+            from pydantic import ValidationError
+
+            from levi.inference.gpu import GpuBusy
+            from levi.inference.ollama import OllamaError
+            from levi.inference.provider import InvalidAnswer, describe
+
+            from .observations import ContextOverflow
             from .supervision import AwaitingTeacher
 
-            reason = (
-                str(exc)
-                if type(exc) is ValueError or isinstance(exc, AwaitingTeacher)
-                else f"Execution blocked ({type(exc).__name__}); inspect provider configuration"
-            )
+            if isinstance(exc, ValidationError):
+                # The model's answer did not fit the schema: say where, so a
+                # person or a teacher can see what it got wrong. These messages
+                # describe model output, never credentials or HTTP bodies.
+                reason = describe(exc)
+            else:
+                reason = (
+                    str(exc)
+                    if type(exc) is ValueError
+                    or isinstance(
+                        exc,
+                        (
+                            Conflict,
+                            AwaitingTeacher,
+                            GpuBusy,
+                            OllamaError,
+                            ContextOverflow,
+                            InvalidAnswer,
+                        ),
+                    )
+                    else f"Execution blocked ({type(exc).__name__}); inspect provider configuration"
+                )
+            blocked_by = "gpu" if isinstance(exc, GpuBusy) else None
             self.store.mutate(
                 "runs",
                 id,
@@ -387,6 +573,8 @@ class Workbench:
                         else RunStatus.BLOCKED
                     ),
                     reason=reason,
+                    # The guardian resumes these by itself once the GPU clears.
+                    blocked_by=blocked_by,
                 ),
             )
             self.store.event(id, "blocked", reason=reason)
@@ -403,6 +591,9 @@ class Workbench:
             self.store.release(id, owner)
             with _LOCK:
                 _ACTIVE.pop(id, None)
+            from levi.harness.closure import close_if_finished
+
+            close_if_finished(self.store, id)
 
     def model_step(self, id, config, context, summary, evidence, phase, started):
         context = TaskContext.model_validate(context.model_dump())
@@ -425,6 +616,11 @@ class Workbench:
                 "Provider configuration changed or disconnected before model phase"
             )
         directory = self.store.run_dir(id)
+        from levi.harness.context import as_text, brief
+
+        # What LEVI knows locally about this dataset, as frozen at plan time:
+        # a model LEVI runs sees it only if it is in the prompt.
+        learner_brief = brief(self.store.state, run, phase)
         fingerprint = digest(
             {
                 "input": run["manifest"],
@@ -433,9 +629,20 @@ class Workbench:
                 "skills": skills(context),
                 "summary": summary,
                 "evidence": evidence,
+                "brief": learner_brief,
             }
         )
         cache_id = f"{id}:{summary['episode_index']}:{phase}"
+        # The model sees this phase's images; it may cite any frame already
+        # observed for the episode -- a refinement keeps the draft's
+        # citations of coarse frames.
+        try:
+            ledger = self.store.get("evidence", f"{id}:{summary['episode_index']}")[
+                "items"
+            ]
+        except KeyError:
+            ledger = []
+        ledger = list({row["id"]: row for row in [*ledger, *evidence]}.values())
         try:
             cached = self.store.get("model_cache", cache_id)
         except KeyError:
@@ -453,7 +660,16 @@ class Workbench:
             )
             output = ModelOutput.model_validate(cached["output"])
             return gate(
-                self, id, context, summary, evidence, phase, fingerprint, output
+                self,
+                id,
+                context,
+                summary,
+                ledger,
+                phase,
+                fingerprint,
+                output,
+                cached.get("learner_error"),
+                cached.get("learner_raw"),
             ), cached["usage"]
         available = context.budget.max_tokens - run["tokens"] - run["reserved_tokens"]
         seconds = (
@@ -467,7 +683,9 @@ class Workbench:
             or seconds < 1
         ):
             raise ValueError("Approved budget exhausted")
-        reservation = min(8192, available)
+        # One call can consume at most its context window (prompt and answer
+        # share it), so that is what it reserves.
+        reservation = min(max(8192, config.context_tokens), available)
         calls = min(3, context.budget.max_calls - run["requests"])
         self.store.mutate(
             "runs",
@@ -484,24 +702,83 @@ class Workbench:
                 "max_seconds": max(1, int(seconds)),
             }
         )
+        from levi.inference.provider import InvalidAnswer
+
         began = time.monotonic()
-        output, usage = self.provider.generate(
-            config,
-            context.instruction,
-            summary,
-            evidence,
-            directory / "evidence",
-            budget,
-        )
-        output = ModelOutput.model_validate(output)
-        self.validate_proposals(context, output.proposals, evidence, summary)
-        if (
+        # The tokens are spent whether or not the answer holds up: settle
+        # them first. Under a teacher an invalid answer is the lesson itself,
+        # so it goes to the teacher with the reason (and, when it did not
+        # even parse, the raw text); without one it is kept beside the run
+        # and the phase fails.
+        raw = problem = None
+        try:
+            output, usage = self.provider.generate(
+                config,
+                context.instruction + as_text(learner_brief),
+                summary,
+                evidence,
+                directory / "evidence",
+                budget,
+            )
+            output = anchor_to_draft(
+                snap_to_episode(ModelOutput.model_validate(output), summary),
+                summary,
+            )
+        except InvalidAnswer as exc:
+            problem, raw, usage = exc, exc.raw, exc.usage
+            output = exc.salvaged or ModelOutput(
+                summary="(the answer did not parse; see learner_raw)"
+            )
+        except BaseException:
+            # No answer and no reported usage: give the reservation back and
+            # count the attempt, or every failed call would strand its
+            # reservation and the run would look spent.
+            self.store.mutate(
+                "runs",
+                id,
+                lambda r: r.update(
+                    requests=r["requests"] - calls + 1,
+                    reserved_tokens=r["reserved_tokens"] - reservation,
+                ),
+            )
+            self.store.event(
+                id, "usage_unknown", phase=phase, episode=summary["episode_index"]
+            )
+            raise
+        if problem is None:
+            try:
+                self.validate_proposals(context, output.proposals, ledger, summary)
+            except ValueError as exc:
+                problem = exc
+        supervised = context.supervision != "none"
+        if problem is not None and not supervised and output.proposals:
+            # No teacher to hand it to: keep what holds up on its own, say
+            # what was dropped, and let the human review see the rest.
+            # In the model's order, each proposal stays if the answer so far
+            # still validates with it (so of two overlapping intervals the
+            # first one written is kept).
+            kept = []
+            for proposal in output.proposals:
+                try:
+                    self.validate_proposals(context, [*kept, proposal], ledger, summary)
+                except ValueError:
+                    continue
+                kept.append(proposal)
+            if kept:
+                self.store.event(
+                    id,
+                    "answer_salvaged",
+                    phase=phase,
+                    episode=summary["episode_index"],
+                    dropped=len(output.proposals) - len(kept),
+                    reason=str(problem)[:300],
+                )
+                output = output.model_copy(update={"proposals": kept})
+                problem = raw = None
+        overspent = (
             usage.get("requests", calls) > calls
             or usage.get("tokens", reservation) > reservation
-        ):
-            raise ValueError(
-                "Provider exceeded reserved budget; stopped before further calls"
-            )
+        )
         usage = {
             **usage,
             "elapsed_seconds": time.monotonic() - began,
@@ -520,26 +797,61 @@ class Workbench:
                 tokens=latest["tokens"] + usage.get("tokens", reservation),
             )
             self.store.save(db, "runs", id, latest)
-            self.store.save(
-                db,
-                "model_cache",
-                cache_id,
+            # Spent is spent, overspent or not; only a usable answer is cached.
+            if not overspent and (problem is None or supervised):
+                self.store.save(
+                    db,
+                    "model_cache",
+                    cache_id,
+                    {
+                        "fingerprint": fingerprint,
+                        "output": output.model_dump(),
+                        "usage": usage,
+                        **({"learner_error": str(problem)} if problem else {}),
+                        **({"learner_raw": raw} if raw else {}),
+                    },
+                )
+        if usage.get("prompt_chars") and usage.get("prompt_tokens"):
+            from levi.inference import request_cost
+
+            request_cost.record(
+                config,
+                usage["prompt_chars"],
+                sum(1 for row in evidence if row.get("artifact")),
+                usage["prompt_tokens"],
+            )
+        if overspent:
+            raise ValueError(
+                "Provider exceeded reserved budget; stopped before further calls"
+            )
+        name = f"episode_{summary['episode_index']:06d}-{phase}"
+        (directory / f"{name}{'-rejected' if problem else ''}.json").write_text(
+            json.dumps(
                 {
-                    "fingerprint": fingerprint,
                     "output": output.model_dump(),
                     "usage": usage,
+                    **({"learner_error": str(problem)} if problem else {}),
+                    **({"learner_raw": raw} if raw else {}),
                 },
-            )
-        (directory / f"episode_{summary['episode_index']:06d}-{phase}.json").write_text(
-            json.dumps(
-                {"output": output.model_dump(), "usage": usage}, ensure_ascii=False
+                ensure_ascii=False,
             )
         )
         self.store.event(
             id, "model_step", phase=phase, episode=summary["episode_index"], usage=usage
         )
+        if problem is not None and not supervised:
+            raise problem
         return gate(
-            self, id, context, summary, evidence, phase, fingerprint, output
+            self,
+            id,
+            context,
+            summary,
+            ledger,
+            phase,
+            fingerprint,
+            output,
+            str(problem) if problem else None,
+            raw,
         ), usage
 
     @staticmethod
@@ -570,9 +882,15 @@ class Workbench:
                         f"{known[id]['episode_index']}"
                     )
             if proposal.start < summary["start"] or proposal.start > summary["end"]:
-                raise ValueError("Proposal begins outside episode")
+                raise ValueError(
+                    f"Proposal begins at {proposal.start:g} s, outside the "
+                    f"episode ({summary['start']:g}-{summary['end']:g} s)"
+                )
             if proposal.end is not None and proposal.end > summary["end"]:
-                raise ValueError("Proposal ends outside episode")
+                raise ValueError(
+                    f"Proposal ends at {proposal.end:g} s, after the episode's "
+                    f"last frame at {summary['end']:g} s"
+                )
 
     def prepare_changes(self, id):
         run = self.store.get("runs", id)
@@ -604,7 +922,17 @@ class Workbench:
                 "input_sha256": run["manifest"]["sha256"],
                 "config_sha256": digest(run["context"]),
                 "included_episodes": run["completed"],
-                "skills_version": "1",
+                # What the agent was instructed with, as the plan approved it:
+                # the skill fingerprints and the harness parameters.
+                "skills_version": ",".join(
+                    f"{name}@{_skill_version(name)}"
+                    for name in sorted(run.get("skill_fingerprints", {}))
+                )
+                or "unknown",
+                "harness": {
+                    k: (run.get("harness") or {}).get(k)
+                    for k in ("parameters", "sources")
+                },
                 "supervision": run["context"].get("supervision", "none"),
                 "teacher_grant": run["context"].get("teacher_grant"),
                 "reviewer_type": None,
@@ -778,23 +1106,43 @@ class Workbench:
         if change.get("undo_of"):
             apply(self, folder, change, run["dataset_key"])
         with pin(self.store.state, run["dataset_key"], folder):
+            from .supersede import split
+
+            provenance_path = folder / "agent-provenance.json"
+            history = (
+                json.loads(provenance_path.read_text())
+                if provenance_path.exists()
+                else []
+            )
             grouped = {}
             for index, proposal in enumerate(change["proposals"]):
                 if change.get("decisions", {}).get(str(index)) == "rejected":
                     continue
                 grouped.setdefault(proposal["episode_index"], []).append(proposal)
+            replaced = {}
+            origin = {"run_id": run["id"], "changeset": id}
             for ep, proposals in grouped.items():
                 response = app.get_episode_atoms(
                     ep,
                     repo_id=run["context"]["repo_id"],
                     revision=run["context"].get("revision"),
                 )
-                atoms = json.loads(response.body)["atoms"]
+                atoms, gone = split(
+                    json.loads(response.body)["atoms"], proposals, history, ep
+                )
+                if gone:
+                    replaced[str(ep)] = len(gone)
                 for proposal in proposals:
                     ANNOTATIONS[proposal["kind"]].apply(
-                        proposal, app=app, state=state, atoms=atoms, folder=folder
+                        proposal,
+                        app=app,
+                        state=state,
+                        atoms=atoms,
+                        folder=folder,
+                        origin=origin,
                     )
                 app._write_episode_annotations(state, ep, atoms)
+            change["replaced"] = replaced
             if change.get("object_jobs"):
                 from levi.annotations.schema import ObjectAnnotation
 
@@ -836,19 +1184,20 @@ class Workbench:
                         "reviewer_type": "human",
                     },
                 )
-            provenance_path = folder / "agent-provenance.json"
-            history = (
-                json.loads(provenance_path.read_text())
-                if provenance_path.exists()
-                else []
-            )
             change["status"] = "committed"
             change["published_revision"] = revision
             history.append(change)
             app.atomic(provenance_path, history)
         change["status"] = "committed"
         change["published_revision"] = revision
-        receipt = {"ok": True, "changeset": id, "revision": revision, "parent": base}
+        receipt = {
+            "ok": True,
+            "changeset": id,
+            "revision": revision,
+            "parent": base,
+            # Earlier agent atoms this commit replaced, per episode.
+            "replaced": change.get("replaced", {}),
+        }
         result = self.store.publish(
             run["dataset_key"], base, revision, key, request, receipt, change=change
         )
@@ -863,6 +1212,19 @@ class Workbench:
         )
         self.store.event(run["id"], "committed", revision=revision)
         return result
+
+
+def _skill_version(name):
+    """The ``metadata.version`` a skill declares in its front matter."""
+    import re
+    from pathlib import Path
+
+    path = Path(__file__).parent / "skills" / name / "SKILL.md"
+    try:
+        found = re.search(r'version:\s*"?([\w.]+)"?', path.read_text())
+    except OSError:
+        return "missing"
+    return found.group(1) if found else "unversioned"
 
 
 def stop():
@@ -944,4 +1306,36 @@ def prepare_evidence(wb, id):
             wb.prepare_changes(id)
             wb.store.mutate("runs", id, lambda r: r.update(status="waiting_for_review"))
         wb.store.event(id, "evidence_prepared", coverage="sampled")
-        return {"run_id": id, "coverage": "sampled", "episodes": selected}
+        value = {"run_id": id, "coverage": "sampled", "episodes": selected}
+        top_k = (
+            (run.get("harness") or {})
+            .get("parameters", {})
+            .get("evidence.refine_top_k", 0)
+        )
+        if top_k and ctx.workflow["kind"] == "temporal":
+            from .observations import changes
+
+            run = wb.store.get("runs", id)
+            value["refine_first"] = {
+                str(ep): changes(wb, run, ep, top_k)["suggested_around_seconds"]
+                for ep in selected
+            }
+            value["refine_policy"] = (
+                f"Published harness parameter evidence.refine_top_k={top_k} "
+                f"({run['harness']['sources'].get('evidence.refine_top_k')}): call "
+                "evidence.refine with these around_seconds before proposing; they "
+                "are the coarse intervals where the picture changed most."
+            )
+        width = (
+            (run.get("harness") or {})
+            .get("parameters", {})
+            .get("evidence.mosaic_tile_width")
+        )
+        if width:
+            value["read_with"] = {
+                "layout": "mosaic",
+                "tile_width": width,
+                "why": "evidence.read uses this dataset's published tile width when "
+                "you omit tile_width; image tokens grow with its square.",
+            }
+        return value

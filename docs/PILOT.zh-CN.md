@@ -71,7 +71,7 @@ VS Code Remote/SSH 中工具进程运行在数据所在主机；需要网页时�
 ```
 
 托管 Claude 使用 `pilot_runtime: "claude"`。时序子任务需补充可观察的定义，物体标注需补充目标；
-详见 [Harness](HARNESS.md)。外发许可只覆盖已选证据，不代表批准无界限上传。
+详见 [Agents](AGENTS.md)。外发许可只覆盖已选证据，不代表批准无界限上传。
 
 ```bash
 uv run levi agent plan create plan.json

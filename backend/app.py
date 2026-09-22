@@ -66,7 +66,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from levi import naming
 from levi.agent.legacy import editor
@@ -77,6 +77,8 @@ from levi.annotations import (
     Sam3Plan,
     SidecarStore,
     outcomes,
+    status,
+    vocabulary,
 )
 from levi.annotations.sam3_protocol import (
     fake_annotations,
@@ -198,6 +200,10 @@ class LanguageAtom(BaseModel):
     # row-level ``camera`` field added in lerobot PR 3467.
     camera: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
+    # LEVI-only, like ``to``: subtask id, outcome, attempt, stated doubt and
+    # the agent run a segment came from. Declared so a save from the editor
+    # keeps it; ``_normalize_atom`` never exports it.
+    levi: dict[str, Any] | None = None
 
 
 class EpisodeAtomsPayload(BaseModel):
@@ -211,6 +217,23 @@ class OutcomePayload(BaseModel):
     repo_id: str | None = None
     local_path: str | None = None
     outcome: Literal["success", "failure"] | None = None
+
+
+class StatusPayload(BaseModel):
+    repo_id: str | None = None
+    local_path: str | None = None
+    done: bool = True
+
+
+class VocabularyPayload(BaseModel):
+    repo_id: str | None = None
+    local_path: str | None = None
+    subtasks: list[dict[str, Any]] = Field(default_factory=list, max_length=40)
+
+
+class RecordingPayload(BaseModel):
+    repo_id: str | None = None
+    local_path: str | None = None
 
 
 class Sam3PlanRequest(Sam3Plan):
@@ -649,8 +672,11 @@ def _load_state(req: DatasetRef, key: str, *, annotations: bool = True) -> Datas
         CACHE_ROOT.mkdir(parents=True, exist_ok=True)
         if not re.fullmatch(r"[\w.-]+/[\w.-]+", req.repo_id):
             raise HTTPException(400, "Invalid Hub dataset ID")
-        root = inside(naming.hub_cache_directory(
-            CACHE_ROOT, req.repo_id, req.revision or "main", credential_scope()))
+        root = inside(
+            naming.hub_cache_directory(
+                CACHE_ROOT, req.repo_id, req.revision or "main", credential_scope()
+            )
+        )
         root.mkdir(parents=True, exist_ok=True)
         snapshot_download(
             req.repo_id,
@@ -1460,6 +1486,7 @@ def _do_export(
         shutil.rmtree(dst_meta)
     shutil.copytree(src_meta, dst_meta)
     from levi.agent.store import Store, current_pin
+
     bundle = current_pin(STATE, state.display_slug)
     if bundle is None:
         bundle = Store(STATE).bundle(state.display_slug)
@@ -1885,6 +1912,153 @@ def set_outcome_label(episode_index: int, payload: OutcomePayload) -> JSONRespon
         raise HTTPException(status_code=404, detail="Unknown episode")
     value = outcomes.write_label(state.annotations_dir, episode_index, payload.outcome)
     return JSONResponse({"ok": True, "label": value})
+
+
+@app.get("/api/episodes/status")
+@editor(read_only=True)
+def get_episode_status(
+    repo_id: str | None = None,
+    revision: str | None = None,
+    local_path: str | None = None,
+) -> JSONResponse:
+    """Episodes a person confirmed as completely annotated."""
+    state = _ensure_state(
+        DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path)
+    )
+    done = status.read_all(state.annotations_dir)
+    return JSONResponse({"status": {str(k): v for k, v in done.items()}})
+
+
+@app.post("/api/episodes/{episode_index}/status")
+@editor()
+def set_episode_status(episode_index: int, payload: StatusPayload) -> JSONResponse:
+    state = _ensure_state(
+        DatasetRef(repo_id=payload.repo_id, local_path=payload.local_path)
+    )
+    known = {int(i) for i in state.episodes_df["episode_index"].tolist()}
+    if episode_index not in known:
+        raise HTTPException(status_code=404, detail="Unknown episode")
+    value = status.confirm(state.annotations_dir, episode_index, payload.done)
+    return JSONResponse({"ok": True, "status": value})
+
+
+def _suggested_subtasks(state: DatasetState) -> list[dict]:
+    """The definitions of the latest agent plan on this dataset, offered as a
+    starting vocabulary; a person still has to save them."""
+    try:
+        from levi.agent.store import Store
+
+        runs = [
+            r
+            for r in Store(STATE).list("runs")
+            if r.get("dataset_key") == state.display_slug
+            and (r["context"].get("workflow") or {}).get("definitions")
+        ]
+    except Exception:  # noqa: BLE001 - a suggestion is optional
+        return []
+    if not runs:
+        return []
+    latest = max(runs, key=lambda r: r.get("created_at") or 0)
+    return [
+        {
+            "id": d["id"],
+            "label": d.get("label") or d["id"],
+            "definition": d.get("definition", ""),
+        }
+        for d in latest["context"]["workflow"]["definitions"]
+    ]
+
+
+@app.get("/api/dataset/vocabulary")
+@editor(read_only=True)
+def get_vocabulary(
+    repo_id: str | None = None,
+    revision: str | None = None,
+    local_path: str | None = None,
+) -> JSONResponse:
+    """The dataset's subtask vocabulary, and a suggestion when it has none."""
+    state = _ensure_state(
+        DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path)
+    )
+    value = vocabulary.read(state.annotations_dir)
+    if not value["subtasks"]:
+        value["suggested"] = _suggested_subtasks(state)
+    value["special"] = list(vocabulary.SPECIAL)
+    return JSONResponse(value)
+
+
+@app.post("/api/dataset/vocabulary")
+@editor()
+def set_vocabulary(payload: VocabularyPayload) -> JSONResponse:
+    state = _ensure_state(
+        DatasetRef(repo_id=payload.repo_id, local_path=payload.local_path)
+    )
+    try:
+        value = vocabulary.write(state.annotations_dir, payload.subtasks)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(value)
+
+
+def _recording_name(repo_id, local_path) -> str:
+    state = _ensure_state(DatasetRef(repo_id=repo_id, local_path=local_path))
+    if not state.local_path and not (repo_id or "").startswith("local/"):
+        raise HTTPException(
+            status_code=400, detail="Recording needs a dataset registered in LEVI"
+        )
+    return state.display_slug
+
+
+@app.get("/api/eval/recording")
+@editor(read_only=True)
+def get_recording(repo_id: str | None = None, local_path: str | None = None):
+    from levi.eval import record
+
+    return JSONResponse(
+        {"session": record.session(_recording_name(repo_id, local_path))}
+    )
+
+
+@app.post("/api/eval/recording/start")
+@editor()
+def start_recording(payload: RecordingPayload) -> JSONResponse:
+    from levi.eval import record
+
+    name = _recording_name(payload.repo_id, payload.local_path)
+    return JSONResponse({"session": record.start(name)})
+
+
+@app.post("/api/eval/recording/stop")
+@editor()
+def stop_recording(payload: RecordingPayload) -> JSONResponse:
+    """Stop the running recording and write ``eval/<dataset>_human_<hour>.md``."""
+    from levi.eval import record
+
+    name = _recording_name(payload.repo_id, payload.local_path)
+    try:
+        result = record.stop(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    m = result["block"]["metrics"]
+    return JSONResponse(
+        {
+            "path": result["path"],
+            "seconds": result["block"]["seconds"],
+            "episodes": result["episodes"],
+            "segments": m["segments"],
+            "coverage_seconds": m["coverage"]["seconds"],
+            "coverage_frames": m["coverage"]["frames"],
+        }
+    )
+
+
+@app.post("/api/eval/recording/cancel")
+@editor()
+def cancel_recording(payload: RecordingPayload) -> JSONResponse:
+    from levi.eval import record
+
+    record.cancel(_recording_name(payload.repo_id, payload.local_path))
+    return JSONResponse({"session": None})
 
 
 def _prepare_sam3_media(state: DatasetState) -> None:

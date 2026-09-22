@@ -130,8 +130,26 @@ def _plan(job_id, stage, source_path, settings, output):
     }
 
 
+# Worker threads that have not finished, so a caller (a test's teardown, a
+# shutdown) can wait for them instead of letting one outlive its workspace.
+_THREADS: set[threading.Thread] = set()
+
+
+def wait_idle(timeout=60.0):
+    """Wait for every launched job thread to finish; returns those still running."""
+    import time as _time
+
+    deadline = _time.monotonic() + timeout
+    for thread in list(_THREADS):
+        thread.join(max(0.0, deadline - _time.monotonic()))
+    return [t for t in _THREADS if t.is_alive()]
+
+
 def launch(job):
+    # Bound now: the worker thread must write where this job was planned,
+    # even if the module's STATE is pointed elsewhere before it finishes.
     path = STATE / "jobs" / (job["id"] + ".json")
+    jobs_dir = path.parent
     with LOCK:
         existing = read(path, None)
         if not existing or existing["status"] != "planned":
@@ -152,7 +170,7 @@ def launch(job):
                     raise ValueError(
                         "Capture changed after planning; create a new plan"
                     )
-                atomic(STATE / "jobs" / (job["id"] + ".options.json"), job["options"])
+                atomic(jobs_dir / (job["id"] + ".options.json"), job["options"])
                 log = path.with_suffix(".log")
                 with log.open("w") as handle:
                     proc = subprocess.Popen(
@@ -171,7 +189,7 @@ def launch(job):
                         proc.wait()
                         raise ValueError("Conversion timed out") from None
                 job["exit_code"] = code
-                result = read(STATE / "jobs" / (job["id"] + ".result.json"), {})
+                result = read(jobs_dir / (job["id"] + ".result.json"), {})
                 job["result"] = result
                 job["status"] = (
                     "succeeded" if code == 0 and result.get("ok") else "failed"
@@ -204,7 +222,15 @@ def launch(job):
                     ACTIVE.pop(job["id"], None)
                 atomic(path, job)
 
-    threading.Thread(target=run, daemon=True).start()
+    def tracked():
+        try:
+            run()
+        finally:
+            _THREADS.discard(threading.current_thread())
+
+    thread = threading.Thread(target=tracked, daemon=True)
+    _THREADS.add(thread)
+    thread.start()
     return job
 
 

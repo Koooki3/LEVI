@@ -124,6 +124,10 @@ def main():
 
         sys.argv.pop(1)
         return clean()
+    if len(sys.argv) > 1 and sys.argv[1] == "docs":
+        from .docs import main as docs
+
+        return docs(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == "migrate":
         from .migrations import main as migrate
 
@@ -140,7 +144,8 @@ def main():
         # someone reading --help would not know they exist.
         epilog=(
             "Also available: stop (stop the shared service), clean (bounded "
-            "cache cleanup), migrate, convert, agent, sam3. Each takes its own "
+            "cache cleanup), migrate, convert, agent, sam3, docs (check or regenerate "
+            "the documentation). Each takes its own "
             "--help."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -216,7 +221,10 @@ def main():
         # caught locally, because nothing ran it here).
         frontend = subprocess.call([bun, "run", "validate"], cwd=PROJECT)
         backend = subprocess.call(["ruff", "check", "."], cwd=PROJECT)
-        raise SystemExit(frontend or backend)
+        # And the docs against the code (see levi/docs.py).
+        from .docs import main as docs
+
+        raise SystemExit(frontend or backend or docs([]))
     if args.command == "serve" and not (PROJECT / ".next/BUILD_ID").is_file():
         parser.error("Missing production build. Run: uv run levi build / 缺少生产构建")
     os.environ.setdefault("LEVI_UI_TOKEN", __import__("secrets").token_urlsafe(32))
