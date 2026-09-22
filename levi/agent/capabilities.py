@@ -5,7 +5,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from .runtime import Workbench
-from .schema import Budget, Contract, Proposal, TaskContext
+from .schema import Budget, Contract, ModelOutput, Proposal, TaskContext
 from .security import Principal
 from .store import Conflict
 
@@ -16,6 +16,14 @@ class Empty(Contract):
 
 class RunRef(Contract):
     run_id: str
+
+
+class TeacherFeedback(RunRef):
+    teaching_id: str
+    revision: int = Field(ge=0)
+    decision: Literal["accept", "revise", "reject"]
+    note: str = Field(min_length=1, max_length=1000)
+    output: ModelOutput | None = None
 
 
 class RunList(Contract):
@@ -185,6 +193,16 @@ class Seek(RunRef):
 from .objects import ObjectRequest
 
 SPECS = {
+    "supervision.pending": (
+        RunRef,
+        "read",
+        "Read the assigned teacher's evidence and pending annotation phases",
+    ),
+    "supervision.feedback": (
+        TeacherFeedback,
+        "draft",
+        "Accept, revise or reject a learner phase; never approve execution or commit",
+    ),
     "runs.result": (
         RunRef,
         "read",
@@ -449,6 +467,33 @@ def _invoke(
         and not run["context"]["allow_media_egress"]
     ):
         raise PermissionError("External media access was not authorized by this plan")
+    if (
+        run
+        and run["context"].get("supervision", "none") != "none"
+        and not principal.human
+        and permission in {"draft", "execute"}
+        and name != "supervision.feedback"
+    ):
+        raise PermissionError(
+            "External agents may only submit teacher feedback for this supervised task"
+        )
+    if name == "supervision.pending":
+        from .supervision import pending
+
+        return pending(workbench, args.run_id, principal)
+    if name == "supervision.feedback":
+        from .supervision import feedback
+
+        return feedback(
+            workbench,
+            args.run_id,
+            principal,
+            args.teaching_id,
+            args.revision,
+            args.decision,
+            args.note,
+            args.output,
+        )
     if name == "runs.result":
         from .tracking import manifest
 

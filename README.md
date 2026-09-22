@@ -9,6 +9,8 @@
 **Guides** — [Conversion](docs/CONVERSION.md) · [RECAP export](docs/RECAP.md) · [Agent Workbench](docs/AGENT_WORKBENCH.md) · [Codex / Claude Pilot](docs/PILOT.md) · [SAM3 objects](docs/SAM3.md) · [Workspace layout](.state.md)
 **Reference** — [Features](docs/FEATURES.md) · [API](docs/API.md) · [Agent Harness](docs/HARNESS.md) · [Validation record](docs/VALIDATION.md) · [Attribution](docs/UPSTREAM.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
+**Ollama / local teacher workflow** — [Ollama / local teacher workflow](docs/OLLAMA.md)
+
 LEVI is an independent robotics dataset browser, annotation editor, converter and review workbench derived from [LeRobot Dataset Visualizer](https://github.com/huggingface/lerobot-dataset-visualizer). English is the default; Chinese is available through the language switch. **The complete capture conversion pipeline is bundled** and requires no sibling repository or training environment: it inspects an input, reports which requirements it meets and which exports it supports, and writes LeRobot v2.1 or a RECAP (π\*0.6) value dataset. Raw robot captures can be browsed and annotated before conversion; their annotations carry over into the converted dataset.
 
 The interface is designed for both standalone browsers and Hugging Face Space embeds. Language preference is kept per browser when storage is available, and the annotation workbench handles Ctrl/Cmd+S, Ctrl/Cmd+Z and playback keys without opening the browser's native Save Page dialog.

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { usePathname } from "next/navigation";
+import { TeacherChoice, TeachingStatus } from "./agent-supervision";
 import AgentRuntimeConnections from "./agent-runtime-connections";
 import AgentPilot from "./agent-pilot";
 import AgentQuality from "./agent-quality";
@@ -55,6 +56,7 @@ type Run = {
     cameras: string[];
     instruction: string;
     provider: string;
+    supervision?: "none" | "shadow" | "supervised";
     pilot_runtime?: "codex" | "claude";
     workflow?: { kind: string };
     budget?: unknown;
@@ -107,6 +109,10 @@ export default function AgentWorkbench() {
     "task",
   );
   const [providers, setProviders] = useState<Provider[]>([]);
+  const [supervision, setSupervision] = useState<
+    "none" | "shadow" | "supervised"
+  >("none");
+  const [teacherGrant, setTeacherGrant] = useState("");
   const [provider, setProvider] = useState("");
   const [runs, setRuns] = useState<Run[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -137,6 +143,11 @@ export default function AgentWorkbench() {
   // The snapshot cap is a guard against copying an unreasonable amount of a
   // dataset, not a knob a person tunes per task.
   const storageMiB = 512;
+  const [providerKind, setProviderKind] = useState<
+    "openai-compatible" | "ollama"
+  >("openai-compatible");
+  const [modelDigest, setModelDigest] = useState<string | null>(null);
+  const [contextTokens, setContextTokens] = useState(8192);
   const [name, setName] = useState("model");
   const [url, setUrl] = useState("");
   const [model, setModel] = useState("");
@@ -281,6 +292,11 @@ export default function AgentWorkbench() {
     instruction,
     provider: pilotRuntime ? "external" : provider,
     pilot_runtime: pilotRuntime || null,
+    supervision:
+      pilotRuntime || ["external", "local-tools"].includes(provider)
+        ? "none"
+        : supervision,
+    teacher_grant: teacherGrant || null,
     mode,
     // On the MCP channel the consent is the connection itself: you created
     // it, it names the datasets it may touch, and the frames go to your own
@@ -432,6 +448,9 @@ export default function AgentWorkbench() {
               }
               edit={(p) => {
                 setTab("model");
+                setProviderKind(p.kind ?? "openai-compatible");
+                setModelDigest(p.model_digest ?? null);
+                setContextTokens(p.context_tokens ?? 8192);
                 setName(p.name);
                 setUrl(p.base_url);
                 setModel(p.model);
@@ -450,12 +469,15 @@ export default function AgentWorkbench() {
                 void act(async () => {
                   await api("/providers", {
                     name,
+                    kind: providerKind,
+                    model_digest: modelDigest,
+                    context_tokens: contextTokens,
                     base_url: url,
                     model,
                     key_env: keyEnv,
                     vision,
                     tools: supportsTools,
-                    structured_output: false,
+                    structured_output: providerKind === "ollama",
                     allow_localhost: allowLocal,
                   });
                   setProviders(await api<Provider[]>("/providers"));
@@ -465,6 +487,31 @@ export default function AgentWorkbench() {
               }}
             >
               <label>
+                Connection type
+                <select
+                  value={providerKind}
+                  onChange={(e) => {
+                    const kind = e.target.value as
+                      | "openai-compatible"
+                      | "ollama";
+                    setProviderKind(kind);
+                    setModelDigest(null);
+                    if (kind === "ollama") {
+                      setName("ollama-local");
+                      setUrl("http://127.0.0.1:11434");
+                      setModel("qwen3.5:4b");
+                      setAllowLocal(true);
+                      setSupportsTools(false);
+                    }
+                  }}
+                >
+                  <option value="openai-compatible">
+                    OpenAI-compatible API
+                  </option>
+                  <option value="ollama">Ollama · local service</option>
+                </select>
+              </label>
+              <label>
                 Provider name
                 <input
                   value={name}
@@ -473,11 +520,18 @@ export default function AgentWorkbench() {
                 />
               </label>
               <label>
-                Compatible API base URL
+                {t(
+                  providerKind === "ollama"
+                    ? "Ollama service URL"
+                    : "Compatible API base URL",
+                )}
                 <input
                   type="url"
                   value={url}
-                  onChange={(e) => setUrl(e.target.value)}
+                  onChange={(e) => {
+                    setUrl(e.target.value);
+                    setModelDigest(null);
+                  }}
                   placeholder="https://provider.example/v1"
                   required
                 />
@@ -486,30 +540,43 @@ export default function AgentWorkbench() {
                 Model ID
                 <input
                   value={model}
-                  onChange={(e) => setModel(e.target.value)}
+                  onChange={(e) => {
+                    setModel(e.target.value);
+                    setModelDigest(null);
+                  }}
                   required
                 />
               </label>
-              <label>
-                Server API-key environment variable
-                <input
-                  value={keyEnv}
-                  onChange={(e) => setKeyEnv(e.target.value)}
-                  required
-                />
-              </label>
-              <p className="levi-agent-muted">
-                Set this environment variable before starting LEVI. Never paste
-                the key here. Tool-call support is required.
-              </p>
-              <label className="levi-agent-check">
-                <input
-                  type="checkbox"
-                  checked={supportsTools}
-                  onChange={(e) => setSupportsTools(e.target.checked)}
-                />
-                Model supports structured tool calls
-              </label>
+              {providerKind !== "ollama" && (
+                <>
+                  <label>
+                    Server API-key environment variable
+                    <input
+                      value={keyEnv}
+                      onChange={(e) => setKeyEnv(e.target.value)}
+                      required
+                    />
+                  </label>
+                  <p className="levi-agent-muted">
+                    Set this environment variable before starting LEVI. Never
+                    paste the key here. Tool-call support is required.
+                  </p>
+                  <label className="levi-agent-check">
+                    <input
+                      type="checkbox"
+                      checked={supportsTools}
+                      onChange={(e) => setSupportsTools(e.target.checked)}
+                    />
+                    Model supports structured tool calls
+                  </label>
+                </>
+              )}
+              {providerKind === "ollama" && (
+                <p className="levi-agent-muted">
+                  Save this connection, then inspect and bind the installed
+                  model in Accounts & connections. No API key is required.
+                </p>
+              )}
               <label className="levi-agent-check">
                 <input
                   type="checkbox"
@@ -570,6 +637,18 @@ export default function AgentWorkbench() {
                   });
                 }}
               >
+                {!pilotRuntime &&
+                  !["external", "local-tools"].includes(provider) && (
+                    <TeacherChoice
+                      dataset={repo}
+                      mode={supervision}
+                      teacher={teacherGrant}
+                      change={(mode, teacher) => {
+                        setSupervision(mode);
+                        setTeacherGrant(teacher);
+                      }}
+                    />
+                  )}
                 <label>
                   Agent model
                   <select
@@ -888,7 +967,11 @@ export default function AgentWorkbench() {
                   {run.requests} · <T>Tokens</T>: {run.tokens} ·{" "}
                   <T>Reserved tokens</T>: {run.reserved_tokens}
                 </p>
-                {run.reason && <p role="status">{run.reason}</p>}
+                {run.reason && <p role="status">{t(run.reason)}</p>}
+                {run.context.supervision &&
+                  run.context.supervision !== "none" && (
+                    <TeachingStatus runId={run.id} status={run.status} />
+                  )}
                 <details>
                   <summary>Approved scope and policy</summary>
                   <pre>

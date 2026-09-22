@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 
 from . import media
 from .formats import ANNOTATIONS, DATASETS
-from .providers import CompatibleProvider
+from .providers import RoutedProvider
 from .schema import ChangeSet, ModelOutput, ProviderConfig, RunStatus, TaskContext
 from .store import Conflict, Store, annotation_digest, digest, file_hash, pin
 
@@ -39,9 +39,17 @@ def new_id(taken=()):
 class Workbench:
     def __init__(self, state, provider=None):
         self.store = Store(state)
-        self.provider = provider or CompatibleProvider()
+        self.provider = provider or RoutedProvider()
 
     def plan(self, context: TaskContext, principal=None):
+        from .supervision import require_teacher
+
+        if context.supervision != "none" and context.provider in {
+            "external",
+            "local-tools",
+        }:
+            raise ValueError("Teacher supervision requires a configured learner model")
+        require_teacher(self.store, context)
         if context.provider in {"external", "local-tools"}:
             config = None
             if (
@@ -63,7 +71,12 @@ class Workbench:
             )
             if not config.enabled:
                 raise ValueError("Provider is disconnected")
-            if not config.tools:
+            if config.kind == "ollama":
+                if not config.structured_output or not config.model_digest:
+                    raise ValueError(
+                        "Inspect and bind an installed Ollama model digest and enable structured output before planning"
+                    )
+            elif not config.tools:
                 raise ValueError("Provider must declare structured tool-call support")
             if context.cameras and (
                 not config.vision or not context.allow_media_egress
@@ -283,14 +296,9 @@ class Workbench:
                     >= context.budget.max_seconds
                 ):
                     raise ValueError("Wall-time budget exhausted")
-                available_tokens = (
-                    context.budget.max_tokens - run["tokens"] - run["reserved_tokens"]
-                )
-                if (
-                    run["requests"] >= context.budget.max_calls
-                    or available_tokens < 256
-                ):
-                    raise ValueError("Model budget exhausted")
+                # model_step enforces fresh-call budgets after checking its
+                # persisted cache. A teacher-approved cached phase can resume
+                # even when the preceding request consumed the final reservation.
                 from . import observations
 
                 summary, evidence = observations.observe(
@@ -360,9 +368,11 @@ class Workbench:
         except Exception as exc:  # noqa: BLE001 - worker boundary; no raw provider errors persisted
             # Never persist provider exception messages: HTTP libraries may include
             # Authorization headers or untrusted response bodies.
+            from .supervision import AwaitingTeacher
+
             reason = (
                 str(exc)
-                if type(exc) is ValueError
+                if type(exc) is ValueError or isinstance(exc, AwaitingTeacher)
                 else f"Execution blocked ({type(exc).__name__}); inspect provider configuration"
             )
             self.store.mutate(
@@ -398,7 +408,9 @@ class Workbench:
         context = TaskContext.model_validate(context.model_dump())
         from .observations import skills
         from .planning import require
+        from .supervision import gate, require_teacher
 
+        require_teacher(self.store, context, id)
         run = self.store.get("runs", id)
         require(self, run)
         if run.get("control"):
@@ -439,7 +451,10 @@ class Workbench:
             self.store.mutate(
                 "runs", id, lambda r: r.update(cache_hits=r.get("cache_hits", 0) + 1)
             )
-            return ModelOutput.model_validate(cached["output"]), cached["usage"]
+            output = ModelOutput.model_validate(cached["output"])
+            return gate(
+                self, id, context, summary, evidence, phase, fingerprint, output
+            ), cached["usage"]
         available = context.budget.max_tokens - run["tokens"] - run["reserved_tokens"]
         seconds = (
             context.budget.max_seconds
@@ -523,7 +538,9 @@ class Workbench:
         self.store.event(
             id, "model_step", phase=phase, episode=summary["episode_index"], usage=usage
         )
-        return output, usage
+        return gate(
+            self, id, context, summary, evidence, phase, fingerprint, output
+        ), usage
 
     @staticmethod
     def validate_proposals(context, proposals, evidence, summary):
@@ -588,6 +605,8 @@ class Workbench:
                 "config_sha256": digest(run["context"]),
                 "included_episodes": run["completed"],
                 "skills_version": "1",
+                "supervision": run["context"].get("supervision", "none"),
+                "teacher_grant": run["context"].get("teacher_grant"),
                 "reviewer_type": None,
                 "coverage": "sampled",
             },

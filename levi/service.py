@@ -75,6 +75,9 @@ app.include_router(agent_router)
 from .agent.pilot_api import router as pilot_router
 
 app.include_router(pilot_router)
+from .inference.api import router as inference_router
+
+app.include_router(inference_router)
 
 
 @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)

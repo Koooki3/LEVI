@@ -221,3 +221,11 @@ The newer [Harness guide](HARNESS.md) specifies executable plan approval, pilot 
 ## Codex / Claude Pilot
 
 [Headless and online Pilot](PILOT.md) extends this same Harness. New connections use scoped grants and an on-demand shared core; legacy environment-token connections remain supported.
+
+
+## Local models and supervised phases
+
+Ollama is a parallel native Provider, not an OpenAI URL with a fake key. Follow
+[the local model guide](OLLAMA.md) for installation, explicit model management,
+digest binding, scoped external teacher feedback and cached phase resumption.
+Generic autonomous tool-loop learning and promotion are not enabled by this integration.

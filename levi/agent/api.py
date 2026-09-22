@@ -95,7 +95,12 @@ def configure_provider(payload: ProviderConfig, request: Request):
         )
     from .security import endpoint_addresses
 
-    endpoint_addresses(payload.base_url, payload.allow_localhost)
+    if payload.kind == "ollama":
+        from levi.inference.transport import validate_ollama_endpoint
+
+        validate_ollama_endpoint(payload.base_url, payload.allow_localhost)
+    else:
+        endpoint_addresses(payload.base_url, payload.allow_localhost)
     wb = workbench()
     try:
         previous = ProviderConfig.model_validate(
@@ -178,6 +183,8 @@ def session_credential(name: str, payload: SessionCredential, request: Request):
     config = ProviderConfig.model_validate(workbench().store.get("providers", name))
     from .credentials import set_session
 
+    if config.kind == "ollama":
+        raise HTTPException(422, "Local Ollama does not use LEVI API-key credentials")
     value = payload.key.get_secret_value()
     if not value or len(value) > 16384:
         raise HTTPException(400, "Credential must be non-empty and bounded")

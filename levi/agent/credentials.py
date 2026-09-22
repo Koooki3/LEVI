@@ -14,6 +14,8 @@ def binding(config):
 
 
 def get(config):
+    if config.kind == "ollama":
+        return None
     with _LOCK:
         entry = _KEYS.get(config.name)
         if entry and entry[0] == binding(config):
@@ -34,6 +36,8 @@ def set_session(name, key, config=None):
 
 
 def status(config):
+    if config.kind == "ollama":
+        return "not_required"
     with _LOCK:
         entry = _KEYS.get(config.name)
         return (

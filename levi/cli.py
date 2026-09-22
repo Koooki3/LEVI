@@ -101,6 +101,10 @@ def stop_children(children):
 
 
 def main():
+    if len(sys.argv) > 2 and sys.argv[1:3] == ["dev", "check-contracts"]:
+        from .domain.schema_catalog import main as check_contracts
+
+        return check_contracts(sys.argv[3:])
     if len(sys.argv) > 1 and sys.argv[1] == "agent":
         from .agent.control import main as agent_control
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Local model and teacher integration
+
+- Add native loopback Ollama profiles without API keys, digest binding, bounded
+  transport, explicit downloads with persisted progress/cancellation, and model
+  load/unload controls. Opening a page does not start inference or download.
+- Add an optional LEVI-owned Ollama process with workspace model storage,
+  isolated environment, explicit start/stop and Linux process-identity checks.
+- Route Ollama through existing approved plans, evidence validators, draft review
+  and versioned commit. Add assigned Codex/Claude teacher phase feedback and SSE
+  status, preserving cached model results and separately requiring human commit.
+- Introduce typed tool/recipe contract foundations and deterministic DAG checks.
+  The general Runtime/format/UI architecture migration is not complete.
+- Add bilingual setup and limitations documentation plus protocol, lifecycle,
+  supervision and opt-in browser tests. No real model/GPU quality claim or release.
+
 ## Unreleased — Live agent activity
 
 - **The plan form offers what the dataset declares.** Episodes, cameras and tasks are chosen by clicking or dragging across chips, with select-all, instead of being typed as comma-separated text where a typo only surfaced as a failed plan. Ambiguous options carry a line of explanation, "Annotation workflow" is now "Task type", and "Draft suggestions" is "Produce annotations".

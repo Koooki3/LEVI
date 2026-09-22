@@ -28,6 +28,7 @@ jobs:
         run: uv sync --locked --group dev --extra agent
       - run: bun install --frozen-lockfile
       - run: bun run validate
+      - run: uv run --no-sync levi dev check-contracts
       - run: uv run --no-sync ruff check .
       - run: uv run --no-sync pytest --basetemp=.state/tmp/build/pytest
       - run: bun run build

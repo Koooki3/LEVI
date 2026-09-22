@@ -1,10 +1,15 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/auth-context";
+import OllamaRuntime from "./ollama-runtime";
+import OllamaModels from "./ollama-models";
 import HfAuthButton from "./hf-auth-button";
 import { T, useLocale } from "./levi-locale";
 
 export type Connection = {
+  kind?: "openai-compatible" | "ollama";
+  model_digest?: string | null;
+  context_tokens?: number;
   name: string;
   model: string;
   base_url: string;
@@ -128,6 +133,10 @@ export default function AgentConnections({
             <HfAuthButton variant="ghost" />
           </div>
         </article>
+        <OllamaRuntime
+          configured={refresh}
+          connectionExists={providers.some((p) => p.name === "ollama-managed")}
+        />
         {providers.map((p) => (
           <article
             key={p.name}
@@ -157,11 +166,13 @@ export default function AgentConnections({
             <p className="levi-agent-muted">
               {t(p.vision ? "Image + text" : "Text only")} ·{" "}
               {t(
-                p.credential_source === "session"
-                  ? "Session credential"
-                  : p.credential_source === "environment"
-                    ? "Environment credential"
-                    : "Credential missing",
+                p.credential_source === "not_required"
+                  ? "No API key required"
+                  : p.credential_source === "session"
+                    ? "Session credential"
+                    : p.credential_source === "environment"
+                      ? "Environment credential"
+                      : "Credential missing",
               )}
             </p>
             <div className="levi-agent-actions">
@@ -175,15 +186,17 @@ export default function AgentConnections({
               <button disabled={busy} onClick={() => edit(p)}>
                 Edit configuration
               </button>
-              <button
-                disabled={busy}
-                onClick={() => {
-                  setCredentialFor(p.name);
-                  setKey("");
-                }}
-              >
-                {t("Set session credential")}
-              </button>
+              {p.kind !== "ollama" && (
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    setCredentialFor(p.name);
+                    setKey("");
+                  }}
+                >
+                  {t("Set session credential")}
+                </button>
+              )}
               <button
                 disabled={busy}
                 onClick={() =>
@@ -196,6 +209,9 @@ export default function AgentConnections({
                 Remove configuration
               </button>
             </div>
+            {p.kind === "ollama" && (
+              <OllamaModels connection={p} refresh={refresh} />
+            )}
             {credentialFor === p.name && (
               <form
                 onSubmit={(e) => {

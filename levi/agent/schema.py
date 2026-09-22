@@ -35,7 +35,9 @@ class Budget(Contract):
 class ProviderConfig(Contract):
     name: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$")
     enabled: bool = True
-    kind: Literal["openai-compatible"] = "openai-compatible"
+    kind: Literal["openai-compatible", "ollama"] = "openai-compatible"
+    model_digest: str | None = Field(default=None, pattern=r"^(sha256:)?[a-f0-9]{64}$")
+    context_tokens: int = Field(default=8192, ge=1024, le=131072)
     base_url: str
     model: str = Field(min_length=1, max_length=200)
     key_env: str = Field(default="LEVI_MODEL_API_KEY", pattern=r"^[A-Z][A-Z0-9_]*$")
@@ -46,6 +48,8 @@ class ProviderConfig(Contract):
 
 
 class TaskContext(Contract):
+    supervision: Literal["none", "shadow", "supervised"] = "none"
+    teacher_grant: str | None = Field(default=None, max_length=100)
     pilot_runtime: Literal["codex", "claude"] | None = None
     workflow: dict[str, Any] = Field(default_factory=dict)
     dataset_adapter: str = "lerobot-and-raw-view"

@@ -141,3 +141,14 @@ Dependencies install locally and are not vendored in LEVI. Generate the complete
 locked transitive license inventory before distributing a bundled binary/image.
 Happy and OpenCode were reviewed for interaction/architecture only; no code,
 assets or hosted services from those projects are included.
+
+
+## Optional local inference integration (unreleased)
+
+LEVI's Ollama protocol/process adapter is original code. It does not vendor the
+Ollama executable or Qwen weights. Ollama is separately installed by the user
+([source, MIT](https://github.com/ollama/ollama)); each selected model remains
+subject to its own license ([Qwen3.5-4B model card](https://huggingface.co/Qwen/Qwen3.5-4B),
+Apache-2.0). Capture the installed service version, full model digest, template and
+quantization before distributing a prepared model bundle. No such binary/model
+bundle is created by this change. Existing Python and Bun locks are unchanged.

@@ -2,6 +2,46 @@
 
 验证日期：2026-09-13。环境：Linux x86_64、Python 3.11.16（独立 uv `.venv`）、Bun 1.3.10、Next.js 15.5.25、Playwright Chromium。参考版本见 [UPSTREAM.md](UPSTREAM.md)。
 
+## 2026-09-22 Local Ollama and supervised annotation increment / 本地模型与监督标注增量
+
+This is incremental engineering validation, not acceptance of the full 0.4.0
+architecture plan. See [implementation status](architecture/IMPLEMENTATION_STATUS.md).
+
+| Check | Result |
+| --- | --- |
+| Full Python suite, including fake Ollama and teacher feedback | 248 passed, 1 opt-in browser test skipped; one Starlette/AnyIO deprecation warning |
+| Final process-persistence failure fix and contract regression | 17 passed, including a newly added disk-failure test |
+| Ruff | Passed |
+| Contract snapshot drift check | Passed |
+| Frontend type, lint, formatting and unit checks | Passed; 200 Bun tests |
+| Production Next.js build | Passed |
+| Opt-in production-browser test with fixture API | 1 passed; English/Chinese connection and download/cancel controls; no page errors |
+
+The final process cleanup change was verified with the targeted suite after the
+full Python run. Model HTTP responses, teacher decisions and process ownership
+are simulated. Browser validation starts only a temporary frontend, blocks
+external requests, uses Chromium with GPU disabled and stops its owned server.
+No real model request, Ollama launch, CUDA probe, model download or GPU inference
+was performed. Model quality, external-client teaching quality, hardware resource
+competition and OS-enforced offline operation remain unverified.
+
+Reproduce the model-free checks from the repository root (create the temporary
+parent first):
+
+```bash
+mkdir -p .state/tmp/validation
+LEVI_WORKSPACE="$PWD/.state" uv run pytest --basetemp "$PWD/.state/tmp/validation/pytest"
+uv run levi dev check-contracts
+bun run format
+bun run validate
+bun run build
+# Optional: point to an already installed Chromium; no browser download required.
+LEVI_WORKSPACE="$PWD/.state" LEVI_BROWSER_TESTS=1 \
+  LEVI_CHROMIUM_EXECUTABLE=/path/to/chromium \
+  uv run pytest tests/test_ollama_browser.py \
+  --basetemp "$PWD/.state/tmp/validation/browser"
+```
+
 ## 2026-09-18 转换框架、RECAP 与原始采集 / Conversion framework, RECAP, raw captures
 
 Scope: modular conversion registry, single-pass pipeline and lossless retime, RECAP value export, input inspection UI, raw-capture browsing views, annotation carry-over, outcome labels, hash-free naming and workspace migration.

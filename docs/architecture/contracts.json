@@ -1,0 +1,678 @@
+{
+  "contracts": {
+    "ModelOutput": {
+      "$defs": {
+        "Proposal": {
+          "additionalProperties": false,
+          "description": "Suggestions only: model output can never claim human review.",
+          "properties": {
+            "attempt": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Attempt",
+              "type": "integer"
+            },
+            "boundary_candidates": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 8,
+              "title": "Boundary Candidates",
+              "type": "array"
+            },
+            "content": {
+              "maxLength": 8000,
+              "minLength": 1,
+              "title": "Content",
+              "type": "string"
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "End"
+            },
+            "episode_index": {
+              "minimum": 0,
+              "title": "Episode Index",
+              "type": "integer"
+            },
+            "evidence_ids": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "evidence_note": {
+              "default": "",
+              "maxLength": 1000,
+              "title": "Evidence Note",
+              "type": "string"
+            },
+            "kind": {
+              "description": "Registered annotation kind: segment, event, issue or outcome",
+              "title": "Kind",
+              "type": "string"
+            },
+            "layer": {
+              "default": "activity",
+              "maxLength": 64,
+              "title": "Layer",
+              "type": "string"
+            },
+            "outcome": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "success",
+                    "failure",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Outcome"
+            },
+            "start": {
+              "minimum": 0,
+              "title": "Start",
+              "type": "number"
+            },
+            "style": {
+              "default": "subtask",
+              "enum": [
+                "subtask",
+                "plan",
+                "memory",
+                "task_aug",
+                "interjection"
+              ],
+              "title": "Style",
+              "type": "string"
+            },
+            "subtask_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Subtask Id"
+            },
+            "uncertainty": {
+              "default": "",
+              "maxLength": 2000,
+              "title": "Uncertainty",
+              "type": "string"
+            }
+          },
+          "required": [
+            "episode_index",
+            "kind",
+            "content",
+            "start",
+            "evidence_ids"
+          ],
+          "title": "Proposal",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "proposals": {
+          "items": {
+            "$ref": "#/$defs/Proposal"
+          },
+          "maxItems": 500,
+          "title": "Proposals",
+          "type": "array"
+        },
+        "summary": {
+          "maxLength": 8000,
+          "title": "Summary",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "summary"
+      ],
+      "title": "ModelOutput",
+      "type": "object"
+    },
+    "ProviderConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_localhost": {
+          "default": false,
+          "title": "Allow Localhost",
+          "type": "boolean"
+        },
+        "base_url": {
+          "title": "Base Url",
+          "type": "string"
+        },
+        "context_tokens": {
+          "default": 8192,
+          "maximum": 131072,
+          "minimum": 1024,
+          "title": "Context Tokens",
+          "type": "integer"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "key_env": {
+          "default": "LEVI_MODEL_API_KEY",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "title": "Key Env",
+          "type": "string"
+        },
+        "kind": {
+          "default": "openai-compatible",
+          "enum": [
+            "openai-compatible",
+            "ollama"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "model_digest": {
+          "anyOf": [
+            {
+              "pattern": "^(sha256:)?[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Digest"
+        },
+        "name": {
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "structured_output": {
+          "default": false,
+          "title": "Structured Output",
+          "type": "boolean"
+        },
+        "tools": {
+          "default": false,
+          "title": "Tools",
+          "type": "boolean"
+        },
+        "vision": {
+          "default": false,
+          "title": "Vision",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "base_url",
+        "model"
+      ],
+      "title": "ProviderConfig",
+      "type": "object"
+    },
+    "Recipe": {
+      "$defs": {
+        "RecipeNode": {
+          "additionalProperties": false,
+          "properties": {
+            "arguments": {
+              "additionalProperties": true,
+              "title": "Arguments",
+              "type": "object"
+            },
+            "depends_on": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "title": "Depends On",
+              "type": "array"
+            },
+            "id": {
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$",
+              "title": "Id",
+              "type": "string"
+            },
+            "tool": {
+              "title": "Tool",
+              "type": "string"
+            },
+            "tool_version": {
+              "title": "Tool Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "tool",
+            "tool_version"
+          ],
+          "title": "RecipeNode",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/RecipeNode"
+          },
+          "maxItems": 1000,
+          "minItems": 1,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "nodes"
+      ],
+      "title": "Recipe",
+      "type": "object"
+    },
+    "TaskContext": {
+      "$defs": {
+        "Budget": {
+          "additionalProperties": false,
+          "properties": {
+            "max_artifact_bytes": {
+              "default": 268435456,
+              "minimum": 1,
+              "title": "Max Artifact Bytes",
+              "type": "integer"
+            },
+            "max_calls": {
+              "default": 8,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Max Calls",
+              "type": "integer"
+            },
+            "max_seconds": {
+              "default": 300,
+              "maximum": 86400,
+              "minimum": 10,
+              "title": "Max Seconds",
+              "type": "integer"
+            },
+            "max_snapshot_bytes": {
+              "default": 536870912,
+              "minimum": 1,
+              "title": "Max Snapshot Bytes",
+              "type": "integer"
+            },
+            "max_tokens": {
+              "default": 16000,
+              "maximum": 1000000,
+              "minimum": 256,
+              "title": "Max Tokens",
+              "type": "integer"
+            }
+          },
+          "title": "Budget",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "allow_media_egress": {
+          "default": false,
+          "title": "Allow Media Egress",
+          "type": "boolean"
+        },
+        "budget": {
+          "$ref": "#/$defs/Budget"
+        },
+        "cameras": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "title": "Cameras",
+          "type": "array"
+        },
+        "dataset_adapter": {
+          "default": "lerobot-and-raw-view",
+          "title": "Dataset Adapter",
+          "type": "string"
+        },
+        "episodes": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 1000,
+          "minItems": 1,
+          "title": "Episodes",
+          "type": "array"
+        },
+        "instruction": {
+          "maxLength": 12000,
+          "minLength": 1,
+          "title": "Instruction",
+          "type": "string"
+        },
+        "mode": {
+          "default": "draft",
+          "enum": [
+            "read_only",
+            "draft"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "pilot_runtime": {
+          "anyOf": [
+            {
+              "enum": [
+                "codex",
+                "claude"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pilot Runtime"
+        },
+        "provider": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "repo_id": {
+          "pattern": "^[\\w.-]+/[\\w.-]+$",
+          "title": "Repo Id",
+          "type": "string"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revision"
+        },
+        "samples_per_episode": {
+          "default": 3,
+          "maximum": 16,
+          "minimum": 1,
+          "title": "Samples Per Episode",
+          "type": "integer"
+        },
+        "supervision": {
+          "default": "none",
+          "enum": [
+            "none",
+            "shadow",
+            "supervised"
+          ],
+          "title": "Supervision",
+          "type": "string"
+        },
+        "teacher_grant": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Teacher Grant"
+        },
+        "workflow": {
+          "additionalProperties": true,
+          "title": "Workflow",
+          "type": "object"
+        }
+      },
+      "required": [
+        "repo_id",
+        "episodes",
+        "instruction",
+        "provider"
+      ],
+      "title": "TaskContext",
+      "type": "object"
+    },
+    "ToolSpec": {
+      "$defs": {
+        "Resources": {
+          "additionalProperties": false,
+          "properties": {
+            "accelerator_slots": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Accelerator Slots",
+              "type": "integer"
+            },
+            "cpu_slots": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Cpu Slots",
+              "type": "integer"
+            },
+            "disk_bytes": {
+              "minimum": 0,
+              "title": "Disk Bytes",
+              "type": "integer"
+            },
+            "memory_bytes": {
+              "minimum": 1,
+              "title": "Memory Bytes",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "memory_bytes",
+            "disk_bytes"
+          ],
+          "title": "Resources",
+          "type": "object"
+        },
+        "Risk": {
+          "enum": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "title": "Risk",
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "cache_dependencies": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Cache Dependencies",
+          "type": "array"
+        },
+        "cancellation_boundary": {
+          "minLength": 1,
+          "title": "Cancellation Boundary",
+          "type": "string"
+        },
+        "data_egress": {
+          "title": "Data Egress",
+          "type": "boolean"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "dry_run": {
+          "title": "Dry Run",
+          "type": "boolean"
+        },
+        "errors": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Errors",
+          "type": "array"
+        },
+        "idempotency": {
+          "enum": [
+            "read_only",
+            "receipt_required"
+          ],
+          "title": "Idempotency",
+          "type": "string"
+        },
+        "input_schema": {
+          "additionalProperties": true,
+          "title": "Input Schema",
+          "type": "object"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_.]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "output_schema": {
+          "additionalProperties": true,
+          "title": "Output Schema",
+          "type": "object"
+        },
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Permissions",
+          "type": "array"
+        },
+        "postconditions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Postconditions",
+          "type": "array"
+        },
+        "preconditions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Preconditions",
+          "type": "array"
+        },
+        "resources": {
+          "$ref": "#/$defs/Resources"
+        },
+        "retryable_errors": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Retryable Errors",
+          "type": "array"
+        },
+        "risk": {
+          "$ref": "#/$defs/Risk"
+        },
+        "side_effects": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Side Effects",
+          "type": "array"
+        },
+        "timeout_seconds": {
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "description",
+        "input_schema",
+        "output_schema",
+        "permissions",
+        "risk",
+        "side_effects",
+        "data_egress",
+        "dry_run",
+        "idempotency",
+        "resources",
+        "timeout_seconds",
+        "cancellation_boundary",
+        "errors"
+      ],
+      "title": "ToolSpec",
+      "type": "object"
+    }
+  },
+  "schema_version": 1,
+  "status": "incremental-contract-baseline"
+}

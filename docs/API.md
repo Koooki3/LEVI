@@ -113,3 +113,28 @@ See SAM3.md for the ordered setup sequence and sidecar schema.
 ## Agent control plane (experimental)
 
 `/api/levi/agent/v1/capabilities` describes the typed tool registry; `POST /api/levi/agent/v1/tools` accepts `name`, `arguments`, optional `idempotency_key`. Provider profiles and server-memory session credentials are human-only. External requests use `LEVI_AGENT_TOKEN` and `LEVI_AGENT_DATASETS`, can read/draft only, and cannot use legacy write APIs. After Agent version activation, legacy annotation/review writes require the `X-LEVI-Annotation-Revision` returned by their corresponding read. See [Agent Workbench](AGENT_WORKBENCH.md) for schemas, MCP, transaction and migration behavior.
+
+
+## Native Ollama and teacher feedback (unreleased)
+
+All paths below use `/api/levi/agent/v1`. Model management requires a human
+control session; an external Agent cannot approve its own download/start request.
+
+| Method / path | Behavior |
+| --- | --- |
+| `POST /providers` | `kind: ollama`, root loopback `base_url`, model and explicit `allow_localhost`; no key |
+| `GET /providers/{name}/ollama` | Inspect service-declared metadata; no inference |
+| `POST /providers/{name}/ollama/bind` | Bind installed digest, explicit `structured_output: true`, optional vision |
+| `POST /providers/{name}/ollama/download` | `approve_download: true`, unique `request_id`; returns persisted job, HTTP 202 |
+| `GET /model-downloads[/{id}]` | Read persisted download progress; interrupted lease is reported |
+| `POST /model-downloads/{id}/cancel` | Request stream cancellation, not guaranteed remote shared-download termination |
+| `POST /providers/{name}/ollama/memory` | `operation: load/unload`, `approve_hardware_use: true`; requires bound model |
+| `GET /ollama/runtime` | Installed/owned-process state and actual managed paths; no hardware probe |
+| `POST /ollama/runtime/start` | `port`, `approve_start: true`; only an installed executable, no installer/download |
+| `POST /ollama/runtime/stop` | Stop the recorded owned process; active task/download guard |
+
+TaskContext adds `supervision: none|shadow|supervised` and `teacher_grant`.
+`supervision.pending` and `supervision.feedback` are shared Registry/REST/MCP
+tools; feedback is restricted to the human or the assigned live scoped grant.
+Teacher feedback never grants plan/pilot/publication authority. See
+[Ollama workflow](OLLAMA.md) for request examples and explicit unimplemented scope.

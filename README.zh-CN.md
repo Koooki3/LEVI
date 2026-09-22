@@ -9,6 +9,8 @@
 **指南** — [转换教程](docs/CONVERSION.md) · [RECAP 导出](docs/RECAP.md) · [Agent 工作台](docs/AGENT_WORKBENCH.md) · [Codex / Claude Pilot](docs/PILOT.zh-CN.md) · [SAM3 对象标注](docs/SAM3.md) · [工作区结构](.state.md)
 **参考** — [功能对照](docs/FEATURES.md) · [API](docs/API.md) · [Agent Harness](docs/HARNESS.md) · [审查与验证](docs/VALIDATION.md) · [许可](docs/UPSTREAM.md) · [第三方清单](THIRD_PARTY_NOTICES.md)
 
+**Ollama / 本地模型监督流程** — [Ollama / 本地模型监督流程](docs/OLLAMA.zh-CN.md)
+
 LEVI 是用于浏览、标注、转换和审核机器人数据的独立工作台。基于 [LeRobot Dataset Visualizer](https://github.com/huggingface/lerobot-dataset-visualizer)，保留多相机与信号同步、视觉问答、动作分析和三维回放，默认英文，可在界面中切换中文；并提供**完全内置的采集数据转换流程**。无需另行下载转换项目或安装训练环境：先检查输入、列出各项要求的满足情况与支持的导出格式，再导出为 LeRobot v2.1 或 RECAP（π\*0.6）价值数据集。原始机器人采集在转换前即可浏览和标注，标注会随转换自动迁移。
 
 界面同时适配独立浏览器和 Hugging Face Space 嵌入环境。标注工作台支持 Ctrl/Cmd+S 保存、Ctrl/Cmd+Z 撤销及播放快捷键；外部浏览器打开时不会触发浏览器原生的“保存网页”对话框。

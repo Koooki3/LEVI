@@ -21,6 +21,17 @@ class FixtureProvider:
         return self.output, {"requests": 1, "tokens": 0, "fixture": True}
 
 
+class RoutedProvider:
+    """Keep provider selection outside task execution and dataset semantics."""
+
+    def generate(self, config, *args):
+        if config.kind == "ollama":
+            from levi.inference.provider import OllamaProvider
+
+            return OllamaProvider().generate(config, *args)
+        return CompatibleProvider().generate(config, *args)
+
+
 class CompatibleProvider:
     def generate(
         self, config: ProviderConfig, instruction, summary, evidence, artifacts, budget
