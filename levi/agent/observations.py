@@ -1,6 +1,7 @@
 """Deterministic observation policy and bounded, exact evidence retrieval."""
 
 import json
+from itertools import pairwise
 from pathlib import Path
 
 import numpy as np
@@ -396,8 +397,9 @@ def recall(wb, run, episode, offset, limit, layout="single", tile_width=320):
             f"episode_{episode:06d}--sheet-{offset:04d}-{len(pictures):03d}"
             f"-w{tile_width}.jpg"
         )
+        # Six to a row, like a reader's own contact sheet of the video.
         value["mosaic"] = media.mosaic(
-            pictures, folder, folder / name, tile_width=tile_width
+            pictures, folder, folder / name, tile_width=tile_width, columns=6
         )
         # Sheets are served through the same explicit artifact allowlist as
         # single frames; nothing is readable by name pattern alone.
@@ -443,7 +445,38 @@ def recall(wb, run, episode, offset, limit, layout="single", tile_width=320):
     return value
 
 
-def refine(wb, run, episode, around, cameras=None, layout="mosaic", tile_width=320):
+def span_frames(context, root, episode, ranges, step):
+    """Frame indices of each ``[from, to]`` span at ``step`` seconds (nearest
+    recorded frame to each instant), one list per span."""
+    table = media.episode_table(media.snapshot_state(context, root), episode)
+    times = table.timestamp.to_numpy(dtype=float)
+    out = []
+    for start, end in ranges:
+        lo, hi = max(float(start), times[0]), min(float(end), times[-1])
+        if hi < lo:
+            raise ValueError(
+                f"Span [{start:g}, {end:g}] s is outside the episode "
+                f"(0 to {times[-1]:.1f} s)"
+            )
+        # Both ends are watched: a span is asked for to see where it ends.
+        targets = [*np.arange(lo, hi + 1e-8, step), hi]
+        positions = sorted({int(np.abs(times - t).argmin()) for t in targets})
+        out.append([int(table.iloc[i].frame_index) for i in positions])
+    return out
+
+
+def refine(
+    wb,
+    run,
+    episode,
+    around,
+    cameras=None,
+    layout="mosaic",
+    tile_width=320,
+    window=None,
+    ranges=None,
+    step=None,
+):
     """Bounded extra frames around candidate boundaries, using the approved
     window/tolerance of the plan. External agents get the same two-pass policy
     the in-process runtime uses: one coarse pass, then a narrow refinement,
@@ -466,9 +499,20 @@ def refine(wb, run, episode, around, cameras=None, layout="mosaic", tile_width=3
         if unknown:
             raise ValueError(f"Cameras outside approved scope: {sorted(unknown)}")
         context = context.model_copy(update={"cameras": list(cameras)})
+    if window is not None:
+        planned = context.workflow["boundary_window_seconds"]
+        if window > planned:
+            raise ValueError(
+                f"window_seconds is at most the plan's boundary window ({planned:g} s)"
+            )
+        context = context.model_copy(
+            update={"workflow": {**context.workflow, "boundary_window_seconds": window}}
+        )
     root = wb.store.run_dir(run["id"]) / "input"
     folder = wb.store.run_dir(run["id"]) / "evidence"
     kept = list(around)
+    ranges = [tuple(r) for r in ranges or []]
+    step = step or context.workflow["boundary_tolerance_seconds"]
     try:
         held = {
             row["artifact"]
@@ -477,7 +521,8 @@ def refine(wb, run, episode, around, cameras=None, layout="mosaic", tile_width=3
         }
     except KeyError:
         held = set()
-    while True:
+    evidence, items = [], None
+    while kept:
         boundaries = [Candidate(value) for value in kept]
         evidence = []
         try:
@@ -509,6 +554,40 @@ def refine(wb, run, episode, around, cameras=None, layout="mosaic", tile_width=3
                     "closer instants"
                 ) from None
             kept = kept[:-1]
+    # Spans at a chosen step: what a reader asks for when it wants to watch a
+    # stretch densely rather than confirm one instant.
+    spanned = list(ranges)
+    span_rows = []
+    while spanned:
+        frames = sorted(
+            {
+                f
+                for part in span_frames(context, root, episode, spanned, step)
+                for f in part
+            }
+        )
+        sampled = []
+        try:
+            summary, sampled = DATASETS[context.dataset_adapter].sample_frames(
+                context, root, episode, folder, frames
+            )
+            items = persist(wb, run["id"], episode, summary, sampled)
+            span_rows = sampled
+            break
+        except CapExceeded:
+            for row in sampled:
+                if row.get("artifact") and row["artifact"] not in held:
+                    (folder / row["artifact"]).unlink(missing_ok=True)
+            if len(spanned) == 1:
+                cap = context.workflow["max_evidence_frames"]
+                have = len(wb.store.get("evidence", f"{run['id']}:{episode}")["items"])
+                raise ValueError(
+                    f"The span [{spanned[0][0]:g}, {spanned[0][1]:g}] s at "
+                    f"{step:g} s would pass the plan's frame cap ({have} of "
+                    f"{cap} frames are used); use a shorter span or a coarser step"
+                ) from None
+            spanned = spanned[:-1]
+    evidence = [*evidence, *span_rows]
     new_ids = {row["id"] for row in evidence}
     added = [row for row in items if row["id"] in new_ids]
     window = context.workflow["boundary_window_seconds"]
@@ -517,34 +596,40 @@ def refine(wb, run, episode, around, cameras=None, layout="mosaic", tile_width=3
         slack = context.workflow["boundary_tolerance_seconds"]
         near = [row for row in added if abs(row["timestamp"] - at) <= window + slack]
         groups.append((at, near))
+    for start, end in spanned:
+        near = [
+            row for row in span_rows if start - 1e-6 <= row["timestamp"] <= end + 1e-6
+        ]
+        groups.append(((start, end), near))
     value = {
         "episode": episode,
-        # One line per instant: how many frames it added and over what span.
+        # One line per instant or span: how many frames it added and over what
+        # span.
         # The ids are one `evidence.read` with images false away, and a
         # proposal may leave its citations to LEVI.
         "added": [
             {
-                "around": at,
+                ("span" if isinstance(at, tuple) else "around"): list(at)
+                if isinstance(at, tuple)
+                else at,
                 "frames": len(near),
-                "from": min(r["timestamp"] for r in near) if near else None,
-                "to": max(r["timestamp"] for r in near) if near else None,
+                "from": round(min(r["timestamp"] for r in near), 3) if near else None,
+                "to": round(max(r["timestamp"] for r in near), 3) if near else None,
             }
             for at, near in groups
         ],
+        # Frames this episode holds, of the plan's cap.
         "total": len(items),
-        "policy": {
-            "boundary_window_seconds": window,
-            "boundary_tolerance_seconds": context.workflow[
-                "boundary_tolerance_seconds"
-            ],
-            "max_evidence_frames": context.workflow["max_evidence_frames"],
-        },
+        "cap": context.workflow["max_evidence_frames"],
     }
     if len(kept) < len(around):
         value["skipped_around_seconds"] = list(around[len(kept) :])
+    if len(spanned) < len(ranges):
+        value["skipped_spans"] = [list(r) for r in ranges[len(spanned) :]]
+    if "skipped_around_seconds" in value or "skipped_spans" in value:
         value["note"] = (
-            "The plan's frame cap took only the first instants; the skipped "
-            "ones were not refined."
+            "The plan's frame cap took only the first instants and spans; the "
+            "skipped ones were not refined."
         )
     if layout == "mosaic":
         # The frames of every instant of this call on one sheet, six to a
@@ -571,21 +656,31 @@ def refine(wb, run, episode, around, cameras=None, layout="mosaic", tile_width=3
         sheets = []
         for start in range(0, len(pictures), 30):
             chunk = pictures[start : start + 30]
-            number += 1
-            name = f"{prefix}{number:03d}-w{tile_width}.jpg"
+            # Claim the name atomically: two refinements of one episode at
+            # the same moment must not write the same sheet.
+            while True:
+                number += 1
+                name = f"{prefix}{number:03d}-w{tile_width}.jpg"
+                try:
+                    (folder / name).open("x").close()
+                    break
+                except FileExistsError:
+                    continue
             sheet = media.mosaic(
                 chunk, folder, folder / name, tile_width=tile_width, columns=6
             )
             sheet.pop("tiles", None)
-            sheet["from"] = chunk[0]["timestamp"]
-            sheet["to"] = chunk[-1]["timestamp"]
-            sheet["reading"] = (
-                "Added frames in time order, six per row; each tile is "
-                "labelled with its frame and time"
-            )
+            # The answer's own `reading` says how to read these sheets.
+            sheet.pop("reading", None)
+            sheet["from"] = round(chunk[0]["timestamp"], 3)
+            sheet["to"] = round(chunk[-1]["timestamp"], 3)
             sheets.append(sheet)
         if sheets:
             value["mosaics"] = sheets
+            value["reading"] = (
+                "Added frames in time order, six per row; each tile is "
+                "labelled with its frame and time"
+            )
             wb.store.mutate(
                 "runs",
                 run["id"],
@@ -844,3 +939,91 @@ def quality(context, proposals, evidence, summary):
         "coverage_claim": "sampled; gaps are not evidence of inactivity",
         "human_review_required": bool(warnings or gaps),
     }
+
+
+# Offsets (seconds) around a proposed boundary shown on a check row: the
+# middle tile is the boundary, three frames on each side.
+CHECK_OFFSETS = (-1.0, -0.6, -0.3, 0.0, 0.3, 0.6, 1.0)
+
+
+def boundary_check(wb, run, episode, tile_width=224, offsets=CHECK_OFFSETS):
+    """One sheet row per boundary of an episode's staged segments: the frames
+    just before and after it, so the annotator checks each boundary against
+    the definitions the plan states for the two subtasks it separates -- the
+    look a careful reader gives every boundary, at one image per episode."""
+    from .schema import TaskContext
+
+    if episode not in run["completed"]:
+        raise ValueError(f"Stage episode {episode} before checking its boundaries")
+    shard = wb.store.get("shards", f"{run['id']}:{episode}")
+    segments = sorted(
+        (
+            p
+            for p in shard["output"]["proposals"]
+            if p.get("kind") == "segment" and p.get("end") is not None
+        ),
+        key=lambda p: p["start"],
+    )
+    boundaries = [
+        (b["start"], a.get("subtask_id"), b.get("subtask_id"))
+        for a, b in pairwise(segments)
+        if b["start"] > 0
+    ]
+    if not boundaries:
+        return {"boundaries": []}, []
+    context = TaskContext.model_validate(run["context"])
+    if len(context.cameras) > 1:
+        context = context.model_copy(update={"cameras": context.cameras[:1]})
+    root = wb.store.run_dir(run["id"]) / "input"
+    folder = wb.store.run_dir(run["id"]) / "evidence"
+    table = media.episode_table(media.snapshot_state(context, root), episode)
+    times = table.timestamp.to_numpy(dtype=float)
+    grid = [
+        [
+            int(
+                table.iloc[
+                    int(np.abs(times - min(max(t + o, 0.0), times[-1])).argmin())
+                ].frame_index
+            )
+            for o in offsets
+        ]
+        for t, _, _ in boundaries
+    ]
+    _, rows = DATASETS[context.dataset_adapter].sample_frames(
+        context, root, episode, folder, sorted({f for row in grid for f in row})
+    )
+    by_frame = {row["frame_index"]: row for row in rows if row.get("artifact")}
+    sheets = []
+    prefix = f"episode_{episode:06d}--boundaries-"
+    number = sum(
+        1
+        for sheet in wb.store.get("runs", run["id"]).get("sheets", [])
+        if sheet.startswith(prefix)
+    )
+    per_sheet = 16
+    for start in range(0, len(grid), per_sheet):
+        tiles = [by_frame[f] for row in grid[start : start + per_sheet] for f in row]
+        while True:
+            number += 1
+            name = f"{prefix}{number:03d}-w{tile_width}.jpg"
+            try:
+                (folder / name).open("x").close()
+                break
+            except FileExistsError:
+                continue
+        sheet = media.mosaic(
+            tiles, folder, folder / name, tile_width=tile_width, columns=len(offsets)
+        )
+        for key in ("tiles", "reading"):
+            sheet.pop(key, None)
+        sheets.append(sheet)
+    wb.store.mutate(
+        "runs",
+        run["id"],
+        lambda record: record.update(
+            sheets=sorted({*record.get("sheets", []), *(s["artifact"] for s in sheets)})
+        ),
+    )
+    return {
+        "boundaries": [[round(t, 3), a, b] for t, a, b in boundaries],
+    }, sheets

@@ -41,8 +41,9 @@ def test_a_mosaic_page_holds_a_whole_coarse_pass_by_default(bench, dataset):
         "evidence.read",
         {"run_id": run["id"], "episode": 0, "layout": "mosaic"},
     )
-    assert sheet["next_offset"] == sheet["total"], "one call, the whole pass"
-    assert len(sheet["items"]) >= len(single["items"])
+    # One call, the whole pass: no next page to ask for.
+    assert "next_offset" not in sheet and len(sheet["times"]) == sheet["total"]
+    assert len(sheet["times"]) >= len(single["items"])
     text = invoke(
         wb,
         agent,
@@ -458,6 +459,341 @@ def test_one_call_gives_one_small_jpeg_sheet(bench, dataset):
     for name in (value["mosaics"][0]["artifact"], page["mosaic"]["artifact"]):
         assert name.endswith(".jpg")
         assert (folder / name).read_bytes()[:3] == b"\xff\xd8\xff"
+
+
+def test_an_edit_replaces_only_the_episodes_it_names(bench, dataset):
+    """An agent correcting one episode once erased a full-dataset draft."""
+    wb, context = bench
+    agent, run, _ = run_for(wb, context, dataset)
+
+    def seg(ep, content):
+        return {
+            "episode_index": ep,
+            "kind": "segment",
+            "subtask_id": "other",
+            "content": content,
+            "start": 0.0,
+            "end": 1.0,
+            "outcome": "unknown",
+        }
+
+    receipt = invoke(
+        wb,
+        agent,
+        "annotations.propose_segments",
+        {
+            "run_id": run["id"],
+            "inspected_episodes": [0],
+            "proposals": [seg(0, "first")],
+        },
+    )
+    change = wb.store.get("changes", receipt["id"])
+    # Unscoped and dropping episode 0: refused, nothing lost.
+    with pytest.raises(ValueError, match="would remove every staged proposal"):
+        invoke(
+            wb,
+            agent,
+            "changes.edit",
+            {
+                "changeset_id": change["id"],
+                "revision": change["revision"],
+                "proposals": [],
+            },
+        )
+    edited = invoke(
+        wb,
+        agent,
+        "changes.edit",
+        {
+            "changeset_id": change["id"],
+            "revision": change["revision"],
+            "proposals": [seg(0, "second")],
+            "episodes": [0],
+        },
+    )
+    assert edited["edited_episodes"] == [0] and edited["staged_proposals"] == 1
+    assert "proposals" not in edited, "an agent gets a receipt"
+    stored = wb.store.get("changes", change["id"])["proposals"]
+    assert [p["content"] for p in stored] == ["second"]
+    with pytest.raises(ValueError, match="outside `episodes`"):
+        invoke(
+            wb,
+            agent,
+            "changes.edit",
+            {
+                "changeset_id": change["id"],
+                "revision": edited["revision"],
+                "proposals": [seg(1, "x")],
+                "episodes": [0],
+            },
+        )
+
+
+# ---- streamlined for a capable external agent (round-3 comparison) --------
+
+
+def two_episode_run(wb, context, dataset, **workflow):
+    from test_agent_economy import with_video
+
+    from levi.agent.planning import approve
+    from levi.agent.schema import TaskContext
+
+    agent = Principal("conn", datasets=(context.repo_id,))
+    ctx = TaskContext(
+        **{
+            **context.model_dump(),
+            "provider": "external",
+            "cameras": [with_video(dataset)],
+            "allow_media_egress": True,
+            "episodes": [0, 1],
+            "workflow": {"kind": "temporal", "definitions": [GRASP], **workflow},
+        }
+    )
+    run = wb.plan(ctx, agent)
+    approve(wb, run["id"], 1, "fixture-human")
+    return agent, wb.store.get("runs", run["id"])
+
+
+def test_an_external_plan_reads_one_frame_per_second_unless_it_chooses():
+    from levi.agent.schema import TaskContext
+
+    base = {"repo_id": "local/x", "episodes": [0], "instruction": "i"}
+    external = TaskContext(**base, provider="external", workflow={"kind": "temporal"})
+    model = TaskContext(**base, provider="qwen-local", workflow={"kind": "temporal"})
+    chosen = TaskContext(
+        **base,
+        provider="external",
+        workflow={"kind": "temporal", "coarse_step_seconds": 2.0},
+    )
+    assert external.workflow["coarse_step_seconds"] == 1.0
+    assert model.workflow["coarse_step_seconds"] == 2.0
+    assert chosen.workflow["coarse_step_seconds"] == 2.0
+    # Stable across revalidation (a stored context is validated again).
+    again = TaskContext.model_validate(external.model_dump())
+    assert again.workflow["coarse_step_seconds"] == 1.0
+
+
+def test_the_first_read_prepares_an_episode_and_the_pilot_still_gates(bench, dataset):
+    wb, context = bench
+    agent, run = two_episode_run(wb, context, dataset)
+    page = invoke(
+        wb,
+        agent,
+        "evidence.read",
+        {"run_id": run["id"], "episode": 0, "layout": "mosaic"},
+    )
+    assert page["times"] and 0 in wb.store.get("runs", run["id"])["prepared"]
+    with pytest.raises(ValueError, match="open after the pilot is accepted"):
+        invoke(
+            wb,
+            agent,
+            "evidence.read",
+            {"run_id": run["id"], "episode": 1, "layout": "mosaic"},
+        )
+
+
+def test_a_waived_pilot_opens_every_episode_after_plan_approval(bench, dataset):
+    wb, context = bench
+    agent, run = two_episode_run(wb, context, dataset, require_human_pilot=False)
+    assert run["plan"]["pilot_review"]["waived"] is True
+    receipt = invoke(
+        wb,
+        agent,
+        "annotations.propose_segments",
+        {
+            "run_id": run["id"],
+            "segments": {
+                "0": [
+                    {
+                        "start": 0.0,
+                        "end": 1.0,
+                        "subtask": "grasp",
+                        "outcome": "success",
+                        "description": "Closes on the plate.",
+                    }
+                ],
+                "1": [
+                    {
+                        "start": 0.0,
+                        "end": 1.9,
+                        "subtask": "other",
+                        "outcome": "unknown",
+                        "description": "The arm rests.",
+                    }
+                ],
+            },
+        },
+    )
+    assert receipt["accepted"] == {"0": 1, "1": 1}
+    staged = wb.store.get("changes", receipt["id"])["proposals"]
+    assert {p["episode_index"] for p in staged} == {0, 1}
+    assert all(p["evidence_ids"] and p["kind"] == "segment" for p in staged)
+    assert staged[0]["content"] == "Closes on the plate."
+
+
+def test_a_call_names_its_episodes_or_gives_segments():
+    from levi.agent.capabilities import Propose
+
+    with pytest.raises(ValueError, match="inspected episodes"):
+        Propose(run_id="r", proposals=[])
+
+
+# ---- review of the streamlining ------------------------------------------
+
+
+def test_one_frame_per_second_comes_with_room_for_long_episodes():
+    from levi.agent.schema import TaskContext
+
+    base = {"repo_id": "local/x", "episodes": [0], "instruction": "i"}
+    ctx = TaskContext(**base, provider="external", workflow={"kind": "temporal"})
+    assert ctx.workflow["max_evidence_frames"] == 240
+    chosen = TaskContext(
+        **base,
+        provider="external",
+        workflow={"kind": "temporal", "max_evidence_frames": 50},
+    )
+    assert chosen.workflow["max_evidence_frames"] == 50
+
+
+def test_object_masks_keep_their_pilot():
+    from levi.agent.planning import Workflow
+
+    with pytest.raises(ValueError, match="cannot be waived"):
+        Workflow(kind="objects", object_concepts=["plate"], require_human_pilot=False)
+
+
+def test_a_waived_pilot_cannot_be_reviewed(bench, dataset):
+    from levi.agent.planning import pilot_review
+    from levi.agent.store import Conflict
+
+    wb, context = bench
+    _, run = two_episode_run(wb, context, dataset, require_human_pilot=False)
+    with pytest.raises(Conflict, match="waived"):
+        pilot_review(wb, run["id"], 0, True, "x", "human")
+
+
+def test_edits_keep_other_episodes_in_place_and_people_may_empty_one(bench, dataset):
+    wb, context = bench
+    agent, run = two_episode_run(wb, context, dataset, require_human_pilot=False)
+
+    def seg(text, start=0.0, end=1.0):
+        return {
+            "start": start,
+            "end": end,
+            "subtask": "other",
+            "outcome": "unknown",
+            "description": text,
+        }
+
+    receipt = invoke(
+        wb,
+        agent,
+        "annotations.propose_segments",
+        {
+            "run_id": run["id"],
+            "segments": {"0": [seg("a0"), seg("b0", 1.0, 1.9)], "1": [seg("a1")]},
+        },
+    )
+    change = wb.store.get("changes", receipt["id"])
+    human = Principal("reviewer", human=True)
+    invoke(
+        wb,
+        human,
+        "changes.review",
+        {
+            "changeset_id": change["id"],
+            "revision": change["revision"],
+            "indices": [2],
+            "decision": "rejected",
+        },
+    )
+    change = wb.store.get("changes", receipt["id"])
+    # An agent replaces episode 0; episode 1 keeps its place and decision.
+    edited = invoke(
+        wb,
+        agent,
+        "changes.edit",
+        {
+            "changeset_id": change["id"],
+            "revision": change["revision"],
+            "episodes": [0],
+            "proposals": [
+                {
+                    "episode_index": 0,
+                    "kind": "segment",
+                    "subtask_id": "other",
+                    "content": "c0",
+                    "start": 0.0,
+                    "end": 1.9,
+                    "outcome": "unknown",
+                }
+            ],
+        },
+    )
+    after = wb.store.get("changes", change["id"])
+    assert [p["content"] for p in after["proposals"]] == ["c0", "a1"]
+    assert after["decisions"] == {"1": "rejected"}
+    with pytest.raises(ValueError, match="not staged yet"):
+        invoke(
+            wb,
+            agent,
+            "changes.edit",
+            {
+                "changeset_id": change["id"],
+                "revision": edited["revision"],
+                "episodes": [5],
+                "proposals": [],
+            },
+        )
+    # A person may empty an episode through the review screen's full save.
+    kept = [p for p in after["proposals"] if p["episode_index"] == 1]
+    saved = invoke(
+        wb,
+        human,
+        "changes.edit",
+        {
+            "changeset_id": change["id"],
+            "revision": edited["revision"],
+            "proposals": kept,
+        },
+    )
+    assert [p["content"] for p in saved["proposals"]] == ["a1"]
+
+
+def test_reading_never_prepares_a_model_run(bench, dataset):
+    from test_agent_economy import with_video
+
+    from levi.agent.planning import approve
+    from levi.agent.schema import ProviderConfig, TaskContext
+
+    wb, context = bench
+    agent = Principal("conn", datasets=(context.repo_id,))
+    wb.store.put(
+        "providers",
+        "fixture",
+        ProviderConfig(
+            name="fixture",
+            base_url="https://example.invalid/v1",
+            model="fixture",
+            tools=True,
+            vision=True,
+        ).model_dump(),
+    )
+    ctx = TaskContext(
+        **{
+            **context.model_dump(),
+            "provider": "fixture",
+            "cameras": [with_video(dataset)],
+            "allow_media_egress": True,
+            "episodes": [0, 1],
+            "workflow": {"kind": "temporal", "definitions": [GRASP]},
+        }
+    )
+    run = wb.plan(ctx, agent)
+    approve(wb, run["id"], 1, "fixture-human")
+    with pytest.raises(KeyError):
+        invoke(wb, agent, "evidence.read", {"run_id": run["id"], "episode": 0})
+    assert not wb.store.get("runs", run["id"]).get("prepared")
 
 
 def test_prepare_large_scope_in_bounded_batches(bench, dataset):

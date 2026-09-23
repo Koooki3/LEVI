@@ -6,7 +6,11 @@ export type HarnessPlan = {
   digest: string;
   approval: { actor: string } | null;
   pilot_episode: number;
-  pilot_review: { accepted: boolean; note: string } | null;
+  pilot_review: {
+    accepted: boolean;
+    note?: string;
+    waived?: boolean;
+  } | null;
   questions: { field: string; message: string }[];
   estimate: { minimum_requests: number; tokens: string };
   excluded: string[];
@@ -49,8 +53,16 @@ export default function AgentPlan({
           · v{plan.revision}
         </p>
         <p>
-          <T>Pilot episode</T>: {plan.pilot_episode} ·{" "}
-          <T>Minimum model requests</T>: {plan.estimate.minimum_requests}
+          {plan.pilot_review?.waived ? (
+            <strong>
+              <T>No separate pilot: this plan waives it</T>
+            </strong>
+          ) : (
+            <>
+              <T>Pilot episode</T>: {plan.pilot_episode}
+            </>
+          )}{" "}
+          · <T>Minimum model requests</T>: {plan.estimate.minimum_requests}
         </p>
         <p className="levi-agent-muted">
           Token cost is unknown until pilot. Limits are enforced; estimates are
@@ -83,6 +95,7 @@ export default function AgentPlan({
           </button>
         )}
         {plan.approval &&
+          !plan.pilot_review?.waived &&
           completed.includes(plan.pilot_episode) &&
           draftRevision !== undefined && (
             <>

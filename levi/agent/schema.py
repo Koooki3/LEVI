@@ -85,6 +85,18 @@ class TaskContext(Contract):
     def scope(self):
         from .planning import Workflow
 
+        # An external agent reads a whole episode at a glance: one frame per
+        # second on one sheet served it better than two seconds plus the
+        # refinements it then asked for everywhere. Model runs keep 2 s (their
+        # context holds fewer images). Only when the plan does not choose.
+        if self.provider == "external":
+            flow = dict(self.workflow or {})
+            if "coarse_step_seconds" not in flow:
+                flow["coarse_step_seconds"] = 1.0
+                # One frame per second must still fit long, multi-camera
+                # episodes with room to refine.
+                flow.setdefault("max_evidence_frames", 240)
+            self.workflow = flow
         self.workflow = Workflow.model_validate(self.workflow).model_dump()
         from .formats import DATASETS
 

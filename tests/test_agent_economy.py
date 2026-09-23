@@ -410,7 +410,8 @@ def test_a_page_of_evidence_can_be_read_as_one_sheet(bench, dataset):
         {"run_id": run["id"], "episode": 0, "limit": 4, "layout": "mosaic"},
     )
     sheet = page["mosaic"]
-    assert "tiles" not in sheet and len(page["items"]) == 4
+    assert "tiles" not in sheet and len(page["times"]) == 4
+    assert "items" not in page, "ids only on request"
     # The sheet is a run artifact, so the MCP bridge is allowed to return it.
     assert sheet["artifact"] in wb.store.get("runs", run["id"])["sheets"]
     assert "--sheet-" in sheet["artifact"] and "-w" in sheet["artifact"]

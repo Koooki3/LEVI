@@ -562,10 +562,10 @@ def test_a_mosaic_page_names_each_frame_once(bench, dataset):
         wb,
         agent,
         "evidence.read",
-        {"run_id": run["id"], "episode": 0, "layout": "mosaic"},
+        {"run_id": run["id"], "episode": 0, "layout": "mosaic", "ids": True},
     )
     # The sheet follows the items list; no per-tile index repeats it.
-    assert "tiles" not in page["mosaic"] and page["mosaic"]["columns"] >= 1
+    assert "tiles" not in page["mosaic"] and page["mosaic"]["columns"] == 6
     assert len({i["id"] for i in page["items"]}) == len(page["items"])
 
 
@@ -676,7 +676,7 @@ def test_provenance_names_the_skills_and_harness_the_run_used(bench, dataset):
     run = temporal_run(wb, context, agent, dataset)
     receipt = propose(wb, agent, run)
     provenance = wb.store.get("changes", receipt["id"])["provenance"]
-    assert "levi-overview@5" in provenance["skills_version"]
+    assert "levi-overview@11" in provenance["skills_version"]
     assert provenance["harness"]["parameters"]["evidence.refine_top_k"] == 0
 
 

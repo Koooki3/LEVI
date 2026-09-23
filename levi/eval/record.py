@@ -209,13 +209,14 @@ def _sections(block: dict, compared: list[dict]) -> list[str]:
         lines += [
             "与同内容副本数据集的逐条一致性（参考 = 对方的标注；同一子任务且 IoU ≥ 0.3 视为匹配）：",
             "",
-            "| 参考数据集 | 共同集数 | 片段 F1 | outcome 一致 | place 一致 | 边界误差 |",
-            "|---|---|---|---|---|---|",
+            "| 参考数据集 | 共同集数 | 片段 F1 | outcome 一致 | 时长一致（子任务） | 时长一致（子任务+outcome） | 边界误差 |",
+            "|---|---|---|---|---|---|---|",
         ]
         for row in compared:
             lines.append(
                 f"| {row['reference']} | {row['episodes']} | {_num(row['segment_f1'], 3)} | "
-                f"{_pct(row['outcome_accuracy'])} | {_pct(row['place_agreement'])} | "
+                f"{_pct(row['outcome_accuracy'])} | {_pct(row['time_accuracy'])} | "
+                f"{_pct(row['outcome_time_accuracy'])} | "
                 f"{_num(row['boundary_mae'])} s |"
             )
         lines.append("")

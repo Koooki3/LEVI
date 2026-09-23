@@ -32,7 +32,9 @@ def test_identical_annotations_agree_and_a_wrong_outcome_does_not():
         {"episode_000000": [seg("grasp", 0.2, 2.1), seg("place", 2.1, 4, "success")]},
     )
     assert not flipped["agreement"]
-    assert flipped["overall"]["place_agreement"] == 0.0
+    # The subtasks cover the same time; half of it has the wrong outcome.
+    assert flipped["overall"]["time_accuracy"] >= 0.9
+    assert flipped["overall"]["outcome_time_accuracy"] < 0.6
     assert flipped["overall"]["boundary_mae"] < 0.2
     missing = grading.grade(ref, {})
     assert missing["overall"]["segment_f1"] == 0.0

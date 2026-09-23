@@ -2,7 +2,7 @@
 
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .runtime import Workbench
 from .schema import Budget, Contract, ModelOutput, Proposal, TaskContext
@@ -72,11 +72,65 @@ class Decide(Review):
 
 class Edit(Review):
     proposals: list[Proposal] = Field(max_length=500)
+    # The episodes this edit replaces; the rest of the draft stays as it is.
+    # Without it the list replaces the whole draft, and an edit that would
+    # drop staged episodes is refused -- an agent correcting one episode once
+    # erased every other episode of a full-dataset draft.
+    episodes: list[int] | None = Field(default=None, min_length=1)
+
+
+class Segment(Contract):
+    """One subtask interval in the shape an annotator writes it."""
+
+    start: float = Field(ge=0)
+    end: float = Field(ge=0)
+    subtask: str
+    outcome: Literal["success", "failure", "unknown"]
+    description: str = Field(min_length=1, max_length=8000)
+    uncertainty: str = Field(default="", max_length=2000)
+    evidence_note: str = Field(default="", max_length=1000)
 
 
 class Propose(RunRef):
-    proposals: list[Proposal] = Field(max_length=500)
-    inspected_episodes: list[int] = Field(min_length=1)
+    proposals: list[Proposal] = Field(default_factory=list, max_length=500)
+    inspected_episodes: list[int] = Field(default_factory=list)
+    # The same work in the annotator's own shape: {episode: [segments]}. Each
+    # episode given is inspected; LEVI fills in kind, style and citations.
+    # Round 2 agents wrote converter scripts to reach the proposal shape.
+    segments: dict[int, list[Segment]] | None = Field(default=None, max_length=200)
+    # Re-stage episodes this run already staged: the new segments take their
+    # place in the draft. For an agent correcting its own staged work (after
+    # evidence.boundaries); episodes a person has reviewed are never replaced.
+    replace: bool = False
+
+    @model_validator(mode="after")
+    def compact(self):
+        if self.segments:
+            self.proposals = self.proposals + [
+                Proposal(
+                    episode_index=ep,
+                    kind="segment",
+                    style="subtask",
+                    subtask_id=s.subtask,
+                    outcome=s.outcome,
+                    start=s.start,
+                    end=s.end,
+                    content=s.description,
+                    uncertainty=s.uncertainty,
+                    evidence_note=s.evidence_note,
+                )
+                for ep, rows in self.segments.items()
+                for s in rows
+            ]
+            self.inspected_episodes = sorted(
+                set(self.inspected_episodes) | set(self.segments)
+            )
+            self.segments = None
+        if not self.inspected_episodes:
+            raise ValueError("Name the inspected episodes, or give `segments`")
+        if len(self.proposals) > 2000:
+            raise ValueError("At most 2000 proposals per call")
+        return self
 
 
 class Prepare(RunRef):
@@ -90,11 +144,14 @@ class Events(RunRef):
 
 
 class Recall(RunRef):
-    episode: int = Field(ge=0)
+    episode: int | None = Field(default=None, ge=0)
+    # Several whole episodes as mosaics in one answer: one turn of an agent
+    # instead of one per episode (every turn re-reads the agent's context).
+    episodes: list[int] = Field(default_factory=list, max_length=4)
     offset: int = Field(default=0, ge=0)
-    # Up to 32 frames per page with images, 200 rows as text only. None: a
-    # full page for the layout (32 frames on a mosaic, so a whole coarse pass
-    # is usually one call; 8 single images; 200 text rows).
+    # None: a full page for the layout -- 48 frames on a mosaic (a whole
+    # episode at one frame per second is one call), 8 single images, 200 text
+    # rows.
     limit: int | None = Field(default=None, ge=1, le=200)
     # "mosaic" returns one labelled contact sheet of this page instead of one
     # image per frame: the same evidence, an order of magnitude fewer tokens.
@@ -104,6 +161,26 @@ class Recall(RunRef):
     # False: the ledger rows only (ids, times, frames), no picture at all --
     # for citing evidence already seen without paying for it again.
     images: bool = True
+    # A mosaic answers with the frame times only; true adds each frame's
+    # evidence id (proposals may leave citations to LEVI).
+    ids: bool = False
+    # The first page also carries the episode's recorded signals (gripper
+    # close/open, height turns, still spans) as a few lines of text, when the
+    # dataset declares state/action columns.
+    signals: bool = True
+
+    @model_validator(mode="after")
+    def one_scope(self):
+        if (self.episode is None) == (not self.episodes):
+            raise ValueError("Give either episode or episodes")
+        if self.episodes:
+            if len(set(self.episodes)) != len(self.episodes) or min(self.episodes) < 0:
+                raise ValueError("episodes must be distinct episode indices")
+            if self.layout != "mosaic" or self.offset or not self.images:
+                raise ValueError(
+                    "episodes reads whole episodes as mosaics (layout 'mosaic', offset 0)"
+                )
+        return self
 
 
 class AgentObject(Contract):
@@ -174,13 +251,56 @@ class Estimate(Contract):
     agent_key: str | None = None
 
 
-class Refine(RunRef):
-    episode: int = Field(ge=0)
-    around_seconds: list[float] = Field(min_length=1, max_length=8)
+def _looks(spec):
+    if not spec.around_seconds and not spec.ranges:
+        raise ValueError("Name around_seconds or ranges")
+    for start, end in spec.ranges:
+        if not 0 < end - start <= 10:
+            raise ValueError("A span runs forward and covers at most 10 s")
+    return spec
+
+
+class RefineSpec(Contract):
+    around_seconds: list[float] = Field(default_factory=list, max_length=8)
+    # [from, to] spans (seconds) sampled at step_seconds: to watch a stretch
+    # densely, as a reader of the video would, rather than confirm an instant.
+    ranges: list[tuple[float, float]] = Field(default_factory=list, max_length=6)
+    # Seconds on each side of every instant; None: the plan's boundary window.
+    window_seconds: float | None = Field(default=None, gt=0, le=10)
+    # Spacing of the added frames; None: the plan's boundary tolerance.
+    step_seconds: float | None = Field(default=None, ge=0.05, le=2)
+
+
+class EpisodeRefine(RefineSpec):
+    @model_validator(mode="after")
+    def looks(self):
+        return _looks(self)
+
+
+class Refine(RunRef, RefineSpec):
+    episode: int | None = Field(default=None, ge=0)
     cameras: list[str] = Field(default_factory=list, max_length=8)
     # "mosaic" returns the added frames as one labelled sheet, so they are
     # seen without paging through the episode again; "none" returns ids only.
     layout: str = Field(default="mosaic", pattern="^(mosaic|none)$")
+    # Several episodes in one call, each with its own instants and spans: one
+    # agent turn for a batch of episodes instead of one per episode.
+    episodes: dict[int, EpisodeRefine] = Field(default_factory=dict, max_length=4)
+
+    @model_validator(mode="after")
+    def one_scope(self):
+        if (self.episode is None) == (not self.episodes):
+            raise ValueError("Give either episode or episodes")
+        if self.episodes:
+            if self.around_seconds or self.ranges:
+                raise ValueError("With episodes, each episode names its own looks")
+            return self
+        return _looks(self)
+
+
+class BoundaryCheck(RunRef):
+    episodes: list[int] = Field(min_length=1, max_length=4)
+    tile_width: int = Field(default=224, ge=96, le=320)
 
 
 class ObjectJob(Contract):
@@ -452,6 +572,15 @@ SPECS = {
         "read",
         "Read a bounded page of exact evidence; layout='mosaic' returns one labelled sheet instead of one image per frame",
     ),
+    "evidence.boundaries": (
+        BoundaryCheck,
+        "draft",
+        (
+            "Check staged segments: one sheet row per boundary (frames from "
+            "1 s before to 1 s after it) with the plan's start and end "
+            "definitions of the subtasks it separates"
+        ),
+    ),
     "evidence.refine": (
         Refine,
         "draft",
@@ -666,6 +795,65 @@ def _invoke(
     schema, permission, _ = SPECS[name]
     principal.require(permission)
     args = schema.model_validate(arguments)
+    if name == "evidence.refine" and args.episodes:
+        shared = {
+            k: v for k, v in arguments.items() if k in {"run_id", "cameras", "layout"}
+        }
+        parts = {
+            ep: _invoke(
+                workbench,
+                principal,
+                name,
+                {**shared, **spec.model_dump(exclude_none=True), "episode": ep},
+                key,
+            )
+            for ep, spec in args.episodes.items()
+        }
+        sheets = [sheet for part in parts.values() for sheet in part.get("mosaics", [])]
+        value = {
+            "episodes": {
+                str(ep): {
+                    k: v for k, v in part.items() if k not in {"mosaics", "reading"}
+                }
+                | {"sheets": len(part.get("mosaics", []))}
+                for ep, part in parts.items()
+            },
+        }
+        if sheets:
+            value["mosaics"] = sheets
+            value["reading"] = (
+                "Sheets follow `episodes` in order (each episode's `sheets` "
+                "says how many are its); added frames in time order, six per "
+                "row, each labelled with its frame and time"
+            )
+        return value
+    if name == "evidence.read" and args.episodes:
+        # Each episode goes through the single-episode read (scope, egress,
+        # first-touch preparation, signals); the sheets are listed together
+        # so a caller receives every picture of the answer.
+        single = {**arguments, "episodes": []}
+        parts = {
+            ep: _invoke(workbench, principal, name, {**single, "episode": ep}, key)
+            for ep in args.episodes
+        }
+        return {
+            "episodes": {
+                str(ep): {k: v for k, v in part.items() if k != "mosaic"}
+                | {"sheet": index}
+                for index, (ep, part) in enumerate(parts.items())
+            },
+            "mosaics": [
+                {k: v for k, v in part["mosaic"].items() if k != "reading"}
+                for part in parts.values()
+            ],
+            "reading": (
+                "One sheet per episode, in the order of `mosaics`; an "
+                "episode's `sheet` is its position there and its tiles are "
+                "the frames at its `times`, six per row. Stage these "
+                "episodes before reading more: a long context drops its "
+                "oldest images"
+            ),
+        }
     store = workbench.store
     run = None
     change = None
@@ -689,7 +877,14 @@ def _invoke(
         run
         and not principal.human
         and name
-        in {"media.sample", "evidence.read", "objects.inspect", "objects.frame"}
+        in {
+            "media.sample",
+            "evidence.read",
+            "evidence.refine",
+            "evidence.boundaries",
+            "objects.inspect",
+            "objects.frame",
+        }
         and run["context"]["cameras"]
         and not run["context"]["allow_media_egress"]
     ):
@@ -915,18 +1110,96 @@ def _invoke(
             args.timestamp,
             args.window_seconds,
         )
+    if (
+        name
+        in {
+            "evidence.read",
+            "evidence.refine",
+            "annotations.propose_segments",
+            "annotations.propose_events",
+        }
+        and run["context"]["workflow"]["kind"] != "objects"
+        # An agent staging its own work; a model run LEVI executes prepares
+        # its episodes itself, and a read must not change it under it.
+        and run["context"]["provider"] == "external"
+    ):
+        # The first touch of an episode prepares it: no runs.prepare step and
+        # no wait for the whole dataset before an agent starts.
+        wanted = (
+            args.inspected_episodes
+            if name.startswith("annotations.propose")
+            else [args.episode]
+        )
+        missing = [
+            ep
+            for ep in wanted
+            if ep not in (run.get("prepared") or []) and ep not in run["completed"]
+        ]
+        if missing:
+            from .runtime import prepare_evidence
+
+            prepare_evidence(workbench, run["id"], episodes=missing)
+            run = store.get("runs", run["id"])
+    if name == "evidence.boundaries":
+        from .observations import CHECK_OFFSETS, boundary_check
+
+        if run["context"]["workflow"]["kind"] != "temporal":
+            raise ValueError("Boundary checks are for temporal (subtask) runs")
+        outside = sorted(set(args.episodes) - set(run["context"]["episodes"]))
+        if outside:
+            raise ValueError(f"Episodes {outside} are outside the approved scope")
+        episodes, mosaics, named = {}, [], set()
+        for ep in dict.fromkeys(args.episodes):
+            value, sheets = boundary_check(workbench, run, ep, args.tile_width)
+            value["sheets"] = list(range(len(mosaics), len(mosaics) + len(sheets)))
+            mosaics += sheets
+            episodes[str(ep)] = value
+            named |= {x for row in value["boundaries"] for x in row[1:] if x}
+        definitions = {
+            d["id"]: {k: d[k] for k in ("starts_when", "ends_when") if d.get(k)}
+            for d in run["context"]["workflow"].get("definitions") or []
+            if d.get("id") in named
+        }
+        answer = {"episodes": episodes, "offsets": list(CHECK_OFFSETS)}
+        if definitions:
+            answer["definitions"] = definitions
+        if mosaics:
+            answer["mosaics"] = mosaics
+            answer["reading"] = (
+                "One row per boundary [time, subtask before, subtask after], in "
+                "order, on the sheets its episode names; a row's tiles are the "
+                "frames at the boundary plus `offsets` seconds, so the middle "
+                "tile is the boundary. Where a row contradicts the "
+                "definitions, re-stage that episode with "
+                "annotations.propose_segments and replace: true"
+            )
+        return answer
     if name == "evidence.read":
         from .observations import recall, text_page
 
         limit = args.limit or (
-            200 if not args.images else 32 if args.layout == "mosaic" else 8
+            200 if not args.images else 48 if args.layout == "mosaic" else 8
         )
-        if not args.images:
-            return text_page(workbench, run, args.episode, args.offset, limit)
-        if limit > 32:
-            raise ValueError("A page with images holds at most 32 frames")
 
-        return recall(
+        def with_signals(value):
+            if args.signals and args.offset == 0:
+                from .signals import for_run
+
+                found = for_run(workbench, run, args.episode)
+                if found:
+                    value["signals"] = found["lines"]
+            return value
+
+        if not args.images:
+            return with_signals(
+                text_page(workbench, run, args.episode, args.offset, limit)
+            )
+        if limit > (48 if args.layout == "mosaic" else 32):
+            raise ValueError(
+                "A mosaic page holds at most 48 frames, a page of single images 32"
+            )
+
+        value = recall(
             workbench,
             run,
             args.episode,
@@ -939,6 +1212,34 @@ def _invoke(
             .get("evidence.mosaic_tile_width")
             or 320,
         )
+        if args.layout == "mosaic" and not args.ids:
+            # One entry per tile, in sheet order: the rows that have a picture.
+            tiles = [
+                row
+                for row in value["items"]
+                if row.get("artifact") is not False and row.get("image_available", True)
+            ]
+            if "tile_ids" in value["mosaic"]:
+                shown = set(value["mosaic"]["tile_ids"])
+                tiles = [row for row in value["items"] if row["id"] in shown]
+            value["times"] = [round(row["timestamp"], 3) for row in tiles]
+            value["frames"] = [row["frame_index"] for row in tiles]
+            if len({row.get("camera_key") for row in tiles}) > 1:
+                value["cameras"] = [row.get("camera_key") for row in tiles]
+            value["mosaic"].pop("tile_ids", None)
+            # The digest pins the ledger for citations; a reader of times
+            # has nothing to cite with it (`ids: true` keeps it).
+            value.pop("ledger_digest", None)
+            if value.get("next_offset") == value.get("total"):
+                value.pop("next_offset", None)
+            value["mosaic"]["reading"] = (
+                "Tiles are the frames at `times`, in that order, "
+                f"{value['mosaic']['columns']} per row; `ids: true` names them. "
+                "Stage an episode before reading the next: a long context "
+                "drops its oldest images"
+            )
+            del value["items"]
+        return with_signals(value)
     if name == "evidence.refine":
         from .observations import refine
 
@@ -953,6 +1254,9 @@ def _invoke(
             .get("parameters", {})
             .get("evidence.mosaic_tile_width")
             or 320,
+            args.window_seconds,
+            args.ranges,
+            args.step_seconds,
         )
     if name == "runs.report_usage":
         from .usage import record
@@ -1161,9 +1465,32 @@ def _invoke(
     if name in {"annotations.propose_segments", "annotations.propose_events"}:
         if run["status"] in {"running", "queued", "succeeded", "cancelled"}:
             raise Conflict("Stop execution before staging suggestions")
-        if set(args.inspected_episodes) & set(run["completed"]):
-            raise Conflict("Use changes.edit for already completed episodes")
-        if not set(args.inspected_episodes) <= set(run.get("prepared", [])):
+        replaced = set(args.inspected_episodes) & set(run["completed"])
+        if replaced and not args.replace:
+            raise Conflict(
+                "Already staged; pass replace: true to re-stage them, or use "
+                "changes.edit"
+            )
+        if replaced and run.get("changes"):
+            draft = store.get("changes", run["changes"])
+            if draft["status"] == "committed":
+                raise Conflict("Published changes cannot be replaced")
+            reviewed = sorted(
+                {
+                    p["episode_index"]
+                    for i, p in enumerate(draft["proposals"])
+                    if p["episode_index"] in replaced
+                    and str(i) in (draft.get("decisions") or {})
+                }
+            )
+            if reviewed:
+                raise Conflict(
+                    f"A person has reviewed episodes {reviewed}; only they "
+                    "may change them (changes.edit)"
+                )
+        if not set(args.inspected_episodes) <= set(run.get("prepared", [])) | set(
+            run["completed"]
+        ):
             raise ValueError("Prepare evidence for every inspected episode first")
         if any(p.episode_index not in args.inspected_episodes for p in args.proposals):
             raise ValueError("Proposal is outside inspected scope")
@@ -1222,6 +1549,28 @@ def _invoke(
         )
         change = workbench.prepare_changes(run["id"])
         change["provenance"]["provider"] = {"external_principal": principal.id}
+        if replaced:
+            # prepare_changes keeps the draft's own proposals for episodes it
+            # already holds; a replacement takes their place, in place.
+            fresh = {
+                ep: [p.model_dump() for p in proposals]
+                for ep, _saved, proposals in checked
+                if ep in replaced
+            }
+            kept, decisions, placed = [], {}, set()
+            for index, p in enumerate(change["proposals"]):
+                ep = p["episode_index"]
+                if ep in fresh:
+                    if ep not in placed:
+                        kept += fresh[ep]
+                        placed.add(ep)
+                    continue
+                if str(index) in (change.get("decisions") or {}):
+                    decisions[str(len(kept))] = change["decisions"][str(index)]
+                kept.append(p)
+            for ep in sorted(set(fresh) - placed):
+                kept += fresh[ep]
+            change["proposals"], change["decisions"] = kept, decisions
         store.put("changes", change["id"], change)
         # A receipt, not the ChangeSet: echoing every staged proposal back made
         # each call cost more than the last (quadratic over a run). The full
@@ -1230,7 +1579,25 @@ def _invoke(
         for proposal in change["proposals"]:
             key = str(proposal["episode_index"])
             staged[key] = staged.get(key, 0) + 1
-        return {
+        # Problems only: an episode that breaks no rule gets no line, so a
+        # clean staging costs nothing to read.
+        problems = {}
+        if run["context"]["workflow"]["kind"] == "temporal":
+            from . import checks, signals
+
+            exempt = checks.always_unknown(
+                run["context"]["workflow"].get("definitions")
+            )
+            for ep, _saved, proposals in checked:
+                sig = signals.for_run(workbench, run, ep) or {}
+                found = checks.staged(
+                    [p.model_dump() for p in proposals if p.kind == "segment"],
+                    sig.get("events"),
+                    exempt,
+                )
+                if found:
+                    problems[str(ep)] = found
+        receipt = {
             "id": change["id"],
             "run_id": change["run_id"],
             "revision": change["revision"],
@@ -1239,14 +1606,23 @@ def _invoke(
                 str(ep): staged.get(str(ep), 0) for ep in args.inspected_episodes
             },
             "staged_proposals": len(change["proposals"]),
-            "staged_episodes": sorted(int(k) for k in staged),
-            "remaining_episodes": sorted(
+            "staged_episodes": len(staged),
+            "remaining_episodes": len(
                 set(run["context"]["episodes"])
                 - set(run["completed"])
                 - set(args.inspected_episodes)
             ),
             "full_draft": "changes.diff",
         }
+        if problems:
+            receipt["problems"] = problems
+            receipt["next"] = (
+                "Look where `problems` point (evidence.refine ranges, or "
+                "evidence.boundaries for the episode) and re-stage what the "
+                "frames show wrong with replace: true; an episode without a "
+                "line broke no rule"
+            )
+        return receipt
     if name == "objects.inspect":
         from .objects import inspect_result
 
@@ -1383,17 +1759,41 @@ def _invoke(
                 "runs.prepare — build the evidence for the approved scope",
                 (
                     "evidence.read with layout='mosaic' — one labelled contact "
-                    "sheet of up to 32 frames: one call usually covers an "
-                    "episode's coarse pass"
+                    "sheet of up to 48 frames: one call usually covers an "
+                    "episode, and `episodes: [a, b, ...]` (up to 4) reads "
+                    "several in one call; the first read of an episode "
+                    "prepares it. When the dataset has state/action columns "
+                    "the answer carries `signals`: when the gripper closed "
+                    "and opened, the arm's height turns and still spans, to "
+                    "the frame. They record what the robot did; what that "
+                    "means for the annotation is the task definition's call"
                 ),
                 (
-                    "evidence.refine — extra frames only where a boundary is "
-                    "unclear; the answer is one sheet of just the added frames, so "
-                    "do not page through the episode again"
+                    "evidence.refine — dense frames where a sheet leaves a "
+                    "boundary or an outcome unsettled: `ranges: [[from, to]]` "
+                    "at `step_seconds` to watch a stretch, `around_seconds` "
+                    "(with `window_seconds`) to confirm an instant, and "
+                    "`episodes: {N: {...}}` for up to four episodes in one "
+                    "call. The answer is one sheet of just the added frames "
+                    "per episode, so do not page through an episode again. "
+                    "`unknown` is for what the recording does not show, not "
+                    "for what was not looked at"
                 ),
                 (
-                    "annotations.propose_segments / objects.propose — several "
-                    "episodes per call; evidence_ids may be left out (LEVI cites "
+                    "evidence.boundaries — after staging, one sheet row per "
+                    "boundary (1 s before to 1 s after it) with the plan's "
+                    "start/end definitions of the subtasks it separates: "
+                    "check every boundary against them, and re-stage an "
+                    "episode that needs it with annotations.propose_segments "
+                    "and replace: true"
+                ),
+                (
+                    "annotations.propose_segments / objects.propose — stage "
+                    "what you have decided before reading more (a long "
+                    "context drops its oldest images), in the same turn as "
+                    "the next read when you can; e.g. "
+                    "segments: {episode: [{start, end, "
+                    "subtask, outcome, description}]}; evidence_ids may be left out (LEVI cites "
                     "the frames you were shown inside each interval), a success "
                     "uses its content as the evidence note unless you give one, "
                     "and an end within half a frame of the last frame is snapped "
@@ -1417,9 +1817,14 @@ def _invoke(
                 "workflow. They are short and they are the contract."
             ),
             "cost": (
-                "Evidence dominates what a task costs. Read pages as mosaics, "
-                "refine only unclear boundaries, and call plans.estimate "
-                "before committing to a large scope."
+                "Evidence and turns dominate what a task costs: every turn "
+                "re-reads your context. Read whole episodes as mosaics, "
+                "several per call; refine what a sheet leaves unsettled for "
+                "all of them in one call; stage them and read the next "
+                "episodes in one turn -- a staging receipt names `problems` "
+                "only where an episode breaks a rule, and only those need "
+                "another look; call plans.estimate before "
+                "committing to a large scope."
             ),
         }
     if name == "datasets.inspect":
@@ -1472,13 +1877,79 @@ def _invoke(
 
         return store.mutate("changes", args.changeset_id, decide)
     if name == "changes.edit":
+        if args.episodes is not None:
+            scope = set(args.episodes)
+            unstaged = sorted(scope - set(run["completed"]))
+            if unstaged:
+                raise ValueError(
+                    f"Episodes {unstaged} are not staged yet; stage them with "
+                    "annotations.propose_segments"
+                )
+            outside = sorted({p.episode_index for p in args.proposals} - scope)
+            if outside:
+                raise ValueError(
+                    f"Proposals for episodes {outside} are outside `episodes`"
+                )
+        if principal.human:
+            # A person's edit is saved as made (the review screen sends the
+            # whole draft, and may empty an episode on purpose).
+            edited = [p.model_dump() for p in args.proposals]
+        else:
+            # The same completion a staging call gives an external caller:
+            # citations from the frames shown, the content as a success note,
+            # boundaries snapped to the first/last frame.
+            from .observations import complete_external
+
+            completed = []
+            for ep in sorted({p.episode_index for p in args.proposals}):
+                saved = store.get("evidence", f"{change['run_id']}:{ep}")
+                completed += complete_external(
+                    [p for p in args.proposals if p.episode_index == ep],
+                    saved["items"],
+                    saved["summary"],
+                )
+            edited = [p.model_dump() for p in completed]
 
         def edit(value):
             if value["revision"] != args.revision or value["status"] == "committed":
                 raise Conflict("Draft revision changed")
+            old = value["proposals"]
+            decisions = value.get("decisions") or {}
+            if args.episodes is not None:
+                # In place: the new proposals of an episode take the position
+                # of its old ones; every other proposal keeps its place and
+                # its review decision.
+                proposals, kept_decisions, placed = [], {}, set()
+                for index, p in enumerate(old):
+                    ep = p["episode_index"]
+                    if ep in scope:
+                        if ep not in placed:
+                            proposals += [q for q in edited if q["episode_index"] == ep]
+                            placed.add(ep)
+                        continue
+                    if str(index) in decisions:
+                        kept_decisions[str(len(proposals))] = decisions[str(index)]
+                    proposals.append(p)
+                for ep in sorted(scope - placed):
+                    proposals += [q for q in edited if q["episode_index"] == ep]
+            else:
+                dropped = sorted(
+                    {p["episode_index"] for p in old}
+                    - {p["episode_index"] for p in edited}
+                )
+                if dropped and not principal.human:
+                    shown = ", ".join(map(str, dropped[:10])) + (
+                        "…" if len(dropped) > 10 else ""
+                    )
+                    raise ValueError(
+                        f"This edit would remove every staged proposal of "
+                        f"{len(dropped)} episode(s) ({shown}); pass `episodes` "
+                        "to edit only those episodes"
+                    )
+                proposals, kept_decisions = edited, {}
             value.update(
-                proposals=[p.model_dump() for p in args.proposals],
-                decisions={},
+                proposals=proposals,
+                decisions=kept_decisions,
                 status="draft",
                 revision=value["revision"] + 1,
             )
@@ -1486,7 +1957,21 @@ def _invoke(
             for row in report["quality"]:
                 store.put("quality", f"{value['run_id']}:{row['episode']}", row)
 
-        return store.mutate("changes", args.changeset_id, edit)
+        result = store.mutate("changes", args.changeset_id, edit)
+        if principal.human:
+            return result  # the review screen redraws the whole draft
+        # A receipt for an agent: the full draft of a large run is thousands of
+        # lines it has already seen, one changes.diff away.
+        episodes = sorted({p["episode_index"] for p in edited})
+        return {
+            "id": result["id"],
+            "run_id": result["run_id"],
+            "revision": result["revision"],
+            "status": result["status"],
+            "edited_episodes": episodes,
+            "staged_proposals": len(result["proposals"]),
+            "full_draft": "changes.diff",
+        }
     if name == "changes.approve":
         report = workbench.validate(change)
         if report.get("pending_objects"):

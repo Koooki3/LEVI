@@ -1259,7 +1259,13 @@ def stop():
 
 
 def prepare_evidence(wb, id, *, episodes=None):
-    """Prepare a bounded subset of approved evidence without model calls."""
+    """Prepare a bounded subset of approved evidence without model calls.
+
+    ``episodes``: only these -- a batch from ``runs.prepare`` (so a large
+    scope never needs one long call), or the episodes an agent's first read
+    names (so nobody waits for a whole dataset before starting). Episodes
+    already prepared are kept as they are: preparing again would drop the
+    frames a refinement added."""
     from .store import dataset_lock
 
     with dataset_lock(wb.store.state, "run-" + id):
@@ -1299,13 +1305,28 @@ def prepare_evidence(wb, id, *, episodes=None):
             if (run["plan"].get("pilot_review") or {}).get("accepted")
             else [run["plan"]["pilot_episode"]]
         )
-        selected = list(allowed) if episodes is None else list(episodes)
-        if not selected or len(selected) != len(set(selected)):
-            raise ValueError("Prepare a nonempty set of distinct episodes")
-        if not set(selected) <= set(allowed):
-            raise ValueError("Evidence request exceeds the approved pilot/scope")
-        if episodes is not None and set(selected) & set(run["completed"]):
-            raise ValueError("Completed episodes cannot be prepared again in a batch")
+        if episodes is None:
+            selected = list(allowed)
+        else:
+            selected = list(episodes)
+            if not selected or len(selected) != len(set(selected)):
+                raise ValueError("Prepare a nonempty set of distinct episodes")
+            outside = sorted(set(selected) - set(allowed))
+            if outside:
+                raise ValueError(
+                    "Evidence request exceeds the approved pilot/scope: "
+                    + (
+                        f"episodes {outside} open after the pilot is accepted"
+                        if set(outside) <= set(ctx.episodes)
+                        else f"episodes {outside} are outside the approved scope"
+                    )
+                )
+            if set(selected) & set(run["completed"]):
+                raise ValueError(
+                    "Completed episodes cannot be prepared again in a batch"
+                )
+            done = set(run.get("prepared") or [])
+            selected = [ep for ep in selected if ep not in done]
         for ep in selected:
             # The declared observation policy, not a second uniform sampler:
             # a temporal plan gets its coarse step, everything else the plan's
@@ -1318,8 +1339,11 @@ def prepare_evidence(wb, id, *, episodes=None):
             )
             persist(wb, id, ep, summary, evidence)
         wb.store.mutate(
-            "runs", id,
-            lambda r: r.update(prepared=sorted(set(r.get("prepared", [])) | set(selected))),
+            "runs",
+            id,
+            lambda r: r.update(
+                prepared=sorted(set(r.get("prepared") or []) | set(selected))
+            ),
         )
         if ctx.workflow["kind"] == "objects":
             for ep in selected:

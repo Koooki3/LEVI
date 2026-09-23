@@ -793,6 +793,7 @@
   "Toggle sidebar": "展开／收起侧栏",
   "Token cost is unknown until pilot. Limits are enforced; estimates are not price promises.": "Token 成本须经试标测量。运行时执行限额，估计不代表价格承诺。",
   "Token limit": "Token 上限",
+  "No separate pilot: this plan waives it": "不单独试点：本计划已免除试点",
   "No limit": "不设上限",
   "Tokens": "Token 数",
   "Total Episodes": "总片段数",

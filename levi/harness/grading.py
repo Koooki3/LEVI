@@ -9,8 +9,11 @@ is then graded episode by episode against it, deterministically:
 - ``segment_f1`` is the F1 of that matching;
 - ``outcome_accuracy`` is the share of matched segments with the same outcome;
 - ``boundary_mae`` is the mean start/end error of matched segments (seconds);
-- ``place_agreement`` compares what matters most for stacking-type tasks: the
-  ordered success/failure outcomes of the ``place`` segments.
+- ``time_accuracy`` is the share of the reference's annotated time the
+  candidate gives the same subtask; ``outcome_time_accuracy`` the share where
+  the outcome is the same as well. Both count time, not segments, so one
+  wrongly split attempt costs what it covers, and neither depends on the
+  task, its vocabulary or the frame rate.
 
 ``agreement`` is high when every one of those clears its threshold; the learner
 is then producing the teacher's annotation, not merely something plausible.
@@ -24,7 +27,8 @@ IOU = 0.3
 THRESHOLDS = {
     "segment_f1": 0.8,
     "outcome_accuracy": 0.9,
-    "place_agreement": 0.9,
+    "time_accuracy": 0.8,
+    "outcome_time_accuracy": 0.75,
     "boundary_mae": 1.0,  # seconds, lower is better
 }
 
@@ -95,18 +99,16 @@ def episode(reference, candidate):
     errors = [
         (abs(r["start"] - c["start"]) + abs(r["end"] - c["end"])) / 2 for r, c in pairs
     ]
-    ref_place = [
-        s.get("outcome")
-        for s in sorted(ref, key=lambda s: s["start"])
-        if s.get("subtask") == "place"
-    ]
-    cand_place = [
-        s.get("outcome")
-        for s in sorted(cand, key=lambda s: s["start"])
-        if s.get("subtask") == "place"
-    ]
-    length = max(len(ref_place), len(cand_place))
-    same = sum(a == b for a, b in zip(ref_place, cand_place))
+    total = sum(max(0.0, r["end"] - r["start"]) for r in ref)
+    same_subtask = same_outcome = 0.0
+    for r in ref:
+        for c in cand:
+            if c.get("subtask") != r.get("subtask"):
+                continue
+            overlap = max(0.0, min(r["end"], c["end"]) - max(r["start"], c["start"]))
+            same_subtask += overlap
+            if c.get("outcome") == r.get("outcome"):
+                same_outcome += overlap
     return {
         "reference_segments": len(ref),
         "candidate_segments": len(cand),
@@ -116,9 +118,10 @@ def episode(reference, candidate):
         if outcomes
         else 0.0,
         "boundary_mae": round(sum(errors) / len(errors), 2) if errors else None,
-        "place_agreement": round(same / length, 3) if length else 1.0,
-        "reference_places": ref_place,
-        "candidate_places": cand_place,
+        "time_accuracy": round(min(1.0, same_subtask / total), 3) if total else None,
+        "outcome_time_accuracy": round(min(1.0, same_outcome / total), 3)
+        if total
+        else None,
     }
 
 

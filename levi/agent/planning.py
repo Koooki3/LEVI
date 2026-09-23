@@ -29,16 +29,21 @@ class Workflow(Contract):
     object_concepts: list[str] = Field(default_factory=list, max_length=30)
     mask_definition: str = Field(default="visible", pattern="^visible$")
     pilot_episode: int | None = Field(default=None, ge=0)
+    # False: the person approving the plan waives the separate pilot step
+    # (plan approval and the final commit still take a person). For a capable
+    # external agent the pilot cost an extra agent and a wait before the rest.
     require_human_pilot: bool = True
 
     @model_validator(mode="after")
     def unique(self):
+        if not self.require_human_pilot and self.kind == "objects":
+            raise ValueError(
+                "Object masks are reviewed on the pilot; the pilot cannot be waived"
+            )
         if len({d.id for d in self.definitions}) != len(self.definitions):
             raise ValueError("Subtask IDs must be unique")
         if any(not item.strip() for item in self.object_concepts):
             raise ValueError("Object concepts cannot be blank")
-        if not self.require_human_pilot:
-            raise ValueError("This release requires human pilot acceptance")
         return self
 
 
@@ -132,7 +137,10 @@ def attach(run):
         "revision": 1,
         "digest": digest(material(run)),
         "approval": None,
-        "pilot_review": None,
+        # Waived in the plan itself, so approving the plan approves the waiver.
+        "pilot_review": None
+        if flow.require_human_pilot
+        else {"accepted": True, "waived": True, "actor": "plan"},
         "pilot_episode": flow.pilot_episode
         if flow.pilot_episode is not None
         else run["context"]["episodes"][0],
@@ -186,7 +194,8 @@ def require(wb, run, *, bulk=False):
         or annotation_digest(wb.store.state, run["dataset_key"]) != run["base_content"]
     ):
         raise Conflict("Annotation baseline changed; create and approve a new plan")
-    if bulk and (plan.get("pilot_review") or {}).get("accepted"):
+    review = plan.get("pilot_review") or {}
+    if bulk and review.get("accepted") and not review.get("waived"):
         current = wb.store.get("changes", run["changes"])
         if plan["pilot_review"].get("draft_digest") != pilot_digest(
             current, plan["pilot_episode"]
@@ -217,6 +226,8 @@ def approve(wb, id, revision, who):
 
 def pilot_review(wb, id, revision, accepted, note, who):
     run = wb.store.get("runs", id)
+    if (run["plan"].get("pilot_review") or {}).get("waived"):
+        raise Conflict("This plan waived the pilot when it was approved")
     require(wb, run)
     if (
         run["status"] != "waiting_for_review"

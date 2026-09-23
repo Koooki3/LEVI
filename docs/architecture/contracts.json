@@ -333,11 +333,18 @@
               "type": "integer"
             },
             "max_seconds": {
+              "anyOf": [
+                {
+                  "maximum": 86400,
+                  "minimum": 10,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "default": 300,
-              "maximum": 86400,
-              "minimum": 10,
-              "title": "Max Seconds",
-              "type": "integer"
+              "title": "Max Seconds"
             },
             "max_snapshot_bytes": {
               "default": 536870912,

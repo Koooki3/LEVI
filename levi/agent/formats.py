@@ -53,6 +53,14 @@ class LeRobotAdapter:
 
         return media.sample(context, root, episode, artifacts)
 
+    def sample_frames(self, context, root, episode, artifacts, frame_indices):
+        """Exactly these frames: a reader's own choice of span and step."""
+        from . import media
+
+        return media.sample(
+            context, root, episode, artifacts, frame_indices=frame_indices
+        )
+
     def sample_temporal(
         self, context, root, episode, artifacts, proposals=None, spacing=None
     ):

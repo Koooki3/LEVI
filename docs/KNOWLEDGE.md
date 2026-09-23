@@ -35,7 +35,7 @@ Agents can read the candidates (`knowledge.list`). Only a person can promote or 
 ## Index
 
 <!-- levi:generated knowledge -->
-### annotation (11)
+### annotation (12)
 
 - **annotation-001** · Cover the whole episode with consecutive intervals, from the first to the last frame; intervals in one layer never overlap, and each ends after it starts.
 - **annotation-002** · A place, transport or stacking step succeeds only when its goal condition is visibly met (for example the object rests on a target of the required kind); name what was placed and what is under it before writing the outcome.
@@ -43,11 +43,12 @@ Agents can read the candidates (`knowledge.list`). Only a person can promote or 
 - **annotation-004** · Anything a human hand does is labelled `other` with outcome unknown, never as a robot subtask.
 - **annotation-005** · Something not seen in coarse samples may still have happened: lifts, releases and hand entries often last well under a second. Refine that interval with dense frames before judging it a failure.
 - **annotation-006** · Read times from each frame's timestamp, never from frame numbers or image order.
-- **annotation-007** · A long stretch of repeated attempts that never lifts the object is one grasp interval with outcome unknown (failure only when the attempt visibly ends); a final successful lift is its own short grasp interval.
+- **annotation-007** · An attempt is one continuous engagement with an object: it starts at contact and lasts while the effector stays on it (re-closing or adjusting the grip is the same attempt); it ends when the effector lets go and moves away, or when the object moves with it. Give each attempt its own interval and outcome -- failure when the effector leaves without the object, unknown only when the recording does not show which -- and label the move from letting go to the next contact as a new approach; two intervals of the same subtask never meet. How finely a task is split is the task's instruction to state; boundaries alone do not settle it.
 - **annotation-008** · The description (`content`) is one short sentence of what the robot does. It contains no frame numbers and no reasoning.
 - **annotation-009** · Episode-level metadata outcomes and per-subtask outcomes answer different questions: an episode can contain successful subtasks and still fail. Never substitute one for the other.
 - **annotation-010** · A dataset can contain demonstrations of other tasks. Judge which task a demo shows from what is on the table (the wide camera), before judging its outcome.
 - **annotation-011** · Judge small-part outcomes (a screw seated in a slot) from the wrist camera's last frames; a hand or object entering at the end does not change the outcome by itself.
+- **annotation-012** · `unknown` says the recording does not show the outcome, not that it was not looked at: when a coarse sheet leaves an outcome or a boundary unsettled, watch that stretch densely before writing `unknown`.
 
 ### interpretation (6)
 

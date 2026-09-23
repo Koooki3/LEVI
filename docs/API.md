@@ -139,6 +139,7 @@ Generated from the capability registry by `uv run levi docs sync`. Do not edit b
 | `cost.profile` | agent | Measured token and time cost on this dataset per agent (API, local VLM, external MCP), the latest breakdown and advice for the next run |
 | `datasets.inspect` | agent | Inspect fixed dataset scope and snapshot cost |
 | `episodes.query` | agent | Read frozen episode scope |
+| `evidence.boundaries` | agent | Check staged segments: one sheet row per boundary (frames from 1 s before to 1 s after it) with the plan's start and end definitions of the subtasks it separates |
 | `evidence.changes` | agent | Rank an episode's coarse intervals by how much the picture changes; refine the top ones first |
 | `evidence.read` | agent | Read a bounded page of exact evidence; layout='mosaic' returns one labelled sheet instead of one image per frame |
 | `evidence.refine` | agent | Add bounded extra frames around candidate boundaries, within the approved window and frame cap |

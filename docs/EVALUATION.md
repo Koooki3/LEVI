@@ -47,7 +47,7 @@ Sections 1–6 are the same for people and agents. Both are measured from the su
    - descriptions that only repeat the label.
 5. **Correctness**:
    - structural validity: empty or out-of-bounds spans, overlaps, ids outside the vocabulary;
-   - agreement with the **same-content copies** of the dataset: segment F1 (same subtask, IoU ≥ 0.3), outcome agreement, place agreement, boundary error. Copies are other catalog datasets that share this dataset's name stem (`<base>_human`, `<base>_agentVLM`, …) and have the same episodes and frame counts;
+   - agreement with the **same-content copies** of the dataset: segment F1 (same subtask, IoU ≥ 0.3), outcome agreement, time accuracy (share of the reference's annotated time given the same subtask, and the same subtask and outcome), boundary error. Every measure is task-agnostic: none depends on the vocabulary, the task or the frame rate. Copies are other catalog datasets that share this dataset's name stem (`<base>_human`, `<base>_agentVLM`, …) and have the same episodes and frame counts;
    - the three least-covered episodes, and a blank line for a tester's comments.
 6. **Efficiency**: duration, time per episode, subtasks per minute, and video seconds annotated per minute.
 
