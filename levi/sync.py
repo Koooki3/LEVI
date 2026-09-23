@@ -12,6 +12,8 @@ seconds (default 5; 0 disables; ``POST /api/levi/sync`` scans at once):
   ``LEVI_SYNC_SETTLE`` seconds (default 10), so a demo still being recorded
   is not built half-written. A capture whose view failed is retried only
   after it changes again.
+- **Namespaces** (``<dataset>--<namespace>``, levi/catalog.py) follow their
+  base: never rebuilt on their own, dropped when the base is.
 - **Removed datasets**: entries whose directory is gone are dropped (a raw
   capture's generated view with them). Annotations, outcome labels, reviews
   and SAM3 revisions stay on disk under the name and re-attach if the
@@ -146,6 +148,16 @@ class Synchronizer:
             return self._made
 
     def _check_entry(self, name: str, entry: dict, now: float):
+        if entry.get("base"):
+            # A namespace follows its base (catalog.follow_base); it goes when
+            # its base goes, and its products stay on disk under its name.
+            if entry["base"] not in catalog.datasets():
+                catalog.remove_entry(name)
+                self.pending.pop(name, None)
+                self._note(
+                    "removed", name, "its base dataset is gone; annotations kept"
+                )
+            return
         path = Path(entry["path"])
         if not path.exists():
             catalog.remove_entry(name)

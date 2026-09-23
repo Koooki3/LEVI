@@ -1778,12 +1778,13 @@ def _invoke(
                     "for what was not looked at"
                 ),
                 (
-                    "evidence.boundaries — after staging, one sheet row per "
+                    "evidence.boundaries — for an episode a staging receipt's "
+                    "`problems` names (or a real doubt): one sheet row per "
                     "boundary (1 s before to 1 s after it) with the plan's "
-                    "start/end definitions of the subtasks it separates: "
-                    "check every boundary against them, and re-stage an "
-                    "episode that needs it with annotations.propose_segments "
-                    "and replace: true"
+                    "start/end definitions of the subtasks it separates; "
+                    "re-stage what the frames show wrong with "
+                    "annotations.propose_segments and replace: true. An "
+                    "episode without a problem line needs no check"
                 ),
                 (
                     "annotations.propose_segments / objects.propose — stage "

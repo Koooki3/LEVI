@@ -3,10 +3,20 @@ subset script's selection), resumable, verified file by file, never
 overlapping earlier draws. The public bucket is replaced by an in-memory one; nothing is downloaded."""
 
 import base64
+import errno
 import hashlib
+import http.client
+import io
 import json
+import logging
+import pathlib
 import random
 import shutil
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
 from collections import defaultdict, deque
 from pathlib import Path
 
@@ -26,8 +36,10 @@ class FakeBucket:
         self.objects_ = objects
         self.fetched: list[str] = []
         self.corrupt: set[str] = set()
+        self.delay = 0.0  # seconds per file, in five "chunks"
+        self.threads: set[threading.Thread] = set()
 
-    def objects(self, prefix, glob=None, delimiter=None):
+    def objects(self, prefix, glob=None, delimiter=None, stop=None):
         if delimiter:
             seen = set()
             for name in sorted(self.objects_):
@@ -49,7 +61,12 @@ class FakeBucket:
                 "md5": base64.b64encode(hashlib.md5(data).digest()).decode(),
             }
 
-    def fetch(self, name, dest: Path, size, md5, on_bytes=None):
+    def fetch(self, name, dest: Path, size, md5, on_bytes=None, stop=None):
+        self.threads.add(threading.current_thread())
+        for _ in range(5):
+            if stop is not None and stop.is_set():
+                raise droid.Stopped("stopping")
+            time.sleep(self.delay / 5)
         self.fetched.append(name)
         data = self.objects_[name]
         if name in self.corrupt:
@@ -237,9 +254,9 @@ def fake_start(monkeypatch):
 
     calls = []
 
-    def start(size=droid.SIZE, workers=None, reason="manual"):
+    def start(size=droid.SIZE, workers=None, reason="manual", automatic=False):
         calls.append(reason)
-        return samples.plan(size, reason)
+        return samples.plan(size, reason, automatic)
 
     monkeypatch.setattr(samples, "start", start)
     return calls
@@ -260,6 +277,10 @@ def test_a_new_workspace_is_offered_a_sample_once_and_only_when_allowed(monkeypa
     samples.on_service_start()
     assert calls == ["new workspace", "resume after restart"]
     assert len(json.loads(droid.ledger_path().read_text())["draws"]) == 1
+    # At most three automatic attempts per draw.
+    samples.on_service_start()
+    samples.on_service_start()
+    assert calls == ["new workspace"] + ["resume after restart"] * 2
 
 
 def test_a_draw_by_hand_answers_the_offer(monkeypatch):
@@ -342,3 +363,405 @@ def test_only_creating_a_workspace_marks_it(monkeypatch, tmp_path):
     assert marked == [1]
     paths.configure()  # it exists now
     assert marked == [1]
+
+
+# ------------------------------------------------ stopping (Ctrl-C, cancel)
+
+
+def test_ctrl_c_stops_the_draw_and_its_threads_before_the_lock_is_released(
+    episode_files, monkeypatch
+):
+    bucket = FakeBucket(release(episode_files))
+    bucket.delay = 0.05
+    draw = new_draw(20)
+    real = droid.Progress.set
+
+    def interrupt_at_first_episode(self, force=False, **fields):
+        # What a Ctrl-C does: KeyboardInterrupt in the main thread.
+        if threading.current_thread() is threading.main_thread() and str(
+            fields.get("current", "")
+        ).startswith("demo_"):
+            raise KeyboardInterrupt
+        return real(self, force, **fields)
+
+    monkeypatch.setattr(droid.Progress, "set", interrupt_at_first_episode)
+    with pytest.raises(KeyboardInterrupt):
+        droid.run(draw["draw"], workers=2, bucket=bucket)
+    fetched = len(bucket.fetched)
+    assert fetched < 20, "the queued episodes were not downloaded"
+    assert not any(t.is_alive() for t in bucket.threads)
+    time.sleep(0.3)
+    assert len(bucket.fetched) == fetched
+    with droid.run_lock() as free:
+        assert free
+    ledger = json.loads(droid.ledger_path().read_text())
+    assert ledger["draws"][0]["status"] == "interrupted"
+
+
+def test_a_second_ctrl_c_still_waits_for_the_threads(monkeypatch):
+    stop = threading.Event()
+    finished = []
+
+    def work():
+        stop.wait(5)
+        time.sleep(0.2)
+        finished.append(1)
+
+    joins = []
+    real = droid.ThreadPoolExecutor.shutdown
+
+    def shutdown(self, wait=True, *, cancel_futures=False):
+        if wait and not joins:
+            joins.append(1)
+            raise KeyboardInterrupt  # the second Ctrl-C, during the join
+        return real(self, wait=wait, cancel_futures=cancel_futures)
+
+    monkeypatch.setattr(droid.ThreadPoolExecutor, "shutdown", shutdown)
+    with pytest.raises(KeyboardInterrupt), droid._threads(1, stop) as pool:
+        pool.submit(work)
+        time.sleep(0.05)
+        raise KeyboardInterrupt
+    assert finished == [1] and stop.is_set()
+
+
+HOLDER = (
+    "import fcntl, sys, time\n"
+    "h = open(sys.argv[1], 'a')\n"
+    "fcntl.flock(h, fcntl.LOCK_EX)\n"
+    "print('held', flush=True)\n"
+    "time.sleep(60)\n"
+)
+
+
+def foreground_draw(identity_ok=True):
+    """A process LEVI did not start holding the run lock, recorded in the
+    ledger the way run() records itself."""
+    from levi import children, samples
+
+    draw = samples.plan(3)
+    partial = droid.partial_root(draw["name"])
+    (partial / "demo_0000").mkdir(parents=True)
+    process = subprocess.Popen(
+        [sys.executable, "-c", HOLDER, str(droid.home() / f"{droid.KEY}.run.lock")],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert process.stdout.readline().strip() == "held"
+    who = children.identity(process.pid)
+    if not identity_ok:
+        who = {**who, "start_ticks": "1"}
+    droid.set_draw(draw["draw"], status="downloading", pid=process.pid, identity=who)
+    return draw, partial, process
+
+
+def test_cancel_stops_a_foreground_draw_it_can_identify_then_discards():
+    from levi import samples
+
+    draw, partial, process = foreground_draw()
+    try:
+        result = samples.cancel(discard=True, grace=5)
+        assert process.wait(timeout=5) is not None
+        assert result["discarded"] == str(partial) and not partial.exists()
+        assert result["stopped"] == [f"{draw['name']} (pid {process.pid})"]
+        ledger = json.loads(droid.ledger_path().read_text())
+        assert ledger["draws"][0]["status"] == "discarded"
+    finally:
+        process.kill()
+        process.wait()
+
+
+def test_cancel_never_touches_a_draw_it_cannot_stop(client):
+    _draw, partial, process = foreground_draw(identity_ok=False)
+    try:
+        from levi import samples
+
+        with pytest.raises(RuntimeError, match="cannot identify"):
+            samples.cancel(discard=True, grace=1)
+        response = client.post("/api/levi/samples/droid_raw/cancel?discard=true")
+        assert response.status_code == 409
+        assert process.poll() is None, "not signalled"
+        assert (partial / "demo_0000").is_dir()
+        ledger = json.loads(droid.ledger_path().read_text())
+        assert ledger["draws"][0]["status"] == "downloading"
+    finally:
+        process.kill()
+        process.wait()
+
+
+def test_the_run_lock_waits_out_a_short_holder():
+    droid.home().mkdir(parents=True, exist_ok=True)
+    held = threading.Event()
+
+    def probe():
+        with droid.run_lock() as free:
+            assert free
+            held.set()
+            time.sleep(0.3)
+
+    thread = threading.Thread(target=probe)
+    thread.start()
+    held.wait(2)
+    with droid.run_lock() as free:
+        assert not free
+    with droid.run_lock(wait=3) as free:
+        assert free
+    thread.join()
+
+
+# --------------------------------------- publishing, lost ledgers, identity
+
+
+def test_a_draw_published_before_its_ledger_update_is_recorded_not_redrawn(
+    episode_files,
+):
+    from levi import samples
+
+    bucket = FakeBucket(release(episode_files))
+    draw = new_draw(2)
+    result = droid.run(draw["draw"], workers=1, bucket=bucket)
+    selection = json.loads((Path(result["path"]) / "_meta/selection.json").read_text())
+
+    def stopped_after_the_rename(v):
+        v["cursor"] = 0
+        droid.draw_entry(v, draw["draw"]).update(status="verifying", path=None)
+
+    droid.update_ledger(stopped_after_the_rename)
+    bucket.fetched = []
+    again = droid.run(draw["draw"], workers=1, bucket=bucket)
+    assert again["status"] == "ready" and again["path"] == result["path"]
+    assert not bucket.fetched and not droid.partial_root(draw["name"]).exists()
+    ledger = json.loads(droid.ledger_path().read_text())
+    assert ledger["draws"][0]["status"] == "ready"
+    assert ledger["cursor"] == selection["order_positions"][1]
+    # plan() does the same, so a new draw never reuses the positions.
+    droid.update_ledger(stopped_after_the_rename)
+    nxt = samples.plan(2)
+    assert nxt["draw"] == 2 and nxt["first"] == selection["order_positions"][1]
+
+
+def test_a_sample_whose_ledger_was_lost_is_never_drawn_again(
+    episode_files, monkeypatch
+):
+    from levi import samples
+
+    bucket = FakeBucket(release(episode_files))
+    result = droid.run(new_draw(3)["draw"], workers=1, bucket=bucket)
+    positions = json.loads((Path(result["path"]) / "_meta/selection.json").read_text())[
+        "order_positions"
+    ]
+    shutil.rmtree(droid.home())  # the ledger is lost; the folder stays
+    samples.note_new_workspace()
+    calls = fake_start(monkeypatch)
+    monkeypatch.setenv("LEVI_DROID_SAMPLE", "auto")
+    samples.on_service_start()
+    assert not calls, "a workspace that holds a sample is not offered another"
+    ledger = json.loads(droid.ledger_path().read_text())
+    assert [(d["name"], d["status"]) for d in ledger["draws"]] == [
+        ("droid_raw_3_draw01", "ready")
+    ]
+    nxt = samples.plan(500)
+    assert nxt["name"] == "droid_raw_500_draw02" and nxt["first"] == positions[1]
+
+
+def test_the_selection_records_whether_the_trajectory_was_checked(episode_files):
+    bucket = FakeBucket(release(episode_files))
+    result = droid.run(new_draw(1)["draw"], workers=1, bucket=bucket)
+    selection = json.loads((Path(result["path"]) / "_meta/selection.json").read_text())
+    assert selection["trajectory_checked"] is droid.trajectory_checked()
+    assert "next unused positions" in selection["sampling"]
+
+
+# ------------------------------------------------ replacement and progress
+
+
+class UnreachableBucket(FakeBucket):
+    def objects(self, prefix, glob=None, delimiter=None, stop=None):
+        raise droid.NetworkError("listing failed after 6 attempts")
+
+
+def test_a_failed_replacement_leaves_the_plan_untouched(episode_files):
+    import copy
+
+    objects = release(episode_files)
+    listing = [n[len(droid.PREFIX) + 1 :] for n in objects if "/metadata_" in n]
+    droid.listing_path().parent.mkdir(parents=True, exist_ok=True)
+    droid.listing_path().write_text("\n".join(listing) + "\n")
+    first = reference_selection(listing, 1)[0][2]
+    plan = {
+        "episodes": [{"index": 0, "source": f"{droid.SOURCE}/{first}"}],
+        "replaced": [],
+        "next": 1,
+    }
+    before = copy.deepcopy(plan)
+    with pytest.raises(droid.NetworkError):
+        droid.replace_unreadable(UnreachableBucket(objects), plan, 0, "unreadable")
+    assert plan == before
+    droid.replace_unreadable(FakeBucket(objects), plan, 0, "unreadable")
+    assert plan["next"] == 2 and len(plan["replaced"]) == 1
+    assert plan["episodes"][0]["source"] != before["episodes"][0]["source"]
+
+
+def test_progress_counts_every_replacement_and_keeps_bytes_consistent(episode_files):
+    listing = [
+        n[len(droid.PREFIX) + 1 :] for n in release(episode_files) if "/metadata_" in n
+    ]
+    picked = reference_selection(listing, 2)
+    broken, missing = picked[0][2], picked[1][2]
+    objects = release(episode_files, broken={broken})
+    # One candidate lacks a camera: replaced while selecting.
+    del objects[f"{droid.PREFIX}/{missing}/recordings/MP4/103.mp4"]
+    result = droid.run(new_draw(3)["draw"], workers=1, bucket=FakeBucket(objects))
+    progress = json.loads(droid.progress_path("droid_raw_3_draw01").read_text())
+    assert progress["replaced"] == 2
+    plan = json.loads((Path(result["path"]) / "_meta/selected.json").read_text())
+    assert (
+        progress["bytes_done"] == progress["bytes_total"] == droid.planned_bytes(plan)
+    )
+
+
+def test_the_time_left_counts_from_the_downloads_not_the_listing(tmp_path):
+    progress = droid.Progress(tmp_path / "p.json", 10)
+    progress.value["started_at"] = time.time() - 3600  # a long listing
+    progress.set(stage="downloading", bytes_total=1000, bytes_done=0)
+    assert progress.value["eta_seconds"] is None  # nothing measured yet
+    progress.value["download_started_at"] = time.time() - 10
+    progress.add_bytes(100)
+    assert 85 <= progress.value["eta_seconds"] <= 95
+    progress.add_bytes(899)
+    assert progress.value["eta_seconds"] >= 1  # bytes remain
+    progress.add_bytes(1)
+    assert progress.value["eta_seconds"] == 0
+
+
+# --------------------------------------------------------------- network
+
+
+class Response(io.BytesIO):
+    def __init__(self, data=b"", fail_first_read=False):
+        super().__init__(data)
+        self.fail_first_read = fail_first_read
+
+    def read(self, *args):
+        if self.fail_first_read:
+            self.fail_first_read = False
+            raise http.client.IncompleteRead(b"")
+        return super().read(*args)
+
+
+@pytest.fixture
+def network(monkeypatch):
+    """urlopen and the backoff sleep, recorded; nothing leaves the machine."""
+    state = {"answers": [], "calls": 0, "sleeps": []}
+
+    def urlopen(url, timeout=None):
+        state["calls"] += 1
+        answer = state["answers"].pop(0) if state["answers"] else state["last"]
+        state["last"] = answer
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer()
+
+    monkeypatch.setattr(droid.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(droid.time, "sleep", state["sleeps"].append)
+    return state
+
+
+def test_a_listing_page_whose_body_is_cut_is_asked_for_again(network):
+    page = json.dumps({"items": [{"name": "a", "size": "1"}]}).encode()
+    network["answers"] = [
+        lambda: Response(page, fail_first_read=True),
+        lambda: Response(page),
+    ]
+    assert list(droid.Bucket().objects("x/")) == [{"name": "a", "size": 1, "md5": None}]
+    assert network["calls"] == 2
+
+
+def test_one_retry_layer_and_no_sleep_after_the_last_attempt(network, tmp_path):
+    network["answers"] = [TimeoutError("timed out")]
+    with pytest.raises(droid.NetworkError, match="after 3 attempts"):
+        droid.Bucket(attempts=3).fetch("p/f.bin", tmp_path / "f.bin", 1, None)
+    assert network["calls"] == 3 and network["sleeps"] == [1, 2]
+    assert not (tmp_path / "f.bin.part").exists()
+
+
+def test_a_refusal_is_not_retried(network, tmp_path):
+    network["answers"] = [urllib.error.HTTPError("u", 404, "Not Found", {}, None)]
+    with pytest.raises(urllib.error.HTTPError):
+        droid.Bucket().fetch("p/f.bin", tmp_path / "f.bin", 1, None)
+    assert network["calls"] == 1 and not network["sleeps"]
+
+
+def test_a_full_disk_is_not_retried(network, tmp_path, monkeypatch):
+    network["answers"] = [lambda: Response(b"x" * 10)]
+    real_open = pathlib.Path.open
+
+    class Full:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def write(self, data):
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+    def open_(self, mode="r", *args, **kwargs):
+        if self.name.endswith(".part"):
+            return Full()
+        return real_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "open", open_)
+    with pytest.raises(OSError) as raised:
+        droid.Bucket().fetch("p/f.bin", tmp_path / "f.bin", 10, None)
+    assert raised.value.errno == errno.ENOSPC
+    assert network["calls"] == 1 and not network["sleeps"]
+
+
+# ----------------------------------------------- service start and settings
+
+
+def test_the_service_resumes_interrupted_and_network_failed_draws_only(monkeypatch):
+    from levi import samples
+
+    calls = fake_start(monkeypatch)
+    draw = samples.plan(3)
+    monkeypatch.setenv("LEVI_DROID_SAMPLE", "auto")
+    for fields, resumed in (
+        ({"status": "interrupted"}, True),
+        ({"status": "failed", "transient": True}, True),
+        ({"status": "failed", "transient": False}, False),
+        ({"status": "cancelled"}, False),
+    ):
+        calls.clear()
+        droid.set_draw(
+            draw["draw"], **{"auto_attempts": 0, "transient": None, **fields}
+        )
+        samples.on_service_start()
+        assert bool(calls) is resumed, fields
+
+
+def test_the_setting_is_off_unless_it_clearly_says_on(monkeypatch, caplog):
+    from levi import samples
+
+    for value in ("off", "0", "false", "no", " OFF "):
+        monkeypatch.setenv("LEVI_DROID_SAMPLE", value)
+        assert samples.setting() == "off", value
+    for value in ("auto", "on", "1", "true", "yes", ""):
+        monkeypatch.setenv("LEVI_DROID_SAMPLE", value)
+        assert samples.setting() == "auto", value
+    monkeypatch.delenv("LEVI_DROID_SAMPLE")
+    assert samples.setting() == "auto"
+    monkeypatch.setenv("LEVI_DROID_SAMPLE", "disabled")
+    with caplog.at_level(logging.WARNING, logger="levi"):
+        assert samples.setting() == "off"
+    assert "LEVI_DROID_SAMPLE" in caplog.text
+
+
+@pytest.mark.parametrize("workers", ["0", "9", "-1"])
+def test_draw_workers_are_checked_before_anything_is_planned(workers):
+    from levi import samples
+
+    with pytest.raises(SystemExit) as raised:
+        samples.cli(["draw", "--workers", workers])
+    assert raised.value.code == 2
+    assert not droid.ledger_path().exists()

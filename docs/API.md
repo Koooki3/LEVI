@@ -10,8 +10,13 @@ Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge fo
 | POST | `/api/levi/convert/inspect` | Start an inspection job `{ "source": "captures/session-a", "options": {} }`; its `result.report` holds the detected format, summary, requirement checklist, per-episode findings and per-target compatibility |
 | GET | `/api/levi/catalog/{name}` | One registered dataset with its `format` and live `revision` (404 once removed); polled by open viewers |
 | DELETE | `/api/levi/catalog/{name}` | Unregister; files, annotations and reviews stay on disk |
+| GET | `/api/levi/catalog/{name}/namespaces` | The dataset's namespaces ([Namespaces](WORKSPACE.md#namespaces-one-input-many-experiments)) |
+| POST | `/api/levi/catalog/{name}/namespaces` | Create (or return) `{name}--{namespace}` from `{ "namespace": "r9-agentCode" }`: one more dataset over the same source, with its own annotations, runs, memory and records; 400 for an invalid name |
 | GET | `/api/levi/sync` | Workspace sync status: enabled, interval/settle, last scan, pending (waiting to settle) and recent changes |
 | POST | `/api/levi/sync` | Scan the workspace now; returns the changes made |
+| GET | `/api/levi/samples` | DROID test-sample status: the `LEVI_DROID_SAMPLE` setting, whether a draw runs, the ledger's draws with progress, free disk space ([DROID test sample](WORKSPACE.md#droid-test-sample)) |
+| POST | `/api/levi/samples/droid_raw` | Draw (or resume) a DROID raw test sample in the background `{ "size": 500, "workers": 4 }` (`size` 1–5000, `workers` 1–8); 409 while a draw runs |
+| POST | `/api/levi/samples/droid_raw/cancel` | Stop the draw and close it as `cancelled` (its partial folder stays); `?discard=true` deletes the folder once the draw stopped; 409 when the draw runs in a process LEVI cannot identify |
 | GET / HEAD | `/api/levi/files/{slug}/{relative_path}` | Registered dataset metadata, Parquet, images or MP4; confined to dataset root |
 | GET | `/api/levi/review?repo_id=org/name` | Restore saved review |
 | POST | `/api/levi/review` | Save `{ "repo_id": "…", "flagged": [0,2], "notes": "…" }` |

@@ -10,7 +10,9 @@ segments break a general annotation rule (built-in knowledge annotation-003,
   never let go (one attempt) or a new approach lies between them.
 - ``unknown``: an outcome is ``unknown`` although the recording goes on to
   show the robot doing something with a known outcome right after it --
-  ``unknown`` is for what the recording does not show.
+  ``unknown`` is for what the recording does not show. Exempt: ``other``
+  (built-in annotation-004: a human hand is ``other`` with outcome unknown)
+  and classes whose plan says their outcome is always unknown.
 
 Measured against a full-dataset reference (2026-09-24): ``unknown`` lines
 were right 78-90% of the time. A third check -- the recorded gripper opening
@@ -29,6 +31,10 @@ UNKNOWN = "unknown"
 # A subtask whose plan says its outcome is always unknown (an idle / "other"
 # class) is never asked to settle one.
 ALWAYS_UNKNOWN = re.compile(r"\balways\W+(?:\w+\W+){0,2}`?unknown", re.IGNORECASE)
+# Built-in knowledge annotation-004: anything a human hand does is ``other``
+# with outcome unknown -- whether or not the plan defines ``other``. No
+# built-in rule says the same of ``background`` or ``unknown``.
+BUILT_IN_UNKNOWN = frozenset({"other"})
 
 
 def always_unknown(definitions):
@@ -59,7 +65,7 @@ def meet(segments):
 def unknown(segments, exempt=()):
     out = []
     for a, b in pairwise(segments):
-        if a["subtask"] in exempt:
+        if a["subtask"] in exempt or a["subtask"] in BUILT_IN_UNKNOWN:
             continue
         if a.get("outcome") == UNKNOWN and b.get("outcome") not in (None, UNKNOWN):
             out.append(

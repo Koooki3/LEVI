@@ -10,8 +10,12 @@ the verification). Draws come from one seeded order of the whole release:
 - The order is the round-robin of the reference subset script: episodes are
   grouped by (lab, outcome), each group shuffled with seed 42, and groups are
   visited in a reshuffled order each round -- no language or success filter.
-  The first draw is that script's ``selected_500``; draw *k* takes the next
-  episodes of the same order, so draws never overlap.
+  A new workspace's first draw starts at position 0 (that script's
+  ``selected_500``); each later draw takes the next unused positions of the
+  same order, so the draws of one workspace never overlap. What identifies
+  a draw's episodes is these positions, recorded in ``_meta/selection.json``
+  (``order_positions``, ``replaced``) -- not its name, which only numbers
+  the workspace's own draws.
 - An episode LEVI cannot read (a missing camera, a malformed trajectory) is
   replaced by the next one of the order; ``_meta/selection.json`` names it.
 
@@ -35,11 +39,16 @@ import argparse
 import base64
 import contextlib
 import csv
+import errno
 import fcntl
 import hashlib
+import http.client
+import importlib.util
 import json
+import math
 import os
 import random
+import re
 import shutil
 import sys
 import threading
@@ -66,6 +75,65 @@ KEY = "droid_raw"
 # anything is downloaded.
 CAMERAS = 3
 ACTIVE = ("planned", "listing", "selecting", "downloading", "verifying")
+# Retrying cannot help these: the local disk failed, not the network.
+LOCAL_ERRNOS = frozenset({errno.ENOSPC, errno.EDQUOT, errno.EFBIG, errno.EROFS})
+# The request itself is refused; asking again gives the same answer.
+PERMANENT_HTTP = frozenset({400, 401, 403, 404})
+# How long a draw keeps trying for the run lock (a status probe holds it for
+# microseconds) before concluding that another process draws.
+LOCK_WAIT = 10.0
+NAME = re.compile(rf"^{KEY}_(\d+)_draw(\d+)$")
+
+
+class Stopped(Exception):
+    """The draw is stopping (Ctrl-C, a failure elsewhere): a thread gives up."""
+
+
+class NetworkError(RuntimeError):
+    """The bucket could not be reached after every attempt. Transient: the
+    service retries such a draw on its next start."""
+
+
+def _check(stop) -> None:
+    if stop is not None and stop.is_set():
+        raise Stopped("the draw is stopping")
+
+
+def _pause(stop, seconds: float) -> None:
+    """The wait between two attempts; a stop ends it at once."""
+    if stop is None:
+        time.sleep(seconds)
+    elif stop.wait(seconds):
+        raise Stopped("the draw is stopping")
+
+
+@contextlib.contextmanager
+def _threads(workers: int, stop: threading.Event):
+    """A thread pool that stops with its caller. When the caller leaves by an
+    exception -- Ctrl-C included -- ``stop`` is set, queued work is cancelled,
+    and the caller goes on only once every running thread has returned (each
+    checks ``stop`` before a file and between chunks). So the run lock is
+    never released while a thread still writes."""
+    pool = ThreadPoolExecutor(max_workers=workers)
+    interrupted = False
+    try:
+        yield pool
+    except BaseException:
+        stop.set()
+        raise
+    finally:
+        pool.shutdown(wait=False, cancel_futures=stop.is_set())
+        while True:
+            try:
+                pool.shutdown(wait=True)
+                break
+            except KeyboardInterrupt:
+                # Another Ctrl-C: the threads are stopping already, and
+                # leaving now would release the lock under them.
+                stop.set()
+                interrupted = True
+    if interrupted:
+        raise KeyboardInterrupt
 
 
 # ------------------------------------------------------------------ places
@@ -123,23 +191,30 @@ def read_json(path: Path, default):
 
 
 @contextlib.contextmanager
-def _flock(path: Path, blocking=True):
+def _flock(path: Path, blocking=True, wait: float = 0.0):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as handle:
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
-        except BlockingIOError:
-            yield False
-            return
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    yield False
+                    return
+                time.sleep(0.05)
         try:
             yield True
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-def run_lock():
-    """Held by the process that is drawing, for as long as it draws."""
-    return _flock(home() / f"{KEY}.run.lock", blocking=False)
+def run_lock(wait: float = 0.0):
+    """Held by the process that is drawing, for as long as it draws (until
+    every thread it started has returned). ``wait``: seconds to keep trying
+    before answering False."""
+    return _flock(home() / f"{KEY}.run.lock", blocking=False, wait=wait)
 
 
 def update_ledger(change) -> dict:
@@ -168,8 +243,9 @@ def set_draw(draw: int, **fields) -> dict:
 
 
 def disk() -> dict:
-    """Free and total bytes where the sample goes -- for the status only; a
-    draw of 500 episodes (18-30 GB) is not gated on it."""
+    """Free and total bytes where the sample goes -- for the status only;
+    nothing checks it before a draw (the first draw of 500 episodes was
+    11.6 GiB)."""
     usage = shutil.disk_usage(ROOT)
     return {"free": usage.free, "total": usage.total}
 
@@ -181,26 +257,46 @@ def gib(value: int) -> str:
 # ------------------------------------------------------------------- bucket
 
 
+def transient(exc: BaseException) -> bool:
+    """A failure that asking again can cure: the network, a body cut short, a
+    server error -- not a refusal (400/401/403/404), not the local disk, not
+    a stop."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code not in PERMANENT_HTTP
+    if isinstance(exc, OSError):
+        return exc.errno not in LOCAL_ERRNOS
+    return isinstance(exc, http.client.HTTPException | ValueError)
+
+
 class Bucket:
     """Anonymous, read-only access to the public bucket (JSON API)."""
 
     def __init__(self, attempts=6):
         self.attempts = attempts
 
-    def _open(self, url, timeout):
+    def _request(self, url, timeout, consume, stop=None, what="request"):
+        """One request -- open, read the whole body, parse or write it --
+        retried as a whole; the only retry layer. A refusal, a local disk
+        error or a stop is raised at once; running out of attempts raises
+        :class:`NetworkError`."""
+        last: BaseException | None = None
         for attempt in range(self.attempts):
+            _check(stop)
             try:
-                return urllib.request.urlopen(url, timeout=timeout)
-            except urllib.error.HTTPError as exc:
-                if exc.code in (400, 401, 403, 404) or attempt == self.attempts - 1:
+                with urllib.request.urlopen(url, timeout=timeout) as response:
+                    return consume(response)
+            except Exception as exc:  # sorted by transient()
+                if not transient(exc):
                     raise
-            except (urllib.error.URLError, TimeoutError, ConnectionError):
-                if attempt == self.attempts - 1:
-                    raise
-            time.sleep(min(30, 2**attempt))
-        raise RuntimeError("unreachable")
+                last = exc
+            if attempt + 1 < self.attempts:
+                _pause(stop, min(30, 2**attempt))
+        raise NetworkError(
+            f"{what} failed after {self.attempts} attempts "
+            f"({type(last).__name__}: {last})"
+        ) from last
 
-    def objects(self, prefix, glob=None, delimiter=None):
+    def objects(self, prefix, glob=None, delimiter=None, stop=None):
         """Objects (and, with a delimiter, sub-prefixes) under ``prefix``."""
         token = None
         while True:
@@ -215,8 +311,13 @@ class Bucket:
                 params["delimiter"] = delimiter
             if token:
                 params["pageToken"] = token
-            with self._open(API + "?" + urllib.parse.urlencode(params), 90) as r:
-                page = json.loads(r.read())
+            page = self._request(
+                API + "?" + urllib.parse.urlencode(params),
+                90,
+                lambda r: json.loads(r.read()),
+                stop,
+                what=f"listing {prefix}",
+            )
             yield from ({"prefix": p} for p in page.get("prefixes", []))
             for item in page.get("items", []):
                 yield {
@@ -228,32 +329,41 @@ class Bucket:
             if not token:
                 return
 
-    def fetch(self, name, dest: Path, size: int, md5: str | None, on_bytes=None):
-        """Download one object; the file appears only once size and MD5 match."""
+    def fetch(
+        self, name, dest: Path, size: int, md5: str | None, on_bytes=None, stop=None
+    ):
+        """Download one object; the file appears only once size and MD5 match.
+        ``stop`` is checked between chunks."""
         url = MEDIA + urllib.parse.quote(name)
         temporary = dest.with_name(dest.name + ".part")
-        last = None
-        for attempt in range(self.attempts):
+
+        def body(response):
             digest, count = hashlib.md5(), 0
-            try:
-                with self._open(url, 120) as response, temporary.open("wb") as out:
-                    while chunk := response.read(1 << 20):
-                        out.write(chunk)
-                        digest.update(chunk)
-                        count += len(chunk)
-            except (OSError, urllib.error.URLError) as exc:
-                last = f"{type(exc).__name__}: {exc}"
-            else:
-                got = base64.b64encode(digest.digest()).decode()
-                if count == size and (md5 is None or got == md5):
-                    os.replace(temporary, dest)
-                    if on_bytes:
-                        on_bytes(count)
-                    return
-                last = f"size {count}/{size}, md5 {got}/{md5}"
-            time.sleep(min(30, 2**attempt))
-        temporary.unlink(missing_ok=True)
-        raise RuntimeError(f"{name.rsplit('/', 1)[-1]}: download failed ({last})")
+            with temporary.open("wb") as out:
+                while True:
+                    _check(stop)
+                    chunk = response.read(1 << 20)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    digest.update(chunk)
+                    count += len(chunk)
+            got = base64.b64encode(digest.digest()).decode()
+            if count != size or (md5 is not None and got != md5):
+                # Cut short or damaged in transit: asked for again.
+                raise ValueError(f"size {count}/{size}, md5 {got}/{md5}")
+            return count
+
+        try:
+            count = self._request(
+                url, 120, body, stop, what=f"{name.rsplit('/', 1)[-1]}: download"
+            )
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
+        os.replace(temporary, dest)
+        if on_bytes:
+            on_bytes(count)
 
 
 def verified(path: Path, size: int, md5: str | None) -> bool:
@@ -271,15 +381,16 @@ def verified(path: Path, size: int, md5: str | None) -> bool:
 # ---------------------------------------------------------- listing, order
 
 
-def list_release(bucket: Bucket, progress=None) -> list[str]:
+def list_release(bucket: Bucket, progress=None, stop=None) -> list[str]:
     """Every episode's metadata object, relative to the release root:
     ``lab/outcome/date/episode/metadata_*.json`` -- kept with the ledger."""
+    stop = stop or threading.Event()
     path = listing_path()
     if path.is_file() and path.stat().st_size:
         return path.read_text().splitlines()
     labs = [
         item["prefix"]
-        for item in bucket.objects(PREFIX + "/", delimiter="/")
+        for item in bucket.objects(PREFIX + "/", delimiter="/", stop=stop)
         if "prefix" in item
     ]
     found: list[str] = []
@@ -288,7 +399,7 @@ def list_release(bucket: Bucket, progress=None) -> list[str]:
     def one(lab):
         rows = [
             item["name"][len(PREFIX) + 1 :]
-            for item in bucket.objects(lab, glob="**/metadata_*.json")
+            for item in bucket.objects(lab, glob="**/metadata_*.json", stop=stop)
             if "name" in item
         ]
         with lock:
@@ -296,7 +407,7 @@ def list_release(bucket: Bucket, progress=None) -> list[str]:
             if progress:
                 progress(len(found), lab.rstrip("/").rsplit("/", 1)[-1])
 
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(labs)))) as pool:
+    with _threads(min(8, max(1, len(labs))), stop) as pool:
         for future in as_completed([pool.submit(one, lab) for lab in labs]):
             future.result()
     rows = sorted(set(found))
@@ -361,10 +472,10 @@ def retained(relative: str) -> bool:
     )
 
 
-def files_of(bucket: Bucket, episode: str) -> list[dict]:
+def files_of(bucket: Bucket, episode: str, stop=None) -> list[dict]:
     base = f"{PREFIX}/{episode}/"
     out = []
-    for item in bucket.objects(base):
+    for item in bucket.objects(base, stop=stop):
         if "name" not in item:
             continue
         relative = item["name"][len(base) :]
@@ -406,6 +517,12 @@ def check_files(destination: Path) -> None:
             raise RuntimeError("invalid HDF5 signature")
 
 
+def trajectory_checked() -> bool:
+    """Whether :func:`readable` checks the trajectory (needs h5py, the
+    ``droid`` extra): a download-time replacement depends on it."""
+    return importlib.util.find_spec("h5py") is not None
+
+
 def readable(demo: Path) -> str | None:
     """What LEVI's own DROID reader says about one episode (None: fine)."""
     from ..conversion.inputs import droid_raw
@@ -414,9 +531,7 @@ def readable(demo: Path) -> str | None:
         meta = droid_raw.metadata(demo)
         droid_raw.camera_paths(demo, meta)
         frames, _task, _outcome = droid_raw._validate_metadata(meta)
-        try:
-            import h5py  # noqa: F401
-        except ImportError:
+        if not trajectory_checked():
             return None
         droid_raw._validate_trajectory(demo, frames)
     except (OSError, ValueError, KeyError, TypeError) as exc:
@@ -442,11 +557,13 @@ class Progress:
             "replaced": 0,
             "current": "",
             "started_at": time.time(),
+            "download_started_at": None,
             "updated_at": time.time(),
             "eta_seconds": None,
         }
         self.written = 0.0
-        self.bytes_at_start = 0
+        # Bytes this run transferred: the rate, whatever was on disk before.
+        self.fetched = 0
 
     def set(self, force=False, **fields):
         with self.lock:
@@ -454,20 +571,40 @@ class Progress:
             now = time.time()
             v = self.value
             v["updated_at"] = now
-            fetched = v["bytes_done"] - self.bytes_at_start
-            elapsed = now - v["started_at"]
-            if v["stage"] == "downloading" and fetched > 0 and elapsed > 5:
-                rate = fetched / elapsed
-                v["eta_seconds"] = round(
-                    max(0, v["bytes_total"] - v["bytes_done"]) / rate
-                )
+            if v["stage"] == "downloading":
+                if v["download_started_at"] is None:
+                    v["download_started_at"] = now
+                v["eta_seconds"] = self._eta(now)
+            else:
+                v["eta_seconds"] = None
             if force or now - self.written >= 1:
                 write_json(self.path, v)
                 self.written = now
 
+    def _eta(self, now) -> int | None:
+        """Seconds left, from the rate since the downloads began: at least 1
+        while bytes remain, 0 only when none do, None until measured."""
+        v = self.value
+        remaining = max(0, v["bytes_total"] - v["bytes_done"])
+        if not remaining:
+            return 0
+        elapsed = now - v["download_started_at"]
+        if self.fetched <= 0 or elapsed <= 5:
+            return None
+        return max(1, math.ceil(remaining / (self.fetched / elapsed)))
+
     def add_bytes(self, count):
         with self.lock:
             self.value["bytes_done"] += count
+            self.fetched += count
+        self.set()
+
+    def adjust(self, done=0, total=0):
+        """An episode swapped for another: its bytes leave, the new one's
+        join the total."""
+        with self.lock:
+            self.value["bytes_done"] += done
+            self.value["bytes_total"] += total
         self.set()
 
 
@@ -478,17 +615,29 @@ def manifest_path(root: Path) -> Path:
     return root / "_meta" / "selected.json"
 
 
-def plan_draw(bucket: Bucket, draw: dict, progress: Progress) -> dict:
+def plan_draw(bucket: Bucket, draw: dict, progress: Progress, stop=None) -> dict:
     """Assign an episode of the release to every index of this draw, with
     each episode's files (sizes and MD5s) -- or read the plan of a draw that
     is being resumed."""
+    stop = stop or threading.Event()
     root = partial_root(draw["name"])
     saved = read_json(manifest_path(root), None)
     if saved:
+        if (saved.get("draw"), saved.get("first"), saved.get("size")) != (
+            draw["draw"],
+            draw["first"],
+            draw["size"],
+        ):
+            raise RuntimeError(
+                f"{root} holds another draw's files (draw {saved.get('draw')}, "
+                f"first {saved.get('first')}); move it away first"
+            )
         return saved
     progress.set(force=True, stage="listing")
     listing = list_release(
-        bucket, lambda n, lab: progress.set(current=f"{lab}: {n} episodes listed")
+        bucket,
+        lambda n, lab: progress.set(current=f"{lab}: {n} episodes listed"),
+        stop,
     )
     episodes = episodes_of(listing)
     sequence = order(episodes)
@@ -501,15 +650,15 @@ def plan_draw(bucket: Bucket, draw: dict, progress: Progress) -> dict:
     chosen: list[dict] = []
     replaced: list[dict] = []
     position = first
-    # Candidate k takes index k unless LEVI could not read it, so the draw is
-    # the same on every machine; file lists are fetched a window at a time.
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    # Candidates are taken in order; one LEVI could not read is skipped and
+    # named in ``replaced``. File lists are fetched a window at a time.
+    with _threads(8, stop) as pool:
         while len(chosen) < size:
             need = size - len(chosen)
             batch = sequence[position : position + need + max(8, need // 20)]
             if not batch:
                 raise RuntimeError("The release has no episodes left to draw")
-            listings = list(pool.map(lambda c: files_of(bucket, c[2]), batch))
+            listings = list(pool.map(lambda c: files_of(bucket, c[2], stop), batch))
             for (lab, outcome, episode), files in zip(batch, listings, strict=True):
                 position += 1
                 problem = listing_problem(files)
@@ -558,7 +707,9 @@ def _counts(keys) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
-def download_episode(bucket: Bucket, root: Path, item: dict, progress: Progress) -> str:
+def download_episode(
+    bucket: Bucket, root: Path, item: dict, progress: Progress, stop=None
+) -> str:
     destination = root / f"demo_{item['index']:04d}"
     done = destination / ".download_complete"
     if done.is_file():
@@ -566,11 +717,14 @@ def download_episode(bucket: Bucket, root: Path, item: dict, progress: Progress)
         return "already complete"
     destination.mkdir(parents=True, exist_ok=True)
     for f in item["files"]:
+        _check(stop)
         target = destination / f["path"]
         target.parent.mkdir(parents=True, exist_ok=True)
         if verified(target, f["size"], f["md5"]):
             continue
-        bucket.fetch(f["name"], target, f["size"], f["md5"], progress.add_bytes)
+        bucket.fetch(
+            f["name"], target, f["size"], f["md5"], progress.add_bytes, stop=stop
+        )
     check_files(destination)
     problem = readable(destination)
     if problem:
@@ -589,31 +743,47 @@ class Unreadable(RuntimeError):
     """Downloaded intact, but LEVI's DROID reader rejects it."""
 
 
-def replace_unreadable(bucket: Bucket, plan: dict, index: int, reason: str) -> dict:
-    """The next unused episode of the order takes an unreadable one's index."""
+def replace_unreadable(
+    bucket: Bucket, plan: dict, index: int, reason: str, stop=None
+) -> dict:
+    """The next unused episode of the order takes an unreadable one's index.
+    The candidates are checked first; the plan changes only once one is
+    found, all at once, so a failed listing leaves it as it was."""
     sequence = order(episodes_of(listing_path().read_text().splitlines()))
     old = plan["episodes"][index]
-    plan["replaced"].append({"index": index, "source": old["source"], "reason": reason})
+    position = plan["next"]
+    replaced = [{"index": index, "source": old["source"], "reason": reason}]
     while True:
-        if plan["next"] >= len(sequence):
+        if position >= len(sequence):
             raise RuntimeError("The release has no episodes left to draw")
-        lab, outcome, episode = sequence[plan["next"]]
-        plan["next"] += 1
-        files = files_of(bucket, episode)
+        lab, outcome, episode = sequence[position]
+        position += 1
+        files = files_of(bucket, episode, stop)
         problem = listing_problem(files)
         if problem is None:
-            plan["episodes"][index] = {
-                "index": index,
-                "lab": lab,
-                "outcome": outcome,
-                "source": f"{SOURCE}/{episode}",
-                "episode": episode,
-                "files": files,
-            }
-            return plan
-        plan["replaced"].append(
+            break
+        replaced.append(
             {"index": index, "source": f"{SOURCE}/{episode}", "reason": problem}
         )
+    plan["replaced"].extend(replaced)
+    plan["next"] = position
+    plan["episodes"][index] = {
+        "index": index,
+        "lab": lab,
+        "outcome": outcome,
+        "source": f"{SOURCE}/{episode}",
+        "episode": episode,
+        "files": files,
+    }
+    return plan
+
+
+def episode_bytes(item: dict) -> int:
+    return sum(f["size"] for f in item["files"])
+
+
+def planned_bytes(plan: dict) -> int:
+    return sum(episode_bytes(i) for i in plan["episodes"])
 
 
 def remaining_bytes(root: Path, plan: dict) -> int:
@@ -647,7 +817,8 @@ def write_selection(root: Path, plan: dict, report: dict | None = None) -> None:
             "source_documentation": DOCS,
             "sampling": (
                 "seeded round-robin across (lab, outcome); no language or success "
-                "filter; draw k continues the same order after draw k-1"
+                "filter; each draw takes the next unused positions of the same "
+                "order (order_positions)"
             ),
             "seed": SEED,
             "draw": plan["draw"],
@@ -657,6 +828,7 @@ def write_selection(root: Path, plan: dict, report: dict | None = None) -> None:
             "available_groups": plan["groups"],
             "selected_groups": selected,
             "replaced": plan["replaced"],
+            "trajectory_checked": trajectory_checked(),
             "retained_files": "metadata_*.json, trajectory.h5, non-stereo recordings/MP4/*.mp4",
             "excluded_files": "recordings/SVO/**, *-stereo.mp4",
             **({"verification": report} if report else {}),
@@ -691,36 +863,162 @@ def verify(root: Path, plan: dict) -> dict:
     return report
 
 
+def on_disk() -> list[dict]:
+    """The sample folders in place (``droid_raw_<size>_draw<NN>``), each with
+    the ``_meta/selection.json`` it carries (None when unreadable)."""
+    try:
+        entries = sorted(ROOT.iterdir())
+    except OSError:
+        return []
+    out = []
+    for path in entries:
+        match = NAME.match(path.name)
+        if not match or not path.is_dir():
+            continue
+        out.append(
+            {
+                "name": path.name,
+                "size": int(match[1]),
+                "draw": int(match[2]),
+                "path": path,
+                "selection": read_json(path / "_meta" / "selection.json", None),
+            }
+        )
+    return out
+
+
+def _positions(selection) -> tuple[int, int] | None:
+    if not isinstance(selection, dict):
+        return None
+    if selection.get("source") != SOURCE or selection.get("seed") != SEED:
+        return None
+    try:
+        first, after = (int(x) for x in selection["order_positions"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return (first, after) if 0 <= first <= after else None
+
+
+def _complete(selection: dict) -> bool:
+    report = selection.get("verification") or {}
+    size = selection.get("selected_episodes")
+    return (
+        size is not None
+        and report.get("expected") == size == report.get("complete")
+        and not report.get("problems")
+    )
+
+
+def reconcile(v: dict) -> list[str]:
+    """Bring the ledger (inside :func:`update_ledger`) in line with the sample
+    folders in place, so no draw downloads again what the workspace holds:
+
+    - an unfinished draw whose folder is in place, naming the same draw,
+      first position and size, with a complete verification -- its process
+      stopped between publishing (the rename) and recording ``ready`` -- is
+      recorded ready;
+    - a complete sample folder the ledger does not know (the ledger was lost,
+      or the folder copied in) is recorded as a ready draw;
+    - the cursor moves past the order positions of every such folder, so a
+      later draw never takes them again.
+    """
+    notes = []
+    for found in on_disk():
+        selection = found["selection"]
+        positions = _positions(selection)
+        if positions is None:
+            continue
+        v["cursor"] = max(v.get("cursor", 0), positions[1])
+        if not _complete(selection):
+            continue
+        ready = {
+            "status": "ready",
+            "path": str(found["path"]),
+            "bytes": selection["verification"].get("bytes"),
+            "replaced": len(selection.get("replaced") or []),
+            "finished_at": time.time(),
+            "pid": None,
+            "identity": None,
+        }
+        entry = next((d for d in v["draws"] if d["name"] == found["name"]), None)
+        if entry is not None:
+            if (
+                entry["status"] not in ("ready", "discarded")
+                and selection.get("draw") == entry["draw"]
+                and positions[0] == entry["first"]
+                and selection.get("selected_episodes") == entry["size"]
+            ):
+                entry.update(ready, recovered="published before the ledger said so")
+                notes.append(f"{found['name']}: published, recorded ready")
+        elif selection.get("draw") == found["draw"] and not any(
+            d["draw"] == found["draw"] for d in v["draws"]
+        ):
+            v["draws"].append(
+                {
+                    "draw": found["draw"],
+                    "name": found["name"],
+                    "size": selection["selected_episodes"],
+                    "first": positions[0],
+                    "reason": "found in the workspace",
+                    "attempts": 0,
+                    **ready,
+                }
+            )
+            notes.append(f"{found['name']}: found in the workspace, recorded ready")
+    return notes
+
+
+def _identity():
+    from ..children import identity
+
+    return identity(os.getpid())
+
+
 def run(draw_number: int, workers: int = 4, bucket: Bucket | None = None) -> dict:
     """Plan, download, verify and publish one draw. Resumes
     whatever an earlier attempt left in the partial folder."""
     bucket = bucket or Bucket()
-    with run_lock() as held:
+    stop = threading.Event()
+    with run_lock(wait=LOCK_WAIT) as held:
         if not held:
             raise RuntimeError("Another LEVI process is drawing a DROID sample")
-        ledger = read_json(ledger_path(), {"draws": []})
+        # A draw published just before its process stopped, or a sample the
+        # ledger lost, is recorded before anything is planned or fetched.
+        ledger = update_ledger(reconcile)
         if not any(d["draw"] == draw_number for d in ledger["draws"]):
             raise ValueError(
                 f"No draw {draw_number} is planned; use `levi sample draw`"
             )
         draw = draw_entry(ledger, draw_number)
         name = draw["name"]
+        if draw["status"] == "ready":
+            return {
+                "status": "ready",
+                "path": draw.get("path") or str(final_root(name)),
+                "bytes": draw.get("bytes"),
+            }
+        if draw["status"] == "discarded":
+            raise ValueError(
+                f"Draw {draw_number} ({name}) was discarded; "
+                "`levi sample draw` plans a new one"
+            )
         root = partial_root(name)
         progress = Progress(progress_path(name), draw["size"])
         set_draw(
             draw_number,
             status="listing",
             pid=os.getpid(),
+            identity=_identity(),
             error=None,
+            transient=None,
             started_at=time.time(),
         )
         try:
             (root / "_meta").mkdir(parents=True, exist_ok=True)
-            plan = plan_draw(bucket, draw, progress)
+            plan = plan_draw(bucket, draw, progress, stop)
             need = remaining_bytes(root, plan)
-            planned = sum(f["size"] for i in plan["episodes"] for f in i["files"])
-            set_draw(draw_number, bytes=planned, disk=disk())
-            set_draw(draw_number, status="downloading")
+            planned = planned_bytes(plan)
+            set_draw(draw_number, bytes=planned, disk=disk(), status="downloading")
             progress.set(
                 force=True,
                 stage="downloading",
@@ -730,9 +1028,9 @@ def run(draw_number: int, workers: int = 4, bucket: Bucket | None = None) -> dic
                 ),
                 bytes_total=planned,
                 bytes_done=planned - need,
+                replaced=len(plan["replaced"]),
             )
-            progress.bytes_at_start = planned - need
-            _download_all(bucket, root, plan, progress, workers)
+            _download_all(bucket, root, plan, progress, workers, stop)
             progress.set(force=True, stage="verifying", current="")
             set_draw(draw_number, status="verifying")
             report = verify(root, plan)
@@ -746,6 +1044,8 @@ def run(draw_number: int, workers: int = 4, bucket: Bucket | None = None) -> dic
                 raise RuntimeError(
                     f"{final} already exists; the sample stays in {root}"
                 )
+            # A stop between here and the ledger update is recovered by
+            # reconcile() from the published _meta/selection.json.
             os.replace(root, final)
             progress.set(force=True, stage="ready", current=str(final))
 
@@ -758,6 +1058,7 @@ def run(draw_number: int, workers: int = 4, bucket: Bucket | None = None) -> dic
                     replaced=len(plan["replaced"]),
                     finished_at=time.time(),
                     pid=None,
+                    identity=None,
                 )
                 v["cursor"] = max(v.get("cursor", 0), plan["next"])
 
@@ -770,29 +1071,43 @@ def run(draw_number: int, workers: int = 4, bucket: Bucket | None = None) -> dic
                 else "failed"
             )
             progress.set(force=True, stage=status, current=str(exc)[-500:])
-            set_draw(draw_number, status=status, error=str(exc)[-2000:], pid=None)
+            set_draw(
+                draw_number,
+                status=status,
+                error=str(exc)[-2000:],
+                transient=isinstance(exc, NetworkError),
+                pid=None,
+                identity=None,
+            )
             raise
 
 
-def _download_all(bucket, root, plan, progress, workers):
+def _download_all(bucket, root, plan, progress, workers, stop=None):
+    stop = stop or threading.Event()
     lock = threading.Lock()
-    failures: list[tuple[int, str]] = []
+    failures: list[tuple[int, BaseException]] = []
 
     def one(index):
         while True:
+            _check(stop)
             item = plan["episodes"][index]
             try:
-                message = download_episode(bucket, root, item, progress)
+                message = download_episode(bucket, root, item, progress, stop)
             except Unreadable as exc:
                 shutil.rmtree(root / f"demo_{index:04d}", ignore_errors=True)
+                old = episode_bytes(item)
+                # Its files are gone: no longer done.
+                progress.adjust(done=-old)
                 with lock:
-                    replace_unreadable(bucket, plan, index, str(exc))
+                    replace_unreadable(bucket, plan, index, str(exc), stop)
                     write_json(manifest_path(root), plan)
+                    progress.adjust(total=episode_bytes(plan["episodes"][index]) - old)
                     progress.set(replaced=len(plan["replaced"]))
+                    set_draw(plan["draw"], bytes=planned_bytes(plan))
                 continue
             return message
 
-    with ThreadPoolExecutor(max_workers=workers) as pool:
+    with _threads(workers, stop) as pool:
         futures = {pool.submit(one, i): i for i in range(plan["size"])}
         for future in as_completed(futures):
             index = futures[future]
@@ -800,19 +1115,26 @@ def _download_all(bucket, root, plan, progress, workers):
                 future.result()
                 progress.set(current=f"demo_{index:04d}")
             except Exception as exc:  # noqa: BLE001 - reported per episode
-                failures.append((index, str(exc)))
+                failures.append((index, exc))
             done = sum(
                 (root / f"demo_{i:04d}" / ".download_complete").is_file()
                 for i in range(plan["size"])
             )
             progress.set(done=done)
+    failures.sort(key=lambda f: f[0])
     with (root / "_meta" / "download_failed.tsv").open("w", newline="") as handle:
         writer = csv.writer(handle, delimiter="\t")
         writer.writerow(("index", "source", "error"))
-        for index, error in sorted(failures):
-            writer.writerow((index, plan["episodes"][index]["source"], error))
+        for index, error in failures:
+            writer.writerow((index, plan["episodes"][index]["source"], str(error)))
     if failures:
-        raise RuntimeError(
+        # Transient (resumed by the service) only when the network alone failed.
+        kind = (
+            NetworkError
+            if all(isinstance(e, NetworkError) for _, e in failures)
+            else RuntimeError
+        )
+        raise kind(
             f"{len(failures)} episodes failed ({failures[0][1]}); drawing again resumes"
         )
 

@@ -78,7 +78,16 @@ def _sources(state: Path):
     folder = Path(state) / "memory"
     if not folder.is_dir():
         return
+    from ..catalog import SEPARATOR, datasets
+
+    registered = datasets()
     for path in sorted(folder.glob("*.json")):
+        # A namespace's notes belong to one experiment: they never become
+        # knowledge every model receives (levi/catalog.py, namespaces). A
+        # name no longer registered counts by its separator.
+        entry = registered.get(path.stem)
+        if entry.get("base") if entry else SEPARATOR in path.stem:
+            continue
         memory = read_json(path) or {}
         workspace = path.stem == "workspace"
         for row in memory.get("teaching", []):

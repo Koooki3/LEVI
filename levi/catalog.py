@@ -6,12 +6,22 @@ parent's name for the legacy generic ``…/dataset`` layout, with a timestamp
 appended only on a real clash. Registering an already-registered path returns
 its existing entry. Ids from before names replaced hashes live on as
 aliases (``dataset_aliases.json``) so old links still resolve.
+
+**Namespaces** reuse one input for independent experiments without copying
+it: ``<dataset>--<namespace>`` is a catalog entry of its own (``base`` and
+``namespace`` fields) over the same source folder and browsing view. Every
+product LEVI keys by catalog name -- annotations, outcome labels, reviews,
+agent revisions and the active head, dataset memory, teaching, examples,
+eval records, cost profiles -- is therefore separate per namespace, and
+nothing one experiment commits reaches another one's model context. Path
+lookups always answer the base dataset.
 """
 
 import contextlib
 import fcntl
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -80,11 +90,85 @@ def _base_name(root: Path) -> str:
 
 
 def _entry_for_path(items: dict, root: Path):
+    """The dataset registered at ``root`` -- never one of its namespaces."""
     text = str(root)
     for item in items.values():
+        if item.get("base"):
+            continue
         if item.get("path") == text or item.get("view") == text:
             return item
     return None
+
+
+SEPARATOR = "--"
+NAMESPACE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._]|-(?!-))*$")
+
+
+def namespace_name(base: str, namespace: str) -> str:
+    return f"{base}{SEPARATOR}{namespace}"
+
+
+def is_namespace(name: str) -> bool:
+    item = datasets().get(name)
+    return bool(item and item.get("base"))
+
+
+def create_namespace(base: str, namespace: str) -> dict:
+    """A namespace of a registered dataset (idempotent). Its products start
+    empty; the source stays one folder."""
+    if len(namespace) > 64 or not NAMESPACE.match(namespace):
+        raise ValueError(
+            "A namespace is 1-64 letters, digits, '.', '_' or single '-', "
+            "starting with a letter or digit"
+        )
+    with locked():
+        items = datasets()
+        source = items.get(base)
+        if source is None:
+            raise ValueError(f"Dataset {base!r} is not registered")
+        if source.get("base"):
+            raise ValueError("A namespace cannot have namespaces of its own")
+        name = namespace_name(base, namespace)
+        item = items.get(name)
+        if item is not None and item.get("base") != base:
+            raise ValueError(f"{name!r} is already a dataset of its own")
+        if item is None:
+            item = {
+                "id": "local/" + name,
+                "name": name,
+                "base": base,
+                "namespace": namespace,
+                "created_at": time.time(),
+            }
+        for key in ("kind", "path", "view", "info", "input_format", "revision"):
+            if key in source:
+                item[key] = source[key]
+        items[name] = item
+        atomic(STATE / "datasets.json", items)
+    return item
+
+
+def namespaces(base: str | None = None) -> list[dict]:
+    return [
+        i
+        for i in datasets().values()
+        if i.get("base") and (base is None or i["base"] == base)
+    ]
+
+
+def follow_base(items: dict) -> bool:
+    """Copy each namespace's shared fields (path, view, info...) from its
+    base, so a rebuilt view reaches every namespace. True if anything changed."""
+    changed = False
+    for item in items.values():
+        source = items.get(item.get("base") or "")
+        if not source:
+            continue
+        for key in ("kind", "path", "view", "info", "input_format", "revision"):
+            if key in source and item.get(key) != source[key]:
+                item[key] = source[key]
+                changed = True
+    return changed
 
 
 def add_entry(root: Path, fields: dict) -> dict:
@@ -99,6 +183,7 @@ def add_entry(root: Path, fields: dict) -> dict:
             name = unique_name(_base_name(root), items.keys())
             item = {"id": "local/" + name, "name": name, "path": str(root), **fields}
         items[item["name"]] = item
+        follow_base(items)
         atomic(STATE / "datasets.json", items)
     return item
 
@@ -146,7 +231,10 @@ def local_root(repo: str):
     name = resolve_name(repo)
     if name is None:
         return None
-    item = datasets()[name]
+    items = datasets()
+    item = items[name]
+    # A namespace reads its base's source and view.
+    item = items.get(item.get("base") or "", item)
     # A raw capture is browsed through its generated view (see levi/views.py).
     if item.get("kind") == "raw":
         if not item.get("view"):
@@ -168,7 +256,15 @@ def name_for_path(path) -> str | None:
 def display_name(repo_id: str | None, local_path: str | None) -> str:
     """The on-disk key for a dataset's sidecars, reviews, diagnostics and
     exports: its catalog name when registered (unique by construction),
-    otherwise its folder name (local) or ``org__name`` (Hub)."""
+    otherwise its folder name (local) or ``org__name`` (Hub). A ``local/``
+    id wins over the path: a namespace shares its base's folder."""
+    if repo_id and repo_id.startswith("local/"):
+        try:
+            name = resolve_name(repo_id)
+        except ValueError:
+            name = None
+        if name:
+            return name
     if local_path:
         return name_for_path(local_path) or _base_name(Path(local_path))
     if repo_id:

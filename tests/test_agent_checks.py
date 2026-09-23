@@ -12,6 +12,7 @@ from test_agent_ergonomics import two_episode_run
 
 from levi.agent import checks
 from levi.agent.capabilities import invoke
+from levi.agent.security import Principal
 
 
 def row(start, end, subtask, outcome="success"):
@@ -39,14 +40,40 @@ def test_unknown_followed_by_what_settles_it_is_named():
 
 def test_a_class_whose_outcome_is_always_unknown_is_exempt():
     definitions = [
-        {"id": "other", "success_when": "The outcome is always unknown."},
+        {"id": "idle", "success_when": "The outcome is always unknown."},
         {"id": "grasp", "success_when": "The object is lifted."},
     ]
     exempt = checks.always_unknown(definitions)
-    assert exempt == {"other"}
-    rows = [row(0, 1, "other", "unknown"), row(1, 2, "approach")]
+    assert exempt == {"idle"}
+    rows = [row(0, 1, "idle", "unknown"), row(1, 2, "approach")]
     assert checks.staged(rows)
     assert not checks.staged(rows, exempt=exempt)
+
+
+def test_a_human_hand_is_other_and_unknown_even_without_a_plan_definition():
+    # Built-in annotation-004: anything a human hand does is `other`, outcome
+    # unknown -- the plan need not define `other` for that.
+    rows = [
+        row(0, 3, "grasp"),
+        row(3, 5, "other", "unknown"),
+        row(5, 8, "place"),
+    ]
+    assert not checks.staged(rows)
+    assert not checks.staged(rows, exempt=checks.always_unknown([]))
+    # No built-in rule says the same of `background`.
+    (line,) = checks.staged([row(0, 1, "background", "unknown"), row(1, 2, "place")])
+    assert line.startswith("background 0.0–1.0 is unknown")
+
+
+def test_the_first_guidance_asks_for_boundary_checks_only_where_problems_are(
+    bench,
+):
+    wb, context = bench
+    agent = Principal("conn", datasets=(context.repo_id,))
+    orientation = invoke(wb, agent, "workspace.get_context", {})
+    (line,) = [x for x in orientation["start_here"] if "evidence.boundaries" in x]
+    assert "check every boundary" not in line
+    assert "`problems` names" in line and "needs no check" in line
 
 
 def test_layers_are_checked_apart():

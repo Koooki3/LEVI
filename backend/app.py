@@ -85,7 +85,14 @@ from levi.annotations.sam3_protocol import (
     validate_annotations_for_plan,
 )
 from levi.auth import credential_scope, hub_token, token
-from levi.catalog import atomic, display_name, local_root, read
+from levi.catalog import (
+    atomic,
+    display_name,
+    local_root,
+    name_for_path,
+    read,
+    resolve_name,
+)
 from levi.paths import CACHE, EXPORTS, SAM3_CHECKPOINT_DIR, STATE, inside
 from levi.revision import dataset_revision
 from levi.versions import is_dataset_v2, is_dataset_v3, normalize_dataset_version
@@ -300,6 +307,9 @@ class DatasetState:
     annotations: dict[int, EpisodeAnnotations] = field(default_factory=dict)
     frame_ts_cache: dict[int, list[float]] = field(default_factory=dict)
     info_signature: str | None = None
+    # The catalog name a ``local/`` id resolved to. A namespace shares its
+    # base's folder, so the path alone would mix their sidecars.
+    catalog_name: str | None = None
 
     def _identity_hash(self, *, short: bool = False) -> str:
         """Deterministic hash of this dataset's identity — shared by every
@@ -327,7 +337,7 @@ class DatasetState:
         same directory so their edits land in the same per-episode files (see
         ``_lookup_episode_annotations``). Uniqueness comes from the catalog,
         which disambiguates two datasets sharing a folder basename."""
-        return dataset_display_slug(self.repo_id, self.local_path)
+        return self.catalog_name or dataset_display_slug(self.repo_id, self.local_path)
 
     @property
     def annotations_dir(self) -> Path:
@@ -371,11 +381,16 @@ def _state_key(req: DatasetRef) -> str:
 
 
 def _ensure_state(req: DatasetRef) -> DatasetState:
+    name = None
     if req.repo_id and req.repo_id.startswith("local/"):
+        name = resolve_name(req.repo_id)
         req = DatasetRef(local_path=str(local_root(req.repo_id)))
     if req.local_path:
         req.local_path = str(inside(req.local_path))
-    key = _state_key(req)
+        # A registered folder asked for by path is its base dataset.
+        name = name or name_for_path(req.local_path)
+    # By catalog name when known: namespaces of one dataset share its path.
+    key = f"catalog::{name}" if name else _state_key(req)
     cached = _states.get(key)
     # Datasets change while LEVI runs (episodes added or removed in place, a
     # raw capture's view rebuilt — see levi/sync.py): a new metadata
@@ -389,7 +404,7 @@ def _ensure_state(req: DatasetRef) -> DatasetState:
         cached = None
     if cached is not None:
         return cached
-    return _load_state(req, key)
+    return _load_state(req, key, catalog_name=name)
 
 
 def _info_signature(root: Path) -> str:
@@ -724,7 +739,13 @@ def _collect_sam3_job(state: DatasetState, job: dict[str, Any]) -> dict[str, Any
     return job
 
 
-def _load_state(req: DatasetRef, key: str, *, annotations: bool = True) -> DatasetState:
+def _load_state(
+    req: DatasetRef,
+    key: str,
+    *,
+    annotations: bool = True,
+    catalog_name: str | None = None,
+) -> DatasetState:
     if req.local_path:
         root = Path(req.local_path).expanduser().resolve()
         if not root.exists():
@@ -842,6 +863,7 @@ def _load_state(req: DatasetRef, key: str, *, annotations: bool = True) -> Datas
         info=info,
         episodes_df=episodes_df,
         info_signature=_info_signature(root) if req.local_path else None,
+        catalog_name=catalog_name,
     )
     if annotations:
         _load_existing_annotations(state)
@@ -1515,7 +1537,7 @@ def _do_export(
         # full copies (videos + parquet + meta) on every click. Only if that
         # name is already owned by a *different* source does it get a
         # timestamp suffix.
-        name = dataset_display_slug(state.repo_id, state.local_path)
+        name = state.display_slug
         out_root = EXPORT_ROOT / f"{name}_annotated"
         if out_root.exists() and _export_source(out_root) != str(state.root):
             prefix = f"{name}_annotated_"

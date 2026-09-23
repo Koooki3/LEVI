@@ -335,6 +335,29 @@ def remove_dataset(name: str):
     return {"removed": name}
 
 
+class NamespaceCreate(BaseModel):
+    namespace: str = Field(min_length=1, max_length=64)
+
+
+@app.get("/api/levi/catalog/{name}/namespaces")
+def list_namespaces(name: str):
+    """Namespaces of a dataset: one source, separate products per experiment."""
+    from .catalog import namespaces
+
+    return {"base": name, "namespaces": [_entry(i) for i in namespaces(name)]}
+
+
+@app.post("/api/levi/catalog/{name}/namespaces")
+def add_namespace(name: str, payload: NamespaceCreate):
+    """Create (or return) ``<name>--<namespace>``; nothing is copied."""
+    from .catalog import create_namespace
+
+    try:
+        return _entry(create_namespace(name, payload.namespace))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @app.get("/api/levi/samples")
 def samples_status():
     from . import samples
@@ -367,7 +390,11 @@ def samples_cancel(discard: bool = False):
     """Stop a background draw; ``?discard=true`` also deletes its partial folder."""
     from . import samples
 
-    return {**samples.cancel(discard), **samples.status()}
+    try:
+        result = samples.cancel(discard)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {**result, **samples.status()}
 
 
 @app.get("/api/levi/sync")

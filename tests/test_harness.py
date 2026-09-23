@@ -676,7 +676,7 @@ def test_provenance_names_the_skills_and_harness_the_run_used(bench, dataset):
     run = temporal_run(wb, context, agent, dataset)
     receipt = propose(wb, agent, run)
     provenance = wb.store.get("changes", receipt["id"])["provenance"]
-    assert "levi-overview@11" in provenance["skills_version"]
+    assert "levi-overview@12" in provenance["skills_version"]
     assert provenance["harness"]["parameters"]["evidence.refine_top_k"] == 0
 
 

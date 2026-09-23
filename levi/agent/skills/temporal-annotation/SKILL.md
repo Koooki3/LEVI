@@ -2,7 +2,7 @@
 name: temporal-annotation
 description: Evidence-grounded attempts, outcomes and temporal boundary review.
 metadata:
-  version: "5"
+  version: "6"
 ---
 
 Definitions are semantic priors, never a required successful sequence. Use the supplied workflow definitions and preserve subtask_id, attempt, outcome and layer. Retrying a subtask creates another attempt, not a new identity. Success needs an observable evidence_note; intention/contact alone is insufficient. Use unknown for invisible outcomes, and unknown/other/background for unclassified segments. Never force all time into a task.

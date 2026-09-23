@@ -2,20 +2,29 @@
 
 A new workspace (``paths.configure`` creating it) is marked so that the
 first time the service runs it draws a DROID raw sample of 500 episodes
-(:mod:`levi.samples.droid`, 18-30 GB). ``levi sample draw`` (or ``POST /api/levi/samples/droid_raw``)
-draws another 500 at any time: a new ``droid_raw_500_drawNN`` capture that
-shares no episode with earlier draws. A draw that was interrupted (service
-stopped, network lost) resumes where it stopped the next time it is started,
-and the service resumes it on start.
+(:mod:`levi.samples.droid`; the first draw was 11.6 GiB). ``levi sample draw``
+(or ``POST /api/levi/samples/droid_raw``) draws another at any time: a new
+``droid_raw_<size>_drawNN`` capture from the workspace's next unused
+positions of the order, sharing no episode with its earlier draws.
 
-``LEVI_DROID_SAMPLE=off``: LEVI never starts or resumes a download by
-itself (tests and CI set it); drawing by hand still works.
+An unfinished draw resumes where it stopped the next time it is started.
+The service, when it starts, resumes by itself a draw left interrupted (its
+process stopped, or Ctrl-C) or failed on the network -- at most
+:data:`AUTO_ATTEMPTS` automatic attempts per draw; a draw cancelled or failed
+for another reason waits for ``levi sample draw``.
+
+``LEVI_DROID_SAMPLE`` = ``off``/``0``/``false``/``no``: LEVI never starts or
+resumes a download by itself (tests and CI set it); drawing by hand still
+works. ``auto``/``on``/``1``/``true``/``yes`` or unset: it does. Any other
+value is ``off``, with a warning.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -26,9 +35,29 @@ from . import droid
 log = logging.getLogger("levi")
 
 
+ENABLED = ("auto", "on", "1", "true", "yes")
+DISABLED = ("off", "0", "false", "no")
+AUTO_ATTEMPTS = 3
+_warned: set[str] = set()
+
+
 def setting() -> str:
-    value = os.environ.get("LEVI_DROID_SAMPLE", "auto").strip().lower()
-    return value if value in ("auto", "off") else "auto"
+    """``auto`` or ``off``. A setting meant to stop downloads never starts
+    one by a typo: an unrecognised value is ``off``, with a warning."""
+    raw = os.environ.get("LEVI_DROID_SAMPLE")
+    value = (raw or "").strip().lower()
+    if not value or value in ENABLED:
+        return "auto"
+    if value not in DISABLED and value not in _warned:
+        _warned.add(value)
+        log.warning(
+            "LEVI_DROID_SAMPLE=%r is none of %s (on) or %s (off); "
+            "the automatic DROID sample stays off",
+            raw,
+            "/".join(ENABLED),
+            "/".join(DISABLED),
+        )
+    return "off"
 
 
 def note_new_workspace() -> None:
@@ -87,24 +116,44 @@ def _next_number(ledger: dict) -> int:
     return max(numbers, default=0) + 1
 
 
-def plan(size: int = droid.SIZE, reason: str = "manual") -> dict:
+def resumable(draw: dict) -> bool:
+    """A draw the service resumes by itself when it starts: one a stopped
+    process left (an active status, or ``interrupted``) or one that failed on
+    the network -- at most AUTO_ATTEMPTS automatic attempts per draw."""
+    if draw.get("auto_attempts", 0) >= AUTO_ATTEMPTS:
+        return False
+    return (
+        draw["status"] in droid.ACTIVE
+        or draw["status"] == "interrupted"
+        or (draw["status"] == "failed" and draw.get("transient") is True)
+    )
+
+
+def plan(
+    size: int = droid.SIZE, reason: str = "manual", automatic: bool = False
+) -> dict:
     """The draw to run now: the unfinished one, or a new one after the last."""
     if not 1 <= size <= 5000:
         raise ValueError("A draw holds 1-5000 episodes")
     chosen: dict = {}
 
     def change(v):
+        # Sample folders in place move the cursor past their positions (and a
+        # published draw the ledger missed is recorded ready) first.
+        droid.reconcile(v)
         # Any draw, by hand or automatic, answers a new workspace's offer.
         if v.get("auto") == "pending":
             v["auto"] = "started"
         current = open_draw(v)
         if current:
             current["attempts"] = current.get("attempts", 0) + 1
+            if automatic:
+                current["auto_attempts"] = current.get("auto_attempts", 0) + 1
             chosen.update(current)
             return
-        number = _next_number(v)
+        number = max([_next_number(v)] + [f["draw"] + 1 for f in droid.on_disk()])
         name = droid.dataset_name(size, number)
-        while droid.final_root(name).exists():
+        while droid.final_root(name).exists() or droid.partial_root(name).exists():
             number += 1
             name = droid.dataset_name(size, number)
         entry = {
@@ -116,6 +165,7 @@ def plan(size: int = droid.SIZE, reason: str = "manual") -> dict:
             "reason": reason,
             "planned_at": time.time(),
             "attempts": 1,
+            "auto_attempts": 1 if automatic else 0,
         }
         v["draws"].append(entry)
         chosen.update(entry)
@@ -124,12 +174,17 @@ def plan(size: int = droid.SIZE, reason: str = "manual") -> dict:
     return chosen
 
 
-def start(size: int = droid.SIZE, workers: int | None = None, reason: str = "manual"):
+def start(
+    size: int = droid.SIZE,
+    workers: int | None = None,
+    reason: str = "manual",
+    automatic: bool = False,
+):
     """Start (or resume) a draw in a worker process LEVI tracks; returns the
     draw. Refused while another process draws."""
     if running():
         raise RuntimeError("A DROID sample is being drawn already")
-    draw = plan(size, reason)
+    draw = plan(size, reason, automatic)
     workers = workers or _workers()
     log_file = droid.log_path(draw["name"])
     log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -173,10 +228,18 @@ def start(size: int = droid.SIZE, workers: int | None = None, reason: str = "man
     return draw
 
 
-def cancel(discard: bool = False) -> dict:
-    """Stop a running draw. Its partial folder stays and a later start
-    resumes it -- or, with ``discard``, the folder is deleted and the draw
-    closed; the next draw then uses the same positions of the order."""
+def cancel(discard: bool = False, grace: float = 10.0) -> dict:
+    """Stop the running draw and close it: ``cancelled`` (its partial folder
+    stays and a later start resumes it) or, with ``discard``, ``discarded``
+    (the folder is deleted; the next draw then takes the same positions).
+
+    A worker LEVI started is terminated. A draw running in a process LEVI did
+    not start (a foreground ``levi sample draw``) is interrupted through the
+    pid its draw records, once that process's identity (start time, boot,
+    executable) matches the record. A draw that cannot be stopped is neither
+    marked nor deleted (RuntimeError); nothing changes until the run lock is
+    held, i.e. until no process draws.
+    """
     from .. import children
 
     stopped = [
@@ -184,34 +247,113 @@ def cancel(discard: bool = False) -> dict:
     ]
     for row in stopped:
         children.terminate(row)
-    ledger = droid.read_json(droid.ledger_path(), {})
-    current = open_draw(ledger)
-    discarded = None
-    if current:
-        if discard:
-            import shutil
+    labels = [r["label"] for r in stopped]
+    other = _stop_untracked(grace)
+    if other:
+        labels.append(other)
+    with droid.run_lock(wait=2.0) as free:
+        if not free:
+            raise RuntimeError(
+                "A DROID sample draw is still running; nothing was cancelled "
+                "(levi sample status)"
+            )
+        ledger = droid.update_ledger(droid.reconcile)
+        current = open_draw(ledger)
+        discarded = None
+        if current:
+            if discard:
+                partial = droid.partial_root(current["name"])
+                shutil.rmtree(partial, ignore_errors=True)
+                discarded = str(partial)
+            droid.set_draw(
+                current["draw"],
+                status="discarded" if discard else "cancelled",
+                pid=None,
+                identity=None,
+            )
+    return {"stopped": labels, "discarded": discarded}
 
-            partial = droid.partial_root(current["name"])
-            shutil.rmtree(partial, ignore_errors=True)
-            discarded = str(partial)
-        droid.set_draw(
-            current["draw"], status="discarded" if discard else "cancelled", pid=None
+
+def _lock_frees(seconds: float) -> bool:
+    with droid.run_lock(wait=seconds) as free:
+        return free
+
+
+def _stop_untracked(grace: float) -> str | None:
+    """Stop a draw that holds the run lock in a process LEVI did not start:
+    SIGINT (it stops its threads and records ``interrupted``), then SIGTERM,
+    then SIGKILL, each only while the process is still the one its draw
+    recorded. None when nothing holds the lock."""
+    from .. import children
+
+    if _lock_frees(1.0):
+        return None
+    holder = None
+    deadline = time.monotonic() + 2.0
+    while True:
+        # The holder records its pid right after taking the lock.
+        ledger = droid.read_json(droid.ledger_path(), {})
+        holder = next(
+            (
+                d
+                for d in ledger.get("draws", [])
+                if d.get("pid") and d["status"] in droid.ACTIVE
+            ),
+            None,
         )
-    return {"stopped": [r["label"] for r in stopped], "discarded": discarded}
+        if holder or time.monotonic() > deadline:
+            break
+        if _lock_frees(0.1):
+            return None
+    refusal = (
+        "A DROID sample is being drawn by a process LEVI did not start and "
+        "cannot identify{}; stop it where it runs (Ctrl-C in its terminal), "
+        "then cancel again. Nothing was changed."
+    )
+    if (
+        holder is None
+        or not holder.get("identity")
+        or children.identity(holder["pid"]) != holder["identity"]
+    ):
+        where = f" (pid {holder['pid']})" if holder else ""
+        raise RuntimeError(refusal.format(where))
+    pid, who = holder["pid"], holder["identity"]
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGKILL):
+        if children.identity(pid) != who:
+            break
+        try:
+            os.kill(pid, sig)
+        except ProcessLookupError:
+            break
+        except PermissionError as exc:
+            raise RuntimeError(refusal.format(f" (pid {pid}, another user)")) from exc
+        if _lock_frees(grace):
+            return f"{holder['name']} (pid {pid})"
+    if _lock_frees(grace):
+        return f"{holder['name']} (pid {pid})"
+    raise RuntimeError(f"The draw in pid {pid} did not stop; nothing was changed.")
 
 
 def on_service_start() -> None:
-    """A new workspace's first draw, or a draw the last service left running.
+    """A new workspace's first draw, or a draw to resume (:func:`resumable`).
     Never fails the service."""
     try:
         ledger = droid.read_json(droid.ledger_path(), {})
         if not ledger or setting() == "off" or running():
             return
+        ledger = droid.update_ledger(droid.reconcile)
         current = open_draw(ledger)
         if ledger.get("auto") == "pending" and not ledger.get("draws"):
-            start(reason="new workspace")
-        elif current and current["status"] in droid.ACTIVE:
-            start(current["size"], reason="resume after restart")
+            start(reason="new workspace", automatic=True)
+        elif current and resumable(current):
+            start(current["size"], reason="resume after restart", automatic=True)
+        elif current:
+            log.info(
+                "DROID sample %s (%s) is not resumed automatically; "
+                "`levi sample draw` resumes it",
+                current["name"],
+                current["status"],
+            )
     except Exception:
         log.exception("DROID sample start failed")
 
@@ -232,7 +374,8 @@ def cli(argv=None) -> int:
         prog="levi sample",
         description=(
             "DROID raw test samples: 500 episodes of the public release per draw, "
-            "reproducible and never overlapping earlier draws."
+            "taken from one seeded order and never overlapping this workspace's "
+            "earlier draws."
         ),
     )
     parser.add_argument(
@@ -247,14 +390,22 @@ def cli(argv=None) -> int:
     parser.add_argument(
         "--discard",
         action="store_true",
-        help="with cancel: delete the unfinished draw's partial folder",
+        help="with cancel: delete the unfinished draw's partial folder (once it stopped)",
     )
     args = parser.parse_args(argv)
+    if args.workers is not None and not 1 <= args.workers <= 8:
+        parser.error("--workers must be 1-8")
+    if not 1 <= args.size <= 5000:
+        parser.error("--size must be 1-5000")
     if args.action == "status":
         print(json.dumps(status(), indent=1))
         return 0
     if args.action == "cancel":
-        print(json.dumps(cancel(args.discard), indent=1))
+        try:
+            print(json.dumps(cancel(args.discard), indent=1))
+        except RuntimeError as exc:
+            print(f"ERROR: {exc}")
+            return 1
         return 0
     if running():
         print("A DROID sample is being drawn already (levi sample status)")
@@ -277,7 +428,7 @@ def cli(argv=None) -> int:
                 f"{p['stage']}: {p['done']}/{p['total']} episodes, "
                 f"{droid.gib(p['bytes_done'])} of {droid.gib(p['bytes_total'])}"
                 + (
-                    f", ~{p['eta_seconds'] // 60} min left"
+                    f", ~{max(1, round(p['eta_seconds'] / 60))} min left"
                     if p.get("eta_seconds")
                     else ""
                 )

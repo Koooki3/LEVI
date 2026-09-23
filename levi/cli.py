@@ -100,6 +100,49 @@ def stop_children(children):
             child.wait()
 
 
+def namespace_cli(argv) -> int:
+    """``levi namespace``: isolated experiments over one registered dataset."""
+    from . import catalog
+
+    parser = argparse.ArgumentParser(
+        prog="levi namespace",
+        description=(
+            "A namespace <dataset>--<name> reads the dataset's one source folder "
+            "and keeps its own annotations, runs, memory and records."
+        ),
+    )
+    sub = parser.add_subparsers(dest="action", required=True)
+    create = sub.add_parser("create", help="create (or show) a namespace")
+    create.add_argument("dataset")
+    create.add_argument("namespace")
+    listing = sub.add_parser("list", help="namespaces of a dataset, or all")
+    listing.add_argument("dataset", nargs="?")
+    remove = sub.add_parser(
+        "remove", help="unregister a namespace (its files on disk stay)"
+    )
+    remove.add_argument("name", help="<dataset>--<namespace>")
+    args = parser.parse_args(argv)
+    try:
+        if args.action == "create":
+            print(
+                json.dumps(
+                    catalog.create_namespace(args.dataset, args.namespace), indent=1
+                )
+            )
+        elif args.action == "list":
+            for item in catalog.namespaces(args.dataset):
+                print(item["name"])
+        else:
+            if not catalog.is_namespace(args.name):
+                raise ValueError(f"{args.name!r} is not a namespace")
+            catalog.remove_entry(args.name)
+            print(f"removed {args.name}; its annotations and records stay on disk")
+    except ValueError as exc:
+        print(f"ERROR: {exc}")
+        return 1
+    return 0
+
+
 def main():
     if len(sys.argv) > 2 and sys.argv[1:3] == ["dev", "check-contracts"]:
         from .domain.schema_catalog import main as check_contracts
@@ -134,6 +177,9 @@ def main():
 
         sys.argv.pop(1)
         return clean()
+    if len(sys.argv) > 1 and sys.argv[1] == "namespace":
+        configure()
+        raise SystemExit(namespace_cli(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "sample":
         configure()
         from .samples import cli as sample_cli
@@ -160,7 +206,7 @@ def main():
         epilog=(
             "Also available: stop (stop the shared service), clean (bounded "
             "cache cleanup), migrate, convert, agent, sam3, sample (DROID test "
-            "samples), docs (check or regenerate the documentation). Each takes its own "
+            "samples), namespace (isolated experiments over one dataset), docs (check or regenerate the documentation). Each takes its own "
             "--help."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
