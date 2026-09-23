@@ -3,6 +3,7 @@
 import argparse
 import difflib
 import json
+import os
 import subprocess
 import sys
 import tomllib
@@ -78,6 +79,8 @@ def configuration(client, project, grant_file):
         "LEVI_WORKSPACE": str(__import__("levi.paths", fromlist=["ROOT"]).ROOT),
         "LEVI_AGENT_GRANT_FILE": str(grant_file),
     }
+    if os.getenv("LEVI_CPU_ONLY") == "1":
+        env["LEVI_CPU_ONLY"] = "1"
     if client == "claude":
         path = project / ".mcp.json"
         before = path.read_text() if path.exists() else "{}\n"

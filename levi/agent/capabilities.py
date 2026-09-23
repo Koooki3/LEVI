@@ -79,6 +79,12 @@ class Propose(RunRef):
     inspected_episodes: list[int] = Field(min_length=1)
 
 
+class Prepare(RunRef):
+    # Bound each call so a large approved scope need not exceed the Core's
+    # HTTP timeout. Omitting episodes preserves the existing small-run API.
+    episodes: list[int] | None = Field(default=None, min_length=1, max_length=16)
+
+
 class Events(RunRef):
     after: int = Field(default=0, ge=0)
 
@@ -515,7 +521,7 @@ SPECS = {
         "Human correction of staged tracks; invalidates approval",
     ),
     "runs.prepare": (
-        RunRef,
+        Prepare,
         "draft",
         "Create bounded immutable evidence artifacts without a model call",
     ),
@@ -1146,7 +1152,7 @@ def _invoke(
     if name == "runs.prepare":
         from .runtime import prepare_evidence
 
-        return prepare_evidence(workbench, args.run_id)
+        return prepare_evidence(workbench, args.run_id, episodes=args.episodes)
     if name == "episodes.query":
         return {
             "episodes": run["context"]["episodes"],

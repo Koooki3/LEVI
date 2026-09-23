@@ -131,9 +131,44 @@ def lerobot_fixture(root: Path):
     return root
 
 
+def droid_fixture(root: Path):
+    h5py = pytest.importorskip("h5py")
+    demo = root / "demo_0000"
+    videos = demo / "recordings" / "MP4"
+    videos.mkdir(parents=True)
+    n = 20
+    meta = {
+        "trajectory_length": n,
+        "current_task": "Move the cup",
+        "success": True,
+        "building": "fixture_lab",
+        "wrist_mp4_path": "source/101.mp4",
+        "ext1_mp4_path": "source/102.mp4",
+        "ext2_mp4_path": "source/103.mp4",
+    }
+    (demo / "metadata_fixture.json").write_text(json.dumps(meta))
+    with h5py.File(demo / "trajectory.h5", "w") as f:
+        t = np.arange(n, dtype=np.int64)
+        f.create_dataset(
+            "observation/timestamp/control/step_start", data=1_700_000_000_000 + t * 70
+        )
+        for prefix in ("observation/robot_state", "action"):
+            key = (
+                "joint_positions"
+                if prefix.startswith("observation")
+                else "joint_position"
+            )
+            f.create_dataset(f"{prefix}/{key}", data=np.tile(t[:, None], (1, 7)) / 100)
+            f.create_dataset(f"{prefix}/gripper_position", data=t / 100)
+    for serial in ("101", "102", "103"):
+        _video(videos / f"{serial}.mp4", n - 1, 60)
+    return root
+
+
 FIXTURES = {
     "robot_capture": capture_fixture,
     "image_sequence": image_fixture,
+    "droid_raw": droid_fixture,
     "lerobot": lerobot_fixture,
 }
 
@@ -191,6 +226,91 @@ def test_round_trip_every_compatible_pair(fmt, target, tmp_path):
     assert (out / "meta/levi_validation.json").is_file()
     assert not list(tmp_path.glob(".*.partial")), "staging must be renamed or removed"
     assert hashes(root) == before, "sources are never modified"
+
+
+def test_droid_view_preserves_source_and_frame_provenance(tmp_path):
+    root = droid_fixture(tmp_path / "droid")
+    before = hashes(root)
+    result = execute("view", root, tmp_path / "view", Options())
+    view = Path(result["dataset_path"])
+    assert hashes(root) == before
+    assert result["episodes"] == 1
+    info = json.loads((view / "meta/info.json").read_text())
+    assert info["total_frames"] == 19
+    assert info["total_videos"] == 3
+    assert info["features"]["source_control_timestamp_sec"]["dtype"] == "float64"
+    table = pq.read_table(view / "data/chunk-000/episode_000000.parquet")
+    assert table.num_rows == 19
+    assert table["timestamp"][18].as_py() == pytest.approx(18 / 14.3, abs=1e-4)
+    provenance = json.loads((view / "meta/levi_provenance.jsonl").read_text())
+    assert provenance["dropped_hdf5_tail_rows"] == 1
+    assert provenance["source_capture_timestamps"][1] == pytest.approx(0.07)
+    assert len(list(view.glob("videos/**/*.mp4"))) == 3
+
+
+def test_droid_preflight_rejects_missing_outcome_and_bad_hdf5(tmp_path):
+    root = droid_fixture(tmp_path / "droid")
+    demo = root / "demo_0000"
+    meta_path = demo / "metadata_fixture.json"
+    meta = json.loads(meta_path.read_text())
+    meta.pop("success")
+    meta_path.write_text(json.dumps(meta))
+    report = registry.inspect(root, Options())
+    assert report.failed and "success" in report.episodes[0].errors[0]
+
+    meta["success"] = False
+    meta_path.write_text(json.dumps(meta))
+    h5py = pytest.importorskip("h5py")
+    with h5py.File(demo / "trajectory.h5", "a") as handle:
+        del handle["action/joint_position"]
+    report = registry.inspect(root, Options())
+    assert report.failed and "action/joint_position" in report.episodes[0].errors[0]
+
+
+def test_droid_missing_task_keeps_episode_for_video_annotation(tmp_path):
+    root = droid_fixture(tmp_path / "droid")
+    path = root / "demo_0000/metadata_fixture.json"
+    meta = json.loads(path.read_text())
+    meta["current_task"] = ""
+    path.write_text(json.dumps(meta))
+    report = registry.inspect(root, Options())
+    assert not report.failed
+    assert report.summary["complete_episodes"] == 1
+    assert any(
+        item.id == "task_text" and item.status == "warn" for item in report.requirements
+    )
+    result = execute("view", root, tmp_path / "view", Options())
+    episode = json.loads(
+        (Path(result["dataset_path"]) / "meta/episodes.jsonl")
+        .read_text()
+        .splitlines()[0]
+    )
+    assert episode["tasks"] == ["Unspecified task"]
+    assert episode["levi_task_unspecified"] is True
+
+
+def test_droid_catalog_does_not_offer_unsupported_conversion(tmp_path):
+    from levi.describe import describe
+
+    root = droid_fixture(tmp_path / "droid")
+    view = tmp_path / "view"
+    execute("view", root, view, Options())
+    value = describe(
+        {
+            "kind": "raw",
+            "path": str(root),
+            "view": str(view),
+            "view_status": "ready",
+            "input_format": "droid_raw",
+        }
+    )
+    assert value["capabilities"]["browse"]
+    assert value["capabilities"]["annotate"]
+    assert value["capabilities"]["convert"] is False
+    assert value["source_time_error_max_seconds"] >= 0
+    advertised = registry.capabilities()["inputs"]
+    droid = next(item for item in advertised if item["id"] == "droid_raw")
+    assert droid["viewable"] is True and droid["convertible"] is False
 
 
 def test_retime_remuxes_losslessly(tmp_path):

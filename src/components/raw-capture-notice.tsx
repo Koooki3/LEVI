@@ -16,20 +16,23 @@ export function RawCaptureNotice({
   const { isRaw, entry, format } = useDatasetSource();
   if (!isRaw || !entry) return null;
   const convertHref = `/workbench?source=${encodeURIComponent(entry.path)}`;
+  const isDroid = format?.input_format === "droid_raw";
   if (compact) {
     return (
       <div className="levi-raw-notice compact" role="note">
         <DatasetFormatBadge format={format ?? undefined} compact />
         <span>
           <T>
-            Raw capture shown through a lossless browsing view — every captured
-            frame. Annotations and outcome labels made here carry over when you
-            convert.
+            {isDroid
+              ? "DROID is browsed and annotated through a stream-copied, nominal-clock view. Original control timestamps remain in provenance; training conversion needs an explicit mapping."
+              : "Raw capture shown through a lossless browsing view — every captured frame. Annotations and outcome labels made here carry over when you convert."}
           </T>
         </span>
-        <Link className="levi-raw-link" href={convertHref}>
-          <T>Convert in the Workbench</T> ↗
-        </Link>
+        {!isDroid && (
+          <Link className="levi-raw-link" href={convertHref}>
+            <T>Convert in the Workbench</T> ↗
+          </Link>
+        )}
       </div>
     );
   }
@@ -39,26 +42,32 @@ export function RawCaptureNotice({
         <DatasetFormatBadge format={format ?? undefined} compact />
         <strong>
           <T>
-            {feature === "export"
-              ? "Exporting needs a converted dataset"
-              : feature === "doctor"
-                ? "Diagnosing the browsing view of a raw capture"
-                : "You are browsing a raw capture"}
+            {isDroid
+              ? "You are browsing a DROID raw capture"
+              : feature === "export"
+                ? "Exporting needs a converted dataset"
+                : feature === "doctor"
+                  ? "Diagnosing the browsing view of a raw capture"
+                  : "You are browsing a raw capture"}
           </T>
         </strong>
       </div>
       <p>
         <T>
-          {feature === "export"
-            ? "A raw capture is shown through a lossless browsing view and is not a training dataset itself. Convert it in the Workbench — language/event annotations, outcome labels and SAM3 objects made here are carried over to the converted dataset, which you can then export."
-            : feature === "doctor"
-              ? "These checks run on the generated view (every frame kept, retimed losslessly). For the capture itself — CSV schema, frame alignment, camera stalls, completion markers — use Inspect input in the Workbench."
-              : "Every captured frame is shown through a lossless browsing view. Viewing, statistics, annotation, SAM3 objects and outcome labels work here and carry over when you convert; exporting requires converting first."}
+          {isDroid
+            ? "DROID raw supports browsing and annotation, but this release does not write a DROID training-format conversion. The view uses nominal video time; check the preserved source timestamps before precise boundary claims."
+            : feature === "export"
+              ? "A raw capture is shown through a lossless browsing view and is not a training dataset itself. Convert it in the Workbench — language/event annotations, outcome labels and SAM3 objects made here are carried over to the converted dataset, which you can then export."
+              : feature === "doctor"
+                ? "These checks run on the generated view (every frame kept, retimed losslessly). For the capture itself — CSV schema, frame alignment, camera stalls, completion markers — use Inspect input in the Workbench."
+                : "Every captured frame is shown through a lossless browsing view. Viewing, statistics, annotation, SAM3 objects and outcome labels work here and carry over when you convert; exporting requires converting first."}
         </T>
       </p>
-      <Link className="levi-secondary inline-block mt-2" href={convertHref}>
-        <T>Convert in the Workbench</T> ↗
-      </Link>
+      {!isDroid && (
+        <Link className="levi-secondary inline-block mt-2" href={convertHref}>
+          <T>Convert in the Workbench</T> ↗
+        </Link>
+      )}
     </div>
   );
 }

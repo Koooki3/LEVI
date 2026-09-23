@@ -9,6 +9,9 @@ dependencies = ["python-dotenv>=1,<2", "fastapi>=0.115,<1", "uvicorn[standard]>=
 
 [project.optional-dependencies]
 agent = ["pydantic-ai-slim[openai]>=1.0,<2", "mcp>=1.12,<2"]
+droid = [
+    "h5py>=3.13,<4",
+]
 
 [project.urls]
 Repository = "https://github.com/Koooki3/LEVI"

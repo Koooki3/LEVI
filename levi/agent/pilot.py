@@ -510,16 +510,21 @@ def start(wb, spec):
         )
     if run.get("pilot_turns", 0) >= run["context"]["budget"]["max_calls"]:
         raise ValueError("Pilot turn budget exhausted; revise and approve the plan")
+    time_limit = run["context"]["budget"]["max_seconds"]
     remaining = (
-        run["context"]["budget"]["max_seconds"]
+        None
+        if time_limit is None
+        else time_limit
         - run.get("pilot_seconds", 0)
         - run.get("pilot_reserved_seconds", 0)
     )
-    if remaining <= 0:
+    if remaining is not None and remaining <= 0:
         raise ValueError("Pilot duration budget exhausted; revise and approve the plan")
     spec = spec.model_copy(
         update={
-            "max_seconds": min(spec.max_seconds, remaining),
+            "max_seconds": spec.max_seconds
+            if remaining is None
+            else min(spec.max_seconds, remaining),
             "max_turns": min(
                 spec.max_turns,
                 run["context"]["budget"]["max_calls"] - run.get("pilot_turns", 0),

@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from test_formats import capture_fixture, make_demo
+from test_formats import capture_fixture, droid_fixture, make_demo
 from test_views import wait
 
 from levi import catalog
@@ -99,6 +99,18 @@ def test_discovery_waits_for_a_stable_copy_and_skips_levi_folders(
     clock[0] += 31
     assert [c["kind"] for c in sync.scan()] == ["added"]
     assert set(catalog.datasets()) == {dataset.name}
+
+
+def test_droid_raw_is_auto_discovered_as_viewable(client, sync, tmp_path):
+    root = droid_fixture(tmp_path / "droid")
+    assert [change["kind"] for change in sync.scan()] == ["added"]
+    entry = catalog.datasets()[root.name]
+    assert entry["input_format"] == "droid_raw"
+    assert wait(client, entry["view_job"])["status"] == "succeeded"
+    listed = client.get("/api/levi/catalog").json()["local"]
+    row = next(item for item in listed if item["name"] == root.name)
+    assert row["format"]["capabilities"]["annotate"] is True
+    assert row["format"]["capabilities"]["convert"] is False
 
 
 def test_raw_capture_changes_rebuild_its_view(client, sync, tmp_path):

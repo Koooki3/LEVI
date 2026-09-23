@@ -139,8 +139,15 @@ def _int(value):
 
 
 def sample():
-    """One look at the GPU. ``available`` is False when there is no NVIDIA GPU;
-    ``error`` is set when the GPU exists but could not be read."""
+    """One look at the GPU unless explicit CPU-only mode forbids probing."""
+    if os.getenv("LEVI_CPU_ONLY") == "1":
+        return {
+            "available": False,
+            "at": time.time(),
+            "processes": [],
+            "ours": [],
+            "cpu_only": True,
+        }
     if not shutil.which("nvidia-smi"):
         return {"available": False, "at": time.time(), "processes": [], "ours": []}
     try:
@@ -420,8 +427,9 @@ def local_endpoint(base_url):
 
 
 def require_free(config=None):
-    """Refuse a local model call (or starting the local service, ``config``
-    None) unless the guardian says the GPU is free or shareable."""
+    """Refuse local inference in CPU-only mode; otherwise enforce GPU policy."""
+    if os.getenv("LEVI_CPU_ONLY") == "1":
+        raise GpuBusy("LEVI_CPU_ONLY=1 forbids local accelerator-backed inference")
     if os.getenv("LEVI_GPU_SHARING") == "allow":
         return None
     if config is not None and not local_endpoint(config.base_url):
@@ -560,6 +568,8 @@ class Watch:
                 LOG.exception("GPU guardian tick failed")
 
     def start(self):
+        if os.getenv("LEVI_CPU_ONLY") == "1":
+            return self
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
         return self

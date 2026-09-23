@@ -458,3 +458,74 @@ def test_one_call_gives_one_small_jpeg_sheet(bench, dataset):
     for name in (value["mosaics"][0]["artifact"], page["mosaic"]["artifact"]):
         assert name.endswith(".jpg")
         assert (folder / name).read_bytes()[:3] == b"\xff\xd8\xff"
+
+
+def test_prepare_large_scope_in_bounded_batches(bench, dataset):
+    """Prepared episodes accumulate after pilot instead of requiring one long call."""
+    from test_agent_economy import with_video
+
+    from levi.agent.planning import approve
+    from levi.agent.schema import TaskContext
+
+    wb, context = bench
+    agent = Principal("conn", datasets=(context.repo_id,))
+    camera = with_video(dataset)
+    ctx = TaskContext(
+        **{
+            **context.model_dump(),
+            "cameras": [camera],
+            "allow_media_egress": True,
+            "episodes": [0, 1],
+            "workflow": {
+                "kind": "temporal",
+                "definitions": [GRASP],
+                "pilot_episode": 0,
+            },
+        }
+    )
+    run = wb.plan(ctx, agent)
+    approve(wb, run["id"], 1, "fixture-human")
+    with pytest.raises(ValueError, match="pilot/scope"):
+        invoke(wb, agent, "runs.prepare", {"run_id": run["id"], "episodes": [1]})
+    pilot = invoke(wb, agent, "runs.prepare", {"run_id": run["id"], "episodes": [0]})
+    assert pilot["episodes"] == [0]
+    draft = invoke(
+        wb,
+        agent,
+        "annotations.propose_segments",
+        {
+            "run_id": run["id"],
+            "inspected_episodes": [0],
+            "proposals": [
+                {
+                    "episode_index": 0,
+                    "kind": "segment",
+                    "subtask_id": "grasp",
+                    "content": "Visible motion",
+                    "start": 0.0,
+                    "end": 1.0,
+                    "outcome": "unknown",
+                }
+            ],
+        },
+    )
+    invoke(
+        wb,
+        Principal("operator", human=True),
+        "plans.review_pilot",
+        {
+            "run_id": run["id"],
+            "revision": draft["revision"],
+            "accepted": True,
+            "note": "Fixture pilot reviewed",
+        },
+    )
+    with pytest.raises(ValueError, match="approved pilot/scope"):
+        invoke(wb, agent, "runs.prepare", {"run_id": run["id"], "episodes": [2]})
+    with pytest.raises(ValueError, match="Completed episodes"):
+        invoke(wb, agent, "runs.prepare", {"run_id": run["id"], "episodes": [0]})
+    remaining = invoke(
+        wb, agent, "runs.prepare", {"run_id": run["id"], "episodes": [1]}
+    )
+    assert remaining["episodes"] == [1]
+    assert wb.store.get("runs", run["id"])["prepared"] == [0, 1]

@@ -79,7 +79,7 @@ class CompatibleProvider:
             transport=PinnedTransport(),
             follow_redirects=False,
             trust_env=False,
-            timeout=min(120, budget.max_seconds),
+            timeout=min(120, budget.max_seconds or 120),
         )
         sdk = AsyncOpenAI(
             base_url=config.base_url, api_key=key, http_client=client, max_retries=0
@@ -147,8 +147,8 @@ class CompatibleProvider:
                         total_tokens_limit=budget.max_tokens,
                     ),
                     model_settings={
-                        "max_tokens": min(4096, budget.max_tokens),
-                        "timeout": min(120, budget.max_seconds),
+                        "max_tokens": min(4096, budget.max_tokens or 4096),
+                        "timeout": min(120, budget.max_seconds or 120),
                     },
                 )
                 usage = result.usage

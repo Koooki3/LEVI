@@ -32,6 +32,7 @@ export interface DatasetFormat {
   view_status?: "building" | "ready" | "failed" | null;
   view_fps?: number | null;
   excluded?: number;
+  source_time_error_max_seconds?: number | null;
   timing?: "resample" | "retime" | null;
   filter_static?: boolean | null;
   source?: string | null;

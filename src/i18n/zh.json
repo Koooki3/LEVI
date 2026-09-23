@@ -1209,5 +1209,11 @@
   "One subtask per line: id | label | definition. With a vocabulary each subtask span gets an id and an outcome, comparable with agent annotations.": "每行一个子任务：id | 名称 | 定义。有了词表，每个子任务区间都带 id 和结果，可与 agent 标注逐条比较。",
   "Use the last agent plan's subtasks": "使用最近一次 agent 计划的子任务",
   "Save vocabulary": "保存词表",
-  "Subtask and outcome": "子任务与结果"
+  "Subtask and outcome": "子任务与结果",
+  "DROID raw (HDF5 + three cameras)": "DROID 原始数据（HDF5 + 三路相机）",
+  "Nominal video clock; original control timestamps are preserved separately": "视频使用名义时钟；原始控制时间戳已另行保存",
+  "Maximum source/view clock difference": "源数据与视图时钟最大差异",
+  "You are browsing a DROID raw capture": "正在浏览 DROID 原始数据",
+  "DROID is browsed and annotated through a stream-copied, nominal-clock view. Original control timestamps remain in provenance; training conversion needs an explicit mapping.": "DROID 通过无重编码、名义时钟视图浏览和标注。原始控制时间戳保存在来源记录中；转换为训练格式需要明确的字段映射。",
+  "DROID raw supports browsing and annotation, but this release does not write a DROID training-format conversion. The view uses nominal video time; check the preserved source timestamps before precise boundary claims.": "DROID 原始数据支持浏览和标注，但当前版本不提供 DROID 训练格式转换写出。视图使用名义视频时间；声明精确时间边界前请核查保留的源时间戳。"
 }

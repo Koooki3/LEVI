@@ -64,6 +64,8 @@ Change detection is `stat`-only: a dataset's *revision* is the inode, size and n
 
 ## Processes LEVI starts, and how they stop
 
+Set `LEVI_CPU_ONLY=1` before starting LEVI for a strict CPU-only session: the idle GPU watcher is not started, GPU status never invokes `nvidia-smi`, and local accelerator-backed inference and SAM3 worker launch are blocked. An external Codex/Claude or remote API provider can still be used. A project-scoped MCP connection created with this flag carries it into the client; a CPU-only call refuses to reuse a core started without it, so stop that core first.
+
 One core process serves the web UI, the REST API and every MCP bridge. It is started by `levi serve` or by the first MCP call, and it keeps running after the browser or the agent goes away. `uv run levi stop` stops it; `uv run levi stop --all` also stops the Ollama service LEVI started itself (never one you run). While idle the core samples the GPU (every 15 s) and the workspace, which costs about 1 % of one CPU core.
 
 Everything else the core starts runs in its own process group and is recorded, with the core's identity, in `outputs/LEVI/workbench/processes.json`:
@@ -96,7 +98,7 @@ Inspect → choose a target → run (see [Conversion](CONVERSION.md)). Targets: 
 
 ## Supported raw capture formats
 
-Three formats the built-in converter (`levi/conversion/`) understands, two of them in active use.
+Four raw input profiles are recognized, two of them currently have direct training conversion writers. DROID raw is browse/annotate only.
 
 ### Type 1 — teleoperation capture (e.g. `data_collection_robotiq`)
 
@@ -125,6 +127,10 @@ Verified end-to-end against a real batch: the `pick_screws_of_same_size_into_the
 **Format**: `wrist_camera/`/`side_camera/` as directories of naturally-sorted PNG/JPEG instead of `.mp4`; `source_fps` must be set explicitly (nothing to probe).
 
 **Status**: input format `image_sequence`, fixture-verified only; neither real corpus above uses it.
+
+### Type 4 — DROID raw HDF5 and MP4
+
+A dataset root contains `demo_NNNN/trajectory.h5`, one `metadata_*.json` and `recordings/MP4/` with three camera recordings. Install `uv sync --locked --extra droid` to inspect it. LEVI validates the HDF5 trajectory fields, indexes all demos and builds a read-only v2.1-shaped browsing view under `outputs/LEVI/workbench/views/<name>/`. The input folder remains untouched; annotation versions stay under the raw dataset name. Direct training conversion is unavailable until an explicit DROID action/time/schema mapping is supplied. The nominal view clock is 14.3 FPS, and `meta/levi_provenance.jsonl` retains each source control timestamp and the per-episode maximum source/view difference. Do not treat nominal time as exact capture time. See [Conversion](CONVERSION.md#droid-raw-browsing-view).
 
 ### Already-converted LeRobot datasets
 

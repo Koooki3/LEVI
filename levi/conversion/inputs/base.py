@@ -22,6 +22,9 @@ class InputFormat:
     # Whether the conversion pipeline can read episodes from this format
     # (False for formats that are already a finished dataset).
     convertible: bool = True
+    # A raw input may support a read-only browsing view without supporting
+    # training-format conversion (for example, DROID needs an action mapping).
+    viewable: bool = True
 
     def detect(self, root: Path) -> float:
         """Confidence in [0, 1] that ``root`` is this format (cheap)."""
@@ -42,4 +45,5 @@ class InputFormat:
             "description": self.description,
             "evidence": self.evidence,
             "convertible": self.convertible,
+            "viewable": self.viewable,
         }

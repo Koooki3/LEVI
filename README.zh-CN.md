@@ -41,6 +41,10 @@ uv run levi                                   # 同时启动网页与 API
 
 远程服务器上请转发网页端口：`ssh -L 7860:127.0.0.1:7860 user@server`。7861 是内部 API，不是工作台页面。
 
+严格仅使用 CPU 时，请在启动服务前设置 `export LEVI_CPU_ONLY=1`。这会禁用后台 GPU 轮询，并阻止本地加速器推理及 SAM3。
+
+DROID 原始目录（`demo_0000/trajectory.h5`、元数据及三路 MP4）是可选的**浏览与标注输入**，目前不支持直接转换成训练数据。使用前运行 `uv sync --locked --extra agent --extra droid`，将数据集目录直接放入 `$LEVI_WORKSPACE`，然后点击 **Sync now** 或重启 LEVI。只读派生视图位于 `outputs/LEVI/workbench/views/<数据集名>/`，不会改动 HDF5 源文件。源 MP4 时间与控制时间不一致，视图采用名义 14.3 FPS；原始时间戳和逐集偏差记录在 `meta/levi_provenance.jsonl`。精确时间边界应复核该记录。详见[转换指南](docs/CONVERSION.md#droid-raw-browsing-view)。
+
 ```bash
 uv run levi stop                # 停止共享服务及其子进程（--all：连同 LEVI 启动的 Ollama）
 uv run levi clean               # 预览可再生缓存（需先停服务）；加 --apply 执行
@@ -107,7 +111,7 @@ docker run --rm -p 127.0.0.1:7860:7860 -v "$HOME/levi-data:/workspace" levi:loca
 ## 常见问题
 
 - **看到 `{"detail":"Not Found"}` 或 API 说明页**：请求进入了 7861；请打开 7860，并确认 SSH 或编辑器的端口转发目标是服务器的 7860。
-- **本地路径被拒绝**：必须是 LeRobot 数据集（含 `meta/info.json`）或可识别的原始采集（`task/demo_NNNN`），且真实路径位于 `LEVI_WORKSPACE` 内。
+- **本地路径被拒绝**：必须是 LeRobot 数据集（含 `meta/info.json`）或可识别的原始采集（`task/demo_NNNN`，或 DROID 的 `demo_NNNN/trajectory.h5`），且真实路径位于 `LEVI_WORKSPACE` 内。
 - **转换失败**：查看输入检查清单和任务日志。重复或缺失的帧 ID、未知夹爪命令、视频数量不符会在发布任何结果前阻止转换；源数据不会被修改。
 - **本地模型任务被阻塞**：原因里会写明正在使用 GPU 的进程；GPU 空闲满 `LEVI_GPU_QUIET_SECONDS` 后即可继续。
 - **服务重启后任务中断**：任务会标记为 interrupted，不会自动续写；请重新规划。

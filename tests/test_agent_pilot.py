@@ -109,7 +109,7 @@ def test_action_pair_and_artifact_manifest(prepared):
     assert all(not Path(a["path"]).is_absolute() for a in result["artifacts"])
 
 
-def test_project_configuration_preserves_other_entries(tmp_path):
+def test_project_configuration_preserves_other_entries(tmp_path, monkeypatch):
     from levi.agent.control import configuration
 
     file = tmp_path / ".mcp.json"
@@ -120,11 +120,24 @@ def test_project_configuration_preserves_other_entries(tmp_path):
     directory = tmp_path / ".codex"
     directory.mkdir()
     (directory / "config.toml").write_text('model = "keep-me"\n')
+    monkeypatch.setenv("LEVI_CPU_ONLY", "1")
     _, _, after = configuration("codex", tmp_path, tmp_path / "credential")
     import tomllib
 
-    assert tomllib.loads(after)["model"] == "keep-me"
+    parsed = tomllib.loads(after)
+    assert parsed["model"] == "keep-me"
+    assert parsed["mcp_servers"]["levi"]["env"]["LEVI_CPU_ONLY"] == "1"
     assert "credential" in after and "Bearer" not in after
+
+
+def test_cpu_only_connection_rejects_existing_gpu_core(monkeypatch, tmp_path):
+    from levi.agent import core
+
+    monkeypatch.setenv("LEVI_CPU_ONLY", "1")
+    monkeypatch.setattr(core, "directory", lambda: tmp_path)
+    monkeypatch.setattr(core, "status", lambda: {"instance": "old", "pid": 1})
+    with pytest.raises(RuntimeError, match="not started with LEVI_CPU_ONLY"):
+        core.ensure()
 
 
 def test_acp_interleaved_events_permissions_and_failure(tmp_path):

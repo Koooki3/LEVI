@@ -16,6 +16,7 @@ The registry (`levi/conversion/registry.py`) is the source of truth; `GET /api/l
 | --- | --- | --- | --- |
 | Robot capture — pose/gripper CSV + video demos (teleoperation `teleop` or `policy_rollout` variant) | `robot_capture` | `lerobot_v21`, `recap_value` | real data: 171-demo screws eval batch, `data_collection_robotiq` teleop demos |
 | Robot capture — CSV + image folders | `image_sequence` | `lerobot_v21`, `recap_value` | fixture only |
+| DROID raw — HDF5, metadata and three MP4s | `droid_raw` | browsing/annotation view only; training export needs explicit mapping | 500-demo raw sample; CPU fixture |
 | LeRobot dataset v2.x (re-export) | `lerobot` | `recap_value` | real data (screws conversion) |
 
 | Output | Id | Notes |
@@ -23,7 +24,13 @@ The registry (`levi/conversion/registry.py`) is the source of truth; `GET /api/l
 | LeRobot v2.1 | `lerobot_v21` | per-episode parquet + H.264 MP4, loadable by LeRobot, openpi and the LEVI viewer |
 | RECAP value dataset (π\*0.6) | `recap_value` | LeRobot v2.1 + rewards, terminal success flags and RLinf's returns sidecar — see [RECAP.md](RECAP.md) |
 
-Known gaps (listed in the UI with reason and workaround): LeRobot v3 as conversion **output** (write v2.1, then use lerobot's `convert_dataset_v21_to_v30`), LeRobot v3 as conversion **input** (export from the raw capture, or convert v3→v2.1), RLDS / Open X-Embodiment and HDF5 (no reader yet — see "Adding a format"). v3 datasets can still be browsed, annotated and validated.
+Known gaps (listed in the UI with reason and workaround): LeRobot v3 as conversion **output** (write v2.1, then use lerobot's `convert_dataset_v21_to_v30`), LeRobot v3 as conversion **input** (export from the raw capture, or convert v3→v2.1), RLDS / Open X-Embodiment and non-DROID HDF5 profiles (no schema reader yet — see "Adding a format"). v3 datasets can still be browsed, annotated and validated.
+
+## DROID raw browsing view
+
+Install the optional HDF5 reader with uv sync --locked --extra droid. Register the folder containing demo_0000/, demo_0001/, and so on. LEVI recognizes trajectory.h5, metadata JSON, and the three videos in recordings/MP4/; it builds a derived, video-aligned v2.1 browsing view under the workspace and leaves every raw file untouched. The viewer and Agent Harness can annotate this view. Its state/action fields are the recorded seven joint positions plus gripper positions, not inferred commands.
+
+The raw MP4s commonly declare 60 FPS while control samples are near 14 Hz. The view stream-copies H.264 packets at a declared 14.3 FPS, uses the shared video-frame count across cameras, and records original per-row control timestamps and any trimmed trailing rows in meta/levi_provenance.jsonl. This is a uniform viewing clock, not exact capture time; max_source_to_view_error_seconds identifies episodes needing manual time-boundary review. Native comparisons must use the same view-clock rule. Camera resolution may vary by episode; actual sizes are recorded in meta/levi_droid_video_shapes.jsonl. No generic DROID-to-training-data writer is implied by this view. Episodes without `current_task` remain browsable as `Unspecified task` and carry an explicit `levi_task_unspecified` marker; episode-level success/failure is never used to invent task text.
 
 ## 输入 / Capture schema (`robot_capture`, `image_sequence`)
 

@@ -42,6 +42,7 @@ def describe(entry: dict) -> dict[str, Any]:
             view_status=entry.get("view_status"),
             view_fps=view.get("view_fps"),
             excluded=len(view.get("excluded") or {}),
+            source_time_error_max_seconds=view.get("source_time_error_max_seconds"),
             capabilities={
                 "browse": entry.get("view_status") == "ready",
                 "annotate": entry.get("view_status") == "ready",
@@ -50,7 +51,8 @@ def describe(entry: dict) -> dict[str, Any]:
                 "doctor": "view",
                 "export_annotated": False,
                 "push_to_hub": False,
-                "convert": True,
+                "convert": (entry.get("input_format") or view.get("input_format"))
+                != "droid_raw",
             },
         )
         return result

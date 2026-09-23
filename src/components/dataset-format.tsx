@@ -5,6 +5,7 @@ import type { DatasetFormat } from "@/types/dataset-format.types";
 const INPUT_LABELS: Record<string, string> = {
   robot_capture: "Robot capture (CSV + video)",
   image_sequence: "Robot capture (CSV + image folders)",
+  droid_raw: "DROID raw (HDF5 + three cameras)",
   lerobot: "LeRobot dataset",
 };
 
@@ -39,6 +40,17 @@ export function useFormatDescription(format: DatasetFormat | undefined) {
           format.view_fps ?? format.fps,
         )}`,
       );
+      if (format.input_format === "droid_raw") {
+        lines.push(
+          t(
+            "Nominal video clock; original control timestamps are preserved separately",
+          ),
+        );
+        if (format.source_time_error_max_seconds != null)
+          lines.push(
+            `${t("Maximum source/view clock difference")} ${format.source_time_error_max_seconds.toFixed(2)} s`,
+          );
+      }
       if (format.excluded)
         lines.push(
           `${format.excluded} ${t("episodes left out (failed inspection)")}`,

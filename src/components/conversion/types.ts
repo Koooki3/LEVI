@@ -94,6 +94,7 @@ export interface FormatDescription {
   description: string;
   evidence: string;
   convertible?: boolean;
+  viewable?: boolean;
   defaults?: Record<string, unknown>;
   inputs?: string[];
 }

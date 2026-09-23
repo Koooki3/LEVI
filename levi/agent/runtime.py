@@ -1258,8 +1258,8 @@ def stop():
             thread.join(timeout=0.1)
 
 
-def prepare_evidence(wb, id):
-    """Headless/MCP evidence preparation without model calls."""
+def prepare_evidence(wb, id, *, episodes=None):
+    """Prepare a bounded subset of approved evidence without model calls."""
     from .store import dataset_lock
 
     with dataset_lock(wb.store.state, "run-" + id):
@@ -1294,11 +1294,18 @@ def prepare_evidence(wb, id):
                     "different data under an approved plan"
                 )
             wb.store.mutate("runs", id, lambda r: r.update(manifest=manifest))
-        selected = (
+        allowed = (
             ctx.episodes
             if (run["plan"].get("pilot_review") or {}).get("accepted")
             else [run["plan"]["pilot_episode"]]
         )
+        selected = list(allowed) if episodes is None else list(episodes)
+        if not selected or len(selected) != len(set(selected)):
+            raise ValueError("Prepare a nonempty set of distinct episodes")
+        if not set(selected) <= set(allowed):
+            raise ValueError("Evidence request exceeds the approved pilot/scope")
+        if episodes is not None and set(selected) & set(run["completed"]):
+            raise ValueError("Completed episodes cannot be prepared again in a batch")
         for ep in selected:
             # The declared observation policy, not a second uniform sampler:
             # a temporal plan gets its coarse step, everything else the plan's
@@ -1310,7 +1317,10 @@ def prepare_evidence(wb, id):
                 ctx, directory / "input", ep, directory / "evidence"
             )
             persist(wb, id, ep, summary, evidence)
-        wb.store.mutate("runs", id, lambda r: r.update(prepared=selected))
+        wb.store.mutate(
+            "runs", id,
+            lambda r: r.update(prepared=sorted(set(r.get("prepared", [])) | set(selected))),
+        )
         if ctx.workflow["kind"] == "objects":
             for ep in selected:
                 wb.store.put(

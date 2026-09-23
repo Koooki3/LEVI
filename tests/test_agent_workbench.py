@@ -1034,6 +1034,29 @@ def test_a_run_may_have_no_token_limit(bench):
     assert updated["context"]["budget"]["max_tokens"] is None
 
 
+def test_external_run_may_remove_token_and_task_time_caps(bench):
+    from levi.agent.planning import rebudget
+    from levi.agent.schema import Budget
+
+    wb, ctx = bench
+    with pytest.raises(ValueError, match="external Agent"):
+        TaskContext.model_validate(
+            ctx.model_dump() | {"budget": Budget(max_seconds=None).model_dump()}
+        )
+    external = TaskContext.model_validate(ctx.model_dump() | {"provider": "external"})
+    run = wb.plan(external)
+    revised = rebudget(
+        wb,
+        run["id"],
+        1,
+        Budget(max_calls=1000, max_tokens=None, max_seconds=None),
+    )
+    assert revised["plan"]["revision"] == 2
+    assert revised["plan"]["approval"] is None
+    assert revised["context"]["budget"]["max_tokens"] is None
+    assert revised["context"]["budget"]["max_seconds"] is None
+
+
 def test_changed_pilot_must_be_reviewed_again(bench):
     from levi.agent.planning import pilot_review
 

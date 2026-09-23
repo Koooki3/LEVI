@@ -296,7 +296,7 @@ class Synchronizer:
                 continue
             if self.discover == "all" and self._looks_raw(path):
                 fmt = registry.detect(path)
-                if fmt is not None and fmt.convertible:
+                if fmt is not None and fmt.viewable:
                     yield path, "raw"
                     continue
             if depth < MAX_DEPTH:

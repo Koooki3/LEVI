@@ -41,6 +41,10 @@ Wait for **Ready** and open **http://127.0.0.1:7860**. The home page streams two
 
 On a remote server, forward the Web UI port: `ssh -L 7860:127.0.0.1:7860 user@server`. Port 7861 is the internal API, not the workbench.
 
+For a strict CPU-only LEVI session, set `export LEVI_CPU_ONLY=1` before starting the service. This disables its background GPU watcher and blocks local accelerator-backed inference and SAM3.
+
+DROID raw folders (`demo_0000/trajectory.h5`, metadata and three MP4 cameras) are an optional **browse-and-annotate input**, not a supported training conversion. For that input, install `uv sync --locked --extra agent --extra droid`, place the dataset folder directly under `$LEVI_WORKSPACE`, and use **Sync now** or restart LEVI. A read-only derived view appears at `outputs/LEVI/workbench/views/<dataset-name>/`; the HDF5 source is untouched. The view uses a nominal 14.3 FPS clock because source MP4 time and control time differ. Original timestamps and per-episode drift are saved in `meta/levi_provenance.jsonl`; review precise temporal boundaries against them. See [Conversion](docs/CONVERSION.md#droid-raw-browsing-view).
+
 ```bash
 uv run levi stop                # stop the shared service and its workers (--all: also LEVI's Ollama)
 uv run levi clean               # preview regenerable caches (service stopped); --apply to remove
@@ -107,7 +111,7 @@ The current release is **0.3.0**; `main` carries the unreleased agent harness, l
 ## Troubleshooting
 
 - **`{"detail":"Not Found"}` or the API landing page** — you reached port 7861; open 7860 and check your SSH or editor port forwarding targets server port 7860.
-- **A local path is refused** — it must be a LeRobot dataset (`meta/info.json`) or a recognised raw capture (`task/demo_NNNN`), and its real path must be inside `LEVI_WORKSPACE`.
+- **A local path is refused** — it must be a LeRobot dataset (`meta/info.json`) or a recognised raw capture (`task/demo_NNNN` or a DROID `demo_NNNN/trajectory.h5`), and its real path must be inside `LEVI_WORKSPACE`.
 - **A conversion fails** — read the inspection checklist and the job log. Duplicate or missing frame ids, unknown gripper commands or video count mismatches stop it before anything is published; the source is never modified.
 - **A local-model run is blocked** — the reason names the process using the GPU; the run resumes once the GPU has been free for `LEVI_GPU_QUIET_SECONDS`.
 - **Interrupted after a restart** — jobs are marked interrupted and never resume writing on their own; plan again.

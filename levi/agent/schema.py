@@ -30,7 +30,9 @@ class Budget(Contract):
     # this machine's GPU time, and a full-dataset run is not capped). Every
     # model request still reserves and settles its own context window.
     max_tokens: int | None = Field(default=16000, ge=256)
-    max_seconds: int = Field(default=300, ge=10, le=86400)
+    # None removes the run-wide wall clock limit for an external Agent. A
+    # managed Pilot still has a bounded, resumable session timeout.
+    max_seconds: int | None = Field(default=300, ge=10, le=86400)
     max_snapshot_bytes: int = Field(default=512 * 1024 * 1024, ge=1)
     max_artifact_bytes: int = Field(default=256 * 1024 * 1024, ge=1)
 
@@ -94,6 +96,8 @@ class TaskContext(Contract):
             raise ValueError("Episodes must be distinct non-negative indices")
         if len(set(self.cameras)) != len(self.cameras):
             raise ValueError("Duplicate cameras")
+        if self.budget.max_seconds is None and self.provider != "external":
+            raise ValueError("Unlimited task duration requires an external Agent")
         if self.imported_from and self.provider != "external":
             raise ValueError("Imported annotation is staged by an external caller")
         if self.imported_window and (

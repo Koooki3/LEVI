@@ -92,6 +92,11 @@ def ensure(port=7861):
         fcntl.flock(lock, fcntl.LOCK_EX)
         current = status()
         if current:
+            if os.getenv("LEVI_CPU_ONLY") == "1" and not current.get("cpu_only"):
+                raise RuntimeError(
+                    "The running LEVI core was not started with LEVI_CPU_ONLY=1; "
+                    "stop it before starting a CPU-only session"
+                )
             return current
         if os.getenv("LEVI_PILOT_CHILD"):
             raise RuntimeError("Owning core stopped; managed Pilot cannot restart it")
@@ -192,7 +197,14 @@ def serve():
             uds.bind(str(path))
             uds.listen(128)
             (root / "instance.json").write_text(
-                json.dumps({"instance": instance, "pid": os.getpid(), "port": port})
+                json.dumps(
+                    {
+                        "instance": instance,
+                        "pid": os.getpid(),
+                        "port": port,
+                        "cpu_only": os.getenv("LEVI_CPU_ONLY") == "1",
+                    }
+                )
             )
             uvicorn.Server(uvicorn.Config("levi.service:app", log_level="warning")).run(
                 sockets=sockets

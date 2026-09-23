@@ -1209,5 +1209,11 @@
   "One subtask per line: id | label | definition. With a vocabulary each subtask span gets an id and an outcome, comparable with agent annotations.": "One subtask per line: id | label | definition. With a vocabulary each subtask span gets an id and an outcome, comparable with agent annotations.",
   "Use the last agent plan's subtasks": "Use the last agent plan's subtasks",
   "Save vocabulary": "Save vocabulary",
-  "Subtask and outcome": "Subtask and outcome"
+  "Subtask and outcome": "Subtask and outcome",
+  "DROID raw (HDF5 + three cameras)": "DROID raw (HDF5 + three cameras)",
+  "Nominal video clock; original control timestamps are preserved separately": "Nominal video clock; original control timestamps are preserved separately",
+  "Maximum source/view clock difference": "Maximum source/view clock difference",
+  "You are browsing a DROID raw capture": "You are browsing a DROID raw capture",
+  "DROID is browsed and annotated through a stream-copied, nominal-clock view. Original control timestamps remain in provenance; training conversion needs an explicit mapping.": "DROID is browsed and annotated through a stream-copied, nominal-clock view. Original control timestamps remain in provenance; training conversion needs an explicit mapping.",
+  "DROID raw supports browsing and annotation, but this release does not write a DROID training-format conversion. The view uses nominal video time; check the preserved source timestamps before precise boundary claims.": "DROID raw supports browsing and annotation, but this release does not write a DROID training-format conversion. The view uses nominal video time; check the preserved source timestamps before precise boundary claims."
 }

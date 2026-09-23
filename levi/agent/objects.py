@@ -40,6 +40,8 @@ def gpu_headroom():
     import shutil
     import subprocess
 
+    if os.getenv("LEVI_CPU_ONLY") == "1":
+        return {"known": False, "reason": "LEVI_CPU_ONLY=1; no accelerator probe"}
     if not shutil.which("nvidia-smi"):
         return {"known": False, "reason": "nvidia-smi not found"}
     try:
@@ -215,6 +217,8 @@ def _worker_failure(code, log_path):
 
 
 def launch(wb, id):
+    if os.getenv("LEVI_CPU_ONLY") == "1":
+        raise ValueError("LEVI_CPU_ONLY=1 forbids SAM3 worker launch")
     job = wb.store.get("object_jobs", id)
     from .planning import require
 

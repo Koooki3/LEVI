@@ -46,6 +46,7 @@ class LeRobotDataset(InputFormat):
     # Not a raw capture: the capture pipeline cannot read it; outputs that
     # accept it ("from_dataset") rewrite its tables and reuse its videos.
     convertible = False
+    viewable = False
 
     def detect(self, root: Path) -> float:
         return 1.0 if read_info(root) else 0.0

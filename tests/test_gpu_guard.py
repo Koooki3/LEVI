@@ -49,6 +49,26 @@ def on_gpu(monkeypatch, apps, commands, total=16000, used=None, util=5, at=None)
         monkeypatch.setattr(gpu.time, "time", lambda: at)
 
 
+def test_cpu_only_mode_never_probes_or_starts_guardian(monkeypatch):
+    from levi.agent import objects
+
+    monkeypatch.setenv("LEVI_CPU_ONLY", "1")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("CPU-only mode must not inspect accelerators")
+
+    monkeypatch.setattr(gpu, "_smi", forbidden)
+    monkeypatch.setattr(gpu.shutil, "which", forbidden)
+    monkeypatch.setattr(objects.subprocess, "run", forbidden)
+    assert gpu.sample()["cpu_only"] is True
+    with pytest.raises(gpu.GpuBusy, match="LEVI_CPU_ONLY"):
+        gpu.require_free(config())
+    watch = gpu.Watch(None).start()
+    assert watch.thread is None
+    assert objects.gpu_headroom()["known"] is False
+    watch.close()
+
+
 def test_a_protected_workload_blocks_and_is_named(monkeypatch):
     on_gpu(
         monkeypatch, [(737719, 8500)], {737719: ACTOR + " --checkpoint_path=/media/x"}

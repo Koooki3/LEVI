@@ -43,8 +43,12 @@ def view_fps(rates: list[float], options: Options) -> float:
 def build(source: Path, target: Path, options: Options, progress_path=None) -> dict:
     """Engine stage ``view``: raw capture → browsing view at ``target``."""
     fmt = registry.detect(source)
-    if fmt is None or not fmt.convertible:
+    if fmt is None or not fmt.viewable:
         raise ValueError("Only raw captures need a browsing view")
+    if fmt.id == "droid_raw":
+        from .droid_view import build as build_droid
+
+        return build_droid(source, target, options, progress_path)
     progress = Progress(progress_path, pipeline.STAGES)
     base = options.model_copy(
         update={"timing": "retime", "filter_static": False, "target": "lerobot_v21"}
@@ -86,7 +90,7 @@ def request(root: Path, options: dict | None = None) -> dict:
     build job when the view is missing or the capture changed since."""
     root = catalog.inside(root)
     fmt = registry.detect(root)
-    if fmt is None or not fmt.convertible:
+    if fmt is None or not fmt.viewable:
         raise ValueError(
             "Not a LeRobot dataset (meta/info.json) or a recognized raw capture"
         )

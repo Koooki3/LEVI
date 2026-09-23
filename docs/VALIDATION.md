@@ -4,6 +4,14 @@ What has been checked, how, and what has not. Newest first. Each entry states wh
 
 按时间倒序记录验证内容、方法与未覆盖范围。每条都注明使用的是真实数据/真实模型，还是固定样例与模拟；样例测试通过不等于模型质量达标。
 
+## 2026-09-23 DROID raw input / DROID 原始数据入口
+
+The four real DROID copies are registered through the ordinary dataset catalog. Each has 500 demos, 160,744 aligned view frames, 1,500 videos and 118 distinct source tasks; source metadata reports 250 successful and 250 failed demos. LEVI did not modify raw HDF5, MP4 or metadata. The new input advertises **viewable/annotatable, not directly convertible**; an optional `h5py` install is required. Empty task text remains an explicitly unknown task, never an inferred outcome. Source and derived clocks are distinct: 32 episodes exceed 1 s drift, maximum 17.95 s, so fine boundaries need review against provenance.
+
+CPU-only regression results: 48 format, sync and raw-view tests passed (one existing Starlette/AnyIO deprecation warning); 3 focused Core/connection tests and the CPU-only GPU-guard test passed. Ruff, documentation and diff checks passed. The 500-episode Harness plan and a scoped Codex MCP connection are prepared, but the plan is still awaiting human approval. No Codex annotations or quality measurements exist yet. Bun/Node were unavailable in the current shell for a final frontend rerun; the earlier frontend validation in this entry's development session preceded the final optional format-type addition.
+
+An initial plan command launched the older idle Core before CPU-only protection was added and may have made a GPU status probe. That Core was stopped. `LEVI_CPU_ONLY=1` now disables the watcher, forbids SAM3/local accelerator inference, propagates to a scoped MCP connection and rejects reuse of an incompatible Core. No GPU inference or model checkpoint download occurred in this DROID work.
+
 ## 2026-09-22 Real-data end-to-end runs, harness and local model / 真实数据端到端、harness 与本地模型
 
 Environment: Linux x86_64, RTX 5060 Ti (shared with robot RL training), Python 3.11 (uv), Bun 1.3.10, Ollama 0.34.2, `qwen3.5:4b` (Q4_K_M).

@@ -51,6 +51,8 @@ Optional Agent runtime (`uv sync --locked --extra agent`), locked in `uv.lock`:
 
 These packages are installed, not vendored. LEVI's adapters and skills are project code. Lockfile entries include the transitive dependency versions/artifact hashes; container or binary releases still require the full actual-platform inventory and license texts described below. No checkpoint is included by the Agent extra.
 
+Optional DROID raw reader (`uv sync --locked --extra droid`): `h5py` 3.16.0, [source](https://github.com/h5py/h5py), BSD-3-Clause. The installed distribution also carries HDF5, LZF and other native-library notices in its `License-File` entries; review those files and the exact wheel before bundling. No DROID dataset files are included in the source release.
+
 Development/test dependencies:
 
 | Package | Version | Declared license |

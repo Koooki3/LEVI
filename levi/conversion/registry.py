@@ -7,6 +7,7 @@ here; the API, the web UI, the CLI and the contract tests pick it up.
 from pathlib import Path
 
 from .inputs.base import InputFormat
+from .inputs.droid_raw import DroidRaw
 from .inputs.image_sequence import ImageSequence
 from .inputs.lerobot import LeRobotDataset
 from .inputs.robot_capture import RobotCapture
@@ -17,7 +18,7 @@ from .outputs.recap_value import RecapValue
 from .report import InputReport
 
 INPUT_FORMATS: dict[str, InputFormat] = {
-    f.id: f for f in (RobotCapture(), ImageSequence(), LeRobotDataset())
+    f.id: f for f in (RobotCapture(), ImageSequence(), DroidRaw(), LeRobotDataset())
 }
 OUTPUT_FORMATS: dict[str, OutputFormat] = {
     f.id: f for f in (LeRobotV21(), RecapValue())
@@ -49,9 +50,9 @@ UNSUPPORTED = [
     },
     {
         "id": "hdf5",
-        "label": "HDF5 (robomimic / ALOHA)",
-        "reason": "No reader yet.",
-        "workaround": "Add an InputFormat in levi/conversion/inputs/ (see docs/CONVERSION.md).",
+        "label": "Other HDF5 profiles (robomimic / ALOHA)",
+        "reason": "DROID raw is supported for browsing and annotation; other HDF5 schemas are not mapped.",
+        "workaround": "Add a schema-specific InputFormat and view builder (see docs/CONVERSION.md).",
     },
 ]
 

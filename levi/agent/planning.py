@@ -273,6 +273,8 @@ def rebudget(wb, id, revision, budget):
             raise Conflict("Pause execution before revising its budget")
         if run["plan"]["revision"] != revision:
             raise Conflict("Plan revision changed")
+        if budget.max_seconds is None and run["context"]["provider"] != "external":
+            raise ValueError("Unlimited task duration requires an external Agent")
         if budget.max_calls < run["requests"] or (
             budget.max_tokens is not None
             and budget.max_tokens < run["tokens"] + run["reserved_tokens"]
