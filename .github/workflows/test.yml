@@ -13,6 +13,8 @@ jobs:
       LEVI_WORKSPACE: ${{ github.workspace }}/.state
       UV_CACHE_DIR: ${{ github.workspace }}/.state/.cache/uv
       NEXT_TELEMETRY_DISABLED: "1"
+      # A fresh CI workspace must not download the DROID test sample.
+      LEVI_DROID_SAMPLE: "off"
       CUDA_VISIBLE_DEVICES: ""
     steps:
       - uses: actions/checkout@v4

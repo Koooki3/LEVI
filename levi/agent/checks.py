@@ -11,9 +11,13 @@ segments break a general annotation rule (built-in knowledge annotation-003,
 - ``unknown``: an outcome is ``unknown`` although the recording goes on to
   show the robot doing something with a known outcome right after it --
   ``unknown`` is for what the recording does not show.
-- ``engagements``: the robot's own record shows the gripper letting go and
-  the arm rising, then closing again, inside one interval: two engagements
-  (two attempts) in one segment.
+
+Measured against a full-dataset reference (2026-09-24): ``unknown`` lines
+were right 78-90% of the time. A third check -- the recorded gripper opening
+and the arm rising inside one interval, as a sign of two attempts -- was
+right about half the time and dropped: whether the effector *left* the
+object is a judgement on the frames (a short lift back onto the same rim is
+the same attempt), and signals that ask for splits make agents over-split.
 
 None of these place a boundary; the frames still decide.
 """
@@ -66,35 +70,7 @@ def unknown(segments, exempt=()):
     return out
 
 
-def engagements(segments, events):
-    """Close -> open -> rise -> close inside one segment, from the recorded
-    gripper and height events (``signals.summarize``)."""
-    if not events:
-        return []
-    out = []
-    for s in segments:
-        inside = [e for e in events if s["start"] - 0.3 <= e["t"] < s["end"]]
-        closes = [e["t"] for e in inside if e["kind"] == "close"]
-        for a, b in pairwise(closes):
-            opened = [e["t"] for e in inside if e["kind"] == "open" and a < e["t"] < b]
-            if not opened:
-                continue
-            rose = [
-                e["t"]
-                for e in inside
-                if e["kind"] == "high" and opened[0] <= e["t"] < b
-            ]
-            if rose:
-                out.append(
-                    f"{s['subtask']} {_t(s['start'])}–{_t(s['end'])}: the gripper "
-                    f"opened at {_t(opened[0])}, the arm rose at {_t(rose[0])} and "
-                    f"it closed again at {_t(b)} -- two engagements in one segment?"
-                )
-                break
-    return out
-
-
-def staged(segments, events=None, exempt=()):
+def staged(segments, exempt=()):
     """Every problem of one episode's staged segments (proposal dicts with
     ``subtask_id`` or plain ``subtask`` rows), layer by layer."""
     layers = {}
@@ -112,5 +88,5 @@ def staged(segments, events=None, exempt=()):
     out = []
     for rows in layers.values():
         rows.sort(key=lambda s: s["start"])
-        out += meet(rows) + unknown(rows, exempt) + engagements(rows, events or [])
+        out += meet(rows) + unknown(rows, exempt)
     return out

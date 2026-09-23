@@ -57,8 +57,15 @@ def configure() -> None:
         # Model weights are workspace-local and never part of the repository.
         "LEVI_SAM3_CHECKPOINT_DIR": checkpoint_dir,
     }
+    new_workspace = not STATE.exists()
     for key, value in values.items():
         # LEVI subprocesses keep all managed data within their workspace.
         inside(value).mkdir(parents=True, exist_ok=True)
         os.environ[key] = str(value)
     STATE.mkdir(parents=True, exist_ok=True)
+    if new_workspace:
+        # A new workspace gets a DROID test sample when the service first
+        # runs, if the disk can hold it (levi/samples).
+        from .samples import note_new_workspace
+
+        note_new_workspace()

@@ -98,6 +98,17 @@ def client(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _no_droid_sample(monkeypatch, tmp_path):
+    """No test downloads the DROID sample a new workspace draws, and none
+    reads or resumes the live workspace's sample ledger."""
+    from levi.samples import droid
+
+    monkeypatch.setenv("LEVI_DROID_SAMPLE", "off")
+    monkeypatch.setattr(droid, "ROOT", tmp_path)
+    monkeypatch.setattr(droid, "STATE", tmp_path / "outputs/LEVI/workbench")
+
+
+@pytest.fixture(autouse=True)
 def _gpu_is_not_this_machines(monkeypatch):
     """The off-peak GPU guard reads the real nvidia-smi; a test must not pass
     or fail depending on who is training on this machine right now."""

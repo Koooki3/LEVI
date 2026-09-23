@@ -134,6 +134,11 @@ def main():
 
         sys.argv.pop(1)
         return clean()
+    if len(sys.argv) > 1 and sys.argv[1] == "sample":
+        configure()
+        from .samples import cli as sample_cli
+
+        raise SystemExit(sample_cli(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "docs":
         from .docs import main as docs
 
@@ -154,8 +159,8 @@ def main():
         # someone reading --help would not know they exist.
         epilog=(
             "Also available: stop (stop the shared service), clean (bounded "
-            "cache cleanup), migrate, convert, agent, sam3, docs (check or regenerate "
-            "the documentation). Each takes its own "
+            "cache cleanup), migrate, convert, agent, sam3, sample (DROID test "
+            "samples), docs (check or regenerate the documentation). Each takes its own "
             "--help."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,

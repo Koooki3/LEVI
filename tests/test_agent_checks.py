@@ -1,7 +1,9 @@
 """Staging speaks only about problems (measured 2026-09-23: agents asked to
 check every boundary looked 20 times and re-staged once). The checks name
 where a staged episode breaks a general rule -- attempts (annotation-007),
-`unknown` (annotation-003/-012) -- and stay silent otherwise."""
+`unknown` (annotation-003/-012) -- and stay silent otherwise. Recorded
+signals raise no problem: whether the effector left the object is for the
+frames to show (a signal-based check was right about half the time)."""
 
 # ruff: noqa: F811
 
@@ -45,29 +47,6 @@ def test_a_class_whose_outcome_is_always_unknown_is_exempt():
     rows = [row(0, 1, "other", "unknown"), row(1, 2, "approach")]
     assert checks.staged(rows)
     assert not checks.staged(rows, exempt=exempt)
-
-
-def test_release_and_rise_inside_one_interval_are_two_engagements():
-    events = [
-        {"t": 1.0, "kind": "close"},
-        {"t": 2.0, "kind": "open"},
-        {"t": 2.4, "kind": "high"},
-        {"t": 3.2, "kind": "close"},
-    ]
-    (line,) = checks.staged([row(0.8, 4.0, "grasp", "failure")], events)
-    assert "opened at 2.0, the arm rose at 2.4 and it closed again at 3.2" in line
-    # Re-closing without rising is the same engagement.
-    same = [e for e in events if e["kind"] != "high"]
-    assert not checks.staged([row(0.8, 4.0, "grasp", "failure")], same)
-    # Split at the release, with an approach between, nothing is left to say.
-    assert not checks.staged(
-        [
-            row(0.8, 2.0, "grasp", "failure"),
-            row(2.0, 3.0, "approach"),
-            row(3.0, 4.0, "grasp"),
-        ],
-        events,
-    )
 
 
 def test_layers_are_checked_apart():

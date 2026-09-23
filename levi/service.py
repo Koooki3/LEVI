@@ -65,6 +65,11 @@ async def lifespan(app):
     marker = STATE / "server.pid"
     marker.write_text(str(os.getpid()))
     SYNC.start()
+    from .samples import on_service_start
+
+    # A new workspace's DROID test sample, or one a stopped service left
+    # half-downloaded; a background worker, never a wait here.
+    on_service_start()
     from .inference.gpu import Watch
 
     # Off-peak GPU: unload the local model the moment someone else computes.
@@ -328,6 +333,41 @@ def remove_dataset(name: str):
     if removed is None:
         raise HTTPException(404, "Dataset is not registered")
     return {"removed": name}
+
+
+@app.get("/api/levi/samples")
+def samples_status():
+    from . import samples
+
+    return samples.status()
+
+
+class SampleDraw(BaseModel):
+    size: int = Field(default=500, ge=1, le=5000)
+    workers: int | None = Field(default=None, ge=1, le=8)
+
+
+@app.post("/api/levi/samples/droid_raw")
+def samples_draw(body: SampleDraw | None = None):
+    """Draw (or resume) a DROID raw test sample in the background."""
+    from . import samples
+
+    body = body or SampleDraw()
+    try:
+        draw = samples.start(body.size, body.workers, reason="requested")
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"draw": draw, **samples.status()}
+
+
+@app.post("/api/levi/samples/droid_raw/cancel")
+def samples_cancel(discard: bool = False):
+    """Stop a background draw; ``?discard=true`` also deletes its partial folder."""
+    from . import samples
+
+    return {**samples.cancel(discard), **samples.status()}
 
 
 @app.get("/api/levi/sync")

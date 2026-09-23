@@ -1583,16 +1583,14 @@ def _invoke(
         # clean staging costs nothing to read.
         problems = {}
         if run["context"]["workflow"]["kind"] == "temporal":
-            from . import checks, signals
+            from . import checks
 
             exempt = checks.always_unknown(
                 run["context"]["workflow"].get("definitions")
             )
             for ep, _saved, proposals in checked:
-                sig = signals.for_run(workbench, run, ep) or {}
                 found = checks.staged(
                     [p.model_dump() for p in proposals if p.kind == "segment"],
-                    sig.get("events"),
                     exempt,
                 )
                 if found:
