@@ -136,7 +136,7 @@ export function TeachingStatus({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "supervision.pending",
-          arguments: { run_id: runId },
+          arguments: { run_id: runId, include_decided: true },
         }),
       })
         .then(async (response) => {

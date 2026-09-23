@@ -410,7 +410,7 @@ def test_a_page_of_evidence_can_be_read_as_one_sheet(bench, dataset):
         {"run_id": run["id"], "episode": 0, "limit": 4, "layout": "mosaic"},
     )
     sheet = page["mosaic"]
-    assert len(sheet["tiles"]) == len(page["items"])
+    assert "tiles" not in sheet and len(page["items"]) == 4
     # The sheet is a run artifact, so the MCP bridge is allowed to return it.
     assert sheet["artifact"] in wb.store.get("runs", run["id"])["sheets"]
     assert "--sheet-" in sheet["artifact"] and "-w" in sheet["artifact"]
@@ -1229,6 +1229,8 @@ def test_reset_leaves_nothing_the_next_task_could_learn_from(bench):
     key = run["dataset_key"]
     wb.store.put("teaching", f"{run['id']}:0:coarse", {"run_id": run["id"]})
     wb.store.put("model_cache", f"{run['id']}:0:coarse", {"output": {}})
+    wb.store.put("plan_history", f"{run['id']}:1", {"revision": 1})
+    wb.store.put("pilot_sessions", "s1", {"run_id": run["id"]})
     wb.store.put("tasks", "task-1", {"id": "task-1", "dataset_key": key})
     wb.store.put("tasks", "task-2", {"id": "task-2", "dataset_key": "other"})
     wb.store.put("changes", "20260101T0000", {"run_id": run["id"]})
@@ -1249,8 +1251,11 @@ def test_reset_leaves_nothing_the_next_task_could_learn_from(bench):
     )
     assert done["applied"] is True and done["tasks"] == 1
     assert not wb.store.ids("teaching") and not wb.store.ids("model_cache")
+    assert not wb.store.ids("plan_history") and not wb.store.ids("pilot_sessions")
     assert wb.store.ids("tasks") == ["task-2"]
     assert not any(path.exists() for path in files)
+    # Nothing else was in the dataset's folder, so it goes too.
+    assert not layout.dataset_dir(wb.store.state, key).exists()
     with wb.store.connect() as db:
         left = [key for (key,) in db.execute("SELECT key FROM receipts")]
     assert left == ["commit:20260101T0001:0"]

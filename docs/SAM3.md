@@ -174,6 +174,8 @@ uv run levi serve
 | LEVI_SAM3_WORKER_PYTHON | integrations/sam3/.venv/bin/python | 独立 worker Python |
 | LEVI_SAM3_DOWNLOAD_VIDEOS | 1 | Hub 作业启动前准备视频资产；设为 0 时由部署者自行准备 |
 | LEVI_SAM3_MIN_FREE_MIB | 7000 | 启动本地 SAM3 worker 所需的最少空闲显存（MiB），不足时拒绝启动 |
+| LEVI_SAM3_TIMEOUT_SECONDS | 21600 | 页面发起的 SAM3 作业最长运行时间，超时即停止 worker 并记为失败 |
+| LEVI_SAM3_STALL_SECONDS | 1800 | 进度文件和日志都不再更新超过该秒数，即判定卡死并停止 worker |
 | HF_TOKEN | 空 | 后端/worker 的非浏览器读取凭据，不要提交 |
 
 正常情况下只需设置 LEVI_WORKSPACE 和 worker Python；模型仓库、文件和目录会由

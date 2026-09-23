@@ -174,6 +174,7 @@ Preserve the LEVI theme, keyboard access and responsive layouts when editing inh
 - Naming (`levi/naming.py`): per-dataset artifacts use the catalog name, per-run artifacts a timestamp — never a hash. `uv run levi migrate` upgrades older workspaces. See `docs/WORKSPACE.md`.
 - `levi/sync.py`: background workspace sync (discover, refresh, rebuild raw views, drop removed datasets); `levi/revision.py` is the stat-only dataset revision shared with the annotation backend and viewer. Catalog writes go through `catalog.locked()` (cross-process).
 - `levi/jobs.py`: allowlisted worker processes, immutable plans, timeouts and recovery.
+- `levi/children.py`: every worker process group LEVI starts (SAM3, conversion, Pilot) is tracked with its owner's identity; the service terminates its own on stop and reclaims a killed service's on start and `levi stop`. Register any new long-running child here (`track` / `untrack`).
 - `levi/service.py`: local API, catalog, diagnostics and dataset file serving.
 - `src/app/api/levi/` and `src/app/api/annotation/`: runtime proxies to the loopback backend.
 - `levi/maintenance.py`: bounded cache cleanup and orphan reporting; preserve registered datasets, results and environments. It refuses while the service runs — `levi stop` first.

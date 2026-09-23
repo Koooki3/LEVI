@@ -140,7 +140,8 @@ export default function AgentWorkbench() {
   const [egress, setEgress] = useState(false);
   const [mode, setMode] = useState("draft");
   const [maxCalls, setMaxCalls] = useState(8);
-  const [maxTokens, setMaxTokens] = useState(16000);
+  // null: no limit on the run's total (each request still reserves its own).
+  const [maxTokens, setMaxTokens] = useState<number | null>(16000);
   // The snapshot cap is a guard against copying an unreasonable amount of a
   // dataset, not a knob a person tunes per task.
   const storageMiB = 512;
@@ -900,9 +901,15 @@ export default function AgentWorkbench() {
                         <input
                           type="number"
                           min={256}
-                          max={1000000}
-                          value={maxTokens}
-                          onChange={(e) => setMaxTokens(Number(e.target.value))}
+                          placeholder={t("No limit")}
+                          value={maxTokens ?? ""}
+                          onChange={(e) =>
+                            setMaxTokens(
+                              e.target.value === ""
+                                ? null
+                                : Number(e.target.value),
+                            )
+                          }
                         />
                       </label>
                     </div>
@@ -1021,8 +1028,15 @@ export default function AgentWorkbench() {
                         <input
                           type="number"
                           min={256}
-                          value={maxTokens}
-                          onChange={(e) => setMaxTokens(Number(e.target.value))}
+                          placeholder={t("No limit")}
+                          value={maxTokens ?? ""}
+                          onChange={(e) =>
+                            setMaxTokens(
+                              e.target.value === ""
+                                ? null
+                                : Number(e.target.value),
+                            )
+                          }
                         />
                       </label>
                       <button

@@ -297,6 +297,94 @@ def test_managed_session_reuses_harness_and_revokes_on_pause(prepared, monkeypat
         pilot.shutdown()
 
 
+def _idle_runtime(monkeypatch, closed):
+    from levi.agent import pilot
+
+    class FixtureACP:
+        def __init__(self, argv, cwd, env, notify, permission):
+            pass
+
+        def call(self, method, params, **kwargs):
+            if method == "initialize":
+                return {"agentCapabilities": {"promptCapabilities": {"image": True}}}
+            if method == "session/new":
+                return {"sessionId": "fixture-session"}
+            return {"stopReason": "end_turn"}
+
+        def send(self, value):
+            pass
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(pilot, "ACP", FixtureACP)
+    monkeypatch.setattr(pilot, "command", lambda _: Path(sys.executable))
+    monkeypatch.setattr(pilot.shutil, "which", lambda _: sys.executable)
+
+    class Result:
+        stdout = "v22.0.0"
+
+    monkeypatch.setattr(pilot.subprocess, "run", lambda *a, **k: Result())
+
+
+def _wait_disconnected(wb, id, seconds):
+    for _ in range(int(seconds / 0.05)):
+        value = wb.store.get("pilot_sessions", id)
+        if value["connection"] == "disconnected":
+            return value
+        time.sleep(0.05)
+    raise AssertionError(f"session still connected: {value}")
+
+
+def test_an_idle_session_releases_its_runtime(prepared, monkeypatch):
+    from levi.agent import pilot
+    from levi.agent.pilot_contracts import PilotStart
+
+    wb, run = prepared
+    invoke(
+        wb,
+        Principal("human", human=True),
+        "plans.approve",
+        {"run_id": run["id"], "revision": 1},
+    )
+    closed = []
+    _idle_runtime(monkeypatch, closed)
+    monkeypatch.setenv("LEVI_PILOT_IDLE_SECONDS", "0.5")
+    value = pilot.start(wb, PilotStart(run_id=run["id"], runtime="codex"))
+    try:
+        session = _wait_disconnected(wb, value["id"], 10)
+        assert session["state"] == "idle_closed" and closed
+        assert not wb.store.get("grants", value["grant_id"])["enabled"]
+    finally:
+        pilot.shutdown()
+
+
+def test_a_finished_run_releases_its_runtime(prepared, monkeypatch):
+    from levi.agent import pilot
+    from levi.agent.pilot_contracts import PilotStart
+
+    wb, run = prepared
+    invoke(
+        wb,
+        Principal("human", human=True),
+        "plans.approve",
+        {"run_id": run["id"], "revision": 1},
+    )
+    closed = []
+    _idle_runtime(monkeypatch, closed)
+    value = pilot.start(wb, PilotStart(run_id=run["id"], runtime="codex"))
+    try:
+        for _ in range(100):
+            if wb.store.get("pilot_sessions", value["id"]).get("stop_reason"):
+                break
+            time.sleep(0.02)
+        wb.store.mutate("runs", run["id"], lambda r: r.update(status="succeeded"))
+        session = _wait_disconnected(wb, value["id"], 10)
+        assert session["state"] == "finished" and closed
+    finally:
+        pilot.shutdown()
+
+
 def test_runtime_binding_change_requires_reapproval(prepared, monkeypatch):
     wb, run = prepared
     from levi.agent import runtime_binding

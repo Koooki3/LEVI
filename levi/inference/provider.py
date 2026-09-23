@@ -178,6 +178,14 @@ def learner_schema(workflow, draft=None, evidence_ids=None):
             "default": None,
             "title": "Subtask Id",
         }
+    if "evidence_ids" in proposal["properties"]:
+        # External agents may leave citations to LEVI; a model LEVI runs must
+        # cite what it saw. Required in its old place (llama.cpp writes the
+        # required fields first, in order), and never empty.
+        proposal["properties"]["evidence_ids"]["minItems"] = 1
+        required = [r for r in proposal.get("required", []) if r != "evidence_ids"]
+        at = required.index("start") + 1 if "start" in required else len(required)
+        proposal["required"] = required[:at] + ["evidence_ids"] + required[at:]
     if evidence_ids and "evidence_ids" in proposal["properties"]:
         # An id outside the evidence cannot be decoded, so none is invented.
         proposal["properties"]["evidence_ids"]["items"] = {

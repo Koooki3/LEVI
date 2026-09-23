@@ -42,7 +42,7 @@ Wait for **Ready** and open **http://127.0.0.1:7860**. The home page streams two
 On a remote server, forward the Web UI port: `ssh -L 7860:127.0.0.1:7860 user@server`. Port 7861 is the internal API, not the workbench.
 
 ```bash
-uv run levi stop                # stop the shared service
+uv run levi stop                # stop the shared service and its workers (--all: also LEVI's Ollama)
 uv run levi clean               # preview regenerable caches (service stopped); --apply to remove
 uv run levi migrate             # preview upgrading an older workspace; --apply to apply
 uv run levi convert --help

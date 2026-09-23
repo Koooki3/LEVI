@@ -163,7 +163,9 @@ def artifact(run_id: str, name: str, request: Request):
         raise HTTPException(404)
     return FileResponse(
         wb.store.run_dir(run_id) / "evidence" / name,
-        media_type="image/png",
+        media_type="image/jpeg"
+        if Path(name).suffix.lower() in {".jpg", ".jpeg"}
+        else "image/png",
         headers={"Cache-Control": "no-store"},
     )
 

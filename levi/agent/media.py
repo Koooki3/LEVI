@@ -357,6 +357,8 @@ def mosaic(items, evidence_dir, destination, *, tile_width=320, columns=4):
     if not items:
         raise ValueError("No evidence frames to lay out")
     tiles, index = [], []
+    # Frames from more than one camera say which on their label.
+    mixed = len({item.get("camera_key") for item in items}) > 1
     for position, item in enumerate(items):
         if not item.get("artifact"):
             raise ValueError("Table-only evidence has no image to lay out")
@@ -366,6 +368,8 @@ def mosaic(items, evidence_dir, destination, *, tile_width=320, columns=4):
         height = max(1, round(image.shape[0] * tile_width / image.shape[1]))
         image = cv2.resize(image, (tile_width, height))
         label = f"f{item['frame_index']} {item['timestamp']:.2f}s"
+        if mixed and item.get("camera_key"):
+            label += " " + str(item["camera_key"]).rsplit(".", 1)[-1]
         cv2.rectangle(image, (0, 0), (8 + 7 * len(label), 17), (0, 0, 0), -1)
         cv2.putText(
             image, label, (4, 13), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1
@@ -381,6 +385,17 @@ def mosaic(items, evidence_dir, destination, *, tile_width=320, columns=4):
                 "camera_key": item.get("camera_key"),
             }
         )
+    # Cameras with different aspect ratios give tiles of different heights;
+    # pad them to one height so the rows can be stacked.
+    tallest = max(tile.shape[0] for tile in tiles)
+    tiles = [
+        np.vstack(
+            [tile, np.zeros((tallest - tile.shape[0], *tile.shape[1:]), tile.dtype)]
+        )
+        if tile.shape[0] < tallest
+        else tile
+        for tile in tiles
+    ]
     blank = np.zeros_like(tiles[0])
     rows = [
         np.hstack(tiles[i : i + columns] + [blank] * ((-len(tiles)) % columns))
@@ -390,7 +405,15 @@ def mosaic(items, evidence_dir, destination, *, tile_width=320, columns=4):
     ]
     destination.parent.mkdir(parents=True, exist_ok=True)
     sheet = np.vstack(rows)
-    if not cv2.imwrite(str(destination), sheet):
+    # A sheet is a reading aid derived from hashed frames, so it is JPEG: a
+    # PNG sheet of 32 frames weighed 1-2.4 MB, and an agent's context of such
+    # sheets passed the model's request size and lost its oldest images.
+    params = (
+        [cv2.IMWRITE_JPEG_QUALITY, 85]
+        if destination.suffix.lower() in {".jpg", ".jpeg"}
+        else []
+    )
+    if not cv2.imwrite(str(destination), sheet, params):
         raise ValueError("Could not write the evidence sheet")
     return {
         "artifact": destination.name,

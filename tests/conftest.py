@@ -106,10 +106,15 @@ def _gpu_is_not_this_machines(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _workspace_files_stay_in_the_test(monkeypatch, tmp_path):
-    """GPU history, learned request costs and evaluation records are written
-    under the live workspace by default; a test must never add to them."""
+    """GPU history, learned request costs, evaluation records and the process
+    registry live under the live workspace by default; a test must never add
+    to them (or reclaim the real service's workers)."""
+    from levi import children
     from levi.eval import record
     from levi.inference import gpu, request_cost
+
+    # The process registry decides what the service kills at start and stop.
+    monkeypatch.setattr(children, "_path", lambda: tmp_path / "processes.json")
 
     monkeypatch.setattr(gpu, "_state_dir", lambda: tmp_path / "models")
     monkeypatch.setattr(request_cost, "_state_dir", lambda: tmp_path / "models")

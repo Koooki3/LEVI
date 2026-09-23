@@ -1,13 +1,83 @@
 """Pinned, bounded loopback transport for a user-authorized Ollama endpoint."""
 
+import contextlib
+import contextvars
 import ipaddress
 import json
+import socket
+import threading
 import time
 from urllib.parse import urlsplit
 
 from levi.agent.security import endpoint_addresses
 
 from .ollama import OllamaError
+
+# Stopping a run must stop the model computing for it. A request blocks for
+# as long as the model generates, and Ollama stops generating when the client
+# goes away, so a run's requests carry its id (``requests_of``) and ``abort``
+# shuts their sockets down. A plain close would not wake the blocked read.
+_OWNER = contextvars.ContextVar("levi_model_requests", default=None)
+_OPEN: dict[str, list[tuple[socket.socket, dict]]] = {}
+_STOPPED: set[str] = set()
+_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def requests_of(owner: str):
+    """Model requests made inside belong to ``owner`` (a run id)."""
+    with _LOCK:
+        _STOPPED.discard(owner)
+    token = _OWNER.set(owner)
+    try:
+        yield
+    finally:
+        _OWNER.reset(token)
+        with _LOCK:
+            _STOPPED.discard(owner)
+
+
+def abort(owner: str) -> int:
+    """Cut ``owner``'s model requests, including one that connects next;
+    returns how many were in flight."""
+    with _LOCK:
+        _STOPPED.add(owner)
+        open_ = list(_OPEN.get(owner, ()))
+    for sock, state in open_:
+        state["aborted"] = True
+        with contextlib.suppress(OSError):
+            sock.shutdown(socket.SHUT_RDWR)
+    return len(open_)
+
+
+def _register(owner, state):
+    """An httpcore trace hook that records the request's socket."""
+
+    def trace(event, info):
+        if event != "connection.connect_tcp.complete" or owner is None:
+            return
+        stream = info.get("return_value")
+        sock = stream.get_extra_info("socket") if stream is not None else None
+        if sock is None:
+            return
+        with _LOCK:
+            _OPEN.setdefault(owner, []).append((sock, state))
+            stopped = owner in _STOPPED
+        if stopped:
+            state["aborted"] = True
+            with contextlib.suppress(OSError):
+                sock.shutdown(socket.SHUT_RDWR)
+
+    return trace
+
+
+def _unregister(owner, state):
+    with _LOCK:
+        rows = [row for row in _OPEN.get(owner, ()) if row[1] is not state]
+        if rows:
+            _OPEN[owner] = rows
+        else:
+            _OPEN.pop(owner, None)
 
 
 def validate_ollama_endpoint(url: str, allow_localhost: bool) -> list[str]:
@@ -78,10 +148,17 @@ class OllamaTransport:
             raise ValueError("Unsupported Ollama operation")
         started = time.monotonic()
         total = 0
+        owner = _OWNER.get()
+        state = {"aborted": False}
         try:
             with (
                 self._client() as client,
-                client.stream(method, self.url + path, json=payload) as response,
+                client.stream(
+                    method,
+                    self.url + path,
+                    json=payload,
+                    extensions={"trace": _register(owner, state)},
+                ) as response,
             ):
                 if response.status_code != 200:
                     raise OllamaError(
@@ -95,12 +172,18 @@ class OllamaTransport:
                     yield chunk
         except OllamaError:
             raise
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, HTTPError) as exc:
+            if state["aborted"]:
+                raise OllamaError(
+                    "Model request stopped: the run was paused or cancelled"
+                ) from None
+            if isinstance(exc, HTTPError):
+                raise OllamaError(
+                    "Ollama connection failed; check the configured local service"
+                ) from None
             raise OllamaError("Ollama connection failed") from exc
-        except HTTPError:
-            raise OllamaError(
-                "Ollama connection failed; check the configured local service"
-            ) from None
+        finally:
+            _unregister(owner, state)
 
     def request(self, method, path, payload):
         chunks = self._chunks(method, path, payload)

@@ -117,7 +117,17 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "stop":
         from .agent.core import stop
 
-        print(json.dumps(stop(), ensure_ascii=False))
+        stopper = argparse.ArgumentParser(
+            prog="levi stop",
+            description="Stop the shared service and every worker it started",
+        )
+        stopper.add_argument(
+            "--all",
+            action="store_true",
+            help="also stop the Ollama service LEVI started (never a shared one)",
+        )
+        options = stopper.parse_args(sys.argv[2:])
+        print(json.dumps(stop(models=options.all), ensure_ascii=False))
         return 0
     if len(sys.argv) > 1 and sys.argv[1] == "clean":
         from .maintenance import main as clean

@@ -31,6 +31,36 @@ def tool(name, args):
     )
 
 
+def call(args):
+    """One capability as the connected agent (LEVI_AGENT_GRANT_FILE or
+    LEVI_AGENT_TOKEN): the JSON answer on one line, then one ``IMAGE: <path>``
+    line per picture it carries, saved as files the agent can open."""
+    from levi.paths import ROOT
+
+    from .mcp import images
+    from .mcp import request as agent_request
+
+    text = args.arguments
+    if text == "@-":
+        text = sys.stdin.read()
+    elif text.startswith("@"):
+        text = Path(text[1:]).read_text()
+    arguments = json.loads(text or "{}")
+    value = agent_request("tools", {"name": args.capability, "arguments": arguments})
+    print(json.dumps(value, ensure_ascii=False))
+    paths = images(args.capability, arguments, value)
+    if paths:
+        folder = args.images or (
+            ROOT / "tmp" / "agent-images" / str(arguments.get("run_id", "run"))
+        )
+        folder.mkdir(parents=True, exist_ok=True)
+        for path in paths:
+            target = folder / Path(path).name.replace("%2F", "_")
+            target.write_bytes(agent_request(path, binary=True))
+            print(f"IMAGE: {target}")
+    return 0
+
+
 def confirm(value, question="Approve this exact revision?"):
     print(json.dumps(value, ensure_ascii=False, indent=2))
     if (
@@ -90,12 +120,14 @@ def connect(args):
 
     from .runtime import new_id
 
-    identifier = new_id()
-    # Readable: which client, and since when. The grant id is recorded in
-    # connection.json once the service has issued it.
-    credential = (
-        STATE / "agent" / "connections" / f"{args.client}-{identifier}" / "credential"
-    )
+    # Readable: which client, and since when; a second connection in the
+    # same minute gets -2, -3... like every other id. The grant id is
+    # recorded in connection.json once the service has issued it.
+    folder = STATE / "agent" / "connections"
+    prefix = f"{args.client}-"
+    taken = {p.name[len(prefix) :] for p in folder.glob(prefix + "*") if p.is_dir()}
+    identifier = new_id(taken)
+    credential = folder / f"{args.client}-{identifier}" / "credential"
     project = Path(args.project).expanduser().resolve()
     if not project.is_dir():
         raise ValueError("Project directory must exist")
@@ -246,6 +278,24 @@ def build_parser():
     c.add_argument("--apply", action="store_true")
     c = commands.add_parser("disconnect")
     c.add_argument("id")
+    c = commands.add_parser(
+        "call",
+        help="Call one capability as the connected agent, for agents that work "
+        "from a shell (what the MCP bridge does)",
+    )
+    c.add_argument("capability")
+    c.add_argument(
+        "arguments",
+        nargs="?",
+        default="{}",
+        help="JSON arguments, @file.json, or @- to read them from stdin",
+    )
+    c.add_argument(
+        "--images",
+        type=Path,
+        help="folder for the images an answer carries "
+        "(default: <workspace>/tmp/agent-images/<run>)",
+    )
     c = commands.add_parser("plan")
     c.add_argument("action", choices=["create", "show", "approve"])
     c.add_argument("value")
@@ -379,6 +429,8 @@ def main(argv=None):
             )
         elif args.command == "connect":
             return connect(args)
+        elif args.command == "call":
+            return call(args)
         elif args.command == "disconnect":
             result = api(f"grants/{args.id}/revoke", {})
             result = {**(result or {}), **forget_configuration(args.id)}

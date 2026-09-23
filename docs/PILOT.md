@@ -210,8 +210,11 @@ turn/time limits survive reconnection. A cancelled task cannot be restarted.
 Unknown runtime usage is never shown as zero or as a guaranteed billing limit.
 
 Closing the browser or frontend leaves Core Host running. Explicit core stop
-terminates its owned runtime children and workers. Restart marks old sessions
-interrupted and revokes their grants. No task is silently auto-resumed. Core
+terminates its owned runtime children and workers. A session also ends, and
+its runtime process with it, when its run finishes or after
+`LEVI_PILOT_IDLE_SECONDS` (default 600) without a message. Restart marks old
+sessions interrupted, revokes their grants and terminates runtime processes a
+killed core left behind (see [Workspace](WORKSPACE.md#processes-levi-starts-and-how-they-stop)). No task is silently auto-resumed. Core
 uses a private Unix socket and an authenticated loopback HTTP compatibility
 listener (default 7861); it refuses occupied ports rather than killing another
 service. Very long workspace paths may exceed the system Unix socket limit.

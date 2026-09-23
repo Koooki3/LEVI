@@ -14,6 +14,7 @@ from pathlib import Path
 
 from pydantic import Field
 
+from levi import children
 from levi.annotations.sam3_protocol import validate_annotations_for_plan
 from levi.annotations.schema import ObjectAnnotation, ObjectEdit, Sam3Plan
 from levi.annotations.sidecar import SidecarStore
@@ -297,6 +298,7 @@ def launch(wb, id):
                         env=environment,
                     )
                     _PROCESSES[id] = process
+                    children.track(process, "sam3", id)
                     wb.store.mutate(
                         "object_jobs", id, lambda j: j.update(status="running")
                     )
@@ -312,6 +314,8 @@ def launch(wb, id):
                             os.killpg(process.pid, signal.SIGKILL)
                             process.wait()
                         raise ValueError("SAM3 job timed out") from None
+                    finally:
+                        children.untrack(process.pid)
                 if code:
                     raise ValueError(_worker_failure(code, directory / "worker.log"))
                 result = json.loads((directory / "result.json").read_text())

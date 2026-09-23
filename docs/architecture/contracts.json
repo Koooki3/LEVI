@@ -49,7 +49,6 @@
                 "type": "string"
               },
               "maxItems": 32,
-              "minItems": 1,
               "title": "Evidence Ids",
               "type": "array"
             },
@@ -127,8 +126,7 @@
             "episode_index",
             "kind",
             "content",
-            "start",
-            "evidence_ids"
+            "start"
           ],
           "title": "Proposal",
           "type": "object"
@@ -348,11 +346,17 @@
               "type": "integer"
             },
             "max_tokens": {
+              "anyOf": [
+                {
+                  "minimum": 256,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "default": 16000,
-              "maximum": 1000000,
-              "minimum": 256,
-              "title": "Max Tokens",
-              "type": "integer"
+              "title": "Max Tokens"
             }
           },
           "title": "Budget",
@@ -390,6 +394,40 @@
           "minItems": 1,
           "title": "Episodes",
           "type": "array"
+        },
+        "imported_from": {
+          "anyOf": [
+            {
+              "enum": [
+                "native-external",
+                "native-local-vlm",
+                "native-local-vlm-teacher"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Imported From"
+        },
+        "imported_window": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Imported Window"
         },
         "instruction": {
           "maxLength": 12000,

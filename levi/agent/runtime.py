@@ -224,6 +224,12 @@ class Workbench:
             )
 
         run = self.store.mutate("runs", id, update)
+        # A model request can run for minutes; the GPU should not keep
+        # computing an answer nobody will use.
+        from levi.inference.transport import abort
+
+        if abort(id):
+            self.store.event(id, "model_request_stopped")
         if action == "cancel":
             from .objects import cancel
 
@@ -265,9 +271,15 @@ class Workbench:
             self.store.release(id, owner)
             raise
         ctx = copy_context()
-        thread = threading.Thread(
-            target=lambda: ctx.run(self.execute, id, owner, pilot=pilot), daemon=True
-        )
+
+        def work():
+            from levi.inference.transport import requests_of
+
+            # Pausing or cancelling the run cuts its in-flight model request.
+            with requests_of(id):
+                self.execute(id, owner, pilot=pilot)
+
+        thread = threading.Thread(target=lambda: ctx.run(work), daemon=True)
         with _LOCK:
             _ACTIVE[id] = thread
         thread.start()
@@ -671,7 +683,11 @@ class Workbench:
                 cached.get("learner_error"),
                 cached.get("learner_raw"),
             ), cached["usage"]
-        available = context.budget.max_tokens - run["tokens"] - run["reserved_tokens"]
+        available = (
+            float("inf")
+            if context.budget.max_tokens is None
+            else context.budget.max_tokens - run["tokens"] - run["reserved_tokens"]
+        )
         seconds = (
             context.budget.max_seconds
             - run["elapsed_seconds"]
@@ -866,6 +882,11 @@ class Workbench:
                 or proposal.episode_index != summary["episode_index"]
             ):
                 raise ValueError("Proposal escapes episode scope")
+            if not proposal.evidence_ids:
+                raise ValueError(
+                    f"Proposal at {proposal.start:g} s cites no evidence; cite "
+                    "the frames it rests on"
+                )
             # Name the citation that failed and why: a model told only that
             # "evidence is unknown" has to resend everything to find out which.
             for id in proposal.evidence_ids:

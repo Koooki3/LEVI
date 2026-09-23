@@ -5,6 +5,7 @@ The caller supplies an authorized transport and remains responsible for task
 scope, destination policy, credentials and resource ownership.
 """
 
+import os
 from collections.abc import Callable, Iterable
 from typing import Any, Protocol
 
@@ -25,6 +26,18 @@ class ModelDetails(BaseModel):
 
 class OllamaError(RuntimeError):
     pass
+
+
+def keep_alive():
+    """How long the model stays in GPU memory after LEVI's last request.
+
+    Ollama's own default is five minutes. LEVI's requests come back to back
+    while a run works, so a shorter window frees the GPU soon after a run
+    finishes, fails or waits for a person (``LEVI_OLLAMA_KEEP_ALIVE``: an
+    Ollama duration such as ``2m``, or seconds; ``0`` unloads after every
+    request)."""
+    value = os.getenv("LEVI_OLLAMA_KEEP_ALIVE", "2m").strip()
+    return int(value) if value.lstrip("-").isdigit() else value
 
 
 class OllamaClient:
@@ -151,6 +164,7 @@ class OllamaClient:
                 # Reasoning tokens before a schema-bound answer cost time and
                 # tokens the answer rarely needs; opt in per call.
                 "think": think,
+                "keep_alive": keep_alive(),
                 "options": {
                     "num_predict": max_output_tokens,
                     "num_ctx": context_tokens,

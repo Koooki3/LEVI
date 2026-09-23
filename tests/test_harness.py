@@ -532,8 +532,9 @@ def test_refine_answers_with_compact_rows(bench, dataset):
         "evidence.refine",
         {"run_id": run["id"], "episode": 0, "around_seconds": [1.0]},
     )
-    assert refined["added"]
-    assert set(refined["added"][0]) == {"id", "timestamp", "frame_index", "camera_key"}
+    # One summary line per instant, not one row per frame.
+    assert set(refined["added"][0]) == {"around", "frames", "from", "to"}
+    assert refined["added"][0]["frames"] > 0
 
 
 def test_a_software_candidate_is_resolved_by_a_person_not_published(tmp_path):
@@ -563,10 +564,9 @@ def test_a_mosaic_page_names_each_frame_once(bench, dataset):
         "evidence.read",
         {"run_id": run["id"], "episode": 0, "layout": "mosaic"},
     )
-    assert set(page["mosaic"]["tiles"][0]) == {"evidence_id", "row", "column"}
-    assert [t["evidence_id"] for t in page["mosaic"]["tiles"]] == [
-        i["id"] for i in page["items"]
-    ]
+    # The sheet follows the items list; no per-tile index repeats it.
+    assert "tiles" not in page["mosaic"] and page["mosaic"]["columns"] >= 1
+    assert len({i["id"] for i in page["items"]}) == len(page["items"])
 
 
 def test_a_failure_reason_is_not_filed_as_doubt():
@@ -638,13 +638,45 @@ def test_disconnect_takes_back_only_its_own_mcp_entry(tmp_path, monkeypatch):
     assert "levi" in json.loads(config.read_text())["mcpServers"]
 
 
+def test_two_connections_in_one_minute_get_their_own_folders(tmp_path, monkeypatch):
+    """A second connect in the same minute used to crash after its grant was
+    issued, leaving a grant with no credential file."""
+    import argparse
+
+    from levi import paths
+    from levi.agent import control
+
+    state = tmp_path / "state"
+    monkeypatch.setattr(paths, "STATE", state)
+    issued = iter(["g1", "g2"])
+    monkeypatch.setattr(
+        control, "api", lambda *a, **k: {"id": next(issued), "token": "t"}
+    )
+    folders = []
+    for name in ("one", "two"):
+        project = tmp_path / name
+        project.mkdir()
+        control.connect(
+            argparse.Namespace(
+                client="claude",
+                dataset=["local/x"],
+                project=str(project),
+                apply=True,
+                hours=None,
+                max_calls=None,
+            )
+        )
+        folders = sorted(p.name for p in (state / "agent/connections").iterdir())
+    assert len(folders) == 2 and folders[1].endswith("-2"), folders
+
+
 def test_provenance_names_the_skills_and_harness_the_run_used(bench, dataset):
     wb, context = bench
     agent = Principal("conn", datasets=(context.repo_id,))
     run = temporal_run(wb, context, agent, dataset)
     receipt = propose(wb, agent, run)
     provenance = wb.store.get("changes", receipt["id"])["provenance"]
-    assert "levi-overview@4" in provenance["skills_version"]
+    assert "levi-overview@5" in provenance["skills_version"]
     assert provenance["harness"]["parameters"]["evidence.refine_top_k"] == 0
 
 

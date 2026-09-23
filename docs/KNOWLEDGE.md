@@ -58,7 +58,7 @@ Agents can read the candidates (`knowledge.list`). Only a person can promote or 
 - **interpretation-005** · Episode-level questions (which task, did it succeed) use workflow `review`; subtask intervals use `temporal`.
 - **interpretation-006** · Episode indices start at 0 ("the first 10 demos" are episodes zero to nine). An explicit list such as "23, 25, 27" is copied exactly, never turned into a range.
 
-### harness (8)
+### harness (10)
 
 - **harness-001** · Structural mistakes by a small model (empty answers, missing fields, invented ids, rewriting a draft) are removed by narrowing the decoding schema, not by notes. Notes help with meaning and carry over to later tasks.
 - **harness-002** · Put the answer before the prose: llama.cpp decodes required properties first and in order, so a required `proposals` placed before a short `summary` stops a small model from spending its output budget on narration.
@@ -68,4 +68,6 @@ Agents can read the candidates (`knowledge.list`). Only a person can promote or 
 - **harness-006** · Supervising a learner does not save a teacher's tokens while the teacher still looks at every episode. Savings need a high first-pass acceptance rate and sampled review.
 - **harness-007** · A shared GPU needs a guardian that learns how other workloads restart and yields to them, preempts in-flight requests and resumes automatically. A fixed quiet window almost never opens.
 - **harness-008** · Settle every model call's tokens whether or not its answer is valid, and keep the valid part of an invalid answer.
+- **harness-009** · An external agent's cost follows the number of turns more than the images: each turn re-reads the whole context. Paging an episode in small pages, refinements that must be re-read by paging, citations the agent has to look up and contract rules found out by refusal each add turns and helper scripts. Give a whole episode in one sheet, return refined frames as their own sheet, let the harness cite what it showed, and state the proposal contract up front.
+- **harness-010** · Measure an agent's tokens per request from its own transcript, count cache reads separately, and keep the operator's work (fixes, gates, retries it caused) out of the task's figure.
 <!-- /levi:generated knowledge -->

@@ -1019,6 +1019,21 @@ def test_budget_revision_retains_completed_work_and_requires_approval(bench):
     assert approved["plan"]["approval"]["digest"] == approved["plan"]["digest"]
 
 
+def test_a_run_may_have_no_token_limit(bench):
+    from levi.agent.planning import rebudget
+    from levi.agent.schema import Budget
+
+    wb, ctx = bench
+    run = execute(
+        wb, wb.plan(ctx.model_copy(update={"budget": Budget(max_tokens=None)}))
+    )
+    assert run["context"]["budget"]["max_tokens"] is None
+    assert run["completed"] == [0], "requests still run and settle"
+    # And a limited run can be lifted to none.
+    updated = rebudget(wb, run["id"], 1, Budget(max_calls=16, max_tokens=None))
+    assert updated["context"]["budget"]["max_tokens"] is None
+
+
 def test_changed_pilot_must_be_reviewed_again(bench):
     from levi.agent.planning import pilot_review
 

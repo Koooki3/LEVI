@@ -598,9 +598,17 @@ def test_a_reviewed_phase_whose_evidence_changed_is_asked_again(
     # The harness changed what this phase shows after the teacher saw it.
     wb.store.mutate("teaching", phase["id"], lambda r: r.update(fingerprint="old"))
     execute_supervised(wb, run["id"])
-    items = invoke(wb, teacher, "supervision.pending", {"run_id": run["id"]})["items"]
+    items = invoke(
+        wb,
+        teacher,
+        "supervision.pending",
+        {"run_id": run["id"], "include_decided": True},
+    )["items"]
     statuses = sorted(item["status"] for item in items)
     assert statuses == ["pending", "superseded"]
+    # What the teacher polls holds only what waits for it.
+    waiting = invoke(wb, teacher, "supervision.pending", {"run_id": run["id"]})
+    assert [item["status"] for item in waiting["items"]] == ["pending"]
 
 
 def test_without_a_teacher_the_valid_part_of_an_answer_goes_on(

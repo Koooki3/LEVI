@@ -42,7 +42,7 @@ uv run levi                                   # 同时启动网页与 API
 远程服务器上请转发网页端口：`ssh -L 7860:127.0.0.1:7860 user@server`。7861 是内部 API，不是工作台页面。
 
 ```bash
-uv run levi stop                # 停止共享服务
+uv run levi stop                # 停止共享服务及其子进程（--all：连同 LEVI 启动的 Ollama）
 uv run levi clean               # 预览可再生缓存（需先停服务）；加 --apply 执行
 uv run levi migrate             # 预览旧工作区的升级；加 --apply 执行
 uv run levi convert --help

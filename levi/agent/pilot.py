@@ -11,11 +11,15 @@ import threading
 import time
 from pathlib import Path
 
+from levi import children
+
 from .grants import create
 from .pilot_contracts import GrantRequest
 from .runtime import new_id
 
 _ACTIVE = {}
+# A run in one of these states has nothing left for a Pilot to do.
+TERMINAL = {"succeeded", "partially_succeeded", "failed", "cancelled"}
 _LOCK = threading.Lock()
 VERSIONS = {"codex": "1.12.0", "claude": "0.79.0"}
 
@@ -96,6 +100,7 @@ class ACP:
             bufsize=1,
             start_new_session=True,
         )
+        children.track(self.process, "pilot", argv[0])
         self.notify = notify
         self.permission = permission
         self.timeout = timeout
@@ -176,6 +181,7 @@ class ACP:
             except subprocess.TimeoutExpired:
                 os.killpg(self.process.pid, signal.SIGKILL)
                 self.process.wait()
+        children.untrack(self.process.pid)
         self.process.stdin.close()
         self.process.stdout.close()
 
@@ -383,9 +389,26 @@ class Session:
                 authentication="ready",
             )
             deadline = time.monotonic() + self.value["max_seconds"]
+            # Between turns the runtime process only waits for a message; it
+            # is not kept for the whole duration budget once nobody sends one.
+            idle_limit = float(os.getenv("LEVI_PILOT_IDLE_SECONDS", "600"))
+            idle_since = checked = time.monotonic()
             while not self.stop.is_set():
-                if time.monotonic() >= deadline:
+                now = time.monotonic()
+                if now >= deadline:
                     raise ValueError("Pilot duration budget exhausted")
+                if now - idle_since >= idle_limit:
+                    self.update(
+                        state="idle_closed",
+                        reason=f"No message for {idle_limit:.0f} s; resume to continue",
+                    )
+                    return
+                if now - checked >= 5:
+                    checked = now
+                    status = self.wb.store.get("runs", self.value["run_id"])["status"]
+                    if status in TERMINAL:
+                        self.update(state="finished", reason=f"Run {status}")
+                        return
                 try:
                     text = self.messages.get(timeout=0.25)
                 except queue.Empty:
@@ -433,6 +456,7 @@ class Session:
                     stop_reason=result.get("stopReason"),
                     usage_status="unknown-unless-reported",
                 )
+                idle_since = time.monotonic()
         except (
             ValueError,
             OSError,

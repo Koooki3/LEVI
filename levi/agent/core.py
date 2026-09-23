@@ -120,12 +120,42 @@ def ensure(port=7861):
         raise RuntimeError("Core startup timed out")
 
 
-def stop():
-    value = status()
-    if value:
+def stop(*, models=False, wait=20.0):
+    """Stop the core and everything it started; ``models`` also stops the
+    Ollama service LEVI started itself (never a shared one)."""
+    from levi import children
+
+    result = {"status": "stopped"}
+    if current := status():
+        who = children.identity(current["pid"])
         # The server, not an unverified PID file, handles its own termination.
-        return request("/api/levi/agent/v1/core/stop", {}, human=True)
-    return {"status": "stopped"}
+        request("/api/levi/agent/v1/core/stop", {}, human=True)
+        # It stops answering before it has stopped its workers: wait for the
+        # process itself, so "stopped" is true when it is printed.
+        deadline = time.monotonic() + wait
+        while (
+            who
+            and children.identity(current["pid"]) == who
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.2)
+        if who and children.identity(current["pid"]) == who:
+            result["status"] = "stopping"
+    # A core that was killed rather than stopped leaves its workers behind.
+    reclaimed = children.reclaim()
+    if reclaimed:
+        result["reclaimed"] = [
+            {"kind": r["kind"], "label": r["label"], "pid": r["pid"]} for r in reclaimed
+        ]
+    if models:
+        from levi.inference.runtime import OllamaRuntimeManager
+        from levi.paths import ROOT, STATE
+
+        owned = OllamaRuntimeManager(ROOT, STATE)
+        result["ollama"] = (
+            "stopped" if owned.stop().get("stop_requested") else "not running"
+        )
+    return result
 
 
 def serve():

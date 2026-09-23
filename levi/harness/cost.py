@@ -60,6 +60,19 @@ def _duplicates(events):
     return sum(count - 1 for count in seen.values() if count > 1)
 
 
+def _refused(events):
+    """The agent's calls LEVI refused, per capability: each one is a round
+    trip the agent paid for and then repeated. In the full-dataset runs they
+    were validation refusals that a clearer contract removed."""
+    counts = Counter(
+        event.get("tool")
+        for event in events
+        if event.get("type") == "action.failed"
+        and event.get("channel", "agent") == "agent"
+    )
+    return dict(counts.most_common())
+
+
 def of(ledger, run, events):
     from levi.agent.usage import agent_key
 
@@ -136,7 +149,10 @@ def of(ledger, run, events):
             "per_episode": round(wall / completed, 1) if wall else None,
         },
         "breakdown": breakdown[:8],
-        "waste": {"duplicate_evidence_reads": _duplicates(events)},
+        "waste": {
+            "duplicate_evidence_reads": _duplicates(events),
+            "refused_calls": _refused(events),
+        },
     }
 
 
@@ -190,6 +206,13 @@ def hints(record, previous):
         advice.append(
             f"{record['waste']['duplicate_evidence_reads']} evidence page(s) were "
             "read twice; keep the ids from the mosaic answer instead of re-reading."
+        )
+    refused = record["waste"].get("refused_calls") or {}
+    if sum(refused.values()) >= 3:
+        worst = ", ".join(f"{tool} {n}" for tool, n in list(refused.items())[:3])
+        advice.append(
+            f"{sum(refused.values())} call(s) were refused ({worst}); read the "
+            "refusal once and fix every item it names before calling again."
         )
     for row in record["breakdown"][:2]:
         if row["share"] >= 0.3:

@@ -144,7 +144,7 @@ uv run levi agent core stop
 暂停/取消先撤销新工具调用，再中断运行时；请求停止不等于进程已经退出。
 恢复会新建对话并复用任务、证据和草稿，不承诺原生聊天记录续接。
 累计回合/时长预算不因重连清零；未知 token/费用不能显示为零或硬账单保证。
-关闭浏览器或前端不会停止核心，需显式 `core stop`。核心重启后标记旧会话中断，不自动重新推理。
+关闭浏览器或前端不会停止核心，需显式 `core stop`。所属 run 结束，或超过 `LEVI_PILOT_IDLE_SECONDS`（默认 600 秒）没有新消息时，会话连同其运行时进程一起结束。核心重启后标记旧会话中断，并终止被杀掉的核心遗留的运行时进程，不自动重新推理（见 [Workspace](WORKSPACE.md#processes-levi-starts-and-how-they-stop)）。
 
 产物位于 `LEVI_WORKSPACE/outputs/LEVI/workbench/agent/datasets/<数据集名>/runs/<时间戳>/`，
 包括证据、对象草稿、公开事件以及 `result.json` / `result.md`；清单路径按 `path_base` 解析。

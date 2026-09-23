@@ -209,3 +209,48 @@ def test_the_editor_confirms_episodes_keeps_a_vocabulary_and_records(client, tmp
     text = Path(result["path"]).read_text()
     assert "带词表子任务 id 的比例 | 100.0%" in text
     assert client.get(f"{api}/eval/recording", params=body).json()["session"] is None
+
+
+def test_work_done_outside_levi_gets_the_same_record(workspace):
+    _tmp, folders = workspace
+    save(folders["plates_agentVLM"], 0, [subtask(0, 1.0, "reach", "approach")])
+    save(folders["plates_agentVLM"], 1, [subtask(0, 2.0, "lift", "grasp")])
+    save(folders["plates_human"], 0, [subtask(0, 0.8, "reach", "approach")])
+    path = record.imported(
+        "plates_agentVLM",
+        "native-local-vlm",
+        time.time() - 60,
+        time.time(),
+        {"local_tokens": 2000, "local_model_seconds": 12.5},
+    )
+    assert path.name.endswith("_native-local-vlm.md")
+    text = path.read_text()
+    assert "本地 VLM 独立（不经 LEVI）" in text and "1,000" in text  # tokens / episode
+    assert "plates_human" in text, "compared with the other copy"
+    with pytest.raises(ValueError, match="Unknown driver"):
+        record.imported("plates_agentVLM", "made-up", 0, 1, {})
+
+
+def test_special_subtasks_are_never_outside_the_vocabulary():
+    segs = metrics.segments(
+        [subtask(0, 0.5, "hand tidies", "other"), subtask(0.5, 1.0, "x", "made-up")],
+        1.0,
+    )
+    m = metrics.episode_metrics(segs, frames=11, fps=10.0, vocab={"grasp"})
+    assert m["unknown_ids"] == 1, "only the made-up id"
+
+
+def test_an_imported_run_is_recorded_as_work_done_outside_levi(workspace):
+    run = {
+        "status": "succeeded",
+        "dataset_key": "plates_agentVLM",
+        "provider_config": {"kind": "external"},
+        "context": {
+            "episodes": [0, 1],
+            "workflow": {"kind": "temporal"},
+            "provider": "external",
+            "imported_from": "native-external",
+        },
+    }
+    assert record.driver(run) == "native-external"
+    assert record.eligible(run)

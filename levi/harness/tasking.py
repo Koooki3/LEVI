@@ -323,7 +323,8 @@ def _plan_step(wb, task, step, principal):
         teacher_grant=task.get("teacher_grant"),
         budget=Budget(
             max_calls=max(8, 3 * 2 * len(step["episodes"]) + 6),
-            max_tokens=max(16000, 60000 * len(step["episodes"])),
+            # No cap on the run's tokens; each request reserves its own window.
+            max_tokens=None,
             max_seconds=max(300, 240 * len(step["episodes"])),
         ),
     )

@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from . import jobs
+from . import children, jobs
 from .auth import hub_token, token
 from .catalog import (
     DEMOS,
@@ -42,6 +42,8 @@ from backend.app import app as annotation_app
 
 @asynccontextmanager
 async def lifespan(app):
+    # Workers left running by a service that was killed rather than stopped.
+    children.reclaim()
     jobs.recover_interrupted()
     from .agent.store import Store
 
@@ -79,6 +81,9 @@ async def lifespan(app):
 
         shutdown()
         jobs.stop_workers()
+        # Whatever is still running in a group this service started (a SAM3
+        # worker, most of all, which holds the GPU).
+        children.stop_owned()
         if marker.exists() and marker.read_text() == str(os.getpid()):
             marker.unlink()
 

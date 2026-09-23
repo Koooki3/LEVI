@@ -25,6 +25,28 @@ def request(path, payload=None, *, binary=False):
     )
 
 
+def images(name, arguments, value):
+    """The artifact paths an answer carries as pictures: the sheet of a
+    mosaic page or refinement, else each frame of a single-image read. The
+    same rule for the MCP bridge and ``levi agent call``."""
+    if not isinstance(value, dict):
+        return []
+    base = "runs/" + quote(str(arguments.get("run_id", "")), safe="") + "/artifacts/"
+    if value.get("mosaic"):
+        return [base + quote(value["mosaic"]["artifact"], safe="")]
+    if value.get("mosaics"):
+        return [base + quote(sheet["artifact"], safe="") for sheet in value["mosaics"]]
+    if name in {"media.sample", "evidence.read"} and value.get("images") is not False:
+        # A run whose evidence was cleaned up still returns its ledger; its
+        # rows say so, and there is no image to fetch for them.
+        return [
+            base + quote(item["artifact"], safe="")
+            for item in value.get("items", [])
+            if item.get("artifact") and item.get("image_available", True)
+        ]
+    return []
+
+
 def build_server():
     from mcp import types
     from mcp.server.lowlevel import Server
@@ -54,47 +76,19 @@ def build_server():
             request, "tools", {"name": name, "arguments": arguments}
         )
         content = [types.TextContent(type="text", text=json.dumps(value))]
-        if value.get("mosaic"):
-            # One sheet for the whole page; individual frames stay addressable
-            # by evidence id through a single-layout read.
-            path = (
-                "runs/"
-                + quote(arguments["run_id"], safe="")
-                + "/artifacts/"
-                + quote(value["mosaic"]["artifact"], safe="")
-            )
+        # Actual images, not filenames an external agent cannot resolve. Scope
+        # was already checked by the REST dispatcher.
+        for path in images(name, arguments, value):
             image = await asyncio.to_thread(request, path, binary=True)
             content.append(
                 types.ImageContent(
                     type="image",
-                    mimeType="image/png",
+                    mimeType="image/jpeg"
+                    if path.lower().endswith((".jpg", ".jpeg"))
+                    else "image/png",
                     data=base64.b64encode(image).decode(),
                 )
             )
-        elif (
-            name in {"media.sample", "evidence.read"}
-            and value.get("images") is not False
-        ):
-            # Return actual images through MCP, not filenames an external Agent
-            # cannot resolve. Scope was already checked by the REST dispatcher.
-            for item in value["items"]:
-                # A run whose evidence was cleaned up still returns its ledger;
-                # its rows say so, and there is no image to fetch for them.
-                if item.get("artifact") and item.get("image_available", True):
-                    path = (
-                        "runs/"
-                        + quote(arguments["run_id"], safe="")
-                        + "/artifacts/"
-                        + quote(item["artifact"], safe="")
-                    )
-                    image = await asyncio.to_thread(request, path, binary=True)
-                    content.append(
-                        types.ImageContent(
-                            type="image",
-                            mimeType="image/png",
-                            data=base64.b64encode(image).decode(),
-                        )
-                    )
         return content
 
     skill_paths = {

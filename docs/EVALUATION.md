@@ -17,6 +17,9 @@ The hour is the completion time in UTC, the same clock that run ids use. A secon
 | `api` | An online model called by LEVI (OpenAI-compatible endpoint) |
 | `local-vlm` | A local model on Ollama, working alone |
 | `local-vlm-teacher` | A local model whose every phase an external teacher reviewed |
+| `native-external`, `native-local-vlm`, `native-local-vlm-teacher` | The same annotators working **without LEVI**; their finished annotation is brought in afterwards |
+
+To compare work done without LEVI on equal terms, import it through the ordinary path: plan an external run with `imported_from` set to one of the `native-*` drivers, prepare evidence, stage the finished segments with `annotations.propose_segments` (LEVI cites the frames it prepared), pass the gates and commit. The run's folder under `outputs/LEVI/workbench/agent/datasets/<dataset>/` then holds the same artifacts as an agent run, and the record is written at commit with that driver. Report the maker's tokens with `runs.report_usage` before committing; the import itself costs no annotator tokens.
 
 ## Recording a person's work
 
@@ -27,7 +30,7 @@ In a dataset's **Annotations** tab:
 3. When an episode is done, click **Confirm episode complete**. Unsaved edits are saved first. Only confirmed episodes count.
 4. **■ Stop recording.** The summary shows the duration, the confirmed episodes, the subtask count and the coverage, plus the record's path. **Discard** ends a session without writing a record.
 
-The subtask vocabulary is set per dataset in **Subtask vocabulary** (one line per subtask: `id | label | definition`). If the last agent plan on the dataset defined subtasks, the editor offers them as a starting point. With a vocabulary, a human span carries the same `levi.subtask_id` and `levi.outcome` as an agent's segment. Without one, the editor works as before (free-text subtasks).
+The subtask vocabulary is set per dataset in **Subtask vocabulary**. Set it before planning agent runs on the dataset: it is stored with the dataset's annotations, so changing it while a run is active changes that run's baseline and the run's proposals are refused. Enter one line per subtask: `id | label | definition`. If the last agent plan on the dataset defined subtasks, the editor offers them as a starting point. With a vocabulary, a human span carries the same `levi.subtask_id` and `levi.outcome` as an agent's segment. Without one, the editor works as before (free-text subtasks).
 
 ## What a record contains
 

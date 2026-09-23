@@ -56,6 +56,8 @@ curl -X POST -H "x-levi-ui-token: $(cat "$LEVI_WORKSPACE/outputs/LEVI/workbench/
 
 在新任务中选择该档案（或给 `levi agent task new` 传 `--provider qwen-local`），选择较小的集和相机范围，并明确同意发送证据。批准计划、跑试点、审核试点，再执行其余集。模型收到带时间标注的证据图像和有界的上下文；结构与范围校验会拒绝格式错误或越界的输出。token 与耗时按阶段计量；每个阶段的结果和成本在老师审核前就已结算，恢复执行不会重复计费。
 
+暂停或取消 run 会立即切断它正在进行的模型请求，GPU 不再为无人使用的答案计算。LEVI 最后一次请求之后，模型在显存中保留 `LEVI_OLLAMA_KEEP_ALIVE`（默认 `2m`，Ollama 自身默认 5 分钟），随后由 Ollama 卸载。LEVI 启动的全部进程及其退出方式见 [Workspace](WORKSPACE.md#processes-levi-starts-and-how-they-stop)。
+
 模型被卸载后，下一次请求会包含加载时间（`qwen3.5:4b` 在消费级 GPU 上约 20 秒）。结构化输出的调用默认关闭"思考"模式，因为它耗费的 token 和时间对结构化答案帮助很小。
 
 ## Harness 为小模型兜住什么

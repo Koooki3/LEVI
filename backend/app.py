@@ -68,7 +68,7 @@ from fastapi.responses import JSONResponse
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from pydantic import BaseModel, Field
 
-from levi import naming
+from levi import children, naming
 from levi.agent.legacy import editor
 from levi.agent.store import resolve as bundle_resolve
 from levi.annotations import (
@@ -603,6 +603,69 @@ def _forget_sam3_process(job_id: str) -> None:
     if process is not None:
         # poll() reaps an already finished child without blocking.
         process.poll()
+        children.untrack(process.pid)
+
+
+def _watch_sam3(process: subprocess.Popen[bytes], job_path: Path) -> None:
+    """Stop a worker that runs past its limit or stops making progress.
+
+    A SAM3 worker holds the GPU for as long as it lives, and nothing else
+    ends a hung one: the page polls its status but never stops it. Progress
+    is the batch progress file or the log growing."""
+    limit = float(os.getenv("LEVI_SAM3_TIMEOUT_SECONDS", "21600"))
+    stall = float(os.getenv("LEVI_SAM3_STALL_SECONDS", "1800"))
+    job = json.loads(job_path.read_text())
+    watched = [Path(job["progress_path"]), Path(job["log_path"])]
+    started = time.time()
+    while True:
+        try:
+            process.wait(timeout=5)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+        now = time.time()
+        active = max([started] + [p.stat().st_mtime for p in watched if p.is_file()])
+        if now - started > limit:
+            reason = (
+                f"SAM3 worker ran longer than {limit:.0f} s and was stopped "
+                "(LEVI_SAM3_TIMEOUT_SECONDS)"
+            )
+        elif now - active > stall:
+            reason = (
+                f"SAM3 worker made no progress for {stall:.0f} s and was stopped "
+                "(LEVI_SAM3_STALL_SECONDS)"
+            )
+        else:
+            continue
+        break
+    # The collector may have reaped the worker a moment ago.
+    try:
+        if os.name == "posix":
+            os.killpg(process.pid, __import__("signal").SIGTERM)
+        else:
+            process.terminate()
+        process.wait(timeout=10)
+    except ProcessLookupError:
+        pass
+    except subprocess.TimeoutExpired:
+        try:
+            if os.name == "posix":
+                os.killpg(process.pid, __import__("signal").SIGKILL)
+            else:
+                process.kill()
+        except ProcessLookupError:
+            pass
+        process.wait()
+    children.untrack(process.pid)
+    job = json.loads(job_path.read_text())
+    if job.get("status") in {"queued", "running"}:
+        job.update(
+            status="failed",
+            error=reason,
+            error_detail=_sam3_log_tail(job),
+            finished_at=pd.Timestamp.utcnow().isoformat(),
+        )
+        atomic(job_path, job)
 
 
 def _collect_sam3_job(state: DatasetState, job: dict[str, Any]) -> dict[str, Any]:
@@ -2680,8 +2743,15 @@ def sam3_run(request: Sam3RunRequest) -> JSONResponse:
         if "process" in locals():
             log_stream.close()
     _SAM3_PROCESSES[job_id] = process
+    children.track(process, "sam3", job_id)
     job.update(status="running", pid=process.pid)
     atomic(_sam3_job_path(store, job_id), job)
+    threading.Thread(
+        target=_watch_sam3,
+        args=(process, _sam3_job_path(store, job_id)),
+        name=f"sam3-watch-{job_id}",
+        daemon=True,
+    ).start()
     return JSONResponse({"ok": True, **_public_sam3_job(job)}, status_code=202)
 
 

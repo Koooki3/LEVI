@@ -26,7 +26,10 @@ class RunStatus(StrEnum):
 
 class Budget(Contract):
     max_calls: int = Field(default=8, ge=1, le=1000)
-    max_tokens: int = Field(default=16000, ge=256, le=1000000)
+    # The run's total; None sets no limit (a local model's tokens cost only
+    # this machine's GPU time, and a full-dataset run is not capped). Every
+    # model request still reserves and settles its own context window.
+    max_tokens: int | None = Field(default=16000, ge=256)
     max_seconds: int = Field(default=300, ge=10, le=86400)
     max_snapshot_bytes: int = Field(default=512 * 1024 * 1024, ge=1)
     max_artifact_bytes: int = Field(default=256 * 1024 * 1024, ge=1)
@@ -63,6 +66,18 @@ class TaskContext(Contract):
     allow_media_egress: bool = False
     budget: Budget = Field(default_factory=Budget)
     samples_per_episode: int = Field(default=3, ge=1, le=16)
+    # Annotation made outside LEVI and brought in through the ordinary plan,
+    # evidence, review and commit path, so it is stored and measured exactly
+    # like LEVI's own work. Names who made it (the evaluation record's driver).
+    imported_from: (
+        Literal["native-external", "native-local-vlm", "native-local-vlm-teacher"]
+        | None
+    ) = None
+    # When the imported work was done ([start, end], seconds since the epoch):
+    # its record measures that span, not how long the import took.
+    imported_window: list[float] | None = Field(
+        default=None, min_length=2, max_length=2
+    )
 
     @model_validator(mode="after")
     def scope(self):
@@ -79,6 +94,12 @@ class TaskContext(Contract):
             raise ValueError("Episodes must be distinct non-negative indices")
         if len(set(self.cameras)) != len(self.cameras):
             raise ValueError("Duplicate cameras")
+        if self.imported_from and self.provider != "external":
+            raise ValueError("Imported annotation is staged by an external caller")
+        if self.imported_window and (
+            not self.imported_from or self.imported_window[0] > self.imported_window[1]
+        ):
+            raise ValueError("imported_window is [start, end] of imported work")
         return self
 
 
@@ -112,7 +133,10 @@ class Proposal(Contract):
     start: float = Field(ge=0)
     end: float | None = Field(default=None, ge=0)
     style: Literal["subtask", "plan", "memory", "task_aug", "interjection"] = "subtask"
-    evidence_ids: list[str] = Field(min_length=1, max_length=32)
+    # An external agent may leave this empty; LEVI then cites the frames it
+    # observed inside the interval (observations.complete_external). Every
+    # proposal is still checked to cite at least one observed frame.
+    evidence_ids: list[str] = Field(default_factory=list, max_length=32)
     outcome: Literal["success", "failure", "unknown"] | None = None
     subtask_id: str | None = None
     attempt: int = Field(default=1, ge=1)

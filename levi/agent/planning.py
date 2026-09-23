@@ -273,9 +273,9 @@ def rebudget(wb, id, revision, budget):
             raise Conflict("Pause execution before revising its budget")
         if run["plan"]["revision"] != revision:
             raise Conflict("Plan revision changed")
-        if (
-            budget.max_calls < run["requests"]
-            or budget.max_tokens < run["tokens"] + run["reserved_tokens"]
+        if budget.max_calls < run["requests"] or (
+            budget.max_tokens is not None
+            and budget.max_tokens < run["tokens"] + run["reserved_tokens"]
         ):
             raise ValueError(
                 "New budget cannot be below already consumed or reserved usage"

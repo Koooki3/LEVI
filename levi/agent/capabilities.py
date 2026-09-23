@@ -18,6 +18,13 @@ class RunRef(Contract):
     run_id: str
 
 
+class Pending(RunRef):
+    # The teacher needs what waits for it; the web UI shows the history too.
+    # Listing decided phases on every poll made each look cost more than the
+    # last over a full-dataset run.
+    include_decided: bool = False
+
+
 class TeacherFeedback(RunRef):
     teaching_id: str
     revision: int = Field(ge=0)
@@ -79,8 +86,10 @@ class Events(RunRef):
 class Recall(RunRef):
     episode: int = Field(ge=0)
     offset: int = Field(default=0, ge=0)
-    # Up to 32 frames per page with images, 200 rows as text only.
-    limit: int = Field(default=8, ge=1, le=200)
+    # Up to 32 frames per page with images, 200 rows as text only. None: a
+    # full page for the layout (32 frames on a mosaic, so a whole coarse pass
+    # is usually one call; 8 single images; 200 text rows).
+    limit: int | None = Field(default=None, ge=1, le=200)
     # "mosaic" returns one labelled contact sheet of this page instead of one
     # image per frame: the same evidence, an order of magnitude fewer tokens.
     layout: str = Field(default="single", pattern="^(single|mosaic)$")
@@ -163,6 +172,9 @@ class Refine(RunRef):
     episode: int = Field(ge=0)
     around_seconds: list[float] = Field(min_length=1, max_length=8)
     cameras: list[str] = Field(default_factory=list, max_length=8)
+    # "mosaic" returns the added frames as one labelled sheet, so they are
+    # seen without paging through the episode again; "none" returns ids only.
+    layout: str = Field(default="mosaic", pattern="^(mosaic|none)$")
 
 
 class ObjectJob(Contract):
@@ -400,7 +412,7 @@ SPECS = {
         ),
     ),
     "supervision.pending": (
-        RunRef,
+        Pending,
         "read",
         "Read the assigned teacher's evidence and pending annotation phases",
     ),
@@ -864,7 +876,7 @@ def _invoke(
     if name == "supervision.pending":
         from .supervision import pending
 
-        return pending(workbench, args.run_id, principal)
+        return pending(workbench, args.run_id, principal, args.include_decided)
     if name == "supervision.feedback":
         from .supervision import feedback
 
@@ -900,9 +912,12 @@ def _invoke(
     if name == "evidence.read":
         from .observations import recall, text_page
 
+        limit = args.limit or (
+            200 if not args.images else 32 if args.layout == "mosaic" else 8
+        )
         if not args.images:
-            return text_page(workbench, run, args.episode, args.offset, args.limit)
-        if args.limit > 32:
+            return text_page(workbench, run, args.episode, args.offset, limit)
+        if limit > 32:
             raise ValueError("A page with images holds at most 32 frames")
 
         return recall(
@@ -910,7 +925,7 @@ def _invoke(
             run,
             args.episode,
             args.offset,
-            args.limit,
+            limit,
             args.layout,
             args.tile_width
             or (run.get("harness") or {})
@@ -921,7 +936,18 @@ def _invoke(
     if name == "evidence.refine":
         from .observations import refine
 
-        return refine(workbench, run, args.episode, args.around_seconds, args.cameras)
+        return refine(
+            workbench,
+            run,
+            args.episode,
+            args.around_seconds,
+            args.cameras,
+            args.layout,
+            (run.get("harness") or {})
+            .get("parameters", {})
+            .get("evidence.mosaic_tile_width")
+            or 320,
+        )
     if name == "runs.report_usage":
         from .usage import record
 
@@ -1139,17 +1165,26 @@ def _invoke(
             from .planning import require
 
             require(workbench, run, bulk=True)
+        from .observations import complete_external, quality
+
+        # Every episode is checked before any is written: a refusal on a later
+        # episode must not leave earlier shards written but not completed.
+        checked = []
         for ep in args.inspected_episodes:
             saved = store.get("evidence", f"{run['id']}:{ep}")
-            proposals = [p for p in args.proposals if p.episode_index == ep]
+            proposals = complete_external(
+                [p for p in args.proposals if p.episode_index == ep],
+                saved["items"],
+                saved["summary"],
+            )
             workbench.validate_proposals(
                 TaskContext.model_validate(run["context"]),
                 proposals,
                 saved["items"],
                 saved["summary"],
             )
-            from .observations import quality
-
+            checked.append((ep, saved, proposals))
+        for ep, saved, proposals in checked:
             store.put(
                 "quality",
                 f"{run['id']}:{ep}",
@@ -1342,12 +1377,26 @@ def _invoke(
                 "runs.prepare — build the evidence for the approved scope",
                 (
                     "evidence.read with layout='mosaic' — one labelled contact "
-                    "sheet per page instead of one image per frame"
+                    "sheet of up to 32 frames: one call usually covers an "
+                    "episode's coarse pass"
                 ),
-                "evidence.refine — extra frames only where a boundary is unclear",
                 (
-                    "annotations.propose_segments / objects.propose — cite the "
-                    "evidence ids you actually read"
+                    "evidence.refine — extra frames only where a boundary is "
+                    "unclear; the answer is one sheet of just the added frames, so "
+                    "do not page through the episode again"
+                ),
+                (
+                    "annotations.propose_segments / objects.propose — several "
+                    "episodes per call; evidence_ids may be left out (LEVI cites "
+                    "the frames you were shown inside each interval), a success "
+                    "uses its content as the evidence note unless you give one, "
+                    "and an end within half a frame of the last frame is snapped "
+                    "to it"
+                ),
+                (
+                    "from a shell rather than MCP: `levi agent call <capability> "
+                    "@-` reads the JSON arguments from stdin and prints IMAGE: "
+                    "lines for the pictures an answer carries"
                 ),
                 (
                     "runs.report_usage — report your own token use when you "
@@ -1484,9 +1533,17 @@ def _response_size(name, value):
         size = {"response_bytes": len(json.dumps(value, ensure_ascii=False))}
     except (TypeError, ValueError):
         return {}
-    sheet = value.get("mosaic") if isinstance(value, dict) else None
-    if isinstance(sheet, dict) and sheet.get("width") and sheet.get("height"):
-        size.update(images=1, image_pixels=sheet["width"] * sheet["height"])
+    sheets = []
+    if isinstance(value, dict):
+        sheets = value.get("mosaics") or (
+            [value["mosaic"]] if isinstance(value.get("mosaic"), dict) else []
+        )
+    sheets = [s for s in sheets if s.get("width") and s.get("height")]
+    if sheets:
+        size.update(
+            images=len(sheets),
+            image_pixels=sum(s["width"] * s["height"] for s in sheets),
+        )
     elif (
         name in {"media.sample", "evidence.read"}
         and value.get("images") is not False

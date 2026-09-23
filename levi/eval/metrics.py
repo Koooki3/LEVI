@@ -115,8 +115,16 @@ def episode_metrics(segs: list[dict], frames: int, fps: float, vocab: set[str]):
         for s in segs
         if s["end"] <= s["start"] or s["start"] < -1e-6 or s["end"] > last + 1e-3
     ]
+    from levi.annotations.vocabulary import SPECIAL
+
+    # "other", "unknown" and "background" belong to every vocabulary.
     unknown_ids = [
-        s for s in segs if s["subtask"] and vocab and s["subtask"] not in vocab
+        s
+        for s in segs
+        if s["subtask"]
+        and vocab
+        and s["subtask"] not in vocab
+        and s["subtask"] not in SPECIAL
     ]
     return {
         "duration": last,

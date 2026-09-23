@@ -135,7 +135,7 @@ def authorized(wb, run_id, who):
     return run, context
 
 
-def pending(wb, run_id, who):
+def pending(wb, run_id, who, include_decided=False):
     run = wb.store.get("runs", run_id)
     if run["context"].get("supervision", "none") == "none":
         # Asking is legitimate; the answer is simply that nothing waits here.
@@ -150,7 +150,10 @@ def pending(wb, run_id, who):
     authorized(wb, run_id, who)
     return {
         "items": [
-            item for item in wb.store.list("teaching") if item["run_id"] == run_id
+            item
+            for item in wb.store.list("teaching")
+            if item["run_id"] == run_id
+            and (include_decided or item["status"] == "pending")
         ],
         "scope": "annotation_phase",
         "promoted": False,

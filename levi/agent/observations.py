@@ -281,6 +281,10 @@ def observe(context, root, episode, folder, proposals=None, spacing=None):
     return temporal(context, root, episode, folder, proposals, spacing)
 
 
+class CapExceeded(ValueError):
+    """More evidence than the plan's frame cap allows for one episode."""
+
+
 def persist(wb, id, episode, summary, evidence):
     try:
         old = wb.store.get("evidence", f"{id}:{episode}")["items"]
@@ -290,7 +294,7 @@ def persist(wb, id, episode, summary, evidence):
     combined.update({r["id"]: r for r in evidence})
     flow = wb.store.get("runs", id)["context"]["workflow"]
     if flow["kind"] == "temporal" and len(combined) > flow["max_evidence_frames"]:
-        raise ValueError(
+        raise CapExceeded(
             "Combined observation/refinement coverage exceeds the approved frame cap"
         )
     # Readers page through this ledger: keep it in playback order, whatever
@@ -390,7 +394,7 @@ def recall(wb, run, episode, offset, limit, layout="single", tile_width=320):
         # find the sheet that backs a suggestion without a lookup table.
         name = (
             f"episode_{episode:06d}--sheet-{offset:04d}-{len(pictures):03d}"
-            f"-w{tile_width}.png"
+            f"-w{tile_width}.jpg"
         )
         value["mosaic"] = media.mosaic(
             pictures, folder, folder / name, tile_width=tile_width
@@ -421,20 +425,35 @@ def recall(wb, run, episode, offset, limit, layout="single", tile_width=320):
             }
             for row in rows
         ]
-        # Tiles say where each item sits on the sheet; what the item is,
-        # the items list already says once.
-        value["mosaic"]["tiles"] = [
-            {k: tile[k] for k in ("evidence_id", "row", "column")}
-            for tile in value["mosaic"]["tiles"]
-        ]
+        # The sheet lays the items out in list order, ``columns`` to a row:
+        # a per-tile index would say what the items list already says.
+        value["mosaic"].pop("tiles", None)
+        value["mosaic"]["reading"] = (
+            "Tiles follow the items list, left to right, "
+            f"{value['mosaic']['columns']} per row; each is labelled with its "
+            "frame and time"
+        )
+        if len(pictures) != len(rows):
+            # Rows without an image have no tile: name the tiles in order.
+            value["mosaic"]["tile_ids"] = [row["id"] for row in pictures]
+            value["mosaic"]["reading"] = (
+                "Tiles are the frames named in tile_ids, in that order, "
+                f"{value['mosaic']['columns']} per row"
+            )
     return value
 
 
-def refine(wb, run, episode, around, cameras=None):
+def refine(wb, run, episode, around, cameras=None, layout="mosaic", tile_width=320):
     """Bounded extra frames around candidate boundaries, using the approved
     window/tolerance of the plan. External agents get the same two-pass policy
     the in-process runtime uses: one coarse pass, then a narrow refinement,
-    instead of sampling everything densely."""
+    instead of sampling everything densely.
+
+    The added frames come back as one sheet (``layout="mosaic"``): reading
+    them used to mean paging through the whole episode again. When the plan's
+    frame cap cannot take every requested instant, the ones that fit are
+    refined and the rest are named in ``skipped_around_seconds`` -- one call
+    that does most of the work beats one that is refused outright."""
     from .schema import TaskContext
 
     if episode not in run["context"]["episodes"]:
@@ -449,30 +468,134 @@ def refine(wb, run, episode, around, cameras=None):
         context = context.model_copy(update={"cameras": list(cameras)})
     root = wb.store.run_dir(run["id"]) / "input"
     folder = wb.store.run_dir(run["id"]) / "evidence"
-    boundaries = [Candidate(value) for value in around]
-    summary, evidence = DATASETS[context.dataset_adapter].sample_temporal(
-        context, root, episode, folder, boundaries
-    )
-    items = persist(wb, run["id"], episode, summary, evidence)
-    added = {row["id"] for row in evidence}
-    return {
+    kept = list(around)
+    try:
+        held = {
+            row["artifact"]
+            for row in wb.store.get("evidence", f"{run['id']}:{episode}")["items"]
+            if row.get("artifact")
+        }
+    except KeyError:
+        held = set()
+    while True:
+        boundaries = [Candidate(value) for value in kept]
+        evidence = []
+        try:
+            # At the plan's boundary tolerance, not half of it: a reader
+            # places a boundary to the tolerance, and twice the frames per
+            # instant only spent the frame cap and the reader's image budget.
+            summary, evidence = DATASETS[context.dataset_adapter].sample_temporal(
+                context,
+                root,
+                episode,
+                folder,
+                boundaries,
+                context.workflow["boundary_tolerance_seconds"],
+            )
+            items = persist(wb, run["id"], episode, summary, evidence)
+            break
+        except (CapExceeded, Overflow):
+            # Frames sampled for an attempt the cap refused are in no ledger;
+            # left on disk they would count against the storage budget.
+            for row in evidence:
+                if row.get("artifact") and row["artifact"] not in held:
+                    (folder / row["artifact"]).unlink(missing_ok=True)
+            if len(kept) == 1:
+                cap = context.workflow["max_evidence_frames"]
+                have = len(wb.store.get("evidence", f"{run['id']}:{episode}")["items"])
+                raise ValueError(
+                    f"Refining around {kept[0]:g} s would pass the plan's frame "
+                    f"cap ({have} of {cap} frames are used); refine fewer or "
+                    "closer instants"
+                ) from None
+            kept = kept[:-1]
+    new_ids = {row["id"] for row in evidence}
+    added = [row for row in items if row["id"] in new_ids]
+    window = context.workflow["boundary_window_seconds"]
+    groups = []
+    for at in kept:
+        slack = context.workflow["boundary_tolerance_seconds"]
+        near = [row for row in added if abs(row["timestamp"] - at) <= window + slack]
+        groups.append((at, near))
+    value = {
         "episode": episode,
-        # Compact rows, like a mosaic page: the full ledger rows (hashes,
-        # decoder bookkeeping) stay in the ledger and cost nothing to skip.
+        # One line per instant: how many frames it added and over what span.
+        # The ids are one `evidence.read` with images false away, and a
+        # proposal may leave its citations to LEVI.
         "added": [
-            {k: row[k] for k in ("id", "timestamp", "frame_index", "camera_key")}
-            for row in items
-            if row["id"] in added
+            {
+                "around": at,
+                "frames": len(near),
+                "from": min(r["timestamp"] for r in near) if near else None,
+                "to": max(r["timestamp"] for r in near) if near else None,
+            }
+            for at, near in groups
         ],
         "total": len(items),
         "policy": {
-            "boundary_window_seconds": context.workflow["boundary_window_seconds"],
+            "boundary_window_seconds": window,
             "boundary_tolerance_seconds": context.workflow[
                 "boundary_tolerance_seconds"
             ],
             "max_evidence_frames": context.workflow["max_evidence_frames"],
         },
     }
+    if len(kept) < len(around):
+        value["skipped_around_seconds"] = list(around[len(kept) :])
+        value["note"] = (
+            "The plan's frame cap took only the first instants; the skipped "
+            "ones were not refined."
+        )
+    if layout == "mosaic":
+        # The frames of every instant of this call on one sheet, six to a
+        # row, split only past 30 tiles: one sheet per instant multiplied the
+        # images an agent collects. Numbered per episode, so a later
+        # refinement never replaces a sheet an earlier answer pointed to.
+        prefix = f"episode_{episode:06d}--refine-"
+        number = sum(
+            1
+            for sheet in wb.store.get("runs", run["id"]).get("sheets", [])
+            if sheet.startswith(prefix)
+        )
+        seen, pictures = set(), []
+        for _, near in groups:
+            for row in near:
+                if (
+                    row["id"] not in seen
+                    and row.get("artifact")
+                    and (folder / row["artifact"]).exists()
+                ):
+                    seen.add(row["id"])
+                    pictures.append(row)
+        pictures.sort(key=lambda row: (row.get("camera_key") or "", row["timestamp"]))
+        sheets = []
+        for start in range(0, len(pictures), 30):
+            chunk = pictures[start : start + 30]
+            number += 1
+            name = f"{prefix}{number:03d}-w{tile_width}.jpg"
+            sheet = media.mosaic(
+                chunk, folder, folder / name, tile_width=tile_width, columns=6
+            )
+            sheet.pop("tiles", None)
+            sheet["from"] = chunk[0]["timestamp"]
+            sheet["to"] = chunk[-1]["timestamp"]
+            sheet["reading"] = (
+                "Added frames in time order, six per row; each tile is "
+                "labelled with its frame and time"
+            )
+            sheets.append(sheet)
+        if sheets:
+            value["mosaics"] = sheets
+            wb.store.mutate(
+                "runs",
+                run["id"],
+                lambda record: record.update(
+                    sheets=sorted(
+                        {*record.get("sheets", []), *(s["artifact"] for s in sheets)}
+                    )
+                ),
+            )
+    return value
 
 
 def rank_intervals(folder, rows, step):
@@ -568,6 +691,71 @@ def changes(wb, run, episode, top_k=None):
         "method": "mean absolute difference of 160x120 grayscale coarse frames; "
         "a high score means the scene changed, not that a subtask boundary is there",
     }
+
+
+def complete_external(proposals, evidence, summary):
+    """What an external agent may leave to LEVI when it stages segments.
+
+    Writing out evidence ids, repeating the description as an evidence note
+    and hitting a float32 last-frame time exactly cost agents a helper script
+    and a refused call each in the full-dataset runs. So, for proposals staged
+    through ``annotations.propose_*`` only (never a model's own output):
+
+    - no ``evidence_ids``: cite the observed frames inside ``[start, end)``,
+      or the nearest observed frame to each boundary when none falls inside
+      (at most 32, spread over the interval);
+    - a ``success`` without ``evidence_note``: the description is the note;
+    - a boundary within half a frame of the episode's first or last frame
+      is that frame's time.
+    """
+    rows = sorted(
+        (
+            r
+            for r in evidence
+            if r.get("episode_index", summary["episode_index"])
+            == summary["episode_index"]
+        ),
+        key=lambda r: r["timestamp"],
+    )
+    frames = summary.get("frames") or 0
+    span = summary["end"] - summary["start"]
+    half = span / (frames - 1) / 2 if frames > 1 and span > 0 else 0.05
+    out = []
+    for p in proposals:
+        update = {}
+        start, end = p.start, p.end
+        if abs(start - summary["start"]) <= half:
+            start = summary["start"]
+        if end is not None and abs(end - summary["end"]) <= half:
+            end = summary["end"]
+        if (start, end) != (p.start, p.end):
+            update.update(start=start, end=end)
+        if not p.evidence_ids and rows:
+            if end is None:
+                inside = [r for r in rows if abs(r["timestamp"] - start) < 1e-6]
+            else:
+                # [start, end), and the last frame for a segment that ends there.
+                closed = end >= summary["end"]
+                inside = [
+                    r
+                    for r in rows
+                    if start <= r["timestamp"] < end
+                    or (closed and r["timestamp"] == end)
+                ]
+            stop = end if end is not None else start
+            if not inside:
+                inside = [
+                    min(rows, key=lambda r: abs(r["timestamp"] - t))
+                    for t in {start, stop}
+                ]
+            if len(inside) > 32:
+                step = (len(inside) - 1) / 31
+                inside = [inside[round(k * step)] for k in range(32)]
+            update["evidence_ids"] = list(dict.fromkeys(r["id"] for r in inside))
+        if p.outcome == "success" and not p.evidence_note:
+            update["evidence_note"] = p.content[:1000]
+        out.append(p.model_copy(update=update) if update else p)
+    return out
 
 
 def quality(context, proposals, evidence, summary):

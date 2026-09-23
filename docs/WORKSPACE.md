@@ -62,6 +62,22 @@ LEVI follows the workspace while it runs (`levi/sync.py`, a background scan ever
 
 Change detection is `stat`-only: a dataset's *revision* is the inode, size and nanosecond mtime of its `meta/` files; a raw capture's fingerprint covers every file and symlink. Catalog writes take a cross-process file lock (`outputs/LEVI/workbench/.catalog.lock`), so several LEVI processes can sync one workspace. Dataset files are served with `Cache-Control: no-cache` so browsers revalidate rather than reuse stale copies. **Unregister** in the Workbench removes an entry without touching files (auto-sync re-adds it if it is still in the workspace).
 
+## Processes LEVI starts, and how they stop
+
+One core process serves the web UI, the REST API and every MCP bridge. It is started by `levi serve` or by the first MCP call, and it keeps running after the browser or the agent goes away. `uv run levi stop` stops it; `uv run levi stop --all` also stops the Ollama service LEVI started itself (never one you run). While idle the core samples the GPU (every 15 s) and the workspace, which costs about 1 % of one CPU core.
+
+Everything else the core starts runs in its own process group and is recorded, with the core's identity, in `outputs/LEVI/workbench/processes.json`:
+
+| Process | Ends when | Also stopped |
+| --- | --- | --- |
+| SAM3 worker (object annotation, from the page or an agent) | its job finishes or is cancelled | past `LEVI_SAM3_TIMEOUT_SECONDS` (default 21600) or after `LEVI_SAM3_STALL_SECONDS` (default 1800) without progress (page jobs); past the run's time budget (agent jobs) |
+| Conversion job | it finishes or is cancelled | after 24 h |
+| Codex / Claude Pilot runtime | the session is paused, cancelled or runs out of turns or time | when its run finishes, or after `LEVI_PILOT_IDLE_SECONDS` (default 600) with no message; resume starts a new session |
+
+When the core stops normally it terminates every group it started. When it was killed instead (SIGKILL, out of memory, a crash), the next start of the core, or `levi stop`, terminates the groups whose owner is gone. A process is signalled only after its start time, boot and executable match the record, so a reused PID is never hit.
+
+The local model is not a child process: Ollama keeps it in GPU memory for `LEVI_OLLAMA_KEEP_ALIVE` (default `2m`) after LEVI's last request, so the GPU frees soon after a run finishes, fails or waits for a person. Pausing or cancelling a run cuts its model request in flight, and Ollama stops generating. The GPU guardian ([Local models](OLLAMA.md#4-shared-gpus-the-guardian)) unloads the model when other work needs the GPU.
+
 ## Two different "converted dataset" concepts
 
 ### Product 1: input → export target (`levi/conversion/`)

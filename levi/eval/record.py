@@ -27,6 +27,11 @@ DRIVERS = {
     "api": "API 模型",
     "local-vlm": "本地 VLM 独立",
     "local-vlm-teacher": "本地 VLM + 外部老师",
+    # Work done without LEVI and saved into the dataset afterwards, so it can
+    # be measured side by side with LEVI's own modes.
+    "native-external": "外部 agent（不经 LEVI）",
+    "native-local-vlm": "本地 VLM 独立（不经 LEVI）",
+    "native-local-vlm-teacher": "本地 VLM + 外部老师（不经 LEVI）",
 }
 
 
@@ -377,6 +382,8 @@ def stop(name: str) -> dict:
 
 def driver(run: dict) -> str:
     context = run["context"]
+    if context.get("imported_from"):
+        return context["imported_from"]
     if context.get("pilot_runtime"):
         return "external-pilot"
     kind = (run.get("provider_config") or {}).get("kind") or context.get("provider")
@@ -389,6 +396,34 @@ def driver(run: dict) -> str:
             else "local-vlm"
         )
     return "api"
+
+
+def _cost_lines(e: dict) -> list[str]:
+    decisions = e.get("teacher_decisions") or {}
+    gates = e.get("human_gates") or {}
+    return [
+        "### 7. Agent 效率与成本",
+        "",
+        "| 指标 | 数值 |",
+        "|---|---|",
+        f"| 外部（非本地算力）token | {_num(e['external_tokens'])}（{e['external_source']}） |",
+        f"| 外部 token / 集 | {_num(e['external_per_episode'])} |",
+        f"| 本地 VLM token | {_num(e['local_tokens'])} |",
+        f"| 本地 VLM token / 集 | {_num(e['local_per_episode'])} |",
+        f"| 本地模型耗时 | {_num(e['local_model_seconds'], 1)} s |",
+        f"| LEVI 送达 agent 的 token（下限） | {_num(e.get('delivered_tokens'))} |",
+        f"| 工具调用 / 耗时 | {_num(e.get('tool_calls'))} 次 / {_num(e.get('tool_seconds'), 1)} s |",
+        f"| 模型请求 / 缓存命中 | {_num(e.get('model_requests'))} / {e.get('cache_hits', '—')} |",
+        f"| 被拒调用（重试成本） | {', '.join(f'{k} {v}' for k, v in (e.get('refused_calls') or {}).items()) or '—'} |",
+        f"| 老师决定 | {', '.join(f'{k} {v}' for k, v in sorted(decisions.items())) or '—'} |",
+        f"| 人工闸门操作 | {', '.join(f'{k} {v}' for k, v in sorted(gates.items())) or '—'} |",
+        "",
+        (
+            "token 口径：外部 token 是非本地算力的消耗（API 计量 / agent 自报 / "
+            "LEVI 实测送达量下限，以来源为准）；本地 VLM token 由 LEVI 计量，只占本机 GPU。"
+        ),
+        "",
+    ]
 
 
 def eligible(run: dict) -> bool:
@@ -422,6 +457,9 @@ def agent(store, run: dict, facts: dict) -> Path:
     cost = of(facts, run, all_events(store, run["id"]))
     finished = _committed_at(store, run["id"]) or time.time()
     started = run.get("created_at") or facts.get("started_at")
+    window = run["context"].get("imported_window")
+    if window:
+        started, finished = window
     done = sorted(run.get("completed", []))
     episodes = episode_segments(name, done, run["id"])
     lengths, _ = metrics.episode_meta(dataset_root(name))
@@ -467,6 +505,7 @@ def agent(store, run: dict, facts: dict) -> Path:
         "teacher_decisions": decisions,
         "human_gates": gates,
         "breakdown": cost["breakdown"],
+        "refused_calls": cost["waste"].get("refused_calls", {}),
     }
     block = {
         "schema": "levi.eval.subtask-annotation.v1",
@@ -489,30 +528,63 @@ def agent(store, run: dict, facts: dict) -> Path:
         "metrics": metrics.summarize(episodes, vocabulary(name)),
         "efficiency": efficiency,
     }
-    lines = [
-        "### 7. Agent 效率与成本",
-        "",
-        "| 指标 | 数值 |",
-        "|---|---|",
-        f"| 外部（非本地算力）token | {_num(external['tokens'])}（{external['source']}） |",
-        f"| 外部 token / 集 | {_num(efficiency['external_per_episode'])} |",
-        f"| 本地 VLM token | {_num(efficiency['local_tokens'])} |",
-        f"| 本地 VLM token / 集 | {_num(efficiency['local_per_episode'])} |",
-        f"| 本地模型耗时 | {_num(efficiency['local_model_seconds'], 1)} s |",
-        f"| LEVI 送达 agent 的 token（下限） | {_num(tokens['delivered'])} |",
-        f"| 工具调用 / 耗时 | {efficiency['tool_calls']} 次 / {_num(efficiency['tool_seconds'], 1)} s |",
-        f"| 模型请求 / 缓存命中 | {_num(efficiency['model_requests'])} / {efficiency['cache_hits']} |",
-        f"| 老师决定 | {', '.join(f'{k} {v}' for k, v in sorted(decisions.items())) or '—'} |",
-        f"| 人工闸门操作 | {', '.join(f'{k} {v}' for k, v in sorted(gates.items())) or '—'} |",
-        "",
-        (
-            "token 口径：外部 token 是非本地算力的消耗（API 计量 / agent 自报 / "
-            "LEVI 实测送达量下限，以来源为准）；本地 VLM token 由 LEVI 计量，只占本机 GPU。"
-        ),
-        "",
-    ]
+    lines = _cost_lines(efficiency)
     return write(
         [name, "agent", how],
         finished,
         render(block, comparisons(name, episodes), lines),
+    )
+
+
+def imported(
+    name: str,
+    driver: str,
+    started: float,
+    finished: float,
+    efficiency: dict,
+    about: dict | None = None,
+) -> Path:
+    """The record of a whole-dataset annotation made outside LEVI and saved
+    into the dataset's annotation files afterwards: the same sections as any
+    other record, measured from those files, with the cost its maker reports
+    (``efficiency`` uses the keys of an agent record's section 7)."""
+    if driver not in DRIVERS:
+        raise ValueError(f"Unknown driver {driver!r}; one of {sorted(DRIVERS)}")
+    lengths, _ = metrics.episode_meta(dataset_root(name))
+    episodes = episode_segments(name, sorted(lengths))
+    n = max(1, len(episodes))
+    e = {
+        "driver": driver,
+        "external_tokens": 0,
+        "external_source": "—",
+        "local_tokens": 0,
+        "local_model_seconds": None,
+        **efficiency,
+    }
+    e.setdefault("external_per_episode", (e["external_tokens"] or 0) // n)
+    e.setdefault("local_per_episode", (e["local_tokens"] or 0) // n)
+    block = {
+        "schema": "levi.eval.subtask-annotation.v1",
+        "kind": "agent",
+        "driver": driver,
+        "dataset": name,
+        "dataset_episodes": len(lengths),
+        "run_id": None,
+        "model": e.get("model"),
+        "started_at": started,
+        "finished_at": finished,
+        "seconds": round(finished - started, 1),
+        "about": {
+            "驱动形式": DRIVERS[driver],
+            "统计口径": "数据集标注文件中的全部子任务（在 LEVI 之外完成后导入）",
+            **(about or {}),
+        },
+        "confirmed": sorted(ep for ep, row in episodes.items() if row["segments"]),
+        "metrics": metrics.summarize(episodes, vocabulary(name)),
+        "efficiency": e,
+    }
+    return write(
+        [name, "agent", driver],
+        finished,
+        render(block, comparisons(name, episodes), _cost_lines(e)),
     )

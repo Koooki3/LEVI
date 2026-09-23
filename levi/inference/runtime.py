@@ -10,6 +10,8 @@ import subprocess
 from contextlib import contextmanager
 from pathlib import Path
 
+from levi import children
+
 _CHILDREN: dict[int, subprocess.Popen] = {}
 
 
@@ -79,19 +81,7 @@ class OllamaRuntimeManager:
             fcntl.flock(handle, fcntl.LOCK_EX)
             yield
 
-    @staticmethod
-    def identity(pid):
-        try:
-            stat = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
-            if stat[0] == "Z":
-                return None
-            return {
-                "start_ticks": stat[19],
-                "boot": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
-                "executable": str(Path(f"/proc/{pid}/exe").resolve(strict=True)),
-            }
-        except (OSError, IndexError):
-            return None
+    identity = staticmethod(children.identity)
 
     def _record(self):
         try:

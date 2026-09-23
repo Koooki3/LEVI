@@ -49,6 +49,15 @@ A connection can read and draft on its datasets only; it can never approve, comm
 
 A first-time agent should call `workspace.get_context`: it returns what the agent may do, what only a person may do, the order to work in, and the runs already waiting for it.
 
+An agent that works from a shell rather than through MCP calls the same capabilities with its connection's credential (`LEVI_AGENT_GRANT_FILE`):
+
+```bash
+uv run levi agent call evidence.read '{"run_id": "…", "episode": 3, "layout": "mosaic"}'
+uv run levi agent call annotations.propose_segments @- < proposals.json   # or @file.json
+```
+
+It prints the JSON answer on one line, then an `IMAGE: <path>` line for each picture the answer carries (saved under `<workspace>/tmp/agent-images/<run>/`, or `--images DIR`) — what the MCP bridge sends as image content.
+
 ## A task, end to end
 
 ```text
@@ -82,8 +91,9 @@ The same console sits at the top of **Agent Workbench → Tasks & review**. The 
 
 Evidence is what a task costs, so it is read deliberately:
 
-- `evidence.read` with `layout: "mosaic"` returns one labelled contact sheet per page instead of one image per frame; every tile keeps its evidence id. `images: false` returns the ids and times only, for citing frames already seen.
-- `evidence.refine` adds dense frames only around moments the coarse pass could not resolve, within the plan's window and frame cap.
+- `evidence.read` with `layout: "mosaic"` returns one labelled contact sheet per page instead of one image per frame; a page holds up to 32 frames by default, so a coarse pass is usually one call. Every tile keeps its evidence id. `images: false` returns the ids and times only, for citing frames already seen.
+- `evidence.refine` adds dense frames only around moments the coarse pass could not resolve, within the plan's window and frame cap, and answers with one JPEG sheet of the added frames of the call (six to a row, split past 30) and one summary line per instant. Refinement samples at the plan's boundary tolerance. When the cap cannot take every requested instant, the ones that fit are refined and the rest are listed in `skipped_around_seconds`.
+- `annotations.propose_segments` takes several episodes per call. An external agent may leave `evidence_ids` out (LEVI cites the observed frames inside each interval), a `success` uses its content as the evidence note unless one is given, and a boundary within half a frame of the episode's first or last frame is snapped to it. A model's own answers are not completed this way: they must cite their evidence.
 - `evidence.changes` ranks the coarse intervals by how much the picture changes across them. When the dataset has a published `evidence.refine_top_k`, `runs.prepare` returns `refine_first` — the instants to refine before proposing — and the in-process runtime refines them too.
 - Coverage is reported as sampled, never full; an interval nobody looked at densely is marked uncertain, not failed.
 

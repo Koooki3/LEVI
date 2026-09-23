@@ -8,6 +8,7 @@ import sys
 import threading
 from pathlib import Path
 
+from . import children
 from .annotations.outcomes import labels_for_source
 from .catalog import atomic, read, register
 from .conversion import registry
@@ -182,12 +183,15 @@ def launch(job):
                     )
                     with LOCK:
                         ACTIVE[job["id"]] = proc
+                    children.track(proc, "conversion", job["id"])
                     try:
                         code = proc.wait(timeout=24 * 3600)
                     except subprocess.TimeoutExpired:
                         os.killpg(proc.pid, signal.SIGKILL)
                         proc.wait()
                         raise ValueError("Conversion timed out") from None
+                    finally:
+                        children.untrack(proc.pid)
                 job["exit_code"] = code
                 result = read(jobs_dir / (job["id"] + ".result.json"), {})
                 job["result"] = result

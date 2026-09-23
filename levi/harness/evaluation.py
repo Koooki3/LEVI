@@ -77,7 +77,7 @@ def tile_floor(store, key):
         ):
             continue
         for sheet in run.get("sheets", []):
-            found = re.search(r"-w(\d+)\.png$", sheet)
+            found = re.search(r"-w(\d+)\.(?:png|jpg)$", sheet)
             if found:
                 widths.append(int(found.group(1)))
     return min(widths) if widths else None

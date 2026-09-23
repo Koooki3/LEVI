@@ -56,9 +56,10 @@ def plan(store, run_dir_for, *, dataset=None, older_than_days=0, include_drafts=
             if target.is_dir():
                 paths.append(str(target))
                 size += _size(target)
-        for sheet in directory.glob("*--sheet-*.png"):
-            paths.append(str(sheet))
-            size += sheet.stat().st_size
+        for pattern in ("*--sheet-*.png", "*--sheet-*.jpg", "*--refine-*.jpg"):
+            for sheet in directory.glob(pattern):
+                paths.append(str(sheet))
+                size += sheet.stat().st_size
         if paths:
             items.append(
                 {
@@ -130,6 +131,11 @@ OWNED = (
     # keyed "<run>:<episode>:<phase>"; left behind they outlive the run.
     "teaching",
     "model_cache",
+    # Earlier plan revisions ("<run>:<revision>") and a managed Pilot's
+    # sessions and permission requests (a run_id in the body).
+    "plan_history",
+    "pilot_sessions",
+    "pilot_permissions",
 )
 
 
@@ -244,6 +250,11 @@ def reset(store, run_dir_for, dataset, *, apply=False):
         return report
 
     memory.unlink(missing_ok=True)
+    # A dataset folder that held nothing but what was just removed goes too;
+    # one that still holds quality reports or teaching files stays.
+    for folder in {p.parent for p in harness}:
+        if folder.is_dir() and not any(folder.iterdir()):
+            folder.rmdir()
     store.drop_receipts(records.get("changes", []))
     for kind, ids in records.items():
         store.drop(kind, ids)
