@@ -1243,3 +1243,26 @@ def test_a_hub_credential_does_not_lock_the_ui_out_of_local_datasets(
         ).status_code
         == 401
     )
+
+
+def test_a_review_can_put_its_samples_on_the_final_state(bench):
+    wb, ctx = bench
+    ctx.provider = "external"
+    ctx.episodes = [0]
+    ctx.samples_per_episode = 4
+    ctx.workflow = {"kind": "review", "final_samples": 2}
+    external = Principal("client", datasets=(ctx.repo_id,))
+    run = invoke(wb, external, "runs.plan", ctx.model_dump())
+    invoke(
+        wb,
+        Principal("human", human=True),
+        "plans.approve",
+        {"run_id": run["id"], "revision": 1},
+    )
+    invoke(wb, external, "runs.prepare", {"run_id": run["id"]})
+    items = invoke(wb, external, "media.sample", {"run_id": run["id"]})["items"]
+    times = sorted(item["timestamp"] for item in items)
+    # Two spread over the episode (first and last frame), two at its end.
+    assert times[0] == 0.0
+    assert times[-1] == pytest.approx(1.9)
+    assert times[-2] == pytest.approx(1.4)

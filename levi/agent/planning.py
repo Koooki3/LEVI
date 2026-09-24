@@ -28,6 +28,10 @@ class Workflow(Contract):
     max_evidence_frames: int = Field(default=96, ge=3, le=1000)
     object_concepts: list[str] = Field(default_factory=list, max_length=30)
     mask_definition: str = Field(default="visible", pattern="^visible$")
+    # Review: how many of the episode's samples sit at its end, 0.5 s apart
+    # and ending on the last frame; the rest stay spread over the episode.
+    # An outcome is judged on the final state, which uniform samples show once.
+    final_samples: int = Field(default=0, ge=0, le=16)
     pilot_episode: int | None = Field(default=None, ge=0)
     # False: the person approving the plan waives the separate pilot step
     # (plan approval and the final commit still take a person). For a capable

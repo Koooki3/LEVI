@@ -190,14 +190,24 @@ def episode_table(state, episode):
     return df.sort_values("frame_index").reset_index(drop=True)
 
 
+# Seconds between the final-state samples of a review (``final_samples``).
+FINAL_SPACING = 0.5
+
+
 def sample(context, root, episode, artifact_dir, *, frame_indices=None):
     import cv2
 
     state = snapshot_state(context, root)
     table = episode_table(state, episode)
-    positions = sorted(
-        set(np.linspace(0, len(table) - 1, context.samples_per_episode).astype(int))
+    final = min(
+        int(context.workflow.get("final_samples") or 0), context.samples_per_episode
     )
+    spread = context.samples_per_episode - final
+    positions = set(np.linspace(0, len(table) - 1, spread).astype(int))
+    times = table.timestamp.to_numpy(dtype=float)
+    for k in range(final):
+        positions.add(int(np.abs(times - (times[-1] - FINAL_SPACING * k)).argmin()))
+    positions = sorted(positions)
     if frame_indices is not None:
         positions = [
             i for i, row in table.iterrows() if int(row.frame_index) in frame_indices
