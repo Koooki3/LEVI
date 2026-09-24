@@ -242,6 +242,10 @@ def test_the_learner_can_only_emit_kinds_and_subtasks_the_plan_allows():
     assert {"end", "outcome", "evidence_note"} <= set(segment["required"])
     assert segment["properties"]["end"]["type"] == "number"
     assert event["properties"]["end"] == {"type": "null"}
+    # ...nor with a null subtask, which the plan's generic field allows.
+    assert "subtask_id" in segment["required"]
+    assert segment["properties"]["subtask_id"]["type"] == "string"
+    assert "null" not in json.dumps(segment["properties"]["subtask_id"])
     assert list(segment["properties"])[:4] == [
         "episode_index",
         "kind",

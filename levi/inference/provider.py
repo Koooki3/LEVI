@@ -272,6 +272,17 @@ def _variants(schema, proposal, kinds, workflow_kind):
             }
             required.add("outcome")
         if workflow_kind == "temporal" and "subtask_id" in fields:
+            # Required is not enough: the plan's field admits null, and a
+            # decoder honouring the schema writes it (then validation rejects
+            # the interval). An interval names a subtask, or unknown/other.
+            fields["subtask_id"] = next(
+                (
+                    branch
+                    for branch in fields["subtask_id"].get("anyOf", [])
+                    if branch.get("type") == "string"
+                ),
+                fields["subtask_id"],
+            )
             required.add("subtask_id")
         if not ANNOTATIONS[kind].point and "evidence_note" in fields:
             # A success must say what was seen; asking every interval for one
