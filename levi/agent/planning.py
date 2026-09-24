@@ -1,6 +1,7 @@
 """Executable approval contracts. Planning is deterministic and never calls a model."""
 
 import time
+from typing import Literal
 
 from pydantic import Field, model_validator
 
@@ -32,6 +33,10 @@ class Workflow(Contract):
     # and ending on the last frame; the rest stay spread over the episode.
     # An outcome is judged on the final state, which uniform samples show once.
     final_samples: int = Field(default=0, ge=0, le=16)
+    # Temporal: refine boundaries in a second pass always, never, or "auto"
+    # -- only when the coarse step is wider than half the boundary window
+    # (a dense coarse pass already shows each boundary).
+    refine: Literal["always", "auto", "never"] = "always"
     pilot_episode: int | None = Field(default=None, ge=0)
     # False: the person approving the plan waives the separate pilot step
     # (plan approval and the final commit still take a person). For a capable

@@ -136,6 +136,7 @@ curl -X POST -H "x-levi-ui-token: $(cat "$LEVI_WORKSPACE/outputs/LEVI/workbench/
 - **`max_images`** 即服务 `--limit-mm-per-prompt` 中的图像数。超出的请求在发送前就会被拒绝，精修批次也按它划分。**`image_max_side`**（可选）把每张图按长边缩到不超过该像素数后再发送；证据文件保持原始尺寸，标定也按缩放后的图像计价。
 - **思考模式**默认关闭：每次请求都发送 `chat_template_kwargs: {"enable_thinking": false}`，Qwen3 系模板会遵守，其他模板会忽略。`think: true` 可以打开，但需要服务端配置 `--reasoning-parser`（schema 在推理结束后才生效），且推理与答案共用同一输出额度。若服务只返回推理而没有答案，请求会失败并说明原因。
 - **`fold_system: true`** 是 Molmo2 必需的：它的对话模板不接受 system 角色，并要求 user/assistant 严格交替，因此系统提示会放在第一条用户消息开头。所有图像都放在文字之前、按证据顺序排列（第 *n* 张图对应编号为 *n* 的证据行），Molmo2 的模板本来也这样放置。Molmo2 没有工具调用，LEVI 也不使用。
+- **`prompt_style: "lean"`**（两种本地 kind 均可）：发送计划的原始指令和帧列表（“image *n* = *t* s”），不再发送 LEVI 的 skills 和整份 JSON；记忆中只保留老师备注与经验（不再重复一遍指令）；要求模型只给区间、不写引用，由 LEVI 为每个区间引用其中至多三帧，并用区间描述作为证据说明。同一模型用与不用 LEVI 的配对实验显示，完整提示会降低本地模型的片段 F1 并使输出 token 约翻倍。默认 `full`。
 - **结构化输出**：vLLM 默认后端（`auto`）能编译 LEVI 的每一个答案 schema；如果请求因结构化输出错误被拒，请用 `--structured-outputs-config.backend guidance` 启动服务。
 - **采样参数**沿用模型自带的生成配置（vLLM 默认 `--generation-config auto`），LEVI 不发送 temperature。不要加 `--generation-config vllm`，它会用 vLLM 的默认值替换模型推荐的设置。
 - **密钥**：不需要。如果服务使用了 `--api-key`，请把它放在 `LEVI_LOCAL_MODEL_KEY`（此类档案默认的 `key_env`，云端 key 因此不会被发到本机端口）或会话凭据中。

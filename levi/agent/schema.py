@@ -70,6 +70,12 @@ class ProviderConfig(Contract):
     # openai-local: send the system prompt as the start of the first user
     # turn, for chat templates that refuse a system role (Molmo2).
     fold_system: bool = False
+    # Local models: "lean" sends the plan's instruction as text with a frame
+    # list and asks for intervals without citations (LEVI cites the frames
+    # inside each interval itself); "full" sends the skills and one JSON
+    # document and asks the model to cite. Paired runs against a bare model
+    # call showed the full prompt costing quality and time on local models.
+    prompt_style: Literal["full", "lean"] = "full"
 
     @model_validator(mode="before")
     @classmethod

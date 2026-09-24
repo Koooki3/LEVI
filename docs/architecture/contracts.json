@@ -259,6 +259,15 @@
           "title": "Name",
           "type": "string"
         },
+        "prompt_style": {
+          "default": "full",
+          "enum": [
+            "full",
+            "lean"
+          ],
+          "title": "Prompt Style",
+          "type": "string"
+        },
         "structured_output": {
           "default": false,
           "title": "Structured Output",

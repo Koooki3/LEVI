@@ -117,3 +117,25 @@ def as_text(value):
     return "\n\n## LEVI local memory (reviewed; context, not labels)\n" + json.dumps(
         value, ensure_ascii=False, indent=1
     )
+
+
+# What a lean learner is told from memory: corrections and lessons only. The
+# profile repeats the plan's instruction, the vocabulary's outcome counts come
+# from committed work (almost all "success"), and the generic rules restate the
+# instruction -- in paired runs they cost a local model quality, not added it.
+LEAN_KEYS = (
+    "teacher_notes",
+    "lessons",
+    "recurring_uncertainty",
+    "examples_from_other_episodes",
+)
+
+
+def as_lean_text(value):
+    kept = {k: v for k, v in (value or {}).items() if k in LEAN_KEYS and v}
+    if not kept:
+        return ""
+    return (
+        "\n\n## From LEVI's memory of this dataset (context, not labels)\n"
+        + json.dumps(kept, ensure_ascii=False, indent=1)
+    )

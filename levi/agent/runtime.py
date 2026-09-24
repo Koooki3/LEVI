@@ -94,6 +94,20 @@ def snap_to_episode(output, summary):
     return output.model_copy(update={"proposals": proposals})
 
 
+def refines(workflow):
+    """Whether a temporal run refines its draft's boundaries in a second pass:
+    ``auto`` skips it when the coarse step is at most half the boundary
+    window, since a dense coarse pass already shows each boundary (paired runs
+    at 0.5 s: the second pass doubled the calls for +0.01 segment F1)."""
+    mode = workflow.get("refine", "always")
+    if mode == "auto":
+        return (
+            workflow.get("coarse_step_seconds", 2.0)
+            > workflow.get("boundary_window_seconds", 1.0) / 2
+        )
+    return mode == "always"
+
+
 class EpisodeRejected(ValueError):
     """Nothing in an unsupervised answer for one episode held up: the
     episode is set aside and the run goes on (see ``Workbench._set_aside``)."""
@@ -468,7 +482,9 @@ class Workbench:
                     output, usage = self.model_step(
                         id, config, context, summary, evidence, "coarse", started
                     )
-                    if context.workflow["kind"] == "temporal":
+                    if context.workflow["kind"] == "temporal" and refines(
+                        context.workflow
+                    ):
                         # The model's own boundaries, plus the published harness
                         # windows where the picture changed most -- the same
                         # learned policy an external agent gets from refine_first.
@@ -738,7 +754,7 @@ class Workbench:
                 "Provider configuration changed or disconnected before model phase"
             )
         directory = self.store.run_dir(id)
-        from levi.harness.context import as_text, brief
+        from levi.harness.context import as_lean_text, as_text, brief
 
         # What LEVI knows locally about this dataset, as frozen at plan time:
         # a model LEVI runs sees it only if it is in the prompt.
@@ -840,7 +856,12 @@ class Workbench:
         try:
             output, usage = self.provider.generate(
                 config,
-                context.instruction + as_text(learner_brief),
+                context.instruction
+                + (
+                    as_lean_text(learner_brief)
+                    if config.prompt_style == "lean"
+                    else as_text(learner_brief)
+                ),
                 summary,
                 evidence,
                 directory / "evidence",
