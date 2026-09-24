@@ -707,6 +707,49 @@ def test_an_unbound_server_cannot_plan_and_a_bound_one_runs_coarse_calibrate_ref
     assert result["tokens"] > 0 and result["requests"] == 4
 
 
+def test_a_refinement_that_does_not_fit_keeps_the_coarse_draft(
+    client, dataset, server, monkeypatch
+):
+    """An episode whose draft has too many boundaries for the frame cap keeps its
+    validated coarse draft instead of blocking the run (NVFP4 run, ep 20)."""
+    from levi import catalog, service
+    from levi.agent import observations
+    from levi.agent.planning import approve
+    from levi.agent.runtime import Workbench
+
+    camera = camera_dataset(dataset)
+    entry = catalog.register(str(dataset))
+    wb = Workbench(service.STATE)
+    context = TaskContext(
+        repo_id=entry["id"],
+        episodes=[0],
+        instruction="Mark the motion",
+        provider="vllm",
+        cameras=[camera],
+        allow_media_egress=True,
+        workflow={**WORKFLOW, "coarse_step_seconds": 0.5},
+        budget=Budget(max_calls=12, max_tokens=None, max_seconds=600),
+    )
+    wb.store.put("providers", "vllm", config().model_dump())
+
+    def overflow(*args, **kwargs):
+        raise observations.ContextOverflow("does not fit the frame cap (3)")
+
+    monkeypatch.setattr(observations, "plan_refinement", overflow)
+    run = wb.plan(context)
+    approve(wb, run["id"], 1, "human")
+    assert wb.store.claim(run["id"], "test-owner")
+    wb.execute(run["id"], "test-owner", pilot=True)
+    result = wb.store.get("runs", run["id"])
+    assert result["status"] == "waiting_for_review", result
+    events = wb.store.events(run["id"])
+    skipped = [e for e in events if e["type"] == "refinement_skipped"]
+    assert [e["episode"] for e in skipped] == [0]
+    assert "frame cap" in skipped[0]["reason"]
+    steps = [e["phase"] for e in events if e["type"] == "model_step"]
+    assert steps == ["coarse"]
+
+
 def test_a_sentence_becomes_a_task_on_a_local_server(tmp_path, server, monkeypatch):
     from levi.harness import tasking
 

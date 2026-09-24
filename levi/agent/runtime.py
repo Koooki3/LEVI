@@ -523,14 +523,29 @@ class Workbench:
                             + len(json.dumps(summary, ensure_ascii=False)),
                             costs,
                         )
-                        batches = observations.plan_refinement(
-                            self,
-                            self.store.get("runs", id),
-                            episode,
-                            output.proposals,
-                            limit,
-                            len(evidence),
-                        )
+                        try:
+                            batches = observations.plan_refinement(
+                                self,
+                                self.store.get("runs", id),
+                                episode,
+                                output.proposals,
+                                limit,
+                                len(evidence),
+                            )
+                        except observations.ContextOverflow as exc:
+                            # The coarse draft already passed validation; one
+                            # episode whose boundaries do not fit the frame cap
+                            # must not block the others. Supervised runs still
+                            # stop, so a person can revise the cap.
+                            if context.supervision != "none":
+                                raise
+                            self.store.event(
+                                id,
+                                "refinement_skipped",
+                                episode=episode,
+                                reason=str(exc)[:300],
+                            )
+                            batches = []
                         finest = observations.refine_spacings(context)[0]
                         for number, batch in enumerate(batches, 1):
                             if batch.windows:
