@@ -15,6 +15,19 @@ from .providers import RoutedProvider
 from .schema import ChangeSet, ModelOutput, ProviderConfig, RunStatus, TaskContext
 from .store import Conflict, Store, annotation_digest, digest, file_hash, pin
 
+
+def run_context(run: dict) -> TaskContext:
+    """A run's approved context, with the subtasks its annotator added
+    (``vocabulary_extensions``) among the plan's definitions."""
+    context = TaskContext.model_validate(run["context"])
+    extra = run.get("vocabulary_extensions") or []
+    if not extra:
+        return context
+    workflow = dict(context.workflow)
+    workflow["definitions"] = list(workflow.get("definitions") or []) + list(extra)
+    return context.model_copy(update={"workflow": workflow})
+
+
 _ACTIVE = {}
 _LOCK = threading.Lock()
 
@@ -102,6 +115,23 @@ class Workbench:
 
     def plan(self, context: TaskContext, principal=None):
         from .supervision import require_teacher
+
+        if context.workflow.get("kind") == "temporal" and not context.workflow.get(
+            "definitions"
+        ):
+            # No subtasks given: the dataset's vocabulary in force -- its own,
+            # else LEVI's built-in manipulation vocabulary.
+            from levi.annotations import vocabulary
+
+            folder = media.state_for(context).annotations_dir
+            context = context.model_copy(
+                update={
+                    "workflow": {
+                        **context.workflow,
+                        "definitions": vocabulary.definitions(folder),
+                    }
+                }
+            )
 
         if context.supervision != "none" and context.provider in {
             "external",
@@ -1025,7 +1055,7 @@ class Workbench:
 
     def validate(self, change):
         run = self.store.get("runs", change["run_id"])
-        context = TaskContext.model_validate(run["context"])
+        context = run_context(run)
         if context.mode == "read_only" and (
             change["proposals"] or change.get("object_jobs")
         ):
@@ -1164,6 +1194,22 @@ class Workbench:
                     )
                 app._write_episode_annotations(state, ep, atoms)
             change["replaced"] = replaced
+            # Subtasks the annotator added and a person has now committed join
+            # the dataset's vocabulary, with where they came from.
+            used = {
+                p.get("subtask_id")
+                for rows in grouped.values()
+                for p in rows
+                if p.get("kind") == "segment"
+            }
+            added = [
+                e for e in run.get("vocabulary_extensions") or [] if e["id"] in used
+            ]
+            if added:
+                from levi.annotations import vocabulary
+
+                vocabulary.extend(state.annotations_dir, added, origin)
+                change["vocabulary_added"] = [e["id"] for e in added]
             if change.get("object_jobs"):
                 from levi.annotations.schema import ObjectAnnotation
 

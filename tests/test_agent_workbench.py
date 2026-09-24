@@ -745,7 +745,8 @@ def test_clarification_and_semantic_contracts(bench):
         {**ctx.model_dump(), "workflow": {"kind": "temporal"}}
     )
     fields = {q["field"] for q in clarify(ctx.model_dump())["questions"]}
-    assert fields == {"cameras", "definitions"}
+    # Definitions are not asked for: the plan gets the dataset's vocabulary.
+    assert fields == {"cameras"}
     p = Proposal(
         episode_index=0,
         kind="segment",

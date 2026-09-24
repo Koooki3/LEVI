@@ -1,0 +1,264 @@
+{
+ "name": "manipulation",
+ "version": 1,
+ "about": "LEVI's built-in, task-agnostic vocabulary of manipulation subtasks. Every dataset starts from it unless it has a vocabulary of its own; an annotator may add a subtask it lacks (with the same fields) while annotating. Object-transfer phases come first -- they cover pick-and-place, stacking and most tabletop tasks -- then contact skills. Definitions name the observable onset: a boundary is where the defined event first happens, not where it becomes obvious. The task's own instruction states which objects and targets count and anything task-specific.",
+ "sources": [
+  "RH20T-P primitive skills (Chen et al., 2024): pick includes the preparation, place includes release and withdrawal",
+  "AgiBot World atomic skills: pick, place, insert, pour, click, slide, push, pull, twist, press, open, close",
+  "BridgeData V2 skills (Walke et al., 2023): pick-and-place, push, reorient, open/close doors and drawers, wipe, fold, stack, twist knobs, flip switches, turn faucets, zip, sweep",
+  "DROID verb distribution (Khazatsky et al., 2024): 86 normalized verbs, most frequent pick, place, open, move, close",
+  "EPIC-KITCHENS-100 verb classes (Damen et al., 2022) and Rubicon Boundaries (Moltisanti et al., 2017): onset of the action, only the last preliminary motion",
+  "MimicGen (Mandlekar et al., 2023): object-centric subtasks, boundary at the step before contact",
+  "Round 1-8 plate-stacking experiment of LEVI: the attempt rule (built-in knowledge annotation-007)"
+ ],
+ "subtasks": [
+  {
+   "id": "approach",
+   "label": "approach",
+   "group": "transfer",
+   "definition": "The effector moves toward an object or place it is about to act on, without carrying it -- including the move from letting go of one object to the next contact.",
+   "starts_when": "The effector starts moving toward the object or place it will act on next.",
+   "ends_when": "The effector first touches the object (or reaches the place it will act at).",
+   "success_when": "The effector reaches the object.",
+   "confusions": "Only the last preliminary motion before the contact; a wander elsewhere first is other. Carrying an object toward a target is transport.",
+   "aliases": ["reach", "move_to", "move_near", "go_to", "move_on_top_of", "move_in_front_of"]
+  },
+  {
+   "id": "grasp",
+   "label": "grasp",
+   "group": "transfer",
+   "definition": "The effector takes hold of an object: from first contact until the object moves with it. One attempt is one continuous engagement.",
+   "starts_when": "The fingers (or suction, or hand) first touch the object.",
+   "ends_when": "The object first moves with the effector -- or the effector lets go and leaves (a failed attempt).",
+   "success_when": "The object is held and lifted or moved with the effector.",
+   "confusions": "Re-closing or adjusting while staying on the object is the same attempt; letting go and leaving ends it, and the next touch is a new grasp after an approach. Failure when the effector leaves without the object.",
+   "aliases": ["pick", "pick_up", "take", "grab", "hold_on", "regrasp"]
+  },
+  {
+   "id": "transport",
+   "label": "transport",
+   "group": "transfer",
+   "definition": "A held object is carried from where it was to above or beside its target.",
+   "starts_when": "The held object leaves its support.",
+   "ends_when": "The object is above or at its target and starts being set down.",
+   "success_when": "The object reaches the intended target.",
+   "confusions": "Carrying toward the wrong target is failure. Moving an object without holding it is push or pull.",
+   "aliases": ["carry", "move", "move_object", "lift", "bring", "transfer"]
+  },
+  {
+   "id": "place",
+   "label": "place",
+   "group": "transfer",
+   "definition": "A held object is lowered onto, into or against its target and released.",
+   "starts_when": "The held object starts descending (or moving) onto its target.",
+   "ends_when": "The effector has released the object and leaves it.",
+   "success_when": "The object rests at the target as the task requires (e.g. stacked, upright, inside).",
+   "confusions": "Release not visible: unknown. Resting half off, on the wrong target or falling over: failure. Dropping from height onto the target is still place.",
+   "aliases": ["put", "put_down", "set_down", "stack", "drop", "release", "deposit", "arrange"]
+  },
+  {
+   "id": "retreat",
+   "label": "retreat",
+   "group": "transfer",
+   "definition": "After releasing an object, the empty effector withdraws from it (or returns to rest).",
+   "starts_when": "The effector opens / lets go of the object it placed.",
+   "ends_when": "The effector has cleared the object, or starts toward the next object.",
+   "success_when": "The placed object is not disturbed.",
+   "confusions": "Only after place (or another release on a target); moving away after a failed grasp is approach toward the next contact.",
+   "aliases": ["withdraw", "move_away", "back_off", "reset", "return", "go_home"]
+  },
+  {
+   "id": "push",
+   "label": "push",
+   "group": "contact",
+   "definition": "The effector moves an object by pushing it along its support without holding it.",
+   "starts_when": "The effector first contacts the object and it starts moving away from the effector.",
+   "ends_when": "The effector stops pushing (contact ends or the object stops).",
+   "success_when": "The object ends where the task wants it.",
+   "confusions": "Sliding an object while holding it is transport. Pressing without displacement is press.",
+   "aliases": ["slide", "shove", "nudge", "sweep_object", "knock", "knock_over", "tip_over"]
+  },
+  {
+   "id": "pull",
+   "label": "pull",
+   "group": "contact",
+   "definition": "The effector draws an object (or part of one) toward itself along a surface or an axis -- dragging, or pulling a handle, cable or rope.",
+   "starts_when": "The object first moves toward the effector under its pull.",
+   "ends_when": "The pull stops.",
+   "success_when": "The object or part ends where the task wants it.",
+   "confusions": "Pulling a drawer or door open is open.",
+   "aliases": ["drag", "tug", "draw", "unplug_pull"]
+  },
+  {
+   "id": "open",
+   "label": "open",
+   "group": "articulated",
+   "definition": "An articulated or covering part is opened: drawer, door, lid, cap, box flap, zipper, faucet valve.",
+   "starts_when": "The part first moves in its opening direction.",
+   "ends_when": "The part stops moving open (or the effector lets go of it).",
+   "success_when": "The part is open as far as the task needs.",
+   "confusions": "Reaching and taking hold of the handle before it moves is approach and grasp.",
+   "aliases": ["uncover", "unzip", "unlid", "pull_open", "open_drawer", "open_door", "turn_on_faucet"]
+  },
+  {
+   "id": "close",
+   "label": "close",
+   "group": "articulated",
+   "definition": "An articulated or covering part is closed: drawer, door, lid, cap, box flap, zipper, faucet valve.",
+   "starts_when": "The part first moves in its closing direction.",
+   "ends_when": "The part stops moving closed (or the effector lets go of it).",
+   "success_when": "The part is fully closed.",
+   "confusions": "Putting a loose lid onto a container is place; closing a hinged lid is close.",
+   "aliases": ["shut", "cover", "zip", "push_closed", "close_drawer", "close_door", "turn_off_faucet"]
+  },
+  {
+   "id": "rotate",
+   "label": "rotate",
+   "group": "articulated",
+   "definition": "An object or a part (knob, dial, valve, handle, cap) is turned about an axis in place.",
+   "starts_when": "The object or part first turns.",
+   "ends_when": "It stops turning.",
+   "success_when": "It reaches the orientation or setting the task wants.",
+   "confusions": "Unscrewing or screwing a cap on a thread is screw. Turning an object over to rest on another face is reorient.",
+   "aliases": ["turn", "twist", "spin", "dial", "turn_knob"]
+  },
+  {
+   "id": "screw",
+   "label": "screw",
+   "group": "articulated",
+   "definition": "A threaded part (cap, bolt, bulb, screw) is screwed in or out.",
+   "starts_when": "The threaded part first turns on its thread.",
+   "ends_when": "It stops turning (tight, or free of the thread).",
+   "success_when": "It is fully tightened, or fully free.",
+   "confusions": "Lifting the freed cap away is transport.",
+   "aliases": ["unscrew", "tighten", "loosen", "fasten"]
+  },
+  {
+   "id": "press",
+   "label": "press",
+   "group": "contact",
+   "definition": "The effector presses a button, switch, key or surface to actuate it, without moving it along the surface.",
+   "starts_when": "The effector first touches the button or switch.",
+   "ends_when": "The effector leaves it.",
+   "success_when": "The device visibly actuates (light, state change) or the task's evidence shows it.",
+   "confusions": "Toggling a lever switch sideways is still press. Holding an object down so another action can happen is hold.",
+   "aliases": ["click", "push_button", "toggle", "flip_switch", "tap", "switch_on", "switch_off", "turn_on", "turn_off"]
+  },
+  {
+   "id": "insert",
+   "label": "insert",
+   "group": "fit",
+   "definition": "A held object is fitted into a close-fitting opening: slot, hole, socket, sleeve, container mouth.",
+   "starts_when": "The object first enters the opening.",
+   "ends_when": "The object is seated (or the effector releases it inside).",
+   "success_when": "The object is fully seated.",
+   "confusions": "Dropping an object into an open container is place.",
+   "aliases": ["plug", "plug_in", "fit", "mount", "attach", "hang", "thread"]
+  },
+  {
+   "id": "remove",
+   "label": "remove",
+   "group": "fit",
+   "definition": "A held object is extracted from where it is fitted or contained: slot, socket, holder, container, peg.",
+   "starts_when": "The held object first moves out of its fit.",
+   "ends_when": "It is free of the fit.",
+   "success_when": "It is fully out.",
+   "confusions": "Lifting a loose object off a surface is grasp then transport.",
+   "aliases": ["unplug", "extract", "take_out", "pull_out", "detach", "unhang"]
+  },
+  {
+   "id": "pour",
+   "label": "pour",
+   "group": "tool",
+   "definition": "A held container is tilted so its contents flow out into or onto a target.",
+   "starts_when": "The held container starts tilting toward the target.",
+   "ends_when": "It is tilted back upright (or contents stop flowing).",
+   "success_when": "The contents land in the target.",
+   "confusions": "Carrying the container to the target is transport.",
+   "aliases": ["fill", "empty", "dump", "tip_out", "sprinkle"]
+  },
+  {
+   "id": "scoop",
+   "label": "scoop",
+   "group": "tool",
+   "definition": "A tool (spoon, spatula, scoop, ladle) collects material from a container or surface.",
+   "starts_when": "The tool first enters the material.",
+   "ends_when": "The tool leaves the material, loaded.",
+   "success_when": "The tool carries material out.",
+   "aliases": ["ladle", "spoon", "shovel", "flip_food"]
+  },
+  {
+   "id": "stir",
+   "label": "stir",
+   "group": "tool",
+   "definition": "A tool or held object is moved repeatedly inside a container to mix its contents.",
+   "starts_when": "The tool first moves inside the contents.",
+   "ends_when": "The mixing motion stops.",
+   "success_when": "The motion covers the contents as the task asks.",
+   "aliases": ["mix", "whisk", "beat"]
+  },
+  {
+   "id": "cut",
+   "label": "cut",
+   "group": "tool",
+   "definition": "A blade or cutting tool separates material.",
+   "starts_when": "The blade first contacts the material.",
+   "ends_when": "The blade leaves the material.",
+   "success_when": "The material is cut through as the task asks.",
+   "aliases": ["slice", "chop", "saw", "trim"]
+  },
+  {
+   "id": "wipe",
+   "label": "wipe",
+   "group": "tool",
+   "definition": "A held cloth, sponge, brush or tool is moved across a surface in contact with it -- wiping, scrubbing, brushing, sweeping.",
+   "starts_when": "The held item first moves across the surface in contact.",
+   "ends_when": "It leaves the surface or the stroke motion stops.",
+   "success_when": "The target area is covered (or visibly cleaned).",
+   "aliases": ["clean", "scrub", "sweep", "brush", "rub", "polish", "dust"]
+  },
+  {
+   "id": "fold",
+   "label": "fold",
+   "group": "deformable",
+   "definition": "A deformable object (cloth, towel, paper, bag, cable) is folded, unfolded, spread, rolled or draped.",
+   "starts_when": "The held part of the deformable object first moves in the folding (or spreading) motion.",
+   "ends_when": "The effector releases the moved part.",
+   "success_when": "The object has the shape the task asks for.",
+   "confusions": "Picking up a folded cloth and moving it elsewhere is grasp, transport, place.",
+   "aliases": ["unfold", "spread", "flatten", "roll", "unroll", "drape", "crumple", "tie", "knot"]
+  },
+  {
+   "id": "reorient",
+   "label": "reorient",
+   "group": "contact",
+   "definition": "An object is turned over or set upright -- flipped onto another face, stood up, laid down -- with or without being lifted clear.",
+   "starts_when": "The object starts tipping or turning onto another face.",
+   "ends_when": "It rests on its new face.",
+   "success_when": "It rests in the orientation the task wants.",
+   "confusions": "Turning a knob or cap in place is rotate or screw.",
+   "aliases": ["flip", "upright", "turn_over", "stand_up", "lay_down", "tilt"]
+  },
+  {
+   "id": "hold",
+   "label": "hold",
+   "group": "contact",
+   "definition": "The effector keeps an object still -- steadying it, pinning it or presenting it -- while something else happens.",
+   "starts_when": "The held object stops moving and is kept in place.",
+   "ends_when": "The effector moves it again or lets go.",
+   "success_when": "The object stays put for as long as the task needs.",
+   "confusions": "A pause with nothing held is other.",
+   "aliases": ["steady", "pin", "present", "show", "keep"]
+  },
+  {
+   "id": "handover",
+   "label": "handover",
+   "group": "transfer",
+   "definition": "An object passes from one effector (or hand) to another.",
+   "starts_when": "The receiving effector first touches the object while the giver still holds it.",
+   "ends_when": "The giving effector has released it.",
+   "success_when": "The receiver holds the object alone.",
+   "aliases": ["hand_over", "pass", "give", "receive"]
+  }
+ ]
+}

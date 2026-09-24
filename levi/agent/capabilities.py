@@ -91,8 +91,25 @@ class Segment(Contract):
     evidence_note: str = Field(default="", max_length=1000)
 
 
+class NewSubtask(Contract):
+    """A subtask the plan's vocabulary lacks, added by the annotator. It
+    needs the same observable definitions as a planned one, and it may not
+    be an existing id or alias (LEVI names the one to use instead)."""
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,39}$")
+    label: str = Field(default="", max_length=80)
+    definition: str = Field(min_length=1, max_length=400)
+    starts_when: str = Field(min_length=1, max_length=400)
+    ends_when: str = Field(min_length=1, max_length=400)
+    success_when: str = Field(min_length=1, max_length=400)
+    confusions: str = Field(default="", max_length=400)
+
+
 class Propose(RunRef):
     proposals: list[Proposal] = Field(default_factory=list, max_length=500)
+    # Subtasks the vocabulary lacks, used by these segments; kept for the rest
+    # of the run and added to the dataset's vocabulary when a person commits.
+    new_subtasks: list[NewSubtask] = Field(default_factory=list, max_length=8)
     inspected_episodes: list[int] = Field(default_factory=list)
     # The same work in the annotator's own shape: {episode: [segments]}. Each
     # episode given is inspected; LEVI fills in kind, style and citations.
@@ -657,7 +674,10 @@ SPECS = {
     "annotations.propose_segments": (
         Propose,
         "draft",
-        "Stage evidence-grounded suggestions; never approve",
+        (
+            "Stage evidence-grounded suggestions; never approve. new_subtasks adds "
+            "a subtask the vocabulary lacks (never an existing id or alias)"
+        ),
     ),
     "annotations.propose_events": (
         Propose,
@@ -1157,7 +1177,8 @@ def _invoke(
             named |= {x for row in value["boundaries"] for x in row[1:] if x}
         definitions = {
             d["id"]: {k: d[k] for k in ("starts_when", "ends_when") if d.get(k)}
-            for d in run["context"]["workflow"].get("definitions") or []
+            for d in (run["context"]["workflow"].get("definitions") or [])
+            + (run.get("vocabulary_extensions") or [])
             if d.get("id") in named
         }
         answer = {"episodes": episodes, "offsets": list(CHECK_OFFSETS)}
@@ -1500,6 +1521,28 @@ def _invoke(
             require(workbench, run, bulk=True)
         from .observations import complete_external, quality
 
+        extensions = list(run.get("vocabulary_extensions") or [])
+        if args.new_subtasks:
+            from levi.annotations import vocabulary
+
+            known = list(run["context"]["workflow"].get("definitions") or [])
+            for item in args.new_subtasks:
+                entry = {**item.model_dump(), "label": item.label or item.id}
+                problem = vocabulary.check_new(entry, known + extensions)
+                if problem:
+                    raise ValueError(problem)
+                extensions.append(entry)
+        context = TaskContext.model_validate(run["context"])
+        if extensions:
+            context = context.model_copy(
+                update={
+                    "workflow": {
+                        **context.workflow,
+                        "definitions": list(context.workflow.get("definitions") or [])
+                        + extensions,
+                    }
+                }
+            )
         # Every episode is checked before any is written: a refusal on a later
         # episode must not leave earlier shards written but not completed.
         checked = []
@@ -1511,18 +1554,22 @@ def _invoke(
                 saved["summary"],
             )
             workbench.validate_proposals(
-                TaskContext.model_validate(run["context"]),
+                context,
                 proposals,
                 saved["items"],
                 saved["summary"],
             )
             checked.append((ep, saved, proposals))
+        if len(extensions) > len(run.get("vocabulary_extensions") or []):
+            store.mutate(
+                "runs", run["id"], lambda r: r.update(vocabulary_extensions=extensions)
+            )
         for ep, saved, proposals in checked:
             store.put(
                 "quality",
                 f"{run['id']}:{ep}",
                 quality(
-                    TaskContext.model_validate(run["context"]),
+                    context,
                     proposals,
                     saved["items"],
                     saved["summary"],

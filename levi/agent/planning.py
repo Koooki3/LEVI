@@ -20,7 +20,7 @@ class SubtaskDefinition(Contract):
 
 class Workflow(Contract):
     kind: str = Field(default="review", pattern=r"^(review|temporal|objects)$")
-    definitions: list[SubtaskDefinition] = Field(default_factory=list, max_length=40)
+    definitions: list[SubtaskDefinition] = Field(default_factory=list, max_length=64)
     overlapping_layers: bool = False
     coarse_step_seconds: float = Field(default=2.0, ge=0.05, le=60)
     boundary_window_seconds: float = Field(default=1.0, ge=0.05, le=10)
@@ -82,13 +82,9 @@ def clarify(context):
                 "message": "Select at least one camera for video annotation",
             }
         )
-    if flow.kind == "temporal" and not flow.definitions:
-        missing.append(
-            {
-                "field": "definitions",
-                "message": "Define observable subtask start, end and success conditions",
-            }
-        )
+    # A temporal plan without definitions gets the dataset's vocabulary in
+    # force (its own, else LEVI's built-in manipulation vocabulary) at
+    # planning, so they are no longer something to ask for.
     if flow.kind == "objects" and not flow.object_concepts:
         missing.append(
             {"field": "object_concepts", "message": "Specify target object concepts"}

@@ -131,7 +131,7 @@ Generated from the capability registry by `uv run levi docs sync`. Do not edit b
 | Capability | Who | What it does |
 | --- | --- | --- |
 | `annotations.propose_events` | agent | Stage event suggestions using the same validators |
-| `annotations.propose_segments` | agent | Stage evidence-grounded suggestions; never approve |
+| `annotations.propose_segments` | agent | Stage evidence-grounded suggestions; never approve. new_subtasks adds a subtask the vocabulary lacks (never an existing id or alias) |
 | `capabilities.list` | agent | Discover schemas, scope and side effects |
 | `changes.approve` | **person** | Human approval of an exact draft revision |
 | `changes.commit` | **person** | Atomically publish all approved annotation changes |

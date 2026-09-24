@@ -13,6 +13,10 @@ The built-in topics:
 - `interpretation`: the model that turns a sentence into a task spec receives these.
 - `harness`: a reference for harness and kernel work. No model prompt includes it.
 
+## Built-in subtask vocabulary
+
+`levi/knowledge/subtasks.json` is the task-agnostic manipulation vocabulary every dataset starts from (`levi/annotations/vocabulary.py`; a dataset's own `vocabulary.json` takes precedence). Each entry has an id, a definition, the observable `starts_when` / `ends_when` / `success_when`, confusions and aliases; ids and aliases are unique across the vocabulary, and annotators extend it only with a defined subtask that is none of them. Sources are listed in the file. See [Agents](AGENTS.md).
+
 ## How local memory becomes built-in knowledge
 
 1. Every closed run refreshes the candidate list (`workbench/knowledge/candidates.json`). The candidates are the teacher notes and retained lessons in local memory that are not already built in.

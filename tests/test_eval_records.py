@@ -167,7 +167,9 @@ def test_the_editor_confirms_episodes_keeps_a_vocabulary_and_records(client, tmp
     body = {"repo_id": repo}
 
     vocab = client.get(f"{api}/dataset/vocabulary", params=body).json()
-    assert vocab["subtasks"] == [] and "other" in vocab["special"]
+    # No vocabulary of its own: LEVI's built-in one is in force.
+    assert vocab["source"] == "builtin" and vocab["subtasks"][0]["id"] == "approach"
+    assert "other" in vocab["special"]
     bad = client.post(
         f"{api}/dataset/vocabulary", json={**body, "subtasks": [{"id": "Grasp!"}]}
     )

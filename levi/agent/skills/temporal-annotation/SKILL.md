@@ -2,7 +2,7 @@
 name: temporal-annotation
 description: Evidence-grounded attempts, outcomes and temporal boundary review.
 metadata:
-  version: "6"
+  version: "7"
 ---
 
 Definitions are semantic priors, never a required successful sequence. Use the supplied workflow definitions and preserve subtask_id, attempt, outcome and layer. Retrying a subtask creates another attempt, not a new identity. Success needs an observable evidence_note; intention/contact alone is insufficient. Use unknown for invisible outcomes, and unknown/other/background for unclassified segments. Never force all time into a task.
@@ -12,3 +12,5 @@ Coarse observations locate candidates only. During boundary_refinement, use dens
 Keep evidence_note short and independently checkable. Do not output private reasoning. Subtask completion and episode outcome are different; an overall failed episode can contain successful attempts. Overlap follows the declared layer policy. Do not invent unseen masks, events or signals.
 
 Recorded signals (gripper close/open, height turns, still spans) time what the robot did, to the frame. They are neither boundaries nor attempts: how a subtask starts, ends and repeats is set by the workflow definitions, and a gripper cycle may be part of one attempt or several. An attempt is one continuous engagement with an object: re-closing, adjusting, or a small lift straight back onto the same spot is the same attempt; letting go and leaving (clear of the object with a visible gap, or off elsewhere) ends it. Each attempt is its own interval with its own outcome (failure when the effector leaves without the object; unknown only when the recording does not show which), the move to the next contact is a new approach, and two intervals of one subtask never meet. Decide from the frames and the definitions; use the signals to see when something happened between two tiles.
+
+The plan's definitions are the dataset's subtask vocabulary -- by default LEVI's built-in manipulation vocabulary (object-transfer phases approach, grasp, transport, place, retreat, then contact skills such as push, open, rotate, insert, pour, wipe, fold). Use its ids; a word you would use that is an alias names the entry to use. Only when no entry fits what the frames show, add one with `new_subtasks` (id, definition, starts_when, ends_when, success_when) in the same propose call: LEVI refuses an existing id or alias and names the one to use, keeps the addition for the rest of the run, and adds it to the dataset's vocabulary when a person commits.
