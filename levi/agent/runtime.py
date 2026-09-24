@@ -65,6 +65,21 @@ def snap_to_episode(output, summary):
     return output.model_copy(update={"proposals": proposals})
 
 
+class EpisodeRejected(ValueError):
+    """Nothing in an unsupervised answer for one episode held up: the
+    episode is set aside and the run goes on (see ``Workbench._set_aside``)."""
+
+    def __init__(self, message, phase):
+        super().__init__(message)
+        self.phase = phase
+
+
+# Set-aside episodes beyond this share of the run point at the setup (prompt,
+# model, harness), not at a few hard episodes: the run blocks instead.
+SET_ASIDE_SHARE = 0.1
+SET_ASIDE_MIN = 3
+
+
 def anchor_to_draft(output, summary):
     """A refinement only sees frames within ``boundary_window_seconds`` of
     each draft boundary, so a boundary it moves further than that has no
@@ -367,7 +382,10 @@ class Workbench:
                     )
                 self.store.mutate("runs", id, lambda r: r.update(manifest=manifest))
             config = ProviderConfig.model_validate(run["provider_config"])
-            remaining = [ep for ep in context.episodes if ep not in run["completed"]]
+            # An episode set aside is not retried here: its rejected answer is
+            # beside the run for review, and a resumed run moves on.
+            done = {*run["completed"], *(f["episode"] for f in run.get("failed", []))}
+            remaining = [ep for ep in context.episodes if ep not in done]
             if pilot:
                 remaining = [
                     ep for ep in remaining if ep == run["plan"]["pilot_episode"]
@@ -410,155 +428,165 @@ class Workbench:
                 # model_step enforces fresh-call budgets after checking its
                 # persisted cache. A teacher-approved cached phase can resume
                 # even when the preceding request consumed the final reservation.
-                from . import observations
+                try:
+                    from . import observations
 
-                summary, evidence = observations.observe(
-                    context, directory / "input", episode, directory / "evidence"
-                )
-                summary["workflow"] = context.workflow
-                observations.persist(self, id, episode, summary, evidence)
-                output, usage = self.model_step(
-                    id, config, context, summary, evidence, "coarse", started
-                )
-                if context.workflow["kind"] == "temporal":
-                    # The model's own boundaries, plus the published harness
-                    # windows where the picture changed most -- the same
-                    # learned policy an external agent gets from refine_first.
-                    # ...all within what the model's context window holds,
-                    # measured from the coarse call it just made.
-                    from levi.inference import request_cost
+                    summary, evidence = observations.observe(
+                        context, directory / "input", episode, directory / "evidence"
+                    )
+                    summary["workflow"] = context.workflow
+                    observations.persist(self, id, episode, summary, evidence)
+                    output, usage = self.model_step(
+                        id, config, context, summary, evidence, "coarse", started
+                    )
+                    if context.workflow["kind"] == "temporal":
+                        # The model's own boundaries, plus the published harness
+                        # windows where the picture changed most -- the same
+                        # learned policy an external agent gets from refine_first.
+                        # ...all within what the model's context window holds,
+                        # measured from the coarse call it just made.
+                        from levi.inference import request_cost
 
-                    costs = request_cost.fitted(config)
-                    if costs is None and config.kind == "ollama":
-                        costs, spent = request_cost.calibrate(
+                        costs = request_cost.fitted(config)
+                        if costs is None and config.kind == "ollama":
+                            costs, spent = request_cost.calibrate(
+                                config,
+                                json.dumps(summary, ensure_ascii=False)[:4000],
+                                [
+                                    directory / "evidence" / row["artifact"]
+                                    for row in evidence
+                                    if row.get("artifact")
+                                ],
+                            )
+                            self.store.mutate(
+                                "runs",
+                                id,
+                                lambda r, spent=spent: r.update(
+                                    requests=r["requests"] + 2,
+                                    tokens=r["tokens"] + spent,
+                                ),
+                            )
+                            self.store.event(
+                                id, "request_cost_calibrated", tokens=spent, fit=costs
+                            )
+                        limit = observations.image_limit(
                             config,
-                            json.dumps(summary, ensure_ascii=False)[:4000],
-                            [
-                                directory / "evidence" / row["artifact"]
-                                for row in evidence
-                                if row.get("artifact")
-                            ],
+                            usage,
+                            evidence,
+                            output.model_dump(),
+                            sum(map(len, observations.skills(context).values()))
+                            + len(json.dumps(summary, ensure_ascii=False)),
+                            costs,
                         )
-                        self.store.mutate(
-                            "runs",
-                            id,
-                            lambda r, spent=spent: r.update(
-                                requests=r["requests"] + 2,
-                                tokens=r["tokens"] + spent,
-                            ),
-                        )
-                        self.store.event(
-                            id, "request_cost_calibrated", tokens=spent, fit=costs
-                        )
-                    limit = observations.image_limit(
-                        config,
-                        usage,
-                        evidence,
-                        output.model_dump(),
-                        sum(map(len, observations.skills(context).values()))
-                        + len(json.dumps(summary, ensure_ascii=False)),
-                        costs,
-                    )
-                    batches = observations.plan_refinement(
-                        self,
-                        self.store.get("runs", id),
-                        episode,
-                        output.proposals,
-                        limit,
-                        len(evidence),
-                    )
-                    finest = observations.refine_spacings(context)[0]
-                    for number, batch in enumerate(batches, 1):
-                        if batch.windows:
-                            self.store.event(
-                                id,
-                                "harness_refinement",
-                                episode=episode,
-                                around=batch.windows,
-                            )
-                        if batch.spacing != finest or len(batches) > 1:
-                            self.store.event(
-                                id,
-                                "refinement_coarsened",
-                                episode=episode,
-                                spacing_seconds=batch.spacing,
-                                image_limit=limit,
-                                batch=number,
-                                batches=len(batches),
-                            )
-                        refined_summary, dense = observations.observe(
-                            context,
-                            directory / "input",
+                        batches = observations.plan_refinement(
+                            self,
+                            self.store.get("runs", id),
                             episode,
-                            directory / "evidence",
-                            batch.boundaries,
-                            batch.spacing,
+                            output.proposals,
+                            limit,
+                            len(evidence),
                         )
-                        refined_summary.update(
-                            workflow=context.workflow,
-                            candidate_draft=output.model_dump(),
-                            phase="boundary_refinement",
-                        )
-                        if batch.start is not None:
-                            count = len(batch.boundaries)
-                            refined_summary["refine_only"] = {
-                                "start": batch.start,
-                                "end": min(batch.end, refined_summary["end"]),
-                                "proposals": count,
-                                "instruction": f"Return all {count} draft "
-                                "proposals that start in [start, end), each with "
-                                "refined boundaries and outcome, and nothing "
-                                "else; the rest of the draft is refined "
-                                "separately.",
-                            }
-                        evidence = observations.persist(
-                            self, id, episode, summary, dense
-                        )
-                        # Only the requested window images go to refinement;
-                        # old evidence remains retrievable.
-                        part, usage = self.model_step(
-                            id,
-                            config,
-                            context,
-                            refined_summary,
-                            dense,
-                            "refine" if len(batches) == 1 else f"refine-{number}",
-                            started,
-                        )
-                        output = (
-                            part
-                            if batch.start is None
-                            else observations.merge(output, part, batch)
-                        )
-                quality = observations.quality(
-                    context, output.proposals, evidence, summary
-                )
-                self.store.put("quality", f"{id}:{episode}", quality)
-                if lease_lost.is_set() or not self.store.claim(id, owner):
-                    raise ValueError("Execution lease lost; result remains unpublished")
-                if self.store.get("runs", id)["control"] == "cancel":
-                    self.store.mutate(
-                        "runs", id, lambda r: r.update(status=RunStatus.CANCELLED)
+                        finest = observations.refine_spacings(context)[0]
+                        for number, batch in enumerate(batches, 1):
+                            if batch.windows:
+                                self.store.event(
+                                    id,
+                                    "harness_refinement",
+                                    episode=episode,
+                                    around=batch.windows,
+                                )
+                            if batch.spacing != finest or len(batches) > 1:
+                                self.store.event(
+                                    id,
+                                    "refinement_coarsened",
+                                    episode=episode,
+                                    spacing_seconds=batch.spacing,
+                                    image_limit=limit,
+                                    batch=number,
+                                    batches=len(batches),
+                                )
+                            refined_summary, dense = observations.observe(
+                                context,
+                                directory / "input",
+                                episode,
+                                directory / "evidence",
+                                batch.boundaries,
+                                batch.spacing,
+                            )
+                            refined_summary.update(
+                                workflow=context.workflow,
+                                candidate_draft=output.model_dump(),
+                                phase="boundary_refinement",
+                            )
+                            if batch.start is not None:
+                                count = len(batch.boundaries)
+                                refined_summary["refine_only"] = {
+                                    "start": batch.start,
+                                    "end": min(batch.end, refined_summary["end"]),
+                                    "proposals": count,
+                                    "instruction": f"Return all {count} draft "
+                                    "proposals that start in [start, end), each with "
+                                    "refined boundaries and outcome, and nothing "
+                                    "else; the rest of the draft is refined "
+                                    "separately.",
+                                }
+                            evidence = observations.persist(
+                                self, id, episode, summary, dense
+                            )
+                            # Only the requested window images go to refinement;
+                            # old evidence remains retrievable.
+                            part, usage = self.model_step(
+                                id,
+                                config,
+                                context,
+                                refined_summary,
+                                dense,
+                                "refine" if len(batches) == 1 else f"refine-{number}",
+                                started,
+                            )
+                            output = (
+                                part
+                                if batch.start is None
+                                else observations.merge(output, part, batch)
+                            )
+                    quality = observations.quality(
+                        context, output.proposals, evidence, summary
                     )
-                    return
-                self.store.put(
-                    "shards",
-                    f"{id}:{episode}",
-                    {"output": output.model_dump(), "usage": usage},
-                )
-                self.store.mutate(
-                    "runs",
-                    id,
-                    lambda r, episode=episode: r.update(
-                        completed=sorted(set(r["completed"] + [episode]))
-                    ),
-                )
-                self.store.event(
-                    id,
-                    "shard_completed",
-                    episode=episode,
-                    evidence_ids=[e["id"] for e in evidence],
-                )
+                    self.store.put("quality", f"{id}:{episode}", quality)
+                    if lease_lost.is_set() or not self.store.claim(id, owner):
+                        raise ValueError(
+                            "Execution lease lost; result remains unpublished"
+                        )
+                    if self.store.get("runs", id)["control"] == "cancel":
+                        self.store.mutate(
+                            "runs", id, lambda r: r.update(status=RunStatus.CANCELLED)
+                        )
+                        return
+                    self.store.put(
+                        "shards",
+                        f"{id}:{episode}",
+                        {"output": output.model_dump(), "usage": usage},
+                    )
+                    self.store.mutate(
+                        "runs",
+                        id,
+                        lambda r, episode=episode: r.update(
+                            completed=sorted(set(r["completed"] + [episode]))
+                        ),
+                    )
+                    self.store.event(
+                        id,
+                        "shard_completed",
+                        episode=episode,
+                        evidence_ids=[e["id"] for e in evidence],
+                    )
+                except EpisodeRejected as exc:
+                    # One episode the model could not answer validly must not
+                    # cost the others: set it aside for the human review and go
+                    # on. The pilot is the exception -- it exists to be looked at.
+                    if pilot:
+                        raise
+                    self._set_aside(id, context, episode, exc)
             self.prepare_changes(id)
             self.store.mutate("runs", id, lambda r: r.update(status=RunStatus.WAITING))
             # A model run is billed through LEVI, so its cost is recorded here
@@ -598,6 +626,7 @@ class Workbench:
                             OllamaError,
                             ContextOverflow,
                             InvalidAnswer,
+                            EpisodeRejected,
                         ),
                     )
                     else f"Execution blocked ({type(exc).__name__}); inspect provider configuration"
@@ -636,6 +665,28 @@ class Workbench:
             from levi.harness.closure import close_if_finished
 
             close_if_finished(self.store, id)
+
+    def _set_aside(self, id, context, episode, exc):
+        """Record an episode whose answer failed validation and decide whether
+        the run may go on without it."""
+        entry = {"episode": episode, "phase": exc.phase, "reason": str(exc)[:300]}
+        failed = self.store.mutate(
+            "runs",
+            id,
+            lambda r: r.update(
+                failed=[
+                    *(f for f in r.get("failed", []) if f["episode"] != episode),
+                    entry,
+                ]
+            ),
+        )["failed"]
+        self.store.event(id, "episode_set_aside", **entry)
+        allowed = max(SET_ASIDE_MIN, int(len(context.episodes) * SET_ASIDE_SHARE))
+        if len(failed) > allowed:
+            raise ValueError(
+                f"{len(failed)} episodes failed validation (more than {allowed}); "
+                f"last, episode {episode}: {entry['reason']}"
+            )
 
     def model_step(self, id, config, context, summary, evidence, phase, started):
         context = TaskContext.model_validate(context.model_dump())
@@ -886,7 +937,7 @@ class Workbench:
             id, "model_step", phase=phase, episode=summary["episode_index"], usage=usage
         )
         if problem is not None and not supervised:
-            raise problem
+            raise EpisodeRejected(str(problem), phase) from problem
         return gate(
             self,
             id,

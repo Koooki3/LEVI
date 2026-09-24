@@ -654,3 +654,100 @@ def test_without_a_teacher_the_valid_part_of_an_answer_goes_on(
     assert [p["content"] for p in shard["output"]["proposals"]] == ["good"]
     events = [e for e in wb.store.events(run["id"]) if e["type"] == "answer_salvaged"]
     assert events and events[0]["dropped"] == 2
+
+
+def _answers_by_episode(monkeypatch, bad_episodes):
+    """A provider whose answer for ``bad_episodes`` fails validation outright."""
+    from levi.agent.runtime import Workbench
+    from levi.agent.schema import ModelOutput
+    from levi.inference.provider import OllamaProvider
+
+    def answer(self, config, goal, summary, evidence, artifacts, budget):
+        episode = summary["episode_index"]
+        content = "bad" if episode in bad_episodes else "good"
+        proposal = {
+            "episode_index": episode,
+            "kind": "segment",
+            "content": content,
+            "start": 0.0,
+            "end": 0.1,
+            "evidence_ids": ["x"],
+            "outcome": "unknown",
+        }
+        return ModelOutput(summary="s", proposals=[proposal]), {
+            "requests": 1,
+            "tokens": 10,
+        }
+
+    def check(context, proposals, evidence, summary):
+        if any(p.content == "bad" for p in proposals):
+            raise ValueError("bad proposal")
+
+    monkeypatch.setattr(OllamaProvider, "generate", answer)
+    monkeypatch.setattr(Workbench, "validate_proposals", staticmethod(check))
+
+
+def _unsupervised_run(client, dataset):
+    from levi.agent.planning import approve
+
+    wb, context, _ = supervised_bench(client, dataset)
+    context = context.model_copy(
+        update={
+            "supervision": "none",
+            "teacher_grant": None,
+            "episodes": [0, 1],
+            "budget": Budget(max_calls=10),
+            "workflow": {**context.workflow, "require_human_pilot": False},
+        }
+    )
+    run = wb.plan(context)
+    approve(wb, run["id"], 1, "human")
+    assert wb.store.claim(run["id"], "test-run")
+    return wb, run["id"]
+
+
+def test_an_episode_with_no_valid_answer_is_set_aside_and_the_run_goes_on(
+    client, dataset, native, monkeypatch
+):
+    _answers_by_episode(monkeypatch, bad_episodes={0})
+    wb, run_id = _unsupervised_run(client, dataset)
+    wb.execute(run_id, "test-run", pilot=False)
+    run = wb.store.get("runs", run_id)
+    assert run["status"] == "waiting_for_review", run["reason"]
+    assert run["completed"] == [1]
+    assert [(f["episode"], f["phase"]) for f in run["failed"]] == [(0, "coarse")]
+    assert "bad proposal" in run["failed"][0]["reason"]
+    events = [e for e in wb.store.events(run_id) if e["type"] == "episode_set_aside"]
+    assert [e["episode"] for e in events] == [0]
+    # The rejected answer stays beside the run for the review.
+    assert (wb.store.run_dir(run_id) / "episode_000000-coarse-rejected.json").exists()
+    # A resumed run does not ask the model about it again.
+    wb.execute(run_id, "test-run", pilot=False)
+    assert wb.store.get("runs", run_id)["failed"] == run["failed"]
+
+
+def test_a_pilot_with_no_valid_answer_still_blocks(
+    client, dataset, native, monkeypatch
+):
+    _answers_by_episode(monkeypatch, bad_episodes={0})
+    wb, run_id = _unsupervised_run(client, dataset)
+    wb.execute(run_id, "test-run", pilot=True)
+    run = wb.store.get("runs", run_id)
+    assert run["status"] == "blocked"
+    assert run["reason"] == "bad proposal"
+    assert run["failed"] == []
+
+
+def test_too_many_set_aside_episodes_block_the_run(
+    client, dataset, native, monkeypatch
+):
+    from levi.agent import runtime
+
+    monkeypatch.setattr(runtime, "SET_ASIDE_MIN", 0)
+    _answers_by_episode(monkeypatch, bad_episodes={0, 1})
+    wb, run_id = _unsupervised_run(client, dataset)
+    wb.execute(run_id, "test-run", pilot=False)
+    run = wb.store.get("runs", run_id)
+    assert run["status"] == "blocked"
+    assert run["reason"].startswith("1 episodes failed validation (more than 0)")
+    assert run["completed"] == []

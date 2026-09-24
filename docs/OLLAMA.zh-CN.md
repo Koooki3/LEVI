@@ -69,7 +69,7 @@ curl -X POST -H "x-levi-ui-token: $(cat "$LEVI_WORKSPACE/outputs/LEVI/workbench/
 - 精修（refine）逐一返回草稿的区间并保持其子任务；移动超出计划边界窗口（即超出所给帧）的边界保留草稿值，区间保持顺序、相邻区间共享边界；
 - 输出额度随预期区间数增长。
 
-请求按模型量体裁衣：只发送紧凑证据行（id、图片序号、时间）；精修携带的图片数、每图与每字符的 token 成本都从本模型自己的计量请求中学习（`workbench/models/request-cost/<provider>.json`，首次用两次单 token 调用标定）。长 episode 分批精修，每批都在上下文与计划帧上限之内。仍然失败的答案保留其有效部分：有老师时连同原因交给老师；无老师时丢弃无效条目并记录（`answer_salvaged`）。无论答案是否有效，token 都会结算。
+请求按模型量体裁衣：只发送紧凑证据行（id、图片序号、时间）；精修携带的图片数、每图与每字符的 token 成本都从本模型自己的计量请求中学习（`workbench/models/request-cost/<provider>.json`，首次用两次单 token 调用标定）。长 episode 分批精修，每批都在上下文与计划帧上限之内。仍然失败的答案保留其有效部分：有老师时连同原因交给老师；无老师时丢弃无效条目并记录（`answer_salvaged`）。某条 episode 的答案一条有效的都没有时，这条 episode 被搁置（记入 `run.failed`，事件 `episode_set_aside`，被拒答案保留在 run 旁边），run 继续跑下一条；恢复 run 时不再重试它。试点仍会阻塞；被搁置的 episode 超过 10%（至少 3 条）时 run 也会阻塞，因为这说明问题出在配置而不是个别难例。无论答案是否有效，token 都会结算。
 
 ## 6. 模型从哪里学习
 
