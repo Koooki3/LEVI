@@ -199,8 +199,8 @@ def test_a_context_overflow_is_named_without_echoing_the_body():
         def __init__(self, body):
             self.body = body
 
-        def read(self):
-            return self.body
+        def iter_bytes(self):
+            yield self.body
 
     overflow = (
         b'{"error":"request (57535 tokens) exceeds the available context size '

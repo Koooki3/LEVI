@@ -1,4 +1,5 @@
-"""Human-controlled Ollama management; never exposed as self-approval MCP tools."""
+"""Human-controlled local-model management (Ollama, and inspect/bind for a
+local OpenAI-compatible server); never exposed as self-approval MCP tools."""
 
 from typing import Literal
 
@@ -57,7 +58,12 @@ def bind_model(name: str, payload: BindModel, request: Request):
 
 @router.post("/providers/{name}/ollama/download", status_code=202)
 def download_model(name: str, payload: DownloadModel, request: Request):
-    return models.start_download(human(request), name, payload.request_id)
+    store = human(request)
+    if models.configuration(store, name).kind != "ollama":
+        raise HTTPException(
+            409, "A local model server loads its own weights; LEVI does not download"
+        )
+    return models.start_download(store, name, payload.request_id)
 
 
 @router.get("/model-downloads")
@@ -134,6 +140,12 @@ class ModelMemory(Contract):
 def model_memory(name: str, payload: ModelMemory, request: Request):
     store = human(request)
     config = models.configuration(store, name)
+    if config.kind != "ollama":
+        raise HTTPException(
+            409,
+            "A local model server keeps its model loaded while it runs; start or "
+            "stop the server itself",
+        )
     if not config.model_digest:
         raise HTTPException(409, "Bind an installed model before managing its memory")
     if any(

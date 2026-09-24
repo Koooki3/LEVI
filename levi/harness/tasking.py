@@ -178,12 +178,15 @@ def path(state, key, task_id):
 
 def interpret(store, text, provider_name, *, principal=None):
     """Ask the learner for a spec, check it, and store it for approval."""
-    from levi.agent.schema import ProviderConfig
+    from levi.agent.schema import LOCAL_MODEL_KINDS, ProviderConfig
     from levi.inference.provider import client_for
 
     config = ProviderConfig.model_validate(store.get("providers", provider_name))
-    if config.kind != "ollama" or not config.model_digest:
-        raise ValueError("Natural-language tasks need a bound local Ollama model")
+    if config.kind not in LOCAL_MODEL_KINDS or not config.model_digest:
+        raise ValueError(
+            "Natural-language tasks need a bound local model (Ollama or a local "
+            "OpenAI-compatible server)"
+        )
     from levi.inference.gpu import require_free
 
     require_free(config)
@@ -196,6 +199,7 @@ def interpret(store, text, provider_name, *, principal=None):
         output_schema=TaskSpec.model_json_schema(),
         max_output_tokens=min(4096, config.context_tokens // 2),
         context_tokens=config.context_tokens,
+        think=config.think,
     )
     seconds = round(time.monotonic() - started, 2)
     try:

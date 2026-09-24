@@ -24,7 +24,7 @@ The channels differ in who runs the model and therefore who spends the tokens.
 | --- | --- | --- | --- |
 | **External MCP** | Your own agent (Claude Code, Codex, any MCP client) | Your agent's context; it reports its use, LEVI measures what it sent | `levi agent connect` |
 | **Online model** | Inside LEVI, against an OpenAI-compatible endpoint | Metered by LEVI on every request; the key comes from the environment variable the profile names (`key_env`, default `LEVI_MODEL_API_KEY`) and is never stored | Agent Workbench → Accounts & connections |
-| **Local model** | Inside LEVI, against a local Ollama model (default `qwen3.5:4b`) | Metered by LEVI; no API key, no cloud | [Local models](OLLAMA.md) |
+| **Local model** | Inside LEVI, against a local Ollama model (default `qwen3.5:4b`) or a local OpenAI-compatible server such as vLLM (`kind: openai-local`) | Metered by LEVI; no API key, no cloud | [Local models](OLLAMA.md) |
 | **Managed Pilot** | A Codex or Claude Code session LEVI supervises | That session | [Pilot](PILOT.md) |
 
 All four go through the same plan, evidence, validation, review and commit path.

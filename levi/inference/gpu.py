@@ -10,7 +10,12 @@ What it knows, from sampling ``nvidia-smi`` (no probing of anyone's process):
 - **Who is on the GPU.** Every compute process that is not Ollama's own is
   identified by a *signature*: its command without paths or run-specific
   arguments, so an actor restarted with a new checkpoint is still the same
-  workload. Each signature's appearances are kept as intervals.
+  workload. Each signature's appearances are kept as intervals. A local
+  OpenAI-compatible server a profile points at (vLLM) is that profile's own
+  model: its processes are recognised by the socket listening on the
+  profile's port, never by name, and that profile's requests do not wait for
+  them. To Ollama, and to a profile on another port, it is someone else's
+  work.
 - **What kind of work it is.** A policy (``models/gpu-policy.json``) classes
   signatures as ``protect`` (never share: latency-sensitive work such as a
   robot actor or a policy server), ``share`` (may coexist when memory and
@@ -30,18 +35,21 @@ What it does:
 - ``Watch`` samples every 15 s, every 2 s while a local model is resident.
   When a protected workload appears, resident models are unloaded at once and
   any request in flight fails as preempted; its phase resumes later from the
-  cache. When the GPU opens again, runs blocked by it are resumed.
+  cache. When the GPU opens again for a blocked run's profile, the run is
+  resumed.
 
 ``LEVI_GPU_SHARING=allow`` switches all of this off for a machine where the
 people involved have agreed to share.
 """
 
+import ipaddress
 import itertools
 import json
 import logging
 import os
 import re
 import shutil
+import socket
 import statistics
 import subprocess
 import threading
@@ -85,6 +93,75 @@ def _parent(pid):
         return int(fields[1])
     except (OSError, IndexError, ValueError):
         return None
+
+
+def server_ports(*configs):
+    """Ports of the local OpenAI-compatible servers these profiles point at:
+    whatever listens there is the model the profile runs, not someone
+    else's work."""
+    from urllib.parse import urlsplit
+
+    ports = set()
+    for config in configs:
+        if (
+            config is None
+            or config.kind != "openai-local"
+            or not local_endpoint(config.base_url)
+        ):
+            continue
+        parsed = urlsplit(config.base_url)
+        ports.add(parsed.port or (443 if parsed.scheme == "https" else 80))
+    return ports
+
+
+def _listening(ports):
+    """Inodes of the TCP sockets listening (state 0A) on ``ports``."""
+    inodes = set()
+    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            lines = Path(table).read_text().splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            fields = line.split()
+            if len(fields) < 10 or fields[3] != "0A":
+                continue
+            try:
+                port = int(fields[1].rsplit(":", 1)[1], 16)
+            except (IndexError, ValueError):
+                continue
+            if port in ports:
+                inodes.add(fields[9])
+    return inodes
+
+
+def _socket_inodes(pid):
+    inodes = set()
+    try:
+        fds = list(Path(f"/proc/{pid}/fd").iterdir())
+    except OSError:
+        return inodes
+    for fd in fds:
+        try:
+            link = os.readlink(fd)
+        except OSError:
+            continue
+        if link.startswith("socket:["):
+            inodes.add(link[8:-1])
+    return inodes
+
+
+def _serves(pid, inodes, depth=8):
+    """True when ``pid`` or one of its ancestors (``depth`` in all) holds a
+    listening socket in ``inodes``: the process is part of that server --
+    vLLM's engine core is a child of the API server that listens."""
+    for _ in range(depth):
+        if not pid or pid <= 1:
+            return False
+        if _socket_inodes(pid) & inodes:
+            return True
+        pid = _parent(pid)
+    return False
 
 
 def _is_ollama(pid, command):
@@ -138,8 +215,11 @@ def _int(value):
         return None
 
 
-def sample():
-    """One look at the GPU unless explicit CPU-only mode forbids probing."""
+def sample(servers=()):
+    """One look at the GPU unless explicit CPU-only mode forbids probing.
+
+    ``servers``: ports of the local model servers LEVI's profiles point at;
+    their processes are listed as ``served``, apart from anyone else's."""
     if os.getenv("LEVI_CPU_ONLY") == "1":
         return {
             "available": False,
@@ -161,7 +241,8 @@ def sample():
             "processes": [],
             "ours": [],
         }
-    processes, ours = [], []
+    processes, ours, served = [], [], []
+    inodes = _listening(set(servers)) if servers else set()
     for parts in apps:
         if len(parts) < 3 or not parts[0].isdigit():
             continue
@@ -172,6 +253,9 @@ def sample():
             ours.append(row)
             continue
         row["signature"] = signature(command)
+        if inodes and _serves(pid, inodes):
+            served.append(row)
+            continue
         processes.append(row)
     total = sum(_int(g[0]) or 0 for g in gpus if len(g) >= 3)
     used = sum(_int(g[1]) or 0 for g in gpus if len(g) >= 3)
@@ -181,6 +265,7 @@ def sample():
         "at": time.time(),
         "processes": processes,
         "ours": ours,
+        "served": served,
         "memory_total_mib": total,
         "memory_used_mib": used,
         "utilization": max(utils) if utils else None,
@@ -237,19 +322,32 @@ def record(now, history=None):
     with _HISTORY_LOCK:
         history = history if history is not None else _read(_history_path(), {})
         workloads = history.setdefault("workloads", {})
-        present = {row["signature"]: row for row in now.get("processes", [])}
+        # A local model server is on the GPU like any work: whether it counts
+        # is for each request to decide, so the history is the same whichever
+        # ports a sample was given.
+        present = {}
+        for row in now.get("processes", []) + now.get("served", []):
+            present.setdefault(row["signature"], []).append(row)
         at = now["at"]
-        for sig, row in present.items():
+        for sig, rows in present.items():
+            row = rows[-1]
             entry = workloads.setdefault(
                 sig, {"intervals": [], "example": row["command"]}
             )
             entry["example"] = row["command"]
             entry["memory_mib"] = row.get("memory_mib")
+            pids = sorted(r["pid"] for r in rows)
             intervals = entry["intervals"]
             if intervals and intervals[-1][1] is None:
-                continue  # still running
-            intervals.append([at, None])
-            del intervals[:-HISTORY_PER_SIGNATURE]
+                # Still running; but one of its processes leaving while another
+                # stays is a leave too, to a request whose own server is the
+                # one that stays (two vLLMs share a signature).
+                if set(entry.get("pids", pids)) - set(pids):
+                    entry["partly_left_at"] = at
+            else:
+                intervals.append([at, None])
+                del intervals[:-HISTORY_PER_SIGNATURE]
+            entry["pids"] = pids
         for sig, entry in workloads.items():
             intervals = entry["intervals"]
             if sig not in present and intervals and intervals[-1][1] is None:
@@ -346,7 +444,11 @@ def decide(now, history, rules, need_mib=None, at=None):
         if kind == "ignore":
             continue
         if kind == "share":
-            room = free_mib >= need + share["margin_mib"] or bool(now.get("ours"))
+            room = (
+                free_mib >= need + share["margin_mib"]
+                or bool(now.get("ours"))
+                or bool(now.get("served"))
+            )
             quiet = utilization is None or utilization <= share["max_utilization"]
             if room and quiet:
                 sharing.append(row)
@@ -371,9 +473,16 @@ def decide(now, history, rules, need_mib=None, at=None):
         if classify(sig, rules) != "protect":
             continue
         intervals = entry.get("intervals") or []
-        if not intervals or intervals[-1][1] is None:
+        if not intervals:
             continue
-        left = at - intervals[-1][1]
+        left_at = intervals[-1][1]
+        if left_at is None:
+            # On the GPU as the requester's own server (anyone else's made it
+            # busy above), yet another process of it may just have left.
+            left_at = entry.get("partly_left_at")
+            if left_at is None:
+                continue
+        left = at - left_at
         quiet, basis = learned_quiet(entry)
         if left < quiet:
             waits.append((quiet - left, sig, left, quiet, basis))
@@ -407,9 +516,9 @@ def decide(now, history, rules, need_mib=None, at=None):
     }
 
 
-def status(need_mib=None):
+def status(need_mib=None, servers=()):
     """Sample, remember and decide: what the guardian thinks right now."""
-    now = sample()
+    now = sample(servers)
     history = (
         record(now)
         if now.get("available") and not now.get("error")
@@ -419,11 +528,33 @@ def status(need_mib=None):
     verdict["sampled_at"] = now["at"]
     verdict["processes"] = now.get("processes", [])
     verdict["ours"] = now.get("ours", [])
+    verdict["served"] = now.get("served", [])
     return verdict
 
 
 def local_endpoint(base_url):
-    return any(h in (base_url or "") for h in ("127.0.0.1", "localhost", "[::1]"))
+    """True when ``base_url`` reaches this machine however it is spelled
+    (``localhost``, ``127.0.1.1``, the host's own name, ``[::1]``): its model
+    computes on this GPU. A name that does not resolve counts as local --
+    guarding it costs a wait, not guarding it could cost someone's run."""
+    from urllib.parse import urlsplit
+
+    try:
+        host = urlsplit(base_url or "").hostname
+    except ValueError:
+        return False
+    if not host:
+        return False
+    try:
+        rows = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except (OSError, UnicodeError):
+        return True
+    for row in rows:
+        address = ipaddress.ip_address(row[4][0].split("%", 1)[0])
+        mapped = getattr(address, "ipv4_mapped", None)
+        if address.is_loopback or (mapped is not None and mapped.is_loopback):
+            return True
+    return False
 
 
 def require_free(config=None):
@@ -434,7 +565,7 @@ def require_free(config=None):
         return None
     if config is not None and not local_endpoint(config.base_url):
         return None
-    verdict = status()
+    verdict = status(servers=server_ports(config))
     if verdict["state"] in {"free", "shared"}:
         return verdict
     wait = verdict.get("wait_seconds")
@@ -513,12 +644,17 @@ class Watch:
             ):
                 yield config
 
-    def resume_blocked(self):
-        """Runs the guardian stopped go on once the GPU is clear, one per tick."""
+    def resume_blocked(self, verdict=None):
+        """Runs the guardian stopped go on once the GPU is clear for them, one
+        per tick. Clear as the run's own profile sees it: to an Ollama run a
+        local server is someone else's work, to a run on that server it is
+        its own model (``verdict``: the view of a profile with no server)."""
         if self.workbench is None:
             return None
         from levi.agent.runtime import _ACTIVE
+        from levi.agent.schema import ProviderConfig
 
+        views = {frozenset(): verdict} if verdict else {}
         for run in self.store.list("runs"):
             if run.get("status") != "blocked" or run.get("blocked_by") != "gpu":
                 continue
@@ -530,6 +666,15 @@ class Watch:
             if not accepted and plan.get("pilot_episode") in done:
                 continue  # waiting for a person to review the pilot, not for the GPU
             try:
+                config = ProviderConfig.model_validate(run.get("provider_config"))
+            except ValueError:
+                config = None
+            ports = frozenset(server_ports(config))
+            if ports not in views:
+                views[ports] = status(servers=ports)
+            if views[ports]["state"] not in {"free", "shared"}:
+                continue
+            try:
                 self.workbench.launch(run["id"], pilot=not accepted)
                 return run["id"]
             except Exception as exc:  # noqa: BLE001 - leave it blocked, say why
@@ -539,6 +684,9 @@ class Watch:
     def tick(self):
         if os.getenv("LEVI_GPU_SHARING") == "allow":
             return None
+        # As Ollama sees it: a local server a profile points at is someone
+        # else's work to Ollama, whose models are unloaded for it as for
+        # anyone's.
         verdict = status()
         self.last = verdict
         if verdict["state"] in {"busy", "unknown"} and verdict.get("ours") is not None:
@@ -548,10 +696,9 @@ class Watch:
             if dropped:
                 verdict["unloaded"] = dropped
                 LOG.info("GPU guardian unloaded %s: %s", dropped, verdict["reason"])
-        elif verdict["state"] in {"free", "shared"}:
-            resumed = self.resume_blocked()
-            if resumed:
-                verdict["resumed"] = resumed
+        resumed = self.resume_blocked(verdict)
+        if resumed:
+            verdict["resumed"] = resumed
         return verdict
 
     def interval(self):
@@ -580,9 +727,24 @@ class Watch:
             self.thread.join(timeout=5)
 
 
-def report():
+def configured_servers(store):
+    """Ports of the enabled openai-local profiles in ``store``."""
+    from levi.agent.schema import ProviderConfig
+
+    configs = []
+    for row in store.list("providers"):
+        try:
+            config = ProviderConfig.model_validate(row)
+        except ValueError:
+            continue
+        if config.enabled:
+            configs.append(config)
+    return server_ports(*configs)
+
+
+def report(servers=()):
     """What the guardian decides now, and what it has learned about each workload."""
-    verdict = status()
+    verdict = status(servers=servers)
     history = _read(_history_path(), {})
     rules = policy()
     workloads = []
@@ -603,10 +765,11 @@ def report():
         )
     return {
         "decision": {
-            k: v for k, v in verdict.items() if k not in {"processes", "ours"}
+            k: v for k, v in verdict.items() if k not in {"processes", "ours", "served"}
         },
         "on_gpu": verdict.get("processes", []),
         "local_model_resident": bool(verdict.get("ours")),
+        "local_servers": verdict.get("served", []),
         "local_model_memory_mib": history.get("ours_memory_mib"),
         "workloads": workloads,
         "policy": rules,

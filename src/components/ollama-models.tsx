@@ -6,7 +6,14 @@ import { T, useLocale } from "./levi-locale";
 
 type Inventory = {
   version: string;
-  model: { name: string; digest: string; size: number } | null;
+  model: {
+    name: string;
+    digest: string;
+    size: number;
+    // A local OpenAI-compatible server: the weights it serves and its context.
+    root?: string | null;
+    max_model_len?: number | null;
+  } | null;
   capabilities: string[];
   digest_matches: boolean;
 };
@@ -49,6 +56,10 @@ export default function OllamaModels({
   refresh: () => Promise<void>;
 }) {
   const { t } = useLocale();
+  // A local OpenAI-compatible server (vLLM) is inspected and bound the same
+  // way, but it loads its own weights and keeps them resident while it runs:
+  // no download and no memory management here.
+  const server = connection.kind === "openai-local";
   const [inventory, setInventory] = useState<Inventory | null>(null);
   const [downloads, setDownloads] = useState<Download[]>([]);
   const [confirmed, setConfirmed] = useState(false);
@@ -65,6 +76,7 @@ export default function OllamaModels({
     setStructured(false);
   }, [connection.base_url, connection.model]);
   useEffect(() => {
+    if (server) return;
     let disposed = false;
     const load = () =>
       request<Download[]>("/model-downloads")
@@ -81,7 +93,7 @@ export default function OllamaModels({
       disposed = true;
       clearInterval(timer);
     };
-  }, [connection.name]);
+  }, [connection.name, server]);
   async function action(fn: () => Promise<void>) {
     setBusy(true);
     setError("");
@@ -100,13 +112,22 @@ export default function OllamaModels({
     <T>
       <section
         className="levi-connection-card"
-        aria-label={t("Local Ollama models")}
+        aria-label={t(server ? "Local server model" : "Local Ollama models")}
       >
-        <h4>Local Ollama models</h4>
-        <p className="levi-agent-muted">
-          External service: model storage and process lifecycle are managed by
-          Ollama. LEVI does not stop this service or guess its model directory.
-        </p>
+        <h4>{t(server ? "Local server model" : "Local Ollama models")}</h4>
+        {server ? (
+          <p className="levi-agent-muted">
+            External server: its weights, context and GPU memory belong to the
+            process that serves it. LEVI inspects and binds what it serves; it
+            never downloads, loads or stops it.
+          </p>
+        ) : (
+          <p className="levi-agent-muted">
+            External service: model storage and process lifecycle are managed by
+            Ollama. LEVI does not stop this service or guess its model
+            directory.
+          </p>
+        )}
         <p className="levi-agent-muted">
           No model inference or automatic download occurs when opening this
           panel.
@@ -129,20 +150,49 @@ export default function OllamaModels({
         {inventory && (
           <div>
             <p>
-              Ollama {inventory.version} ·{" "}
-              {t(inventory.model ? "Model installed" : "Model not installed")}
+              {server ? t("Server") : "Ollama"} {inventory.version} ·{" "}
+              {t(
+                inventory.model
+                  ? server
+                    ? "Model served"
+                    : "Model installed"
+                  : server
+                    ? "Model not served"
+                    : "Model not installed",
+              )}
             </p>
             {inventory.model && (
               <>
-                <p>
-                  {inventory.model.name} ·{" "}
-                  {(inventory.model.size / 1024 ** 3).toFixed(2)} GiB
-                </p>
+                {server ? (
+                  <>
+                    <p>
+                      {inventory.model.name} · {t("Served context")}{" "}
+                      {inventory.model.max_model_len ?? t("Unknown")}
+                    </p>
+                    {inventory.model.root && (
+                      <p className="levi-agent-endpoint">
+                        {inventory.model.root}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p>
+                    {inventory.model.name} ·{" "}
+                    {(inventory.model.size / 1024 ** 3).toFixed(2)} GiB
+                  </p>
+                )}
                 <p className="levi-agent-endpoint">{inventory.model.digest}</p>
-                <p>
-                  {t("Service-declared capabilities")} ·{" "}
-                  {inventory.capabilities.join(", ") || t("Unknown")}
-                </p>
+                {server ? (
+                  <p>
+                    The server declares no capabilities; confirm them for this
+                    model.
+                  </p>
+                ) : (
+                  <p>
+                    {t("Service-declared capabilities")} ·{" "}
+                    {inventory.capabilities.join(", ") || t("Unknown")}
+                  </p>
+                )}
                 <p className="levi-agent-muted">
                   Declared capabilities are not a quality evaluation. Binding a
                   new digest requires a new task plan.
@@ -159,7 +209,9 @@ export default function OllamaModels({
                   <input
                     type="checkbox"
                     checked={vision}
-                    disabled={!inventory.capabilities.includes("vision")}
+                    disabled={
+                      !server && !inventory.capabilities.includes("vision")
+                    }
                     onChange={(e) => setVision(e.target.checked)}
                   />
                   Model supports image input
@@ -179,16 +231,20 @@ export default function OllamaModels({
                   }
                 >
                   {t(
-                    inventory.digest_matches
-                      ? "Rebind installed model"
-                      : "Bind installed model",
+                    server
+                      ? inventory.digest_matches
+                        ? "Rebind served model"
+                        : "Bind served model"
+                      : inventory.digest_matches
+                        ? "Rebind installed model"
+                        : "Bind installed model",
                   )}
                 </button>
               </>
             )}
           </div>
         )}
-        {connection.model_digest && (
+        {connection.model_digest && !server && (
           <div>
             <p className="levi-agent-muted">
               This request may initialize model hardware. It will not download a
@@ -229,40 +285,42 @@ export default function OllamaModels({
             )}
           </div>
         )}
-        <details>
-          <summary>Download model explicitly</summary>
-          <p>
-            {connection.model} · {connection.base_url}
-          </p>
-          <p className="levi-agent-muted">
-            The Ollama service will access its model registry. Review the model
-            license and available disk space first. Download size is not GPU
-            memory usage.
-          </p>
-          <label className="levi-agent-check">
-            <input
-              type="checkbox"
-              checked={confirmed}
-              onChange={(e) => setConfirmed(e.target.checked)}
-            />
-            I authorize this model download and have reviewed its license
-          </label>
-          <button
-            disabled={busy || active || !confirmed || !connection.enabled}
-            onClick={() =>
-              void action(async () => {
-                const job = await request<Download>(path + "/download", {
-                  request_id: crypto.randomUUID(),
-                  approve_download: true,
-                });
-                setDownloads((rows) => [...rows, job]);
-                setConfirmed(false);
-              })
-            }
-          >
-            Start model download
-          </button>
-        </details>
+        {!server && (
+          <details>
+            <summary>Download model explicitly</summary>
+            <p>
+              {connection.model} · {connection.base_url}
+            </p>
+            <p className="levi-agent-muted">
+              The Ollama service will access its model registry. Review the
+              model license and available disk space first. Download size is not
+              GPU memory usage.
+            </p>
+            <label className="levi-agent-check">
+              <input
+                type="checkbox"
+                checked={confirmed}
+                onChange={(e) => setConfirmed(e.target.checked)}
+              />
+              I authorize this model download and have reviewed its license
+            </label>
+            <button
+              disabled={busy || active || !confirmed || !connection.enabled}
+              onClick={() =>
+                void action(async () => {
+                  const job = await request<Download>(path + "/download", {
+                    request_id: crypto.randomUUID(),
+                    approve_download: true,
+                  });
+                  setDownloads((rows) => [...rows, job]);
+                  setConfirmed(false);
+                })
+              }
+            >
+              Start model download
+            </button>
+          </details>
+        )}
         {downloads.map((job) => (
           <article key={job.id} aria-label={job.id}>
             <p>
@@ -308,10 +366,12 @@ export default function OllamaModels({
             )}
           </article>
         ))}
-        <p className="levi-agent-muted">
-          Cancellation closes LEVI&apos;s download stream; a download shared
-          with another Ollama client may continue.
-        </p>
+        {!server && (
+          <p className="levi-agent-muted">
+            Cancellation closes LEVI&apos;s download stream; a download shared
+            with another Ollama client may continue.
+          </p>
+        )}
       </section>
     </T>
   );

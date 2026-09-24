@@ -3,7 +3,7 @@
 from typing import Protocol
 from urllib.parse import urlsplit
 
-from .schema import ModelOutput, ProviderConfig
+from .schema import LOCAL_MODEL_KINDS, ModelOutput, ProviderConfig
 from .security import endpoint_addresses
 
 
@@ -25,10 +25,10 @@ class RoutedProvider:
     """Keep provider selection outside task execution and dataset semantics."""
 
     def generate(self, config, *args):
-        if config.kind == "ollama":
-            from levi.inference.provider import OllamaProvider
+        if config.kind in LOCAL_MODEL_KINDS:
+            from levi.inference.provider import LocalProvider
 
-            return OllamaProvider().generate(config, *args)
+            return LocalProvider().generate(config, *args)
         return CompatibleProvider().generate(config, *args)
 
 

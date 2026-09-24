@@ -1,6 +1,7 @@
 """Durable, bounded single-orchestrator execution over existing LEVI services."""
 
 import json
+import math
 import sqlite3
 import threading
 import time
@@ -12,7 +13,14 @@ from datetime import UTC, datetime
 from . import media
 from .formats import ANNOTATIONS, DATASETS
 from .providers import RoutedProvider
-from .schema import ChangeSet, ModelOutput, ProviderConfig, RunStatus, TaskContext
+from .schema import (
+    LOCAL_MODEL_KINDS,
+    ChangeSet,
+    ModelOutput,
+    ProviderConfig,
+    RunStatus,
+    TaskContext,
+)
 from .store import Conflict, Store, annotation_digest, digest, file_hash, pin
 
 
@@ -52,16 +60,37 @@ def new_id(taken=()):
 def snap_to_episode(output, summary):
     """Timestamps are float32 in the data and decimals in an answer: an
     interval written to end at 11.2 s when the last frame is 11.1999998 s
-    ends at the last frame. Only a sub-millisecond overshoot is snapped."""
-    end = summary.get("end")
+    ends at the last frame. Only a sub-millisecond overshoot is snapped, at
+    either edge and for starts as well as ends.
+
+    A model phase covers one episode, so the episode a proposal names is
+    redundant: it is set to the phase's episode (citing another episode's
+    evidence is still refused). Boundary candidates are hints for dense
+    refinement; one outside the episode is dropped, not the proposal."""
+    start, end = summary.get("start"), summary.get("end")
     if end is None:
         return output
-    proposals = [
-        p.model_copy(update={"end": end})
-        if p.end is not None and end < p.end <= end + 1e-3
-        else p
-        for p in output.proposals
-    ]
+    first = start if start is not None else float("-inf")
+
+    def snapped(t):
+        if t is None:
+            return t
+        if end < t <= end + 1e-3:
+            return end
+        if first - 1e-3 <= t < first:
+            return first
+        return t
+
+    proposals = []
+    for p in output.proposals:
+        update = {"start": snapped(p.start), "end": snapped(p.end)}
+        if summary.get("episode_index") is not None:
+            update["episode_index"] = summary["episode_index"]
+        candidates = [snapped(t) for t in p.boundary_candidates]
+        update["boundary_candidates"] = [
+            t for t in candidates if math.isfinite(t) and first <= t <= end
+        ]
+        proposals.append(p.model_copy(update=update))
     return output.model_copy(update={"proposals": proposals})
 
 
@@ -175,10 +204,10 @@ class Workbench:
             )
             if not config.enabled:
                 raise ValueError("Provider is disconnected")
-            if config.kind == "ollama":
+            if config.kind in LOCAL_MODEL_KINDS:
                 if not config.structured_output or not config.model_digest:
                     raise ValueError(
-                        "Inspect and bind an installed Ollama model digest and enable structured output before planning"
+                        "Inspect and bind the local model's digest and enable structured output before planning"
                     )
             elif not config.tools:
                 raise ValueError("Provider must declare structured tool-call support")
@@ -448,7 +477,7 @@ class Workbench:
                         from levi.inference import request_cost
 
                         costs = request_cost.fitted(config)
-                        if costs is None and config.kind == "ollama":
+                        if costs is None and config.kind in LOCAL_MODEL_KINDS:
                             costs, spent = request_cost.calibrate(
                                 config,
                                 json.dumps(summary, ensure_ascii=False)[:4000],
@@ -823,8 +852,10 @@ class Workbench:
             )
         except InvalidAnswer as exc:
             problem, raw, usage = exc, exc.raw, exc.usage
-            output = exc.salvaged or ModelOutput(
-                summary="(the answer did not parse; see learner_raw)"
+            output = (
+                snap_to_episode(exc.salvaged, summary)
+                if exc.salvaged
+                else ModelOutput(summary="(the answer did not parse; see learner_raw)")
             )
         except BaseException:
             # No answer and no reported usage: give the reservation back and

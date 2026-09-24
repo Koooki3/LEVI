@@ -37,12 +37,20 @@ class Budget(Contract):
     max_artifact_bytes: int = Field(default=256 * 1024 * 1024, ge=1)
 
 
+# Models LEVI runs on this machine through its own hardened path (narrowed
+# output schema, compact evidence, request-cost sizing, GPU guard): Ollama,
+# or a local OpenAI-compatible server such as vLLM ("openai-local").
+LOCAL_MODEL_KINDS = frozenset({"ollama", "openai-local"})
+# The most one model call may reserve (its whole context window).
+MAX_CONTEXT_TOKENS = 131072
+
+
 class ProviderConfig(Contract):
     name: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$")
     enabled: bool = True
-    kind: Literal["openai-compatible", "ollama"] = "openai-compatible"
+    kind: Literal["openai-compatible", "ollama", "openai-local"] = "openai-compatible"
     model_digest: str | None = Field(default=None, pattern=r"^(sha256:)?[a-f0-9]{64}$")
-    context_tokens: int = Field(default=8192, ge=1024, le=131072)
+    context_tokens: int = Field(default=8192, ge=1024, le=MAX_CONTEXT_TOKENS)
     base_url: str
     model: str = Field(min_length=1, max_length=200)
     key_env: str = Field(default="LEVI_MODEL_API_KEY", pattern=r"^[A-Z][A-Z0-9_]*$")
@@ -50,6 +58,31 @@ class ProviderConfig(Contract):
     tools: bool = False
     structured_output: bool = False
     allow_localhost: bool = False
+    # Local models: what one request may carry -- at most this many images
+    # (a server's per-prompt limit, e.g. vLLM's --limit-mm-per-prompt), each
+    # sent with its longer side at most this many pixels. The evidence files
+    # keep their native size; only the copy sent is scaled.
+    max_images: int | None = Field(default=None, ge=1, le=1000)
+    image_max_side: int | None = Field(default=None, ge=128, le=4096)
+    # Let the model reason before its schema-bound answer (off: it costs
+    # tokens and time the structured answer rarely needs).
+    think: bool = False
+    # openai-local: send the system prompt as the start of the first user
+    # turn, for chat templates that refuse a system role (Molmo2).
+    fold_system: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _local_key(cls, data):
+        # A local server's optional key has a variable of its own, so a cloud
+        # key set for an online profile never reaches a loopback port.
+        if (
+            isinstance(data, dict)
+            and data.get("kind") == "openai-local"
+            and "key_env" not in data
+        ):
+            return {**data, "key_env": "LEVI_LOCAL_MODEL_KEY"}
+        return data
 
 
 class TaskContext(Contract):

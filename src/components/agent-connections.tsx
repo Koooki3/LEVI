@@ -7,9 +7,13 @@ import HfAuthButton from "./hf-auth-button";
 import { T, useLocale } from "./levi-locale";
 
 export type Connection = {
-  kind?: "openai-compatible" | "ollama";
+  kind?: "openai-compatible" | "ollama" | "openai-local";
   model_digest?: string | null;
   context_tokens?: number;
+  max_images?: number | null;
+  image_max_side?: number | null;
+  think?: boolean;
+  fold_system?: boolean;
   name: string;
   model: string;
   base_url: string;
@@ -209,7 +213,7 @@ export default function AgentConnections({
                 Remove configuration
               </button>
             </div>
-            {p.kind === "ollama" && (
+            {(p.kind === "ollama" || p.kind === "openai-local") && (
               <OllamaModels connection={p} refresh={refresh} />
             )}
             {credentialFor === p.name && (

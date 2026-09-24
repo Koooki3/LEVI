@@ -10,7 +10,8 @@ enough to fit, ``calibrate`` measures it directly with two one-token calls.
 
 Ollama may count only the prompt tokens it did not have cached, so samples
 can under-state a prompt that shares a prefix with the call before it; the
-margin and the context headroom the harness keeps absorb that.
+margin and the context headroom the harness keeps absorb that. (vLLM counts
+the whole prompt.)
 """
 
 import numpy as np
@@ -28,7 +29,11 @@ def _path(config):
 
 
 def _key(config):
-    return f"{config.model}@{config.model_digest or ''}"
+    # Images sent smaller cost fewer tokens: a fit holds for one image size.
+    side = getattr(config, "image_max_side", None)
+    return f"{config.model}@{config.model_digest or ''}" + (
+        f"@{side}px" if side else ""
+    )
 
 
 def record(config, chars, images, tokens):
@@ -62,15 +67,13 @@ def calibrate(config, text, image_paths):
 
     Returns (fit or None, tokens spent), so the caller can bill the run.
     """
-    import base64
     import secrets
 
     from .gpu import require_free
-    from .provider import client_for
+    from .provider import client_for, encode_image
 
-    images = [
-        base64.b64encode(path.read_bytes()).decode("ascii") for path in image_paths[:2]
-    ]
+    # Priced as they are sent (downscaled when the profile says so).
+    images = [encode_image(path, config) for path in image_paths[:2]]
     if len(images) < 2:
         return None, 0
     spent = 0

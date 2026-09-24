@@ -125,3 +125,26 @@ def test_usage_missing_is_unknown_not_zero():
         "source": "reported",
     }
     assert transport.calls[-1][2]["options"]["num_predict"] == 100
+
+
+def test_where_the_time_went_is_kept_when_reported():
+    transport = FakeTransport()
+    transport.response.update(
+        prompt_eval_count=100,
+        eval_count=20,
+        load_duration=2_500_000_000,
+        prompt_eval_duration=400_000_000,
+        eval_duration=1_200_000_000,
+    )
+    usage = OllamaClient(transport).chat(
+        "qwen3.5:4b", "fixture-digest", [], output_schema={}, max_output_tokens=100
+    )["usage"]
+    assert (
+        usage["load_seconds"],
+        usage["prefill_seconds"],
+        usage["decode_seconds"],
+    ) == (
+        2.5,
+        0.4,
+        1.2,
+    )

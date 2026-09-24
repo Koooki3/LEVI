@@ -31,7 +31,7 @@ def provider_kind(run):
         return "pilot"
     provider = run.get("provider_config") or {}
     kind = provider.get("kind") or context.get("provider")
-    if kind in {"external", "local-tools", "ollama"}:
+    if kind in {"external", "local-tools", "ollama", "openai-local"}:
         return kind
     return "api"
 

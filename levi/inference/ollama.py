@@ -178,6 +178,18 @@ class OllamaClient:
             raise OllamaError("Missing model response content")
         counts = [response.get("prompt_eval_count"), response.get("eval_count")]
         reported = all(type(value) is int and value >= 0 for value in counts)
+        # Where the call's time went (Ollama reports nanoseconds): loading the
+        # model, reading the prompt, writing the answer. Compared across
+        # models, these say more than the wall time around the call.
+        durations = {
+            name: round(response[key] / 1e9, 3)
+            for key, name in (
+                ("load_duration", "load_seconds"),
+                ("prompt_eval_duration", "prefill_seconds"),
+                ("eval_duration", "decode_seconds"),
+            )
+            if type(response.get(key)) is int and response[key] >= 0
+        }
         return {
             "content": message["content"],
             "tool_calls": message.get("tool_calls", []),
@@ -185,5 +197,6 @@ class OllamaClient:
                 "tokens": sum(counts) if reported else None,
                 "prompt_tokens": counts[0] if reported else None,
                 "source": "reported" if reported else "unknown",
+                **durations,
             },
         }

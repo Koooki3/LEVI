@@ -264,3 +264,195 @@ def test_the_report_explains_itself(monkeypatch):
     assert value["decision"]["state"] == "busy"
     assert value["workloads"][0]["class"] == "protect"
     assert json.dumps(value)
+
+
+def vllm(url="http://127.0.0.1:8000"):
+    return ProviderConfig(
+        name="vllm",
+        kind="openai-local",
+        base_url=url,
+        model="qwen3.8-27b",
+        vision=True,
+        structured_output=True,
+        allow_localhost=True,
+    )
+
+
+def serving(monkeypatch, port=8000, listener=100, family=None):
+    """A server whose process ``listener`` listens on ``port``; ``family``
+    maps pid -> parent."""
+    monkeypatch.setattr(
+        gpu, "_listening", lambda ports: {"4242"} if port in ports else set()
+    )
+    monkeypatch.setattr(
+        gpu, "_socket_inodes", lambda pid: {"4242"} if pid == listener else set()
+    )
+    monkeypatch.setattr(gpu, "_parent", lambda pid: (family or {}).get(pid))
+
+
+def test_the_local_server_a_profile_points_at_is_ours(monkeypatch):
+    # vLLM: the API server listens, its engine core (a child) holds the GPU.
+    on_gpu(
+        monkeypatch,
+        [(200, 20000)],
+        {200: "VLLM::EngineCore", 100: "python3 -m vllm serve /models/q"},
+    )
+    serving(monkeypatch, family={200: 100, 100: 1})
+    verdict = gpu.require_free(vllm())
+    assert verdict["state"] == "free" and [r["pid"] for r in verdict["served"]] == [200]
+    # For Ollama (or a profile on another port) it is someone else's work.
+    with pytest.raises(gpu.GpuBusy, match="protected"):
+        gpu.require_free(config())
+    with pytest.raises(gpu.GpuBusy, match="protected"):
+        gpu.require_free(vllm("http://127.0.0.1:8001"))
+    # Recorded as on the GPU whoever asked, so it never seems to have left.
+    assert gpu.require_free(vllm())["state"] == "free"
+    [(sig, seen)] = gpu._read(gpu._history_path(), {})["workloads"].items()
+    assert sig == "VLLM::EngineCore" and seen["intervals"][-1][1] is None
+
+
+def test_a_process_outside_the_server_still_blocks_it(monkeypatch):
+    on_gpu(
+        monkeypatch,
+        [(200, 20000), (300, 8000)],
+        {200: "VLLM::EngineCore", 300: ACTOR},
+    )
+    serving(monkeypatch, family={200: 100, 300: 1})
+    with pytest.raises(gpu.GpuBusy, match="conrft"):
+        gpu.require_free(vllm())
+
+
+def blocked(id, profile):
+    return {
+        "id": id,
+        "status": "blocked",
+        "blocked_by": "gpu",
+        "plan": {"pilot_episode": 0, "pilot_review": {"accepted": True}},
+        "completed": [],
+        "provider_config": profile.model_dump(),
+    }
+
+
+def test_the_watch_resumes_each_run_as_its_own_profile_sees_the_gpu(monkeypatch):
+    # LEVI's vLLM holds the GPU; an Ollama run and a run on vLLM wait for it.
+    on_gpu(monkeypatch, [(200, 20000)], {200: "VLLM::EngineCore"})
+    serving(monkeypatch, family={200: 100})
+    unloaded, launched = [], []
+    monkeypatch.setattr(
+        gpu, "unload_all", lambda c: unloaded.append(c.name) or ["qwen3.5:4b"]
+    )
+
+    class Bench:
+        def launch(self, run_id, pilot):
+            launched.append(run_id)
+
+    runs = [blocked("on-ollama", config()), blocked("on-vllm", vllm())]
+
+    class Profiles:
+        def list(self, kind):
+            if kind == "providers":
+                return [config().model_dump(), vllm().model_dump()]
+            return [r for r in runs if r["id"] not in launched]
+
+    watch = gpu.Watch(Profiles(), workbench=Bench())
+    # To Ollama the server is someone else's work: its models are unloaded
+    # and its run keeps waiting, tick after tick; the vLLM run goes on.
+    verdict = watch.tick()
+    assert verdict["state"] == "busy" and unloaded == ["qwen-local"]
+    assert verdict["resumed"] == "on-vllm"
+    assert watch.tick().get("resumed") is None and launched == ["on-vllm"]
+    value = gpu.report(gpu.configured_servers(Profiles()))
+    assert value["decision"]["state"] == "free"
+    assert [r["pid"] for r in value["local_servers"]] == [200]
+
+
+def test_a_foreign_listener_on_the_port_still_counts_for_ollama(monkeypatch):
+    # A robot policy server listening where a vLLM profile points (openpi's
+    # default is 8000) with the vLLM stopped: nothing it does may hide it.
+    policy = "python scripts/serve_policy.py --env DROID policy:checkpoint"
+    on_gpu(monkeypatch, [(300, 9000)], {300: policy}, at=1000)
+    serving(monkeypatch, listener=300)
+    unloaded = []
+    monkeypatch.setattr(
+        gpu, "unload_all", lambda c: unloaded.append(c.name) or ["qwen3.5:4b"]
+    )
+
+    class Profiles:
+        def list(self, kind):
+            if kind == "providers":
+                return [config().model_dump(), vllm().model_dump()]
+            return []
+
+    assert gpu.Watch(Profiles()).tick()["state"] == "busy"
+    assert unloaded == ["qwen-local"]
+    gpu.require_free(vllm())
+    # It stops between rounds: its history was kept, so Ollama cools down.
+    on_gpu(monkeypatch, [], {}, at=1010)
+    with pytest.raises(gpu.GpuBusy, match="cooling"):
+        gpu.require_free(config())
+
+
+def test_a_same_named_process_leaving_beside_the_own_server_cools(monkeypatch):
+    # Someone else's vLLM (another port) beside LEVI's: the same signature.
+    engine = "VLLM::EngineCore"
+    on_gpu(
+        monkeypatch, [(200, 20000), (400, 9000)], {200: engine, 400: engine}, at=1000
+    )
+    serving(monkeypatch, family={200: 100, 400: 1})
+    with pytest.raises(gpu.GpuBusy, match="protected"):
+        gpu.require_free(vllm())
+    on_gpu(monkeypatch, [(200, 20000)], {200: engine}, at=1010)
+    with pytest.raises(gpu.GpuBusy, match="cooling"):
+        gpu.require_free(vllm())
+    history = gpu._read(gpu._history_path(), {})["workloads"][engine]
+    assert history["intervals"] == [[1000, None]] and history["pids"] == [200]
+    on_gpu(monkeypatch, [(200, 20000)], {200: engine}, at=1011 + gpu.DEFAULT_QUIET)
+    assert gpu.require_free(vllm())["state"] == "free"
+
+
+@pytest.mark.parametrize(
+    "url,local",
+    [
+        ("http://127.0.0.1:8000", True),
+        ("http://127.0.1.1:8000", True),
+        ("http://localhost:8000", True),
+        ("http://[::1]:8000", True),
+        ("http://[0:0:0:0:0:0:0:1]:8000", True),
+        ("http://10.0.0.9:11434", False),
+        ("", False),
+    ],
+)
+def test_any_spelling_of_this_machine_is_guarded(url, local):
+    assert gpu.local_endpoint(url) is local
+
+
+def test_a_listening_socket_is_found_through_proc():
+    import os
+    import socket
+
+    if not os.path.exists("/proc/net/tcp"):
+        pytest.skip("needs Linux /proc")
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+        inodes = gpu._listening({port})
+        assert inodes and inodes <= gpu._socket_inodes(os.getpid())
+        assert gpu._serves(os.getpid(), inodes)
+    assert gpu.server_ports(vllm(), config()) == {8000}
+
+
+def test_a_local_servers_own_error_is_not_taken_for_a_preemption(monkeypatch):
+    from levi.inference.ollama import OllamaError
+    from levi.inference.provider import LocalProvider
+
+    def refused(*a, **k):
+        raise OllamaError("Local model server HTTP request failed (400)")
+
+    monkeypatch.setattr(LocalProvider, "_chat", staticmethod(refused))
+    on_gpu(monkeypatch, [(200, 20000)], {200: "VLLM::EngineCore"})
+    serving(monkeypatch, family={200: 100})
+    budget = type("B", (), {"max_tokens": 1000, "max_seconds": 30})()
+    cfg = vllm().model_copy(update={"model_digest": "a" * 64})
+    with pytest.raises(OllamaError, match="400"):
+        LocalProvider().generate(cfg, "goal", {"workflow": {}}, [], "/tmp", budget)

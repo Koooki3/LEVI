@@ -1,14 +1,17 @@
-"""Workspace-persisted Ollama inventory and explicit download jobs.
+"""Workspace-persisted local-model inventory, binding and explicit Ollama
+download jobs.
 
 Uses the existing SQLite store and event journal. External Ollama instances own
-model storage; LEVI never guesses their paths or stops their processes.
+model storage; LEVI never guesses their paths or stops their processes. A
+local OpenAI-compatible server (openai-local) loads its own weights: LEVI
+inspects and binds what it serves, and never downloads for it.
 """
 
 import threading
 import time
 
 from levi.agent.runtime import new_id
-from levi.agent.schema import ProviderConfig
+from levi.agent.schema import LOCAL_MODEL_KINDS, MAX_CONTEXT_TOKENS, ProviderConfig
 from levi.agent.store import Conflict, digest
 
 from .ollama import OllamaError
@@ -23,8 +26,8 @@ def configuration(store, name):
         config = ProviderConfig.model_validate(store.get("providers", name))
     except KeyError:
         raise ValueError("Unknown model connection") from None
-    if config.kind != "ollama" or not config.enabled:
-        raise ValueError("An enabled Ollama connection is required")
+    if config.kind not in LOCAL_MODEL_KINDS or not config.enabled:
+        raise ValueError("An enabled local model connection is required")
     return config
 
 
@@ -35,13 +38,17 @@ def inspect(store, name):
     installed = next((m for m in models if m.name == config.model), None)
     details = client.show(config.model) if installed else {}
     # Only declared capabilities are returned. This does not execute a probe.
+    # A local OpenAI-compatible server declares none: the person confirms.
     capabilities = details.get("capabilities", [])
     return {
+        "kind": config.kind,
         "version": client.version(),
         "model": installed.model_dump() if installed else None,
         "models": [model.model_dump() for model in models],
         "capabilities": capabilities if isinstance(capabilities, list) else [],
-        "capability_evidence": "service_declared",
+        "capability_evidence": "service_declared"
+        if config.kind == "ollama"
+        else "user_confirmed",
         "quality_verified": False,
         "digest_matches": bool(installed and installed.digest == config.model_digest),
         "storage": {"ownership": "external", "path": None},
@@ -53,8 +60,23 @@ def bind(store, name, expected_digest, *, vision, structured_output):
     client = client_for(config, timeout=15)
     model = client.require_model(config.model, expected_digest)
     details = client.show(config.model)
-    if vision and "vision" not in details.get("capabilities", []):
-        raise ValueError("The installed model does not declare vision capability")
+    context = config.context_tokens
+    if config.kind == "ollama":
+        if vision and "vision" not in details.get("capabilities", []):
+            raise ValueError("The installed model does not declare vision capability")
+    else:
+        # The server's context is fixed when it starts and no request can
+        # narrow it (Ollama's num_ctx does): it is what one call may spend,
+        # so it is what a call reserves and what requests are sized to.
+        served = (details.get("details") or {}).get("max_model_len")
+        if type(served) is int:
+            if served > MAX_CONTEXT_TOKENS:
+                raise ValueError(
+                    f"The server's context ({served}) is more than LEVI "
+                    f"reserves per call; serve it with --max-model-len "
+                    f"{MAX_CONTEXT_TOKENS} or less"
+                )
+            context = served
     if not structured_output:
         raise ValueError(
             "Explicit structured-output capability confirmation is required"
@@ -66,6 +88,7 @@ def bind(store, name, expected_digest, *, vision, structured_output):
             "model_digest": model.digest,
             "vision": vision,
             "structured_output": True,
+            "context_tokens": context,
         }
     )
     with store.connect() as db:
@@ -86,11 +109,18 @@ def bind(store, name, expected_digest, *, vision, structured_output):
                 "template_digest": digest(details.get("template", "")),
                 "details": details.get("details", {}),
                 "capabilities": details.get("capabilities", []),
-                "evidence": "service_declared_and_user_confirmed",
+                "evidence": "service_declared_and_user_confirmed"
+                if config.kind == "ollama"
+                else "user_confirmed",
                 "quality_verified": False,
                 "recorded_at": time.time(),
             },
         )
+    # Binding does not change where the profile's session key (``vllm
+    # --api-key``) is sent, so the key stays with the bound profile.
+    from levi.agent.credentials import rebind
+
+    rebind(name, config, candidate)
     return candidate.model_dump()
 
 
@@ -100,6 +130,11 @@ def _lease(config):
 
 def start_download(store, name, request_id):
     config = configuration(store, name)
+    if config.kind != "ollama":
+        raise ValueError(
+            "A local model server loads its own weights; start it with the "
+            "model instead of downloading through LEVI"
+        )
     request = digest(config.model_dump(exclude={"model_digest"}))
     # The request key is scoped to this provider, never used as a filename.
     key = f"{name}:{request_id}"

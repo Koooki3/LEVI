@@ -46,6 +46,7 @@ function tool<T>(name: string, args: unknown, key?: string) {
   return api<T>("/tools", { name, arguments: args, idempotency_key: key });
 }
 type Provider = Connection;
+type ProviderKind = NonNullable<Connection["kind"]>;
 type Run = {
   plan?: HarnessPlan;
   cache_hits?: number;
@@ -145,11 +146,17 @@ export default function AgentWorkbench() {
   // The snapshot cap is a guard against copying an unreasonable amount of a
   // dataset, not a knob a person tunes per task.
   const storageMiB = 512;
-  const [providerKind, setProviderKind] = useState<
-    "openai-compatible" | "ollama"
-  >("openai-compatible");
+  const [providerKind, setProviderKind] =
+    useState<ProviderKind>("openai-compatible");
+  const localKind = providerKind !== "openai-compatible";
   const [modelDigest, setModelDigest] = useState<string | null>(null);
   const [contextTokens, setContextTokens] = useState(8192);
+  // Local models: a server's per-request image limit, the longest image side
+  // sent, reasoning before the answer, and (Molmo2) no system role.
+  const [maxImages, setMaxImages] = useState<number | null>(null);
+  const [imageMaxSide, setImageMaxSide] = useState<number | null>(null);
+  const [think, setThink] = useState(false);
+  const [foldSystem, setFoldSystem] = useState(false);
   const [name, setName] = useState("model");
   const [url, setUrl] = useState("");
   const [model, setModel] = useState("");
@@ -453,6 +460,10 @@ export default function AgentWorkbench() {
                 setProviderKind(p.kind ?? "openai-compatible");
                 setModelDigest(p.model_digest ?? null);
                 setContextTokens(p.context_tokens ?? 8192);
+                setMaxImages(p.max_images ?? null);
+                setImageMaxSide(p.image_max_side ?? null);
+                setThink(p.think ?? false);
+                setFoldSystem(p.fold_system ?? false);
                 setName(p.name);
                 setUrl(p.base_url);
                 setModel(p.model);
@@ -479,8 +490,13 @@ export default function AgentWorkbench() {
                     key_env: keyEnv,
                     vision,
                     tools: supportsTools,
-                    structured_output: providerKind === "ollama",
+                    structured_output: localKind,
                     allow_localhost: allowLocal,
+                    // Local-model settings only where their inputs show.
+                    max_images: localKind ? maxImages : null,
+                    image_max_side: localKind ? imageMaxSide : null,
+                    think: localKind && think,
+                    fold_system: providerKind === "openai-local" && foldSystem,
                   });
                   setProviders(await api<Provider[]>("/providers"));
                   setProvider(name);
@@ -493,15 +509,28 @@ export default function AgentWorkbench() {
                 <select
                   value={providerKind}
                   onChange={(e) => {
-                    const kind = e.target.value as
-                      | "openai-compatible"
-                      | "ollama";
+                    const kind = e.target.value as ProviderKind;
                     setProviderKind(kind);
                     setModelDigest(null);
+                    if (kind === "openai-compatible") {
+                      setKeyEnv((v) =>
+                        v === "LEVI_LOCAL_MODEL_KEY" ? "LEVI_MODEL_API_KEY" : v,
+                      );
+                    }
                     if (kind === "ollama") {
                       setName("ollama-local");
                       setUrl("http://127.0.0.1:11434");
                       setModel("qwen3.5:4b");
+                      setAllowLocal(true);
+                      setSupportsTools(false);
+                    }
+                    if (kind === "openai-local") {
+                      setName("vllm-local");
+                      setUrl("http://127.0.0.1:8100");
+                      setModel("");
+                      setContextTokens(32768);
+                      // Its own variable: a cloud key is never sent here.
+                      setKeyEnv("LEVI_LOCAL_MODEL_KEY");
                       setAllowLocal(true);
                       setSupportsTools(false);
                     }
@@ -511,6 +540,9 @@ export default function AgentWorkbench() {
                     OpenAI-compatible API
                   </option>
                   <option value="ollama">Ollama · local service</option>
+                  <option value="openai-local">
+                    Local OpenAI-compatible server (vLLM)
+                  </option>
                 </select>
               </label>
               <label>
@@ -525,7 +557,9 @@ export default function AgentWorkbench() {
                 {t(
                   providerKind === "ollama"
                     ? "Ollama service URL"
-                    : "Compatible API base URL",
+                    : providerKind === "openai-local"
+                      ? "Local model server URL"
+                      : "Compatible API base URL",
                 )}
                 <input
                   type="url"
@@ -549,7 +583,7 @@ export default function AgentWorkbench() {
                   required
                 />
               </label>
-              {providerKind !== "ollama" && (
+              {providerKind === "openai-compatible" && (
                 <>
                   <label>
                     Server API-key environment variable
@@ -578,6 +612,81 @@ export default function AgentWorkbench() {
                   Save this connection, then inspect and bind the installed
                   model in Accounts & connections. No API key is required.
                 </p>
+              )}
+              {providerKind === "openai-local" && (
+                <>
+                  <p className="levi-agent-muted">
+                    Use the server root without /v1. Save this connection, then
+                    inspect and bind the served model in Accounts & connections.
+                  </p>
+                  <label>
+                    API-key environment variable (optional)
+                    <input
+                      value={keyEnv}
+                      onChange={(e) => setKeyEnv(e.target.value)}
+                      required
+                    />
+                  </label>
+                  <label className="levi-agent-check">
+                    <input
+                      type="checkbox"
+                      checked={foldSystem}
+                      onChange={(e) => setFoldSystem(e.target.checked)}
+                    />
+                    Send the system prompt in the first user turn (Molmo2)
+                  </label>
+                </>
+              )}
+              {localKind && (
+                <>
+                  <label>
+                    Context tokens
+                    <input
+                      type="number"
+                      min={1024}
+                      max={131072}
+                      value={contextTokens}
+                      onChange={(e) => setContextTokens(Number(e.target.value))}
+                      required
+                    />
+                  </label>
+                  <label>
+                    Images per request (empty: no limit)
+                    <input
+                      type="number"
+                      min={1}
+                      max={1000}
+                      value={maxImages ?? ""}
+                      onChange={(e) =>
+                        setMaxImages(
+                          e.target.value ? Number(e.target.value) : null,
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    Longest image side sent, pixels (empty: native)
+                    <input
+                      type="number"
+                      min={128}
+                      max={4096}
+                      value={imageMaxSide ?? ""}
+                      onChange={(e) =>
+                        setImageMaxSide(
+                          e.target.value ? Number(e.target.value) : null,
+                        )
+                      }
+                    />
+                  </label>
+                  <label className="levi-agent-check">
+                    <input
+                      type="checkbox"
+                      checked={think}
+                      onChange={(e) => setThink(e.target.checked)}
+                    />
+                    Let the model reason before answering
+                  </label>
+                </>
               )}
               <label className="levi-agent-check">
                 <input

@@ -206,15 +206,15 @@ Generated from the capability registry by `uv run levi docs sync`. Do not edit b
 | `workspace.reset` | **person** | Remove one dataset's agent history: runs, records and published revisions |
 <!-- /levi:generated capabilities -->
 
-## Local models (Ollama)
+## Local models (Ollama, local OpenAI-compatible servers)
 
-Model management requires the operator session; an external agent cannot approve its own download or start request.
+Model management requires the operator session; an external agent cannot approve its own download or start request. The inspect and bind endpoints also serve `kind: openai-local` profiles (a local vLLM server, see [Local models](OLLAMA.md#8-a-local-openai-compatible-server-vllm)); download and memory requests for them return HTTP 409, since the server loads and keeps its own weights.
 
 | Method / path | Behavior |
 | --- | --- |
-| `POST /providers` | `kind: ollama`, loopback `base_url`, model and explicit `allow_localhost`; no key |
+| `POST /providers` | `kind: ollama` or `openai-local`, loopback `base_url` (the server root), model and explicit `allow_localhost`; no key (`openai-local` sends one only when `key_env` is set) |
 | `GET /providers/{name}/ollama` | Inspect service-declared metadata; no inference |
-| `POST /providers/{name}/ollama/bind` | Bind the installed digest, explicit `structured_output: true`, optional vision |
+| `POST /providers/{name}/ollama/bind` | Bind the installed digest, explicit `structured_output: true`, optional vision; `openai-local` also sets `context_tokens` to the server's context (refused above 131072) |
 | `POST /providers/{name}/ollama/download` | `approve_download: true`, unique `request_id`; returns a persisted job, HTTP 202 |
 | `GET /model-downloads[/{id}]` | Persisted download progress |
 | `POST /model-downloads/{id}/cancel` | Stop consuming the download stream |

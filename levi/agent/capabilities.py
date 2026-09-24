@@ -967,9 +967,9 @@ def _invoke(
             return tasking.approve(store, args.task_id, by=principal.id)
         return tasking.advance(workbench, args.task_id, principal)
     if name == "gpu.status":
-        from levi.inference.gpu import report
+        from levi.inference.gpu import configured_servers, report
 
-        return report()
+        return report(configured_servers(store))
     if name == "cost.profile":
         from levi.catalog import display_name
         from levi.harness.layout import memory_path, read_json

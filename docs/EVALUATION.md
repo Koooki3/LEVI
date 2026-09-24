@@ -15,7 +15,7 @@ The hour is the completion time in UTC, the same clock that run ids use. A secon
 | `external-mcp` | An external agent (Claude Code, Codex, …) working through LEVI's MCP tools |
 | `external-pilot` | An external agent that LEVI runs as a managed Pilot |
 | `api` | An online model called by LEVI (OpenAI-compatible endpoint) |
-| `local-vlm` | A local model on Ollama, working alone |
+| `local-vlm` | A local model on Ollama or a local OpenAI-compatible server (`openai-local`, e.g. vLLM), working alone |
 | `local-vlm-teacher` | A local model whose every phase an external teacher reviewed |
 | `native-external`, `native-local-vlm`, `native-local-vlm-teacher` | The same annotators working **without LEVI**; their finished annotation is brought in afterwards |
 

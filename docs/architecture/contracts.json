@@ -186,6 +186,25 @@
           "title": "Enabled",
           "type": "boolean"
         },
+        "fold_system": {
+          "default": false,
+          "title": "Fold System",
+          "type": "boolean"
+        },
+        "image_max_side": {
+          "anyOf": [
+            {
+              "maximum": 4096,
+              "minimum": 128,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image Max Side"
+        },
         "key_env": {
           "default": "LEVI_MODEL_API_KEY",
           "pattern": "^[A-Z][A-Z0-9_]*$",
@@ -196,10 +215,25 @@
           "default": "openai-compatible",
           "enum": [
             "openai-compatible",
-            "ollama"
+            "ollama",
+            "openai-local"
           ],
           "title": "Kind",
           "type": "string"
+        },
+        "max_images": {
+          "anyOf": [
+            {
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Images"
         },
         "model": {
           "maxLength": 200,
@@ -228,6 +262,11 @@
         "structured_output": {
           "default": false,
           "title": "Structured Output",
+          "type": "boolean"
+        },
+        "think": {
+          "default": false,
+          "title": "Think",
           "type": "boolean"
         },
         "tools": {

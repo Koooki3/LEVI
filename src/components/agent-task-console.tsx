@@ -78,7 +78,9 @@ export default function AgentTaskConsole({
   teacherGrant?: string;
 }) {
   const { t } = useLocale();
-  const local = providers.filter((p) => p.kind === "ollama");
+  const local = providers.filter(
+    (p) => p.kind === "ollama" || p.kind === "openai-local",
+  );
   const [provider, setProvider] = useState(local[0]?.name ?? "");
   const [text, setText] = useState("");
   const [task, setTask] = useState<Task | null>(null);
@@ -111,7 +113,8 @@ export default function AgentTaskConsole({
     return (
       <p className="levi-agent-muted">
         <T>
-          Configure and bind a local Ollama model to describe tasks in words.
+          Configure and bind a local model (Ollama or a local server) to
+          describe tasks in words.
         </T>
       </p>
     );

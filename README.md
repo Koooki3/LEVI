@@ -61,7 +61,7 @@ An agent reads sampled evidence and proposes; only a person approves a plan, acc
 | --- | --- | --- |
 | External MCP | Your own agent (Claude Code, Codex, any MCP client) | `uv run levi agent connect --client claude --project <dir> --dataset local/<name> --apply` |
 | Online | An OpenAI-compatible endpoint, metered by LEVI | Agent Workbench → Accounts & connections |
-| Local | An Ollama model on this machine (default `qwen3.5:4b`), metered, no API key | [Local models](docs/OLLAMA.md) |
+| Local | An Ollama model on this machine (default `qwen3.5:4b`) or a local vLLM server, metered, no API key | [Local models](docs/OLLAMA.md) |
 | Managed Pilot | A Codex or Claude Code session LEVI supervises | [Pilot](docs/PILOT.md) |
 
 A task goes **plan → approve → pilot → review pilot → remaining episodes → review → commit**. With a local model, one sentence can start it:

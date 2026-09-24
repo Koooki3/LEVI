@@ -62,6 +62,9 @@ class FakeTransport:
                 },
                 "prompt_eval_count": 40,
                 "eval_count": 20,
+                "load_duration": 1_500_000_000,
+                "prompt_eval_duration": 250_000_000,
+                "eval_duration": 750_000_000,
             }
         raise AssertionError(path)
 
@@ -181,6 +184,15 @@ def test_shared_harness_mock_pilot_keeps_raw_source_unchanged(client, dataset, n
     assert result["completed"] == [0]
     assert wb.store.get("changes", result["changes"])["status"] == "draft"
     assert any(row[1] == "/api/chat" for row in native.calls)
+    # Where each call's time went is kept in its phase's usage.
+    usage = [
+        e["usage"] for e in wb.store.events(run["id"]) if e["type"] == "model_step"
+    ]
+    assert usage and all(
+        (u["load_seconds"], u["prefill_seconds"], u["decode_seconds"])
+        == (1.5, 0.25, 0.75)
+        for u in usage
+    )
     assert source == {
         str(path): file_hash(path) for path in dataset.rglob("*") if path.is_file()
     }

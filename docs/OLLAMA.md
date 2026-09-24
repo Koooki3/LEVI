@@ -1,8 +1,8 @@
-# Local models (Ollama)
+# Local models (Ollama, or a local vLLM server)
 
 [中文](OLLAMA.zh-CN.md)
 
-LEVI can run a vision-language model on your own machine through [Ollama](https://ollama.com). The default profile is `qwen3.5:4b` (Qwen3.5-4B, Q4_K_M, about 3.4 GB, image input). A local model works through the same approved plans, evidence validation, review and commit as any other agent — it proposes, a person publishes — with no API key and no cloud fallback. LEVI meters every request.
+LEVI can run a vision-language model on your own machine through [Ollama](https://ollama.com), or through a local OpenAI-compatible server such as [vLLM](https://docs.vllm.ai) for models Ollama does not carry (see [§8](#8-a-local-openai-compatible-server-vllm)). The default profile is `qwen3.5:4b` (Qwen3.5-4B, Q4_K_M, about 3.4 GB, image input). A local model works through the same approved plans, evidence validation, review and commit as any other agent — it proposes, a person publishes — with no API key and no cloud fallback. LEVI meters every request.
 
 Local models are used for two things:
 
@@ -112,6 +112,55 @@ In the Workbench, choose the connection under **External teacher supervision**. 
 
 Every piece of feedback is kept as a file (`datasets/<name>/teaching/<run>/episode_NNNNNN-<phase>.json`) and its note becomes part of the dataset's memory for the next task. A teacher can also correct a natural-language interpretation (`tasks.feedback`); the corrected spec becomes an example and the note a lesson for future requests. A teacher's committed work can be frozen as a reference and later learner runs graded against it (`teaching/reference-<task>.json`, `teaching/grades.json`).
 
+## 8. A local OpenAI-compatible server (vLLM)
+
+A profile of kind `openai-local` runs a model served by vLLM (or another local OpenAI-compatible server) through the same hardened path as Ollama: the narrowed answer schema (sent as `response_format` `json_schema`, which the server enforces while decoding), compact evidence rows, request-cost calibration and image limits, salvage of invalid answers, pause/cancel cutting the request in flight, the GPU guardian and natural-language tasks. Evaluation records name it `local-vlm`. Use it for models without an Ollama build — Molmo2 — or to compare a model on both engines.
+
+LEVI does not install, start or stop the server. Run vLLM in an environment of its own, not LEVI's `.venv`. The commands below are for vLLM 0.30:
+
+```bash
+# Qwen3.8-27B, 4-bit weights (sized for a 32 GB GPU)
+vllm serve RedHatAI/Qwen3.8-27B-INT4 --served-model-name qwen3.8-27b \
+  --host 127.0.0.1 --port 8100 --max-model-len 32768 --max-num-seqs 2 \
+  --gpu-memory-utilization 0.90 --limit-mm-per-prompt '{"image": 64, "video": 0}'
+
+# Molmo2-8B (Molmo2-ER is served the same way from its own checkpoint, --max-model-len 16384).
+# On a 32 GB GPU the multimodal memory profile (26 full-size images) runs out of memory:
+# skip it, leave headroom for the vision encoder, and send downscaled frames
+# (profile "image_max_side": 378, one crop per frame). Molmo2 decodes greedily.
+vllm serve allenai/Molmo2-8B --trust-remote-code --served-model-name molmo2-8b \
+  --host 127.0.0.1 --port 8101 --max-model-len 36864 --max-num-batched-tokens 36864 \
+  --max-num-seqs 1 --gpu-memory-utilization 0.82 --skip-mm-profiling \
+  --override-generation-config '{"temperature": 0.0}' \
+  --limit-mm-per-prompt '{"image": 64, "video": 0}'
+```
+
+Then create the profile (Workbench → Model settings → *Local OpenAI-compatible server (vLLM)*, or REST):
+
+```bash
+curl -X POST -H "x-levi-ui-token: $(cat "$LEVI_WORKSPACE/outputs/LEVI/workbench/agent/core/human.key")" \
+  -H "Content-Type: application/json" http://127.0.0.1:7861/api/levi/agent/v1/providers -d '{
+  "name": "qwen38-vllm", "kind": "openai-local", "base_url": "http://127.0.0.1:8100",
+  "model": "qwen3.8-27b", "context_tokens": 32768, "vision": true,
+  "allow_localhost": true, "max_images": 64}'
+```
+
+and inspect and bind it in Accounts & connections (`GET …/providers/qwen38-vllm/ollama`, then `POST …/ollama/bind` with the digest shown, `"vision": true, "structured_output": true`).
+
+- **Base URL** is the server root (`http://127.0.0.1:8100`, no `/v1`; LEVI's examples use 8100 because openpi's policy server defaults to 8000), loopback only.
+- **`model`** is the `--served-model-name`. The bound digest identifies what the server says it serves: the model id, the weights it was started from (`root` in `/v1/models`) and its context. A server restarted with other weights blocks inference until the model is bound again. To pin an exact revision, serve a local snapshot directory: its path carries the revision.
+- **`context_tokens`** is set by binding to the server's `--max-model-len` (at most 131072; binding refuses a longer one). The server's context is fixed when it starts and no request can narrow it, so it is what one call may spend and what LEVI reserves for it.
+- **`max_images`** is the server's `--limit-mm-per-prompt` image count. A request with more images is refused before it is sent, and refinement batches are sized to it. **`image_max_side`** (optional) sends each image scaled down to at most that many pixels on its longer side; the evidence files keep their native size, and calibration prices the scaled images.
+- **Thinking** is off: every request sends `chat_template_kwargs: {"enable_thinking": false}`, which Qwen3-family templates obey and others ignore. `think: true` opts in, but only works with a `--reasoning-parser` on the server (the schema then applies after the reasoning), and the reasoning comes out of the same output allowance. If the server returns reasoning and no answer, the request fails with that reason.
+- **`fold_system: true`** is needed for Molmo2: its chat template refuses a system turn and requires strict user/assistant alternation, so the system prompt is sent at the start of the first user turn. Every image goes before the text, in evidence order (image *n* is the evidence row numbered *n*), as Molmo2's template places them anyway. Molmo2 has no tool calling; LEVI does not use it.
+- **Structured output**: vLLM's default backend (`auto`) compiles every LEVI answer schema; if a request is refused with a structured-output error, start the server with `--structured-outputs-config.backend guidance`.
+- **Sampling** follows the model's own generation config (vLLM's default `--generation-config auto`); LEVI sends no temperature. Do not pass `--generation-config vllm`, which replaces the model's recommended settings with vLLM's defaults.
+- **Key**: none is needed. If the server runs with `--api-key`, set it in `LEVI_LOCAL_MODEL_KEY` (the profile's default `key_env` for this kind, so a cloud key is never sent to a local port) or as a session credential.
+- **GPU guardian**: the processes serving the profile's port (the API server that listens there and the engine processes it started) are recognised as LEVI's own model through the listening socket, never by name, so they do not block this profile's requests. Other people's work still does. The guardian cannot unload a vLLM model: the server holds `--gpu-memory-utilization` of the GPU for as long as it runs. For an Ollama profile, and for a profile on another port, it is someone else's work: Ollama's models are unloaded for it, a run waits until it has gone, and the guardian resumes each blocked run only when the GPU is clear for that run's own profile. Stop vLLM before running Ollama, and do not run both at once. A profile's requests take whatever listens on its port for its server; while another program uses that port (openpi's policy server also defaults to 8000), disable the profile. Load and unload controls and downloads do not apply (HTTP 409). Recognition reads the server's sockets through `/proc`, so it needs the server to run as the same user as LEVI; otherwise add an ignore rule to `workbench/models/gpu-policy.json`, e.g. `{"rules": [{"match": "(?i)vllm", "class": "ignore"}]}`.
+- **Tokens**: vLLM reports the whole prompt, while Ollama leaves out a cached prefix; compare completion tokens and per-call time across engines. Ollama calls also record `load_seconds`, `prefill_seconds` and `decode_seconds` in each phase's usage.
+
+Before a long run, run the pilot: binding performs no inference, so the pilot is the first request the server answers.
+
 ## Development checks
 
 ```bash
@@ -119,6 +168,7 @@ uv sync --locked --group dev --extra agent
 mkdir -p "$LEVI_WORKSPACE/tmp/validation"
 uv run pytest tests/test_ollama_protocol.py tests/test_ollama_integration.py \
   tests/test_ollama_runtime.py tests/test_gpu_guard.py tests/test_teaching.py \
+  tests/test_openai_local.py \
   --basetemp="$LEVI_WORKSPACE/tmp/validation/local-model-tests"
 ```
 
@@ -128,5 +178,5 @@ These tests use fake model responses, simulated teachers and a fake `nvidia-smi`
 
 - The annotation quality of a small local model is not established. Measure it on your data with a teacher and a reference before relying on it.
 - `OLLAMA_NO_CLOUD` is not network isolation: there is no OS-level offline sandbox.
-- The GPU guard sees processes through `nvidia-smi`; it is a courtesy policy, not a GPU scheduler or lease.
+- The GPU guard sees processes through `nvidia-smi`; it is a courtesy policy, not a GPU scheduler or lease. It recognises a local server's processes only when they run as the same user as LEVI (it reads their sockets through `/proc`).
 - No weight training, automatic skill publication or competency promotion.

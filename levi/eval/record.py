@@ -382,6 +382,8 @@ def stop(name: str) -> dict:
 
 
 def driver(run: dict) -> str:
+    from levi.agent.schema import LOCAL_MODEL_KINDS
+
     context = run["context"]
     if context.get("imported_from"):
         return context["imported_from"]
@@ -390,7 +392,7 @@ def driver(run: dict) -> str:
     kind = (run.get("provider_config") or {}).get("kind") or context.get("provider")
     if kind in {"external", "local-tools"}:
         return "external-mcp"
-    if kind == "ollama":
+    if kind in LOCAL_MODEL_KINDS:
         return (
             "local-vlm-teacher"
             if context.get("supervision", "none") != "none"

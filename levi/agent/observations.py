@@ -99,7 +99,7 @@ def image_limit(config, usage, evidence, draft, prompt_chars=None, costs=None):
     count; the next prompt's text is counted at 3 (so it comes out long).
     Without reported usage there is nothing to learn from: no limit.
     ``prompt_chars`` estimates the text of a call made before providers
-    reported it.
+    reported it. A profile's ``max_images`` caps the result either way.
     """
     tokens = usage.get("reported_tokens")
     images = sum(1 for row in evidence if row.get("artifact"))
@@ -109,17 +109,21 @@ def image_limit(config, usage, evidence, draft, prompt_chars=None, costs=None):
 
     expected = len(draft.get("proposals", [])) if isinstance(draft, dict) else None
     room = config.context_tokens * 0.85 - output_allowance(config, expected)
+    # A server's own per-request image limit caps whatever the context holds.
+    cap = getattr(config, "max_images", None)
     if costs:
         from levi.inference.provider import model_view
 
         per_char, per_image = costs
         # Each image also brings its row in the evidence text.
         row = len(json.dumps(model_view(evidence[:1]), ensure_ascii=False))
-        return max(0, int((room - text * per_char) // (per_image + row * per_char)))
+        fits = max(0, int((room - text * per_char) // (per_image + row * per_char)))
+        return min(fits, cap) if cap else fits
     if not tokens or not images:
-        return None
+        return cap
     per_image = max(1.0, (tokens - chars / 4) / images)
-    return max(0, int((room - text / 3) // per_image))
+    fits = max(0, int((room - text / 3) // per_image))
+    return min(fits, cap) if cap else fits
 
 
 def refine_spacings(context):

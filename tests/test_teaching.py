@@ -311,6 +311,95 @@ def test_an_end_written_as_a_decimal_snaps_to_the_float32_last_frame():
     assert [p.end for p in snapped.proposals] == [last, 11.5]
 
 
+def test_an_edge_start_the_phases_episode_and_stray_candidates_are_snapped():
+    import pytest
+
+    from levi.agent.runtime import Workbench, snap_to_episode
+    from levi.agent.schema import ModelOutput, TaskContext
+
+    first, last = 5.0, 21.899999618530273
+
+    def outcome(**extra):
+        return {
+            "episode_index": 3,
+            "kind": "outcome",
+            "content": "final state",
+            "start": 21.9,
+            "outcome": "failure",
+            "evidence_ids": ["e"],
+            **extra,
+        }
+
+    output = ModelOutput(
+        summary="s",
+        proposals=[
+            outcome(),
+            outcome(
+                episode_index=7,
+                start=4.9996,
+                boundary_candidates=[6.0, 30.0, 1.0, 21.9],
+            ),
+        ],
+    )
+    summary = {"episode_index": 3, "start": first, "end": last}
+    snapped = snap_to_episode(output, summary)
+    # A start written as 21.9 for a last frame at 21.8999996 s, or a hair
+    # before the first frame, sits on the frame; the episode is the phase's.
+    assert [p.start for p in snapped.proposals] == [last, first]
+    assert {p.episode_index for p in snapped.proposals} == {3}
+    assert snapped.proposals[1].boundary_candidates == [6.0, last]
+    context = TaskContext(
+        repo_id="local/d",
+        episodes=[3],
+        instruction="i",
+        provider="p",
+        workflow={"kind": "review"},
+    )
+    Workbench.validate_proposals(
+        context, snapped.proposals, [{"id": "e", "episode_index": 3}], summary
+    )
+    # Citing another episode's evidence is still refused.
+    with pytest.raises(ValueError, match="from episode 4"):
+        Workbench.validate_proposals(
+            context, snapped.proposals, [{"id": "e", "episode_index": 4}], summary
+        )
+
+
+def test_a_first_temporal_pass_has_room_for_an_interval_every_two_seconds(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from levi.agent.schema import ProviderConfig
+    from levi.inference import provider
+
+    config = ProviderConfig(
+        name="q",
+        kind="ollama",
+        base_url="http://127.0.0.1:1",
+        model="m",
+        context_tokens=32768,
+    )
+    summary = {"workflow": {"kind": "temporal"}, "start": 0.0, "end": 16.9}
+    assert provider.expected_proposals(summary, None) == 9
+    assert provider.expected_proposals(summary, [{}, {}]) == 2
+    review = {"workflow": {"kind": "review"}, "start": 0.0, "end": 30.0}
+    assert provider.expected_proposals(review, None) is None
+    seen = {}
+
+    class Client:
+        def chat(self, *args, **kwargs):
+            seen.update(kwargs)
+
+    monkeypatch.setattr(provider, "client_for", lambda config, timeout: Client())
+    budget = SimpleNamespace(max_seconds=60, max_tokens=100_000)
+    provider.LocalProvider._chat(
+        config, "", [], budget, summary["workflow"], None, None, 9
+    )
+    # The ten intervals a 27B model found in 16.9 s no longer hit the cut.
+    assert seen["max_output_tokens"] == 400 + 260 * 9 > 2048
+
+
 def test_a_refinement_keeps_the_drafts_intervals_and_subtasks():
     from levi.inference.provider import learner_schema, pinned_draft
 
@@ -382,6 +471,36 @@ def test_the_valid_part_of_a_rejected_answer_survives():
     kept = salvage(raw)
     assert [p.start for p in kept.proposals] == [0.0]
     assert salvage("{not json") is None
+
+
+def test_the_finished_proposals_of_a_cut_off_answer_survive():
+    import json as _json
+
+    from levi.inference.provider import salvage
+
+    good = {
+        "episode_index": 0,
+        "kind": "segment",
+        "content": "a",
+        "start": 0.0,
+        "end": 1.0,
+        "evidence_ids": ["e"],
+    }
+    full = _json.dumps(
+        {
+            "proposals": [good, {**good, "start": 1.0, "end": 2.0}],
+            "summary": "s",
+            "warnings": ["a long warning"],
+        },
+        indent=2,
+    )
+    # Cut off in the warnings (the output allowance ran out): both kept.
+    cut = full[: full.index("a long") + 3]
+    assert [p.start for p in salvage(cut).proposals] == [0.0, 1.0]
+    # Cut off inside the second proposal: the first is kept.
+    mid = full[: full.index('"start": 1.0') + 6]
+    assert [p.start for p in salvage(mid).proposals] == [0.0]
+    assert salvage('{"proposals": [{"episode_ind') is None
 
 
 def test_a_refined_boundary_without_evidence_keeps_the_drafts():

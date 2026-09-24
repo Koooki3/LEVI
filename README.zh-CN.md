@@ -61,7 +61,7 @@ agent 读取采样证据并提出建议；只有人能批准计划、验收试�
 | --- | --- | --- |
 | 外部 MCP | 你自己的 agent（Claude Code、Codex 或任意 MCP 客户端） | `uv run levi agent connect --client claude --project <目录> --dataset local/<名称> --apply` |
 | 在线 | OpenAI 兼容端点，由 LEVI 计量 | Agent Workbench → Accounts & connections |
-| 本地 | 本机 Ollama 模型（默认 `qwen3.5:4b`），由 LEVI 计量，无需 API key | [本地模型](docs/OLLAMA.zh-CN.md) |
+| 本地 | 本机 Ollama 模型（默认 `qwen3.5:4b`）或本地 vLLM 服务，由 LEVI 计量，无需 API key | [本地模型](docs/OLLAMA.zh-CN.md) |
 | 托管 Pilot | 由 LEVI 监督的 Codex 或 Claude Code 会话 | [Pilot](docs/PILOT.zh-CN.md) |
 
 一个任务的流程是 **规划 → 批准 → 试点 → 试点验收 → 其余集 → 审核 → 提交**。使用本地模型时，一句话就能发起：

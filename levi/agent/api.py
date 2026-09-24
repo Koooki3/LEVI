@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 
 from .capabilities import invoke, public_run
 from .runtime import Workbench
-from .schema import ProviderConfig, ToolCall
+from .schema import LOCAL_MODEL_KINDS, ProviderConfig, ToolCall
 from .security import Principal, external_principal
 from .store import Conflict
 
@@ -95,10 +95,17 @@ def configure_provider(payload: ProviderConfig, request: Request):
         )
     from .security import endpoint_addresses
 
-    if payload.kind == "ollama":
-        from levi.inference.transport import validate_ollama_endpoint
+    if payload.kind in LOCAL_MODEL_KINDS:
+        from levi.inference import transport
 
-        validate_ollama_endpoint(payload.base_url, payload.allow_localhost)
+        kind = (
+            transport.OpenAILocalTransport
+            if payload.kind == "openai-local"
+            else transport.OllamaTransport
+        )
+        transport.validate_local_endpoint(
+            payload.base_url, payload.allow_localhost, kind.label
+        )
     else:
         endpoint_addresses(payload.base_url, payload.allow_localhost)
     wb = workbench()

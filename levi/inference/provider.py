@@ -1,7 +1,9 @@
-"""Ollama adapter for the existing approved annotation workflow."""
+"""Local-model adapter (Ollama, or a local OpenAI-compatible server) for the
+existing approved annotation workflow."""
 
 import base64
 import json
+import math
 from pathlib import Path
 
 from levi.agent.schema import ModelOutput
@@ -32,7 +34,12 @@ def salvage(raw):
     try:
         value = json.loads(raw)
     except ValueError:
-        return None
+        # An answer cut off by the output allowance still carries the
+        # proposals it finished before the cut.
+        items = complete_items(raw, "proposals")
+        if not items:
+            return None
+        value = {"proposals": items}
     if not isinstance(value, dict):
         return None
     kept = []
@@ -46,6 +53,26 @@ def salvage(raw):
         summary=summary[:8000] if isinstance(summary, str) else "",
         proposals=kept[:500],
     )
+
+
+def complete_items(raw, key):
+    """The objects of the array under ``key`` that a truncated JSON text
+    finished; stops at the first one it cut off."""
+    at = raw.find(f'"{key}"')
+    at = raw.find("[", at) if at >= 0 else -1
+    if at < 0:
+        return []
+    decoder, items, at = json.JSONDecoder(), [], at + 1
+    while True:
+        while at < len(raw) and raw[at] in " \t\r\n,":
+            at += 1
+        if at >= len(raw) or raw[at] == "]":
+            return items
+        try:
+            item, at = decoder.raw_decode(raw, at)
+        except ValueError:
+            return items
+        items.append(item)
 
 
 def describe(exc):
@@ -76,7 +103,44 @@ def model_view(evidence):
 
 
 def client_for(config, *, timeout=120):
+    """The protocol client for a local model profile; the one factory every
+    caller (and every test fake) goes through."""
+    if config.kind == "openai-local":
+        from levi.agent.credentials import get
+
+        from .openai_local import OpenAILocalClient
+        from .transport import OpenAILocalTransport
+
+        return OpenAILocalClient(
+            OpenAILocalTransport(config, timeout=timeout, key=get(config)), config
+        )
     return OllamaClient(OllamaTransport(config, timeout=timeout))
+
+
+def encode_image(path, config=None):
+    """Base64 of an evidence image as the model receives it: the file itself,
+    or, with the profile's ``image_max_side``, a copy whose longer side is at
+    most that (area interpolation, PNG). The evidence file and its hash never
+    change; coordinates in the evidence text stay native."""
+    data = Path(path).read_bytes()
+    side = getattr(config, "image_max_side", None)
+    if side:
+        import cv2
+        import numpy as np
+
+        image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
+        if image is not None and max(image.shape[:2]) > side:
+            scale = side / max(image.shape[:2])
+            size = (
+                max(1, round(image.shape[1] * scale)),
+                max(1, round(image.shape[0] * scale)),
+            )
+            ok, encoded = cv2.imencode(
+                ".png", cv2.resize(image, size, interpolation=cv2.INTER_AREA)
+            )
+            if ok:
+                data = encoded.tobytes()
+    return base64.b64encode(data).decode("ascii")
 
 
 KINDS_BY_WORKFLOW = {
@@ -89,6 +153,11 @@ SPECIAL_SUBTASKS = ["unknown", "other", "background"]
 # Tokens an answer needs: a little for the summary, about this much a proposal.
 ANSWER_BASE = 400
 PER_PROPOSAL = 260
+# A first (coarse) temporal pass does not know how many intervals it will
+# find; plan for one every two seconds (the plates reference averages one per
+# 1.8 s). With a fixed six, a 27B model that found ten intervals in a 17 s
+# episode was cut off mid-answer.
+SECONDS_PER_PROPOSAL = 2.0
 
 
 def output_allowance(config, expected=None):
@@ -97,6 +166,20 @@ def output_allowance(config, expected=None):
     Too little cuts the JSON off mid-proposal and wastes the whole call."""
     need = ANSWER_BASE + PER_PROPOSAL * max(6, expected or 0)
     return min(max(2048, need), config.context_tokens // 4)
+
+
+def expected_proposals(summary, draft):
+    """Proposals a phase should have room for: the pinned draft's count, or,
+    for a first temporal pass, one per SECONDS_PER_PROPOSAL of the episode."""
+    if draft:
+        return len(draft)
+    if ((summary or {}).get("workflow") or {}).get("kind") != "temporal":
+        return None
+    try:
+        seconds = float(summary["end"]) - float(summary["start"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return math.ceil(max(0.0, seconds) / SECONDS_PER_PROPOSAL)
 
 
 def pinned_draft(summary):
@@ -306,16 +389,13 @@ def _variants(schema, proposal, kinds, workflow_kind):
     )
 
 
-class OllamaProvider:
+class LocalProvider:
     def generate(self, config, instruction, summary, evidence, artifacts, budget):
         if not config.structured_output or not config.model_digest:
             raise ValueError(
-                "Ollama requires a bound model digest and structured output capability"
+                "A local model requires a bound model digest and structured output capability"
             )
-        from .gpu import require_free
-
-        require_free(config)
-        images = []
+        paths = []
         for item in evidence:
             if not item.get("artifact"):
                 continue
@@ -326,7 +406,21 @@ class OllamaProvider:
                 raise ValueError(
                     "Evidence path is outside the authorized artifact directory"
                 )
-            images.append(base64.b64encode(path.read_bytes()).decode("ascii"))
+            paths.append(path)
+        if config.max_images and len(paths) > config.max_images:
+            # Refused before the GPU is touched: the server would reject it
+            # after reading every image.
+            from levi.agent.observations import ContextOverflow
+
+            raise ContextOverflow(
+                f"{len(paths)} images exceed the {config.max_images} this model "
+                "accepts per request (max_images); lower the plan's frame cap or "
+                "coarse step, or raise max_images with the server's limit"
+            )
+        from .gpu import require_free
+
+        require_free(config)
+        images = [encode_image(path, config) for path in paths]
         from levi.agent.observations import skills
         from levi.agent.schema import TaskContext
 
@@ -363,22 +457,24 @@ class OllamaProvider:
                 "Evidence text exceeds the local context safety limit; reduce task scope"
             )
         try:
+            draft = pinned_draft(summary)
             response = self._chat(
                 config,
                 content,
                 messages,
                 budget,
                 summary.get("workflow"),
-                pinned_draft(summary),
+                draft,
                 citable(summary, evidence),
+                expected_proposals(summary, draft),
             )
         except Exception as exc:
             # A request cut off because the guardian unloaded the model for
             # someone else's work is a preemption, not a model failure: the
             # run waits for the GPU and redoes this phase.
-            from .gpu import GpuBusy, status
+            from .gpu import GpuBusy, server_ports, status
 
-            verdict = status()
+            verdict = status(servers=server_ports(config))
             if verdict["state"] in {"busy", "unknown", "cooling"}:
                 raise GpuBusy(
                     f"Preempted by the GPU guardian: {verdict['reason']}"
@@ -404,6 +500,12 @@ class OllamaProvider:
             # Lets the harness split the prompt's tokens into text and images.
             "prompt_chars": len(system) + len(content),
             "prompt_tokens": usage.get("prompt_tokens"),
+            # Where the call's time went, when the service says (Ollama).
+            **{
+                key: usage[key]
+                for key in ("load_seconds", "prefill_seconds", "decode_seconds")
+                if key in usage
+            },
         }
         try:
             result = ModelOutput.model_validate_json(response["content"])
@@ -420,16 +522,30 @@ class OllamaProvider:
 
     @staticmethod
     def _chat(
-        config, content, messages, budget, workflow=None, draft=None, evidence_ids=None
+        config,
+        content,
+        messages,
+        budget,
+        workflow=None,
+        draft=None,
+        evidence_ids=None,
+        expected=None,
     ):
+        if expected is None and draft:
+            expected = len(draft)
         return client_for(config, timeout=budget.max_seconds).chat(
             config.model,
             config.model_digest,
             messages,
             output_schema=learner_schema(workflow, draft, evidence_ids),
             max_output_tokens=min(
-                output_allowance(config, len(draft) if draft else None),
+                output_allowance(config, expected),
                 budget.max_tokens,
             ),
             context_tokens=config.context_tokens,
+            think=config.think,
         )
+
+
+# Earlier name, kept for callers and tests.
+OllamaProvider = LocalProvider
