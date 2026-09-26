@@ -65,7 +65,7 @@ The first request after the model was unloaded includes loading it (about 20 s f
 A 4B model follows instructions loosely; LEVI does not rely on it to. Each request's output schema is narrowed so that malformed answers cannot be decoded (Ollama enforces the schema while decoding):
 
 - only the annotation kinds the plan allows (a plan with subtask definitions asks for intervals only), only its subtask ids, and only the evidence ids it was shown or its draft already cited;
-- every interval has an end, an outcome and a one-sentence evidence note; the proposals come first and the summary is short, so the answer is not spent on narration;
+- every interval has an end and an outcome, and under the default `full` prompt style a one-sentence evidence note (a `lean` profile writes none: LEVI uses the interval's wording as its note); the proposals come first and the summary is short, so the answer is not spent on narration;
 - a refinement returns the draft's intervals one for one, each keeping its subtask; a refined boundary that moves further than the plan's boundary window (beyond the frames it was shown) keeps the draft's, intervals keep their order and shared boundaries;
 - the answer budget grows with the number of intervals expected.
 
@@ -114,7 +114,7 @@ Every piece of feedback is kept as a file (`datasets/<name>/teaching/<run>/episo
 
 ## 8. A local OpenAI-compatible server (vLLM)
 
-A profile of kind `openai-local` runs a model served by vLLM (or another local OpenAI-compatible server) through the same hardened path as Ollama: the narrowed answer schema (sent as `response_format` `json_schema`, which the server enforces while decoding), compact evidence rows, request-cost calibration and image limits, salvage of invalid answers, pause/cancel cutting the request in flight, the GPU guardian and natural-language tasks. Evaluation records name it `local-vlm`. Use it for models without an Ollama build — Molmo2 — or to compare a model on both engines.
+A profile of kind `openai-local` runs a model served by vLLM (or another local OpenAI-compatible server) through the same hardened path as Ollama: the narrowed answer schema (sent as `response_format` `json_schema`, which the server enforces while decoding), compact evidence rows, request-cost calibration and image limits, salvage of invalid answers, pause/cancel cutting the request in flight, the GPU guardian and natural-language tasks. Evaluation records name it `local-vlm`. Use it for models without an Ollama build, or to compare a model on both engines.
 
 LEVI does not install, start or stop the server. Run vLLM in an environment of its own, not LEVI's `.venv`. The commands below are for vLLM 0.30:
 
@@ -123,16 +123,6 @@ LEVI does not install, start or stop the server. Run vLLM in an environment of i
 vllm serve RedHatAI/Qwen3.8-27B-INT4 --served-model-name qwen3.8-27b \
   --host 127.0.0.1 --port 8100 --max-model-len 32768 --max-num-seqs 2 \
   --gpu-memory-utilization 0.90 --limit-mm-per-prompt '{"image": 64, "video": 0}'
-
-# Molmo2-8B (Molmo2-ER is served the same way from its own checkpoint, --max-model-len 16384).
-# On a 32 GB GPU the multimodal memory profile (26 full-size images) runs out of memory:
-# skip it, leave headroom for the vision encoder, and send downscaled frames
-# (profile "image_max_side": 378, one crop per frame). Molmo2 decodes greedily.
-vllm serve allenai/Molmo2-8B --trust-remote-code --served-model-name molmo2-8b \
-  --host 127.0.0.1 --port 8101 --max-model-len 36864 --max-num-batched-tokens 36864 \
-  --max-num-seqs 1 --gpu-memory-utilization 0.82 --skip-mm-profiling \
-  --override-generation-config '{"temperature": 0.0}' \
-  --limit-mm-per-prompt '{"image": 64, "video": 0}'
 ```
 
 Then create the profile (Workbench → Model settings → *Local OpenAI-compatible server (vLLM)*, or REST):
@@ -142,7 +132,7 @@ curl -X POST -H "x-levi-ui-token: $(cat "$LEVI_WORKSPACE/outputs/LEVI/workbench/
   -H "Content-Type: application/json" http://127.0.0.1:7861/api/levi/agent/v1/providers -d '{
   "name": "qwen38-vllm", "kind": "openai-local", "base_url": "http://127.0.0.1:8100",
   "model": "qwen3.8-27b", "context_tokens": 32768, "vision": true,
-  "allow_localhost": true, "max_images": 64}'
+  "allow_localhost": true, "max_images": 64, "prompt_style": "lean"}'
 ```
 
 and inspect and bind it in Accounts & connections (`GET …/providers/qwen38-vllm/ollama`, then `POST …/ollama/bind` with the digest shown, `"vision": true, "structured_output": true`).
@@ -152,10 +142,10 @@ and inspect and bind it in Accounts & connections (`GET …/providers/qwen38-vll
 - **`context_tokens`** is set by binding to the server's `--max-model-len` (at most 131072; binding refuses a longer one). The server's context is fixed when it starts and no request can narrow it, so it is what one call may spend and what LEVI reserves for it.
 - **`max_images`** is the server's `--limit-mm-per-prompt` image count. A request with more images is refused before it is sent, and refinement batches are sized to it. **`image_max_side`** (optional) sends each image scaled down to at most that many pixels on its longer side; the evidence files keep their native size, and calibration prices the scaled images.
 - **Thinking** is off: every request sends `chat_template_kwargs: {"enable_thinking": false}`, which Qwen3-family templates obey and others ignore. `think: true` opts in, but only works with a `--reasoning-parser` on the server (the schema then applies after the reasoning), and the reasoning comes out of the same output allowance. If the server returns reasoning and no answer, the request fails with that reason.
-- **`fold_system: true`** is needed for Molmo2: its chat template refuses a system turn and requires strict user/assistant alternation, so the system prompt is sent at the start of the first user turn. Every image goes before the text, in evidence order (image *n* is the evidence row numbered *n*), as Molmo2's template places them anyway. Molmo2 has no tool calling; LEVI does not use it.
-- **`prompt_style: "lean"`** (both local kinds) sends the plan's instruction as written plus a frame list ("image *n* = *t* s") instead of LEVI's skills and one JSON document, keeps only teacher notes and lessons from memory (never a second copy of the instruction), and asks for intervals without citations: LEVI cites up to three frames inside each interval itself and uses the interval's wording as its evidence note. Paired runs of the same model with and without LEVI showed the full prompt costing a local model segment F1 and about twice the output tokens. Default `full`.
+- **`fold_system: true`** is for chat templates that refuse a system turn and require strict user/assistant alternation: the system prompt is sent at the start of the first user turn, and every image goes before the text, in evidence order (image *n* is the evidence row numbered *n*).
+- **`prompt_style: "lean"`** (both local kinds) sends the plan's instruction as written plus a frame list ("image *n* = *t* s") instead of LEVI's skills and one JSON document, keeps from memory only teacher notes, lessons, recurring uncertainty and examples from other episodes (never a second copy of the instruction), and asks for intervals without citations or evidence notes: LEVI cites up to three frames inside each interval itself and uses the interval's wording as its evidence note. Paired runs of the same model with and without LEVI showed the full prompt costing a local model segment F1 and about twice the output tokens, so `lean` is recommended for temporal annotation (subtasks and events). The profile's style also applies to dataset review, where `lean` measured worse (balanced accuracy 0.590 vs 0.621 with `full`): run reviews with a `full` profile. Default `full`.
 - **Structured output**: vLLM's default backend (`auto`) compiles every LEVI answer schema; if a request is refused with a structured-output error, start the server with `--structured-outputs-config.backend guidance`.
-- **Sampling** follows the model's own generation config (vLLM's default `--generation-config auto`); LEVI sends no temperature. Do not pass `--generation-config vllm`, which replaces the model's recommended settings with vLLM's defaults.
+- **Sampling** follows the model's own generation config (vLLM's default `--generation-config auto`); LEVI sends no temperature. Do not pass `--generation-config vllm`, which replaces the model's recommended settings with vLLM's defaults. For greedy (repeatable) decoding, start the server with `--override-generation-config '{"temperature": 0.0}'`.
 - **Key**: none is needed. If the server runs with `--api-key`, set it in `LEVI_LOCAL_MODEL_KEY` (the profile's default `key_env` for this kind, so a cloud key is never sent to a local port) or as a session credential.
 - **GPU guardian**: the processes serving the profile's port (the API server that listens there and the engine processes it started) are recognised as LEVI's own model through the listening socket, never by name, so they do not block this profile's requests. Other people's work still does. The guardian cannot unload a vLLM model: the server holds `--gpu-memory-utilization` of the GPU for as long as it runs. For an Ollama profile, and for a profile on another port, it is someone else's work: Ollama's models are unloaded for it, a run waits until it has gone, and the guardian resumes each blocked run only when the GPU is clear for that run's own profile. Stop vLLM before running Ollama, and do not run both at once. A profile's requests take whatever listens on its port for its server; while another program uses that port (openpi's policy server also defaults to 8000), disable the profile. Load and unload controls and downloads do not apply (HTTP 409). Recognition reads the server's sockets through `/proc`, so it needs the server to run as the same user as LEVI; otherwise add an ignore rule to `workbench/models/gpu-policy.json`, e.g. `{"rules": [{"match": "(?i)vllm", "class": "ignore"}]}`.
 - **Tokens**: vLLM reports the whole prompt, while Ollama leaves out a cached prefix; compare completion tokens and per-call time across engines. Ollama calls also record `load_seconds`, `prefill_seconds` and `decode_seconds` in each phase's usage.
@@ -178,6 +168,7 @@ These tests use fake model responses, simulated teachers and a fake `nvidia-smi`
 ## Limits
 
 - The annotation quality of a small local model is not established. Measure it on your data with a teacher and a reference before relying on it.
+- LEVI sends no sampling parameters (temperature, top-p, seed) on either local channel, so whether answers are deterministic is decided by the server: for Ollama the model's own parameters (its Modelfile), for vLLM the served generation config (see **Sampling** above).
 - `OLLAMA_NO_CLOUD` is not network isolation: there is no OS-level offline sandbox.
 - The GPU guard sees processes through `nvidia-smi`; it is a courtesy policy, not a GPU scheduler or lease. It recognises a local server's processes only when they run as the same user as LEVI (it reads their sockets through `/proc`).
 - No weight training, automatic skill publication or competency promotion.

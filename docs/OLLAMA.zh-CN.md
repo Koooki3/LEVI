@@ -65,11 +65,11 @@ curl -X POST -H "x-levi-ui-token: $(cat "$LEVI_WORKSPACE/outputs/LEVI/workbench/
 4B 模型对指令的遵循很松散，LEVI 不依赖它自觉。每次请求的输出 schema 都被收窄，使畸形答案根本无法被解码（Ollama 在解码时强制 schema）：
 
 - 只允许计划允许的标注类型（有子任务定义的计划只要区间）、计划中的子任务 id、以及本次提供或草稿已引用的证据 id；
-- 每个区间必须有 end、outcome 和一句证据说明；proposals 先于 summary 生成且 summary 很短，答案不会被叙述耗尽；
+- 每个区间必须有 end 和 outcome，默认的 `full` 提示风格下还要有一句证据说明（`lean` 档案不写证据说明，由 LEVI 用区间描述作为说明）；proposals 先于 summary 生成且 summary 很短，答案不会被叙述耗尽；
 - 精修（refine）逐一返回草稿的区间并保持其子任务；移动超出计划边界窗口（即超出所给帧）的边界保留草稿值，区间保持顺序、相邻区间共享边界；
 - 输出额度随预期区间数增长。
 
-请求按模型量体裁衣：只发送紧凑证据行（id、图片序号、时间）；精修携带的图片数、每图与每字符的 token 成本都从本模型自己的计量请求中学习（`workbench/models/request-cost/<provider>.json`，首次用两次单 token 调用标定）。长 episode 分批精修，每批都在上下文与计划帧上限之内。仍然失败的答案保留其有效部分：有老师时连同原因交给老师；无老师时丢弃无效条目并记录（`answer_salvaged`）。某条 episode 的答案一条有效的都没有时，这条 episode 被搁置（记入 `run.failed`，事件 `episode_set_aside`，被拒答案保留在 run 旁边），run 继续跑下一条；恢复 run 时不再重试它。试点仍会阻塞；被搁置的 episode 超过 10%（至少 3 条）时 run 也会阻塞，因为这说明问题出在配置而不是个别难例。无论答案是否有效，token 都会结算。
+请求按模型量体裁衣：只发送紧凑证据行（id、图片序号、时间）；精修携带的图片数、每图与每字符的 token 成本都从本模型自己的计量请求中学习（`workbench/models/request-cost/<provider>.json`，首次用两次单 token 调用标定）。长 episode 分批精修，每批都在上下文与计划帧上限之内。连分批也放不下时（草稿的边界数超过粗扫后帧上限剩余的容量），无人监督的 run 保留该 episode 已通过校验的粗草稿，记录 `refinement_skipped` 及相关数字后继续；有监督的 run 则停下，由人调整帧上限。仍然失败的答案保留其有效部分：有老师时连同原因交给老师；无老师时丢弃无效条目并记录（`answer_salvaged`）。某条 episode 的答案一条有效的都没有时，这条 episode 被搁置（记入 `run.failed`，事件 `episode_set_aside`，被拒答案保留在 run 旁边），run 继续跑下一条；恢复 run 时不再重试它。试点仍会阻塞；被搁置的 episode 超过 10%（至少 3 条）时 run 也会阻塞，因为这说明问题出在配置而不是个别难例。无论答案是否有效，token 都会结算。
 
 ## 6. 模型从哪里学习
 
@@ -98,7 +98,7 @@ uv run levi agent task new "…" --provider qwen-local --supervision supervised 
 
 ## 8. 本地 OpenAI 兼容服务（vLLM）
 
-`openai-local` 类型的档案通过与 Ollama 相同的加固路径，运行由 vLLM（或其他本地 OpenAI 兼容服务）提供的模型：收窄的答案 schema（以 `response_format` `json_schema` 发送，由服务在解码时强制）、紧凑证据行、请求成本标定与图像上限、无效答案的部分保留、暂停/取消即切断进行中的请求、GPU 守护，以及自然语言任务。评测记录中的 driver 为 `local-vlm`。适用于没有 Ollama 版本的模型（如 Molmo2），或在两种引擎上对比同一模型。
+`openai-local` 类型的档案通过与 Ollama 相同的加固路径，运行由 vLLM（或其他本地 OpenAI 兼容服务）提供的模型：收窄的答案 schema（以 `response_format` `json_schema` 发送，由服务在解码时强制）、紧凑证据行、请求成本标定与图像上限、无效答案的部分保留、暂停/取消即切断进行中的请求、GPU 守护，以及自然语言任务。评测记录中的 driver 为 `local-vlm`。适用于没有 Ollama 版本的模型，或在两种引擎上对比同一模型。
 
 LEVI 不安装、不启动、也不停止该服务。请在独立环境中运行 vLLM，不要装进 LEVI 的 `.venv`。以下命令适用于 vLLM 0.30：
 
@@ -107,15 +107,6 @@ LEVI 不安装、不启动、也不停止该服务。请在独立环境中运行
 vllm serve RedHatAI/Qwen3.8-27B-INT4 --served-model-name qwen3.8-27b \
   --host 127.0.0.1 --port 8100 --max-model-len 32768 --max-num-seqs 2 \
   --gpu-memory-utilization 0.90 --limit-mm-per-prompt '{"image": 64, "video": 0}'
-
-# Molmo2-8B（Molmo2-ER 用它自己的权重，同样方式启动，--max-model-len 16384）。
-# 在 32 GB GPU 上，多模态显存预估（26 张全尺寸图像）会显存不足：跳过它，为视觉编码器
-# 留出余量，并发送缩小后的帧（档案 "image_max_side": 378，每帧一个切片）。Molmo2 用贪心解码。
-vllm serve allenai/Molmo2-8B --trust-remote-code --served-model-name molmo2-8b \
-  --host 127.0.0.1 --port 8101 --max-model-len 36864 --max-num-batched-tokens 36864 \
-  --max-num-seqs 1 --gpu-memory-utilization 0.82 --skip-mm-profiling \
-  --override-generation-config '{"temperature": 0.0}' \
-  --limit-mm-per-prompt '{"image": 64, "video": 0}'
 ```
 
 然后创建档案（工作台 → Model settings → *Local OpenAI-compatible server (vLLM)*，或 REST）：
@@ -125,7 +116,7 @@ curl -X POST -H "x-levi-ui-token: $(cat "$LEVI_WORKSPACE/outputs/LEVI/workbench/
   -H "Content-Type: application/json" http://127.0.0.1:7861/api/levi/agent/v1/providers -d '{
   "name": "qwen38-vllm", "kind": "openai-local", "base_url": "http://127.0.0.1:8100",
   "model": "qwen3.8-27b", "context_tokens": 32768, "vision": true,
-  "allow_localhost": true, "max_images": 64}'
+  "allow_localhost": true, "max_images": 64, "prompt_style": "lean"}'
 ```
 
 再在“账号与连接”中检查并绑定（`GET …/providers/qwen38-vllm/ollama`，然后用显示的 digest 调 `POST …/ollama/bind`，并带上 `"vision": true, "structured_output": true`）。
@@ -135,10 +126,10 @@ curl -X POST -H "x-levi-ui-token: $(cat "$LEVI_WORKSPACE/outputs/LEVI/workbench/
 - **`context_tokens`** 由绑定设为服务的 `--max-model-len`（最多 131072，更长的会被拒绝绑定）。服务的上下文在启动时就已固定，单个请求无法缩小它，所以一次调用最多可能用掉这么多，LEVI 也按这个数预留。
 - **`max_images`** 即服务 `--limit-mm-per-prompt` 中的图像数。超出的请求在发送前就会被拒绝，精修批次也按它划分。**`image_max_side`**（可选）把每张图按长边缩到不超过该像素数后再发送；证据文件保持原始尺寸，标定也按缩放后的图像计价。
 - **思考模式**默认关闭：每次请求都发送 `chat_template_kwargs: {"enable_thinking": false}`，Qwen3 系模板会遵守，其他模板会忽略。`think: true` 可以打开，但需要服务端配置 `--reasoning-parser`（schema 在推理结束后才生效），且推理与答案共用同一输出额度。若服务只返回推理而没有答案，请求会失败并说明原因。
-- **`fold_system: true`** 是 Molmo2 必需的：它的对话模板不接受 system 角色，并要求 user/assistant 严格交替，因此系统提示会放在第一条用户消息开头。所有图像都放在文字之前、按证据顺序排列（第 *n* 张图对应编号为 *n* 的证据行），Molmo2 的模板本来也这样放置。Molmo2 没有工具调用，LEVI 也不使用。
-- **`prompt_style: "lean"`**（两种本地 kind 均可）：发送计划的原始指令和帧列表（“image *n* = *t* s”），不再发送 LEVI 的 skills 和整份 JSON；记忆中只保留老师备注与经验（不再重复一遍指令）；要求模型只给区间、不写引用，由 LEVI 为每个区间引用其中至多三帧，并用区间描述作为证据说明。同一模型用与不用 LEVI 的配对实验显示，完整提示会降低本地模型的片段 F1 并使输出 token 约翻倍。默认 `full`。
+- **`fold_system: true`** 用于不接受 system 角色、并要求 user/assistant 严格交替的对话模板：系统提示会放在第一条用户消息开头，所有图像都放在文字之前、按证据顺序排列（第 *n* 张图对应编号为 *n* 的证据行）。
+- **`prompt_style: "lean"`**（两种本地 kind 均可）：发送计划的原始指令和帧列表（“image *n* = *t* s”），不再发送 LEVI 的 skills 和整份 JSON；记忆中只保留老师备注、经验、反复出现的不确定性和其他集的示例（不再重复一遍指令）；要求模型只给区间、不写引用和证据说明，由 LEVI 为每个区间引用其中至多三帧，并用区间描述作为证据说明。同一模型用与不用 LEVI 的配对实验显示，完整提示会降低本地模型的片段 F1 并使输出 token 约翻倍，因此时序标注（子任务与事件）推荐使用 `lean`。档案的提示风格同样作用于数据集审查，而审查在 `lean` 下实测更差（balanced accuracy 0.590，`full` 为 0.621）：审查请使用 `full` 档案。默认 `full`。
 - **结构化输出**：vLLM 默认后端（`auto`）能编译 LEVI 的每一个答案 schema；如果请求因结构化输出错误被拒，请用 `--structured-outputs-config.backend guidance` 启动服务。
-- **采样参数**沿用模型自带的生成配置（vLLM 默认 `--generation-config auto`），LEVI 不发送 temperature。不要加 `--generation-config vllm`，它会用 vLLM 的默认值替换模型推荐的设置。
+- **采样参数**沿用模型自带的生成配置（vLLM 默认 `--generation-config auto`），LEVI 不发送 temperature。不要加 `--generation-config vllm`，它会用 vLLM 的默认值替换模型推荐的设置。需要贪心（可复现）解码时，用 `--override-generation-config '{"temperature": 0.0}'` 启动服务。
 - **密钥**：不需要。如果服务使用了 `--api-key`，请把它放在 `LEVI_LOCAL_MODEL_KEY`（此类档案默认的 `key_env`，云端 key 因此不会被发到本机端口）或会话凭据中。
 - **GPU 守护**：为该档案端口提供服务的进程（在端口上监听的 API 服务及其启动的引擎进程）通过监听套接字被识别为 LEVI 自己的模型，绝不按名字识别，因此不会挡住该档案的请求；其他人的工作仍然会挡住。守护无法卸载 vLLM 的模型：服务运行期间一直占用 `--gpu-memory-utilization` 比例的显存。对 Ollama 档案以及其他端口上的档案来说，它是别人的工作：会为它卸载 Ollama 的模型，run 会等它离开；守护只在 GPU 对被挡住的 run 自己的档案而言空闲时才恢复该 run。运行 Ollama 前请先停掉 vLLM，不要两者同时运行。档案的请求会把在其端口上监听的任何进程都当作它的服务；另一个程序占用该端口期间（openpi 的策略服务默认也用 8000），请停用该档案。加载/卸载控制和下载不适用（HTTP 409）。识别需要通过 `/proc` 读取服务的套接字，因此服务须与 LEVI 以同一用户运行；否则请在 `workbench/models/gpu-policy.json` 中加一条忽略规则，例如 `{"rules": [{"match": "(?i)vllm", "class": "ignore"}]}`。
 - **Token**：vLLM 报告完整的提示长度，而 Ollama 不计入已缓存的前缀；跨引擎比较时请看输出 token 与单次调用耗时。Ollama 调用还会在每个阶段的用量中记录 `load_seconds`、`prefill_seconds` 和 `decode_seconds`。
@@ -161,6 +152,7 @@ uv run pytest tests/test_ollama_protocol.py tests/test_ollama_integration.py \
 ## 限制
 
 - 小型本地模型的标注质量尚未确立。依赖它之前，请在自己的数据上用老师和参考答案实测。
+- 两种本地通道 LEVI 都不发送采样参数（temperature、top-p、seed），答案是否确定由服务端决定：Ollama 取模型自身参数（其 Modelfile），vLLM 取所服务的生成配置（见上文**采样参数**）。
 - `OLLAMA_NO_CLOUD` 不等于网络隔离：没有操作系统级的离线沙箱。
 - GPU 守卫通过 `nvidia-smi` 识别进程，它是礼让策略，不是 GPU 调度器或资源租约。它只能识别与 LEVI 同一用户运行的本地服务进程（通过 `/proc` 读取其套接字）。
 - 不训练权重，不自动发布技能，不自动晋级能力档案。
