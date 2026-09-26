@@ -18,6 +18,13 @@ import type {
   Sam3PromptPreset,
   Sam3Revision,
 } from "../types/object-annotation.types";
+import type {
+  RecapEpisode,
+  RecapJob,
+  RecapRunRequest,
+  RecapStatus,
+  RecapSummary,
+} from "../types/recap.types";
 
 // Revision tokens belong to the editor's last read, never an automatic pre-save
 // refresh (which would hide concurrent edits). Kept in memory, not credentials.
@@ -694,4 +701,138 @@ export async function deleteSam3PromptPreset(
   if (!response.ok) throw new Error(`SAM3 delete preset: ${response.status}`);
   const data = (await response.json()) as { presets?: Sam3PromptPreset[] };
   return data.presets ?? [];
+}
+
+// ---------------------------------------------------------------------------
+// RECAP value model / advantage labels (`/api/recap/*`). Results are per
+// dataset (catalog name); a missing result is a 404, which the read helpers
+// report as `null` rather than an error.
+
+/** Error message from a failed response: the backend's `detail` (a string, or
+ * the `msg` of each validation error), else a short raw body, else
+ * `<what>: <status>`. */
+export async function responseErrorMessage(
+  response: Response,
+  what: string,
+): Promise<string> {
+  const text = await response.text().catch(() => "");
+  try {
+    const payload = JSON.parse(text) as { detail?: unknown };
+    if (typeof payload.detail === "string" && payload.detail.trim())
+      return payload.detail.trim();
+    if (Array.isArray(payload.detail)) {
+      const messages = payload.detail
+        .map((item) =>
+          item && typeof item === "object" && "msg" in item
+            ? String((item as { msg: unknown }).msg)
+            : "",
+        )
+        .filter(Boolean);
+      if (messages.length) return messages.join("; ");
+    }
+  } catch {
+    // Non-JSON proxy error: use the raw text below.
+  }
+  const raw = text.trim();
+  return raw && raw.length <= 300 ? raw : `${what}: ${response.status}`;
+}
+
+export async function fetchRecapStatus(
+  ident: DatasetIdent,
+  signal?: AbortSignal,
+): Promise<RecapStatus> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const response = await annotationFetch(buildUrl("/api/recap/status", ident), {
+    cache: "no-store",
+    signal,
+  });
+  if (!response.ok)
+    throw new Error(await responseErrorMessage(response, "RECAP status"));
+  return response.json() as Promise<RecapStatus>;
+}
+
+export async function runRecap(
+  ident: DatasetIdent,
+  request: RecapRunRequest,
+): Promise<RecapJob> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const response = await annotationFetch(endpoint("/api/recap/run"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      repo_id: ident.repoId || null,
+      checkpoint: request.checkpoint,
+      episodes: request.episodes ?? null,
+      lookahead: request.lookahead ?? 10,
+      positive_quantile: request.positive_quantile ?? 0.3,
+      threshold: request.threshold ?? null,
+    }),
+  });
+  if (!response.ok)
+    throw new Error(await responseErrorMessage(response, "RECAP run"));
+  return response.json() as Promise<RecapJob>;
+}
+
+export async function fetchRecapJob(
+  jobId: string,
+  ident: DatasetIdent,
+  signal?: AbortSignal,
+): Promise<RecapJob> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const response = await annotationFetch(
+    buildUrl(`/api/recap/jobs/${encodeURIComponent(jobId)}`, ident),
+    { cache: "no-store", signal },
+  );
+  if (!response.ok)
+    throw new Error(await responseErrorMessage(response, "RECAP job"));
+  return response.json() as Promise<RecapJob>;
+}
+
+export async function cancelRecapJob(
+  jobId: string,
+  ident: DatasetIdent,
+): Promise<RecapJob> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const response = await annotationFetch(
+    buildUrl(`/api/recap/jobs/${encodeURIComponent(jobId)}/cancel`, ident),
+    { method: "POST", headers: { "Content-Type": "application/json" } },
+  );
+  if (!response.ok)
+    throw new Error(await responseErrorMessage(response, "RECAP cancel"));
+  return response.json() as Promise<RecapJob>;
+}
+
+/** Per-episode positive fractions of the current result; `null` when the
+ * dataset has no advantage labels yet (404). */
+export async function fetchRecapSummary(
+  ident: DatasetIdent,
+  signal?: AbortSignal,
+): Promise<RecapSummary | null> {
+  if (!ENV_URL) return null;
+  const response = await annotationFetch(
+    buildUrl("/api/recap/summary", ident),
+    { cache: "no-store", signal },
+  );
+  if (response.status === 404) return null;
+  if (!response.ok)
+    throw new Error(await responseErrorMessage(response, "RECAP summary"));
+  return response.json() as Promise<RecapSummary>;
+}
+
+/** One episode's per-frame value/advantage labels; `null` when the dataset
+ * (or this episode) has no labels yet (404). */
+export async function fetchRecapEpisode(
+  episodeId: number,
+  ident: DatasetIdent,
+  signal?: AbortSignal,
+): Promise<RecapEpisode | null> {
+  if (!ENV_URL) return null;
+  const response = await annotationFetch(
+    buildUrl(`/api/recap/episodes/${episodeId}`, ident),
+    { cache: "no-store", signal },
+  );
+  if (response.status === 404) return null;
+  if (!response.ok)
+    throw new Error(await responseErrorMessage(response, "RECAP episode"));
+  return response.json() as Promise<RecapEpisode>;
 }
