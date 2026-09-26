@@ -6,8 +6,10 @@ import {
   framePeriod,
   nearestFrame,
   positiveFraction,
+  recapView,
   valuePath,
   valueToY,
+  type RecapViewInput,
 } from "@/components/recap-lanes";
 
 const ts = (n: number, fps = 10) =>
@@ -236,5 +238,104 @@ describe("formatting", () => {
     expect(formatSigned(-0.5, 2)).toBe("-0.50");
     expect(formatSigned(null)).toBe("—");
     expect(formatSigned(Number.NaN)).toBe("—");
+  });
+});
+
+describe("recapView", () => {
+  const base: RecapViewInput = {
+    statusLoaded: true,
+    statusError: false,
+    hasCheckpoints: true,
+    hasCurrent: true,
+    jobActive: false,
+    episode: "labels",
+    controlsOpen: false,
+  };
+
+  test("a labelled episode shows rows, meta and a recompute affordance", () => {
+    expect(recapView(base)).toEqual({
+      note: null,
+      control: "recompute",
+      showMeta: true,
+      showRows: true,
+    });
+    expect(recapView({ ...base, controlsOpen: true }).control).toBe("compute");
+  });
+
+  test("collapses to one muted line without checkpoints or a result", () => {
+    expect(
+      recapView({
+        ...base,
+        hasCheckpoints: false,
+        hasCurrent: false,
+        episode: "none",
+      }),
+    ).toEqual({
+      note: "no-checkpoint",
+      control: null,
+      showMeta: false,
+      showRows: false,
+    });
+  });
+
+  test("offers compute when checkpoints exist but nothing was computed", () => {
+    const view = recapView({ ...base, hasCurrent: false, episode: "none" });
+    expect(view.note).toBeNull();
+    expect(view.control).toBe("compute");
+    expect(view.showRows).toBe(false);
+  });
+
+  test("an active job shows progress instead of controls", () => {
+    const view = recapView({
+      ...base,
+      hasCurrent: false,
+      episode: "none",
+      jobActive: true,
+    });
+    expect(view.control).toBe("progress");
+    expect(view.note).toBeNull();
+    // Even with no checkpoints listed any more, a running job stays visible.
+    expect(
+      recapView({
+        ...base,
+        hasCheckpoints: false,
+        hasCurrent: false,
+        episode: "none",
+        jobActive: true,
+      }).note,
+    ).toBeNull();
+  });
+
+  test("keeps empty rows while an episode loads under a result", () => {
+    const view = recapView({ ...base, episode: "loading" });
+    expect(view.showRows).toBe(true);
+    expect(view.showMeta).toBe(false);
+    expect(
+      recapView({ ...base, hasCurrent: false, episode: "loading" }).showRows,
+    ).toBe(false);
+  });
+
+  test("an episode outside the result says so", () => {
+    expect(recapView({ ...base, episode: "none" }).note).toBe(
+      "no-episode-labels",
+    );
+  });
+
+  test("loading and unavailable status", () => {
+    expect(
+      recapView({ ...base, statusLoaded: false, episode: "loading" }).note,
+    ).toBe("loading");
+    const failed = recapView({
+      ...base,
+      statusLoaded: false,
+      statusError: true,
+      episode: "none",
+    });
+    expect(failed.note).toBe("unavailable");
+    expect(failed.control).toBeNull();
+    // Labels that did load still draw, even if status failed.
+    expect(
+      recapView({ ...base, statusLoaded: false, statusError: true }).showRows,
+    ).toBe(true);
   });
 });

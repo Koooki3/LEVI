@@ -21,6 +21,9 @@ import { T, useLocale } from "@/components/levi-locale";
  *   - interjections + speech: combined event track.
  *   - vqa: event track.
  *
+ *   VALUE MODEL (RECAP advantage labels, not language atoms — see
+ *   recap-value-section.tsx): advantage runs and the V(o_t) curve.
+ *
  * Interactions:
  *   - Click a marker → seek + select (handled by the panel's listening to
  *     `selectAtom` via context).
@@ -52,6 +55,7 @@ import {
   type Role,
 } from "../types/language.types";
 import { DraggablePopup } from "./draggable-popup";
+import { RecapValueSection } from "./recap-value-section";
 
 const LABEL_WIDTH = 84;
 const DRAG_THRESHOLD_PX = 4;
@@ -928,6 +932,25 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                     ))}
                   </div>
                 ))}
+
+                {/* RECAP value model (advantage labels + V(o_t)): a third
+                section inside .tl-tracks so the playhead spans it. It loads
+                on its own and renders nothing without an annotation backend,
+                so it never delays or shifts the language rows above. */}
+                <RecapValueSection
+                  duration={duration}
+                  currentTime={currentTime}
+                  onSeek={(ts) => {
+                    seek(ts, "external");
+                    setIsPlaying(false);
+                  }}
+                  onBandClick={onTrackBandClick}
+                  onHoverMove={onTrackHoverMove}
+                  onHoverLeave={onTrackHoverLeave}
+                  showTip={showTip}
+                  moveTip={moveTip}
+                  hideTip={hideTip}
+                />
 
                 {/* Playhead — spans the full tracks region via top/bottom. */}
                 <div className="tl-playhead" style={{ left: playheadLeft }} />

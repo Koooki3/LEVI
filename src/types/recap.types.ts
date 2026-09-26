@@ -98,6 +98,10 @@ export interface RecapEpisode {
   positive: boolean[];
 }
 
+/** Dispatched on `window` when a run finishes, so other views (the episode
+ * list's positive-fraction badges) can refresh. */
+export const RECAP_UPDATED_EVENT = "levi-recap-updated";
+
 export function isRecapJobActive(job: RecapJob | null | undefined): boolean {
   return !!job && (job.status === "queued" || job.status === "running");
 }

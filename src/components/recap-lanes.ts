@@ -243,3 +243,59 @@ export function formatSigned(value: number | null | undefined, digits = 3) {
   const text = value.toFixed(digits);
   return value > 0 ? `+${text}` : text;
 }
+
+// ---------------------------------------------------------------------------
+// Section state: what the VALUE MODEL header and rows show.
+
+export interface RecapViewInput {
+  /** recap/status has answered (successfully). */
+  statusLoaded: boolean;
+  /** recap/status failed (route missing, backend down, …). */
+  statusError: boolean;
+  /** status.checkpoints is non-empty (ready or not). */
+  hasCheckpoints: boolean;
+  /** status.current is set: the dataset has a result. */
+  hasCurrent: boolean;
+  jobActive: boolean;
+  /** This episode's labels: still loading, absent (404), or present. */
+  episode: "loading" | "none" | "labels";
+  /** The user opened the compute controls under an existing result. */
+  controlsOpen: boolean;
+}
+
+export interface RecapView {
+  /** Muted one-line note in place of the header subtitle. */
+  note:
+    | "unavailable"
+    | "loading"
+    | "no-checkpoint"
+    | "no-episode-labels"
+    | null;
+  /** What the right side of the header offers. */
+  control: "progress" | "compute" | "recompute" | null;
+  /** Checkpoint · threshold · positive share + legend in the header. */
+  showMeta: boolean;
+  /** ADVANTAGE + VALUE rows (empty while an episode loads under a result,
+   * so the timeline keeps its height). */
+  showRows: boolean;
+}
+
+export function recapView(input: RecapViewInput): RecapView {
+  const hasLabels = input.episode === "labels";
+  const showRows =
+    hasLabels || (input.episode === "loading" && input.hasCurrent);
+  let note: RecapView["note"] = null;
+  if (!hasLabels) {
+    if (input.statusError) note = "unavailable";
+    else if (!input.statusLoaded) note = "loading";
+    else if (!input.hasCheckpoints && !input.hasCurrent && !input.jobActive)
+      note = "no-checkpoint";
+    else if (input.hasCurrent && input.episode === "none")
+      note = "no-episode-labels";
+  }
+  let control: RecapView["control"] = null;
+  if (input.jobActive) control = "progress";
+  else if (input.statusLoaded && input.hasCheckpoints)
+    control = input.hasCurrent && !input.controlsOpen ? "recompute" : "compute";
+  return { note, control, showMeta: hasLabels, showRows };
+}

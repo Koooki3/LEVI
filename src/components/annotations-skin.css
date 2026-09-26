@@ -1707,3 +1707,251 @@
     width: 100%;
   }
 }
+
+/* ----- VALUE MODEL section (RECAP advantage labels) ----- */
+.annotations-skin {
+  --recap-pos: #3fb950;
+  --recap-neg: #f85149;
+  --recap-value: #e3b341;
+  --recap-accent: #d2a8ff;
+}
+.annotations-skin .tl-section-head.value-model {
+  border-left-color: var(--recap-accent);
+  align-items: center;
+  flex-wrap: wrap;
+  row-gap: 4px;
+  min-height: 24px;
+}
+.annotations-skin .recap-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0;
+  color: var(--fg-2);
+}
+.annotations-skin .recap-meta code,
+.annotations-skin .tl-section-sub code {
+  font-family: inherit;
+  color: var(--fg-1);
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-xs);
+  padding: 0 4px;
+}
+.annotations-skin .recap-stale {
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--hf-orange);
+  color: var(--hf-orange);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.annotations-skin .recap-head-right {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.annotations-skin .recap-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--fg-3);
+}
+.annotations-skin .recap-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 8px;
+  border-radius: 2px;
+}
+.annotations-skin .recap-legend .recap-swatch.neg {
+  margin-left: 6px;
+}
+.annotations-skin .recap-swatch.pos {
+  background: var(--recap-pos);
+}
+.annotations-skin .recap-swatch.neg {
+  background: var(--recap-neg);
+}
+.annotations-skin .dot-advantage {
+  background: linear-gradient(
+    90deg,
+    var(--recap-pos) 50%,
+    var(--recap-neg) 50%
+  );
+}
+.annotations-skin .dot-value {
+  background: var(--recap-value);
+}
+.annotations-skin .recap-compute,
+.annotations-skin .recap-job {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.annotations-skin .recap-compute select {
+  font-size: 11px;
+  padding: 2px 6px;
+  max-width: 220px;
+}
+.annotations-skin .recap-btn {
+  font-size: 11px;
+  line-height: 16px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-1);
+  background: transparent;
+  color: var(--fg-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.annotations-skin .recap-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--fg-1);
+}
+.annotations-skin .recap-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.annotations-skin .recap-btn.primary {
+  border-color: var(--recap-pos);
+  background: rgba(63, 185, 80, 0.15);
+  color: #aff5b4;
+}
+.annotations-skin .recap-btn.ghost {
+  border-color: transparent;
+  color: var(--fg-3);
+  padding: 1px 6px;
+}
+.annotations-skin .recap-job-stage {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  color: var(--fg-2);
+  white-space: nowrap;
+}
+.annotations-skin .recap-progress {
+  position: relative;
+  display: inline-block;
+  width: 120px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.annotations-skin .recap-progress > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--recap-accent);
+  border-radius: 999px;
+  transition: width 300ms ease;
+}
+.annotations-skin .recap-note {
+  font-size: 11px;
+  color: var(--fg-3);
+  padding: 0 0 4px 11px;
+  margin-bottom: 4px;
+}
+.annotations-skin .recap-note.error {
+  color: #ffb4ae;
+}
+/* Advantage runs: a solid fill whose opacity (inline, 0.25..1) carries the
+   strength; no text, so no padding. */
+.annotations-skin .tl-seg.adv {
+  padding: 0;
+  border-radius: 1px;
+}
+.annotations-skin .tl-seg.adv.pos {
+  background: var(--recap-pos);
+}
+.annotations-skin .tl-seg.adv.neg {
+  background: var(--recap-neg);
+}
+.annotations-skin .tl-seg.adv:hover {
+  outline: 1px solid var(--fg-1);
+  z-index: 1;
+}
+.annotations-skin .tl-row.recap-value-row {
+  height: 40px;
+}
+.annotations-skin .recap-value-row .track {
+  height: 36px;
+  overflow: visible;
+}
+.annotations-skin .recap-plot {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.annotations-skin .recap-grid {
+  stroke: var(--border-1);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.annotations-skin .recap-line {
+  fill: none;
+  stroke: var(--recap-value);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.annotations-skin .recap-axis {
+  position: absolute;
+  left: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 8.5px;
+  line-height: 10px;
+  color: var(--fg-3);
+  pointer-events: none;
+}
+.annotations-skin .recap-axis.top {
+  top: 1px;
+}
+.annotations-skin .recap-axis.bottom {
+  bottom: 1px;
+}
+.annotations-skin .recap-dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+  border: 1.5px solid #0f172a;
+  background: var(--recap-value);
+  pointer-events: none;
+  z-index: 6;
+}
+.annotations-skin .recap-dot.pos {
+  box-shadow: 0 0 0 2px var(--recap-pos);
+}
+.annotations-skin .recap-dot.neg {
+  box-shadow: 0 0 0 2px var(--recap-neg);
+}
+.annotations-skin .recap-readout {
+  position: absolute;
+  transform: translateX(8px);
+  padding: 0 5px;
+  border-radius: 3px;
+  background: #11180ddd;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9.5px;
+  line-height: 13px;
+  color: var(--fg-1);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 6;
+}
+.annotations-skin .recap-readout.flip {
+  transform: translateX(calc(-100% - 8px));
+}
+.annotations-skin .recap-readout.low {
+  bottom: 2px;
+}
+.annotations-skin .recap-readout.high {
+  top: 2px;
+}
