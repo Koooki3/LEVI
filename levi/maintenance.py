@@ -51,7 +51,13 @@ def size(path):
 
 
 # Artifact trees keyed by catalog name; each entry is one dataset's sidecars.
-PER_DATASET = ("annotations", "object_annotations", "views", "agent/datasets")
+PER_DATASET = (
+    "annotations",
+    "object_annotations",
+    "views",
+    "agent/datasets",
+    "recap_values",
+)
 
 
 def orphans():

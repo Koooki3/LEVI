@@ -2894,6 +2894,103 @@ def sam3_edit(
     return JSONResponse({"ok": True, **result})
 
 
+# --- RECAP value model: per-frame values and advantage labels -----------------
+# Results are keyed by catalog name (a namespace keeps its own) and live
+# outside agent bundles; see levi/recap and docs/RECAP.md.
+
+
+class RecapRunRequest(BaseModel):
+    repo_id: str
+    checkpoint: str = Field(min_length=1, max_length=64)
+    episodes: list[int] | None = None
+    lookahead: int | None = Field(default=None, ge=1, le=10000)
+    positive_quantile: float | None = Field(default=None, gt=0, lt=1)
+    threshold: float | None = None
+    # "sft": demonstrations, every episode a success and every frame positive
+    # (RLinf's dataset type); the default reads each episode's outcome.
+    dataset_type: Literal["rollout", "sft"] = "rollout"
+
+
+def _recap_call(call):
+    from levi.recap.jobs import RecapError
+
+    try:
+        return call()
+    except RecapError as exc:
+        raise HTTPException(exc.status, exc.detail) from exc
+
+
+def _recap_job(job_id: str, repo_id: str | None) -> dict[str, Any]:
+    from levi.recap import jobs as recap_jobs
+
+    name = None
+    if repo_id:
+        name = recap_jobs.dataset(repo_id).name
+    job = recap_jobs.find(job_id, name)
+    if job is None:
+        raise HTTPException(404, "RECAP value job not found")
+    return job
+
+
+@app.get("/api/recap/status")
+def recap_status(repo_id: str) -> JSONResponse:
+    from levi.recap import jobs as recap_jobs
+
+    return JSONResponse(_recap_call(lambda: recap_jobs.status(repo_id)))
+
+
+@app.post("/api/recap/run")
+def recap_run(request: RecapRunRequest, repo_id: str | None = None) -> JSONResponse:
+    from levi.recap import jobs as recap_jobs
+
+    if repo_id and repo_id != request.repo_id:
+        raise HTTPException(400, "repo_id in the query and the body differ")
+    job = _recap_call(
+        lambda: recap_jobs.start(
+            request.repo_id,
+            request.checkpoint,
+            episodes=request.episodes,
+            lookahead=request.lookahead,
+            positive_quantile=request.positive_quantile,
+            threshold=request.threshold,
+            dataset_type=request.dataset_type,
+        )
+    )
+    return JSONResponse(recap_jobs.public(job), status_code=202)
+
+
+@app.get("/api/recap/jobs/{job_id}")
+def recap_job_status(job_id: str, repo_id: str | None = None) -> JSONResponse:
+    from levi.recap import jobs as recap_jobs
+
+    job = _recap_call(lambda: recap_jobs.collect(_recap_job(job_id, repo_id)))
+    return JSONResponse(recap_jobs.public(job))
+
+
+@app.post("/api/recap/jobs/{job_id}/cancel")
+def recap_job_cancel(job_id: str, repo_id: str | None = None) -> JSONResponse:
+    from levi.recap import jobs as recap_jobs
+
+    job = _recap_call(lambda: recap_jobs.cancel(_recap_job(job_id, repo_id)))
+    return JSONResponse(recap_jobs.public(job))
+
+
+@app.get("/api/recap/summary")
+def recap_summary(repo_id: str) -> JSONResponse:
+    from levi.recap import jobs as recap_jobs
+
+    return JSONResponse(_recap_call(lambda: recap_jobs.summary_payload(repo_id)))
+
+
+@app.get("/api/recap/episodes/{episode_index}")
+def recap_episode(episode_index: int, repo_id: str) -> JSONResponse:
+    from levi.recap import jobs as recap_jobs
+
+    return JSONResponse(
+        _recap_call(lambda: recap_jobs.episode_payload(repo_id, episode_index))
+    )
+
+
 @app.get("/api/episodes/{episode_index}/frame_timestamps")
 def episode_frame_timestamps(
     episode_index: int,

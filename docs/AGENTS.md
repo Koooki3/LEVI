@@ -188,6 +188,7 @@ uv run levi agent knowledge list|refresh|promote|reject      # built-in knowledg
 | Harness | `memory.get`, `memory.search`, `cost.profile`, `knowledge.list`, `improvements.list`, `improvements.get`, `improvements.evaluate`, `improvements.revise`, `improvements.transition` (up to `awaiting_authorization`) | agent |
 | | `memory.rebuild`, `knowledge.promote`, `knowledge.reject`; publishing, retaining, rolling back and resolving improvements | **person** |
 | Supervision | `supervision.pending`, `supervision.feedback` | assigned teacher |
+| RECAP value model | `recap.status`, `recap.get` (read-only: checkpoints, current advantage labels, an episode's positive/negative runs and value curve; see [RECAP](RECAP.md)) | agent |
 | Workspace | `gpu.status` (the local-model GPU guardian's decision) | agent |
 | | `workspace.clean`, `workspace.reset` | **person** |
 

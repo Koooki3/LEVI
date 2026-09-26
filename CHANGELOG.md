@@ -4,6 +4,10 @@ All notable changes to LEVI. Versions follow the tags on GitHub; everything unde
 
 ## Unreleased
 
+### RECAP value model and advantage labels
+
+- **Per-frame values and advantage labels from a RECAP value model.** A checkpoint store `checkpoints/recap_value/<name>/` with a `manifest.json` for every choice the model needs (expert variant, camera views, base models and tokenizer, return range, threshold); `levi recap import|set|checkpoints|run|show`. A job runs RLinf's `ValueCriticModel` in its own environment (`integrations/recap_value`, `setup.sh` applies openpi's transformers patch; `--selftest` checks the build without a checkpoint) or a `fake` provider without a model, then LEVI computes RLinf's N-step advantage and labels each frame against the request's threshold, the checkpoint's unified threshold or this dataset's quantile. Revisions per dataset (namespaces separate) under `workbench/recap_values/<name>/`, with RLinf's `advantages.parquet` columns, provenance and a stale flag; routes `recap/status|run|jobs|summary|episodes`, read-only agent capabilities `recap.status` and `recap.get`. Settings: `LEVI_RECAP_VALUE_CHECKPOINT_DIR`, `LEVI_RECAP_VALUE_WORKER_PYTHON`, `LEVI_RECAP_VALUE_MIN_FREE_MIB`, `LEVI_RECAP_VALUE_TIMEOUT_SECONDS`, `LEVI_RECAP_VALUE_STALL_SECONDS`, `LEVI_RECAP_VALUE_BATCH_SIZE`, `LEVI_RECAP_VALUE_DEVICE`. See [RECAP](docs/RECAP.md#value-model-and-advantage-labels-in-levi--levi-中的价值模型与优势标签).
+
 ### Local models and natural-language tasks
 
 - Native Ollama provider with digest binding, bounded transport, explicit downloads with persisted progress and cancellation, and load/unload controls; an optional LEVI-owned Ollama service with workspace model storage, `OLLAMA_NO_CLOUD`, explicit start/stop and Linux process-identity checks. Default profile: `qwen3.5:4b`. Schema-bound calls run with reasoning off.

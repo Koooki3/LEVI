@@ -179,6 +179,8 @@ Generated from the capability registry by `uv run levi docs sync`. Do not edit b
 | `plans.rebudget` | **person** | Revise budget, retain completed shards, revoke execution approval |
 | `plans.review_pilot` | **person** | Accept or reject pilot quality before expanding scope |
 | `quality.inspect` | agent | Check a dataset's structure, timing, media, actions and distribution; writes <dataset>/reports/quality-<hour>.json |
+| `recap.get` | agent | Current RECAP advantage labels: per-episode positive fraction and mean value, or for one episode its runs of positive/negative frames and V(o_t) about once a second |
+| `recap.status` | agent | RECAP value model on this dataset: checkpoints and their readiness, the worker, the current advantage labels (threshold, stale) and the latest job; reads only |
 | `runs.abandon` | **person** | Close a run nobody will finish, so its evidence can be cleaned up |
 | `runs.cancel` | agent / operator | Request cancellation; not an immediate termination claim |
 | `runs.events` | agent | Replay sequenced run events |

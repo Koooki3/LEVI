@@ -354,6 +354,11 @@ class DatasetRef(Contract):
     repo_id: str
 
 
+class RecapGet(DatasetRef):
+    # Without an episode: the per-episode summary of the current labels.
+    episode: int | None = Field(default=None, ge=0)
+
+
 class KnowledgeList(Contract):
     topic: Literal["annotation", "interpretation", "harness"] | None = None
     refresh: bool = False
@@ -489,6 +494,24 @@ SPECS = {
         (
             "Measured token and time cost on this dataset per agent (API, local "
             "VLM, external MCP), the latest breakdown and advice for the next run"
+        ),
+    ),
+    "recap.status": (
+        DatasetRef,
+        "read",
+        (
+            "RECAP value model on this dataset: checkpoints and their readiness, "
+            "the worker, the current advantage labels (threshold, stale) and the "
+            "latest job; reads only"
+        ),
+    ),
+    "recap.get": (
+        RecapGet,
+        "read",
+        (
+            "Current RECAP advantage labels: per-episode positive fraction and mean "
+            "value, or for one episode its runs of positive/negative frames and "
+            "V(o_t) about once a second"
         ),
     ),
     "knowledge.list": (
@@ -985,6 +1008,17 @@ def _invoke(
             "note": "tokens.source says whether a figure was metered by LEVI, "
             "reported by the agent, or LEVI's measured lower bound.",
         }
+    if name in {"recap.status", "recap.get"}:
+        from levi.recap import jobs as recap_jobs
+
+        try:
+            if name == "recap.status":
+                return recap_jobs.status(args.repo_id, reconcile=False)
+            if args.episode is None:
+                return recap_jobs.summary_payload(args.repo_id)
+            return recap_jobs.episode_digest(args.repo_id, args.episode)
+        except recap_jobs.RecapError as exc:
+            raise ValueError(exc.detail) from exc
     if name in {"memory.get", "memory.search", "memory.rebuild"}:
         from levi.catalog import display_name
         from levi.harness import memory

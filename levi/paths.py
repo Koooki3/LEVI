@@ -32,6 +32,9 @@ CACHE = inside(ROOT / ".cache/levi")
 EXPORTS = inside(ROOT / "outputs/LEVI/exports")
 CHECKPOINTS = inside(ROOT / "checkpoints")
 SAM3_CHECKPOINT_DIR = inside(CHECKPOINTS / "sam3")
+# RECAP value-model checkpoints: one folder per imported checkpoint, each with
+# a manifest.json (levi/recap/checkpoints.py).
+RECAP_VALUE_CHECKPOINT_DIR = inside(CHECKPOINTS / "recap_value")
 
 
 def configure() -> None:
@@ -45,6 +48,16 @@ def configure() -> None:
             ) from exc
     else:
         checkpoint_dir = SAM3_CHECKPOINT_DIR
+    # Read where used (levi/recap/checkpoints.py); not exported, since the
+    # RECAP worker is handed explicit paths. Checked here to fail early.
+    configured_recap_dir = os.getenv("LEVI_RECAP_VALUE_CHECKPOINT_DIR")
+    if configured_recap_dir:
+        try:
+            inside(configured_recap_dir)
+        except ValueError as exc:
+            raise ValueError(
+                "LEVI_RECAP_VALUE_CHECKPOINT_DIR must remain inside LEVI_WORKSPACE"
+            ) from exc
     values = {
         "UV_CACHE_DIR": ROOT / ".cache/uv",
         "HF_HOME": ROOT / ".cache/huggingface",

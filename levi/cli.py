@@ -157,6 +157,11 @@ def main():
 
         sys.argv.pop(1)
         return sam3()
+    if len(sys.argv) > 1 and sys.argv[1] == "recap":
+        configure()
+        from .recap.cli import main as recap
+
+        raise SystemExit(recap(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "stop":
         from .agent.core import stop
 
@@ -205,7 +210,8 @@ def main():
         # someone reading --help would not know they exist.
         epilog=(
             "Also available: stop (stop the shared service), clean (bounded "
-            "cache cleanup), migrate, convert, agent, sam3, sample (DROID test "
+            "cache cleanup), migrate, convert, agent, sam3, recap (RECAP value "
+            "model: checkpoints and advantage labels), sample (DROID test "
             "samples), namespace (isolated experiments over one dataset), docs (check or regenerate the documentation). Each takes its own "
             "--help."
         ),

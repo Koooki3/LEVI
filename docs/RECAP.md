@@ -64,3 +64,66 @@ RLinf's value dataset repacks inputs by robot type; LEVI's camera features are `
     "prompt": "prompt",
 },
 ```
+
+## Value model and advantage labels in LEVI / LEVI 中的价值模型与优势标签
+
+The export above trains a value model; LEVI can also **run** one. A RECAP value model (RLinf's `ValueCriticModel`: SigLIP2-so400m + Gemma3-270M prefix, a Gemma value expert reading a `[CLS]` token, 201 bins over [−1, 0]) predicts V(o_t) for every frame. LEVI turns the values into RLinf's N-step advantage and a positive / negative label per frame, keeps them per dataset and shows them in the episode viewer: the annotations timeline gets a **VALUE MODEL** section under PERSISTENT and EVENTS — an ADVANTAGE row of runs (green positive, red negative, stronger the further from the threshold) and a VALUE row with the V(o_t) curve and a playhead marker — with the checkpoint and threshold in its header and a compute / recompute control (checkpoint, progress, cancel, error). The episode list shows each episode's positive fraction as a small badge.
+
+The core stays model-free: inference runs in its own uv environment, `integrations/recap_value` ([README](../integrations/recap_value/README.md)), and a `fake` provider (a deterministic time-to-go curve, no model) runs with LEVI's own Python for tests and for trying the page.
+
+### Checkpoints
+
+Checkpoints live in `$LEVI_WORKSPACE/checkpoints/recap_value/<name>/` (`LEVI_RECAP_VALUE_CHECKPOINT_DIR` overrides it, inside the workspace): the weights and a `manifest.json` (`levi.recap_value.checkpoint.v1`). Importing copies the file — a hard link on the same filesystem — computes its sha256 and never moves or deletes the source:
+
+```bash
+uv run levi recap import /path/to/run/checkpoints/global_step_3000 --name fr3-step3000 \
+  --views base=observation.images.view1,left_wrist=observation.images.hand \
+  --siglip siglip2-so400m-patch14-224 --gemma3 gemma-3-270m --tokenizer gemma-3-270m
+uv run levi recap set fr3-step3000 --return-min -700 --unified-threshold -0.0123
+uv run levi recap checkpoints [--verify]     # readiness; --verify re-hashes the weights
+uv run levi recap import --fake --name demo  # a fake checkpoint for the page
+```
+
+The source may be a `global_step_*` folder, its `actor` folder or `full_weights.pt` itself; the step is read from the path. When the worker environment exists, import reads the weights' shapes and fills `critic_expert_variant` from them (`variant_source: inferred`). Base-model paths are relative to the checkpoint folder or absolute inside the workspace.
+
+Every choice the worker would otherwise have to guess is a manifest field; a checkpoint is **not ready** until the ones without a safe default are set:
+
+| Field | Default | Meaning / what to confirm from the training run |
+| --- | --- | --- |
+| `critic_expert_variant` | *(none)* | value expert size; RLinf's yaml default is `gemma_1m`, its `from_checkpoint` default `gemma_100m` — confirm, or let import infer it from the weights |
+| `views` | *(none)* | which camera fills `base_0_rgb`, `left_wrist_0_rgb`, `right_wrist_0_rgb`; `null` is a zero image with its mask off (RLinf's LiberoInputs keeps a wrist view, FrankaEEInputs pads both wrist slots) |
+| `base_models.siglip`, `.gemma3`, `.tokenizer` | *(none)* | folders with `config.json` (weights optional — the checkpoint replaces them all) and the Gemma3 tokenizer |
+| `return_min`, `return_max` | from the dataset | RLinf's `data.return_min/max` (or the training datasets' `stats.json`); without them LEVI uses this dataset's own returns and says so (`return_range_source: dataset`) |
+| `unified_threshold` | *(none)* | the training mixture's `unified_threshold`; without it the threshold comes from this dataset |
+| `max_token_len`, `num_bins`, `v_min`, `v_max`, `precision` | 200, 201, −1, 0, `bfloat16` | RLinf defaults |
+| `gamma`, `failure_reward`, `lookahead`, `positive_quantile` | 1.0, −300, 10, 0.3 | RLinf defaults (`advantage_lookahead_step`, `positive_quantile`) |
+
+### Running
+
+From the page (VALUE MODEL → Compute advantages), from a terminal (`uv run levi recap run local/<name> --checkpoint <n> [--episodes 0,3] [--threshold X] [--sft]`, `uv run levi recap show local/<name> [--episode N]`) or the API (`/api/annotation/recap/status|run|jobs/<id>|jobs/<id>/cancel|summary|episodes/<n>`, `repo_id` in the query). One job per dataset at a time. A job runs in its own process group like a SAM3 job, is stopped past `LEVI_RECAP_VALUE_TIMEOUT_SECONDS` (default 21600) or after `LEVI_RECAP_VALUE_STALL_SECONDS` (default 1800) without progress, and is refused under `LEVI_CPU_ONLY=1` (the fake provider stays available) or with less than `LEVI_RECAP_VALUE_MIN_FREE_MIB` (default 6000) of free GPU memory. `LEVI_RECAP_VALUE_WORKER_PYTHON` names the worker's Python (default `integrations/recap_value/.venv/bin/python`), `LEVI_RECAP_VALUE_BATCH_SIZE` the inference batch (default 32) and `LEVI_RECAP_VALUE_DEVICE` the device (`auto`, `cuda`, `cuda:N`, `cpu`). Agents read the labels with `recap.status` and `recap.get` (read-only).
+
+Returns need each episode's outcome, with the export's priority: a human label, then the capture's `levi_outcome`. Episodes without one are left out and listed (`skipped_episodes` in the summary); naming them explicitly is refused. `dataset_type: sft` treats every episode as a success and, as in RLinf, labels every frame positive.
+
+### Advantage and threshold
+
+RLinf's formula (`compute_advantages.py`, commit 807e5fd), per episode of n frames with lookahead N:
+
+```text
+R_t = normalize(G_t − G_{t+N})   if t + N < n, V_next = V(o_{t+N})
+R_t = normalize(G_t)             otherwise,    V_next = 0
+A_t = R_t + γ^min(N, n−t) · V_next − V(o_t)          normalize(x) = (x − return_min)/(return_max − return_min) − 1
+```
+
+G is the export's return (−1 per step, terminal 0 or `failure_reward`); with γ ≠ 1 the reward sum is discounted instead. A frame is positive when A_t ≥ threshold. The threshold is, in order: the request's `threshold` (`manual`); the checkpoint's `unified_threshold` (`checkpoint`); else the (1 − `positive_quantile`) percentile of this run's advantages (`dataset_quantile`). RLinf computes the unified threshold over all its training datasets together, so a threshold from one dataset is only comparable within that dataset. The tests run RLinf's own loop on the same values and require identical results.
+
+### Storage
+
+`outputs/LEVI/workbench/recap_values/<catalog name>/revisions/<id>/` holds one `episode-NNNNNN.parquet` per episode (`episode_index, frame_index, timestamp, value, value_next, reward_sum, return, advantage, positive`), `advantages.parquet` with the columns of RLinf's `meta/advantages_{tag}.parquet` (keyed by this dataset's episode and frame indices — map through `source_demo` when a converted dataset renumbers episodes), `revision.json` (checkpoint name, sha256 and manifest, request, threshold and its source, return range, outcomes, view fingerprint, worker provenance, LEVI commit) and `summary.json`; `current.json` names the revision shown. Results are per catalog name — a namespace keeps its own — and outside agent bundles. A revision becomes **stale** when the capture's fingerprint (or a LeRobot dataset's revision) or an outcome label changes after it was computed.
+
+### When a real checkpoint arrives
+
+Import it, then confirm against the training run (its Hydra config and `meta/mixture_config.yaml`): `critic_expert_variant` (compare with the inferred one), the camera mapping `views` (the value dataset's repack keys), `max_token_len`, `return_min` / `return_max` (`data.return_min/max` or the datasets' stats), `unified_threshold` and `positive_quantile` for the tag, `gamma` / `failure_reward` / `lookahead`, and the base models (SigLIP2 so400m-patch14-224, Gemma3-270M and its tokenizer — gated on the Hub, so place them in the workspace). The worker then loads the weights strictly and refuses on any missing or unexpected key (an absent `lm_head.weight`, unused by the value, is only reported).
+
+### 中文摘要
+
+LEVI 可以直接运行 RECAP 价值模型（RLinf `ValueCriticModel`），为每一帧计算 V(o_t)，按 RLinf 的 N 步优势公式得到 A_t 与正/负标签，结果按数据集（命名空间各自独立）保存在 `outputs/LEVI/workbench/recap_values/<名称>/`，并在回放页标注时间轴的 **VALUE MODEL** 区显示（优势段绿/红、价值曲线、计算/重算控件），回合列表显示正样本比例徽标。检查点放在 `checkpoints/recap_value/<名称>/`，用 `levi recap import` 导入（复制或硬链接，不改动源文件），`manifest.json` 记录所有不可猜测的选择：专家规模 `critic_expert_variant`、相机映射 `views`、基础模型与分词器路径、回报范围 `return_min/return_max`、统一阈值 `unified_threshold` 等；缺少必填项时检查点标记为未就绪。阈值优先级：请求中的 `threshold` > 检查点的 `unified_threshold` > 本数据集优势值的 (1 − positive_quantile) 分位数。推理在独立环境 `integrations/recap_value` 中运行（`setup.sh` 安装并打上 openpi 的 transformers 补丁），`fake` 提供者无需模型即可试用页面。拿到真实检查点后请按上表逐项确认字段。

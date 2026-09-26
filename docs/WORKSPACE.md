@@ -75,6 +75,7 @@ Everything else the core starts runs in its own process group and is recorded, w
 | Process | Ends when | Also stopped |
 | --- | --- | --- |
 | SAM3 worker (object annotation, from the page or an agent) | its job finishes or is cancelled | past `LEVI_SAM3_TIMEOUT_SECONDS` (default 21600) or after `LEVI_SAM3_STALL_SECONDS` (default 1800) without progress (page jobs); past the run's time budget (agent jobs) |
+| RECAP value worker (per-frame values, from the page or `levi recap run`) | its job finishes or is cancelled | past `LEVI_RECAP_VALUE_TIMEOUT_SECONDS` (default 21600) or after `LEVI_RECAP_VALUE_STALL_SECONDS` (default 1800) without progress ([RECAP](RECAP.md#value-model-and-advantage-labels-in-levi--levi-中的价值模型与优势标签)) |
 | Conversion job | it finishes or is cancelled | after 24 h |
 | DROID test-sample download | the draw is ready or fails, or is stopped (`levi sample cancel`) | — (the next core start resumes a draw left interrupted or failed on the network, at most 3 automatic attempts per draw) |
 | Codex / Claude Pilot runtime | the session is paused, cancelled or runs out of turns or time | when its run finishes, or after `LEVI_PILOT_IDLE_SECONDS` (default 600) with no message; resume starts a new session |
