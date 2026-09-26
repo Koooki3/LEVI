@@ -105,6 +105,23 @@ function OutcomeBadge({
   );
 }
 
+/** Share of an episode's frames with a positive RECAP advantage label, as a
+ * small green/red bar (value-model result; absent without one). */
+function RecapBadge({ fraction }: { fraction: number | undefined }) {
+  if (fraction == null || !Number.isFinite(fraction)) return null;
+  const pct = Math.round(Math.max(0, Math.min(1, fraction)) * 100);
+  return (
+    <span
+      className="shrink-0 flex h-1 w-3.5 overflow-hidden rounded-full bg-red-400/80"
+      role="img"
+      title={`Positive advantage: ${pct}% of frames`}
+      aria-label={`Positive advantage: ${pct}% of frames`}
+    >
+      <span className="h-full bg-emerald-400" style={{ width: `${pct}%` }} />
+    </span>
+  );
+}
+
 interface SidebarProps {
   datasetInfo: DatasetDisplayInfo;
   paginatedEpisodes: number[];
@@ -137,6 +154,8 @@ interface SidebarProps {
   humanOutcomes?: Set<string>;
   /** Makes the outcome dot editable (annotation backend available). */
   onOutcomeChange?: (episode: number, outcome: EpisodeOutcome | null) => void;
+  /** Per-episode positive-advantage fraction from the RECAP value model. */
+  recapFractions?: Record<string, number>;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -161,6 +180,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   episodeOutcomes,
   humanOutcomes,
   onOutcomeChange,
+  recapFractions,
 }) => {
   const [mobileVisible, setMobileVisible] = useState(false);
   const { flagged, count, toggle } = useFlaggedEpisodes();
@@ -330,6 +350,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                               summary={annotationSummary}
                             />
                           )}
+                          {recapFractions && (
+                            <RecapBadge
+                              fraction={recapFractions[String(episode)]}
+                            />
+                          )}
                           <OutcomeBadge
                             outcome={episodeOutcomes?.[String(episode)]}
                             human={humanOutcomes?.has(String(episode))}
@@ -363,6 +388,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                             <AnnotationDots
                               episode={episode}
                               summary={annotationSummary}
+                            />
+                          )}
+                          {recapFractions && (
+                            <RecapBadge
+                              fraction={recapFractions[String(episode)]}
                             />
                           )}
                           <OutcomeBadge

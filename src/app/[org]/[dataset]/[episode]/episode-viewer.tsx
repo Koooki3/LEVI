@@ -65,10 +65,13 @@ import type { DatasetMetadata } from "@/utils/parquetUtils";
 import {
   fetchAnnotationSummary,
   fetchOutcomeLabels,
+  fetchRecapSummary,
   isAnnotateBackendEnabled,
   saveOutcomeLabel,
   type AnnotationSummary,
 } from "@/utils/annotationsClient";
+
+import { RECAP_UPDATED_EVENT } from "@/types/recap.types";
 
 const URDFViewer = lazy(() => import("@/components/urdf-viewer"));
 const ActionInsightsPanel = lazy(
@@ -472,6 +475,12 @@ function EpisodeViewerInner({
         : null,
     [episodeOutcomes, humanOutcomes],
   );
+  // RECAP value model: per-episode share of positive-advantage frames, for
+  // the sidebar badge. Absent (null) until advantage labels exist.
+  const [recapFractions, setRecapFractions] = useState<Record<
+    string,
+    number
+  > | null>(null);
   const humanOutcomeKeys = useMemo(
     () => new Set(Object.keys(humanOutcomes ?? {})),
     [humanOutcomes],
@@ -578,6 +587,37 @@ function EpisodeViewerInner({
       .catch(() => {});
     return () => {
       cancelled = true;
+    };
+  }, [org, dataset]);
+
+  // Refetched when a run in the timeline's VALUE MODEL section finishes.
+  useEffect(() => {
+    if (!org || !dataset || !isAnnotateBackendEnabled()) return;
+    let controller = new AbortController();
+    const load = () => {
+      controller.abort();
+      controller = new AbortController();
+      fetchRecapSummary({ repoId: `${org}/${dataset}` }, controller.signal)
+        .then((summary) => {
+          if (!mountedRef.current) return;
+          setRecapFractions(
+            summary
+              ? Object.fromEntries(
+                  Object.entries(summary.episodes).map(([ep, row]) => [
+                    ep,
+                    row.positive_fraction,
+                  ]),
+                )
+              : null,
+          );
+        })
+        .catch(() => {});
+    };
+    load();
+    window.addEventListener(RECAP_UPDATED_EVENT, load);
+    return () => {
+      controller.abort();
+      window.removeEventListener(RECAP_UPDATED_EVENT, load);
     };
   }, [org, dataset]);
 
@@ -1081,6 +1121,7 @@ function EpisodeViewerInner({
                 annotationSummary={annotationSummary ?? undefined}
                 episodeOutcomes={mergedOutcomes ?? undefined}
                 humanOutcomes={humanOutcomeKeys}
+                recapFractions={recapFractions ?? undefined}
                 onOutcomeChange={
                   isAnnotateBackendEnabled() ? changeOutcome : undefined
                 }

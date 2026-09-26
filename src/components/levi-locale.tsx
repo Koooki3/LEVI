@@ -113,6 +113,8 @@ export function useLocale() {
         /^Individual dimension peaks range from (.*) to (.*) steps\.$/,
         "各维度峰值滞后范围为 $1 至 $2 步。",
       ],
+      // RECAP value model (sidebar badge).
+      [/^Positive advantage: (\d+)% of frames$/, "正优势帧占比：$1%"],
       [/^Saved episode to (.*)$/, "片段已保存至 $1"],
       [/^Save failed: (.*)$/, "保存失败：$1"],
       [
