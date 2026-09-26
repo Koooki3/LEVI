@@ -27,6 +27,7 @@ from .catalog import (
     remove_entry,
     resolve_name,
     review_path,
+    with_base,
 )
 from .conversion import registry
 from .conversion.options import Options
@@ -308,6 +309,7 @@ def add_dataset(payload: Register):
 def _entry(item: dict) -> dict:
     """A catalog entry as the UI sees it: what it is, and its live revision
     (read from disk now, so it is current even between sync scans)."""
+    item = with_base(item)
     root = item.get("view") if item.get("kind") == "raw" else item.get("path")
     live = dataset_revision(Path(root)) if root and Path(root).exists() else None
     return {**item, "format": describe(item), "revision": live}

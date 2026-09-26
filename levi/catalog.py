@@ -113,6 +113,30 @@ def is_namespace(name: str) -> bool:
     return bool(item and item.get("base"))
 
 
+# What a namespace takes from its base: the source, its browsing view and the
+# view's state (a raw capture's view_status gates browsing and annotating, so a
+# namespace without it could never be opened).
+SHARED = (
+    "kind",
+    "path",
+    "view",
+    "view_status",
+    "view_error",
+    "info",
+    "input_format",
+    "revision",
+)
+
+
+def with_base(item: dict, items: dict | None = None) -> dict:
+    """``item`` with its base's shared fields, as it should read now (entries
+    written before a field was shared still carry the old copy)."""
+    source = (items if items is not None else datasets()).get(item.get("base") or "")
+    if not source:
+        return item
+    return {**item, **{key: source[key] for key in SHARED if key in source}}
+
+
 def create_namespace(base: str, namespace: str) -> dict:
     """A namespace of a registered dataset (idempotent). Its products start
     empty; the source stays one folder."""
@@ -140,7 +164,7 @@ def create_namespace(base: str, namespace: str) -> dict:
                 "namespace": namespace,
                 "created_at": time.time(),
             }
-        for key in ("kind", "path", "view", "info", "input_format", "revision"):
+        for key in SHARED:
             if key in source:
                 item[key] = source[key]
         items[name] = item
@@ -164,7 +188,7 @@ def follow_base(items: dict) -> bool:
         source = items.get(item.get("base") or "")
         if not source:
             continue
-        for key in ("kind", "path", "view", "info", "input_format", "revision"):
+        for key in SHARED:
             if key in source and item.get(key) != source[key]:
                 item[key] = source[key]
                 changed = True

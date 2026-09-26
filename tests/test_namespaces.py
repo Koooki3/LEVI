@@ -124,3 +124,22 @@ def test_namespace_api_and_cli(client, base, capsys):
     assert namespace_cli(["remove", base["name"]]) == 1  # not a namespace
     assert namespace_cli(["remove", made.json()["name"]]) == 0
     assert made.json()["name"] not in catalog.datasets()
+
+
+def test_a_namespace_of_a_raw_capture_opens_once_the_view_is_ready(client, base):
+    # A raw capture is browsable only when its view is ready; the namespace must
+    # say so too, or the list shows it as still building and never links it.
+    catalog.add_entry(
+        catalog.inside(base["path"]),
+        {"kind": "raw", "view": base["path"], "view_status": "ready"},
+    )
+    ns = catalog.create_namespace(base["name"], "exp")
+    assert ns["view_status"] == "ready"
+    # An entry written before view_status was shared reads its base's state.
+    items = catalog.datasets()
+    items[ns["name"]].pop("view_status")
+    catalog.atomic(catalog.STATE / "datasets.json", items)
+    listed = {d["name"]: d for d in client.get("/api/levi/catalog").json()["local"]}
+    assert listed[ns["name"]]["view_status"] == "ready"
+    one = client.get(f"/api/levi/catalog/{ns['name']}").json()
+    assert one["view_status"] == "ready"
