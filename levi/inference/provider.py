@@ -641,7 +641,3 @@ class LocalProvider:
             context_tokens=config.context_tokens,
             think=config.think,
         )
-
-
-# Earlier name, kept for callers and tests.
-OllamaProvider = LocalProvider

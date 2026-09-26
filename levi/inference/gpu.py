@@ -272,14 +272,6 @@ def sample(servers=()):
     }
 
 
-def others():
-    """Compute processes on the GPU that are not Ollama's (compatibility)."""
-    now = sample()
-    if now.get("error"):
-        return [{"pid": None, "command": now["error"], "memory_mib": None}]
-    return now["processes"]
-
-
 # --- memory of who used the GPU -------------------------------------------
 
 

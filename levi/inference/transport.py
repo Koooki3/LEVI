@@ -96,9 +96,6 @@ def validate_local_endpoint(
     return sorted(addresses)
 
 
-validate_ollama_endpoint = validate_local_endpoint
-
-
 class OllamaTransport:
     """No redirects, environment proxies, automatic retries or implicit pulls.
 

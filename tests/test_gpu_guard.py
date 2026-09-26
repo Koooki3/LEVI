@@ -87,7 +87,7 @@ def test_ollamas_own_model_process_is_not_someone_else(monkeypatch):
         },
     )
     monkeypatch.setattr(gpu, "_parent", lambda pid: 810188)
-    assert gpu.others() == []
+    assert gpu.sample()["processes"] == []
     assert gpu.require_free(config())["state"] == "free"
 
 
@@ -98,7 +98,7 @@ def test_a_process_merely_named_like_a_runner_is_not_trusted(monkeypatch):
         {5: "/home/bofang/llama-server --model x", 1: "/sbin/init"},
     )
     monkeypatch.setattr(gpu, "_parent", lambda pid: 1)
-    assert [row["pid"] for row in gpu.others()] == [5]
+    assert [row["pid"] for row in gpu.sample()["processes"]] == [5]
 
 
 def test_unreadable_nvidia_smi_is_not_treated_as_free(monkeypatch):
@@ -244,18 +244,18 @@ def test_the_watch_unloads_for_protected_work_and_resumes_when_clear(monkeypatch
 
 
 def test_a_request_cut_off_by_the_guardian_is_a_preemption(monkeypatch):
-    from levi.inference.provider import OllamaProvider
+    from levi.inference.provider import LocalProvider
 
     def cut(*a, **k):
         raise RuntimeError("connection reset")
 
-    monkeypatch.setattr(OllamaProvider, "_chat", staticmethod(cut))
+    monkeypatch.setattr(LocalProvider, "_chat", staticmethod(cut))
     on_gpu(monkeypatch, [(7, 8000)], {7: ACTOR})
     budget = type("B", (), {"max_tokens": 1000, "max_seconds": 30})()
     cfg = config().model_copy(update={"model_digest": "a" * 64})
     monkeypatch.setattr(gpu, "require_free", lambda c=None: None)
     with pytest.raises(gpu.GpuBusy, match="Preempted"):
-        OllamaProvider().generate(cfg, "goal", {"workflow": {}}, [], "/tmp", budget)
+        LocalProvider().generate(cfg, "goal", {"workflow": {}}, [], "/tmp", budget)
 
 
 def test_the_report_explains_itself(monkeypatch):

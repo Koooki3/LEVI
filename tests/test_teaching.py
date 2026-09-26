@@ -256,10 +256,10 @@ def test_the_learner_can_only_emit_kinds_and_subtasks_the_plan_allows():
 
 def test_a_rejected_learner_answer_is_kept(tmp_path, monkeypatch):
     from levi.agent.schema import ProviderConfig
-    from levi.inference.provider import InvalidAnswer, OllamaProvider
+    from levi.inference.provider import InvalidAnswer, LocalProvider
 
     monkeypatch.setattr(
-        OllamaProvider,
+        LocalProvider,
         "_chat",
         staticmethod(
             lambda *a, **k: {
@@ -282,7 +282,7 @@ def test_a_rejected_learner_answer_is_kept(tmp_path, monkeypatch):
     evidence_dir = tmp_path / "evidence"
     evidence_dir.mkdir()
     with pytest.raises(InvalidAnswer, match="proposals.0") as caught:
-        OllamaProvider().generate(
+        LocalProvider().generate(
             cfg, "goal", {"episode_index": 3, "workflow": {}}, [], evidence_dir, budget
         )
     # The answer and what it cost travel with the error.

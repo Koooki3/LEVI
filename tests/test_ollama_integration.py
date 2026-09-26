@@ -12,7 +12,7 @@ from levi.agent.schema import Budget, ProviderConfig, TaskContext
 from levi.agent.store import Conflict, Store, file_hash
 from levi.inference import models, provider
 from levi.inference.ollama import OllamaClient, OllamaError
-from levi.inference.transport import OllamaTransport, validate_ollama_endpoint
+from levi.inference.transport import OllamaTransport, validate_local_endpoint
 
 DIGEST = "a" * 64
 
@@ -270,7 +270,7 @@ def test_download_control_rejects_agent_self_approval(client, monkeypatch):
 )
 def test_endpoint_policy_rejects_ambiguous_endpoints(url, allowed):
     with pytest.raises(ValueError):
-        validate_ollama_endpoint(url, allowed)
+        validate_local_endpoint(url, allowed)
 
 
 def test_http_redirect_is_not_followed(monkeypatch):
@@ -310,7 +310,7 @@ def test_response_bound_and_malformed_progress(monkeypatch):
 
 def test_out_of_scope_evidence_rejected_before_call(tmp_path, native):
     with pytest.raises(ValueError, match="outside"):
-        provider.OllamaProvider().generate(
+        provider.LocalProvider().generate(
             config(model_digest=DIGEST, vision=True),
             "x",
             {},
@@ -544,7 +544,7 @@ def test_an_unparseable_learner_answer_reaches_the_teacher_raw(
 ):
     from levi.agent.capabilities import invoke
     from levi.agent.planning import approve
-    from levi.inference.provider import InvalidAnswer, OllamaProvider
+    from levi.inference.provider import InvalidAnswer, LocalProvider
 
     def unparseable(self, *a, **k):
         raise InvalidAnswer(
@@ -553,7 +553,7 @@ def test_an_unparseable_learner_answer_reaches_the_teacher_raw(
             {"requests": 1, "tokens": 77, "reported_tokens": 77},
         )
 
-    monkeypatch.setattr(OllamaProvider, "generate", unparseable)
+    monkeypatch.setattr(LocalProvider, "generate", unparseable)
     wb, context, teacher = supervised_bench(client, dataset)
     run = wb.plan(context)
     approve(wb, run["id"], 1, "human")
@@ -571,12 +571,12 @@ def test_a_failed_or_overspent_call_leaves_honest_accounts(
 ):
     from levi.agent.planning import approve
     from levi.inference.ollama import OllamaError
-    from levi.inference.provider import OllamaProvider
+    from levi.inference.provider import LocalProvider
 
     def refused(self, *a, **k):
         raise OllamaError("Ollama HTTP request failed (400)")
 
-    monkeypatch.setattr(OllamaProvider, "generate", refused)
+    monkeypatch.setattr(LocalProvider, "generate", refused)
     wb, context, _ = supervised_bench(client, dataset)
     run = wb.plan(context)
     approve(wb, run["id"], 1, "human")
@@ -587,7 +587,7 @@ def test_a_failed_or_overspent_call_leaves_honest_accounts(
     def greedy(self, config, goal, summary, evidence, artifacts, budget):
         return {"summary": "x"}, {"requests": 1, "tokens": budget.max_tokens + 5}
 
-    monkeypatch.setattr(OllamaProvider, "generate", greedy)
+    monkeypatch.setattr(LocalProvider, "generate", greedy)
     wb.store.mutate("runs", run["id"], lambda r: r.update(requests=0))
     over = execute_supervised(wb, run["id"])
     assert "exceeded reserved budget" in over["reason"]
@@ -629,7 +629,7 @@ def test_without_a_teacher_the_valid_part_of_an_answer_goes_on(
     from levi.agent.planning import approve
     from levi.agent.runtime import Workbench
     from levi.agent.schema import ModelOutput
-    from levi.inference.provider import OllamaProvider
+    from levi.inference.provider import LocalProvider
 
     def seg(content):
         return {
@@ -654,7 +654,7 @@ def test_without_a_teacher_the_valid_part_of_an_answer_goes_on(
         if len(proposals) > 1:
             raise ValueError("Overlapping segments in an exclusive annotation layer")
 
-    monkeypatch.setattr(OllamaProvider, "generate", answer)
+    monkeypatch.setattr(LocalProvider, "generate", answer)
     monkeypatch.setattr(Workbench, "validate_proposals", staticmethod(check))
     wb, context, _ = supervised_bench(client, dataset)
     context = context.model_copy(update={"supervision": "none", "teacher_grant": None})
@@ -672,7 +672,7 @@ def _answers_by_episode(monkeypatch, bad_episodes):
     """A provider whose answer for ``bad_episodes`` fails validation outright."""
     from levi.agent.runtime import Workbench
     from levi.agent.schema import ModelOutput
-    from levi.inference.provider import OllamaProvider
+    from levi.inference.provider import LocalProvider
 
     def answer(self, config, goal, summary, evidence, artifacts, budget):
         episode = summary["episode_index"]
@@ -695,7 +695,7 @@ def _answers_by_episode(monkeypatch, bad_episodes):
         if any(p.content == "bad" for p in proposals):
             raise ValueError("bad proposal")
 
-    monkeypatch.setattr(OllamaProvider, "generate", answer)
+    monkeypatch.setattr(LocalProvider, "generate", answer)
     monkeypatch.setattr(Workbench, "validate_proposals", staticmethod(check))
 
 
