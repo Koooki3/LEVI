@@ -1725,7 +1725,7 @@
 .annotations-skin .recap-meta {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 0;
+  gap: 0 0.35em;
   color: var(--fg-2);
 }
 .annotations-skin .recap-meta code,

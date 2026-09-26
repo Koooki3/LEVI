@@ -20,7 +20,7 @@ export interface AdvantageRun {
   positive: boolean;
   /** Mean continuous advantage over the run's finite values; null if none. */
   meanAdv: number | null;
-  /** 0.25..1 — mean |A − threshold| of the run over the episode's scale. */
+  /** 0.45..1 — mean |A − threshold| of the run over the episode's scale. */
   strength: number;
   firstFrame: number;
   lastFrame: number;
@@ -28,7 +28,7 @@ export interface AdvantageRun {
   count: number;
 }
 
-export const MIN_STRENGTH = 0.25;
+export const MIN_STRENGTH = 0.45;
 
 const finite = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);

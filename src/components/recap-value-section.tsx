@@ -395,13 +395,13 @@ export const RecapValueSection: React.FC<Props> = ({
             {current?.checkpoint ?? episode.revision_id}
           </span>
           <span>
-            {" · "}
+            {"· "}
             <T>threshold</T> {formatSigned(episode.threshold, 4)}
           </span>
           <span
             title={t("Share of this episode's frames with positive advantage")}
           >
-            {" · "}
+            {"· "}
             {percent(episodeFraction)} <T>positive frames</T>
           </span>
           {current?.stale && (

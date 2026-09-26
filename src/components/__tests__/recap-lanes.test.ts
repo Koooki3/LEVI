@@ -65,7 +65,7 @@ describe("advantageRuns", () => {
     expect(runs[0].end).toBeCloseTo(5);
   });
 
-  test("strength is normalised per episode and clamped to 0.25..1", () => {
+  test("strength is normalised per episode and clamped to MIN_STRENGTH..1", () => {
     const thr = -0.1;
     // Gaps from threshold: 0.01, 0.5, 1.0 (the last one is the scale).
     const advantage = [thr + 0.01, thr - 0.5, thr + 1.0];
