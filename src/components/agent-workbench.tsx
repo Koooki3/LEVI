@@ -152,11 +152,12 @@ export default function AgentWorkbench() {
   const [modelDigest, setModelDigest] = useState<string | null>(null);
   const [contextTokens, setContextTokens] = useState(8192);
   // Local models: a server's per-request image limit, the longest image side
-  // sent, reasoning before the answer, and (Molmo2) no system role.
+  // sent, reasoning before the answer, no system role, and the prompt style.
   const [maxImages, setMaxImages] = useState<number | null>(null);
   const [imageMaxSide, setImageMaxSide] = useState<number | null>(null);
   const [think, setThink] = useState(false);
   const [foldSystem, setFoldSystem] = useState(false);
+  const [promptStyle, setPromptStyle] = useState<"full" | "lean">("full");
   const [name, setName] = useState("model");
   const [url, setUrl] = useState("");
   const [model, setModel] = useState("");
@@ -464,6 +465,7 @@ export default function AgentWorkbench() {
                 setImageMaxSide(p.image_max_side ?? null);
                 setThink(p.think ?? false);
                 setFoldSystem(p.fold_system ?? false);
+                setPromptStyle(p.prompt_style ?? "full");
                 setName(p.name);
                 setUrl(p.base_url);
                 setModel(p.model);
@@ -497,6 +499,8 @@ export default function AgentWorkbench() {
                     image_max_side: localKind ? imageMaxSide : null,
                     think: localKind && think,
                     fold_system: providerKind === "openai-local" && foldSystem,
+                    // Saving replaces the whole profile: send the style shown.
+                    prompt_style: localKind ? promptStyle : "full",
                   });
                   setProviders(await api<Provider[]>("/providers"));
                   setProvider(name);
@@ -633,7 +637,8 @@ export default function AgentWorkbench() {
                       checked={foldSystem}
                       onChange={(e) => setFoldSystem(e.target.checked)}
                     />
-                    Send the system prompt in the first user turn (Molmo2)
+                    Send the system prompt in the first user turn (templates
+                    without a system role)
                   </label>
                 </>
               )}
@@ -685,6 +690,22 @@ export default function AgentWorkbench() {
                       onChange={(e) => setThink(e.target.checked)}
                     />
                     Let the model reason before answering
+                  </label>
+                  <label>
+                    Prompt style
+                    <select
+                      value={promptStyle}
+                      onChange={(e) =>
+                        setPromptStyle(e.target.value as "full" | "lean")
+                      }
+                    >
+                      <option value="full">
+                        Full: LEVI skills and context (dataset review)
+                      </option>
+                      <option value="lean">
+                        Lean: instruction and frame list (temporal annotation)
+                      </option>
+                    </select>
                   </label>
                 </>
               )}

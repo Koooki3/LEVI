@@ -14,6 +14,7 @@ export type Connection = {
   image_max_side?: number | null;
   think?: boolean;
   fold_system?: boolean;
+  prompt_style?: "full" | "lean";
   name: string;
   model: string;
   base_url: string;
