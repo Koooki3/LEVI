@@ -22,6 +22,8 @@ This is the source-release inventory for LEVI v0.3.0, refreshed on 2026-09-13. T
 | External lerobot-doctor service | External service linked from the workbench; see [UPSTREAM](docs/UPSTREAM.md) | Linked rather than vendored; LEVI's own diagnostics are separate source code. |
 | SAM3 adapter source | [facebookresearch/sam3](https://github.com/facebookresearch/sam3/tree/660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b), pinned Git dependency; [SAM License](https://github.com/facebookresearch/sam3/blob/main/LICENSE) | Installed only in integrations/sam3; adapter code and checkpoints are not bundled. |
 | SAM3 checkpoint mirror | [1038lab/sam3](https://huggingface.co/1038lab/sam3), sam3.pt; mirror/model-page terms apply | Downloaded at runtime after the user authenticates; never committed or included in source release. |
+| RLinf RECAP value-model code | [RLinf/RLinf](https://github.com/RLinf/RLinf) commit `807e5fd`, Apache-2.0 | Vendored in `integrations/recap_value/levi_recap_worker/rlinf/` (value model, processing, advantage helpers; changes marked in the files) and `integrations/recap_value/vendor/rlinf/compute_advantages.py` (tests only); each folder keeps the LICENSE. |
+| openpi `transformers_replace` | [Physical-Intelligence/openpi](https://github.com/Physical-Intelligence/openpi) `src/openpi/models_pytorch/transformers_replace` (as shipped in `rlinf-openpi==0.1.1`), Apache-2.0 | Vendored unmodified in `integrations/recap_value/vendor/openpi_transformers_replace/` with its LICENSE; `setup.sh` copies it over `transformers==4.53.2` in the worker environment only. |
 
 The react-icons package's MIT license does **not** replace the individual icon collections' licenses. Its installed `LICENSE` and `README.md` list those collections. If an artifact contains the entire react-icons package, inventory all included collections, not just the icons imported by LEVI.
 
@@ -129,6 +131,10 @@ This procedure is a release requirement documented in [RELEASING](docs/RELEASING
 ### SAM3 integration dependencies
 
 The SAM3 worker declares its own uv environment and is intentionally absent from the core uv.lock. It adds huggingface-hub for runtime download from the 1038lab/sam3 mirror. Its exact Torch/torchvision wheels, CUDA runtime, transitive dependencies, native libraries and model checkpoint must be inventoried from the actual environment before publishing a Docker/PyPI/binary artifact. The source release does not claim that inventory is complete.
+
+### RECAP value worker dependencies
+
+The RECAP value worker (`integrations/recap_value`) has its own uv environment and lock, absent from the core uv.lock: Torch (CUDA 12.8 wheels), transformers 4.53.2 (Apache-2.0, patched in place by `setup.sh`), tokenizers, safetensors, sentencepiece, PyAV (BSD-3-Clause; its wheels bundle FFmpeg libraries under their own licenses), numpy and pyarrow. Value-model checkpoints and the SigLIP2 / Gemma3 base models and tokenizer are user-supplied under their own terms (Gemma models are subject to the Gemma terms of use) and are never committed.
 
 ## Optional Pilot integration
 
