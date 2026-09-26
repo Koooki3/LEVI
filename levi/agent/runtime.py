@@ -95,10 +95,13 @@ def snap_to_episode(output, summary):
 
 
 def refines(workflow):
-    """Whether a temporal run refines its draft's boundaries in a second pass:
-    ``auto`` skips it when the coarse step is at most half the boundary
-    window, since a dense coarse pass already shows each boundary (paired runs
-    at 0.5 s: the second pass doubled the calls for +0.01 segment F1)."""
+    """Whether a temporal run refines its draft's boundaries in a second pass.
+
+    ``always`` (the default, recommended) refines every draft. ``auto`` skips
+    the second pass when the coarse step is at most half the boundary window:
+    it saves about half the calls but costs accuracy (paired runs at 0.5 s:
+    segment F1 0.626 vs 0.641, derived outcome 0.791 vs 0.834 with
+    ``always``)."""
     mode = workflow.get("refine", "always")
     if mode == "auto":
         return (

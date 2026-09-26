@@ -193,4 +193,4 @@ def test_auto_refinement_skips_a_dense_coarse_pass():
     assert refines(
         {"refine": "auto", "coarse_step_seconds": 1.0, "boundary_window_seconds": 1.0}
     )
-    assert not refines({"refine": "never", "coarse_step_seconds": 2.0})
+    assert refines({"refine": "always", "coarse_step_seconds": 0.5})

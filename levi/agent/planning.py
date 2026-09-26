@@ -33,10 +33,11 @@ class Workflow(Contract):
     # and ending on the last frame; the rest stay spread over the episode.
     # An outcome is judged on the final state, which uniform samples show once.
     final_samples: int = Field(default=0, ge=0, le=16)
-    # Temporal: refine boundaries in a second pass always, never, or "auto"
-    # -- only when the coarse step is wider than half the boundary window
-    # (a dense coarse pass already shows each boundary).
-    refine: Literal["always", "auto", "never"] = "always"
+    # Temporal: refine boundaries in a second pass "always" (default,
+    # recommended) or "auto" -- only when the coarse step is wider than half
+    # the boundary window. "auto" is faster but measured less accurate than
+    # "always" in paired runs (see ``runtime.refines``).
+    refine: Literal["always", "auto"] = "always"
     pilot_episode: int | None = Field(default=None, ge=0)
     # False: the person approving the plan waives the separate pilot step
     # (plan approval and the final commit still take a person). For a capable
@@ -151,7 +152,12 @@ def attach(run):
         else run["context"]["episodes"][0],
         "questions": clarify(run["context"])["questions"],
         "estimate": {
-            "basis": "one coarse request per episode plus one bounded temporal refinement; provider tool turns may add requests",
+            "basis": (
+                "one coarse request per episode; a temporal plan adds a bounded "
+                'boundary refinement (workflow.refine "always"; "auto" may skip '
+                "it, a long episode is refined in several batches); provider tool "
+                "turns may add requests"
+            ),
             "minimum_requests": 0
             if flow.kind == "objects"
             else len(run["context"]["episodes"])
