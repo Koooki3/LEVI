@@ -6,7 +6,7 @@
 
 English · [简体中文](README.zh-CN.md)
 
-LEVI is a local workbench for robot-learning data. It browses LeRobot datasets and raw robot captures, converts them into training formats, checks their quality, and annotates them with AI agents whose every suggestion a person reviews before it is published. It runs on your machine: source data is never modified, and nothing leaves the machine unless you connect a remote model.
+LEVI is a local workbench for robot-learning data. It browses LeRobot datasets and raw robot captures, converts them into training formats, checks their quality, and annotates them with AI agents; a person reviews every suggestion before it is published. It runs on your machine: source data is never modified, and nothing leaves the machine unless you connect a remote model.
 
 ![LEVI interface](docs/assets/home-en.png)
 
@@ -18,7 +18,7 @@ LEVI is a local workbench for robot-learning data. It browses LeRobot datasets a
 | **Convert** | Raw captures (CSV + video or image folders) and LeRobot v2.x into **LeRobot v2.1** or a **RECAP (π\*0.6) value dataset**, after an inspection that lists which requirements the input meets. Single-pass, parallel, with a lossless retime mode. Raw captures can be browsed and annotated before conversion; the annotations carry over. |
 | **Check and curate** | Structural quality checks over every episode (timestamps, actions, video, metadata), episode outcome labels, review flags, and agent-driven content review — which task a demo really shows, whether it succeeded. |
 | **Annotate with agents** | Subtask segments, events and object masks proposed by an external MCP agent (Claude Code, Codex, …), an API model or a **local model on Ollama**, then reviewed, committed and undoable by a person. A natural-language request can start a whole task. |
-| **Learn from every task** | The harness closes each task with a ledger, measured token and time cost, a local memory of what was verified on that dataset, and improvement candidates that a person can publish for the next task. |
+| **Learn from every task** | The harness closes each task with a ledger, the measured token and time cost, a local memory of what was verified on that dataset, and improvement candidates that a person can publish for the next task. |
 
 ## Quick start
 
@@ -43,7 +43,7 @@ On a remote server, forward the Web UI port: `ssh -L 7860:127.0.0.1:7860 user@se
 
 For a strict CPU-only LEVI session, set `export LEVI_CPU_ONLY=1` before starting the service. This disables its background GPU watcher and blocks local accelerator-backed inference and SAM3.
 
-DROID raw folders (`demo_0000/trajectory.h5`, metadata and three MP4 cameras) are an optional **browse-and-annotate input**, not a supported training conversion. For that input, install `uv sync --locked --extra agent --extra droid`, place the dataset folder directly under `$LEVI_WORKSPACE`, and use **Sync now** or restart LEVI. A read-only derived view appears at `outputs/LEVI/workbench/views/<dataset-name>/`; the HDF5 source is untouched. The view uses a nominal 14.3 FPS clock because source MP4 time and control time differ. Original timestamps and per-episode drift are saved in `meta/levi_provenance.jsonl`; review precise temporal boundaries against them. See [Conversion](docs/CONVERSION.md#droid-raw-browsing-view). A new workspace also downloads its own DROID test dataset, 500 episodes of the public release in one seeded order (`uv run levi sample draw` makes another 500), — see [DROID test sample](docs/WORKSPACE.md#droid-test-sample).
+DROID raw folders (`demo_0000/trajectory.h5`, metadata and three MP4 cameras) are an optional **browse-and-annotate input**, not a supported training conversion. To use it, run `uv sync --locked --extra agent --extra droid`, place the dataset folder directly under `$LEVI_WORKSPACE`, and use **Sync now** or restart LEVI. A read-only derived view appears at `outputs/LEVI/workbench/views/<dataset-name>/`; the HDF5 source is untouched. The view uses a nominal 14.3 FPS clock because source MP4 time and control time differ. Original timestamps and per-episode drift are saved in `meta/levi_provenance.jsonl`; check precise time boundaries against them. See [Conversion](docs/CONVERSION.md#droid-raw-browsing-view). A new workspace also downloads its own DROID test dataset: 500 episodes of the public release, taken in one seeded order (`uv run levi sample draw` takes another 500, none of them drawn before); see [DROID test sample](docs/WORKSPACE.md#droid-test-sample).
 
 ```bash
 uv run levi stop                # stop the shared service and its workers (--all: also LEVI's Ollama)
