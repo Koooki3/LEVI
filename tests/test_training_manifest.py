@@ -104,7 +104,7 @@ def _anchored(name, outcomes, run_id="anchored-20260928-0001"):
     from levi.agent.store import Store
 
     store = Store(catalog.STATE)
-    spec = builtin()["plates-release-ar2"].model_dump(by_alias=True)
+    spec = builtin()["plates-release"].model_dump(by_alias=True)
     store.put(
         "runs",
         run_id,
@@ -295,7 +295,7 @@ def test_manifest_records_provenance(repo):
     }
     assert ds["fingerprint"]["data_files"] == 3
     assert manifest["annotation"]["revision"] and manifest["annotation"]["digest"]
-    assert manifest["anchored"]["spec"]["id"] == "plates-release-ar2"
+    assert manifest["anchored"]["spec"]["id"] == "plates-release"
     assert manifest["anchored"]["provider"]["model"] == "m"
     recap = manifest["recap"]
     assert recap["checkpoint"] == "fake-a" and recap["threshold"] == 0.0
