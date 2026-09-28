@@ -102,6 +102,10 @@ export interface RecapEpisode {
  * list's positive-fraction badges) can refresh. */
 export const RECAP_UPDATED_EVENT = "levi-recap-updated";
 
+/** Dispatched on `window` after a person's outcome label is saved: results
+ * computed before it are stale, so the VALUE MODEL header re-reads status. */
+export const OUTCOME_LABELS_CHANGED_EVENT = "levi-outcome-labels-changed";
+
 export function isRecapJobActive(job: RecapJob | null | undefined): boolean {
   return !!job && (job.status === "queued" || job.status === "running");
 }

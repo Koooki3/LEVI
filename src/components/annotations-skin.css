@@ -1874,10 +1874,10 @@
   z-index: 1;
 }
 .annotations-skin .tl-row.recap-value-row {
-  height: 40px;
+  height: 56px;
 }
 .annotations-skin .recap-value-row .track {
-  height: 36px;
+  height: 52px;
   overflow: visible;
 }
 .annotations-skin .recap-plot {

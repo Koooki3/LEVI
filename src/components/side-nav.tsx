@@ -108,14 +108,17 @@ function OutcomeBadge({
 /** Share of an episode's frames with a positive RECAP advantage label, as a
  * small green/red bar (value-model result; absent without one). */
 function RecapBadge({ fraction }: { fraction: number | undefined }) {
+  const { t } = useLocale();
   if (fraction == null || !Number.isFinite(fraction)) return null;
   const pct = Math.round(Math.max(0, Math.min(1, fraction)) * 100);
+  // Attributes are not reached by <T>; translate them here.
+  const label = t(`Positive advantage: ${pct}% of frames`);
   return (
     <span
       className="shrink-0 flex h-1 w-3.5 overflow-hidden rounded-full bg-red-400/80"
       role="img"
-      title={`Positive advantage: ${pct}% of frames`}
-      aria-label={`Positive advantage: ${pct}% of frames`}
+      title={label}
+      aria-label={label}
     >
       <span className="h-full bg-emerald-400" style={{ width: `${pct}%` }} />
     </span>

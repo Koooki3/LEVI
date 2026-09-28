@@ -6,7 +6,9 @@ import {
   framePeriod,
   nearestFrame,
   positiveFraction,
+  recapApplies,
   recapView,
+  thresholdSourceKey,
   valuePath,
   valueToY,
   type RecapViewInput,
@@ -337,5 +339,27 @@ describe("recapView", () => {
     expect(
       recapView({ ...base, statusLoaded: false, statusError: true }).showRows,
     ).toBe(true);
+  });
+});
+
+describe("thresholdSourceKey / recapApplies", () => {
+  test("names every threshold source and passes unknown ones through", () => {
+    expect(thresholdSourceKey("manual")).toBe(
+      "threshold set by hand for this run",
+    );
+    expect(thresholdSourceKey("checkpoint")).toBe(
+      "the checkpoint's unified threshold",
+    );
+    expect(thresholdSourceKey("dataset_quantile")).toBe(
+      "quantile of this dataset's advantages",
+    );
+    expect(thresholdSourceKey("other")).toBe("other");
+    expect(thresholdSourceKey(null)).toBe("");
+  });
+
+  test("labels exist only for registered local datasets", () => {
+    expect(recapApplies("local/plates--ns")).toBe(true);
+    expect(recapApplies("lerobot/pusht")).toBe(false);
+    expect(recapApplies(null)).toBe(false);
   });
 });

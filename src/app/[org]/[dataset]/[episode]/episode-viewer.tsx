@@ -71,7 +71,10 @@ import {
   type AnnotationSummary,
 } from "@/utils/annotationsClient";
 
-import { RECAP_UPDATED_EVENT } from "@/types/recap.types";
+import {
+  OUTCOME_LABELS_CHANGED_EVENT,
+  RECAP_UPDATED_EVENT,
+} from "@/types/recap.types";
 
 const URDFViewer = lazy(() => import("@/components/urdf-viewer"));
 const ActionInsightsPanel = lazy(
@@ -632,11 +635,14 @@ function EpisodeViewerInner({
         else delete next[key];
         return next;
       });
-      saveOutcomeLabel(episode, { repoId: `${org}/${dataset}` }, outcome).catch(
-        () => {
+      saveOutcomeLabel(episode, { repoId: `${org}/${dataset}` }, outcome)
+        // Advantage labels computed before this are now stale.
+        .then(() =>
+          window.dispatchEvent(new CustomEvent(OUTCOME_LABELS_CHANGED_EVENT)),
+        )
+        .catch(() => {
           if (mountedRef.current) setHumanOutcomes(previous);
-        },
-      );
+        });
     },
     [org, dataset, humanOutcomes],
   );

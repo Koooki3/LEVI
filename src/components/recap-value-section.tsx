@@ -23,7 +23,9 @@ import {
   formatSigned,
   nearestFrame,
   positiveFraction,
+  recapApplies,
   recapView,
+  thresholdSourceKey,
   valuePath,
 } from "@/components/recap-lanes";
 import {
@@ -35,6 +37,7 @@ import {
   runRecap,
 } from "@/utils/annotationsClient";
 import {
+  OUTCOME_LABELS_CHANGED_EVENT,
   RECAP_UPDATED_EVENT,
   isRecapJobActive,
   type RecapEpisode,
@@ -100,7 +103,8 @@ export const RecapValueSection: React.FC<Props> = ({
   // Bumped to refetch status + episode (after a run finishes).
   const [reloadKey, setReloadKey] = useState(0);
 
-  const enabled = isAnnotateBackendEnabled() && !!repoId && episodeId != null;
+  const enabled =
+    isAnnotateBackendEnabled() && recapApplies(repoId) && episodeId != null;
 
   // ---- Load status + this episode's labels; abort on episode change ----
   useEffect(() => {
@@ -134,6 +138,25 @@ export const RecapValueSection: React.FC<Props> = ({
       });
     return () => controller.abort();
   }, [enabled, repoId, episodeId, reloadKey]);
+
+  // An outcome label saved in the episode list makes the current result
+  // stale: re-read the status (not the rows) so the header says so at once.
+  useEffect(() => {
+    if (!enabled || !repoId) return;
+    let controller: AbortController | null = null;
+    const refresh = () => {
+      controller?.abort();
+      controller = new AbortController();
+      fetchRecapStatus({ repoId }, controller.signal)
+        .then((next) => setStatus(next))
+        .catch(() => {});
+    };
+    window.addEventListener(OUTCOME_LABELS_CHANGED_EVENT, refresh);
+    return () => {
+      window.removeEventListener(OUTCOME_LABELS_CHANGED_EVENT, refresh);
+      controller?.abort();
+    };
+  }, [enabled, repoId]);
 
   // Default the checkpoint picker to the current result's checkpoint, else
   // the first ready one.
@@ -278,7 +301,7 @@ export const RecapValueSection: React.FC<Props> = ({
       <span className="recap-job-stage">
         <T>{job.status === "queued" ? "queued" : job.progress.stage}</T>
         {job.progress.total > 0 &&
-          ` ${job.progress.done}/${job.progress.total}`}
+          ` ${job.progress.done}/${job.progress.total} ${t("frames")}`}
       </span>
       <span
         className="recap-progress"
@@ -307,6 +330,12 @@ export const RecapValueSection: React.FC<Props> = ({
     status && !status.worker.ready
       ? status.worker.reason || t("The advantage worker is not ready")
       : null;
+
+  // A disabled <option>'s tooltip rarely shows: say why under the header.
+  const notReady =
+    view.control === "compute"
+      ? (status?.checkpoints ?? []).filter((c) => !c.ready)
+      : [];
 
   const computeControl = status && !jobActive && (
     <span className="recap-compute">
@@ -394,9 +423,26 @@ export const RecapValueSection: React.FC<Props> = ({
           <span title={t("Value-model checkpoint")}>
             {current?.checkpoint ?? episode.revision_id}
           </span>
-          <span>
+          <span
+            title={
+              current
+                ? `${t(thresholdSourceKey(current.threshold_source))}${
+                    current.threshold_source === "dataset_quantile" &&
+                    current.positive_quantile != null
+                      ? ` (${Math.round((1 - current.positive_quantile) * 100)}%)`
+                      : ""
+                  } · ${t("lookahead")} ${current.lookahead}`
+                : undefined
+            }
+          >
             {"· "}
             <T>threshold</T> {formatSigned(episode.threshold, 4)}
+            {current?.threshold_source === "manual" && (
+              <>
+                {" "}
+                (<T>manual</T>)
+              </>
+            )}
           </span>
           <span
             title={t("Share of this episode's frames with positive advantage")}
@@ -445,6 +491,11 @@ export const RecapValueSection: React.FC<Props> = ({
         {workerReason && view.control === "compute" && (
           <div className="recap-note">{workerReason}</div>
         )}
+        {notReady.map((c) => (
+          <div className="recap-note" key={c.name}>
+            <code>{c.name}</code> <T>not ready</T>: {c.reason}
+          </div>
+        ))}
         {errorLine}
         {view.showRows && (
           <>

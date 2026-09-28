@@ -299,3 +299,24 @@ export function recapView(input: RecapViewInput): RecapView {
     control = input.hasCurrent && !input.controlsOpen ? "recompute" : "compute";
   return { note, control, showMeta: hasLabels, showRows };
 }
+
+/** English catalog key for where a result's threshold came from (the
+ * header's tooltip); unknown sources fall back to the raw value. */
+export function thresholdSourceKey(source: string | null | undefined): string {
+  switch (source) {
+    case "manual":
+      return "threshold set by hand for this run";
+    case "checkpoint":
+      return "the checkpoint's unified threshold";
+    case "dataset_quantile":
+      return "quantile of this dataset's advantages";
+    default:
+      return source ?? "";
+  }
+}
+
+/** Only registered local datasets (`local/<name>`) can have advantage
+ * labels; the section stays hidden for Hub datasets. */
+export function recapApplies(repoId: string | null | undefined): boolean {
+  return !!repoId && repoId.startsWith("local/");
+}
