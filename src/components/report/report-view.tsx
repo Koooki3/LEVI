@@ -261,10 +261,16 @@ export default function ReportView() {
   const [toast, setToast] = useState(false);
   const etag = useRef<string | null>(null);
   const shownLang = useRef<ReportLang | null>(null);
+  const wantedLang = useRef<ReportLang>(lang);
+  useEffect(() => {
+    wantedLang.current = lang;
+  }, [lang]);
 
   const load = useCallback(
     async (announce: boolean) => {
       const next = await leviApi<ReportPayload>(`report?lang=${lang}`);
+      // A slower answer for the language the reader just left is dropped.
+      if (wantedLang.current !== lang) return;
       etag.current = next.etag;
       const changed = shownLang.current === lang;
       shownLang.current = lang;

@@ -545,6 +545,13 @@ select optgroup {
   .levi-header nav {
     gap: 13px;
     font-size: 11px;
+    /* Scroll the entries rather than widen the page on a phone. */
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .levi-header nav > * {
+    flex: 0 0 auto;
   }
   .levi-hero {
     grid-template-columns: 1fr;

@@ -221,6 +221,13 @@ function ChartBlock({ spec }: { spec: Extract<BlockSpec, { kind: "chart" }> }) {
     0,
     SERIES_COLORS.length,
   );
+  // Bars grow from zero; a line may zoom to its range.
+  const nonNegative = rows.every((row) =>
+    series.every((item) => {
+      const value = row[item.key];
+      return typeof value !== "number" || value >= 0;
+    }),
+  );
   const title = pick(spec.title, lang);
   const yLabel = pick(spec.y_label, lang);
   const axis = { stroke: "#89927f", fontSize: 11 };
@@ -241,7 +248,10 @@ function ChartBlock({ spec }: { spec: Extract<BlockSpec, { kind: "chart" }> }) {
       key="y"
       tick={{ fill: "#afb7a8", fontSize: 11 }}
       stroke="#ffffff30"
-      domain={spec.y_domain ?? ["auto", "auto"]}
+      domain={
+        spec.y_domain ??
+        (spec.type === "line" || !nonNegative ? ["auto", "auto"] : [0, "auto"])
+      }
       tickFormatter={(value: number) => formatNumber(value, undefined)}
       width={52}
       label={
