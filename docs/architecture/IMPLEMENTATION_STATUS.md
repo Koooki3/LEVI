@@ -1,7 +1,7 @@
 # Unified execution architecture: implementation status
 
-This records actual incremental changes toward the approved 0.4.0 plan. Package
-version remains 0.3.0. No tag, release, commit or remote repository mutation is
+This page records the incremental changes actually made toward the approved 0.4.0
+plan. The package version is still 0.3.0. No tag, release, commit or remote repository mutation is
 part of this update. Existing execution and format services remain authoritative
 until their replacements pass migration and equivalence gates.
 

@@ -2,7 +2,7 @@
 
 What has been checked, how, and what has not. Newest first. Each entry states whether it used real data and real models or fixtures and stubs; a passing fixture test is never presented as model quality. Reference versions are in [UPSTREAM.md](UPSTREAM.md).
 
-按时间倒序记录验证内容、方法与未覆盖范围。每条都注明使用的是真实数据/真实模型，还是固定样例与模拟；样例测试通过不等于模型质量达标。
+按时间倒序记录验证内容、方法与未覆盖范围。每条都注明用的是真实数据/真实模型，还是固定样例与模拟；样例测试通过不等于模型质量达标。参考版本见 [UPSTREAM.md](UPSTREAM.md)。
 
 ## Anchored review
 
@@ -24,9 +24,9 @@ Not established: anchors from a measured-aperture gripper channel or from `actio
 
 The four real DROID copies are registered through the ordinary dataset catalog. Each has 500 demos, 160,744 aligned view frames, 1,500 videos and 118 distinct source tasks; source metadata reports 250 successful and 250 failed demos. LEVI did not modify raw HDF5, MP4 or metadata. The new input advertises **viewable/annotatable, not directly convertible**; an optional `h5py` install is required. Empty task text remains an explicitly unknown task, never an inferred outcome. Source and derived clocks are distinct: 32 episodes exceed 1 s drift, maximum 17.95 s, so fine boundaries need review against provenance.
 
-CPU-only regression results: 48 format, sync and raw-view tests passed (one existing Starlette/AnyIO deprecation warning); 3 focused Core/connection tests and the CPU-only GPU-guard test passed. Ruff, documentation and diff checks passed. The 500-episode Harness plan and a scoped Codex MCP connection are prepared, but the plan is still awaiting human approval. No Codex annotations or quality measurements exist yet. Bun/Node were unavailable in the current shell for a final frontend rerun; the earlier frontend validation in this entry's development session preceded the final optional format-type addition.
+CPU-only regression results: 48 format, sync and raw-view tests passed (one existing Starlette/AnyIO deprecation warning); 3 focused Core/connection tests and the CPU-only GPU-guard test passed. Ruff, documentation and diff checks passed. The 500-episode Harness plan and a scoped Codex MCP connection are prepared, but the plan is still awaiting human approval. No Codex annotations or quality measurements exist yet. Bun/Node were not available in the shell, so the frontend was not rerun at the end; the last frontend validation in this session ran before the optional format type was added.
 
-An initial plan command launched the older idle Core before CPU-only protection was added and may have made a GPU status probe. That Core was stopped. `LEVI_CPU_ONLY=1` now disables the watcher, forbids SAM3/local accelerator inference, propagates to a scoped MCP connection and rejects reuse of an incompatible Core. No GPU inference or model checkpoint download occurred in this DROID work.
+Before CPU-only protection was added, a first plan command launched the older idle Core, which may have probed GPU status. That Core was stopped. `LEVI_CPU_ONLY=1` now disables the watcher, forbids SAM3/local accelerator inference, propagates to a scoped MCP connection and rejects reuse of an incompatible Core. No GPU inference or model checkpoint download occurred in this DROID work.
 
 ## 2026-09-22 Real-data end-to-end runs, harness and local model / 真实数据端到端、harness 与本地模型
 
@@ -208,7 +208,7 @@ The browser script reads public datasets and writes screenshots/results to `outp
 
 ![LEVI 动作洞察](assets/insights-zh.png)
 
-Screenshot video content: [samanthalhy/so100_strawberry_2](https://huggingface.co/datasets/samanthalhy/so100_strawberry_2) and [samanthalhy/eval_so100_smol_strawberry_2](https://huggingface.co/datasets/samanthalhy/eval_so100_smol_strawberry_2), whose dataset cards declared Apache-2.0 on the validation date. Both were removed from the Hub before 2026-09-20 and are no longer LEVI's default demonstrations; the screenshots are kept as the record of that validation run. LEVI interface design and modifications are described in [UPSTREAM.md](UPSTREAM.md).
+Video in the screenshots: [samanthalhy/so100_strawberry_2](https://huggingface.co/datasets/samanthalhy/so100_strawberry_2) and [samanthalhy/eval_so100_smol_strawberry_2](https://huggingface.co/datasets/samanthalhy/eval_so100_smol_strawberry_2), whose dataset cards declared Apache-2.0 on the validation date. Both were removed from the Hub before 2026-09-20 and are no longer LEVI's default demonstrations; the screenshots are kept as the record of that validation run. LEVI interface design and modifications are described in [UPSTREAM.md](UPSTREAM.md).
 
 
 ## Agent Workbench — 2026-09-20 local validation
@@ -236,7 +236,7 @@ This section concerns the experimental Agent implementation described in
 No real model inference, GPU execution, CUDA detection, checkpoint download,
 external account login or publication was performed. SAM3 is exercised through
 a protocol substitute; the compatible provider uses a mock HTTP transport.
-At this earlier increment, ACP and HTTP MCP remained deferred. Engineering tests do not establish annotation
+At this increment, ACP and HTTP MCP were still deferred. Engineering tests do not establish annotation
 quality or satisfaction of the separate real-model acceptance gates.
 
 ## Harness increment — 2026-09-20
