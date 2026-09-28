@@ -1,0 +1,43 @@
+[project]
+name = "levi-seg-worker"
+version = "0.1.0"
+description = "Isolated fast instance-segmentation worker for LEVI (distilled RF-DETR-Seg student + ByteTrack)"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = "Apache-2.0"
+dependencies = [
+  "numpy>=1.26,<2.3",
+  "pyarrow>=19,<24",
+  "torch>=2.7,<2.11",
+  "torchvision>=0.22,<0.26",
+  # RF-DETR (Apache-2.0) with the training extra: the student is fine-tuned
+  # from the COCO RF-DETR-Seg-Small weights on SAM3 teacher pseudo-labels.
+  # XL/2XL variants carry a different licence and are never used.
+  "rfdetr[train]==1.11.0",
+  # ByteTrack comes from supervision (MIT).
+  "supervision>=0.29,<0.31",
+  "pycocotools>=2.0,<3",
+  "opencv-python-headless>=4.8,<6",
+  "nvidia-ml-py>=12,<14",
+]
+
+[project.scripts]
+levi-seg-worker = "levi_seg_worker.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["levi_seg_worker"]
+
+# Keep the core LEVI environment model-free; the same CUDA wheel index as the
+# SAM3 and RECAP workers.
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128" }]
+torchvision = [{ index = "pytorch-cu128" }]

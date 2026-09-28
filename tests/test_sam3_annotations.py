@@ -592,3 +592,81 @@ def test_episode_objects_endpoint_serves_drawable_masks(tmp_path, client, monkey
     served = payload["objects"][0]
     assert served["mask_rle"]["size"] and served["mask_rle"]["counts"]
     assert "rle_size" not in served and "rle_counts" not in served
+
+
+def test_worker_propagates_every_prompt_not_only_the_last(tmp_path: Path) -> None:
+    """Regression: SAM3's ``add_prompt`` starts with ``reset_state``, so a
+    session tracks one text prompt at a time. The worker used to add every
+    prompt and propagate once, which left only the last prompt propagated
+    through the video; earlier prompts kept frame 0 only. Each prompt now gets
+    its own add + propagate pass, with track ids kept unique."""
+    import numpy as np
+
+    worker_root = Path(__file__).resolve().parents[1] / "integrations" / "sam3"
+    sys.path.insert(0, str(worker_root))
+    try:
+        from levi_sam3_worker.worker import _run_episode_camera
+    finally:
+        sys.path.pop(0)
+
+    video = tmp_path / "videos/chunk-000/observation.images.side/episode_000000.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"fixture")
+    (tmp_path / "meta").mkdir()
+    (tmp_path / "meta/episodes.jsonl").write_text(
+        '{"episode_index": 0, "length": 5}\n'
+    )
+
+    class ResettingPredictor:
+        """Mimics SAM3: add_prompt resets the session to the new prompt only;
+        ids restart at 0 after each reset; propagation covers every frame of
+        the current prompt's objects."""
+
+        def __init__(self):
+            self.prompt = None
+            self.calls = []
+
+        def _out(self, frame_index):
+            count = {"cup": 1, "plate": 2}[self.prompt]
+            return {
+                "frame_index": frame_index,
+                "out_obj_ids": np.arange(count),
+                "out_binary_masks": np.ones((count, 2, 2), dtype=bool),
+                "out_probs": np.full(count, 0.9),
+            }
+
+        def handle_request(self, request):
+            self.calls.append(request["type"])
+            if request["type"] == "start_session":
+                return {"session_id": "s"}
+            if request["type"] == "add_prompt":
+                self.prompt = request["text"]  # reset_state: earlier prompt gone
+                return {"frame_index": 0, "outputs": self._out(0)}
+            return {}
+
+        def handle_stream_request(self, request):
+            self.calls.append(request["type"])
+            for frame in range(5):
+                yield {"frame_index": frame, "outputs": self._out(frame)}
+
+    predictor = ResettingPredictor()
+    rows = _run_episode_camera(
+        predictor,
+        tmp_path,
+        {"fps": 10},
+        plan={"prompts": ["cup", "plate"], "start_frame": 0, "max_frames": None},
+        episode_index=0,
+        camera_key="observation.images.side",
+        np=np,
+    )
+    frames = {}
+    for row in rows:
+        frames.setdefault(row["concept"], set()).add(row["frame_index"])
+    # Both prompts reach every frame, not just the last prompt.
+    assert frames == {"cup": set(range(5)), "plate": set(range(5))}
+    tracks = {(row["concept"], row["track_id"]) for row in rows}
+    assert tracks == {("cup", 0), ("plate", 1), ("plate", 2)}
+    assert len({row["object_id"] for row in rows}) == 3
+    assert predictor.calls.count("propagate_in_video") == 2
+    assert predictor.calls.count("add_prompt") == 2
+    assert predictor.calls.count("close_session") == 1

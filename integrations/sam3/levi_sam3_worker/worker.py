@@ -398,6 +398,8 @@ def _append_outputs(
     fps: float,
     np: Any,
     frame_offset: int = 0,
+    id_offset: int = 0,
+    default_concept: str = "object",
 ) -> None:
     ids, masks, boxes, scores = _normalise_outputs(outputs, np)
     for index, (object_id, mask) in enumerate(zip(ids, masks, strict=False)):
@@ -423,10 +425,10 @@ def _append_outputs(
                 # starts at a non-zero timestamp.
                 "timestamp": frame_index / fps,
                 "camera_key": camera_key,
-                "object_id": f"sam3-{episode_index}-{camera_key.replace('.', '_')}-{object_id}",
-                "track_id": max(0, object_id),
-                "concept": concepts.get(object_id, "object"),
-                "category": concepts.get(object_id),
+                "object_id": f"sam3-{episode_index}-{camera_key.replace('.', '_')}-{id_offset + max(0, object_id)}",
+                "track_id": id_offset + max(0, object_id),
+                "concept": concepts.get(object_id, default_concept),
+                "category": concepts.get(object_id, default_concept),
                 "bbox_xyxy": bbox,
                 "image_size": [int(mask.shape[-2]), int(mask.shape[-1])],
                 "mask_rle": _rle(mask),
@@ -437,7 +439,7 @@ def _append_outputs(
                 # when the confidence score is above the configured threshold.
                 "status": "suggested",
                 "source": "sam3",
-                "prompt": concepts.get(object_id),
+                "prompt": concepts.get(object_id, default_concept),
             }
         )
 
@@ -484,17 +486,26 @@ def _run_episode_camera(
         )
     session = predictor.handle_request({"type": "start_session", "resource_path": str(video)})
     session_id = session["session_id"]
-    concepts: dict[int, str] = {}
     rows: list[dict[str, Any]] = []
+    threshold = float(plan.get("review_threshold", 0.6))
+    # ``add_prompt`` starts with ``reset_state``: a session tracks exactly one
+    # text prompt at a time. Several prompts added before one propagation
+    # left only the last prompt propagated (the others kept frame 0 only), so
+    # every concept gets its own prompt + propagation pass. The video stays
+    # loaded in the one session; object ids restart after each reset and are
+    # offset so track ids stay unique within the episode/camera.
+    id_offset = 0
     try:
         for prompt in plan["prompts"]:
+            concepts: dict[int, str] = {}
+            seen: set[int] = set()
             response = predictor.handle_request(
                 {
                     "type": "add_prompt",
                     "session_id": session_id,
                     "frame_index": source_start_frame,
                     "text": prompt,
-                    "output_prob_thresh": float(plan.get("review_threshold", 0.6)),
+                    "output_prob_thresh": threshold,
                 }
             )
             outputs = response.get("outputs", {})
@@ -503,6 +514,7 @@ def _run_episode_camera(
                 ids = _as_numpy(ids, np).reshape(-1).tolist() if ids is not None else []
                 for object_id in ids:
                     concepts.setdefault(int(object_id), prompt)
+                    seen.add(int(object_id))
                 if "frame_index" not in outputs:
                     outputs = dict(outputs)
                     outputs["frame_index"] = response.get("frame_index", source_start_frame)
@@ -515,31 +527,40 @@ def _run_episode_camera(
                     fps=fps,
                     np=np,
                     frame_offset=segment_start_frame,
+                    id_offset=id_offset,
+                    default_concept=prompt,
                 )
-        request = {
-            "type": "propagate_in_video",
-            "session_id": session_id,
-            "propagation_direction": "forward",
-            "start_frame_index": source_start_frame,
-            "output_prob_thresh": float(plan.get("review_threshold", 0.6)),
-        }
-        if max_frames is not None:
-            request["max_frame_num_to_track"] = int(max_frames)
-        for response in predictor.handle_stream_request(request):
-            outputs = response.get("outputs", {})
-            if isinstance(outputs, dict):
-                outputs = dict(outputs)
-                outputs["frame_index"] = response.get("frame_index", outputs.get("frame_index", source_start_frame))
-                _append_outputs(
-                    rows,
-                    outputs,
-                    episode_index=episode_index,
-                    camera_key=camera_key,
-                    concepts=concepts,
-                    fps=fps,
-                    np=np,
-                    frame_offset=segment_start_frame,
-                )
+            request = {
+                "type": "propagate_in_video",
+                "session_id": session_id,
+                "propagation_direction": "forward",
+                "start_frame_index": source_start_frame,
+                "output_prob_thresh": threshold,
+            }
+            if max_frames is not None:
+                request["max_frame_num_to_track"] = int(max_frames)
+            for response in predictor.handle_stream_request(request):
+                outputs = response.get("outputs", {})
+                if isinstance(outputs, dict):
+                    outputs = dict(outputs)
+                    outputs["frame_index"] = response.get("frame_index", outputs.get("frame_index", source_start_frame))
+                    ids = outputs.get("out_obj_ids", outputs.get("object_ids", []))
+                    ids = _as_numpy(ids, np).reshape(-1).tolist() if ids is not None else []
+                    seen.update(int(object_id) for object_id in ids)
+                    _append_outputs(
+                        rows,
+                        outputs,
+                        episode_index=episode_index,
+                        camera_key=camera_key,
+                        concepts=concepts,
+                        fps=fps,
+                        np=np,
+                        frame_offset=segment_start_frame,
+                        id_offset=id_offset,
+                        default_concept=prompt,
+                    )
+            if seen:
+                id_offset += max(max(seen), 0) + 1
     finally:
         predictor.handle_request({"type": "close_session", "session_id": session_id})
     # The official predictor can emit the conditioning frame twice. Keep one

@@ -247,11 +247,134 @@ class SidecarStore:
     def read_episode(
         self, episode_index: int, revision_id: str | None = None
     ) -> list[dict[str, Any]]:
-        return [
-            row
-            for row in self.read_annotations(revision_id)
-            if row["episode_index"] == episode_index
+        """One episode's rows, reading only that episode's mask files (a
+        dataset-wide revision can hold every frame of every episode)."""
+        revision_id = revision_id or self.current_revision()
+        if not revision_id:
+            return []
+        folder = self.revision_path(revision_id) / "masks" / f"episode-{episode_index:06d}"
+        rows: list[dict[str, Any]] = []
+        for path in sorted(folder.glob("**/*.parquet")):
+            rows.extend(
+                self._from_mask_row(row)
+                for row in pq.read_table(path).to_pylist()
+                if row["episode_index"] == episode_index
+            )
+        return rows
+
+    @staticmethod
+    def _mask_file(masks_root: Path, episode_index: int, camera_key: str) -> Path:
+        camera_name = camera_key.replace("/", "_").replace("\\", "_")
+        return masks_root / f"episode-{episode_index:06d}" / f"{camera_name}.parquet"
+
+    def publish_merged(
+        self,
+        annotations: list[ObjectAnnotation],
+        replace: set[tuple[int, str]],
+        *,
+        model: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """A new revision = the current one with the (episode, camera) pairs in
+        ``replace`` swapped for ``annotations``.
+
+        A model run on some episodes must not erase every other episode's
+        objects. Untouched mask files are hard-linked (revisions are
+        immutable), so saving one episode costs the same on a fully labelled
+        dataset as on an empty one."""
+        self.initialize()
+        annotations = [
+            ObjectAnnotation.model_validate(row.model_dump()) for row in annotations
         ]
+        for row in annotations:
+            validate_rle(row.mask_rle)
+            if row.mask_rle["size"] != row.image_size:
+                raise ValueError("RLE size must match image_size")
+        replace = set(replace) | {(r.episode_index, r.camera_key) for r in annotations}
+        parent = self.current_revision()
+        parent_root = self.revision_path(parent) if parent else None
+        kept_tracks: list[dict[str, Any]] = []
+        kept_objects: list[dict[str, Any]] = []
+        kept_qa: list[dict[str, Any]] = []
+        kept_events: list[dict[str, Any]] = []
+        kept_files: list[tuple[Path, Path]] = []
+        kept_count = 0
+        revision_id = timestamp_id(self.root / "revisions", create_dir=True)
+        revision = self.revision_path(revision_id)
+        masks_root = revision / "masks"
+        if parent_root is not None and parent_root.is_dir():
+            def table(name: str) -> list[dict[str, Any]]:
+                path = parent_root / name
+                return pq.read_table(path).to_pylist() if path.is_file() else []
+
+            tracks = table("tracks.parquet")
+            kept_tracks = [
+                t for t in tracks if (t["episode_index"], t["camera_key"]) not in replace
+            ]
+            live_ids = {(t["episode_index"], t["object_id"]) for t in kept_tracks}
+            dropped_ids = {
+                (t["episode_index"], t["object_id"])
+                for t in tracks
+                if (t["episode_index"], t["camera_key"]) in replace
+            } - live_ids
+            kept_objects = [
+                o
+                for o in table("objects.parquet")
+                if (o["episode_index"], o["object_id"]) not in dropped_ids
+            ]
+            kept_qa = [
+                q for q in table("qa.parquet") if (q["episode_index"], q["camera_key"]) not in replace
+            ]
+            kept_events = table("events.parquet")
+            for path in sorted((parent_root / "masks").glob("episode-*/*.parquet")):
+                meta = pq.read_table(path, columns=["episode_index", "camera_key"]).slice(0, 1).to_pylist()
+                if meta and (meta[0]["episode_index"], meta[0]["camera_key"]) in replace:
+                    continue
+                kept_files.append((path, masks_root / path.relative_to(parent_root / "masks")))
+                kept_count += pq.read_metadata(path).num_rows
+        for source, target in kept_files:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.link(source, target)
+            except OSError:
+                import shutil
+
+                shutil.copyfile(source, target)
+        new_objects = self._objects(annotations)
+        seen_objects = {(o["episode_index"], o["object_id"]) for o in kept_objects}
+        object_rows = kept_objects + [
+            o for o in new_objects if (o["episode_index"], o["object_id"]) not in seen_objects
+        ]
+        track_rows = kept_tracks + [
+            self._track_row(row) for row in self._derive_tracks(annotations)
+        ]
+        _write_table(revision / "objects.parquet", object_rows, OBJECT_SCHEMA)
+        _write_table(revision / "tracks.parquet", track_rows, TRACK_SCHEMA)
+        _write_table(revision / "qa.parquet", kept_qa, QA_SCHEMA)
+        _write_table(revision / "events.parquet", kept_events, EVENT_SCHEMA)
+        by_camera: dict[tuple[int, str], list[dict[str, Any]]] = {}
+        for row in annotations:
+            by_camera.setdefault((row.episode_index, row.camera_key), []).append(
+                self._mask_row(row)
+            )
+        for (episode_index, camera_key), rows in by_camera.items():
+            _write_table(
+                self._mask_file(masks_root, episode_index, camera_key),
+                sorted(rows, key=lambda item: (item["frame_index"], item["track_id"])),
+                MASK_SCHEMA,
+            )
+        revision_info = {
+            "schema_version": SCHEMA_VERSION,
+            "revision_id": revision_id,
+            "parent_revision": parent,
+            "created_at": datetime.now(UTC).isoformat(),
+            "annotation_count": kept_count + len(annotations),
+            "track_count": len(track_rows),
+            "model": model or {"provider": "human"},
+            "replaced": sorted([int(e), str(c)] for e, c in replace),
+        }
+        _write_json(revision / "revision.json", revision_info)
+        _write_json(self.current_path, {"revision_id": revision_id})
+        return revision_info
 
     def apply_edit(self, edit: ObjectEdit) -> dict[str, Any]:
         current = self.current_revision()

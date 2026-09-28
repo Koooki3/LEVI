@@ -27,6 +27,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="optional path to write batch progress JSON (episode/camera done-of-total)",
     )
+    parser.add_argument(
+        "--pseudo-label",
+        action="store_true",
+        help="teacher mode: text-prompted SAM3 image pseudo-labels on sampled frames, "
+        "written as COCO train/valid/test folders (LEVI's student distillation)",
+    )
     args = parser.parse_args(argv)
     if args.check:
         print("LEVI SAM3 worker configuration")
@@ -42,6 +48,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--plan and --output are required unless --check is used")
     if not _enabled():
         parser.error("SAM3 is disabled; set LEVI_SAM3_ENABLED=1 to enable it")
+    if args.pseudo_label:
+        from .pseudo_label import run
+
+        run(args.plan, args.output, args.progress)
+        return 0
     from .worker import run_plan
 
     run_plan(args.plan, args.output, args.progress)
