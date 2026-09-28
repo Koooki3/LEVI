@@ -58,7 +58,7 @@ Select the profile in a new task (or pass `--provider qwen-local` to `levi agent
 
 Pausing or cancelling a run cuts its model request in flight, so the GPU stops computing an answer nobody will use. After LEVI's last request the model stays loaded for `LEVI_OLLAMA_KEEP_ALIVE` (default `2m`; Ollama's own default is 5 minutes), then Ollama unloads it. See [Workspace](WORKSPACE.md#processes-levi-starts-and-how-they-stop) for every process LEVI starts and how it stops.
 
-The first request after the model was unloaded includes loading it (about 20 s for `qwen3.5:4b` on a consumer GPU). Schema-bound calls are sent with reasoning ("thinking") off, since it costs tokens and time the structured answer rarely needs.
+The first request after the model was unloaded includes the time to load it (about 20 s for `qwen3.5:4b` on a consumer GPU). Schema-bound calls are sent with reasoning ("thinking") off, since it costs tokens and time the structured answer rarely needs.
 
 ## What the harness enforces for a small model
 
