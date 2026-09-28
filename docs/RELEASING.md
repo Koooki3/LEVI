@@ -11,7 +11,7 @@ About description:
 Topics: `lerobot`, `robotics`, `robot-learning`, `dataset-visualization`, `data-annotation`, `dataset-conversion`, `data-quality`, `imitation-learning`, `data-curation`, `mcp`, `ollama`, `huggingface`, `nextjs`, `fastapi`, `uv`.
 
 README.md is the English project landing page and `README.zh-CN.md` is the Chinese companion; the two are updated together. Guides live in `docs/`; the [README](../README.md#documentation) lists them. No hosted demo or deployment URL is claimed.
-README.md 是英文项目入口；README.zh-CN.md 提供中文版本；没有将本地服务地址用作公开演示网址。
+README.md 是英文项目首页，README.zh-CN.md 是中文版本，两者同步更新；不声称有托管演示或部署网址，也不把本地服务地址当作公开演示网址。
 
 ## Release checklist
 
@@ -21,7 +21,7 @@ README.md 是英文项目入口；README.zh-CN.md 提供中文版本；没有将
 4. Retain `LICENSE`, `NOTICE`, upstream history and [source attribution](UPSTREAM.md). Refresh [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md); before publishing Docker/PyPI/binary artifacts, generate and review their complete dependency/asset inventory and ship the applicable license/NOTICE texts as described there. Keep SAM3 checkpoints, Hugging Face tokens, worker environments and workspace data out of the source release; verify the global SAM3 status and model-free worker checks without CUDA/model execution. Publish only to the intended `origin`; never push LEVI releases to upstream.
 5. Push `main` and wait for **LEVI checks** to pass on the exact release commit. Create a version tag only after validation, and publish the matching notes.
 
-发布前同步版本与锁文件，验证构建及受影响流程，检查暂存内容和清理预览。CI 通过后再创建版本标签及 Release。不得覆盖已有标签或强制改写公共历史。
+发布前同步更新版本号和锁文件，验证构建和受影响的流程，检查暂存内容和清理预览。CI 通过后再创建版本标签和 Release。不得覆盖已有标签，也不得强制改写公开历史。
 
 Example, from a clean checkout with an authorized GitHub CLI account (replace `X.Y.Z`):
 
