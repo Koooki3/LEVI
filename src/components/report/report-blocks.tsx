@@ -156,9 +156,9 @@ function ProgressBlock({ id }: { id?: string }) {
                   {t("report.eta")} {eta}
                 </span>
               )}
-              {item.owner && item.owner !== item.id && (
+              {pick(item.owner, lang) && pick(item.owner, lang) !== item.id && (
                 <span>
-                  {t("report.owner")} {item.owner}
+                  {t("report.owner")} {pick(item.owner, lang)}
                 </span>
               )}
               {(item.links ?? []).map((link, index) =>
@@ -398,7 +398,7 @@ function TableBlock({ data }: { data: Parameters<typeof lookupTable>[1] }) {
   const found = lookupTable(status, data);
   if (!found.ok) return <BlockError message={found.error} />;
   const { columns, rows } = found.value;
-  const sorted = sortRows(rows, sort.key, sort.dir);
+  const sorted = sortRows(rows, sort.key, sort.dir, lang);
   const numeric = (key: string) =>
     rows.some((row) => typeof row[key] === "number") &&
     rows.every((row) => row[key] == null || typeof row[key] === "number");

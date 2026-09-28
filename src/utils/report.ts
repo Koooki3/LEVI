@@ -27,7 +27,7 @@ export interface Workstream {
   started_at?: string | null;
   updated_at?: string | null;
   eta?: string | null;
-  owner?: string | null;
+  owner?: Bilingual;
   links?: { label?: Bilingual; path?: string }[];
 }
 
@@ -527,26 +527,36 @@ export function formatGpu(resources: ReportResources | undefined | null) {
 
 export type SortDirection = "asc" | "desc";
 
+/** A cell's sortable value: numbers stay numbers, bilingual text is picked. */
+function sortValue(value: unknown, lang: ReportLang): unknown {
+  if (value !== null && typeof value === "object" && !Array.isArray(value))
+    return pick(value as Bilingual, lang);
+  return value;
+}
+
 /** Numbers numerically, text naturally; empty cells always last. */
 export function sortRows(
   rows: Record<string, unknown>[],
   key: string | null,
   direction: SortDirection,
+  lang: ReportLang = "en",
 ): Record<string, unknown>[] {
   if (!key) return rows;
   const factor = direction === "asc" ? 1 : -1;
   const empty = (v: unknown) => v === null || v === undefined || v === "";
   return rows
-    .map((row, index) => ({ row, index }))
+    .map((row, index) => ({ row, index, value: sortValue(row[key], lang) }))
     .sort((a, b) => {
-      const x = a.row[key];
-      const y = b.row[key];
+      const x = a.value;
+      const y = b.value;
       if (empty(x) || empty(y))
         return empty(x) === empty(y) ? a.index - b.index : empty(x) ? 1 : -1;
       const order =
         finite(x) && finite(y)
           ? x - y
-          : String(x).localeCompare(String(y), undefined, { numeric: true });
+          : String(x).localeCompare(String(y), lang === "zh" ? "zh" : "en", {
+              numeric: true,
+            });
       return order * factor || a.index - b.index;
     })
     .map(({ row }) => row);

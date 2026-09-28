@@ -15,7 +15,9 @@ def report(tmp_path, monkeypatch):
         json.dumps({"schema": "levi.report.status.v1", "levi_main": "abc1234"})
     )
     (root / "assets/ui.png").write_bytes(b"\x89PNG\r\n\x1a\n")
-    (root / "assets/diagram.svg").write_text("<svg xmlns='http://www.w3.org/2000/svg'/>")
+    (root / "assets/diagram.svg").write_text(
+        "<svg xmlns='http://www.w3.org/2000/svg'/>"
+    )
     (root / "assets/notes.md").write_text("secret")
     (root / "secret.png").write_bytes(b"\x89PNG")
     monkeypatch.setenv("LEVI_REPORT_DIR", str(root))
@@ -84,7 +86,10 @@ def test_assets_are_confined_to_the_assets_folder(client, report, tmp_path):
     assert svg.headers["x-content-type-options"] == "nosniff"
     # Not an image type, outside assets/, traversal, hidden, missing.
     assert client.get("/api/levi/report/assets/notes.md").status_code == 403
-    assert client.get("/api/levi/report/assets/..%2Fsecret.png").status_code in (403, 404)
+    assert client.get("/api/levi/report/assets/..%2Fsecret.png").status_code in (
+        403,
+        404,
+    )
     assert client.get("/api/levi/report/assets/.hidden.png").status_code == 403
     assert client.get("/api/levi/report/assets/none.png").status_code == 404
     # A symlink that leaves the folder is refused, even to an image.
@@ -96,7 +101,13 @@ def test_assets_are_confined_to_the_assets_folder(client, report, tmp_path):
 def test_asset_resolution_rejects_traversal_directly(report):
     from levi import report as technical_report
 
-    for bad in ("../secret.png", "/etc/passwd.png", "a/../../secret.png", "", "x\\y.png"):
+    for bad in (
+        "../secret.png",
+        "/etc/passwd.png",
+        "a/../../secret.png",
+        "",
+        "x\\y.png",
+    ):
         with pytest.raises(PermissionError):
             technical_report.asset(bad)
 

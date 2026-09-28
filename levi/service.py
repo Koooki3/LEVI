@@ -594,7 +594,6 @@ def diagnostics(payload: Diagnostic):
     )
 
 
-
 # ------------------------------------------------------------ report
 # A read-only view of LEVI_REPORT_DIR (levi/report.py); the page polls
 # /version and refetches the document only when it changed.
@@ -640,5 +639,6 @@ def report_asset(path: str):
             "Content-Security-Policy": "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox",
         },
     )
+
 
 app.mount("/annotations", annotation_app)

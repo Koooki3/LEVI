@@ -128,15 +128,17 @@ def load(lang: str | None = None) -> dict:
     if _stat(status):
         try:
             data = json.loads(_read_text(status))
-            if not isinstance(data, dict):
-                raise ValueError("expected a JSON object")
-            if data.get("schema") not in (None, SCHEMA):
-                result["errors"].append(
-                    f"{STATUS}: schema {data.get('schema')!r}, expected {SCHEMA!r}"
-                )
-            result["status"] = data
         except (OSError, ValueError) as exc:
             result["errors"].append(f"{STATUS}: {exc}")
+        else:
+            if not isinstance(data, dict):
+                result["errors"].append(f"{STATUS}: expected a JSON object")
+            else:
+                if data.get("schema") not in (None, SCHEMA):
+                    result["errors"].append(
+                        f"{STATUS}: schema {data.get('schema')!r}, expected {SCHEMA!r}"
+                    )
+                result["status"] = data
     return result
 
 

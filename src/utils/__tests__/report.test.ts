@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   type ReportStatus,
   assetSrc,
+  cellText,
   chartSeries,
   clampProgress,
   deltaTone,
@@ -225,6 +226,21 @@ describe("tables", () => {
       "b10",
     ]);
     expect(sortRows(rows, null, "asc")).toBe(rows);
+  });
+
+  test("bilingual cells sort and show in the reader's language", () => {
+    const cells = [
+      { n: { en: "beta", zh: "乙" } },
+      { n: { en: "alpha" } },
+      { n: "gamma" },
+    ];
+    expect(
+      sortRows(cells, "n", "asc", "en").map((r) => cellText(r.n, "en")),
+    ).toEqual(["alpha", "beta", "gamma"]);
+    expect(cellText({ en: "beta", zh: "乙" }, "zh")).toBe("乙");
+    expect(cellText({ en: "alpha" }, "zh")).toBe("alpha");
+    expect(cellText(0.5, "en")).toBe("0.5");
+    expect(cellText(null, "en")).toBe("");
   });
 });
 
