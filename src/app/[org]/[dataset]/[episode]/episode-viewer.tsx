@@ -62,6 +62,7 @@ import {
   writeBrowserStorage,
 } from "@/utils/browserStorage";
 import type { DatasetMetadata } from "@/utils/parquetUtils";
+import { urlSeekTarget, urlTimeWriter } from "@/utils/urlTime";
 import {
   fetchAnnotationSummary,
   fetchOutcomeLabels,
@@ -131,6 +132,9 @@ function UrlTimeSync() {
       lastUrlSecondRef.current = currentSec;
       const newParams = new URLSearchParams(searchParams.toString());
       newParams.set("t", currentSec.toString());
+      // Next.js reports this replaceState through useSearchParams; the
+      // ?t= seek below must not snap the playhead back to the whole second.
+      urlTimeWriter.last = currentSec.toString();
       window.history.replaceState(
         {},
         "",
@@ -952,13 +956,8 @@ function EpisodeViewerInner({
 
   // Initialize based on URL time parameter
   useEffect(() => {
-    const timeParam = searchParams.get("t");
-    if (timeParam) {
-      const timeValue = parseFloat(timeParam);
-      if (!isNaN(timeValue)) {
-        seek(timeValue);
-      }
-    }
+    const target = urlSeekTarget(searchParams.get("t"));
+    if (target != null) seek(target);
   }, [searchParams, seek]);
 
   // sync with parent window hf.co/spaces
