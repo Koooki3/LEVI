@@ -102,7 +102,7 @@ Inspect → choose a target → run (see [Conversion](CONVERSION.md)). Targets: 
 
 ## Supported raw capture formats
 
-Four raw input profiles are recognized, two of them currently have direct training conversion writers. DROID raw is browse/annotate only.
+LEVI recognizes four raw input profiles; two of them currently have a direct training-conversion writer. DROID raw is browse/annotate only.
 
 ### Type 1 — teleoperation capture (e.g. `data_collection_robotiq`)
 
@@ -156,12 +156,11 @@ A workspace LEVI creates is offered a test dataset: the first time the core runs
 
 ### Already-converted LeRobot datasets
 
-Not a "raw" format, but relevant: LEVI can register and fully use **any** v2.0/v2.1/v3.0/v3.1 dataset directly — regardless of what produced it (LEVI's own converter, an external script, or a Hub download) — with no conversion step. A dataset produced by an external conversion script is registered as-is and labelled that way in the dataset list.
+Not a "raw" format, but relevant: LEVI can register and fully use **any** v2.0/v2.1/v3.0/v3.1 dataset directly, with no conversion step, whatever produced it (LEVI's own converter, an external script, or a Hub download). A dataset produced by an external conversion script is registered as-is and labelled that way in the dataset list.
 
 ## Shared Agent Core
 
 `outputs/LEVI/workbench/agent/core/` holds the private socket, instance and human control key. `agent/connections/<client>-<timestamp>/` holds scoped machine-local credentials and a record of the project MCP entry the connection wrote. Pilot sessions and artifacts use the existing per-dataset run directories; see [Pilot](PILOT.md). Never publish these runtime files.
-
 
 ## Local model state
 
