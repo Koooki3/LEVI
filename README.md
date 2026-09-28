@@ -95,6 +95,8 @@ LEVI checks the spec against the catalog and waits for your approval before anyt
 
 `LEVI_WORKSPACE` holds data and state and can live outside the checkout (default `.state/`). Datasets sit directly under it; LEVI's own state is under `outputs/LEVI/`; model weights under `checkpoints/`. Names follow the dataset and the episode (`episode_000007`), runs a readable timestamp (`temporal-20260922T0941`) — never a hash. LEVI follows the workspace while it runs: datasets copied in are registered, changed ones refreshed, removed ones dropped. See [Workspace](docs/WORKSPACE.md).
 
+The **Report** page shows a live technical report from a folder you name with `LEVI_REPORT_DIR` (read-only, may be outside the workspace); see [API](docs/API.md#technical-report--技术报告).
+
 ## Deployment
 
 LEVI is a single-user local workbench with file access. Hugging Face sign-in (a token, OAuth, or `HF_TOKEN` on the backend) controls Hub access, not LEVI permissions; a browser token is kept in local storage and an HttpOnly video-proxy cookie and cleared on sign-out. Never commit credentials or `.env`; put any shared deployment behind an authenticated reverse proxy and set `LEVI_SECURE_COOKIES=1` for HTTPS or Space embeds. Hub upload is an explicit API action; conversion and saving never upload.

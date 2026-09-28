@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from . import children, jobs
@@ -593,5 +593,52 @@ def diagnostics(payload: Diagnostic):
         decode_video=payload.decode_video,
     )
 
+
+
+# ------------------------------------------------------------ report
+# A read-only view of LEVI_REPORT_DIR (levi/report.py); the page polls
+# /version and refetches the document only when it changed.
+
+
+@app.get("/api/levi/report")
+def report(request: Request, lang: str = "en"):
+    from . import report as technical_report
+
+    marker = technical_report.version(lang)
+    headers = {"ETag": marker["etag"], "Cache-Control": "no-cache"}
+    if request.headers.get("if-none-match") == marker["etag"]:
+        return Response(status_code=304, headers=headers)
+    return JSONResponse(technical_report.load(lang), headers=headers)
+
+
+@app.get("/api/levi/report/version")
+def report_version(lang: str = "en"):
+    from . import report as technical_report
+
+    return JSONResponse(
+        technical_report.version(lang), headers={"Cache-Control": "no-store"}
+    )
+
+
+@app.api_route("/api/levi/report/assets/{path:path}", methods=["GET", "HEAD"])
+def report_asset(path: str):
+    from . import report as technical_report
+
+    try:
+        full, kind = technical_report.asset(path)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    return FileResponse(
+        full,
+        media_type=kind,
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+            # An SVG opened on its own must not run script in LEVI's origin.
+            "Content-Security-Policy": "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox",
+        },
+    )
 
 app.mount("/annotations", annotation_app)

@@ -73,6 +73,9 @@ export async function backendProxy(
       // Dataset files change while LEVI runs (levi/sync.py): keep the
       // backend's "revalidate before reuse" policy.
       "cache-control",
+      // Report assets (levi/report.py): an SVG must stay sandboxed.
+      "content-security-policy",
+      "x-content-type-options",
     ]) {
       const value = upstream.headers.get(key);
       if (value) responseHeaders.set(key, value);

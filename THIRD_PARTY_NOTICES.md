@@ -80,7 +80,9 @@ Runtime dependencies:
 | [react](https://www.npmjs.com/package/react/v/19.2.4) | 19.2.4 | MIT |
 | [react-dom](https://www.npmjs.com/package/react-dom/v/19.2.4) | 19.2.4 | MIT |
 | [react-icons](https://www.npmjs.com/package/react-icons/v/5.5.0) | 5.5.0 | MIT (package code; icon licenses are separate) |
+| [react-markdown](https://www.npmjs.com/package/react-markdown/v/10.1.0) | 10.1.0 | MIT |
 | [recharts](https://www.npmjs.com/package/recharts/v/2.15.4) | 2.15.4 | MIT |
+| [remark-gfm](https://www.npmjs.com/package/remark-gfm/v/4.0.1) | 4.0.1 | MIT |
 | [three](https://www.npmjs.com/package/three/v/0.182.0) | 0.182.0 | MIT |
 | [urdf-loader](https://www.npmjs.com/package/urdf-loader/v/0.12.6) | 0.12.6 | Apache-2.0 |
 

@@ -25,6 +25,9 @@ Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge fo
 | POST | `/api/levi/jobs/{id}/run` | Consume the stored plan once; body `{}` |
 | GET | `/api/levi/jobs` | Latest 50 plans/jobs, structured `progress` (stages, stage, done/total, current item, elapsed, ETA, warnings) and up to 32 KB of each log tail |
 | POST | `/api/levi/diagnostics` | Structural quality check `{ "repo_id": "…", "max_episodes": 0, "checks": ["metadata","temporal"], "decode_video": true }` (`max_episodes: 0` = all); the report is also kept at `outputs/LEVI/datasets/<name>/reports/quality-<YYYYmmddTHH>.json` and its `path` returned ([Data quality](QUALITY.md)) |
+| GET | `/api/levi/report?lang=en\|zh` | The technical report ([below](#technical-report--技术报告)): `{configured, dir, exists, lang, document_lang, markdown, status, errors, mtime, etag}`; answers `304` to a matching `If-None-Match` |
+| GET | `/api/levi/report/version?lang=en\|zh` | The report's change marker `{configured, etag, mtime}` from file stats only; the page polls it every 5 s |
+| GET / HEAD | `/api/levi/report/assets/{relative_path}` | An image (PNG, JPEG, GIF, WebP, SVG) under the report's `assets/`; anything else, a hidden name or a path leaving the folder is `403` |
 | GET | `/api/annotation/health` | Annotation service availability |
 | POST | `/api/annotation/dataset/load` | Load `{ "repo_id": "…" }` or `{ "local_path": "/workspace/dataset" }` |
 | GET | `/api/annotation/episodes/{id}/atoms?repo_id=…` | Read language atoms |
@@ -86,6 +89,20 @@ Diagnostic calls are synchronous and can take time to download remote shards. Co
 Plans capture source size/mtime fingerprints. Execution fails if the source changes before or during processing. The worker is always `python -m levi.conversion`. Job results include `exit_code`, structured `result` (with `video_modes`, `fps`, optional `fps_note`), `output_exists`, the automatically registered `dataset` and, when the source had annotations, a `carryover` report. The output directory is the dataset itself; the default name is `<source>_<lerobot|recap>_<timestamp>`, and a job id is the same timestamp. Stage `view` builds a raw capture's browsing view and updates its catalog entry.
 
 Read-only stages (`inspect`, `summary`, …) have no output dataset. A failing report exits with code 2 and is recorded as failed; exceptions exit nonzero. Nothing is published unless the whole run succeeds. Interrupted jobs are marked on service restart and never resumed automatically.
+
+## Technical report / 技术报告
+
+The **Report / 报告** page (`/report`) renders a technical report kept outside LEVI: set `LEVI_REPORT_DIR` to its folder (for example in `.env`). LEVI only reads that one folder; it may lie outside `LEVI_WORKSPACE`, and nothing else outside the workspace becomes readable. Unset, or pointing at a missing folder, the page explains how to configure it.
+
+| File | Content |
+| --- | --- |
+| `LEVI.md`, `LEVI.zh-CN.md` | The report in English and Chinese (GitHub-flavoured Markdown; raw HTML is not rendered). The page follows the language switch and falls back to English. |
+| `status.json` | Live data, schema `levi.report.status.v1`: `generated_at`, `levi_main`, `workstreams` (state, progress 0–1, stage, ETA), `metrics`, `charts`, `tables`, `milestones`, `resources` (GPU, free disk). Bilingual fields are `{"en": "…", "zh": "…"}`. |
+| `assets/` | Images the Markdown references as `assets/<file>`. |
+
+Fenced blocks with a JSON body become components: `levi-progress` (`{"source": "workstreams"}` or `{"id": "W1b"}`), `levi-chart` (`{"type": "bar"|"line"|"grouped-bar", "title", "data": "<charts key>" or inline rows, "x", "series": [{"key", "label"}], "y_label", "y_domain"}`), `levi-metrics`, `levi-table` and `levi-timeline` (`{"data": "<key>"}` in `metrics`, `tables`, `milestones`). A block that does not parse shows its error in place; the rest of the report still renders. The page polls `/api/levi/report/version` every 5 s and swaps in a changed report without moving the reader's scroll position.
+
+技术报告页读取 `LEVI_REPORT_DIR` 指向的目录（只读，可在工作区之外）：`LEVI.md` / `LEVI.zh-CN.md` 为正文，`status.json` 为实时数据，`assets/` 为图片。页面随语言切换选择中文或英文（缺失时回退英文），每 5 秒检测一次变化并无闪烁地更新。
 
 ## Service entry points / 服务入口
 

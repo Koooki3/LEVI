@@ -20,6 +20,9 @@ export default function LeviHeader() {
             <Link href="/guide">
               <T>Guide</T>
             </Link>
+            <Link href="/report">
+              <T>Report</T>
+            </Link>
             <button
               className="levi-language"
               onClick={() =>

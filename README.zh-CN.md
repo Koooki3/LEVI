@@ -95,6 +95,8 @@ LEVI 会按数据目录校验解析出的任务规格，等你批准后才会执
 
 `LEVI_WORKSPACE` 存放数据和状态，可以放在仓库之外（默认 `.state/`）。数据集直接放在它下面；LEVI 自己的状态在 `outputs/LEVI/`；模型权重在 `checkpoints/`。名称与数据集和集编号对应（`episode_000007`），每次运行用可读的时间戳（`temporal-20260922T0941`），从不使用哈希。LEVI 运行时持续与工作区同步：拷入的数据集自动登记，变化的会刷新，删除的会移除。详见 [工作区](docs/WORKSPACE.md)。
 
+**报告**页显示 `LEVI_REPORT_DIR` 所指目录中的实时技术报告（只读，可在工作区之外），见 [API](docs/API.md#technical-report--技术报告)。
+
 ## 部署
 
 LEVI 是有文件访问权限的单用户本地工作台。Hugging Face 登录（令牌、OAuth 或后端的 `HF_TOKEN`）只控制 Hub 访问，不是 LEVI 的用户权限；浏览器中的令牌保存在本地存储和一个 HttpOnly 视频代理 cookie 里，退出登录时清除。切勿提交凭据或 `.env`；多人共享部署请放在带认证的反向代理之后，HTTPS 或 Space 嵌入请设置 `LEVI_SECURE_COOKIES=1`。上传到 Hub 需要显式的 API 操作；转换和保存从不上传。
