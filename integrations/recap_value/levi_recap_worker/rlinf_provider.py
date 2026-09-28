@@ -244,8 +244,13 @@ def tokenizer_for(manifest: dict, ckpt_dir: Path):
     from transformers import AutoTokenizer
 
     path = base_path(ckpt_dir, manifest["base_models"].get("tokenizer"), "tokenizer")
+    # RLinf loads the Hub folder, which ships tokenizer.json. A folder with
+    # only the SentencePiece model (tokenizer.model) would otherwise be
+    # converted to a fast tokenizer, which needs protobuf; the slow
+    # SentencePiece tokenizer gives the same ids without it. (LEVI change.)
+    fast = (Path(path) / "tokenizer.json").is_file()
     return AutoTokenizer.from_pretrained(
-        path, add_bos_token=True, local_files_only=True
+        path, add_bos_token=True, local_files_only=True, use_fast=fast
     )
 
 
