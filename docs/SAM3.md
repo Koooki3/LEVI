@@ -23,7 +23,7 @@ CUDA 主机上才会加载模型。
 
 ## 模型来源与账号
 
-默认模型配置固定为：
+默认模型配置如下：
 
 | 项目 | 默认值 |
 | --- | --- |
@@ -43,13 +43,13 @@ checkpoint 布局兼容。LEVI 不把权重提交到 Git，也不会把 token �
 
 ## 首次部署：严格按顺序执行
 
-以下命令从克隆后的 LEVI 根目录执行。目录名称和绝对路径可以任意，示例不会依赖
-特定工作区名称。
+以下命令在克隆下来的 LEVI 根目录执行。目录名和绝对路径不限，示例不依赖特定的
+工作区名称。
 
 ### 1. 准备系统工具
 
-安装 uv、ffmpeg 和 ffprobe。真实 SAM3 主机还需要 Python 3.12、匹配驱动的
-CUDA-enabled PyTorch 环境；官方 SAM3 当前要求 PyTorch 2.7 或更高版本及兼容的
+安装 uv、ffmpeg 和 ffprobe。运行真实 SAM3 的主机还需要 Python 3.12，以及与
+驱动匹配、支持 CUDA 的 PyTorch 环境；官方 SAM3 当前要求 PyTorch 2.7 或更高版本及兼容的
 CUDA 运行时。LEVI 的 CPU 检查不会验证这些 GPU 条件。
 
 ### 2. 克隆并建立独立工作区
@@ -70,7 +70,7 @@ LEVI_WORKSPACE 只保存数据集登记、sidecar、报告、checkpoint 和运�
 
 ### 3. 登录 Hugging Face
 
-先在 [1038lab/sam3 模型页](https://huggingface.co/1038lab/sam3) 登录准备使用的账号。
+先用准备使用的账号登录 [1038lab/sam3 模型页](https://huggingface.co/1038lab/sam3)。
 如果页面显示 `Request access`、受限模型或许可确认，按页面提示提交访问申请并接受
 适用条款；只有页面允许该账号读取模型后才继续。不要用另一个账号申请、登录或下载，
 否则数据快照和 checkpoint 会被隔离到不同账号作用域。
@@ -92,8 +92,8 @@ HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" uvx hf auth whoami
 
 登录账号需要能读取 1038lab/sam3。也可以直接打开 LEVI，点击页面中的 Connect
 Hugging Face，输入只读 token；浏览器会把当前 token 放入 HttpOnly 会话 cookie，
-真实 worker 只在当前作业进程中使用它。若不希望浏览器保存 token，可只使用本机
-按上述工作区 HF_HOME 设置执行 hf auth login，或使用运行环境中的 HF_TOKEN。
+真实 worker 只在当前作业进程中使用它。若不希望浏览器保存 token，可以只在本机
+按上面的工作区 HF_HOME 执行 hf auth login，或使用运行环境中的 HF_TOKEN。
 
 ### 4. 安装独立 SAM3 worker
 
@@ -105,7 +105,7 @@ uv sync --project integrations/sam3
 export LEVI_SAM3_WORKER_PYTHON="$PWD/integrations/sam3/.venv/bin/python"
 ~~~
 
-项目的 integration 配置会安装固定 commit 的官方 SAM3 源码和 CUDA PyTorch 索引。
+integration 项目的配置会安装固定 commit 的官方 SAM3 源码，并从 CUDA PyTorch 索引安装 PyTorch。
 第一次同步可能下载较大的 Python/CUDA 包；这些内容留在 uv 缓存和运行时目录，不会
 写入 Git。
 
@@ -141,10 +141,10 @@ uv run levi serve
    若账号显示“未登录”，点击 Connect Hugging Face；已通过 CLI 登录的账号会显示为
    environment/cache。浏览器登录成功后，状态卡会立即刷新。
 3. 确认模型为 1038lab/sam3 / sam3.pt，保存位置为当前工作区下的
-   checkpoints/sam3/sam3.pt。若 checkpoint 尚未缓存，页面会出现“下载 checkpoint”按钮、
+   checkpoints/sam3/sam3.pt。若 checkpoint 尚未缓存，页面会出现“下载模型检查点”按钮、
    0% 进度条和当前路径；点击按钮后会用当前 Hugging Face 会话启动后台下载，状态卡每秒
    更新已下载字节、总字节（若 Hub 提供元数据）和进度。失败时可点击“重试下载”。
-4. 等待 Checkpoint 变为“已就绪”后再运行标注；真实 worker 不会在未准备好时静默启动隐藏下载。
+4. 等状态卡显示“模型检查点已就绪”后再运行标注；真实 worker 不会在未准备好时静默启动隐藏下载。
    CLI 登录、浏览器登录和 HF_TOKEN 都会使用同一工作区保存位置。
 5. 在第 1 步选择用于审核的相机，输入逗号、分号或换行分隔的文本 prompt，例如
    cup, plate, robot gripper；可保存和复用 prompt 预设。
@@ -153,7 +153,7 @@ uv run levi serve
 7. 点击“运行 SAM3 标注”。LEVI 会先提交 model-neutral plan 做 episode、相机、prompt
    和阈值校验，计划通过后才启动 worker；进度条显示已完成的组合数。页面不会显示视频预览，
    审核入口是按相机汇总的轨迹清单。
-8. 作业完成后，建议保持 suggested。点击每条轨迹可跳到首帧；确认帧区间、帧数和均值后逐条
+8. 作业完成后，建议让结果保持 suggested（界面显示为“待审核建议”）。点击每条轨迹可跳到首帧；确认帧区间、帧数和均值后逐条
    接受或拒绝。每次操作都会创建新的 sidecar revision，审核完成后再导出或交给后续流程。
 
 页面不要求数据集属于某个固定账号。Hub 数据集使用当前账号作用域缓存；本地数据集
@@ -211,8 +211,8 @@ retained frames, as a new revision with `model.provider = carry_over`.
 object_id、track_id、concept、bbox_xyxy、image_size、rle_size、rle_counts、score、
 visible、occluded、status、source 和 prompt。v3 共享视频 shard 会按
 meta/episodes 中的 camera chunk/file/from_timestamp/length 定位，并把 predictor 的
-文件级帧号转换为 episode-local 帧号，同时限制传播范围不越过当前 episode。RLE 使用
-COCO 列优先（Fortran）运行长度编码，不使用有损视频保存类别像素。源数据和 sidecar
+文件级帧号转换为 episode-local 帧号，同时限制传播范围不越过当前 episode。RLE 采用
+COCO 的列优先（Fortran 顺序）游程编码，不用有损视频保存类别像素。源数据和 sidecar
 revision 可分别备份和比较。
 
 ## API
@@ -234,8 +234,7 @@ revision 可分别备份和比较。
 
 provider=sam3 的响应为 202 和 job_id。worker 只读取已经由状态卡下载并校验过的
 checkpoint（直接运行 worker 时仍保留自身的 Hub fallback），随后逐个读取 episode/camera，
-最后写入结果 JSON。结果必须
-通过 schema、计划范围和 RLE coverage 校验，失败时不会产生半成品 revision。
+最后写入结果 JSON。结果必须通过 schema、计划范围和 RLE coverage 校验，失败时不会产生半成品 revision。
 
 ## 兼容原生 LeRobot
 
@@ -255,8 +254,8 @@ add_features/modify_features 复制工具，并在导出报告中记录来源 re
 
 ## 常见迁移问题
 
-- **页面仍显示旧账号**：退出 LEVI，在浏览器开发者工具中确认
-  levi-hf-auth-v1；旧的 lerobot-viz-oauth 会被自动删除；重新使用目标账号登录。
+- **页面仍显示旧账号**：退出 LEVI，在浏览器开发者工具中检查
+  levi-hf-auth-v1（旧的 lerobot-viz-oauth 会被自动删除），再用目标账号重新登录。
 - **状态卡显示未登录，但 CLI 已登录**：确认启动 LEVI 的同一用户可以读取
   HF_HOME/HF_HUB_CACHE；状态卡会把 CLI 凭据显示为 environment/cache；若在 LEVI 启动前登录，请把 HF_HOME 指向当前工作区的 .cache/huggingface（第 3 步命令已这样设置）。
 - **模型下载到了旧目录**：停止 LEVI，设置新的 LEVI_WORKSPACE 后重新执行
@@ -270,7 +269,7 @@ add_features/modify_features 复制工具，并在导出报告中记录来源 re
 
 源码检查、前端类型/格式、API fake provider、RLE、sidecar、转换和文档校验可以在
 CPU 主机完成。仓库验证不会导入 Torch、探测 CUDA、下载模型或执行 SAM3 推理。真实
-模型验证应由部署者在自己的 CUDA 主机按第 7 步运行，并将结果作为本地运行记录，不要
+模型验证应由部署者在自己的 CUDA 主机上按第 7 步运行，结果留作本地运行记录；不要
 提交 checkpoint 或 token。
 
 ## 参考资料

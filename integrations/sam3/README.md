@@ -1,8 +1,8 @@
 # SAM3 worker for LEVI
 
-This directory contains LEVI's isolated SAM3 worker. The capability is enabled
-globally by the core application, while the worker itself runs in its own uv
-environment so the CPU-safe workbench never imports Torch or probes CUDA.
+This directory contains LEVI's isolated SAM3 worker. The core application enables
+SAM3 globally; the worker runs in its own uv environment, so the CPU-safe
+workbench never imports Torch or probes CUDA.
 
 The default model is the checkpoint mirror 1038lab/sam3, file sam3.pt. Model
 weights are downloaded from the annotation page after the Hugging Face account is
@@ -18,8 +18,8 @@ Hub datasets and registered local datasets.
 
 ## Install on the CUDA host
 
-From the cloned LEVI root. If no workspace was exported yet, set one before
-logging in so the account cache migrates with the checkout:
+Run these from the cloned LEVI root. If no workspace is exported yet, set one
+before logging in so the account cache moves with the checkout:
 
 ~~~bash
 export LEVI_WORKSPACE="${LEVI_WORKSPACE:-$PWD/.state}"
@@ -35,9 +35,8 @@ HF_HOME="$LEVI_WORKSPACE/.cache/huggingface" hf auth whoami
 ~~~
 
    When hf is not installed globally, prefix the uvx commands with the same
-   `HF_HOME="$LEVI_WORKSPACE/.cache/huggingface"` setting. A browser token can
-   also be entered through LEVI's Connect Hugging
-   Face dialog.
+   `HF_HOME="$LEVI_WORKSPACE/.cache/huggingface"` setting. You can also enter a
+   browser token in LEVI's Connect Hugging Face dialog.
 3. Create and sync the isolated worker:
 
 ~~~bash
@@ -71,7 +70,7 @@ uv run levi build
 uv run levi serve
 ~~~
 
-Open http://127.0.0.1:7860. Select an episode from either a demo or local
+Open http://127.0.0.1:7860. Select an episode from a demo or a local
 dataset, open the annotation tab and verify the account in the SAM3 runtime card.
 When the checkpoint is missing, the page shows its workspace path, a progress bar
 and Download checkpoint. Click it, wait for Checkpoint ready, then choose a camera
@@ -106,9 +105,9 @@ the worker keeps a direct-CLI fallback for standalone operation. The initial siz
 is fetched from model metadata when available; otherwise the UI uses an
 indeterminate progress bar. A non-empty file is required before a real API run.
 
-The official SAM3 predictor is called with an explicit checkpoint_path. This
-prevents the upstream builder from silently looking up facebook/sam3 and makes
-the 1038lab mirror the single configured source. A pre-downloaded compatible
+LEVI calls the official SAM3 predictor with an explicit checkpoint_path, so the
+upstream builder cannot silently look up facebook/sam3 and the 1038lab mirror
+is the only configured source. A pre-downloaded compatible
 checkpoint can be selected with LEVI_SAM3_CHECKPOINT.
 
 ## Contract and sidecar
