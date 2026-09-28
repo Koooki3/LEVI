@@ -4,6 +4,22 @@ What has been checked, how, and what has not. Newest first. Each entry states wh
 
 按时间倒序记录验证内容、方法与未覆盖范围。每条都注明使用的是真实数据/真实模型，还是固定样例与模拟；样例测试通过不等于模型质量达标。
 
+## Anchored review
+
+2026-09-28, real data and a real model: the frozen 60-episode plates test set (a raw policy-rollout capture browsed through its view), RedHatAI Qwen3.8-27B INT4 on vLLM 0.30 (`--max-model-len 49152`, xgrammar without whitespace, thinking off, greedy through `--override-generation-config '{"temperature": 0.0}'`), RTX 5090 used by nothing else. One server session ran the external release-anchored review script (AR2, the accepted milestone plates-v1.1 check), then a LEVI review run with `workflow.anchored = {"spec": "plates-release-ar2"}` driven through plan, pilot, review and commit, then the external script again.
+
+| | External AR2 (before) | LEVI anchored review | External AR2 (after) |
+| --- | ---: | ---: | ---: |
+| Events (gripper openings) judged | 205 | 205 | 205 |
+| Answers identical to the other two, all four fields | — | 205 / 205 | 205 / 205 |
+| Episode outcomes identical | — | 60 / 60 | 60 / 60 |
+| Tokens (server-reported) | 758,212 | 758,212 | 758,212 |
+| Time | 303 s | 369 s in the run (295 s of it model calls), 383 s plan to commit | 320 s |
+
+Anchors equal the capture's own `last_gripper_command` transitions in all 60 episodes, and the frames sent are byte-identical PNGs to the script's. Outcomes scored against the frozen gold (aggregates only): balanced accuracy 0.936, false success 0.128, success recall 1.0 — the milestone's numbers. Against earlier server sessions (the milestone baseline and a robustness round) 20–22 of 205 answers differ in a field, none in an event's validity or an episode's outcome: greedy decoding is repeatable within a session, not across restarts. LEVI's extra time is evidence extraction (a seek, decode, PNG write and hash per frame, about 20 ms each) and the GPU guardian's check before every request.
+
+Not established: anchors from a measured-aperture gripper channel or from `action` on a real dataset, and any spec other than the plates one.
+
 ## 2026-09-23 DROID raw input / DROID 原始数据入口
 
 The four real DROID copies are registered through the ordinary dataset catalog. Each has 500 demos, 160,744 aligned view frames, 1,500 videos and 118 distinct source tasks; source metadata reports 250 successful and 250 failed demos. LEVI did not modify raw HDF5, MP4 or metadata. The new input advertises **viewable/annotatable, not directly convertible**; an optional `h5py` install is required. Empty task text remains an explicitly unknown task, never an inferred outcome. Source and derived clocks are distinct: 32 episodes exceed 1 s drift, maximum 17.95 s, so fine boundaries need review against provenance.

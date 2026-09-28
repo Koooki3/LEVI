@@ -171,16 +171,17 @@ def gripper_dataset(dataset):
         frame.to_parquet(path)
 
 
-def replies(server, answers):
+def replies(fake, answers):
     def reply(payload):
-        answer = answers.pop(0)
-        return completion(json.dumps(answer))
+        return completion(json.dumps(answers.pop(0)))
 
-    server.reply = reply
+    fake.reply = reply
 
 
 def test_a_review_asks_once_per_opening_and_proposes_the_outcome(
-    client, dataset, server
+    client,
+    dataset,
+    server,  # noqa: F811 - the fixture imported above
 ):
     from levi import catalog, service
     from levi.agent.runtime import Workbench
@@ -248,9 +249,10 @@ def test_a_review_asks_once_per_opening_and_proposes_the_outcome(
     assert by_episode[1]["outcome"] == "failure"
     assert by_episode[1]["evidence_ids"][0].endswith("frame_000019")
     # A resumed episode reads its answers from the cache.
-    assert wb.store.get("model_cache", f"{run['id']}:0:anchor-000007")["answer"][
-        "held"
-    ] == "yes"
+    assert (
+        wb.store.get("model_cache", f"{run['id']}:0:anchor-000007")["answer"]["held"]
+        == "yes"
+    )
     # Results are readable by capability and by the viewer's route.
     human = Principal("tester", human=True)
     summary = invoke(wb, human, "anchored.get", {"repo_id": entry["id"]})
@@ -283,7 +285,11 @@ def test_a_review_asks_once_per_opening_and_proposes_the_outcome(
     assert missing.status_code == 404
 
 
-def test_an_answer_outside_the_spec_sets_the_episode_aside(client, dataset, server):
+def test_an_answer_outside_the_spec_sets_the_episode_aside(
+    client,
+    dataset,
+    server,  # noqa: F811 - the fixture imported above
+):
     from levi import catalog, service
     from levi.agent.runtime import Workbench
 

@@ -9,6 +9,7 @@ This guide covers how to drive an agent, what a task goes through, and the **har
 - [A task, end to end](#a-task-end-to-end)
 - [Natural-language tasks](#natural-language-tasks)
 - [Evidence and refinement](#evidence-and-refinement)
+- [Anchored review](#anchored-review)
 - [Object masks](#object-masks)
 - [The harness](#the-harness)
 - [Watching and cleaning up](#watching-and-cleaning-up)
@@ -101,6 +102,10 @@ Evidence is what a task costs, so it is read deliberately:
 - `evidence.changes` ranks the coarse intervals by how much the picture changes across them. When the dataset has a published `evidence.refine_top_k`, `runs.prepare` returns `refine_first` — the instants to refine before proposing — and the in-process runtime refines them too.
 - Coverage is reported as sampled, never full; an interval nobody looked at densely is marked uncertain, not failed.
 
+## Anchored review
+
+A review plan with `workflow.anchored` judges each episode at the events its robot signals record — by default every gripper opening — instead of on evenly spread samples: per event, a few frames per camera at fixed offsets and one narrow question with enum answers; a rule over the answers says whether the event counts, a rule over the events gives the outcome. The spec (anchor, frames, question, answer fields, rules) is a built-in one named by id — `{"spec": "plates-release-ar2"}`, the accepted plates release review — or given whole, and the plan freezes it. It runs on a bound local model; each question has a model phase's budget, cache, accounting and set-aside. The outcome goes to the review queue as one `outcome` proposal; the per-event answers and frames are kept per run and read with `anchored.get` (`anchored.specs` lists the specs) and in the episode viewer's ANCHORED REVIEW row. See [Anchored review](ANCHORED_REVIEW.md).
+
 ## Object masks
 
 `objects.strategy` reads the machine — SAM3 worker, checkpoint, free GPU memory — and recommends a path. With SAM3: `objects.plan → objects.run`. Without it: `objects.detect` measures candidate regions with no model or GPU, and the agent submits the ones that are objects by `candidate_id` through `objects.propose` (`track_by: "overlap"` links identities across frames and refuses when frames are too far apart). Both end in the same staged review. From a terminal: `levi agent objects status|run|review|show|relink …`. See [SAM3](SAM3.md).
@@ -188,6 +193,7 @@ uv run levi agent knowledge list|refresh|promote|reject      # built-in knowledg
 | Harness | `memory.get`, `memory.search`, `cost.profile`, `knowledge.list`, `improvements.list`, `improvements.get`, `improvements.evaluate`, `improvements.revise`, `improvements.transition` (up to `awaiting_authorization`) | agent |
 | | `memory.rebuild`, `knowledge.promote`, `knowledge.reject`; publishing, retaining, rolling back and resolving improvements | **person** |
 | Supervision | `supervision.pending`, `supervision.feedback` | assigned teacher |
+| Anchored review | `anchored.specs`, `anchored.get` (read-only: built-in specs; per-episode outcomes or one episode's events, answers, validity and frames; see [Anchored review](ANCHORED_REVIEW.md)) | agent |
 | RECAP value model | `recap.status`, `recap.get` (read-only: checkpoints, current advantage labels, an episode's positive/negative runs and value curve; see [RECAP](RECAP.md)) | agent |
 | Workspace | `gpu.status` (the local-model GPU guardian's decision) | agent |
 | | `workspace.clean`, `workspace.reset` | **person** |
