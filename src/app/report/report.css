@@ -193,6 +193,14 @@
 .lr-doc p {
   margin: 10px 0;
 }
+/* Long paths and URLs wrap instead of widening a phone screen. */
+.lr-doc p,
+.lr-doc li,
+.lr-doc blockquote,
+.lr-progress-meta,
+.lr-metric-note {
+  overflow-wrap: anywhere;
+}
 .lr-doc ul,
 .lr-doc ol:not(.lr-timeline) {
   margin: 10px 0;
