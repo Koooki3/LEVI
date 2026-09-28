@@ -1,6 +1,6 @@
 # Annotation evaluation records
 
-LEVI records how well and how fast subtasks were annotated, for a person and for an agent, in one format so the two can be compared line by line.
+LEVI records how well and how fast a person or an agent annotated subtasks, in one format, so the two can be compared line by line.
 
 | Who | When the record is written | File |
 | --- | --- | --- |
@@ -19,7 +19,7 @@ The hour is the completion time in UTC, the same clock that run ids use. A secon
 | `local-vlm-teacher` | A local model whose every phase an external teacher reviewed |
 | `native-external`, `native-local-vlm`, `native-local-vlm-teacher` | The same annotators working **without LEVI**; their finished annotation is brought in afterwards |
 
-To compare work done without LEVI on equal terms, import it through the ordinary path: plan an external run with `imported_from` set to one of the `native-*` drivers, prepare evidence, stage the finished segments with `annotations.propose_segments` (LEVI cites the frames it prepared), pass the gates and commit. The run's folder under `outputs/LEVI/workbench/agent/datasets/<dataset>/` then holds the same artifacts as an agent run, and the record is written at commit with that driver. Report the maker's tokens with `runs.report_usage` before committing; the import itself costs no annotator tokens.
+To compare work done without LEVI on equal terms, import it through the ordinary path: plan an external run with `imported_from` set to one of the `native-*` drivers, prepare evidence, stage the finished segments with `annotations.propose_segments` (LEVI cites the frames it prepared), pass the gates and commit. The run's folder under `outputs/LEVI/workbench/agent/datasets/<dataset>/` then holds the same artifacts as an agent run, and the record is written at commit with that driver. Report the original annotator's tokens with `runs.report_usage` before committing; the import itself costs no annotator tokens.
 
 ## Recording a person's work
 

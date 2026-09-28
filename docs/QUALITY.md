@@ -1,6 +1,6 @@
 # Data quality and curation
 
-LEVI checks a dataset at two levels. **Structural checks** run without a model and read every episode: timestamps, numeric features, metadata, video integrity. **Content review** — is this demo the task it claims to be, did it succeed, when did each attempt happen — needs someone to look, and LEVI gives that look to an agent under human review. Neither level changes the source data.
+LEVI checks a dataset at two levels. **Structural checks** run without a model and read every episode: timestamps, numeric features, metadata, video integrity. **Content review** — is this demo the task it claims to be, did it succeed, when did each attempt happen — needs someone to look at the video; LEVI has an agent do the looking, under human review. Neither level changes the source data.
 
 ## Structural checks (Doctor)
 
@@ -29,7 +29,7 @@ Counts are per individual result, not per heading. Thresholds are heuristics: a 
 
 ## What structural checks cannot see
 
-Real example from a policy-rollout capture of 214 demos: the structural check passed with warnings, yet 7 of the first 20 demos showed a different task entirely (plates, not screws), and the metadata labelled all of them as the screw task. Other problems of the same kind:
+A real example, from a policy-rollout capture of 214 demos: the structural check passed with warnings, yet 7 of the first 20 demos showed a different task entirely (plates, not screws), and the metadata labelled all of them as the screw task. Other problems of the same kind:
 
 - a camera that froze mid-recording and kept writing the same frame;
 - success/failure labels that disagree with what the video shows;
@@ -47,7 +47,7 @@ Content review is an agent task (see [Agents](AGENTS.md)), planned and approved 
 | Video subtasks and events | Time segments per attempt with subtask, outcome and uncertainty | Subtask labels for training, failure analysis |
 | Visible object masks | Masks and tracks per object | Object-centric training data |
 
-Choose cameras for what must be judged: a wide camera shows which task and scene; a wrist camera shows small parts (whether a screw is seated). What the reviewer accepts is published as a revision with provenance; nothing is inferred into a label without that review.
+Choose cameras for what must be judged: a wide camera shows which task and scene; a wrist camera shows small parts (whether a screw is seated). What the reviewer accepts is published as a revision with provenance; no inference becomes a label without that review.
 
 ## Labels, flags and the review list
 

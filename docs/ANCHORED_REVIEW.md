@@ -15,7 +15,7 @@ It is a review run like any other: plan, approval, pilot, the review queue and a
 
 ## When to use it
 
-When success is decided at a few robot actions whose moment the data records — a release, a grasp, a button press — and each can be judged from frames around it. An even sample of an episode shows each such moment at most once, often not at all; an anchored review looks at every one of them, closely, with the question the task needs.
+When success is decided at a few robot actions whose moment the data records — a release, a grasp, a button press — and each can be judged from frames around it. Evenly spread samples show each such moment at most once, often not at all; an anchored review looks closely at every one of them, with the question the task needs.
 
 ## Plan one
 
@@ -61,7 +61,7 @@ Each condition of an event reads as **supported** (it holds), **contradicted** (
 
 ## Anchors
 
-Anchors are read from what the dataset declares, as the evidence [signals](AGENTS.md#evidence-and-refinement) are: a float vector column and a dimension whose name says gripper (`grip`, `finger`, `claw`, `jaw`). The recorded state (`observation.*`) is used before `action` unless the spec names a column. Crossings are found with hysteresis on the channel's range (the dataset's `meta/stats.json` range, else the episode's); the level an episode starts at is its initial state.
+Like the evidence [signals](AGENTS.md#evidence-and-refinement), anchors are read from what the dataset declares: a float vector column and a dimension whose name says gripper (`grip`, `finger`, `claw`, `jaw`). The recorded state (`observation.*`) is used before `action` unless the spec names a column. Crossings are found with hysteresis on the channel's range (the dataset's `meta/stats.json` range, else the episode's); the level an episode starts at is its initial state.
 
 | Dataset | What the anchor is |
 | --- | --- |
@@ -78,7 +78,7 @@ Per episode, beside the run and in the agent store (`anchored` records, removed 
 - The evidence ledger (`episode_NNNNNN-observations.json`) and the frames as lossless PNG under `evidence/` (removed by `levi agent clean`, rebuilt on demand).
 - One `outcome` proposal in the run's review draft: success or failure, the answers of each event in its text, citing the frames nearest each event (valid events first). Committing it writes the episode's outcome label, which the episode list shows and exports carry.
 
-Each question has a model phase's safeguards: the budget is reserved and settled, answers are cached (a resumed run does not ask again), an answer outside the spec sets its episode aside with its tokens settled, the GPU guardian can hold the run, and pause and cancel cut the request in flight.
+Each question gets the same safeguards as a model phase: the budget is reserved and settled, answers are cached (a resumed run does not ask again), an answer outside the spec sets its episode aside with its tokens settled, the GPU guardian can hold the run, and pause and cancel cut the request in flight.
 
 ## Reading the results
 
