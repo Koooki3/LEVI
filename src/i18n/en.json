@@ -1301,6 +1301,7 @@
   "report.updatedAgo": "updated",
   "report.eta": "ETA",
   "report.owner": "owner",
+  "report.workstreamId": "workstream id",
   "report.vsBaseline": "vs baseline",
   "report.sort": "Sort by this column",
   "report.state.running": "Running",

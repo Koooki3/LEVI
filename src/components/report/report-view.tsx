@@ -16,6 +16,7 @@ import {
   formatStamp,
   isFollowableLink,
   isReportBlock,
+  workstreamLabel,
 } from "@/utils/report";
 import { ReportBlock, ReportContext } from "./report-blocks";
 
@@ -202,6 +203,8 @@ function StatusStrip({
   const lang = report.lang;
   const status = report.status;
   const gpu = formatGpu(status?.resources);
+  // The GPU holder is recorded by workstream id; show its title.
+  const holder = workstreamLabel(status, gpu?.holder, lang);
   const disk = status?.resources?.disk_free_gb;
   const age = formatAge(status?.generated_at, now, lang);
   return (
@@ -233,9 +236,9 @@ function StatusStrip({
             <span style={{ width: `${Math.round(gpu.fraction * 100)}%` }} />
           </span>
           {gpu.text}
-          <span className="lr-faint">
+          <span className="lr-faint" title={holder.id ?? undefined}>
             {" · "}
-            {gpu.holder ?? t("report.gpuFree")}
+            {holder.text || t("report.gpuFree")}
           </span>
         </span>
       )}

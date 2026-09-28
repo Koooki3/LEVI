@@ -1301,6 +1301,7 @@
   "report.updatedAgo": "更新于",
   "report.eta": "预计完成",
   "report.owner": "负责",
+  "report.workstreamId": "工作流编号",
   "report.vsBaseline": "基线",
   "report.sort": "按此列排序",
   "report.state.running": "进行中",

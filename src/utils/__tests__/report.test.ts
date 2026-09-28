@@ -26,6 +26,7 @@ import {
   slugify,
   sortRows,
   sortWorkstreams,
+  workstreamLabel,
 } from "@/utils/report";
 
 const status: ReportStatus = {
@@ -208,6 +209,29 @@ describe("number formats", () => {
       formatGpu({ gpu: { used_mib: 16384, total_mib: 32768, holder: "W1b" } }),
     ).toEqual({ text: "16.0 / 32.0 GiB", fraction: 0.5, holder: "W1b" });
     expect(formatGpu({})).toBe(null);
+  });
+
+  test("workstreams read by title, the id kept for the tooltip", () => {
+    const status = {
+      workstreams: [
+        { id: "W1b", title: { en: "LEVI speed-up", zh: "LEVI 提速" } },
+        { id: "W9" },
+      ],
+    };
+    expect(workstreamLabel(status, "W1b", "zh")).toEqual({
+      text: "LEVI 提速",
+      id: "W1b",
+    });
+    expect(workstreamLabel(status, "W1b", "en").text).toBe("LEVI speed-up");
+    expect(workstreamLabel(status, "W9", "en")).toEqual({
+      text: "W9",
+      id: null,
+    });
+    expect(workstreamLabel(status, "someone", "en")).toEqual({
+      text: "someone",
+      id: null,
+    });
+    expect(workstreamLabel(null, null, "en")).toEqual({ text: "", id: null });
   });
 });
 

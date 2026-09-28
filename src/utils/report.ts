@@ -285,6 +285,23 @@ export function lookupWorkstreams(
     : missing("workstream", spec.id);
 }
 
+/**
+ * What people see for a workstream (or a GPU holder / owner that names one):
+ * its title in `lang`; the id only when there is no title. `id` goes to the
+ * tooltip — internal ids are for the ledger, not the page.
+ */
+export function workstreamLabel(
+  status: ReportStatus | null | undefined,
+  id: string | null | undefined,
+  lang: ReportLang,
+): { text: string; id: string | null } {
+  if (!id) return { text: "", id: null };
+  const all = Array.isArray(status?.workstreams) ? status.workstreams : [];
+  const found = all.find((item) => item?.id === id);
+  const title = found ? pick(found.title, lang) : "";
+  return title ? { text: title, id } : { text: id, id: null };
+}
+
 function lookupKey<T>(
   status: ReportStatus | null,
   section: "metrics" | "charts" | "tables" | "milestones",

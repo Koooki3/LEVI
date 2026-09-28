@@ -39,6 +39,7 @@ import {
   pick,
   sortRows,
   sortWorkstreams,
+  workstreamLabel,
 } from "@/utils/report";
 
 export interface ReportContextValue {
@@ -117,11 +118,20 @@ function ProgressBlock({ id }: { id?: string }) {
         const pct = progress === null ? null : Math.round(progress * 100);
         const eta = formatEta(item.eta, now, lang);
         const age = formatAge(item.updated_at, now, lang);
+        // An owner that is another workstream's id reads as its title.
+        const ownerId = pick(item.owner, lang);
+        const owner = workstreamLabel(status, ownerId, lang);
         return (
           <div className={`lr-progress lr-state-${state}`} key={item.id}>
             <div className="lr-progress-head">
-              <span className="lr-chip">{item.id}</span>
-              <span className="lr-progress-title">
+              <span
+                className="lr-progress-title"
+                title={
+                  pick(item.title, lang)
+                    ? `${t("report.workstreamId")}: ${item.id}`
+                    : undefined
+                }
+              >
                 {pick(item.title, lang) || item.id}
               </span>
               <span className={`lr-state lr-state-badge-${state}`}>
@@ -156,9 +166,9 @@ function ProgressBlock({ id }: { id?: string }) {
                   {t("report.eta")} {eta}
                 </span>
               )}
-              {pick(item.owner, lang) && pick(item.owner, lang) !== item.id && (
-                <span>
-                  {t("report.owner")} {pick(item.owner, lang)}
+              {owner.text && ownerId !== item.id && (
+                <span title={owner.id ?? undefined}>
+                  {t("report.owner")} {owner.text}
                 </span>
               )}
               {(item.links ?? []).map((link, index) =>
