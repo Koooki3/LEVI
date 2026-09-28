@@ -280,6 +280,9 @@ function ChartBlock({ spec }: { spec: Extract<BlockSpec, { kind: "chart" }> }) {
         wrapperStyle={{ fontSize: 12, color: "#afb7a8" }}
         iconType="circle"
         iconSize={8}
+        formatter={(value: string) => (
+          <span className="lr-legend-text">{value}</span>
+        )}
       />
     ) : null,
   ];

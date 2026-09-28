@@ -431,6 +431,7 @@
   }
 }
 .lr-progress-pct {
+  margin-left: auto;
   font: 600 13px var(--font-geist-mono);
   font-variant-numeric: tabular-nums;
   min-width: 42px;
@@ -567,6 +568,9 @@
   margin-left: auto;
   padding-left: 12px;
   font-variant-numeric: tabular-nums;
+}
+.lr-legend-text {
+  color: var(--text-muted);
 }
 .lr-swatch {
   width: 8px;
