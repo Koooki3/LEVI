@@ -5,10 +5,15 @@ import json
 
 from levi.agent.schema import ModelOutput, ProviderConfig
 from levi.inference.provider import (
+    LEAN_FILLED,
+    LEAN_REFINED,
     LocalProvider,
     cite_frames,
     lean_content,
+    lean_fill,
     learner_schema,
+    parse_answer,
+    salvage,
 )
 
 FLOW = {
@@ -47,8 +52,79 @@ def test_a_lean_schema_asks_for_intervals_without_citations():
     assert {"evidence_ids", "evidence_note"} <= set(full["required"])
     assert not {"evidence_ids", "evidence_note"} & set(lean["required"])
     assert {"subtask_id", "start", "end", "outcome"} <= set(lean["required"])
-    assert lean["properties"]["evidence_note"]["maxLength"] == 80
     assert lean["properties"]["content"]["maxLength"] == 120
+    # What LEVI fills in is not decoded at all: every field costs output
+    # tokens on every proposal. The plan allows segments only: no kind either.
+    assert not set(LEAN_FILLED) & set(lean["properties"])
+    assert "kind" not in lean["properties"]
+    assert lean["additionalProperties"] is False
+    # Without definitions both kinds stay possible, so the kind is written.
+    free = learner_schema({"kind": "temporal"}, lean=True)["$defs"]
+    assert "kind" in free["Proposal_segment"]["properties"]
+
+
+def test_a_lean_refinement_writes_only_boundaries_and_outcome():
+    draft = [
+        {
+            "kind": "segment",
+            "subtask_id": "grasp",
+            "start": 0.0,
+            "end": 1.0,
+            "outcome": "success",
+            "content": "grasps it",
+            "episode_index": 4,
+        },
+        {
+            "kind": "segment",
+            "subtask_id": "place",
+            "start": 1.0,
+            "end": 1.5,
+            "outcome": "unknown",
+            "content": "puts it down",
+            "episode_index": 4,
+        },
+    ]
+    schema = learner_schema(FLOW, draft, lean=True)
+    items = schema["properties"]["proposals"]["prefixItems"]
+    for number in range(2):
+        shape = schema["$defs"][f"Draft_{number}"]
+        assert set(shape["properties"]) == set(LEAN_REFINED)
+        assert set(shape["required"]) == set(LEAN_REFINED)
+    assert len(items) == 2
+    full = learner_schema(FLOW, draft)["$defs"]["Draft_0"]["properties"]
+    assert {"subtask_id", "content"} <= set(full)
+    summary = {"episode_index": 4, "workflow": FLOW}
+    answer = json.dumps(
+        {
+            "proposals": [
+                {"start": 0.2, "end": 1.1, "outcome": "success"},
+                {"start": 1.1, "end": 1.5, "outcome": "failure"},
+            ],
+            "summary": "s",
+            "warnings": [],
+        }
+    )
+    out = parse_answer(answer, lean_fill(summary, FLOW, draft))
+    first, second = out.proposals
+    assert (first.subtask_id, first.content, first.kind) == (
+        "grasp",
+        "grasps it",
+        "segment",
+    )
+    assert (first.start, first.end, first.episode_index) == (0.2, 1.1, 4)
+    assert (second.subtask_id, second.outcome) == ("place", "failure")
+    # A cut-off lean answer is completed the same way before salvage.
+    cut = answer[: answer.index('{"start": 1.1')]
+    kept = salvage(cut, lean_fill(summary, FLOW, draft))
+    assert [(p.subtask_id, p.start) for p in kept.proposals] == [("grasp", 0.2)]
+
+
+def test_what_the_learner_wrote_is_kept():
+    fill = lean_fill({"episode_index": 2}, FLOW)
+    [item] = fill([{"episode_index": 5, "kind": "segment", "start": 0.0}])
+    assert item["episode_index"] == 5
+    [item] = fill([{"start": 0.0}])
+    assert (item["episode_index"], item["kind"]) == (2, "segment")
 
 
 def test_a_lean_request_is_the_instruction_and_a_frame_list():
@@ -146,8 +222,6 @@ def test_a_lean_provider_sends_no_overview_and_no_json_document(tmp_path, monkey
             "warnings": [],
             "proposals": [
                 {
-                    "episode_index": 0,
-                    "kind": "segment",
                     "subtask_id": "grasp",
                     "content": "grasp",
                     "start": 0.0,
@@ -181,6 +255,11 @@ def test_a_lean_provider_sends_no_overview_and_no_json_document(tmp_path, monkey
     assert sent["lean"] is True
     assert "LEVI overview" not in system and user.startswith("# Guideline")
     assert output.proposals[0].evidence_ids == ["episode_000000--cam--frame_000000"]
+    assert (output.proposals[0].episode_index, output.proposals[0].kind) == (
+        0,
+        "segment",
+    )
+    assert output.proposals[0].evidence_note == "grasp"
 
 
 def test_auto_refinement_skips_a_dense_coarse_pass():

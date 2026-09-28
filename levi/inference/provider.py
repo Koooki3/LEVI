@@ -24,9 +24,10 @@ class InvalidAnswer(ValueError):
         self.salvaged = salvaged
 
 
-def salvage(raw):
+def salvage(raw, fill=None):
     """What survives of an answer that failed as a whole: every proposal
-    that validates alone. None when the text is not JSON at all."""
+    that validates alone. None when the text is not JSON at all. ``fill``
+    completes a lean answer's proposals first (see ``lean_fill``)."""
     from pydantic import ValidationError
 
     from levi.agent.schema import Proposal
@@ -43,7 +44,10 @@ def salvage(raw):
     if not isinstance(value, dict):
         return None
     kept = []
-    for item in value.get("proposals") or []:
+    items = value.get("proposals") or []
+    if fill and isinstance(items, list):
+        items = fill(items)
+    for item in items:
         try:
             kept.append(Proposal.model_validate(item))
         except (ValidationError, TypeError, ValueError):
@@ -242,11 +246,7 @@ def learner_schema(workflow, draft=None, evidence_ids=None, lean=False):
         field = proposal["properties"].get(name)
         if field and field.get("type") == "string":
             field["maxLength"] = limit
-    kinds = KINDS_BY_WORKFLOW.get((workflow or {}).get("kind"))
-    if kinds and "segment" in kinds and (workflow or {}).get("definitions"):
-        # Subtask definitions each state when they start and end: the plan
-        # asks for intervals, and a point event would dodge end and outcome.
-        kinds = ["segment"]
+    kinds = learner_kinds(workflow)
     if kinds:
         proposal["properties"]["kind"] = {
             **proposal["properties"]["kind"],
@@ -283,13 +283,69 @@ def learner_schema(workflow, draft=None, evidence_ids=None, lean=False):
     if kinds:
         _variants(schema, proposal, kinds, (workflow or {}).get("kind"), lean)
     if draft and kinds:
-        _pin(schema, draft)
+        _pin(schema, draft, lean)
     return schema
 
 
-def _pin(schema, draft):
+def learner_kinds(workflow):
+    """The annotation kinds a learner may propose for this workflow."""
+    kinds = KINDS_BY_WORKFLOW.get((workflow or {}).get("kind"))
+    if kinds and "segment" in kinds and (workflow or {}).get("definitions"):
+        # Subtask definitions each state when they start and end: the plan
+        # asks for intervals, and a point event would dodge end and outcome.
+        kinds = ["segment"]
+    return kinds
+
+
+# What a lean learner does not write: LEVI knows or derives it (the episode,
+# a kind the plan allows alone, the frames it cites and the note it takes
+# from the wording, see cite_frames). Every field decoded costs output
+# tokens on every proposal, and output tokens dominate a local model's time.
+LEAN_FILLED = (
+    "episode_index",
+    "evidence_ids",
+    "evidence_note",
+    "uncertainty",
+    "boundary_candidates",
+)
+# A lean refinement changes only these: the draft keeps its kind, subtask
+# and wording (see lean_fill).
+LEAN_REFINED = ("start", "end", "outcome")
+
+
+def lean_fill(summary, workflow, draft=None):
+    """Completes the proposals of a lean answer with what LEVI filled in
+    for the learner: the episode, the kind when the plan allows only one,
+    and, when refining a pinned draft, each draft interval's kind, subtask
+    and wording. What the learner did write is kept."""
+    kinds = learner_kinds(workflow) or []
+    episode = (summary or {}).get("episode_index")
+
+    def fill(items):
+        out = []
+        for number, item in enumerate(items):
+            if not isinstance(item, dict):
+                out.append(item)
+                continue
+            item = dict(item)
+            if episode is not None:
+                item.setdefault("episode_index", episode)
+            if draft and number < len(draft):
+                for name in ("kind", "subtask_id", "content"):
+                    if draft[number].get(name) is not None:
+                        item.setdefault(name, draft[number][name])
+            if len(kinds) == 1:
+                item.setdefault("kind", kinds[0])
+            out.append(item)
+        return out
+
+    return fill
+
+
+def _pin(schema, draft, lean=False):
     """A refinement returns the draft's intervals, in order, each keeping its
-    kind and subtask: only boundaries, outcome and wording can change."""
+    kind and subtask: only boundaries, outcome and wording can change (a lean
+    learner writes only boundaries and outcome, LEAN_REFINED)."""
     import copy
 
     items = []
@@ -305,6 +361,15 @@ def _pin(schema, draft):
             }
         # Boundary candidates seed a refinement; a refinement needs none.
         shape["properties"].pop("boundary_candidates", None)
+        if lean:
+            shape["properties"] = {
+                name: value
+                for name, value in shape["properties"].items()
+                if name in LEAN_REFINED
+            }
+            shape["required"] = [
+                name for name in shape.get("required", []) if name in LEAN_REFINED
+            ]
         schema["$defs"][f"Draft_{number}"] = shape
         items.append({"$ref": f"#/$defs/Draft_{number}"})
     schema["properties"]["proposals"] = {
@@ -381,6 +446,12 @@ def _variants(schema, proposal, kinds, workflow_kind, lean=False):
                 "maxLength": 200,
             }
             required.add("evidence_note")
+        if lean:
+            for name in LEAN_FILLED:
+                fields.pop(name, None)
+            if len(kinds) == 1:
+                fields.pop("kind", None)
+                required.discard("kind")
         shape["properties"] = {
             **{name: fields[name] for name in LEADING if name in fields},
             **{name: value for name, value in fields.items() if name not in LEADING},
@@ -424,7 +495,7 @@ def lean_content(instruction, summary, evidence):
             "## Draft to refine",
             (
                 "Return these intervals in this order, each keeping its subtask; "
-                "adjust only boundaries, outcomes and wording:"
+                "adjust only their boundaries and outcomes:"
             ),
             *(
                 f"{n}. {p.get('subtask_id') or p.get('kind')} {p['start']:g}-"
@@ -464,6 +535,22 @@ def cite_frames(output, evidence, per_interval=3):
             update["evidence_note"] = p.content[:80]
         proposals.append(p.model_copy(update=update) if update else p)
     return output.model_copy(update={"proposals": proposals})
+
+
+def parse_answer(content, fill=None):
+    """The model's answer as a ModelOutput; ``fill`` first completes the
+    proposals of a lean answer (see ``lean_fill``). Raises ValidationError,
+    also for text that is not JSON."""
+    if fill is not None:
+        try:
+            value = json.loads(content)
+        except ValueError:
+            value = None
+        if isinstance(value, dict) and isinstance(value.get("proposals"), list):
+            return ModelOutput.model_validate(
+                {**value, "proposals": fill(value["proposals"])}
+            )
+    return ModelOutput.model_validate_json(content)
 
 
 class LocalProvider:
@@ -547,8 +634,8 @@ class LocalProvider:
             raise ValueError(
                 "Evidence text exceeds the local context safety limit; reduce task scope"
             )
+        draft = pinned_draft(summary)
         try:
-            draft = pinned_draft(summary)
             response = self._chat(
                 config,
                 content,
@@ -599,8 +686,9 @@ class LocalProvider:
                 if key in usage
             },
         }
+        fill = lean_fill(summary, summary.get("workflow"), draft) if lean else None
         try:
-            result = ModelOutput.model_validate_json(response["content"])
+            result = parse_answer(response["content"], fill)
         except ValidationError as exc:
             # A rejected answer is teaching material: keep it beside the run.
             phase = summary.get("phase") or "coarse"
@@ -609,7 +697,7 @@ class LocalProvider:
             )
             raw = response["content"][:200_000]
             (Path(artifacts).parent / name).write_text(raw)
-            salvaged = salvage(raw)
+            salvaged = salvage(raw, fill)
             if lean and salvaged is not None:
                 salvaged = cite_frames(salvaged, evidence)
             raise InvalidAnswer(describe(exc), raw, spent, salvaged) from exc
