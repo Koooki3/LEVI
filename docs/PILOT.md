@@ -4,7 +4,7 @@ Status: experimental. Linux, WSL and VS Code Remote/SSH are the first supported
 hosts. “Offline” means **without the LEVI Web UI**, not without model networking.
 API-driven annotation remains an online Workbench channel. All channels share
 LEVI's capability registry, executable plans, evidence, validators and commits.
-No real-model quality or GPU acceptance is implied by protocol tests.
+Protocol tests do not establish real-model quality or GPU acceptance.
 
 ## Install in order
 
@@ -144,9 +144,9 @@ uv run levi agent pilot review <run-id> --text "Checked evidence and boundaries"
 # Or add --reject and state what needs correction.
 ```
 
-Mask review should use the existing player/sidecar tools. The terminal does not
-pretend an RLE dump is a visual quality inspection; pending object review blocks
-approval. After pilot acceptance, ask the existing agent to continue, or send a
+Review masks with the existing player/sidecar tools. An RLE dump in the terminal
+is not a visual quality inspection; pending object review blocks approval.
+After pilot acceptance, ask the existing agent to continue, or send a
 managed-session message:
 
 ```bash
@@ -164,8 +164,8 @@ uv run levi agent result <run-id>
 
 Commit uses a stable revision-specific idempotency key. Export reuses the
 existing native exporter and verifies the resulting sidecars/provenance. It
-exports the full dataset, preserving unselected episodes unchanged; it does not
-silently claim to be a filtered export.
+exports the full dataset and leaves unselected episodes unchanged; it is not
+presented as a filtered export.
 
 ## Online Workbench and recovery
 
