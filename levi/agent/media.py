@@ -192,6 +192,37 @@ def episode_table(state, episode):
 
 # Seconds between the final-state samples of a review (``final_samples``).
 FINAL_SPACING = 0.5
+# Evidence frames this close ahead of the last one read are decoded on to,
+# not sought (a seek decodes again from the previous keyframe).
+SEEK_AHEAD = 64
+
+
+class FrameReader:
+    """Exact frames of one open capture, cheapest in increasing order.
+
+    A frame a few ahead of the last one read is reached by decoding on
+    (grab); anything else is sought. Either way the capture must then stand
+    right after the requested frame, or the read fails."""
+
+    def __init__(self, cap):
+        self.cap = cap
+        # The frame the capture returns next when read on without seeking.
+        self.following = 0
+
+    def read(self, frame):
+        import cv2
+
+        ahead = frame - self.following
+        if 0 <= ahead <= SEEK_AHEAD:
+            ok = all(self.cap.grab() for _ in range(ahead))
+        else:
+            ok = self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame)
+        ok, image = self.cap.read() if ok else (False, None)
+        # A failed read leaves the position unknown: seek next time.
+        self.following = frame + 1 if ok else -1
+        if not ok or abs(self.cap.get(cv2.CAP_PROP_POS_FRAMES) - 1 - frame) > 0.5:
+            raise ValueError("Evidence frame decoding/seek failed")
+        return image
 
 
 def sample(context, root, episode, artifact_dir, *, frame_indices=None):
@@ -223,6 +254,9 @@ def sample(context, root, episode, artifact_dir, *, frame_indices=None):
                 ledger = item
                 break
     artifact_dir.mkdir(parents=True, exist_ok=True)
+    # The storage budget covers every artifact of the run; measured once and
+    # then counted up, not re-listed per frame (that grew with the run).
+    used = sum(p.stat().st_size for p in artifact_dir.iterdir() if p.is_file())
     evidence = []
     for camera in context.cameras or [None]:
         cap = None
@@ -232,6 +266,7 @@ def sample(context, root, episode, artifact_dir, *, frame_indices=None):
             cap = cv2.VideoCapture(str(backend().inside(relative, root)))
             if not cap.isOpened():
                 raise ValueError("Cannot decode the selected video")
+            reader = FrameReader(cap)
             from urllib.parse import quote
 
             from .video_evidence import frame_index
@@ -281,29 +316,20 @@ def sample(context, root, episode, artifact_dir, *, frame_indices=None):
                         ):
                             evidence.append(cached["row"])
                             continue
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, decoded_frame)
-                    ok, image = cap.read()
-                    if (
-                        not ok
-                        or abs(cap.get(cv2.CAP_PROP_POS_FRAMES) - 1 - decoded_frame)
-                        > 0.5
-                    ):
-                        raise ValueError("Evidence frame decoding/seek failed")
+                    image = reader.read(decoded_frame)
                     size = [int(image.shape[0]), int(image.shape[1])]
                     # Lossless evidence; native coordinates are never resized.
                     ok, encoded = cv2.imencode(".png", image)
                     if not ok:
                         raise ValueError("Evidence PNG encoding failed")
                     data = encoded.tobytes()
-                    used = sum(
-                        p.stat().st_size for p in artifact_dir.iterdir() if p.is_file()
-                    )
                     if used + len(data) > context.budget.max_artifact_bytes:
                         raise ValueError(
                             "Evidence artifacts exceed the approved storage budget"
                         )
                     artifact = evidence_id + ".png"
                     (artifact_dir / artifact).write_bytes(data)
+                    used += len(data)
                     sha = hashlib.sha256(data).hexdigest()
                 evidence.append(
                     EvidenceRef(
