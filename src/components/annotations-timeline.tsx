@@ -24,6 +24,9 @@ import { T, useLocale } from "@/components/levi-locale";
  *   VALUE MODEL (RECAP advantage labels, not language atoms — see
  *   recap-value-section.tsx): advantage runs and the V(o_t) curve.
  *
+ *   ANCHORED REVIEW (anchored-review-section.tsx): one marker per recorded
+ *   robot event, coloured by the anchored review's verdict.
+ *
  * Interactions:
  *   - Click a marker → seek + select (handled by the panel's listening to
  *     `selectAtom` via context).
@@ -55,6 +58,7 @@ import {
   type Role,
 } from "../types/language.types";
 import { DraggablePopup } from "./draggable-popup";
+import { AnchoredReviewSection } from "./anchored-review-section";
 import { RecapValueSection } from "./recap-value-section";
 
 const LABEL_WIDTH = 84;
@@ -932,6 +936,22 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                     ))}
                   </div>
                 ))}
+
+                {/* Anchored review: the events the robot recorded and how
+                the review judged each; nothing without a result. */}
+                <AnchoredReviewSection
+                  duration={duration}
+                  onSeek={(ts) => {
+                    seek(ts, "external");
+                    setIsPlaying(false);
+                  }}
+                  onBandClick={onTrackBandClick}
+                  onHoverMove={onTrackHoverMove}
+                  onHoverLeave={onTrackHoverLeave}
+                  showTip={showTip}
+                  moveTip={moveTip}
+                  hideTip={hideTip}
+                />
 
                 {/* RECAP value model (advantage labels + V(o_t)): a third
                 section inside .tl-tracks so the playhead spans it. It loads

@@ -25,6 +25,7 @@ import type {
   RecapStatus,
   RecapSummary,
 } from "../types/recap.types";
+import type { AnchoredEpisode } from "../types/anchored.types";
 
 // Revision tokens belong to the editor's last read, never an automatic pre-save
 // refresh (which would hide concurrent edits). Kept in memory, not credentials.
@@ -835,4 +836,25 @@ export async function fetchRecapEpisode(
   if (!response.ok)
     throw new Error(await responseErrorMessage(response, "RECAP episode"));
   return response.json() as Promise<RecapEpisode>;
+}
+
+// ---------------------------------------------------------------------------
+// Anchored review (`/api/anchored/*`): per-event evidence of the newest
+// anchored review run on the dataset. A missing result is a 404 → `null`.
+
+/** One episode's anchored-review record; `null` when there is none (404). */
+export async function fetchAnchoredEpisode(
+  episodeId: number,
+  ident: DatasetIdent,
+  signal?: AbortSignal,
+): Promise<AnchoredEpisode | null> {
+  if (!ENV_URL) return null;
+  const response = await annotationFetch(
+    buildUrl(`/api/anchored/episodes/${episodeId}`, ident),
+    { cache: "no-store", signal },
+  );
+  if (response.status === 404) return null;
+  if (!response.ok)
+    throw new Error(await responseErrorMessage(response, "Anchored review"));
+  return response.json() as Promise<AnchoredEpisode>;
 }

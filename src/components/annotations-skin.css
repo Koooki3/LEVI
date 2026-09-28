@@ -1955,3 +1955,41 @@
 .annotations-skin .recap-readout.high {
   top: 2px;
 }
+
+/* ----- ANCHORED REVIEW section (per-event verdicts) ----- */
+.annotations-skin {
+  --anchored-valid: #3fb950;
+  --anchored-contradicted: #f85149;
+  --anchored-unknown: #e3b341;
+  --anchored-accent: #58a6ff;
+}
+.annotations-skin .tl-section-head.anchored {
+  border-left-color: var(--anchored-accent);
+  align-items: center;
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.annotations-skin .anchored-outcome.success {
+  color: var(--anchored-valid);
+  font-weight: 600;
+}
+.annotations-skin .anchored-outcome.failure {
+  color: var(--anchored-contradicted);
+  font-weight: 600;
+}
+.annotations-skin .dot-anchored {
+  background: var(--anchored-accent);
+}
+.annotations-skin .tl-tick.anchored {
+  width: 6px;
+  transform: translateX(-3px);
+}
+.annotations-skin .tl-tick.anchored.supported {
+  background: var(--anchored-valid);
+}
+.annotations-skin .tl-tick.anchored.contradicted {
+  background: var(--anchored-contradicted);
+}
+.annotations-skin .tl-tick.anchored.unknown {
+  background: var(--anchored-unknown);
+}
