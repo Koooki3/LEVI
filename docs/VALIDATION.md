@@ -6,9 +6,9 @@ What has been checked, how, and what has not. Newest first. Each entry states wh
 
 ## Anchored review
 
-2026-09-28, real data and a real model: the frozen 60-episode plates test set (a raw policy-rollout capture browsed through its view), RedHatAI Qwen3.8-27B INT4 on vLLM 0.30 (`--max-model-len 49152`, xgrammar without whitespace, thinking off, greedy through `--override-generation-config '{"temperature": 0.0}'`), RTX 5090 used by nothing else. One server session ran the external release-anchored review script (AR2, the accepted milestone plates-v1.1 check), then a LEVI review run with `workflow.anchored = {"spec": "plates-release-ar2"}` driven through plan, pilot, review and commit, then the external script again.
+2026-09-28, real data and a real model: the frozen test set (60 plates episodes; a raw policy-rollout capture browsed through its view), RedHatAI Qwen3.8-27B INT4 on vLLM 0.30 (`--max-model-len 49152`, xgrammar without whitespace, thinking off, greedy through `--override-generation-config '{"temperature": 0.0}'`), RTX 5090 used by nothing else. One server session ran the external release-anchored review script (rule set 2, the check accepted with the current best configuration v1.1), then a LEVI anchored review run with the built-in plates release-review rules (`workflow.anchored = {"spec": "plates-release"}`; the run named the spec by its former id `plates-release-ar2`, which still resolves to it) driven through plan, pilot, review and commit, then the external script again.
 
-| | External AR2 (before) | LEVI anchored review | External AR2 (after) |
+| | External script (before) | LEVI anchored review | External script (after) |
 | --- | ---: | ---: | ---: |
 | Events (gripper openings) judged | 205 | 205 | 205 |
 | Answers identical to the other two, all four fields | — | 205 / 205 | 205 / 205 |
@@ -16,7 +16,7 @@ What has been checked, how, and what has not. Newest first. Each entry states wh
 | Tokens (server-reported) | 758,212 | 758,212 | 758,212 |
 | Time | 303 s | 369 s in the run (295 s of it model calls), 383 s plan to commit | 320 s |
 
-Anchors equal the capture's own `last_gripper_command` transitions in all 60 episodes, and the frames sent are byte-identical PNGs to the script's. Outcomes scored against the frozen gold (aggregates only): balanced accuracy 0.936, false success 0.128, success recall 1.0 — the milestone's numbers. Against earlier server sessions (the milestone baseline and a robustness round) 20–22 of 205 answers differ in a field, none in an event's validity or an episode's outcome: greedy decoding is repeatable within a session, not across restarts. LEVI's extra time is evidence extraction (a seek, decode, PNG write and hash per frame, about 20 ms each) and the GPU guardian's check before every request.
+Anchors equal the capture's own `last_gripper_command` transitions in all 60 episodes, and the frames sent are byte-identical PNGs to the script's. Outcomes scored against the locked gold-standard labels (aggregates only): balanced accuracy 0.936, false success 0.128, success recall 1.0 — the numbers accepted for configuration v1.1. Against earlier server sessions (the frozen-set baseline run and a robustness repeat run) 20–22 of 205 answers differ in a field, none in an event's validity or an episode's outcome: greedy decoding is repeatable within a session, not across restarts. LEVI's extra time is evidence extraction (a seek, decode, PNG write and hash per frame, about 20 ms each) and the GPU guardian's check before every request.
 
 Not established: anchors from a measured-aperture gripper channel or from `action` on a real dataset, and any spec other than the plates one.
 

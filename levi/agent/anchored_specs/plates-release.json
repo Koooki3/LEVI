@@ -1,7 +1,9 @@
 {
-  "id": "plates-release-ar2",
+  "id": "plates-release",
+  "aliases": ["plates-release-ar2"],
   "version": 1,
-  "description": "Stack the plates of the same colour (pink on pink, white on white; green is a distractor). At every gripper opening the robot recorded, judge whether a plate was released onto the plate of its colour and stays there. The episode succeeds when both pink and white have such a release. Accepted on the frozen60 plates test set as AR2 (balanced accuracy 0.936, false success 0.128 with Qwen3.8-27B, greedy).",
+  "title": {"en": "Plates release-review rules", "zh": "plates 释放复核规则"},
+  "description": "Stack the plates of the same colour (pink on pink, white on white; green is a distractor). At every gripper opening the robot recorded, judge whether a plate was released onto the plate of its colour and stays there. The episode succeeds when both pink and white have such a release. These are the release-anchored review rules (rule set 2) accepted on the frozen plates test set of 60 episodes: balanced accuracy 0.936, false success 0.128 with Qwen3.8-27B, greedy decoding.",
   "anchor": {"signal": "gripper", "event": "open"},
   "views": [
     {

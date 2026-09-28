@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   anchoredMarkers,
+  anchoredSpecTitle,
   anchoredSummary,
   eventText,
 } from "@/components/anchored-lanes";
@@ -36,7 +37,11 @@ const record = (events: AnchoredEvent[]): AnchoredEpisode => ({
   run_id: "review-20260928T1200",
   episode_index: 3,
   status: "waiting_for_review",
-  spec: { id: "plates-release-ar2", version: 1 },
+  spec: {
+    id: "plates-release",
+    version: 1,
+    title: { en: "Plates release-review rules", zh: "plates 释放复核规则" },
+  },
   channel: "observation.state.gripper",
   event: "open",
   outcome: "failure",
@@ -91,5 +96,23 @@ describe("wording", () => {
         ]),
       ),
     ).toBe("1/2 valid · pink");
+  });
+});
+
+describe("anchoredSpecTitle", () => {
+  test("the title in the viewer's language, else English, else the id", () => {
+    const spec = record([]).spec;
+    expect(anchoredSpecTitle(spec, "zh")).toBe("plates 释放复核规则");
+    expect(anchoredSpecTitle(spec, "en")).toBe("Plates release-review rules");
+    expect(anchoredSpecTitle(spec, "fr")).toBe("Plates release-review rules");
+    expect(anchoredSpecTitle({ id: "block-drop", version: 1 }, "zh")).toBe(
+      "block-drop",
+    );
+    expect(
+      anchoredSpecTitle(
+        { id: "plates-release-ar2", version: 1, title: null },
+        "en",
+      ),
+    ).toBe("plates-release-ar2");
   });
 });

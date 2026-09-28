@@ -37,7 +37,13 @@ export interface AnchoredEpisode {
   run_id: string;
   episode_index: number;
   status: string;
-  spec: { id: string; version: number | null };
+  /** `title` is the display name per language (e.g. `{en, zh}`); the id is
+   * for plans and records and is shown only when there is no title. */
+  spec: {
+    id: string;
+    version: number | null;
+    title?: Record<string, string> | null;
+  };
   channel: string;
   event: "open" | "close" | string;
   outcome: "success" | "failure";

@@ -11,9 +11,11 @@ invent an event.
 
 Everything task-specific is in a spec (``AnchoredSpec``): the anchor, the
 frames per camera, the question, the answer fields, the rules. LEVI ships
-specs in ``anchored_specs/`` (``plates-release-ar2`` reproduces the accepted
-AR2 plates review exactly); a plan may name one (``{"spec": "<id>"}``) or
-give its own in full. The plan freezes the resolved spec, so approval covers
+specs in ``anchored_specs/`` (``plates-release``, the plates release-review
+rules, reproduces the accepted external release-anchored review exactly); a
+plan may name one (``{"spec": "<id>"}``, or an older id the spec lists under
+``aliases``) or give its own in full. A spec's ``title`` is what people see;
+its id is for plans and records. The plan freezes the resolved spec, so approval covers
 the question and the rules.
 
 Anchors are read from what the dataset declares, as ``signals.py`` does: a
@@ -33,6 +35,7 @@ run), and the episode's outcome goes to the ordinary review queue as one
 """
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any, Literal
@@ -109,6 +112,9 @@ class EpisodeRule(Contract):
 class AnchoredSpec(Contract):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_.-]{0,63}$")
     version: int = Field(default=1, ge=1)
+    # Display name per language ({"en": ..., "zh": ...}); the id is shown
+    # only where there is no title.
+    title: dict[str, str] | None = None
     description: str = Field(default="", max_length=2000)
     anchor: AnchorSpec = Field(default_factory=AnchorSpec)
     views: list[ViewSpec] = Field(min_length=1, max_length=8)
@@ -122,6 +128,18 @@ class AnchoredSpec(Contract):
 
     @model_validator(mode="after")
     def consistent(self):
+        if self.title is not None and (
+            not self.title
+            or any(
+                not re.fullmatch(r"[a-z]{2}(-[A-Za-z]{2,4})?", k)
+                or not v.strip()
+                or len(v) > 200
+                for k, v in self.title.items()
+            )
+        ):
+            raise ValueError(
+                "title maps language codes to non-empty names of up to 200 characters"
+            )
         names = [f.name for f in self.fields]
         if len(set(names)) != len(names):
             raise ValueError("Answer field names must be unique")
@@ -156,28 +174,77 @@ class AnchoredSpec(Contract):
         }
 
 
+def _shipped():
+    """(specs by id, {alias: id}) from ``anchored_specs/``. A spec file may
+    list ``aliases``: former ids that plans, stored runs and scripts still
+    name (``plates-release-ar2`` for ``plates-release``)."""
+    specs, aliases = {}, {}
+    for path in sorted(SPECS_DIR.glob("*.json")):
+        raw = json.loads(path.read_text())
+        former = raw.pop("aliases", [])
+        spec = AnchoredSpec.model_validate(raw)
+        specs[spec.id] = spec
+        for name in former:
+            aliases[name] = spec.id
+    clash = set(aliases) & set(specs)
+    if clash:
+        raise ValueError(f"Anchored spec aliases shadow ids: {sorted(clash)}")
+    return specs, aliases
+
+
 def builtin():
     """The specs LEVI ships, by id."""
-    out = {}
-    for path in sorted(SPECS_DIR.glob("*.json")):
-        spec = AnchoredSpec.model_validate(json.loads(path.read_text()))
-        out[spec.id] = spec
-    return out
+    return _shipped()[0]
+
+
+def aliases():
+    """Former built-in ids that still resolve: ``{alias: id}``."""
+    return _shipped()[1]
+
+
+def lookup(spec_id):
+    """The built-in spec with this id or former id, else None."""
+    specs, former = _shipped()
+    return specs.get(former.get(spec_id, spec_id))
+
+
+def title_of(spec, lang="en"):
+    """A spec's display name in ``lang`` (else English, else any), from the
+    spec itself or -- for a spec frozen before titles, by its id or former
+    id -- from the built-in one; None when there is none."""
+    spec = spec if isinstance(spec, dict) else spec.model_dump(by_alias=True)
+    title = spec.get("title")
+    if not title:
+        shipped = lookup(spec.get("id"))
+        title = shipped.title if shipped else None
+    if not title:
+        return None
+    return title.get(lang) or title.get("en") or next(iter(title.values()))
+
+
+def titles(spec):
+    """Every language's display name of a spec (see ``title_of``)."""
+    spec = spec if isinstance(spec, dict) else spec.model_dump(by_alias=True)
+    if spec.get("title"):
+        return dict(spec["title"])
+    shipped = lookup(spec.get("id"))
+    return dict(shipped.title) if shipped and shipped.title else None
 
 
 def resolve(value):
-    """A plan's ``workflow.anchored``: ``{"spec": "<built-in id>"}`` or a
-    whole spec. Returns the full spec as a plain dict (frozen in the plan)."""
+    """A plan's ``workflow.anchored``: ``{"spec": "<built-in id or former
+    id>"}`` or a whole spec. Returns the full spec as a plain dict (frozen in
+    the plan)."""
     if not isinstance(value, dict):
         raise ValueError("workflow.anchored must be an object")  # noqa: TRY004 - pydantic reports ValueError
     if set(value) == {"spec"}:
-        specs = builtin()
-        if value["spec"] not in specs:
+        spec = lookup(value["spec"])
+        if spec is None:
             raise ValueError(
                 f"Unknown anchored review spec {value['spec']!r}; built in: "
-                + ", ".join(sorted(specs))
+                + ", ".join(sorted(builtin()))
             )
-        return specs[value["spec"]].model_dump(by_alias=True)
+        return spec.model_dump(by_alias=True)
     return AnchoredSpec.model_validate(value).model_dump(by_alias=True)
 
 
@@ -484,7 +551,7 @@ def review_episode(wb, id, config, context, episode, started):
         "schema": "levi.anchored.v1",
         "run_id": id,
         "episode_index": episode,
-        "spec": {"id": spec.id, "version": spec.version},
+        "spec": {"id": spec.id, "version": spec.version, "title": titles(spec)},
         "channel": channel,
         "event": spec.anchor.event,
         "outcome": verdict,
@@ -518,7 +585,8 @@ def review_episode(wb, id, config, context, episode, started):
         for e in events
     ]
     content = (
-        f"Anchored review {spec.id}: {len(events)} gripper {name} event(s); "
+        f"Anchored review ({title_of(spec) or spec.id}): {len(events)} gripper "
+        f"{name} event(s); "
         + ("; ".join(parts) if parts else "none recorded")
         + f". Outcome {verdict}."
     )
@@ -544,7 +612,7 @@ def review_episode(wb, id, config, context, episode, started):
     )
     wb.validate_proposals(context, [proposal], evidence, summary)
     output = ModelOutput(
-        summary=f"{spec.id}: {sum(e['valid'] for e in events)}/{len(events)} valid",
+        summary=f"{title_of(spec) or spec.id}: {sum(e['valid'] for e in events)}/{len(events)} valid",
         proposals=[proposal],
     )
     return summary, evidence, output, total
@@ -723,7 +791,11 @@ def run_summary(run, found):
         "run_id": run["id"],
         "status": run["status"],
         "created_at": run.get("created_at"),
-        "spec": {"id": spec["id"], "version": spec.get("version")},
+        "spec": {
+            "id": spec["id"],
+            "version": spec.get("version"),
+            "title": titles(spec),
+        },
         "episodes": {
             str(ep): {
                 "outcome": rec["outcome"],
@@ -762,6 +834,7 @@ def payload(store, dataset_key, episode=None, run_id=None) -> dict[str, Any] | N
                 "spec": {
                     "id": spec["id"],
                     "version": spec.get("version"),
+                    "title": titles(spec),
                     "fields": spec["fields"],
                     "valid_when": spec["valid_when"],
                 },

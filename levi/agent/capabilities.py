@@ -1039,12 +1039,18 @@ def _invoke(
             "reported by the agent, or LEVI's measured lower bound.",
         }
     if name == "anchored.specs":
-        from .anchored import builtin
+        from .anchored import aliases, builtin
 
+        former = aliases()
         return {
-            "specs": [spec.model_dump(by_alias=True) for spec in builtin().values()],
+            "specs": [
+                spec.model_dump(by_alias=True)
+                | {"aliases": sorted(k for k, v in former.items() if v == spec.id)}
+                for spec in builtin().values()
+            ],
             "use": 'Plan a review with workflow.anchored = {"spec": "<id>"} or a '
-            "whole spec of this shape",
+            "whole spec of this shape; a former id listed under aliases still "
+            "names its spec. Show people the title, not the id",
         }
     if name == "anchored.get":
         from levi.catalog import display_name

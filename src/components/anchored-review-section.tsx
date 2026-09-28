@@ -7,7 +7,8 @@
  * One marker per recorded robot event (e.g. each gripper opening) at its
  * frame: green = valid (every condition of the spec's rule holds), red =
  * contradicted, amber = unknown. Hover shows the model's answers and each
- * condition's reading; click seeks to the event. The header names the spec,
+ * condition's reading; click seeks to the event. The header names the spec
+ * by its title (its id on hover),
  * the review's outcome for the episode and the valid events.
  *
  * Rendered inside `.tl-tracks` like the value-model section; it renders
@@ -17,7 +18,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { T, useLocale } from "@/components/levi-locale";
 import { useAnnotations } from "@/context/annotations-context";
-import { anchoredMarkers, anchoredSummary } from "@/components/anchored-lanes";
+import {
+  anchoredMarkers,
+  anchoredSpecTitle,
+  anchoredSummary,
+} from "@/components/anchored-lanes";
 import {
   fetchAnchoredEpisode,
   isAnnotateBackendEnabled,
@@ -46,7 +51,7 @@ export const AnchoredReviewSection: React.FC<Props> = ({
   hideTip,
 }) => {
   const { episodeId, ident } = useAnnotations();
-  const { t } = useLocale();
+  const { t, language } = useLocale();
   const repoId = ident.repoId ?? null;
   const [record, setRecord] = useState<AnchoredEpisode | null>(null);
 
@@ -80,7 +85,11 @@ export const AnchoredReviewSection: React.FC<Props> = ({
             <T>Anchored review</T>
           </span>
           <span className="tl-section-sub">
-            <span title={t("Anchored review spec")}>{record.spec.id}</span>
+            <span
+              title={`${t("Anchored review rules")} · ${t("Rule set id")}: ${record.spec.id}`}
+            >
+              {anchoredSpecTitle(record.spec, language)}
+            </span>
             {" · "}
             <span
               className={`anchored-outcome ${record.outcome}`}

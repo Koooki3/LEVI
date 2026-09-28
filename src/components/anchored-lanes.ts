@@ -55,6 +55,18 @@ export function anchoredMarkers(
   }));
 }
 
+/** The spec's display name in `language` (else English, else any), falling
+ * back to its id when the spec has no title. */
+export function anchoredSpecTitle(
+  spec: AnchoredEpisode["spec"],
+  language: string,
+): string {
+  const title = spec.title ?? {};
+  return (
+    title[language] || title.en || Object.values(title).find(Boolean) || spec.id
+  );
+}
+
 /** "2/3 valid · pink, white" — the section header's summary. */
 export function anchoredSummary(record: AnchoredEpisode): string {
   const valid = record.events.filter((e) => e.valid).length;

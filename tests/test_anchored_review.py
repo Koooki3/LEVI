@@ -23,7 +23,7 @@ from levi.agent.planning import Workflow, approve, clarify
 from levi.agent.schema import Budget, TaskContext
 from levi.agent.security import Principal
 
-PLATES = anchored.builtin()["plates-release-ar2"]
+PLATES = anchored.builtin()["plates-release"]
 
 
 def spec(camera, **extra):
@@ -47,8 +47,9 @@ def spec(camera, **extra):
     } | extra
 
 
-def test_the_plates_spec_is_ar2_frame_for_frame():
-    """The shipped spec reproduces the accepted external AR2 review: same
+def test_the_plates_spec_is_the_accepted_review_frame_for_frame():
+    """The shipped spec reproduces the accepted external release-anchored
+    review (rule set 2): same
     frames, same field order (the decoding order), same rules."""
     side, wrist = PLATES.views
     assert (side.camera, side.offsets) == (
@@ -97,16 +98,17 @@ def test_the_plates_spec_is_ar2_frame_for_frame():
 
 def test_a_plan_names_a_built_in_spec_or_gives_its_own_and_freezes_it():
     flow = Workflow.model_validate(
-        {"kind": "review", "anchored": {"spec": "plates-release-ar2"}}
+        {"kind": "review", "anchored": {"spec": "plates-release"}}
     )
-    assert flow.anchored["id"] == "plates-release-ar2"
+    assert flow.anchored["id"] == "plates-release"
+    assert flow.anchored["title"]["en"] == "Plates release-review rules"
     # Frozen as a plain dict that validates to itself.
     assert Workflow.model_validate(flow.model_dump()).model_dump() == flow.model_dump()
     with pytest.raises(ValueError, match="Unknown anchored review spec"):
         Workflow.model_validate({"kind": "review", "anchored": {"spec": "nope"}})
     with pytest.raises(ValueError, match="review workflow"):
         Workflow.model_validate(
-            {"kind": "temporal", "anchored": {"spec": "plates-release-ar2"}}
+            {"kind": "temporal", "anchored": {"spec": "plates-release"}}
         )
     with pytest.raises(ValueError, match="cannot take"):
         AnchoredSpec.model_validate(
@@ -135,11 +137,92 @@ def test_a_plan_names_a_built_in_spec_or_gives_its_own_and_freezes_it():
             "provider": "vllm",
             "cameras": ["observation.images.view1"],
             "allow_media_egress": True,
-            "workflow": {"kind": "review", "anchored": {"spec": "plates-release-ar2"}},
+            "workflow": {"kind": "review", "anchored": {"spec": "plates-release"}},
         }
     )
     assert [q["field"] for q in asked["questions"]] == ["cameras"]
     assert "observation.images.hand" in asked["questions"][0]["message"]
+
+
+def test_the_former_plates_id_still_names_the_same_spec():
+    """Approved plans, stored runs and scripts name ``plates-release-ar2``;
+    it resolves to the renamed spec, question and rules unchanged."""
+    assert anchored.aliases() == {"plates-release-ar2": "plates-release"}
+    assert anchored.lookup("plates-release-ar2") == PLATES
+    assert anchored.lookup("plates-release") == PLATES
+    assert anchored.lookup("nope") is None
+    old = Workflow.model_validate(
+        {"kind": "review", "anchored": {"spec": "plates-release-ar2"}}
+    )
+    new = Workflow.model_validate(
+        {"kind": "review", "anchored": {"spec": "plates-release"}}
+    )
+    assert old.anchored == new.anchored
+    # A plan approved before the rename froze the whole spec under the old id
+    # and without a title: it still validates to itself, keeps its id, and
+    # is shown by the built-in spec's title.
+    frozen = PLATES.model_dump(by_alias=True) | {"id": "plates-release-ar2"}
+    frozen.pop("title")
+    kept = Workflow.model_validate({"kind": "review", "anchored": frozen})
+    assert kept.anchored["id"] == "plates-release-ar2"
+    assert kept.anchored["question"] == PLATES.question
+    assert anchored.title_of(frozen) == "Plates release-review rules"
+    assert anchored.title_of(frozen, "zh") == "plates 释放复核规则"
+    assert anchored.title_of(frozen, "fr") == "Plates release-review rules"
+    # A spec of one's own without a title shows its id.
+    assert anchored.title_of(spec("cam")) is None
+    assert anchored.titles(spec("cam", title={"en": "Block drop"})) == {
+        "en": "Block drop"
+    }
+    with pytest.raises(ValueError, match="title"):
+        AnchoredSpec.model_validate(spec("cam", title={"english": "x"}))
+    with pytest.raises(ValueError, match="title"):
+        AnchoredSpec.model_validate(spec("cam", title={"en": " "}))
+
+
+def test_a_run_stored_under_the_former_id_reads_with_its_title():
+    """Results of a run planned before the rename (spec id
+    ``plates-release-ar2``, no title frozen) come back with the title."""
+
+    class Store:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def list(self, kind):
+            return list(self.rows[kind].values())
+
+        def ids(self, kind):
+            return list(self.rows[kind])
+
+        def get(self, kind, key):
+            return self.rows[kind][key]
+
+    frozen = PLATES.model_dump(by_alias=True) | {"id": "plates-release-ar2"}
+    frozen.pop("title")
+    run = {
+        "id": "r1",
+        "status": "committed",
+        "dataset_key": "local/plates",
+        "created_at": 1.0,
+        "context": {"workflow": {"kind": "review", "anchored": frozen}},
+    }
+    record = {
+        "run_id": "r1",
+        "episode_index": 0,
+        "spec": {"id": "plates-release-ar2", "version": 1},
+        "outcome": "failure",
+        "events": [],
+    }
+    store = Store({"runs": {"r1": run}, "anchored": {"r1:0": record}})
+    summary = anchored.payload(store, "local/plates")
+    assert summary["spec"]["id"] == "plates-release-ar2"
+    assert summary["spec"]["title"] == {
+        "en": "Plates release-review rules",
+        "zh": "plates 释放复核规则",
+    }
+    one = anchored.payload(store, "local/plates", episode=0)
+    assert one["spec"]["id"] == "plates-release-ar2"
+    assert one["spec"]["title"]["en"] == "Plates release-review rules"
 
 
 def test_anchors_are_the_channels_transitions_to_the_frame():
@@ -264,7 +347,10 @@ def test_a_review_asks_once_per_opening_and_proposes_the_outcome(
         "result": "unknown",
     }
     specs = invoke(wb, human, "anchored.specs", {})
-    assert "plates-release-ar2" in [s["id"] for s in specs["specs"]]
+    listed_specs = {s["id"]: s for s in specs["specs"]}
+    assert listed_specs["plates-release"]["aliases"] == ["plates-release-ar2"]
+    assert listed_specs["plates-release"]["title"]["zh"] == "plates 释放复核规则"
+    assert "plates-release-ar2" not in listed_specs
     viewer = client.get(
         "/annotations/api/anchored/episodes/0", params={"repo_id": entry["id"]}
     )
