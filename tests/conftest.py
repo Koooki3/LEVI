@@ -130,3 +130,13 @@ def _workspace_files_stay_in_the_test(monkeypatch, tmp_path):
     monkeypatch.setattr(gpu, "_state_dir", lambda: tmp_path / "models")
     monkeypatch.setattr(request_cost, "_state_dir", lambda: tmp_path / "models")
     monkeypatch.setattr(record, "eval_dir", lambda: tmp_path / "eval")
+
+
+@pytest.fixture(autouse=True)
+def fresh_gpu_verdict():
+    """A GPU "free" reused across tests would hide the next test's GPU."""
+    from levi.inference import gpu
+
+    gpu._RECENT_FREE.clear()
+    yield
+    gpu._RECENT_FREE.clear()

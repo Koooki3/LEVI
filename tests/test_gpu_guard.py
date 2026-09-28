@@ -456,3 +456,19 @@ def test_a_local_servers_own_error_is_not_taken_for_a_preemption(monkeypatch):
     cfg = vllm().model_copy(update={"model_digest": "a" * 64})
     with pytest.raises(OllamaError, match="400"):
         LocalProvider().generate(cfg, "goal", {"workflow": {}}, [], "/tmp", budget)
+
+
+def test_a_recent_free_is_reused_briefly_and_a_busy_gpu_is_not(monkeypatch):
+    calls = []
+    on_gpu(monkeypatch, [], {})
+    smi = gpu._smi
+    monkeypatch.setattr(gpu, "_smi", lambda *a: calls.append(a) or smi(*a))
+    assert gpu.require_free(config())["state"] == "free"
+    sampled = len(calls)
+    gpu.require_free(config())
+    assert len(calls) == sampled  # reused
+    clock = gpu.time.monotonic() + gpu.REUSE_FREE_SECONDS + 1
+    monkeypatch.setattr(gpu.time, "monotonic", lambda: clock)
+    on_gpu(monkeypatch, [(737719, 8500)], {737719: ACTOR})
+    with pytest.raises(gpu.GpuBusy):
+        gpu.require_free(config())

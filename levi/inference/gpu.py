@@ -549,6 +549,12 @@ def local_endpoint(base_url):
     return False
 
 
+# How long a request may rely on the guardian's last "free" for the same
+# model servers instead of sampling the GPU again.
+REUSE_FREE_SECONDS = 10.0
+_RECENT_FREE: dict = {}
+
+
 def require_free(config=None):
     """Refuse local inference in CPU-only mode; otherwise enforce GPU policy."""
     if os.getenv("LEVI_CPU_ONLY") == "1":
@@ -557,7 +563,18 @@ def require_free(config=None):
         return None
     if config is not None and not local_endpoint(config.base_url):
         return None
-    verdict = status(servers=server_ports(config))
+    servers = tuple(sorted(server_ports(config)))
+    # Back-to-back requests (a run's episodes, an anchored review's events)
+    # reuse a recent "go": two nvidia-smi calls per request add up, and a
+    # workload that appears is still seen within REUSE_FREE_SECONDS.
+    seen = _RECENT_FREE.get(servers)
+    if seen and time.monotonic() - seen[0] < REUSE_FREE_SECONDS:
+        return seen[1]
+    verdict = status(servers=servers)
+    _RECENT_FREE.pop(servers, None)
+    if verdict["state"] == "free":
+        # Only a GPU nobody else uses; sharing depends on load that moves.
+        _RECENT_FREE[servers] = (time.monotonic(), verdict)
     if verdict["state"] in {"free", "shared"}:
         return verdict
     wait = verdict.get("wait_seconds")
