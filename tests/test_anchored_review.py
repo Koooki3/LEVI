@@ -270,6 +270,7 @@ def test_a_review_asks_once_per_opening_and_proposes_the_outcome(
     )
     assert viewer.status_code == 200, viewer.text
     assert viewer.json()["events"][0]["answer"]["colour"] == "red"
+    assert list(viewer.json()["events"][0]["answer"]) == ["held", "colour", "in_box"]
     assert viewer.json()["spec"]["fields"][0]["name"] == "held"
     empty = client.get(
         "/annotations/api/anchored/episodes/1", params={"repo_id": entry["id"]}

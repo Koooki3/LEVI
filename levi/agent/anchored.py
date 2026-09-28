@@ -749,8 +749,15 @@ def payload(store, dataset_key, episode=None, run_id=None) -> dict[str, Any] | N
             continue
         if episode in found:
             spec = run["context"]["workflow"]["anchored"]
+            record = found[episode]
+            # The store keeps keys sorted; answers read in the spec's order.
+            order = [f["name"] for f in spec["fields"]]
+            for event in record["events"]:
+                event["answer"] = {
+                    k: event["answer"][k] for k in order if k in event["answer"]
+                }
             return {
-                **found[episode],
+                **record,
                 "status": run["status"],
                 "spec": {
                     "id": spec["id"],
