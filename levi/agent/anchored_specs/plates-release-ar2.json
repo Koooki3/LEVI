@@ -1,0 +1,44 @@
+{
+  "id": "plates-release-ar2",
+  "version": 1,
+  "description": "Stack the plates of the same colour (pink on pink, white on white; green is a distractor). At every gripper opening the robot recorded, judge whether a plate was released onto the plate of its colour and stays there. The episode succeeds when both pink and white have such a release. Accepted on the frozen60 plates test set as AR2 (balanced accuracy 0.936, false success 0.128 with Qwen3.8-27B, greedy).",
+  "anchor": {"signal": "gripper", "event": "open"},
+  "views": [
+    {
+      "role": "side",
+      "camera": "observation.images.view1",
+      "offsets": [-25, -15, -8, -3, -1, 4, 12]
+    },
+    {
+      "role": "wrist",
+      "camera": "observation.images.hand",
+      "offsets": [-15, -6, -1, 4]
+    }
+  ],
+  "question": "A robot arm with a two-finger gripper is stacking plates of the same colour (pink on pink, white on white; a green plate is a distractor). The gripper receives an OPEN command at t=0. Images 1-7 are the side camera at t=-2.5, -1.5, -0.8, -0.3, -0.1, +0.4, +1.2 s; images 8-11 are the wrist camera (looking down between the fingers) at t=-1.5, -0.6, -0.1, +0.4 s.\nThe gripper holds a plate by pinching its thin rim, so a held plate usually hangs TILTED under the fingers; that counts as held if the whole plate is off the table and moves together with the gripper across the earlier images. A plate that stays on the table while the fingers close or drag it is NOT held.\nAnswer strictly from what the images show:\n- held_before: just before the open, is a plate held off the table by the fingers?\n- plate_colour: colour of that held plate (none if nothing is held).\n- landed_on: after the open, where is that plate: resting on a plate of the same colour, on a plate of another colour, on the table, still in the gripper; nothing_released if no plate was held.\n- stays: at t=+1.2 s does it stay where it landed (not sliding off)?\nUse unclear whenever the images do not show it.",
+  "fields": [
+    {"name": "held_before", "enum": ["yes", "no", "unclear"]},
+    {"name": "plate_colour", "enum": ["pink", "white", "green", "none", "unclear"]},
+    {
+      "name": "landed_on",
+      "enum": [
+        "same_colour_plate",
+        "other_colour_plate",
+        "table",
+        "still_in_gripper",
+        "nothing_released",
+        "unclear"
+      ]
+    },
+    {"name": "stays", "enum": ["yes", "no", "unclear"]}
+  ],
+  "valid_when": [
+    {"field": "held_before", "in": ["yes"]},
+    {"field": "landed_on", "in": ["same_colour_plate"]},
+    {"field": "stays", "not_in": ["no"]},
+    {"field": "plate_colour", "in": ["pink", "white"]}
+  ],
+  "unknown_values": ["unclear"],
+  "episode": {"label_field": "plate_colour", "require_labels": ["pink", "white"]},
+  "max_output_tokens": 200
+}

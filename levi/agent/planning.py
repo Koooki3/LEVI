@@ -1,7 +1,7 @@
 """Executable approval contracts. Planning is deterministic and never calls a model."""
 
 import time
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
@@ -43,9 +43,19 @@ class Workflow(Contract):
     # (plan approval and the final commit still take a person). For a capable
     # external agent the pilot cost an extra agent and a wait before the rest.
     require_human_pilot: bool = True
+    # Review: judge the episode at the events its robot signals mark instead
+    # of on evenly spread samples -- a built-in spec's id ({"spec": "<id>"})
+    # or a whole spec, resolved and frozen here (see ``anchored.py``).
+    anchored: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def unique(self):
+        if self.anchored is not None:
+            if self.kind != "review":
+                raise ValueError("An anchored review is a review workflow")
+            from .anchored import resolve
+
+            self.anchored = resolve(self.anchored)
         if not self.require_human_pilot and self.kind == "objects":
             raise ValueError(
                 "Object masks are reviewed on the pilot; the pilot cannot be waived"
@@ -111,6 +121,20 @@ def clarify(context):
                 "message": "Authorize the selected media scope or use a local object-only workflow",
             }
         )
+    if flow.anchored:
+        absent = [
+            v["camera"]
+            for v in flow.anchored["views"]
+            if v["camera"] not in ctx.cameras
+        ]
+        if absent:
+            missing.append(
+                {
+                    "field": "cameras",
+                    "message": "Select the cameras the anchored review spec shows: "
+                    + ", ".join(absent),
+                }
+            )
     if flow.pilot_episode is not None and flow.pilot_episode not in ctx.episodes:
         missing.append(
             {
@@ -153,13 +177,18 @@ def attach(run):
         "questions": clarify(run["context"])["questions"],
         "estimate": {
             "basis": (
+                "one request per anchor event (the robot's recorded "
+                f"gripper {flow.anchored['anchor']['event']}) per episode"
+            )
+            if flow.anchored
+            else (
                 "one coarse request per episode; a temporal plan adds a bounded "
                 'boundary refinement (workflow.refine "always"; "auto" may skip '
                 "it, a long episode is refined in several batches); provider tool "
                 "turns may add requests"
             ),
             "minimum_requests": 0
-            if flow.kind == "objects"
+            if flow.kind == "objects" or flow.anchored
             else len(run["context"]["episodes"])
             * (2 if flow.kind == "temporal" else 1),
             "tokens": "unknown until pilot; budget is a stop limit, not a price quote",

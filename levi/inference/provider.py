@@ -615,6 +615,81 @@ class LocalProvider:
             raise InvalidAnswer(describe(exc), raw, spent, salvaged) from exc
         return (cite_frames(result, evidence) if lean else result), spent
 
+    def ask(
+        self, config, question, artifacts, folder, schema, max_output_tokens, budget
+    ):
+        """One user turn -- the images in order, then ``question`` -- decoded
+        against ``schema``; no system prompt, skills or evidence ledger (an
+        anchored review's spec is the whole instruction). Returns the answer
+        text, unparsed, and its usage."""
+        if not config.structured_output or not config.model_digest:
+            raise ValueError(
+                "A local model requires a bound model digest and structured output capability"
+            )
+        if artifacts and not config.vision:
+            raise ValueError("Provider has no declared vision capability")
+        root = Path(folder).resolve()
+        paths = []
+        for name in artifacts:
+            path = (root / name).resolve()
+            if not path.is_relative_to(root):
+                raise ValueError(
+                    "Evidence path is outside the authorized artifact directory"
+                )
+            paths.append(path)
+        if config.max_images and len(paths) > config.max_images:
+            from levi.agent.observations import ContextOverflow
+
+            raise ContextOverflow(
+                f"{len(paths)} images exceed the {config.max_images} this model "
+                "accepts per request (max_images)"
+            )
+        from .gpu import require_free
+
+        require_free(config)
+        message = {"role": "user", "content": question}
+        if paths:
+            message["images"] = [encode_image(path, config) for path in paths]
+        try:
+            response = client_for(config, timeout=budget.max_seconds).chat(
+                config.model,
+                config.model_digest,
+                [message],
+                output_schema=schema,
+                max_output_tokens=min(max_output_tokens, budget.max_tokens),
+                context_tokens=config.context_tokens,
+                think=config.think,
+            )
+        except Exception as exc:
+            from .gpu import GpuBusy, server_ports, status
+
+            verdict = status(servers=server_ports(config))
+            if verdict["state"] in {"busy", "unknown", "cooling"}:
+                raise GpuBusy(
+                    f"Preempted by the GPU guardian: {verdict['reason']}"
+                ) from exc
+            raise
+        if response["tool_calls"]:
+            raise ValueError("The answer must be JSON, not tool calls")
+        usage = response["usage"]
+        return response["content"], {
+            "requests": 1,
+            "tokens": usage["tokens"]
+            if usage["tokens"] is not None
+            else budget.max_tokens,
+            "usage_kind": "reported"
+            if usage["source"] == "reported"
+            else "conservative_reservation",
+            "reported_tokens": usage["tokens"],
+            "prompt_tokens": usage.get("prompt_tokens"),
+            "finish_reason": response.get("finish_reason"),
+            **{
+                key: usage[key]
+                for key in ("load_seconds", "prefill_seconds", "decode_seconds")
+                if key in usage
+            },
+        }
+
     @staticmethod
     def _chat(
         config,

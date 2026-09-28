@@ -2991,6 +2991,47 @@ def recap_episode(episode_index: int, repo_id: str) -> JSONResponse:
     )
 
 
+# --- Anchored review: per-event evidence of the newest anchored review ------
+# Read-only; results live in the agent store (see levi/agent/anchored.py).
+
+
+def _anchored(state: DatasetState, episode: int | None, run_id: str | None):
+    from levi.agent.anchored import payload
+    from levi.agent.store import Store
+
+    found = payload(Store(STATE), state.display_slug, episode, run_id)
+    if found is None:
+        raise HTTPException(404, "No anchored review result")
+    return JSONResponse(found)
+
+
+@app.get("/api/anchored/summary")
+def anchored_summary(
+    repo_id: str | None = None,
+    revision: str | None = None,
+    local_path: str | None = None,
+    run_id: str | None = None,
+) -> JSONResponse:
+    state = _ensure_state(
+        DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path)
+    )
+    return _anchored(state, None, run_id)
+
+
+@app.get("/api/anchored/episodes/{episode_index}")
+def anchored_episode(
+    episode_index: int,
+    repo_id: str | None = None,
+    revision: str | None = None,
+    local_path: str | None = None,
+    run_id: str | None = None,
+) -> JSONResponse:
+    state = _ensure_state(
+        DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path)
+    )
+    return _anchored(state, episode_index, run_id)
+
+
 @app.get("/api/episodes/{episode_index}/frame_timestamps")
 def episode_frame_timestamps(
     episode_index: int,

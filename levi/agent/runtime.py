@@ -234,6 +234,15 @@ class Workbench:
                 raise ValueError(
                     "Vision capability and explicit media egress consent are required"
                 )
+        if context.workflow.get("anchored") and (
+            config is None
+            or config.kind not in LOCAL_MODEL_KINDS
+            or context.supervision != "none"
+        ):
+            raise ValueError(
+                "An anchored review runs on a bound local model (ollama or "
+                "openai-local) without teacher supervision"
+            )
         context = DATASETS[context.dataset_adapter].pin(context)
         state, files = DATASETS[context.dataset_adapter].inspect(context)
         if sum(files.values()) > context.budget.max_snapshot_bytes:
@@ -477,14 +486,26 @@ class Workbench:
                 try:
                     from . import observations
 
-                    summary, evidence = observations.observe(
-                        context, directory / "input", episode, directory / "evidence"
-                    )
-                    summary["workflow"] = context.workflow
-                    observations.persist(self, id, episode, summary, evidence)
-                    output, usage = self.model_step(
-                        id, config, context, summary, evidence, "coarse", started
-                    )
+                    if context.workflow.get("anchored"):
+                        # One narrow question per recorded robot event
+                        # instead of one look at evenly spread samples.
+                        from . import anchored
+
+                        summary, evidence, output, usage = anchored.review_episode(
+                            self, id, config, context, episode, started
+                        )
+                    else:
+                        summary, evidence = observations.observe(
+                            context,
+                            directory / "input",
+                            episode,
+                            directory / "evidence",
+                        )
+                        summary["workflow"] = context.workflow
+                        observations.persist(self, id, episode, summary, evidence)
+                        output, usage = self.model_step(
+                            id, config, context, summary, evidence, "coarse", started
+                        )
                     if context.workflow["kind"] == "temporal" and refines(
                         context.workflow
                     ):

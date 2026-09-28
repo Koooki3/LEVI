@@ -123,6 +123,8 @@ OWNED = (
     "shards",
     "evidence",
     "quality",
+    # An anchored review's per-episode event records ("<run>:<episode>").
+    "anchored",
     "object_jobs",
     "detections",
     "object_evidence",

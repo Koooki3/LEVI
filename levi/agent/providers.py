@@ -31,6 +31,15 @@ class RoutedProvider:
             return LocalProvider().generate(config, *args)
         return CompatibleProvider().generate(config, *args)
 
+    def ask(self, config, *args):
+        """One question with a fixed answer schema (an anchored review);
+        local models only."""
+        if config.kind in LOCAL_MODEL_KINDS:
+            from levi.inference.provider import LocalProvider
+
+            return LocalProvider().ask(config, *args)
+        raise ValueError("A schema-bound question needs a local model profile")
+
 
 class CompatibleProvider:
     def generate(

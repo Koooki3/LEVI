@@ -359,6 +359,20 @@ class RecapGet(DatasetRef):
     episode: int | None = Field(default=None, ge=0)
 
 
+class AnchoredGet(Contract):
+    # A dataset (its newest anchored review) or one run; with an episode, that
+    # episode's events and the frames each was judged on.
+    repo_id: str | None = None
+    run_id: str | None = None
+    episode: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def target(self):
+        if not self.repo_id and not self.run_id:
+            raise ValueError("Name a repo_id or a run_id")
+        return self
+
+
 class KnowledgeList(Contract):
     topic: Literal["annotation", "interpretation", "harness"] | None = None
     refresh: bool = False
@@ -512,6 +526,22 @@ SPECS = {
             "Current RECAP advantage labels: per-episode positive fraction and mean "
             "value, or for one episode its runs of positive/negative frames and "
             "V(o_t) about once a second"
+        ),
+    ),
+    "anchored.specs": (
+        Empty,
+        "read",
+        (
+            "Built-in anchored review specs: the event each is anchored on, the "
+            "frames per camera, the question, answer fields and success rules"
+        ),
+    ),
+    "anchored.get": (
+        AnchoredGet,
+        "read",
+        (
+            "Results of an anchored review: per-episode outcomes, or one "
+            "episode's events with their answers, validity and cited frames"
         ),
     ),
     "knowledge.list": (
@@ -1008,6 +1038,30 @@ def _invoke(
             "note": "tokens.source says whether a figure was metered by LEVI, "
             "reported by the agent, or LEVI's measured lower bound.",
         }
+    if name == "anchored.specs":
+        from .anchored import builtin
+
+        return {
+            "specs": [spec.model_dump(by_alias=True) for spec in builtin().values()],
+            "use": 'Plan a review with workflow.anchored = {"spec": "<id>"} or a '
+            "whole spec of this shape",
+        }
+    if name == "anchored.get":
+        from levi.catalog import display_name
+
+        from .anchored import payload
+
+        if (
+            run is None
+            and not principal.human
+            and args.repo_id not in principal.datasets
+        ):
+            raise PermissionError("Dataset is outside this principal's scope")
+        key = run["dataset_key"] if run else display_name(args.repo_id, None)
+        found = payload(store, key, args.episode, args.run_id)
+        if found is None:
+            raise KeyError("No anchored review result for this scope")
+        return found
     if name in {"recap.status", "recap.get"}:
         from levi.recap import jobs as recap_jobs
 
