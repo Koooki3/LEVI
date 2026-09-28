@@ -2975,19 +2975,39 @@ def recap_job_cancel(job_id: str, repo_id: str | None = None) -> JSONResponse:
     return JSONResponse(recap_jobs.public(job))
 
 
+def _recap_optional(call, optional: bool):
+    """``optional=true``: "no labels yet" is an answer (200, ``null``), not
+    an error -- the viewer asks on every episode of every dataset, and a 404
+    there only fills the browser console."""
+    from levi.recap.jobs import RecapError
+
+    try:
+        return call()
+    except RecapError as exc:
+        if optional and exc.status == 404:
+            return None
+        raise HTTPException(exc.status, exc.detail) from exc
+
+
 @app.get("/api/recap/summary")
-def recap_summary(repo_id: str) -> JSONResponse:
-    from levi.recap import jobs as recap_jobs
-
-    return JSONResponse(_recap_call(lambda: recap_jobs.summary_payload(repo_id)))
-
-
-@app.get("/api/recap/episodes/{episode_index}")
-def recap_episode(episode_index: int, repo_id: str) -> JSONResponse:
+def recap_summary(repo_id: str, optional: bool = False) -> JSONResponse:
     from levi.recap import jobs as recap_jobs
 
     return JSONResponse(
-        _recap_call(lambda: recap_jobs.episode_payload(repo_id, episode_index))
+        _recap_optional(lambda: recap_jobs.summary_payload(repo_id), optional)
+    )
+
+
+@app.get("/api/recap/episodes/{episode_index}")
+def recap_episode(
+    episode_index: int, repo_id: str, optional: bool = False
+) -> JSONResponse:
+    from levi.recap import jobs as recap_jobs
+
+    return JSONResponse(
+        _recap_optional(
+            lambda: recap_jobs.episode_payload(repo_id, episode_index), optional
+        )
     )
 
 

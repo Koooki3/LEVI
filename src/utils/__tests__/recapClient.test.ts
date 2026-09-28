@@ -146,6 +146,17 @@ describe("RECAP client", () => {
     );
   });
 
+  test("summary and episode ask with optional=true and read null", async () => {
+    respond(200, null);
+    expect(await fetchRecapSummary(ident)).toBeNull();
+    expect(await fetchRecapEpisode(5, ident)).toBeNull();
+    for (const call of calls) {
+      const url = new URL(call.url);
+      expect(url.searchParams.get("optional")).toBe("true");
+      expect(url.searchParams.get("repo_id")).toBe("local/plates");
+    }
+  });
+
   test("other failures still throw", async () => {
     respond(500, "boom");
     await expect(fetchRecapEpisode(5, ident)).rejects.toThrow("boom");

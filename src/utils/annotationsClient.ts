@@ -803,25 +803,34 @@ export async function cancelRecapJob(
   return response.json() as Promise<RecapJob>;
 }
 
+/** `optional=true`: the backend answers "no labels yet" with 200 `null`
+ * instead of a 404, which the browser would log as an error on every
+ * episode of every dataset. A 404 (an older backend) still means `null`. */
+function optionalUrl(path: string, ident: DatasetIdent): string {
+  const url = new URL(buildUrl(path, ident));
+  url.searchParams.set("optional", "true");
+  return url.toString();
+}
+
 /** Per-episode positive fractions of the current result; `null` when the
- * dataset has no advantage labels yet (404). */
+ * dataset has no advantage labels yet. */
 export async function fetchRecapSummary(
   ident: DatasetIdent,
   signal?: AbortSignal,
 ): Promise<RecapSummary | null> {
   if (!ENV_URL) return null;
   const response = await annotationFetch(
-    buildUrl("/api/recap/summary", ident),
+    optionalUrl("/api/recap/summary", ident),
     { cache: "no-store", signal },
   );
   if (response.status === 404) return null;
   if (!response.ok)
     throw new Error(await responseErrorMessage(response, "RECAP summary"));
-  return response.json() as Promise<RecapSummary>;
+  return (await response.json()) as RecapSummary | null;
 }
 
 /** One episode's per-frame value/advantage labels; `null` when the dataset
- * (or this episode) has no labels yet (404). */
+ * (or this episode) has no labels yet. */
 export async function fetchRecapEpisode(
   episodeId: number,
   ident: DatasetIdent,
@@ -829,13 +838,13 @@ export async function fetchRecapEpisode(
 ): Promise<RecapEpisode | null> {
   if (!ENV_URL) return null;
   const response = await annotationFetch(
-    buildUrl(`/api/recap/episodes/${episodeId}`, ident),
+    optionalUrl(`/api/recap/episodes/${episodeId}`, ident),
     { cache: "no-store", signal },
   );
   if (response.status === 404) return null;
   if (!response.ok)
     throw new Error(await responseErrorMessage(response, "RECAP episode"));
-  return response.json() as Promise<RecapEpisode>;
+  return (await response.json()) as RecapEpisode | null;
 }
 
 // ---------------------------------------------------------------------------

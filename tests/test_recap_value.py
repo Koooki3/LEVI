@@ -380,6 +380,15 @@ def test_fake_run_publishes_labels_and_serves_them(recap, capture):
         ).status_code
         == 404
     )
+    # The viewer asks with optional=true: "no labels yet" is a 200 null.
+    for path in ("/annotations/api/recap/summary", "/annotations/api/recap/episodes/0"):
+        quiet = client.get(path, params={"repo_id": repo, "optional": "true"})
+        assert quiet.status_code == 200 and quiet.json() is None
+    unknown = client.get(
+        "/annotations/api/recap/summary",
+        params={"repo_id": "local/no-such-dataset", "optional": "true"},
+    )
+    assert unknown.status_code != 200
 
     job = run(client, repo)
     assert job["status"] == "succeeded", job
@@ -430,6 +439,13 @@ def test_fake_run_publishes_labels_and_serves_them(recap, capture):
             "/annotations/api/recap/episodes/9", params={"repo_id": repo}
         ).status_code
         == 404
+    )
+    assert (
+        client.get(
+            "/annotations/api/recap/episodes/9",
+            params={"repo_id": repo, "optional": "true"},
+        ).json()
+        is None
     )
 
     # Storage: per-episode parquet, RLinf's advantages table, provenance.
