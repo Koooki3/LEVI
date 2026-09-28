@@ -68,6 +68,17 @@ PRESETS: dict[str, dict[str, Any]] = {
         "precision": "bfloat16",
         "action_dim": 7,
         "action_horizon": 10,
+        # sft_recap and rollouts_recap were built from raw captures filtered by
+        # filter_static_pose_frames.py (5 mm / 0.01 rad, ±2 frames around a
+        # gripper command flip kept).
+        "static_filter": {
+            "rule": "fr3_static_pose_v3",
+            "xyz_threshold_m": 0.005,
+            "euler_threshold_rad": 0.01,
+            "gripper_epsilon": 1e-6,
+            "gripper_protect_margin": 2,
+            "min_frames": 2,
+        },
         "gamma": 1.0,
         "failure_reward": -300.0,
         "lookahead": 10,
@@ -108,6 +119,21 @@ class BaseModels(BaseModel):
     tokenizer: str | None = None
 
 
+class StaticFilter(BaseModel):
+    """The static-pose frame filter the model's training data went through
+    (``levi/recap/static_filter.py``). A run on an unfiltered raw-capture
+    view applies it by default: values and advantages over the kept frames
+    only, the dropped frames left unlabelled."""
+
+    model_config = ConfigDict(extra="forbid")
+    rule: Literal["fr3_static_pose_v3"] = "fr3_static_pose_v3"
+    xyz_threshold_m: float = Field(default=0.005, gt=0)
+    euler_threshold_rad: float = Field(default=0.01, gt=0)
+    gripper_epsilon: float = Field(default=1e-6, ge=0)
+    gripper_protect_margin: int = Field(default=2, ge=0, le=100)
+    min_frames: int = Field(default=2, ge=1)
+
+
 class Manifest(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -142,6 +168,8 @@ class Manifest(BaseModel):
     # defaults 32 / 50; not used by the value forward).
     action_dim: int = Field(default=32, ge=1, le=1024)
     action_horizon: int = Field(default=50, ge=1, le=10000)
+    # Set when the training datasets were static-filtered (see StaticFilter).
+    static_filter: StaticFilter | None = None
     # Advantage fields (RLinf compute_advantages).
     return_min: float | None = None
     return_max: float | None = None
@@ -458,6 +486,7 @@ def inspect_weights(weights: Path, timeout: float = 600) -> dict[str, Any]:
 
 
 EDITABLE = (
+    "static_filter",
     "env_type",
     "model_type",
     "action_dim",

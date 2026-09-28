@@ -451,8 +451,15 @@ def run_episodes(critic: Critic, plan: dict, progress, batch_size: int) -> dict:
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for item in plan["episodes"]:
             ep, n = int(item["episode_index"]), int(item["length"])
+            # Static-filtered runs label only the kept rows; every frame is
+            # still decoded (sequential decode), the rest are not inferred.
+            keep = set(item["keep"]) if "keep" in item else None
             frame_ids, values, pending = [], [], []
-            for frame_index, task, images in episode_frames(plan, ep, views):
+            for position, (frame_index, task, images) in enumerate(
+                episode_frames(plan, ep, views)
+            ):
+                if keep is not None and position not in keep:
+                    continue
                 frame_ids.append(frame_index)
                 pending.append((images, task))
                 if len(pending) >= batch_size:
@@ -462,10 +469,13 @@ def run_episodes(critic: Critic, plan: dict, progress, batch_size: int) -> dict:
                         progress.values(done + len(values))
             if pending:
                 values.extend(_infer(critic, pool, pending, batch_size))
-            if len(values) != n:
-                raise ValueError(f"episode {ep}: {len(values)} values for {n} frames")
+            wanted = n if keep is None else len(keep)
+            if len(values) != wanted:
+                raise ValueError(
+                    f"episode {ep}: {len(values)} values for {wanted} frames"
+                )
             out[ep] = (np.asarray(frame_ids, np.int64), np.asarray(values, np.float32))
-            done += n
+            done += wanted
             if progress is not None:
                 progress.values(done)
     return out

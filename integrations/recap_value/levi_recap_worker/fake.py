@@ -53,11 +53,13 @@ def values(plan: dict, progress) -> tuple[dict, dict]:
     for item in plan["episodes"]:
         ep, n = int(item["episode_index"]), int(item["length"])
         frames = _frames(plan, ep, n)
+        if "keep" in item:  # static-filtered: only the kept frames
+            frames = frames[np.asarray(item["keep"], dtype=np.int64)]
         success = item.get("success") is not False
-        value = np.clip(curve(n, success, ep, scale, penalty), v_min, v_max)
+        value = np.clip(curve(len(frames), success, ep, scale, penalty), v_min, v_max)
         out[ep] = (frames, value.astype(np.float32))
         if delay:
             time.sleep(delay)
-        done += n
+        done += len(frames)
         progress.values(done)
     return out, {"provider": "fake", "model": "deterministic time-to-go curve"}

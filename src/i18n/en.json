@@ -1315,5 +1315,9 @@
   "report.empty.missingDir": "Report folder not found",
   "report.empty.missingDirBody": "LEVI_REPORT_DIR points to a folder that does not exist (yet). The page will show the report as soon as it appears.",
   "report.empty.missingDoc": "The report has no document yet",
-  "report.empty.missingDocBody": "The folder exists but holds no LEVI.md. The page updates as soon as it is written."
+  "report.empty.missingDocBody": "The folder exists but holds no LEVI.md. The page updates as soon as it is written.",
+  "The model was trained on static-filtered data: near-static frames are left unlabelled, and returns and advantages run over the kept frames": "The model was trained on static-filtered data: near-static frames are left unlabelled, and returns and advantages run over the kept frames",
+  "static filter": "static filter",
+  "Computed with base-model files that are not verified official releases — for development only": "Computed with base-model files that are not verified official releases — for development only",
+  "dev base model": "dev base model"
 }

@@ -33,6 +33,15 @@ export interface RecapCurrent {
   lookahead: number;
   positive_fraction: number;
   stale: boolean;
+  /** Set when the training data's static-pose filter was applied: only the
+   * kept frames are labelled. */
+  static_filter?: {
+    rule: string | null;
+    kept_frames: number | null;
+    frames: number | null;
+  } | null;
+  /** Base-model folders not verified as official files (development only). */
+  dev_only_base_models?: string[];
 }
 
 export type RecapJobState =
@@ -96,6 +105,11 @@ export interface RecapEpisode {
   value: number[];
   advantage: number[];
   positive: boolean[];
+  /** True when only the frames kept by the training static filter are
+   * listed; the frame indices then skip the unlabelled (dropped) frames. */
+  static_filter?: boolean;
+  /** Frames in the episode (labelled or not). */
+  episode_frames?: number | null;
 }
 
 /** Dispatched on `window` when a run finishes, so other views (the episode

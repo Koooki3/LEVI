@@ -25,6 +25,7 @@ place; a run refuses without it.
 ```bash
 .venv/bin/python -m levi_recap_worker.cli --check
 .venv/bin/python -m levi_recap_worker.cli --inspect path/to/full_weights.pt
+.venv/bin/python -m levi_recap_worker.cli --strict-check path/to/checkpoint_folder   # manifest.json → missing/unexpected keys
 .venv/bin/python -m levi_recap_worker.cli --selftest [--size tiny|full] [--device cuda|cpu|both] [--frames N]
 .venv/bin/python -m levi_recap_worker.cli --plan plan.json --output result.json --progress progress.json
 ```
@@ -63,9 +64,23 @@ and in the `rlinf-openpi==0.1.1` package RLinf installs.
 are decoded with PyAV (RGB24, in order, frame i for row `frame_index` i),
 converted to LeRobot's float [0, 1] and back through openpi's `_parse_image`
 (`(255·x).astype(uint8)`, an exact round trip), and the manifest's `views`
-fill the three image slots as LiberoInputs / FrankaEEInputs do. The rest —
+fill the three image slots as LiberoInputs / FrankaEEInputs do (a padded
+slot's mask is off unless the manifest's `model_type` is `pi0_fast`).
+A plan episode with a `keep` list (the training static filter) is decoded in
+full but only its kept rows are inferred. The rest —
 resize-with-pad to 224, [−1, 1], the `Task: {prompt}.` prompt, tokenisation,
 bf16 with RLinf's fp32 layers and the two-stage forward — is RLinf's own code
 (`_prepare_observation_cpu`, `infer_batch`). Robot state is not a value-model
 input. Weights load strictly: any missing or unexpected key fails the job
 (an absent `lm_head.weight`, unused by the value, is reported only).
+
+## Checking against the frozen FR3 RECAP sources
+
+`tests/test_fr3_preprocessing.py` (`.venv/bin/python -m unittest discover
+tests`) runs the frozen FR3 value r1 code — `build_input_transforms(env_type=
+"fr3_recap")` and `_prepare_observation_cpu` from the package's
+`recap_frozen_sources.tar.gz` (`LEVI_RECAP_FROZEN_SRC`) — against the
+worker's preparation, and, with `LEVI_RECAP_FROZEN_PREP` from
+`tools/frozen_prep.py` (run in an RLinf environment), compares real decoded
+frames, masks and Gemma3 tokens bit for bit. Both skip without the sources.
+

@@ -2909,6 +2909,9 @@ class RecapRunRequest(BaseModel):
     # "sft": demonstrations, every episode a success and every frame positive
     # (RLinf's dataset type); the default reads each episode's outcome.
     dataset_type: Literal["rollout", "sft"] = "rollout"
+    # The training-data static-pose filter (docs/RECAP.md): "auto" applies it
+    # when the checkpoint names one and the dataset is a raw-capture view.
+    static_filter: Literal["auto", "on", "off"] = "auto"
 
 
 def _recap_call(call):
@@ -2954,6 +2957,7 @@ def recap_run(request: RecapRunRequest, repo_id: str | None = None) -> JSONRespo
             positive_quantile=request.positive_quantile,
             threshold=request.threshold,
             dataset_type=request.dataset_type,
+            static_filter=request.static_filter,
         )
     )
     return JSONResponse(recap_jobs.public(job), status_code=202)

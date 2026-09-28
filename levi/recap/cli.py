@@ -7,8 +7,8 @@ levi recap checkpoints [--verify] [--json]
 levi recap inspect <n>                      strict key check (worker, CPU)
 levi recap base import <folder> [--name] [--official repo] [--sha256-file f] [--weights] [--label TEXT]
 levi recap base list
-levi recap threshold <repo_id> <repo_id> … [--positive-quantile q] [--set <checkpoint> --provenance TEXT]
-levi recap run <repo_id> --checkpoint <n> [--episodes 0,3] [--threshold X]
+levi recap threshold <repo_id> <repo_id> … [--positive-quantile q] [--set <checkpoint> --provenance-text TEXT]
+levi recap run <repo_id> --checkpoint <n> [--episodes 0,3] [--threshold X] [--static-filter auto|on|off]
 levi recap show <repo_id> [--episode N]
 """
 
@@ -60,6 +60,12 @@ def _manifest_options(parser: argparse.ArgumentParser) -> None:
         type=_provenance,
         action="append",
         help="key=text: where a number came from (repeatable)",
+    )
+    group.add_argument(
+        "--no-static-filter",
+        dest="no_static_filter",
+        action="store_true",
+        help="the training data was not static-filtered (clears static_filter)",
     )
     group.add_argument("--variant", dest="critic_expert_variant")
     group.add_argument("--views", type=_views, help="base=KEY,left_wrist=KEY|none,…")
@@ -113,6 +119,8 @@ def _fields(args) -> dict:
     }
     if base:
         fields["base_models"] = base
+    if getattr(args, "no_static_filter", False):
+        fields["static_filter"] = None
     if getattr(args, "provenance", None):
         merged: dict = {}
         for item in args.provenance:
@@ -193,6 +201,13 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--positive-quantile", type=float)
     run.add_argument("--threshold", type=float)
     run.add_argument("--sft", action="store_true", help="demonstrations: all success")
+    run.add_argument(
+        "--static-filter",
+        choices=["auto", "on", "off"],
+        default="auto",
+        help="the training data's static-pose filter (auto: raw-capture views "
+        "when the checkpoint names one)",
+    )
     show = sub.add_parser("show", help="the current labels of a dataset")
     show.add_argument("repo_id")
     show.add_argument("--episode", type=int)
@@ -314,6 +329,7 @@ def _run(args) -> int:
         positive_quantile=args.positive_quantile,
         threshold=args.threshold,
         dataset_type="sft" if args.sft else "rollout",
+        static_filter=args.static_filter,
         watch=False,
     )
     print(f"job {job['id']} started ({job['provider']})", file=sys.stderr)

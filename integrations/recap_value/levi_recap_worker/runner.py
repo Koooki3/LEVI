@@ -50,7 +50,9 @@ def run_plan(plan_path: Path, output: Path, progress_path: Path | None) -> int:
     started = time.time()
     try:
         plan = json.loads(Path(plan_path).read_text())
-        total = int(sum(e["length"] for e in plan["episodes"]))
+        total = int(
+            sum(len(e.get("keep", ())) or e["length"] for e in plan["episodes"])
+        )
         progress = Progress(progress_path, total)
         provider = plan["provider"]
         if provider == "fake":

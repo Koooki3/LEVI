@@ -450,6 +450,27 @@ export const RecapValueSection: React.FC<Props> = ({
             {"· "}
             {percent(episodeFraction)} <T>positive frames</T>
           </span>
+          {episode.static_filter && episode.episode_frames != null && (
+            <span
+              title={t(
+                "The model was trained on static-filtered data: near-static frames are left unlabelled, and returns and advantages run over the kept frames",
+              )}
+            >
+              {"· "}
+              <T>static filter</T> {episode.frame_index.length}/
+              {episode.episode_frames}
+            </span>
+          )}
+          {(current?.dev_only_base_models?.length ?? 0) > 0 && (
+            <span
+              className="recap-stale"
+              title={t(
+                "Computed with base-model files that are not verified official releases — for development only",
+              )}
+            >
+              <T>dev base model</T>
+            </span>
+          )}
           {current?.stale && (
             <span
               className="recap-stale"

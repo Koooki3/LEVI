@@ -307,6 +307,93 @@ def _levi_commit() -> str | None:
     return done.stdout.strip() or None if done.returncode == 0 else None
 
 
+def _static_filter(
+    ds: Dataset,
+    manifest: checkpoints.Manifest,
+    mode: str,
+    lengths: dict[int, int],
+) -> tuple[dict[str, Any], dict[int, list[int]]]:
+    """Which frames of each episode the training filter keeps.
+
+    Returns the run's filter record and ``{episode: kept positions}`` (empty
+    when the filter is not applied). Only a raw-capture view converted one
+    row per captured frame (``timing: retime``, no static filter of its own)
+    can be filtered: the decision reads the capture's pose and gripper CSVs,
+    exactly like the training pipeline."""
+    if mode not in ("auto", "on", "off"):
+        raise RecapError(400, "static_filter is auto, on or off")
+    params = manifest.static_filter.model_dump() if manifest.static_filter else None
+    record: dict[str, Any] = {"mode": mode, "applied": False, "params": params}
+    if params is None:
+        if mode == "on":
+            raise RecapError(
+                400,
+                f"Checkpoint {manifest.name} names no training static filter "
+                "(manifest static_filter)",
+            )
+        record["reason"] = "the checkpoint's training data was not static-filtered"
+        return record, {}
+    if mode == "off":
+        record["reason"] = "turned off for this run"
+        return record, {}
+    view = catalog.read(ds.root / "meta/levi_view.json", {})
+    conversion = catalog.read(ds.root / "meta/levi_conversion.json", {})
+    options = conversion.get("options") or {}
+    source_root = view.get("source_root")
+    problem = None
+    if not source_root or view.get("input_format") != "robot_capture":
+        problem = (
+            "the dataset is not a raw robot-capture view (a LeRobot dataset "
+            "is taken as already filtered like the training data)"
+        )
+    elif options.get("timing") != "retime" or options.get("filter_static"):
+        problem = (
+            "the view was not converted one row per captured frame "
+            "(timing retime, no static filter of its own)"
+        )
+    elif not Path(source_root).is_dir():
+        problem = f"the raw capture {source_root} is missing"
+    if problem:
+        if mode == "on":
+            raise RecapError(400, f"Cannot apply the static filter: {problem}")
+        record["reason"] = problem
+        return record, {}
+    from . import static_filter as sf
+
+    keeps: dict[int, list[int]] = {}
+    skipped: dict[int, str] = {}
+    kept_total = frames_total = 0
+    for ep, length in lengths.items():
+        demo = ds.rows[ep].get("source_demo")
+        if not demo:
+            skipped[ep] = "static filter: no source_demo for this episode"
+            continue
+        decision = sf.kept_positions(Path(source_root) / str(demo), params)
+        if decision["frames"] != length:
+            skipped[ep] = (
+                f"static filter: {decision['frames']} capture rows vs {length} "
+                "view frames"
+            )
+            continue
+        if decision.get("skipped"):
+            skipped[ep] = f"static filter: {decision['skipped']} (training drops it)"
+            continue
+        keeps[ep] = decision["keep"]
+        kept_total += len(decision["keep"])
+        frames_total += length
+    record.update(
+        applied=True,
+        rule=sf.RULE,
+        source=sf.SOURCE,
+        frames=frames_total,
+        kept_frames=kept_total,
+        dropped_fraction=(1 - kept_total / frames_total) if frames_total else 0.0,
+    )
+    if skipped:
+        record["skipped"] = skipped
+    return record, keeps
+
+
 def start(
     repo_id: str,
     checkpoint: str,
@@ -316,9 +403,16 @@ def start(
     positive_quantile: float | None = None,
     threshold: float | None = None,
     dataset_type: str = "rollout",
+    static_filter: str = "auto",
     watch: bool = True,
 ) -> dict[str, Any]:
-    """Validate, write the plan and start the worker; returns the job."""
+    """Validate, write the plan and start the worker; returns the job.
+
+    ``static_filter`` (auto / on / off): when the checkpoint's training data
+    was static-filtered, keep only the frames that filter keeps (values,
+    returns and advantages over the kept sequence; dropped frames stay
+    unlabelled). ``auto`` applies it to raw-capture views and leaves other
+    datasets as they are."""
     ds = dataset(repo_id)
     try:
         folder, manifest = checkpoints.load(checkpoint)
@@ -375,6 +469,14 @@ def start(
         if not ds.data_path(ep).is_file():
             raise RecapError(400, f"Episode {ep} has no data parquet")
         lengths[ep] = length
+    filtering, keeps = _static_filter(ds, manifest, static_filter, lengths)
+    for ep, reason in filtering.pop("skipped", {}).items():
+        skipped[str(ep)] = reason
+        success.pop(ep, None)
+        lengths.pop(ep, None)
+        keeps.pop(ep, None)
+    if not success:
+        raise RecapError(400, "No episode is left to label after the static filter")
     request = {
         "episodes": episodes,
         "lookahead": lookahead if lookahead is not None else manifest.lookahead,
@@ -385,6 +487,7 @@ def start(
         ),
         "threshold": threshold,
         "dataset_type": dataset_type,
+        "static_filter": static_filter,
     }
     if request["lookahead"] < 1:
         raise RecapError(400, "lookahead must be at least 1")
@@ -403,7 +506,9 @@ def start(
         result_path = base / "results" / f"{job_id}.json"
         log_path = _jobs_dir(ds.name) / f"{job_id}.log"
         progress_path = _jobs_dir(ds.name) / f"{job_id}.progress.json"
-        total = int(sum(lengths.values()))
+        total = int(
+            sum(len(keeps[ep]) if ep in keeps else n for ep, n in lengths.items())
+        )
         plan = {
             "schema": PLAN_SCHEMA,
             "job_id": job_id,
@@ -427,9 +532,15 @@ def start(
                 "tasks": {str(k): v for k, v in ds.tasks.items()},
             },
             "episodes": [
-                {"episode_index": ep, "length": lengths[ep], "success": success[ep]}
+                {
+                    "episode_index": ep,
+                    "length": lengths[ep],
+                    "success": success[ep],
+                    **({"keep": keeps[ep]} if ep in keeps else {}),
+                }
                 for ep in sorted(lengths)
             ],
+            "static_filter": filtering,
             "batch_size": _batch_size(),
             "device": _device() if manifest.provider == "rlinf" else "cpu",
         }
@@ -449,6 +560,7 @@ def start(
             "request": request,
             "success": {str(k): v for k, v in success.items()},
             "skipped_episodes": skipped,
+            "static_filter": filtering,
             "plan_path": str(plan_path),
             "result_path": str(result_path),
             "log_path": str(log_path),
@@ -742,7 +854,7 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     sft = request["dataset_type"] == "sft"
     lookahead = int(request["lookahead"])
     gamma = float(manifest.gamma)
-    total = int(sum(e["length"] for e in plan["episodes"]))
+    total = int(sum(len(e.get("keep", ())) or e["length"] for e in plan["episodes"]))
     _set_stage(job, "advantages", 0, total)
     grouped = {int(k): g for k, g in table.groupby("episode_index")}
     per_episode: dict[int, dict[str, np.ndarray]] = {}
@@ -762,14 +874,17 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
             columns=["frame_index", "timestamp"],
         )
         expected = data.column("frame_index").to_numpy().astype(np.int64)
-        if (
-            len(frames) != n
-            or len(expected) != n
-            or not np.array_equal(frames, expected)
-        ):
+        timestamps = data.column("timestamp").to_numpy().astype(np.float64)
+        if len(expected) != n:
+            raise ValueError(f"episode {ep}: the dataset has {len(expected)} rows, not {n}")
+        if "keep" in item:
+            # Static-filtered: the kept sequence is the episode.
+            keep = np.asarray(item["keep"], dtype=np.int64)
+            expected, timestamps = expected[keep], timestamps[keep]
+        if len(frames) != len(expected) or not np.array_equal(frames, expected):
             raise ValueError(
-                f"episode {ep}: {len(frames)} values for {n} frames, or frame "
-                "indices that differ from the dataset"
+                f"episode {ep}: {len(frames)} values for {len(expected)} frames, "
+                "or frame indices that differ from the dataset"
             )
         if not np.all(np.isfinite(values)):
             raise ValueError(f"episode {ep}: non-finite values")
@@ -782,11 +897,11 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
                 f"episode {ep}: values outside [{manifest.v_min}, {manifest.v_max}]"
             )
         returns, rewards = advantage.episode_rewards(
-            n, bool(item["success"]), gamma, float(manifest.failure_reward)
+            len(frames), bool(item["success"]), gamma, float(manifest.failure_reward)
         )
         per_episode[ep] = {
             "frame_index": frames,
-            "timestamp": data.column("timestamp").to_numpy().astype(np.float64),
+            "timestamp": timestamps,
             "value": values,
             "return": returns,
             "reward": rewards,
@@ -858,6 +973,9 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
             str(k): ("success" if v else "failure") for k, v in job["success"].items()
         },
         "skipped_episodes": job.get("skipped_episodes", {}),
+        "static_filter": {
+            k: v for k, v in (plan.get("static_filter") or {}).items() if k != "skipped"
+        },
         "worker": result.get("provenance", {}),
         "base_models": plan["checkpoint"].get("base_models"),
         "dev_only_base_models": plan["checkpoint"].get("dev_only_base_models", []),
@@ -913,6 +1031,21 @@ def current(ds: Dataset) -> dict[str, Any] | None:
         "lookahead": record["lookahead"],
         "positive_fraction": record["positive_fraction"],
         "stale": bool(reasons),
+        # Frames labelled / frames in the labelled episodes when the
+        # training static filter was applied (else null).
+        "static_filter": _filter_brief(record),
+        "dev_only_base_models": record.get("dev_only_base_models") or [],
+    }
+
+
+def _filter_brief(record: dict[str, Any]) -> dict[str, Any] | None:
+    info = record.get("static_filter") or {}
+    if not info.get("applied"):
+        return None
+    return {
+        "rule": info.get("rule"),
+        "kept_frames": info.get("kept_frames"),
+        "frames": info.get("frames"),
     }
 
 
@@ -952,6 +1085,10 @@ def episode_payload(repo_id: str, episode: int) -> dict[str, Any]:
         "value": [float(v) for v in columns["value"]],
         "advantage": [float(v) for v in columns["advantage"]],
         "positive": columns["positive"],
+        # With the training static filter only kept frames are listed: the
+        # frame indices skip over the dropped (unlabelled) ones.
+        "static_filter": bool((record.get("static_filter") or {}).get("applied")),
+        "episode_frames": ds.rows.get(episode, {}).get("length"),
     }
 
 

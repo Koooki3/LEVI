@@ -1315,5 +1315,9 @@
   "report.empty.missingDir": "找不到报告目录",
   "report.empty.missingDirBody": "LEVI_REPORT_DIR 指向的目录（尚）不存在。目录出现后页面会自动显示报告。",
   "report.empty.missingDoc": "报告目录中还没有正文",
-  "report.empty.missingDocBody": "目录存在，但还没有 LEVI.md。写入后页面会自动更新。"
+  "report.empty.missingDocBody": "目录存在，但还没有 LEVI.md。写入后页面会自动更新。",
+  "The model was trained on static-filtered data: near-static frames are left unlabelled, and returns and advantages run over the kept frames": "模型的训练数据经过静止帧过滤：近乎静止的帧不打标签，回报与优势只在保留的帧上计算",
+  "static filter": "静止帧过滤",
+  "Computed with base-model files that are not verified official releases — for development only": "所用基础模型文件未经官方版本校验——仅供开发",
+  "dev base model": "开发用基础模型"
 }
