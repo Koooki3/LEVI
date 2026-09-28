@@ -1266,3 +1266,14 @@ def test_a_review_can_put_its_samples_on_the_final_state(bench):
     assert times[0] == 0.0
     assert times[-1] == pytest.approx(1.9)
     assert times[-2] == pytest.approx(1.4)
+
+
+def test_a_run_with_two_requests_in_flight_completes_every_episode(bench):
+    wb, context = bench
+    config = wb.store.get("providers", "fixture")
+    config["requests_in_flight"] = 2
+    wb.store.put("providers", "fixture", config)
+    context = context.model_copy(update={"episodes": [0, 1]})
+    run = execute(wb, wb.plan(context), pilot=False)
+    assert run["status"] == "waiting_for_review", run
+    assert run["completed"] == [0, 1]

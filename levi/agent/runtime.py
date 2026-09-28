@@ -169,6 +169,44 @@ def anchor_to_draft(output, summary):
     return output.model_copy(update={"proposals": proposals})
 
 
+# An episode step asks the run to stop (paused or cancelled) with this.
+STOP = object()
+
+
+def run_episodes(step, episodes, width=1):
+    """``step`` for each episode, in order, at most ``width`` at a time.
+
+    One at a time is the plain loop. With more, the next episode starts as
+    soon as one finishes; a failure or a stop request lets the running ones
+    finish and starts no more, then the first failure is raised."""
+    if width <= 1:
+        for episode in episodes:
+            if step(episode) is STOP:
+                return STOP
+        return None
+    from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+
+    queue, pending, failure, stopped = iter(episodes), set(), None, False
+    with ThreadPoolExecutor(width, thread_name_prefix="levi-episode") as pool:
+        while True:
+            while failure is None and not stopped and len(pending) < width:
+                episode = next(queue, None)
+                if episode is None:
+                    break
+                pending.add(pool.submit(step, episode))
+            if not pending:
+                break
+            done, pending = wait(pending, return_when=FIRST_COMPLETED)
+            for future in done:
+                if future.exception() is not None:
+                    failure = failure or future.exception()
+                elif future.result() is STOP:
+                    stopped = True
+    if failure is not None:
+        raise failure
+    return STOP if stopped else None
+
+
 class Workbench:
     def __init__(self, state, provider=None):
         self.store = Store(state)
@@ -445,7 +483,8 @@ class Workbench:
                 remaining = [
                     ep for ep in remaining if ep == run["plan"]["pilot_episode"]
                 ]
-            for episode in remaining:
+
+            def episode_step(episode):
                 run = self.store.get("runs", id)
                 if lease_lost.is_set() or not self.store.claim(id, owner):
                     raise ValueError(
@@ -474,7 +513,7 @@ class Workbench:
                             else RunStatus.PAUSED
                         ),
                     )
-                    return
+                    return STOP
                 if (
                     time.monotonic() - started + run["elapsed_seconds"]
                     >= context.budget.max_seconds
@@ -645,7 +684,7 @@ class Workbench:
                         self.store.mutate(
                             "runs", id, lambda r: r.update(status=RunStatus.CANCELLED)
                         )
-                        return
+                        return STOP
                     self.store.put(
                         "shards",
                         f"{id}:{episode}",
@@ -671,6 +710,14 @@ class Workbench:
                     if pilot:
                         raise
                     self._set_aside(id, context, episode, exc)
+                return None
+
+            # A profile may keep several requests in flight (a server that
+            # batches them decodes one while it reads the other's prompt);
+            # the pilot and the default stay one episode at a time.
+            width = 1 if pilot else config.requests_in_flight
+            if run_episodes(episode_step, remaining, width) is STOP:
+                return
             self.prepare_changes(id)
             self.store.mutate("runs", id, lambda r: r.update(status=RunStatus.WAITING))
             # A model run is billed through LEVI, so its cost is recorded here

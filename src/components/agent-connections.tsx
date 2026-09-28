@@ -15,6 +15,7 @@ export type Connection = {
   think?: boolean;
   fold_system?: boolean;
   prompt_style?: "full" | "lean";
+  requests_in_flight?: number;
   name: string;
   model: string;
   base_url: string;

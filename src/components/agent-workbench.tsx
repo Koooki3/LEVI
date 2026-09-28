@@ -158,6 +158,8 @@ export default function AgentWorkbench() {
   const [think, setThink] = useState(false);
   const [foldSystem, setFoldSystem] = useState(false);
   const [promptStyle, setPromptStyle] = useState<"full" | "lean">("full");
+  // Not edited here; kept so saving a profile does not reset it.
+  const [inFlight, setInFlight] = useState(1);
   const [name, setName] = useState("model");
   const [url, setUrl] = useState("");
   const [model, setModel] = useState("");
@@ -466,6 +468,7 @@ export default function AgentWorkbench() {
                 setThink(p.think ?? false);
                 setFoldSystem(p.fold_system ?? false);
                 setPromptStyle(p.prompt_style ?? "full");
+                setInFlight(p.requests_in_flight ?? 1);
                 setName(p.name);
                 setUrl(p.base_url);
                 setModel(p.model);
@@ -501,6 +504,7 @@ export default function AgentWorkbench() {
                     fold_system: providerKind === "openai-local" && foldSystem,
                     // Saving replaces the whole profile: send the style shown.
                     prompt_style: localKind ? promptStyle : "full",
+                    requests_in_flight: localKind ? inFlight : 1,
                   });
                   setProviders(await api<Provider[]>("/providers"));
                   setProvider(name);

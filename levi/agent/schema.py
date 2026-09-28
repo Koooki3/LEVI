@@ -76,6 +76,11 @@ class ProviderConfig(Contract):
     # document and asks the model to cite. Paired runs against a bare model
     # call showed the full prompt costing quality and time on local models.
     prompt_style: Literal["full", "lean"] = "full"
+    # Episodes a run sends at once (one request each in flight). A server
+    # that batches requests (vLLM --max-num-seqs) decodes one answer while it
+    # reads another prompt; more than it batches only queues. Greedy answers
+    # can then differ in the last digits between runs (batched arithmetic).
+    requests_in_flight: int = Field(default=1, ge=1, le=8)
 
     @model_validator(mode="before")
     @classmethod
