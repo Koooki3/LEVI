@@ -162,6 +162,11 @@ def main():
         from .recap.cli import main as recap
 
         raise SystemExit(recap(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "export":
+        configure()
+        from .training_manifest import main as export
+
+        raise SystemExit(export(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "stop":
         from .agent.core import stop
 
@@ -211,7 +216,8 @@ def main():
         epilog=(
             "Also available: stop (stop the shared service), clean (bounded "
             "cache cleanup), migrate, convert, agent, sam3, recap (RECAP value "
-            "model: checkpoints and advantage labels), sample (DROID test "
+            "model: checkpoints and advantage labels), export (training manifests: which "
+            "frames enter a learner's loss, with what weight), sample (DROID test "
             "samples), namespace (isolated experiments over one dataset), docs (check or regenerate the documentation). Each takes its own "
             "--help."
         ),

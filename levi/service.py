@@ -594,6 +594,56 @@ def diagnostics(payload: Diagnostic):
     )
 
 
+# ------------------------------------------------------------ training manifest
+# Which frames of a dataset enter a learner's loss (levi/training_manifest.py,
+# docs/TRAINING_MANIFEST.md). Always written under the workspace's exports.
+
+
+class TrainingManifest(BaseModel):
+    repo_id: str
+    operation: str
+    params: dict[str, float | str] = Field(default_factory=dict)
+    tasks: list[str] | None = None
+    episodes: list[int] | None = Field(default=None, max_length=100000)
+    anchored_run: str | None = Field(default=None, max_length=128)
+    anchored_tasks: list[str] | None = None
+    recap_revision: str | None = Field(default=None, max_length=64)
+    allow_stale: bool = False
+
+
+@app.get("/api/levi/manifest/operations")
+def manifest_operations():
+    from .training_manifest import operations
+
+    return {"operations": operations()}
+
+
+@app.get("/api/levi/manifest")
+def manifest_list(repo_id: str):
+    from .training_manifest import listing
+
+    return {"manifests": listing(repo_id)}
+
+
+@app.post("/api/levi/manifest")
+def manifest_build(payload: TrainingManifest):
+    from .training_manifest import build
+
+    result = build(
+        payload.repo_id,
+        payload.operation,
+        payload.params,
+        tasks=payload.tasks,
+        episodes=payload.episodes,
+        anchored_run=payload.anchored_run,
+        anchored_tasks=payload.anchored_tasks,
+        recap_revision=payload.recap_revision,
+        allow_stale=payload.allow_stale,
+    )
+    # The per-episode table stays in manifest.json on disk.
+    return {k: v for k, v in result.items() if k != "episodes"}
+
+
 # ------------------------------------------------------------ report
 # A read-only view of LEVI_REPORT_DIR (levi/report.py); the page polls
 # /version and refetches the document only when it changed.

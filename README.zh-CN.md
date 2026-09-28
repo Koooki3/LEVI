@@ -82,6 +82,7 @@ LEVI 会对照数据目录校验解析出的任务规格，等你批准后才执
 | [数据质量](docs/QUALITY.md) | 结构化检查、内容审查、结局标签、审核标记与审核清单 |
 | [转换](docs/CONVERSION.md) | 输入格式、检查、帧时间模式、选项、性能、溯源 |
 | [RECAP](docs/RECAP.md) | RECAP 价值数据集格式与使用方式 |
+| [训练清单](docs/TRAINING_MANIFEST.md) | 哪些帧以什么权重进入训练 loss，附完整来源记录；训练端读取器 |
 | [SAM3](docs/SAM3.md) | 可选的模型辅助物体掩码 |
 | [评测记录](docs/EVALUATION.md) | 记录人工标注过程；人工与 agent 子任务标注按模式的质量与成本记录 |
 | [内置知识](docs/KNOWLEDGE.md) | LEVI 中所有模型都遵循的、与数据集无关的规则，以及本地记忆如何提升为内置知识 |

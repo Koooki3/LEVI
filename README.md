@@ -82,6 +82,7 @@ LEVI checks the spec against the catalog and waits for your approval before anyt
 | [Data quality](docs/QUALITY.md) | Structural checks, content review, labels, flags and review manifests |
 | [Conversion](docs/CONVERSION.md) | Input formats, inspection, timing modes, options, performance, provenance |
 | [RECAP](docs/RECAP.md) | The RECAP value-dataset format and how to consume it |
+| [Training manifests](docs/TRAINING_MANIFEST.md) | Which frames enter a learner's loss and with what weight, with provenance; the trainer-side reader |
 | [SAM3](docs/SAM3.md) | Optional model-assisted object masks |
 | [Evaluation records](docs/EVALUATION.md) | Recording human annotation work; per-mode quality and cost records of human and agent subtask annotation |
 | [Built-in knowledge](docs/KNOWLEDGE.md) | Dataset-agnostic rules every model in LEVI follows, and how local memory is promoted into them |

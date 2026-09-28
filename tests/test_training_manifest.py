@@ -1,0 +1,462 @@
+"""Training manifests: operations, provenance, refusals, CLI/API and the
+standalone trainer-side reader (integrations/training_manifest)."""
+
+import importlib.util
+import json
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pyarrow.parquet as pq
+import pytest
+
+from levi import catalog, paths
+from levi import training_manifest as tm
+
+PROJECT = Path(__file__).resolve().parents[1]
+TASKS = ["stack the plates", "pick the screws"]
+# episode -> (task, robot flag, frames)
+EPISODES = {
+    0: (0, True, 12),
+    1: (0, False, 10),
+    2: (1, True, 8),
+}
+
+
+def _dataset(root: Path) -> Path:
+    (root / "meta").mkdir(parents=True)
+    (root / "data/chunk-000").mkdir(parents=True)
+    info = {
+        "codebase_version": "v2.1",
+        "robot_type": "generic_arm",
+        "fps": 10,
+        "total_episodes": len(EPISODES),
+        "total_frames": sum(n for *_, n in EPISODES.values()),
+        "total_tasks": 2,
+        "chunks_size": 1000,
+        "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
+        "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
+        "features": {
+            "action": {"dtype": "float32", "shape": [2], "names": ["x", "gripper"]},
+            "observation.state": {
+                "dtype": "float32",
+                "shape": [2],
+                "names": ["x", "gripper"],
+            },
+            "timestamp": {"dtype": "float32", "shape": [1], "names": None},
+            "episode_index": {"dtype": "int64", "shape": [1], "names": None},
+            "frame_index": {"dtype": "int64", "shape": [1], "names": None},
+            "index": {"dtype": "int64", "shape": [1], "names": None},
+            "task_index": {"dtype": "int64", "shape": [1], "names": None},
+        },
+    }
+    (root / "meta/info.json").write_text(json.dumps(info))
+    (root / "meta/tasks.jsonl").write_text(
+        "".join(
+            json.dumps({"task_index": i, "task": t}) + "\n" for i, t in enumerate(TASKS)
+        )
+    )
+    rows, start = [], 0
+    for ep, (task, flag, n) in EPISODES.items():
+        rows.append(
+            {
+                "episode_index": ep,
+                "tasks": [TASKS[task]],
+                "length": n,
+                "is_success": flag,
+                "rollout_source_demo": f"/rollouts/demo_{ep:04d}",
+            }
+        )
+        t = np.arange(n, dtype=float) / 10
+        pd.DataFrame(
+            {
+                "action": [[float(x), 1.0] for x in t],
+                "observation.state": [[float(x), 1.0] for x in t],
+                "timestamp": t,
+                "episode_index": [ep] * n,
+                "frame_index": range(n),
+                "index": range(start, start + n),
+                "task_index": [task] * n,
+            }
+        ).to_parquet(root / f"data/chunk-000/episode_{ep:06d}.parquet")
+        start += n
+    (root / "meta/episodes.jsonl").write_text(
+        "".join(json.dumps(r) + "\n" for r in rows)
+    )
+    return root
+
+
+@pytest.fixture
+def repo(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "EXPORTS", tmp_path / "exports")
+    root = _dataset(tmp_path / "rollouts")
+    response = client.post("/api/levi/catalog", json={"path": str(root)})
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
+def _name(repo):
+    return repo.split("/", 1)[1]
+
+
+def _anchored(name, outcomes, run_id="anchored-20260928-0001"):
+    from levi.agent.anchored import builtin
+    from levi.agent.store import Store
+
+    store = Store(catalog.STATE)
+    spec = builtin()["plates-release-ar2"].model_dump(by_alias=True)
+    store.put(
+        "runs",
+        run_id,
+        {
+            "id": run_id,
+            "status": "succeeded",
+            "created_at": 1.0,
+            "dataset_key": name,
+            "context": {"workflow": {"kind": "anchored", "anchored": spec}},
+            "provider_config": {"kind": "openai-local", "name": "q", "model": "m"},
+        },
+    )
+    for ep, outcome in outcomes.items():
+        store.put(
+            "anchored",
+            f"{run_id}:{ep}",
+            {
+                "episode_index": ep,
+                "outcome": outcome,
+                "basis": {"undecided_labels": ["white"] if ep == 1 else []},
+                "events": [],
+            },
+        )
+    return run_id
+
+
+def _recap(repo, threshold=0.0):
+    """A published RECAP revision: frame f of each episode is positive when
+    f is even; the last frame of episode 0 is unlabelled (static-filtered)."""
+    from levi.recap import jobs, store
+
+    ds = jobs.dataset(repo)
+    episodes = {}
+    for ep, (*_, n) in EPISODES.items():
+        frames = np.arange(n - 1 if ep == 0 else n)
+        adv = np.where(frames % 2 == 0, 0.5, -0.5)
+        episodes[ep] = {
+            "frame_index": frames,
+            "timestamp": frames / 10,
+            "value": -frames / 100,
+            "value_next": np.zeros(len(frames)),
+            "reward_sum": np.zeros(len(frames)),
+            "reward_sum_raw": np.zeros(len(frames)),
+            "return": np.zeros(len(frames)),
+            "advantage": adv,
+            "num_valid_rewards": np.ones(len(frames), dtype=np.int64),
+            "positive": adv >= threshold,
+        }
+    return store.publish(
+        ds.name,
+        episodes,
+        {
+            "checkpoint": {"name": "fake-a", "sha256": "0" * 64},
+            "provider": "fake",
+            "threshold": threshold,
+            "threshold_source": "request",
+            "lookahead": 10,
+            "dataset_type": "rollout",
+            "fingerprint": ds.fingerprint(),
+            "outcomes": {str(e): ds.outcome(e) for e in EPISODES},
+            "static_filter": {"applied": True},
+        },
+        dataset_name=ds.name,
+    )
+
+
+def _subtasks(name):
+    from levi.agent.store import resolve
+
+    folder = resolve(catalog.STATE, name, "annotations")
+    folder.mkdir(parents=True, exist_ok=True)
+    atom = lambda sid, start, to, outcome: {
+        "role": "assistant",
+        "content": sid,
+        "style": "subtask",
+        "timestamp": start,
+        "to": to,
+        "levi": {"subtask_id": sid, "outcome": outcome, "attempt": 1},
+    }
+    (folder / "episode_000000.json").write_text(
+        json.dumps(
+            {
+                "episode_index": 0,
+                "atoms": [
+                    atom("grasp", 0.0, 0.5, "success"),
+                    atom("place", 0.5, None, "failure"),
+                ],
+            }
+        )
+    )
+
+
+def _frames(result):
+    return pq.read_table(Path(result["output_dir"]) / tm.FRAMES).to_pandas()
+
+
+def test_operations_decide_include_and_weight(repo):
+    name = _name(repo)
+    run_id = _anchored(name, {0: "failure", 1: "failure"})
+    _recap(repo)
+    _subtasks(name)
+
+    everything = tm.build(repo, "all_rollouts")
+    f = _frames(everything)
+    assert len(f) == 30 and f.include.all() and (f.weight == 1).all()
+    assert everything["counts"]["episodes_included"] == 3
+    # Evidence columns ride along whatever the operation.
+    e0 = f[f.episode_index == 0]
+    assert list(e0.subtask_id[:5]) == ["grasp"] * 5 and e0.subtask_id.iloc[5] == "place"
+    assert e0.subtask_outcome.iloc[-1] == "failure"
+    assert e0.recap_positive.iloc[-1] is None and e0.recap_positive.iloc[0]
+    assert (
+        e0.robot_flag.iloc[0] == "success" and e0.anchored_outcome.iloc[0] == "failure"
+    )
+    # Anchored review outranks the robot flag; episode 2 has no anchored verdict.
+    assert e0.episode_success_source.iloc[0] == "anchored"
+    assert f[f.episode_index == 2].episode_success_source.iloc[0] == "robot_flag"
+    assert f[f.episode_index == 1].anchored_undecided.iloc[0]
+
+    flag = _frames(tm.build(repo, "robot_flag_success"))
+    assert set(flag[flag.include].episode_index) == {0, 2}
+    assert set(flag[~flag.include].exclude_reason) == {"robot_flag_failure"}
+
+    verified = tm.build(repo, "verified_success")
+    v = _frames(verified)
+    # Episode 0: the robot said success, the anchored review failure.
+    assert set(v[v.include].episode_index) == {2}
+    assert verified["anchored"]["run_id"] == run_id
+    assert verified["counts"]["included_by_verdict_source"] == {"robot_flag": 1}
+    strict = _frames(tm.build(repo, "verified_success", {"fallback": "exclude"}))
+    assert not strict.include.any()
+    assert set(strict[strict.episode_index == 2].exclude_reason) == {"unverified"}
+    # The anchored spec is declared valid for plates only: screws keep the flag,
+    # plates episodes use the anchored verdict.
+    scoped = tm.build(repo, "verified_success", anchored_tasks=["pick the screws"])
+    s = _frames(scoped)
+    assert set(s[s.include].episode_index) == {0, 2}
+
+    mask = _frames(tm.build(repo, "advantage_positive_mask"))
+    assert (mask.include == (mask.recap_positive == True)).all()
+    assert "advantage_unlabelled" in set(mask.exclude_reason)
+    weighted = _frames(
+        tm.build(
+            repo,
+            "advantage_weighted",
+            {"negative_weight": 0.25, "unlabelled_weight": 0.5},
+        )
+    )
+    expected = np.where(
+        weighted.recap_positive.isna(),
+        0.5,
+        np.where(weighted.recap_positive == True, 1.0, 0.25),
+    )
+    assert np.allclose(weighted.weight, expected) and weighted.include.all()
+
+    # A human label outranks both.
+    from levi.agent.store import resolve
+    from levi.annotations import outcomes
+
+    outcomes.write_label(resolve(catalog.STATE, name, "annotations"), 0, "success")
+    human = _frames(tm.build(repo, "verified_success"))
+    assert set(human[human.include].episode_index) == {0, 2}
+    assert human[human.episode_index == 0].episode_success_source.iloc[0] == "human"
+
+
+def test_manifest_records_provenance(repo):
+    name = _name(repo)
+    _anchored(name, {0: "success"})
+    _recap(repo)
+    result = tm.build(repo, "advantage_weighted", tasks=["stack the plates"])
+    manifest = json.loads((Path(result["output_dir"]) / tm.MANIFEST).read_text())
+    assert manifest["schema"] == tm.SCHEMA
+    assert manifest["operation"] == {
+        "name": "advantage_weighted",
+        "summary": tm.OPERATIONS["advantage_weighted"].summary,
+        "params": {
+            "positive_weight": 1.0,
+            "negative_weight": 0.2,
+            "unlabelled_weight": 0.0,
+        },
+    }
+    ds = manifest["dataset"]
+    assert ds["name"] == name and ds["namespace"] is None and ds["fps"] == 10
+    assert set(ds["fingerprint"]["meta_sha256"]) == {
+        "info.json",
+        "episodes.jsonl",
+        "tasks.jsonl",
+    }
+    assert ds["fingerprint"]["data_files"] == 3
+    assert manifest["annotation"]["revision"] and manifest["annotation"]["digest"]
+    assert manifest["anchored"]["spec"]["id"] == "plates-release-ar2"
+    assert manifest["anchored"]["provider"]["model"] == "m"
+    recap = manifest["recap"]
+    assert recap["checkpoint"] == "fake-a" and recap["threshold"] == 0.0
+    assert recap["stale_reasons"] == [] and recap["static_filter"]
+    # Out-of-scope episodes stay listed, excluded, so the file covers the dataset.
+    frames = _frames(result)
+    assert set(frames[frames.task == "pick the screws"].exclude_reason) == {
+        "out_of_scope"
+    }
+    assert manifest["counts"]["episodes_in_scope"] == 2
+    assert manifest["episodes"][0]["rollout_source_demo"] == "/rollouts/demo_0000"
+    assert "levi_commit" in manifest
+    _, table = tm.load(result["output_dir"])
+    assert table.num_rows == 30
+    (Path(result["output_dir"]) / tm.FRAMES).write_bytes(b"changed")
+    with pytest.raises(tm.ManifestError, match="does not match"):
+        tm.load(result["output_dir"])
+
+
+def test_namespace_keeps_its_own_evidence(client, repo):
+    name = _name(repo)
+    created = client.post(
+        f"/api/levi/catalog/{name}/namespaces", json={"namespace": "e2-a3"}
+    )
+    assert created.status_code == 200, created.text
+    ns = (
+        created.json()["id"]
+        if "id" in created.json()
+        else "local/" + created.json()["name"]
+    )
+    _anchored(name, {0: "failure"})  # on the base, not the namespace
+    with pytest.raises(tm.ManifestError, match="needs an anchored review"):
+        tm.build(ns, "verified_success")
+    result = tm.build(ns, "robot_flag_success")
+    assert result["dataset"]["base"] == name
+    assert result["dataset"]["namespace"] == "e2-a3"
+    assert Path(result["output_dir"]).parent == tm.root(f"{name}--e2-a3")
+
+
+def test_refusals(repo):
+    name = _name(repo)
+    with pytest.raises(tm.ManifestError, match="Unknown operation"):
+        tm.build(repo, "all_the_things")
+    with pytest.raises(tm.ManifestError, match="takes no parameter"):
+        tm.build(repo, "all_rollouts", {"weight": 2})
+    with pytest.raises(tm.ManifestError, match="must be one of"):
+        tm.build(repo, "advantage_positive_mask", {"unlabelled": "maybe"})
+    with pytest.raises(tm.ManifestError, match="finite weight"):
+        tm.build(repo, "advantage_weighted", {"negative_weight": -1})
+    with pytest.raises(tm.ManifestError, match="needs RECAP"):
+        tm.build(repo, "advantage_weighted")
+    with pytest.raises(tm.ManifestError, match="needs an anchored"):
+        tm.build(repo, "verified_success")
+    with pytest.raises(tm.ManifestError, match="No episode has task"):
+        tm.build(repo, "all_rollouts", tasks=["fold laundry"])
+    with pytest.raises(tm.ManifestError, match="not in the dataset"):
+        tm.build(repo, "all_rollouts", episodes=[7])
+    with pytest.raises(tm.ManifestError, match="No anchored review run"):
+        tm.build(repo, "all_rollouts", anchored_run="anchored-nope")
+    _recap(repo)
+    # The robot's flag changed after the labels were computed: stale.
+    meta = catalog.local_root(repo) / "meta/episodes.jsonl"
+    rows = [json.loads(line) for line in meta.read_text().splitlines()]
+    rows[1]["is_success"] = True
+    meta.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    with pytest.raises(tm.ManifestError, match="stale"):
+        tm.build(repo, "advantage_positive_mask")
+    stale = tm.build(repo, "advantage_positive_mask", allow_stale=True)
+    assert stale["recap"]["stale_reasons"]
+    out = catalog.local_root(repo).parent / "taken"
+    out.mkdir()
+    (out / "x").write_text("x")
+    with pytest.raises(tm.ManifestError, match="not empty"):
+        tm.build(repo, "all_rollouts", output=out)
+    assert name
+
+
+def test_compare_measures_the_input_difference(repo):
+    a = tm.build(repo, "all_rollouts")["output_dir"]
+    b = tm.build(repo, "robot_flag_success")["output_dir"]
+    diff = tm.compare(a, b)
+    assert diff["episodes_only_in_a"] == [1] and diff["episodes_only_in_b"] == []
+    assert diff["frames_included_only_in_a"] == 10
+    # all: 30 frames at 1/30; flag: 20 frames at 1/20 -> TV = 10/30.
+    assert diff["input_difference"] == pytest.approx(1 / 3, abs=1e-6)
+    assert tm.compare(a, a)["input_difference"] == 0
+
+
+def test_cli_and_api(repo, client, capsys):
+    assert tm.main(["operations"]) == 0
+    names = [o["name"] for o in json.loads(capsys.readouterr().out)]
+    assert names == list(tm.OPERATIONS)
+    assert tm.main(["manifest", _name(repo), "--operation", "robot_flag_success",
+                    "--episodes", "0-1"]) == 0  # fmt: skip
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["counts"]["episodes_included"] == 1
+    assert tm.main(["manifest", repo, "--operation", "verified_success"]) == 1
+    assert "needs an anchored review" in capsys.readouterr().out
+    assert tm.main(["list", repo]) == 0
+    assert len(json.loads(capsys.readouterr().out)) == 1
+
+    ops = client.get("/api/levi/manifest/operations").json()["operations"]
+    assert {o["name"] for o in ops} == set(tm.OPERATIONS)
+    made = client.post(
+        "/api/levi/manifest",
+        json={
+            "repo_id": repo,
+            "operation": "all_rollouts",
+            "tasks": ["pick the screws"],
+        },
+    )
+    assert made.status_code == 200, made.text
+    body = made.json()
+    assert body["counts"]["episodes_included"] == 1 and "episodes" not in body
+    assert Path(body["output_dir"], tm.FRAMES).is_file()
+    bad = client.post("/api/levi/manifest", json={"repo_id": repo, "operation": "x"})
+    assert bad.status_code == 400 and "Unknown operation" in bad.json()["detail"]
+    listed = client.get("/api/levi/manifest", params={"repo_id": repo}).json()
+    assert len(listed["manifests"]) == 2
+
+
+# ---------------------------------------------------------------- reader
+
+
+def _reader():
+    path = PROJECT / "integrations/training_manifest/levi_manifest_reader.py"
+    spec = importlib.util.spec_from_file_location("levi_manifest_reader", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_reader_masks_weights_and_audits(repo):
+    reader = _reader()
+    _recap(repo)
+    result = tm.build(repo, "advantage_positive_mask")
+    root = catalog.local_root(repo)
+    m = reader.ManifestFrames.open(result["output_dir"], root)
+    assert m.episodes() == [0, 1, 2]
+    # Frame 0 positive, 1 negative, 2 positive; past the end is padding.
+    assert m.action_mask(1, 0, 3).tolist() == [True, False, True]
+    assert m.action_mask(1, 8, 4).tolist() == [True, False, False, False]
+    keys = [(0, 0), (0, 1), (5, 0)]
+    assert m.sampling_weights(keys).tolist() == [1.0, 0.0, 0.0]
+    rng = np.random.default_rng(0)
+    prompts = [m.prompt("stack", 0, 0, rng) for _ in range(2000)]
+    share = sum(p.endswith("Advantage: positive") for p in prompts) / 2000
+    assert 0.87 < share < 0.93
+    assert m.prompt("stack", 0, 1, rng) == "stack"
+
+    # A loader drawing by the manifest's weights never draws an excluded frame.
+    weights = m.weight * m.include
+    rows = rng.choice(len(weights), size=5000, p=weights / weights.sum())
+    drawn = list(zip(m.episode[rows], m.frame[rows], strict=True))
+    report = reader.audit(m, drawn)
+    assert report["excluded_drawn"] == 0
+    for ep, share in report["expected"].items():
+        assert abs(report["observed"][ep] - share) < 0.03
+    assert reader.audit(m, [(0, 1)])["excluded_drawn"] == 1
+
+    # The trainer's dataset must be the one the manifest was written for.
+    (root / "meta/tasks.jsonl").write_text('{"task_index": 0, "task": "other"}\n')
+    with pytest.raises(ValueError, match="differs"):
+        reader.ManifestFrames.open(result["output_dir"], root)
