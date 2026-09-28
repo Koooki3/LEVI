@@ -8,8 +8,18 @@ module only replaces what RLinf gets from LeRobot and openpi:
   HWC by openpi's ``_parse_image`` (``(255 * x).astype(uint8)``);
 - cameras: the manifest's ``views`` fill ``base_0_rgb`` /
   ``left_wrist_0_rgb`` / ``right_wrist_0_rgb`` the way LiberoInputs and
-  FrankaEEInputs do (a missing camera is a zero image with its mask off);
-- prompt: the frame's task from ``meta/tasks.jsonl``.
+  FrankaEEInputs do (a missing camera is a zero image, its mask off for
+  ``model_type`` pi0 / pi05 and on for pi0_fast);
+- prompt: the frame's task from ``meta/tasks.jsonl`` (compute_advantages'
+  ``KEY_MAPPINGS`` map LeRobot's ``task`` to ``prompt``).
+
+The FR3 RECAP run (``env_type`` ``fr3_recap``, RLinf 807e5fdd plus local
+FR3 patches) routes ``fr3_recap`` through the libero branch of
+``build_input_transforms`` (InjectDefaultPrompt(None) + LiberoInputs) with
+``observation.images.view1`` -> base and ``observation.images.hand`` -> left
+wrist; its manifest preset (``levi recap import --preset fr3_recap``) states
+exactly that, and ``action_dim`` / ``action_horizon`` are passed to the
+config as its patched ``from_checkpoint`` does.
 
 Everything after that — resize-with-pad to 224, [-1, 1], the ``Task: {p}.``
 prompt, tokenisation and the two-stage forward — is RLinf's
@@ -32,6 +42,18 @@ import pyarrow.parquet as pq
 
 RLINF_COMMIT = "807e5fd"
 SLOTS = ("base_0_rgb", "left_wrist_0_rgb", "right_wrist_0_rgb")
+# RLinf's openpi variants (checkpoint_utils.build_input_transforms). The
+# variant decides the mask of a padded (absent) camera: LiberoInputs and
+# FrankaEEInputs mask padding images for pi0 / pi05 but not for pi0-FAST.
+MODEL_TYPES = ("pi0", "pi05", "pi0_fast")
+
+
+def padding_mask(manifest: dict) -> bool:
+    """The image mask RLinf gives a zero-padded camera slot."""
+    model_type = str(manifest.get("model_type") or "pi05").lower()
+    if model_type not in MODEL_TYPES:
+        raise ValueError(f"model_type {model_type!r} is not one of {MODEL_TYPES}")
+    return model_type == "pi0_fast"
 # Unused by the value forward (the value comes from the expert's hidden state
 # through ValueHead); tied to the embeddings in HF. Reported, not fatal.
 UNUSED_KEYS = re.compile(r"(^|\.)lm_head\.weight$")
@@ -215,6 +237,10 @@ def build_model(manifest: dict, ckpt_dir: Path):
         gemma3_path=base_path(ckpt_dir, base.get("gemma3"), "gemma3"),
         dtype=manifest["precision"],
         max_token_len=int(manifest["max_token_len"]),
+        # Config-only in the value forward, but RLinf's from_checkpoint (as
+        # patched in the FR3 run) passes them to get_model; keep the config equal.
+        action_dim=int(manifest.get("action_dim") or 32),
+        action_horizon=int(manifest.get("action_horizon") or 50),
     )
     return ValueCriticModel(config)
 
@@ -238,6 +264,32 @@ def load_weights(model, weights: Path) -> dict:
         )
     model.load_state_dict(state, strict=False)
     return {"keys": len(state), "missing_unused": tolerated}
+
+
+def strict_report(ckpt_dir: Path) -> dict:
+    """Build the model the manifest describes (CPU) and load the weights
+    with the same strict rule as a job: RLinf's ``missing`` / ``unexpected``
+    counts (the FR3 advantage job logged 0 / 0) plus the load report."""
+    import json
+
+    require_patch()
+    ckpt_dir = Path(ckpt_dir)
+    manifest = json.loads((ckpt_dir / "manifest.json").read_text())
+    model = build_model(manifest, ckpt_dir)
+    state = strip_model_prefix(
+        load_state_dict(ckpt_dir / manifest["weights"]),
+        set(model.state_dict().keys()),
+    )
+    missing, unexpected = model.load_state_dict(state, strict=False)
+    report = {
+        "missing": len(missing),
+        "unexpected": len(unexpected),
+        "missing_keys": list(missing)[:20],
+        "unexpected_keys": list(unexpected)[:20],
+        "model_parameters": int(sum(p.numel() for p in model.parameters())),
+    }
+    report["ok"] = report["missing"] == 0 and report["unexpected"] == 0
+    return report
 
 
 def tokenizer_for(manifest: dict, ckpt_dir: Path):
@@ -284,12 +336,13 @@ class Critic:
         """One frame through RLinf's CPU preparation (``images`` holds uint8
         HWC arrays per filled slot)."""
         base = images["base_0_rgb"]
+        pad_mask = np.bool_(padding_mask(self.manifest))
         slots, masks = {}, {}
         for slot in SLOTS:
             if images.get(slot) is not None:
                 slots[slot], masks[slot] = images[slot], np.True_
             else:
-                slots[slot], masks[slot] = np.zeros_like(base), np.False_
+                slots[slot], masks[slot] = np.zeros_like(base), pad_mask
         return self.model._prepare_observation_cpu(
             {"image": slots, "image_mask": masks, "prompt": prompt}, self.processor
         )
@@ -443,6 +496,10 @@ def values(plan: dict, progress, tokenizer=None) -> tuple[dict, dict]:
         "batch_size": batch_size,
         "decoder": "pyav rgb24, sequential, frame i = row frame_index i",
         "views": manifest["views"],
+        "env_type": manifest.get("env_type"),
+        "model_type": manifest.get("model_type") or "pi05",
+        "action_dim": manifest.get("action_dim"),
+        "action_horizon": manifest.get("action_horizon"),
         "max_token_len": manifest["max_token_len"],
         "critic_expert_variant": manifest["critic_expert_variant"],
         "weights_sha256": manifest.get("sha256"),

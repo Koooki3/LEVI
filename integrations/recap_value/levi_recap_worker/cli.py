@@ -30,6 +30,13 @@ def main(argv: list[str] | None = None) -> int:
         help="print what a full_weights.pt contains (keys, inferred variant)",
     )
     parser.add_argument(
+        "--strict-check",
+        type=Path,
+        metavar="CHECKPOINT_DIR",
+        help="build the model from a checkpoint folder's manifest.json (CPU) and "
+        "report missing / unexpected keys of its weights",
+    )
+    parser.add_argument(
         "--selftest",
         action="store_true",
         help="build the model from local test configs, save/strictly reload "
@@ -57,6 +64,12 @@ def main(argv: list[str] | None = None) -> int:
 
         print(json.dumps(inspect_weights(args.inspect)))
         return 0
+    if args.strict_check:
+        from .rlinf_provider import strict_report
+
+        report = strict_report(args.strict_check)
+        print(json.dumps(report))
+        return 0 if report["ok"] else 1
     if args.selftest:
         from .selftest import run
 

@@ -1,9 +1,13 @@
 """``levi recap``: the RECAP value checkpoint store and value/advantage runs.
 
-levi recap import <src> --name <n> [manifest options]
+levi recap import <src> --name <n> [--preset fr3_recap] [manifest options]
 levi recap import --fake --name <n>
 levi recap set <n> [manifest options]
 levi recap checkpoints [--verify] [--json]
+levi recap inspect <n>                      strict key check (worker, CPU)
+levi recap base import <folder> [--name] [--official repo] [--sha256-file f] [--weights] [--label TEXT]
+levi recap base list
+levi recap threshold <repo_id> <repo_id> … [--positive-quantile q] [--set <checkpoint> --provenance TEXT]
 levi recap run <repo_id> --checkpoint <n> [--episodes 0,3] [--threshold X]
 levi recap show <repo_id> [--episode N]
 """
@@ -35,8 +39,28 @@ def _views(text: str) -> dict:
     return out
 
 
+def _provenance(text: str) -> dict:
+    """``key=text`` (repeatable)."""
+    key, sep, value = text.partition("=")
+    if not sep or not key.strip():
+        raise argparse.ArgumentTypeError("provenance is key=text")
+    return {key.strip(): value.strip()}
+
+
 def _manifest_options(parser: argparse.ArgumentParser) -> None:
     group = parser.add_argument_group("manifest fields")
+    group.add_argument("--env-type", dest="env_type", help="RLinf robot/env type")
+    group.add_argument(
+        "--model-type", dest="model_type", choices=["pi0", "pi05", "pi0_fast"]
+    )
+    group.add_argument("--action-dim", dest="action_dim", type=int)
+    group.add_argument("--action-horizon", dest="action_horizon", type=int)
+    group.add_argument(
+        "--provenance",
+        type=_provenance,
+        action="append",
+        help="key=text: where a number came from (repeatable)",
+    )
     group.add_argument("--variant", dest="critic_expert_variant")
     group.add_argument("--views", type=_views, help="base=KEY,left_wrist=KEY|none,…")
     group.add_argument("--max-token-len", dest="max_token_len", type=int)
@@ -60,6 +84,10 @@ def _manifest_options(parser: argparse.ArgumentParser) -> None:
 
 def _fields(args) -> dict:
     keys = (
+        "env_type",
+        "model_type",
+        "action_dim",
+        "action_horizon",
         "critic_expert_variant",
         "views",
         "max_token_len",
@@ -85,6 +113,11 @@ def _fields(args) -> dict:
     }
     if base:
         fields["base_models"] = base
+    if getattr(args, "provenance", None):
+        merged: dict = {}
+        for item in args.provenance:
+            merged.update(item)
+        fields["provenance"] = merged
     return fields
 
 
@@ -109,12 +142,49 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="do not read the weights with the worker",
     )
+    imp.add_argument(
+        "--preset",
+        help="fill the run's fields from a known RLinf setup (fr3_recap)",
+    )
     _manifest_options(imp)
     edit = sub.add_parser("set", help="edit a checkpoint's manifest fields")
     edit.add_argument("name")
     _manifest_options(edit)
     listing = sub.add_parser("checkpoints", help="list checkpoints and readiness")
     listing.add_argument("--verify", action="store_true", help="re-hash the weights")
+    inspect = sub.add_parser(
+        "inspect", help="build the model and load the weights strictly (CPU)"
+    )
+    inspect.add_argument("name")
+    base = sub.add_parser("base", help="shared base-model folders (_base/<name>)")
+    base_sub = base.add_subparsers(dest="base_command", required=True)
+    base_imp = base_sub.add_parser("import", help="copy and verify a model folder")
+    base_imp.add_argument("source", type=Path)
+    base_imp.add_argument("--name")
+    base_imp.add_argument(
+        "--official", help="Hub release to verify against (default: from the name)"
+    )
+    base_imp.add_argument(
+        "--sha256-file", dest="sha256_file", type=Path, help="sha256sum list"
+    )
+    base_imp.add_argument(
+        "--weights", action="store_true", help="also copy the weight files"
+    )
+    base_imp.add_argument(
+        "--label", help="mark as development-only (e.g. an unofficial mirror)"
+    )
+    base_sub.add_parser("list", help="the base-model folders and their checks")
+    thr = sub.add_parser(
+        "threshold", help="RLinf's unified threshold over several datasets"
+    )
+    thr.add_argument("repo_ids", nargs="+")
+    thr.add_argument("--positive-quantile", dest="positive_quantile", type=float)
+    thr.add_argument("--set", dest="set_checkpoint", help="store it on a checkpoint")
+    thr.add_argument(
+        "--provenance-text",
+        dest="provenance_text",
+        help="where the threshold comes from (stored with --set)",
+    )
     run = sub.add_parser("run", help="compute values and advantage labels")
     run.add_argument("repo_id")
     run.add_argument("--checkpoint", required=True)
@@ -146,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
                     provider="fake" if args.fake else "rlinf",
                     fields=_fields(args),
                     inspect=not args.no_inspect,
+                    preset=args.preset,
                 )
             )
             return 0
@@ -158,6 +229,46 @@ def main(argv: list[str] | None = None) -> int:
                 for row in rows:
                     row["verify"] = checkpoints.verify(row["name"])
             _print(rows)
+            return 0
+        if args.command == "inspect":
+            report = checkpoints.strict_check(args.name)
+            _print(report)
+            return 0 if report.get("ok") else 1
+        if args.command == "base":
+            from . import base_models
+
+            if args.base_command == "list":
+                _print(base_models.listing(checkpoints.store_dir()))
+                return 0
+            _print(
+                base_models.import_base(
+                    checkpoints.store_dir(),
+                    args.source,
+                    args.name,
+                    official=args.official,
+                    sha256_file=args.sha256_file,
+                    weights=args.weights,
+                    label=args.label,
+                )
+            )
+            return 0
+        if args.command == "threshold":
+            from . import jobs
+
+            found = jobs.unified_threshold(args.repo_ids, args.positive_quantile)
+            if args.set_checkpoint:
+                text = args.provenance_text or (
+                    "recomputed by LEVI over " + " + ".join(args.repo_ids)
+                )
+                checkpoints.update(
+                    args.set_checkpoint,
+                    {
+                        "unified_threshold": found["threshold"],
+                        "provenance": {"unified_threshold": text},
+                    },
+                )
+                found["stored_on"] = args.set_checkpoint
+            _print(found)
             return 0
         if args.command == "run":
             return _run(args)

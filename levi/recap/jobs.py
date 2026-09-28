@@ -80,11 +80,18 @@ class Dataset:
 
     def outcome(self, episode: int) -> str | None:
         """A human label wins over the capture's own ``levi_outcome`` (the
-        same rule as the RECAP export)."""
+        same rule as the RECAP export); an RLinf-format RECAP dataset's
+        per-episode ``is_success`` (meta/episodes.jsonl) comes last."""
         if episode in self.human:
             return self.human[episode]
-        value = self.rows.get(episode, {}).get("levi_outcome")
-        return value if value in ("success", "failure") else None
+        row = self.rows.get(episode, {})
+        value = row.get("levi_outcome")
+        if value in ("success", "failure"):
+            return value
+        flag = row.get("is_success")
+        if isinstance(flag, bool):
+            return "success" if flag else "failure"
+        return None
 
     def data_path(self, episode: int) -> Path:
         chunk = int(self.info.get("chunks_size") or 1000)
@@ -405,6 +412,10 @@ def start(
                 "name": manifest.name,
                 "dir": str(folder),
                 "manifest": manifest.public(),
+                "base_models": checkpoints.base_models_status(folder, manifest)
+                if manifest.provider == "rlinf"
+                else None,
+                "dev_only_base_models": checkpoints.dev_only(folder, manifest),
             },
             "dataset": {
                 "name": ds.name,
@@ -848,6 +859,13 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         },
         "skipped_episodes": job.get("skipped_episodes", {}),
         "worker": result.get("provenance", {}),
+        "base_models": plan["checkpoint"].get("base_models"),
+        "dev_only_base_models": plan["checkpoint"].get("dev_only_base_models", []),
+        "threshold_provenance": (
+            manifest.provenance.get("unified_threshold")
+            if source == "checkpoint"
+            else None
+        ),
         "fps": float(plan["dataset"]["fps"]),
         "levi_commit": _levi_commit(),
     }
@@ -978,4 +996,79 @@ def episode_digest(repo_id: str, episode: int) -> dict[str, Any]:
             {"time": round(times[i], 3), "value": round(full["value"][i], 4)}
             for i in range(0, len(positive), step)
         ],
+    }
+
+
+# ---------------------------------------------------------------- threshold
+
+
+def unified_threshold(
+    repo_ids: list[str], positive_quantile: float | None = None
+) -> dict[str, Any]:
+    """RLinf's unified threshold over several datasets' current revisions:
+    the (1 - positive_quantile) percentile of every frame's continuous
+    advantage, all datasets together (``sft`` ones included — RLinf forces
+    their labels positive only after the threshold is computed). Every
+    revision must come from the same checkpoint weights, lookahead and
+    return range."""
+    if not repo_ids:
+        raise RecapError(400, "Name at least one dataset")
+    parts, rows, keys = [], [], set()
+    for repo_id in repo_ids:
+        ds = dataset(repo_id)
+        rid = store.current_id(ds.name)
+        record = store.revision(ds.name, rid) if rid else None
+        if not record:
+            raise RecapError(400, f"{repo_id} has no computed revision")
+        table = pq.read_table(
+            store.root(ds.name) / "revisions" / rid / "advantages.parquet",
+            columns=["advantage_continuous"],
+        )
+        scores = table.column("advantage_continuous").to_numpy()
+        parts.append(scores)
+        keys.add(
+            (
+                record["checkpoint"].get("sha256"),
+                record.get("lookahead"),
+                record.get("return_min"),
+                record.get("return_max"),
+                record.get("gamma"),
+            )
+        )
+        rows.append(
+            {
+                "repo_id": repo_id,
+                "revision_id": rid,
+                "dataset_type": record.get("dataset_type"),
+                "frames": int(len(scores)),
+                "positive_quantile": record.get("positive_quantile"),
+            }
+        )
+    if len(keys) != 1:
+        raise RecapError(
+            400,
+            "The revisions differ in checkpoint, lookahead, return range or gamma: "
+            f"{sorted(map(str, keys))}",
+        )
+    quantile = (
+        positive_quantile
+        if positive_quantile is not None
+        else rows[0]["positive_quantile"]
+    )
+    if quantile is None or not 0 < float(quantile) < 1:
+        raise RecapError(400, "positive_quantile must lie strictly between 0 and 1")
+    combined = np.concatenate(parts)
+    threshold = advantage.quantile_threshold(combined, float(quantile))
+    for row, scores in zip(rows, parts):
+        row["positive_at_threshold"] = int(np.count_nonzero(scores >= threshold))
+    return {
+        "threshold": threshold,
+        "positive_quantile": float(quantile),
+        "frames": int(len(combined)),
+        "positive_frames": int(np.count_nonzero(combined >= threshold)),
+        "advantage_min": float(combined.min()),
+        "advantage_max": float(combined.max()),
+        "advantage_mean": float(combined.mean()),
+        "checkpoint_sha256": next(iter(keys))[0],
+        "datasets": rows,
     }
