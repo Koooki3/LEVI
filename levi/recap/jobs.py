@@ -876,7 +876,9 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         expected = data.column("frame_index").to_numpy().astype(np.int64)
         timestamps = data.column("timestamp").to_numpy().astype(np.float64)
         if len(expected) != n:
-            raise ValueError(f"episode {ep}: the dataset has {len(expected)} rows, not {n}")
+            raise ValueError(
+                f"episode {ep}: the dataset has {len(expected)} rows, not {n}"
+            )
         if "keep" in item:
             # Static-filtered: the kept sequence is the episode.
             keep = np.asarray(item["keep"], dtype=np.int64)
@@ -1177,7 +1179,7 @@ def unified_threshold(
                 "repo_id": repo_id,
                 "revision_id": rid,
                 "dataset_type": record.get("dataset_type"),
-                "frames": int(len(scores)),
+                "frames": len(scores),
                 "positive_quantile": record.get("positive_quantile"),
             }
         )
@@ -1201,7 +1203,7 @@ def unified_threshold(
     return {
         "threshold": threshold,
         "positive_quantile": float(quantile),
-        "frames": int(len(combined)),
+        "frames": len(combined),
         "positive_frames": int(np.count_nonzero(combined >= threshold)),
         "advantage_min": float(combined.min()),
         "advantage_max": float(combined.max()),

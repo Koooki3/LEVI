@@ -110,14 +110,16 @@ def _frozen_modules():
         sys.modules[spec.name] = module
         try:
             spec.loader.exec_module(module)
-        except Exception:  # noqa: BLE001 -- franka_policy is not needed
+        except Exception:
             if mod == "libero_policy":
                 raise
         loaded[mod] = module
     pkg = _stub("rlinf.models.embodiment.openpi.policies", **loaded)
     pkg.__path__ = [str(policies)]
     recap = root / "RLinf_train_r1/rlinf/models/embodiment/value_model/recap"
-    spec = importlib.util.spec_from_file_location("frozen_checkpoint_utils", recap / "checkpoint_utils.py")
+    spec = importlib.util.spec_from_file_location(
+        "frozen_checkpoint_utils", recap / "checkpoint_utils.py"
+    )
     ckpt_utils = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(ckpt_utils)
     return transforms, ckpt_utils
@@ -131,7 +133,9 @@ class _Tokenizer:
         return ([2] if add_special_tokens else []) + [3 + (ord(c) % 250) for c in text]
 
 
-@unittest.skipUnless(FROZEN and Path(FROZEN).is_dir(), "LEVI_RECAP_FROZEN_SRC is not set")
+@unittest.skipUnless(
+    FROZEN and Path(FROZEN).is_dir(), "LEVI_RECAP_FROZEN_SRC is not set"
+)
 class FrozenTransformTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -160,13 +164,17 @@ class FrozenTransformTests(unittest.TestCase):
                 use_quantile_norm=model_type != "pi0",
             )
         )
-        return chain({k: v.copy() if isinstance(v, np.ndarray) else v for k, v in obs.items()})
+        return chain(
+            {k: v.copy() if isinstance(v, np.ndarray) else v for k, v in obs.items()}
+        )
 
     def _levi(self, view1_hwc, hand_hwc, prompt, model_type):
         critic = self.provider.Critic.__new__(self.provider.Critic)
         critic.manifest = {"model_type": model_type}
         critic.processor = self.processor
-        critic.model = types.SimpleNamespace(_prepare_observation_cpu=self.levi_prepare_cpu)
+        critic.model = types.SimpleNamespace(
+            _prepare_observation_cpu=self.levi_prepare_cpu
+        )
         images = {
             "base_0_rgb": self.provider.lerobot_roundtrip(view1_hwc),
             "left_wrist_0_rgb": self.provider.lerobot_roundtrip(hand_hwc),
@@ -183,30 +191,47 @@ class FrozenTransformTests(unittest.TestCase):
                 prompt = "Stack the plates of same color together."
                 # compute_advantages.build_obs: LeRobot float32 CHW in [0, 1].
                 obs = {
-                    "observation/image": (view1.transpose(2, 0, 1).astype(np.float32) / 255),
-                    "observation/wrist_image": (hand.transpose(2, 0, 1).astype(np.float32) / 255),
+                    "observation/image": (
+                        view1.transpose(2, 0, 1).astype(np.float32) / 255
+                    ),
+                    "observation/wrist_image": (
+                        hand.transpose(2, 0, 1).astype(np.float32) / 255
+                    ),
                     "observation/state": np.zeros(7, np.float32),
                     "prompt": prompt,
                 }
                 # LeRobot divides a torch uint8 tensor; match that exactly.
                 import torch
 
-                obs["observation/image"] = (torch.from_numpy(view1).permute(2, 0, 1).float() / 255).numpy()
-                obs["observation/wrist_image"] = (torch.from_numpy(hand).permute(2, 0, 1).float() / 255).numpy()
+                obs["observation/image"] = (
+                    torch.from_numpy(view1).permute(2, 0, 1).float() / 255
+                ).numpy()
+                obs["observation/wrist_image"] = (
+                    torch.from_numpy(hand).permute(2, 0, 1).float() / 255
+                ).numpy()
                 frozen = self._frozen(obs, model_type)
                 levi, images = self._levi(view1, hand, prompt, model_type)
                 self.assertEqual(list(frozen["image"]), list(self.provider.SLOTS))
-                np.testing.assert_array_equal(frozen["image"]["base_0_rgb"], images["base_0_rgb"])
-                np.testing.assert_array_equal(frozen["image"]["left_wrist_0_rgb"], images["left_wrist_0_rgb"])
+                np.testing.assert_array_equal(
+                    frozen["image"]["base_0_rgb"], images["base_0_rgb"]
+                )
+                np.testing.assert_array_equal(
+                    frozen["image"]["left_wrist_0_rgb"], images["left_wrist_0_rgb"]
+                )
                 expected = self.levi_prepare_cpu(frozen, self.processor)
                 for key in ("images", "image_masks"):
                     self.assertEqual(list(expected[key]), list(levi[key]))
                     for cam in expected[key]:
-                        np.testing.assert_array_equal(expected[key][cam].numpy(), levi[key][cam].numpy())
+                        np.testing.assert_array_equal(
+                            expected[key][cam].numpy(), levi[key][cam].numpy()
+                        )
                 for key in ("tokenized_prompt", "tokenized_prompt_mask"):
-                    np.testing.assert_array_equal(expected[key].numpy(), levi[key].numpy())
+                    np.testing.assert_array_equal(
+                        expected[key].numpy(), levi[key].numpy()
+                    )
                 self.assertEqual(
-                    bool(levi["image_masks"]["right_wrist_0_rgb"][0]), model_type == "pi0_fast"
+                    bool(levi["image_masks"]["right_wrist_0_rgb"][0]),
+                    model_type == "pi0_fast",
                 )
 
 
@@ -225,11 +250,14 @@ class FrozenRealFrameTests(unittest.TestCase):
         data = Path(os.environ["LEVI_RECAP_FROZEN_DATA"])
         manifest = json.loads((ckpt / "manifest.json").read_text())
         processor = ValueProcessor(
-            tokenizer=rp.tokenizer_for(manifest, ckpt), max_token_len=int(manifest["max_token_len"])
+            tokenizer=rp.tokenizer_for(manifest, ckpt),
+            max_token_len=int(manifest["max_token_len"]),
         )
         critic = rp.Critic.__new__(rp.Critic)
         critic.manifest, critic.processor = manifest, processor
-        critic.model = types.SimpleNamespace(_prepare_observation_cpu=ValueCriticModel._prepare_observation_cpu)
+        critic.model = types.SimpleNamespace(
+            _prepare_observation_cpu=ValueCriticModel._prepare_observation_cpu
+        )
         ref = np.load(PREP)
         wanted: dict = {}
         for key in ref.files:
@@ -243,22 +271,42 @@ class FrozenRealFrameTests(unittest.TestCase):
             for line in (data / name / "meta/tasks.jsonl").read_text().splitlines():
                 row = json.loads(line)
                 tasks[str(row["task_index"])] = row["task"]
-            plan = {"dataset": {"root": str(data / name), "data_path": info["data_path"],
-                                "video_path": info["video_path"], "chunks_size": info["chunks_size"],
-                                "tasks": tasks}}
-            for pos, (_fi, task, images) in enumerate(rp.episode_frames(plan, ep, manifest["views"])):
+            plan = {
+                "dataset": {
+                    "root": str(data / name),
+                    "data_path": info["data_path"],
+                    "video_path": info["video_path"],
+                    "chunks_size": info["chunks_size"],
+                    "tasks": tasks,
+                }
+            }
+            for pos, (_fi, task, images) in enumerate(
+                rp.episode_frames(plan, ep, manifest["views"])
+            ):
                 if pos not in frames:
                     continue
                 key = f"{name}/{ep}/{pos}"
                 prep = critic.prepare(images, task)
-                np.testing.assert_array_equal(images["base_0_rgb"], ref[f"{key}/uint8/base"])
-                np.testing.assert_array_equal(images["left_wrist_0_rgb"], ref[f"{key}/uint8/left"])
+                np.testing.assert_array_equal(
+                    images["base_0_rgb"], ref[f"{key}/uint8/base"]
+                )
+                np.testing.assert_array_equal(
+                    images["left_wrist_0_rgb"], ref[f"{key}/uint8/left"]
+                )
                 for cam, tensor in prep["images"].items():
-                    np.testing.assert_array_equal(tensor.numpy(), ref[f"{key}/img/{cam}"])
+                    np.testing.assert_array_equal(
+                        tensor.numpy(), ref[f"{key}/img/{cam}"]
+                    )
                 for cam, tensor in prep["image_masks"].items():
-                    np.testing.assert_array_equal(tensor.numpy(), ref[f"{key}/mask/{cam}"])
-                np.testing.assert_array_equal(prep["tokenized_prompt"].numpy(), ref[f"{key}/tokens"])
-                np.testing.assert_array_equal(prep["tokenized_prompt_mask"].numpy(), ref[f"{key}/tokmask"])
+                    np.testing.assert_array_equal(
+                        tensor.numpy(), ref[f"{key}/mask/{cam}"]
+                    )
+                np.testing.assert_array_equal(
+                    prep["tokenized_prompt"].numpy(), ref[f"{key}/tokens"]
+                )
+                np.testing.assert_array_equal(
+                    prep["tokenized_prompt_mask"].numpy(), ref[f"{key}/tokmask"]
+                )
                 self.assertEqual(task, str(ref[f"{key}/prompt"]))
                 checked += 1
         self.assertGreater(checked, 0)

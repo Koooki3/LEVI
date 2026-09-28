@@ -30,20 +30,34 @@ def main() -> int:
     rlinf = args.frozen_src / "RLinf_train_r1"
     sys.path[:0] = [str(rlinf), str(args.frozen_src / "openpi/src")]
     spec = importlib.util.spec_from_file_location(
-        "ca", rlinf / "examples/offline_rl/advantage_labeling/recap/process/compute_advantages.py"
+        "ca",
+        rlinf
+        / "examples/offline_rl/advantage_labeling/recap/process/compute_advantages.py",
     )
     ca = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(ca)
     from openpi.transforms import compose
-    from rlinf.models.embodiment.value_model.recap.checkpoint_utils import build_input_transforms
+    from rlinf.models.embodiment.value_model.recap.checkpoint_utils import (
+        build_input_transforms,
+    )
     from rlinf.models.embodiment.value_model.recap.processing import ValueProcessor
     from transformers import AutoTokenizer
 
-    tok = AutoTokenizer.from_pretrained(args.tokenizer, add_bos_token=True, local_files_only=True)
-    processor = ValueProcessor(tokenizer=tok, max_token_len=200)  # from_checkpoint's value
+    tok = AutoTokenizer.from_pretrained(
+        args.tokenizer, add_bos_token=True, local_files_only=True
+    )
+    processor = ValueProcessor(
+        tokenizer=tok, max_token_len=200
+    )  # from_checkpoint's value
     transform = compose(
-        build_input_transforms(env_type="fr3_recap", model_type="pi05", action_dim=7,
-                               default_prompt=None, norm_stats=None, use_quantile_norm=True)
+        build_input_transforms(
+            env_type="fr3_recap",
+            model_type="pi05",
+            action_dim=7,
+            default_prompt=None,
+            norm_stats=None,
+            use_quantile_norm=True,
+        )
     )
     dumps = {}
     for name, episodes in json.loads(args.samples).items():
@@ -51,7 +65,7 @@ def main() -> int:
         ds = ca.LeRobotDataset(str(path), download_videos=False, video_backend="pyav")
         ds.hf_dataset.set_transform(ca.decode_image_struct_batch)
         tasks = {}
-        for line in open(path / "meta/tasks.jsonl"):
+        for line in (path / "meta/tasks.jsonl").read_text().splitlines():
             row = json.loads(line)
             tasks[row["task_index"]] = row["task"]
         starts, ends = ca.episode_boundaries(ds)
@@ -60,7 +74,12 @@ def main() -> int:
             for f in sorted({0, 1, n // 3, n // 2, n - 2, n - 1}):
                 sample = ds[starts[ep] + f]
                 obs = ca.build_obs(sample, "fr3_recap", tasks)
-                tr = transform({k: v.copy() if isinstance(v, np.ndarray) else v for k, v in obs.items()})
+                tr = transform(
+                    {
+                        k: v.copy() if isinstance(v, np.ndarray) else v
+                        for k, v in obs.items()
+                    }
+                )
                 prep = ca.ValueCriticModel._prepare_observation_cpu(tr, processor)
                 key = f"{name}/{ep}/{f}"
                 for cam, t in prep["images"].items():

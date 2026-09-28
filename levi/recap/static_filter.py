@@ -28,8 +28,9 @@ from __future__ import annotations
 
 import csv
 import math
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 
@@ -58,7 +59,13 @@ GRIPPER_COLUMNS = [
     "gripper_width",
     "last_gripper_command",
 ]
-FRAMES_COLUMNS = ["timestamp_sec", "frame_index", "success_flag", "wrist_video", "side_video"]
+FRAMES_COLUMNS = [
+    "timestamp_sec",
+    "frame_index",
+    "success_flag",
+    "wrist_video",
+    "side_video",
+]
 
 
 def quaternion_to_euler(qx: float, qy: float, qz: float, qw: float):
@@ -135,7 +142,7 @@ def load_aligned_states(demo_dir: Path) -> list[tuple[int, np.ndarray]]:
                 ],
                 dtype=np.float64,
             )
-        except Exception:  # noqa: BLE001 -- the script skips unreadable rows
+        except Exception:  # noqa: BLE001, S112 -- the script skips unreadable rows
             continue
         if np.all(np.isfinite(state)):
             states.append((frame_index, state))
@@ -162,7 +169,7 @@ def choose_frames_to_drop(
 ) -> tuple[set[int], int, int]:
     drop: set[int] = set()
     total_pairs = matched_pairs = 0
-    for (_prev_frame, prev_state), (cur_frame, cur_state) in zip(
+    for (_prev_frame, prev_state), (cur_frame, cur_state) in zip(  # noqa: RUF007
         aligned_states[:-1], aligned_states[1:]
     ):
         total_pairs += 1

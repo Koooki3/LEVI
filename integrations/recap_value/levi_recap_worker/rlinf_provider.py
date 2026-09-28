@@ -54,6 +54,8 @@ def padding_mask(manifest: dict) -> bool:
     if model_type not in MODEL_TYPES:
         raise ValueError(f"model_type {model_type!r} is not one of {MODEL_TYPES}")
     return model_type == "pi0_fast"
+
+
 # Unused by the value forward (the value comes from the expert's hidden state
 # through ValueHead); tied to the embeddings in HF. Reported, not fatal.
 UNUSED_KEYS = re.compile(r"(^|\.)lm_head\.weight$")

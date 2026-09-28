@@ -221,7 +221,12 @@ def import_base(
             kind, expected = reference[path.name]
             actual = digest if kind == "sha256" else git_blob(path)
             ok = actual == expected
-            checks.append({"against": f"{official}@{OFFICIAL[official]['revision'][:7]}", "ok": ok})
+            checks.append(
+                {
+                    "against": f"{official}@{OFFICIAL[official]['revision'][:7]}",
+                    "ok": ok,
+                }
+            )
             if not ok:
                 mismatches.append(f"{path.name} differs from {official}")
         listed = _listed(sums, source, path.name) if sums else None
@@ -296,5 +301,7 @@ def listing(store: Path) -> list[dict[str, Any]]:
     if not base.is_dir():
         return []
     return [
-        describe(p) for p in sorted(base.iterdir()) if p.is_dir() and not p.name.startswith(".")
+        describe(p)
+        for p in sorted(base.iterdir())
+        if p.is_dir() and not p.name.startswith(".")
     ]
