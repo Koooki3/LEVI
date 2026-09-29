@@ -247,7 +247,7 @@ export function EpisodeTable({
                       <span className="levi-pool-muted">·</span>
                     )}
                   </td>
-                  <td className="levi-pool-ellipsis" title={row.source_path}>
+                  <td className="levi-pool-source" title={row.source_path}>
                     {row.source}
                   </td>
                   <td>
@@ -274,7 +274,7 @@ export function EpisodeTable({
                   </td>
                   {showPolicy && (
                     <td
-                      className="levi-pool-ellipsis"
+                      className="levi-pool-policy"
                       title={
                         [
                           row.policy_model,

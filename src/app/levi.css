@@ -1898,6 +1898,18 @@ select optgroup {
   white-space: nowrap;
   max-width: 280px;
 }
+.levi-pool-source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 170px;
+}
+.levi-pool-policy {
+  min-width: 210px;
+  max-width: 300px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
 .levi-pool-muted {
   color: #89927f;
   font-size: 12px;
