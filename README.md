@@ -131,7 +131,7 @@ The current release is **0.3.0**; `main` carries unreleased work listed in the [
 - **Evidence is sampled.** Dense refinement looks where it is pointed and cannot prove that nothing happened elsewhere.
 - **Model quality is measured per dataset, not claimed.** Automated tests use fixtures and stub models. A local model's annotation quality is still being established. The built-in anchored review rules are validated on one task (plates); the candidate rule set with a start check only on development data. The fast segmentation student is scored against SAM3's labels, not against human labels, so it can at best match SAM3. RECAP value labels have been checked on one real checkpoint. Whether curated inputs (training manifests, training-pool exports) improve a trained policy is not established here.
 - **Not built.** MCP is stdio only. There is no multi-user access control, no OS-level offline sandbox and no GPU scheduler: the GPU guardian and `LEVI_GPU_LOCK_FILE` are courtesy policies among cooperating processes.
-- **Not verified.** The Docker image has not been built or run, and its `Dockerfile` copies a `public/` folder that this repository no longer has, so `docker build` should stop at that step until the line changes. Linux x86_64 is the tested platform.
+- **Not verified.** The Docker image has not been built or run (the `Dockerfile` no longer copies the `public/` folder this repository does not have, but no build has confirmed the rest). Linux x86_64 is the tested platform.
 
 Details: [Validation](docs/VALIDATION.md).
 
