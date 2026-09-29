@@ -7,6 +7,7 @@ It is a review run like any other: plan, approval, pilot, the review queue and a
 - [When to use it](#when-to-use-it)
 - [Plan one](#plan-one)
 - [The spec](#the-spec)
+- [Start check and vetoes](#start-check-and-vetoes)
 - [Anchors](#anchors)
 - [What a run keeps](#what-a-run-keeps)
 - [Reading the results](#reading-the-results)
@@ -53,15 +54,58 @@ A spec is JSON (`levi/agent/anchored_specs/<id>.json` for the built-in ones):
 | `title` | Optional display name per language, e.g. `{"en": "Plates release-review rules", "zh": "plates 释放复核规则"}`. The viewer and the outcome proposal show it; the id is shown only when a spec has no title. |
 | `aliases` | Built-in specs only: former ids that still resolve to this spec. |
 | `anchor` | `{"signal": "gripper", "event": "open" \| "close"}`, optionally `column` (a float vector column), `dimension` (its dimension name) and `open_level` (`high`, the default, or `low` for a channel that records closure). |
-| `views` | Per camera: a `role`, the `camera` key and `offsets` in frames or `offsets_seconds` (converted with the dataset's fps). Offsets are clamped to the episode. The images are sent in this order, native size, PNG. |
+| `views` | Per camera: a `role`, the `camera` key and `offsets` in frames or `offsets_seconds` (converted with the dataset's fps), counted from the anchor event, or with `"at": "start"` / `"at": "end"` from the episode's first / last frame. Offsets are clamped to the episode. The images are sent in this order, native size, PNG. |
 | `question` | The whole instruction; no system prompt, skills or evidence ledger are added. |
 | `fields` | Ordered answer fields, each with its `enum`. The server decodes them in this order, all required. |
 | `valid_when` | Conditions `{"field", "in": [...]}` or `{"field", "not_in": [...]}`; an event is valid when all hold. |
 | `unknown_values` | Answers that mean "cannot tell" (default `["unclear"]`). |
 | `episode` | `{"label_field", "require_labels": [...]}`: success when every label has a valid event; or `{"min_valid": n}`. |
 | `max_output_tokens` | The answer's allowance (default 200). |
+| `start` | Optional [start check](#start-check-and-vetoes): one question per episode on frames at its start, whose answer can waive required labels. |
+| `vetoes` | Optional [vetoes](#start-check-and-vetoes): rules any event can break, each read from the event's answer or asked as its own question. |
 
 Each condition of an event reads as **supported** (it holds), **contradicted** (it fails on a definite answer) or **unknown** (it fails on an unknown value). The event is valid when every condition is supported, contradicted when any is contradicted, unknown otherwise. A label the episode needs that has no valid event but an unknown one is named in the outcome proposal's `uncertainty`, so the reviewer sees where to look.
+
+## Start check and vetoes
+
+Both are declared in the spec, as data; a spec without them runs exactly as before (same requests, record and outcome, and the plan freezes the same spec), which a regression test checks byte for byte on recorded answers.
+
+**Start check** (`start`): one more question, asked once per episode before the events, on views `at` the episode's `start` (or `end`). It has its own `question`, `fields` and `max_output_tokens`, and a list `waive` of `{"label", "when": [conditions over its answer]}`. A required label (`episode.require_labels`) is waived — the episode does not need a valid event for it — when every condition holds; when one reads unknown, the label stays required and, if it has no valid event, is named undecided. For plates: a colour already stacked at the start, or with fewer than two plates, is not required.
+
+```json
+"start": {
+  "views": [{"role": "start_side", "camera": "observation.images.view1", "offsets": [0], "at": "start"}],
+  "question": "... For pink and for white: two_or_more_apart, already_stacked, one_or_none or unclear ...",
+  "fields": [{"name": "pink", "enum": ["two_or_more_apart", "already_stacked", "one_or_none", "unclear"]}, ...],
+  "waive": [{"label": "pink", "when": [{"field": "pink", "in": ["already_stacked", "one_or_none"]}]}, ...]
+}
+```
+
+**Vetoes** (`vetoes`): a list of rules that any single event can break. Each has an `id`, an optional `title`, and:
+
+| Field | Meaning |
+| --- | --- |
+| `ask_when` | Conditions over the event's own answer; the veto is read at events where none is contradicted (every event when empty). |
+| `question`, `fields`, `views`, `max_output_tokens` | Optional: the veto's own question, asked at the event after the spec's question. `views` default to the spec's (the same images, so a server's prefix cache serves them). Without a question, the veto reads the event's own answer. |
+| `veto_when` | Conditions over the veto's answer (or the event's). All supported: **confirmed**; one contradicted: **cleared**; otherwise **undecided**. |
+| `effect` | `episode` (default): a confirmed veto at any event makes the outcome failure. `event`: it only makes its event invalid (contradicted); an undecided one makes a valid event unknown. |
+
+An undecided `episode` veto does not change the outcome: like an undecided label, it is named in the proposal's `uncertainty` (for a success) and in the record's `basis.undecided_vetoes`, so the reviewer sees where to look; the training manifest's `anchored_undecided` counts it. For screws, "a target screw dropped into a compartment that already held screws or nuts" is a veto with its own question, and "the robot dropped a distractor into an empty compartment" a veto read from the event's answer:
+
+```json
+"vetoes": [
+  {"id": "occupied_compartment",
+   "ask_when": [{"field": "object", "in": ["short_silver_screw"]}],
+   "question": "... does that compartment hold black screws, nuts or other hardware ...?",
+   "fields": [{"name": "compartment_had_hardware", "enum": ["yes", "no", "unclear"]}],
+   "veto_when": [{"field": "compartment_had_hardware", "in": ["yes"]}]},
+  {"id": "distractor_in_empty_compartment",
+   "veto_when": [{"field": "object", "in": ["black_screw", "long_silver_screw", "hex_key"]},
+                 {"field": "landed_in", "in": ["empty_compartment"]}]}
+]
+```
+
+Each start check and veto question is one more request with the same safeguards as the spec's own (budget, cache, an answer outside its fields sets the episode aside); the plan's estimate names them.
 
 ## Anchors
 
@@ -78,7 +122,7 @@ Like the evidence [signals](AGENTS.md#evidence-and-refinement), anchors are read
 
 Per episode, beside the run and in the agent store (`anchored` records, removed with the run by `reset`):
 
-- `episode_NNNNNN-anchored.json`: the spec's id and title, the channel read, every event's frame and time, its answers, the per-condition reading, its verdict and validity, the frames shown (camera, offset, frame, evidence id) and its tokens and time; the episode's outcome and what it rests on (valid labels, missing, undecided).
+- `episode_NNNNNN-anchored.json`: the spec's id and title, the channel read, every event's frame and time, its answers, the per-condition reading, its verdict and validity, the frames shown (camera, offset, frame, evidence id) and its tokens and time; with vetoes, each veto's verdict at the event (`confirmed`, `cleared`, `undecided` or `not_asked`) with its answer and frames; with a start check, its answer, each waiver's reading and its frames (`start`); the episode's outcome and what it rests on (valid labels, missing, undecided, and when used, waived labels, confirmed and undecided vetoes).
 - The evidence ledger (`episode_NNNNNN-observations.json`) and the frames as lossless PNG under `evidence/` (removed by `levi agent clean`, rebuilt on demand).
 - One `outcome` proposal in the run's review draft: success or failure, the answers of each event in its text, citing the frames nearest each event (valid events first). Committing it writes the episode's outcome label, which the episode list shows and exports carry.
 
@@ -98,5 +142,5 @@ The plates release-review rules (`plates-release`) reproduce the external releas
 
 - One anchor signal: gripper crossings. Other events (contact, a button, a height turn) are not yet anchors.
 - Offsets are fixed per spec; a gripper that moves much faster or slower than the one a spec was written for needs its own offsets.
-- The episode rule is a set cover or a count. Order constraints (this before that) are not expressed.
+- The episode rule is a set cover or a count, narrowed by a start check and broken by vetoes. Order constraints (this before that) are not expressed, and a later event cannot undo an earlier `episode` veto (use `effect: event` for a fault a later event can correct).
 - Greedy answers are deterministic within one server session; a restarted server can change a few answers.

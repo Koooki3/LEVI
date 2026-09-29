@@ -392,6 +392,8 @@ def build(
     if not scope:
         raise ManifestError("No episode is in scope")
 
+    from .agent.anchored import undecided as anchored_undecided
+
     run, verdicts = _anchored(ds.name, anchored_run)
     # Human labels alone are a verification too (a task without anchored-review
     # rules is verified by people); refuse only when nothing verifies the scope.
@@ -440,7 +442,7 @@ def build(
         )
         anchored_outcome = record["outcome"] if record else None
         undecided = (
-            bool((record.get("basis") or {}).get("undecided_labels"))
+            anchored_undecided(record["outcome"], record.get("basis") or {})
             if record
             else None
         )

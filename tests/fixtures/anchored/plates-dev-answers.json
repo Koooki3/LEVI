@@ -1,0 +1,1531 @@
+{
+"about": "Answers of the plates release-review rules at every gripper opening of 100 development episodes (rollouts_recap plates pool, not a test set), Qwen3.8-27B INT4, greedy, run review-20260928T1751. Used to prove specs without start check or vetoes decide exactly as before.",
+"episodes": {
+"0": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "green",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"1": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "nothing_released",
+"stays": "yes"
+}
+],
+"2": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"3": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "other_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "yes"
+},
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "unclear"
+}
+],
+"4": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "green",
+"landed_on": "other_colour_plate",
+"stays": "yes"
+}
+],
+"5": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"6": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "green",
+"landed_on": "other_colour_plate",
+"stays": "yes"
+}
+],
+"7": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"8": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"9": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"10": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "green",
+"landed_on": "other_colour_plate",
+"stays": "yes"
+}
+],
+"11": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"12": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"13": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "green",
+"landed_on": "other_colour_plate",
+"stays": "yes"
+}
+],
+"14": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"15": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"16": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "other_colour_plate",
+"stays": "yes"
+}
+],
+"17": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"18": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"19": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"20": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"21": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "nothing_released",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"22": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "no"
+}
+],
+"23": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"24": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "other_colour_plate",
+"stays": "yes"
+}
+],
+"25": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"26": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"27": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"28": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"29": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "nothing_released",
+"stays": "yes"
+}
+],
+"30": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"31": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"32": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"33": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"34": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "green",
+"landed_on": "other_colour_plate",
+"stays": "yes"
+}
+],
+"35": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"36": [
+{
+"held_before": "yes",
+"plate_colour": "green",
+"landed_on": "other_colour_plate",
+"stays": "yes"
+}
+],
+"37": [
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "no"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"38": [
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "unclear"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"39": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"40": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "no"
+}
+],
+"41": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"42": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "nothing_released",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"43": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "other_colour_plate",
+"stays": "yes"
+}
+],
+"44": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "no"
+},
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "no"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "nothing_released",
+"stays": "yes"
+},
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "no"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "nothing_released",
+"stays": "yes"
+}
+],
+"45": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "nothing_released",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"46": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "nothing_released",
+"stays": "yes"
+}
+],
+"47": [
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "no"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "table",
+"stays": "yes"
+}
+],
+"48": [
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "nothing_released",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "nothing_released",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"49": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"50": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"51": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"52": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"53": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"54": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"55": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"56": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"57": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "unclear"
+},
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "no"
+}
+],
+"58": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"59": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"60": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"61": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"62": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"63": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"64": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"65": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"66": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"67": [
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"68": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"69": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "green",
+"landed_on": "other_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "no"
+}
+],
+"70": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "unclear"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"71": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"72": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "other_colour_plate",
+"stays": "yes"
+}
+],
+"73": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"74": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"75": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"76": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"77": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"78": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "no"
+}
+],
+"79": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"80": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"81": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"82": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"83": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "unclear"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"84": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"85": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"86": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"87": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"88": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "nothing_released",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"89": [
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"90": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"91": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"92": [
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "unclear"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "yes"
+}
+],
+"93": [
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "other_colour_plate",
+"stays": "yes"
+}
+],
+"94": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"95": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"96": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"97": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"98": [
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "same_colour_plate",
+"stays": "yes"
+}
+],
+"99": [
+{
+"held_before": "no",
+"plate_colour": "none",
+"landed_on": "nothing_released",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "pink",
+"landed_on": "table",
+"stays": "yes"
+},
+{
+"held_before": "yes",
+"plate_colour": "white",
+"landed_on": "nothing_released",
+"stays": "yes"
+}
+]
+}
+}

@@ -2,7 +2,10 @@
 schema-bound question per event, rules from a spec, one outcome proposal per
 episode through the ordinary review queue. Protocol fakes only."""
 
+import hashlib
 import json
+import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -24,6 +27,19 @@ from levi.agent.schema import Budget, TaskContext
 from levi.agent.security import Principal
 
 PLATES = anchored.builtin()["plates-release"]
+FIXTURES = Path(__file__).parent / "fixtures" / "anchored"
+
+
+def golden(name, observed):
+    """Compare with a recorded fixture, byte for byte. The ``*-before.json``
+    fixtures were written by the code before start checks and vetoes existed
+    (604b248) with LEVI_ANCHORED_GOLDEN=write; never rewrite them to make a
+    test pass."""
+    path = FIXTURES / name
+    text = json.dumps(observed, sort_keys=True, ensure_ascii=False, indent=1) + "\n"
+    if os.environ.get("LEVI_ANCHORED_GOLDEN") == "write":
+        path.write_text(text)
+    assert path.read_text() == text
 
 
 def spec(camera, **extra):
@@ -444,3 +460,397 @@ def test_only_a_local_model_runs_an_anchored_review(client, dataset):
             )
         )
     assert DIGEST
+
+
+def test_a_spec_without_start_check_or_vetoes_decides_exactly_as_before():
+    """Regression: the plates rules on 221 recorded answers (100 development
+    episodes) give the same per-event readings, outcomes and bases, and the
+    plan freezes the same spec, byte for byte, as before start checks and
+    vetoes existed."""
+    answers = json.loads((FIXTURES / "plates-dev-answers.json").read_text())
+    observed = {}
+    for ep, rows in answers["episodes"].items():
+        events = []
+        for answer in rows:
+            checks, verdict = judge(PLATES, answer)
+            events.append(
+                {
+                    "answer": answer,
+                    "checks": checks,
+                    "verdict": verdict,
+                    "valid": verdict == "supported",
+                }
+            )
+        verdict, basis = outcome(PLATES, events)
+        observed[ep] = {
+            "events": [[e["verdict"], e["checks"]] for e in events],
+            "outcome": verdict,
+            "basis": basis,
+        }
+    observed["frozen_spec"] = Workflow.model_validate(
+        {"kind": "review", "anchored": {"spec": "plates-release"}}
+    ).model_dump()
+    golden("plates-dev-before.json", observed)
+
+
+def scrub(value, run_id):
+    """A run's record without what differs between two identical runs."""
+    if isinstance(value, dict):
+        return {
+            k: scrub(v, run_id)
+            for k, v in value.items()
+            if k not in {"elapsed_seconds", "at", "created_at"}
+        }
+    if isinstance(value, list):
+        return [scrub(v, run_id) for v in value]
+    if isinstance(value, str):
+        return value.replace(run_id, "<run>")
+    return value
+
+
+def test_a_review_without_start_check_or_vetoes_runs_exactly_as_before(
+    client,
+    dataset,
+    server,  # noqa: F811 - the fixture imported above
+):
+    """Regression: the same requests (frames, question, schema), the same
+    record and the same outcome proposal as before start checks and vetoes
+    existed."""
+    from levi import catalog, service
+    from levi.agent.runtime import Workbench
+
+    camera = camera_dataset(dataset)
+    gripper_dataset(dataset)
+    entry = catalog.register(str(dataset))
+    wb = Workbench(service.STATE)
+    wb.store.put("providers", "vllm", config().model_dump())
+    context = TaskContext(
+        repo_id=entry["id"],
+        episodes=[0, 1],
+        instruction="Judge each release",
+        provider="vllm",
+        cameras=[camera],
+        allow_media_egress=True,
+        workflow={
+            "kind": "review",
+            "anchored": spec(camera),
+            "require_human_pilot": False,
+        },
+        budget=Budget(max_calls=20, max_tokens=None, max_seconds=600),
+    )
+    run = wb.plan(context)
+    approve(wb, run["id"], 1, "human")
+    replies(
+        server,
+        [
+            {"held": "yes", "colour": "red", "in_box": "yes"},
+            {"held": "unclear", "colour": "blue", "in_box": "yes"},
+        ],
+    )
+    assert wb.store.claim(run["id"], "owner")
+    wb.execute(run["id"], "owner", pilot=False)
+    result = wb.store.get("runs", run["id"])
+    requests = []
+    for chat in server.chats():
+        (message,) = chat["messages"]
+        requests.append(
+            {
+                "images": [
+                    hashlib.sha256(p["image_url"]["url"].encode()).hexdigest()
+                    for p in message["content"]
+                    if p["type"] == "image_url"
+                ],
+                "text": message["content"][-1]["text"],
+                "rest": {k: v for k, v in chat.items() if k != "messages"},
+            }
+        )
+    change = wb.store.get("changes", result["changes"])
+    observed = {
+        "plan": {
+            "workflow": run["context"]["workflow"],
+            "estimate": run["plan"]["estimate"],
+        },
+        "requests": requests,
+        "records": [wb.store.get("anchored", f"{run['id']}:{ep}") for ep in (0, 1)],
+        "proposals": [
+            {
+                k: p.get(k)
+                for k in (
+                    "episode_index",
+                    "kind",
+                    "content",
+                    "start",
+                    "outcome",
+                    "evidence_ids",
+                    "evidence_note",
+                    "uncertainty",
+                )
+            }
+            for p in sorted(change["proposals"], key=lambda p: p["episode_index"])
+        ],
+    }
+    golden("block-drop-run-before.json", scrub(observed, run["id"]))
+
+
+def vetoed_spec(camera, **extra):
+    """The block-drop spec with a start check (a colour with no block at the
+    start is not required) and two vetoes: one read from the event's own
+    answer, one with its own question."""
+    return spec(
+        camera,
+        start={
+            "views": [
+                {"role": "start", "camera": camera, "offsets": [0], "at": "start"}
+            ],
+            "question": "Which blocks are on the table?",
+            "fields": [
+                {"name": "red", "enum": ["present", "absent", "unclear"]},
+                {"name": "blue", "enum": ["present", "absent", "unclear"]},
+            ],
+            "waive": [
+                {"label": "red", "when": [{"field": "red", "in": ["absent"]}]},
+                {"label": "blue", "when": [{"field": "blue", "in": ["absent"]}]},
+            ],
+            "max_output_tokens": 32,
+        },
+        vetoes=[
+            {
+                "id": "wrong_box",
+                "ask_when": [{"field": "held", "in": ["yes"]}],
+                "views": [{"role": "after", "camera": camera, "offsets": [4]}],
+                "question": "Did the block land in the box that was full at the start?",
+                "fields": [{"name": "full_box", "enum": ["yes", "no", "unclear"]}],
+                "veto_when": [{"field": "full_box", "in": ["yes"]}],
+                "max_output_tokens": 16,
+            },
+            {
+                "id": "no_block",
+                "effect": "event",
+                "veto_when": [{"field": "colour", "in": ["none"]}],
+            },
+        ],
+        **extra,
+    )
+
+
+def test_a_start_check_and_vetoes_are_declared_in_the_spec_only():
+    cam = "cam"
+    parsed = AnchoredSpec.model_validate(vetoed_spec(cam))
+    frozen = anchored.dump(parsed)
+    assert [v["id"] for v in frozen["vetoes"]] == ["wrong_box", "no_block"]
+    assert frozen["start"]["views"][0]["at"] == "start"
+    # Anchor views keep their old frozen form.
+    assert "at" not in frozen["views"][0]
+    assert "start" not in anchored.dump(AnchoredSpec.model_validate(spec(cam)))
+    assert anchored.cameras(frozen) == [cam]
+    two = vetoed_spec(cam)
+    two["start"]["views"][0]["camera"] = "top"
+    assert anchored.cameras(two) == [cam, "top"]
+    bad = [
+        (
+            "unknown field",
+            {"vetoes": [{"id": "x", "veto_when": [{"field": "nope", "in": ["a"]}]}]},
+        ),
+        (
+            "cannot take",
+            {"vetoes": [{"id": "x", "veto_when": [{"field": "held", "in": ["a"]}]}]},
+        ),
+        (
+            "question with its fields",
+            {
+                "vetoes": [
+                    {
+                        "id": "x",
+                        "question": "q",
+                        "veto_when": [{"field": "held", "in": ["yes"]}],
+                    }
+                ]
+            },
+        ),
+        (
+            "unique",
+            {
+                "vetoes": [{"id": "x", "veto_when": [{"field": "held", "in": ["yes"]}]}]
+                * 2
+            },
+        ),
+    ]
+    for message, extra in bad:
+        with pytest.raises(ValueError, match=message):
+            AnchoredSpec.model_validate(spec(cam, **extra))
+    with pytest.raises(ValueError, match="not one of episode.require_labels"):
+        broken = vetoed_spec(cam)
+        broken["start"]["waive"][0]["label"] = "green"
+        AnchoredSpec.model_validate(broken)
+    with pytest.raises(ValueError, match="start or end"):
+        broken = vetoed_spec(cam)
+        broken["start"]["views"][0]["at"] = "anchor"
+        AnchoredSpec.model_validate(broken)
+
+
+def event(answer, verdict, vetoes=None, frame=1):
+    out = {
+        "frame_index": frame,
+        "answer": answer,
+        "verdict": verdict,
+        "valid": verdict == "supported",
+    }
+    return out | ({"vetoes": vetoes} if vetoes is not None else {})
+
+
+def test_a_start_check_waives_labels_and_a_veto_fails_the_episode():
+    rules = AnchoredSpec.model_validate(vetoed_spec("cam"))
+    red = {"held": "yes", "colour": "red", "in_box": "yes"}
+    clear = [
+        {"id": "wrong_box", "effect": "episode", "verdict": "cleared"},
+        {"id": "no_block", "effect": "event", "verdict": "cleared"},
+    ]
+    events = [event(red, "supported", clear, 7)]
+    # Blue required and missing: failure, as without a start check.
+    verdict, basis = outcome(rules, events, {"red": "present", "blue": "present"})
+    assert (verdict, basis["missing_labels"], basis["waived_labels"]) == (
+        "failure",
+        ["blue"],
+        [],
+    )
+    # No blue block at the start: not required.
+    verdict, basis = outcome(rules, events, {"red": "present", "blue": "absent"})
+    assert (verdict, basis["waived_labels"], basis["vetoes"]) == (
+        "success",
+        ["blue"],
+        [],
+    )
+    # Cannot tell whether there was one: still required, and undecided.
+    verdict, basis = outcome(rules, events, {"red": "present", "blue": "unclear"})
+    assert (verdict, basis["undecided_labels"]) == ("failure", ["blue"])
+    assert anchored.undecided(verdict, basis)
+    # A confirmed veto at any event fails the episode.
+    hit = [dict(clear[0], verdict="confirmed"), clear[1]]
+    verdict, basis = outcome(
+        rules,
+        [*events, event(red, "supported", hit, 13)],
+        {"red": "present", "blue": "absent"},
+    )
+    assert verdict == "failure"
+    assert basis["vetoes"] == [{"veto": "wrong_box", "frame_index": 13}]
+    # An undecided veto leaves a success undecided (not a failure).
+    unsure = [dict(clear[0], verdict="undecided"), clear[1]]
+    verdict, basis = outcome(
+        rules,
+        [event(red, "supported", unsure, 7)],
+        {"red": "present", "blue": "absent"},
+    )
+    assert verdict == "success"
+    assert basis["undecided_vetoes"] == [{"veto": "wrong_box", "frame_index": 7}]
+    assert anchored.undecided(verdict, basis)
+    assert not anchored.undecided("failure", basis | {"undecided_labels": []})
+    # An event-level veto only makes its event invalid (or unknown).
+    assert (
+        anchored.settle("supported", [dict(clear[1], verdict="confirmed")])
+        == "contradicted"
+    )
+    assert (
+        anchored.settle("supported", [dict(clear[1], verdict="undecided")]) == "unknown"
+    )
+    assert (
+        anchored.settle("contradicted", [dict(clear[1], verdict="undecided")])
+        == "contradicted"
+    )
+    assert (
+        anchored.settle("supported", [dict(clear[0], verdict="confirmed")])
+        == "supported"
+    )
+    # A veto without a question reads the event's own answer.
+    no_block = rules.vetoes[1]
+    assert (
+        anchored.veto_verdict(rules, no_block, red | {"colour": "none"})[1]
+        == "confirmed"
+    )
+    assert (
+        anchored.veto_verdict(rules, no_block, red | {"colour": "unclear"})[1]
+        == "undecided"
+    )
+    assert anchored.veto_verdict(rules, no_block, red)[1] == "cleared"
+
+
+def test_a_review_asks_the_start_check_and_the_vetoes(
+    client,
+    dataset,
+    server,  # noqa: F811 - the fixture imported above
+):
+    from levi import catalog, service
+    from levi.agent.runtime import Workbench
+
+    camera = camera_dataset(dataset)
+    gripper_dataset(dataset)
+    entry = catalog.register(str(dataset))
+    wb = Workbench(service.STATE)
+    wb.store.put("providers", "vllm", config().model_dump())
+    context = TaskContext(
+        repo_id=entry["id"],
+        episodes=[0, 1],
+        instruction="Judge each release",
+        provider="vllm",
+        cameras=[camera],
+        allow_media_egress=True,
+        workflow={
+            "kind": "review",
+            "anchored": vetoed_spec(camera),
+            "require_human_pilot": False,
+        },
+        budget=Budget(max_calls=20, max_tokens=None, max_seconds=600),
+    )
+    run = wb.plan(context)
+    basis = run["plan"]["estimate"]["basis"]
+    assert "veto question asked at it (wrong_box)" in basis
+    assert "one start check per episode" in basis
+    approve(wb, run["id"], 1, "human")
+    replies(
+        server,
+        [
+            # Episode 0: start check, then per event its answer and the
+            # question veto (asked only where a block was held).
+            {"red": "present", "blue": "absent"},
+            {"held": "yes", "colour": "red", "in_box": "yes"},
+            {"full_box": "yes"},
+            {"held": "no", "colour": "none", "in_box": "no"},
+            # Episode 1 (never opens): the start check only.
+            {"red": "absent", "blue": "absent"},
+        ],
+    )
+    assert wb.store.claim(run["id"], "owner")
+    wb.execute(run["id"], "owner", pilot=False)
+    result = wb.store.get("runs", run["id"])
+    assert result["status"] == "waiting_for_review", result["reason"]
+    texts = [c["messages"][0]["content"][-1]["text"] for c in server.chats()]
+    assert texts == [
+        "Which blocks are on the table?",
+        "Did the gripper put the block down in the box?",
+        "Did the block land in the box that was full at the start?",
+        "Did the gripper put the block down in the box?",
+        "Which blocks are on the table?",
+    ]
+    assert result["requests"] == 5
+    record = wb.store.get("anchored", f"{run['id']}:0")
+    assert record["start"]["answer"] == {"blue": "absent", "red": "present"}
+    assert [f["frame_index"] for f in record["start"]["frames"]] == [0]
+    first, second = record["events"]
+    assert [v["verdict"] for v in first["vetoes"]] == ["confirmed", "cleared"]
+    assert [f["frame_index"] for f in first["vetoes"][0]["frames"]] == [11]
+    assert [v["verdict"] for v in second["vetoes"]] == ["not_asked", "confirmed"]
+    assert second["verdict"] == "contradicted"
+    # Blue waived and red valid, but the full-box veto fails the episode.
+    assert record["outcome"] == "failure"
+    assert record["basis"]["waived_labels"] == ["blue"]
+    assert record["basis"]["vetoes"] == [{"veto": "wrong_box", "frame_index": 7}]
+    change = wb.store.get("changes", result["changes"])
+    by_episode = {p["episode_index"]: p for p in change["proposals"]}
+    assert "veto wrong_box confirmed" in by_episode[0]["content"]
+    assert "start (red=present, blue=absent)" in by_episode[0]["content"]
+    assert "vetoed: wrong_box" in by_episode[0]["evidence_note"]
+    # Nothing required at the start and no event: nothing left to do.
+    assert by_episode[1]["outcome"] == "success"
+    human = Principal("tester", human=True)
+    one = invoke(wb, human, "anchored.get", {"run_id": run["id"], "episode": 0})
+    assert list(one["start"]["answer"]) == ["red", "blue"]
+    assert [v["id"] for v in one["spec"]["vetoes"]] == ["wrong_box", "no_block"]

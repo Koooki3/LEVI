@@ -73,6 +73,9 @@ class ViewSpec(Contract):
     offsets_seconds: list[float] | None = Field(
         default=None, min_length=1, max_length=32
     )
+    # What the offsets count from: the anchor event (default), the episode's
+    # first frame or its last (a view of the starting or final state).
+    at: Literal["anchor", "start", "end"] = "anchor"
 
     @model_validator(mode="after")
     def one_kind(self):
@@ -100,6 +103,63 @@ class Condition(Contract):
         return self
 
 
+class Probe(Contract):
+    """One more narrow question beside the spec's own: its frames, its text,
+    its answer fields."""
+
+    views: list[ViewSpec] | None = Field(default=None, min_length=1, max_length=8)
+    question: str = Field(min_length=1, max_length=8000)
+    fields: list[AnswerField] = Field(min_length=1, max_length=16)
+    max_output_tokens: int = Field(default=200, ge=16, le=4096)
+
+    def answer_schema(self):
+        return _answer_schema(self.fields)
+
+
+class Waiver(Contract):
+    # A required label the episode does not need when every condition holds
+    # on the start check's answer (e.g. a colour already stacked at the start).
+    label: str
+    when: list[Condition] = Field(min_length=1, max_length=16)
+
+
+class StartCheck(Probe):
+    """Asked once per episode on frames at its start (views ``at`` start or
+    end); its answer can waive required labels."""
+
+    waive: list[Waiver] = Field(min_length=1, max_length=16)
+
+
+class Veto(Contract):
+    """A rule that any event can break. At each event where ``ask_when``
+    (over the event's own answer) is not contradicted, ``veto_when`` is read
+    over the veto's own question -- when it has one; its views default to the
+    spec's -- or over the event's answer. All supported: confirmed;
+    one contradicted: cleared; else undecided. A confirmed veto fails the
+    episode (``effect: episode``) or only its event (``effect: event``)."""
+
+    id: str = Field(pattern=r"^[a-z][a-z0-9_]{0,39}$")
+    title: dict[str, str] | None = None
+    effect: Literal["episode", "event"] = "episode"
+    ask_when: list[Condition] = Field(default_factory=list, max_length=16)
+    views: list[ViewSpec] | None = Field(default=None, min_length=1, max_length=8)
+    question: str | None = Field(default=None, min_length=1, max_length=8000)
+    fields: list[AnswerField] | None = Field(default=None, min_length=1, max_length=16)
+    veto_when: list[Condition] = Field(min_length=1, max_length=16)
+    max_output_tokens: int = Field(default=200, ge=16, le=4096)
+
+    @model_validator(mode="after")
+    def asked_or_read(self):
+        if (self.question is None) != (self.fields is None):
+            raise ValueError(f"Veto {self.id!r} gives a question with its fields")
+        if self.views is not None and self.question is None:
+            raise ValueError(f"Veto {self.id!r} has views but no question")
+        return self
+
+    def answer_schema(self):
+        return _answer_schema(self.fields)
+
+
 class EpisodeRule(Contract):
     # Success when every label here has a valid event (label_field names the
     # answer that carries it); without labels, when at least min_valid events
@@ -125,6 +185,10 @@ class AnchoredSpec(Contract):
     unknown_values: list[str] = Field(default_factory=lambda: ["unclear"])
     episode: EpisodeRule = Field(default_factory=EpisodeRule)
     max_output_tokens: int = Field(default=200, ge=16, le=4096)
+    # Optional, both absent from a spec that does not use them (and from its
+    # frozen form): one start check per episode, and vetoes at every event.
+    start: StartCheck | None = None
+    vetoes: list[Veto] = Field(default_factory=list, max_length=8)
 
     @model_validator(mode="after")
     def consistent(self):
@@ -140,38 +204,116 @@ class AnchoredSpec(Contract):
             raise ValueError(
                 "title maps language codes to non-empty names of up to 200 characters"
             )
-        names = [f.name for f in self.fields]
-        if len(set(names)) != len(names):
-            raise ValueError("Answer field names must be unique")
-        values = {f.name: set(f.enum) for f in self.fields}
-        for c in self.valid_when:
-            if c.field not in values:
-                raise ValueError(f"valid_when names an unknown field {c.field!r}")
-            unknown = set(c.is_in or c.not_in or []) - values[c.field]
-            if unknown:
-                raise ValueError(
-                    f"valid_when on {c.field!r} uses values it cannot take: "
-                    + ", ".join(sorted(unknown))
-                )
+        values = _values(self.fields, "Answer field")
+        _check(self.valid_when, values, "valid_when")
         rule = self.episode
         if rule.require_labels:
             if rule.label_field not in values:
                 raise ValueError("episode.label_field must name an answer field")
             if set(rule.require_labels) - values[rule.label_field]:
                 raise ValueError("episode.require_labels must be values of label_field")
-        if len({v.role for v in self.views}) != len(self.views):
-            raise ValueError("View roles must be unique")
+        _roles(self.views, "View")
+        if self.start is not None:
+            own = _values(self.start.fields, "start field")
+            for w in self.start.waive:
+                if w.label not in rule.require_labels:
+                    raise ValueError(
+                        f"start.waive names {w.label!r}, not one of "
+                        "episode.require_labels"
+                    )
+                _check(w.when, own, f"start.waive {w.label!r}")
+            if not self.start.views or any(v.at == "anchor" for v in self.start.views):
+                raise ValueError("start views are at the episode's start or end")
+            _roles(self.start.views, "start view")
+        ids = [v.id for v in self.vetoes]
+        if len(set(ids)) != len(ids):
+            raise ValueError("Veto ids must be unique")
+        for veto in self.vetoes:
+            where = f"veto {veto.id!r}"
+            _check(veto.ask_when, values, f"{where} ask_when")
+            own = (
+                values
+                if veto.fields is None
+                else _values(veto.fields, f"{where} field")
+            )
+            _check(veto.veto_when, own, f"{where} veto_when")
+            if veto.views:
+                _roles(veto.views, f"{where} view")
         return self
 
     def answer_schema(self):
         """The JSON schema the server decodes against: every field required,
         in the spec's order, each one of its values."""
-        return {
-            "type": "object",
-            "additionalProperties": False,
-            "required": [f.name for f in self.fields],
-            "properties": {f.name: {"enum": list(f.enum)} for f in self.fields},
-        }
+        return _answer_schema(self.fields)
+
+
+def _answer_schema(fields):
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [f.name for f in fields],
+        "properties": {f.name: {"enum": list(f.enum)} for f in fields},
+    }
+
+
+def _values(fields, what):
+    names = [f.name for f in fields]
+    if len(set(names)) != len(names):
+        raise ValueError(f"{what} names must be unique")
+    return {f.name: set(f.enum) for f in fields}
+
+
+def _check(conditions, values, where):
+    for c in conditions:
+        if c.field not in values:
+            raise ValueError(f"{where} names an unknown field {c.field!r}")
+        unknown = set(c.is_in or c.not_in or []) - values[c.field]
+        if unknown:
+            raise ValueError(
+                f"{where} on {c.field!r} uses values it cannot take: "
+                + ", ".join(sorted(unknown))
+            )
+
+
+def _roles(views, what):
+    if len({v.role for v in views}) != len(views):
+        raise ValueError(f"{what} roles must be unique")
+
+
+# Keys a spec that does not use them leaves out of its frozen form, so a plan
+# for an older spec freezes exactly what it froze before they existed.
+_OPTIONAL = {"start": None, "vetoes": []}
+
+
+def dump(spec):
+    """A spec as the plain dict a plan freezes and ``anchored.specs`` lists."""
+    out = spec.model_dump(by_alias=True)
+    for key, empty in _OPTIONAL.items():
+        if out.get(key) == empty:
+            out.pop(key)
+
+    def views(listed):
+        for v in listed or []:
+            if v.get("at") == "anchor":
+                v.pop("at")
+
+    views(out["views"])
+    if "start" in out:
+        views(out["start"]["views"])
+    for veto in out.get("vetoes", []):
+        views(veto.get("views"))
+    return out
+
+
+def cameras(spec):
+    """Every camera a spec (a dict or AnchoredSpec) shows, in first-use order."""
+    spec = spec if isinstance(spec, dict) else dump(spec)
+    listed = list(spec["views"])
+    for veto in spec.get("vetoes") or []:
+        listed += veto.get("views") or []
+    if spec.get("start"):
+        listed += spec["start"]["views"]
+    return list(dict.fromkeys(v["camera"] for v in listed))
 
 
 def _shipped():
@@ -244,8 +386,8 @@ def resolve(value):
                 f"Unknown anchored review spec {value['spec']!r}; built in: "
                 + ", ".join(sorted(builtin()))
             )
-        return spec.model_dump(by_alias=True)
-    return AnchoredSpec.model_validate(value).model_dump(by_alias=True)
+        return dump(spec)
+    return dump(AnchoredSpec.model_validate(value))
 
 
 def spec_of(workflow):
@@ -346,12 +488,12 @@ def view_offsets(view, fps):
 # --- judging ---------------------------------------------------------------
 
 
-def judge(spec, answer):
-    """Each condition as supported / contradicted / unknown, and the event's
-    reading: supported (valid) when all hold, contradicted when one fails on
-    a definite answer, unknown otherwise."""
+def read(conditions, answer, unknown_values):
+    """Each condition over an answer as supported / contradicted / unknown,
+    and their reading together: supported when all hold, contradicted when
+    one fails on a definite answer, unknown otherwise."""
     checks = []
-    for c in spec.valid_when:
+    for c in conditions:
         value = answer.get(c.field)
         holds = value in c.is_in if c.is_in is not None else value not in c.not_in
         checks.append(
@@ -361,14 +503,14 @@ def judge(spec, answer):
                 "result": "supported"
                 if holds
                 else "unknown"
-                if value in spec.unknown_values
+                if value in unknown_values
                 else "contradicted",
             }
         )
     results = {c["result"] for c in checks}
     verdict = (
         "supported"
-        if results == {"supported"}
+        if results <= {"supported"}
         else "contradicted"
         if "contradicted" in results
         else "unknown"
@@ -376,24 +518,78 @@ def judge(spec, answer):
     return checks, verdict
 
 
-def outcome(spec, events):
-    """The episode's outcome from its judged events, and what it rests on."""
+def judge(spec, answer):
+    """Each condition as supported / contradicted / unknown, and the event's
+    reading: supported (valid) when all hold, contradicted when one fails on
+    a definite answer, unknown otherwise."""
+    return read(spec.valid_when, answer, spec.unknown_values)
+
+
+VETO = {"supported": "confirmed", "contradicted": "cleared", "unknown": "undecided"}
+
+
+def veto_verdict(spec, veto, event_answer, own_answer=None):
+    """A veto's checks and verdict at one event (``confirmed`` / ``cleared``
+    / ``undecided``), from its own answer or, without a question, the
+    event's."""
+    checks, reading = read(
+        veto.veto_when,
+        event_answer if veto.question is None else own_answer,
+        spec.unknown_values,
+    )
+    return checks, VETO[reading]
+
+
+def settle(verdict, vetoes):
+    """An event's verdict after its ``effect: event`` vetoes: a confirmed one
+    contradicts it, an undecided one leaves a supported event unknown."""
+    mine = {v["verdict"] for v in vetoes if v["effect"] == "event"}
+    if "confirmed" in mine:
+        return "contradicted"
+    if "undecided" in mine and verdict == "supported":
+        return "unknown"
+    return verdict
+
+
+def waivers(spec, start_answer):
+    """(labels waived, labels whose waiver is undecided) from the start
+    check's answer; nothing without one."""
+    if spec.start is None or start_answer is None:
+        return [], []
+    waived, unsure = [], []
+    for w in spec.start.waive:
+        reading = read(w.when, start_answer, spec.unknown_values)[1]
+        if reading == "supported":
+            waived.append(w.label)
+        elif reading == "unknown":
+            unsure.append(w.label)
+    return waived, [x for x in unsure if x not in waived]
+
+
+def outcome(spec, events, start_answer=None):
+    """The episode's outcome from its judged events (and the start check's
+    answer), and what it rests on."""
     valid = [e for e in events if e["valid"]]
     rule = spec.episode
     if rule.require_labels:
+        waived, unsure = waivers(spec, start_answer)
         labels = {e["answer"].get(rule.label_field) for e in valid}
-        missing = [x for x in rule.require_labels if x not in labels]
-        # A missing label with an undecided event is the reviewer's to look at.
+        missing = [
+            x for x in rule.require_labels if x not in labels and x not in waived
+        ]
+        # A missing label with an undecided event (or an undecided waiver) is
+        # the reviewer's to look at.
         undecided = [
             x
             for x in missing
-            if any(
+            if x in unsure
+            or any(
                 e["verdict"] == "unknown"
                 and e["answer"].get(rule.label_field) in (x, *spec.unknown_values)
                 for e in events
             )
         ]
-        return (
+        verdict, basis = (
             "failure" if missing else "success",
             {
                 "valid_labels": sorted(labels, key=str),
@@ -401,11 +597,38 @@ def outcome(spec, events):
                 "undecided_labels": undecided,
             },
         )
-    ok = len(valid) >= rule.min_valid
-    return "success" if ok else "failure", {
-        "valid_events": len(valid),
-        "min_valid": rule.min_valid,
-    }
+        if spec.start is not None:
+            basis["waived_labels"] = waived
+    else:
+        ok = len(valid) >= rule.min_valid
+        verdict, basis = (
+            "success" if ok else "failure",
+            {"valid_events": len(valid), "min_valid": rule.min_valid},
+        )
+    if any(v.effect == "episode" for v in spec.vetoes):
+
+        def found(state):
+            return [
+                {"veto": v["id"], "frame_index": e.get("frame_index")}
+                for e in events
+                for v in e.get("vetoes") or []
+                if v["effect"] == "episode" and v["verdict"] == state
+            ]
+
+        basis["vetoes"] = found("confirmed")
+        basis["undecided_vetoes"] = found("undecided")
+        if basis["vetoes"]:
+            verdict = "failure"
+    return verdict, basis
+
+
+def undecided(verdict, basis):
+    """Whether an outcome rests on something undecided: a required label (or
+    its waiver), or -- for a success -- a veto."""
+    return bool(
+        basis.get("undecided_labels")
+        or (verdict == "success" and basis.get("undecided_vetoes"))
+    )
 
 
 def validate_answer(spec, raw):
@@ -431,6 +654,13 @@ def validate_answer(spec, raw):
 
 
 # --- one episode -----------------------------------------------------------
+
+
+def view_rows(view, fps, n, last):
+    """Row positions a view shows: its offsets from the anchor row ``n``, the
+    first row or the last, clamped to the episode."""
+    base = n if view.at == "anchor" else 0 if view.at == "start" else last
+    return [min(last, max(0, base + d)) for d in view_offsets(view, fps)]
 
 
 def review_episode(wb, id, config, context, episode, started):
@@ -459,39 +689,52 @@ def review_episode(wb, id, config, context, episode, started):
     frames = table.frame_index.to_numpy(dtype=int)
     times = table.timestamp.to_numpy(dtype=float)
     adapter = DATASETS[context.dataset_adapter]
-    # Frames per camera: every offset of every anchor, clamped to the episode.
-    wanted = {}
-    for view in spec.views:
-        offsets = view_offsets(view, fps)
-        wanted[view.role] = {
-            n: [int(frames[min(last, max(0, n + d))]) for d in offsets]
-            for n in positions
+    asked_vetoes = [v for v in spec.vetoes if v.question is not None]
+
+    def shows(views, n):
+        return {
+            v.role: [int(frames[r]) for r in view_rows(v, fps, n, last)] for v in views
         }
-    evidence, summary = [], None
+
+    # Frames per camera: every offset of every view the questions show, at
+    # every anchor (and the start check's once), clamped to the episode.
+    wanted = {n: shows(spec.views, n) for n in positions}
+    per_camera = {}
     for view in spec.views:
-        chosen = sorted({f for rows in wanted[view.role].values() for f in rows})
-        if not chosen and view is spec.views[0]:
+        per_camera.setdefault(view.camera, set()).update(
+            f for n in positions for f in wanted[n][view.role]
+        )
+    for veto in asked_vetoes:
+        for view in veto.views or []:
+            per_camera.setdefault(view.camera, set()).update(
+                f for n in positions for f in shows([view], n)[view.role]
+            )
+    start_frames = shows(spec.start.views, 0) if spec.start else {}
+    for view in spec.start.views if spec.start else []:
+        per_camera.setdefault(view.camera, set()).update(start_frames[view.role])
+    evidence, summary = [], None
+    for camera, found in per_camera.items():
+        chosen = sorted(found)
+        if not chosen and camera == spec.views[0].camera:
             # No event: the outcome still cites what the episode ends on.
             chosen = [int(frames[last])]
         if not chosen:
             continue
-        scoped = context.model_copy(update={"cameras": [view.camera]})
+        scoped = context.model_copy(update={"cameras": [camera]})
         summary, rows = adapter.sample_frames(scoped, root, episode, folder, chosen)
         evidence += rows
     summary["workflow"] = context.workflow
     summary["anchored"] = {"spec": spec.id, "channel": channel}
     evidence = observations.persist(wb, id, episode, summary, evidence)
     by_frame = {(row["camera_key"], row["frame_index"]): row for row in evidence}
-    events, total = [], {"requests": 0, "tokens": 0, "elapsed_seconds": 0.0}
-    schema = spec.answer_schema()
-    for n in positions:
-        shown = []
-        for view in spec.views:
-            for d, frame in zip(
-                view_offsets(view, fps), wanted[view.role][n], strict=True
-            ):
+    total = {"requests": 0, "tokens": 0, "elapsed_seconds": 0.0}
+
+    def shown_for(views, rows):
+        out = []
+        for view in views:
+            for d, frame in zip(view_offsets(view, fps), rows[view.role], strict=True):
                 row = by_frame[(view.camera, frame)]
-                shown.append(
+                out.append(
                     {
                         "role": view.role,
                         "camera": view.camera,
@@ -502,51 +745,100 @@ def review_episode(wb, id, config, context, episode, started):
                         "sha256": row["sha256"],
                     }
                 )
-        answer, usage = ask(
+        return out
+
+    def brief(shown):
+        return [
+            {
+                k: s[k]
+                for k in ("role", "camera", "offset", "frame_index", "evidence_id")
+            }
+            for s in shown
+        ]
+
+    def spent(usage):
+        total["requests"] += 0 if usage.get("cached") else 1
+        total["tokens"] += usage.get("tokens") or 0
+        total["elapsed_seconds"] += usage.get("elapsed_seconds") or 0.0
+        return {
+            k: usage.get(k)
+            for k in ("tokens", "prompt_tokens", "elapsed_seconds", "cached")
+            if usage.get(k) is not None
+        }
+
+    def put(phase, probe, shown):
+        return ask(
             wb,
             id,
             config,
             context,
             episode,
-            f"anchor-{int(frames[n]):06d}",
-            spec,
-            schema,
+            phase,
+            probe,
+            probe.answer_schema(),
             shown,
             started,
         )
+
+    start = None
+    if spec.start is not None:
+        shown = shown_for(spec.start.views, start_frames)
+        answer, usage = put("start", spec.start, shown)
+        start = {
+            "answer": answer,
+            "waive": [
+                {
+                    "label": w.label,
+                    "checks": read(w.when, answer, spec.unknown_values)[0],
+                    "reading": read(w.when, answer, spec.unknown_values)[1],
+                }
+                for w in spec.start.waive
+            ],
+            "frames": brief(shown),
+            "usage": spent(usage),
+        }
+    events = []
+    for n in positions:
+        shown = shown_for(spec.views, wanted[n])
+        anchor = f"anchor-{int(frames[n]):06d}"
+        answer, usage = put(anchor, spec, shown)
         checks, verdict = judge(spec, answer)
-        events.append(
-            {
-                "frame_index": int(frames[n]),
-                "timestamp": float(times[n]),
-                "answer": answer,
-                "checks": checks,
-                "verdict": verdict,
-                "valid": verdict == "supported",
-                "frames": [
-                    {
-                        k: s[k]
-                        for k in (
-                            "role",
-                            "camera",
-                            "offset",
-                            "frame_index",
-                            "evidence_id",
-                        )
+        event = {
+            "frame_index": int(frames[n]),
+            "timestamp": float(times[n]),
+            "answer": answer,
+            "checks": checks,
+            "verdict": verdict,
+            "valid": verdict == "supported",
+            "frames": brief(shown),
+            "usage": spent(usage),
+        }
+        if spec.vetoes:
+            results = []
+            for veto in spec.vetoes:
+                result = {"id": veto.id, "effect": veto.effect}
+                if read(veto.ask_when, answer, spec.unknown_values)[1] == (
+                    "contradicted"
+                ):
+                    results.append(result | {"verdict": "not_asked"})
+                    continue
+                own = None
+                if veto.question is not None:
+                    views = veto.views or spec.views
+                    mine = shown_for(views, shows(views, n))
+                    own, usage = put(f"{anchor}-veto-{veto.id}", veto, mine)
+                    result |= {
+                        "answer": own,
+                        "frames": brief(mine),
+                        "usage": spent(usage),
                     }
-                    for s in shown
-                ],
-                "usage": {
-                    k: usage.get(k)
-                    for k in ("tokens", "prompt_tokens", "elapsed_seconds", "cached")
-                    if usage.get(k) is not None
-                },
-            }
-        )
-        total["requests"] += 0 if usage.get("cached") else 1
-        total["tokens"] += usage.get("tokens") or 0
-        total["elapsed_seconds"] += usage.get("elapsed_seconds") or 0.0
-    verdict, basis = outcome(spec, events)
+                checks, reading = veto_verdict(spec, veto, answer, own)
+                results.append(result | {"checks": checks, "verdict": reading})
+            event["vetoes"] = results
+            event["verdict"] = settle(verdict, results)
+            event["valid"] = event["verdict"] == "supported"
+        events.append(event)
+    verdict, basis = outcome(spec, events, start and start["answer"])
     record = {
         "schema": "levi.anchored.v1",
         "run_id": id,
@@ -560,14 +852,20 @@ def review_episode(wb, id, config, context, episode, started):
         "usage": total,
         "at": time.time(),
     }
+    if start is not None:
+        record["start"] = start
     wb.store.put("anchored", f"{id}:{episode}", record)
     (directory / f"episode_{episode:06d}-anchored.json").write_text(
         json.dumps(record, ensure_ascii=False)
     )
-    # Cite the frames the verdict rests on: the valid events first, each by
-    # its frames nearest the anchor (one before, one after, per camera).
+    # Cite the frames the verdict rests on: an event that vetoed the episode
+    # first, then the valid events, each by its frames nearest the anchor
+    # (one before, one after, per camera).
+    vetoing = {v["frame_index"] for v in basis.get("vetoes") or []}
     cited = []
-    for e in sorted(events, key=lambda e: not e["valid"]):
+    for e in sorted(
+        events, key=lambda e: (e["frame_index"] not in vetoing, not e["valid"])
+    ):
         for view in spec.views:
             mine = [f for f in e["frames"] if f["role"] == view.role]
             before = [f for f in mine if f["offset"] < 0]
@@ -578,15 +876,32 @@ def review_episode(wb, id, config, context, episode, started):
     if not cited:
         cited = [evidence[-1]["id"]]
     name = spec.anchor.event
+
+    def vetoed(e):
+        hits = [
+            f"veto {v['id']} {v['verdict']}"
+            for v in e.get("vetoes") or []
+            if v["verdict"] in ("confirmed", "undecided")
+        ]
+        return "; " + ", ".join(hits) if hits else ""
+
     parts = [
         f"{'valid' if e['valid'] else e['verdict']} {name} at {e['timestamp']:.1f} s ("
         + ", ".join(f"{k}={v}" for k, v in e["answer"].items())
+        + vetoed(e)
         + ")"
         for e in events
     ]
     content = (
-        f"Anchored review ({title_of(spec) or spec.id}): {len(events)} gripper "
-        f"{name} event(s); "
+        f"Anchored review ({title_of(spec) or spec.id}): "
+        + (
+            "start ("
+            + ", ".join(f"{k}={v}" for k, v in start["answer"].items())
+            + "); "
+            if start is not None
+            else ""
+        )
+        + f"{len(events)} gripper {name} event(s); "
         + ("; ".join(parts) if parts else "none recorded")
         + f". Outcome {verdict}."
     )
@@ -595,11 +910,18 @@ def review_episode(wb, id, config, context, episode, started):
         if "valid_labels" in basis
         else f"{basis['valid_events']} valid event(s)"
     )
-    uncertainty = (
-        "undecided for " + ", ".join(basis["undecided_labels"])
-        if basis.get("undecided_labels")
-        else ""
-    )
+    if basis.get("waived_labels"):
+        note += "; not required at the start: " + ", ".join(basis["waived_labels"])
+    if basis.get("vetoes"):
+        note += "; vetoed: " + ", ".join(sorted({v["veto"] for v in basis["vetoes"]}))
+    doubts = []
+    if basis.get("undecided_labels"):
+        doubts.append("undecided for " + ", ".join(basis["undecided_labels"]))
+    if verdict == "success" and basis.get("undecided_vetoes"):
+        doubts.append(
+            "veto undecided: "
+            + ", ".join(sorted({v["veto"] for v in basis["undecided_vetoes"]}))
+        )
     proposal = Proposal(
         episode_index=episode,
         kind="outcome",
@@ -608,7 +930,7 @@ def review_episode(wb, id, config, context, episode, started):
         outcome=verdict,
         evidence_ids=cited[:MAX_CITED],
         evidence_note=note[:1000],
-        uncertainty=uncertainty,
+        uncertainty="; ".join(doubts),
     )
     wb.validate_proposals(context, [proposal], evidence, summary)
     output = ModelOutput(
@@ -620,8 +942,9 @@ def review_episode(wb, id, config, context, episode, started):
 
 def ask(wb, id, config, context, episode, phase, spec, schema, shown, started):
     """One anchored question: the budget, cache and accounting of a model
-    phase (see ``Workbench.model_step``), with the spec's question and schema
-    instead of the annotation contract."""
+    phase (see ``Workbench.model_step``), with the question and schema of
+    ``spec`` (the spec itself, its start check or one of its vetoes) instead
+    of the annotation contract."""
     from .planning import require
     from .runtime import EpisodeRejected
     from .schema import ProviderConfig
@@ -822,21 +1145,31 @@ def payload(store, dataset_key, episode=None, run_id=None) -> dict[str, Any] | N
         if episode in found:
             spec = run["context"]["workflow"]["anchored"]
             record = found[episode]
+
             # The store keeps keys sorted; answers read in the spec's order.
-            order = [f["name"] for f in spec["fields"]]
+            def ordered(answer, fields):
+                order = [f["name"] for f in fields or []]
+                return {k: answer[k] for k in order if k in answer}
+
+            vetoes = {v["id"]: v for v in spec.get("vetoes") or []}
             for event in record["events"]:
-                event["answer"] = {
-                    k: event["answer"][k] for k in order if k in event["answer"]
-                }
-            return {
-                **record,
-                "status": run["status"],
-                "spec": {
-                    "id": spec["id"],
-                    "version": spec.get("version"),
-                    "title": titles(spec),
-                    "fields": spec["fields"],
-                    "valid_when": spec["valid_when"],
-                },
+                event["answer"] = ordered(event["answer"], spec["fields"])
+                for v in event.get("vetoes") or []:
+                    if v.get("answer") is not None and v["id"] in vetoes:
+                        v["answer"] = ordered(v["answer"], vetoes[v["id"]]["fields"])
+            if record.get("start") and spec.get("start"):
+                record["start"]["answer"] = ordered(
+                    record["start"]["answer"], spec["start"]["fields"]
+                )
+            shown = {
+                "id": spec["id"],
+                "version": spec.get("version"),
+                "title": titles(spec),
+                "fields": spec["fields"],
+                "valid_when": spec["valid_when"],
             }
+            for key in ("start", "vetoes"):
+                if spec.get(key):
+                    shown[key] = spec[key]
+            return {**record, "status": run["status"], "spec": shown}
     return None

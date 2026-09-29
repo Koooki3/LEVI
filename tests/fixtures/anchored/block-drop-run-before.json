@@ -1,0 +1,406 @@
+{
+ "plan": {
+  "estimate": {
+   "basis": "one request per anchor event (the robot's recorded gripper open) per episode",
+   "minimum_requests": 0,
+   "tokens": "unknown until pilot; budget is a stop limit, not a price quote"
+  },
+  "workflow": {
+   "anchored": {
+    "anchor": {
+     "column": null,
+     "dimension": null,
+     "event": "open",
+     "open_level": "high",
+     "signal": "gripper"
+    },
+    "description": "",
+    "episode": {
+     "label_field": "colour",
+     "min_valid": 1,
+     "require_labels": [
+      "red",
+      "blue"
+     ]
+    },
+    "fields": [
+     {
+      "enum": [
+       "yes",
+       "no",
+       "unclear"
+      ],
+      "name": "held"
+     },
+     {
+      "enum": [
+       "red",
+       "blue",
+       "none",
+       "unclear"
+      ],
+      "name": "colour"
+     },
+     {
+      "enum": [
+       "yes",
+       "no",
+       "unclear"
+      ],
+      "name": "in_box"
+     }
+    ],
+    "id": "block-drop",
+    "max_output_tokens": 64,
+    "question": "Did the gripper put the block down in the box?",
+    "title": null,
+    "unknown_values": [
+     "unclear"
+    ],
+    "valid_when": [
+     {
+      "field": "held",
+      "in": [
+       "yes"
+      ],
+      "not_in": null
+     },
+     {
+      "field": "in_box",
+      "in": [
+       "yes"
+      ],
+      "not_in": null
+     }
+    ],
+    "version": 1,
+    "views": [
+     {
+      "camera": "observation.images.front",
+      "offsets": [
+       -2,
+       0,
+       3
+      ],
+      "offsets_seconds": null,
+      "role": "front"
+     }
+    ]
+   },
+   "boundary_tolerance_seconds": 0.2,
+   "boundary_window_seconds": 1.0,
+   "coarse_step_seconds": 2.0,
+   "definitions": [],
+   "final_samples": 0,
+   "kind": "review",
+   "mask_definition": "visible",
+   "max_evidence_frames": 96,
+   "object_concepts": [],
+   "overlapping_layers": false,
+   "pilot_episode": null,
+   "refine": "always",
+   "require_human_pilot": false
+  }
+ },
+ "proposals": [
+  {
+   "content": "Anchored review (block-drop): 2 gripper open event(s); valid open at 0.7 s (held=yes, colour=red, in_box=yes); unknown open at 1.3 s (held=unclear, colour=blue, in_box=yes). Outcome failure.",
+   "episode_index": 0,
+   "evidence_ids": [
+    "episode_000000--observation.images.front--frame_000005",
+    "episode_000000--observation.images.front--frame_000007",
+    "episode_000000--observation.images.front--frame_000011",
+    "episode_000000--observation.images.front--frame_000013"
+   ],
+   "evidence_note": "valid: red",
+   "kind": "outcome",
+   "outcome": "failure",
+   "start": 0.0,
+   "uncertainty": "undecided for blue"
+  },
+  {
+   "content": "Anchored review (block-drop): 0 gripper open event(s); none recorded. Outcome failure.",
+   "episode_index": 1,
+   "evidence_ids": [
+    "episode_000001--observation.images.front--frame_000019"
+   ],
+   "evidence_note": "valid: ",
+   "kind": "outcome",
+   "outcome": "failure",
+   "start": 0.0,
+   "uncertainty": ""
+  }
+ ],
+ "records": [
+  {
+   "basis": {
+    "missing_labels": [
+     "blue"
+    ],
+    "undecided_labels": [
+     "blue"
+    ],
+    "valid_labels": [
+     "red"
+    ]
+   },
+   "channel": "observation.state.gripper.pos",
+   "episode_index": 0,
+   "event": "open",
+   "events": [
+    {
+     "answer": {
+      "colour": "red",
+      "held": "yes",
+      "in_box": "yes"
+     },
+     "checks": [
+      {
+       "field": "held",
+       "result": "supported",
+       "value": "yes"
+      },
+      {
+       "field": "in_box",
+       "result": "supported",
+       "value": "yes"
+      }
+     ],
+     "frame_index": 7,
+     "frames": [
+      {
+       "camera": "observation.images.front",
+       "evidence_id": "episode_000000--observation.images.front--frame_000005",
+       "frame_index": 5,
+       "offset": -2,
+       "role": "front"
+      },
+      {
+       "camera": "observation.images.front",
+       "evidence_id": "episode_000000--observation.images.front--frame_000007",
+       "frame_index": 7,
+       "offset": 0,
+       "role": "front"
+      },
+      {
+       "camera": "observation.images.front",
+       "evidence_id": "episode_000000--observation.images.front--frame_000010",
+       "frame_index": 10,
+       "offset": 3,
+       "role": "front"
+      }
+     ],
+     "timestamp": 0.7,
+     "usage": {
+      "prompt_tokens": 100,
+      "tokens": 120
+     },
+     "valid": true,
+     "verdict": "supported"
+    },
+    {
+     "answer": {
+      "colour": "blue",
+      "held": "unclear",
+      "in_box": "yes"
+     },
+     "checks": [
+      {
+       "field": "held",
+       "result": "unknown",
+       "value": "unclear"
+      },
+      {
+       "field": "in_box",
+       "result": "supported",
+       "value": "yes"
+      }
+     ],
+     "frame_index": 13,
+     "frames": [
+      {
+       "camera": "observation.images.front",
+       "evidence_id": "episode_000000--observation.images.front--frame_000011",
+       "frame_index": 11,
+       "offset": -2,
+       "role": "front"
+      },
+      {
+       "camera": "observation.images.front",
+       "evidence_id": "episode_000000--observation.images.front--frame_000013",
+       "frame_index": 13,
+       "offset": 0,
+       "role": "front"
+      },
+      {
+       "camera": "observation.images.front",
+       "evidence_id": "episode_000000--observation.images.front--frame_000016",
+       "frame_index": 16,
+       "offset": 3,
+       "role": "front"
+      }
+     ],
+     "timestamp": 1.3,
+     "usage": {
+      "prompt_tokens": 100,
+      "tokens": 120
+     },
+     "valid": false,
+     "verdict": "unknown"
+    }
+   ],
+   "outcome": "failure",
+   "run_id": "<run>",
+   "schema": "levi.anchored.v1",
+   "spec": {
+    "id": "block-drop",
+    "title": null,
+    "version": 1
+   },
+   "usage": {
+    "requests": 2,
+    "tokens": 240
+   }
+  },
+  {
+   "basis": {
+    "missing_labels": [
+     "red",
+     "blue"
+    ],
+    "undecided_labels": [],
+    "valid_labels": []
+   },
+   "channel": "observation.state.gripper.pos",
+   "episode_index": 1,
+   "event": "open",
+   "events": [],
+   "outcome": "failure",
+   "run_id": "<run>",
+   "schema": "levi.anchored.v1",
+   "spec": {
+    "id": "block-drop",
+    "title": null,
+    "version": 1
+   },
+   "usage": {
+    "requests": 0,
+    "tokens": 0
+   }
+  }
+ ],
+ "requests": [
+  {
+   "images": [
+    "c5b2ae03ce49c8474fc88083d46628b481f83a792a05b29f7384089db1993b96",
+    "96f37fc42550c4c1d3e252c104938e0d339882b328285e9d5077c1b30ba27bd5",
+    "7e5450e1783963aa4e9f0593123147cbcf446d0b3457b7f4dc819f3dcff87924"
+   ],
+   "rest": {
+    "chat_template_kwargs": {
+     "enable_thinking": false
+    },
+    "max_completion_tokens": 64,
+    "model": "qwen3.8-27b",
+    "response_format": {
+     "json_schema": {
+      "name": "levi_answer",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "colour": {
+         "enum": [
+          "red",
+          "blue",
+          "none",
+          "unclear"
+         ]
+        },
+        "held": {
+         "enum": [
+          "yes",
+          "no",
+          "unclear"
+         ]
+        },
+        "in_box": {
+         "enum": [
+          "yes",
+          "no",
+          "unclear"
+         ]
+        }
+       },
+       "required": [
+        "held",
+        "colour",
+        "in_box"
+       ],
+       "type": "object"
+      },
+      "strict": true
+     },
+     "type": "json_schema"
+    },
+    "stream": false
+   },
+   "text": "Did the gripper put the block down in the box?"
+  },
+  {
+   "images": [
+    "6d6a68c222117bebb3dea227e1a5de9b625daccd8bb702f83bce56fce3264f3f",
+    "448100ec45f0bb3ba2188dd48f9e93f4ba0b6fd3c9f9f918562902541ea67d13",
+    "b8a84001181aa47e2533a5ba58ec9df1a627adda4258ce7e635df3698746dc44"
+   ],
+   "rest": {
+    "chat_template_kwargs": {
+     "enable_thinking": false
+    },
+    "max_completion_tokens": 64,
+    "model": "qwen3.8-27b",
+    "response_format": {
+     "json_schema": {
+      "name": "levi_answer",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "colour": {
+         "enum": [
+          "red",
+          "blue",
+          "none",
+          "unclear"
+         ]
+        },
+        "held": {
+         "enum": [
+          "yes",
+          "no",
+          "unclear"
+         ]
+        },
+        "in_box": {
+         "enum": [
+          "yes",
+          "no",
+          "unclear"
+         ]
+        }
+       },
+       "required": [
+        "held",
+        "colour",
+        "in_box"
+       ],
+       "type": "object"
+      },
+      "strict": true
+     },
+     "type": "json_schema"
+    },
+    "stream": false
+   },
+   "text": "Did the gripper put the block down in the box?"
+  }
+ ]
+}

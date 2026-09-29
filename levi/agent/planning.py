@@ -122,11 +122,9 @@ def clarify(context):
             }
         )
     if flow.anchored:
-        absent = [
-            v["camera"]
-            for v in flow.anchored["views"]
-            if v["camera"] not in ctx.cameras
-        ]
+        from .anchored import cameras
+
+        absent = [c for c in cameras(flow.anchored) if c not in ctx.cameras]
         if absent:
             missing.append(
                 {
@@ -148,6 +146,16 @@ def clarify(context):
         "workflow": flow.model_dump(),
         "model_calls": 0,
     }
+
+
+def _extra_requests(spec):
+    """What an anchored spec's start check and vetoes add to the estimate."""
+    asked = [v["id"] for v in spec.get("vetoes") or [] if v.get("question")]
+    return (
+        f", plus one per veto question asked at it ({', '.join(asked)})"
+        if asked
+        else ""
+    ) + (", plus one start check per episode" if spec.get("start") else "")
 
 
 def attach(run):
@@ -179,6 +187,7 @@ def attach(run):
             "basis": (
                 "one request per anchor event (the robot's recorded "
                 f"gripper {flow.anchored['anchor']['event']}) per episode"
+                + _extra_requests(flow.anchored)
             )
             if flow.anchored
             else (

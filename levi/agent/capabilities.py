@@ -1049,12 +1049,12 @@ def _invoke(
             "reported by the agent, or LEVI's measured lower bound.",
         }
     if name == "anchored.specs":
-        from .anchored import aliases, builtin
+        from .anchored import aliases, builtin, dump
 
         former = aliases()
         return {
             "specs": [
-                spec.model_dump(by_alias=True)
+                dump(spec)
                 | {"aliases": sorted(k for k, v in former.items() if v == spec.id)}
                 for spec in builtin().values()
             ],
