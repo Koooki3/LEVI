@@ -109,6 +109,15 @@ _UNLABELLED = Param(
     ("exclude", "include"),
 )
 
+_UNDECIDED = Param(
+    str,
+    "exclude",
+    "anchored successes the review left undecided (undecided labels or "
+    "vetoes, contested start-check waivers): exclude leaves them out, "
+    "include keeps them",
+    ("exclude", "include"),
+)
+
 OPERATIONS: dict[str, Operation] = {
     op.name: op
     for op in (
@@ -128,7 +137,7 @@ OPERATIONS: dict[str, Operation] = {
             "the anchored review (for the tasks it is valid for), then the "
             "fallback.",
             frozenset({"anchored"}),
-            {"fallback": _FALLBACK},
+            {"fallback": _FALLBACK, "undecided": _UNDECIDED},
         ),
         Operation(
             "advantage_positive_mask",
@@ -502,6 +511,12 @@ def build(
                 drop(np.ones(n, bool), "unverified")
             elif success != "success":
                 drop(np.ones(n, bool), f"{source or 'no'}_{success or 'verdict'}")
+            elif (
+                source == "anchored"
+                and undecided
+                and settings["undecided"] == "exclude"
+            ):
+                drop(np.ones(n, bool), "anchored_undecided")
         elif operation == "advantage_positive_mask":
             known_label = np.array([p is not None for p in positive])
             neg = np.array([p is False for p in positive])

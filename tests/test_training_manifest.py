@@ -224,6 +224,15 @@ def test_a_contested_waiver_leaves_an_anchored_success_undecided(repo):
     }
     assert flags == {0: True, 1: False, 2: True}
 
+    # verified_success leaves undecided anchored successes out unless asked.
+    verified = _frames(tm.build(repo, "verified_success"))
+    assert set(verified[verified.include].episode_index) == {1}
+    assert set(verified[verified.episode_index == 0].exclude_reason) == {
+        "anchored_undecided"
+    }
+    kept = _frames(tm.build(repo, "verified_success", params={"undecided": "include"}))
+    assert set(kept[kept.include].episode_index) == {0, 1, 2}
+
 
 def test_operations_decide_include_and_weight(repo):
     name = _name(repo)
