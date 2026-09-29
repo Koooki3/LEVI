@@ -18,7 +18,11 @@ import { PushDialog } from "@/components/pool/push-dialog";
 import { RecentJobs } from "@/components/pool/job-list";
 import { CleanupPanel, DiskUsage } from "@/components/pool/cleanup-panel";
 import { LogDialog, useJobPolling } from "@/components/pool/job-panel";
-import { PoolJobProgress, RUNNING } from "@/components/pool/pool-progress";
+import {
+  PoolJobProgress,
+  RUNNING,
+  STOPPED,
+} from "@/components/pool/pool-progress";
 import { defaultTiming } from "@/components/pool/types";
 import type {
   EpisodeRow,
@@ -280,8 +284,32 @@ export default function TrainingPool() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewKey, scanned, scannedAt]);
 
-  // Follow the export job at the pace its state calls for.
-  useJobPolling(exportJob, setExportJob);
+  // The export the export panel follows: the one started or resumed here,
+  // else a running, interrupted or failed one found in the job list (so a
+  // reload during an export, or a worker that died, shows itself).
+  const shownExport = useMemo(
+    () =>
+      exportJob ??
+      status?.jobs.find(
+        (j) =>
+          j.kind === "export" &&
+          (RUNNING.has(j.status) || STOPPED.has(j.status)),
+      ) ??
+      null,
+    [exportJob, status],
+  );
+  // Follow it at the pace its state calls for.
+  useJobPolling(shownExport, setExportJob);
+  // A record that was cleared or deleted no longer belongs on the panel.
+  useEffect(() => {
+    if (
+      exportJob &&
+      status &&
+      !RUNNING.has(exportJob.status) &&
+      !status.jobs.some((j) => j.id === exportJob.id)
+    )
+      setExportJob(null);
+  }, [status, exportJob]);
 
   async function act(fn: () => Promise<void>) {
     setError("");
@@ -547,7 +575,7 @@ export default function TrainingPool() {
               recipe={recipe}
               preview={preview}
               exportRoots={status?.export_roots || []}
-              job={exportJob}
+              job={shownExport}
               humanAsSuccess={humanAsSuccess}
               onHumanAsSuccess={setHumanAsSuccess}
               format={format}

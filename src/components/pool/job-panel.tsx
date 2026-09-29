@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
 import { ago, pollDelay } from "./pool-progress";
@@ -64,6 +64,7 @@ export function LogDialog({
   onClose: () => void;
 }) {
   const { t } = useLocale();
+  const titleId = useId();
   const ref = useRef<HTMLDialogElement>(null);
   const [text, setText] = useState("");
   const [error, setError] = useState("");
@@ -95,11 +96,11 @@ export function LogDialog({
     <dialog
       ref={ref}
       className="levi-pool-dialog levi-pool-logdialog"
-      aria-labelledby="pool-log-title"
+      aria-labelledby={titleId}
       onClose={onClose}
     >
       <form method="dialog" className="levi-pool-dialog-head">
-        <h2 id="pool-log-title">
+        <h2 id={titleId}>
           {t("Job log")} <code>{id}</code>
         </h2>
         <button aria-label={t("Close")} className="levi-secondary">

@@ -19,7 +19,7 @@ the check did not see):
    ``resume.json``), and its file count matches what the export recorded;
    anything else means someone changed it: refused unless ``force``;
 3. it lies inside ``LEVI_EXPORT_ROOTS`` or the workspace's export folder;
-4. it is not inside, and does not contain, a pool source dataset or root;
+4. it is not inside a pool source dataset, and does not contain a source or a pool root;
 5. it is not a symbolic link and resolves to its own name inside its parent
    (no traversal); symlinks inside it are unlinked, never followed;
 6. no push of it and no other live job uses it.
@@ -111,7 +111,9 @@ def _push_jobs_for(target: Path) -> list[dict]:
 
 
 def _sources() -> list[Path]:
-    found = set(settings.pool_roots())
+    """The pool's source datasets (an export may sit inside a pool root, but
+    never inside a source)."""
+    found: set[Path] = set()
     with contextlib.suppress(Exception):
         from . import index
 
@@ -195,6 +197,7 @@ def _inspect_dir(job: dict, role: str, path: Path) -> dict:
         if resolved == source or resolved.is_relative_to(source):
             info["refusals"].append(f"It lies inside the pool source {source}")
             break
+    for source in [*_sources(), *(Path(r).resolve() for r in settings.pool_roots())]:
         if source.is_relative_to(resolved):
             info["refusals"].append(f"It contains the pool source {source}")
             break

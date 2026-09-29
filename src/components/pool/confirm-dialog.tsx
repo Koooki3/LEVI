@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { useLocale } from "@/components/levi-locale";
 
 /** A modal confirmation. Focus starts on Cancel (a destructive button is
@@ -26,6 +26,7 @@ export function ConfirmDialog({
   onCancel: () => void;
 }) {
   const { t } = useLocale();
+  const titleId = useId();
   const ref = useRef<HTMLDialogElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -40,7 +41,7 @@ export function ConfirmDialog({
     <dialog
       ref={ref}
       className="levi-pool-dialog"
-      aria-labelledby="pool-confirm-title"
+      aria-labelledby={titleId}
       onCancel={(e) => {
         e.preventDefault();
         onCancel();
@@ -50,7 +51,7 @@ export function ConfirmDialog({
       }}
     >
       <div className="levi-pool-dialog-head">
-        <h2 id="pool-confirm-title">{title}</h2>
+        <h2 id={titleId}>{title}</h2>
       </div>
       <div className="levi-pool-confirm-body">{children}</div>
       <div className="levi-row levi-pool-confirm-actions">

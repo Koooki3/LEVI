@@ -671,7 +671,9 @@ def check_space(job: dict, staging: Path | None = None) -> dict:
     if need + margin > free:
 
         def gib(n):
-            return f"{n / 1024**3:.1f} GiB"
+            return (
+                f"{n / 1024**3:.1f} GiB" if n >= 1024**3 else f"{n / 1024**2:.0f} MiB"
+            )
 
         raise ValueError(
             f"Not enough free space for this export on {volume}: it needs about "

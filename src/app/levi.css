@@ -2577,3 +2577,12 @@ button.levi-pool-danger {
   flex-direction: column;
   gap: 6px;
 }
+.levi-pool-banner .levi-row {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.levi-pool-banner button,
+.levi-pool-job .levi-status,
+.levi-pool-actions button {
+  white-space: nowrap;
+}
