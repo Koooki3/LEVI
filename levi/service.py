@@ -87,6 +87,10 @@ async def lifespan(app):
 
         shutdown()
         jobs.stop_workers()
+        from .segmentation import live as segmentation_live
+
+        # Live overlays save what they showed before their worker exits.
+        segmentation_live.stop_all()
         # Whatever is still running in a group this service started (a SAM3
         # worker, most of all, which holds the GPU).
         children.stop_owned()

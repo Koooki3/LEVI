@@ -709,9 +709,11 @@ def _collect_sam3_job(state: DatasetState, job: dict[str, Any]) -> dict[str, Any
             )
             validate_annotations_for_plan(plan, annotations)
             sidecar = _sidecar(state)
-            revision = sidecar.publish(
+            # Replace only the planned (episode, camera) pairs: a run on some
+            # episodes must keep every other episode's objects.
+            revision = sidecar.publish_merged(
                 annotations,
-                parent_revision=sidecar.current_revision(),
+                {(e, c) for e in plan.episode_indices for c in plan.camera_keys},
                 model=result.get("model") or {"provider": "sam3"},
             )
             job.update(
@@ -2670,9 +2672,9 @@ def sam3_run(request: Sam3RunRequest) -> JSONResponse:
         store, plan_path, plan_payload = _sam3_plan_payload(state, request)
     if request.provider == "fake":
         annotations = fake_annotations(request)
-        revision = store.publish(
+        revision = store.publish_merged(
             annotations,
-            parent_revision=store.current_revision(),
+            {(e, c) for e in request.episode_indices for c in request.camera_keys},
             model={"provider": "fake", "model_version": "fixture", "cpu_only": True},
         )
         return JSONResponse(
@@ -3122,3 +3124,10 @@ def push_to_hub(req: PushToHubRequest) -> JSONResponse:
             "message": f"Pushed annotated dataset to {target_repo}",
         }
     )
+
+
+# --- Fast instance segmentation (student live overlay, labelling, distillation)
+# Kept in its own module; see backend/segmentation.py and docs/SEGMENTATION.md.
+from backend.segmentation import router as _segmentation_router  # noqa: E402
+
+app.include_router(_segmentation_router)

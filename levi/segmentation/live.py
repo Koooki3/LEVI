@@ -121,7 +121,9 @@ class LiveSession:
             elif kind == "error":
                 self.error = message.get("message")
             elif kind == "idle":
+                # The worker waits for its stdin to end; tell it to save and exit.
                 self.state = "stopping"
+                threading.Thread(target=self.send, args=({"op": "stop"},), daemon=True).start()
             elif kind == "stopped":
                 self.summary = message.get("summary")
             self._push(kind or "message", None, line)

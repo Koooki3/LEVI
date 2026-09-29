@@ -79,7 +79,7 @@ class ObjectAnnotation(BaseModel):
     visible: bool = True
     occluded: bool = False
     status: ReviewStatus = ReviewStatus.SUGGESTED
-    source: Literal["sam3", "agent", "human", "fake", "import"] = "sam3"
+    source: Literal["sam3", "agent", "human", "fake", "import", "student"] = "sam3"
     prompt: str | None = None
 
     @field_validator("bbox_xyxy")
