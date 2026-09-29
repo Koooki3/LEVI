@@ -106,6 +106,23 @@ export default function Workbench() {
           <T>{error}</T>
         </p>
       )}
+      <section className="levi-box levi-pool-teaser">
+        <div>
+          <h2>
+            <T>Training pool</T>
+          </h2>
+          <p>
+            <T>
+              Every dataset on this machine by task: compose tasks in order,
+              preview, export for π0.5 or RECAP and send it to a training
+              machine.
+            </T>
+          </p>
+        </div>
+        <Link className="levi-primary" href="/pool">
+          <T>Open the training pool</T>
+        </Link>
+      </section>
       <section className="levi-box">
         <h2>
           <T>Local datasets</T>

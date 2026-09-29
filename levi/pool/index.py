@@ -65,7 +65,12 @@ def _filter(
         df = df[df.task.str.contains(search.lower(), regex=False, na=False)]
     if formats:
         df = df[df.format.isin(formats)]
-    if outcome:
+    if outcome == "robot_flag_success":
+        df = df[df.robot_flag == "success"]
+    elif outcome == "verified_success":
+        # A human label first, then the robot's flag (as in recipes).
+        df = df[df.human_label.fillna(df.robot_flag) == "success"]
+    elif outcome:
         df = df[df.outcome == outcome]
     if policies:
         df = df[df.policy.isin(policies)]
@@ -92,6 +97,56 @@ def episodes(limit: int = 200, offset: int = 0, **filters) -> dict:
         row.pop("video_sha256", None)
         row.pop("stat_sig", None)
     return {"total": len(df), "offset": offset, "episodes": rows}
+
+
+def facets(**filters) -> dict:
+    """Counts for the page's facets over the rows the visibility toggles
+    (``show_heldout``, ``show_copies``, ``show_archive``) and ``categories``
+    leave: categories, sources, formats, policies, outcomes, dates, plus how
+    many held-out episodes and copies the toggles hide."""
+    full = frame()
+    toggles = {
+        k: filters.get(k)
+        for k in ("show_heldout", "show_copies", "show_archive")
+        if k in filters
+    }
+    df = _filter(full, **toggles)
+    scoped = _filter(full, categories=filters.get("categories"), **toggles)
+    dates = sorted(d for d in scoped.date.dropna().unique() if d)
+    return {
+        "episodes": len(df),
+        "categories": dict(Counter(df.category)),
+        "sources": [
+            {"source": s, "path": p, "episodes": int(n)}
+            for (s, p), n in scoped.groupby(["source", "source_path"])
+            .size()
+            .sort_values(ascending=False)
+            .items()
+        ],
+        "formats": dict(Counter(scoped.format)),
+        "policies": dict(Counter(scoped.policy.dropna())),
+        "outcomes": {
+            "success": int((scoped.outcome == "success").sum()),
+            "failure": int((scoped.outcome == "failure").sum()),
+            "robot_flag_success": int((scoped.robot_flag == "success").sum()),
+            "verified_success": int(
+                (scoped.human_label.fillna(scoped.robot_flag) == "success").sum()
+            ),
+        },
+        "date_min": dates[0] if dates else None,
+        "date_max": dates[-1] if dates else None,
+        "hidden_heldout": int(
+            len(_filter(full, **{**toggles, "show_heldout": True})) - len(df)
+        )
+        if not toggles.get("show_heldout")
+        else 0,
+        "hidden_copies": int(
+            len(_filter(full, **{**toggles, "show_copies": True})) - len(df)
+        )
+        if not toggles.get("show_copies")
+        else 0,
+        "archive": int((full.category == "archive").sum()),
+    }
 
 
 def tasks(**filters) -> list[dict]:

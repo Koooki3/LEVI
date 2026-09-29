@@ -33,6 +33,40 @@ export async function leviApi<T>(path: string, body?: unknown): Promise<T> {
   if (repo && observed) reviewRevisions.set(repo, observed);
   return response.json();
 }
+/** A LEVI API call with an explicit method (PUT / DELETE / POST / GET). */
+export async function leviRequest<T>(
+  method: "GET" | "POST" | "PUT" | "DELETE",
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const response = await fetch(`/api/levi/${path}`, {
+    method,
+    cache: "no-store",
+    ...(body === undefined
+      ? {}
+      : {
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+  });
+  if (!response.ok) {
+    const data = await response
+      .json()
+      .catch(() => ({ detail: `HTTP ${response.status}` }));
+    throw new Error(
+      typeof data.detail === "string"
+        ? data.detail
+        : Array.isArray(data.detail)
+          ? data.detail
+              .map((d: { loc?: unknown[]; msg?: string }) =>
+                [d.loc?.slice(1).join("."), d.msg].filter(Boolean).join(": "),
+              )
+              .join("; ")
+          : JSON.stringify(data.detail),
+    );
+  }
+  return response.json();
+}
 /**
  * File name for an exported review or analysis document:
  * `<dataset>-<kind>-<YYYYmmddTHH>.json`, in UTC like LEVI's run ids.

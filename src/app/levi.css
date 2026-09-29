@@ -1747,3 +1747,508 @@ select optgroup {
   border-radius: 0.375rem;
   padding: 0.2rem 0.6rem;
 }
+
+/* Training pool (src/app/pool/page.tsx, src/components/pool/) */
+.levi-workbench.levi-pool {
+  max-width: 1680px;
+  padding: 36px 3%;
+}
+.levi-pool-teaser {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.levi-pool-teaser h2 {
+  margin-bottom: 4px;
+}
+.levi-pool-scan-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.levi-pool-roots {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.levi-pool-jobs {
+  margin-top: 12px;
+  font-size: 12px;
+}
+.levi-pool-jobs summary {
+  cursor: pointer;
+  color: #c9d3bf;
+}
+.levi-pool-jobs .levi-table td {
+  padding: 8px 8px;
+}
+.levi-pool-layout {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr) 360px;
+  gap: 18px;
+  align-items: start;
+}
+.levi-pool-centre,
+.levi-pool-side {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.levi-pool-card {
+  background: #1b231b;
+  border: 1px solid #ffffff20;
+  border-radius: 10px;
+  padding: 18px;
+  min-width: 0;
+}
+.levi-pool-card h2 {
+  font-size: 16px;
+  margin-bottom: 10px;
+}
+.levi-pool-card h3 {
+  font-size: 13px;
+  margin: 14px 0 8px;
+  color: #dedfcf;
+}
+.levi-pool-facets {
+  background: #161d17;
+  border: 1px solid #ffffff18;
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: sticky;
+  top: 12px;
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+}
+.levi-pool-facets fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.levi-pool-facets legend,
+.levi-pool-label {
+  font: 10px/1.8 monospace;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: #a7b397;
+  margin-bottom: 4px;
+}
+.levi-pool-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #d8dccb;
+  padding: 3px 2px;
+  border-radius: 4px;
+  min-width: 0;
+}
+.levi-pool-check:hover {
+  background: #ffffff08;
+}
+.levi-pool-check .grow,
+.levi-pool-order .grow {
+  flex: 1;
+  min-width: 0;
+}
+.levi-pool-check input {
+  accent-color: #d4f779;
+}
+.levi-pool-count {
+  font: 11px monospace;
+  color: #89927f;
+}
+.levi-pool-scroll {
+  max-height: 220px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.levi-pool-full {
+  width: 100%;
+}
+.levi-pool-dates {
+  display: grid;
+  gap: 6px;
+}
+.levi-pool-dates label {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  align-items: center;
+  font-size: 11px;
+  color: #afb7a8;
+}
+.levi-pool-dates .levi-input {
+  padding: 6px 8px;
+}
+.levi-pool-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 280px;
+}
+.levi-pool-muted {
+  color: #89927f;
+  font-size: 12px;
+}
+.levi-pool-hint {
+  color: #afb7a8;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+.levi-pool-notice {
+  color: #d4f779;
+  font-size: 12px;
+}
+.levi-pool-link {
+  color: #d4f779;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  align-self: flex-start;
+}
+.levi-pool-table-wrap {
+  overflow-x: auto;
+  max-height: 520px;
+  overflow-y: auto;
+}
+.levi-pool-table th {
+  position: sticky;
+  top: 0;
+  background: #1b231b;
+  font-weight: 600;
+  color: #c7caba;
+  white-space: nowrap;
+  z-index: 1;
+}
+.levi-pool-table td,
+.levi-pool-table th {
+  padding: 8px 8px;
+}
+.levi-pool-table .num {
+  text-align: right;
+}
+.levi-pool-table tr.levi-pool-focus td {
+  background: #d4f77912;
+}
+.levi-pool-task {
+  text-align: left;
+  color: #f1efdf;
+}
+.levi-pool-task:hover,
+.levi-pool-task[aria-pressed="true"] {
+  color: #d4f779;
+}
+.levi-pool-add {
+  border: 1px solid #a7be7870;
+  border-radius: 4px;
+  padding: 3px 9px;
+  font-size: 11px;
+  color: #d4f779;
+  white-space: nowrap;
+}
+.levi-pool-add:disabled {
+  color: #89927f;
+  border-color: #ffffff20;
+}
+.levi-pool-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid #ffffff30;
+  font-size: 10px;
+  color: #c7caba;
+  white-space: nowrap;
+}
+.levi-pool-badge.heldout {
+  margin-left: 0;
+  border-color: #f1c67790;
+  color: #f1c677;
+}
+.levi-pool-badge.warn {
+  color: #f1c677;
+}
+.levi-pool-outcome.success {
+  color: #d4f779;
+}
+.levi-pool-outcome.failure {
+  color: #ff9c94;
+}
+.levi-pool-path {
+  font-size: 11px;
+  color: #afb7a8;
+}
+.levi-pool-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 10px;
+}
+.levi-pool-order {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0 12px;
+}
+.levi-pool-order li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid #ffffff1c;
+  border-radius: 6px;
+  background: #161d17;
+  font-size: 12px;
+  cursor: grab;
+}
+.levi-pool-order li.dragging {
+  opacity: 0.5;
+}
+.levi-pool-order li.drop {
+  border-color: #d4f779;
+  box-shadow: 0 0 0 1px #d4f77950;
+}
+.levi-pool-order li.levi-pool-empty {
+  cursor: default;
+  color: #89927f;
+  border-style: dashed;
+}
+.levi-pool-order button {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid #ffffff20;
+  color: #d4f779;
+  font-size: 12px;
+  line-height: 1;
+}
+.levi-pool-order button:disabled {
+  color: #56604f;
+}
+.levi-pool-order button:focus-visible,
+.levi-pool-add:focus-visible,
+.levi-pool-task:focus-visible,
+.levi-pool-link:focus-visible {
+  outline: 2px solid #d4f779;
+  outline-offset: 2px;
+}
+.levi-pool-grip {
+  color: #68765e;
+  letter-spacing: -2px;
+}
+.levi-pool-rank {
+  color: #a7b397;
+  font: 11px monospace;
+  min-width: 16px;
+}
+.levi-pool-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 8px 0;
+}
+.levi-pool-fields label,
+.levi-pool-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: #afb7a8;
+  min-width: 0;
+}
+.levi-pool-fields .wide {
+  grid-column: 1 / -1;
+}
+.levi-pool-fields label.levi-pool-check {
+  flex-direction: row;
+}
+.levi-pool-fields textarea {
+  font: 11px/1.6 monospace;
+  resize: vertical;
+}
+.levi-pool-bad {
+  color: #ffaaa3;
+  font-size: 11px;
+}
+.levi-input[aria-invalid="true"] {
+  border-color: #ffaaa3;
+}
+.levi-pool-constraints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+.levi-pool-constraints .levi-pool-label {
+  width: 100%;
+}
+.levi-pool-chip {
+  border: 1px solid #d4f77950;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 11px;
+  color: #e5fbb6;
+}
+.levi-pool-preview {
+  border-top: 1px solid #ffffff15;
+  margin-top: 12px;
+}
+.levi-pool-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.levi-pool-stats div {
+  border: 1px solid #ffffff1c;
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+}
+.levi-pool-stats strong {
+  font-size: 18px;
+  color: #f1efdf;
+}
+.levi-pool-stats span {
+  font-size: 11px;
+  color: #afb7a8;
+}
+.levi-pool-stats .heldout {
+  border-color: #f1c67760;
+}
+.levi-pool-stats .heldout strong {
+  color: #f1c677;
+}
+.levi-pool-reasons {
+  width: 100%;
+  margin-top: 10px;
+  font-size: 12px;
+}
+.levi-pool-reasons caption {
+  text-align: left;
+  color: #a7b397;
+  font-size: 11px;
+  padding-bottom: 4px;
+}
+.levi-pool-reasons th {
+  text-align: left;
+  font-weight: normal;
+  color: #c9d3bf;
+  padding: 3px 0;
+}
+.levi-pool-reasons .num {
+  text-align: right;
+}
+.levi-pool-recipes {
+  border-top: 1px solid #ffffff15;
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.levi-pool-recipes .levi-row {
+  align-items: flex-end;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+.levi-secondary.danger {
+  color: #ffaaa3;
+  border-color: #ffaaa360;
+}
+.levi-secondary:disabled,
+.levi-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.levi-pool-plan,
+.levi-pool-job {
+  margin-top: 12px;
+  border-top: 1px solid #ffffff15;
+  padding-top: 10px;
+  font-size: 12px;
+}
+.levi-pool-job .levi-row {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.levi-pool-dialog {
+  background: #1b231b;
+  color: #f1efdf;
+  border: 1px solid #ffffff30;
+  border-radius: 12px;
+  padding: 22px;
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  margin: auto;
+}
+.levi-pool-dialog::backdrop {
+  background: #05080599;
+}
+.levi-pool-dialog-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.levi-pool-dialog-head h2 {
+  font-size: 18px;
+}
+.levi-pool-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+}
+.levi-pool-targets legend {
+  font: 10px/1.8 monospace;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: #a7b397;
+}
+@media (max-width: 1280px) {
+  .levi-pool-layout {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+  .levi-pool-side {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+}
+@media (max-width: 860px) {
+  .levi-pool-layout,
+  .levi-pool-side {
+    grid-template-columns: 1fr;
+  }
+  .levi-pool-facets {
+    position: static;
+    max-height: none;
+  }
+  .levi-pool-ellipsis {
+    max-width: 180px;
+  }
+  .levi-pool-fields {
+    grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .levi-pool .levi-bar span {
+    transition: none;
+  }
+}

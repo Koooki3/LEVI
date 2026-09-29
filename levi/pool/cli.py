@@ -109,6 +109,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export.add_argument("--hardlink", action="store_true")
     export.add_argument("--dry-run", action="store_true", help="plan only")
+    remotes = sub.add_parser("remote", help="remote targets for push (SSH keys only)")
+    msub = remotes.add_subparsers(dest="remote_action", required=True)
+    add = msub.add_parser("add", help="register or replace a target")
+    add.add_argument("name")
+    add.add_argument("spec", help="[user@]host:/path (host may be an ssh alias)")
+    add.add_argument("--port", type=int)
+    add.add_argument("--description", default="")
+    msub.add_parser("list", help="registered targets")
+    forget = msub.add_parser("delete", help="forget a target")
+    forget.add_argument("name")
+    push = sub.add_parser(
+        "push", help="send a finished export to a remote target (rsync over SSH)"
+    )
+    push.add_argument("export_dir")
+    push.add_argument("--target", required=True, help="a registered target name")
+    push.add_argument(
+        "--dry-run", action="store_true", help="list what would be sent (rsync -n)"
+    )
     return parser
 
 
@@ -116,7 +134,7 @@ def main(argv=None) -> int:
     from ..paths import configure
 
     configure()
-    from . import index, jobs, recipe, settings
+    from . import index, jobs, recipe, remote, settings
 
     args = build_parser().parse_args(argv)
     try:
@@ -204,6 +222,40 @@ def main(argv=None) -> int:
 
             atomic(jobs._path(job["id"]), job)
             _print(result)
+        elif args.action == "remote":
+            if args.remote_action == "add":
+                _print(
+                    remote.save(
+                        remote.target_from(
+                            args.name,
+                            {
+                                "spec": args.spec,
+                                "port": args.port,
+                                "description": args.description,
+                            },
+                        )
+                    )
+                )
+            elif args.remote_action == "list":
+                _print(remote.listing())
+            else:
+                _print({"deleted": remote.delete(args.name)})
+        elif args.action == "push":
+            target = remote.get(args.target)
+
+            def echo(update):
+                print(
+                    f"\r{update['percent']:3d}%  {update['bytes']:,} B  "
+                    f"{update['rate']}  eta {update['eta_seconds']}s",
+                    end="",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
+            result = remote.push(args.export_dir, target, args.dry_run, echo=echo)
+            print(file=sys.stderr)
+            _print(result)
+            return 0 if result["ok"] else 1
     except KeyError as exc:
         print(f"ERROR: not found: {exc}")
         return 1

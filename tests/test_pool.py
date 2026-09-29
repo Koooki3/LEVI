@@ -813,3 +813,45 @@ def test_scan_job_runs_as_a_tracked_worker(pool, client):
     )
     assert done["result"]["summary"]["episodes"] == pool["summary"]["episodes"]
     assert done["progress"]["stage"] == "done"
+
+
+# ------------------------------------------------------------------ P3 page
+
+
+def test_page_routes_facets_outcomes_and_export_summary(pool, client):
+    facets = client.get("/api/levi/pool/facets").json()
+    assert facets["hidden_heldout"] >= 1 and facets["hidden_copies"] >= 1
+    assert facets["categories"]["rollout"] == 3
+    shown = client.get("/api/levi/pool/facets", params={"show_heldout": True}).json()
+    assert shown["hidden_heldout"] == 0 and shown["episodes"] > facets["episodes"]
+    assert facets["outcomes"]["robot_flag_success"] >= 1
+    flagged = client.get(
+        "/api/levi/pool/episodes", params={"outcome": "robot_flag_success"}
+    ).json()["episodes"]
+    assert flagged and all(e["robot_flag"] == "success" for e in flagged)
+    verified = client.get(
+        "/api/levi/pool/episodes", params={"outcome": "verified_success"}
+    ).json()["episodes"]
+    assert all((e["human_label"] or e["robot_flag"]) == "success" for e in verified)
+    page = client.get("/api/levi/pool/episodes").json()["episodes"]
+    assert all("viewer" in e and e["viewer"] is None for e in page)
+    body = {"name": "sum", "categories": ["rollout"], "tasks": ["stack the plates"]}
+    job = client.post(
+        "/api/levi/pool/export",
+        json={
+            "recipe": body,
+            "options": {
+                "format": "raw_capture",
+                "name": "sum-v1",
+                "output_dir": str(pool["out"]),
+            },
+        },
+    ).json()
+    assert not jobs.wait_idle(120)
+    done = client.get(f"/api/levi/pool/jobs/{job['id']}").json()
+    assert done["status"] == "succeeded", done.get("error")
+    summary = client.get(f"/api/levi/pool/jobs/{job['id']}/summary").json()
+    assert summary["counts"]["episodes"] == 3 and summary["counts"]["excluded"][
+        "heldout"
+    ] == 1
+    assert client.get("/api/levi/pool/jobs/nope-1/summary").status_code in (400, 404)

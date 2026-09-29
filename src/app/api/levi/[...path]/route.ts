@@ -4,4 +4,5 @@ export const dynamic = "force-dynamic";
 export const GET = backendProxy;
 export const HEAD = backendProxy;
 export const POST = backendProxy;
+export const PUT = backendProxy;
 export const DELETE = backendProxy;

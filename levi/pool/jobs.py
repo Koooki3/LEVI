@@ -24,6 +24,7 @@ from . import settings
 
 LOCK = threading.Lock()
 ACTIVE: dict[str, subprocess.Popen] = {}
+CANCELLED: set[str] = set()
 _THREADS: set[threading.Thread] = set()
 TIMEOUT = 24 * 3600
 
@@ -71,6 +72,27 @@ def plan_export(recipe, options) -> dict:
     return job
 
 
+def plan_push(source: str, target_name: str, dry_run: bool = False) -> dict:
+    """A push of a finished export to a registered remote target."""
+    from . import remote
+
+    folder = remote.check_source(source)
+    target = remote.get(target_name)
+    job_id = timestamp_id(jobs_dir(), ".json", prefix="push-")
+    job = {
+        "id": f"push-{job_id}",
+        "kind": "push",
+        "source": str(folder),
+        "remote": target.model_dump(),
+        "destination": remote.destination(target, folder),
+        "dry_run": dry_run,
+        "status": "planned",
+        "planned_at": time.time(),
+    }
+    atomic(_path(job["id"]), job)
+    return job
+
+
 def execute(job: dict, progress_path: Path | None = None) -> dict:
     """Run a planned job in this process (the worker, or the CLI)."""
     if job["kind"] == "scan":
@@ -81,6 +103,15 @@ def execute(job: dict, progress_path: Path | None = None) -> dict:
         from .export import run
 
         return run(job, progress_path)
+    if job["kind"] == "push":
+        from . import remote
+
+        return remote.push(
+            Path(job["source"]),
+            remote.Target.model_validate(job["remote"]),
+            bool(job.get("dry_run")),
+            progress_path,
+        )
     raise ValueError(f"Unknown pool job kind: {job['kind']}")
 
 
@@ -137,7 +168,10 @@ def launch(job_id: str) -> dict:
             job["exit_code"] = code
             job["result"] = result
             job["status"] = "succeeded" if code == 0 and result.get("ok") else "failed"
-            if job["status"] == "failed":
+            if job["id"] in CANCELLED:
+                job["status"] = "cancelled"
+                job["error"] = "Cancelled"
+            elif job["status"] == "failed":
                 job["error"] = result.get("error") or f"Worker exited with {code}"
         except Exception as exc:  # noqa: BLE001
             job["status"] = "failed"
@@ -145,6 +179,7 @@ def launch(job_id: str) -> dict:
         finally:
             with LOCK:
                 ACTIVE.pop(job["id"], None)
+                CANCELLED.discard(job["id"])
             job["finished_at"] = time.time()
             atomic(path, job)
 
@@ -167,8 +202,32 @@ def wait_idle(timeout: float = 60.0) -> list:
     return [t for t in _THREADS if t.is_alive()]
 
 
+def cancel(job_id: str) -> dict:
+    """Stop a running job: SIGTERM to its process group (the worker and, for
+    a push, rsync). An export removes its ``.partial`` folder on the way out;
+    a push keeps what arrived (``--partial``), so pushing again resumes."""
+    path = _path(job_id)
+    with LOCK:
+        proc = ACTIVE.get(job_id)
+        if proc is None or proc.poll() is not None:
+            raise ValueError("The job is not running")
+        CANCELLED.add(job_id)
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    job = read(path, {})
+    return {**_brief(job), "status": "cancelling"}
+
+
+def _terminated(signum, frame):
+    # Unwind (``finally`` / ``except BaseException`` blocks clean up).
+    raise SystemExit(128 + signum)
+
+
 def worker(path: Path) -> int:
     """``python -m levi.pool run-job <plan>``: the worker process."""
+    signal.signal(signal.SIGTERM, _terminated)
     job = json.loads(Path(path).read_text())
     result_path = Path(path).with_suffix(".result.json")
     try:
@@ -244,7 +303,9 @@ def recover_interrupted():
         if value.get("status") in ("running", "queued"):
             value.update(
                 status="interrupted",
-                error="Service restarted; an unfinished export leaves only its "
+                error="Service restarted; an unfinished push resumes when started again"
+                if value.get("kind") == "push"
+                else "Service restarted; an unfinished export leaves only its "
                 ".partial folder, which can be deleted",
             )
             atomic(path, value)

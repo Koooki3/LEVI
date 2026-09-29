@@ -17,6 +17,9 @@ export default function LeviHeader() {
             <Link href="/workbench">
               <T>Conversion & review</T>
             </Link>
+            <Link href="/pool">
+              <T>Training pool</T>
+            </Link>
             <Link href="/guide">
               <T>Guide</T>
             </Link>
