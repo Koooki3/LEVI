@@ -17,9 +17,9 @@ All results are ordinary object annotations: the same sidecar, review states, Ob
 
 ## Saving never erases other episodes / 保存不会覆盖其他片段
 
-A run (student labelling, a live session, or a SAM3 run) writes one new sidecar revision that replaces only the (episode, camera) pairs it covered; every other episode's objects are kept (hard-linked from the previous revision). Before this release a SAM3 run replaced the whole sidecar, so labelling episode 5 erased episode 3's objects.
+A run (student labelling, a live session, or a SAM3 run) writes one new sidecar revision that replaces only the (episode, camera) pairs it covered; every other episode's objects are kept (hard-linked from the previous revision). Earlier versions replaced the whole sidecar with a SAM3 run's result, so labelling episode 5 erased episode 3's objects.
 
-每次运行（学生模型标注、实时会话或 SAM3 运行）只写一个新的 sidecar 版本，只替换本次覆盖的（片段，相机）；其他片段的对象全部保留（从上一个版本硬链接）。此前 SAM3 运行会替换整个 sidecar，标注第 5 个片段会抹掉第 3 个片段的对象，本版已修正。
+每次运行（学生模型标注、实时会话或 SAM3 运行）只写一个新的 sidecar 版本，只替换本次覆盖的（片段，相机）；其他片段的对象全部保留（从上一个版本硬链接）。早期版本让 SAM3 运行的结果替换整个 sidecar，标注第 5 个片段会抹掉第 3 个片段的对象；现已修正。
 
 ## Install / 安装
 
@@ -136,6 +136,7 @@ Under the annotation service (`/annotations/api/…` on the core port, `/api/ann
 | `POST segmentation/distil` | `{name, concepts, sources: [{repo_id?, train, valid, test, stride?}], architecture?, epochs?, stride?, confidence?}` → job |
 | `GET segmentation/jobs/{id}`, `POST segmentation/jobs/{id}/cancel` | progress, result, cancel |
 | `POST segmentation/live` | `{episode_index, model, cameras?, save?, lead_frames?}` → session (once the model is loaded) |
+| `GET segmentation/live/{id}` | the session's state; a session with unsaved results publishes them first |
 | `POST segmentation/live/{id}/clock` | `{playing, time, rate}` (episode-local seconds) |
 | `GET segmentation/live/{id}/events` | server-sent events: `result` (one camera frame: objects with `track_id`, `concept`, `score`, `bbox_xyxy`, `mask_rle`), `stats`, `ready`, `stopped`, `error`, `closed`; a slow reader gets only the newest result per camera |
 | `POST segmentation/live/{id}/stop` | stop and save |

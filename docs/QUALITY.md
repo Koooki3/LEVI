@@ -47,11 +47,13 @@ Content review is an agent task (see [Agents](AGENTS.md)), planned and approved 
 | Video subtasks and events | Time segments per attempt with subtask, outcome and uncertainty | Subtask labels for training, failure analysis |
 | Visible object masks | Masks and tracks per object | Object-centric training data |
 
+When success is decided at a few robot actions whose moment the data records, such as a release, a dataset review can be planned as a [release-anchored review](ANCHORED_REVIEW.md): a local model answers one narrow question at each recorded event, and a rule over the answers gives the episode's outcome as one proposal for a person to review.
+
 Choose cameras for what must be judged: a wide camera shows which task and scene; a wrist camera shows small parts (whether a screw is seated). What the reviewer accepts is published as a revision with provenance; no inference becomes a label without that review.
 
 ## Labels, flags and the review list
 
-- **Outcome labels.** Click an episode's dot in the sidebar to label it success or failure; human labels override metadata and are written as `levi_outcome` in exports. They feed the Failures filter and the RECAP export ([RECAP](RECAP.md)).
+- **Outcome labels.** Click an episode's dot in the sidebar to label it success or failure; human labels override metadata and are written as `levi_outcome` in exports. They feed the Failures filter, the RECAP export ([RECAP](RECAP.md)) and the `verified_success` training manifest ([Training manifests](TRAINING_MANIFEST.md)).
 - **Review flags.** Mark episodes to exclude or revisit; the review list is saved per dataset (`outputs/LEVI/workbench/reviews/<name>.json`) and exported as a `levi.review.v1` manifest, `<name>-review-<YYYYmmddTHH>.json`. Flags never delete source data.
 - **Carry-over.** Annotations and labels made on a raw capture move with it into every conversion, matched by source demo ([Conversion](CONVERSION.md)).
 

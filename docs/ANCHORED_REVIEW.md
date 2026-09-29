@@ -145,7 +145,7 @@ Each question gets the same safeguards as a model phase: the budget is reserved 
 ## Reading the results
 
 - `anchored.get` — `{"repo_id"}` or `{"run_id"}`: the newest anchored review's per-episode outcome, event and valid counts, requests, tokens and time; with `"episode": N`, that episode's record and the spec's fields and rules. Both carry the spec's `id` and `title`.
-- `GET /api/anchored/summary` and `GET /api/anchored/episodes/{N}` (`repo_id` or `local_path`, optional `run_id`) — the same for the viewer.
+- `GET /api/annotation/anchored/summary` and `GET /api/annotation/anchored/episodes/{N}` through the web UI (`/api/anchored/…` on the annotation service; `repo_id` or `local_path`, optional `run_id`) — the same for the viewer.
 - In the episode viewer, the annotations timeline shows an **ANCHORED REVIEW** row headed by the spec's title (its id on hover): one marker per event at its frame, green when valid, red when contradicted, amber when unknown; hovering shows the answers and each condition, clicking seeks to the event. The row does not yet show the start check or veto verdicts: a marker is coloured by the event's verdict after its `effect: event` vetoes, and hovering shows only the spec's own answer. Read them in the outcome proposal (its text, `evidence_note` and `uncertainty`) or with `anchored.get`.
 
 ## Measured

@@ -11,7 +11,7 @@ Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge fo
 | GET | `/api/levi/catalog/{name}` | One registered dataset with its `format` and live `revision` (404 once removed); polled by open viewers |
 | DELETE | `/api/levi/catalog/{name}` | Unregister; files, annotations and reviews stay on disk |
 | GET | `/api/levi/catalog/{name}/namespaces` | The dataset's namespaces ([Namespaces](WORKSPACE.md#namespaces-one-input-many-experiments)) |
-| POST | `/api/levi/catalog/{name}/namespaces` | Create (or return) `{name}--{namespace}` from `{ "namespace": "r9-agentCode" }`: one more dataset over the same source, with its own annotations, runs, memory and records; 400 for an invalid name |
+| POST | `/api/levi/catalog/{name}/namespaces` | Create (or return) `{name}--{namespace}` from `{ "namespace": "code-agent" }`: one more dataset over the same source, with its own annotations, runs, memory and records; 400 for an invalid name |
 | GET | `/api/levi/sync` | Workspace sync status: enabled, interval/settle, last scan, pending (waiting to settle) and recent changes |
 | POST | `/api/levi/sync` | Scan the workspace now; returns the changes made |
 | GET | `/api/levi/samples` | DROID test-sample status: the `LEVI_DROID_SAMPLE` setting, whether a draw runs, the ledger's draws with progress, free disk space ([DROID test sample](WORKSPACE.md#droid-test-sample)) |
@@ -38,7 +38,7 @@ Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge fo
 | POST | `/api/levi/pool/push` | `{ "target": "…", "export_job": "…" \| "source": "<export dir>", "dry_run": false }`: rsync over SSH of a finished pool export, as a cancellable job |
 | GET | `/api/levi/manifest/operations` | Built-in training-manifest operations with their parameters ([Training manifests](TRAINING_MANIFEST.md)) |
 | GET | `/api/levi/manifest?repo_id=local/<name>` | Manifests written for a dataset: directory, time, operation, counts |
-| POST | `/api/levi/manifest` | Write a manifest `{ "repo_id": "local/<name>", "operation": "verified_success", "params": {"fallback": "exclude"}, "tasks": ["…"], "episodes": [0, 1], "anchored_run": null, "anchored_tasks": ["…"], "recap_revision": null, "allow_stale": false }`; returns the manifest without its per-episode table (that stays in `manifest.json`); 400 for an unknown operation or parameter, a missing anchored review or RECAP revision, or stale RECAP labels |
+| POST | `/api/levi/manifest` | Write a manifest `{ "repo_id": "local/<name>", "operation": "verified_success", "params": {"fallback": "exclude"}, "tasks": ["…"], "episodes": [0, 1], "anchored_run": null, "anchored_tasks": ["…"], "recap_revision": null, "allow_stale": false }`; returns the manifest without its per-episode table (that stays in `manifest.json`); 400 for an unknown operation or parameter, a missing anchored review and human outcome labels (`verified_success`), a missing RECAP revision, or stale RECAP labels |
 | GET | `/api/levi/report?lang=en\|zh` | The technical report ([below](#technical-report--技术报告)): `{configured, dir, exists, lang, document_lang, markdown, status, errors, mtime, etag}`; answers `304` to a matching `If-None-Match` |
 | GET | `/api/levi/report/version?lang=en\|zh` | The report's change marker `{configured, etag, mtime}` from file stats only; the page polls it every 5 s |
 | GET / HEAD | `/api/levi/report/assets/{relative_path}` | An image (PNG, JPEG, GIF, WebP, SVG) under the report's `assets/`; anything else, a hidden name or a path leaving the folder is `403` |
@@ -46,7 +46,15 @@ Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge fo
 | POST | `/api/annotation/dataset/load` | Load `{ "repo_id": "…" }` or `{ "local_path": "/workspace/dataset" }` |
 | GET | `/api/annotation/episodes/{id}/atoms?repo_id=…` | Read language atoms |
 | POST | `/api/annotation/episodes/{id}/atoms` | Replace `{ "repo_id": "…", "episode_index": 0, "atoms": [...] }` |
+| DELETE | `/api/annotation/episodes/{id}/atoms?repo_id=…` | Delete an episode's annotation file, which returns it to never annotated (saving an empty `atoms` list instead records "reviewed, nothing to annotate") |
 | GET | `/api/annotation/episodes/{id}/frame_timestamps?repo_id=…` | Exact source timestamps |
+| GET | `/api/annotation/episodes/annotation-summary?repo_id=…` | Per episode, whether it has language annotations and object masks (the sidebar's annotated indicator) |
+| GET | `/api/annotation/episodes/status?repo_id=…` | Episodes a person confirmed as completely annotated `{ "status": {"3": …} }` |
+| POST | `/api/annotation/episodes/{id}/status` | Confirm `{ "repo_id": "…", "done": true }` or clear (`false`) an episode as completely annotated |
+| GET | `/api/annotation/dataset/vocabulary?repo_id=…` | The dataset's subtask vocabulary, with a suggestion when it has none |
+| POST | `/api/annotation/dataset/vocabulary` | Replace `{ "repo_id": "…", "subtasks": [...] }`; 400 for an invalid entry |
+| GET | `/api/annotation/eval/recording?repo_id=…` | The running recording session of a person's annotation work, or `null` ([Evaluation records](EVALUATION.md)) |
+| POST | `/api/annotation/eval/recording/start`, `/stop`, `/cancel` | Start, stop (writes `eval/<dataset>_human_<hour>.md`; 409 when nothing runs) or discard a recording `{ "repo_id": "…" }` |
 | GET | `/api/annotation/episodes/outcomes?repo_id=…` | Human success/failure labels `{ "labels": { "3": {"outcome": "success", "source": "human", "updated_at": "…"} } }` |
 | POST | `/api/annotation/episodes/{id}/outcome` | Set `{ "repo_id": "…", "outcome": "success" \| "failure" }` or clear with `"outcome": null` |
 | POST | `/api/annotation/export` | New annotated tree (`<name>_annotated/`, updated in place on re-export); optional `output_dir`, `copy_videos`; refused (409) for a raw capture's browsing view |
@@ -60,15 +68,23 @@ Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge fo
 | GET | `/api/annotation/sam3/revisions` | List object annotation revisions |
 | GET | `/api/annotation/sam3/episodes/{id}/objects` | Read object masks/bboxes, with `camera_key`, `frame_index` and `annotation_revision` filters |
 | POST | `/api/annotation/sam3/edits` | Revision-checked accept/reject/relabel/occlusion/delete/refine |
+| GET / POST | `/api/annotation/sam3/prompt-presets` | Named prompt sets shared by every dataset of the workspace; `POST` saves `{ "name": "…", "prompts": ["…"] }` (at most 200 presets) |
+| DELETE | `/api/annotation/sam3/prompt-presets/{name}` | Delete a preset |
 | GET | `/api/annotation/segmentation/status` | Fast segmentation: worker and teacher readiness, student models, cameras, recent jobs, live sessions ([Fast segmentation](SEGMENTATION.md)) |
 | GET/DELETE | `/api/annotation/segmentation/models[/{name}]` | List or delete distilled student models |
 | POST | `/api/annotation/segmentation/label` | Label episodes (all by default) with a student; `202` job |
 | POST | `/api/annotation/segmentation/distil` | Distil a student from SAM3 pseudo-labels; `202` job |
 | GET/POST | `/api/annotation/segmentation/jobs/{id}[/cancel]` | Poll (publishes a finished labelling job) or cancel |
 | POST | `/api/annotation/segmentation/live` | Start a live overlay session for one episode (answers once the model is loaded) |
+| GET | `/api/annotation/segmentation/live/{id}` | The session's state; a session with unsaved results publishes them first |
 | POST | `/api/annotation/segmentation/live/{id}/clock` | Player clock `{playing, time, rate}` |
 | GET | `/api/annotation/segmentation/live/{id}/events` | Server-sent events: per-camera `result`, `stats`, `stopped`, `error`, `closed` |
 | POST | `/api/annotation/segmentation/live/{id}/stop` | Stop and save the shown frames for this episode only |
+| GET | `/api/annotation/recap/status?repo_id=…` | RECAP value model on this dataset: checkpoints and readiness, the worker, the current advantage labels, the latest job ([RECAP](RECAP.md#value-model-and-advantage-labels-in-levi--levi-中的价值模型与优势标签)) |
+| POST | `/api/annotation/recap/run` | Compute values and advantage labels `{ "repo_id": "…", "checkpoint": "…", "episodes"?, "lookahead"?, "positive_quantile"?, "threshold"?, "dataset_type"?, "static_filter"? }`; `202` job, one per dataset at a time |
+| GET / POST | `/api/annotation/recap/jobs/{id}[/cancel]` | Poll or cancel a RECAP job |
+| GET | `/api/annotation/recap/summary?repo_id=…`, `/api/annotation/recap/episodes/{N}?repo_id=…` | Per-episode positive fraction, or one episode's runs and value curve; `optional=true` answers `200` with `null` while there are no labels yet |
+| GET | `/api/annotation/anchored/summary`, `/api/annotation/anchored/episodes/{N}` | Per-event evidence of the newest anchored review (`repo_id` or `local_path`, optional `run_id`); `404` without a result ([Anchored review](ANCHORED_REVIEW.md#reading-the-results)) |
 
 For the `local/<slug>` repo IDs returned by registration, the annotation API resolves the registered directory automatically. Direct `local_path` also works if it remains inside the configured workspace.
 
@@ -123,7 +139,7 @@ The **Report / 报告** page (`/report`) renders a technical report kept outside
 | `status.json` | Live data, schema `levi.report.status.v1`: `generated_at`, `levi_main`, `workstreams` (state, progress 0–1, stage, ETA), `metrics`, `charts`, `tables`, `milestones`, `resources` (GPU, free disk). Bilingual fields are `{"en": "…", "zh": "…"}`. |
 | `assets/` | Images the Markdown references as `assets/<file>`. |
 
-Fenced blocks with a JSON body become components: `levi-progress` (`{"source": "workstreams"}` or `{"id": "W1b"}`), `levi-chart` (`{"type": "bar"|"line"|"grouped-bar", "title", "data": "<charts key>" or inline rows, "x", "series": [{"key", "label"}], "y_label", "y_domain"}`), `levi-metrics`, `levi-table` and `levi-timeline` (`{"data": "<key>"}` in `metrics`, `tables`, `milestones`). A block that does not parse shows its error in place; the rest of the report still renders. The page polls `/api/levi/report/version` every 5 s and swaps in a changed report without moving the reader's scroll position.
+Fenced blocks with a JSON body become components: `levi-progress` (`{"source": "workstreams"}` or `{"id": "<workstream id>"}`), `levi-chart` (`{"type": "bar"|"line"|"grouped-bar", "title", "data": "<charts key>" or inline rows, "x", "series": [{"key", "label"}], "y_label", "y_domain"}`), `levi-metrics`, `levi-table` and `levi-timeline` (`{"data": "<key>"}` in `metrics`, `tables`, `milestones`). A block that does not parse shows its error in place; the rest of the report still renders. The page polls `/api/levi/report/version` every 5 s and swaps in a changed report without moving the reader's scroll position.
 
 技术报告页读取 `LEVI_REPORT_DIR` 指向的目录（只读，可在工作区之外）：`LEVI.md` / `LEVI.zh-CN.md` 为正文，`status.json` 为实时数据，`assets/` 为图片。页面随语言切换选择中文或英文（缺失时回退英文），每 5 秒检测一次变化并无闪烁地更新。
 
@@ -162,6 +178,20 @@ All agent routes live under `/api/levi/agent/v1`. `GET /capabilities` lists ever
 An external agent authenticates with its scoped connection credential (`Authorization: Bearer …`; see `levi agent connect`) or the legacy `LEVI_AGENT_TOKEN` / `LEVI_AGENT_DATASETS` pair. It may read and draft on its datasets only; plan approval, pilot review, commit, reset, clean, model management and publishing improvements require the operator session. After agent revisions are active, legacy annotation/review writes must send the `X-LEVI-Annotation-Revision` returned by their read.
 
 Capability groups — orientation, quality, planning, execution, evidence, annotations, objects, natural-language tasks, harness (memory, cost, improvements), supervision, workspace — and who may call each are listed in [Agents → Capability reference](AGENTS.md#capability-reference). Live activity streams as Server-Sent Events at `/activity/stream` (operator only).
+
+Other routes of the same service, mostly for the Agent Workbench (operator session unless noted; a route a person alone may call needs the human control key):
+
+| Method / path | Behavior |
+| --- | --- |
+| `GET /runs`, `GET /runs/{id}/manifest`, `GET /runs/{id}/artifacts/{name}`, `GET /runs/{id}/stream?after=` | Runs the caller may see; a run's manifest; a stored artifact; the run's events as Server-Sent Events |
+| `GET /activity?after=&limit=`, `GET /activity/tasks?limit=` | Recent agent actions for the first paint of the panel; runs as tasks (what each waits for, how far it got, what it made) |
+| `GET /providers`, `POST /providers`, `DELETE /providers/{name}` | Model profiles ([Local models](#local-models-ollama-local-openai-compatible-servers) for the local kinds) |
+| `POST /providers/{name}/session`, `/activate`, `/disconnect` | Keep an API key in server memory for the session (not for local Ollama); enable a profile; disable it and drop the session key |
+| `GET /connections`, `POST /connections/external` | Connection state; allow or refuse external MCP access |
+| `GET /grants`, `POST /grants`, `POST /grants/{id}/revoke` | Scoped connection grants (what `levi agent connect` creates and `disconnect` revokes) |
+| `GET /runtimes`, `GET` / `POST /pilot/sessions`, `POST /pilot/sessions/{id}/message`, `POST /pilot/sessions/{id}/{action}`, `GET /pilot/permissions`, `POST /pilot/permissions/{id}` | Managed Pilot runtimes, sessions and their permission requests ([Pilot](PILOT.md)) |
+| `GET /formats` | What agent adapters support: dataset kinds, annotation kinds, the object sidecar format and exports |
+| `POST /core/stop` | Stop the core process (human key; only a core started by the launcher) |
 
 ### Capability reference
 

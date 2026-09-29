@@ -4,7 +4,7 @@ A training manifest tells a fixed training recipe which frames of a dataset go i
 
 ```bash
 levi export operations                                    # built-in operations and their parameters
-levi export manifest local/<name> --operation verified_success [--param fallback=exclude] \
+levi export manifest local/<name> --operation verified_success [--param fallback=exclude] [--param undecided=include] \
     [--task "stack the plates of same color together"] [--episodes 0-49] \
     [--anchored-run <run id>] [--anchored-task "<task it is valid for>"] \
     [--recap-revision <id>] [--allow-stale] [--output <new dir in the workspace>] [--json]
@@ -20,7 +20,7 @@ The API is `GET /api/levi/manifest/operations`, `GET /api/levi/manifest?repo_id=
 | --- | --- | --- |
 | `all_rollouts` | every frame in scope, weight 1 (the no-curation baseline) | — |
 | `robot_flag_success` | episodes the robot flagged success (`levi_outcome`, or `is_success` in `meta/episodes.jsonl`) | — |
-| `verified_success` | episodes whose verdict is success: a human label first, then the anchored review (only for the tasks it is declared valid for), then the `fallback` (`robot_flag`, the default, or `exclude`) | an anchored review run |
+| `verified_success` | episodes whose verdict is success: a human label first, then the anchored review (only for the tasks it is declared valid for), then the `fallback` (`robot_flag`, the default, or `exclude`). An anchored success the review left undecided is out by default; `undecided=include` keeps it | an anchored review run, or human outcome labels in scope (a task without anchored-review rules is verified by people alone) |
 | `advantage_positive_mask` | frames the RECAP value model labels positive; `unlabelled` frames are excluded (default) or included | a RECAP revision |
 | `advantage_weighted` | every frame, weight `positive_weight` (1.0) or `negative_weight` (0.2); frames without a label get `unlabelled_weight` (0.0) | a RECAP revision |
 
@@ -87,7 +87,7 @@ For openpi (`pi05_fr3_*` configs), without changing openpi's main branch:
 **内置操作**（与任务无关）：
 - `all_rollouts`：全部帧；
 - `robot_flag_success`：机器人标志为成功的片段；
-- `verified_success`：按“人工标签 > 锚定复核（仅限声明为已验证的任务）> 机器人标志”判为成功的片段；
+- `verified_success`：按“人工标签 > 锚定复核（仅限声明为已验证的任务）> 机器人标志”判为成功的片段；锚定复核给出的成功若结论未定（起始检查或否决规则无法判断），默认排除，`undecided=include` 可保留；只有人工标签、没有锚定复核也可以运行；
 - `advantage_positive_mask`：只保留 RECAP 正优势帧；
 - `advantage_weighted`：按优势正负加权。
 

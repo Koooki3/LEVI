@@ -51,6 +51,7 @@ On a machine where others train or run robots on the same GPU, sharing it silent
 - **While the service runs** a watcher samples every 15 s (2 s while a model is resident), unloads resident models the moment protected work appears — a request cut off this way is recorded as a preemption, not a model failure — and **resumes** every run blocked by the GPU once the window has passed.
 - `uv run levi agent gpu` (or the `gpu.status` capability) shows the decision, its reason, the workloads seen and their learned windows.
 - `LEVI_GPU_SHARING=allow` disables the guardian when you have agreed to share the GPU.
+- `LEVI_GPU_LOCK_FILE` is a separate, opt-in mechanism for fast-segmentation jobs: an `flock` file that labelling and distillation hold while they run, so they queue behind other tools that honour the same file. The guardian does not read it and local-model requests do not take it. See [Fast segmentation](SEGMENTATION.md#settings--设置).
 
 ## 5. Run a task
 

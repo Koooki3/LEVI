@@ -51,6 +51,7 @@ curl -X POST -H "x-levi-ui-token: $(cat "$LEVI_WORKSPACE/outputs/LEVI/workbench/
 - **服务运行期间**，守护每 15 s 采样一次（模型驻留显存时每 2 s），受保护的负载一出现就卸载模型——这样被打断的请求记为抢占，不算模型失败——窗口过后**自动恢复**所有被 GPU 挡住的 run。
 - `uv run levi agent gpu`（或 `gpu.status` 能力）显示判决、原因、见过的负载及各自学到的窗口。
 - 已与他人约定共享 GPU 时，设置 `LEVI_GPU_SHARING=allow` 关闭守护。
+- `LEVI_GPU_LOCK_FILE` 是另一套需要主动开启的机制，只用于快速分割作业：标注和蒸馏运行期间持有这个 `flock` 锁文件，因此会排在同样遵守它的其他工具之后。守护进程不读取它，本地模型请求也不会占用它。见[快速分割](SEGMENTATION.md#settings--设置)。
 
 ## 5. 运行任务
 

@@ -207,6 +207,9 @@ uv run levi serve
 still read). Masks drawn on a raw capture's browsing view carry over to a conversion on exactly
 retained frames, as a new revision with `model.provider = carry_over`.
 
+一次 SAM3 运行发布的新 revision 只替换本次覆盖的（片段，相机），其他片段的对象原样保留（掩码文件从上一个 revision 硬链接）。
+A SAM3 run publishes a new revision that replaces only the (episode, camera) pairs it covered; every other episode's objects are kept (mask files are hard-linked from the previous revision). The fast student model and live overlay write to the same sidecar the same way ([Fast segmentation](SEGMENTATION.md)).
+
 每行 mask 记录包含 episode_index、frame_index、episode-local timestamp、camera_key、
 object_id、track_id、concept、bbox_xyxy、image_size、rle_size、rle_counts、score、
 visible、occluded、status、source 和 prompt。v3 共享视频 shard 会按
@@ -231,6 +234,8 @@ revision 可分别备份和比较。
 | GET | /api/sam3/revisions | 列出对象标注 revision |
 | GET | /api/sam3/episodes/{id}/objects | 按相机、帧或 revision 读取对象记录 |
 | POST | /api/sam3/edits | 带 base_revision 的接受/拒绝/重标/遮挡/删除/精修 |
+| GET / POST | /api/sam3/prompt-presets | 读取或保存可复用的命名 prompt 集（整个工作区共用，最多 200 个） |
+| DELETE | /api/sam3/prompt-presets/{name} | 删除一个 prompt 集 |
 
 provider=sam3 的响应为 202 和 job_id。worker 只读取已经由状态卡下载并校验过的
 checkpoint（直接运行 worker 时仍保留自身的 Hub fallback），随后逐个读取 episode/camera，
@@ -285,4 +290,4 @@ LEVI 只借鉴公开 API 和数据格式，不复制参考项目的受版权保�
 
 ## Agent assistance
 
-SAM3 is also available as an optional ToolProvider in the [agent workflow](AGENTS.md#object-masks). It runs on a frozen dataset scope and stages results for the shared human review/commit flow. Existing standalone object annotation remains supported. Agent execution requires an existing checkpoint and never initiates a download; all engineering tests use CPU fixtures without CUDA probing or real inference.
+SAM3 is the quality path of [fast segmentation](SEGMENTATION.md), which distils a small student model from it. It is also available as an optional ToolProvider in the [agent workflow](AGENTS.md#object-masks). It runs on a frozen dataset scope and stages results for the shared human review/commit flow. Existing standalone object annotation remains supported. Agent execution requires an existing checkpoint and never initiates a download; all engineering tests use CPU fixtures without CUDA probing or real inference.
