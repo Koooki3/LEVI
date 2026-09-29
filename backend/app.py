@@ -709,11 +709,22 @@ def _collect_sam3_job(state: DatasetState, job: dict[str, Any]) -> dict[str, Any
             )
             validate_annotations_for_plan(plan, annotations)
             sidecar = _sidecar(state)
-            # Replace only the planned (episode, camera) pairs: a run on some
-            # episodes must keep every other episode's objects.
+            # Replace only the planned (episode, camera) pairs the worker
+            # finished: a run on some episodes keeps every other episode's
+            # objects, and a pair that failed keeps its old (possibly
+            # reviewed) objects instead of being cleared.
+            failed = {
+                (int(item["episode_index"]), str(item["camera_key"]))
+                for item in result.get("item_errors", [])
+            }
             revision = sidecar.publish_merged(
                 annotations,
-                {(e, c) for e in plan.episode_indices for c in plan.camera_keys},
+                {
+                    (e, c)
+                    for e in plan.episode_indices
+                    for c in plan.camera_keys
+                    if (e, c) not in failed
+                },
                 model=result.get("model") or {"provider": "sam3"},
             )
             job.update(
@@ -723,7 +734,7 @@ def _collect_sam3_job(state: DatasetState, job: dict[str, Any]) -> dict[str, Any
                 annotation_count=len(annotations),
                 item_errors=result.get("item_errors", []),
             )
-        except (OSError, ValueError, TypeError) as exc:
+        except (OSError, ValueError, TypeError, KeyError) as exc:
             job.update(status="failed", error=f"Invalid SAM3 worker result: {exc}")
     elif return_code is not None or not _sam3_process_alive(job):
         detail = _sam3_log_tail(job)

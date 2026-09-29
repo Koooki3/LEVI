@@ -358,11 +358,20 @@ def _episode_video(
             f"{camera_prefix}/file_index",
             episode.get("video_file_index", 0),
         )
+        # A v3 ``video_path`` ("videos/{video_key}/chunk-{chunk_index:03d}/
+        # file-{file_index:03d}.mp4") takes this camera's own chunk/file
+        # indices: video and data files roll over independently.
+        camera_chunk = episode.get(
+            f"{camera_prefix}/chunk_index", episode.get("video_chunk_index")
+        )
+        camera_file = episode.get(
+            f"{camera_prefix}/file_index", episode.get("video_file_index")
+        )
         values = {
             "episode_index": episode_index,
             "episode_chunk": episode.get("episode_chunk", default_chunk),
-            "chunk_index": data_chunk,
-            "file_index": data_file,
+            "chunk_index": data_chunk if camera_chunk is None else camera_chunk,
+            "file_index": data_file if camera_file is None else camera_file,
             "video_chunk": video_chunk,
             "video_chunk_index": video_chunk,
             "video_file_index": video_file,

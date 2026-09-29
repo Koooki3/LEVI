@@ -1097,9 +1097,28 @@ def _invoke(
         if not principal.human and args.repo_id not in principal.datasets:
             raise PermissionError("Dataset is outside this principal's scope")
         key = display_name(args.repo_id, None)
+        worker = seg_jobs.worker_state()
+        listed = seg_models.listing(key)
+        if not principal.human:
+            # A scoped agent sees neither workspace paths nor the names of
+            # datasets outside its scope.
+            allowed = {display_name(d, None) for d in principal.datasets}
+            worker = {
+                "ready": worker["ready"],
+                "reason": None
+                if worker["ready"]
+                else "the fast segmentation worker is not installed",
+            }
+            listed = [
+                {
+                    **{k: v for k, v in model.items() if k != "path"},
+                    "datasets": [d for d in model["datasets"] if d in allowed],
+                }
+                for model in listed
+            ]
         return {
-            "worker": seg_jobs.worker_state(),
-            "models": seg_models.listing(key),
+            "worker": worker,
+            "models": listed,
             "jobs": [seg_jobs.public(job) for job in seg_jobs.jobs(key)][-10:],
             "note": "Label, distil and the live overlay are started by a person "
             "in the episode viewer (Annotations > Objects) or the HTTP API; "

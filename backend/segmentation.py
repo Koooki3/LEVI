@@ -193,27 +193,67 @@ class ClockRequest(BaseModel):
 
 
 # ---------------------------------------------------------------- status
+#
+# Status, job and live queries are polled, so they run read-only: no dataset
+# lock, no copy of the annotation bundle. Only when a finished labelling job
+# or a stopped live session still has rows to publish does one of them open
+# a write transaction (``_publish_pending``), once.
 
 
 def _collected_jobs(state) -> list[dict[str, Any]]:
-    name = _dataset_name(state)
-    publish = _publisher(state)
-    return [seg_jobs.public(seg_jobs.collect(job, publish)) for job in seg_jobs.jobs(name)][-20:]
+    return [seg_jobs.public(seg_jobs.collect(job)) for job in seg_jobs.jobs(_dataset_name(state))][-20:]
 
 
 def _live_public(state) -> list[dict[str, Any]]:
-    publish = _publisher(state)
     out = []
     for session in seg_live.sessions(_dataset_name(state)):
-        seg_live.finish(session, publish)
+        seg_live.finish(session, None)
         out.append(session.public())
     seg_live.forget_finished()
     return out
 
 
-@router.get("/api/segmentation/status")
+def _pending(repo_id: str | None, revision: str | None, local_path: str | None) -> bool:
+    name = _dataset_name(_state(repo_id, revision, local_path))
+    return any(seg_jobs.awaiting_publish(seg_jobs.collect(job)) for job in seg_jobs.jobs(name)) or any(
+        seg_live.awaiting_publish(session) for session in seg_live.sessions(name)
+    )
+
+
 @editor(internal=True)
+def _publish_pending(
+    repo_id: str | None = None,
+    revision: str | None = None,
+    local_path: str | None = None,
+) -> JSONResponse:
+    state = _state(repo_id, revision, local_path)
+    name = _dataset_name(state)
+    publish = _publisher(state)
+    for job in seg_jobs.jobs(name):
+        if seg_jobs.awaiting_publish(job):
+            seg_jobs.collect(job, publish)
+    for session in seg_live.sessions(name):
+        seg_live.finish(session, publish)
+    return JSONResponse({"ok": True})
+
+
+def _publish_if_pending(repo_id: str | None, revision: str | None, local_path: str | None) -> None:
+    if _pending(repo_id, revision, local_path):
+        _publish_pending(repo_id=repo_id, revision=revision, local_path=local_path)
+
+
+@router.get("/api/segmentation/status")
 def segmentation_status(
+    repo_id: str | None = None,
+    revision: str | None = None,
+    local_path: str | None = None,
+) -> JSONResponse:
+    _publish_if_pending(repo_id, revision, local_path)
+    return _status(repo_id=repo_id, revision=revision, local_path=local_path)
+
+
+@editor(read_only=True)
+def _status(
     repo_id: str | None = None,
     revision: str | None = None,
     local_path: str | None = None,
@@ -422,7 +462,6 @@ def segmentation_distil(request: DistilRequest) -> JSONResponse:
 
 
 @router.get("/api/segmentation/jobs/{job_id}")
-@editor(internal=True)
 def segmentation_job(
     job_id: str,
     repo_id: str | None = None,
@@ -430,8 +469,12 @@ def segmentation_job(
     local_path: str | None = None,
 ) -> JSONResponse:
     state = _state(repo_id, revision, local_path)
-    job = _call(lambda: seg_jobs.find(_dataset_name(state), job_id))
-    return JSONResponse(seg_jobs.public(seg_jobs.collect(job, _publisher(state))))
+    name = _dataset_name(state)
+    job = seg_jobs.collect(_call(lambda: seg_jobs.find(name, job_id)))
+    if seg_jobs.awaiting_publish(job):
+        _publish_pending(repo_id=repo_id, revision=revision, local_path=local_path)
+        job = _call(lambda: seg_jobs.find(name, job_id))
+    return JSONResponse(seg_jobs.public(job))
 
 
 @router.post("/api/segmentation/jobs/{job_id}/cancel")
@@ -481,16 +524,16 @@ def segmentation_live_start(request: LiveRequest) -> JSONResponse:
 
 
 @router.get("/api/segmentation/live/{session_id}")
-@editor(internal=True)
 def segmentation_live_get(
     session_id: str,
     repo_id: str | None = None,
     revision: str | None = None,
     local_path: str | None = None,
 ) -> JSONResponse:
-    state = _state(repo_id, revision, local_path)
-    session = _session(state, session_id)
-    seg_live.finish(session, _publisher(state))
+    session = _session(_state(repo_id, revision, local_path), session_id)
+    if seg_live.awaiting_publish(session):
+        _publish_pending(repo_id=repo_id, revision=revision, local_path=local_path)
+    seg_live.finish(session, None)
     return JSONResponse(session.public())
 
 
@@ -534,7 +577,6 @@ def segmentation_live_events(
 
 
 @router.post("/api/segmentation/live/{session_id}/stop")
-@editor(internal=True)
 def segmentation_live_stop(
     session_id: str,
     repo_id: str | None = None,
@@ -543,11 +585,13 @@ def segmentation_live_stop(
 ) -> JSONResponse:
     """Stop a session and save what it showed (unless it was started with
     ``save: false``) as one revision that replaces only this episode's
-    cameras."""
-    state = _state(repo_id, revision, local_path)
-    session = _session(state, session_id)
+    cameras. The worker is stopped outside the dataset lock (it may take
+    tens of seconds); only the publish holds it."""
+    session = _session(_state(repo_id, revision, local_path), session_id)
     session.stop()
-    seg_live.finish(session, _publisher(state))
+    if seg_live.awaiting_publish(session):
+        _publish_pending(repo_id=repo_id, revision=revision, local_path=local_path)
+    seg_live.finish(session, None)
     return JSONResponse(session.public())
 
 

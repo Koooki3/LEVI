@@ -63,6 +63,10 @@ async def lifespan(app):
     from .agent.runtime import Workbench
 
     recover(Workbench(STATE))
+    from .segmentation.live import discard_orphans
+
+    # Unsaved live-overlay rows of a service that was killed.
+    discard_orphans()
     marker = STATE / "server.pid"
     marker.write_text(str(os.getpid()))
     SYNC.start()
@@ -89,7 +93,9 @@ async def lifespan(app):
         jobs.stop_workers()
         from .segmentation import live as segmentation_live
 
-        # Live overlays save what they showed before their worker exits.
+        # Stop live overlays and discard their unsaved rows: saving needs an
+        # annotation transaction, which shutdown does not open (a live view
+        # saves when the page stops it or it goes idle).
         segmentation_live.stop_all()
         # Whatever is still running in a group this service started (a SAM3
         # worker, most of all, which holds the GPU).

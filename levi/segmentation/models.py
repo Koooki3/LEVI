@@ -73,10 +73,25 @@ def problems(manifest: dict[str, Any], directory: Path) -> list[str]:
         issues.append("concepts must be a non-empty list of names")
     if manifest.get("architecture") not in ARCHITECTURES and manifest.get("provider") != "fake":
         issues.append(f"architecture must be one of {', '.join(ARCHITECTURES)}")
-    weights = directory / str(manifest.get("weights") or WEIGHTS)
+    name = weights_name(manifest)
+    if name is None:
+        issues.append("weights must be a plain file name inside the model folder")
+        return issues
+    weights = directory / name
     if not weights.is_file() or weights.stat().st_size == 0:
         issues.append(f"weights file {weights.name} is missing")
     return issues
+
+
+def weights_name(manifest: dict[str, Any]) -> str | None:
+    """The manifest's weights file name, or None unless it is a plain name
+    (no directory part), so a manifest can never point outside its folder."""
+    value = manifest.get("weights") or WEIGHTS
+    if not isinstance(value, str):
+        return None
+    if value in {".", ".."} or "/" in value or "\\" in value or Path(value).name != value:
+        return None
+    return value
 
 
 def load(name: str) -> tuple[Path, dict[str, Any]]:
@@ -144,7 +159,7 @@ def worker_spec(name: str) -> dict[str, Any]:
     return {
         "name": name,
         "provider": manifest.get("provider", "student"),
-        "weights": str(directory / (manifest.get("weights") or WEIGHTS)),
+        "weights": str(directory / str(weights_name(manifest))),
         "architecture": manifest.get("architecture", "rf-detr-seg-small"),
         "concepts": manifest["concepts"],
         "class_names": manifest.get("class_names") or manifest["concepts"],

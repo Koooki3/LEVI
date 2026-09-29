@@ -379,3 +379,276 @@ def test_worker_clock_follows_each_camera_and_removes_transport_delay(monkeypatc
     clock.set(playing=False, position=1.0, sent_at=now + 30, cameras={"a": 1.2})
     assert clock.position(None, "a") == pytest.approx(1.2)
     assert clock.position(None, "unknown") == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------- review fixes
+
+
+def _dataset_key(repo):
+    from backend import app
+
+    return app._ensure_state(app.DatasetRef(repo_id=repo)).display_slug
+
+
+def _count_bundle_copies(monkeypatch, repo):
+    """Move the dataset onto the annotation bundle store (where every write
+    transaction copies the whole bundle) and count those copies."""
+    from backend import app
+    from levi.agent.store import Store
+
+    name = _dataset_key(repo)
+    store = Store(app.STATE)
+    base, revision, _ = store.prepare(name)
+    store.publish(name, base, revision, "seg-test", "seg-test", {"revision": revision})
+    calls: list[str] = []
+    real = Store.prepare
+
+    def counted(self, dataset, kind=None):
+        calls.append(dataset)
+        return real(self, dataset, kind)
+
+    monkeypatch.setattr(Store, "prepare", counted)
+    return calls
+
+
+def test_polling_is_read_only_until_a_result_waits(seg, video_dataset, monkeypatch):
+    """Regression: every 15 s status poll opened a write transaction, which
+    copied and hashed the whole annotation bundle under the dataset lock."""
+    from levi.segmentation import jobs
+
+    repo = _repo(seg, video_dataset)
+    copies = _count_bundle_copies(monkeypatch, repo)
+    for _ in range(3):
+        assert seg.get("/annotations/api/segmentation/status", params={"repo_id": repo}).status_code == 200
+    assert copies == []
+    started = seg.post(
+        "/annotations/api/segmentation/label",
+        json={"repo_id": repo, "provider": "fake", "episodes": [1]},
+    )
+    assert started.status_code == 202, started.text
+    job_id = started.json()["id"]
+    record = jobs.find(_dataset_key(repo), job_id)
+    deadline = time.time() + 60
+    while not Path(record["result_path"]).is_file() and time.time() < deadline:
+        time.sleep(0.1)
+    assert copies == []
+    # The first poll that sees the finished job publishes it, once.
+    status = seg.get("/annotations/api/segmentation/status", params={"repo_id": repo}).json()
+    assert [j["status"] for j in status["jobs"]] == ["succeeded"]
+    assert len(copies) == 1
+    seg.get("/annotations/api/segmentation/status", params={"repo_id": repo})
+    job = seg.get(f"/annotations/api/segmentation/jobs/{job_id}", params={"repo_id": repo}).json()
+    assert job["status"] == "succeeded" and len(copies) == 1
+    assert {r["camera_key"] for r in _objects(seg, repo, 1)} == set(CAMERAS)
+
+
+def test_failed_sam3_pair_keeps_its_objects(seg, dataset):
+    """Regression: a SAM3 re-run whose (episode, camera) pair failed cleared
+    that pair's existing (possibly reviewed) objects."""
+    from backend import app
+    from levi.annotations import Sam3Plan
+    from levi.annotations.sam3_protocol import fake_annotations
+
+    camera = "observation.images.front"
+    repo = _repo(seg, dataset)
+    _sam3_fake(seg, repo, 0)
+    _sam3_fake(seg, repo, 1)
+    kept = _objects(seg, repo, 1)
+    assert kept
+    state = app._ensure_state(app.DatasetRef(repo_id=repo))
+    staging = app._sidecar(state).staging_root / "jobs"
+    staging.mkdir(parents=True, exist_ok=True)
+    plan = {"episode_indices": [0, 1], "camera_keys": [camera], "prompts": ["plate"], "max_frames": 3}
+    only_first = Sam3Plan.model_validate({**plan, "episode_indices": [0], "provider": "fake"})
+    (staging / "plan.json").write_text(json.dumps(plan))
+    (staging / "result.json").write_text(
+        json.dumps(
+            {
+                "status": "succeeded",
+                "annotations": [row.model_dump(mode="json") for row in fake_annotations(only_first)],
+                "item_errors": [{"episode_index": 1, "camera_key": camera, "error": "decode failed"}],
+            }
+        )
+    )
+    job_id = "a" * 16
+    (staging / f"{job_id}.json").write_text(
+        json.dumps(
+            {
+                "job_id": job_id,
+                "status": "running",
+                "plan_path": str(staging / "plan.json"),
+                "result_path": str(staging / "result.json"),
+            }
+        )
+    )
+    job = seg.get(f"/annotations/api/sam3/jobs/{job_id}", params={"repo_id": repo})
+    assert job.status_code == 200, job.text
+    assert job.json()["status"] == "succeeded", job.json()
+    assert {r["prompt"] for r in _objects(seg, repo, 0)} == {"plate"}
+    assert _objects(seg, repo, 1) == kept
+
+
+def _v3_multi_file(root: Path) -> tuple[dict, Path]:
+    """A v3 dataset whose episode 3 lives in data file 0 but video file 1:
+    both video files exist, so the wrong indices find the wrong video."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    camera = "observation.images.front"
+    for index in (0, 1):
+        path = root / f"videos/{camera}/chunk-000/file-{index:03d}.mp4"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"fixture")
+    (root / "meta/episodes/chunk-000").mkdir(parents=True)
+    pq.write_table(
+        pa.Table.from_pylist(
+            [
+                {
+                    "episode_index": 3,
+                    "length": 20,
+                    "data/chunk_index": 0,
+                    "data/file_index": 0,
+                    f"videos/{camera}/chunk_index": 0,
+                    f"videos/{camera}/file_index": 1,
+                    f"videos/{camera}/from_timestamp": 2.0,
+                    f"videos/{camera}/to_timestamp": 4.0,
+                }
+            ]
+        ),
+        root / "meta/episodes/chunk-000/file-000.parquet",
+    )
+    info = {
+        "codebase_version": "v3.0",
+        "fps": 10,
+        "chunks_size": 1000,
+        "data_path": "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet",
+        "video_path": "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4",
+    }
+    return info, root / f"videos/{camera}/chunk-000/file-001.mp4"
+
+
+def test_v3_video_uses_the_cameras_own_file_indices(tmp_path):
+    """Regression: the v3 video path took the data file's chunk/file indices."""
+    import sys
+
+    from levi.segmentation import media
+
+    info, expected = _v3_multi_file(tmp_path)
+    video = media.resolve(tmp_path, info, 3, "observation.images.front")
+    assert video.video == expected
+    assert video.start_frame == 20 and video.length == 20
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "integrations" / "sam3"))
+    try:
+        from levi_sam3_worker.worker import _episode_video
+    finally:
+        sys.path.pop(0)
+    assert _episode_video(tmp_path, info, 3, "observation.images.front") == (expected, 2.0)
+
+
+def test_service_shutdown_discards_unsaved_live_rows(seg, video_dataset):
+    """Regression: rows a live worker wrote at service shutdown were never
+    published (sessions live only in memory) and stayed on disk."""
+    from levi.segmentation import jobs, live
+
+    repo = _repo(seg, video_dataset)
+    started = seg.post(
+        "/annotations/api/segmentation/live",
+        json={"repo_id": repo, "episode_index": 0, "provider": "fake"},
+    )
+    assert started.status_code == 201, started.text
+    sid = started.json()["id"]
+    seg.post(
+        f"/annotations/api/segmentation/live/{sid}/clock",
+        params={"repo_id": repo},
+        json={"playing": False, "time": 0.55, "rate": 1},
+    )
+    _events(seg, repo, sid, want=("result",), until=lambda r: r["frame_index"] == 5)
+    live.stop_all(5)
+    session = live.get(sid)
+    assert session.stopped_at is not None
+    assert not (session.folder / "rows").exists()
+    status = seg.get("/annotations/api/segmentation/status", params={"repo_id": repo}).json()
+    assert [s["revision_id"] for s in status["live"] if s["id"] == sid] == [None]
+    assert _objects(seg, repo, 0) == []
+    # A killed service's leftovers are removed by the next start's sweep.
+    orphan = jobs.root(_dataset_key(repo)) / "live" / "20260101-0000" / "rows"
+    orphan.mkdir(parents=True)
+    (orphan / "episode-000000.parquet").write_bytes(b"x")
+    live.discard_orphans()
+    assert not orphan.exists()
+
+
+def _manifest(directory: Path, **fields):
+    from levi.segmentation import models
+
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "weights.pth").write_bytes(b"w")
+    manifest = {"schema": models.SCHEMA, "provider": "fake", "concepts": ["cup"], **fields}
+    (directory / "manifest.json").write_text(json.dumps(manifest))
+
+
+def test_manifest_weights_must_be_a_plain_file_name(tmp_path, monkeypatch):
+    from levi.segmentation import models
+
+    monkeypatch.setenv("LEVI_SEG_MODEL_DIR", str(tmp_path / "models"))
+    (tmp_path / "outside.pth").write_bytes(b"w")
+    _manifest(tmp_path / "models" / "escape", weights="../../outside.pth")
+    _manifest(tmp_path / "models" / "plain", weights="weights.pth")
+    assert [m["name"] for m in models.listing()] == ["plain"]
+    with pytest.raises(ValueError, match="plain file name"):
+        models.worker_spec("escape")
+    assert models.worker_spec("plain")["weights"] == str(tmp_path / "models" / "plain" / "weights.pth")
+
+
+def test_segmentation_status_capability_is_scoped(tmp_path, monkeypatch):
+    """A scoped agent sees neither workspace paths nor the names of datasets
+    outside its scope; a person sees both."""
+    import sys
+
+    from levi.agent.capabilities import invoke
+    from levi.agent.runtime import Workbench
+    from levi.agent.security import Principal
+    from levi.catalog import display_name
+
+    monkeypatch.setenv("LEVI_SEG_MODEL_DIR", str(tmp_path / "models"))
+    monkeypatch.setenv("LEVI_SEG_WORKER_PYTHON", sys.executable)
+    mine = display_name("org/mine", None)
+    _manifest(tmp_path / "models" / "shared", datasets=[{"name": mine}, {"name": "someone-elses-data"}])
+    wb = Workbench(tmp_path / "state")
+    agent = invoke(wb, Principal("agent", datasets=("org/mine",)), "segmentation.status", {"repo_id": "org/mine"})
+    text = json.dumps(agent)
+    assert str(tmp_path) not in text and "someone-elses-data" not in text
+    assert agent["models"][0]["datasets"] == [mine]
+    assert agent["worker"]["ready"] is True
+    with pytest.raises(PermissionError):
+        invoke(wb, Principal("agent", datasets=("org/mine",)), "segmentation.status", {"repo_id": "org/other"})
+    person = invoke(wb, Principal("human", human=True), "segmentation.status", {"repo_id": "org/mine"})
+    assert person["models"][0]["path"] == str(tmp_path / "models" / "shared")
+    assert "someone-elses-data" in person["models"][0]["datasets"]
+
+
+def test_segmentation_routes_require_the_ui_token(seg, video_dataset, monkeypatch):
+    repo = _repo(seg, video_dataset)
+    monkeypatch.setenv("LEVI_UI_TOKEN", "test-ui-token")
+    monkeypatch.setenv("LEVI_AGENT_TOKEN", "test-scoped-token")
+    ui = {"x-levi-ui-token": "test-ui-token"}
+    agent = {"Authorization": "Bearer test-scoped-token"}
+    routes = [
+        ("GET", "/annotations/api/segmentation/status", None),
+        ("GET", "/annotations/api/segmentation/models", None),
+        ("DELETE", "/annotations/api/segmentation/models/anything", None),
+        ("POST", "/annotations/api/segmentation/label", {"repo_id": repo, "provider": "fake"}),
+        ("POST", "/annotations/api/segmentation/distil", {"repo_id": repo}),
+        ("GET", "/annotations/api/segmentation/jobs/20260101-0000", None),
+        ("POST", "/annotations/api/segmentation/jobs/20260101-0000/cancel", None),
+        ("POST", "/annotations/api/segmentation/live", {"repo_id": repo, "episode_index": 0, "provider": "fake"}),
+        ("GET", "/annotations/api/segmentation/live/x", None),
+        ("POST", "/annotations/api/segmentation/live/x/clock", {"playing": False, "time": 0}),
+        ("GET", "/annotations/api/segmentation/live/x/events", None),
+        ("POST", "/annotations/api/segmentation/live/x/stop", None),
+    ]
+    for method, url, body in routes:
+        params = {"repo_id": repo}
+        assert seg.request(method, url, params=params, json=body).status_code == 401, url
+        assert seg.request(method, url, params=params, json=body, headers=agent).status_code == 403, url
+    assert seg.get("/annotations/api/segmentation/status", params={"repo_id": repo}, headers=ui).status_code == 200

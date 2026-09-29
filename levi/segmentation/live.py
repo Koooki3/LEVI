@@ -8,10 +8,11 @@ only ever receives the newest result of each camera (older ones are dropped
 here, as the page drops stale frames on its side), so the relay can never
 hold back playback.
 
-When a session stops (the page, an idle timeout or the service), the worker
-writes the first result of every processed frame as sidecar rows; the
-backend publishes them as one revision that replaces only this episode's
-cameras, so they appear in Objects & Tracking and in exports.
+When a session stops (the page or an idle timeout), the worker writes the
+first result of every processed frame as sidecar rows; the backend
+publishes them as one revision that replaces only this episode's cameras,
+so they appear in Objects & Tracking and in exports. A service shutdown
+stops sessions without saving (``stop_all``).
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import collections
 import contextlib
 import json
 import os
+import shutil
 import signal
 import subprocess
 import threading
@@ -316,14 +318,31 @@ def wait_ready(session: LiveSession, timeout: float = 120.0) -> None:
         time.sleep(0.05)
 
 
+def _files(session: LiveSession) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    result = session.result() or {}
+    return result, list(result.get("files") or [])
+
+
+def awaiting_publish(session: LiveSession) -> bool:
+    """Stopped, not yet finished, and has rows to save into the sidecar."""
+    if session.stopped_at is None or session.published or not session.save:
+        return False
+    return bool(_files(session)[1])
+
+
 def finish(session: LiveSession, publish: jobs.Publisher | None) -> LiveSession:
-    """Publish a stopped session's rows once (no-op until it has stopped)."""
-    if session.stopped_at is None or session.published or publish is None:
+    """Finish a stopped session once: publish its rows (needs ``publish``;
+    without it a session with rows to save waits for a caller that has one)
+    and drop the rows folder. No-op until the session has stopped."""
+    if session.stopped_at is None or session.published:
+        return session
+    result, files = _files(session)
+    wanted = session.save and bool(files)
+    if wanted and publish is None:
         return session
     session.published = True
-    result = session.result() or {}
-    files = result.get("files") or []
-    if session.save and files:
+    if wanted:
+        assert publish is not None
         rows: list[dict[str, Any]] = []
         pairs: set[tuple[int, str]] = set()
         for item in files:
@@ -349,17 +368,35 @@ def finish(session: LiveSession, publish: jobs.Publisher | None) -> LiveSession:
         session.summary = result["summary"]
     # Rows are in the sidecar now (or were not wanted); the worker folder
     # keeps only its plan, log and result summary.
-    import shutil
-
     shutil.rmtree(session.folder / "rows", ignore_errors=True)
     return session
 
 
 def stop_all(timeout: float = 10.0) -> None:
-    """Service shutdown: stop every session (their rows are kept on disk)."""
+    """Service shutdown: stop every session and discard what it had not
+    saved yet. Publishing needs the dataset's annotation transaction, which
+    a shutting-down service does not open, and sessions live only in this
+    process, so rows left on disk would never be published. The live view
+    saves on stop from the page or on idle; a shutdown is neither."""
     for session in sessions():
         if session.stopped_at is None:
             session.stop(timeout)
+        if not session.published:
+            session.published = True
+            shutil.rmtree(session.folder / "rows", ignore_errors=True)
+    discard_orphans()
+
+
+def discard_orphans() -> None:
+    """Remove ``rows/`` folders of sessions this process does not know (a
+    service that was killed before it could clean up)."""
+    known = {s.folder.resolve() for s in sessions()}
+    base = live_root()
+    if not base.is_dir():
+        return
+    for rows in base.glob("*/live/*/rows"):
+        if rows.parent.resolve() not in known:
+            shutil.rmtree(rows, ignore_errors=True)
 
 
 def forget_finished(max_age: float = 3600.0) -> None:

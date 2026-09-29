@@ -76,14 +76,22 @@ def resolve(root: Path, info: dict[str, Any], episode_index: int, camera_key: st
     template = info.get("video_path")
     if template:
         default_chunk = episode_index // int(info.get("chunks_size", 1000) or 1000)
+        # A v3 ``video_path`` ("videos/{video_key}/chunk-{chunk_index:03d}/
+        # file-{file_index:03d}.mp4") takes this camera's own chunk/file
+        # indices: video and data files roll over independently, so the
+        # data file's indices point at another episode's video.
+        video_chunk = episode.get(f"{prefix}/chunk_index", episode.get("video_chunk_index"))
+        video_file = episode.get(f"{prefix}/file_index", episode.get("video_file_index"))
+        data_chunk = episode.get("data/chunk_index", episode.get("chunk_index", 0))
+        data_file = episode.get("data/file_index", episode.get("file_index", 0))
         values = {
             "episode_index": episode_index,
             "episode_chunk": episode.get("episode_chunk", default_chunk),
-            "chunk_index": episode.get("data/chunk_index", episode.get("chunk_index", 0)),
-            "file_index": episode.get("data/file_index", episode.get("file_index", 0)),
-            "video_chunk": episode.get(f"{prefix}/chunk_index", episode.get("video_chunk_index", default_chunk)),
-            "video_chunk_index": episode.get(f"{prefix}/chunk_index", episode.get("video_chunk_index", default_chunk)),
-            "video_file_index": episode.get(f"{prefix}/file_index", episode.get("video_file_index", 0)),
+            "chunk_index": data_chunk if video_chunk is None else video_chunk,
+            "file_index": data_file if video_file is None else video_file,
+            "video_chunk": default_chunk if video_chunk is None else video_chunk,
+            "video_chunk_index": default_chunk if video_chunk is None else video_chunk,
+            "video_file_index": 0 if video_file is None else video_file,
             "video_key": camera_key,
         }
         try:

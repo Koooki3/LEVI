@@ -453,6 +453,16 @@ def _read_rows(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def awaiting_publish(job: dict[str, Any]) -> bool:
+    """A finished labelling job whose rows still need a sidecar publish
+    (the only case a caller has to open an annotation transaction for)."""
+    return (
+        job.get("kind") == "label"
+        and job.get("status") in ACTIVE
+        and Path(str(job.get("result_path"))).is_file()
+    )
+
+
 def collect(job: dict[str, Any], publish: Publisher | None = None) -> dict[str, Any]:
     """Reconcile a finished worker into its result, exactly once.
 
@@ -513,6 +523,11 @@ def collect(job: dict[str, Any], publish: Publisher | None = None) -> dict[str, 
 
 
 def _finish_label(job: dict[str, Any], result: dict[str, Any], publish: Publisher | None) -> None:
+    # TODO(S2, pre-merge review): this loads every row of the run into the
+    # core process and publishes them in one revision inside the request
+    # that found the job finished. Before labelling large datasets, publish
+    # the worker's per-(episode, camera) Parquet files as they are (or in
+    # batches of episodes) instead of round-tripping them through Python.
     assert publish is not None
     rows: list[dict[str, Any]] = []
     pairs: set[tuple[int, str]] = set()
