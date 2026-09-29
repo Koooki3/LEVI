@@ -70,6 +70,8 @@ def _filter(
     elif outcome == "verified_success":
         # A human label first, then the robot's flag (as in recipes).
         df = df[df.human_label.fillna(df.robot_flag) == "success"]
+    elif outcome == "human_verified_success":
+        df = df[df.human_label == "success"]
     elif outcome:
         df = df[df.outcome == outcome]
     if policies:
@@ -132,6 +134,7 @@ def facets(**filters) -> dict:
             "verified_success": int(
                 (scoped.human_label.fillna(scoped.robot_flag) == "success").sum()
             ),
+            "human_verified_success": int((scoped.human_label == "success").sum()),
         },
         "date_min": dates[0] if dates else None,
         "date_max": dates[-1] if dates else None,

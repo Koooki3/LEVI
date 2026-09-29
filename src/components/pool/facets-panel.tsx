@@ -110,6 +110,7 @@ export function FacetsPanel({
             ["all", "All"],
             ["robot_flag_success", "Robot flag: success"],
             ["verified_success", "Verified success"],
+            ["human_verified_success", "Human-labelled success"],
           ] as [OutcomeFilter, string][]
         ).map(([value, label]) => (
           <label key={value} className="levi-pool-check">

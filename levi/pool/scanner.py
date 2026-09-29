@@ -112,6 +112,7 @@ RC_FACTS = (
     "video_sha256",
 )
 VIDEO_SUFFIXES = (".mp4", ".avi", ".mkv")
+EXPORT_MARKERS = {"pool_export.json", ".levi-export.json"}
 
 
 def index_path() -> Path:
@@ -175,7 +176,14 @@ def _read_jsonl(path: Path) -> list[dict]:
 def walk(roots: list[Path], rules: dict, progress: Progress | None = None) -> dict:
     """Every raw episode, LeRobot dataset, DROID episode, record-only data
     folder and LEVI workspace under the roots (skip rules applied)."""
-    found = {"rc": [], "lerobot": [], "droid": [], "unsupported": {}, "workspaces": []}
+    found = {
+        "rc": [],
+        "lerobot": [],
+        "droid": [],
+        "unsupported": {},
+        "workspaces": [],
+        "exports": [],
+    }
     seen: set[str] = set()
     suffixes = rules["unsupported_suffixes"]
     for root in roots:
@@ -191,6 +199,10 @@ def walk(roots: list[Path], rules: dict, progress: Progress | None = None) -> di
             rel = here.relative_to(root).as_posix()
             if labels.is_workspace(here):
                 found["workspaces"].append(here)
+            if EXPORT_MARKERS & set(filenames):
+                # Whatever lies below was written by a pool export or a LEVI
+                # export: not an original collection.
+                found["exports"].append(here)
             keep = []
             for name in dirnames:
                 child_rel = name if rel == "." else f"{rel}/{name}"
@@ -239,8 +251,9 @@ def walk(roots: list[Path], rules: dict, progress: Progress | None = None) -> di
 
 
 class Context:
-    def __init__(self, roots, rules, workspaces, registered):
+    def __init__(self, roots, rules, workspaces, registered, exports=()):
         self.roots = roots
+        self.exports = {str(e) for e in exports}
         self.rules = rules
         self.workspaces = {str(w) for w in workspaces}
         self.registered = registered
@@ -259,6 +272,9 @@ class Context:
         # Two roots may hold folders with one relative name.
         return rel if len(self.roots) == 1 else f"{root.name}/{rel}"
 
+    def in_export(self, path: Path) -> bool:
+        return any(str(p) in self.exports for p in [Path(path), *Path(path).parents])
+
     def in_workspace(self, path: Path) -> bool:
         path = Path(path)
         return any(str(p) in self.workspaces for p in path.parents)
@@ -273,6 +289,8 @@ def _category(ctx: Context, path: Path, fmt: str, facts: dict, levi: bool):
         return rules["format_categories"][fmt], "format_rule"
     if levi:
         return "levi", "levi_output"
+    if ctx.in_export(path):
+        return "levi", "levi_export"
     if ctx.in_workspace(path):
         return "levi", "levi_workspace_copy"
     source = facts.get("data_source")
@@ -711,6 +729,7 @@ def _heldout(rows: list[dict], roots: list[Path], progress) -> dict:
     entries = heldout.load(settings.heldout_files())
     report = {
         "lists": [str(p) for p in settings.heldout_files()],
+        "disabled": settings.heldout_disabled(),
         "entries": len(entries),
         "matched_by_path": 0,
         "matched_by_sha256": 0,
@@ -835,7 +854,8 @@ def _group(rows: list[dict]) -> dict:
     for row in rows:
         key = "row:" + row["key"]
         find(key)
-        if row["fingerprint"]:
+        # An episode with no frames says nothing about what it recorded.
+        if row["fingerprint"] and int(row.get("frames") or 0) > 0:
             union(key, "fp:" + row["fingerprint"])
         if row.get("content_hash"):
             union(key, "content:" + row["content_hash"])
@@ -1007,7 +1027,7 @@ def scan(progress_path: Path | None = None, rehash: bool = False) -> dict:
         )
     )
     registered = labels.registered_paths(workspaces)
-    ctx = Context(roots, rules, workspaces, registered)
+    ctx = Context(roots, rules, workspaces, registered, found["exports"])
     rows = _rc_rows(ctx, found["rc"], previous, progress)
     rc_keys = {r["key"]: r for r in rows}
     progress.stage("Datasets", len(found["lerobot"]) + 1)

@@ -9,7 +9,10 @@ import {
   type Filters,
 } from "@/components/pool/facets-panel";
 import { EpisodeTable, TaskTable } from "@/components/pool/pool-tables";
-import { CompositionPanel } from "@/components/pool/composition-panel";
+import {
+  CompositionPanel,
+  PoolWarnings,
+} from "@/components/pool/composition-panel";
 import { ExportPanel } from "@/components/pool/export-panel";
 import { PushDialog } from "@/components/pool/push-dialog";
 import {
@@ -83,6 +86,7 @@ export default function TrainingPool() {
   const [composition, setComposition] = useState<Recipe>(EMPTY_RECIPE);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [format, setFormat] = useState<ExportFormat>("lerobot_v21");
+  const [humanAsSuccess, setHumanAsSuccess] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewError, setPreviewError] = useState("");
   const [previewing, setPreviewing] = useState(false);
@@ -186,7 +190,7 @@ export default function TrainingPool() {
   }, [filterKey, focus, offset, scannedAt, scanned]);
 
   // Live preview, debounced.
-  const previewKey = JSON.stringify([recipe, format]);
+  const previewKey = JSON.stringify([recipe, format, humanAsSuccess]);
   useEffect(() => {
     if (!scanned || recipe.tasks.length === 0) {
       setPreview(null);
@@ -198,6 +202,7 @@ export default function TrainingPool() {
       leviRequest<Preview>("POST", "pool/preview", {
         recipe: { ...recipe, name: recipe.name || "untitled" },
         format,
+        human_as_success: humanAsSuccess,
       })
         .then((value) => {
           setPreview(value);
@@ -253,6 +258,7 @@ export default function TrainingPool() {
           {t(error)}
         </p>
       )}
+      <PoolWarnings warnings={status?.warnings || []} />
       {notice && (
         <p className="levi-pool-notice" role="status">
           {notice}
@@ -483,6 +489,8 @@ export default function TrainingPool() {
                       date_to: recipe.date_to,
                       policies: recipe.policies,
                       include_nonstandard: recipe.include_nonstandard,
+                      allow_unlinked_sources:
+                        recipe.allow_unlinked_sources || false,
                       exclude: recipe.exclude,
                       task_text: recipe.task_text || {},
                     },
@@ -527,6 +535,8 @@ export default function TrainingPool() {
               preview={preview}
               exportRoots={status?.export_roots || []}
               job={exportJob}
+              humanAsSuccess={humanAsSuccess}
+              onHumanAsSuccess={setHumanAsSuccess}
               onFormat={setFormat}
               onJob={(j) => {
                 setExportJob(j);

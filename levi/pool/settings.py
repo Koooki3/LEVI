@@ -6,6 +6,7 @@
   under. Default: the workspace.
 - ``LEVI_POOL_HELDOUT``: comma-separated JSON lists of held-out episodes
   (``{"episodes": [{"path", "sha256": {...}}, ...]}``), never exported.
+  Unset, exports are refused; ``none`` states that there is no held-out set.
 """
 
 import os
@@ -43,8 +44,26 @@ def export_roots() -> list[Path]:
     return _paths(os.getenv("LEVI_EXPORT_ROOTS")) or [workspace()]
 
 
+def heldout_disabled() -> bool:
+    """``LEVI_POOL_HELDOUT=none``: the operator states there is no held-out
+    set; without this an empty setting refuses exports."""
+    return (os.getenv("LEVI_POOL_HELDOUT") or "").strip().lower() == "none"
+
+
 def heldout_files() -> list[Path]:
+    if heldout_disabled():
+        return []
     return _paths(os.getenv("LEVI_POOL_HELDOUT"))
+
+
+def require_heldout() -> None:
+    """An export needs a held-out list, or an explicit ``none``."""
+    if not heldout_files() and not heldout_disabled():
+        raise ValueError(
+            "No held-out list is configured: set LEVI_POOL_HELDOUT to the frozen "
+            "test lists (comma-separated JSON files), or to `none` if the pool "
+            "has no held-out set. Refusing to export without knowing."
+        )
 
 
 def enabled() -> bool:

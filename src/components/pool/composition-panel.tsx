@@ -4,9 +4,37 @@ import { useLocale } from "@/components/levi-locale";
 import {
   CATEGORY_LABELS,
   REASON_LABELS,
+  WARNING_LABELS,
+  type PoolWarning,
   type Preview,
   type Recipe,
 } from "./types";
+
+const OUTCOME_SOURCES: Record<string, string> = {
+  human: "human label",
+  robot_flag: "robot flag",
+  sft_demonstration: "demonstration",
+  none: "none",
+};
+
+/** Server warnings; a blocking one stops the export until fixed. */
+export function PoolWarnings({ warnings }: { warnings: PoolWarning[] }) {
+  const { t } = useLocale();
+  if (!warnings?.length) return null;
+  return (
+    <ul className="levi-pool-warnings" role="status">
+      {warnings.map((w) => (
+        <li key={w.code} className={w.blocking ? "blocking" : ""}>
+          <strong>{w.blocking ? t("Blocks export") : t("Note")}</strong>{" "}
+          {t(WARNING_LABELS[w.code] || w.message)}
+          {w.tasks?.length ? ` (${w.tasks.slice(0, 3).join("; ")})` : ""}
+          {w.episodes ? ` (${w.episodes.toLocaleString()})` : ""}
+          {w.ids?.length ? ` (${w.ids.length})` : ""}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function move<T>(list: T[], from: number, to: number): T[] {
   if (to < 0 || to >= list.length || from === to) return list;
@@ -66,7 +94,9 @@ export function CompositionPanel({
           t(
             recipe.outcome === "robot_flag_success"
               ? "Robot flag: success"
-              : "Verified success",
+              : recipe.outcome === "human_verified_success"
+                ? "Human-labelled success"
+                : "Verified success",
           ),
         ]
       : []),
@@ -207,6 +237,18 @@ export function CompositionPanel({
         />
         <span>{t("Include non-standard folders")}</span>
       </label>
+      <label className="levi-pool-check">
+        <input
+          type="checkbox"
+          checked={!!recipe.allow_unlinked_sources}
+          onChange={() =>
+            set({ allow_unlinked_sources: !recipe.allow_unlinked_sources })
+          }
+        />
+        <span>
+          {t("Allow raw captures and unlinked LeRobot data of one task")}
+        </span>
+      </label>
       <div className="levi-pool-constraints">
         <span className="levi-pool-label">{t("Constraints")}</span>
         {constraints.length ? (
@@ -288,6 +330,18 @@ export function CompositionPanel({
                 </tbody>
               </table>
             )}
+            {Object.keys(preview.outcome_sources || {}).length > 0 && (
+              <p className="levi-pool-hint">
+                {t("Outcome from")}:{" "}
+                {Object.entries(preview.outcome_sources)
+                  .map(
+                    ([source, n]) =>
+                      `${t(OUTCOME_SOURCES[source] || source)} ${n.toLocaleString()}`,
+                  )
+                  .join(" · ")}
+              </p>
+            )}
+            <PoolWarnings warnings={preview.warnings} />
             {preview.tasks_without_episodes.length > 0 && (
               <p className="levi-warnings">
                 {t("No episodes left for")}:{" "}

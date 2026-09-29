@@ -17,7 +17,11 @@ export const CATEGORY_LABELS: Record<string, string> = {
   archive: "Archive",
 };
 
-export type OutcomeFilter = "all" | "robot_flag_success" | "verified_success";
+export type OutcomeFilter =
+  | "all"
+  | "robot_flag_success"
+  | "verified_success"
+  | "human_verified_success";
 export type ExportFormat = "lerobot_v21" | "recap_value" | "raw_capture";
 
 export const FORMAT_LABELS: Record<ExportFormat, string> = {
@@ -87,6 +91,7 @@ export interface PoolJob {
 
 export interface PoolStatus {
   enabled: boolean;
+  warnings: PoolWarning[];
   roots: string[];
   export_roots: string[];
   heldout_lists: string[];
@@ -158,12 +163,25 @@ export interface Recipe {
   date_to: string | null;
   policies: string[];
   include_nonstandard: boolean;
+  allow_unlinked_sources?: boolean;
   exclude: string[];
   task_text?: Record<string, string>;
   saved_at?: string;
 }
 
+export interface PoolWarning {
+  code: string;
+  blocking: boolean;
+  message: string;
+  tasks?: string[];
+  episodes?: number;
+  ids?: string[];
+}
+
 export interface Preview {
+  warnings: PoolWarning[];
+  outcome_sources: Record<string, number>;
+  excluded_label_conflicts: number;
   episodes: number;
   frames: number;
   tasks: {
@@ -205,5 +223,19 @@ export const REASON_LABELS: Record<string, string> = {
   no_outcome: "No outcome",
   per_task_cap: "Per-task cap",
   excluded_by_recipe: "Excluded by hand",
+  label_conflict: "Conflicting human labels",
   conversion_preflight: "Failed capture checks",
+};
+
+/** Server warnings (recipe.find_warnings) as UI text. */
+export const WARNING_LABELS: Record<string, string> = {
+  heldout_unconfigured:
+    "No held-out list is configured (LEVI_POOL_HELDOUT): exports are refused until it is set, or set to none.",
+  heldout_lists_changed:
+    "The held-out lists changed since the last scan: scan again.",
+  heldout_unmatched: "Held-out entries that match no indexed episode",
+  possible_unlinked_conversion:
+    "Tasks taken from raw captures and from an unlinked LeRobot dataset may be the same recordings twice. Name the sources, or allow it.",
+  outcome_from_robot_flag:
+    "Episodes that count as verified only through the operator's key press (no human label)",
 };

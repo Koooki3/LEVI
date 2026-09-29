@@ -2,8 +2,10 @@
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -110,6 +112,15 @@ def make_demo(demo, n=20, *, rollout=None, task=None, created=None, filtered_fro
     return demo
 
 
+def _state_names(dims):
+    """The pipeline's names for a 7-dim pose + gripper state."""
+    return (
+        ["x", "y", "z", "rx", "ry", "rz", "gripper"]
+        if dims == 7
+        else [f"s{i}" for i in range(dims)]
+    )
+
+
 def make_lerobot(root, dims, fps=10, n=20, episodes=2, task="Move the gripper"):
     """A small LeRobot v2.1 dataset with videos (state/action of ``dims``)."""
     (root / "meta").mkdir(parents=True)
@@ -125,7 +136,7 @@ def make_lerobot(root, dims, fps=10, n=20, episodes=2, task="Move the gripper"):
         "observation.state": {
             "dtype": "float32",
             "shape": [dims],
-            "names": [f"s{i}" for i in range(dims)],
+            "names": _state_names(dims),
         },
         "timestamp": {"dtype": "float32", "shape": [1], "names": None},
         "episode_index": {"dtype": "int64", "shape": [1], "names": None},
@@ -799,7 +810,9 @@ def test_api_routes(pool, client):
     assert refused.status_code == 403
     assert client.delete("/api/levi/pool/recipes/api").status_code == 200
     assert client.get("/api/levi/pool/recipes/api").status_code == 404
-    assert client.get("/api/levi/pool/jobs").json()["jobs"][0]["kind"] == "export"
+    assert (
+        client.get("/api/levi/pool/jobs").json()["jobs"] == []
+    )  # dry runs leave no plan
 
 
 def test_scan_job_runs_as_a_tracked_worker(pool, client):
@@ -856,3 +869,312 @@ def test_page_routes_facets_outcomes_and_export_summary(pool, client):
         and summary["counts"]["excluded"]["heldout"] == 1
     )
     assert client.get("/api/levi/pool/jobs/nope-1/summary").status_code in (400, 404)
+
+
+# ------------------------------------------------------------------ review
+
+
+def _snapshot(root):
+    """Every file under ``root``: size, mtime and content hash."""
+    out = {}
+    for path in sorted(root.rglob("*")):
+        if path.is_file() and not path.is_symlink():
+            st = path.stat()
+            out[str(path)] = (st.st_size, st.st_mtime_ns, _sha(path))
+        elif path.is_dir():
+            out[str(path)] = "dir"
+    return out
+
+
+@pytest.fixture
+def small(tmp_path, monkeypatch):
+    """A tiny pool root of its own: original rollouts and a LeRobot dataset
+    with no link to them; exports may go anywhere under the root."""
+    root = tmp_path / "small"
+    for i in range(3):
+        make_demo(
+            root / "orig/models/pi/pick_x" / f"demo_{i:04d}",
+            rollout="success",
+            task="pick x",
+            created=f"2026-09-0{i + 1}T10:00:00",
+        )
+    monkeypatch.setenv("LEVI_WORKSPACE", str(tmp_path / "ws2"))
+    monkeypatch.setenv("LEVI_POOL_ROOTS", str(root))
+    monkeypatch.setenv("LEVI_POOL_HELDOUT", "none")
+    monkeypatch.setenv("LEVI_EXPORT_ROOTS", str(tmp_path))
+    monkeypatch.setattr(export, "_levi_commit", lambda: "test")
+    scanner.scan()
+    return {"root": root, "tmp": tmp_path}
+
+
+def _options(name, **kw):
+    return export.ExportOptions(name=name, **kw)
+
+
+def test_s1_export_needs_a_heldout_list_or_an_explicit_none(pool, monkeypatch):
+    rec = Recipe(name="r", categories=["rollout"], tasks=["stack the plates"])
+    opts = _options("s1", format="raw_capture", output_dir=str(pool["out"]))
+    monkeypatch.delenv("LEVI_POOL_HELDOUT")
+    with pytest.raises(ValueError, match="No held-out list"):
+        jobs.plan_export(rec, opts)
+    assert any(
+        w["code"] == "heldout_unconfigured" for w in recipe.preview(rec)["warnings"]
+    )
+    # Scanned with a list, exported with another one: rescan first.
+    other = pool["root"] / "other.json"
+    other.write_text(json.dumps({"episodes": []}))
+    monkeypatch.setenv("LEVI_POOL_HELDOUT", str(other))
+    with pytest.raises(ValueError, match="changed since the last scan"):
+        jobs.plan_export(rec, opts)
+    # An explicit `none` is a statement, and is recorded.
+    monkeypatch.setenv("LEVI_POOL_HELDOUT", "none")
+    scanner.scan()
+    job = jobs.plan_export(rec, opts)
+    assert job["heldout_disabled"] and job["heldout_lists"] == []
+    # A hand-edited plan without either is refused when it runs.
+    job.update(heldout_disabled=False)
+    with pytest.raises(ValueError, match="no held-out list"):
+        export.run(job)
+
+
+def test_s1_unmatched_heldout_entries_warn(pool, monkeypatch):
+    lst = pool["root"] / "moved.json"
+    lst.write_text(
+        json.dumps(
+            {"episodes": [{"path": "nowhere/demo_0000", "sha256": {"a.mp4": "0" * 64}}]}
+        )
+    )
+    monkeypatch.setenv("LEVI_POOL_HELDOUT", str(lst))
+    scanner.scan()
+    rec = Recipe(name="r", categories=["rollout"], tasks=["stack the plates"])
+    warnings = {w["code"]: w for w in recipe.preview(rec)["warnings"]}
+    assert (
+        warnings["heldout_unmatched"]["ids"]
+        and not warnings["heldout_unmatched"]["blocking"]
+    )
+
+
+def test_s2_task_text_cannot_leave_the_staging_folder(pool):
+    for text in ("..", ".", "...", "/"):
+        rec = Recipe(
+            name="t",
+            categories=["rollout"],
+            tasks=["stack the plates"],
+            task_text={"stack the plates": text},
+        )
+        name = f"dots{abs(hash(text))}"
+        _, _, record = _export(pool, rec, format="raw_capture", name=name)
+        folders = {e["path"].split("/")[0] for e in record["episodes"]}
+        assert folders == ({"task"} if text.strip("./") == "" else folders)
+        assert all(not e["path"].startswith("..") for e in record["episodes"])
+    exports = pool["out"] / "exports"
+    assert not [p for p in exports.iterdir() if p.name.startswith("demo_")]
+    assert not (pool["out"] / "demo_0000").exists()
+    with pytest.raises(ValueError, match="one line"):
+        Recipe(name="t", task_text={"a": "x\ny"})
+    with pytest.raises(PermissionError, match="outside the export"):
+        export._inside(exports / ".a.partial", exports / "demo_0000")
+
+
+def test_s2_distinct_tasks_may_not_share_one_text(pool):
+    rec = Recipe(
+        name="t",
+        categories=["human", "rollout"],
+        tasks=["stack the plates", "pour water into cup"],
+        task_text={"stack the plates": "Same", "pour water into cup": "Same"},
+    )
+    with pytest.raises(ValueError, match="both be written"):
+        jobs.plan_export(
+            rec,
+            _options("same", format="raw_capture", output_dir=str(pool["out"])),
+        )
+
+
+def test_s3_exports_inside_the_pool_root_are_not_originals(small):
+    root = small["root"]
+    rec = Recipe(name="r", categories=["rollout"], tasks=["pick x"])
+    # An export shallower than the originals, in the pool root.
+    job = jobs.plan_export(
+        rec, _options("x1", format="raw_capture", output_dir=str(root))
+    )
+    jobs.execute(job)
+    scanner.scan()
+    frame = index.frame()
+    inside = frame[frame.key.str.contains("/x1/")]
+    assert len(inside) == 3
+    assert set(inside.category) == {"levi"}
+    assert set(inside.category_reason) == {"levi_export"}
+    originals = frame[frame.key.str.contains("/orig/")]
+    assert originals.canonical.all() and set(originals.category) == {"rollout"}
+    assert (inside.copies == 1).all() and not inside.canonical.any()
+    # The default selection reads the originals.
+    chosen, _ = recipe.select(rec)
+    assert all("/orig/" in r["key"] for r in chosen) and len(chosen) == 3
+
+
+def test_s4_raw_and_unlinked_lerobot_of_one_task_is_refused(small):
+    root = small["root"]
+    make_lerobot(root / "lerobot/pick_x_v", 7, task="pick x")
+    scanner.scan()
+    rec = Recipe(name="r", tasks=["pick x"])
+    codes = {w["code"]: w for w in recipe.preview(rec)["warnings"]}
+    assert codes["possible_unlinked_conversion"]["blocking"]
+    opts = _options("s4", format="lerobot_v21")
+    with pytest.raises(ValueError, match="same recordings twice"):
+        jobs.plan_export(rec, opts)
+    # Naming the sources, or saying so, lifts it.
+    named = rec.model_copy(update={"sources": ["orig/models/pi"]})
+    assert not any(
+        w["blocking"] for w in recipe.preview(named)["warnings"]
+    ) and jobs.plan_export(named, opts)
+    allowed = rec.model_copy(update={"allow_unlinked_sources": True})
+    assert jobs.plan_export(allowed, _options("s4b", format="lerobot_v21"))
+
+
+def test_s5_hardlink_links_videos_only(pool):
+    rec = Recipe(name="h", categories=["rollout"], tasks=["stack the plates"])
+    _, _, record = _export(
+        pool, rec, format="raw_capture", name="linked", hardlink=True
+    )
+    out = pool["out"] / "exports/linked"
+    for row in record["episodes"]:
+        src = Path(row["source_path"])
+        dst = out / row["path"]
+        assert row["hardlinked_files"] == 2
+        assert (
+            os.stat(src / "side_camera.mp4").st_ino
+            == os.stat(dst / "side_camera.mp4").st_ino
+        )
+        for small_file in ("metadata.json", "frames.csv", "events.csv"):
+            assert os.stat(src / small_file).st_ino != os.stat(dst / small_file).st_ino
+    # Rewriting a copied file in place leaves the source alone.
+    row = record["episodes"][0]
+    before = (Path(row["source_path"]) / "metadata.json").read_text()
+    (out / row["path"] / "metadata.json").write_text("{}")
+    assert (Path(row["source_path"]) / "metadata.json").read_text() == before
+
+
+def _with_conflict(rec_name="c"):
+    df = index.frame()
+    key = df[
+        (df.task == "stack the plates")
+        & (df.category == "rollout")
+        & df.canonical
+        & ~df.heldout.astype(bool)
+    ].key.iloc[0]
+    df = df.copy()
+    df.loc[df.key == key, ["label_conflict", "human_label"]] = [True, None]
+    return df, key
+
+
+def test_s6_label_conflicts_leave_verified_and_recap_selections(pool):
+    df, key = _with_conflict()
+    rec = Recipe(name="c", categories=["rollout"], tasks=["stack the plates"])
+    for outcome in ("verified_success", "human_verified_success"):
+        _, excluded = recipe.select(rec.model_copy(update={"outcome": outcome}), df=df)
+        assert {"key": key, "reason": "label_conflict"}.items() <= next(
+            e for e in excluded if e["key"] == key
+        ).items()
+    _, excluded = recipe.select(rec, df=df, target="recap_value")
+    assert any(e["key"] == key and e["reason"] == "label_conflict" for e in excluded)
+    # ...but stays in a plain selection.
+    chosen, _ = recipe.select(rec, df=df)
+    assert key in {r["key"] for r in chosen}
+
+
+def test_s6_human_only_outcome_and_visible_fallback(pool):
+    rec = Recipe(
+        name="v",
+        categories=["rollout"],
+        tasks=["stack the plates"],
+        outcome="verified_success",
+    )
+    view = recipe.preview(rec)
+    assert view["outcome_sources"].get("robot_flag", 0) >= 1
+    assert any(w["code"] == "outcome_from_robot_flag" for w in view["warnings"])
+    human = recipe.preview(rec.model_copy(update={"outcome": "human_verified_success"}))
+    # The one human label in the fixture is a failure: nothing is verified.
+    assert human["episodes"] == 0
+    assert set(human["outcome_sources"]) <= {"human"}
+    rows = index.episodes(limit=100, outcome="human_verified_success")["episodes"]
+    assert all(r["human_label"] == "success" for r in rows)
+
+
+def test_s7_recap_can_count_human_demonstrations_as_success(pool):
+    rec = Recipe(
+        name="d", categories=["human"], tasks=["pour water into cup"], per_task_cap=2
+    )
+    assert recipe.preview(rec, "recap_value")["episodes"] == 0
+    with pytest.raises(ValueError, match="no exportable"):
+        jobs.plan_export(
+            rec, _options("d0", format="recap_value", output_dir=str(pool["out"]))
+        )
+    assert recipe.preview(rec, "recap_value", human_as_success=True)["episodes"] == 2
+    _, result, record = _export(
+        pool, rec, format="recap_value", name="demos", human_as_success=True
+    )
+    assert result["episodes"] == 2
+    assert {e["outcome_source"] for e in record["episodes"]} == {"sft_demonstration"}
+    out = pool["out"] / "exports/demos"
+    labels = (out / "meta/episode_labels.csv").read_text().splitlines()
+    assert labels[1:] == ["0,1", "1,1"]
+
+
+def test_s8_sources_are_unchanged_by_every_export_and_by_a_failure(pool):
+    before = _snapshot(pool["root"])
+    rec = Recipe(
+        name="s8",
+        categories=["human", "rollout"],
+        tasks=["stack the plates", "pour water into cup"],
+        per_task_cap=2,
+    )
+    _export(pool, rec, format="lerobot_v21", name="s8-lerobot")
+    _export(
+        pool,
+        rec.model_copy(
+            update={"categories": ["rollout"], "tasks": ["stack the plates"]}
+        ),
+        format="recap_value",
+        name="s8-recap",
+    )
+    _export(pool, rec, format="raw_capture", name="s8-raw", hardlink=True)
+    _export(pool, rec, format="raw_capture", name="s8-raw2")
+    assert _snapshot(pool["root"]) == before
+    # A failing export (schema mismatch) leaves the sources and no partial.
+    bad = Recipe(name="bad", sources=["lerobot/fr3_seven", "lerobot/two_dims"])
+    with pytest.raises(ValueError, match="one schema"):
+        _export(pool, bad, format="lerobot_v21", name="s8-bad")
+    assert _snapshot(pool["root"]) == before
+    assert not list(pool["out"].rglob("*.partial"))
+    assert not (pool["out"] / "exports/s8-bad").exists()
+
+
+def test_s9_export_record_has_conversion_and_groups(pool):
+    rec = Recipe(
+        name="r", categories=["human"], tasks=["pour water into cup"], per_task_cap=2
+    )
+    _, _, record = _export(pool, rec, format="lerobot_v21", name="s9")
+    assert record["conversion"]["fps"] == 10 and record["conversion"]["filter_static"]
+    assert record["conversion"]["timing"] == "resample"
+    assert all(e["group"] for e in record["episodes"])
+    assert record["heldout_disabled"] is False and record["heldout_lists"]
+    _, _, raw = _export(pool, rec, format="raw_capture", name="s9raw")
+    assert all(e["group"] for e in raw["episodes"]) and raw["conversion"] is None
+
+
+def test_nits_camera_maps_must_be_distinct_and_state_names_agree(pool):
+    with pytest.raises(ValueError, match="different output keys"):
+        export.ExportOptions(
+            format="lerobot_v21",
+            name="c",
+            camera_map={
+                "a": "observation.images.hand",
+                "b": "observation.images.hand",
+            },
+        )
+    with pytest.raises(ValueError, match="different output keys"):
+        export.ExportOptions(
+            format="lerobot_v21",
+            name="c",
+            cameras={"x": "observation.images.hand", "y": "observation.images.hand"},
+        )

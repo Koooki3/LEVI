@@ -47,6 +47,8 @@ export function ExportPanel({
   preview,
   exportRoots,
   job,
+  humanAsSuccess,
+  onHumanAsSuccess,
   onFormat,
   onJob,
   onPush,
@@ -55,6 +57,8 @@ export function ExportPanel({
   preview: Preview | null;
   exportRoots: string[];
   job: PoolJob | null;
+  humanAsSuccess: boolean;
+  onHumanAsSuccess: (value: boolean) => void;
   onFormat: (format: ExportFormat) => void;
   onJob: (job: PoolJob) => void;
   onPush: (job: PoolJob) => void;
@@ -74,6 +78,7 @@ export function ExportPanel({
   const nameProblem = name && !NAME.test(name);
   const canRun =
     recipe.tasks.length > 0 &&
+    !preview?.warnings?.some((w) => w.blocking) &&
     !!name &&
     !nameProblem &&
     !dirProblem &&
@@ -93,6 +98,7 @@ export function ExportPanel({
           cameras: pairs(cameras),
           camera_map: pairs(cameraMap),
           hardlink: format === "raw_capture" && hardlink,
+          human_as_success: format === "recap_value" && humanAsSuccess,
         },
         dry_run: dryRun,
       });
@@ -201,6 +207,18 @@ export function ExportPanel({
             </label>
           </>
         )}
+        {format === "recap_value" && (
+          <label className="levi-pool-check wide">
+            <input
+              type="checkbox"
+              checked={humanAsSuccess}
+              onChange={() => onHumanAsSuccess(!humanAsSuccess)}
+            />
+            <span>
+              {t("Count human demonstrations without an outcome as success")}
+            </span>
+          </label>
+        )}
         {format === "raw_capture" && (
           <label className="levi-pool-check wide">
             <input
@@ -209,7 +227,9 @@ export function ExportPanel({
               onChange={() => setHardlink(!hardlink)}
             />
             <span>
-              {t("Hard-link files instead of copying (never edit the export)")}
+              {t(
+                "Hard-link videos instead of copying (small files are always copied)",
+              )}
             </span>
           </label>
         )}
@@ -219,6 +239,11 @@ export function ExportPanel({
           ? `${preview.episodes.toLocaleString()} ${t("episodes")} · ${preview.frames.toLocaleString()} ${t("frames")} · ${preview.excluded_heldout.toLocaleString()} ${t("held-out excluded")}`
           : t("Choose tasks to see a preview.")}
       </p>
+      {preview?.warnings?.some((w) => w.blocking) && (
+        <p className="levi-pool-bad" role="alert">
+          {t("Resolve the blocking notes in the composition first.")}
+        </p>
+      )}
       <div className="levi-row">
         <button
           type="button"

@@ -13,7 +13,13 @@ from .export import ExportOptions
 from .recipe import Recipe
 
 Strings = Annotated[list[str] | None, Query()]
-Outcome = Literal["success", "failure", "robot_flag_success", "verified_success"]
+Outcome = Literal[
+    "success",
+    "failure",
+    "robot_flag_success",
+    "verified_success",
+    "human_verified_success",
+]
 
 router = APIRouter(prefix="/api/levi/pool", tags=["Training pool"])
 
@@ -48,6 +54,16 @@ def _filters(
     }
 
 
+def _status_warnings() -> list[dict]:
+    """Held-out setup problems, before any recipe is looked at."""
+    if not settings.enabled() or not index.summary():
+        return []
+    try:
+        return recipe.find_warnings(recipe.Recipe(name="status"), [])
+    except (ValueError, OSError):
+        return []
+
+
 @router.get("/status")
 def status():
     """Settings, the last scan's summary and the running jobs."""
@@ -56,6 +72,8 @@ def status():
         "roots": [str(p) for p in settings.pool_roots()],
         "export_roots": [str(p) for p in settings.export_roots()],
         "heldout_lists": [str(p) for p in settings.heldout_files()],
+        "heldout_disabled": settings.heldout_disabled(),
+        "warnings": _status_warnings(),
         "last_scan": index.summary() or None,
         "jobs": jobs.listing(10),
     }
@@ -252,13 +270,16 @@ def recipe_delete(name: str):
 class Preview(BaseModel):
     recipe: Recipe
     format: Literal["lerobot_v21", "recap_value", "raw_capture"] | None = None
+    human_as_success: bool = False
 
 
 @router.post("/preview")
 def preview(payload: Preview):
     """Counts for a recipe (saved or not): episodes, frames, per task, and
     what is excluded and why."""
-    return recipe.preview(payload.recipe, payload.format)
+    return recipe.preview(
+        payload.recipe, payload.format, human_as_success=payload.human_as_success
+    )
 
 
 class Export(BaseModel):
@@ -279,6 +300,7 @@ def export(payload: Export):
         raise HTTPException(404, "Recipe not found") from None
     job = jobs.plan_export(chosen, payload.options)
     if payload.dry_run:
+        jobs.discard(job["id"])
         return jobs._brief(job)
     return jobs._brief(jobs.launch(job["id"]))
 

@@ -23,7 +23,11 @@ The training pool indexes every dataset under a set of read-only folders, one ro
 | `LEVI_POOL_ROOTS` | Comma-separated folders the pool reads, never writes | unset: the training pool is idle |
 | `LEVI_EXPORT_ROOTS` | Comma-separated folders an export may be written under | the workspace |
 | `LEVI_POOL_SSH` | The SSH client of remote transfers (default `ssh`; tests point it at a stand-in) | `ssh` |
-| `LEVI_POOL_HELDOUT` | Comma-separated held-out lists (JSON with `episodes: [{path, sha256: {video: hex}, frame_count, frozen_id}]`; `path` relative to a pool root or absolute; other keys such as `dev_pool` are ignored) | none |
+| `LEVI_POOL_HELDOUT` | Comma-separated held-out lists (JSON with `episodes: [{path, sha256: {video: hex}, frame_count, frozen_id}]`; `path` relative to a pool root or absolute; other keys such as `dev_pool` are ignored), or `none` for a pool without a held-out set | unset: **exports are refused** |
+
+An export also needs the held-out setting: unset, planning and running an export are refused (a missing setting must not let frozen test episodes through). The lists in force must be the ones the last scan used — otherwise the index does not mark them — so a change asks for a new scan; held-out entries that match no indexed episode are listed as a warning (`heldout_unmatched`).
+
+没配置 `LEVI_POOL_HELDOUT`（也没写 `none`）时拒绝导出；导出时的清单必须和上次扫描用的一致，否则要求重新扫描；匹配不到片段的清单条目会给出警告。
 
 A relative export name lands in `<workspace>/exports/pool/<name>`.
 
@@ -56,7 +60,7 @@ Raw episodes with a non-standard folder name (`demo_0022 copy`, `demo_0038_failu
 Skip, category and format rules are data, not code (`levi/pool/rules.py`); `<workspace>/pool/rules.json` may override any top-level key. Defaults:
 
 - never descended: `.git`, `.venv`, `venv`, `node_modules`, `.cache`, `__pycache__`, `wandb`, `checkpoints`, `site-packages`, a root's top-level `models`, a LEVI workspace's `outputs/LEVI`, `agent/datasets`, `.state/tmp`, `.state/logs`, `*.partial`, symlinked folders;
-- categories, first match wins: `_archive/` paths → `archive`; DROID raw → `external`; a dataset with a LEVI marker (`meta/levi_conversion.json`, `meta/levi_recap.json`, `pool_export.json`, …) or inside a LEVI workspace (a folder holding `outputs/LEVI/workbench/datasets.json`) → `levi`; `data_source: policy_rollout` → `rollout`; `data_source` of a human collector or a teleoperation `control_mode` (`pygame`, `spacemouse`, `gello`, …) → `human`; a raw capture without `data_source` → `human`; a LeRobot dataset converted from indexed raw episodes → the category of those episodes; any other LeRobot dataset → `human` (`lerobot_default_category`).
+- categories, first match wins: `_archive/` paths → `archive`; DROID raw → `external`; a dataset with a LEVI marker (`meta/levi_conversion.json`, `meta/levi_recap.json`, `pool_export.json`, …), anything below a folder holding `pool_export.json` or `.levi-export.json` (a raw-capture export lying in a pool root), or inside a LEVI workspace (a folder holding `outputs/LEVI/workbench/datasets.json`) → `levi`; `data_source: policy_rollout` → `rollout`; `data_source` of a human collector or a teleoperation `control_mode` (`pygame`, `spacemouse`, `gello`, …) → `human`; a raw capture without `data_source` → `human`; a LeRobot dataset converted from indexed raw episodes → the category of those episodes; any other LeRobot dataset → `human` (`lerobot_default_category`).
 - tasks are normalised for grouping: underscores to spaces, lower case, single spaces (`Pour_water_into_brown_cup` and `pour water into brown cup` are one task); the original spellings stay listed.
 
 分类规则全部是数据：`_archive/` → 归档；DROID → 外部；有 LEVI 标记或在 LEVI 工作区内 → LEVI 处理后；`data_source: policy_rollout` → rollout；遥操作 `control_mode` 或无 `data_source` 的原始采集 → 人工。任务文本规范化（下划线变空格、小写），原始写法保留。
@@ -86,12 +90,17 @@ A recipe is a named, saved selection (`pool/recipes/<name>.json`):
 | --- | --- |
 | `categories`, `sources`, `formats`, `policies`, `date_from`, `date_to` | filters (`sources` also orders episodes within a task) |
 | `tasks` | ordered list of normalised tasks; the export follows this order |
-| `outcome` | `all`, `robot_flag_success` (the robot's flag) or `verified_success` (a human label first, then the robot's flag) |
+| `outcome` | `all`, `robot_flag_success` (the robot's flag), `verified_success` (a human label first, then the robot's flag; the preview counts `outcome_sources` and warns how many rest on the operator's key press only) or `human_verified_success` (a human label only). An episode whose human labels disagree is left out of both verified outcomes and of RECAP exports (`label_conflict`) |
 | `per_task_cap`, `seed` | at most this many episodes per task, drawn reproducibly |
 | `include_nonstandard`, `exclude` | non-standard folders in; episode keys out |
+| `allow_unlinked_sources` | see below |
 | `task_text` | normalised task → the text written into the export |
 
-The selection runs in this order: held-out out (always), `exclude`, non-standard and unsupported formats out, one episode per group, the outcome filter, the export format's own need (a raw copy takes raw captures; a RECAP value export needs an outcome), then `per_task_cap`. The preview lists episodes and frames per task and every exclusion by reason (`heldout`, `duplicate`, `nonstandard`, `unsupported`, `outcome_filter`, `no_outcome`, `per_task_cap`, …).
+The selection runs in this order: held-out out (always), `exclude`, non-standard and unsupported formats out, one episode per group, the outcome filter, the export format's own need (a raw copy takes raw captures; a RECAP value export needs an outcome), then `per_task_cap`. A task taken from raw captures **and** from a LeRobot dataset that no scan link ties to them (no provenance, different content hash) may be one recording twice. The preview warns (`possible_unlinked_conversion`) and planning an export refuses, unless the recipe names its `sources` or sets `allow_unlinked_sources`. Preview `warnings` also carry the held-out problems above; a `blocking` one stops an export.
+
+同一任务同时取自原始采集和无法关联的 LeRobot 数据集时，可能是同一批录制的重复：预览警告，导出默认拒绝，指定 `sources` 或设置 `allow_unlinked_sources` 后放行。
+
+The preview lists episodes and frames per task and every exclusion by reason (`heldout`, `duplicate`, `nonstandard`, `unsupported`, `outcome_filter`, `no_outcome`, `per_task_cap`, …).
 
 ```bash
 uv run levi pool recipe save pi05-mix --category human --task "pick fork into green plate" \
@@ -107,14 +116,16 @@ uv run levi pool recipe list | delete <name>
 ```bash
 uv run levi pool export pi05-mix --format lerobot_v21 --name pi05-mix-v1 \
     [--output-dir /data/exports] [--fps 10] [--camera-map observation.images.wrist=observation.images.hand] \
-    [--hardlink] [--dry-run]
+    [--hardlink] [--human-as-success] [--timing resample|retime] [--filter-static|--no-filter-static] [--dry-run]
 ```
 
 | Format | What it writes |
 | --- | --- |
 | `lerobot_v21` | One LeRobot v2.1 dataset for openpi / π0.5. Raw captures go through LEVI's conversion pipeline (the same checks and options as `levi convert`: resample to `fps`, static-frame filter); LeRobot v2.x episodes are copied with new indices. Episodes follow the recipe's task order, then source order, then episode order; one merged task table. Camera keys become `observation.images.hand` / `observation.images.view1` (`cameras` maps raw capture cameras, `camera_map` LeRobot keys). Every source must share fps, state and action dimensions and video resolution — otherwise nothing is written and the refusal lists the differences. Raw captures failing the capture checks are left out and listed (`conversion_preflight`). |
-| `recap_value` | The same plus RECAP rewards, returns and labels ([RECAP](RECAP.md)); raw captures are retimed without filtering (one row per executed step). The outcome is the human label, else the robot's flag; episodes with neither are left out (`no_outcome`). |
-| `raw_capture` | Raw capture folders copied (or with `--hardlink`, hard-linked: never edit such an export) into `<task>/demo_NNNN`, renumbered per task, with `task_description.txt`. |
+| `recap_value` | The same plus RECAP rewards, returns and labels ([RECAP](RECAP.md)); raw captures are retimed without filtering (one row per executed step). The outcome is the human label, else the robot's flag; episodes with neither are left out (`no_outcome`), and an episode with conflicting human labels is left out (`label_conflict`) instead of falling back to the operator's key. `--human-as-success` counts human-category episodes without an outcome (demonstrations, RLinf's `sft`) as successes, recorded as `outcome_source: sft_demonstration`. |
+| `raw_capture` | Raw capture folders copied into `<task>/demo_NNNN`, renumbered per task, with `task_description.txt`. With `--hardlink` only the videos are hard-linked (they are most of the bytes; never edit them in place); metadata and CSV files are always copied. A task text that is empty, `.` or `..` becomes the folder `task`, and every path written is checked to lie inside the staging folder. |
+
+`pool_export.json` also records the effective conversion parameters (`conversion`: fps, timing, static-frame filter, orientation, cameras, …), each episode's `group`, the held-out lists (or `heldout_disabled`) and the warnings that applied. Two tasks that would be written under one text are refused at planning; `camera_map` and `cameras` must map to distinct output keys; LeRobot sources whose `observation.state` names differ from the output's are refused with the differences. A dry run runs the same held-out group check as the export and leaves no plan behind.
 
 Each episode row in `meta/episodes.jsonl` of a LeRobot export carries `pool_key`, `pool_source` and `pool_fingerprint`; `meta/levi_provenance.jsonl` maps new to source episode indices. Not in this version: LeRobot v3 output (needs lerobot's v2.1→v3 converter; convert the v2.1 export with it) and exporting a recipe as a training manifest without copying data. To move an export to another machine see [Remote transfer](#remote-transfer--远程传输).
 

@@ -48,7 +48,7 @@ from ..conversion.outputs.recap_value import RECAP_COLUMNS, RecapOptions, RecapV
 from ..conversion.progress import Progress
 from ..conversion.report import InputReport, Requirement
 from . import heldout, index, scanner, settings
-from .recipe import NAME, Recipe, select
+from .recipe import NAME, Recipe, find_warnings, select
 
 SCHEMA = "levi.pool.export.v1"
 FORMATS = ("lerobot_v21", "recap_value", "raw_capture")
@@ -89,14 +89,26 @@ class ExportOptions(BaseModel):
     # raw_capture: hard-link files instead of copying them (same filesystem;
     # the export then shares its bytes with the source — never edit it).
     hardlink: bool = False
-    # recap_value
+    # recap_value: an episode of the human category without an outcome (a
+    # demonstration) counts as a success, recorded as ``sft_demonstration``.
+    human_as_success: bool = False
+    # recap_value (rewards)
     failure_reward: float = Field(-300.0, le=0, ge=-1e6)
     gamma: float = Field(1.0, gt=0, le=1)
     workers: int | None = Field(None, ge=1, le=64)
 
+    @field_validator("cameras")
+    @classmethod
+    def _cameras(cls, value):
+        if len(set(value.values())) != len(value):
+            raise ValueError("cameras must map to different output keys")
+        return value
+
     @field_validator("camera_map")
     @classmethod
     def _map(cls, value):
+        if len(set(value.values())) != len(value):
+            raise ValueError("camera_map must map to different output keys")
         for key, feature in value.items():
             if not re.fullmatch(r"observation\.images\.[A-Za-z0-9_.-]+", feature):
                 raise ValueError("camera_map values must start observation.images.")
@@ -139,7 +151,17 @@ def _all_source_paths() -> list[str]:
 
 def plan(recipe: Recipe, options: ExportOptions) -> dict:
     """Freeze the selection now: the export is reproducible from its plan."""
-    chosen, excluded = select(recipe, target=options.format)
+    settings.require_heldout()
+    chosen, excluded = select(
+        recipe, target=options.format, human_as_success=options.human_as_success
+    )
+    warnings = find_warnings(recipe, chosen)
+    blocking = [w for w in warnings if w["blocking"]]
+    if blocking:
+        raise ValueError(
+            "Refusing to plan this export:\n- "
+            + "\n- ".join(w["message"] for w in blocking)
+        )
     if not chosen:
         raise ValueError(
             "The recipe selects no exportable episode"
@@ -149,6 +171,15 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
                 else ""
             )
         )
+    texts = recipe.task_text
+    shown: dict[str, str] = {}
+    for row in chosen:
+        text = texts.get(row["task"], row["task"])
+        if shown.setdefault(text, row["task"]) != row["task"]:
+            raise ValueError(
+                f"Tasks {shown[text]!r} and {row['task']!r} would both be written "
+                f"as {text!r}; give them different task_text"
+            )
     sources = sorted({r["source_path"] for r in chosen} | set(_all_source_paths()))
     target = settings.check_export_target(options.target(), sources)
     keep = (
@@ -174,6 +205,9 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "stat_sig",
     )
     episodes = [{k: row.get(k) for k in keep} for row in chosen]
+    # The index's view of copies, checked at plan time too so a dry run
+    # cannot pass what the export would refuse.
+    refuse_heldout_groups(episodes)
     return {
         "schema": SCHEMA,
         "recipe": recipe.model_dump(),
@@ -185,6 +219,8 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "index": index.summary().get("scanned_at"),
         "pool_roots": [str(p) for p in settings.pool_roots()],
         "heldout_lists": [str(p) for p in settings.heldout_files()],
+        "heldout_disabled": settings.heldout_disabled(),
+        "warnings": [w for w in warnings if not w["blocking"]],
     }
 
 
@@ -410,6 +446,16 @@ def _schema_check(plan_eps: list[dict], options: ExportOptions) -> dict:
             problems.append(
                 f"{path}: fps {info.get('fps')} (export fps {options.fps:g})"
             )
+        source_names = features.get("observation.state", {}).get("names")
+        if (
+            expected["names"] is not None
+            and source_names is not None
+            and list(source_names) != list(expected["names"])
+        ):
+            problems.append(
+                f"{path}: state names {list(source_names)} differ from "
+                f"{list(expected['names'])}"
+            )
         if state != expected["state"]:
             problems.append(
                 f"{path}: observation.state has {state} dims, expected {expected['state']}"
@@ -435,15 +481,27 @@ def _schema_check(plan_eps: list[dict], options: ExportOptions) -> dict:
     return {"expected": expected, "infos": infos}
 
 
-def _link_or_copy(src: Path, dst: Path, hardlink: bool):
+def _inside(root: Path, path: Path) -> Path:
+    """Every path an export writes lies in its staging folder."""
+    resolved = Path(os.path.abspath(path))
+    if not resolved.is_relative_to(Path(os.path.abspath(root))):
+        raise PermissionError(f"Refusing to write outside the export: {path}")
+    return path
+
+
+def _link_or_copy(src: Path, dst: Path, hardlink: bool) -> bool:
+    """Copy a file, or hard-link it when ``hardlink`` and it is a video:
+    small files (metadata, CSVs) are always copied, because something may
+    later rewrite them in place. True when linked."""
     dst.parent.mkdir(parents=True, exist_ok=True)
-    if hardlink:
+    if hardlink and src.suffix.lower() in scanner.VIDEO_SUFFIXES:
         try:
             os.link(src, dst)
-            return
+            return True
         except OSError:
             pass
     shutil.copy2(src, dst)
+    return False
 
 
 def _list_f32(values) -> pa.Array:
@@ -467,6 +525,8 @@ def run(job: dict, progress_path: Path | None = None) -> dict:
     target = Path(job["target"])
     sources = job["sources"]
     settings.check_export_target(target, sources)
+    if not job.get("heldout_lists") and not job.get("heldout_disabled"):
+        raise ValueError("The plan names no held-out list; refusing to export")
     staging = target.parent / f".{target.name}.partial"
     settings.guard_write(staging, sources)
     progress = Progress(progress_path, STAGES)
@@ -497,6 +557,8 @@ def run(job: dict, progress_path: Path | None = None) -> dict:
             "index_scanned_at": job.get("index"),
             "pool_roots": job["pool_roots"],
             "heldout_lists": job["heldout_lists"],
+            "heldout_disabled": bool(job.get("heldout_disabled")),
+            "conversion": result.get("conversion"),
             "counts": {
                 "episodes": len(result["episodes"]),
                 "frames": result["frames"],
@@ -506,7 +568,7 @@ def run(job: dict, progress_path: Path | None = None) -> dict:
             },
             "episodes": result["episodes"],
             "excluded": job["excluded"] + result["dropped"],
-            "warnings": result.get("warnings", []),
+            "warnings": job.get("warnings", []) + result.get("warnings", []),
         }
         atomic(staging / "pool_export.json", record)
         progress.stage("Publish", 1)
@@ -548,16 +610,23 @@ def _raw_capture(job, options, staging, progress) -> dict:
         if ep["format"] != "robot_capture":
             raise ValueError(f"{ep['key']} is not a raw capture")
         text = texts.get(ep["task"], ep["task"])
-        folder = re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("_") or "task"
+        folder = re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("_")
+        if folder.strip(".") == "":  # "", ".", "..", "..."
+            folder = "task"
         number = counters[folder]
         counters[folder] += 1
-        dst = staging / folder / f"demo_{number:04d}"
+        dst = _inside(staging, staging / folder / f"demo_{number:04d}")
         src = Path(ep["key"])
+        linked = 0
         for path in sorted(src.rglob("*")):
             if path.is_dir() or path.is_symlink():
                 continue
-            _link_or_copy(path, dst / path.relative_to(src), options.hardlink)
-        description = staging / folder / "task_description.txt"
+            linked += _link_or_copy(
+                path,
+                _inside(staging, dst / path.relative_to(src)),
+                options.hardlink,
+            )
+        description = _inside(staging, staging / folder / "task_description.txt")
         if not description.exists():
             description.write_text(text + "\n", encoding="utf-8")
         frames += int(ep["frames"] or 0)
@@ -567,7 +636,9 @@ def _raw_capture(job, options, staging, progress) -> dict:
                 "source_path": ep["key"],
                 "source": ep["source"],
                 "task": ep["task"],
+                "group": ep.get("group"),
                 "fingerprint": ep["fingerprint"],
+                "hardlinked_files": linked,
                 "outcome": ep["outcome"],
                 "outcome_source": ep["outcome_source"],
                 "frames": ep["frames"],
@@ -777,6 +848,7 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
                 "source": ep["source"],
                 "format": ep["format"],
                 "task": ep["task"],
+                "group": ep.get("group"),
                 "fingerprint": ep["fingerprint"],
                 "outcome": ep["outcome"],
                 "outcome_source": ep["outcome_source"],

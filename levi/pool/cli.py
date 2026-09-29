@@ -69,7 +69,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--task", action="append", help="repeatable; the export follows this order"
     )
     save.add_argument(
-        "--outcome", choices=["all", "robot_flag_success", "verified_success"]
+        "--outcome",
+        choices=[
+            "all",
+            "robot_flag_success",
+            "verified_success",
+            "human_verified_success",
+        ],
     )
     save.add_argument("--per-task-cap", type=int)
     save.add_argument("--seed", type=int)
@@ -77,6 +83,11 @@ def build_parser() -> argparse.ArgumentParser:
     save.add_argument("--date-from")
     save.add_argument("--date-to")
     save.add_argument("--include-nonstandard", action="store_true")
+    save.add_argument(
+        "--allow-unlinked-sources",
+        action="store_true",
+        help="allow a task from raw captures and an unlinked LeRobot dataset",
+    )
     save.add_argument("--format", action="append", dest="formats", help="repeatable")
     save.add_argument(
         "--exclude", action="append", help="episode key to leave out (repeatable)"
@@ -90,6 +101,11 @@ def build_parser() -> argparse.ArgumentParser:
     show = rsub.add_parser("show", help="a recipe and its preview")
     show.add_argument("name")
     show.add_argument("--format", choices=["lerobot_v21", "recap_value", "raw_capture"])
+    show.add_argument(
+        "--human-as-success",
+        action="store_true",
+        help="recap_value: count human demonstrations without an outcome as success",
+    )
     rsub.add_parser("list", help="saved recipes")
     delete = rsub.add_parser("delete", help="delete a saved recipe")
     delete.add_argument("name")
@@ -107,7 +123,30 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="LeRobot source key=output key (repeatable)",
     )
-    export.add_argument("--hardlink", action="store_true")
+    export.add_argument(
+        "--hardlink",
+        action="store_true",
+        help="raw_capture: hard-link videos (small files are copied)",
+    )
+    export.add_argument(
+        "--human-as-success",
+        action="store_true",
+        help="recap_value: count human demonstrations without an outcome as success",
+    )
+    export.add_argument(
+        "--camera",
+        action="append",
+        default=[],
+        help="raw capture camera=output key (repeatable)",
+    )
+    export.add_argument("--timing", choices=["resample", "retime"])
+    export.add_argument(
+        "--filter-static",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="drop static frames of raw captures (default: lerobot yes, recap no)",
+    )
+    export.add_argument("--failure-reward", type=float)
     export.add_argument("--dry-run", action="store_true", help="plan only")
     remotes = sub.add_parser("remote", help="remote targets for push (SSH keys only)")
     msub = remotes.add_subparsers(dest="remote_action", required=True)
@@ -189,9 +228,17 @@ def main(argv=None) -> int:
                     value["task_text"] = dict(t.split("=", 1) for t in args.task_text)
                 if args.include_nonstandard:
                     value["include_nonstandard"] = True
+                if args.allow_unlinked_sources:
+                    value["allow_unlinked_sources"] = True
                 _print(recipe.save(recipe.Recipe.model_validate(value)))
             elif args.recipe_action == "show":
-                _print(recipe.preview(recipe.load(args.name), args.format))
+                _print(
+                    recipe.preview(
+                        recipe.load(args.name),
+                        args.format,
+                        human_as_success=args.human_as_success,
+                    )
+                )
             elif args.recipe_action == "list":
                 _print(recipe.listing())
             else:
@@ -199,6 +246,11 @@ def main(argv=None) -> int:
         elif args.action == "export":
             from .export import ExportOptions
 
+            extra = {}
+            if args.camera:
+                extra["cameras"] = dict(p.split("=", 1) for p in args.camera)
+            if args.failure_reward is not None:
+                extra["failure_reward"] = args.failure_reward
             options = ExportOptions(
                 format=args.format,
                 name=args.name,
@@ -206,20 +258,30 @@ def main(argv=None) -> int:
                 fps=args.fps,
                 camera_map=dict(p.split("=", 1) for p in args.camera_map),
                 hardlink=args.hardlink,
+                human_as_success=args.human_as_success,
+                timing=args.timing,
+                filter_static=args.filter_static,
+                **extra,
             )
             job = jobs.plan_export(recipe.load(args.recipe), options)
             brief = jobs._brief(job)
             if args.dry_run:
+                jobs.discard(job["id"])
                 _print(brief)
                 return 0
             print(
                 f"exporting {brief['planned_episodes']} episodes to {job['target']}",
                 file=sys.stderr,
             )
-            result = jobs.execute(job)
-            job.update(status="succeeded", result=result)
             from ..catalog import atomic
 
+            try:
+                result = jobs.execute(job)
+            except (Exception, KeyboardInterrupt) as exc:
+                job.update(status="failed", error=f"{type(exc).__name__}: {exc}")
+                atomic(jobs._path(job["id"]), job)
+                raise
+            job.update(status="succeeded", result=result)
             atomic(jobs._path(job["id"]), job)
             _print(result)
         elif args.action == "remote":
@@ -259,7 +321,7 @@ def main(argv=None) -> int:
     except KeyError as exc:
         print(f"ERROR: not found: {exc}")
         return 1
-    except (ValueError, PermissionError) as exc:
+    except (ValueError, PermissionError, OSError) as exc:
         print(f"ERROR: {exc}")
         return 1
     return 0

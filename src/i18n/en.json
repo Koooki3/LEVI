@@ -1527,5 +1527,21 @@
   "sources": "sources",
   "spellings": "spellings",
   "Previous page": "Previous page",
-  "Next page": "Next page"
+  "Next page": "Next page",
+  "Human-labelled success": "Human-labelled success",
+  "Conflicting human labels": "Conflicting human labels",
+  "Allow raw captures and unlinked LeRobot data of one task": "Allow raw captures and unlinked LeRobot data of one task",
+  "Outcome from": "Outcome from",
+  "demonstration": "demonstration",
+  "none": "none",
+  "Blocks export": "Blocks export",
+  "Note": "Note",
+  "Count human demonstrations without an outcome as success": "Count human demonstrations without an outcome as success",
+  "Hard-link videos instead of copying (small files are always copied)": "Hard-link videos instead of copying (small files are always copied)",
+  "Resolve the blocking notes in the composition first.": "Resolve the blocking notes in the composition first.",
+  "No held-out list is configured (LEVI_POOL_HELDOUT): exports are refused until it is set, or set to none.": "No held-out list is configured (LEVI_POOL_HELDOUT): exports are refused until it is set, or set to none.",
+  "The held-out lists changed since the last scan: scan again.": "The held-out lists changed since the last scan: scan again.",
+  "Held-out entries that match no indexed episode": "Held-out entries that match no indexed episode",
+  "Tasks taken from raw captures and from an unlinked LeRobot dataset may be the same recordings twice. Name the sources, or allow it.": "Tasks taken from raw captures and from an unlinked LeRobot dataset may be the same recordings twice. Name the sources, or allow it.",
+  "Episodes that count as verified only through the operator's key press (no human label)": "Episodes that count as verified only through the operator's key press (no human label)"
 }

@@ -10,8 +10,11 @@ the export follows it), date and policy, then applies, in order:
 4. duplicates out: of the episodes left with one fingerprint, the canonical
    one (or, when the canonical copy is not selected, the best-ranked one)
    stays;
-5. the outcome filter: ``all``, ``robot_flag_success`` (the robot's flag) or
-   ``verified_success`` (a human label first, then the robot's flag);
+5. the outcome filter: ``all``, ``robot_flag_success`` (the robot's flag),
+   ``verified_success`` (a human label first, then the robot's flag) or
+   ``human_verified_success`` (a human label only). An episode whose human
+   labels disagree (``label_conflict``) is out of every verified outcome and
+   of RECAP exports;
 6. ``per_task_cap`` episodes per task, drawn with ``seed``.
 
 Every episode left out is listed with its reason.
@@ -45,13 +48,19 @@ class Recipe(BaseModel):
         default_factory=list
     )
     tasks: list[str] = Field(default_factory=list, max_length=5000)
-    outcome: Literal["all", "robot_flag_success", "verified_success"] = "all"
+    outcome: Literal[
+        "all", "robot_flag_success", "verified_success", "human_verified_success"
+    ] = "all"
     per_task_cap: int | None = Field(None, ge=1, le=10_000_000)
     seed: int = 0
     date_from: str | None = Field(None, pattern=DATE)
     date_to: str | None = Field(None, pattern=DATE)
     policies: list[str] = Field(default_factory=list)
     include_nonstandard: bool = False
+    # A task taken from raw captures and from a LeRobot source that is not
+    # linked to them may be one recording twice: refused unless sources are
+    # named or this is set.
+    allow_unlinked_sources: bool = False
     exclude: list[str] = Field(default_factory=list, max_length=100000)
     # Normalized task -> the text written into the export (default: the
     # normalized task itself).
@@ -70,7 +79,15 @@ class Recipe(BaseModel):
     @field_validator("task_text")
     @classmethod
     def _task_text(cls, value):
-        return {normalize_task(k): v.strip() for k, v in value.items() if v.strip()}
+        out = {}
+        for key, text in value.items():
+            text = text.strip()
+            if not text:
+                continue
+            if len(text) > 300 or any(ord(c) < 32 or ord(c) == 127 for c in text):
+                raise ValueError("task_text must be one line of at most 300 characters")
+            out[normalize_task(key)] = text
+        return out
 
 
 def recipes_dir():
@@ -134,11 +151,18 @@ def _rank(row: dict) -> tuple:
     )
 
 
-def select(recipe: Recipe, df: pd.DataFrame | None = None, target: str | None = None):
+def select(
+    recipe: Recipe,
+    df: pd.DataFrame | None = None,
+    target: str | None = None,
+    human_as_success: bool = False,
+):
     """Ordered episodes of a recipe, and every excluded one with its reason.
 
     ``target`` adds the export format's own requirement: ``raw_capture`` copies
-    raw captures only, ``recap_value`` needs an outcome per episode."""
+    raw captures only, ``recap_value`` needs an outcome per episode
+    (``human_as_success``: a human demonstration without one counts as a
+    success)."""
     df = index.frame() if df is None else df
     df = index._filter(
         df,
@@ -193,16 +217,28 @@ def select(recipe: Recipe, df: pd.DataFrame | None = None, target: str | None = 
         for row in members[1:]:
             out(row, "duplicate", kept=members[0]["key"])
     passed = []
+    verified = recipe.outcome in ("verified_success", "human_verified_success")
     for row in unique:
-        if recipe.outcome == "robot_flag_success" and row["robot_flag"] != "success":
+        if (verified or target == "recap_value") and row.get("label_conflict"):
+            out(row, "label_conflict")
+        elif recipe.outcome == "robot_flag_success" and row["robot_flag"] != "success":
             out(row, "outcome_filter", outcome=row["robot_flag"])
         elif (
             recipe.outcome == "verified_success"
             and (row["human_label"] or row["robot_flag"]) != "success"
         ):
             out(row, "outcome_filter", outcome=row["human_label"] or row["robot_flag"])
+        elif recipe.outcome == "human_verified_success" and (
+            row["human_label"] != "success"
+        ):
+            out(row, "outcome_filter", outcome=row["human_label"])
         elif target == "recap_value" and row["outcome"] not in ("success", "failure"):
-            out(row, "no_outcome")
+            if human_as_success and row["category"] == "human":
+                passed.append(
+                    {**row, "outcome": "success", "outcome_source": "sft_demonstration"}
+                )
+            else:
+                out(row, "no_outcome")
         else:
             passed.append(row)
     task_order = recipe.tasks or sorted({r["task"] for r in passed})
@@ -235,8 +271,91 @@ def select(recipe: Recipe, df: pd.DataFrame | None = None, target: str | None = 
     return chosen, excluded
 
 
-def preview(recipe: Recipe, target: str | None = None, df=None) -> dict:
-    chosen, excluded = select(recipe, df, target)
+def find_warnings(recipe: Recipe, chosen: list[dict], df=None) -> list[dict]:
+    """What the selection rests on that a person should know. ``blocking``
+    ones stop an export (plan) until fixed or lifted explicitly."""
+    out: list[dict] = []
+    scan = (index.summary().get("heldout") or {}) if index.summary() else {}
+    lists = [str(p) for p in settings.heldout_files()]
+    if not lists and not settings.heldout_disabled():
+        out.append(
+            {
+                "code": "heldout_unconfigured",
+                "blocking": True,
+                "message": "No held-out list is configured (LEVI_POOL_HELDOUT); "
+                "exports are refused until it is set, or set to `none`",
+            }
+        )
+    elif index.summary() and scan.get("lists", []) != lists:
+        out.append(
+            {
+                "code": "heldout_lists_changed",
+                "blocking": True,
+                "message": "The held-out lists changed since the last scan; "
+                "scan again so the index marks them",
+                "scanned_with": scan.get("lists", []),
+                "now": lists,
+            }
+        )
+    if scan.get("unmatched"):
+        out.append(
+            {
+                "code": "heldout_unmatched",
+                "blocking": False,
+                "message": f"{len(scan['unmatched'])} held-out entries match no "
+                "indexed episode (moved, renamed or not under the pool roots)",
+                "ids": scan["unmatched"][:20],
+            }
+        )
+    full = index.frame() if df is None else df
+    linked = set(full.loc[full.format == "robot_capture", "group"])
+    raw_tasks, loose = defaultdict(set), defaultdict(set)
+    for row in chosen:
+        if row["format"] == "robot_capture":
+            raw_tasks[row["task"]].add(row["source"])
+        elif row["format"] == "lerobot" and row.get("group") not in linked:
+            loose[row["task"]].add(row["source"])
+    both = sorted(set(raw_tasks) & set(loose))
+    if both:
+        lifted = bool(recipe.sources or recipe.allow_unlinked_sources)
+        out.append(
+            {
+                "code": "possible_unlinked_conversion",
+                "blocking": not lifted,
+                "message": f"{len(both)} task(s) are taken from raw captures and "
+                "from a LeRobot dataset with no link to them; it may be the same "
+                "recordings twice. Name the sources, or allow it explicitly",
+                "tasks": both[:20],
+                "raw_sources": sorted({s for t in both for s in raw_tasks[t]})[:10],
+                "lerobot_sources": sorted({s for t in both for s in loose[t]})[:10],
+            }
+        )
+    fallback = sum(
+        1
+        for r in chosen
+        if r["outcome_source"] == "robot_flag" and recipe.outcome == "verified_success"
+    )
+    if fallback:
+        out.append(
+            {
+                "code": "outcome_from_robot_flag",
+                "blocking": False,
+                "message": f"{fallback} episode(s) count as verified only through "
+                "the operator's key press (no human label); use the human-labelled "
+                "outcome to leave them out",
+                "episodes": fallback,
+            }
+        )
+    return out
+
+
+def preview(
+    recipe: Recipe,
+    target: str | None = None,
+    df=None,
+    human_as_success: bool = False,
+) -> dict:
+    chosen, excluded = select(recipe, df, target, human_as_success)
     reasons = Counter(e["reason"] for e in excluded)
     per_task = defaultdict(lambda: {"episodes": 0, "frames": 0, "sources": Counter()})
     for row in chosen:
@@ -265,7 +384,11 @@ def preview(recipe: Recipe, target: str | None = None, df=None) -> dict:
         "categories": dict(Counter(r["category"] for r in chosen)),
         "formats": dict(Counter(r["format"] for r in chosen)),
         "outcomes": dict(Counter(r["outcome"] or "none" for r in chosen)),
+        "outcome_sources": dict(Counter(r["outcome_source"] or "none" for r in chosen)),
+        "human_as_success": human_as_success,
+        "warnings": find_warnings(recipe, chosen, df),
         "excluded": dict(reasons),
+        "excluded_label_conflicts": reasons.get("label_conflict", 0),
         "excluded_heldout": reasons.get("heldout", 0),
         "excluded_duplicates": reasons.get("duplicate", 0),
         "excluded_nonstandard": reasons.get("nonstandard", 0),

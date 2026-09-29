@@ -1527,5 +1527,21 @@
   "sources": "个来源",
   "spellings": "种写法",
   "Previous page": "上一页",
-  "Next page": "下一页"
+  "Next page": "下一页",
+  "Human-labelled success": "仅人工标注的成功",
+  "Conflicting human labels": "人工标签冲突",
+  "Allow raw captures and unlinked LeRobot data of one task": "允许同一任务同时取原始采集和未关联的 LeRobot 数据",
+  "Outcome from": "结局来源",
+  "demonstration": "人工示范",
+  "none": "无",
+  "Blocks export": "阻止导出",
+  "Note": "提示",
+  "Count human demonstrations without an outcome as success": "没有结局的人工示范按成功计",
+  "Hard-link videos instead of copying (small files are always copied)": "视频用硬链接代替复制（小文件始终复制）",
+  "Resolve the blocking notes in the composition first.": "请先处理组合中阻止导出的提示。",
+  "No held-out list is configured (LEVI_POOL_HELDOUT): exports are refused until it is set, or set to none.": "未配置留出清单（LEVI_POOL_HELDOUT）：设置清单或设为 none 之前，导出会被拒绝。",
+  "The held-out lists changed since the last scan: scan again.": "留出清单在上次扫描后有变化：请重新扫描。",
+  "Held-out entries that match no indexed episode": "留出清单中匹配不到任何已登记片段的条目",
+  "Tasks taken from raw captures and from an unlinked LeRobot dataset may be the same recordings twice. Name the sources, or allow it.": "同一任务同时取自原始采集和没有关联记录的 LeRobot 数据集，可能是同一批录制的重复。请指定来源，或明确允许。",
+  "Episodes that count as verified only through the operator's key press (no human label)": "仅凭操作员按键结果算作已核实的片段（没有人工标签）"
 }

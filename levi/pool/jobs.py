@@ -48,6 +48,7 @@ def plan_scan(rehash: bool = False) -> dict:
         "rehash": rehash,
         "pool_roots": [str(r) for r in roots],
         "heldout_lists": [str(p) for p in settings.heldout_files()],
+        "heldout_disabled": settings.heldout_disabled(),
         "status": "planned",
         "planned_at": time.time(),
     }
@@ -93,6 +94,11 @@ def plan_push(source: str, target_name: str, dry_run: bool = False) -> dict:
     return job
 
 
+def discard(job_id: str) -> None:
+    """Drop a plan that was only a dry run."""
+    _path(job_id).unlink(missing_ok=True)
+
+
 def execute(job: dict, progress_path: Path | None = None) -> dict:
     """Run a planned job in this process (the worker, or the CLI)."""
     if job["kind"] == "scan":
@@ -118,7 +124,9 @@ def execute(job: dict, progress_path: Path | None = None) -> dict:
 def _environment(job: dict) -> dict:
     env = dict(os.environ)
     env["LEVI_POOL_ROOTS"] = ",".join(job.get("pool_roots") or [])
-    env["LEVI_POOL_HELDOUT"] = ",".join(job.get("heldout_lists") or [])
+    env["LEVI_POOL_HELDOUT"] = ",".join(job.get("heldout_lists") or []) or (
+        "none" if job.get("heldout_disabled") else ""
+    )
     workspace = settings.workspace()
     env["LEVI_WORKSPACE"] = str(workspace)
     # Folders the worker's ``configure`` requires inside its workspace; one
