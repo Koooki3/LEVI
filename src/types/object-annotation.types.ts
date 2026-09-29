@@ -22,7 +22,7 @@ export interface ObjectAnnotation {
   visible: boolean;
   occluded: boolean;
   status: ReviewStatus;
-  source: "sam3" | "human" | "fake" | "import";
+  source: "sam3" | "student" | "human" | "fake" | "import";
   prompt: string | null;
 }
 

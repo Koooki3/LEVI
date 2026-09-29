@@ -27,6 +27,7 @@ import {
 import AnnotationRecorder from "@/components/annotation-recorder";
 import { AnnotationsPanel } from "@/components/annotations-panel";
 import ObjectAnnotationPanel from "@/components/object-annotation-panel";
+import FastSegmentationPanel from "@/components/fast-segmentation-panel";
 import { AnnotationsTimeline } from "@/components/annotations-timeline";
 import Sidebar from "@/components/side-nav";
 import StatsPanel from "@/components/stats-panel";
@@ -1309,13 +1310,21 @@ function EpisodeViewerInner({
                   )}
 
                   {annotationsSubTab === "vision" && (
-                    <ObjectAnnotationPanel
-                      episodeId={episodeId}
-                      ident={{ repoId: datasetInfo.repoId }}
-                      cameraKeys={videosInfo.map((v) => v.filename)}
-                      allEpisodes={availableEpisodes}
-                      taskIndex={taskIndex}
-                    />
+                    <>
+                      <FastSegmentationPanel
+                        episodeId={episodeId}
+                        ident={{ repoId: datasetInfo.repoId }}
+                        cameraKeys={videosInfo.map((v) => v.filename)}
+                        allEpisodes={availableEpisodes}
+                      />
+                      <ObjectAnnotationPanel
+                        episodeId={episodeId}
+                        ident={{ repoId: datasetInfo.repoId }}
+                        cameraKeys={videosInfo.map((v) => v.filename)}
+                        allEpisodes={availableEpisodes}
+                        taskIndex={taskIndex}
+                      />
+                    </>
                   )}
                 </div>
               )}

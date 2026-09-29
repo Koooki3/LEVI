@@ -249,8 +249,9 @@ def test_fake_distil_registers_model_with_manifest(seg, video_dataset):
 # ---------------------------------------------------------------- live
 
 
-def _events(client, repo, session_id, after=0, want=("result",), limit=200):
-    """Read SSE frames until every kind in ``want`` was seen."""
+def _events(client, repo, session_id, after=0, want=("result",), limit=200, until=None):
+    """Read SSE frames until every kind in ``want`` was seen (and ``until``
+    holds for a result, when given)."""
     seen: dict[str, list[dict]] = {}
     with client.stream(
         "GET",
@@ -264,7 +265,10 @@ def _events(client, repo, session_id, after=0, want=("result",), limit=200):
             if line.startswith("event: "):
                 kind = line[7:]
             elif line.startswith("data: ") and kind:
-                seen.setdefault(kind, []).append(json.loads(line[6:]))
+                value = json.loads(line[6:])
+                if kind == "result" and until is not None and not until(value):
+                    continue
+                seen.setdefault(kind, []).append(value)
                 if all(k in seen for k in want) or kind == "closed":
                     break
             if count > limit * 4:
@@ -290,7 +294,9 @@ def test_live_session_follows_clock_and_saves_only_its_episode(seg, video_datase
         json={"playing": False, "time": 0.55, "rate": 1},
     )
     assert clock.status_code == 200 and clock.json()["ok"] is True
-    seen = _events(seg, repo, sid, want=("result",))
+    # The paused player at 0.55 s shows frame 5 (a result for frame 0 may
+    # come first, from before the clock arrived).
+    seen = _events(seg, repo, sid, want=("result",), until=lambda r: r["frame_index"] == 5)
     result = seen["result"][-1]
     assert result["camera_key"] in CAMERAS
     assert result["frame_index"] == 5

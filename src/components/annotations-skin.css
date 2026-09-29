@@ -1993,3 +1993,108 @@
 .annotations-skin .tl-tick.anchored.unknown {
   background: var(--anchored-unknown);
 }
+
+/* Fast segmentation panel (fast-segmentation-panel.tsx). */
+.annotations-skin .fast-seg-panel {
+  margin-bottom: 16px;
+}
+.annotations-skin .fast-seg-status {
+  margin-top: 12px;
+  font-size: 12px;
+}
+.annotations-skin .fast-seg-hint {
+  margin: 8px 0 0;
+  color: #94a3b8;
+  font-size: 12px;
+}
+.annotations-skin .fast-seg-hint code,
+.annotations-skin .fast-seg-grid code,
+.annotations-skin .fast-seg-stats code {
+  color: #d4f779;
+  font-size: 11px;
+}
+.annotations-skin .fast-seg-error {
+  margin: 8px 0 0;
+  color: #fca5a5;
+  font-size: 12px;
+  word-break: break-word;
+}
+.annotations-skin .fast-seg-model {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(175, 183, 168, 0.14);
+  border-radius: 10px;
+  background: rgba(15, 20, 15, 0.45);
+}
+.annotations-skin .fast-seg-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: #e2e8f0;
+}
+.annotations-skin .fast-seg-grid > span:nth-child(odd) {
+  color: #94a3b8;
+}
+.annotations-skin .fast-seg-recall {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+.annotations-skin .fast-seg-chip {
+  border: 1px solid rgba(212, 247, 121, 0.24);
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: #e2e8f0;
+}
+.annotations-skin .fast-seg-chip b {
+  color: #d4f779;
+  font-weight: 600;
+}
+.annotations-skin .fast-seg-licence {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  color: #94a3b8;
+  font-size: 11px;
+}
+.annotations-skin .fast-seg-job {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+.annotations-skin .fast-seg-job .object-annotation-run {
+  justify-self: start;
+}
+.annotations-skin .fast-seg-stats {
+  margin-top: 10px;
+  overflow-x: auto;
+}
+.annotations-skin .fast-seg-stats table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.annotations-skin .fast-seg-stats th,
+.annotations-skin .fast-seg-stats td {
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(175, 183, 168, 0.12);
+  text-align: left;
+  color: #e2e8f0;
+}
+.annotations-skin .fast-seg-stats th {
+  color: #94a3b8;
+  font-weight: 500;
+}
+.annotations-skin .fast-seg-advanced summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  color: #f8fafc;
+  font-size: 13px;
+}

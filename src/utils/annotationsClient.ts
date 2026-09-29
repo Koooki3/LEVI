@@ -26,6 +26,13 @@ import type {
   RecapSummary,
 } from "../types/recap.types";
 import type { AnchoredEpisode } from "../types/anchored.types";
+import type {
+  DistilRequest,
+  LiveSessionInfo,
+  SegJob,
+  SegModel,
+  SegStatus,
+} from "../types/segmentation.types";
 
 // Revision tokens belong to the editor's last read, never an automatic pre-save
 // refresh (which would hide concurrent edits). Kept in memory, not credentials.
@@ -866,4 +873,193 @@ export async function fetchAnchoredEpisode(
   if (!response.ok)
     throw new Error(await responseErrorMessage(response, "Anchored review"));
   return response.json() as Promise<AnchoredEpisode>;
+}
+
+// ---------------------------------------------------------------------------
+// Fast segmentation (`/api/segmentation/*`): student models, offline labelling,
+// distillation and the live overlay session. Errors carry the backend detail.
+
+async function segJson<R>(response: Response, what: string): Promise<R> {
+  if (!response.ok) throw new Error(await responseErrorMessage(response, what));
+  return response.json() as Promise<R>;
+}
+
+function segBody(ident: DatasetIdent, body: Record<string, unknown>): string {
+  return JSON.stringify({
+    ...body,
+    repo_id: ident.repoId || null,
+    local_path: ident.localPath || null,
+    revision: ident.revision || null,
+  });
+}
+
+const JSON_HEADERS = { "Content-Type": "application/json" };
+
+export async function fetchSegStatus(
+  ident: DatasetIdent,
+  signal?: AbortSignal,
+): Promise<SegStatus> {
+  const response = await annotationFetch(
+    buildUrl("/api/segmentation/status", ident),
+    { cache: "no-store", signal },
+  );
+  return segJson(response, "Segmentation status");
+}
+
+export async function deleteSegModel(name: string): Promise<SegModel[]> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const response = await annotationFetch(
+    endpoint(`/api/segmentation/models/${encodeURIComponent(name)}`),
+    { method: "DELETE" },
+  );
+  const data = await segJson<{ models?: SegModel[] }>(response, "Delete model");
+  return data.models ?? [];
+}
+
+export async function startSegLabel(
+  ident: DatasetIdent,
+  request: {
+    model: string;
+    episodes?: number[] | null;
+    cameras?: string[] | null;
+    batch?: number;
+  },
+): Promise<SegJob> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const response = await annotationFetch(endpoint("/api/segmentation/label"), {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: segBody(ident, {
+      provider: "student",
+      model: request.model,
+      episodes: request.episodes ?? null,
+      cameras: request.cameras ?? null,
+      ...(request.batch ? { batch: request.batch } : {}),
+    }),
+  });
+  return segJson(response, "Label dataset");
+}
+
+export async function startSegDistil(
+  ident: DatasetIdent,
+  request: DistilRequest,
+): Promise<SegJob> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const response = await annotationFetch(endpoint("/api/segmentation/distil"), {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: segBody(ident, { provider: "student", ...request }),
+  });
+  return segJson(response, "Distil model");
+}
+
+export async function fetchSegJob(
+  jobId: string,
+  ident: DatasetIdent,
+  signal?: AbortSignal,
+): Promise<SegJob> {
+  const response = await annotationFetch(
+    buildUrl(`/api/segmentation/jobs/${encodeURIComponent(jobId)}`, ident),
+    { cache: "no-store", signal },
+  );
+  return segJson(response, "Segmentation job");
+}
+
+export async function cancelSegJob(
+  jobId: string,
+  ident: DatasetIdent,
+): Promise<SegJob> {
+  const response = await annotationFetch(
+    buildUrl(
+      `/api/segmentation/jobs/${encodeURIComponent(jobId)}/cancel`,
+      ident,
+    ),
+    { method: "POST", headers: JSON_HEADERS },
+  );
+  return segJson(response, "Cancel job");
+}
+
+export async function startLiveSession(
+  ident: DatasetIdent,
+  request: {
+    episode_index: number;
+    model: string;
+    cameras?: string[] | null;
+    save?: boolean;
+    lead_frames?: number;
+  },
+): Promise<LiveSessionInfo> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const response = await annotationFetch(endpoint("/api/segmentation/live"), {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: segBody(ident, {
+      provider: "student",
+      save: true,
+      lead_frames: 1,
+      ...request,
+      cameras: request.cameras ?? null,
+    }),
+  });
+  return segJson(response, "Live overlay");
+}
+
+function liveUrl(sessionId: string, ident: DatasetIdent, tail = ""): string {
+  return buildUrl(
+    `/api/segmentation/live/${encodeURIComponent(sessionId)}${tail}`,
+    ident,
+  );
+}
+
+/** URL for an `EventSource` on the session's server-sent events. */
+export function liveEventsUrl(
+  sessionId: string,
+  ident: DatasetIdent,
+  after = 0,
+): string {
+  const url = new URL(liveUrl(sessionId, ident, "/events"));
+  url.searchParams.set("after", String(after));
+  return url.toString();
+}
+
+/** Push the player clock. Plain `fetch` (no revision bookkeeping): it is
+ * fire-and-forget and runs several times a second while seeking. */
+export async function sendLiveClock(
+  sessionId: string,
+  ident: DatasetIdent,
+  clock: { playing: boolean; time: number; rate: number },
+): Promise<boolean> {
+  const response = await fetch(liveUrl(sessionId, ident, "/clock"), {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify(clock),
+  });
+  return response.ok;
+}
+
+export async function stopLiveSession(
+  sessionId: string,
+  ident: DatasetIdent,
+): Promise<LiveSessionInfo> {
+  const response = await annotationFetch(liveUrl(sessionId, ident, "/stop"), {
+    method: "POST",
+    headers: JSON_HEADERS,
+  });
+  return segJson(response, "Stop live overlay");
+}
+
+/** Best-effort stop that survives page unload. */
+export function stopLiveSessionOnUnload(
+  sessionId: string,
+  ident: DatasetIdent,
+): void {
+  try {
+    void fetch(liveUrl(sessionId, ident, "/stop"), {
+      method: "POST",
+      headers: JSON_HEADERS,
+      keepalive: true,
+    }).catch(() => undefined);
+  } catch {
+    // The service stops orphaned sessions itself when it shuts down.
+  }
 }

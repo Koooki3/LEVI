@@ -11,6 +11,7 @@ import type { ObjectAnnotation } from "@/types/object-annotation.types";
 import { fetchObjectAnnotations } from "@/utils/annotationsClient";
 import { proxyHfUrl } from "@/utils/auth";
 import { VideoOverlayCanvas } from "./video-overlay-canvas";
+import { LiveSegmentationCanvas } from "./live-segmentation-canvas";
 import { ColormappedVideo } from "./colormapped-video";
 
 const THRESHOLDS = {
@@ -476,6 +477,16 @@ export const SimpleVideosPlayer = ({
                       videoEl={videoEls[idx] ?? null}
                       cameraKey={info.filename}
                       objectAnnotations={objectAnnotations}
+                    />
+                    {/* Live segmentation (fast segmentation panel): drawn on
+                    top, follows the video element's own clock. */}
+                    <LiveSegmentationCanvas
+                      videoEl={videoEls[idx] ?? null}
+                      cameraKey={info.filename}
+                      episodeId={annotationEpisodeId}
+                      segmentStart={
+                        info.isSegmented ? (info.segmentStart ?? 0) : 0
+                      }
                     />
                   </div>
                 </div>
