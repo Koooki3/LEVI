@@ -131,7 +131,7 @@ class Tracker:
 
         # supervision scales lost_track_buffer by frame_rate / 30.
         self._bt = sv.ByteTrack(
-            frame_rate=max(1, int(round(self.fps))),
+            frame_rate=max(1, round(self.fps)),
             lost_track_buffer=self.settings.lost_buffer,
             track_activation_threshold=self.settings.activation,
             minimum_matching_threshold=self.settings.matching,

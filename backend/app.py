@@ -3128,6 +3128,6 @@ def push_to_hub(req: PushToHubRequest) -> JSONResponse:
 
 # --- Fast instance segmentation (student live overlay, labelling, distillation)
 # Kept in its own module; see backend/segmentation.py and docs/SEGMENTATION.md.
-from backend.segmentation import router as _segmentation_router  # noqa: E402
+from backend.segmentation import router as _segmentation_router
 
 app.include_router(_segmentation_router)

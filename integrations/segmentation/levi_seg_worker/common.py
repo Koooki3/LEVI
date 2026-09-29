@@ -17,7 +17,7 @@ import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import numpy as np
 
@@ -369,7 +369,7 @@ class Heartbeat:
         while not self._stop.wait(self.period):
             self.progress.touch()
 
-    def __enter__(self) -> Heartbeat:
+    def __enter__(self) -> Self:
         self._thread.start()
         return self
 

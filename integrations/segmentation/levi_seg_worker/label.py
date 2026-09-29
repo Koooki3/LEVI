@@ -15,7 +15,15 @@ from pathlib import Path
 from typing import Any
 
 from . import engine as engines
-from .common import Heartbeat, Progress, VideoReader, annotation, atomic_json, gpu_lock, write_rows
+from .common import (
+    Heartbeat,
+    Progress,
+    VideoReader,
+    annotation,
+    atomic_json,
+    gpu_lock,
+    write_rows,
+)
 
 
 def _decode(reader: VideoReader, out: queue.Queue, stop: threading.Event) -> None:

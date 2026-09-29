@@ -34,7 +34,16 @@ from pathlib import Path
 from typing import Any
 
 from . import engine as engines
-from .common import Nvml, VideoReader, annotation, atomic_json, gpu_lock, percentile, rle_encode, write_rows
+from .common import (
+    Nvml,
+    VideoReader,
+    annotation,
+    atomic_json,
+    gpu_lock,
+    percentile,
+    rle_encode,
+    write_rows,
+)
 
 # ------------------------------------------------------------------ clock
 
@@ -179,7 +188,7 @@ class LiveRunner:
                 playing, rate, _, version = self.clock.state()
                 now = time.monotonic()
                 position = self.clock.position(now)
-                due = int(math.floor(position * self.fps + 1e-6))
+                due = math.floor(position * self.fps + 1e-6)
                 target = min(max(0, due + (self.lead if playing else 0)), max(0, reader.length - 1))
                 last = cam.last_decoded
                 # Pausing lands up to ``lead`` frames behind the newest decoded
@@ -531,7 +540,7 @@ def bench(plan_path: Path, output: Path) -> int:
                 now = time.monotonic()
                 if now - wall0 > duration + 0.2:
                     break
-                shown = int(math.floor(clock.position(now) * runner.fps + 1e-6))
+                shown = math.floor(clock.position(now) * runner.fps + 1e-6)
                 if shown >= runner.length:
                     break
                 display["ticks"] += 1
