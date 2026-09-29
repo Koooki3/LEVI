@@ -270,6 +270,20 @@ def test_operations_decide_include_and_weight(repo):
     assert human[human.episode_index == 0].episode_success_source.iloc[0] == "human"
 
 
+def test_verified_success_from_human_labels_alone(repo):
+    """A task without anchored-review rules is verified by people only."""
+    from levi.agent.store import resolve
+    from levi.annotations import outcomes
+
+    name = _name(repo)
+    labels = resolve(catalog.STATE, name, "annotations")
+    outcomes.write_label(labels, 0, "failure")
+    outcomes.write_label(labels, 2, "success")
+    frames = _frames(tm.build(repo, "verified_success", params={"fallback": "exclude"}))
+    assert set(frames[frames.include].episode_index) == {2}
+    assert set(frames[frames.include].episode_success_source) == {"human"}
+
+
 def test_manifest_records_provenance(repo):
     name = _name(repo)
     _anchored(name, {0: "success"})

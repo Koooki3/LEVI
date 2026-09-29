@@ -393,10 +393,17 @@ def build(
         raise ManifestError("No episode is in scope")
 
     run, verdicts = _anchored(ds.name, anchored_run)
-    if "anchored" in op.needs and run is None:
+    # Human labels alone are a verification too (a task without anchored-review
+    # rules is verified by people); refuse only when nothing verifies the scope.
+    if (
+        "anchored" in op.needs
+        and run is None
+        and not any(ep in scope for ep in ds.human)
+    ):
         raise ManifestError(
-            f"{operation} needs an anchored review of {ds.name}; run one "
-            "(levi agent, workflow.anchored) or use robot_flag_success"
+            f"{operation} needs an anchored review or human outcome labels on "
+            f"{ds.name}; run one (levi agent, workflow.anchored), label episodes, "
+            "or use robot_flag_success"
         )
     applies = set(anchored_tasks) if anchored_tasks else None
     recap, stale = _recap(ds, recap_revision)
