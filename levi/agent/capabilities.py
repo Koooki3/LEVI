@@ -543,7 +543,9 @@ SPECS = {
         "read",
         (
             "Built-in anchored review specs: the event each is anchored on, the "
-            "frames per camera, the question, answer fields and success rules"
+            "frames per camera, the question, answer fields and success rules, "
+            "any start check and vetoes, and a status (stable, or candidate: "
+            "still being validated, never a default)"
         ),
     ),
     "anchored.get": (
@@ -551,7 +553,9 @@ SPECS = {
         "read",
         (
             "Results of an anchored review: per-episode outcomes, or one "
-            "episode's events with their answers, validity and cited frames"
+            "episode's events with their answers, validity and cited frames, "
+            "its start check and veto verdicts, and what the outcome rests on "
+            "(including undecided labels, vetoes and contested waivers)"
         ),
     ),
     "knowledge.list": (
@@ -1053,14 +1057,23 @@ def _invoke(
 
         former = aliases()
         return {
+            # Stable specs first; a candidate is listed, never a default.
             "specs": [
                 dump(spec)
-                | {"aliases": sorted(k for k, v in former.items() if v == spec.id)}
-                for spec in builtin().values()
+                | {
+                    "status": spec.status,
+                    "aliases": sorted(k for k, v in former.items() if v == spec.id),
+                }
+                for spec in sorted(
+                    builtin().values(), key=lambda s: s.status == "candidate"
+                )
             ],
             "use": 'Plan a review with workflow.anchored = {"spec": "<id>"} or a '
             "whole spec of this shape; a former id listed under aliases still "
-            "names its spec. Show people the title, not the id",
+            "names its spec. Show people the title, not the id. A spec with "
+            'status "candidate" is still being validated: never choose it by '
+            "default; plan it only when a person names it, and say it is a "
+            "candidate",
         }
     if name == "anchored.get":
         from levi.catalog import display_name

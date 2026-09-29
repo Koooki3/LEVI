@@ -159,8 +159,8 @@ Generated from the capability registry by `uv run levi docs sync`. Do not edit b
 <!-- levi:generated capabilities -->
 | Capability | Who | What it does |
 | --- | --- | --- |
-| `anchored.get` | agent | Results of an anchored review: per-episode outcomes, or one episode's events with their answers, validity and cited frames |
-| `anchored.specs` | agent | Built-in anchored review specs: the event each is anchored on, the frames per camera, the question, answer fields and success rules |
+| `anchored.get` | agent | Results of an anchored review: per-episode outcomes, or one episode's events with their answers, validity and cited frames, its start check and veto verdicts, and what the outcome rests on (including undecided labels, vetoes and contested waivers) |
+| `anchored.specs` | agent | Built-in anchored review specs: the event each is anchored on, the frames per camera, the question, answer fields and success rules, any start check and vetoes, and a status (stable, or candidate: still being validated, never a default) |
 | `annotations.propose_events` | agent | Stage event suggestions using the same validators |
 | `annotations.propose_segments` | agent | Stage evidence-grounded suggestions; never approve. new_subtasks adds a subtask the vocabulary lacks (never an existing id or alias) |
 | `capabilities.list` | agent | Discover schemas, scope and side effects |

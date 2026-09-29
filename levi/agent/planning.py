@@ -196,12 +196,27 @@ def attach(run):
                 "it, a long episode is refined in several batches); provider tool "
                 "turns may add requests"
             ),
-            "minimum_requests": 0
-            if flow.kind == "objects" or flow.anchored
+            # An anchored review asks at least its start check per episode,
+            # when its spec has one.
+            "minimum_requests": (
+                len(run["context"]["episodes"]) if flow.anchored.get("start") else 0
+            )
+            if flow.anchored
+            else 0
+            if flow.kind == "objects"
             else len(run["context"]["episodes"])
             * (2 if flow.kind == "temporal" else 1),
             "tokens": "unknown until pilot; budget is a stop limit, not a price quote",
         },
+        # Which spec the plan freezes and whether it is still a candidate,
+        # for the person approving it.
+        "anchored_spec": {
+            "id": flow.anchored["id"],
+            "version": flow.anchored.get("version"),
+            "status": flow.anchored.get("status", "stable"),
+        }
+        if flow.anchored
+        else None,
         "submission": "draft_then_human_commit",
         "excluded": [
             "unselected episodes/cameras",

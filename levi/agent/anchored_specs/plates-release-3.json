@@ -5,6 +5,7 @@
     "en": "Plates release-review rules, rule set 3 (with start check)",
     "zh": "plates 释放复核规则（第 3 版，含起始状态检查）"
   },
+  "status": "candidate",
   "description": "Rule set 2 (plates-release: same frames, question and per-release rules) plus a start check on the side camera's first frame: a colour already stacked at the start, or with fewer than two plates, is not required. CANDIDATE, validated on development data only (2026-09-29, Qwen3.8-27B, greedy; 63 human-judged episodes: 48 of the rollouts_recap plates pool and the diagnostic set of 15): agreement 0.810 -> 0.921, success recall 0.816 -> 0.959, false successes 3/14 -> 3/14. Known risk: the start check called two separate white plates 'one_or_none' in 11 of about 57 episodes; on an episode whose white plates are never stacked that waiver would give a false success. Not yet checked on a held-out or frozen set.",
   "anchor": {
     "signal": "gripper",

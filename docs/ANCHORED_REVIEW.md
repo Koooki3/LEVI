@@ -41,7 +41,9 @@ The plan resolves the spec and freezes it, so approving the plan approves the qu
 | Spec | Id | Task | Anchor | Frames |
 | --- | --- | --- | --- | --- |
 | Plates release-review rules | `plates-release` (formerly `plates-release-ar2`, still accepted) | Stack plates by colour (pink, white; green is a distractor) | gripper opens | side `view1` at −25, −15, −8, −3, −1, +4, +12 frames; wrist `hand` at −15, −6, −1, +4 |
-| Plates release-review rules, rule set 3 (with start check) — candidate | `plates-release-3` | As `plates-release`, plus a [start check](#start-check-and-vetoes): a colour already stacked at the start, or with fewer than two plates, is not required | gripper opens | as `plates-release`; start check: side `view1` at the first frame |
+| Plates release-review rules, rule set 3 (with start check) — `status: candidate` | `plates-release-3` | As `plates-release`, plus a [start check](#start-check-and-vetoes): a colour already stacked at the start, or with fewer than two plates, is not required | gripper opens | as `plates-release`; start check: side `view1` at the first frame |
+
+`anchored.specs` gives each spec a `status`: `stable`, or `candidate` for a spec still being validated (`plates-release-3`). Stable specs are listed first; a candidate is never a default — an agent plans it only when a person names it — and a plan that freezes one says so in `plan.anchored_spec.status`.
 
 A plan or script that names a former id gets the same spec. Plans approved before a rename keep the spec they froze, id included, and their results still show the spec's title.
 
@@ -52,10 +54,11 @@ A spec is JSON (`levi/agent/anchored_specs/<id>.json` for the built-in ones):
 | Field | Meaning |
 | --- | --- |
 | `id`, `version`, `description` | Identity; the description says what the spec was validated on. |
+| `status` | `stable` (the default, left out of the frozen form) or `candidate`: still being validated, listed and plannable when named, never a default. |
 | `title` | Optional display name per language, e.g. `{"en": "Plates release-review rules", "zh": "plates 释放复核规则"}`. The viewer and the outcome proposal show it; the id is shown only when a spec has no title. |
 | `aliases` | Built-in specs only: former ids that still resolve to this spec. |
 | `anchor` | `{"signal": "gripper", "event": "open" \| "close"}`, optionally `column` (a float vector column), `dimension` (its dimension name) and `open_level` (`high`, the default, or `low` for a channel that records closure). |
-| `views` | Per camera: a `role`, the `camera` key and `offsets` in frames or `offsets_seconds` (converted with the dataset's fps), counted from the anchor event, or with `"at": "start"` / `"at": "end"` from the episode's first / last frame. Offsets are clamped to the episode. The images are sent in this order, native size, PNG. |
+| `views` | Per camera: a `role`, the `camera` key and `offsets` in frames or `offsets_seconds` (converted with the dataset's fps), counted from the anchor event. Offsets are clamped to the episode. The images are sent in this order, native size, PNG. The spec's own views are always at the anchor; `"at": "start"` / `"at": "end"` (offsets from the episode's first / last frame) belong to the start check's views, and a veto's own views may use them too. |
 | `question` | The whole instruction; no system prompt, skills or evidence ledger are added. |
 | `fields` | Ordered answer fields, each with its `enum`. The server decodes them in this order, all required. |
 | `valid_when` | Conditions `{"field", "in": [...]}` or `{"field", "not_in": [...]}`; an event is valid when all hold. |
@@ -71,7 +74,13 @@ Each condition of an event reads as **supported** (it holds), **contradicted** (
 
 Both are declared in the spec, as data; a spec without them runs exactly as before (same requests, record and outcome, and the plan freezes the same spec), which a regression test checks byte for byte on recorded answers.
 
-**Start check** (`start`): one more question, asked once per episode before the events, on views `at` the episode's `start` (or `end`). It has its own `question`, `fields` and `max_output_tokens`, and a list `waive` of `{"label", "when": [conditions over its answer]}`. A required label (`episode.require_labels`) is waived — the episode does not need a valid event for it — when every condition holds; when one reads unknown, the label stays required and, if it has no valid event, is named undecided. For plates: a colour already stacked at the start, or with fewer than two plates, is not required.
+**Start check** (`start`): one more question, asked once per episode before the events, on views `at` the episode's `start` (or `end`). It has its own `question`, `fields` and `max_output_tokens`, and a list `waive` of `{"label", "when": [conditions over its answer]}` (each label at most once). A required label (`episode.require_labels`) is waived — the episode does not need a valid event for it — when every condition holds; when one reads unknown, the label stays required and, if it has no valid event, is named undecided. For plates: a colour already stacked at the start, or with fewer than two plates, is not required.
+
+The record's `basis` splits the waivers:
+
+- `waived_labels`: waivers the outcome rests on (the label has no valid event). The outcome proposal cites the start check's frames for them.
+- `redundant_waivers`: the label has a valid event anyway; the waiver changed nothing.
+- `contested_waivers`: waivers in `waived_labels` whose label does have events, none valid (contradicted or unknown) — the episode handled that label, so the start check's answer may be wrong. A success that rests on one is **undecided**: it is named in the proposal's `uncertainty`, `anchored.undecided` is true and the training manifest's `anchored_undecided` is true. The outcome itself stays success; a person decides.
 
 ```json
 "start": {
@@ -82,12 +91,12 @@ Both are declared in the spec, as data; a spec without them runs exactly as befo
 }
 ```
 
-**Vetoes** (`vetoes`): a list of rules that any single event can break. Each has an `id`, an optional `title`, and:
+**Vetoes** (`vetoes`): a list of rules that any single event can break. Each has an `id`, an optional `title` (per language, checked like the spec's; kept in the record, not yet shown), and:
 
 | Field | Meaning |
 | --- | --- |
 | `ask_when` | Conditions over the event's own answer; the veto is read at events where none is contradicted (every event when empty). |
-| `question`, `fields`, `views`, `max_output_tokens` | Optional: the veto's own question, asked at the event after the spec's question. `views` default to the spec's (the same images, so a server's prefix cache serves them). Without a question, the veto reads the event's own answer. |
+| `question`, `fields`, `views`, `max_output_tokens` | Optional: the veto's own question, asked at the event after the spec's question. `views` default to the spec's (the same images, so a server's prefix cache serves them). Without a question, the veto reads the event's own answer, and `views` or `max_output_tokens` are refused. |
 | `veto_when` | Conditions over the veto's answer (or the event's). All supported: **confirmed**; one contradicted: **cleared**; otherwise **undecided**. |
 | `effect` | `episode` (default): a confirmed veto at any event makes the outcome failure. `event`: it only makes its event invalid (contradicted); an undecided one makes a valid event unknown. |
 
@@ -106,7 +115,11 @@ An undecided `episode` veto does not change the outcome: like an undecided label
 ]
 ```
 
-Each start check and veto question is one more request with the same safeguards as the spec's own (budget, cache, an answer outside its fields sets the episode aside); the plan's estimate names them.
+Each start check and veto question is one more request with the same safeguards as the spec's own (budget, cache, an answer outside its fields sets the episode aside); the plan's estimate names them, and with a start check its `minimum_requests` is one per episode.
+
+**What an outcome is undecided on** (`anchored.undecided`, the manifest's `anchored_undecided`): a required label with no valid event but an unknown one, or with an unknown waiver (for either outcome); for a success, also an undecided `episode` veto or a contested waiver.
+
+**Cited frames.** The outcome proposal cites, in order: for an event whose `episode` veto was confirmed, the frames that veto's own question looked at, then the event's frames nearest the anchor; the episode's last frame when it has no event; the start check's frames when a waiver decided the outcome; then the valid events' frames (at most 32).
 
 ## Anchors
 
@@ -133,7 +146,7 @@ Each question gets the same safeguards as a model phase: the budget is reserved 
 
 - `anchored.get` — `{"repo_id"}` or `{"run_id"}`: the newest anchored review's per-episode outcome, event and valid counts, requests, tokens and time; with `"episode": N`, that episode's record and the spec's fields and rules. Both carry the spec's `id` and `title`.
 - `GET /api/anchored/summary` and `GET /api/anchored/episodes/{N}` (`repo_id` or `local_path`, optional `run_id`) — the same for the viewer.
-- In the episode viewer, the annotations timeline shows an **ANCHORED REVIEW** row headed by the spec's title (its id on hover): one marker per event at its frame, green when valid, red when contradicted, amber when unknown; hovering shows the answers and each condition, clicking seeks to the event.
+- In the episode viewer, the annotations timeline shows an **ANCHORED REVIEW** row headed by the spec's title (its id on hover): one marker per event at its frame, green when valid, red when contradicted, amber when unknown; hovering shows the answers and each condition, clicking seeks to the event. The row does not yet show the start check or veto verdicts: a marker is coloured by the event's verdict after its `effect: event` vetoes, and hovering shows only the spec's own answer. Read them in the outcome proposal (its text, `evidence_note` and `uncertainty`) or with `anchored.get`.
 
 ## Measured
 

@@ -150,10 +150,15 @@ class Veto(Contract):
 
     @model_validator(mode="after")
     def asked_or_read(self):
+        _title(self.title, f"Veto {self.id!r} title")
         if (self.question is None) != (self.fields is None):
             raise ValueError(f"Veto {self.id!r} gives a question with its fields")
         if self.views is not None and self.question is None:
             raise ValueError(f"Veto {self.id!r} has views but no question")
+        if "max_output_tokens" in self.model_fields_set and self.question is None:
+            raise ValueError(
+                f"Veto {self.id!r} has max_output_tokens but no question to ask"
+            )
         return self
 
     def answer_schema(self):
@@ -176,6 +181,9 @@ class AnchoredSpec(Contract):
     # only where there is no title.
     title: dict[str, str] | None = None
     description: str = Field(default="", max_length=2000)
+    # "candidate": still being validated -- listed and plannable when named,
+    # never a default. Left out of the frozen form when stable.
+    status: Literal["stable", "candidate"] = "stable"
     anchor: AnchorSpec = Field(default_factory=AnchorSpec)
     views: list[ViewSpec] = Field(min_length=1, max_length=8)
     question: str = Field(min_length=1, max_length=8000)
@@ -192,18 +200,7 @@ class AnchoredSpec(Contract):
 
     @model_validator(mode="after")
     def consistent(self):
-        if self.title is not None and (
-            not self.title
-            or any(
-                not re.fullmatch(r"[a-z]{2}(-[A-Za-z]{2,4})?", k)
-                or not v.strip()
-                or len(v) > 200
-                for k, v in self.title.items()
-            )
-        ):
-            raise ValueError(
-                "title maps language codes to non-empty names of up to 200 characters"
-            )
+        _title(self.title, "title")
         values = _values(self.fields, "Answer field")
         _check(self.valid_when, values, "valid_when")
         rule = self.episode
@@ -213,8 +210,18 @@ class AnchoredSpec(Contract):
             if set(rule.require_labels) - values[rule.label_field]:
                 raise ValueError("episode.require_labels must be values of label_field")
         _roles(self.views, "View")
+        if any(v.at != "anchor" for v in self.views):
+            # Every event would be shown the same frames; the start check
+            # (or a veto) is where the episode's first or last frame belongs.
+            raise ValueError(
+                "views are at the anchor; show the episode's start or end in "
+                "the start check or a veto"
+            )
         if self.start is not None:
             own = _values(self.start.fields, "start field")
+            labels = [w.label for w in self.start.waive]
+            if len(set(labels)) != len(labels):
+                raise ValueError("start.waive names a label twice")
             for w in self.start.waive:
                 if w.label not in rule.require_labels:
                     raise ValueError(
@@ -245,6 +252,21 @@ class AnchoredSpec(Contract):
         """The JSON schema the server decodes against: every field required,
         in the spec's order, each one of its values."""
         return _answer_schema(self.fields)
+
+
+def _title(title, what):
+    if title is not None and (
+        not title
+        or any(
+            not re.fullmatch(r"[a-z]{2}(-[A-Za-z]{2,4})?", k)
+            or not v.strip()
+            or len(v) > 200
+            for k, v in title.items()
+        )
+    ):
+        raise ValueError(
+            f"{what} maps language codes to non-empty names of up to 200 characters"
+        )
 
 
 def _answer_schema(fields):
@@ -282,7 +304,7 @@ def _roles(views, what):
 
 # Keys a spec that does not use them leaves out of its frozen form, so a plan
 # for an older spec freezes exactly what it froze before they existed.
-_OPTIONAL = {"start": None, "vetoes": []}
+_OPTIONAL = {"status": "stable", "start": None, "vetoes": []}
 
 
 def dump(spec):
@@ -302,6 +324,9 @@ def dump(spec):
         views(out["start"]["views"])
     for veto in out.get("vetoes", []):
         views(veto.get("views"))
+        if veto.get("question") is None:
+            # Nothing is asked, so there is no answer to bound.
+            veto.pop("max_output_tokens")
     return out
 
 
@@ -598,7 +623,21 @@ def outcome(spec, events, start_answer=None):
             },
         )
         if spec.start is not None:
-            basis["waived_labels"] = waived
+            # A waiver matters only for a label with no valid event; one
+            # whose label also has events that are not valid (contradicted
+            # or unknown) is contested: the episode did handle that label,
+            # so the start check's answer may be wrong.
+            decided = [x for x in waived if x not in labels]
+            basis["waived_labels"] = decided
+            basis["redundant_waivers"] = [x for x in waived if x in labels]
+            basis["contested_waivers"] = [
+                x
+                for x in decided
+                if any(
+                    not e["valid"] and e["answer"].get(rule.label_field) == x
+                    for e in events
+                )
+            ]
     else:
         ok = len(valid) >= rule.min_valid
         verdict, basis = (
@@ -624,10 +663,13 @@ def outcome(spec, events, start_answer=None):
 
 def undecided(verdict, basis):
     """Whether an outcome rests on something undecided: a required label (or
-    its waiver), or -- for a success -- a veto."""
+    its waiver), or -- for a success -- a veto or a contested waiver."""
     return bool(
         basis.get("undecided_labels")
-        or (verdict == "success" and basis.get("undecided_vetoes"))
+        or (
+            verdict == "success"
+            and (basis.get("undecided_vetoes") or basis.get("contested_waivers"))
+        )
     )
 
 
@@ -712,12 +754,12 @@ def review_episode(wb, id, config, context, episode, started):
     start_frames = shows(spec.start.views, 0) if spec.start else {}
     for view in spec.start.views if spec.start else []:
         per_camera.setdefault(view.camera, set()).update(start_frames[view.role])
+    if not positions:
+        # No event: the outcome still cites what the episode ends on.
+        per_camera.setdefault(spec.views[0].camera, set()).add(int(frames[last]))
     evidence, summary = [], None
     for camera, found in per_camera.items():
         chosen = sorted(found)
-        if not chosen and camera == spec.views[0].camera:
-            # No event: the outcome still cites what the episode ends on.
-            chosen = [int(frames[last])]
         if not chosen:
             continue
         scoped = context.model_copy(update={"cameras": [camera]})
@@ -859,20 +901,44 @@ def review_episode(wb, id, config, context, episode, started):
         json.dumps(record, ensure_ascii=False)
     )
     # Cite the frames the verdict rests on: an event that vetoed the episode
-    # first, then the valid events, each by its frames nearest the anchor
-    # (one before, one after, per camera).
+    # first (the frames its confirmed vetoes asked about, then its own), the
+    # episode's last frame when there is no event, the start check's frames
+    # when a waiver decided the outcome, then the valid events, each by its
+    # frames nearest the anchor (one before, one after, per camera).
     vetoing = {v["frame_index"] for v in basis.get("vetoes") or []}
     cited = []
-    for e in sorted(
+
+    def cite(ids):
+        cited.extend(x for x in dict.fromkeys(ids) if x not in cited)
+
+    ordered = sorted(
         events, key=lambda e: (e["frame_index"] not in vetoing, not e["valid"])
-    ):
+    )
+
+    def near(e):
+        for v in e.get("vetoes") or []:
+            if v["verdict"] == "confirmed":
+                cite(f["evidence_id"] for f in v.get("frames") or [])
         for view in spec.views:
             mine = [f for f in e["frames"] if f["role"] == view.role]
             before = [f for f in mine if f["offset"] < 0]
             after = [f for f in mine if f["offset"] >= 0]
-            for f in ([before[-1]] if before else []) + ([after[0]] if after else []):
-                if f["evidence_id"] not in cited:
-                    cited.append(f["evidence_id"])
+            cite(
+                f["evidence_id"]
+                for f in ([before[-1]] if before else [])
+                + ([after[0]] if after else [])
+            )
+
+    for e in ordered:
+        if e["frame_index"] in vetoing:
+            near(e)
+    if not events:
+        cite([by_frame[(spec.views[0].camera, int(frames[last]))]["id"]])
+    if basis.get("waived_labels"):
+        cite(f["evidence_id"] for f in start["frames"])
+    for e in ordered:
+        if e["frame_index"] not in vetoing:
+            near(e)
     if not cited:
         cited = [evidence[-1]["id"]]
     name = spec.anchor.event
@@ -917,6 +983,11 @@ def review_episode(wb, id, config, context, episode, started):
     doubts = []
     if basis.get("undecided_labels"):
         doubts.append("undecided for " + ", ".join(basis["undecided_labels"]))
+    if verdict == "success" and basis.get("contested_waivers"):
+        doubts.append(
+            "waived at the start but with events that are not valid: "
+            + ", ".join(basis["contested_waivers"])
+        )
     if verdict == "success" and basis.get("undecided_vetoes"):
         doubts.append(
             "veto undecided: "

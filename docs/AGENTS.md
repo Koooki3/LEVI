@@ -195,7 +195,7 @@ uv run levi agent knowledge list|refresh|promote|reject      # built-in knowledg
 | Harness | `memory.get`, `memory.search`, `cost.profile`, `knowledge.list`, `improvements.list`, `improvements.get`, `improvements.evaluate`, `improvements.revise`, `improvements.transition` (up to `awaiting_authorization`) | agent |
 | | `memory.rebuild`, `knowledge.promote`, `knowledge.reject`; publishing, retaining, rolling back and resolving improvements | **person** |
 | Supervision | `supervision.pending`, `supervision.feedback` | assigned teacher |
-| Anchored review | `anchored.specs`, `anchored.get` (read-only: built-in specs; per-episode outcomes or one episode's events, answers, validity and frames; see [Anchored review](ANCHORED_REVIEW.md)) | agent |
+| Anchored review | `anchored.specs`, `anchored.get` (read-only: built-in specs with their status — a `candidate` is never a default; per-episode outcomes or one episode's events, answers, validity and frames; see [Anchored review](ANCHORED_REVIEW.md)) | agent |
 | Fast segmentation | `segmentation.status` (read-only: student models with their held-out scores and licences, worker readiness, latest labelling or distillation jobs; see [Fast segmentation](SEGMENTATION.md)) | agent |
 | RECAP value model | `recap.status`, `recap.get` (read-only: checkpoints, current advantage labels, an episode's positive/negative runs and value curve; see [RECAP](RECAP.md)) | agent |
 | Workspace | `gpu.status` (the local-model GPU guardian's decision) | agent |

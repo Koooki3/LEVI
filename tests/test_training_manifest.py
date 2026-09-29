@@ -99,7 +99,7 @@ def _name(repo):
     return repo.split("/", 1)[1]
 
 
-def _anchored(name, outcomes, run_id="anchored-20260928-0001"):
+def _anchored(name, outcomes, run_id="anchored-20260928-0001", bases=None):
     from levi.agent.anchored import builtin
     from levi.agent.store import Store
 
@@ -124,7 +124,9 @@ def _anchored(name, outcomes, run_id="anchored-20260928-0001"):
             {
                 "episode_index": ep,
                 "outcome": outcome,
-                "basis": {"undecided_labels": ["white"] if ep == 1 else []},
+                "basis": (bases or {}).get(
+                    ep, {"undecided_labels": ["white"] if ep == 1 else []}
+                ),
                 "events": [],
             },
         )
@@ -199,6 +201,28 @@ def _subtasks(name):
 
 def _frames(result):
     return pq.read_table(Path(result["output_dir"]) / tm.FRAMES).to_pandas()
+
+
+def test_a_contested_waiver_leaves_an_anchored_success_undecided(repo):
+    """A success that rests on a start-check waiver its own events contest
+    (or on an undecided veto) is flagged; a plain success is not."""
+    name = _name(repo)
+    plain = {"undecided_labels": [], "waived_labels": [], "contested_waivers": []}
+    _anchored(
+        name,
+        {0: "success", 1: "success", 2: "success"},
+        bases={
+            0: plain | {"waived_labels": ["white"], "contested_waivers": ["white"]},
+            1: plain | {"waived_labels": ["white"]},
+            2: plain | {"undecided_vetoes": [{"veto": "x", "frame_index": 3}]},
+        },
+    )
+    f = _frames(tm.build(repo, "all_rollouts"))
+    flags = {
+        ep: bool(f[f.episode_index == ep].anchored_undecided.iloc[0])
+        for ep in (0, 1, 2)
+    }
+    assert flags == {0: True, 1: False, 2: True}
 
 
 def test_operations_decide_include_and_weight(repo):

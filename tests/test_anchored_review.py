@@ -848,8 +848,19 @@ def test_a_review_asks_the_start_check_and_the_vetoes(
     assert "veto wrong_box confirmed" in by_episode[0]["content"]
     assert "start (red=present, blue=absent)" in by_episode[0]["content"]
     assert "vetoed: wrong_box" in by_episode[0]["evidence_note"]
-    # Nothing required at the start and no event: nothing left to do.
+    # The citations lead with the frame the confirmed veto asked about,
+    # and the start frame the blue waiver rests on is among them.
+    veto_frame = first["vetoes"][0]["frames"][0]["evidence_id"]
+    start_frame = record["start"]["frames"][0]["evidence_id"]
+    assert by_episode[0]["evidence_ids"][0] == veto_frame
+    assert start_frame in by_episode[0]["evidence_ids"]
+    # Nothing required at the start and no event: nothing left to do. The
+    # episode's last frame is still cited first, then the start frame.
     assert by_episode[1]["outcome"] == "success"
+    start_1 = wb.store.get("anchored", f"{run['id']}:1")["start"]["frames"][0]
+    items = wb.store.get("evidence", f"{run['id']}:1")["items"]
+    end = next(r["id"] for r in items if r["frame_index"] == 19)
+    assert by_episode[1]["evidence_ids"] == [end, start_1["evidence_id"]]
     human = Principal("tester", human=True)
     one = invoke(wb, human, "anchored.get", {"run_id": run["id"], "episode": 0})
     assert list(one["start"]["answer"]) == ["red", "blue"]
@@ -892,3 +903,215 @@ def test_plates_rule_set_3_is_rule_set_2_plus_a_start_check():
         )[0]
         == "failure"
     )
+
+
+def plate(colour, verdict, **answer):
+    """One plates release event: a clean same-colour stack unless ``answer``
+    says otherwise."""
+    return event(
+        {
+            "held_before": "yes",
+            "plate_colour": colour,
+            "landed_on": "same_colour_plate",
+            "stays": "yes",
+        }
+        | answer,
+        verdict,
+    )
+
+
+def test_a_waiver_its_own_events_contest_leaves_the_success_undecided():
+    """The reviewer's case: the start check says at most one white plate, yet
+    one white release is contradicted (on the table) and another unknown. The
+    waiver still decides the outcome, but the success is not clean: it is
+    named, undecided and in the proposal's uncertainty."""
+    three = anchored.builtin()["plates-release-3"]
+    start = {"pink": "two_or_more_apart", "white": "one_or_none"}
+    events = [
+        plate("pink", "supported"),
+        plate("white", "contradicted", landed_on="table"),
+        plate("white", "unknown", held_before="unclear"),
+    ]
+    verdict, basis = outcome(three, events, start)
+    assert verdict == "success"
+    assert basis["waived_labels"] == ["white"]
+    assert basis["contested_waivers"] == ["white"]
+    assert basis["redundant_waivers"] == []
+    assert anchored.undecided(verdict, basis)
+    # No white release at all: the waiver decides, uncontested, clean.
+    verdict, basis = outcome(three, events[:1], start)
+    assert (verdict, basis["waived_labels"], basis["contested_waivers"]) == (
+        "success",
+        ["white"],
+        [],
+    )
+    assert not anchored.undecided(verdict, basis)
+    # A valid white release anyway: the waiver changed nothing.
+    both = [*events, plate("white", "supported")]
+    verdict, basis = outcome(three, both, start)
+    assert verdict == "success"
+    assert (basis["waived_labels"], basis["redundant_waivers"]) == ([], ["white"])
+    assert basis["contested_waivers"] == []
+    assert not anchored.undecided(verdict, basis)
+    # A failure for another reason stays a plain failure.
+    verdict, basis = outcome(three, events[1:], start)
+    assert (verdict, basis["missing_labels"]) == ("failure", ["pink"])
+    assert not anchored.undecided(verdict, basis | {"undecided_labels": []})
+
+
+def test_the_candidate_spec_is_marked_and_never_a_default(client):
+    from levi import service
+    from levi.agent.runtime import Workbench
+
+    three = anchored.builtin()["plates-release-3"]
+    assert (three.status, PLATES.status) == ("candidate", "stable")
+    assert anchored.dump(three)["status"] == "candidate"
+    assert "status" not in anchored.dump(PLATES)
+    with pytest.raises(ValueError, match="status"):
+        AnchoredSpec.model_validate(spec("cam", status="beta"))
+    wb = Workbench(service.STATE)
+    listed = invoke(wb, Principal("tester", human=True), "anchored.specs", {})
+    statuses = [(s["id"], s["status"]) for s in listed["specs"]]
+    # Stable first; a candidate is labelled and the instructions forbid it
+    # as a default.
+    assert statuses[0] == ("plates-release", "stable")
+    assert ("plates-release-3", "candidate") in statuses
+    assert statuses.index(("plates-release-3", "candidate")) > 0
+    assert "never choose it by default" in listed["use"]
+
+
+def test_a_plan_names_the_candidate_and_counts_the_start_check(
+    client,
+    dataset,
+    server,  # noqa: F811 - the fixture imported above
+):
+    from levi import catalog, service
+    from levi.agent.runtime import Workbench
+
+    camera = camera_dataset(dataset)
+    gripper_dataset(dataset)
+    entry = catalog.register(str(dataset))
+    wb = Workbench(service.STATE)
+    wb.store.put("providers", "vllm", config().model_dump())
+
+    def plan(anchored_spec):
+        return wb.plan(
+            TaskContext(
+                repo_id=entry["id"],
+                episodes=[0, 1],
+                instruction="Judge each release",
+                provider="vllm",
+                cameras=[camera],
+                allow_media_egress=True,
+                workflow={"kind": "review", "anchored": anchored_spec},
+                budget=Budget(max_calls=20, max_tokens=None, max_seconds=600),
+            )
+        )["plan"]
+
+    checked = plan(vetoed_spec(camera, status="candidate"))
+    assert checked["estimate"]["minimum_requests"] == 2
+    assert checked["anchored_spec"] == {
+        "id": "block-drop",
+        "version": 1,
+        "status": "candidate",
+    }
+    plain = plan(spec(camera))
+    assert plain["estimate"]["minimum_requests"] == 0
+    assert plain["anchored_spec"]["status"] == "stable"
+
+
+def test_loose_spec_parts_are_refused():
+    cam = "cam"
+    no_question = {"id": "x", "veto_when": [{"field": "held", "in": ["yes"]}]}
+    cases = [
+        ("no question to ask", {"vetoes": [no_question | {"max_output_tokens": 50}]}),
+        ("Veto 'x' title", {"vetoes": [no_question | {"title": {"en": " "}}]}),
+        ("Veto 'x' title", {"vetoes": [no_question | {"title": {}}]}),
+        (
+            "views are at the anchor",
+            {"views": [{"role": "front", "camera": cam, "offsets": [0], "at": "end"}]},
+        ),
+    ]
+    for message, extra in cases:
+        with pytest.raises(ValueError, match=message):
+            AnchoredSpec.model_validate(spec(cam, **extra))
+    twice = vetoed_spec(cam)
+    twice["start"]["waive"].append(twice["start"]["waive"][0])
+    with pytest.raises(ValueError, match="names a label twice"):
+        AnchoredSpec.model_validate(twice)
+    # A veto read from the event's answer freezes without an answer budget,
+    # and its frozen form validates again.
+    frozen = anchored.dump(AnchoredSpec.model_validate(vetoed_spec(cam)))
+    assert "max_output_tokens" not in frozen["vetoes"][1]
+    AnchoredSpec.model_validate(frozen)
+    # A veto's own views may look at the episode's start or end.
+    AnchoredSpec.model_validate(
+        spec(
+            cam,
+            vetoes=[
+                {
+                    "id": "x",
+                    "title": {"en": "Start box"},
+                    "views": [
+                        {"role": "s", "camera": cam, "offsets": [0], "at": "start"}
+                    ],
+                    "question": "q",
+                    "fields": [{"name": "full", "enum": ["yes", "no", "unclear"]}],
+                    "veto_when": [{"field": "full", "in": ["yes"]}],
+                }
+            ],
+        )
+    )
+
+
+def test_a_contested_waiver_is_in_the_proposals_uncertainty(
+    client,
+    dataset,
+    server,  # noqa: F811 - the fixture imported above
+):
+    from levi import catalog, service
+    from levi.agent.runtime import Workbench
+
+    camera = camera_dataset(dataset)
+    gripper_dataset(dataset)
+    entry = catalog.register(str(dataset))
+    wb = Workbench(service.STATE)
+    wb.store.put("providers", "vllm", config().model_dump())
+    checked = vetoed_spec(camera)
+    checked.pop("vetoes")
+    context = TaskContext(
+        repo_id=entry["id"],
+        episodes=[0],
+        instruction="Judge each release",
+        provider="vllm",
+        cameras=[camera],
+        allow_media_egress=True,
+        workflow={
+            "kind": "review",
+            "anchored": checked,
+            "require_human_pilot": False,
+        },
+        budget=Budget(max_calls=20, max_tokens=None, max_seconds=600),
+    )
+    run = wb.plan(context)
+    approve(wb, run["id"], 1, "human")
+    replies(
+        server,
+        [
+            # No blue block at the start, yet a blue block is dropped outside
+            # the box.
+            {"red": "present", "blue": "absent"},
+            {"held": "yes", "colour": "red", "in_box": "yes"},
+            {"held": "yes", "colour": "blue", "in_box": "no"},
+        ],
+    )
+    assert wb.store.claim(run["id"], "owner")
+    wb.execute(run["id"], "owner", pilot=False)
+    result = wb.store.get("runs", run["id"])
+    assert result["status"] == "waiting_for_review", result["reason"]
+    record = wb.store.get("anchored", f"{run['id']}:0")
+    assert record["outcome"] == "success"
+    assert record["basis"]["contested_waivers"] == ["blue"]
+    (proposal,) = wb.store.get("changes", result["changes"])["proposals"]
+    assert "not valid: blue" in proposal["uncertainty"]
+    assert record["start"]["frames"][0]["evidence_id"] in proposal["evidence_ids"]
