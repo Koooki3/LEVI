@@ -1,9 +1,9 @@
 # Unified execution architecture: implementation status
 
 This page records the incremental changes actually made toward the approved 0.4.0
-plan. The package version is still 0.3.0. No tag, release, commit or remote repository mutation is
-part of this update. Existing execution and format services remain authoritative
-until their replacements pass migration and equivalence gates.
+plan. The package version is still 0.3.0; unreleased changes are listed in the
+[changelog](../../CHANGELOG.md). Existing execution and format services remain
+authoritative until their replacements pass migration and equivalence gates.
 
 ## Implemented and connected
 
@@ -65,6 +65,23 @@ until their replacements pass migration and equivalence gates.
 - English/Chinese local-model guides, API reference, workspace paths and notices
   describe installed behavior and its limits.
 
+## Work outside the plan's packages
+
+These capabilities were added on top of the harness; each has its own guide with
+its measurements and limits.
+
+- Local OpenAI-compatible servers (vLLM) as a second local-model protocol, the lean
+  prompt style and several requests in flight: [Local models](../OLLAMA.md).
+- Release-anchored review, with a spec-declared start check and vetoes:
+  [Anchored review](../ANCHORED_REVIEW.md).
+- Fast instance segmentation (student model, live overlay, distillation from SAM3):
+  [Fast segmentation](../SEGMENTATION.md).
+- RECAP value model, per-frame values and advantage labels: [RECAP](../RECAP.md).
+- Training manifests: [Training manifests](../TRAINING_MANIFEST.md).
+- Training pool: [Training pool](../TRAINING_POOL.md).
+- Namespaces, the DROID test sample and the report page:
+  [Workspace](../WORKSPACE.md), [API](../API.md#technical-report--技术报告).
+
 ## Verification scope
 
 Tests include deterministic contracts, fake native model HTTP responses,
@@ -82,7 +99,7 @@ See [validation record](../VALIDATION.md) for recorded execution results.
 | WP01 contracts | Partial: Python contracts and drift snapshot; complete single-source TS/MCP/CLI generation pending |
 | WP02–WP07 data/runtime/formats/review | Existing services preserved; planned unified replacement not implemented |
 | WP08 model loop/UI base | Partial: native provider routed through existing annotation Harness; generic tool loop pending |
-| WP09 Ollama/offline | Partial: local service integration, explicit downloads and owned-process lifecycle; installer, capability inference probes, offline bundle and shared resource arbitration pending |
+| WP09 Ollama/offline | Partial: local service integration, explicit downloads and owned-process lifecycle; installer, capability inference probes and offline bundle pending; GPU sharing is a courtesy guardian, not arbitration |
 | WP10 Harness/memory | Partial: task ledger, per-dataset verified memory with plan-time context, rebuild; FTS5/semantic index and dependency-cache migration pending |
 | WP11 supervision/improvements | Partial: annotation-phase teacher gate; improvement candidates with deterministic triage, LEVI-computed evaluation, human publication, observation and retain/rollback (harness parameters only); competency promotion, general tool supervision and skill-text learning pending |
 | WP12 six-area UI/governance | Existing UI extended; systematic navigation/state/governance refactor pending |

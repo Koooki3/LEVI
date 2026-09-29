@@ -4,6 +4,18 @@ What has been checked, how, and what has not. Newest first. Each entry states wh
 
 按时间倒序记录验证内容、方法与未覆盖范围。每条都注明用的是真实数据/真实模型，还是固定样例与模拟；样例测试通过不等于模型质量达标。参考版本见 [UPSTREAM.md](UPSTREAM.md)。
 
+## 2026-09-29 Later work: where the evidence is / 后续功能的验证依据
+
+Fixture tests exist for each feature below (`tests/test_segmentation.py`, `test_recap_value.py`, `test_recap_fr3.py`, `test_training_manifest.py`, `test_pool*.py`, `test_report.py`, `test_namespaces.py`, `test_anchored_review.py`); they use synthetic data, fake providers and stand-in workers, and do not measure model quality. This entry lists what has more than that, and what has not.
+
+- **Fast segmentation**: measured on real data and a GPU (latency, frame rate, tracking, offline speed, held-out scores of the plates student): [Fast segmentation](SEGMENTATION.md#measured--实测). The scores are against SAM3's labels and a small hand-checked reference set, not against a full human labelling. The 30 fps figures come from 10 fps recordings played at 3×.
+- **RECAP value labels**: the FR3 checkpoint loaded with no missing or unexpected keys and its advantage job ran ([RECAP](RECAP.md)); the advantage formula is tested against RLinf's own loop. That the labels improve a trained policy is not established.
+- **Anchored review**: the plates rules are validated on the frozen test set (next entry); the rule set with a start check only on development data; no other task.
+- **Training manifests and training pool**: fixture-tested, including that exports leave source datasets unchanged. No training run on their output is recorded here.
+- **Docker**: the image has still not been built or run.
+
+以上每项功能都有固定样例测试（合成数据、模拟提供者和替身 worker），它们不衡量模型质量。这一条只列出有更多依据的部分：快速分割有真实数据和 GPU 上的实测，指标对照 SAM3 标注和少量人工核对的参考帧；RECAP 价值标签在真实检查点上加载无缺失键、优势作业跑通，但标签能否改善策略尚无结论；锚定复核的 plates 规则在冻结测试集上验证，带起始检查的规则集只在开发数据上验证；训练清单和训练池只有固定样例测试，没有训练运行的记录；Docker 镜像仍未构建或运行。
+
 ## Anchored review
 
 2026-09-28, real data and a real model: the frozen test set (60 plates episodes; a raw policy-rollout capture browsed through its view), RedHatAI Qwen3.8-27B INT4 on vLLM 0.30 (`--max-model-len 49152`, xgrammar without whitespace, thinking off, greedy through `--override-generation-config '{"temperature": 0.0}'`), RTX 5090 used by nothing else. One server session ran the external release-anchored review script (rule set 2, the check accepted with the current best configuration v1.1), then a LEVI anchored review run with the built-in plates release-review rules (`workflow.anchored = {"spec": "plates-release"}`; the run named the spec by its former id `plates-release-ar2`, which still resolves to it) driven through plan, pilot, review and commit, then the external script again.

@@ -22,6 +22,7 @@ Modified upstream source files that support stable comment headers carry a LEVI 
 - Dataset-scoped flags, local HF Token login, safe current-annotation save before export and stale-request protection.
 - Agent workbench and harness (`levi/agent/`, `levi/harness/`): one capability layer for UI, REST, MCP and CLI; plan, pilot and commit gates; evidence ledgers; task closure, measured cost, local memory, improvement candidates, teacher supervision and grading. Local model integration (`levi/inference/`): Ollama provider, owned service and an off-peak GPU guard.
 - Built-in conversion (`levi/conversion/`), raw-capture browsing views, outcome labels and RECAP export.
+- Later additions with no upstream counterpart: release-anchored review (`levi/agent/anchored.py`), fast instance segmentation (`levi/segmentation/`, `backend/segmentation.py`, `integrations/segmentation/`), the RECAP value model (`levi/recap/`, `integrations/recap_value/`), training manifests (`levi/training_manifest.py`), the training pool (`levi/pool/`), the report page (`levi/report.py`), namespaces and the DROID test sample. The third-party code and models they use are listed in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 - Locked Python/JavaScript dependencies, independent Docker/CI, tests and bilingual documentation.
 - Removed the upstream workflow that pushed automatically to `lerobot/visualize_dataset`.
 
@@ -67,7 +68,7 @@ Baseline: `huggingface/lerobot-dataset-visualizer@dc59887796fd41f37040c0df6b10e6
 - Embedded-image-only datasets are rejected by the retained upstream loader.
 - Hub video, OAuth, external doctor, URDF meshes and research-paper links require network access. Their text is not translated by LEVI.
 - Auto chunk suggestions and alignment estimates preserve upstream mathematical behavior, not universal training prescriptions.
-- Runtime is a source checkout, not a standalone frontend bundled inside a PyPI wheel. Use the documented source install or Docker image.
+- Runtime is a source checkout, not a standalone frontend bundled inside a PyPI wheel. Use the documented source install; the Docker image is provided but unverified ([Validation](VALIDATION.md)).
 - Stopping the service terminates conversion workers; interrupted jobs are marked for inspection and outputs are only published on success. Restart never automatically resumes writes.
 - A raw capture's browsing view is for viewing and annotation, not training: it carries no pixel statistics and cannot be exported directly.
 

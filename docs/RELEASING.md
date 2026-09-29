@@ -6,7 +6,7 @@ Repository: https://github.com/Koooki3/LEVI
 
 About description:
 
-> A bilingual workbench for robot-learning data: browse and convert LeRobot datasets and raw captures, check their quality, and annotate them with human-reviewed agents — external MCP, API or local Ollama models — with measured cost and local memory.
+> A bilingual workbench for robot-learning data: browse and convert LeRobot datasets and raw captures, check their quality, and annotate them with human-reviewed agents — external MCP, API or local (Ollama, vLLM) models — with measured cost and local memory.
 
 Topics: `lerobot`, `robotics`, `robot-learning`, `dataset-visualization`, `data-annotation`, `dataset-conversion`, `data-quality`, `imitation-learning`, `data-curation`, `mcp`, `ollama`, `huggingface`, `nextjs`, `fastapi`, `uv`.
 

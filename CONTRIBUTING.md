@@ -20,7 +20,7 @@ bun run format && bun run validate
 Set `LEVI_WORKSPACE` to a local test data directory. Run `bun run format` with the local Bun before the frontend checks. You can add the project-local runtime to the current shell's PATH without changing shell startup files.
 
 - Preserve Apache-2.0 attribution and upstream history. New third-party assets need a documented source and compatible license.
-- Keep both locale catalogs, both READMEs and the paired Chinese guides (`docs/*.zh-CN.md`) current. Record unreleased changes in `CHANGELOG.md` and open problems in `docs/architecture/issue-register.md`; remove a register entry once its fix is tested. Dataset contents and schema identifiers must remain unchanged by translation.
+- Keep both locale catalogs, both READMEs and the paired Chinese guides (`docs/*.zh-CN.md`) current. Record unreleased changes in `CHANGELOG.md` and open problems in the local, git-ignored issue register (`$LEVI_WORKSPACE/memory/issue-register.md`); remove a register entry once its fix is tested. `uv run levi docs check` fails when a capability, `levi agent` command, user-facing `LEVI_*` setting or link is undocumented or broken; `uv run levi docs sync` regenerates the capability reference and the knowledge index. Dataset contents and schema identifiers must remain unchanged by translation.
 - Do not place caches, datasets, checkpoints, tokens or logs in source control.
 - Jobs must use an allowlist, argv arrays and a new output directory. Do not add arbitrary shell execution from HTTP requests.
 - Reproduce video behavior in a real browser. A passing build alone does not validate media playback.
