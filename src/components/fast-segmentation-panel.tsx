@@ -1068,7 +1068,10 @@ export default function FastSegmentationPanel({
           </div>
 
           {/* e. Distil */}
-          <details className="object-annotation-step fast-seg-advanced">
+          <details
+            className="object-annotation-step fast-seg-advanced"
+            open={distilJob && ACTIVE.has(distilJob.status) ? true : undefined}
+          >
             <summary>
               <span className="object-annotation-step-number">03</span>
               <strong>

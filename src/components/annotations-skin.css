@@ -2098,3 +2098,18 @@
   color: #f8fafc;
   font-size: 13px;
 }
+.annotations-skin .object-annotation-controls .object-annotation-checkbox {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+}
+.annotations-skin
+  .object-annotation-controls
+  .object-annotation-checkbox
+  input {
+  min-height: 0;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  accent-color: #d4f779;
+}
