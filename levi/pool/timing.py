@@ -41,6 +41,11 @@ def time_scale(source_fps: float | None, fps: float, timing: str | None):
     return source_fps / fps
 
 
+def rounded(value: float | None) -> float | None:
+    """Six decimals: a probed rate is 9.437066…, no need to keep all of it."""
+    return None if value is None else round(float(value), 6)
+
+
 def _measured(row: dict) -> float | None:
     value = row.get("measured_fps")
     try:

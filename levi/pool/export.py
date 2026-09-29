@@ -958,9 +958,9 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
                 **_policy_fields(ep),
                 **_selection_fields(ep),
                 "frames": n,
-                "source_fps": source_fps,
-                "time_scale": timing_mod.time_scale(
-                    source_fps, options.fps, options.timing
+                "source_fps": timing_mod.rounded(source_fps),
+                "time_scale": timing_mod.rounded(
+                    timing_mod.time_scale(source_fps, options.fps, options.timing)
                 ),
             }
         )

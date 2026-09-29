@@ -185,7 +185,7 @@ Each episode row in `meta/episodes.jsonl` of a LeRobot export carries `pool_key`
 
 ## Frame rates / 帧率
 
-Stored videos run at 10 fps for human collection and at about 9.4–10 fps for policy rollouts (online-RL runs about 9.5, direct deployment and student policies about 9.96). LeRobot and RECAP exports are written at 10 fps by default (`--fps`, or the fps field of the export panel). How a slower rollout meets that rate depends on the timing mode (`--timing resample|retime`, the **Timing** select of the export panel, `options.timing` of the API; `levi/pool/timing.py`, `levi/conversion/options.py`):
+Stored videos run at 10 fps for human collection and at about 9.4–10 fps for policy rollouts (online-RL runs about 9.5, with single episodes down to about 8.6; direct deployment and student policies about 9.96). LeRobot and RECAP exports are written at 10 fps by default (`--fps`, or the fps field of the export panel). How a slower rollout meets that rate depends on the timing mode (`--timing resample|retime`, the **Timing** select of the export panel, `options.timing` of the API; `levi/pool/timing.py`, `levi/conversion/options.py`):
 
 - **`retime`** (default of `recap_value`) keeps every captured row and declares the rows at the export fps. A rollout captured at 9.5 fps and declared at 10 fps has a timeline about 5% shorter than the recording (6% at 9.4 fps), so its motion plays about 5% faster than it happened. Rows and pixels are unchanged.
 - **`resample`** (default of `lerobot_v21`) drops rows to reach the export fps and never adds any. A raw rollout measured below the export fps cannot be converted at it, and the export is refused before anything is converted (`Raw captures converted at … fps, not 10 …; lower the export fps to 9 or use timing retime`). Lower `--fps` to the nearest integer below the slowest measured rate, or choose `retime`.
@@ -199,7 +199,7 @@ Stored videos run at 10 fps for human collection and at about 9.4–10 fps for p
 
 **Record.** `pool_export.json` has `timing` (`mode`, `export_fps`, `source_fps_min/max`, `time_scale_min/max`, `episodes_off_by_over_2_percent`; `null` for a raw capture copy) and, per episode of a LeRobot or RECAP export, `source_fps` (measured from the video; a LeRobot source's own fps) and `time_scale` (exported duration ÷ recorded duration: `source_fps / fps` for `retime`, 1 for `resample`, which picks rows by time). `params.timing` and `conversion.timing` hold the mode actually used, also when the default applied.
 
-存储的视频：人工采集为 10 fps，策略 rollout 约 9.4–10 fps（在线 RL 约 9.5，直接部署和学生策略约 9.96）。LeRobot 与 RECAP 导出默认按 10 fps 写入（`--fps`，或导出面板的 fps 字段）。较慢的 rollout 如何对上这个帧率，取决于时间模式（`--timing resample|retime`，导出面板的“时间模式”下拉框，API 的 `options.timing`；`levi/pool/timing.py`、`levi/conversion/options.py`）：
+存储的视频：人工采集为 10 fps，策略 rollout 约 9.4–10 fps（在线 RL 约 9.5，个别片段低至约 8.6；直接部署和学生策略约 9.96）。LeRobot 与 RECAP 导出默认按 10 fps 写入（`--fps`，或导出面板的 fps 字段）。较慢的 rollout 如何对上这个帧率，取决于时间模式（`--timing resample|retime`，导出面板的“时间模式”下拉框，API 的 `options.timing`；`levi/pool/timing.py`、`levi/conversion/options.py`）：
 
 - **`retime`**（`recap_value` 的默认）保留每个采集行，并按导出 fps 声明。按 9.5 fps 采集、按 10 fps 声明的 rollout，时间轴比实际录制短约 5%（9.4 fps 时约 6%），动作播放比实际发生时快约 5%。行数和画面不变。
 - **`resample`**（`lerobot_v21` 的默认）只丢行、不补行。实测低于导出 fps 的原始 rollout 无法按该 fps 转换，导出会在转换开始前被拒绝（`Raw captures converted at … fps, not 10 …; lower the export fps to 9 or use timing retime`）。可把 `--fps` 降到不高于最慢实测帧率的最大整数，或改用 `retime`。
