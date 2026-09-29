@@ -39,12 +39,12 @@ Distillation also needs the [SAM3](SAM3.md) worker and checkpoint. RF-DETR downl
 1. Open an episode, **Annotations → Objects**, choose a student model and switch on **Live overlay**. LEVI starts one worker for this episode (both cameras) and answers once the model is loaded (a few seconds).
 2. Play, pause, seek or change speed as usual. The page posts the player clock to the worker; the worker decodes the frame that is due (one frame ahead by default), runs the student on both cameras in one batch and tracks each camera.
 3. Each camera has its own overlay canvas. On every animation frame it reads the video's own `currentTime` and draws that frame's result, or the newest earlier result no more than 3 frames old; an older result is dropped rather than shown late. The overlay never waits for the model, so playback never stalls.
-4. Switching the overlay off (or leaving the episode, or 2 minutes without a player clock) stops the worker. With **Save results when stopping** on, the first result of every frame shown is saved as one revision for this episode's cameras.
+4. Switching the overlay off, leaving the episode or closing the page stops the worker (a page that disappears without saying so is noticed after 2 minutes without a player clock; the page sends one every second, also while paused). With **Save results when stopping** on, the first result of every frame shown is saved as one revision for this episode's cameras.
 
 1. 打开片段，进入 **Annotations → Objects**，选择学生模型，打开 **实时叠加**。LEVI 为该片段启动一个 worker（两路相机），模型加载完成后（几秒）返回。
 2. 照常播放、暂停、拖动或改变倍速。页面把播放器时钟发给 worker；worker 解码当前应显示的帧（默认提前 1 帧），两路相机合成一批推理，并各自跟踪。
 3. 每路相机有独立的叠加画布。每个动画帧读取该视频自己的 `currentTime`，显示这一帧的结果；没有时显示不超过 3 帧的最新结果，更旧的结果直接丢弃，不会延迟显示。叠加层从不等待模型，播放不会卡顿。
-4. 关闭叠加（或离开片段，或 2 分钟收不到播放器时钟）会停止 worker。勾选 **停止时保存结果** 时，已显示各帧的第一次结果作为该片段相机的一个版本保存。
+4. 关闭叠加、离开片段或关闭页面都会停止 worker（页面每秒发送一次播放器时钟，暂停时也发；页面异常消失时，2 分钟收不到时钟即停止）。勾选 **停止时保存结果** 时，已显示各帧的第一次结果作为该片段相机的一个版本保存。
 
 Instance ids are stable across frames and across a concept's single-frame flicker: each track votes on its concept, so one mislabelled frame changes neither the id nor the label. A seek restarts the tracker (new ids after the old ones).
 

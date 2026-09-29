@@ -530,8 +530,7 @@ export default function FastSegmentationPanel({
     setLiveError(null);
   }, [episodeId]);
 
-  // Push the player clock: play/pause/seek/rate events plus a 1 s heartbeat
-  // while playing. Fire-and-forget, at most one request in flight.
+  // Push the player clock: play/pause/seek/rate events plus a 1 s heartbeat. Fire-and-forget, at most one request in flight.
   const liveId =
     session && (session.state === "running" || session.state === "starting")
       ? session.id
@@ -570,8 +569,10 @@ export default function FastSegmentationPanel({
     };
     const unsubscribe = subscribeLive(bind);
     bind();
+    // Also while paused: a paused viewer is still watching, and the worker
+    // stops a session that hears no clock for LEVI_SEG_LIVE_IDLE_SECONDS.
     const heartbeat = window.setInterval(() => {
-      if (bound && !bound.el.paused) push();
+      if (bound) push();
     }, 1000);
     return () => {
       unsubscribe();
