@@ -369,7 +369,7 @@ def _rc_rows(ctx, demos, previous, progress) -> list[dict]:
         key = str(demo)
         sig = _sig(demo, [demo.parent / "task_description.txt"])
         old = previous.get(key)
-        if old and old.get("stat_sig") == sig:
+        if old and old.get("stat_sig") == sig and old.get("fingerprint_kind") == "raw":
             facts = {k: old.get(k) for k in RC_FACTS}
         else:
             facts = rc_facts(demo)
@@ -429,7 +429,11 @@ def _content_hash(path: Path) -> str:
     return _md5(path.read_bytes())
 
 
-def _lerobot_rows(ctx, dataset: Path, rc_keys: dict, previous) -> tuple[list, dict]:
+def _lerobot_rows(
+    ctx, dataset: Path, rc_keys: dict, previous, aliases: dict
+) -> tuple[list, dict]:
+    """Rows of one LeRobot dataset; ``aliases`` collects raw episodes found
+    to be derived from another raw episode (key -> original key)."""
     info = _read_json(dataset / "meta/info.json") or {}
     version = str(info.get("codebase_version") or "?")
     features = info.get("features") or {}
@@ -475,10 +479,16 @@ def _lerobot_rows(ctx, dataset: Path, rc_keys: dict, previous) -> tuple[list, di
             candidates.append(processed[position])
         if conv_source and row.get("source_demo"):
             candidates.append(str(Path(conv_source) / row["source_demo"]))
-        for candidate in candidates:
-            if candidate and str(Path(candidate)) in rc_keys:
-                link = str(Path(candidate))
-                break
+        linked = [
+            str(Path(c)) for c in candidates if c and str(Path(c)) in rc_keys
+        ]
+        # Several indexed raw folders may stand behind one converted episode
+        # (the original rollout and a filtered copy of it): the first is the
+        # original, the others are derived from it.
+        link = linked[0] if linked else None
+        for other in dict.fromkeys(linked[1:]):
+            if rc_keys[other]["fingerprint"] != rc_keys[link]["fingerprint"]:
+                aliases[other] = link
         if link:
             fingerprint, kind = rc_keys[link]["fingerprint"], "derived"
         elif old and old.get("stat_sig") == sig and old.get("fingerprint_kind") == "content":
@@ -927,11 +937,18 @@ def scan(progress_path: Path | None = None, rehash: bool = False) -> dict:
     rc_keys = {r["key"]: r for r in rows}
     progress.stage("Datasets", len(found["lerobot"]) + 1)
     extra_sources = {}
+    aliases: dict[str, str] = {}
     for dataset in found["lerobot"]:
-        more, source = _lerobot_rows(ctx, dataset, rc_keys, previous)
+        more, source = _lerobot_rows(ctx, dataset, rc_keys, previous, aliases)
         rows += more
         extra_sources[str(dataset)] = source
         progress.advance(ctx.relative(dataset))
+    for key, original in aliases.items():
+        rc_keys[key].update(
+            fingerprint=rc_keys[original]["fingerprint"],
+            fingerprint_kind="derived",
+            derived_from=original,
+        )
     rows += _droid_rows(ctx, found["droid"], previous)
     progress.advance("DROID")
     progress.stage("Labels", 1)
