@@ -38,12 +38,12 @@ Distillation also needs the [SAM3](SAM3.md) worker and checkpoint. RF-DETR downl
 
 1. Open an episode, **Annotations → Objects**, choose a student model and switch on **Live overlay**. LEVI starts one worker for this episode (both cameras) and answers once the model is loaded (a few seconds).
 2. Play, pause, seek or change speed as usual. The page posts the player clock to the worker; the worker decodes the frame that is due (one frame ahead by default), runs the student on both cameras in one batch and tracks each camera.
-3. Each camera has its own overlay canvas. On every animation frame it reads the video's own `currentTime` and draws that frame's result, or the newest earlier result no more than 3 frames old; an older result is dropped rather than shown late. The overlay never waits for the model, so playback never stalls.
+3. The page sends each camera's own position with the time it read it, so the worker follows every camera even when their videos drift apart and removes the message's transport delay. Each camera has its own overlay canvas. On every animation frame it reads the video's own `currentTime` and draws that frame's result, or the newest earlier result no more than 3 frames old; an older result is dropped rather than shown late. The overlay never waits for the model, so playback never stalls.
 4. Switching the overlay off, leaving the episode or closing the page stops the worker (a page that disappears without saying so is noticed after 2 minutes without a player clock; the page sends one every second, also while paused). With **Save results when stopping** on, the first result of every frame shown is saved as one revision for this episode's cameras.
 
 1. 打开片段，进入 **Annotations → Objects**，选择学生模型，打开 **实时叠加**。LEVI 为该片段启动一个 worker（两路相机），模型加载完成后（几秒）返回。
 2. 照常播放、暂停、拖动或改变倍速。页面把播放器时钟发给 worker；worker 解码当前应显示的帧（默认提前 1 帧），两路相机合成一批推理，并各自跟踪。
-3. 每路相机有独立的叠加画布。每个动画帧读取该视频自己的 `currentTime`，显示这一帧的结果；没有时显示不超过 3 帧的最新结果，更旧的结果直接丢弃，不会延迟显示。叠加层从不等待模型，播放不会卡顿。
+3. 页面发送每路相机各自的位置和读取时刻，worker 分别跟随每路相机（即使两路视频有偏差），并扣除消息在路上的延迟。每路相机有独立的叠加画布。每个动画帧读取该视频自己的 `currentTime`，显示这一帧的结果；没有时显示不超过 3 帧的最新结果，更旧的结果直接丢弃，不会延迟显示。叠加层从不等待模型，播放不会卡顿。
 4. 关闭叠加、离开片段或关闭页面都会停止 worker（页面每秒发送一次播放器时钟，暂停时也发；页面异常消失时，2 分钟收不到时钟即停止）。勾选 **停止时保存结果** 时，已显示各帧的第一次结果作为该片段相机的一个版本保存。
 
 Instance ids are stable across frames and across a concept's single-frame flicker: each track votes on its concept, so one mislabelled frame changes neither the id nor the label. A seek restarts the tracker (new ids after the old ones).
@@ -52,7 +52,26 @@ Instance ids are stable across frames and across a concept's single-frame flicke
 
 ### Measured / 实测
 
-MEASUREMENTS
+Plates test set (10 episodes held out from training, both cameras, 3,550 frames), one RTX 5090 used by nothing else, student `plates-student-v1` in FP16. The recordings are 10 fps, so 30 fps playback is the video played at 3× (`bench` in the worker: the live pipeline with a synthetic player clock and a simulated display that shows the newest result not older than 3 frames).
+
+在 plates 测试集上测量（10 个未参与训练的片段，两路相机，共 3550 帧），RTX 5090 独占，学生模型 `plates-student-v1`，FP16。录像是 10 fps，30 fps 回放即 3 倍速播放。
+
+| Measure / 指标 | Decode one frame ahead (default) / 提前 1 帧解码（默认） | No decode-ahead / 不提前解码 |
+| --- | --- | --- |
+| Sustained rate per camera / 每路持续帧率 | 29.4–29.9 fps | 30.0 fps |
+| Frames analysed / 处理帧占比 | ≥ 98 % (one frame per episode: the first) | 100 % |
+| Skipped / dropped frames / 跳帧、丢帧 | 0 / 0 | 0 / 0 |
+| End-to-end latency (decoded → mask ready), p50 per camera / 端到端延迟 p50 | 7–16 ms (median 12.5 ms) | 7–16 ms (median 11.8 ms) |
+| Latency p95 (worst episode) / p95（最差片段） | 35 ms | 23 ms |
+| Display shows the result of the frame on screen / 显示的正是当前帧的结果 | 99.6 % of display ticks | 0 % (always the previous frame, ≤ 3 frames old) |
+| Inference, both cameras in one batch, p50 / p95 / 两路合批推理 | 6–8 ms / 9–18 ms | 6–7 ms / 9–14 ms |
+| GPU memory (worker process) / 显存（worker 进程） | 1,436 MiB | 1,436 MiB |
+| CPU (worker process, 32-thread 9950X3D) / CPU | 430–550 % | 430–480 % |
+| Model load / 模型加载 | 3.8 s | 3.7 s |
+
+Through the web UI (production build, headless Chromium, episode 72 at 3×): every sampled display tick drew the result of the frame on screen on both cameras; the worker analysed all 220 frames of each camera with no skipped frame, latency p50 8 / 16 ms and p95 15 / 19 ms (wrist / side). Offline labelling of the same 10 episodes, both cameras, as one LEVI job: 232 fps including decoding and mask encoding (15.6 s plus 3.9 s model load).
+
+通过网页界面（生产构建，headless Chromium，片段 72，3 倍速）：两路相机每次采样时显示的都是屏幕上这一帧的结果；worker 处理了每路全部 220 帧，无跳帧，延迟 p50 8 / 16 ms，p95 15 / 19 ms（腕部 / 侧面）。离线标注同样 10 个片段的两路相机（一个 LEVI 作业）：232 fps（含解码和 mask 编码），15.6 s，另加模型加载 3.9 s。
 
 ## Label a dataset / 标注数据集
 
@@ -79,7 +98,14 @@ Held-out scores are against the teacher, not against human labels: a student can
 
 ### The plates student / plates 学生模型
 
-PLATES_MODEL
+`plates-student-v1` was distilled inside LEVI (one job, 59 minutes: teacher 24 min, training 35 min, scoring 18 s) for the concepts *pink plate, white plate, green plate, blue plate, cup, robot arm, human hand*:
+
+- sources: 30 policy rollouts of `stack_the_plates_of_same_color_together` for training (4 of them with a hand in view; 3 more for validation), and 14 online-RL plates episodes in which a person's hand is in view (11 train, 1 validation, 2 held out) — found by a SAM3 "human hand" scan of 112 rollouts, 36 teleoperated demonstrations and 140 sampled online-RL episodes, checked by eye (the teleoperated demonstrations show no hands; in wrist views SAM3 also calls an eggplant tip or a pink plate edge a hand);
+- teacher frames: 6,516 train / 410 validation / 1,610 held-out (every 3rd frame; every 2nd for the hand episodes);
+- held-out scores against the teacher (10 rollout test episodes + 2 hand episodes): AP50 0.938, AP50:95 0.839, class-agnostic recall 0.978; recall per concept — pink 0.99, white 0.96, green 0.99, blue 1.00, cup 0.99, robot arm 0.92, human hand 0.78 (precision 0.70, 156 instances);
+- against the benchmark's hand-checked reference frames of the same test episodes (40 frames, 298 instances): AP50 0.927 / AP 0.864, versus 0.817 / 0.759 for the benchmark's student trained on rollouts only; tracking against SAM3's tracks: 2.1 identity switches per 100 frames (2.3 before), IDF1 0.72 (0.70), MOTA 0.80 (0.72).
+
+`plates-student-v1` 在 LEVI 内蒸馏（一个作业，59 分钟：教师 24 分钟，训练 35 分钟，评估 18 秒）。训练来源为 30 个策略 rollout（其中 4 个有人手；另 3 个做验证），加上 14 个画面中有人手的 online RL plates 片段（通过 SAM3 "human hand" 扫描 112 个 rollout、36 个遥操作示教和 140 个抽样 online RL 片段找到，并逐张目检；遥操作示教里没有人手；腕部视角下 SAM3 也会把茄子尖或粉色盘沿判为人手）。留出集对照教师：AP50 0.938，AP50:95 0.839；人手召回 0.78、精度 0.70。对照基准中人工核对过的参考帧：AP50 0.927 / AP 0.864（只用 rollout 训练的基准学生模型为 0.817 / 0.759）；对照 SAM3 轨迹，每 100 帧 2.1 次 ID 切换（原 2.3），IDF1 0.72，MOTA 0.80。
 
 ## Licences and model sources / 许可与模型来源
 
@@ -136,4 +162,6 @@ Agents read the same state with the read-only capability `segmentation.status` (
 - Recorded plates videos are 10 fps; 30 fps playback was measured by playing them at 3× speed, which moves objects three times as far between frames as a real 30 fps camera (harder for tracking).
 - A student knows only its concepts and the looks its training frames showed; a new task or new objects need a new distillation (about 30–40 minutes on one RTX 5090 for ~40 episodes).
 - The Robotiq gripper is not found by any text prompt; it is part of "robot arm".
-- Identity switches: about 2 per 100 frames against SAM3 tracks on the plates test set (SAM3 itself is the reference). Objects that leave and re-enter the view get a new id after the tracker's lost buffer (30 s at 10 fps).
+- Concept by colour can be wrong where the teacher is wrong: a pink plate pushed by a hand was labelled white in one checked frame; the wrist camera's cyan cast is the hardest case.
+- While the live overlay runs on an episode, the stored objects of that episode are hidden; the overlay stops when the Annotations tab is left.
+- Identity switches: about 2 per 100 frames against SAM3 tracks on the plates test set (SAM3 itself is the reference). Objects that leave and re-enter the view get a new id once the tracker has lost them for longer than its lost buffer (`tracker.lost_buffer` in the manifest).
