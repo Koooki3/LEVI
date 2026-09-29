@@ -1,6 +1,8 @@
 "use client";
+import { Fragment, useState } from "react";
 import Link from "next/link";
 import { useLocale } from "@/components/levi-locale";
+import { SelectionFields, entryFromSuggest } from "./selection-fields";
 import {
   CATEGORIES,
   CATEGORY_LABELS,
@@ -8,8 +10,13 @@ import {
   POLICY_METHODS,
   policyLabel,
   type EpisodeRow,
+  type Suggest,
+  type TaskEntry,
   type TaskRow,
 } from "./types";
+
+/** A task with more available episodes than this always opens the chooser. */
+export const CHOOSER_ABOVE = 100;
 
 const CATEGORY_SHORT: Record<string, string> = {
   human: "Human",
@@ -20,21 +27,51 @@ const CATEGORY_SHORT: Record<string, string> = {
 };
 
 /** Per task: episodes by category, frames and success rate; add a task to
- * the composition or focus the episode table on it. */
+ * the composition (a task with many episodes opens a chooser for how many,
+ * which outcomes and how to pick) or focus the episode table on it. */
 export function TaskTable({
   tasks,
   chosen,
   focus,
+  suggest,
   onAdd,
   onFocus,
 }: {
   tasks: TaskRow[];
   chosen: string[];
   focus: string | null;
-  onAdd: (task: string) => void;
+  suggest: (task: string) => Promise<Suggest>;
+  onAdd: (entry: TaskEntry) => void;
   onFocus: (task: string | null) => void;
 }) {
   const { t } = useLocale();
+  const [open, setOpen] = useState<{
+    task: string;
+    info: Suggest;
+    draft: TaskEntry;
+  } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [problem, setProblem] = useState("");
+  async function add(row: TaskRow) {
+    setBusy(row.task);
+    setProblem("");
+    try {
+      const info = await suggest(row.task);
+      const draft = entryFromSuggest(row.task, info);
+      // A small task the composition's balance does not trim goes in whole.
+      if (info.available <= CHOOSER_ABOVE && draft.count === null) {
+        onAdd(draft);
+        setOpen(null);
+      } else {
+        setOpen({ task: row.task, info, draft });
+      }
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const columns = CATEGORIES.filter((c) =>
     tasks.some((row) => row.categories[c]),
   );
@@ -77,51 +114,53 @@ export function TaskTable({
         <tbody>
           {tasks.map((row) => {
             const added = chosen.includes(row.task);
+            const chooser = open?.task === row.task ? open : null;
             return (
-              <tr
-                key={row.task}
-                className={focus === row.task ? "levi-pool-focus" : ""}
-              >
-                <td>
-                  <button
-                    type="button"
-                    className="levi-pool-task"
-                    title={row.spellings.join("\n")}
-                    aria-pressed={focus === row.task}
-                    onClick={() =>
-                      onFocus(focus === row.task ? null : row.task)
-                    }
-                  >
-                    {row.task}
-                  </button>
-                  {row.spellings.length > 1 && (
-                    <span className="levi-pool-muted">
-                      {" "}
-                      · {row.spellings.length} {t("spellings")}
-                    </span>
-                  )}
-                </td>
-                {columns.map((c) => (
-                  <td key={c} className="num tabular">
-                    {row.categories[c]
-                      ? row.categories[c].toLocaleString()
-                      : "·"}
+              <Fragment key={row.task}>
+                <tr className={focus === row.task ? "levi-pool-focus" : ""}>
+                  <td>
+                    <button
+                      type="button"
+                      className="levi-pool-task"
+                      title={row.spellings.join("\n")}
+                      aria-pressed={focus === row.task}
+                      onClick={() =>
+                        onFocus(focus === row.task ? null : row.task)
+                      }
+                    >
+                      {row.task}
+                    </button>
+                    {row.spellings.length > 1 && (
+                      <span className="levi-pool-muted">
+                        {" "}
+                        · {row.spellings.length} {t("spellings")}
+                      </span>
+                    )}
                   </td>
-                ))}
-                <td className="num tabular">{row.episodes.toLocaleString()}</td>
-                <td className="num tabular">{row.frames.toLocaleString()}</td>
-                <td
-                  className="num tabular"
-                  title={`${row.success} / ${row.success + row.failure}`}
-                >
-                  {row.success_rate === null
-                    ? "—"
-                    : `${Math.round(row.success_rate * 100)}%`}
-                </td>
-                {showMethods && (
-                  <td className="levi-pool-methods">
-                    {POLICY_METHODS.filter((m) => row.policy_methods?.[m]).map(
-                      (m) => (
+                  {columns.map((c) => (
+                    <td key={c} className="num tabular">
+                      {row.categories[c]
+                        ? row.categories[c].toLocaleString()
+                        : "·"}
+                    </td>
+                  ))}
+                  <td className="num tabular">
+                    {row.episodes.toLocaleString()}
+                  </td>
+                  <td className="num tabular">{row.frames.toLocaleString()}</td>
+                  <td
+                    className="num tabular"
+                    title={`${row.success} / ${row.success + row.failure}`}
+                  >
+                    {row.success_rate === null
+                      ? "—"
+                      : `${Math.round(row.success_rate * 100)}%`}
+                  </td>
+                  {showMethods && (
+                    <td className="levi-pool-methods">
+                      {POLICY_METHODS.filter(
+                        (m) => row.policy_methods?.[m],
+                      ).map((m) => (
                         <span
                           key={m}
                           className="levi-pool-badge"
@@ -129,22 +168,79 @@ export function TaskTable({
                         >
                           {t(METHOD_LABELS[m])} {row.policy_methods?.[m]}
                         </span>
-                      ),
-                    )}
+                      ))}
+                    </td>
+                  )}
+                  <td>
+                    <button
+                      type="button"
+                      className="levi-pool-add"
+                      disabled={added || busy === row.task}
+                      aria-expanded={chooser ? true : undefined}
+                      aria-label={`${t("Add to composition")}: ${row.task}`}
+                      onClick={() => void add(row)}
+                    >
+                      {added ? t("Added") : `+ ${t("Add")}`}
+                    </button>
                   </td>
+                </tr>
+                {chooser && (
+                  <tr className="levi-pool-chooser-row">
+                    <td colSpan={columns.length + 5 + (showMethods ? 1 : 0)}>
+                      <div
+                        className="levi-pool-chooser"
+                        role="group"
+                        aria-label={`${t("Choose episodes")}: ${row.task}`}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") setOpen(null);
+                        }}
+                      >
+                        <strong>{t("Choose episodes")}</strong>
+                        <SelectionFields
+                          available={chooser.info.available}
+                          successes={chooser.info.successes}
+                          failures={chooser.info.failures}
+                          unknown={chooser.info.unknown}
+                          value={chooser.draft}
+                          onChange={(patch) =>
+                            setOpen({
+                              ...chooser,
+                              draft: { ...chooser.draft, ...patch },
+                            })
+                          }
+                        />
+                        {chooser.info.earlier_counts.length > 0 && (
+                          <p className="levi-pool-hint">
+                            {t(
+                              "Suggested count: the median of the tasks already added.",
+                            )}
+                          </p>
+                        )}
+                        <div className="levi-row">
+                          <button
+                            type="button"
+                            className="levi-primary"
+                            autoFocus
+                            onClick={() => {
+                              onAdd(chooser.draft);
+                              setOpen(null);
+                            }}
+                          >
+                            {t("Add to composition")}
+                          </button>
+                          <button
+                            type="button"
+                            className="levi-secondary"
+                            onClick={() => setOpen(null)}
+                          >
+                            {t("Cancel")}
+                          </button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
                 )}
-                <td>
-                  <button
-                    type="button"
-                    className="levi-pool-add"
-                    disabled={added}
-                    aria-label={`${t("Add to composition")}: ${row.task}`}
-                    onClick={() => onAdd(row.task)}
-                  >
-                    {added ? t("Added") : `+ ${t("Add")}`}
-                  </button>
-                </td>
-              </tr>
+              </Fragment>
             );
           })}
           {tasks.length === 0 && (
@@ -159,6 +255,11 @@ export function TaskTable({
           )}
         </tbody>
       </table>
+      {problem && (
+        <p className="levi-error" role="alert">
+          {problem}
+        </p>
+      )}
     </div>
   );
 }

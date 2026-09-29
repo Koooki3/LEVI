@@ -25,9 +25,12 @@ import type {
   ExportFormat,
   Facets,
   PoolJob,
+  PickedEpisodes,
   PoolStatus,
   Preview,
   Recipe,
+  Suggest,
+  TaskEntry,
   TaskRow,
 } from "@/components/pool/types";
 
@@ -115,6 +118,40 @@ export default function TrainingPool() {
       date_to: filters.dateTo || null,
     }),
     [composition, filters],
+  );
+
+  const chosenNames = useMemo(
+    () => composition.tasks.map((e) => e.task),
+    [composition.tasks],
+  );
+  const suggest = useCallback(
+    (task: string) =>
+      leviRequest<Suggest>("POST", "pool/suggest", {
+        recipe: { ...recipe, name: recipe.name || "untitled" },
+        task,
+        format,
+        human_as_success: humanAsSuccess,
+      }),
+    [recipe, format, humanAsSuccess],
+  );
+  const listEpisodes = useCallback(
+    (task: string) =>
+      leviRequest<PickedEpisodes>("POST", "pool/selection", {
+        recipe: { ...recipe, name: recipe.name || "untitled" },
+        task,
+        format,
+        human_as_success: humanAsSuccess,
+      }),
+    [recipe, format, humanAsSuccess],
+  );
+  const addTask = useCallback(
+    (entry: TaskEntry) =>
+      setComposition((c) =>
+        c.tasks.some((e) => e.task === entry.task)
+          ? c
+          : { ...c, tasks: [...c.tasks, entry] },
+      ),
+    [],
   );
 
   const refreshStatus = useCallback(async () => {
@@ -424,16 +461,11 @@ export default function TrainingPool() {
               </h2>
               <TaskTable
                 tasks={tasks}
-                chosen={composition.tasks}
+                chosen={chosenNames}
                 focus={focus}
                 onFocus={setFocus}
-                onAdd={(task) =>
-                  setComposition((c) =>
-                    c.tasks.includes(task)
-                      ? c
-                      : { ...c, tasks: [...c.tasks, task] },
-                  )
-                }
+                suggest={suggest}
+                onAdd={addTask}
               />
             </section>
             <section className="levi-pool-card" aria-labelledby="pool-episodes">
@@ -458,7 +490,7 @@ export default function TrainingPool() {
                 total={episodes.total}
                 offset={offset}
                 pageSize={PAGE}
-                chosenTasks={composition.tasks}
+                chosenTasks={chosenNames}
                 exclude={composition.exclude}
                 onPage={setOffset}
                 onToggleExclude={(key) =>
@@ -480,6 +512,8 @@ export default function TrainingPool() {
               previewing={previewing}
               recipes={recipes}
               onChange={setComposition}
+              onListEpisodes={listEpisodes}
+              refreshKey={previewKey}
               onClear={() => setComposition(EMPTY_RECIPE)}
               onSave={() =>
                 void act(async () => {

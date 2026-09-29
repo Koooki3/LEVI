@@ -205,12 +205,25 @@ export interface EpisodeRow {
   viewer: string | null;
 }
 
+export type Strategy = "quality" | "random" | "first";
+export const STRATEGIES: Strategy[] = ["quality", "random", "first"];
+
+/** One task of a recipe (levi/pool/recipe.py TaskEntry): how many episodes it
+ * contributes (null = the recipe's per-task cap, else all), the target share of
+ * successes (null = the task's own share) and how they are picked. */
+export interface TaskEntry {
+  task: string;
+  count: number | null;
+  success_ratio: number | null;
+  strategy: Strategy;
+}
+
 export interface Recipe {
   name: string;
   description?: string;
   categories: string[];
   sources: string[];
-  tasks: string[];
+  tasks: TaskEntry[];
   outcome: OutcomeFilter;
   per_task_cap: number | null;
   seed: number;
@@ -236,19 +249,88 @@ export interface PoolWarning {
   ids?: string[];
 }
 
+/** Per task, what selection did (levi/pool/select.py ``choose``). */
+export interface TaskReport {
+  task: string;
+  strategy: Strategy;
+  requested: number | null;
+  success_ratio: number | null;
+  available: number;
+  successes: number;
+  failures: number;
+  unknown: number;
+  already_used: number;
+  selected: number;
+  selected_successes: number;
+  selected_failures: number;
+  selected_unknown: number;
+  shortfall: number;
+  shortfall_successes: number;
+  shortfall_failures: number;
+  notes: string[];
+  note: string;
+}
+
+export interface Mix {
+  episodes: number;
+  successes: number;
+  failures: number;
+  unknown: number;
+  success_share: number | null;
+  categories: Record<string, number>;
+  policy_methods: Record<string, number>;
+  lean: { dimension: string; value: string; share: number } | null;
+}
+
+/** ``POST pool/suggest``: what adding a task offers. */
+export interface Suggest {
+  task: string;
+  available: number;
+  successes: number;
+  failures: number;
+  unknown: number;
+  already_used: number;
+  suggested_count: number;
+  earlier_counts: number[];
+}
+
+export interface PickedEpisode {
+  key: string;
+  source: string;
+  source_path: string;
+  format: string;
+  episode: string;
+  episode_index: number | null;
+  frames: number | null;
+  outcome: string | null;
+  outcome_source: string | null;
+  policy_label: string | null;
+  date: string | null;
+  quality_score: number;
+  sel_stratum: string;
+  selection_reason: string[];
+  viewer: string | null;
+}
+
+export interface PickedEpisodes {
+  task: string;
+  report: TaskReport;
+  episodes: PickedEpisode[];
+}
+
 export interface Preview {
   warnings: PoolWarning[];
+  mix?: Mix;
   outcome_sources: Record<string, number>;
   excluded_label_conflicts: number;
   episodes: number;
   frames: number;
-  tasks: {
-    task: string;
+  tasks: (TaskReport & {
     text: string;
     episodes: number;
     frames: number;
     sources: Record<string, number>;
-  }[];
+  })[];
   tasks_without_episodes: string[];
   categories: Record<string, number>;
   formats: Record<string, number>;
@@ -281,6 +363,8 @@ export const REASON_LABELS: Record<string, string> = {
   outcome_filter: "Outcome filter",
   no_outcome: "No outcome",
   per_task_cap: "Per-task cap",
+  not_selected: "Not picked (over the task's count)",
+  already_in_composition: "Already picked for an earlier task",
   excluded_by_recipe: "Excluded by hand",
   label_conflict: "Conflicting human labels",
   conversion_preflight: "Failed capture checks",
@@ -297,4 +381,40 @@ export const WARNING_LABELS: Record<string, string> = {
     "Tasks taken from raw captures and from an unlinked LeRobot dataset may be the same recordings twice. Name the sources, or allow it.",
   outcome_from_robot_flag:
     "Episodes that count as verified only through the operator's key press (no human label)",
+};
+
+/** Why the selection took an episode (select.py ``score_rows``), as UI text. */
+export const PICK_REASONS: Record<string, string> = {
+  human: "human label",
+  robot_flag: "robot flag",
+  sft_demonstration: "demonstration",
+  no_outcome: "no outcome",
+  conflicting_labels: "conflicting labels",
+  efficient: "efficient length",
+  slow: "slower than most successes",
+  very_short: "shorter than most successes",
+  full_attempt: "full attempt",
+  short_attempt: "short attempt",
+  odd_length: "unusual length",
+  unscored: "not scored by outcome",
+};
+
+/** Selection notes (select.py ``MESSAGES``), as UI text. */
+export const SELECTION_NOTES: Record<string, string> = {
+  fewer_available: "Fewer episodes are available than requested",
+  success_short:
+    "Not enough successes for the requested share; failures fill in",
+  failure_short:
+    "Not enough failures for the requested share; successes fill in",
+  unknown_outcomes_used:
+    "Episodes with no reliable outcome were needed to reach the count",
+  no_outcomes:
+    "No episode of this task has a recorded outcome; the success share is not applied",
+  already_used: "Episodes already picked for an earlier task were skipped",
+};
+
+export const STRATEGY_LABELS: Record<Strategy, string> = {
+  quality: "Smart pick",
+  random: "Random",
+  first: "In order",
 };

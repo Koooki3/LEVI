@@ -1,14 +1,17 @@
 "use client";
 import { useState } from "react";
 import { useLocale } from "@/components/levi-locale";
+import { MixSummary, PickedList, TaskPick } from "./task-pick";
 import {
   CATEGORY_LABELS,
   METHOD_LABELS,
   REASON_LABELS,
   WARNING_LABELS,
+  type PickedEpisodes,
   type PoolWarning,
   type Preview,
   type Recipe,
+  type TaskEntry,
 } from "./types";
 
 const OUTCOME_SOURCES: Record<string, string> = {
@@ -45,9 +48,10 @@ function move<T>(list: T[], from: number, to: number): T[] {
   return next;
 }
 
-/** Right column: the ordered task list (drag, or the up / down buttons),
- * per-task cap, seed, the filters it carries, the live preview and the
- * saved recipes. */
+/** Right column: the ordered task list (drag by the grip, or the up / down
+ * buttons) with, per task, how many episodes it contributes (editable, with
+ * the picked episodes on request), the default cap, seed, the filters it
+ * carries, the live preview with its mix, and the saved recipes. */
 export function CompositionPanel({
   recipe,
   preview,
@@ -59,6 +63,8 @@ export function CompositionPanel({
   onLoad,
   onDelete,
   onClear,
+  onListEpisodes,
+  refreshKey,
 }: {
   recipe: Recipe;
   preview: Preview | null;
@@ -70,6 +76,8 @@ export function CompositionPanel({
   onLoad: (name: string) => void;
   onDelete: (name: string) => void;
   onClear: () => void;
+  onListEpisodes: (task: string) => Promise<PickedEpisodes>;
+  refreshKey: string;
 }) {
   const { t } = useLocale();
   const [dragging, setDragging] = useState<number | null>(null);
@@ -80,8 +88,14 @@ export function CompositionPanel({
   const reorder = (from: number, to: number) => {
     if (to < 0 || to >= recipe.tasks.length) return;
     set({ tasks: move(recipe.tasks, from, to) });
-    setAnnounce(`${recipe.tasks[from]} → ${to + 1}`);
+    setAnnounce(`${recipe.tasks[from].task} → ${to + 1}`);
   };
+  const patch = (task: string, change: Partial<TaskEntry>) =>
+    set({
+      tasks: recipe.tasks.map((e) =>
+        e.task === task ? { ...e, ...change } : e,
+      ),
+    });
   const perTask = new Map((preview?.tasks || []).map((p) => [p.task, p]));
   const excludedReasons = Object.entries(preview?.excluded || {}).filter(
     ([, n]) => n > 0,
@@ -120,12 +134,12 @@ export function CompositionPanel({
         )}
       </p>
       <ol className="levi-pool-order" aria-label={t("Task order")}>
-        {recipe.tasks.map((task, index) => {
+        {recipe.tasks.map((entry, index) => {
+          const task = entry.task;
           const counts = perTask.get(task);
           return (
             <li
               key={task}
-              draggable
               className={
                 over === index && dragging !== null && dragging !== index
                   ? "drop"
@@ -133,12 +147,8 @@ export function CompositionPanel({
                     ? "dragging"
                     : ""
               }
-              onDragStart={(e) => {
-                setDragging(index);
-                e.dataTransfer.effectAllowed = "move";
-                e.dataTransfer.setData("text/plain", String(index));
-              }}
               onDragOver={(e) => {
+                if (dragging === null) return;
                 e.preventDefault();
                 setOver(index);
               }}
@@ -149,50 +159,70 @@ export function CompositionPanel({
                 setDragging(null);
                 setOver(null);
               }}
-              onDragEnd={() => {
-                setDragging(null);
-                setOver(null);
-              }}
             >
-              <span className="levi-pool-grip" aria-hidden>
-                ⋮⋮
-              </span>
-              <span className="levi-pool-rank tabular">{index + 1}</span>
-              <span className="grow levi-pool-ellipsis" title={task}>
-                {task}
-              </span>
-              <span className="levi-pool-count tabular">
-                {counts
-                  ? counts.episodes.toLocaleString()
-                  : preview
-                    ? "0"
-                    : "…"}
-              </span>
-              <button
-                type="button"
-                aria-label={`${t("Move up")}: ${task}`}
-                disabled={index === 0}
-                onClick={() => reorder(index, index - 1)}
+              <div
+                className="levi-pool-row"
+                draggable
+                onDragStart={(e) => {
+                  setDragging(index);
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", String(index));
+                }}
+                onDragEnd={() => {
+                  setDragging(null);
+                  setOver(null);
+                }}
               >
-                ↑
-              </button>
-              <button
-                type="button"
-                aria-label={`${t("Move down")}: ${task}`}
-                disabled={index === recipe.tasks.length - 1}
-                onClick={() => reorder(index, index + 1)}
-              >
-                ↓
-              </button>
-              <button
-                type="button"
-                aria-label={`${t("Remove")}: ${task}`}
-                onClick={() =>
-                  set({ tasks: recipe.tasks.filter((x) => x !== task) })
-                }
-              >
-                ×
-              </button>
+                <span className="levi-pool-grip" aria-hidden>
+                  ⋮⋮
+                </span>
+                <span className="levi-pool-rank tabular">{index + 1}</span>
+                <span className="grow levi-pool-ellipsis" title={task}>
+                  {task}
+                </span>
+                <span className="levi-pool-count tabular">
+                  {counts
+                    ? counts.episodes.toLocaleString()
+                    : preview
+                      ? "0"
+                      : "…"}
+                </span>
+                <button
+                  type="button"
+                  aria-label={`${t("Move up")}: ${task}`}
+                  disabled={index === 0}
+                  onClick={() => reorder(index, index - 1)}
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  aria-label={`${t("Move down")}: ${task}`}
+                  disabled={index === recipe.tasks.length - 1}
+                  onClick={() => reorder(index, index + 1)}
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  aria-label={`${t("Remove")}: ${task}`}
+                  onClick={() =>
+                    set({ tasks: recipe.tasks.filter((x) => x.task !== task) })
+                  }
+                >
+                  ×
+                </button>
+              </div>
+              <TaskPick
+                entry={entry}
+                report={counts}
+                onChange={(change) => patch(task, change)}
+              />
+              <PickedList
+                task={task}
+                refreshKey={refreshKey}
+                load={onListEpisodes}
+              />
             </li>
           );
         })}
@@ -207,7 +237,11 @@ export function CompositionPanel({
       </p>
       <div className="levi-pool-fields">
         <label>
-          <span>{t("Per-task cap")}</span>
+          <span
+            title={t("Used for tasks that have no episode count of their own")}
+          >
+            {t("Per-task cap")}
+          </span>
           <input
             className="levi-input"
             type="number"
@@ -349,6 +383,7 @@ export function CompositionPanel({
                   .join(" · ")}
               </p>
             )}
+            {preview.mix && <MixSummary mix={preview.mix} />}
             <PoolWarnings warnings={preview.warnings} />
             {preview.tasks_without_episodes.length > 0 && (
               <p className="levi-warnings">
