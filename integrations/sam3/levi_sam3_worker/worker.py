@@ -136,9 +136,15 @@ def _ensure_checkpoint() -> tuple[Path, str]:
     if configured:
         checkpoint = Path(configured).expanduser().resolve()
         if not checkpoint.is_file() or checkpoint.stat().st_size <= 0:
-            raise FileNotFoundError(f"LEVI_SAM3_CHECKPOINT not found or empty: {checkpoint}")
+            raise FileNotFoundError(
+                f"LEVI_SAM3_CHECKPOINT not found or empty: {checkpoint}"
+            )
         _write_checkpoint_progress(
-            "ready", bytes_downloaded=checkpoint.stat().st_size, total_bytes=checkpoint.stat().st_size, percent=100.0, path=checkpoint
+            "ready",
+            bytes_downloaded=checkpoint.stat().st_size,
+            total_bytes=checkpoint.stat().st_size,
+            percent=100.0,
+            path=checkpoint,
         )
         return checkpoint, "local"
 
@@ -166,11 +172,7 @@ def _ensure_checkpoint() -> tuple[Path, str]:
     def monitor() -> None:
         while not stop.is_set():
             current = _incomplete_bytes(target_dir)
-            percent = (
-                min(100.0, current * 100.0 / total_bytes)
-                if total_bytes
-                else None
-            )
+            percent = min(100.0, current * 100.0 / total_bytes) if total_bytes else None
             _write_checkpoint_progress(
                 "downloading",
                 bytes_downloaded=current,
@@ -180,7 +182,9 @@ def _ensure_checkpoint() -> tuple[Path, str]:
             )
             stop.wait(0.5)
 
-    thread = threading.Thread(target=monitor, name="sam3-checkpoint-progress", daemon=True)
+    thread = threading.Thread(
+        target=monitor, name="sam3-checkpoint-progress", daemon=True
+    )
     thread.start()
     try:
         from huggingface_hub import hf_hub_download
@@ -262,9 +266,15 @@ def _normalise_outputs(outputs: Any, np: Any) -> tuple[list[int], list[Any], Any
     if not isinstance(outputs, dict):
         raise TypeError("SAM3 returned a non-object output")
     ids = outputs.get("out_obj_ids", outputs.get("object_ids", outputs.get("obj_ids")))
-    masks = outputs.get("out_binary_masks", outputs.get("masks", outputs.get("binary_masks")))
-    boxes = outputs.get("out_boxes_xywh", outputs.get("boxes", outputs.get("boxes_xywh")))
-    scores = outputs.get("out_probs", outputs.get("scores", outputs.get("probabilities")))
+    masks = outputs.get(
+        "out_binary_masks", outputs.get("masks", outputs.get("binary_masks"))
+    )
+    boxes = outputs.get(
+        "out_boxes_xywh", outputs.get("boxes", outputs.get("boxes_xywh"))
+    )
+    scores = outputs.get(
+        "out_probs", outputs.get("scores", outputs.get("probabilities"))
+    )
     if ids is None or masks is None:
         raise RuntimeError("SAM3 output must include out_obj_ids and out_binary_masks")
     ids_array = _as_numpy(ids, np).reshape(-1)
@@ -272,9 +282,16 @@ def _normalise_outputs(outputs: Any, np: Any) -> tuple[list[int], list[Any], Any
     if masks_array.ndim == 2:
         masks_array = masks_array[None, ...]
     if masks_array.ndim != 3:
-        raise RuntimeError(f"SAM3 masks must be [objects,height,width], got {masks_array.shape}")
+        raise RuntimeError(
+            f"SAM3 masks must be [objects,height,width], got {masks_array.shape}"
+        )
     ids_list = [int(value) for value in ids_array.tolist()]
-    return ids_list, [masks_array[index] for index in range(min(len(ids_list), len(masks_array)))], boxes, scores
+    return (
+        ids_list,
+        [masks_array[index] for index in range(min(len(ids_list), len(masks_array)))],
+        boxes,
+        scores,
+    )
 
 
 def _bbox_from_mask(mask: Any, np: Any) -> list[float] | None:
@@ -288,7 +305,9 @@ def _bbox_xywh(boxes: Any, index: int, mask: Any, np: Any) -> list[float] | None
     if boxes is not None:
         try:
             value = _as_numpy(boxes, np)[index].tolist()
-            if len(value) >= 4 and all(math.isfinite(float(item)) for item in value[:4]):
+            if len(value) >= 4 and all(
+                math.isfinite(float(item)) for item in value[:4]
+            ):
                 x, y, width, height = (float(item) for item in value[:4])
                 # SAM3's video API returns pixel xywh. Defensive support for
                 # normalized boxes makes the adapter tolerant of future APIs.
@@ -493,7 +512,9 @@ def _run_episode_camera(
             if remaining_frames
             else int(requested_max_frames)
         )
-    session = predictor.handle_request({"type": "start_session", "resource_path": str(video)})
+    session = predictor.handle_request(
+        {"type": "start_session", "resource_path": str(video)}
+    )
     session_id = session["session_id"]
     rows: list[dict[str, Any]] = []
     threshold = float(plan.get("review_threshold", 0.6))
@@ -526,7 +547,9 @@ def _run_episode_camera(
                     seen.add(int(object_id))
                 if "frame_index" not in outputs:
                     outputs = dict(outputs)
-                    outputs["frame_index"] = response.get("frame_index", source_start_frame)
+                    outputs["frame_index"] = response.get(
+                        "frame_index", source_start_frame
+                    )
                 _append_outputs(
                     rows,
                     outputs,
@@ -552,9 +575,15 @@ def _run_episode_camera(
                 outputs = response.get("outputs", {})
                 if isinstance(outputs, dict):
                     outputs = dict(outputs)
-                    outputs["frame_index"] = response.get("frame_index", outputs.get("frame_index", source_start_frame))
+                    outputs["frame_index"] = response.get(
+                        "frame_index", outputs.get("frame_index", source_start_frame)
+                    )
                     ids = outputs.get("out_obj_ids", outputs.get("object_ids", []))
-                    ids = _as_numpy(ids, np).reshape(-1).tolist() if ids is not None else []
+                    ids = (
+                        _as_numpy(ids, np).reshape(-1).tolist()
+                        if ids is not None
+                        else []
+                    )
                     seen.update(int(object_id) for object_id in ids)
                     _append_outputs(
                         rows,
@@ -626,7 +655,9 @@ def _run_batch(
     total = len(pairs)
     annotations: list[dict[str, Any]] = []
     item_errors: list[dict[str, Any]] = []
-    _write_batch_progress(progress_path, done=0, total=total, episode_index=None, camera_key=None)
+    _write_batch_progress(
+        progress_path, done=0, total=total, episode_index=None, camera_key=None
+    )
     for done, (episode_index, camera_key) in enumerate(pairs, start=1):
         try:
             annotations.extend(
@@ -649,12 +680,18 @@ def _run_batch(
                 }
             )
         _write_batch_progress(
-            progress_path, done=done, total=total, episode_index=episode_index, camera_key=camera_key
+            progress_path,
+            done=done,
+            total=total,
+            episode_index=episode_index,
+            camera_key=camera_key,
         )
     return annotations, item_errors
 
 
-def run_plan(plan_path: Path, output_path: Path, progress_path: Path | None = None) -> None:
+def run_plan(
+    plan_path: Path, output_path: Path, progress_path: Path | None = None
+) -> None:
     if not _enabled():
         raise RuntimeError("SAM3 is disabled; set LEVI_SAM3_ENABLED=1 to enable it")
     plan = json.loads(plan_path.read_text())
@@ -668,7 +705,9 @@ def run_plan(plan_path: Path, output_path: Path, progress_path: Path | None = No
     from sam3.model_builder import build_sam3_video_predictor
 
     if not torch.cuda.is_available():
-        raise RuntimeError("SAM3 worker requires a CUDA device; LEVI core remains CPU-safe")
+        raise RuntimeError(
+            "SAM3 worker requires a CUDA device; LEVI core remains CPU-safe"
+        )
     checkpoint, checkpoint_source = _ensure_checkpoint()
     # Passing an explicit path prevents the pinned official builder from
     # looking up facebook/sam3. The mirror is resolved above with the user's

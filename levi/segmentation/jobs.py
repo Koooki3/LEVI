@@ -131,9 +131,7 @@ def check_gpu(kind: str) -> list[str]:
     gpu = gpu_headroom()
     need = _min_free(kind)
     if gpu.get("known") and gpu["free_mib"] < need:
-        message = (
-            f"Only {gpu['free_mib']} MiB of GPU memory is free; this needs about {need} MiB"
-        )
+        message = f"Only {gpu['free_mib']} MiB of GPU memory is free; this needs about {need} MiB"
         if gpu_lock_file() and kind != "live":
             return [message + "; the job waits for the GPU lock"]
         raise SegError(409, message)
@@ -256,13 +254,18 @@ def start(
     if provider != "fake":
         worker = worker_state()
         if not worker["ready"]:
-            raise SegError(503, "Fast segmentation worker is not ready: " + worker["reason"])
+            raise SegError(
+                503, "Fast segmentation worker is not ready: " + worker["reason"]
+            )
     with locked(dataset):
         for job in reversed(jobs(dataset)):
             if job.get("status") in ACTIVE and job.get("kind") == kind:
                 job = collect(job)
                 if job.get("status") in ACTIVE:
-                    raise SegError(409, f"A {kind} job ({job['id']}) is already running for this dataset")
+                    raise SegError(
+                        409,
+                        f"A {kind} job ({job['id']}) is already running for this dataset",
+                    )
         base = root(dataset)
         job_id = naming.timestamp_id(_jobs_dir(dataset), ".json")
         plan_path = base / "plans" / f"{job_id}.json"
@@ -319,7 +322,11 @@ def start(
                     start_new_session=(os.name == "posix"),
                 )
             except OSError as exc:
-                job.update(status="failed", error=f"Unable to start the segmentation worker: {exc}", finished_at=time.time())
+                job.update(
+                    status="failed",
+                    error=f"Unable to start the segmentation worker: {exc}",
+                    finished_at=time.time(),
+                )
                 _save(job)
                 raise SegError(503, job["error"]) from exc
         _PROCESSES[(dataset, job_id)] = process
@@ -327,7 +334,12 @@ def start(
         job.update(status="running", pid=process.pid, started_at=time.time())
         _save(job)
     if watch:
-        thread = threading.Thread(target=_watch, args=(process, dataset, job_id), name=f"seg-watch-{job_id}", daemon=True)
+        thread = threading.Thread(
+            target=_watch,
+            args=(process, dataset, job_id),
+            name=f"seg-watch-{job_id}",
+            daemon=True,
+        )
         with _LOCK:
             _WATCHERS[:] = [t for t in _WATCHERS if t.is_alive()] + [thread]
         thread.start()
@@ -413,7 +425,12 @@ def _watch(process: subprocess.Popen, dataset: str, job_id: str) -> None:
         with locked(dataset):
             current = _read(dataset, job_id)
             if current and current.get("status") in ACTIVE:
-                current.update(status="failed", error=reason, error_detail=_log_tail(current), finished_at=time.time())
+                current.update(
+                    status="failed",
+                    error=reason,
+                    error_detail=_log_tail(current),
+                    finished_at=time.time(),
+                )
                 _save(current)
         _forget((dataset, job_id))
         return
@@ -440,7 +457,9 @@ def _progress(job: dict[str, Any]) -> dict[str, Any] | None:
     return {k: v for k, v in value.items() if k != "updated_at"}
 
 
-Publisher = Callable[[list[dict[str, Any]], set[tuple[int, str]], dict[str, Any]], dict[str, Any]]
+Publisher = Callable[
+    [list[dict[str, Any]], set[tuple[int, str]], dict[str, Any]], dict[str, Any]
+]
 
 
 def _read_rows(path: Path) -> list[dict[str, Any]]:
@@ -498,7 +517,9 @@ def collect(job: dict[str, Any], publish: Publisher | None = None) -> dict[str, 
             try:
                 result = json.loads(result_path.read_text())
                 if result.get("status") != "succeeded":
-                    raise ValueError(result.get("error") or "the worker reported a failure")
+                    raise ValueError(
+                        result.get("error") or "the worker reported a failure"
+                    )
                 if job["kind"] == "label":
                     _finish_label(job, result, publish)
                 else:
@@ -522,7 +543,9 @@ def collect(job: dict[str, Any], publish: Publisher | None = None) -> dict[str, 
     return job
 
 
-def _finish_label(job: dict[str, Any], result: dict[str, Any], publish: Publisher | None) -> None:
+def _finish_label(
+    job: dict[str, Any], result: dict[str, Any], publish: Publisher | None
+) -> None:
     # TODO(S2, pre-merge review): this loads every row of the run into the
     # core process and publishes them in one revision inside the request
     # that found the job finished. Before labelling large datasets, publish
@@ -565,7 +588,10 @@ def _finish_distil(job: dict[str, Any], result: dict[str, Any]) -> None:
         status="succeeded",
         finished_at=time.time(),
         model=name,
-        timing={"seconds": manifest.get("seconds"), "stages": manifest.get("stage_seconds")},
+        timing={
+            "seconds": manifest.get("seconds"),
+            "stages": manifest.get("stage_seconds"),
+        },
         progress={"stage": "registered", "done": 1, "total": 1},
     )
 
@@ -601,7 +627,12 @@ def cancel(job: dict[str, Any]) -> dict[str, Any]:
 def levi_commit() -> str | None:
     try:
         done = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=paths.PROJECT, capture_output=True, text=True, timeout=5, check=False
+            ["git", "rev-parse", "HEAD"],
+            cwd=paths.PROJECT,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None

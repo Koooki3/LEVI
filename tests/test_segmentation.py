@@ -33,7 +33,9 @@ def video_dataset(dataset):
         for episode in range(2):
             path = dataset / f"videos/chunk-000/{camera}/episode_{episode:06d}.mp4"
             path.parent.mkdir(parents=True, exist_ok=True)
-            writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 10, (64, 48))
+            writer = cv2.VideoWriter(
+                str(path), cv2.VideoWriter_fourcc(*"mp4v"), 10, (64, 48)
+            )
             for frame in range(20):
                 image = np.full((48, 64, 3), (frame * 10) % 255, np.uint8)
                 writer.write(image)
@@ -62,7 +64,9 @@ def _repo(client, dataset) -> str:
 def _wait_job(client, repo, job_id, timeout=60):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        job = client.get(f"/annotations/api/segmentation/jobs/{job_id}", params={"repo_id": repo})
+        job = client.get(
+            f"/annotations/api/segmentation/jobs/{job_id}", params={"repo_id": repo}
+        )
         assert job.status_code == 200, job.text
         value = job.json()
         if value["status"] in {"succeeded", "failed", "cancelled"}:
@@ -72,7 +76,9 @@ def _wait_job(client, repo, job_id, timeout=60):
 
 
 def _objects(client, repo, episode):
-    response = client.get(f"/annotations/api/sam3/episodes/{episode}/objects", params={"repo_id": repo})
+    response = client.get(
+        f"/annotations/api/sam3/episodes/{episode}/objects", params={"repo_id": repo}
+    )
     assert response.status_code == 200, response.text
     return response.json()["objects"]
 
@@ -142,13 +148,17 @@ def test_publish_merged_replaces_only_named_pairs(tmp_path):
 def _tracks(store):
     import pyarrow.parquet as pq
 
-    return pq.read_table(store.revision_path(store.current_revision()) / "tracks.parquet").to_pylist()
+    return pq.read_table(
+        store.revision_path(store.current_revision()) / "tracks.parquet"
+    ).to_pylist()
 
 
 # ---------------------------------------------------------------- jobs
 
 
-def test_status_lists_cameras_and_reports_missing_worker(seg, video_dataset, monkeypatch):
+def test_status_lists_cameras_and_reports_missing_worker(
+    seg, video_dataset, monkeypatch
+):
     from levi.segmentation import jobs
 
     monkeypatch.setenv("LEVI_SEG_WORKER_PYTHON", "/nonexistent/python")
@@ -184,7 +194,9 @@ def test_fake_label_job_publishes_every_episode_and_camera(seg, video_dataset):
     # Episode 0's SAM3 objects survive a labelling job on episode 1.
     assert {r["source"] for r in _objects(seg, repo, 0)} == {"fake"}
     assert _objects(seg, repo, 0)[0]["prompt"] == "cup"
-    status = seg.get("/annotations/api/segmentation/status", params={"repo_id": repo}).json()
+    status = seg.get(
+        "/annotations/api/segmentation/status", params={"repo_id": repo}
+    ).json()
     assert [j["id"] for j in status["jobs"]] == [job["id"]]
 
 
@@ -200,12 +212,20 @@ def test_label_job_cancel_stops_worker(seg, video_dataset, monkeypatch):
         return real_start(*args, **kwargs)
 
     monkeypatch.setattr(jobs, "start", slow_start)
-    started = seg.post("/annotations/api/segmentation/label", json={"repo_id": repo, "provider": "fake"})
+    started = seg.post(
+        "/annotations/api/segmentation/label",
+        json={"repo_id": repo, "provider": "fake"},
+    )
     assert started.status_code == 202, started.text
     job_id = started.json()["id"]
-    second = seg.post("/annotations/api/segmentation/label", json={"repo_id": repo, "provider": "fake"})
+    second = seg.post(
+        "/annotations/api/segmentation/label",
+        json={"repo_id": repo, "provider": "fake"},
+    )
     assert second.status_code == 409, second.text
-    cancelled = seg.post(f"/annotations/api/segmentation/jobs/{job_id}/cancel", params={"repo_id": repo})
+    cancelled = seg.post(
+        f"/annotations/api/segmentation/jobs/{job_id}/cancel", params={"repo_id": repo}
+    )
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["status"] == "cancelled"
     assert _objects(seg, repo, 0) == []
@@ -226,7 +246,9 @@ def test_fake_distil_registers_model_with_manifest(seg, video_dataset):
     job = _wait_job(seg, repo, started.json()["id"])
     assert job["status"] == "succeeded", job
     assert job["model"] == "plates-test"
-    listed = seg.get("/annotations/api/segmentation/models", params={"repo_id": repo}).json()["models"]
+    listed = seg.get(
+        "/annotations/api/segmentation/models", params={"repo_id": repo}
+    ).json()["models"]
     assert [m["name"] for m in listed] == ["plates-test"]
     model = listed[0]
     assert model["concepts"] == request["concepts"]
@@ -234,7 +256,9 @@ def test_fake_distil_registers_model_with_manifest(seg, video_dataset):
     assert "SAM License" in model["licence"]["teacher"]
     assert model["for_this_dataset"] is True
     manifest = json.loads((Path(model["path"]) / "manifest.json").read_text())
-    assert manifest["datasets"][0]["train"] == [0] and manifest["datasets"][0]["test"] == [1]
+    assert manifest["datasets"][0]["train"] == [0] and manifest["datasets"][0][
+        "test"
+    ] == [1]
     again = seg.post("/annotations/api/segmentation/distil", json=request)
     assert again.status_code == 409, again.text
     overlap = seg.post(
@@ -296,7 +320,9 @@ def test_live_session_follows_clock_and_saves_only_its_episode(seg, video_datase
     assert clock.status_code == 200 and clock.json()["ok"] is True
     # The paused player at 0.55 s shows frame 5 (a result for frame 0 may
     # come first, from before the clock arrived).
-    seen = _events(seg, repo, sid, want=("result",), until=lambda r: r["frame_index"] == 5)
+    seen = _events(
+        seg, repo, sid, want=("result",), until=lambda r: r["frame_index"] == 5
+    )
     result = seen["result"][-1]
     assert result["camera_key"] in CAMERAS
     assert result["frame_index"] == 5
@@ -310,7 +336,9 @@ def test_live_session_follows_clock_and_saves_only_its_episode(seg, video_datase
         json={"playing": True, "time": 0.0, "rate": 3},
     )
     time.sleep(0.5)
-    stopped = seg.post(f"/annotations/api/segmentation/live/{sid}/stop", params={"repo_id": repo})
+    stopped = seg.post(
+        f"/annotations/api/segmentation/live/{sid}/stop", params={"repo_id": repo}
+    )
     assert stopped.status_code == 200, stopped.text
     value = stopped.json()
     assert value["state"] == "stopped", value
@@ -332,15 +360,36 @@ def test_live_stream_drops_stale_results_for_slow_readers():
     """A reader that fell behind gets only the newest result per camera."""
     from levi.segmentation.live import LiveSession
 
-    session = LiveSession("x", "d", {"episode_index": 0, "cameras": [{"camera_key": "a"}, {"camera_key": "b"}], "model": {}}, Path("."), "fake")
+    session = LiveSession(
+        "x",
+        "d",
+        {
+            "episode_index": 0,
+            "cameras": [{"camera_key": "a"}, {"camera_key": "b"}],
+            "model": {},
+        },
+        Path("."),
+        "fake",
+    )
     for frame in range(5):
         for camera in ("a", "b"):
-            session._push("result", camera, json.dumps({"camera_key": camera, "frame_index": frame}))
+            session._push(
+                "result",
+                camera,
+                json.dumps({"camera_key": camera, "frame_index": frame}),
+            )
     session._push("stats", None, json.dumps({"type": "stats"}))
     session.stopped_at = time.time()
-    frames = [chunk for chunk in session.stream(0, keepalive=0.01) if chunk.startswith("id:")]
-    results = [json.loads(f.split("data: ", 1)[1]) for f in frames if "event: result" in f]
-    assert sorted((r["camera_key"], r["frame_index"]) for r in results) == [("a", 4), ("b", 4)]
+    frames = [
+        chunk for chunk in session.stream(0, keepalive=0.01) if chunk.startswith("id:")
+    ]
+    results = [
+        json.loads(f.split("data: ", 1)[1]) for f in frames if "event: result" in f
+    ]
+    assert sorted((r["camera_key"], r["frame_index"]) for r in results) == [
+        ("a", 4),
+        ("b", 4),
+    ]
     assert any("event: stats" in f for f in frames)
 
 
@@ -364,12 +413,20 @@ def test_worker_clock_follows_each_camera_and_removes_transport_delay(monkeypatc
     follows its own camera's time, measured when the player read it."""
     import sys
 
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "integrations" / "segmentation"))
+    sys.path.insert(
+        0, str(Path(__file__).resolve().parents[1] / "integrations" / "segmentation")
+    )
     from levi_seg_worker.live import Clock
 
     clock = Clock()
     now = time.time()
-    clock.set(playing=True, position=2.0, rate=3.0, sent_at=now - 0.5, cameras={"a": 2.0, "b": 1.5})
+    clock.set(
+        playing=True,
+        position=2.0,
+        rate=3.0,
+        sent_at=now - 0.5,
+        cameras={"a": 2.0, "b": 1.5},
+    )
     at = time.monotonic()
     # Half a second in transit at 3x: the player is 1.5 s further on.
     assert clock.position(at, "a") == pytest.approx(3.5, abs=0.05)
@@ -419,7 +476,12 @@ def test_polling_is_read_only_until_a_result_waits(seg, video_dataset, monkeypat
     repo = _repo(seg, video_dataset)
     copies = _count_bundle_copies(monkeypatch, repo)
     for _ in range(3):
-        assert seg.get("/annotations/api/segmentation/status", params={"repo_id": repo}).status_code == 200
+        assert (
+            seg.get(
+                "/annotations/api/segmentation/status", params={"repo_id": repo}
+            ).status_code
+            == 200
+        )
     assert copies == []
     started = seg.post(
         "/annotations/api/segmentation/label",
@@ -433,11 +495,15 @@ def test_polling_is_read_only_until_a_result_waits(seg, video_dataset, monkeypat
         time.sleep(0.1)
     assert copies == []
     # The first poll that sees the finished job publishes it, once.
-    status = seg.get("/annotations/api/segmentation/status", params={"repo_id": repo}).json()
+    status = seg.get(
+        "/annotations/api/segmentation/status", params={"repo_id": repo}
+    ).json()
     assert [j["status"] for j in status["jobs"]] == ["succeeded"]
     assert len(copies) == 1
     seg.get("/annotations/api/segmentation/status", params={"repo_id": repo})
-    job = seg.get(f"/annotations/api/segmentation/jobs/{job_id}", params={"repo_id": repo}).json()
+    job = seg.get(
+        f"/annotations/api/segmentation/jobs/{job_id}", params={"repo_id": repo}
+    ).json()
     assert job["status"] == "succeeded" and len(copies) == 1
     assert {r["camera_key"] for r in _objects(seg, repo, 1)} == set(CAMERAS)
 
@@ -458,15 +524,26 @@ def test_failed_sam3_pair_keeps_its_objects(seg, dataset):
     state = app._ensure_state(app.DatasetRef(repo_id=repo))
     staging = app._sidecar(state).staging_root / "jobs"
     staging.mkdir(parents=True, exist_ok=True)
-    plan = {"episode_indices": [0, 1], "camera_keys": [camera], "prompts": ["plate"], "max_frames": 3}
-    only_first = Sam3Plan.model_validate({**plan, "episode_indices": [0], "provider": "fake"})
+    plan = {
+        "episode_indices": [0, 1],
+        "camera_keys": [camera],
+        "prompts": ["plate"],
+        "max_frames": 3,
+    }
+    only_first = Sam3Plan.model_validate(
+        {**plan, "episode_indices": [0], "provider": "fake"}
+    )
     (staging / "plan.json").write_text(json.dumps(plan))
     (staging / "result.json").write_text(
         json.dumps(
             {
                 "status": "succeeded",
-                "annotations": [row.model_dump(mode="json") for row in fake_annotations(only_first)],
-                "item_errors": [{"episode_index": 1, "camera_key": camera, "error": "decode failed"}],
+                "annotations": [
+                    row.model_dump(mode="json") for row in fake_annotations(only_first)
+                ],
+                "item_errors": [
+                    {"episode_index": 1, "camera_key": camera, "error": "decode failed"}
+                ],
             }
         )
     )
@@ -537,12 +614,17 @@ def test_v3_video_uses_the_cameras_own_file_indices(tmp_path):
     video = media.resolve(tmp_path, info, 3, "observation.images.front")
     assert video.video == expected
     assert video.start_frame == 20 and video.length == 20
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "integrations" / "sam3"))
+    sys.path.insert(
+        0, str(Path(__file__).resolve().parents[1] / "integrations" / "sam3")
+    )
     try:
         from levi_sam3_worker.worker import _episode_video
     finally:
         sys.path.pop(0)
-    assert _episode_video(tmp_path, info, 3, "observation.images.front") == (expected, 2.0)
+    assert _episode_video(tmp_path, info, 3, "observation.images.front") == (
+        expected,
+        2.0,
+    )
 
 
 def test_service_shutdown_discards_unsaved_live_rows(seg, video_dataset):
@@ -567,7 +649,9 @@ def test_service_shutdown_discards_unsaved_live_rows(seg, video_dataset):
     session = live.get(sid)
     assert session.stopped_at is not None
     assert not (session.folder / "rows").exists()
-    status = seg.get("/annotations/api/segmentation/status", params={"repo_id": repo}).json()
+    status = seg.get(
+        "/annotations/api/segmentation/status", params={"repo_id": repo}
+    ).json()
     assert [s["revision_id"] for s in status["live"] if s["id"] == sid] == [None]
     assert _objects(seg, repo, 0) == []
     # A killed service's leftovers are removed by the next start's sweep.
@@ -583,7 +667,12 @@ def _manifest(directory: Path, **fields):
 
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "weights.pth").write_bytes(b"w")
-    manifest = {"schema": models.SCHEMA, "provider": "fake", "concepts": ["cup"], **fields}
+    manifest = {
+        "schema": models.SCHEMA,
+        "provider": "fake",
+        "concepts": ["cup"],
+        **fields,
+    }
     (directory / "manifest.json").write_text(json.dumps(manifest))
 
 
@@ -597,7 +686,9 @@ def test_manifest_weights_must_be_a_plain_file_name(tmp_path, monkeypatch):
     assert [m["name"] for m in models.listing()] == ["plain"]
     with pytest.raises(ValueError, match="plain file name"):
         models.worker_spec("escape")
-    assert models.worker_spec("plain")["weights"] == str(tmp_path / "models" / "plain" / "weights.pth")
+    assert models.worker_spec("plain")["weights"] == str(
+        tmp_path / "models" / "plain" / "weights.pth"
+    )
 
 
 def test_segmentation_status_capability_is_scoped(tmp_path, monkeypatch):
@@ -613,16 +704,34 @@ def test_segmentation_status_capability_is_scoped(tmp_path, monkeypatch):
     monkeypatch.setenv("LEVI_SEG_MODEL_DIR", str(tmp_path / "models"))
     monkeypatch.setenv("LEVI_SEG_WORKER_PYTHON", sys.executable)
     mine = display_name("org/mine", None)
-    _manifest(tmp_path / "models" / "shared", datasets=[{"name": mine}, {"name": "someone-elses-data"}])
+    _manifest(
+        tmp_path / "models" / "shared",
+        datasets=[{"name": mine}, {"name": "someone-elses-data"}],
+    )
     wb = Workbench(tmp_path / "state")
-    agent = invoke(wb, Principal("agent", datasets=("org/mine",)), "segmentation.status", {"repo_id": "org/mine"})
+    agent = invoke(
+        wb,
+        Principal("agent", datasets=("org/mine",)),
+        "segmentation.status",
+        {"repo_id": "org/mine"},
+    )
     text = json.dumps(agent)
     assert str(tmp_path) not in text and "someone-elses-data" not in text
     assert agent["models"][0]["datasets"] == [mine]
     assert agent["worker"]["ready"] is True
     with pytest.raises(PermissionError):
-        invoke(wb, Principal("agent", datasets=("org/mine",)), "segmentation.status", {"repo_id": "org/other"})
-    person = invoke(wb, Principal("human", human=True), "segmentation.status", {"repo_id": "org/mine"})
+        invoke(
+            wb,
+            Principal("agent", datasets=("org/mine",)),
+            "segmentation.status",
+            {"repo_id": "org/other"},
+        )
+    person = invoke(
+        wb,
+        Principal("human", human=True),
+        "segmentation.status",
+        {"repo_id": "org/mine"},
+    )
     assert person["models"][0]["path"] == str(tmp_path / "models" / "shared")
     assert "someone-elses-data" in person["models"][0]["datasets"]
 
@@ -637,18 +746,42 @@ def test_segmentation_routes_require_the_ui_token(seg, video_dataset, monkeypatc
         ("GET", "/annotations/api/segmentation/status", None),
         ("GET", "/annotations/api/segmentation/models", None),
         ("DELETE", "/annotations/api/segmentation/models/anything", None),
-        ("POST", "/annotations/api/segmentation/label", {"repo_id": repo, "provider": "fake"}),
+        (
+            "POST",
+            "/annotations/api/segmentation/label",
+            {"repo_id": repo, "provider": "fake"},
+        ),
         ("POST", "/annotations/api/segmentation/distil", {"repo_id": repo}),
         ("GET", "/annotations/api/segmentation/jobs/20260101-0000", None),
         ("POST", "/annotations/api/segmentation/jobs/20260101-0000/cancel", None),
-        ("POST", "/annotations/api/segmentation/live", {"repo_id": repo, "episode_index": 0, "provider": "fake"}),
+        (
+            "POST",
+            "/annotations/api/segmentation/live",
+            {"repo_id": repo, "episode_index": 0, "provider": "fake"},
+        ),
         ("GET", "/annotations/api/segmentation/live/x", None),
-        ("POST", "/annotations/api/segmentation/live/x/clock", {"playing": False, "time": 0}),
+        (
+            "POST",
+            "/annotations/api/segmentation/live/x/clock",
+            {"playing": False, "time": 0},
+        ),
         ("GET", "/annotations/api/segmentation/live/x/events", None),
         ("POST", "/annotations/api/segmentation/live/x/stop", None),
     ]
     for method, url, body in routes:
         params = {"repo_id": repo}
-        assert seg.request(method, url, params=params, json=body).status_code == 401, url
-        assert seg.request(method, url, params=params, json=body, headers=agent).status_code == 403, url
-    assert seg.get("/annotations/api/segmentation/status", params={"repo_id": repo}, headers=ui).status_code == 200
+        assert seg.request(method, url, params=params, json=body).status_code == 401, (
+            url
+        )
+        assert (
+            seg.request(
+                method, url, params=params, json=body, headers=agent
+            ).status_code
+            == 403
+        ), url
+    assert (
+        seg.get(
+            "/annotations/api/segmentation/status", params={"repo_id": repo}, headers=ui
+        ).status_code
+        == 200
+    )

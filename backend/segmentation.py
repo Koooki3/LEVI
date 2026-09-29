@@ -43,9 +43,13 @@ def _call(call):
         raise HTTPException(exc.status, exc.detail) from exc
 
 
-def _state(repo_id: str | None, revision: str | None = None, local_path: str | None = None):
+def _state(
+    repo_id: str | None, revision: str | None = None, local_path: str | None = None
+):
     app = _app()
-    return app._ensure_state(app.DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path))
+    return app._ensure_state(
+        app.DatasetRef(repo_id=repo_id, revision=revision, local_path=local_path)
+    )
 
 
 def _dataset_name(state) -> str:
@@ -56,9 +60,13 @@ def _publisher(state) -> seg_jobs.Publisher:
     """Publish worker rows into this dataset's sidecar, replacing only the
     (episode, camera) pairs the run produced."""
 
-    def publish(rows: list[dict[str, Any]], pairs: set[tuple[int, str]], model: dict[str, Any]):
+    def publish(
+        rows: list[dict[str, Any]], pairs: set[tuple[int, str]], model: dict[str, Any]
+    ):
         annotations = [
-            ObjectAnnotation.model_validate({k: v for k, v in row.items() if k in _ANNOTATION_FIELDS})
+            ObjectAnnotation.model_validate(
+                {k: v for k, v in row.items() if k in _ANNOTATION_FIELDS}
+            )
             for row in rows
         ]
         return _app()._sidecar(state).publish_merged(annotations, pairs, model=model)
@@ -89,13 +97,17 @@ def _videos(state, episodes: list[int], cameras: list[str]) -> list[dict[str, An
     known = set(_episode_indices(state))
     missing = [e for e in episodes if e not in known]
     if missing:
-        raise HTTPException(400, f"Unknown episode(s): {', '.join(map(str, missing[:10]))}")
+        raise HTTPException(
+            400, f"Unknown episode(s): {', '.join(map(str, missing[:10]))}"
+        )
     _app()._prepare_sam3_media(state)
     items = []
     for episode in episodes:
         for camera in cameras:
             try:
-                items.append(media.resolve(state.root, state.info, episode, camera).plan())
+                items.append(
+                    media.resolve(state.root, state.info, episode, camera).plan()
+                )
             except FileNotFoundError as exc:
                 raise HTTPException(404, str(exc)) from exc
     return items
@@ -155,7 +167,9 @@ class DistilRequest(Ref):
     provider: Literal["student", "fake"] = "student"
     sources: list[DistilSource] = Field(min_length=1, max_length=16)
     cameras: list[str] | None = None
-    architecture: Literal["rf-detr-seg-nano", "rf-detr-seg-small", "rf-detr-seg-medium"] = "rf-detr-seg-small"
+    architecture: Literal[
+        "rf-detr-seg-nano", "rf-detr-seg-small", "rf-detr-seg-medium"
+    ] = "rf-detr-seg-small"
     epochs: int = Field(default=20, ge=1, le=200)
     batch_size: int = Field(default=8, ge=1, le=64)
     stride: int = Field(default=3, ge=1, le=100)
@@ -201,7 +215,10 @@ class ClockRequest(BaseModel):
 
 
 def _collected_jobs(state) -> list[dict[str, Any]]:
-    return [seg_jobs.public(seg_jobs.collect(job)) for job in seg_jobs.jobs(_dataset_name(state))][-20:]
+    return [
+        seg_jobs.public(seg_jobs.collect(job))
+        for job in seg_jobs.jobs(_dataset_name(state))
+    ][-20:]
 
 
 def _live_public(state) -> list[dict[str, Any]]:
@@ -215,9 +232,9 @@ def _live_public(state) -> list[dict[str, Any]]:
 
 def _pending(repo_id: str | None, revision: str | None, local_path: str | None) -> bool:
     name = _dataset_name(_state(repo_id, revision, local_path))
-    return any(seg_jobs.awaiting_publish(seg_jobs.collect(job)) for job in seg_jobs.jobs(name)) or any(
-        seg_live.awaiting_publish(session) for session in seg_live.sessions(name)
-    )
+    return any(
+        seg_jobs.awaiting_publish(seg_jobs.collect(job)) for job in seg_jobs.jobs(name)
+    ) or any(seg_live.awaiting_publish(session) for session in seg_live.sessions(name))
 
 
 @editor(internal=True)
@@ -237,7 +254,9 @@ def _publish_pending(
     return JSONResponse({"ok": True})
 
 
-def _publish_if_pending(repo_id: str | None, revision: str | None, local_path: str | None) -> None:
+def _publish_if_pending(
+    repo_id: str | None, revision: str | None, local_path: str | None
+) -> None:
     if _pending(repo_id, revision, local_path):
         _publish_pending(repo_id=repo_id, revision=revision, local_path=local_path)
 
@@ -329,7 +348,11 @@ def segmentation_label(request: LabelRequest) -> JSONResponse:
             "label",
             request.provider,
             plan,
-            request={"episodes": len(episodes), "cameras": cameras, "model": spec.get("name")},
+            request={
+                "episodes": len(episodes),
+                "cameras": cameras,
+                "model": spec.get("name"),
+            },
             model=spec.get("name"),
             warnings=warnings,
         )
@@ -350,7 +373,9 @@ def segmentation_distil(request: DistilRequest) -> JSONResponse:
     if request.provider == "student":
         teacher = _teacher_status()
         if not teacher["ready"]:
-            raise HTTPException(409, "The SAM3 teacher is not ready: " + str(teacher["reason"]))
+            raise HTTPException(
+                409, "The SAM3 teacher is not ready: " + str(teacher["reason"])
+            )
         warnings = _call(lambda: seg_jobs.check_gpu("distil"))
     else:
         warnings = []
@@ -362,12 +387,19 @@ def segmentation_distil(request: DistilRequest) -> JSONResponse:
             if (source.repo_id or source.local_path)
             else state
         )
-        cameras = _cameras(source_state, request.cameras) if request.cameras else media.camera_keys(source_state.info)
+        cameras = (
+            _cameras(source_state, request.cameras)
+            if request.cameras
+            else media.camera_keys(source_state.info)
+        )
         split_of: dict[int, str] = {}
         for split in ("train", "valid", "test"):
             for episode in getattr(source, split):
                 if episode in split_of:
-                    raise HTTPException(400, f"Episode {episode} is in both {split_of[episode]} and {split}")
+                    raise HTTPException(
+                        400,
+                        f"Episode {episode} is in both {split_of[episode]} and {split}",
+                    )
                 split_of[episode] = split
         if not split_of:
             continue
@@ -450,7 +482,10 @@ def segmentation_distil(request: DistilRequest) -> JSONResponse:
             request={
                 "name": request.name,
                 "concepts": request.concepts,
-                "episodes": {s: sum(1 for i in items if i["split"] == s) for s in ("train", "valid", "test")},
+                "episodes": {
+                    s: sum(1 for i in items if i["split"] == s)
+                    for s in ("train", "valid", "test")
+                },
                 "architecture": request.architecture,
                 "epochs": request.epochs,
             },
@@ -598,4 +633,3 @@ def segmentation_live_stop(
 def stop_all() -> None:
     """Service shutdown: stop live sessions and running jobs' workers."""
     seg_live.stop_all()
-

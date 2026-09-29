@@ -63,15 +63,21 @@ def camera_keys(info: dict[str, Any]) -> list[str]:
     return sorted(
         key
         for key, value in features.items()
-        if key.startswith("observation.images.") and (value or {}).get("dtype") == "video"
+        if key.startswith("observation.images.")
+        and (value or {}).get("dtype") == "video"
     )
 
 
-def resolve(root: Path, info: dict[str, Any], episode_index: int, camera_key: str) -> EpisodeVideo:
+def resolve(
+    root: Path, info: dict[str, Any], episode_index: int, camera_key: str
+) -> EpisodeVideo:
     episode = episode_metadata(root, episode_index)
     fps = float(info.get("fps") or 30)
     prefix = f"videos/{camera_key}"
-    start_s = float(episode.get(f"{prefix}/from_timestamp", episode.get("video_from_timestamp", 0)) or 0)
+    start_s = float(
+        episode.get(f"{prefix}/from_timestamp", episode.get("video_from_timestamp", 0))
+        or 0
+    )
     video = None
     template = info.get("video_path")
     if template:
@@ -80,8 +86,12 @@ def resolve(root: Path, info: dict[str, Any], episode_index: int, camera_key: st
         # file-{file_index:03d}.mp4") takes this camera's own chunk/file
         # indices: video and data files roll over independently, so the
         # data file's indices point at another episode's video.
-        video_chunk = episode.get(f"{prefix}/chunk_index", episode.get("video_chunk_index"))
-        video_file = episode.get(f"{prefix}/file_index", episode.get("video_file_index"))
+        video_chunk = episode.get(
+            f"{prefix}/chunk_index", episode.get("video_chunk_index")
+        )
+        video_file = episode.get(
+            f"{prefix}/file_index", episode.get("video_file_index")
+        )
         data_chunk = episode.get("data/chunk_index", episode.get("chunk_index", 0))
         data_file = episode.get("data/file_index", episode.get("file_index", 0))
         values = {
@@ -115,7 +125,10 @@ def resolve(root: Path, info: dict[str, Any], episode_index: int, camera_key: st
         )
     length = int(episode.get("length", 0) or 0)
     if length <= 0:
-        end_s = float(episode.get(f"{prefix}/to_timestamp", episode.get("video_to_timestamp", 0)) or 0)
+        end_s = float(
+            episode.get(f"{prefix}/to_timestamp", episode.get("video_to_timestamp", 0))
+            or 0
+        )
         if end_s > start_s:
             length = max(0, round((end_s - start_s) * fps))
     return EpisodeVideo(

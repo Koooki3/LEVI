@@ -47,7 +47,14 @@ def _idle_seconds() -> float:
 
 
 class LiveSession:
-    def __init__(self, session_id: str, dataset: str, plan: dict[str, Any], folder: Path, provider: str):
+    def __init__(
+        self,
+        session_id: str,
+        dataset: str,
+        plan: dict[str, Any],
+        folder: Path,
+        provider: str,
+    ):
         self.id = session_id
         self.dataset = dataset
         self.plan = plan
@@ -67,7 +74,9 @@ class LiveSession:
         self.created_at = time.time()
         self.stopped_at: float | None = None
         self.seq = 0
-        self.events: collections.deque[tuple[int, str, str | None, str]] = collections.deque(maxlen=MAX_EVENTS)
+        self.events: collections.deque[tuple[int, str, str | None, str]] = (
+            collections.deque(maxlen=MAX_EVENTS)
+        )
         self.cv = threading.Condition()
         self.process: subprocess.Popen | None = None
         self._stdin_lock = threading.Lock()
@@ -93,7 +102,9 @@ class LiveSession:
         finally:
             log.close()
         children.track(self.process, "segmentation-live", self.id)
-        threading.Thread(target=self._read, name=f"seg-live-{self.id}", daemon=True).start()
+        threading.Thread(
+            target=self._read, name=f"seg-live-{self.id}", daemon=True
+        ).start()
 
     def _push(self, kind: str, camera: str | None, raw: str) -> None:
         with self.cv:
@@ -125,7 +136,9 @@ class LiveSession:
             elif kind == "idle":
                 # The worker waits for its stdin to end; tell it to save and exit.
                 self.state = "stopping"
-                threading.Thread(target=self.send, args=({"op": "stop"},), daemon=True).start()
+                threading.Thread(
+                    target=self.send, args=({"op": "stop"},), daemon=True
+                ).start()
             elif kind == "stopped":
                 self.summary = message.get("summary")
             self._push(kind or "message", None, line)
@@ -136,7 +149,11 @@ class LiveSession:
         if code != 0 and not self.error:
             self.error = f"live worker exited with code {code}"
         self.stopped_at = time.time()
-        self._push("closed", None, json.dumps({"type": "closed", "state": self.state, "error": self.error}))
+        self._push(
+            "closed",
+            None,
+            json.dumps({"type": "closed", "state": self.state, "error": self.error}),
+        )
 
     def send(self, message: dict[str, Any]) -> bool:
         process = self.process
@@ -265,7 +282,9 @@ def start(
             raise jobs.SegError(400, "Choose a student model")
         worker = jobs.worker_state()
         if not worker["ready"]:
-            raise jobs.SegError(503, "Fast segmentation worker is not ready: " + worker["reason"])
+            raise jobs.SegError(
+                503, "Fast segmentation worker is not ready: " + worker["reason"]
+            )
         try:
             spec = models.worker_spec(model)
         except KeyError as exc:
@@ -274,7 +293,11 @@ def start(
             raise jobs.SegError(400, str(exc)) from exc
         jobs.check_gpu("live")
     else:
-        spec = {"name": model or "fake", "provider": "fake", "concepts": concepts or ["robot arm", "cup"]}
+        spec = {
+            "name": model or "fake",
+            "provider": "fake",
+            "concepts": concepts or ["robot arm", "cup"],
+        }
     with _LOCK:
         running = [s for s in _SESSIONS.values() if s.stopped_at is None]
         # One live view per episode: a second start replaces the first.
@@ -403,7 +426,11 @@ def forget_finished(max_age: float = 3600.0) -> None:
     now = time.time()
     with _LOCK:
         for key, session in list(_SESSIONS.items()):
-            if session.stopped_at and session.published and now - session.stopped_at > max_age:
+            if (
+                session.stopped_at
+                and session.published
+                and now - session.stopped_at > max_age
+            ):
                 _SESSIONS.pop(key, None)
 
 

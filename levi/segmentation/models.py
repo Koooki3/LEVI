@@ -26,7 +26,12 @@ MANIFEST = "manifest.json"
 WEIGHTS = "weights.pth"
 NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$"
 ARCHITECTURES = ("rf-detr-seg-nano", "rf-detr-seg-small", "rf-detr-seg-medium")
-DEFAULT_TRACKER = {"lost_buffer": 300, "activation": 0.5, "matching": 0.8, "min_frames": 1}
+DEFAULT_TRACKER = {
+    "lost_buffer": 300,
+    "activation": 0.5,
+    "matching": 0.8,
+    "min_frames": 1,
+}
 LICENCES = {
     "student_code_and_base_weights": "Apache-2.0 (RF-DETR, Roboflow)",
     "tracker": "MIT (supervision ByteTrack)",
@@ -69,9 +74,16 @@ def problems(manifest: dict[str, Any], directory: Path) -> list[str]:
     if manifest.get("schema") != SCHEMA:
         issues.append(f"schema is not {SCHEMA}")
     concepts = manifest.get("concepts")
-    if not isinstance(concepts, list) or not concepts or not all(isinstance(c, str) and c for c in concepts):
+    if (
+        not isinstance(concepts, list)
+        or not concepts
+        or not all(isinstance(c, str) and c for c in concepts)
+    ):
         issues.append("concepts must be a non-empty list of names")
-    if manifest.get("architecture") not in ARCHITECTURES and manifest.get("provider") != "fake":
+    if (
+        manifest.get("architecture") not in ARCHITECTURES
+        and manifest.get("provider") != "fake"
+    ):
         issues.append(f"architecture must be one of {', '.join(ARCHITECTURES)}")
     name = weights_name(manifest)
     if name is None:
@@ -89,7 +101,12 @@ def weights_name(manifest: dict[str, Any]) -> str | None:
     value = manifest.get("weights") or WEIGHTS
     if not isinstance(value, str):
         return None
-    if value in {".", ".."} or "/" in value or "\\" in value or Path(value).name != value:
+    if (
+        value in {".", ".."}
+        or "/" in value
+        or "\\" in value
+        or Path(value).name != value
+    ):
         return None
     return value
 
@@ -112,7 +129,9 @@ def public(name: str, manifest: dict[str, Any], directory: Path) -> dict[str, An
         "provider": manifest.get("provider", "student"),
         "architecture": manifest.get("architecture"),
         "concepts": manifest.get("concepts", []),
-        "datasets": [d.get("name") for d in manifest.get("datasets", []) if isinstance(d, dict)],
+        "datasets": [
+            d.get("name") for d in manifest.get("datasets", []) if isinstance(d, dict)
+        ],
         "created_at": manifest.get("created_at"),
         "teacher": (manifest.get("teacher") or {}).get("name"),
         "confidence": manifest.get("confidence"),
@@ -126,7 +145,9 @@ def public(name: str, manifest: dict[str, Any], directory: Path) -> dict[str, An
             },
             "images": metrics.get("images"),
         },
-        "training_frames": ((manifest.get("teacher") or {}).get("pseudo_labels") or {}).get("splits"),
+        "training_frames": (
+            (manifest.get("teacher") or {}).get("pseudo_labels") or {}
+        ).get("splits"),
         "licence": manifest.get("licence"),
         "ready": not problems(manifest, directory),
         "path": str(directory),
@@ -217,7 +238,9 @@ def import_weights(
         "metrics": {"heldout_vs_teacher": None},
         "weights": WEIGHTS,
     }
-    (directory / MANIFEST).write_text(json.dumps(manifest, indent=1, ensure_ascii=False))
+    (directory / MANIFEST).write_text(
+        json.dumps(manifest, indent=1, ensure_ascii=False)
+    )
     return directory
 
 
