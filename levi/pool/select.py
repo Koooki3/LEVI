@@ -78,7 +78,7 @@ def outcome_class(row: dict, *, reliable: bool) -> str:
 
 
 def stratum_of(row: dict) -> str:
-    date = str(row.get("date") or "")[:7] or "-"
+    date = str(row.get("date") or "")[:10] or "-"
     return " | ".join(
         [
             str(row.get("policy_method") or "-"),
