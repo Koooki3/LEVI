@@ -84,6 +84,7 @@ LEVI checks the spec against the catalog and waits for your approval before anyt
 | [RECAP](docs/RECAP.md) | The RECAP value-dataset format and how to consume it |
 | [Training manifests](docs/TRAINING_MANIFEST.md) | Which frames enter a learner's loss and with what weight, with provenance; the trainer-side reader |
 | [SAM3](docs/SAM3.md) | Optional model-assisted object masks |
+| [Fast segmentation](docs/SEGMENTATION.md) | Live instance-segmentation overlay while an episode plays, fast dataset labelling, distilling a student from SAM3 |
 | [Evaluation records](docs/EVALUATION.md) | Recording human annotation work; per-mode quality and cost records of human and agent subtask annotation |
 | [Built-in knowledge](docs/KNOWLEDGE.md) | Dataset-agnostic rules every model in LEVI follows, and how local memory is promoted into them |
 | [Workspace](docs/WORKSPACE.md) | What lives where under `LEVI_WORKSPACE`, naming, sync, cleanup |

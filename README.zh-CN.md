@@ -84,6 +84,7 @@ LEVI 会对照数据目录校验解析出的任务规格，等你批准后才执
 | [RECAP](docs/RECAP.md) | RECAP 价值数据集格式与使用方式 |
 | [训练清单](docs/TRAINING_MANIFEST.md) | 哪些帧以什么权重进入训练 loss，附完整来源记录；训练端读取器 |
 | [SAM3](docs/SAM3.md) | 可选的模型辅助物体掩码 |
+| [快速分割](docs/SEGMENTATION.md) | 播放片段时实时叠加实例分割、快速标注数据集、从 SAM3 蒸馏学生模型 |
 | [评测记录](docs/EVALUATION.md) | 记录人工标注过程；人工与 agent 子任务标注按模式的质量与成本记录 |
 | [内置知识](docs/KNOWLEDGE.md) | LEVI 中所有模型都遵循的、与数据集无关的规则，以及本地记忆如何提升为内置知识 |
 | [工作区](docs/WORKSPACE.md) | `LEVI_WORKSPACE` 下各类文件的位置、命名、同步与清理 |

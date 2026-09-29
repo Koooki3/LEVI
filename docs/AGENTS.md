@@ -110,6 +110,8 @@ A review plan with `workflow.anchored` (a release-anchored review, anchored revi
 
 `objects.strategy` reads the machine — SAM3 worker, checkpoint, free GPU memory — and recommends a path. With SAM3: `objects.plan → objects.run`. Without it: `objects.detect` measures candidate regions with no model or GPU, and the agent submits the ones that are objects by `candidate_id` through `objects.propose` (`track_by: "overlap"` links identities across frames and refuses when frames are too far apart). Both end in the same staged review. From a terminal: `levi agent objects status|run|review|show|relink …`. See [SAM3](SAM3.md).
 
+Fast instance segmentation (a distilled student model with a live overlay in the episode viewer, fast or SAM3-quality dataset labelling, and distillation from SAM3) is started by a person in the web UI or the HTTP API; its results are ordinary object annotations, `suggested` until reviewed. An agent reads its state with `segmentation.status`: the student models of a dataset, their concepts, held-out scores against the teacher and licences, the worker's readiness and the latest jobs. See [Fast segmentation](SEGMENTATION.md).
+
 ## The harness
 
 LEVI keeps everything a task leaves behind so that the next task on the same dataset starts better. The harness makes no model call of its own.
@@ -194,6 +196,7 @@ uv run levi agent knowledge list|refresh|promote|reject      # built-in knowledg
 | | `memory.rebuild`, `knowledge.promote`, `knowledge.reject`; publishing, retaining, rolling back and resolving improvements | **person** |
 | Supervision | `supervision.pending`, `supervision.feedback` | assigned teacher |
 | Anchored review | `anchored.specs`, `anchored.get` (read-only: built-in specs; per-episode outcomes or one episode's events, answers, validity and frames; see [Anchored review](ANCHORED_REVIEW.md)) | agent |
+| Fast segmentation | `segmentation.status` (read-only: student models with their held-out scores and licences, worker readiness, latest labelling or distillation jobs; see [Fast segmentation](SEGMENTATION.md)) | agent |
 | RECAP value model | `recap.status`, `recap.get` (read-only: checkpoints, current advantage labels, an episode's positive/negative runs and value curve; see [RECAP](RECAP.md)) | agent |
 | Workspace | `gpu.status` (the local-model GPU guardian's decision) | agent |
 | | `workspace.clean`, `workspace.reset` | **person** |

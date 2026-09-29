@@ -134,6 +134,10 @@ This procedure is a release requirement documented in [RELEASING](docs/RELEASING
 
 The SAM3 worker declares its own uv environment and is intentionally absent from the core uv.lock. It adds huggingface-hub for runtime download from the 1038lab/sam3 mirror. Its exact Torch/torchvision wheels, CUDA runtime, transitive dependencies, native libraries and model checkpoint must be inventoried from the actual environment before publishing a Docker/PyPI/binary artifact. The source release does not claim that inventory is complete.
 
+### Fast segmentation worker dependencies
+
+The fast segmentation worker (`integrations/segmentation`) has its own uv environment and lock, absent from the core uv.lock: Torch and torchvision (CUDA 12.8 wheels), RF-DETR `rfdetr[train]==1.11.0` (Apache-2.0; only the N/S/M segmentation variants, whose COCO weights are downloaded at first use under Apache-2.0 — the XL/2XL variants carry another licence and are never used), supervision (MIT, ByteTrack), pycocotools (BSD-2-Clause), faster-coco-eval and torch-hungarian (Apache-2.0), OpenCV headless (Apache-2.0), nvidia-ml-py (BSD-3-Clause), numpy and pyarrow. No AGPL or non-commercial package is part of it. Students distilled in LEVI stay in the user's workspace; the SAM3 teacher that labels their training frames is covered by the SAM License (see above).
+
 ### RECAP value worker dependencies
 
 The RECAP value worker (`integrations/recap_value`) has its own uv environment and lock, absent from the core uv.lock: Torch (CUDA 12.8 wheels), transformers 4.53.2 (Apache-2.0, patched in place by `setup.sh`), tokenizers, safetensors, sentencepiece, PyAV (BSD-3-Clause; its wheels bundle FFmpeg libraries under their own licenses), numpy and pyarrow. Value-model checkpoints and the SigLIP2 / Gemma3 base models and tokenizer are user-supplied under their own terms (Gemma models are subject to the Gemma terms of use) and are never committed.

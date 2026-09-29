@@ -49,6 +49,15 @@ Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge fo
 | GET | `/api/annotation/sam3/revisions` | List object annotation revisions |
 | GET | `/api/annotation/sam3/episodes/{id}/objects` | Read object masks/bboxes, with `camera_key`, `frame_index` and `annotation_revision` filters |
 | POST | `/api/annotation/sam3/edits` | Revision-checked accept/reject/relabel/occlusion/delete/refine |
+| GET | `/api/annotation/segmentation/status` | Fast segmentation: worker and teacher readiness, student models, cameras, recent jobs, live sessions ([Fast segmentation](SEGMENTATION.md)) |
+| GET/DELETE | `/api/annotation/segmentation/models[/{name}]` | List or delete distilled student models |
+| POST | `/api/annotation/segmentation/label` | Label episodes (all by default) with a student; `202` job |
+| POST | `/api/annotation/segmentation/distil` | Distil a student from SAM3 pseudo-labels; `202` job |
+| GET/POST | `/api/annotation/segmentation/jobs/{id}[/cancel]` | Poll (publishes a finished labelling job) or cancel |
+| POST | `/api/annotation/segmentation/live` | Start a live overlay session for one episode (answers once the model is loaded) |
+| POST | `/api/annotation/segmentation/live/{id}/clock` | Player clock `{playing, time, rate}` |
+| GET | `/api/annotation/segmentation/live/{id}/events` | Server-sent events: per-camera `result`, `stats`, `stopped`, `error`, `closed` |
+| POST | `/api/annotation/segmentation/live/{id}/stop` | Stop and save the shown frames for this episode only |
 
 For the `local/<slug>` repo IDs returned by registration, the annotation API resolves the registered directory automatically. Direct `local_path` also works if it remains inside the configured workspace.
 
@@ -217,6 +226,7 @@ Generated from the capability registry by `uv run levi docs sync`. Do not edit b
 | `runs.report_usage` | agent | Report this agent's own token/request use for the run; feeds cost estimates |
 | `runs.result` | agent | Read the durable artifact manifest and review status |
 | `runs.resume` | agent / operator | Resume uncompleted shards without repeating completed ones |
+| `segmentation.status` | agent | Fast instance segmentation on this dataset: the distilled student models (concepts, held-out scores against the SAM3 teacher, licences), the worker's readiness and the latest labelling or distillation jobs; reads only |
 | `supervision.feedback` | agent | Accept, revise or reject a learner phase; never approve execution or commit |
 | `supervision.pending` | agent | Read the assigned teacher's evidence and pending annotation phases |
 | `tasks.advance` | agent / operator | Run the task's next automatic step; stops at every human gate |

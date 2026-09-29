@@ -528,6 +528,16 @@ SPECS = {
             "V(o_t) about once a second"
         ),
     ),
+    "segmentation.status": (
+        DatasetRef,
+        "read",
+        (
+            "Fast instance segmentation on this dataset: the distilled student "
+            "models (concepts, held-out scores against the SAM3 teacher, "
+            "licences), the worker's readiness and the latest labelling or "
+            "distillation jobs; reads only"
+        ),
+    ),
     "anchored.specs": (
         Empty,
         "read",
@@ -1079,6 +1089,22 @@ def _invoke(
             return recap_jobs.episode_digest(args.repo_id, args.episode)
         except recap_jobs.RecapError as exc:
             raise ValueError(exc.detail) from exc
+    if name == "segmentation.status":
+        from levi.catalog import display_name
+        from levi.segmentation import jobs as seg_jobs
+        from levi.segmentation import models as seg_models
+
+        if not principal.human and args.repo_id not in principal.datasets:
+            raise PermissionError("Dataset is outside this principal's scope")
+        key = display_name(args.repo_id, None)
+        return {
+            "worker": seg_jobs.worker_state(),
+            "models": seg_models.listing(key),
+            "jobs": [seg_jobs.public(job) for job in seg_jobs.jobs(key)][-10:],
+            "note": "Label, distil and the live overlay are started by a person "
+            "in the episode viewer (Annotations > Objects) or the HTTP API; "
+            "see docs/SEGMENTATION.md",
+        }
     if name in {"memory.get", "memory.search", "memory.rebuild"}:
         from levi.catalog import display_name
         from levi.harness import memory
