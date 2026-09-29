@@ -20,6 +20,7 @@ import {
   RUNNING,
   StatusBadge,
 } from "@/components/pool/pool-progress";
+import { defaultTiming } from "@/components/pool/types";
 import type {
   EpisodeRow,
   ExportFormat,
@@ -32,6 +33,7 @@ import type {
   Suggest,
   TaskEntry,
   TaskRow,
+  Timing,
 } from "@/components/pool/types";
 
 const PAGE = 50;
@@ -96,6 +98,9 @@ export default function TrainingPool() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [format, setFormat] = useState<ExportFormat>("lerobot_v21");
   const [humanAsSuccess, setHumanAsSuccess] = useState(false);
+  const [fps, setFps] = useState(10);
+  // null: the format's own timing (LeRobot resample, RECAP retime).
+  const [timing, setTiming] = useState<Timing | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewError, setPreviewError] = useState("");
   const [previewing, setPreviewing] = useState(false);
@@ -236,7 +241,14 @@ export default function TrainingPool() {
   }, [filterKey, focus, offset, scannedAt, scanned]);
 
   // Live preview, debounced.
-  const previewKey = JSON.stringify([recipe, format, humanAsSuccess]);
+  const effectiveTiming = timing ?? defaultTiming(format);
+  const previewKey = JSON.stringify([
+    recipe,
+    format,
+    humanAsSuccess,
+    fps,
+    effectiveTiming,
+  ]);
   useEffect(() => {
     if (!scanned || recipe.tasks.length === 0) {
       setPreview(null);
@@ -249,6 +261,8 @@ export default function TrainingPool() {
         recipe: { ...recipe, name: recipe.name || "untitled" },
         format,
         human_as_success: humanAsSuccess,
+        // How raw captures meet the export rate (raw copies have none).
+        ...(effectiveTiming ? { fps, timing: effectiveTiming } : {}),
       })
         .then((value) => {
           setPreview(value);
@@ -586,7 +600,15 @@ export default function TrainingPool() {
               job={exportJob}
               humanAsSuccess={humanAsSuccess}
               onHumanAsSuccess={setHumanAsSuccess}
-              onFormat={setFormat}
+              format={format}
+              onFormat={(next) => {
+                setFormat(next);
+                setTiming(null);
+              }}
+              fps={fps}
+              onFps={setFps}
+              timing={timing}
+              onTiming={setTiming}
               onJob={(j) => {
                 setExportJob(j);
                 void refreshStatus();

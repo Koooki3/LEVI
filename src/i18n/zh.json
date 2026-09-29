@@ -1617,5 +1617,13 @@
   "09 / Report": "09 / 报告",
   "The Report page shows a live technical report from the folder named by LEVI_REPORT_DIR. It follows the language switch and updates when the report files change.": "「报告」页显示 LEVI_REPORT_DIR 所指目录中的实时技术报告，随语言切换显示中文或英文，报告文件变化时自动更新。",
   "10 / Share": "10 / 分享",
-  "README.md and README.zh-CN.md cover installation, SSH port forwarding, deployment and troubleshooting. docs/API.md lists the REST routes and agent capabilities; docs/RELEASING.md and CHANGELOG.md cover releases and changes. LEVI preserves the upstream Apache-2.0 license and attribution.": "README.md 和 README.zh-CN.md 说明安装、SSH 端口转发、部署及故障排查。docs/API.md 列出 REST 路由和 agent 能力；docs/RELEASING.md 与 CHANGELOG.md 说明发布流程和变更。LEVI 保留上游 Apache-2.0 许可证和来源声明。"
+  "README.md and README.zh-CN.md cover installation, SSH port forwarding, deployment and troubleshooting. docs/API.md lists the REST routes and agent capabilities; docs/RELEASING.md and CHANGELOG.md cover releases and changes. LEVI preserves the upstream Apache-2.0 license and attribution.": "README.md 和 README.zh-CN.md 说明安装、SSH 端口转发、部署及故障排查。docs/API.md 列出 REST 路由和 agent 能力；docs/RELEASING.md 与 CHANGELOG.md 说明发布流程和变更。LEVI 保留上游 Apache-2.0 许可证和来源声明。",
+  "Timing": "时间模式",
+  "Resample (drop frames only)": "重采样（只丢帧）",
+  "Retime (keep every frame)": "重定时（保留每一帧）",
+  "Drops frames only, never adds any (refused when a source's frame rate is below the export FPS).": "只丢帧，不补帧（源帧率低于导出帧率时会被拒绝）",
+  "Keeps every frame and declares it at the export FPS (the time axis stretches or shrinks slightly, so motion plays slightly faster or slower).": "保留每一帧，按导出帧率声明（时间轴略有伸缩，动作播放略快或略慢）",
+  "{count} raw episode(s) were recorded below the export FPS {fps} (as slow as {min} FPS). Resample cannot add frames, so the export would be refused. Lower the FPS to {suggested}, or switch the timing to Retime.": "{count} 个原始片段的录制帧率低于导出帧率 {fps}（最低 {min}）。重采样不会补帧，导出会被拒绝。请把导出帧率降到 {suggested}，或把时间模式改为重定时。",
+  "Retime: the time axis of {count} raw episode(s) becomes up to {percent}% longer than recorded (motion plays that much slower).": "重定时：{count} 个原始片段的时间轴最多拉长 {percent}%（动作播放相应变慢）。",
+  "Retime: the time axis of {count} raw episode(s) becomes up to {percent}% shorter than recorded (motion plays that much faster).": "重定时：{count} 个原始片段的时间轴最多缩短 {percent}%（动作播放相应变快）。"
 }

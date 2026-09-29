@@ -2297,6 +2297,10 @@ select optgroup {
   border-color: #ff9c94;
   color: #ffaaa3;
 }
+.levi-pool-warnings li[data-level="info"] {
+  border-color: #9fb3c850;
+  color: #b6c4d3;
+}
 
 .levi-pool-pick {
   display: flex;

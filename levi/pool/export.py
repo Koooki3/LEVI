@@ -36,7 +36,7 @@ from typing import Literal
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..catalog import atomic
 from ..conversion import dataset, media, pipeline
@@ -49,6 +49,7 @@ from ..conversion.outputs.recap_value import RECAP_COLUMNS, RecapOptions, RecapV
 from ..conversion.progress import Progress
 from ..conversion.report import InputReport, Requirement
 from . import heldout, index, scanner, settings
+from . import timing as timing_mod
 from .recipe import NAME, Recipe, find_warnings, select_detailed
 
 SCHEMA = "levi.pool.export.v1"
@@ -82,8 +83,11 @@ class ExportOptions(BaseModel):
     # LeRobot source video key -> output key; keys already named like the
     # output need no entry.
     camera_map: dict[str, str] = Field(default_factory=dict)
-    # Conversion of raw captures; None = the format's default (lerobot:
-    # resample + static filter; recap: retime, every step kept).
+    # How the frames meet ``fps``: "resample" only drops frames, "retime" keeps
+    # every frame and declares it at ``fps`` (levi/pool/timing.py). None =
+    # the format's default (lerobot: resample + static filter; recap: retime,
+    # every step kept); resolved at validation, so plans and records hold the
+    # mode used. A raw capture copy has no time axis: timing is ignored (None).
     timing: Literal["resample", "retime"] | None = None
     filter_static: bool | None = None
     robot_type: str | None = Field(None, min_length=1, max_length=100)
@@ -117,6 +121,15 @@ class ExportOptions(BaseModel):
                 raise ValueError("camera_map keys must be nonempty")
         return value
 
+    @model_validator(mode="after")
+    def _timing(self):
+        self.timing = (
+            (self.timing or timing_mod.default_timing(self.format))
+            if timing_mod.has_timing(self.format)
+            else None
+        )
+        return self
+
     def target(self) -> Path:
         parent = (
             Path(self.output_dir).expanduser()
@@ -130,7 +143,7 @@ class ExportOptions(BaseModel):
         return Options(
             fps=self.fps,
             cameras=self.cameras,
-            timing=self.timing or ("retime" if recap else "resample"),
+            timing=self.timing or timing_mod.default_timing(self.format) or "resample",
             filter_static=(not recap)
             if self.filter_static is None
             else self.filter_static,
@@ -195,6 +208,7 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "task_raw",
         "frames",
         "fps",
+        "measured_fps",
         "state_dim",
         "action_dim",
         "category",
@@ -232,7 +246,8 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "pool_roots": [str(p) for p in settings.pool_roots()],
         "heldout_lists": [str(p) for p in settings.heldout_files()],
         "heldout_disabled": settings.heldout_disabled(),
-        "warnings": [w for w in warnings if not w["blocking"]],
+        "warnings": [w for w in warnings if not w["blocking"]]
+        + timing_mod.warnings(chosen, options.fps, options.timing),
     }
 
 
@@ -363,6 +378,14 @@ def _unchanged(episodes: list[dict]):
 # ------------------------------------------------------------------ inputs
 
 
+def _below_message(slowest: float, fps: float) -> str:
+    return (
+        f"Raw captures converted at {slowest:g} fps, not {fps:g} (their cameras "
+        f"are slower); lower the export fps to {max(1, int(slowest + 1e-9))} "
+        "or use timing retime"
+    )
+
+
 class PoolCaptures(InputFormat):
     """The planned raw episodes as one conversion input, in export order.
 
@@ -376,6 +399,8 @@ class PoolCaptures(InputFormat):
         self.items = episodes
         self.texts = texts
         self.dropped: dict[str, list[str]] = {}
+        # Slowest measured camera rate per kept episode (id -> fps).
+        self.measured: dict[str, float] = {}
 
     def inspect(self, root, options, progress=None) -> InputReport:
         capture = RobotCapture()
@@ -435,7 +460,19 @@ class PoolCaptures(InputFormat):
 
         todo = [i for i in self.items if i[0] not in self.dropped]
         with ThreadPoolExecutor(max_workers=8) as pool:
-            return list(pool.map(build, todo))
+            built = list(pool.map(build, todo))
+        self.measured = {
+            e.source_id: min(e.camera_fps.values()) for e in built if e.camera_fps
+        }
+        slowest = min(self.measured.values(), default=None)
+        if (
+            options.timing == "resample"
+            and slowest is not None
+            and options.fps > slowest + timing_mod.TOLERANCE
+        ):
+            # resample never adds frames; refuse before converting anything.
+            raise ValueError(_below_message(slowest, options.fps))
+        return built
 
 
 # ------------------------------------------------------------------ helpers
@@ -601,6 +638,7 @@ def run(job: dict, progress_path: Path | None = None) -> dict:
             "heldout_lists": job["heldout_lists"],
             "heldout_disabled": bool(job.get("heldout_disabled")),
             "conversion": result.get("conversion"),
+            "timing": result.get("timing"),
             "counts": {
                 "episodes": len(result["episodes"]),
                 "frames": result["frames"],
@@ -629,6 +667,24 @@ def run(job: dict, progress_path: Path | None = None) -> dict:
         "frames": record["counts"]["frames"],
         "excluded": record["counts"]["excluded"],
         "warnings": record["warnings"],
+    }
+
+
+def _timing_record(options: ExportOptions, rows: list[dict]) -> dict:
+    """The timing mode used and how far each source's time axis moved: per
+    episode ``source_fps`` (measured) and ``time_scale`` (exported duration /
+    recorded duration; ``source_fps / fps`` for retime, 1 for resample)."""
+    rates = [r["source_fps"] for r in rows if r.get("source_fps")]
+    scales = [r["time_scale"] for r in rows if r.get("time_scale")]
+    off = [s for s in scales if abs(s - 1) > timing_mod.NOTE_FRACTION]
+    return {
+        "mode": options.timing,
+        "export_fps": options.fps,
+        "source_fps_min": min(rates, default=None),
+        "source_fps_max": max(rates, default=None),
+        "time_scale_min": min(scales, default=None),
+        "time_scale_max": max(scales, default=None),
+        "episodes_off_by_over_2_percent": len(off),
     }
 
 
@@ -718,6 +774,7 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
     part = staging / ".parts" / "raw"
     part_rows: dict[str, dict] = {}
     part_info = None
+    source = None
     part_stats: dict[int, dict] = {}
     if raw_items:
         progress.stage("Convert raw captures", len(raw_items))
@@ -749,10 +806,7 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
             part_stats[row["episode_index"]] = row["stats"]
         conv_fps = float(part_info["fps"])
         if abs(conv_fps - options.fps) > 0.01:
-            raise ValueError(
-                f"Raw captures converted at {conv_fps:g} fps, not {options.fps:g} "
-                "(their cameras are slower); lower the export fps"
-            )
+            raise ValueError(_below_message(conv_fps, options.fps))
     kept = [
         e for e in planned if e["format"] != "robot_capture" or pids[id(e)] in part_rows
     ]
@@ -775,6 +829,7 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
     for new, ep in enumerate(kept):
         if ep["format"] == "robot_capture":
             root, info = part, part_info
+            source_fps = source.measured.get(pids[id(ep)])
             old = part_rows[pids[id(ep)]]["episode_index"]
             mapping = {k: k for k in _video_keys(info)}
             stats = dict(part_stats.get(old, {}))
@@ -782,6 +837,7 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
         else:
             root = Path(ep["source_path"])
             info = schema["infos"][ep["source_path"]]
+            source_fps = float(info.get("fps") or 0) or None
             old = int(ep["episode_index"])
             mapping = _mapping(info, options.camera_map)
             if ep["source_path"] not in ds_stats:
@@ -902,6 +958,10 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
                 **_policy_fields(ep),
                 **_selection_fields(ep),
                 "frames": n,
+                "source_fps": source_fps,
+                "time_scale": timing_mod.time_scale(
+                    source_fps, options.fps, options.timing
+                ),
             }
         )
         offset += n
@@ -963,4 +1023,5 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
         "task_order": task_order,
         "warnings": warnings,
         "conversion": conv.model_dump() if raw_items else None,
+        "timing": _timing_record(options, record_rows),
     }

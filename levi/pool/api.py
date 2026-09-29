@@ -289,6 +289,10 @@ class Preview(BaseModel):
     recipe: Recipe
     format: Literal["lerobot_v21", "recap_value", "raw_capture"] | None = None
     human_as_success: bool = False
+    # The export's frame rate and timing mode, for the notes on how raw
+    # captures meet it (timing None: the format's default).
+    fps: float | None = Field(None, ge=1, le=240)
+    timing: Literal["resample", "retime"] | None = None
 
 
 @router.post("/preview")
@@ -296,7 +300,11 @@ def preview(payload: Preview):
     """Counts for a recipe (saved or not): episodes, frames, per task, and
     what is excluded and why."""
     return recipe.preview(
-        payload.recipe, payload.format, human_as_success=payload.human_as_success
+        payload.recipe,
+        payload.format,
+        human_as_success=payload.human_as_success,
+        fps=payload.fps,
+        timing=payload.timing,
     )
 
 

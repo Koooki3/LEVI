@@ -67,7 +67,7 @@ Skip, category and format rules are data, not code (`levi/pool/rules.py`); `<wor
 
 ### Index / 片段索引
 
-Columns of `pool/index.parquet` include `key`, `source`, `format`, `episode`, `task` (normalised) and `task_raw`, `frames`, `fps`, `cameras`, `state_dim`/`action_dim`, `category` and `category_reason`, `data_source`, `control_mode`, the policy columns below, `date`, `robot_flag` (a rollout's own success flag), `human_label` (from any LEVI workspace under the roots, read-only), `outcome` and `outcome_source` (human label first, then the robot's flag), `nonstandard`, `exportable`, `fingerprint`, `content_hash`, `recording`, `filtered`, `group`, `canonical`, `copies`, `heldout`, `heldout_set`, `heldout_id`.
+Columns of `pool/index.parquet` include `key`, `source`, `format`, `episode`, `task` (normalised) and `task_raw`, `frames`, `fps` (the nominal rate), `measured_fps` (the rate the collector measured, `collection_freq_hz`; raw captures only), `cameras`, `state_dim`/`action_dim`, `category` and `category_reason`, `data_source`, `control_mode`, the policy columns below, `date`, `robot_flag` (a rollout's own success flag), `human_label` (from any LEVI workspace under the roots, read-only), `outcome` and `outcome_source` (human label first, then the robot's flag), `nonstandard`, `exportable`, `fingerprint`, `content_hash`, `recording`, `filtered`, `group`, `canonical`, `copies`, `heldout`, `heldout_set`, `heldout_id`.
 
 ### Which policy produced a rollout / 是哪个策略产生的 rollout
 
@@ -176,7 +176,7 @@ uv run levi pool export pi05-mix --format lerobot_v21 --name pi05-mix-v1 \
 | `recap_value` | The same plus RECAP rewards, returns and labels ([RECAP](RECAP.md)); raw captures are retimed without filtering (one row per executed step). The outcome is the human label, else the robot's flag; episodes with neither are left out (`no_outcome`), and an episode with conflicting human labels is left out (`label_conflict`) instead of falling back to the operator's key. `--human-as-success` counts human-category episodes without an outcome (demonstrations, RLinf's `sft`) as successes, recorded as `outcome_source: sft_demonstration`. |
 | `raw_capture` | Raw capture folders copied into `<task>/demo_NNNN`, renumbered per task, with `task_description.txt`. With `--hardlink` only the videos are hard-linked (they are most of the bytes; never edit them in place); metadata and CSV files are always copied. A task text that is empty, `.` or `..` becomes the folder `task`, and every path written is checked to lie inside the staging folder. |
 
-`pool_export.json` also records the effective conversion parameters (`conversion`: fps, timing, static-frame filter, orientation, cameras, …), each episode's `group`, the held-out lists (or `heldout_disabled`) and the warnings that applied. Two tasks that would be written under one text are refused at planning; `camera_map` and `cameras` must map to distinct output keys; LeRobot sources whose `observation.state` names differ from the output's are refused with the differences. A dry run runs the same held-out group check as the export and leaves no plan behind.
+`pool_export.json` also records the effective conversion parameters (`conversion`: fps, timing, static-frame filter, orientation, cameras, …), the timing mode used (`timing`, see [Frame rates](#frame-rates--帧率)), each episode's `group`, the held-out lists (or `heldout_disabled`) and the warnings that applied. Two tasks that would be written under one text are refused at planning; `camera_map` and `cameras` must map to distinct output keys; LeRobot sources whose `observation.state` names differ from the output's are refused with the differences. A dry run runs the same held-out group check as the export and leaves no plan behind.
 
 Each episode row in `meta/episodes.jsonl` of a LeRobot export carries `pool_key`, `pool_source` and `pool_fingerprint`; `meta/levi_provenance.jsonl` maps new to source episode indices. Not in this version: LeRobot v3 output (needs lerobot's v2.1→v3 converter; convert the v2.1 export with it) and exporting a recipe as a training manifest without copying data. To move an export to another machine see [Remote transfer](#remote-transfer--远程传输).
 
@@ -185,17 +185,33 @@ Each episode row in `meta/episodes.jsonl` of a LeRobot export carries `pool_key`
 
 ## Frame rates / 帧率
 
-Stored videos run at 10 fps for human collection and at about 9.4–10 fps for policy rollouts (online-RL runs about 9.5, direct deployment and student policies about 9.96). LeRobot exports are written at 10 fps by default (`--fps`, or the fps field of the export panel). How a slower rollout meets that rate depends on the timing mode (`levi/conversion/options.py`, `levi/pool/export.py`):
+Stored videos run at 10 fps for human collection and at about 9.4–10 fps for policy rollouts (online-RL runs about 9.5, direct deployment and student policies about 9.96). LeRobot and RECAP exports are written at 10 fps by default (`--fps`, or the fps field of the export panel). How a slower rollout meets that rate depends on the timing mode (`--timing resample|retime`, the **Timing** select of the export panel, `options.timing` of the API; `levi/pool/timing.py`, `levi/conversion/options.py`):
 
-- **`retime`** (default of `recap_value`; `--timing retime` for `lerobot_v21`) keeps every captured row and declares the rows at the export fps. A rollout captured at 9.5 fps and declared at 10 fps has a timeline about 5% shorter than the recording (6% at 9.4 fps), so its motion plays about 5% faster than it happened. Rows and pixels are unchanged.
-- **`resample`** (default of `lerobot_v21`, and the only mode of the export panel) drops rows to reach the export fps and never adds any. A raw rollout measured below the export fps is converted at its measured rate, and the pool then refuses the export (`Raw captures converted at … fps, not 10 …; lower the export fps`). Lower `--fps` to the measured rate or choose `retime`.
-- LeRobot v2.x sources are copied as they are, so their own fps must equal the export fps.
+- **`retime`** (default of `recap_value`) keeps every captured row and declares the rows at the export fps. A rollout captured at 9.5 fps and declared at 10 fps has a timeline about 5% shorter than the recording (6% at 9.4 fps), so its motion plays about 5% faster than it happened. Rows and pixels are unchanged.
+- **`resample`** (default of `lerobot_v21`) drops rows to reach the export fps and never adds any. A raw rollout measured below the export fps cannot be converted at it, and the export is refused before anything is converted (`Raw captures converted at … fps, not 10 …; lower the export fps to 9 or use timing retime`). Lower `--fps` to the nearest integer below the slowest measured rate, or choose `retime`.
+- A raw capture copy (`raw_capture`) has no time axis: the option is ignored (recorded as `null`) and the panel hides it.
+- LeRobot v2.x sources are copied as they are, so their own fps must equal the export fps in either mode.
 
-存储的视频：人工采集为 10 fps，策略 rollout 约 9.4–10 fps（在线 RL 约 9.5，直接部署和学生策略约 9.96）。LeRobot 导出默认按 10 fps 写入（`--fps`，或导出面板的 fps 字段）。较慢的 rollout 如何对上这个帧率，取决于时间模式：
+**Preview notes.** The index keeps each raw episode's measured rate (`measured_fps`; an index from before this column needs a rescan, and until then no note appears). With an export fps and a timing mode, the composition preview and `levi pool recipe show NAME --format … --fps … [--timing …]` add:
 
-- **`retime`**（`recap_value` 的默认；`lerobot_v21` 用 `--timing retime`）保留每个采集行，并按导出 fps 声明。按 9.5 fps 采集、按 10 fps 声明的 rollout，时间轴比实际录制短约 5%（9.4 fps 时约 6%），动作播放比实际发生时快约 5%。行数和画面不变。
-- **`resample`**（`lerobot_v21` 的默认，也是导出面板唯一的模式）只丢行、不补行。实测低于导出 fps 的原始 rollout 按实测帧率转换，随后训练池拒绝导出（`Raw captures converted at … fps, not 10 …; lower the export fps`）。可把 `--fps` 降到实测值，或改用 `retime`。
-- LeRobot v2.x 来源原样复制，所以自身的 fps 必须等于导出 fps。
+- `source_fps_below_export` (`resample`): how many raw episodes are recorded below the export fps, the slowest rate, and the fixes (`suggested_fps`, or `retime`). It is a note in the preview and in a dry run, not an error; it carries `refused: true` because the export will certainly fail, and the export panel disables **Dry run** and **Start export** while it stands.
+- `retime_time_scale` (`retime`, informational, `level: info`): shown only when some raw source differs from the export fps by more than 2%; it gives the episode count and the largest deviation (`max_deviation_percent`, `direction`: e.g. "the time axis is up to 5.3% shorter").
+
+**Record.** `pool_export.json` has `timing` (`mode`, `export_fps`, `source_fps_min/max`, `time_scale_min/max`, `episodes_off_by_over_2_percent`; `null` for a raw capture copy) and, per episode of a LeRobot or RECAP export, `source_fps` (measured from the video; a LeRobot source's own fps) and `time_scale` (exported duration ÷ recorded duration: `source_fps / fps` for `retime`, 1 for `resample`, which picks rows by time). `params.timing` and `conversion.timing` hold the mode actually used, also when the default applied.
+
+存储的视频：人工采集为 10 fps，策略 rollout 约 9.4–10 fps（在线 RL 约 9.5，直接部署和学生策略约 9.96）。LeRobot 与 RECAP 导出默认按 10 fps 写入（`--fps`，或导出面板的 fps 字段）。较慢的 rollout 如何对上这个帧率，取决于时间模式（`--timing resample|retime`，导出面板的“时间模式”下拉框，API 的 `options.timing`；`levi/pool/timing.py`、`levi/conversion/options.py`）：
+
+- **`retime`**（`recap_value` 的默认）保留每个采集行，并按导出 fps 声明。按 9.5 fps 采集、按 10 fps 声明的 rollout，时间轴比实际录制短约 5%（9.4 fps 时约 6%），动作播放比实际发生时快约 5%。行数和画面不变。
+- **`resample`**（`lerobot_v21` 的默认）只丢行、不补行。实测低于导出 fps 的原始 rollout 无法按该 fps 转换，导出会在转换开始前被拒绝（`Raw captures converted at … fps, not 10 …; lower the export fps to 9 or use timing retime`）。可把 `--fps` 降到不高于最慢实测帧率的最大整数，或改用 `retime`。
+- 原始采集目录拷贝（`raw_capture`）没有时间轴：该选项被忽略（记录为 `null`），面板也不显示。
+- LeRobot v2.x 来源原样复制，所以无论哪种模式，自身的 fps 都必须等于导出 fps。
+
+**预览提示。** 索引记录每个原始片段的实测帧率（`measured_fps`；旧索引没有这一列，需要重新扫描，在此之前不会出现提示）。给出导出 fps 和时间模式后，组合预览和 `levi pool recipe show 名称 --format … --fps … [--timing …]` 会增加：
+
+- `source_fps_below_export`（`resample`）：有多少原始片段的录制帧率低于导出 fps、最慢的帧率，以及解决办法（`suggested_fps`，或改用 `retime`）。它在预览和试运行中只是提示而不是错误；带 `refused: true`，因为导出必然失败，所以该提示存在时导出面板会禁用“试运行”和“开始导出”。
+- `retime_time_scale`（`retime`，仅供参考，`level: info`）：只有某个原始来源与导出 fps 相差超过 2% 时才显示，给出受影响的片段数和最大偏差（`max_deviation_percent`、`direction`，例如“时间轴最多缩短 5.3%”）。
+
+**记录。** `pool_export.json` 有 `timing`（`mode`、`export_fps`、`source_fps_min/max`、`time_scale_min/max`、`episodes_off_by_over_2_percent`；原始采集目录拷贝为 `null`），LeRobot 与 RECAP 导出的每个片段还有 `source_fps`（由视频实测；LeRobot 来源为其自身 fps）和 `time_scale`（导出时长 ÷ 录制时长：`retime` 为 `source_fps / fps`，`resample` 按时间取行，为 1）。`params.timing` 和 `conversion.timing` 记录实际使用的模式，使用默认值时也一样。
 
 ## The page / 训练池页面
 
@@ -205,11 +221,11 @@ Stored videos run at 10 fps for human collection and at about 9.4–10 fps for p
 - **Filters** (left): category (原始人工采集 / 原始 rollout / LEVI 处理后 / 外部 / 归档), source (searchable, counts), a task search, outcome (all / robot flag success / verified success), three policy facets (策略模型 / Policy model, 检查点 / Checkpoint, 运行方式 / How it was run: 直接部署, DSRL, RLT, SFE, 学生策略, 未知; each with counts and shown only when the selection holds rollouts) and date. *Show hidden* switches on held-out episodes (留出测试集), copies and the archive; each shows how many it hides.
 - **Tasks and episodes** (centre): the task table (episodes per category, frames, success rate, how its rollouts were run, **+ Add** puts the task at the end of the composition; a task with more than 100 available episodes, or more than the composition's balanced count, opens a chooser first: number of episodes (a number field and a slider, default the balanced count), share of successes (natural share / all successes / all failures / custom %) and how to pick (smart pick / random / in order), with a hint of the resulting split and a warning when the share cannot be met; clicking a task narrows the episode table to it) and the paged episode table with source, category, task, frames, outcome, the policy label (rollouts) and badges for held-out, copy, non-standard and not exportable. An episode of a source registered in LEVI links to the viewer; otherwise its path is shown. A held-out row has no checkbox and cannot be part of an export: the server excludes it whatever the page sends.
 - **Composition** (right): the ordered task list (drag a task by its grip, or use its up / down buttons; the order is the export order); each task shows *Picked N of M · successes a · failures b* with **Edit** (the same chooser), a warning when the requested mix or count cannot be met, and **Show picked episodes** (the episodes with quality score and why); the per-task cap (for tasks with no count of their own), seed, non-standard folders, the constraints taken from the filters, and a live preview (episodes, frames, held-out excluded, the overall success / failure mix with the category and method shares, and every other exclusion with its reason). Recipes are saved, loaded and deleted by name.
-- **Export**: format, dataset name, output directory (a folder outside `LEVI_EXPORT_ROOTS` is flagged in the field and refused by the server), fps, camera mapping, hard links (raw capture copy only), **Dry run** and **Start export** with progress. A finished export links to its `pool_export.json` and offers **Send to remote / 传到远程**.
+- **Export**: format, dataset name, output directory (a folder outside `LEVI_EXPORT_ROOTS` is flagged in the field and refused by the server), fps, timing (LeRobot and RECAP: a select with a one-line explanation), camera mapping, hard links (raw capture copy only), **Dry run** and **Start export** with progress. A finished export links to its `pool_export.json` and offers **Send to remote / 传到远程**.
 
 Page routes beyond the table above: `GET /api/levi/pool/facets` (facet counts and what the toggles hide), `outcome=robot_flag_success|verified_success`, `date_from`, `date_to` on `tasks` and `episodes`, and each episode row carries `viewer` (its LEVI viewer path or `null`).
 
-页面在 `/pool`（顶部导航“训练池”，工作台也有入口），与 `levi pool …` 共用后端：顶部是池目录、上次扫描和“立即扫描”；左侧分面（类别、来源、任务搜索、结局、策略模型、检查点、运行方式、日期，可显示留出测试集、副本、归档并显示被隐藏的数量）；中间是任务表和片段表（已登记的数据集可跳到片段查看器，否则显示路径）；右侧是组合（有序任务列表，可拖动或用上下按钮排序；每个任务显示“选 N / 共 M · 成功 a · 失败 b”，可编辑片段数、成功占比和选取方式，可查看所选片段及质量分；片段数超过 100 的任务添加时先弹出选择面板；每任务上限、种子、实时预览（含成功/失败构成）及各类排除原因、命名保存/载入/删除）和导出面板（格式、名称、输出目录、fps、相机映射、硬链接、试运行、进度、`pool_export.json` 链接）。留出片段在页面上不可选，服务端也会排除。
+页面在 `/pool`（顶部导航“训练池”，工作台也有入口），与 `levi pool …` 共用后端：顶部是池目录、上次扫描和“立即扫描”；左侧分面（类别、来源、任务搜索、结局、策略模型、检查点、运行方式、日期，可显示留出测试集、副本、归档并显示被隐藏的数量）；中间是任务表和片段表（已登记的数据集可跳到片段查看器，否则显示路径）；右侧是组合（有序任务列表，可拖动或用上下按钮排序；每个任务显示“选 N / 共 M · 成功 a · 失败 b”，可编辑片段数、成功占比和选取方式，可查看所选片段及质量分；片段数超过 100 的任务添加时先弹出选择面板；每任务上限、种子、实时预览（含成功/失败构成）及各类排除原因、命名保存/载入/删除）和导出面板（格式、名称、输出目录、fps、时间模式、相机映射、硬链接、试运行、进度、`pool_export.json` 链接）。留出片段在页面上不可选，服务端也会排除。
 
 ## Remote transfer / 远程传输
 
@@ -239,10 +255,10 @@ All routes are behind the service's UI token and same-origin check.
 | POST | `/api/levi/pool/scan?rehash=` | Start a scan job |
 | GET | `/api/levi/pool/jobs`, `/api/levi/pool/jobs/{id}` | Scan and export jobs with progress and result |
 | GET / PUT / DELETE | `/api/levi/pool/recipes`, `/api/levi/pool/recipes/{name}` | Recipe CRUD (the body's `name` must match the URL) |
-| POST | `/api/levi/pool/preview` | `{ "recipe": {…}, "format": "recap_value" }` → counts and exclusions; per task `available`, `successes`, `failures`, `selected`, `selected_successes`, `selected_failures`, `shortfall`, `notes`; the overall `mix` |
+| POST | `/api/levi/pool/preview` | `{ "recipe": {…}, "format": "recap_value", "fps"?, "timing"? }` → counts and exclusions (with `fps` and a format that has a time axis, the `warnings` also judge the raw captures at that fps and `timing`: see [Frame rates](#frame-rates--帧率)); per task `available`, `successes`, `failures`, `selected`, `selected_successes`, `selected_failures`, `shortfall`, `notes`; the overall `mix` |
 | POST | `/api/levi/pool/selection` | `{ "recipe": {…}, "task": "…" }` → the episodes picked for that task (`quality_score`, `sel_stratum`, `selection_reason`, `viewer`) and the task's report; 404 for a task the recipe lacks |
 | POST | `/api/levi/pool/suggest` | `{ "recipe": {…}, "task": "…" }` → `available`, `successes`, `failures`, `suggested_count` (the balanced default) for adding that task |
-| POST | `/api/levi/pool/export` | `{ "recipe_name": "…" or "recipe": {…}, "options": {"format", "name", "output_dir", "fps", "cameras", "camera_map", "hardlink", …}, "dry_run": false }`; 403 for a path outside `LEVI_EXPORT_ROOTS` or inside a source, 400 for an existing target or an empty selection |
+| POST | `/api/levi/pool/export` | `{ "recipe_name": "…" or "recipe": {…}, "options": {"format", "name", "output_dir", "fps", "timing", "cameras", "camera_map", "hardlink", …}, "dry_run": false }`; 403 for a path outside `LEVI_EXPORT_ROOTS` or inside a source, 400 for an existing target or an empty selection |
 | GET | `/api/levi/pool/facets?category=&show_heldout=&show_copies=&show_archive=` | Facet counts for the page (including `policy_models`, `policy_checkpoints`, `policy_methods`) and what the toggles hide |
 | POST | `/api/levi/pool/jobs/{id}/cancel` | Stop a running scan, export or push |
 | GET | `/api/levi/pool/jobs/{id}/summary` | `pool_export.json` of a finished export job |

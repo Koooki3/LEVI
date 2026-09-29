@@ -36,6 +36,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import index, recap_signal, settings
 from . import select as picker
+from . import timing as timing_mod
 from .rules import CATEGORIES, normalize_task
 
 NAME = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
@@ -588,7 +589,12 @@ def preview(
     target: str | None = None,
     df=None,
     human_as_success: bool = False,
+    fps: float | None = None,
+    timing: str | None = None,
 ) -> dict:
+    """Counts for a recipe. With ``fps`` (and, for the formats that have a
+    time axis, ``timing``; default: the format's own) the warnings include how
+    the chosen raw captures meet that export rate (levi/pool/timing.py)."""
     result = select_detailed(recipe, df, target, human_as_success)
     chosen, excluded = result.chosen, result.excluded
     reasons = Counter(e["reason"] for e in excluded)
@@ -630,7 +636,14 @@ def preview(
         "outcomes": dict(Counter(r["outcome"] or "none" for r in chosen)),
         "outcome_sources": dict(Counter(r["outcome_source"] or "none" for r in chosen)),
         "human_as_success": human_as_success,
-        "warnings": find_warnings(recipe, chosen, df),
+        "warnings": find_warnings(recipe, chosen, df)
+        + (
+            timing_mod.warnings(
+                chosen, fps, timing or timing_mod.default_timing(target)
+            )
+            if fps and timing_mod.has_timing(target)
+            else []
+        ),
         "excluded": dict(reasons),
         "excluded_label_conflicts": reasons.get("label_conflict", 0),
         "excluded_heldout": reasons.get("heldout", 0),

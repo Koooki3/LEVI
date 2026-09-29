@@ -28,7 +28,7 @@ Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge fo
 | GET | `/api/levi/pool/status`, `/api/levi/pool/sources`, `/api/levi/pool/tasks`, `/api/levi/pool/episodes` | Training pool: settings and last scan, sources, per-task counts, the episode index (filters and paging in [Training pool](TRAINING_POOL.md#api--接口)) |
 | POST | `/api/levi/pool/scan` | Start a scan job of `LEVI_POOL_ROOTS`; poll `GET /api/levi/pool/jobs/{id}` |
 | GET / PUT / DELETE | `/api/levi/pool/recipes/{name}` | Saved training-pool recipes (`GET /api/levi/pool/recipes` lists them) |
-| POST | `/api/levi/pool/preview` | Counts and exclusions of a recipe `{ "recipe": {…}, "format": "lerobot_v21" }` |
+| POST | `/api/levi/pool/preview` | Counts and exclusions of a recipe `{ "recipe": {…}, "format": "lerobot_v21", "fps"?, "timing"? }`; with `fps`, `warnings` also note raw captures recorded below the export fps (`resample`) or off by over 2% (`retime`) |
 | POST | `/api/levi/pool/selection` | The episodes a recipe picks for one task `{ "recipe": {…}, "task": "…", "format"?, "human_as_success"? }`, each with its quality score, stratum and reasons; 404 when the recipe has no such task |
 | POST | `/api/levi/pool/suggest` | What adding a task offers, same body: available episodes (successes, failures) under the recipe's filters and a default count that keeps the composition balanced | |
 | POST | `/api/levi/pool/export` | Plan (`dry_run`) or start an export `{ "recipe_name": "…", "options": {"format": "lerobot_v21", "name": "…"} }`; held-out episodes are refused, 403 for a folder outside `LEVI_EXPORT_ROOTS` or inside a source |

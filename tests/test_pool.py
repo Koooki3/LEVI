@@ -49,7 +49,9 @@ def _video(path, frames, fps=10):
     )
 
 
-def make_demo(demo, n=20, *, rollout=None, task=None, created=None, filtered_from=None):
+def make_demo(
+    demo, n=20, *, rollout=None, task=None, created=None, filtered_from=None, fps=10
+):
     """A raw capture episode (RC files); ``rollout`` = outcome of a policy
     rollout, None = human teleoperation."""
     demo.mkdir(parents=True)
@@ -92,7 +94,7 @@ def make_demo(demo, n=20, *, rollout=None, task=None, created=None, filtered_fro
         "created_at": created,
         "stopped_at": created,
         "frame_count": n,
-        "collection_freq_hz": 10.0,
+        "collection_freq_hz": float(fps),
     }
     if filtered_from:
         meta["filtered_from_frame_count"] = filtered_from
@@ -108,7 +110,7 @@ def make_demo(demo, n=20, *, rollout=None, task=None, created=None, filtered_fro
         meta.update(control_mode="pygame", success_flag_final=0)
     (demo / "metadata.json").write_text(json.dumps(meta))
     for camera in Options().cameras:
-        _video(demo / f"{camera}.mp4", n)
+        _video(demo / f"{camera}.mp4", n, fps)
     return demo
 
 
@@ -1288,3 +1290,275 @@ def test_cli_saves_per_task_specs(pool, capsys):
     assert cli.main(["recipe", "suggest", "spec", "--task", "stack the plates"]) == 0
     assert cli.main(["recipe", "episodes", "spec", "--task", "stack the plates"]) == 0
     assert '"quality_score"' in capsys.readouterr().out
+
+
+# ------------------------------------------------------------------ timing
+
+
+@pytest.fixture
+def slow(tmp_path, monkeypatch):
+    """A pool root with a 10 fps rollout source and a 9.5 fps one (as online
+    RL runs record), one task."""
+    root = tmp_path / "slowpool"
+    for i in range(2):
+        make_demo(
+            root / "direct/models/pi/pick_x" / f"demo_{i:04d}",
+            rollout="success",
+            task="pick x",
+            created=f"2026-09-0{i + 1}T10:00:00",
+        )
+        make_demo(
+            root / "online_rl/sfe/pi/pick_x" / f"demo_{i:04d}",
+            rollout="success",
+            task="pick x",
+            created=f"2026-09-1{i + 1}T10:00:00",
+            fps=9.5,
+        )
+    monkeypatch.setenv("LEVI_WORKSPACE", str(tmp_path / "ws3"))
+    monkeypatch.setenv("LEVI_POOL_ROOTS", str(root))
+    monkeypatch.setenv("LEVI_POOL_HELDOUT", "none")
+    monkeypatch.setenv("LEVI_EXPORT_ROOTS", str(tmp_path))
+    monkeypatch.setattr(export, "_levi_commit", lambda: "test")
+    scanner.scan()
+    return {"root": root, "tmp": tmp_path}
+
+
+def _slow_recipe():
+    return Recipe(name="slow", categories=["rollout"], tasks=["pick x"])
+
+
+def _codes(view):
+    return {w["code"]: w for w in view["warnings"]}
+
+
+def test_timing_defaults_per_format_and_raw_capture_ignores_it():
+    make = lambda **kw: export.ExportOptions(name="t", **kw)
+    assert make(format="lerobot_v21").timing == "resample"
+    assert make(format="recap_value").timing == "retime"
+    assert make(format="lerobot_v21", timing="retime").timing == "retime"
+    assert make(format="recap_value", timing="resample").timing == "resample"
+    assert make(format="raw_capture").timing is None
+    assert make(format="raw_capture", timing="retime").timing is None
+    assert make(format="lerobot_v21", timing="retime").conversion().timing == "retime"
+    with pytest.raises(ValueError, match="timing"):
+        make(format="lerobot_v21", timing="stretch")
+
+
+def test_index_holds_the_measured_rate(slow):
+    by_source = {}
+    for row in rows(categories=["rollout"]):
+        by_source.setdefault(row["source"], set()).add(row["measured_fps"])
+    assert by_source == {
+        "direct/models/pi": {10.0},
+        "online_rl/sfe/pi": {9.5},
+    }
+
+
+def test_preview_warns_when_resample_cannot_reach_the_export_fps(slow):
+    rec = _slow_recipe()
+    view = recipe.preview(rec, "lerobot_v21", fps=10, timing="resample")
+    warning = _codes(view)["source_fps_below_export"]
+    assert warning["episodes"] == 2 and warning["sources"] == ["online_rl/sfe/pi"]
+    assert warning["min_source_fps"] == 9.5 and warning["suggested_fps"] == 9
+    assert warning["suggested_timing"] == "retime"
+    # Advisory in the preview (the plan and export decide), but flagged as
+    # the case that would certainly be refused.
+    assert warning["blocking"] is False and warning["refused"] is True
+    assert "retime_time_scale" not in _codes(view)
+    # The suggested fix, or a lower rate, clears it; so does retime.
+    assert not _codes(recipe.preview(rec, "lerobot_v21", fps=9, timing="resample"))
+    assert "source_fps_below_export" not in _codes(
+        recipe.preview(rec, "lerobot_v21", fps=10, timing="retime")
+    )
+    # The format's default timing is judged when none is given.
+    assert "source_fps_below_export" in _codes(
+        recipe.preview(rec, "lerobot_v21", fps=10)
+    )
+    assert "source_fps_below_export" not in _codes(
+        recipe.preview(rec, "recap_value", fps=10)
+    )
+    # Without an export fps, or for a raw capture copy, nothing to judge.
+    assert not {"source_fps_below_export", "retime_time_scale"} & set(
+        _codes(recipe.preview(rec, "lerobot_v21"))
+    )
+    assert not {"source_fps_below_export", "retime_time_scale"} & set(
+        _codes(recipe.preview(rec, "raw_capture", fps=10, timing="retime"))
+    )
+
+
+def test_preview_notes_the_time_scale_of_retime(slow):
+    view = recipe.preview(_slow_recipe(), "lerobot_v21", fps=10, timing="retime")
+    note = _codes(view)["retime_time_scale"]
+    assert note["level"] == "info" and note["blocking"] is False
+    assert note["max_deviation_percent"] == 5.0 and note["direction"] == "shorter"
+    assert note["episodes"] == 2  # only the 9.5 fps source is off by over 2%
+    assert (note["min_source_fps"], note["max_source_fps"]) == (9.5, 10.0)
+    # Within 2%: no note.
+    only_fast = Recipe(
+        name="fast", categories=["rollout"], sources=["direct/models/pi"]
+    )
+    assert not recipe.preview(only_fast, "lerobot_v21", fps=10, timing="retime")[
+        "warnings"
+    ]
+    # Declared below the recorded rate, the axis grows instead.
+    slower = _codes(recipe.preview(_slow_recipe(), "recap_value", fps=9.5))
+    assert slower["retime_time_scale"]["direction"] == "longer"
+    assert slower["retime_time_scale"]["max_deviation_percent"] == 5.3
+
+
+def test_api_preview_and_export_take_timing(slow, client):
+    body = {"recipe": _slow_recipe().model_dump(), "format": "lerobot_v21", "fps": 10}
+    view = client.post("/api/levi/pool/preview", json=body).json()
+    assert "source_fps_below_export" in _codes(view)
+    view = client.post("/api/levi/pool/preview", json={**body, "timing": "retime"})
+    assert "retime_time_scale" in _codes(view.json())
+    bad = client.post("/api/levi/pool/preview", json={**body, "timing": "stretch"})
+    assert bad.status_code == 422
+    bad = client.post("/api/levi/pool/preview", json={**body, "fps": 0})
+    assert bad.status_code == 422
+    options = {
+        "format": "lerobot_v21",
+        "name": "api-t",
+        "output_dir": str(slow["tmp"] / "exports"),
+        "fps": 10,
+    }
+    dry = client.post(
+        "/api/levi/pool/export",
+        json={"recipe": body["recipe"], "options": options, "dry_run": True},
+    ).json()
+    assert dry["options"]["timing"] == "resample"
+    # The dry run plans it (the export itself refuses) and carries the note.
+    assert "source_fps_below_export" in {w["code"] for w in dry["warnings"]}
+    dry = client.post(
+        "/api/levi/pool/export",
+        json={
+            "recipe": body["recipe"],
+            "options": {**options, "timing": "retime"},
+            "dry_run": True,
+        },
+    ).json()
+    assert dry["options"]["timing"] == "retime"
+    assert "retime_time_scale" in {w["code"] for w in dry["warnings"]}
+    raw = client.post(
+        "/api/levi/pool/export",
+        json={
+            "recipe": body["recipe"],
+            "options": {**options, "format": "raw_capture", "timing": "retime"},
+            "dry_run": True,
+        },
+    ).json()
+    assert raw["options"]["timing"] is None
+    assert not {w["code"] for w in raw["warnings"]} & {
+        "source_fps_below_export",
+        "retime_time_scale",
+    }
+    refused = client.post(
+        "/api/levi/pool/export",
+        json={
+            "recipe": body["recipe"],
+            "options": {**options, "timing": "stretch"},
+            "dry_run": True,
+        },
+    )
+    assert refused.status_code == 422
+
+
+def test_resample_below_the_export_fps_is_still_refused_before_converting(slow):
+    options = export.ExportOptions(
+        format="lerobot_v21",
+        name="refused",
+        output_dir=str(slow["tmp"] / "exports"),
+        filter_static=False,
+    )
+    job = jobs.plan_export(_slow_recipe(), options)
+    with pytest.raises(ValueError, match="lower the export fps to 9") as caught:
+        jobs.execute(job)
+    assert "timing retime" in str(caught.value)
+    assert not (slow["tmp"] / "exports/refused").exists()
+    assert not list((slow["tmp"] / "exports").glob(".*partial"))
+
+
+def test_export_records_the_timing_and_each_episodes_time_scale(slow):
+    def run(name, **kw):
+        options = export.ExportOptions(
+            name=name,
+            output_dir=str(slow["tmp"] / "exports"),
+            filter_static=False,
+            **kw,
+        )
+        jobs.execute(jobs.plan_export(_slow_recipe(), options))
+        out = slow["tmp"] / "exports" / name
+        return out, json.loads((out / "pool_export.json").read_text())
+
+    out, record = run("retimed", format="lerobot_v21", timing="retime")
+    assert record["params"]["timing"] == "retime"
+    assert record["conversion"]["timing"] == "retime"
+    info = json.loads((out / "meta/info.json").read_text())
+    assert info["fps"] == 10 and info["total_frames"] == 80
+    scales = {
+        e["source"]: (e["source_fps"], e["time_scale"]) for e in record["episodes"]
+    }
+    assert scales == {
+        "direct/models/pi": (10.0, 1.0),
+        "online_rl/sfe/pi": (9.5, 0.95),
+    }
+    assert all(e["frames"] == 20 for e in record["episodes"])
+    assert record["timing"]["mode"] == "retime" and record["timing"]["export_fps"] == 10
+    assert (record["timing"]["source_fps_min"], record["timing"]["source_fps_max"]) == (
+        9.5,
+        10.0,
+    )
+    assert record["timing"]["time_scale_min"] == 0.95
+    assert record["timing"]["episodes_off_by_over_2_percent"] == 2
+    assert any(
+        w["code"] == "retime_time_scale"
+        for w in record["warnings"]
+        if isinstance(w, dict)
+    )
+    table = pq.read_table(out / "data/chunk-000/episode_000000.parquet")
+    assert table.column("timestamp").to_pylist()[-1] == pytest.approx(1.9)
+    # Resample at a rate every source reaches: the axis is true (scale 1).
+    _, record = run("resampled", format="lerobot_v21", fps=9)
+    assert (
+        record["timing"]["mode"] == "resample" and record["timing"]["export_fps"] == 9
+    )
+    assert {e["time_scale"] for e in record["episodes"]} == {1.0}
+    assert {e["source_fps"] for e in record["episodes"]} == {9.5, 10.0}
+    # RECAP defaults to retime and records it too.
+    _, record = run("recap", format="recap_value", human_as_success=True)
+    assert record["timing"]["mode"] == "retime"
+    # A raw capture copy has no time axis.
+    _, record = run("rawcopy", format="raw_capture", timing="retime")
+    assert record["timing"] is None and record["params"]["timing"] is None
+    assert all("time_scale" not in e for e in record["episodes"])
+
+
+def test_cli_timing_option_reaches_the_export_and_the_preview(slow, capsys):
+    from levi.pool import cli
+
+    recipe.save(_slow_recipe())
+    base = ["export", "slow", "--name", "cli-t", "--dry-run"]
+    base += ["--output-dir", str(slow["tmp"] / "exports")]
+    assert cli.main([*base, "--format", "lerobot_v21"]) == 0
+    assert json.loads(capsys.readouterr().out)["options"]["timing"] == "resample"
+    assert cli.main([*base, "--format", "lerobot_v21", "--timing", "retime"]) == 0
+    assert json.loads(capsys.readouterr().out)["options"]["timing"] == "retime"
+    assert cli.main([*base, "--format", "raw_capture", "--timing", "retime"]) == 0
+    assert json.loads(capsys.readouterr().out)["options"]["timing"] is None
+    with pytest.raises(SystemExit):
+        cli.main([*base, "--format", "lerobot_v21", "--timing", "stretch"])
+    capsys.readouterr()
+    show = ["recipe", "show", "slow", "--format", "lerobot_v21", "--fps", "10"]
+    assert cli.main(show) == 0
+    assert "source_fps_below_export" in capsys.readouterr().out
+    assert cli.main([*show, "--timing", "retime"]) == 0
+    out = capsys.readouterr().out
+    assert "retime_time_scale" in out and "source_fps_below_export" not in out
+
+
+def test_an_index_without_measured_rates_gives_no_timing_notes(slow):
+    frame = pd.read_parquet(scanner.index_path()).drop(columns=["measured_fps"])
+    frame.to_parquet(scanner.index_path(), index=False)
+    for timing in ("resample", "retime"):
+        view = recipe.preview(_slow_recipe(), "lerobot_v21", fps=10, timing=timing)
+        assert not {"source_fps_below_export", "retime_time_scale"} & set(_codes(view))

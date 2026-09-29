@@ -6,7 +6,9 @@ import {
   CATEGORY_LABELS,
   METHOD_LABELS,
   REASON_LABELS,
-  WARNING_LABELS,
+  TIMING_WARNING_CODES,
+  stopsExport,
+  warningText,
   type PickedEpisodes,
   type PoolWarning,
   type Preview,
@@ -28,11 +30,17 @@ export function PoolWarnings({ warnings }: { warnings: PoolWarning[] }) {
   return (
     <ul className="levi-pool-warnings" role="status">
       {warnings.map((w) => (
-        <li key={w.code} className={w.blocking ? "blocking" : ""}>
-          <strong>{w.blocking ? t("Blocks export") : t("Note")}</strong>{" "}
-          {t(WARNING_LABELS[w.code] || w.message)}
+        <li
+          key={w.code}
+          className={stopsExport(w) ? "blocking" : ""}
+          data-level={w.level}
+        >
+          <strong>{stopsExport(w) ? t("Blocks export") : t("Note")}</strong>{" "}
+          {warningText(w, t)}
           {w.tasks?.length ? ` (${w.tasks.slice(0, 3).join("; ")})` : ""}
-          {w.episodes ? ` (${w.episodes.toLocaleString()})` : ""}
+          {w.episodes && !TIMING_WARNING_CODES.has(w.code)
+            ? ` (${w.episodes.toLocaleString()})`
+            : ""}
           {w.ids?.length ? ` (${w.ids.length})` : ""}
         </li>
       ))}

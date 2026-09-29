@@ -58,6 +58,7 @@ COLUMNS = [
     "task_raw",
     "frames",
     "fps",
+    "measured_fps",
     "cameras",
     "state_dim",
     "action_dim",
@@ -104,6 +105,7 @@ COLUMNS = [
 RC_FACTS = (
     "frames",
     "fps",
+    "measured_fps",
     "cameras",
     "task_raw",
     "data_source",
@@ -345,6 +347,9 @@ def rc_facts(demo: Path) -> dict:
             path.read_text(encoding="utf-8").strip() if path.is_file() else ""
         ) or demo.parent.name
     rate = meta.get("nominal_freq_hz") or meta.get("collection_freq_hz")
+    # The rate the collector measured (its videos are encoded at it); the
+    # nominal one is only what was asked for.
+    measured = meta.get("collection_freq_hz")
     started, stopped = meta.get("created_at"), meta.get("stopped_at")
     folder = meta.get("task_folder") or demo.parent.name
     recording = (
@@ -355,6 +360,9 @@ def rc_facts(demo: Path) -> dict:
     return {
         "frames": int(meta.get("frame_count") or frames),
         "fps": float(rate) if isinstance(rate, (int, float)) else None,
+        "measured_fps": float(measured)
+        if isinstance(measured, (int, float)) and measured > 0
+        else None,
         "cameras": json.dumps([Path(n).stem for n, _ in videos]),
         "task_raw": str(text),
         "data_source": meta.get("data_source"),

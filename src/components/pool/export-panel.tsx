@@ -6,10 +6,15 @@ import { PoolJobProgress, RUNNING, StatusBadge } from "./pool-progress";
 import {
   FORMAT_LABELS,
   REASON_LABELS,
+  TIMING_HINTS,
+  TIMING_LABELS,
+  defaultTiming,
+  stopsExport,
   type ExportFormat,
   type PoolJob,
   type Preview,
   type Recipe,
+  type Timing,
 } from "./types";
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
@@ -49,7 +54,12 @@ export function ExportPanel({
   job,
   humanAsSuccess,
   onHumanAsSuccess,
+  format,
   onFormat,
+  fps,
+  onFps,
+  timing,
+  onTiming,
   onJob,
   onPush,
 }: {
@@ -59,15 +69,19 @@ export function ExportPanel({
   job: PoolJob | null;
   humanAsSuccess: boolean;
   onHumanAsSuccess: (value: boolean) => void;
+  format: ExportFormat;
   onFormat: (format: ExportFormat) => void;
+  fps: number;
+  onFps: (value: number) => void;
+  /** The chosen timing; null = the format's own default. */
+  timing: Timing | null;
+  onTiming: (value: Timing) => void;
   onJob: (job: PoolJob) => void;
   onPush: (job: PoolJob) => void;
 }) {
   const { t } = useLocale();
-  const [format, setFormat] = useState<ExportFormat>("lerobot_v21");
   const [name, setName] = useState("");
   const [outputDir, setOutputDir] = useState("");
-  const [fps, setFps] = useState(10);
   const [cameras, setCameras] = useState(DEFAULT_CAMERAS);
   const [cameraMap, setCameraMap] = useState("");
   const [hardlink, setHardlink] = useState(false);
@@ -76,9 +90,11 @@ export function ExportPanel({
   const [busy, setBusy] = useState(false);
   const dirProblem = outputDirProblem(outputDir, exportRoots);
   const nameProblem = name && !NAME.test(name);
+  const effectiveTiming = timing ?? defaultTiming(format);
+  const stopped = !!preview?.warnings?.some(stopsExport);
   const canRun =
     recipe.tasks.length > 0 &&
-    !preview?.warnings?.some((w) => w.blocking) &&
+    !stopped &&
     !!name &&
     !nameProblem &&
     !dirProblem &&
@@ -95,6 +111,7 @@ export function ExportPanel({
           name,
           output_dir: outputDir.trim() || null,
           fps,
+          ...(effectiveTiming ? { timing: effectiveTiming } : {}),
           cameras: pairs(cameras),
           camera_map: pairs(cameraMap),
           hardlink: format === "raw_capture" && hardlink,
@@ -124,9 +141,7 @@ export function ExportPanel({
             className="levi-input"
             value={format}
             onChange={(e) => {
-              const next = e.target.value as ExportFormat;
-              setFormat(next);
-              onFormat(next);
+              onFormat(e.target.value as ExportFormat);
             }}
           >
             {(Object.keys(FORMAT_LABELS) as ExportFormat[]).map((f) => (
@@ -183,8 +198,26 @@ export function ExportPanel({
                 min={1}
                 max={240}
                 value={fps}
-                onChange={(e) => setFps(Number(e.target.value) || 10)}
+                onChange={(e) => onFps(Number(e.target.value) || 10)}
               />
+            </label>
+            <label className="wide">
+              <span>{t("Timing")}</span>
+              <select
+                className="levi-input"
+                value={effectiveTiming ?? "resample"}
+                aria-describedby="pool-export-timing-hint"
+                onChange={(e) => onTiming(e.target.value as Timing)}
+              >
+                {(Object.keys(TIMING_LABELS) as Timing[]).map((m) => (
+                  <option key={m} value={m}>
+                    {t(TIMING_LABELS[m])}
+                  </option>
+                ))}
+              </select>
+              <small id="pool-export-timing-hint" className="levi-pool-hint">
+                {t(TIMING_HINTS[effectiveTiming ?? "resample"])}
+              </small>
             </label>
             <label className="wide">
               <span>{t("Raw capture cameras (camera=output key)")}</span>
@@ -239,7 +272,7 @@ export function ExportPanel({
           ? `${preview.episodes.toLocaleString()} ${t("episodes")} · ${preview.frames.toLocaleString()} ${t("frames")} · ${preview.excluded_heldout.toLocaleString()} ${t("held-out excluded")}`
           : t("Choose tasks to see a preview.")}
       </p>
-      {preview?.warnings?.some((w) => w.blocking) && (
+      {stopped && (
         <p className="levi-pool-bad" role="alert">
           {t("Resolve the blocking notes in the composition first.")}
         </p>

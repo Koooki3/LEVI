@@ -76,6 +76,27 @@ export const FORMAT_LABELS: Record<ExportFormat, string> = {
   raw_capture: "Raw capture copy",
 };
 
+/** How the export's frames meet its fps (levi/pool/timing.py). */
+export type Timing = "resample" | "retime";
+
+/** The format's own timing; a raw capture copy has none. */
+export function defaultTiming(format: ExportFormat): Timing | null {
+  if (format === "raw_capture") return null;
+  return format === "recap_value" ? "retime" : "resample";
+}
+
+export const TIMING_LABELS: Record<Timing, string> = {
+  resample: "Resample (drop frames only)",
+  retime: "Retime (keep every frame)",
+};
+
+export const TIMING_HINTS: Record<Timing, string> = {
+  resample:
+    "Drops frames only, never adds any (refused when a source's frame rate is below the export FPS).",
+  retime:
+    "Keeps every frame and declares it at the export FPS (the time axis stretches or shrinks slightly, so motion plays slightly faster or slower).",
+};
+
 export interface ScanSummary {
   scanned_at: string;
   seconds: number;
@@ -247,6 +268,50 @@ export interface PoolWarning {
   tasks?: string[];
   episodes?: number;
   ids?: string[];
+  /** The export would certainly be refused (the plan still runs). */
+  refused?: boolean;
+  /** "info" notes inform; they never block. */
+  level?: "info";
+  export_fps?: number;
+  min_source_fps?: number;
+  suggested_fps?: number;
+  max_deviation_percent?: number;
+  direction?: "shorter" | "longer";
+}
+
+/** Whether a warning stops the export (server-blocking, or certainly
+ * refused at this fps and timing). */
+export function stopsExport(w: PoolWarning): boolean {
+  return !!w.blocking || !!w.refused;
+}
+
+export const TIMING_WARNING_CODES = new Set([
+  "source_fps_below_export",
+  "retime_time_scale",
+]);
+
+const TIMING_WARNING_TEXT: Record<string, (w: PoolWarning) => string> = {
+  source_fps_below_export: () =>
+    "{count} raw episode(s) were recorded below the export FPS {fps} (as slow as {min} FPS). Resample cannot add frames, so the export would be refused. Lower the FPS to {suggested}, or switch the timing to Retime.",
+  retime_time_scale: (w) =>
+    w.direction === "longer"
+      ? "Retime: the time axis of {count} raw episode(s) becomes up to {percent}% longer than recorded (motion plays that much slower)."
+      : "Retime: the time axis of {count} raw episode(s) becomes up to {percent}% shorter than recorded (motion plays that much faster).",
+};
+
+/** A warning as UI text; the timing notes carry their numbers. */
+export function warningText(
+  w: PoolWarning,
+  t: (key: string) => string,
+): string {
+  const template = TIMING_WARNING_TEXT[w.code];
+  if (!template) return t(WARNING_LABELS[w.code] || w.message);
+  return t(template(w))
+    .replace("{count}", String(w.episodes ?? 0))
+    .replace("{min}", String(w.min_source_fps ?? ""))
+    .replace("{fps}", String(w.export_fps ?? ""))
+    .replace("{suggested}", String(w.suggested_fps ?? ""))
+    .replace("{percent}", String(w.max_deviation_percent ?? ""));
 }
 
 /** Per task, what selection did (levi/pool/select.py ``choose``). */

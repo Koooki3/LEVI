@@ -128,6 +128,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="recap_value: count human demonstrations without an outcome as success",
     )
+    show.add_argument(
+        "--fps",
+        type=float,
+        help="export fps: also note how raw captures measured below or above it fare",
+    )
+    show.add_argument(
+        "--timing",
+        choices=["resample", "retime"],
+        help="with --fps: timing mode to judge (default: the format's own)",
+    )
     picked = rsub.add_parser("episodes", help="the episodes a recipe picks for a task")
     picked.add_argument("name")
     picked.add_argument("--task", required=True)
@@ -172,7 +182,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="raw capture camera=output key (repeatable)",
     )
-    export.add_argument("--timing", choices=["resample", "retime"])
+    export.add_argument(
+        "--timing",
+        choices=["resample", "retime"],
+        help="lerobot_v21 / recap_value: resample drops frames only (default of "
+        "lerobot_v21; refused when a raw source runs below --fps), retime keeps "
+        "every frame and declares it at --fps (default of recap_value); "
+        "ignored for raw_capture",
+    )
     export.add_argument(
         "--filter-static",
         action=argparse.BooleanOptionalAction,
@@ -274,6 +291,8 @@ def main(argv=None) -> int:
                         recipe.load(args.name),
                         args.format,
                         human_as_success=args.human_as_success,
+                        fps=args.fps,
+                        timing=args.timing,
                     )
                 )
             elif args.recipe_action == "episodes":
