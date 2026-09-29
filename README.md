@@ -16,10 +16,14 @@ LEVI is a local workbench for robot-learning data. It browses LeRobot datasets a
 | --- | --- |
 | **Browse and analyze** | Synchronized multi-camera playback, state/action charts, statistics, filtering, frame gallery, Action Insights and 3D robot replay for LeRobot v2.0–v3.1, local or on the Hugging Face Hub. Derived from the [LeRobot Dataset Visualizer](https://github.com/huggingface/lerobot-dataset-visualizer). |
 | **Convert** | Raw captures (CSV + video or image folders) and LeRobot v2.x into **LeRobot v2.1** or a **RECAP (π\*0.6) value dataset**, after an inspection that lists which requirements the input meets. Single-pass, parallel, with a lossless retime mode. Raw captures can be browsed and annotated before conversion; the annotations carry over. |
-| **Training pool** | Index every dataset under read-only folders per episode — raw captures, LeRobot v2.x, DROID; human collection, policy rollouts, LEVI outputs — with copies and filtered variants grouped and frozen test episodes held out. Compose tasks in a chosen order and export a merged LeRobot v2.1 (openpi / π0.5), RECAP value or raw-capture dataset with a provenance record. |
-| **Check and curate** | Structural quality checks over every episode (timestamps, actions, video, metadata), episode outcome labels, review flags, and agent-driven content review — which task a demo really shows, whether it succeeded. |
-| **Annotate with agents** | Subtask segments, events and object masks proposed by an external MCP agent (Claude Code, Codex, …), an API model or a **local model on Ollama**, then reviewed, committed and undoable by a person. A natural-language request can start a whole task. |
+| **Training pool** | Index every dataset under read-only folders per episode — raw captures, LeRobot v2.x, DROID; human collection, policy rollouts, LEVI outputs — with copies and filtered variants grouped and frozen test episodes held out. Compose tasks in a chosen order and export a merged LeRobot v2.1 (openpi / π0.5), RECAP value or raw-capture dataset with a provenance record. Point `LEVI_POOL_ROOTS` at the folders to index. |
+| **Check and curate** | Structural quality checks over every episode (timestamps, actions, video, metadata), episode outcome labels, review flags, and agent-driven content review: which task a demo really shows, whether it succeeded. A release-anchored review judges success at the moments the robot's own signals mark, such as each gripper opening, with one narrow question per event. |
+| **Annotate with agents** | Subtask segments, events and object masks proposed by an external MCP agent (Claude Code, Codex, …), an API model or a **local model** (Ollama, or a vLLM server), then reviewed, committed and undoable by a person. A natural-language request can start a whole task. |
+| **Segment objects fast** | A small student model distilled from SAM3 outlines and tracks objects live while an episode plays, and labels whole datasets offline; SAM3 stays the quality path. Results are ordinary object annotations, `suggested` until a person reviews them. |
+| **Feed training** | A RECAP value model gives per-frame values and advantage labels, shown in the episode viewer. Training manifests state which frames enter a learner's loss and with what weight, with provenance, and a standalone reader applies them in the trainer. |
 | **Learn from every task** | The harness closes each task with a ledger, the measured token and time cost, a local memory of what was verified on that dataset, and improvement candidates that a person can publish for the next task. |
+
+The header opens **Explore** (browse and analyze), **Conversion & review** (convert, register, check), **Training pool**, **Guide**, **Report**, and the **Agent Workbench** and **Accounts & connections** panels.
 
 ## Quick start
 
@@ -42,9 +46,9 @@ Wait for **Ready** and open **http://127.0.0.1:7860**. The home page streams two
 
 On a remote server, forward the Web UI port: `ssh -L 7860:127.0.0.1:7860 user@server`. Port 7861 is the internal API, not the workbench.
 
-For a strict CPU-only LEVI session, set `export LEVI_CPU_ONLY=1` before starting the service. This disables its background GPU watcher and blocks local accelerator-backed inference and SAM3.
+For a strict CPU-only LEVI session, set `export LEVI_CPU_ONLY=1` before starting the service. This disables its background GPU watcher and blocks local accelerator-backed inference, SAM3, fast segmentation and RECAP value models (the fake providers used in tests still run).
 
-DROID raw folders (`demo_0000/trajectory.h5`, metadata and three MP4 cameras) are an optional **browse-and-annotate input**, not a supported training conversion. To use it, run `uv sync --locked --extra agent --extra droid`, place the dataset folder directly under `$LEVI_WORKSPACE`, and use **Sync now** or restart LEVI. A read-only derived view appears at `outputs/LEVI/workbench/views/<dataset-name>/`; the HDF5 source is untouched. The view uses a nominal 14.3 FPS clock because source MP4 time and control time differ. Original timestamps and per-episode drift are saved in `meta/levi_provenance.jsonl`; check precise time boundaries against them. See [Conversion](docs/CONVERSION.md#droid-raw-browsing-view). A new workspace also downloads its own DROID test dataset: 500 episodes of the public release, taken in one seeded order (`uv run levi sample draw` takes another 500, none of them drawn before); see [DROID test sample](docs/WORKSPACE.md#droid-test-sample).
+DROID raw folders (`demo_0000/trajectory.h5`, metadata and three MP4 cameras) are an optional **browse-and-annotate input**, not a supported training conversion. To use it, run `uv sync --locked --extra agent --extra droid`, place the dataset folder directly under `$LEVI_WORKSPACE`, and use **Sync now** or restart LEVI. A read-only derived view appears at `outputs/LEVI/workbench/views/<dataset-name>/`; the HDF5 source is untouched. The view uses a nominal 14.3 FPS clock because source MP4 time and control time differ. Original timestamps and per-episode drift are saved in `meta/levi_provenance.jsonl`; check precise time boundaries against them. See [Conversion](docs/CONVERSION.md#droid-raw-browsing-view). A new workspace also downloads its own DROID test dataset: 500 episodes of the public release, taken in one seeded order, about 11.6 GiB in the background (`LEVI_DROID_SAMPLE=off` skips it; `uv run levi sample draw` takes another 500, none of them drawn before); see [DROID test sample](docs/WORKSPACE.md#droid-test-sample).
 
 ```bash
 uv run levi stop                # stop the shared service and its workers (--all: also LEVI's Ollama)
@@ -52,6 +56,11 @@ uv run levi clean               # preview regenerable caches (service stopped); 
 uv run levi migrate             # preview upgrading an older workspace; --apply to apply
 uv run levi convert --help
 uv run levi agent --help        # tasks, connections, reviews, memory, improvements from a terminal
+uv run levi namespace --help    # isolated experiments over one dataset
+uv run levi recap --help        # RECAP value checkpoints and advantage labels
+uv run levi export --help       # training manifests
+uv run levi pool --help         # training pool: scan, recipes, exports, remote push
+uv run levi docs check          # documentation against the code (docs sync regenerates)
 ```
 
 ## Agents, with a person in charge
@@ -71,25 +80,26 @@ A task goes **plan → approve → pilot → review pilot → remaining episodes
 uv run levi agent task new "Check the quality of <dataset>, then annotate subtasks on the first 10 demos and report tokens and time" --provider qwen-local
 ```
 
-LEVI checks the spec against the catalog and waits for your approval before anything runs. Around every task, the **harness** records what it cost (tokens and time, per agent and per dataset), keeps a memory of human-verified facts that the next task starts from, and files improvement candidates that you can evaluate and publish. On a GPU shared with robot training, the local model runs off-peak and yields automatically. See [Agents](docs/AGENTS.md).
+LEVI checks the spec against the catalog and waits for your approval before anything runs. Around every task, the **harness** records what it cost (tokens and time, per agent and per dataset), keeps a memory of human-verified facts that the next task starts from, and files improvement candidates that you can evaluate and publish. On a GPU shared with robot training, the local model runs off-peak and yields automatically; a vLLM profile can work on several episodes at once (`requests_in_flight`). See [Agents](docs/AGENTS.md) and, for the release-anchored review, [Anchored review](docs/ANCHORED_REVIEW.md).
 
 ## Documentation
 
 | Guide | Contents |
 | --- | --- |
 | [Agents](docs/AGENTS.md) | Channels, task lifecycle, natural-language tasks, evidence, object masks, the harness (cost, memory, self-improvement, teacher supervision), capability reference |
-| [Local models](docs/OLLAMA.md) · [中文](docs/OLLAMA.zh-CN.md) | Ollama setup, model binding, off-peak GPU use, the teacher/learner loop |
+| [Local models](docs/OLLAMA.md) · [中文](docs/OLLAMA.zh-CN.md) | Ollama setup, a local vLLM server, model binding, the lean prompt style, requests in flight, off-peak GPU use, the teacher/learner loop |
 | [Pilot](docs/PILOT.md) · [中文](docs/PILOT.zh-CN.md) | Managed Codex / Claude Code sessions |
+| [Anchored review](docs/ANCHORED_REVIEW.md) | Judge an episode at each recorded robot event: spec, start check and vetoes, anchors, records, measured agreement |
 | [Data quality](docs/QUALITY.md) | Structural checks, content review, labels, flags and review manifests |
 | [Conversion](docs/CONVERSION.md) | Input formats, inspection, timing modes, options, performance, provenance |
-| [RECAP](docs/RECAP.md) | The RECAP value-dataset format and how to consume it |
+| [RECAP](docs/RECAP.md) | The RECAP value-dataset export, and running a RECAP value model in LEVI: checkpoints, per-frame values, advantage labels |
 | [Training pool](docs/TRAINING_POOL.md) | Scan read-only data folders, group copies, hold out test sets, compose and export merged training datasets |
 | [Training manifests](docs/TRAINING_MANIFEST.md) | Which frames enter a learner's loss and with what weight, with provenance; the trainer-side reader |
 | [SAM3](docs/SAM3.md) | Optional model-assisted object masks |
 | [Fast segmentation](docs/SEGMENTATION.md) | Live instance-segmentation overlay while an episode plays, fast dataset labelling, distilling a student from SAM3 |
 | [Evaluation records](docs/EVALUATION.md) | Recording human annotation work; per-mode quality and cost records of human and agent subtask annotation |
 | [Built-in knowledge](docs/KNOWLEDGE.md) | Dataset-agnostic rules every model in LEVI follows, and how local memory is promoted into them |
-| [Workspace](docs/WORKSPACE.md) | What lives where under `LEVI_WORKSPACE`, naming, sync, cleanup |
+| [Workspace](docs/WORKSPACE.md) | What lives where under `LEVI_WORKSPACE`, naming, sync, processes LEVI starts, namespaces, the DROID test sample, cleanup |
 | [API](docs/API.md) | REST routes and agent capabilities |
 | [Validation](docs/VALIDATION.md) | What has been tested, on what, and what has not |
 | [Architecture status](docs/architecture/IMPLEMENTATION_STATUS.md) | Implementation progress against the architecture plan |
@@ -98,6 +108,8 @@ LEVI checks the spec against the catalog and waits for your approval before anyt
 ## Workspace
 
 `LEVI_WORKSPACE` holds data and state and can live outside the checkout (default `.state/`). Datasets sit directly under it; LEVI's own state is under `outputs/LEVI/`; model weights under `checkpoints/`. Names follow the dataset and the episode (`episode_000007`), runs a readable timestamp (`temporal-20260922T0941`) — never a hash. LEVI follows the workspace while it runs: datasets copied in are registered, changed ones refreshed, removed ones dropped. See [Workspace](docs/WORKSPACE.md).
+
+A **namespace** (`uv run levi namespace create <dataset> <name>`) lets several experiments share one source dataset without copying it: each keeps its own annotations, runs, memory and records ([Workspace](docs/WORKSPACE.md#namespaces-one-input-many-experiments)). To share one GPU with other tools, set `LEVI_GPU_LOCK_FILE` to a lock file they also honour; segmentation labelling and distillation queue on it ([Fast segmentation](docs/SEGMENTATION.md#settings--设置)).
 
 The **Report** page shows a live technical report from a folder you name with `LEVI_REPORT_DIR` (read-only, may be outside the workspace); see [API](docs/API.md#technical-report--技术报告).
 
@@ -110,9 +122,18 @@ docker build -t levi:local .
 docker run --rm -p 127.0.0.1:7860:7860 -v "$HOME/levi-data:/workspace" levi:local
 ```
 
+The image installs the core only (`uv sync --locked --no-dev`, without the `agent` extra) and has not been built or run; see [Status and limits](#status-and-limits).
+
 ## Status and limits
 
-The current release is **0.3.0**; `main` carries the unreleased agent harness, local-model and data-curation work listed in the [changelog](CHANGELOG.md). Evidence is sampled: dense refinement looks where it is pointed and cannot prove that nothing happened elsewhere. Model annotation quality is measured per dataset rather than claimed; automated tests use fixtures and stub models, and the local model's annotation quality is still being established. MCP is stdio only. There is no multi-user access control, OS-level offline sandbox or GPU scheduler. Details: [Validation](docs/VALIDATION.md).
+The current release is **0.3.0**; `main` carries unreleased work listed in the [changelog](CHANGELOG.md): the agent harness and local models (Ollama and vLLM), release-anchored review, fast instance segmentation, RECAP value labels, training manifests, the training pool and the report page.
+
+- **Evidence is sampled.** Dense refinement looks where it is pointed and cannot prove that nothing happened elsewhere.
+- **Model quality is measured per dataset, not claimed.** Automated tests use fixtures and stub models. A local model's annotation quality is still being established. The built-in anchored review rules are validated on one task (plates); the candidate rule set with a start check only on development data. The fast segmentation student is scored against SAM3's labels, not against human labels, so it can at best match SAM3. RECAP value labels have been checked on one real checkpoint. Whether curated inputs (training manifests, training-pool exports) improve a trained policy is not established here.
+- **Not built.** MCP is stdio only. There is no multi-user access control, no OS-level offline sandbox and no GPU scheduler: the GPU guardian and `LEVI_GPU_LOCK_FILE` are courtesy policies among cooperating processes.
+- **Not verified.** The Docker image has not been built or run, and its `Dockerfile` copies a `public/` folder that this repository no longer has, so `docker build` should stop at that step until the line changes. Linux x86_64 is the tested platform.
+
+Details: [Validation](docs/VALIDATION.md).
 
 ## Troubleshooting
 
@@ -120,6 +141,7 @@ The current release is **0.3.0**; `main` carries the unreleased agent harness, l
 - **A local path is refused** — it must be a LeRobot dataset (`meta/info.json`) or a recognised raw capture (`task/demo_NNNN` or a DROID `demo_NNNN/trajectory.h5`), and its real path must be inside `LEVI_WORKSPACE`.
 - **A conversion fails** — read the inspection checklist and the job log. Duplicate or missing frame ids, unknown gripper commands or video count mismatches stop it before anything is published; the source is never modified.
 - **A local-model run is blocked** — the reason names the process using the GPU; the run resumes once the GPU has been free for `LEVI_GPU_QUIET_SECONDS`.
+- **A SAM3, segmentation or RECAP action says the worker is missing** — each model runs in its own environment (`integrations/sam3`, `integrations/segmentation`, `integrations/recap_value`, each with its own `setup.sh` or README); the core never imports Torch. See [SAM3](docs/SAM3.md), [Fast segmentation](docs/SEGMENTATION.md), [RECAP](docs/RECAP.md).
 - **Interrupted after a restart** — jobs are marked interrupted and never resume writing on their own; plan again.
 
 ## Development
@@ -134,4 +156,4 @@ bun run format && bun run validate                # type check, lint, format, fr
 uv run levi build
 ```
 
-CI runs the same checks and a production build. Read [CONTRIBUTING](CONTRIBUTING.md) before submitting changes; report problems in [Issues](https://github.com/Koooki3/LEVI/issues). LEVI is licensed under Apache-2.0 and keeps the upstream `LICENSE`, `NOTICE` and [attribution](docs/UPSTREAM.md); see [third-party notices](THIRD_PARTY_NOTICES.md).
+`levi check` runs the frontend validation, Ruff and `levi docs check`, which fails when the docs fall behind the code (`uv run levi docs sync` regenerates the generated sections). CI runs the same checks and a production build. Read [CONTRIBUTING](CONTRIBUTING.md) before submitting changes; report problems in [Issues](https://github.com/Koooki3/LEVI/issues). LEVI is licensed under Apache-2.0 and keeps the upstream `LICENSE`, `NOTICE` and [attribution](docs/UPSTREAM.md); see [third-party notices](THIRD_PARTY_NOTICES.md).
