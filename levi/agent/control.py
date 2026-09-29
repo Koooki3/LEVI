@@ -270,6 +270,11 @@ def build_parser():
     commands = p.add_subparsers(dest="command", required=True)
     c = commands.add_parser("core")
     c.add_argument("action", choices=["status", "start", "stop"])
+    c.add_argument(
+        "--force",
+        action="store_true",
+        help="stop: even while jobs run (a pool export stays resumable)",
+    )
     c = commands.add_parser("connect")
     c.add_argument("--client", choices=["codex", "claude"], required=True)
     c.add_argument("--project", default=".")
@@ -428,7 +433,7 @@ def main(argv=None):
                 if args.action == "status"
                 else core.ensure()
                 if args.action == "start"
-                else core.stop()
+                else core.stop(force=args.force)
             )
         elif args.command == "connect":
             return connect(args)

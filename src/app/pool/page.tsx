@@ -15,11 +15,10 @@ import {
 } from "@/components/pool/composition-panel";
 import { ExportPanel } from "@/components/pool/export-panel";
 import { PushDialog } from "@/components/pool/push-dialog";
-import {
-  PoolJobProgress,
-  RUNNING,
-  StatusBadge,
-} from "@/components/pool/pool-progress";
+import { RecentJobs } from "@/components/pool/job-list";
+import { CleanupPanel, DiskUsage } from "@/components/pool/cleanup-panel";
+import { LogDialog, useJobPolling } from "@/components/pool/job-panel";
+import { PoolJobProgress, RUNNING } from "@/components/pool/pool-progress";
 import { defaultTiming } from "@/components/pool/types";
 import type {
   EpisodeRow,
@@ -106,6 +105,9 @@ export default function TrainingPool() {
   const [previewing, setPreviewing] = useState(false);
   const [exportJob, setExportJob] = useState<PoolJob | null>(null);
   const [pushFor, setPushFor] = useState<PoolJob | null>(null);
+  const [logFor, setLogFor] = useState<PoolJob | null>(null);
+  // Bumped when jobs or files change, so the cleanup section reloads.
+  const [cleanupKey, setCleanupKey] = useState(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -278,19 +280,8 @@ export default function TrainingPool() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewKey, scanned, scannedAt]);
 
-  // Follow the export job.
-  useEffect(() => {
-    if (!exportJob || !RUNNING.has(exportJob.status)) return;
-    const timer = setInterval(() => {
-      leviRequest<PoolJob>(
-        "GET",
-        `pool/jobs/${encodeURIComponent(exportJob.id)}`,
-      )
-        .then(setExportJob)
-        .catch(() => {});
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [exportJob]);
+  // Follow the export job at the pace its state calls for.
+  useJobPolling(exportJob, setExportJob);
 
   async function act(fn: () => Promise<void>) {
     setError("");
@@ -391,67 +382,26 @@ export default function TrainingPool() {
           <PoolJobProgress job={scanJob} />
         )}
         {status && status.jobs.length > 0 && (
-          <details className="levi-pool-jobs">
+          <details className="levi-pool-jobs" open>
             <summary>
               {t("Recent jobs")} ({status.jobs.length})
             </summary>
-            <table className="levi-table">
-              <tbody>
-                {status.jobs.map((j) => (
-                  <tr key={j.id}>
-                    <td>
-                      <code>{j.id}</code>
-                    </td>
-                    <td>{t(j.kind)}</td>
-                    <td>
-                      <StatusBadge status={j.status} />
-                    </td>
-                    <td className="levi-pool-ellipsis">
-                      <code>
-                        {j.kind === "push"
-                          ? j.destination
-                          : j.kind === "export"
-                            ? j.result?.dataset_path || j.target
-                            : ""}
-                      </code>
-                    </td>
-                    <td>
-                      {when(j.finished_at || j.started_at || j.planned_at)}
-                    </td>
-                    <td>
-                      {RUNNING.has(j.status) && (
-                        <button
-                          type="button"
-                          className="levi-pool-link"
-                          onClick={() =>
-                            void act(async () => {
-                              await leviRequest(
-                                "POST",
-                                `pool/jobs/${encodeURIComponent(j.id)}/cancel`,
-                              );
-                              await refreshStatus();
-                            })
-                          }
-                        >
-                          {t("Cancel")}
-                        </button>
-                      )}
-                      {j.kind === "export" && j.status === "succeeded" && (
-                        <button
-                          type="button"
-                          className="levi-pool-link"
-                          onClick={() => setPushFor(j)}
-                        >
-                          {t("Send to remote")}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <RecentJobs
+              jobs={status.jobs}
+              onChanged={() => {
+                void refreshStatus();
+                setCleanupKey((k) => k + 1);
+              }}
+              onPush={setPushFor}
+              onJob={(j) => {
+                if (j.kind === "export") setExportJob(j);
+              }}
+              onLog={setLogFor}
+              onNotice={setNotice}
+            />
           </details>
         )}
+        <DiskUsage disk={status?.disk || []} />
       </section>
 
       {!scanned && status?.enabled && (
@@ -618,12 +568,20 @@ export default function TrainingPool() {
           </div>
         </div>
       )}
+      {status?.enabled && (
+        <CleanupPanel
+          refreshKey={cleanupKey}
+          onChanged={() => void refreshStatus()}
+          onNotice={setNotice}
+        />
+      )}
       <p className="levi-pool-hint">
         <Link className="text-cyan-300" href="/workbench">
           ← {t("Conversion & review")}
         </Link>
       </p>
       <PushDialog exportJob={pushFor} onClose={() => setPushFor(null)} />
+      <LogDialog job={logFor} onClose={() => setLogFor(null)} />
     </main>
   );
 }

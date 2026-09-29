@@ -51,7 +51,7 @@ For a strict CPU-only LEVI session, set `export LEVI_CPU_ONLY=1` before starting
 DROID raw folders (`demo_0000/trajectory.h5`, metadata and three MP4 cameras) are an optional **browse-and-annotate input**, not a supported training conversion. To use it, run `uv sync --locked --extra agent --extra droid`, place the dataset folder directly under `$LEVI_WORKSPACE`, and use **Sync now** or restart LEVI. A read-only derived view appears at `outputs/LEVI/workbench/views/<dataset-name>/`; the HDF5 source is untouched. The view uses a nominal 14.3 FPS clock because source MP4 time and control time differ. Original timestamps and per-episode drift are saved in `meta/levi_provenance.jsonl`; check precise time boundaries against them. See [Conversion](docs/CONVERSION.md#droid-raw-browsing-view). A new workspace also downloads its own DROID test dataset: 500 episodes of the public release, taken in one seeded order, about 11.6 GiB in the background (`LEVI_DROID_SAMPLE=off` skips it; `uv run levi sample draw` takes another 500, none of them drawn before); see [DROID test sample](docs/WORKSPACE.md#droid-test-sample).
 
 ```bash
-uv run levi stop                # stop the shared service and its workers (--all: also LEVI's Ollama)
+uv run levi stop                # stop the shared service and its workers; refuses while jobs run (--wait [min], --force; --all: also LEVI's Ollama)
 uv run levi clean               # preview regenerable caches (service stopped); --apply to remove
 uv run levi migrate             # preview upgrading an older workspace; --apply to apply
 uv run levi convert --help

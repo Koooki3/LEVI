@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import index, jobs, recipe, remote, settings
+from . import cleanup, deletion, index, jobs, journal, recipe, remote, settings
 from .export import ExportOptions
 from .recipe import Recipe
 
@@ -80,6 +80,7 @@ def status():
         "heldout_lists": [str(p) for p in settings.heldout_files()],
         "heldout_disabled": settings.heldout_disabled(),
         "warnings": _status_warnings(),
+        "disk": cleanup.disk(),
         "last_scan": index.summary() or None,
         "jobs": jobs.listing(10),
     }
@@ -238,8 +239,136 @@ def job(job_id: str):
 
 @router.post("/jobs/{job_id}/cancel")
 def job_cancel(job_id: str):
-    """Stop a running scan, export or push."""
-    return jobs.cancel(job_id)
+    """Stop a running job for good; an export's partial folder is removed.
+    A job that already stopped (interrupted, failed) becomes cancelled."""
+    try:
+        return jobs.cancel(job_id)
+    except KeyError:
+        raise HTTPException(404, "Pool job not found") from None
+
+
+@router.post("/jobs/{job_id}/resume")
+def job_resume(job_id: str):
+    """Continue an interrupted or failed job: an export from its journal (409
+    with the reason when the unfinished output cannot be trusted: run it
+    again), a push with rsync's kept files, a scan as a fresh one."""
+    try:
+        return jobs._brief(jobs.resume(job_id))
+    except KeyError:
+        raise HTTPException(404, "Pool job not found") from None
+    except journal.ResumeRefused as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@router.post("/jobs/{job_id}/rerun")
+def job_rerun(job_id: str):
+    """Plan the job again from its saved recipe and options and start it (an
+    unfinished output of the old export is removed first)."""
+    try:
+        return jobs._brief(jobs.rerun(job_id))
+    except KeyError:
+        raise HTTPException(404, "Pool job not found") from None
+
+
+@router.get("/jobs/{job_id}/log")
+def job_log(job_id: str, kb: Annotated[int, Query(ge=1, le=2048)] = 64):
+    """The last ``kb`` KB of the job's timestamped log."""
+    try:
+        text = jobs.log_tail(job_id, kb)
+    except KeyError:
+        raise HTTPException(404, "Pool job not found") from None
+    return {"id": job_id, "text": text, "bytes": len(text.encode())}
+
+
+@router.get("/jobs/{job_id}/error-report")
+def job_error_report(job_id: str):
+    """State, structured error, failed episodes and log tail: what to paste
+    into a bug report."""
+    try:
+        return jobs.error_report(job_id)
+    except KeyError:
+        raise HTTPException(404, "Pool job not found") from None
+
+
+@router.get("/jobs/{job_id}/delete-preview")
+def job_delete_preview(job_id: str, files: bool = True):
+    """What clearing (``files=false``) or deleting (``files=true``) this job
+    would remove: the export directory with its size, episodes, format, time
+    and pushes, whether the job owns it, and what would refuse or need a
+    second confirmation (``needs_force``)."""
+    try:
+        return deletion.plan(job_id, files)
+    except KeyError:
+        raise HTTPException(404, "Pool job not found") from None
+
+
+@router.delete("/jobs/{job_id}")
+def job_delete(job_id: str, files: bool = False, force: bool = False):
+    """Clear a finished job's record; with ``files=true`` also the export
+    directory (and leftover partial) that job produced. Refused with 409
+    while the job runs, when a safety rule forbids the directory, or when it
+    was changed since the export and ``force`` is not set. Returns the bytes
+    freed."""
+    try:
+        return deletion.delete(job_id, files, force, how="api")
+    except KeyError:
+        raise HTTPException(404, "Pool job not found") from None
+    except deletion.DeleteRefused as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+class DeleteJobs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ids: list[str] = Field(min_length=1, max_length=500)
+    files: bool = False
+    force: bool = False
+
+
+@router.post("/jobs/delete")
+def jobs_delete(payload: DeleteJobs):
+    """The same for several jobs; each is answered on its own (refused ones
+    are listed with the reason, the rest go)."""
+    return deletion.delete_many(
+        payload.ids, payload.files, payload.force, how="api bulk"
+    )
+
+
+@router.post("/jobs/clear-failed")
+def jobs_clear_failed():
+    """Clear every failed, interrupted and cancelled job and its leftovers;
+    finished exports and running jobs are never touched."""
+    return deletion.clear_failed(how="api clear-failed")
+
+
+@router.get("/deleted")
+def deleted_log():
+    """The tail of ``pool/deleted.jsonl``: every deletion, with who and how."""
+    return {"deleted": deletion.read_deleted(200)}
+
+
+@router.get("/cleanup")
+def cleanup_inventory():
+    """Partials and old jobs with sizes and ages, what is reclaimable and the
+    free space of the volumes."""
+    return cleanup.inventory()
+
+
+class CleanupBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    partials: list[str] = Field(default_factory=list, max_length=200)
+    jobs: list[str] = Field(default_factory=list, max_length=500)
+    sweep: bool = False
+    all_partials: bool = False
+
+
+@router.post("/cleanup")
+def cleanup_apply(payload: CleanupBody):
+    """Delete the named partials and old jobs (never a live job's, never a
+    finished export), or run the sweeper (``sweep``: expired items only;
+    ``all_partials``: every stopped partial)."""
+    if payload.sweep:
+        return cleanup.sweep(all_partials=payload.all_partials)
+    return cleanup.delete(payload.partials, payload.jobs)
 
 
 @router.get("/jobs/{job_id}/summary")
@@ -250,7 +379,11 @@ def job_summary(job_id: str):
     except KeyError:
         raise HTTPException(404, "Pool job not found") from None
     folder = (job.get("result") or {}).get("dataset_path")
-    if job.get("kind") != "export" or job.get("status") != "succeeded" or not folder:
+    if (
+        job.get("kind") != "export"
+        or job.get("status") not in ("done", "done_with_errors")
+        or not folder
+    ):
         raise HTTPException(404, "No finished export for this job")
     path = Path(folder) / "pool_export.json"
     if not path.is_file():
@@ -426,7 +559,7 @@ def push(payload: Push):
         source = (job.get("result") or {}).get("dataset_path")
         if (
             job.get("kind") != "export"
-            or job.get("status") != "succeeded"
+            or job.get("status") not in ("done", "done_with_errors")
             or not source
         ):
             raise ValueError("That export has not finished")

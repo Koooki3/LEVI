@@ -125,16 +125,45 @@ def ensure(port=7861):
         raise RuntimeError("Core startup timed out")
 
 
-def stop(*, models=False, wait=20.0):
-    """Stop the core and everything it started; ``models`` also stops the
-    Ollama service LEVI started itself (never a shared one)."""
-    from levi import children
+JOB_POLL_SECONDS = 15.0
 
+
+def stop(*, models=False, wait=20.0, force=False, wait_jobs=None):
+    """Stop the core and everything it started; ``models`` also stops the
+    Ollama service LEVI started itself (never a shared one).
+
+    Stopping kills the workers of running jobs (a pool export, a conversion,
+    a RECAP or segmentation run). So it refuses while any is running --
+    returning ``{"status": "refused", "running": [...]}`` -- unless ``force``
+    (pool exports are then marked interrupted and can be resumed) or
+    ``wait_jobs`` minutes pass for them to finish."""
+    from levi import activity, children
+
+    if not force:
+        running = activity.running_jobs()
+        deadline = time.monotonic() + (wait_jobs or 0) * 60
+        while running and wait_jobs and time.monotonic() < deadline:
+            print(
+                f"waiting for {len(running)} running job(s):\n"
+                f"{activity.describe(running)}",
+                file=sys.stderr,
+                flush=True,
+            )
+            time.sleep(min(JOB_POLL_SECONDS, max(0.01, deadline - time.monotonic())))
+            running = activity.running_jobs()
+        if running:
+            return {
+                "status": "refused",
+                "running": running,
+                "hint": "Stopping now would kill these jobs. Wait for them, use "
+                "`levi stop --wait [minutes]`, or `levi stop --force` (pool exports "
+                "are kept as interrupted and can be resumed).",
+            }
     result = {"status": "stopped"}
     if current := status():
         who = children.identity(current["pid"])
         # The server, not an unverified PID file, handles its own termination.
-        request("/api/levi/agent/v1/core/stop", {}, human=True)
+        request("/api/levi/agent/v1/core/stop", {"force": True}, human=True)
         # It stops answering before it has stopped its workers: wait for the
         # process itself, so "stopped" is true when it is printed.
         deadline = time.monotonic() + wait

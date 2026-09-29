@@ -152,16 +152,24 @@ def clean(apply=False):
                 and not any(shell.rglob("*"))
             ):
                 shell.rmdir()
+    # Training-pool leftovers: expired partial exports, old job files and
+    # stale temporaries (a running job's files and finished exports are never
+    # touched; the service is stopped here anyway).
+    from .pool import cleanup as pool_cleanup
+
+    pool = pool_cleanup.sweep(dry_run=not apply)
     return {
         "applied": apply,
-        "bytes": sum(r["bytes"] for r in entries),
+        "bytes": sum(r["bytes"] for r in entries) + pool["bytes"],
         "entries": entries,
+        "pool": pool,
         "orphans": leftovers,
         "preserved": [
             "datasets",
             "annotations",
             "reviews",
             "job reports",
+            "finished training-pool exports",
             ".env",
             ".venv",
             ".runtime",

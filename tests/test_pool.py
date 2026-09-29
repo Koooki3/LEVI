@@ -826,7 +826,7 @@ def test_scan_job_runs_as_a_tracked_worker(pool, client):
     assert job["kind"] == "scan" and job["status"] == "running"
     assert not jobs.wait_idle(120)
     done = client.get(f"/api/levi/pool/jobs/{job['id']}").json()
-    assert done["status"] == "succeeded", (
+    assert done["status"] == "done", (
         done.get("error"),
         (jobs.jobs_dir() / f"{job['id']}.log").read_text()[-2000:],
     )
@@ -868,7 +868,7 @@ def test_page_routes_facets_outcomes_and_export_summary(pool, client):
     ).json()
     assert not jobs.wait_idle(120)
     done = client.get(f"/api/levi/pool/jobs/{job['id']}").json()
-    assert done["status"] == "succeeded", done.get("error")
+    assert done["status"] == "done", done.get("error")
     summary = client.get(f"/api/levi/pool/jobs/{job['id']}/summary").json()
     assert (
         summary["counts"]["episodes"] == 3

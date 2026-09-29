@@ -172,15 +172,46 @@ def main():
 
         stopper = argparse.ArgumentParser(
             prog="levi stop",
-            description="Stop the shared service and every worker it started",
+            description="Stop the shared service and every worker it started. It "
+            "refuses while jobs (pool exports, conversions, RECAP or segmentation "
+            "runs) are running, and lists them with their progress; use --wait "
+            "to let them finish or --force to interrupt them.",
         )
         stopper.add_argument(
             "--all",
             action="store_true",
             help="also stop the Ollama service LEVI started (never a shared one)",
         )
+        stopper.add_argument(
+            "--force",
+            action="store_true",
+            help="stop even while jobs run: their workers are killed (a pool export "
+            "is kept as interrupted, with its partial output, and can be resumed)",
+        )
+        stopper.add_argument(
+            "--wait",
+            nargs="?",
+            type=float,
+            const=60.0,
+            default=None,
+            metavar="MINUTES",
+            help="wait for running jobs to finish (default 60 minutes), then stop; "
+            "refuse if they are still running",
+        )
         options = stopper.parse_args(sys.argv[2:])
-        print(json.dumps(stop(models=options.all), ensure_ascii=False))
+        result = stop(models=options.all, force=options.force, wait_jobs=options.wait)
+        if result.get("status") == "refused":
+            from .activity import describe
+
+            print(
+                "levi stop refused: these jobs are running and would be killed:\n"
+                + describe(result["running"])
+                + f"\n{result['hint']}",
+                file=sys.stderr,
+            )
+            print(json.dumps(result, ensure_ascii=False))
+            return 3
+        print(json.dumps(result, ensure_ascii=False))
         return 0
     if len(sys.argv) > 1 and sys.argv[1] == "clean":
         from .maintenance import main as clean

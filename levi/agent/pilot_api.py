@@ -5,7 +5,7 @@ import json
 import os
 import signal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from .api import principal, workbench
@@ -26,6 +26,22 @@ async def stop_core(request: Request):
     human(request)
     if not os.getenv("LEVI_CORE_INSTANCE"):
         raise ValueError("This API is not owned by Core Host")
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    if not (isinstance(body, dict) and body.get("force")):
+        from levi import activity
+
+        running = activity.running_jobs()
+        if running:
+            # Stopping kills their workers: say which, and how to go on.
+            raise HTTPException(
+                409,
+                "Jobs are running; stopping now would kill them:\n"
+                + activity.describe(running)
+                + "\nWait for them, or stop with force (pool exports stay resumable).",
+            )
     asyncio.get_running_loop().call_later(0.3, os.kill, os.getpid(), signal.SIGTERM)
     return {"status": "stopping"}
 

@@ -123,16 +123,51 @@ export interface PoolProgress {
   bytes?: number;
   rate?: string;
   rsync_eta_seconds?: number;
+  updated_at?: number;
+}
+
+/** Job states (levi/pool/jobs.py). */
+export type JobStatus =
+  | "planned"
+  | "running"
+  | "stalled"
+  | "cancelling"
+  | "cancelled"
+  | "interrupted"
+  | "failed"
+  | "done"
+  | "done_with_errors";
+
+/** A fatal error made readable (levi/pool/joblog.py ``describe_*``). */
+export interface JobErrorInfo {
+  type: string;
+  message: string;
+  stage?: string;
+  hint?: string;
 }
 
 export interface PoolJob {
   id: string;
   kind: "scan" | "export" | "push";
-  status: string;
+  status: JobStatus | string;
   error?: string;
+  reason?: string;
+  error_info?: JobErrorInfo | null;
   planned_at?: number;
   started_at?: number;
   finished_at?: number;
+  interrupted_at?: number;
+  resumes?: number;
+  /** Seconds since the worker's last heartbeat or progress write. */
+  age_seconds?: number | null;
+  /** Seconds since its work last moved. */
+  idle_seconds?: number | null;
+  updated_at?: number | null;
+  resumable?: boolean;
+  rerunnable?: boolean;
+  partial?: string | null;
+  failures?: number;
+  log_bytes?: number;
   target?: string;
   source?: string;
   destination?: string;
@@ -148,12 +183,20 @@ export interface PoolJob {
     episodes?: number;
     frames?: number;
     excluded?: Record<string, number>;
-    warnings?: string[];
+    warnings?: (string | { code: string; message: string })[];
+    errors?: number;
+    resumed?: boolean;
     bytes?: number;
     destination?: string;
     seconds?: number;
     summary?: ScanSummary;
   };
+}
+
+export interface PoolDisk {
+  path: string;
+  free_bytes: number;
+  total_bytes: number;
 }
 
 export interface PoolStatus {
@@ -163,6 +206,7 @@ export interface PoolStatus {
   export_roots: string[];
   heldout_lists: string[];
   last_scan: ScanSummary | null;
+  disk?: PoolDisk[];
   jobs: PoolJob[];
 }
 
@@ -433,6 +477,7 @@ export const REASON_LABELS: Record<string, string> = {
   excluded_by_recipe: "Excluded by hand",
   label_conflict: "Conflicting human labels",
   conversion_preflight: "Failed capture checks",
+  convert_error: "Conversion failed",
 };
 
 /** Server warnings (recipe.find_warnings) as UI text. */
@@ -483,3 +528,85 @@ export const STRATEGY_LABELS: Record<Strategy, string> = {
   random: "Random",
   first: "In order",
 };
+
+/** ``GET pool/jobs/{id}/delete-preview``: what clearing or deleting a job
+ * would remove (levi/pool/deletion.py). */
+export interface DeleteOutput {
+  role: "output" | "partial";
+  path: string;
+  exists: boolean;
+  bytes?: number;
+  episodes?: number | null;
+  format?: string | null;
+  created_at?: string | null;
+  owner: string | null;
+  owned: boolean;
+  will_delete: boolean;
+  kept_because?: string | null;
+  needs_force: string[];
+  refusals: string[];
+  shared_with: string[];
+  pushed: { job: string; remote: string | null; status: string; at?: number }[];
+}
+
+export interface DeletePlan {
+  id: string;
+  kind: string;
+  status: string;
+  running: boolean;
+  record_files: number;
+  record_bytes: number;
+  outputs: DeleteOutput[];
+  refused: string | null;
+  needs_force: boolean;
+  freed_bytes: number;
+}
+
+export interface DeleteResult {
+  id: string;
+  record_cleared: boolean;
+  removed: { role: string; path: string; bytes: number; files: number }[];
+  kept: { path: string; why: string }[];
+  errors: string[];
+  freed_bytes: number;
+}
+
+export interface BulkDeleteResult {
+  results: DeleteResult[];
+  refused: { id: string; reason: string }[];
+  freed_bytes: number;
+  cleared?: number;
+}
+
+/** ``GET pool/cleanup``. */
+export interface CleanupPartial {
+  path: string;
+  name: string;
+  job: string | null;
+  status: string | null;
+  live: boolean;
+  known: boolean;
+  resumable: boolean;
+  bytes: number;
+  age_seconds: number;
+  expires_in_seconds: number | null;
+}
+
+export interface CleanupJob {
+  id: string;
+  kind: string;
+  status: string;
+  bytes: number;
+  age_seconds: number;
+  expires_in_seconds: number;
+}
+
+export interface CleanupInventory {
+  partials: CleanupPartial[];
+  jobs: CleanupJob[];
+  temp: { path: string; bytes: number; age_seconds: number }[];
+  reclaimable_bytes: number;
+  removable_bytes: number;
+  disk: PoolDisk[];
+  ttl: { partial_seconds: number; job_seconds: number };
+}

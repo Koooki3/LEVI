@@ -23,6 +23,7 @@ quality score, reasons), per task the requested and achieved counts, every
 exclusion and its reason, the LEVI commit and the format parameters. Held-out episodes are refused.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -30,6 +31,7 @@ import shutil
 import time
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 from typing import Literal
 
@@ -48,7 +50,8 @@ from ..conversion.outputs.lerobot_v21 import LeRobotV21
 from ..conversion.outputs.recap_value import RECAP_COLUMNS, RecapOptions, RecapValue
 from ..conversion.progress import Progress
 from ..conversion.report import InputReport, Requirement
-from . import heldout, index, scanner, settings
+from . import heldout, index, joblog, scanner, settings
+from . import journal as journal_mod
 from . import timing as timing_mod
 from .recipe import NAME, Recipe, find_warnings, select_detailed
 
@@ -101,6 +104,9 @@ class ExportOptions(BaseModel):
     failure_reward: float = Field(-300.0, le=0, ge=-1e6)
     gamma: float = Field(1.0, gt=0, le=1)
     workers: int | None = Field(None, ge=1, le=64)
+    # Episodes that fail to convert are left out and listed; the export stops
+    # (resumable) when more than this share of its episodes failed.
+    on_error_max_fraction: float = Field(0.1, ge=0, le=1)
 
     @field_validator("cameras")
     @classmethod
@@ -209,6 +215,7 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "frames",
         "fps",
         "measured_fps",
+        "video_bytes",
         "state_dim",
         "action_dim",
         "category",
@@ -233,6 +240,7 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
     # The index's view of copies, checked at plan time too so a dry run
     # cannot pass what the export would refuse.
     refuse_heldout_groups(episodes)
+    check_space({"episodes": episodes, "target": str(target)})
     return {
         "schema": SCHEMA,
         "recipe": recipe.model_dump(),
@@ -464,14 +472,6 @@ class PoolCaptures(InputFormat):
         self.measured = {
             e.source_id: min(e.camera_fps.values()) for e in built if e.camera_fps
         }
-        slowest = min(self.measured.values(), default=None)
-        if (
-            options.timing == "resample"
-            and slowest is not None
-            and options.fps > slowest + timing_mod.TOLERANCE
-        ):
-            # resample never adds frames; refuse before converting anything.
-            raise ValueError(_below_message(slowest, options.fps))
         return built
 
 
@@ -597,19 +597,248 @@ def _levi_commit():
 
 # ------------------------------------------------------------------ run
 
+BATCH_EPISODES = 8  # raw episodes per conversion part (one journal line each)
+PARTS = ".parts"
+SIZE_FACTOR = 1.3  # planned source video bytes -> bytes the export may write
 
-def run(job: dict, progress_path: Path | None = None) -> dict:
+
+class FatalExport(RuntimeError):
+    """A failure of the run itself (disk, memory, too many bad episodes), not
+    of one episode: the export stops and can be resumed."""
+
+
+def _is_fatal(exc: BaseException) -> bool:
+    """Whether an error stops the export (True) or only costs the episode
+    that raised it (False)."""
+    if joblog.TERMINATING.is_set() or isinstance(
+        exc,
+        (SystemExit, KeyboardInterrupt, FatalExport, MemoryError, BrokenProcessPool),
+    ):
+        return True
+    if isinstance(exc, FileNotFoundError):
+        return False
+    return isinstance(exc, OSError)
+
+
+def _volume(path: Path) -> Path:
+    path = Path(path)
+    while not path.exists() and path.parent != path:
+        path = path.parent
+    return path
+
+
+def _tree_bytes(path: Path) -> int:
+    total = 0
+    for item in Path(path).rglob("*"):
+        try:
+            if item.is_file() and not item.is_symlink():
+                total += item.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def estimate_bytes(episodes: list[dict]) -> int:
+    """What the export will write, roughly: the videos of its episodes (the
+    index's ``video_bytes``; a LeRobot source's share of its video folder)
+    times ``SIZE_FACTOR`` (re-encoding and merged metadata)."""
+    total = 0
+    lerobot: dict[str, int] = Counter()
+    for ep in episodes:
+        if ep.get("video_bytes"):
+            total += int(ep["video_bytes"])
+        elif ep["format"] == "lerobot":
+            lerobot[ep["source_path"]] += 1
+    for path, count in lerobot.items():
+        root = Path(path)
+        try:
+            all_eps = int(_info(root).get("total_episodes") or 0) or count
+            total += _tree_bytes(root / "videos") * count // max(1, all_eps)
+        except (OSError, ValueError):
+            continue
+    return int(total * SIZE_FACTOR)
+
+
+def check_space(job: dict, staging: Path | None = None) -> dict:
+    """Refuse early, with numbers, when the volume cannot hold the export
+    (what an unfinished ``.partial`` already holds counts as written)."""
+    wanted = estimate_bytes(job["episodes"])
+    have = _tree_bytes(staging) if staging is not None and Path(staging).exists() else 0
+    volume = _volume(Path(job["target"]).parent)
+    free = shutil.disk_usage(volume).free
+    margin = settings.free_margin_bytes()
+    need = max(0, wanted - have)
+    if need + margin > free:
+
+        def gib(n):
+            return f"{n / 1024**3:.1f} GiB"
+
+        raise ValueError(
+            f"Not enough free space for this export on {volume}: it needs about "
+            f"{gib(need)} (the planned sources' videos times {SIZE_FACTOR:g}, "
+            f"{gib(wanted)}, minus {gib(have)} already written) and keeps "
+            f"{gib(margin)} in reserve; {gib(free)} is free. Free space, or choose "
+            "another output folder"
+        )
+    return {"need": need, "free": free, "margin": margin}
+
+
+def _probe_rates(raw_eps: list[dict], conv: Options) -> dict[str, float]:
+    """The slowest measured camera rate of every raw episode (ffprobe)."""
+
+    def one(ep):
+        rates = [camera_info(Path(ep["key"]), c, conv)["fps"] for c in conv.cameras]
+        return ep["key"], min(rates)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return dict(pool.map(one, raw_eps))
+
+
+def check_fps(job: dict, options: ExportOptions) -> None:
+    """``resample`` never adds frames: a raw episode measured below the
+    export fps refuses the export before anything is converted."""
+    if options.format == "raw_capture" or options.timing != "resample":
+        return
+    raw_eps = [e for e in job["episodes"] if e["format"] == "robot_capture"]
+    if not raw_eps:
+        return
+    try:
+        rates = _probe_rates(raw_eps, options.conversion())
+    except (OSError, ValueError, RuntimeError):
+        return  # unreadable sources are reported by the capture checks
+    slowest = min(rates.values())
+    if options.fps > slowest + timing_mod.TOLERANCE:
+        raise ValueError(_below_message(slowest, options.fps))
+
+
+def _cancel_requested(job_path: Path | None) -> bool:
+    return bool(job_path) and joblog.paths(job_path)["cancel"].exists()
+
+
+def _stopping_reason(job_path: Path | None) -> str:
+    if job_path and joblog.paths(job_path)["stopping"].exists():
+        return "service stopped"
+    return "stopped by a signal"
+
+
+def _dispose(staging: Path, journal, exc: BaseException, job_path, log) -> str:
+    """What becomes of the ``.partial`` folder when a run ends early: a
+    cancel removes it; a stop or crash keeps it; a failure keeps it while it
+    holds finished work (a resume needs it) and removes it otherwise."""
+    terminating = isinstance(exc, (SystemExit, KeyboardInterrupt)) or (
+        joblog.TERMINATING.is_set()
+    )
+    if _cancel_requested(job_path):
+        shutil.rmtree(staging, ignore_errors=True)
+        log.info("cancelled; the partial folder was removed")
+        return "removed"
+    if journal is not None and journal.has_units():
+        if terminating:
+            journal.note_stopped("interrupted", _stopping_reason(job_path))
+            log.warning(
+                f"{_stopping_reason(job_path)}; the partial folder is kept: "
+                f"{journal.new_units} unit(s) finished in this run"
+            )
+        else:
+            journal.note_stopped("failed", f"{type(exc).__name__}: {exc}"[:500])
+            log.warning("failed; the partial folder is kept for a resume")
+        return "kept"
+    shutil.rmtree(staging, ignore_errors=True)
+    log.info("nothing finished yet; the partial folder was removed")
+    return "removed"
+
+
+class _NullLog:
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+
+class RunContext:
+    """What one export run threads through its stages."""
+
+    def __init__(self, job, options, staging, progress, journal, job_path, log):
+        self.job = job
+        self.options = options
+        self.staging = staging
+        self.progress = progress
+        self.journal = journal
+        self.job_path = job_path
+        self.log = log
+        self.failures: list[dict] = []
+        self.convert_errors = 0
+
+    def fail(self, ep: dict, exc: BaseException, stage: str, unit: str) -> dict:
+        """One episode's failure: recorded, and the episode left out (the
+        returned exclusion row). ``check_budget`` stops the run when too many."""
+        info = joblog.failure(exc, episode=ep["key"], unit=unit, stage=stage)
+        if self.job_path:
+            joblog.append_failure(self.job_path, info)
+        self.log.trace(exc, f"{stage} {ep['key']}")
+        self.failures.append(
+            {k: info[k] for k in ("episode", "unit", "stage", "type", "message")}
+        )
+        self.convert_errors += 1
+        return {
+            "key": ep["key"],
+            "source": ep["source"],
+            "task": ep["task"],
+            "reason": "convert_error",
+            "detail": [f"{type(exc).__name__}: {str(exc)[:300]}"],
+        }
+
+    def preflight_drop(self, ep: dict, reasons: list[str]) -> dict:
+        """An episode that failed the capture checks: listed, left out."""
+        info = {
+            "episode": ep["key"],
+            "unit": f"preflight|{ep['key']}",
+            "stage": "Convert raw captures",
+            "type": "CaptureCheck",
+            "message": "; ".join(reasons)[:2000],
+            "traceback": "",
+        }
+        if self.job_path:
+            joblog.append_failure(self.job_path, info)
+        self.log.warning(f"left out {ep['key']}: {info['message']}")
+        self.failures.append(
+            {k: info[k] for k in ("episode", "unit", "stage", "type", "message")}
+        )
+        return {
+            "key": ep["key"],
+            "source": ep["source"],
+            "task": ep["task"],
+            "reason": "conversion_preflight",
+            "detail": reasons,
+        }
+
+    def check_budget(self) -> None:
+        total = max(1, len(self.job["episodes"]))
+        if self.convert_errors / total > self.options.on_error_max_fraction:
+            raise FatalExport(
+                f"{self.convert_errors} of {total} episodes failed to convert, more "
+                f"than the allowed {self.options.on_error_max_fraction:.0%} "
+                "(on_error_max_fraction); see the job's errors.jsonl. Finished work "
+                "is kept: fix the cause and resume, or raise the limit and run again"
+            )
+
+
+def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -> dict:
     options = ExportOptions.model_validate(job["options"])
     target = Path(job["target"])
     sources = job["sources"]
-    settings.check_export_target(target, sources)
+    staging = target.parent / f".{target.name}.partial"
+    settings.check_export_target(target, sources, allow_partial=resume)
     if not job.get("heldout_lists") and not job.get("heldout_disabled"):
         raise ValueError("The plan names no held-out list; refusing to export")
-    staging = target.parent / f".{target.name}.partial"
     settings.guard_write(staging, sources)
+    job_path = settings.job_path(job["id"]) if job.get("id") else None
+    log = joblog.JobLog(joblog.paths(job_path)["log"]) if job_path else _NullLog()
     progress = Progress(progress_path, STAGES)
     progress.stage("Check", len(job["episodes"]))
     episodes = job["episodes"]
+    log.info(
+        f"{'resuming' if resume else 'starting'} export {options.name} "
+        f"({options.format}, {len(episodes)} episodes) -> {target}"
+    )
     refuse_heldout(
         episodes,
         [Path(p) for p in job["pool_roots"]],
@@ -617,15 +846,30 @@ def run(job: dict, progress_path: Path | None = None) -> dict:
     )
     refuse_heldout_groups(episodes)
     _unchanged(episodes)
-    staging.mkdir(parents=True)
+    check_space(job, staging if resume else None)
+    check_fps(job, options)
+    if resume:
+        journal = journal_mod.Journal.open(staging, job)
+        log.info(
+            f"journal verified: {len(journal.units)} finished unit(s), "
+            f"{journal.interruptions} earlier interruption(s)"
+        )
+        # What a crash left half-written is not trusted; the units are.
+        (staging / "pool_export.json").unlink(missing_ok=True)
+        shutil.rmtree(staging / "meta", ignore_errors=True)
+    else:
+        staging.mkdir(parents=True)
+        journal = journal_mod.Journal.create(staging, job)
+    ctx = RunContext(job, options, staging, progress, journal, job_path, log)
     try:
         if options.format == "raw_capture":
-            result = _raw_capture(job, options, staging, progress)
+            result = _raw_capture(ctx)
         else:
-            result = _lerobot(job, options, staging, progress, progress_path)
+            result = _lerobot(ctx)
         record = {
             "schema": SCHEMA,
             "name": options.name,
+            "job_id": job.get("id"),
             "format": options.format,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "levi_commit": _levi_commit(),
@@ -649,16 +893,29 @@ def run(job: dict, progress_path: Path | None = None) -> dict:
             "episodes": result["episodes"],
             "excluded": job["excluded"] + result["dropped"],
             "warnings": job.get("warnings", []) + result.get("warnings", []),
+            "errors": ctx.failures,
+            "resumed": journal.resumes > 0,
+            "resumes": journal.resumes,
+            "interruptions": journal.interruptions,
         }
         atomic(staging / "pool_export.json", record)
         progress.stage("Publish", 1)
+        journal.discard()
+        shutil.rmtree(staging / PARTS, ignore_errors=True)
         if target.exists():
             raise ValueError(f"Export directory already exists: {target}")
         staging.rename(target)
-    except BaseException:
-        shutil.rmtree(staging, ignore_errors=True)
+    except BaseException as exc:
+        if not isinstance(exc, (SystemExit, KeyboardInterrupt)):
+            log.trace(exc, "export")
+        _dispose(staging, journal, exc, job_path, log)
         raise
     progress.finish()
+    size = _tree_bytes(target)
+    log.info(
+        f"finished: {record['counts']['episodes']} episodes, "
+        f"{record['counts']['frames']} frames, {len(ctx.failures)} failure(s)"
+    )
     return {
         "ok": True,
         "dataset_path": str(target),
@@ -667,6 +924,10 @@ def run(job: dict, progress_path: Path | None = None) -> dict:
         "frames": record["counts"]["frames"],
         "excluded": record["counts"]["excluded"],
         "warnings": record["warnings"],
+        "errors": len(ctx.failures),
+        "resumed": record["resumed"],
+        "interruptions": journal.interruptions,
+        "bytes": size,
     }
 
 
@@ -701,10 +962,24 @@ def _task_order(episodes, recipe) -> list[str]:
     return order + [t for t in present if t not in order]
 
 
-def _raw_capture(job, options, staging, progress) -> dict:
+def _copy_hashed(src: Path, dst: Path) -> str:
+    """``copy2`` that also returns the sha256 of what it wrote."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256()
+    with Path(src).open("rb") as reader, dst.open("wb") as writer:
+        for chunk in iter(lambda: reader.read(1 << 20), b""):
+            digest.update(chunk)
+            writer.write(chunk)
+    shutil.copystat(src, dst)
+    return digest.hexdigest()
+
+
+def _raw_capture(ctx: RunContext) -> dict:
+    job, options, staging, progress = ctx.job, ctx.options, ctx.staging, ctx.progress
     texts = _texts(job)
     counters: Counter = Counter()
     rows = []
+    dropped = []
     frames = 0
     progress.stage("Merge", len(job["episodes"]))
     for ep in job["episodes"]:
@@ -715,25 +990,46 @@ def _raw_capture(job, options, staging, progress) -> dict:
         if folder.strip(".") == "":  # "", ".", "..", "..."
             folder = "task"
         number = counters[folder]
-        counters[folder] += 1
         dst = _inside(staging, staging / folder / f"demo_{number:04d}")
+        rel = dst.relative_to(staging).as_posix()
         src = Path(ep["key"])
-        linked = 0
-        for path in sorted(src.rglob("*")):
-            if path.is_dir() or path.is_symlink():
-                continue
-            linked += _link_or_copy(
-                path,
-                _inside(staging, dst / path.relative_to(src)),
-                options.hardlink,
-            )
+        unit = f"copy|{ep['key']}"
+        recorded = ctx.journal.done(unit)
+        try:
+            if (
+                recorded
+                and recorded.get("path") == rel
+                and ctx.journal.verified(recorded["files"])
+            ):
+                linked = recorded["linked"]
+            else:
+                if dst.exists():
+                    shutil.rmtree(dst)  # a copy the crash cut short
+                linked, files = 0, {}
+                for path in sorted(src.rglob("*")):
+                    if path.is_dir() or path.is_symlink():
+                        continue
+                    out = _inside(staging, dst / path.relative_to(src))
+                    linked += _link_or_copy(path, out, options.hardlink)
+                    name = out.relative_to(staging).as_posix()
+                    files[name] = journal_mod.file_record(staging, name)
+                ctx.journal.record(unit, path=rel, linked=linked, files=files)
+        except Exception as exc:
+            if _is_fatal(exc):
+                raise
+            shutil.rmtree(dst, ignore_errors=True)
+            dropped.append(ctx.fail(ep, exc, "Merge", unit))
+            ctx.check_budget()
+            progress.advance(ep["key"])
+            continue
+        counters[folder] += 1
         description = _inside(staging, staging / folder / "task_description.txt")
         if not description.exists():
             description.write_text(text + "\n", encoding="utf-8")
         frames += int(ep["frames"] or 0)
         rows.append(
             {
-                "path": dst.relative_to(staging).as_posix(),
+                "path": rel,
                 "source_path": ep["key"],
                 "source": ep["source"],
                 "task": ep["task"],
@@ -748,15 +1044,254 @@ def _raw_capture(job, options, staging, progress) -> dict:
             }
         )
         progress.advance(ep["key"])
+    if not rows:
+        raise ValueError("No episode could be copied")
+    copied = {r["source_path"] for r in rows}
     return {
         "episodes": rows,
         "frames": frames,
-        "dropped": [],
-        "task_order": _task_order(job["episodes"], job["recipe"]),
+        "dropped": dropped,
+        "task_order": _task_order(
+            [e for e in job["episodes"] if e["key"] in copied], job["recipe"]
+        ),
     }
 
 
-def _lerobot(job, options, staging, progress, progress_path) -> dict:
+class Part:
+    """One conversion part: a small dataset made from a few raw episodes."""
+
+    def __init__(self, part_id: str, directory: Path, measured: dict[str, float]):
+        self.id = part_id
+        self.dir = directory
+        self.measured = measured
+        self.info = _info(directory)
+        self.rows = {
+            r["source_demo"]: r
+            for r in dataset.read_jsonl(directory / "meta/episodes.jsonl")
+        }
+        self.stats = {
+            r["episode_index"]: r["stats"]
+            for r in dataset.read_jsonl(directory / "meta/episodes_stats.jsonl")
+        }
+
+    def files(self, staging: Path) -> tuple[dict, dict]:
+        """Every file of the part with its size and sha256 (paths relative to
+        the staging folder), and the files of each (episode, camera) unit."""
+        chunk = int(self.info.get("chunks_size") or 1000)
+        rels = ["meta/info.json", "meta/episodes.jsonl", "meta/episodes_stats.jsonl"]
+        units: dict[str, list[str]] = {}
+        for pid, row in self.rows.items():
+            index_ = row["episode_index"]
+            units[f"{pid}|data"] = [
+                self.info["data_path"].format(
+                    episode_chunk=index_ // chunk, episode_index=index_
+                )
+            ]
+            for key in _video_keys(self.info):
+                units[f"{pid}|{key}"] = [
+                    self.info["video_path"].format(
+                        episode_chunk=index_ // chunk,
+                        episode_index=index_,
+                        video_key=key,
+                    )
+                ]
+        for paths in units.values():
+            rels += paths
+        rels = list(dict.fromkeys(rels))
+
+        def name(rel: str) -> str:
+            return (self.dir / rel).relative_to(staging).as_posix()
+
+        files = {name(r): journal_mod.file_record(self.dir, r) for r in rels}
+        return files, {u: [name(r) for r in paths] for u, paths in units.items()}
+
+
+def _next_part(ctx: RunContext) -> str:
+    seq = 1 + max(
+        (int(r["part"][1:]) for r in ctx.journal.prefixed("part|")), default=-1
+    )
+    # Ids also skip the folders of parts that never got their journal line.
+    parts_dir = ctx.staging / PARTS
+    if parts_dir.is_dir():
+        for child in parts_dir.iterdir():
+            digits = re.sub(r"\D", "", child.name)
+            if digits:
+                seq = max(seq, int(digits) + 1)
+    return f"p{seq:04d}"
+
+
+def _run_part(ctx: RunContext, items: list[tuple[str, dict]], texts, conv):
+    """Convert ``items`` with the conversion pipeline as one part and journal
+    it. A part that fails is retried episode by episode, so one bad episode
+    costs only itself. Returns (parts, excluded rows)."""
+    part_id = _next_part(ctx)
+    parts_dir = ctx.staging / PARTS
+    parts_dir.mkdir(parents=True, exist_ok=True)
+    directory = parts_dir / part_id
+    by_pid = dict(items)
+    source = PoolCaptures(items, texts)
+    mark = len(ctx.failures)
+    try:
+        pipeline.run(
+            parts_dir / f"in{part_id}",
+            directory,
+            conv,
+            source,
+            LeRobotV21(),
+            None,
+            strict=True,
+        )
+    except Exception as exc:
+        shutil.rmtree(directory, ignore_errors=True)
+        shutil.rmtree(parts_dir / f".{part_id}.partial", ignore_errors=True)
+        if _is_fatal(exc):
+            raise
+        if source.dropped and len(source.dropped) == len(items):
+            excluded = [
+                ctx.preflight_drop(by_pid[p], r) for p, r in source.dropped.items()
+            ]
+        elif len(items) > 1:
+            ctx.log.warning(
+                f"a part of {len(items)} episodes failed ({type(exc).__name__}: "
+                f"{str(exc)[:200]}); retrying them one by one"
+            )
+            parts, excluded = [], []
+            for item in items:
+                more_parts, more_excluded = _run_part(ctx, [item], texts, conv)
+                parts += more_parts
+                excluded += more_excluded
+            return parts, excluded
+        else:
+            _, ep = items[0]
+            excluded = [
+                ctx.fail(ep, exc, "Convert raw captures", f"convert|{ep['key']}")
+            ]
+        ctx.journal.record(
+            f"part|{part_id}",
+            part=part_id,
+            items=[p for p, _ in items],
+            excluded=excluded,
+            failures=ctx.failures[mark:],
+            measured={},
+            files={},
+            units={},
+        )
+        ctx.check_budget()
+        return [], excluded
+    part = Part(part_id, directory, dict(source.measured))
+    if abs(float(part.info["fps"]) - ctx.options.fps) > 0.01:
+        raise FatalExport(_below_message(float(part.info["fps"]), ctx.options.fps))
+    excluded = [ctx.preflight_drop(by_pid[p], r) for p, r in source.dropped.items()]
+    files, units = part.files(ctx.staging)
+    ctx.journal.record(
+        f"part|{part_id}",
+        part=part_id,
+        items=[p for p, _ in items],
+        excluded=excluded,
+        failures=ctx.failures[mark:],
+        measured=part.measured,
+        files=files,
+        units=units,
+    )
+    return [part], excluded
+
+
+def _convert_raw(ctx: RunContext, raw_items, texts, conv):
+    """The raw episodes as journaled conversion parts: (part by episode id,
+    excluded rows). A resume keeps every part whose files verify."""
+    progress = ctx.progress
+    cameras = len(conv.cameras)
+    progress.stage("Convert raw captures", len(raw_items) * cameras)
+    parts: dict[str, Part] = {}
+    excluded: list[dict] = []
+    finished: set[str] = set()
+    parts_dir = ctx.staging / PARTS
+    for record in list(ctx.journal.prefixed("part|")):
+        directory = parts_dir / record["part"]
+        usable = (directory.is_dir() or not record["files"]) and ctx.journal.verified(
+            record["files"]
+        )
+        if not usable:
+            ctx.log.warning(
+                f"part {record['part']} failed verification; its episodes are "
+                "converted again"
+            )
+            del ctx.journal.units[f"part|{record['part']}"]
+            continue
+        if record["files"]:
+            part = Part(record["part"], directory, record.get("measured") or {})
+            for pid in record["items"]:
+                if pid in part.rows:
+                    parts[pid] = part
+        excluded += record.get("excluded") or []
+        failures = record.get("failures") or []
+        ctx.failures += failures
+        ctx.convert_errors += sum(1 for f in failures if f["type"] != "CaptureCheck")
+        finished.update(record["items"])
+    if parts_dir.is_dir():
+        keep = {r["part"] for r in ctx.journal.prefixed("part|")}
+        for child in parts_dir.iterdir():
+            if child.name not in keep:
+                shutil.rmtree(child, ignore_errors=True)
+    if finished:
+        ctx.log.info(f"{len(finished)} raw episode(s) already converted")
+        progress.advance("resumed", step=len(finished) * cameras)
+    remaining = [item for item in raw_items if item[0] not in finished]
+    batch = settings.batch_episodes() or max(
+        BATCH_EPISODES, 2 * (conv.workers or pipeline.auto_workers())
+    )
+    for start in range(0, len(remaining), batch):
+        chunk = remaining[start : start + batch]
+        made, dropped = _run_part(ctx, chunk, texts, conv)
+        excluded += dropped
+        for part in made:
+            for pid in part.rows:
+                parts[pid] = part
+        progress.advance(chunk[-1][1]["key"], step=len(chunk) * cameras)
+        ctx.log.info(
+            f"converted {min(start + batch, len(remaining))}/{len(remaining)} episodes"
+        )
+    return parts, excluded
+
+
+def _check_lerobot_episode(ep: dict, info: dict, mapping: dict) -> None:
+    """Cheap checks that would make merging this episode fail, made before
+    anything is written so a bad source episode costs only itself."""
+    root = Path(ep["source_path"])
+    old = int(ep["episode_index"])
+    chunk = int(info.get("chunks_size") or 1000)
+    path = root / info["data_path"].format(
+        episode_chunk=old // chunk, episode_index=old
+    )
+    frame_index = pq.read_table(path, columns=["frame_index"])["frame_index"]
+    n = len(frame_index)
+    if not np.array_equal(np.asarray(frame_index.to_pylist()), np.arange(n)):
+        raise ValueError(f"{ep['key']}: frame_index is not 0..{n - 1}")
+    for key in mapping:
+        video = root / info["video_path"].format(
+            episode_chunk=old // chunk, episode_index=old, video_key=key
+        )
+        if not video.is_file():
+            raise FileNotFoundError(f"{ep['key']}: missing video {video}")
+
+
+def _place_video(src: Path, dst: Path, converted: bool) -> str | None:
+    """Put ``src`` at ``dst``: a hard link for a converted part (the parts
+    folder goes at the end), a hashed copy for a LeRobot source. Returns the
+    sha256 when it was computed on the way."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.unlink(missing_ok=True)
+    if converted:
+        try:
+            os.link(src, dst)
+        except OSError:
+            shutil.copy2(src, dst)
+        return None
+    return _copy_hashed(src, dst)
+
+
+def _lerobot(ctx: RunContext) -> dict:
+    job, options, staging, progress = ctx.job, ctx.options, ctx.staging, ctx.progress
     recap = options.format == "recap_value"
     texts = _texts(job)
     planned = job["episodes"]
@@ -770,45 +1305,28 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
         )
     pids = {id(e): f"p{i:06d}" for i, e in enumerate(planned)}
     raw_items = [(pids[id(e)], e) for e in planned if e["format"] == "robot_capture"]
-    dropped = []
-    part = staging / ".parts" / "raw"
-    part_rows: dict[str, dict] = {}
-    part_info = None
-    source = None
-    part_stats: dict[int, dict] = {}
+    dropped: list[dict] = []
+    owner: dict[str, Part] = {}
     if raw_items:
-        progress.stage("Convert raw captures", len(raw_items))
-        source = PoolCaptures(raw_items, texts)
-        pipeline.run(
-            staging / ".parts" / "input",
-            part,
-            conv,
-            source,
-            LeRobotV21(),
-            progress_path,
-            strict=True,
-        )
-        for pid, reasons in source.dropped.items():
-            ep = next(e for p, e in raw_items if p == pid)
-            dropped.append(
-                {
-                    "key": ep["key"],
-                    "source": ep["source"],
-                    "task": ep["task"],
-                    "reason": "conversion_preflight",
-                    "detail": reasons,
-                }
-            )
-        part_info = _info(part)
-        for row in dataset.read_jsonl(part / "meta/episodes.jsonl"):
-            part_rows[row["source_demo"]] = row
-        for row in dataset.read_jsonl(part / "meta/episodes_stats.jsonl"):
-            part_stats[row["episode_index"]] = row["stats"]
-        conv_fps = float(part_info["fps"])
-        if abs(conv_fps - options.fps) > 0.01:
-            raise ValueError(_below_message(conv_fps, options.fps))
+        owner, dropped = _convert_raw(ctx, raw_items, texts, conv)
+    lerobot_bad: set[int] = set()
+    for e in planned:
+        if e["format"] != "lerobot":
+            continue
+        info = schema["infos"][e["source_path"]]
+        try:
+            _check_lerobot_episode(e, info, _mapping(info, options.camera_map))
+        except Exception as exc:
+            if _is_fatal(exc):
+                raise
+            dropped.append(ctx.fail(e, exc, "Merge", f"merge|{e['key']}"))
+            lerobot_bad.add(id(e))
+    ctx.check_budget()
     kept = [
-        e for e in planned if e["format"] != "robot_capture" or pids[id(e)] in part_rows
+        e
+        for e in planned
+        if id(e) not in lerobot_bad
+        and (e["format"] != "robot_capture" or pids[id(e)] in owner)
     ]
     if not kept:
         raise ValueError("No episode passed the capture checks")
@@ -824,16 +1342,19 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
     features: dict = {}
     names = None
     episodes_meta, epstats, provenance, measured, record_rows = [], [], [], {}, []
+    part_info = next(iter(owner.values())).info if owner else None
     offset = 0
     progress.stage("Merge", len(kept))
     for new, ep in enumerate(kept):
         if ep["format"] == "robot_capture":
-            root, info = part, part_info
-            source_fps = source.measured.get(pids[id(ep)])
-            old = part_rows[pids[id(ep)]]["episode_index"]
+            pid = pids[id(ep)]
+            part = owner[pid]
+            root, info = part.dir, part.info
+            source_fps = part.measured.get(pid)
+            old = part.rows[pid]["episode_index"]
             mapping = {k: k for k in _video_keys(info)}
-            stats = dict(part_stats.get(old, {}))
-            move = True
+            stats = dict(part.stats.get(old, {}))
+            converted = True
         else:
             root = Path(ep["source_path"])
             info = schema["infos"][ep["source_path"]]
@@ -851,7 +1372,7 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
                 mapping.get(k, k): v
                 for k, v in ds_stats[ep["source_path"]].get(old, {}).items()
             }
-            move = False
+            converted = False
         chunk = int(info.get("chunks_size") or 1000)
         table = pq.read_table(
             root
@@ -917,12 +1438,22 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
                 episode_chunk=new // 1000, episode_index=new, video_key=out_key
             )
             dst = staging / rel
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            if move:
-                os.replace(src, dst)
+            unit = f"merge|{ep['key']}|{out_key}"
+            recorded = ctx.journal.done(unit)
+            if (
+                recorded
+                and set(recorded["files"]) == {rel}
+                and ctx.journal.verified(recorded["files"])
+            ):
+                probe = recorded["probe"]
             else:
-                shutil.copy2(src, dst)
-            probe = media.probe(dst)
+                sha = _place_video(src, dst, converted)
+                probe = media.probe(dst)
+                ctx.journal.record(
+                    unit,
+                    files={rel: journal_mod.file_record(staging, rel, sha)},
+                    probe=probe,
+                )
             measured[rel] = {**probe, "frames": probe["declared_frames"]}
             feature = dict(info["features"][src_key])
             feature["info"] = {**feature.get("info", {}), "video.fps": options.fps}
@@ -996,7 +1527,6 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
         "video_path": VIDEO_PATH,
         "features": features,
     }
-    shutil.rmtree(staging / ".parts", ignore_errors=True)
     atomic(staging / "meta/info.json", info)
     dataset.jsonl(staging / "meta/episodes.jsonl", episodes_meta)
     dataset.jsonl(staging / "meta/episodes_stats.jsonl", epstats)

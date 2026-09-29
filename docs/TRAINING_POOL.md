@@ -23,6 +23,12 @@ The training pool indexes every dataset under a set of read-only folders, one ro
 | `LEVI_POOL_ROOTS` | Comma-separated folders the pool reads, never writes | unset: the training pool is idle |
 | `LEVI_EXPORT_ROOTS` | Comma-separated folders an export may be written under | the workspace |
 | `LEVI_POOL_SSH` | The SSH client of remote transfers (default `ssh`; tests point it at a stand-in) | `ssh` |
+| `LEVI_POOL_STALL_SECONDS` | A running job whose worker has not moved for this long is reported `stalled` | `300` |
+| `LEVI_POOL_PARTIAL_TTL` | How long an interrupted or failed export's `.partial` folder is kept for a resume before the sweeper removes it (`3d`, `12h`, `90m`, `3600s`; a bare number is days) | `3d` |
+| `LEVI_POOL_JOB_TTL` | How long a finished job's log and files are kept; the record then shrinks to a summary (failed, cancelled and interrupted records go entirely). Same units | `30d` |
+| `LEVI_POOL_AUTO_RESUME` | `1`: when the service starts, resume the exports it finds interrupted | off |
+| `LEVI_POOL_FREE_MARGIN_GIB` | Free space an export leaves on its volume; planning and starting refuse when the estimate plus this does not fit | `1` |
+| `LEVI_POOL_BATCH_EPISODES` | Raw episodes converted per journaled part (a smaller part loses less to an interruption, costs a little more start-up) | automatic, at least 8 |
 | `LEVI_POOL_HELDOUT` | Comma-separated held-out lists (JSON with `episodes: [{path, sha256: {video: hex}, frame_count, frozen_id}]`; `path` relative to a pool root or absolute; other keys such as `dev_pool` are ignored), or `none` for a pool without a held-out set | unset: **exports are refused** |
 
 An export also needs the held-out setting: unset, planning and running an export are refused (a missing setting must not let frozen test episodes through). The lists in force must be the ones the last scan used — otherwise the index does not mark them — so a change asks for a new scan; held-out entries that match no indexed episode are listed as a warning (`heldout_unmatched`).
@@ -167,7 +173,10 @@ The choice is deterministic for a recipe, its `seed` and the index, and one func
 ```bash
 uv run levi pool export pi05-mix --format lerobot_v21 --name pi05-mix-v1 \
     [--output-dir /data/exports] [--fps 10] [--camera-map observation.images.wrist=observation.images.hand] \
-    [--hardlink] [--human-as-success] [--timing resample|retime] [--filter-static|--no-filter-static] [--dry-run]
+    [--hardlink] [--human-as-success] [--timing resample|retime] [--filter-static|--no-filter-static] [--on-error-max-fraction 0.1] [--dry-run]
+uv run levi pool export --resume <job-id>      # continue an interrupted or failed export
+uv run levi pool jobs [log <id> | delete <id> [--files] | clear-failed]   # states, logs, clearing
+uv run levi pool clean [--dry-run] [--all-partials]                         # expired partials, old job files
 ```
 
 | Format | What it writes |
@@ -213,6 +222,86 @@ Stored videos run at 10 fps for human collection and at about 9.4–10 fps for p
 
 **记录。** `pool_export.json` 有 `timing`（`mode`、`export_fps`、`source_fps_min/max`、`time_scale_min/max`、`episodes_off_by_over_2_percent`；原始采集目录拷贝为 `null`），LeRobot 与 RECAP 导出的每个片段还有 `source_fps`（由视频实测；LeRobot 来源为其自身 fps）和 `time_scale`（导出时长 ÷ 录制时长：`retime` 为 `source_fps / fps`，`resample` 按时间取行，为 1）。`params.timing` 和 `conversion.timing` 记录实际使用的模式，使用默认值时也一样。
 
+## Jobs: states, resume, errors, cleanup / 作业：状态、续做、错误、清理
+
+A scan, export or push runs as a worker process; the worker owns the job record (`<workspace>/pool/jobs/<id>.json`), so the final state survives the service. The page, `levi pool jobs` and `GET /api/levi/pool/jobs/{id}` show:
+
+| State | Meaning |
+| --- | --- |
+| `planned` / `running` | Planned; the worker works (its heartbeat, `<id>.beat.json`, is rewritten every 2 s) |
+| `stalled` | The worker is alive but nothing moved (no heartbeat, or no unit finished) for `LEVI_POOL_STALL_SECONDS` |
+| `cancelling` / `cancelled` | Cancel was asked and is being carried out / done: an export's `.partial` folder is removed |
+| `interrupted` | The worker is gone without finishing: the service stopped or restarted (`levi stop`), the process was killed (SIGTERM, SIGKILL, out of memory), the machine went down. The `.partial` folder and its journal stay; the record says why (`reason`, `interrupted_at`) |
+| `failed` | A fatal error (disk full, too many bad episodes, …): `error.json` has type, message, stage and a hint. The partial output is kept when it holds finished work |
+| `done` / `done_with_errors` | Finished; `done_with_errors` when some episodes failed and were left out (`errors.jsonl`) |
+
+The API adds `age_seconds` (since the last heartbeat or progress write) and `idle_seconds` (since the work last moved), `resumable`, `rerunnable`, `partial`, `error_info` and `failures`. A job whose worker has vanished is reported `interrupted` on the next read, never left as `running`; older records that say `succeeded` read as `done`.
+
+### Resume, re-run, cancel
+
+An export works in **units** and writes a journal into its `.<name>.partial` folder: `resume.json` (the plan's hash, options, counters) and `resume.units.jsonl` (append-only; one line per finished unit with the size and sha256 of each file it made: a converted part of raw episodes, a merged video, a copied episode). Raw captures are converted in parts of several episodes; a part that fails is retried episode by episode.
+
+`levi pool export --resume <job-id>`, `POST /api/levi/pool/jobs/{id}/resume` and the **Resume** button continue an interrupted or failed export:
+
+1. The frozen plan must match the journal (same options, episodes and target) and the source episodes must be unchanged since the scan (stat signatures), the held-out lists must be as planned, and the held-out check runs again. If not, the resume is refused with the reason (409) and **Re-run** is the way on.
+2. Every finished unit is verified on disk (the file exists, its size matches and, up to 64 MiB, its sha256); a unit that fails is done again.
+3. The rest is converted, the dataset is finalised and `.partial` is renamed. The result equals an uninterrupted run's (`pool_export.json` also records `resumed`, `resumes` and `interruptions`).
+
+**Re-run** (`POST …/rerun`, button) plans again from the saved recipe and options and starts it, removing the old unfinished output first. **Cancel** (`POST …/cancel`) is told apart from a stop by a marker written before the signal: a cancel removes the partial output at once; a service stop, a kill or a crash keeps it. Cancelling an interrupted or failed job removes its partial too. A push resumes by running rsync again (`--partial` keeps what arrived); a raw-capture copy resumes per episode like an export; an interrupted scan simply starts again as a new job (the index is replaced atomically). `LEVI_POOL_AUTO_RESUME=1` resumes interrupted exports when the service starts.
+
+### Stopping the service
+
+`levi stop` refuses while pool, conversion, RECAP or segmentation jobs run (it lists them with their progress and exits 3): `levi stop --wait [minutes]` waits for them (60 by default) and then stops, `levi stop --force` stops anyway (a pool export is then marked `interrupted` with the reason `service stopped` and can be resumed; the other job kinds behave as before). The core's stop route (`POST /api/levi/agent/v1/core/stop`) answers 409 with the list unless `{"force": true}`; `levi agent core stop --force` is the same. Ctrl+C on the foreground `levi` cannot ask first: it interrupts the exports the same way.
+
+### Errors and logs
+
+- `<id>.log`: one timestamped log per job (stages, warnings, tracebacks), rotated at 4 MiB into `<id>.log.1`; `<id>.stdio` holds whatever the process printed outside it. `GET /api/levi/pool/jobs/{id}/log?kb=64`, `levi pool jobs log <id>`, the page's **View log**.
+- An episode that fails to convert is written to `<id>.errors.jsonl` (episode, unit, stage, exception type, message, traceback, time) and left out with the reason `convert_error` (a capture-check failure keeps `conversion_preflight` and is listed there too); the export continues and ends `done_with_errors`. It stops (`failed`, resumable) when more than `on_error_max_fraction` (default 0.1; `--on-error-max-fraction`) of the planned episodes failed to convert, or on a fatal error (disk full, out of memory, permission). `pool_export.json` records `errors`, the exclusions with their reasons, `resumed`, `resumes` and `interruptions`.
+- Exit codes and signals become sentences with a hint (143 stopped by the service or the user, 137/-9 killed and probably out of memory, disk full, permission denied, a missing source, a held-out refusal). `GET …/error-report` (the page's **Copy error report**) bundles the state, `error.json`, the failed episodes and the log tail.
+- Before it starts an export estimates its size (the planned sources' videos ×1.3, minus what an unfinished partial already holds) against the free space of the target volume less `LEVI_POOL_FREE_MARGIN_GIB`, and refuses at planning (also in a dry run) and at start with the numbers. With `--timing resample` it also refuses before converting when a raw source runs below the export fps.
+
+### Clearing and deleting jobs
+
+Each job in the page's recent-jobs list has **Clear record** (removes the record, log and progress files; the exported data stays) and, for exports, **Delete record and files** (also removes the export directory and the partial leftover *of that job*). Several jobs can be selected (**Clear selected**, **Delete selected (with files)**), and **Clear all failed and interrupted jobs** removes the records and partial folders of failed, interrupted and cancelled jobs; it never touches a finished export. CLI: `levi pool jobs delete <id> [--files] [--yes] [--force]`, `levi pool jobs clear-failed [--yes]`; API: `GET /jobs/{id}/delete-preview?files=`, `DELETE /jobs/{id}?files=&force=`, `POST /jobs/delete` (`{ids, files, force}`), `POST /jobs/clear-failed`. The confirmation shows the exact path, its size, episodes, format, creation time and whether it was sent to a remote; Cancel has the focus by default.
+
+The server deletes a directory only when all of this holds, and checks it again right before the first file goes:
+
+1. it is the job's recorded target (or its `.partial`) **and that job produced it**: `pool_export.json` names the job (`job_id`), a partial's journal likewise. When a failed job and its successful re-run share a name, deleting the failed record with files leaves the directory of the successful one;
+2. it carries the pool marker (`pool_export.json`, or the partial's `resume.json`) and holds the episodes the export recorded; otherwise something else changed it, and it needs a second confirmation (`--force`, the dialog's **Delete anyway**);
+3. it lies inside `LEVI_EXPORT_ROOTS` or the workspace's export folder;
+4. it is not inside, and does not contain, a pool source or root;
+5. it is not a symbolic link and resolves to its own name inside its parent; links inside it are unlinked, never followed;
+6. no push of it is running and no other live job uses it. A running job is never cleared: cancel it first.
+
+Every removal is appended to `<workspace>/pool/deleted.jsonl` (time, job, what, path, bytes, files, who and how; `GET /api/levi/pool/deleted`); nothing else of a deleted export is kept. The response and the page report the bytes freed.
+
+### Cleanup
+
+`levi pool clean [--dry-run] [--all-partials]`, the page's **Cleanup** section (`GET/POST /api/levi/pool/cleanup`: partials and old jobs with sizes and ages, delete buttons, the free space of the volumes) and `levi clean` share one sweeper, which also runs at service start and after every job. Rules: a finished export leaves no `.partial` and no temporary file; a cancelled job's partial goes at once; an interrupted or failed export keeps its partial for `LEVI_POOL_PARTIAL_TTL`; a finished job's log and files go after `LEVI_POOL_JOB_TTL` (its record becomes a summary); stale `*.tmp` and `.index.*.parquet` files go after an hour. A live job's files (its worker's identity is checked) and finished exports are never touched; `--all-partials` also removes partials that could still be resumed. A partial found without a job or journal is only removed by `--all-partials`.
+
+作业是一个工作进程；工作进程自己维护作业记录（`<workspace>/pool/jobs/<id>.json`），所以最终状态在服务停止后也在。页面、`levi pool jobs` 和 `GET /api/levi/pool/jobs/{id}` 显示的状态：
+
+| 状态 | 含义 |
+| --- | --- |
+| `planned` / `running` | 已计划 / 运行中（心跳 `<id>.beat.json` 每 2 秒更新） |
+| `stalled` | 进程还在，但 `LEVI_POOL_STALL_SECONDS` 内没有任何进展（没有心跳，或没有完成任何单元） |
+| `cancelling` / `cancelled` | 已请求取消 / 已取消：导出的 `.partial` 目录被删除 |
+| `interrupted` | 工作进程没做完就没了：服务被停止或重启（`levi stop`）、进程被杀（SIGTERM、SIGKILL、内存不足）、机器宕机。`.partial` 目录和日志保留；记录里写明原因（`reason`、`interrupted_at`） |
+| `failed` | 致命错误（磁盘满、失败片段太多等）：`error.json` 记录类型、信息、阶段和处理建议；已有完成的工作时保留未完成输出 |
+| `done` / `done_with_errors` | 已完成；有片段失败并被排除时为 `done_with_errors`（见 `errors.jsonl`） |
+
+接口另外给出 `age_seconds`（距上次心跳或进度写入）、`idle_seconds`（距上次有进展）、`resumable`、`rerunnable`、`partial`、`error_info`、`failures`。工作进程消失的作业，下一次读取时就是 `interrupted`，不会一直显示 `running`；旧记录里的 `succeeded` 读作 `done`。
+
+**继续、重新运行、取消。** 导出按“单元”推进，并在 `.<名称>.partial` 里写日志：`resume.json`（计划哈希、选项、计数）和 `resume.units.jsonl`（只追加；每个完成的单元一行，含所产出文件的大小和 sha256：一批原始片段的转换结果、一个合并后的视频、一个拷贝的片段）。原始采集按若干片段一批转换；一批失败时逐个片段重试。`levi pool export --resume <作业号>`、`POST /api/levi/pool/jobs/{id}/resume` 和“继续”按钮从日志接着做：（1）冻结的计划必须与日志一致（选项、片段、目标相同），来源片段自扫描以来没有变化，留出清单与计划一致，并重新做留出检查——否则拒绝并说明原因（409），此时用“重新运行”；（2）每个已完成单元都在磁盘上核对（文件存在、大小一致，64 MiB 以内再核对 sha256），核对不过的单元重做；（3）其余部分转换、收尾并把 `.partial` 改名，结果与不中断的运行一致（`pool_export.json` 还记录 `resumed`、`resumes`、`interruptions`）。“重新运行”按保存的配方和选项重新规划并启动，先清除旧的未完成输出。“取消”通过信号前写下的标记与“被停止”区分：取消立即删除未完成输出；服务停止、被杀或崩溃则保留。取消一个已中断或失败的作业同样会删除其未完成输出。推送靠再次运行 rsync 继续（`--partial` 保留已到达的部分）；原始采集拷贝和导出一样按片段续做；中断的扫描直接作为新作业重来（索引是原子替换的）。`LEVI_POOL_AUTO_RESUME=1` 让服务启动时自动继续被中断的导出。
+
+**停止服务。** 有训练池、转换、RECAP 或分割作业在运行时，`levi stop` 会拒绝（列出作业和进度，退出码 3）：`levi stop --wait [分钟]` 等它们结束（默认 60 分钟）后再停止，`levi stop --force` 强行停止（训练池导出会标为 `interrupted`，原因 `service stopped`，可继续；其他类型作业行为不变）。核心服务的停止接口在没有 `{"force": true}` 时返回 409 和作业列表；`levi agent core stop --force` 同理。在前台按 Ctrl+C 无法先询问，会用同样方式中断导出。
+
+**错误与日志。** `<id>.log` 是每个作业一份带时间戳的日志（阶段、警告、堆栈），超过 4 MiB 轮转为 `<id>.log.1`；`<id>.stdio` 保存日志之外进程打印的内容。可用 `GET …/log?kb=64`、`levi pool jobs log <id>` 或页面“查看日志”读取。转换失败的片段写入 `<id>.errors.jsonl`（片段、单元、阶段、异常类型、信息、堆栈、时间），以 `convert_error` 为由被排除（未通过采集检查的仍为 `conversion_preflight`，同样列入）；导出继续，结束时为 `done_with_errors`。失败片段超过计划片段的 `on_error_max_fraction`（默认 0.1，`--on-error-max-fraction`）或遇到致命错误（磁盘满、内存不足、权限）时导出停止（`failed`，可继续）。`pool_export.json` 记录 `errors`、带原因的排除、`resumed`、`resumes`、`interruptions`。退出码和信号会变成带建议的句子（143 被服务或用户停止，137/-9 被杀、多半内存不足，磁盘满，权限不足，来源缺失，留出拒绝）；`GET …/error-report`（页面“复制错误报告”）打包状态、`error.json`、失败片段和日志末尾。导出开始前会估算大小（计划来源的视频 ×1.3，减去未完成输出已占的部分），与目标磁盘剩余空间减 `LEVI_POOL_FREE_MARGIN_GIB` 比较，不够就在规划（含试运行）和启动时拒绝并给出数字；`--timing resample` 时如有原始来源帧率低于导出 fps，也在开始转换前拒绝。
+
+**清除和删除作业。** 页面“最近的作业”里每个作业有“清除记录”（删除记录、日志和进度文件，导出的数据保留）；导出作业还有“删除记录和文件”（同时删除该作业产生的导出目录和未完成残留）。可多选（“清除所选”“删除所选（含文件）”），“清除全部失败/中断的作业”会删除失败、中断和已取消作业的记录及其未完成目录，绝不动已完成的导出。命令行：`levi pool jobs delete <id> [--files] [--yes] [--force]`、`levi pool jobs clear-failed [--yes]`；接口：`GET /jobs/{id}/delete-preview?files=`、`DELETE /jobs/{id}?files=&force=`、`POST /jobs/delete`、`POST /jobs/clear-failed`。确认框显示确切路径、大小、片段数、格式、创建时间和是否传到过远程，默认焦点在“取消”。服务端只在下列条件全部满足时删除目录，并在删第一个文件前再检查一次：（1）它是该作业记录的目标（或其 `.partial`），并且**是该作业产生的**（`pool_export.json` 记有 `job_id`，未完成目录的日志同理）——失败作业与其成功重跑同名时，带文件删除失败作业的记录不会动成功作业的目录；（2）带有训练池标记（`pool_export.json`，或未完成目录的 `resume.json`）且片段数与导出记录一致，否则说明被别的东西改过，需要二次确认（`--force`、对话框里的“仍然删除”）；（3）在 `LEVI_EXPORT_ROOTS` 或工作区导出目录之内；（4）不在任何来源或池根之内，也不包含它们；（5）不是符号链接，且解析后仍是其父目录下的同名目录，目录内的链接只解除、不跟随；（6）没有正在运行的推送，也没有其他运行中的作业在用它。运行中的作业不能清除，先取消。每次删除都追加到 `<workspace>/pool/deleted.jsonl`（时间、作业、对象、路径、字节数、文件数、谁以何种方式；`GET /api/levi/pool/deleted`），被删除导出的其他内容一概不保留；返回值和页面显示释放的字节数。
+
+**清理。** `levi pool clean [--dry-run] [--all-partials]`、页面“清理”区（`GET/POST /api/levi/pool/cleanup`：未完成目录和旧作业的大小与年龄、删除按钮、磁盘剩余空间）和 `levi clean` 共用一个清理程序，服务启动时和每个作业结束后也会运行。规则：完成的导出不留 `.partial` 和临时文件；取消的作业立即删除其未完成目录；中断或失败的导出保留 `LEVI_POOL_PARTIAL_TTL`；已结束作业的日志和文件在 `LEVI_POOL_JOB_TTL` 后删除（记录缩为摘要）；过期一小时的 `*.tmp`、`.index.*.parquet` 会被清掉。运行中作业的文件（会核对工作进程身份）和完成的导出永远不动；`--all-partials` 连仍可继续的未完成目录也删除；没有作业也没有日志的未完成目录只有 `--all-partials` 会删。
+
 ## The page / 训练池页面
 
 `/pool` (top navigation **Training pool / 训练池**, and a card on the Workbench). It is the same backend as `levi pool …`.
@@ -248,7 +337,7 @@ All routes are behind the service's UI token and same-origin check.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| GET | `/api/levi/pool/status` | Settings, the last scan's summary, recent jobs |
+| GET | `/api/levi/pool/status` | Settings, the last scan's summary, recent jobs, free space of the export volumes |
 | GET | `/api/levi/pool/sources?category=&show_archive=` | Sources with format, category, episodes, copies, held-out, exportable |
 | GET | `/api/levi/pool/tasks?category=&source=&search=&format=&show_heldout=&show_copies=&show_archive=` | Per task: episodes, frames, categories, success rate, spellings, `policy_methods`; takes the same policy filters |
 | GET | `/api/levi/pool/episodes?…&task=&outcome=&policy=&policy_model=&policy_checkpoint=&policy_method=&limit=&offset=` | The index, paged |
@@ -260,7 +349,13 @@ All routes are behind the service's UI token and same-origin check.
 | POST | `/api/levi/pool/suggest` | `{ "recipe": {…}, "task": "…" }` → `available`, `successes`, `failures`, `suggested_count` (the balanced default) for adding that task |
 | POST | `/api/levi/pool/export` | `{ "recipe_name": "…" or "recipe": {…}, "options": {"format", "name", "output_dir", "fps", "timing", "cameras", "camera_map", "hardlink", …}, "dry_run": false }`; 403 for a path outside `LEVI_EXPORT_ROOTS` or inside a source, 400 for an existing target or an empty selection |
 | GET | `/api/levi/pool/facets?category=&show_heldout=&show_copies=&show_archive=` | Facet counts for the page (including `policy_models`, `policy_checkpoints`, `policy_methods`) and what the toggles hide |
-| POST | `/api/levi/pool/jobs/{id}/cancel` | Stop a running scan, export or push |
+| POST | `/api/levi/pool/jobs/{id}/cancel` | Stop a running job for good (an export's partial is removed); an interrupted or failed job becomes cancelled and loses its partial |
+| POST | `/api/levi/pool/jobs/{id}/resume` | Continue an interrupted or failed job (409 with the reason when an export's unfinished output cannot be trusted) |
+| POST | `/api/levi/pool/jobs/{id}/rerun` | Plan the job again from its saved recipe and options and start it |
+| GET | `/api/levi/pool/jobs/{id}/log?kb=64`, `/api/levi/pool/jobs/{id}/error-report` | The log tail; state, structured error, failed episodes and log tail |
+| GET / DELETE | `/api/levi/pool/jobs/{id}/delete-preview?files=`, `/api/levi/pool/jobs/{id}?files=&force=` | What clearing or deleting a job would remove; do it (409 with the reason when refused) |
+| POST | `/api/levi/pool/jobs/delete`, `/api/levi/pool/jobs/clear-failed` | Bulk clear or delete `{ids, files, force}`; clear failed, interrupted and cancelled jobs and their partials |
+| GET / POST | `/api/levi/pool/cleanup`, `/api/levi/pool/deleted` | Partials, old jobs and free space; delete named ones or `{sweep: true}`; the deletion log |
 | GET | `/api/levi/pool/jobs/{id}/summary` | `pool_export.json` of a finished export job |
 | GET | `/api/levi/pool/remotes` | Registered remote targets |
 | PUT / DELETE | `/api/levi/pool/remotes/{name}` | Register (`{"spec": "[user@]host:/path", "port"?}`) or forget a target; unknown fields such as `password` are refused |

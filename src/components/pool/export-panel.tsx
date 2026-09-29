@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
 import { PoolJobProgress, RUNNING, StatusBadge } from "./pool-progress";
+import { JobBanner, LogDialog } from "./job-panel";
 import {
   FORMAT_LABELS,
   REASON_LABELS,
@@ -88,6 +89,7 @@ export function ExportPanel({
   const [plan, setPlan] = useState<PoolJob | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [logFor, setLogFor] = useState<PoolJob | null>(null);
   const dirProblem = outputDirProblem(outputDir, exportRoots);
   const nameProblem = name && !NAME.test(name);
   const effectiveTiming = timing ?? defaultTiming(format);
@@ -130,7 +132,10 @@ export function ExportPanel({
       setBusy(false);
     }
   }
-  const done = job && job.status === "succeeded" && job.kind === "export";
+  const done =
+    job &&
+    (job.status === "done" || job.status === "done_with_errors") &&
+    job.kind === "export";
   return (
     <section className="levi-pool-card" aria-labelledby="pool-export">
       <h2 id="pool-export">{t("Export")}</h2>
@@ -320,7 +325,10 @@ export function ExportPanel({
             </code>
           </p>
           <PoolJobProgress job={job} />
-          {job.error && <p className="levi-error">{t(job.error)}</p>}
+          <JobBanner job={job} onJob={onJob} onLog={setLogFor} />
+          {job.error && job.status === "cancelled" && (
+            <p className="levi-pool-muted">{t(job.error)}</p>
+          )}
           {done && (
             <>
               <p className="levi-pool-hint">
@@ -352,6 +360,7 @@ export function ExportPanel({
           )}
         </div>
       )}
+      <LogDialog job={logFor} onClose={() => setLogFor(null)} />
     </section>
   );
 }

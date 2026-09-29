@@ -274,7 +274,7 @@ def test_push_api_job_and_cancel(exports, fake_ssh, tmp_path, client, monkeypatc
     assert job["kind"] == "push" and job["status"] == "running"
     assert not jobs.wait_idle(120)
     done = client.get(f"/api/levi/pool/jobs/{job['id']}").json()
-    assert done["status"] == "succeeded", (
+    assert done["status"] == "done", (
         done.get("error"),
         (jobs.jobs_dir() / f"{job['id']}.log").read_text()[-2000:],
     )

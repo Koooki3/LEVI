@@ -152,12 +152,24 @@ def build_parser() -> argparse.ArgumentParser:
     rsub.add_parser("list", help="saved recipes")
     delete = rsub.add_parser("delete", help="delete a saved recipe")
     delete.add_argument("name")
-    export = sub.add_parser("export", help="export a saved recipe")
-    export.add_argument("recipe")
-    export.add_argument(
-        "--format", required=True, choices=["lerobot_v21", "recap_value", "raw_capture"]
+    export = sub.add_parser(
+        "export",
+        help="export a saved recipe (or --resume an interrupted export)",
+        description="Export a recipe into a new dataset. An export that was "
+        "interrupted (the service stopped, the process was killed) keeps its "
+        ".partial folder and a journal: `levi pool export --resume <job-id>` "
+        "continues from the finished units (`levi pool jobs` lists the ids).",
     )
-    export.add_argument("--name", required=True, help="the new dataset's folder name")
+    export.add_argument("recipe", nargs="?", help="saved recipe name")
+    export.add_argument(
+        "--resume",
+        metavar="JOB",
+        help="continue this interrupted or failed export job from its journal",
+    )
+    export.add_argument(
+        "--format", choices=["lerobot_v21", "recap_value", "raw_capture"]
+    )
+    export.add_argument("--name", help="the new dataset's folder name")
     export.add_argument("--output-dir", help="parent folder (in LEVI_EXPORT_ROOTS)")
     export.add_argument("--fps", type=float, default=10)
     export.add_argument(
@@ -197,7 +209,60 @@ def build_parser() -> argparse.ArgumentParser:
         help="drop static frames of raw captures (default: lerobot yes, recap no)",
     )
     export.add_argument("--failure-reward", type=float)
+    export.add_argument(
+        "--on-error-max-fraction",
+        type=float,
+        help="stop (resumable) when more than this share of the episodes failed "
+        "to convert; failing episodes are left out and listed (default 0.1)",
+    )
     export.add_argument("--dry-run", action="store_true", help="plan only")
+    listing = sub.add_parser(
+        "jobs",
+        help="scan, export and push jobs: list, log, delete, clear-failed",
+        description="`levi pool jobs` lists jobs with their states; `log ID` prints "
+        "a job's log; `delete ID [--files]` clears a finished job's record (and "
+        "with --files the export it produced); `clear-failed` removes the records "
+        "and leftovers of failed, interrupted and cancelled jobs.",
+    )
+    listing.add_argument("--limit", type=int, default=20)
+    jsub = listing.add_subparsers(dest="jobs_action")
+    jlog = jsub.add_parser("log", help="the tail of a job's log")
+    jlog.add_argument("job")
+    jdel = jsub.add_parser(
+        "delete",
+        help="clear a job's record; --files also deletes the export it produced",
+    )
+    jdel.add_argument("job")
+    jdel.add_argument(
+        "--files",
+        action="store_true",
+        help="also delete the export directory (and leftover partial) of this job",
+    )
+    jdel.add_argument("--yes", action="store_true", help="do not ask")
+    jdel.add_argument(
+        "--force",
+        action="store_true",
+        help="delete even if the folder was changed since the export",
+    )
+    jclear = jsub.add_parser(
+        "clear-failed",
+        help="remove failed, interrupted and cancelled jobs and their leftovers",
+    )
+    jclear.add_argument("--yes", action="store_true", help="do not ask")
+    clean = sub.add_parser(
+        "clean",
+        help="remove what jobs left behind: expired partial exports, old job files",
+        description="Sweeps `.partial` folders of finished or cancelled exports, "
+        "interrupted or failed ones older than LEVI_POOL_PARTIAL_TTL (default 3 "
+        "days), job logs older than LEVI_POOL_JOB_TTL (default 30 days) and stale "
+        "temporaries. A running job's files and finished exports are never touched.",
+    )
+    clean.add_argument("--dry-run", action="store_true", help="list, remove nothing")
+    clean.add_argument(
+        "--all-partials",
+        action="store_true",
+        help="also remove interrupted/failed partials that could still be resumed",
+    )
     remotes = sub.add_parser("remote", help="remote targets for push (SSH keys only)")
     msub = remotes.add_subparsers(dest="remote_action", required=True)
     add = msub.add_parser("add", help="register or replace a target")
@@ -310,46 +375,35 @@ def main(argv=None) -> int:
             else:
                 _print({"deleted": recipe.delete(args.name)})
         elif args.action == "export":
-            from .export import ExportOptions
-
-            extra = {}
-            if args.camera:
-                extra["cameras"] = dict(p.split("=", 1) for p in args.camera)
-            if args.failure_reward is not None:
-                extra["failure_reward"] = args.failure_reward
-            options = ExportOptions(
-                format=args.format,
-                name=args.name,
-                output_dir=args.output_dir,
-                fps=args.fps,
-                camera_map=dict(p.split("=", 1) for p in args.camera_map),
-                hardlink=args.hardlink,
-                human_as_success=args.human_as_success,
-                timing=args.timing,
-                filter_static=args.filter_static,
-                **extra,
-            )
-            job = jobs.plan_export(recipe.load(args.recipe), options)
-            brief = jobs._brief(job)
-            if args.dry_run:
-                jobs.discard(job["id"])
-                _print(brief)
+            return _export(args, jobs, recipe)
+        elif args.action == "jobs":
+            if args.jobs_action == "log":
+                print(jobs.log_tail(args.job, 128))
                 return 0
-            print(
-                f"exporting {brief['planned_episodes']} episodes to {job['target']}",
-                file=sys.stderr,
+            if args.jobs_action == "delete":
+                return _delete_job(args)
+            if args.jobs_action == "clear-failed":
+                return _clear_failed(args)
+            _print(
+                [
+                    {
+                        k: j.get(k)
+                        for k in (
+                            "id",
+                            "kind",
+                            "status",
+                            "age_seconds",
+                            "resumable",
+                            "error",
+                        )
+                    }
+                    for j in jobs.listing(args.limit)
+                ]
             )
-            from ..catalog import atomic
+        elif args.action == "clean":
+            from . import cleanup
 
-            try:
-                result = jobs.execute(job)
-            except (Exception, KeyboardInterrupt) as exc:
-                job.update(status="failed", error=f"{type(exc).__name__}: {exc}")
-                atomic(jobs._path(job["id"]), job)
-                raise
-            job.update(status="succeeded", result=result)
-            atomic(jobs._path(job["id"]), job)
-            _print(result)
+            _print(cleanup.sweep(dry_run=args.dry_run, all_partials=args.all_partials))
         elif args.action == "remote":
             if args.remote_action == "add":
                 _print(
@@ -390,4 +444,133 @@ def main(argv=None) -> int:
     except (ValueError, PermissionError, OSError) as exc:
         print(f"ERROR: {exc}")
         return 1
+    return 0
+
+
+def _export(args, jobs, recipe) -> int:
+    """``levi pool export``: plan and run in this process (with the job
+    worker's record keeping, heartbeat and journal), or ``--resume`` one."""
+    from .export import ExportOptions
+
+    if args.resume:
+        job = jobs.prepare_resume(args.resume)
+        print(f"resuming {job['id']} -> {job['target']}", file=sys.stderr)
+    else:
+        if not (args.recipe and args.format and args.name):
+            raise ValueError("export needs a recipe, --format and --name (or --resume)")
+        extra = {}
+        if args.camera:
+            extra["cameras"] = dict(p.split("=", 1) for p in args.camera)
+        if args.failure_reward is not None:
+            extra["failure_reward"] = args.failure_reward
+        if args.on_error_max_fraction is not None:
+            extra["on_error_max_fraction"] = args.on_error_max_fraction
+        options = ExportOptions(
+            format=args.format,
+            name=args.name,
+            output_dir=args.output_dir,
+            fps=args.fps,
+            camera_map=dict(p.split("=", 1) for p in args.camera_map),
+            hardlink=args.hardlink,
+            human_as_success=args.human_as_success,
+            timing=args.timing,
+            filter_static=args.filter_static,
+            **extra,
+        )
+        job = jobs.plan_export(recipe.load(args.recipe), options)
+        brief = jobs._brief(job)
+        if args.dry_run:
+            jobs.discard(job["id"])
+            _print(brief)
+            return 0
+        print(
+            f"exporting {brief['planned_episodes']} episodes to {job['target']} "
+            f"(job {job['id']}; if it is interrupted: levi pool export --resume "
+            f"{job['id']})",
+            file=sys.stderr,
+        )
+    code = jobs.run_worker(jobs._path(job["id"]))
+    final = jobs.get(job["id"])
+    if final["status"] in ("done", "done_with_errors"):
+        _print(final["result"])
+        if final["status"] == "done_with_errors":
+            print(
+                f"finished with {final['result'].get('errors')} episode(s) left out: "
+                f"levi pool jobs --log {job['id']}",
+                file=sys.stderr,
+            )
+        return 0
+    info = final.get("error_info") or {}
+    print(f"ERROR ({final['status']}): {final.get('error')}")
+    if info.get("hint"):
+        print(f"  {info['hint']}")
+    if final.get("resumable"):
+        print(f"  resume with: levi pool export --resume {job['id']}")
+    return code or 1
+
+
+def _confirm(question: str, yes: bool) -> bool:
+    if yes:
+        return True
+    if not sys.stdin.isatty():
+        print(f"{question}\nNot confirmed: pass --yes to go ahead.", file=sys.stderr)
+        return False
+    return input(f"{question} [y/N] ").strip().lower() in ("y", "yes")
+
+
+def _gib(n) -> str:
+    return f"{(n or 0) / 1024**3:.2f} GiB"
+
+
+def _delete_job(args) -> int:
+    from . import deletion
+
+    wanted = deletion.plan(args.job, args.files)
+    if wanted["refused"]:
+        print(f"ERROR: {wanted['refused']}")
+        return 1
+    print(f"job {wanted['id']} ({wanted['kind']}, {wanted['status']})")
+    print(f"  record: {wanted['record_files']} file(s) will be cleared")
+    for item in wanted["outputs"]:
+        verdict = (
+            "will be deleted"
+            if item["will_delete"]
+            else (item.get("kept_because") or "stays")
+        )
+        print(
+            f"  {item['role']}: {item['path']} ({_gib(item.get('bytes'))}, "
+            f"{item.get('episodes')} episodes, {item.get('format')}, "
+            f"created {item.get('created_at')}) - {verdict}"
+        )
+        for push in item.get("pushed") or []:
+            print(f"    pushed to {push['remote']}: {push['status']}")
+        for note in item["needs_force"]:
+            print(f"    WARNING: {note}")
+    if wanted["needs_force"] and not args.force:
+        print(
+            "ERROR: the folder was changed since the export; pass --force to delete it"
+        )
+        return 1
+    if not _confirm("Go ahead?", args.yes):
+        return 1
+    _print(deletion.delete(args.job, args.files, args.force, how="cli"))
+    return 0
+
+
+def _clear_failed(args) -> int:
+    from . import deletion, jobs
+
+    stopped = [j for j in jobs.listing(500) if j["status"] in deletion.STOPPED_STATES]
+    if not stopped:
+        print("No failed, interrupted or cancelled jobs.")
+        return 0
+    for j in stopped:
+        print(f"  {j['id']}  {j['status']}  {j.get('error') or ''}"[:160])
+    if not _confirm(
+        f"Remove these {len(stopped)} job(s) and their partial folders? "
+        "(finished exports are not touched)",
+        args.yes,
+    ):
+        return 1
+    _print(deletion.clear_failed(how="cli clear-failed"))
     return 0

@@ -9,6 +9,20 @@ import os
 import time
 from pathlib import Path
 
+# When any Progress last moved (a stage began, a unit finished, a warning was
+# raised): a job's heartbeat reports it, so a worker that is alive but stuck
+# can be told from one that is working.
+LAST_ACTIVITY = time.time()
+
+
+def activity() -> float:
+    return LAST_ACTIVITY
+
+
+def _touch() -> None:
+    global LAST_ACTIVITY
+    LAST_ACTIVITY = time.time()
+
 
 class Progress:
     def __init__(self, path: Path | None, stages: list[str], interval: float = 0.5):
@@ -30,6 +44,7 @@ class Progress:
         self._last = 0.0
 
     def stage(self, name: str, total: int = 0):
+        _touch()
         self.state.update(
             stage=name,
             stage_index=self.stages.index(name) if name in self.stages else 0,
@@ -41,11 +56,13 @@ class Progress:
         self._write(force=True)
 
     def advance(self, current: str = "", step: int = 1):
+        _touch()
         self.state["done"] += step
         self.state["current"] = current
         self._write()
 
     def warn(self, message: str):
+        _touch()
         self.state["warnings"].append(message)
         self._write(force=True)
 

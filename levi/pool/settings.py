@@ -7,6 +7,17 @@
 - ``LEVI_POOL_HELDOUT``: comma-separated JSON lists of held-out episodes
   (``{"episodes": [{"path", "sha256": {...}}, ...]}``), never exported.
   Unset, exports are refused; ``none`` states that there is no held-out set.
+- ``LEVI_POOL_STALL_SECONDS`` (300): a running job that has not moved for this
+  long is reported ``stalled``.
+- ``LEVI_POOL_PARTIAL_TTL`` (3 days) and ``LEVI_POOL_JOB_TTL`` (30 days): how
+  long an interrupted or failed export's ``.partial`` folder, and a finished
+  job's record and log, are kept before the sweeper removes them (``3d``,
+  ``12h``, ``90m``, ``3600s``; a bare number is days).
+- ``LEVI_POOL_AUTO_RESUME`` (off): ``1`` resumes interrupted exports when the
+  service starts.
+- ``LEVI_POOL_FREE_MARGIN_GIB`` (1): free space an export leaves on its volume.
+- ``LEVI_POOL_BATCH_EPISODES`` (auto, at least 8): raw episodes converted per
+  journaled part; a smaller part loses less to an interruption.
 """
 
 import os
@@ -66,6 +77,67 @@ def require_heldout() -> None:
         )
 
 
+def _number(name: str, default: float, minimum: float = 0.0) -> float:
+    try:
+        return max(minimum, float(os.getenv(name) or default))
+    except ValueError:
+        return default
+
+
+UNITS = {"s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
+
+
+def _duration(name: str, default: float, bare: str) -> float:
+    """``3d``, ``12h``, ``90m``, ``3600s``; a bare number counts in ``bare``
+    units; ``0`` keeps nothing past its use."""
+    value = (os.getenv(name) or "").strip().lower()
+    if not value:
+        return default
+    unit = UNITS[bare]
+    if value[-1] in UNITS:
+        unit, value = UNITS[value[-1]], value[:-1]
+    try:
+        return max(0.0, float(value) * unit)
+    except ValueError:
+        return default
+
+
+def stall_seconds() -> float:
+    return max(5.0, _duration("LEVI_POOL_STALL_SECONDS", 300.0, "s"))
+
+
+def partial_ttl_seconds() -> float:
+    return _duration("LEVI_POOL_PARTIAL_TTL", 3 * 86400.0, "d")
+
+
+def job_ttl_seconds() -> float:
+    return _duration("LEVI_POOL_JOB_TTL", 30 * 86400.0, "d")
+
+
+def auto_resume() -> bool:
+    return (os.getenv("LEVI_POOL_AUTO_RESUME") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def free_margin_bytes() -> int:
+    return int(_number("LEVI_POOL_FREE_MARGIN_GIB", 1.0) * 1024**3)
+
+
+def batch_episodes() -> int | None:
+    value = int(_number("LEVI_POOL_BATCH_EPISODES", 0))
+    return value if value > 0 else None
+
+
+def job_path(job_id: str) -> Path:
+    if not job_id.replace("-", "").isalnum():
+        raise ValueError("Invalid job ID")
+    return pool_dir() / "jobs" / f"{job_id}.json"
+
+
 def enabled() -> bool:
     return bool(pool_roots())
 
@@ -87,9 +159,13 @@ def inside_any(path: Path, bases: list[Path]) -> Path | None:
     return None
 
 
-def check_export_target(target: str | Path, sources: list[str | Path]) -> Path:
+def check_export_target(
+    target: str | Path, sources: list[str | Path], allow_partial: bool = False
+) -> Path:
     """Where an export may be written: inside an export root, outside every
-    source dataset it reads (and every indexed source), and new."""
+    source dataset it reads (and every indexed source), and new.
+    ``allow_partial``: the export's own unfinished ``.partial`` folder may be
+    there (a resume)."""
     target = Path(target).expanduser()
     if not target.is_absolute():
         target = default_export_parent() / target
@@ -113,7 +189,7 @@ def check_export_target(target: str | Path, sources: list[str | Path]) -> Path:
     if target.exists() or target.is_symlink():
         raise ValueError(f"Export directory already exists: {target}")
     staging = target.parent / f".{target.name}.partial"
-    if staging.exists():
+    if staging.exists() and not allow_partial:
         raise ValueError(f"An unfinished export is in the way: {staging}")
     return target
 

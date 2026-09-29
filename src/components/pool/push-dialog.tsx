@@ -9,6 +9,7 @@ import {
   bytes,
   duration,
 } from "./pool-progress";
+import { JobBanner, LogDialog, useJobPolling } from "./job-panel";
 import type { PoolJob, RemoteTarget } from "./types";
 
 /** "Send to remote": pick or register a target ([user@]host:/path, SSH
@@ -51,15 +52,8 @@ export function PushDialog({
     } else if (!exportJob && dialog.open) dialog.close();
   }, [exportJob, load]);
   const running = !!job && RUNNING.has(job.status);
-  useEffect(() => {
-    if (!job || !RUNNING.has(job.status)) return;
-    const timer = setInterval(() => {
-      leviRequest<PoolJob>("GET", `pool/jobs/${encodeURIComponent(job.id)}`)
-        .then(setJob)
-        .catch(() => {});
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [job]);
+  const [logFor, setLogFor] = useState<PoolJob | null>(null);
+  useJobPolling(job, setJob);
   async function act(fn: () => Promise<void>) {
     setError("");
     try {
@@ -274,15 +268,19 @@ export function PushDialog({
             <code>{job.destination}</code>
           </p>
           <PoolJobProgress job={job} />
-          {job.status === "succeeded" && (
+          <JobBanner job={job} onJob={setJob} onLog={setLogFor} />
+          {(job.status === "done" || job.status === "done_with_errors") && (
             <p className="levi-pool-hint">
               {job.dry_run ? t("Dry run finished") : t("Sent")}:{" "}
               {bytes(job.result?.bytes)} · {duration(job.result?.seconds)}
             </p>
           )}
-          {job.error && <pre className="levi-code">{t(job.error)}</pre>}
+          {job.error && job.status === "cancelled" && (
+            <pre className="levi-code">{t(job.error)}</pre>
+          )}
         </div>
       )}
+      <LogDialog job={logFor} onClose={() => setLogFor(null)} />
     </dialog>
   );
 }

@@ -2466,3 +2466,114 @@ select optgroup {
     margin-left: 0;
   }
 }
+
+/* Training pool: job states, banners, deletion and cleanup */
+.levi-pool-banner {
+  border: 1px solid #f1c67780;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 10px 0;
+  background: #f1c67714;
+  line-height: 1.5;
+}
+.levi-pool-banner.fail {
+  border-color: #ff9c94;
+  background: #ff9c9414;
+}
+.levi-pool-banner p {
+  margin: 4px 0;
+}
+.levi-pool-banner-title strong {
+  font-size: 14px;
+}
+.levi-pool-danger,
+button.levi-pool-danger {
+  background: #a3372f;
+  color: #fff;
+  border: 1px solid #ff9c94;
+  border-radius: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.levi-pool-danger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.levi-pool-danger:focus-visible {
+  outline: 2px solid #ffd3ce;
+  outline-offset: 2px;
+}
+.levi-pool-danger-link {
+  color: #ffaaa3;
+}
+.levi-pool-link:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+.levi-pool-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  justify-content: flex-end;
+}
+.levi-pool-bulk {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+.levi-pool-log {
+  max-height: 55dvh;
+  overflow: auto;
+  background: #0f140f;
+  border: 1px solid #ffffff20;
+  border-radius: 6px;
+  padding: 10px;
+  font: 11px/1.5 monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.levi-pool-logdialog {
+  width: min(900px, calc(100vw - 32px));
+}
+.levi-pool-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.levi-pool-facts dt {
+  color: #c7caba;
+}
+.levi-pool-facts dd {
+  margin: 0;
+  word-break: break-all;
+}
+.levi-pool-confirm-job {
+  border-top: 1px solid #ffffff20;
+  padding-top: 8px;
+  margin-top: 8px;
+}
+.levi-pool-confirm-job h3 {
+  font-size: 13px;
+  margin: 0 0 4px;
+}
+.levi-pool-confirm-actions {
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+.levi-pool-confirm-body {
+  max-height: 55dvh;
+  overflow: auto;
+}
+.levi-pool-disk {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
