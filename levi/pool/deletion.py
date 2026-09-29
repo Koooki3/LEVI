@@ -38,6 +38,7 @@ from pathlib import Path
 
 from ..catalog import read
 from . import cleanup, joblog, jobs, journal, settings
+from .scanner import EXPORT_MARKERS
 
 FILE_COUNT_SLACK = 0  # recorded episodes must all be there
 _SIZES: dict[str, tuple[int, int, float]] = {}
@@ -120,7 +121,14 @@ def _sources() -> list[Path]:
         found |= {Path(s["path"]) for s in index.sources(show_archive=True)}
     for _path, job in _records():
         found |= {Path(s) for s in job.get("sources") or []}
-    return [Path(p).resolve() for p in found]
+    # A finished pool export that sits inside a pool root is scanned as a source
+    # too (category "LEVI"), but it is an export, not source data: it is the very
+    # thing the user deletes, so it must not block its own deletion.
+    return [
+        Path(p).resolve()
+        for p in found
+        if not any((Path(p) / name).is_file() for name in EXPORT_MARKERS)
+    ]
 
 
 def _owner_of_output(target: Path, job: dict) -> str | None:

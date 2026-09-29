@@ -240,6 +240,32 @@ def test_a_pool_source_or_a_folder_holding_one_is_never_deleted(rp):
     assert holder.is_dir()
 
 
+def test_a_finished_export_the_scan_indexed_as_a_source_can_be_deleted(rp, monkeypatch):
+    """A finished export inside a pool root is scanned as a source (category
+    LEVI); that entry must not block its own deletion (the reported bug: "It lies
+    inside / contains the pool source <itself>")."""
+    from levi.pool import index
+
+    export = _export_dir(rp["out"] / "indexed_export", job_id="export-idx")
+    _fake("export-idx", export, result={"dataset_path": str(export)})
+    real = index.sources
+
+    def with_the_export(*args, **kwargs):
+        return [*real(*args, **kwargs), {"path": str(export), "category": "levi"}]
+
+    monkeypatch.setattr(index, "sources", with_the_export)
+    assert deletion.plan("export-idx", files=True)["refused"] is None
+    deletion.delete("export-idx", files=True)
+    assert not export.exists()
+    # A real source next to it is still protected.
+    inside = rp["root"] / "rollouts/models/pi/pick_x/inside_export2"
+    _export_dir(inside, job_id="export-in2")
+    _fake("export-in2", inside)
+    with pytest.raises(DeleteRefused, match="pool source"):
+        deletion.delete("export-in2", files=True)
+    assert inside.is_dir()
+
+
 def test_a_changed_folder_needs_force_and_says_why(rp):
     unmarked = _export_dir(rp["out"] / "nomark", marker=False)
     _fake("export-nomark", unmarked, result={"dataset_path": str(unmarked)})
