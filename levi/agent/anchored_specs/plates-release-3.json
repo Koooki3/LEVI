@@ -1,0 +1,176 @@
+{
+  "id": "plates-release-3",
+  "version": 1,
+  "title": {
+    "en": "Plates release-review rules, rule set 3 (with start check)",
+    "zh": "plates 释放复核规则（第 3 版，含起始状态检查）"
+  },
+  "description": "Rule set 2 (plates-release: same frames, question and per-release rules) plus a start check on the side camera's first frame: a colour already stacked at the start, or with fewer than two plates, is not required. CANDIDATE, validated on development data only (2026-09-29, Qwen3.8-27B, greedy; 63 human-judged episodes: 48 of the rollouts_recap plates pool and the diagnostic set of 15): agreement 0.810 -> 0.921, success recall 0.816 -> 0.959, false successes 3/14 -> 3/14. Known risk: the start check called two separate white plates 'one_or_none' in 11 of about 57 episodes; on an episode whose white plates are never stacked that waiver would give a false success. Not yet checked on a held-out or frozen set.",
+  "anchor": {
+    "signal": "gripper",
+    "event": "open"
+  },
+  "views": [
+    {
+      "role": "side",
+      "camera": "observation.images.view1",
+      "offsets": [
+        -25,
+        -15,
+        -8,
+        -3,
+        -1,
+        4,
+        12
+      ]
+    },
+    {
+      "role": "wrist",
+      "camera": "observation.images.hand",
+      "offsets": [
+        -15,
+        -6,
+        -1,
+        4
+      ]
+    }
+  ],
+  "question": "A robot arm with a two-finger gripper is stacking plates of the same colour (pink on pink, white on white; a green plate is a distractor). The gripper receives an OPEN command at t=0. Images 1-7 are the side camera at t=-2.5, -1.5, -0.8, -0.3, -0.1, +0.4, +1.2 s; images 8-11 are the wrist camera (looking down between the fingers) at t=-1.5, -0.6, -0.1, +0.4 s.\nThe gripper holds a plate by pinching its thin rim, so a held plate usually hangs TILTED under the fingers; that counts as held if the whole plate is off the table and moves together with the gripper across the earlier images. A plate that stays on the table while the fingers close or drag it is NOT held.\nAnswer strictly from what the images show:\n- held_before: just before the open, is a plate held off the table by the fingers?\n- plate_colour: colour of that held plate (none if nothing is held).\n- landed_on: after the open, where is that plate: resting on a plate of the same colour, on a plate of another colour, on the table, still in the gripper; nothing_released if no plate was held.\n- stays: at t=+1.2 s does it stay where it landed (not sliding off)?\nUse unclear whenever the images do not show it.",
+  "fields": [
+    {
+      "name": "held_before",
+      "enum": [
+        "yes",
+        "no",
+        "unclear"
+      ]
+    },
+    {
+      "name": "plate_colour",
+      "enum": [
+        "pink",
+        "white",
+        "green",
+        "none",
+        "unclear"
+      ]
+    },
+    {
+      "name": "landed_on",
+      "enum": [
+        "same_colour_plate",
+        "other_colour_plate",
+        "table",
+        "still_in_gripper",
+        "nothing_released",
+        "unclear"
+      ]
+    },
+    {
+      "name": "stays",
+      "enum": [
+        "yes",
+        "no",
+        "unclear"
+      ]
+    }
+  ],
+  "valid_when": [
+    {
+      "field": "held_before",
+      "in": [
+        "yes"
+      ]
+    },
+    {
+      "field": "landed_on",
+      "in": [
+        "same_colour_plate"
+      ]
+    },
+    {
+      "field": "stays",
+      "not_in": [
+        "no"
+      ]
+    },
+    {
+      "field": "plate_colour",
+      "in": [
+        "pink",
+        "white"
+      ]
+    }
+  ],
+  "unknown_values": [
+    "unclear"
+  ],
+  "episode": {
+    "label_field": "plate_colour",
+    "require_labels": [
+      "pink",
+      "white"
+    ]
+  },
+  "max_output_tokens": 200,
+  "start": {
+    "views": [
+      {
+        "role": "start_side",
+        "camera": "observation.images.view1",
+        "offsets": [
+          0
+        ],
+        "at": "start"
+      }
+    ],
+    "question": "This image is the side camera at the start of a robot episode, before the robot has moved anything. The robot's task is to stack plates of the same colour: pink on pink, white on white (green plates are distractors). Look only at plates lying on the black tablecloth in front of the robot; ignore plates at the back edge of the table, on or beside the whiteboard or the shelf, plates holding a cup, and cups.\nFor pink and for white, answer:\n- two_or_more_apart: at least two plates of that colour that are not all in one stack yet, so the robot still has to stack them;\n- already_stacked: all plates of that colour already lie on each other in one stack (two stacked plates look like one plate with a thicker, doubled rim);\n- one_or_none: at most one plate of that colour;\n- unclear: the image does not show it.",
+    "fields": [
+      {
+        "name": "pink",
+        "enum": [
+          "two_or_more_apart",
+          "already_stacked",
+          "one_or_none",
+          "unclear"
+        ]
+      },
+      {
+        "name": "white",
+        "enum": [
+          "two_or_more_apart",
+          "already_stacked",
+          "one_or_none",
+          "unclear"
+        ]
+      }
+    ],
+    "waive": [
+      {
+        "label": "pink",
+        "when": [
+          {
+            "field": "pink",
+            "in": [
+              "already_stacked",
+              "one_or_none"
+            ]
+          }
+        ]
+      },
+      {
+        "label": "white",
+        "when": [
+          {
+            "field": "white",
+            "in": [
+              "already_stacked",
+              "one_or_none"
+            ]
+          }
+        ]
+      }
+    ],
+    "max_output_tokens": 60
+  }
+}

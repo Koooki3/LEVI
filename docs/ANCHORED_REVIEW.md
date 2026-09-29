@@ -41,6 +41,7 @@ The plan resolves the spec and freezes it, so approving the plan approves the qu
 | Spec | Id | Task | Anchor | Frames |
 | --- | --- | --- | --- | --- |
 | Plates release-review rules | `plates-release` (formerly `plates-release-ar2`, still accepted) | Stack plates by colour (pink, white; green is a distractor) | gripper opens | side `view1` at −25, −15, −8, −3, −1, +4, +12 frames; wrist `hand` at −15, −6, −1, +4 |
+| Plates release-review rules, rule set 3 (with start check) — candidate | `plates-release-3` | As `plates-release`, plus a [start check](#start-check-and-vetoes): a colour already stacked at the start, or with fewer than two plates, is not required | gripper opens | as `plates-release`; start check: side `view1` at the first frame |
 
 A plan or script that names a former id gets the same spec. Plans approved before a rename keep the spec they froze, id included, and their results still show the spec's title.
 
@@ -137,6 +138,8 @@ Each question gets the same safeguards as a model phase: the budget is reserved 
 ## Measured
 
 The plates release-review rules (`plates-release`) reproduce the external release-anchored review script accepted with the current best configuration v1.1 (rule set 2 of the anchored review): the same anchors, frames, pixels (PNG of the full-resolution frames), question, schema and rules, thinking off, greedy decoding on the server. In one server session on the frozen test set (60 plates episodes), LEVI and the external script gave identical answers on all 205 events and identical outcomes on all 60 episodes, with the same tokens; LEVI took 369 s against the script's 303–320 s. See the [validation record](VALIDATION.md#anchored-review).
+
+The candidate rule set 3 (`plates-release-3`) was checked on development data only (63 human-judged plates episodes: 48 of the rollouts_recap pool, the diagnostic set of 15; one server session, greedy). Against rule set 2 on the same answers: agreement with people 0.810 → 0.921, success recall 0.816 → 0.959, false successes unchanged at 3 of 14 failures. The start check called two separate white plates a single one in 11 of about 57 episodes; wherever those white plates are never stacked, that waiver would give a false success, so the candidate is not the default until a held-out check.
 
 ## Limits
 

@@ -854,3 +854,41 @@ def test_a_review_asks_the_start_check_and_the_vetoes(
     one = invoke(wb, human, "anchored.get", {"run_id": run["id"], "episode": 0})
     assert list(one["start"]["answer"]) == ["red", "blue"]
     assert [v["id"] for v in one["spec"]["vetoes"]] == ["wrong_box", "no_block"]
+
+
+def test_plates_rule_set_3_is_rule_set_2_plus_a_start_check():
+    """The candidate asks exactly rule set 2's question at every release
+    (so its release answers equal plates-release's) and waives a colour the
+    start check finds already stacked or single."""
+    three = anchored.builtin()["plates-release-3"]
+    keep = ("anchor", "views", "question", "fields", "valid_when", "episode")
+    assert {k: getattr(three, k) for k in keep} == {k: getattr(PLATES, k) for k in keep}
+    assert three.vetoes == []
+    assert [v.at for v in three.start.views] == ["start"]
+    ok = {
+        "held_before": "yes",
+        "plate_colour": "pink",
+        "landed_on": "same_colour_plate",
+        "stays": "yes",
+    }
+    events = [{"answer": ok, "valid": True, "verdict": "supported"}]
+    assert (
+        outcome(
+            three, events, {"pink": "two_or_more_apart", "white": "already_stacked"}
+        )[0]
+        == "success"
+    )
+    assert (
+        outcome(three, events, {"pink": "two_or_more_apart", "white": "one_or_none"})[0]
+        == "success"
+    )
+    verdict, basis = outcome(
+        three, events, {"pink": "two_or_more_apart", "white": "unclear"}
+    )
+    assert (verdict, basis["undecided_labels"]) == ("failure", ["white"])
+    assert (
+        outcome(
+            three, events, {"pink": "two_or_more_apart", "white": "two_or_more_apart"}
+        )[0]
+        == "failure"
+    )
