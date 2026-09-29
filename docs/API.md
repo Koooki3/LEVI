@@ -29,6 +29,8 @@ Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge fo
 | POST | `/api/levi/pool/scan` | Start a scan job of `LEVI_POOL_ROOTS`; poll `GET /api/levi/pool/jobs/{id}` |
 | GET / PUT / DELETE | `/api/levi/pool/recipes/{name}` | Saved training-pool recipes (`GET /api/levi/pool/recipes` lists them) |
 | POST | `/api/levi/pool/preview` | Counts and exclusions of a recipe `{ "recipe": {…}, "format": "lerobot_v21" }` |
+| POST | `/api/levi/pool/selection` | The episodes a recipe picks for one task `{ "recipe": {…}, "task": "…", "format"?, "human_as_success"? }`, each with its quality score, stratum and reasons; 404 when the recipe has no such task |
+| POST | `/api/levi/pool/suggest` | What adding a task offers, same body: available episodes (successes, failures) under the recipe's filters and a default count that keeps the composition balanced | |
 | POST | `/api/levi/pool/export` | Plan (`dry_run`) or start an export `{ "recipe_name": "…", "options": {"format": "lerobot_v21", "name": "…"} }`; held-out episodes are refused, 403 for a folder outside `LEVI_EXPORT_ROOTS` or inside a source |
 | GET | `/api/levi/pool/facets` | Training pool facet counts and what the visibility toggles hide |
 | POST | `/api/levi/pool/jobs/{id}/cancel` | Stop a running pool scan, export or push |
