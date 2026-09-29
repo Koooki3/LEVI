@@ -159,6 +159,13 @@ def inside_any(path: Path, bases: list[Path]) -> Path | None:
     return None
 
 
+def _is_export_dir(path: Path) -> bool:
+    """A folder a pool export wrote (it carries the export marker)."""
+    from .scanner import EXPORT_MARKERS
+
+    return any((Path(path) / name).is_file() for name in EXPORT_MARKERS)
+
+
 def check_export_target(
     target: str | Path, sources: list[str | Path], allow_partial: bool = False
 ) -> Path:
@@ -178,6 +185,12 @@ def check_export_target(
         )
     for source in sources:
         source = Path(source).resolve()
+        if target == source and (_is_export_dir(source) or not source.exists()):
+            # The very folder of an earlier pool export (still listed by the scan,
+            # or already deleted and only listed by a stale index): not a source
+            # dataset. An existing folder is refused as "already exists" below; a
+            # folder that is gone is free to be written again.
+            continue
         if target == source or target.is_relative_to(source):
             raise PermissionError(
                 f"Export directory {target} lies inside the source dataset {source}"

@@ -728,6 +728,29 @@ def test_schema_mismatch_between_sources_is_refused(pool):
         )
 
 
+def test_an_earlier_export_of_the_same_name_is_not_a_source(pool, monkeypatch):
+    """The reported bug: 'Export directory X lies inside the source dataset X' when a
+    finished export (still indexed as a source, or already deleted) has the same name."""
+    monkeypatch.setenv("LEVI_EXPORT_ROOTS", f"{pool['out']},{pool['root']}")
+    old = pool["out"] / "again"
+    # 1. the earlier export was deleted but the stale index still lists its path
+    assert not old.exists()
+    assert settings.check_export_target(old, [str(old)]) == old
+    # 2. the earlier export is still there: refused as "already exists", not as a source
+    old.mkdir()
+    (old / "pool_export.json").write_text("{}")
+    with pytest.raises(ValueError, match="already exists"):
+        settings.check_export_target(old, [str(old)])
+    # 3. a real source dataset at the same path still protects it
+    real = pool["out"] / "real_source"
+    real.mkdir()
+    with pytest.raises(PermissionError, match="inside the source dataset"):
+        settings.check_export_target(real, [str(real)])
+    # 4. a folder inside a finished export (whose folder is a source) is still refused
+    with pytest.raises(PermissionError, match="inside the source dataset"):
+        settings.check_export_target(old / "nested", [str(old)])
+
+
 def test_path_guards(pool, monkeypatch):
     monkeypatch.setenv("LEVI_EXPORT_ROOTS", f"{pool['out']},{pool['root']}")
     sources = [str(pool["root"] / "collect/data")]
