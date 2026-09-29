@@ -25,7 +25,7 @@ Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge fo
 | POST | `/api/levi/jobs/{id}/run` | Consume the stored plan once; body `{}` |
 | GET | `/api/levi/jobs` | Latest 50 plans/jobs, structured `progress` (stages, stage, done/total, current item, elapsed, ETA, warnings) and up to 32 KB of each log tail |
 | POST | `/api/levi/diagnostics` | Structural quality check `{ "repo_id": "…", "max_episodes": 0, "checks": ["metadata","temporal"], "decode_video": true }` (`max_episodes: 0` = all); the report is also kept at `outputs/LEVI/datasets/<name>/reports/quality-<YYYYmmddTHH>.json` and its `path` returned ([Data quality](QUALITY.md)) |
-| GET | `/api/levi/pool/status`, `/api/levi/pool/sources`, `/api/levi/pool/tasks`, `/api/levi/pool/episodes` | Training pool: settings and last scan, sources, per-task counts, the episode index (filters and paging in [Training pool](TRAINING_POOL.md#api)) |
+| GET | `/api/levi/pool/status`, `/api/levi/pool/sources`, `/api/levi/pool/tasks`, `/api/levi/pool/episodes` | Training pool: settings and last scan, sources, per-task counts, the episode index (filters and paging in [Training pool](TRAINING_POOL.md#api--接口)) |
 | POST | `/api/levi/pool/scan` | Start a scan job of `LEVI_POOL_ROOTS`; poll `GET /api/levi/pool/jobs/{id}` |
 | GET / PUT / DELETE | `/api/levi/pool/recipes/{name}` | Saved training-pool recipes (`GET /api/levi/pool/recipes` lists them) |
 | POST | `/api/levi/pool/preview` | Counts and exclusions of a recipe `{ "recipe": {…}, "format": "lerobot_v21" }` |

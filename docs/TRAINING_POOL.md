@@ -7,7 +7,7 @@ The training pool indexes every dataset under a set of read-only folders, one ro
 ## Guarantees / 保证
 
 - **Sources are read-only.** The pool only reads `LEVI_POOL_ROOTS`. Its own files live in `<workspace>/pool/`; an export goes to a new folder, written as `.<name>.partial` and renamed when complete. An export may not lie inside (or contain) any indexed source dataset, must lie inside `LEVI_EXPORT_ROOTS`, and its folder must not exist yet.
-- **Held-out episodes are never exported.** The lists in `LEVI_POOL_HELDOUT` (for example `levi-hub/gold/frozen/plates-frozen-v1.json`) are matched by path and by video sha256; every copy, filtered variant or conversion of a held-out episode is held out too. A recipe cannot include them, and the export checks again — by path, by sha256 and against the index — and refuses the whole export if one slipped into a plan. This is a refusal, not a filter default.
+- **Held-out episodes are never exported.** The lists in `LEVI_POOL_HELDOUT` (for example `/data/frozen/heldout.json`) are matched by path and by video sha256; every copy, filtered variant or conversion of a held-out episode is held out too. A recipe cannot include them, and the export checks again — by path, by sha256 and against the index — and refuses the whole export if one slipped into a plan. This is a refusal, not a filter default.
 - **One recorded episode counts once.** Copies are grouped (see [Grouping](#grouping-copies-variants-conversions--副本与版本归并)); an export takes the canonical member unless the recipe names only other sources.
 - **Traceable.** Every export writes `pool_export.json`: the recipe, the task order, each episode's source path, group, fingerprint, outcome and its source, policy fields (`policy_model`, `policy_checkpoint`, `policy_method`, `policy_phase`, `policy_label`) and why it was picked (`selection_stratum`, `quality_score`, `selection_reason`), per task what was asked for and what was picked (`selection`), every exclusion with its reason, the LEVI commit and the format parameters.
 
@@ -34,7 +34,7 @@ A relative export name lands in `<workspace>/exports/pool/<name>`.
 ## Scanning / 扫描
 
 ```bash
-LEVI_POOL_ROOTS=/data LEVI_POOL_HELDOUT=/data/frozen/plates-frozen-v1.json uv run levi pool scan [--rehash]
+LEVI_POOL_ROOTS=/data LEVI_POOL_HELDOUT=/data/frozen/heldout.json uv run levi pool scan [--rehash]
 uv run levi pool status
 ```
 
@@ -183,6 +183,20 @@ Each episode row in `meta/episodes.jsonl` of a LeRobot export carries `pool_key`
 导出格式：LeRobot v2.1（多来源合并，按任务顺序→来源→片段排序，统一相机键和 fps，状态/动作维度或分辨率不一致时拒绝并列出差异）、RECAP 价值数据集（结局按“人工标签 > 机器人标志”，无结局的片段排除并列出）、原始采集目录（按任务重编号，可硬链接）。暂不支持：LeRobot v3 输出、导出为训练清单。传到其他机器见 [远程传输](#remote-transfer--远程传输)。
 
 
+## Frame rates / 帧率
+
+Stored videos run at 10 fps for human collection and at about 9.4–10 fps for policy rollouts (online-RL runs about 9.5, direct deployment and student policies about 9.96). LeRobot exports are written at 10 fps by default (`--fps`, or the fps field of the export panel). How a slower rollout meets that rate depends on the timing mode (`levi/conversion/options.py`, `levi/pool/export.py`):
+
+- **`retime`** (default of `recap_value`; `--timing retime` for `lerobot_v21`) keeps every captured row and declares the rows at the export fps. A rollout captured at 9.5 fps and declared at 10 fps has a timeline about 5% shorter than the recording (6% at 9.4 fps), so its motion plays about 5% faster than it happened. Rows and pixels are unchanged.
+- **`resample`** (default of `lerobot_v21`, and the only mode of the export panel) drops rows to reach the export fps and never adds any. A raw rollout measured below the export fps is converted at its measured rate, and the pool then refuses the export (`Raw captures converted at … fps, not 10 …; lower the export fps`). Lower `--fps` to the measured rate or choose `retime`.
+- LeRobot v2.x sources are copied as they are, so their own fps must equal the export fps.
+
+存储的视频：人工采集为 10 fps，策略 rollout 约 9.4–10 fps（在线 RL 约 9.5，直接部署和学生策略约 9.96）。LeRobot 导出默认按 10 fps 写入（`--fps`，或导出面板的 fps 字段）。较慢的 rollout 如何对上这个帧率，取决于时间模式：
+
+- **`retime`**（`recap_value` 的默认；`lerobot_v21` 用 `--timing retime`）保留每个采集行，并按导出 fps 声明。按 9.5 fps 采集、按 10 fps 声明的 rollout，时间轴比实际录制短约 5%（9.4 fps 时约 6%），动作播放比实际发生时快约 5%。行数和画面不变。
+- **`resample`**（`lerobot_v21` 的默认，也是导出面板唯一的模式）只丢行、不补行。实测低于导出 fps 的原始 rollout 按实测帧率转换，随后训练池拒绝导出（`Raw captures converted at … fps, not 10 …; lower the export fps`）。可把 `--fps` 降到实测值，或改用 `retime`。
+- LeRobot v2.x 来源原样复制，所以自身的 fps 必须等于导出 fps。
+
 ## The page / 训练池页面
 
 `/pool` (top navigation **Training pool / 训练池**, and a card on the Workbench). It is the same backend as `levi pool …`.
@@ -212,7 +226,7 @@ uv run levi pool push <export-dir> --target gpu1 [--dry-run]
 
 远程目标是命名的 `[user@]host:/路径`（host 可以是 `~/.ssh/config` 里的别名），存在工作区 `pool/remotes.json`；各部分严格校验，不允许以 `-` 开头，不接受也不保存密码。传输用 rsync over SSH（`BatchMode=yes`，主机密钥必须已在 `known_hosts`，不关闭 `StrictHostKeyChecking`），参数以列表传递，不经 shell；支持 `--partial` 续传、进度、取消。只有训练池生成的、位于 `LEVI_EXPORT_ROOTS` 内的完整导出目录可以传输。
 
-## API
+## API / 接口
 
 All routes are behind the service's UI token and same-origin check.
 
@@ -235,3 +249,10 @@ All routes are behind the service's UI token and same-origin check.
 | GET | `/api/levi/pool/remotes` | Registered remote targets |
 | PUT / DELETE | `/api/levi/pool/remotes/{name}` | Register (`{"spec": "[user@]host:/path", "port"?}`) or forget a target; unknown fields such as `password` are refused |
 | POST | `/api/levi/pool/push` | `{ "target": "…", "export_job": "…" or "source": "<export dir>", "dry_run": false }`: rsync over SSH as a cancellable job |
+
+所有路由都在服务的界面令牌和同源检查之后：
+
+- **只读查询**：`status`（设置、上次扫描摘要、近期作业）、`sources`、`tasks`、`episodes`（分页）和 `facets`（页面的分面计数，以及开关隐藏了多少）。`tasks`、`episodes` 和 `facets` 都接受策略模型、检查点和运行方式过滤。
+- **扫描与作业**：`POST scan?rehash=` 启动扫描作业；`jobs` 和 `jobs/{id}` 给出进度和结果；`POST jobs/{id}/cancel` 停止运行中的扫描、导出或推送；`jobs/{id}/summary` 返回已完成导出的 `pool_export.json`。
+- **选择**：`recipes` 是选择的增删改查（请求体的 `name` 必须与 URL 一致）；`POST preview` 返回数量和排除原因，每个任务有 `available`、`successes`、`failures`、`selected`、`shortfall` 等字段，以及整体 `mix`；`POST selection` 返回某个任务选中的片段和该任务的报告，选择里没有该任务时返回 404；`POST suggest` 返回加入某个任务时的可用数量和均衡的默认数量。
+- **导出与传输**：`POST export` 接受 `recipe_name` 或 `recipe`、`options` 和 `dry_run`；路径在 `LEVI_EXPORT_ROOTS` 之外或在源数据集内部时返回 403。`remotes` 和 `remotes/{name}` 登记或删除远程目标（不接受 `password` 等未知字段）；`POST push` 以可取消的作业通过 SSH 运行 rsync。
