@@ -61,8 +61,15 @@ def describe(entry: dict) -> dict[str, Any]:
     export = _read(root / EXPORT_MARKER)
     pool_export = _read(root / "pool_export.json")
     if pool_export:
-        origin = "levi_pool_export"
-        result["pool_recipe"] = (pool_export.get("recipe") or {}).get("name")
+        # A training-pool export (docs/TRAINING_POOL.md): merged from several
+        # sources, so it names its recipe rather than one source.
+        result["pool_export"] = {
+            "recipe": (pool_export.get("recipe") or {}).get("name"),
+            "format": pool_export.get("format"),
+            "episodes": (pool_export.get("counts") or {}).get("episodes"),
+        }
+    if pool_export and not recap:
+        origin = "levi_export"
     elif export:
         origin = "levi_export"
         result["source"] = export.get("source_root")

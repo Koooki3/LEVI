@@ -128,6 +128,7 @@ def _rank(row: dict) -> tuple:
         not row["canonical"],
         row["category"] == "levi" or bool(row["in_levi_workspace"]),
         row["format"] != "robot_capture",
+        bool(row.get("filtered")),
         str(row["source_path"]).count("/"),
         row["key"],
     )
@@ -184,7 +185,7 @@ def select(recipe: Recipe, df: pd.DataFrame | None = None, target: str | None = 
             kept.append(row)
     groups = defaultdict(list)
     for row in kept:
-        groups[row["fingerprint"] or row["key"]].append(row)
+        groups[row.get("group") or row["key"]].append(row)
     unique = []
     for members in groups.values():
         members.sort(key=_rank)
@@ -195,9 +196,10 @@ def select(recipe: Recipe, df: pd.DataFrame | None = None, target: str | None = 
     for row in unique:
         if recipe.outcome == "robot_flag_success" and row["robot_flag"] != "success":
             out(row, "outcome_filter", outcome=row["robot_flag"])
-        elif recipe.outcome == "verified_success" and (
-            row["human_label"] or row["robot_flag"]
-        ) != "success":
+        elif (
+            recipe.outcome == "verified_success"
+            and (row["human_label"] or row["robot_flag"]) != "success"
+        ):
             out(row, "outcome_filter", outcome=row["human_label"] or row["robot_flag"])
         elif target == "recap_value" and row["outcome"] not in ("success", "failure"):
             out(row, "no_outcome")
@@ -214,9 +216,7 @@ def select(recipe: Recipe, df: pd.DataFrame | None = None, target: str | None = 
         members = sorted(by_task.get(task, []), key=lambda r: r["key"])
         if recipe.per_task_cap and len(members) > recipe.per_task_cap:
             rng = random.Random(f"{recipe.seed}:{task}")
-            keep = set(
-                r["key"] for r in rng.sample(members, recipe.per_task_cap)
-            )
+            keep = {r["key"] for r in rng.sample(members, recipe.per_task_cap)}
             for row in members:
                 if row["key"] not in keep:
                     out(row, "per_task_cap")
@@ -225,7 +225,9 @@ def select(recipe: Recipe, df: pd.DataFrame | None = None, target: str | None = 
     chosen.sort(
         key=lambda r: (
             position[r["task"]],
-            source_order.get(r["source"], source_order.get(r["source_path"], len(source_order))),
+            source_order.get(
+                r["source"], source_order.get(r["source_path"], len(source_order))
+            ),
             r["source"],
             _natural(r["episode"]),
         )

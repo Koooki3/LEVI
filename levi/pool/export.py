@@ -77,9 +77,7 @@ class ExportOptions(BaseModel):
     output_dir: str | None = None
     fps: float = Field(10, ge=1, le=240)
     # Raw capture camera -> output key (the pipeline's cameras option).
-    cameras: dict[str, str] = Field(
-        default_factory=lambda: dict(Options().cameras)
-    )
+    cameras: dict[str, str] = Field(default_factory=lambda: dict(Options().cameras))
     # LeRobot source video key -> output key; keys already named like the
     # output need no entry.
     camera_map: dict[str, str] = Field(default_factory=dict)
@@ -172,6 +170,7 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "outcome",
         "outcome_source",
         "fingerprint",
+        "group",
         "stat_sig",
     )
     episodes = [{k: row.get(k) for k in keep} for row in chosen]
@@ -235,20 +234,47 @@ def refuse_heldout(episodes: list[dict], roots: list[Path], lists: list[Path]):
         )
 
 
+def refuse_heldout_groups(episodes: list[dict]):
+    """The current index's view: no planned episode may share a group (a
+    copy, a filtered variant or a conversion) with a held-out episode."""
+    try:
+        df = index.frame()
+    except ValueError:
+        return
+    held = set(df.loc[df.heldout.astype(bool), "group"])
+    groups = dict(zip(df.key, df.group, strict=True))
+    hits = [
+        e["key"]
+        for e in episodes
+        if groups.get(e["key"], e.get("group")) in held or e.get("group") in held
+    ]
+    if hits:
+        raise PermissionError(
+            f"Refusing to export {len(hits)} held-out episode(s) (copies of a "
+            "frozen test episode): " + ", ".join(hits[:10])
+        )
+
+
 def _unchanged(episodes: list[dict]):
     changed = []
     for ep in episodes:
         if ep["format"] == "robot_capture":
-            if scanner._sig(
-                Path(ep["key"]), [Path(ep["key"]).parent / "task_description.txt"]
-            ) != ep["stat_sig"]:
+            if (
+                scanner._sig(
+                    Path(ep["key"]), [Path(ep["key"]).parent / "task_description.txt"]
+                )
+                != ep["stat_sig"]
+            ):
                 changed.append(ep["key"])
         elif ep["format"] == "lerobot":
             root = Path(ep["source_path"])
             markers = scanner.rules_mod.load(settings.pool_dir())["levi_markers"]
-            if scanner._sig(
-                root / "meta", [root / m for m in markers if (root / m).is_file()]
-            ) != ep["stat_sig"]:
+            if (
+                scanner._sig(
+                    root / "meta", [root / m for m in markers if (root / m).is_file()]
+                )
+                != ep["stat_sig"]
+            ):
                 changed.append(ep["key"])
     if changed:
         raise ValueError(
@@ -354,9 +380,7 @@ def _schema_check(plan_eps: list[dict], options: ExportOptions) -> dict:
     """The output schema, or a refusal listing how the sources differ."""
     conv = options.conversion()
     raw_eps = [e for e in plan_eps if e["format"] == "robot_capture"]
-    lerobot = sorted(
-        {e["source_path"] for e in plan_eps if e["format"] == "lerobot"}
-    )
+    lerobot = sorted({e["source_path"] for e in plan_eps if e["format"] == "lerobot"})
     names = pipeline._names(conv)
     expected = {
         "fps": options.fps,
@@ -383,7 +407,9 @@ def _schema_check(plan_eps: list[dict], options: ExportOptions) -> dict:
                 names=features.get("observation.state", {}).get("names"),
             )
         if abs(float(info.get("fps") or 0) - options.fps) > 0.01:
-            problems.append(f"{path}: fps {info.get('fps')} (export fps {options.fps:g})")
+            problems.append(
+                f"{path}: fps {info.get('fps')} (export fps {options.fps:g})"
+            )
         if state != expected["state"]:
             problems.append(
                 f"{path}: observation.state has {state} dims, expected {expected['state']}"
@@ -451,6 +477,7 @@ def run(job: dict, progress_path: Path | None = None) -> dict:
         [Path(p) for p in job["pool_roots"]],
         [Path(p) for p in job["heldout_lists"]],
     )
+    refuse_heldout_groups(episodes)
     _unchanged(episodes)
     staging.mkdir(parents=True)
     try:
@@ -609,9 +636,7 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
                 "(their cameras are slower); lower the export fps"
             )
     kept = [
-        e
-        for e in planned
-        if e["format"] != "robot_capture" or pids[id(e)] in part_rows
+        e for e in planned if e["format"] != "robot_capture" or pids[id(e)] in part_rows
     ]
     if not kept:
         raise ValueError("No episode passed the capture checks")
@@ -644,10 +669,7 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
             if ep["source_path"] not in ds_stats:
                 path = root / "meta/episodes_stats.jsonl"
                 ds_stats[ep["source_path"]] = (
-                    {
-                        r["episode_index"]: r["stats"]
-                        for r in dataset.read_jsonl(path)
-                    }
+                    {r["episode_index"]: r["stats"] for r in dataset.read_jsonl(path)}
                     if path.is_file()
                     else {}
                 )
@@ -658,7 +680,8 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
             move = False
         chunk = int(info.get("chunks_size") or 1000)
         table = pq.read_table(
-            root / info["data_path"].format(episode_chunk=old // chunk, episode_index=old)
+            root
+            / info["data_path"].format(episode_chunk=old // chunk, episode_index=old)
         )
         n = table.num_rows
         if not np.array_equal(
@@ -809,7 +832,8 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
     atomic(staging / "meta/levi_validation.json", validation)
     if not validation["ok"]:
         raise ValueError(
-            "Merged dataset failed validation: " + "; ".join(validation["failures"][:10])
+            "Merged dataset failed validation: "
+            + "; ".join(validation["failures"][:10])
         )
     return {
         "episodes": record_rows,

@@ -79,9 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     save.add_argument("--include-nonstandard", action="store_true")
     show = rsub.add_parser("show", help="a recipe and its preview")
     show.add_argument("name")
-    show.add_argument(
-        "--format", choices=["lerobot_v21", "recap_value", "raw_capture"]
-    )
+    show.add_argument("--format", choices=["lerobot_v21", "recap_value", "raw_capture"])
     rsub.add_parser("list", help="saved recipes")
     delete = rsub.add_parser("delete", help="delete a saved recipe")
     delete.add_argument("name")

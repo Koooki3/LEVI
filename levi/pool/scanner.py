@@ -78,7 +78,11 @@ COLUMNS = [
     "not_exportable_reason",
     "fingerprint",
     "fingerprint_kind",
+    "content_hash",
+    "recording",
+    "filtered",
     "derived_from",
+    "group",
     "canonical",
     "canonical_key",
     "copies",
@@ -102,6 +106,8 @@ RC_FACTS = (
     "date",
     "robot_flag",
     "fingerprint",
+    "recording",
+    "filtered",
     "video_bytes",
     "video_sha256",
 )
@@ -324,6 +330,13 @@ def rc_facts(demo: Path) -> dict:
             path.read_text(encoding="utf-8").strip() if path.is_file() else ""
         ) or demo.parent.name
     rate = meta.get("nominal_freq_hz") or meta.get("collection_freq_hz")
+    started, stopped = meta.get("created_at"), meta.get("stopped_at")
+    folder = meta.get("task_folder") or demo.parent.name
+    recording = (
+        _md5(f"{rules_mod.normalize_task(folder)}|{started}|{stopped}".encode())
+        if started and stopped
+        else None
+    )
     return {
         "frames": int(meta.get("frame_count") or frames),
         "fps": float(rate) if isinstance(rate, (int, float)) else None,
@@ -335,6 +348,10 @@ def rc_facts(demo: Path) -> dict:
         "date": str(meta.get("created_at") or "")[:10] or None,
         "robot_flag": raw.demo_outcome(demo),
         "fingerprint": fingerprint,
+        # One recording, however it was later filtered or copied: the task
+        # folder and the collector's start and stop times.
+        "recording": recording,
+        "filtered": bool(meta.get("filtered_from_frame_count")),
         "video_bytes": int(sum(s for _, s in videos)),
         "video_sha256": "{}",
     }
@@ -369,7 +386,12 @@ def _rc_rows(ctx, demos, previous, progress) -> list[dict]:
         key = str(demo)
         sig = _sig(demo, [demo.parent / "task_description.txt"])
         old = previous.get(key)
-        if old and old.get("stat_sig") == sig and old.get("fingerprint_kind") == "raw":
+        if (
+            old
+            and old.get("stat_sig") == sig
+            and old.get("fingerprint_kind") == "raw"
+            and all(k in old for k in RC_FACTS)
+        ):
             facts = {k: old.get(k) for k in RC_FACTS}
         else:
             facts = rc_facts(demo)
@@ -399,6 +421,8 @@ def _rc_rows(ctx, demos, previous, progress) -> list[dict]:
             "exportable": reason is None,
             "not_exportable_reason": "nonstandard" if reason else None,
             "fingerprint_kind": "raw",
+            "content_hash": None,
+            "links": [],
             "derived_from": None,
             "in_levi_workspace": ctx.in_workspace(demo),
             "stat_sig": sig,
@@ -424,16 +448,13 @@ def _content_hash(path: Path) -> str:
                 digest.update(name.encode())
                 digest.update(values.tobytes())
             return digest.hexdigest()
-    except Exception:  # noqa: BLE001 -- fall back to the file bytes
-        pass
+    except Exception:  # noqa: BLE001 -- unreadable table: hash the file bytes
+        return _md5(path.read_bytes())
     return _md5(path.read_bytes())
 
 
-def _lerobot_rows(
-    ctx, dataset: Path, rc_keys: dict, previous, aliases: dict
-) -> tuple[list, dict]:
-    """Rows of one LeRobot dataset; ``aliases`` collects raw episodes found
-    to be derived from another raw episode (key -> original key)."""
+def _lerobot_rows(ctx, dataset: Path, rc_keys: dict, previous) -> tuple[list, dict]:
+    """Rows of one LeRobot dataset (v3: the source only)."""
     info = _read_json(dataset / "meta/info.json") or {}
     version = str(info.get("codebase_version") or "?")
     features = info.get("features") or {}
@@ -463,7 +484,7 @@ def _lerobot_rows(
     conversion = _read_json(dataset / "meta/levi_conversion.json") or {}
     conv_source = conversion.get("source") or conversion.get("derived_from")
     cameras = [k for k, f in features.items() if f.get("dtype") == "video"]
-    shape = lambda k: (features.get(k, {}).get("shape") or [None])[0]  # noqa: E731
+    shape = lambda k: (features.get(k, {}).get("shape") or [None])[0]
     chunk = int(info.get("chunks_size") or 1000)
     data_path = info.get("data_path") or ""
 
@@ -479,34 +500,35 @@ def _lerobot_rows(
             candidates.append(processed[position])
         if conv_source and row.get("source_demo"):
             candidates.append(str(Path(conv_source) / row["source_demo"]))
-        linked = [
-            str(Path(c)) for c in candidates if c and str(Path(c)) in rc_keys
-        ]
-        # Several indexed raw folders may stand behind one converted episode
-        # (the original rollout and a filtered copy of it): the first is the
-        # original, the others are derived from it.
+        # Every indexed raw folder standing behind this episode (the original
+        # rollout and a filtered copy of it may both be named).
+        linked = list(
+            dict.fromkeys(
+                str(Path(c)) for c in candidates if c and str(Path(c)) in rc_keys
+            )
+        )
         link = linked[0] if linked else None
-        for other in dict.fromkeys(linked[1:]):
-            if rc_keys[other]["fingerprint"] != rc_keys[link]["fingerprint"]:
-                aliases[other] = link
-        if link:
-            fingerprint, kind = rc_keys[link]["fingerprint"], "derived"
-        elif old and old.get("stat_sig") == sig and old.get("fingerprint_kind") == "content":
-            fingerprint, kind = old["fingerprint"], "content"
+        if old and old.get("stat_sig") == sig and old.get("content_hash"):
+            content = old["content_hash"]
         else:
             part = dataset / data_path.format(
                 episode_chunk=ep // chunk, episode_index=ep
             )
-            fingerprint, kind = (
-                (_content_hash(part), "content") if part.is_file() else (None, None)
-            )
+            content = _content_hash(part) if part.is_file() else None
+        if link:
+            fingerprint, kind = rc_keys[link]["fingerprint"], "derived"
+        else:
+            fingerprint, kind = content, "content" if content else None
         flag = row.get("levi_outcome")
         if flag not in ("success", "failure"):
             flag = None
         data_source = row.get("data_source")
-        if flag is None and isinstance(row.get("is_success"), bool):
-            if data_source in ctx.rules["rollout_data_sources"]:
-                flag = "success" if row["is_success"] else "failure"
+        if (
+            flag is None
+            and isinstance(row.get("is_success"), bool)
+            and data_source in ctx.rules["rollout_data_sources"]
+        ):
+            flag = "success" if row["is_success"] else "failure"
         facts = {"data_source": data_source}
         category, why = _category(ctx, dataset, "lerobot", facts, bool(markers))
         if category is None and "levi_outcome" in row:
@@ -544,6 +566,10 @@ def _lerobot_rows(
             "not_exportable_reason": None,
             "fingerprint": fingerprint,
             "fingerprint_kind": kind,
+            "content_hash": content,
+            "recording": None,
+            "filtered": False,
+            "links": linked,
             "derived_from": link,
             "in_levi_workspace": ctx.in_workspace(dataset),
             "video_bytes": None,
@@ -605,6 +631,10 @@ def _droid_rows(ctx, demos, previous) -> list[dict]:
                     b"droid|" + meta_path.read_bytes() + str(h5).encode()
                 ),
                 "fingerprint_kind": "droid",
+                "content_hash": None,
+                "recording": None,
+                "filtered": False,
+                "links": [],
                 "derived_from": None,
                 "in_levi_workspace": ctx.in_workspace(demo),
                 "video_bytes": None,
@@ -629,12 +659,11 @@ def _labels(rows: list[dict], workspaces: list[Path]) -> dict:
         label = found.get(row["key"])
         if label:
             direct[row["key"]] = label
-            if row["fingerprint"]:
-                groups[row["fingerprint"]].add(label["outcome"])
+            groups[row["group"]].add(label["outcome"])
     conflicts = 0
     for row in rows:
         label = direct.get(row["key"])
-        group = groups.get(row["fingerprint"]) if row["fingerprint"] else None
+        group = groups.get(row["group"])
         row["label_conflict"] = bool(group and len(group) > 1)
         if row["label_conflict"]:
             conflicts += 1
@@ -731,7 +760,7 @@ def _heldout(rows: list[dict], roots: list[Path], progress) -> dict:
         if progress:
             progress.advance(entry["id"])
     for entry, row in originals:
-        held[row["fingerprint"]] = (entry["set"], entry["id"])
+        held[row["group"]] = (entry["set"], entry["id"])
     # Copies re-encoded or re-written byte for byte but with another
     # frames.csv: same video name, size and sha256.
     sizes = {}
@@ -743,18 +772,18 @@ def _heldout(rows: list[dict], roots: list[Path], progress) -> dict:
                 continue
             sizes[(name, size)] = (want, entry)
     for r in raw_rows:
-        if r["fingerprint"] in held:
+        if r["group"] in held:
             continue
         for video in sorted(Path(r["key"]).glob("*.mp4")):
             probe = (video.name, _size(video))
             if probe in sizes:
                 want, entry = sizes[probe]
                 if _video_sha(r, [video.name]).get(video.name) == want:
-                    held[r["fingerprint"]] = (entry["set"], entry["id"])
+                    held[r["group"]] = (entry["set"], entry["id"])
                     break
     count = 0
     for row in rows:
-        mark = held.get(row["fingerprint"]) if row["fingerprint"] else None
+        mark = held.get(row["group"])
         if mark:
             row["heldout"], (row["heldout_set"], row["heldout_id"]) = True, mark
             count += 1
@@ -772,34 +801,72 @@ def _size(path: Path) -> int | None:
 
 
 def _rank(row: dict) -> tuple:
+    """Which member of a group is the canonical one: the original raw
+    collection or rollout folder first, then unfiltered before filtered,
+    then the shallowest path."""
     return (
         row["category"] == "archive",
         row["category"] == "levi" or bool(row["in_levi_workspace"]),
         row["format"] != "robot_capture",
+        bool(row["filtered"]),
         bool(row["nonstandard"]),
         len(Path(row["source_path"]).parts),
         row["key"],
     )
 
 
-def _dedup(rows: list[dict]) -> dict:
-    groups: dict[str, list] = defaultdict(list)
+def _group(rows: list[dict]) -> dict:
+    """One group per recorded episode: rows sharing a fingerprint, a LeRobot
+    content hash, a recording identity or a conversion link are unioned;
+    the best-ranked member is canonical, the others are its copies."""
+    parent: dict[str, str] = {}
+
+    def find(x):
+        while parent.setdefault(x, x) != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
     for row in rows:
+        key = "row:" + row["key"]
+        find(key)
         if row["fingerprint"]:
-            groups[row["fingerprint"]].append(row)
-        else:
-            row.update(canonical=True, canonical_key=row["key"], copies=0)
+            union(key, "fp:" + row["fingerprint"])
+        if row.get("content_hash"):
+            union(key, "content:" + row["content_hash"])
+        if row.get("recording"):
+            union(key, "rec:" + row["recording"])
+        for link in row.get("links") or []:
+            union(key, "row:" + link)
+    members: dict[str, list] = defaultdict(list)
+    for row in rows:
+        members[find("row:" + row["key"])].append(row)
     duplicates = 0
-    for members in groups.values():
-        members.sort(key=_rank)
-        head = members[0]["key"]
-        for i, row in enumerate(members):
-            row.update(canonical=i == 0, canonical_key=head, copies=len(members) - 1)
-        duplicates += len(members) - 1
+    for group in members.values():
+        group.sort(key=_rank)
+        head = group[0]["key"]
+        for i, row in enumerate(group):
+            row.update(
+                group=head,
+                canonical=i == 0,
+                canonical_key=head,
+                copies=len(group) - 1,
+            )
+        duplicates += len(group) - 1
+    for row in rows:
+        row.pop("links", None)
     return {
-        "fingerprints": len(groups),
+        "groups": len(members),
         "duplicate_episodes": duplicates,
-        "groups_with_copies": sum(1 for m in groups.values() if len(m) > 1),
+        "groups_with_copies": sum(1 for g in members.values() if len(g) > 1),
+        "filtered_variants": sum(
+            1 for r in rows if r["filtered"] and not r["canonical"]
+        ),
     }
 
 
@@ -838,7 +905,11 @@ def _sources(ctx, rows, extra_sources, unsupported, dataset_paths) -> list[dict]
                 "labelled": sum(1 for r in members if r["human_label"]),
                 "exportable": any(r["exportable"] for r in members),
                 "reason": next(
-                    (r["not_exportable_reason"] for r in members if not r["exportable"]),
+                    (
+                        r["not_exportable_reason"]
+                        for r in members
+                        if not r["exportable"]
+                    ),
                     None,
                 )
                 if not any(r["exportable"] for r in members)
@@ -929,7 +1000,11 @@ def scan(progress_path: Path | None = None, rehash: bool = False) -> dict:
     found = walk(roots, rules, progress)
     workspaces = sorted(
         set(found["workspaces"])
-        | ({settings.workspace()} if labels.is_workspace(settings.workspace()) else set())
+        | (
+            {settings.workspace()}
+            if labels.is_workspace(settings.workspace())
+            else set()
+        )
     )
     registered = labels.registered_paths(workspaces)
     ctx = Context(roots, rules, workspaces, registered)
@@ -937,24 +1012,17 @@ def scan(progress_path: Path | None = None, rehash: bool = False) -> dict:
     rc_keys = {r["key"]: r for r in rows}
     progress.stage("Datasets", len(found["lerobot"]) + 1)
     extra_sources = {}
-    aliases: dict[str, str] = {}
     for dataset in found["lerobot"]:
-        more, source = _lerobot_rows(ctx, dataset, rc_keys, previous, aliases)
+        more, source = _lerobot_rows(ctx, dataset, rc_keys, previous)
         rows += more
         extra_sources[str(dataset)] = source
         progress.advance(ctx.relative(dataset))
-    for key, original in aliases.items():
-        rc_keys[key].update(
-            fingerprint=rc_keys[original]["fingerprint"],
-            fingerprint_kind="derived",
-            derived_from=original,
-        )
     rows += _droid_rows(ctx, found["droid"], previous)
     progress.advance("DROID")
+    dedup_report = _group(rows)
     progress.stage("Labels", 1)
     label_report = _labels(rows, workspaces)
     heldout_report = _heldout(rows, roots, progress)
-    dedup_report = _dedup(rows)
     progress.stage("Index", 1)
     dataset_paths = {r["source_path"] for r in rows} | set(extra_sources)
     sources = _sources(ctx, rows, extra_sources, found["unsupported"], dataset_paths)
@@ -971,7 +1039,9 @@ def scan(progress_path: Path | None = None, rehash: bool = False) -> dict:
         "roots": [str(r) for r in roots],
         "episodes": len(rows),
         "reused": sum(
-            1 for r in rows if previous.get(r["key"], {}).get("stat_sig") == r["stat_sig"]
+            1
+            for r in rows
+            if previous.get(r["key"], {}).get("stat_sig") == r["stat_sig"]
         ),
         "sources": len(sources),
         "formats": dict(Counter(r["format"] for r in rows)),
@@ -985,7 +1055,11 @@ def scan(progress_path: Path | None = None, rehash: bool = False) -> dict:
         "heldout": heldout_report,
         "labels": label_report,
         "unsupported_sources": sum(
-            1 for s in sources if not s["exportable"] and s["format"] not in (
+            1
+            for s in sources
+            if not s["exportable"]
+            and s["format"]
+            not in (
                 "robot_capture",
                 "lerobot",
                 "droid_raw",

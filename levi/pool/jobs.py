@@ -88,7 +88,14 @@ def _environment(job: dict) -> dict:
     env = dict(os.environ)
     env["LEVI_POOL_ROOTS"] = ",".join(job.get("pool_roots") or [])
     env["LEVI_POOL_HELDOUT"] = ",".join(job.get("heldout_lists") or [])
-    env["LEVI_WORKSPACE"] = str(settings.workspace())
+    workspace = settings.workspace()
+    env["LEVI_WORKSPACE"] = str(workspace)
+    # Folders the worker's ``configure`` requires inside its workspace; one
+    # inherited from another workspace would stop it before it starts.
+    for name in ("LEVI_SAM3_CHECKPOINT_DIR", "LEVI_RECAP_VALUE_CHECKPOINT_DIR"):
+        value = env.get(name)
+        if value and not Path(value).resolve().is_relative_to(workspace):
+            env.pop(name)
     return env
 
 
@@ -103,7 +110,6 @@ def launch(job_id: str) -> dict:
         atomic(path, job)
 
     def work():
-        progress = path.with_suffix(".progress.json")
         result_path = path.with_suffix(".result.json")
         log = path.with_suffix(".log")
         try:

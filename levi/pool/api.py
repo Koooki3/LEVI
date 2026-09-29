@@ -1,29 +1,31 @@
 """``/api/levi/pool/*``: the training pool over HTTP, behind the service's
 UI-token and same-origin middleware (writes: recipes, scans, exports)."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from . import index, jobs, recipe, settings
-from .recipe import Recipe
 from .export import ExportOptions
+from .recipe import Recipe
+
+Strings = Annotated[list[str] | None, Query()]
 
 router = APIRouter(prefix="/api/levi/pool", tags=["Training pool"])
 
 
 def _filters(
-    category: list[str] | None = Query(None),
-    source: list[str] | None = Query(None),
-    task: list[str] | None = Query(None),
-    search: str | None = None,
-    format: list[str] | None = Query(None),
-    outcome: Literal["success", "failure"] | None = None,
-    policy: list[str] | None = Query(None),
-    show_heldout: bool = False,
-    show_copies: bool = False,
-    show_archive: bool = False,
+    category=None,
+    source=None,
+    task=None,
+    search=None,
+    format=None,
+    outcome=None,
+    policy=None,
+    show_heldout=False,
+    show_copies=False,
+    show_archive=False,
 ) -> dict:
     return {
         "categories": category,
@@ -59,10 +61,10 @@ def sources(category: str | None = None, show_archive: bool = False):
 
 @router.get("/tasks")
 def tasks(
-    category: list[str] | None = Query(None),
-    source: list[str] | None = Query(None),
+    category: Strings = None,
+    source: Strings = None,
     search: str | None = None,
-    format: list[str] | None = Query(None),
+    format: Strings = None,
     show_heldout: bool = False,
     show_copies: bool = False,
     show_archive: bool = False,
@@ -84,25 +86,33 @@ def tasks(
 
 @router.get("/episodes")
 def episodes(
-    category: list[str] | None = Query(None),
-    source: list[str] | None = Query(None),
-    task: list[str] | None = Query(None),
+    category: Strings = None,
+    source: Strings = None,
+    task: Strings = None,
     search: str | None = None,
-    format: list[str] | None = Query(None),
+    format: Strings = None,
     outcome: Literal["success", "failure"] | None = None,
-    policy: list[str] | None = Query(None),
+    policy: Strings = None,
     show_heldout: bool = False,
     show_copies: bool = False,
     show_archive: bool = False,
-    limit: int = Query(200, ge=1, le=5000),
-    offset: int = Query(0, ge=0),
+    limit: Annotated[int, Query(ge=1, le=5000)] = 200,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ):
     return index.episodes(
         limit=limit,
         offset=offset,
         **_filters(
-            category, source, task, search, format, outcome, policy,
-            show_heldout, show_copies, show_archive,
+            category,
+            source,
+            task,
+            search,
+            format,
+            outcome,
+            policy,
+            show_heldout,
+            show_copies,
+            show_archive,
         ),
     )
 

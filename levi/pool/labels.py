@@ -35,7 +35,9 @@ def _head_folder(state: Path, name: str) -> Path:
         except sqlite3.Error:
             row = None
         if row and row[0] != "legacy":
-            return state / "agent/datasets" / name / "revisions" / row[0] / "annotations"
+            return (
+                state / "agent/datasets" / name / "revisions" / row[0] / "annotations"
+            )
     return state / "annotations" / name
 
 
