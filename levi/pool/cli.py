@@ -77,6 +77,16 @@ def build_parser() -> argparse.ArgumentParser:
     save.add_argument("--date-from")
     save.add_argument("--date-to")
     save.add_argument("--include-nonstandard", action="store_true")
+    save.add_argument("--format", action="append", dest="formats", help="repeatable")
+    save.add_argument(
+        "--exclude", action="append", help="episode key to leave out (repeatable)"
+    )
+    save.add_argument(
+        "--task-text",
+        action="append",
+        default=[],
+        help="normalized task=text written into the export (repeatable)",
+    )
     show = rsub.add_parser("show", help="a recipe and its preview")
     show.add_argument("name")
     show.add_argument("--format", choices=["lerobot_v21", "recap_value", "raw_capture"])
@@ -152,9 +162,13 @@ def main(argv=None) -> int:
                     ("policies", args.policy),
                     ("date_from", args.date_from),
                     ("date_to", args.date_to),
+                    ("formats", args.formats),
+                    ("exclude", args.exclude),
                 ):
                     if given is not None:
                         value[key] = given
+                if args.task_text:
+                    value["task_text"] = dict(t.split("=", 1) for t in args.task_text)
                 if args.include_nonstandard:
                     value["include_nonstandard"] = True
                 _print(recipe.save(recipe.Recipe.model_validate(value)))

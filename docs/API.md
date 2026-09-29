@@ -25,6 +25,11 @@ Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge fo
 | POST | `/api/levi/jobs/{id}/run` | Consume the stored plan once; body `{}` |
 | GET | `/api/levi/jobs` | Latest 50 plans/jobs, structured `progress` (stages, stage, done/total, current item, elapsed, ETA, warnings) and up to 32 KB of each log tail |
 | POST | `/api/levi/diagnostics` | Structural quality check `{ "repo_id": "…", "max_episodes": 0, "checks": ["metadata","temporal"], "decode_video": true }` (`max_episodes: 0` = all); the report is also kept at `outputs/LEVI/datasets/<name>/reports/quality-<YYYYmmddTHH>.json` and its `path` returned ([Data quality](QUALITY.md)) |
+| GET | `/api/levi/pool/status`, `/api/levi/pool/sources`, `/api/levi/pool/tasks`, `/api/levi/pool/episodes` | Training pool: settings and last scan, sources, per-task counts, the episode index (filters and paging in [Training pool](TRAINING_POOL.md#api)) |
+| POST | `/api/levi/pool/scan` | Start a scan job of `LEVI_POOL_ROOTS`; poll `GET /api/levi/pool/jobs/{id}` |
+| GET / PUT / DELETE | `/api/levi/pool/recipes/{name}` | Saved training-pool recipes (`GET /api/levi/pool/recipes` lists them) |
+| POST | `/api/levi/pool/preview` | Counts and exclusions of a recipe `{ "recipe": {…}, "format": "lerobot_v21" }` |
+| POST | `/api/levi/pool/export` | Plan (`dry_run`) or start an export `{ "recipe_name": "…", "options": {"format": "lerobot_v21", "name": "…"} }`; held-out episodes are refused, 403 for a folder outside `LEVI_EXPORT_ROOTS` or inside a source |
 | GET | `/api/levi/manifest/operations` | Built-in training-manifest operations with their parameters ([Training manifests](TRAINING_MANIFEST.md)) |
 | GET | `/api/levi/manifest?repo_id=local/<name>` | Manifests written for a dataset: directory, time, operation, counts |
 | POST | `/api/levi/manifest` | Write a manifest `{ "repo_id": "local/<name>", "operation": "verified_success", "params": {"fallback": "exclude"}, "tasks": ["…"], "episodes": [0, 1], "anchored_run": null, "anchored_tasks": ["…"], "recap_revision": null, "allow_stale": false }`; returns the manifest without its per-episode table (that stays in `manifest.json`); 400 for an unknown operation or parameter, a missing anchored review or RECAP revision, or stale RECAP labels |

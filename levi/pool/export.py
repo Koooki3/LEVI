@@ -803,7 +803,7 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
     info = {
         "codebase_version": "v2.1",
         "robot_type": robot_type,
-        "fps": options.fps,
+        "fps": int(options.fps) if float(options.fps).is_integer() else options.fps,
         "total_episodes": len(episodes_meta),
         "total_frames": offset,
         "total_tasks": len(task_order),
