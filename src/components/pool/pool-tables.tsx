@@ -4,6 +4,9 @@ import { useLocale } from "@/components/levi-locale";
 import {
   CATEGORIES,
   CATEGORY_LABELS,
+  METHOD_LABELS,
+  POLICY_METHODS,
+  policyLabel,
   type EpisodeRow,
   type TaskRow,
 } from "./types";
@@ -35,6 +38,10 @@ export function TaskTable({
   const columns = CATEGORIES.filter((c) =>
     tasks.some((row) => row.categories[c]),
   );
+  // Only when some task has rollouts.
+  const showMethods = tasks.some(
+    (row) => Object.keys(row.policy_methods || {}).length > 0,
+  );
   return (
     <div className="levi-pool-table-wrap">
       <table className="levi-table levi-pool-table">
@@ -61,6 +68,7 @@ export function TaskTable({
             <th scope="col" className="num">
               {t("Success rate")}
             </th>
+            {showMethods && <th scope="col">{t("How it was run")}</th>}
             <th scope="col">
               <span className="sr-only">{t("Actions")}</span>
             </th>
@@ -110,6 +118,21 @@ export function TaskTable({
                     ? "—"
                     : `${Math.round(row.success_rate * 100)}%`}
                 </td>
+                {showMethods && (
+                  <td className="levi-pool-methods">
+                    {POLICY_METHODS.filter((m) => row.policy_methods?.[m]).map(
+                      (m) => (
+                        <span
+                          key={m}
+                          className="levi-pool-badge"
+                          title={t(METHOD_LABELS[m])}
+                        >
+                          {t(METHOD_LABELS[m])} {row.policy_methods?.[m]}
+                        </span>
+                      ),
+                    )}
+                  </td>
+                )}
                 <td>
                   <button
                     type="button"
@@ -126,7 +149,10 @@ export function TaskTable({
           })}
           {tasks.length === 0 && (
             <tr>
-              <td colSpan={columns.length + 5} className="levi-pool-muted">
+              <td
+                colSpan={columns.length + 5 + (showMethods ? 1 : 0)}
+                className="levi-pool-muted"
+              >
                 {t("No tasks match these filters.")}
               </td>
             </tr>
@@ -176,6 +202,8 @@ export function EpisodeTable({
 }) {
   const { t } = useLocale();
   const last = Math.min(total, offset + rows.length);
+  // Only when some listed episode is a rollout with policy information.
+  const showPolicy = rows.some((row) => row.policy_method || row.policy_model);
   return (
     <div>
       <div className="levi-pool-table-wrap">
@@ -187,6 +215,7 @@ export function EpisodeTable({
               <th scope="col">{t("Source")}</th>
               <th scope="col">{t("Category")}</th>
               <th scope="col">{t("Task")}</th>
+              {showPolicy && <th scope="col">{t("Policy")}</th>}
               <th scope="col" className="num">
                 {t("Frames")}
               </th>
@@ -243,6 +272,24 @@ export function EpisodeTable({
                   >
                     {row.task}
                   </td>
+                  {showPolicy && (
+                    <td
+                      className="levi-pool-ellipsis"
+                      title={
+                        [
+                          row.policy_model,
+                          row.policy_checkpoint,
+                          row.policy_phase,
+                        ]
+                          .filter(Boolean)
+                          .join("\n") || undefined
+                      }
+                    >
+                      {policyLabel(row, t) || (
+                        <span className="levi-pool-muted">—</span>
+                      )}
+                    </td>
+                  )}
                   <td className="num tabular">
                     {row.frames?.toLocaleString() ?? "—"}
                   </td>
@@ -270,7 +317,7 @@ export function EpisodeTable({
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={7} className="levi-pool-muted">
+                <td colSpan={showPolicy ? 8 : 7} className="levi-pool-muted">
                   {t("No episodes match these filters.")}
                 </td>
               </tr>

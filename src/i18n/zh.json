@@ -1543,5 +1543,15 @@
   "The held-out lists changed since the last scan: scan again.": "留出清单在上次扫描后有变化：请重新扫描。",
   "Held-out entries that match no indexed episode": "留出清单中匹配不到任何已登记片段的条目",
   "Tasks taken from raw captures and from an unlinked LeRobot dataset may be the same recordings twice. Name the sources, or allow it.": "同一任务同时取自原始采集和没有关联记录的 LeRobot 数据集，可能是同一批录制的重复。请指定来源，或明确允许。",
-  "Episodes that count as verified only through the operator's key press (no human label)": "仅凭操作员按键结果算作已核实的片段（没有人工标签）"
+  "Episodes that count as verified only through the operator's key press (no human label)": "仅凭操作员按键结果算作已核实的片段（没有人工标签）",
+  "Policy model": "策略模型",
+  "How it was run": "运行方式",
+  "Direct deployment": "直接部署",
+  "DSRL online RL": "DSRL 在线 RL",
+  "RLT online RL": "RLT 在线 RL",
+  "SFE online RL": "SFE 在线 RL",
+  "Student policy": "学生策略",
+  "Other method": "其他方式",
+  "Unknown method": "未知方式",
+  "Policy checkpoint": "检查点"
 }

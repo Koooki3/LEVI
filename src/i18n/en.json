@@ -1543,5 +1543,15 @@
   "The held-out lists changed since the last scan: scan again.": "The held-out lists changed since the last scan: scan again.",
   "Held-out entries that match no indexed episode": "Held-out entries that match no indexed episode",
   "Tasks taken from raw captures and from an unlinked LeRobot dataset may be the same recordings twice. Name the sources, or allow it.": "Tasks taken from raw captures and from an unlinked LeRobot dataset may be the same recordings twice. Name the sources, or allow it.",
-  "Episodes that count as verified only through the operator's key press (no human label)": "Episodes that count as verified only through the operator's key press (no human label)"
+  "Episodes that count as verified only through the operator's key press (no human label)": "Episodes that count as verified only through the operator's key press (no human label)",
+  "Policy model": "Policy model",
+  "How it was run": "How it was run",
+  "Direct deployment": "Direct deployment",
+  "DSRL online RL": "DSRL online RL",
+  "RLT online RL": "RLT online RL",
+  "SFE online RL": "SFE online RL",
+  "Student policy": "Student policy",
+  "Other method": "Other method",
+  "Unknown method": "Unknown method",
+  "Policy checkpoint": "Policy checkpoint"
 }

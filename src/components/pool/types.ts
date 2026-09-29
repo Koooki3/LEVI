@@ -17,6 +17,52 @@ export const CATEGORY_LABELS: Record<string, string> = {
   archive: "Archive",
 };
 
+/** How a rollout was run (levi/pool/policy.py), as UI text. */
+export const POLICY_METHODS = [
+  "direct",
+  "dsrl",
+  "rlt",
+  "sfe",
+  "student",
+  "other",
+  "unknown",
+] as const;
+export type PolicyMethod = (typeof POLICY_METHODS)[number];
+
+export const METHOD_LABELS: Record<string, string> = {
+  direct: "Direct deployment",
+  dsrl: "DSRL online RL",
+  rlt: "RLT online RL",
+  sfe: "SFE online RL",
+  student: "Student policy",
+  other: "Other method",
+  unknown: "Unknown method",
+};
+
+/** ``pi05_fr3_all_step49999`` -> ``step49999`` (as the server's label). */
+export function shortCheckpoint(checkpoint: string | null): string | null {
+  if (!checkpoint) return null;
+  const match = /(step[_-]?\d+)$/.exec(checkpoint);
+  return match ? match[1] : checkpoint;
+}
+
+/** ``pi05_fr3_all_state · step49999 · DSRL online RL`` in the page language. */
+export function policyLabel(
+  row: Pick<EpisodeRow, "policy_model" | "policy_checkpoint" | "policy_method">,
+  t: (key: string) => string,
+): string | null {
+  if (!row.policy_method && !row.policy_model) return null;
+  return [
+    row.policy_model,
+    shortCheckpoint(row.policy_checkpoint),
+    row.policy_method
+      ? t(METHOD_LABELS[row.policy_method] || row.policy_method)
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 export type OutcomeFilter =
   | "all"
   | "robot_flag_success"
@@ -105,6 +151,9 @@ export interface Facets {
   sources: { source: string; path: string; episodes: number }[];
   formats: Record<string, number>;
   policies: Record<string, number>;
+  policy_models: Record<string, number>;
+  policy_checkpoints: Record<string, number>;
+  policy_methods: Record<string, number>;
   outcomes: Record<string, number>;
   date_min: string | null;
   date_max: string | null;
@@ -123,6 +172,7 @@ export interface TaskRow {
   failure: number;
   success_rate: number | null;
   sources: string[];
+  policy_methods?: Record<string, number>;
 }
 
 export interface EpisodeRow {
@@ -141,6 +191,11 @@ export interface EpisodeRow {
   robot_flag: string | null;
   human_label: string | null;
   policy: string | null;
+  policy_model: string | null;
+  policy_checkpoint: string | null;
+  policy_method: string | null;
+  policy_phase: string | null;
+  policy_label: string | null;
   date: string | null;
   heldout: boolean;
   heldout_id: string | null;
@@ -162,6 +217,9 @@ export interface Recipe {
   date_from: string | null;
   date_to: string | null;
   policies: string[];
+  policy_models?: string[];
+  policy_checkpoints?: string[];
+  policy_methods?: string[];
   include_nonstandard: boolean;
   allow_unlinked_sources?: boolean;
   exclude: string[];
@@ -195,6 +253,7 @@ export interface Preview {
   categories: Record<string, number>;
   formats: Record<string, number>;
   outcomes: Record<string, number>;
+  policy_methods?: Record<string, number>;
   excluded: Record<string, number>;
   excluded_heldout: number;
   excluded_duplicates: number;

@@ -4,6 +4,8 @@ import { useLocale } from "@/components/levi-locale";
 import {
   CATEGORIES,
   CATEGORY_LABELS,
+  METHOD_LABELS,
+  POLICY_METHODS,
   type Facets,
   type OutcomeFilter,
 } from "./types";
@@ -13,7 +15,10 @@ export interface Filters {
   sources: string[];
   search: string;
   outcome: OutcomeFilter;
-  policies: string[];
+  policies: string[]; // the old single field (a saved recipe's checkpoints)
+  policyModels: string[];
+  policyCheckpoints: string[];
+  policyMethods: string[];
   dateFrom: string;
   dateTo: string;
   showHeldout: boolean;
@@ -27,6 +32,9 @@ export const EMPTY_FILTERS: Filters = {
   search: "",
   outcome: "all",
   policies: [],
+  policyModels: [],
+  policyCheckpoints: [],
+  policyMethods: [],
   dateFrom: "",
   dateTo: "",
   showHeldout: false,
@@ -45,8 +53,45 @@ function shortSource(source: string): string {
   return parts.length > 3 ? `…/${parts.slice(-3).join("/")}` : source;
 }
 
-/** Left column: category, source, task search, outcome, policy and date
- * facets with counts; held-out, copies and archive are hidden by default. */
+/** One policy facet: a checkbox per value with its episode count. */
+function PolicyFacet({
+  legend,
+  entries,
+  selected,
+  label,
+  onToggle,
+}: {
+  legend: string;
+  entries: [string, number][];
+  selected: string[];
+  label?: (value: string) => string;
+  onToggle: (value: string) => void;
+}) {
+  const { t } = useLocale();
+  return (
+    <fieldset>
+      <legend>{t(legend)}</legend>
+      <div className="levi-pool-scroll">
+        {entries.map(([value, n]) => (
+          <label key={value} className="levi-pool-check" title={value}>
+            <input
+              type="checkbox"
+              checked={selected.includes(value)}
+              onChange={() => onToggle(value)}
+            />
+            <span className="grow levi-pool-ellipsis">
+              {label ? label(value) : value}
+            </span>
+            <span className="levi-pool-count">{n.toLocaleString()}</span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+/** Left column: category, source, task search, outcome, policy (model,
+ * checkpoint, how it was run) and date facets with counts; held-out, copies and archive are hidden by default. */
 export function FacetsPanel({
   facets,
   filters,
@@ -66,8 +111,14 @@ export function FacetsPanel({
       s.source.toLowerCase().includes(sourceSearch.toLowerCase()),
   );
   const shownSources = allSources ? sources : sources.slice(0, 12);
-  const policies = Object.entries(facets?.policies || {}).sort(
-    (a, b) => b[1] - a[1],
+  const byCount = (counts: Record<string, number> | undefined) =>
+    Object.entries(counts || {}).sort(
+      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+    );
+  const models = byCount(facets?.policy_models);
+  const checkpoints = byCount(facets?.policy_checkpoints);
+  const methods = POLICY_METHODS.filter((m) => facets?.policy_methods?.[m]).map(
+    (m) => [m, facets?.policy_methods?.[m] || 0] as [string, number],
   );
   const categories = CATEGORIES.filter(
     (c) => c !== "archive" || filters.showArchive,
@@ -170,25 +221,36 @@ export function FacetsPanel({
           </button>
         )}
       </fieldset>
-      {policies.length > 0 && (
-        <fieldset>
-          <legend>{t("Policy")}</legend>
-          <div className="levi-pool-scroll">
-            {policies.map(([policy, n]) => (
-              <label key={policy} className="levi-pool-check" title={policy}>
-                <input
-                  type="checkbox"
-                  checked={filters.policies.includes(policy)}
-                  onChange={() =>
-                    set({ policies: toggle(filters.policies, policy) })
-                  }
-                />
-                <span className="grow levi-pool-ellipsis">{policy}</span>
-                <span className="levi-pool-count">{n.toLocaleString()}</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
+      {models.length > 0 && (
+        <PolicyFacet
+          legend="Policy model"
+          entries={models}
+          selected={filters.policyModels}
+          onToggle={(v) =>
+            set({ policyModels: toggle(filters.policyModels, v) })
+          }
+        />
+      )}
+      {checkpoints.length > 0 && (
+        <PolicyFacet
+          legend="Policy checkpoint"
+          entries={checkpoints}
+          selected={filters.policyCheckpoints}
+          onToggle={(v) =>
+            set({ policyCheckpoints: toggle(filters.policyCheckpoints, v) })
+          }
+        />
+      )}
+      {methods.length > 0 && (
+        <PolicyFacet
+          legend="How it was run"
+          entries={methods}
+          selected={filters.policyMethods}
+          label={(v) => t(METHOD_LABELS[v] || v)}
+          onToggle={(v) =>
+            set({ policyMethods: toggle(filters.policyMethods, v) })
+          }
+        />
       )}
       <fieldset>
         <legend>{t("Date")}</legend>

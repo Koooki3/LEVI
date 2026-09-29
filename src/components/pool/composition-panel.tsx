@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import {
   CATEGORY_LABELS,
+  METHOD_LABELS,
   REASON_LABELS,
   WARNING_LABELS,
   type PoolWarning,
@@ -89,6 +90,13 @@ export function CompositionPanel({
     ...recipe.categories.map((c) => t(CATEGORY_LABELS[c] || c)),
     ...recipe.sources.map((s) => `${t("Source")}: ${s}`),
     ...recipe.policies.map((p) => `${t("Policy")}: ${p}`),
+    ...(recipe.policy_models || []).map((p) => `${t("Policy model")}: ${p}`),
+    ...(recipe.policy_checkpoints || []).map(
+      (p) => `${t("Policy checkpoint")}: ${p}`,
+    ),
+    ...(recipe.policy_methods || []).map(
+      (p) => `${t("How it was run")}: ${t(METHOD_LABELS[p] || p)}`,
+    ),
     ...(recipe.outcome !== "all"
       ? [
           t(

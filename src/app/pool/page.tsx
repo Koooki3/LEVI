@@ -44,6 +44,9 @@ const EMPTY_RECIPE: Recipe = {
   date_from: null,
   date_to: null,
   policies: [],
+  policy_models: [],
+  policy_checkpoints: [],
+  policy_methods: [],
   include_nonstandard: false,
   exclude: [],
 };
@@ -53,6 +56,9 @@ function query(filters: Filters, extra: Record<string, string> = {}) {
   for (const c of filters.categories) q.append("category", c);
   for (const s of filters.sources) q.append("source", s);
   for (const p of filters.policies) q.append("policy", p);
+  for (const p of filters.policyModels) q.append("policy_model", p);
+  for (const p of filters.policyCheckpoints) q.append("policy_checkpoint", p);
+  for (const p of filters.policyMethods) q.append("policy_method", p);
   if (filters.search) q.set("search", filters.search);
   if (filters.outcome !== "all") q.set("outcome", filters.outcome);
   if (filters.dateFrom) q.set("date_from", filters.dateFrom);
@@ -101,6 +107,9 @@ export default function TrainingPool() {
       categories: filters.categories,
       sources: filters.sources,
       policies: filters.policies,
+      policy_models: filters.policyModels,
+      policy_checkpoints: filters.policyCheckpoints,
+      policy_methods: filters.policyMethods,
       outcome: filters.outcome,
       date_from: filters.dateFrom || null,
       date_to: filters.dateTo || null,
@@ -488,6 +497,9 @@ export default function TrainingPool() {
                       date_from: recipe.date_from,
                       date_to: recipe.date_to,
                       policies: recipe.policies,
+                      policy_models: recipe.policy_models || [],
+                      policy_checkpoints: recipe.policy_checkpoints || [],
+                      policy_methods: recipe.policy_methods || [],
                       include_nonstandard: recipe.include_nonstandard,
                       allow_unlinked_sources:
                         recipe.allow_unlinked_sources || false,
@@ -510,7 +522,10 @@ export default function TrainingPool() {
                     ...EMPTY_FILTERS,
                     categories: loaded.categories,
                     sources: loaded.sources,
-                    policies: loaded.policies,
+                    policies: loaded.policies || [],
+                    policyModels: loaded.policy_models || [],
+                    policyCheckpoints: loaded.policy_checkpoints || [],
+                    policyMethods: loaded.policy_methods || [],
                     outcome: loaded.outcome,
                     dateFrom: loaded.date_from || "",
                     dateTo: loaded.date_to || "",

@@ -12,7 +12,13 @@ def frame() -> pd.DataFrame:
     path = scanner.index_path()
     if not path.is_file():
         raise ValueError("The pool has not been scanned yet: run `levi pool scan`")
-    return pd.read_parquet(path)
+    df = pd.read_parquet(path)
+    if "policy_method" not in df.columns:
+        raise ValueError(
+            "The pool index is from an older LEVI (no policy columns): "
+            "run `levi pool scan`"
+        )
+    return df
 
 
 def summary() -> dict:
@@ -46,6 +52,9 @@ def _filter(
     formats=None,
     outcome=None,
     policies=None,
+    policy_models=None,
+    policy_checkpoints=None,
+    policy_methods=None,
     date_from=None,
     date_to=None,
     show_heldout=False,
@@ -76,6 +85,12 @@ def _filter(
         df = df[df.outcome == outcome]
     if policies:
         df = df[df.policy.isin(policies)]
+    if policy_models:
+        df = df[df.policy_model.isin(policy_models)]
+    if policy_checkpoints:
+        df = df[df.policy_checkpoint.isin(policy_checkpoints)]
+    if policy_methods:
+        df = df[df.policy_method.isin(policy_methods)]
     if date_from:
         df = df[df.date.fillna("") >= date_from]
     if date_to:
@@ -104,7 +119,9 @@ def episodes(limit: int = 200, offset: int = 0, **filters) -> dict:
 def facets(**filters) -> dict:
     """Counts for the page's facets over the rows the visibility toggles
     (``show_heldout``, ``show_copies``, ``show_archive``) and ``categories``
-    leave: categories, sources, formats, policies, outcomes, dates, plus how
+    leave: categories, sources, formats, policies (the old single field: the
+    checkpoint), policy_models, policy_checkpoints, policy_methods, outcomes,
+    dates, plus how
     many held-out episodes and copies the toggles hide."""
     full = frame()
     toggles = {
@@ -127,6 +144,9 @@ def facets(**filters) -> dict:
         ],
         "formats": dict(Counter(scoped.format)),
         "policies": dict(Counter(scoped.policy.dropna())),
+        "policy_models": dict(Counter(scoped.policy_model.dropna())),
+        "policy_checkpoints": dict(Counter(scoped.policy_checkpoint.dropna())),
+        "policy_methods": dict(Counter(scoped.policy_method.dropna())),
         "outcomes": {
             "success": int((scoped.outcome == "success").sum()),
             "failure": int((scoped.outcome == "failure").sum()),
@@ -159,7 +179,15 @@ def tasks(**filters) -> list[dict]:
     out = []
     by_task = defaultdict(list)
     for row in df[
-        ["task", "task_raw", "category", "frames", "outcome", "source"]
+        [
+            "task",
+            "task_raw",
+            "category",
+            "frames",
+            "outcome",
+            "source",
+            "policy_method",
+        ]
     ].itertuples(index=False):
         by_task[row.task].append(row)
     for task, members in sorted(by_task.items()):
@@ -172,6 +200,9 @@ def tasks(**filters) -> list[dict]:
                 "episodes": len(members),
                 "frames": int(sum(int(m.frames or 0) for m in members)),
                 "categories": dict(Counter(m.category for m in members)),
+                "policy_methods": dict(
+                    Counter(m.policy_method for m in members if m.policy_method)
+                ),
                 "success": outcomes.get("success", 0),
                 "failure": outcomes.get("failure", 0),
                 "success_rate": round(outcomes.get("success", 0) / decided, 3)

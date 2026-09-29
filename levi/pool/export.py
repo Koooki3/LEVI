@@ -200,6 +200,12 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "human_label",
         "outcome",
         "outcome_source",
+        "policy",
+        "policy_model",
+        "policy_checkpoint",
+        "policy_method",
+        "policy_phase",
+        "policy_label",
         "fingerprint",
         "group",
         "stat_sig",
@@ -221,6 +227,19 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "heldout_lists": [str(p) for p in settings.heldout_files()],
         "heldout_disabled": settings.heldout_disabled(),
         "warnings": [w for w in warnings if not w["blocking"]],
+    }
+
+
+def _policy_fields(ep: dict) -> dict:
+    return {
+        k: ep.get(k)
+        for k in (
+            "policy_model",
+            "policy_checkpoint",
+            "policy_method",
+            "policy_phase",
+            "policy_label",
+        )
     }
 
 
@@ -641,6 +660,7 @@ def _raw_capture(job, options, staging, progress) -> dict:
                 "hardlinked_files": linked,
                 "outcome": ep["outcome"],
                 "outcome_source": ep["outcome_source"],
+                **_policy_fields(ep),
                 "frames": ep["frames"],
             }
         )
@@ -852,6 +872,7 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
                 "fingerprint": ep["fingerprint"],
                 "outcome": ep["outcome"],
                 "outcome_source": ep["outcome_source"],
+                **_policy_fields(ep),
                 "frames": n,
             }
         )

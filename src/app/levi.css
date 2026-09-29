@@ -1974,6 +1974,12 @@ select optgroup {
   color: #c7caba;
   white-space: nowrap;
 }
+.levi-pool-methods {
+  min-width: 140px;
+}
+.levi-pool-methods .levi-pool-badge {
+  margin: 0 4px 3px 0;
+}
 .levi-pool-badge.heldout {
   margin-left: 0;
   border-color: #f1c67790;

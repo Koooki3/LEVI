@@ -41,9 +41,10 @@ import pyarrow.parquet as pq
 from ..conversion import raw
 from ..conversion.progress import Progress
 from . import heldout, labels, settings
+from . import policy as policy_mod
 from . import rules as rules_mod
 
-SCHEMA = "levi.pool.index.v1"
+SCHEMA = "levi.pool.index.v2"
 STAGES = ["Walk", "Raw episodes", "Datasets", "Labels", "Held-out", "Index"]
 COLUMNS = [
     "key",
@@ -65,6 +66,11 @@ COLUMNS = [
     "data_source",
     "control_mode",
     "policy",
+    "policy_model",
+    "policy_checkpoint",
+    "policy_method",
+    "policy_phase",
+    "policy_label",
     "date",
     "robot_flag",
     "human_label",
@@ -102,7 +108,10 @@ RC_FACTS = (
     "task_raw",
     "data_source",
     "control_mode",
-    "policy",
+    "policy_model",
+    "policy_checkpoint",
+    "policy_method",
+    "policy_phase",
     "date",
     "robot_flag",
     "fingerprint",
@@ -308,18 +317,6 @@ def _category(ctx: Context, path: Path, fmt: str, facts: dict, levi: bool):
     return None, None
 
 
-def _policy(meta: dict) -> str | None:
-    policy = meta.get("policy")
-    if isinstance(policy, dict):
-        checkpoint = policy.get("checkpoint_dir")
-        if checkpoint:
-            return Path(str(checkpoint)).name
-        return policy.get("config")
-    if isinstance(policy, str):
-        return policy
-    return None
-
-
 def _videos(folder: Path) -> list[tuple[str, int]]:
     out = []
     for entry in os.scandir(folder):
@@ -362,7 +359,7 @@ def rc_facts(demo: Path) -> dict:
         "task_raw": str(text),
         "data_source": meta.get("data_source"),
         "control_mode": meta.get("control_mode"),
-        "policy": _policy(meta),
+        **policy_mod.from_metadata(meta),
         "date": str(meta.get("created_at") or "")[:10] or None,
         "robot_flag": raw.demo_outcome(demo),
         "fingerprint": fingerprint,
@@ -411,6 +408,8 @@ def _rc_rows(ctx, demos, previous, progress) -> list[dict]:
             and all(k in old for k in RC_FACTS)
         ):
             facts = {k: old.get(k) for k in RC_FACTS}
+            if facts["policy_method"] == "unknown":
+                facts["policy_method"] = None  # decided again by the category
         else:
             facts = rc_facts(demo)
         source, nested = _rc_source(ctx, demo, task_dirs)
@@ -422,6 +421,7 @@ def _rc_rows(ctx, demos, previous, progress) -> list[dict]:
         category, why = _category(ctx, demo, "robot_capture", facts, False)
         return {
             **facts,
+            **policy_mod.finish(facts, category, demo),
             "key": key,
             "source": ctx.source_id(source),
             "source_path": str(source),
@@ -556,7 +556,13 @@ def _lerobot_rows(ctx, dataset: Path, rc_keys: dict, previous) -> tuple[list, di
         if category is None:
             category = ctx.rules["lerobot_default_category"]
             why = "default: LeRobot dataset without provenance"
+        fields = policy_mod.finish(
+            policy_mod.from_lerobot(row, rc_keys.get(link) if link else None),
+            category,
+            row.get("rollout_source_demo"),
+        )
         return {
+            **fields,
             "key": key,
             "source": ctx.source_id(dataset),
             "source_path": str(dataset),
@@ -575,7 +581,6 @@ def _lerobot_rows(ctx, dataset: Path, rc_keys: dict, previous) -> tuple[list, di
             "category_reason": why,
             "data_source": data_source,
             "control_mode": None,
-            "policy": row.get("rollout_policy") or None,
             "date": None,
             "robot_flag": flag,
             "nonstandard": False,
@@ -633,7 +638,7 @@ def _droid_rows(ctx, demos, previous) -> list[dict]:
                 "category_reason": why,
                 "data_source": None,
                 "control_mode": None,
-                "policy": None,
+                **policy_mod.finish({}, category),
                 "date": None,
                 "robot_flag": (
                     ("success" if success else "failure")

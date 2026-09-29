@@ -9,6 +9,19 @@ def _print(value) -> None:
     print(json.dumps(value, indent=1, ensure_ascii=False, default=str))
 
 
+def _policy_flags(parser) -> None:
+    parser.add_argument("--policy-model", action="append", help="e.g. pi05_fr3_all")
+    parser.add_argument(
+        "--policy-checkpoint", action="append", help="e.g. pi05_fr3_all_step49999"
+    )
+    parser.add_argument(
+        "--policy-method",
+        action="append",
+        choices=["direct", "dsrl", "rlt", "sfe", "student", "other", "unknown"],
+        help="how the rollout was run (direct = direct deployment)",
+    )
+
+
 def _filters(parser) -> None:
     parser.add_argument("--category", action="append", help="repeatable")
     parser.add_argument("--source", action="append", help="source id or path")
@@ -16,7 +29,8 @@ def _filters(parser) -> None:
     parser.add_argument("--search", help="substring of the task")
     parser.add_argument("--format", action="append", dest="formats")
     parser.add_argument("--outcome", choices=["success", "failure"])
-    parser.add_argument("--policy", action="append")
+    parser.add_argument("--policy", action="append", help="checkpoint name (old)")
+    _policy_flags(parser)
     parser.add_argument("--show-heldout", action="store_true")
     parser.add_argument("--show-copies", action="store_true")
     parser.add_argument("--show-archive", action="store_true")
@@ -31,6 +45,9 @@ def _filter_args(args) -> dict:
         "formats": args.formats,
         "outcome": args.outcome,
         "policies": args.policy,
+        "policy_models": args.policy_model,
+        "policy_checkpoints": args.policy_checkpoint,
+        "policy_methods": args.policy_method,
         "show_heldout": args.show_heldout,
         "show_copies": args.show_copies,
         "show_archive": args.show_archive,
@@ -79,7 +96,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     save.add_argument("--per-task-cap", type=int)
     save.add_argument("--seed", type=int)
-    save.add_argument("--policy", action="append")
+    save.add_argument("--policy", action="append", help="checkpoint name (old)")
+    _policy_flags(save)
     save.add_argument("--date-from")
     save.add_argument("--date-to")
     save.add_argument("--include-nonstandard", action="store_true")
@@ -217,6 +235,9 @@ def main(argv=None) -> int:
                     ("per_task_cap", args.per_task_cap),
                     ("seed", args.seed),
                     ("policies", args.policy),
+                    ("policy_models", args.policy_model),
+                    ("policy_checkpoints", args.policy_checkpoint),
+                    ("policy_methods", args.policy_method),
                     ("date_from", args.date_from),
                     ("date_to", args.date_to),
                     ("formats", args.formats),

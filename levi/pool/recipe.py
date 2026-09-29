@@ -1,7 +1,7 @@
 """Recipes: named, saved selections over the pool index, and their preview.
 
 A recipe picks episodes by category, source, format, task (an ordered list:
-the export follows it), date and policy, then applies, in order:
+the export follows it), date and policy (model, checkpoint, how it was run), then applies, in order:
 
 1. held-out episodes out — always, whatever the recipe says;
 2. episodes the recipe names in ``exclude`` out;
@@ -55,7 +55,13 @@ class Recipe(BaseModel):
     seed: int = 0
     date_from: str | None = Field(None, pattern=DATE)
     date_to: str | None = Field(None, pattern=DATE)
+    # The old single field: a rollout's checkpoint name (kept for saved recipes).
     policies: list[str] = Field(default_factory=list)
+    policy_models: list[str] = Field(default_factory=list)
+    policy_checkpoints: list[str] = Field(default_factory=list)
+    policy_methods: list[
+        Literal["direct", "dsrl", "rlt", "sfe", "student", "other", "unknown"]
+    ] = Field(default_factory=list)
     include_nonstandard: bool = False
     # A task taken from raw captures and from a LeRobot source that is not
     # linked to them may be one recording twice: refused unless sources are
@@ -171,6 +177,9 @@ def select(
         tasks=recipe.tasks or None,
         formats=recipe.formats or None,
         policies=recipe.policies or None,
+        policy_models=recipe.policy_models or None,
+        policy_checkpoints=recipe.policy_checkpoints or None,
+        policy_methods=recipe.policy_methods or None,
         date_from=recipe.date_from,
         date_to=recipe.date_to,
         show_heldout=True,
@@ -383,6 +392,12 @@ def preview(
         "tasks_without_episodes": missing,
         "categories": dict(Counter(r["category"] for r in chosen)),
         "formats": dict(Counter(r["format"] for r in chosen)),
+        "policy_methods": dict(
+            Counter(r["policy_method"] for r in chosen if r.get("policy_method"))
+        ),
+        "policy_models": dict(
+            Counter(r["policy_model"] for r in chosen if r.get("policy_model"))
+        ),
         "outcomes": dict(Counter(r["outcome"] or "none" for r in chosen)),
         "outcome_sources": dict(Counter(r["outcome_source"] or "none" for r in chosen)),
         "human_as_success": human_as_success,

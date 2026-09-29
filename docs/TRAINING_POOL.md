@@ -9,7 +9,7 @@ The training pool indexes every dataset under a set of read-only folders, one ro
 - **Sources are read-only.** The pool only reads `LEVI_POOL_ROOTS`. Its own files live in `<workspace>/pool/`; an export goes to a new folder, written as `.<name>.partial` and renamed when complete. An export may not lie inside (or contain) any indexed source dataset, must lie inside `LEVI_EXPORT_ROOTS`, and its folder must not exist yet.
 - **Held-out episodes are never exported.** The lists in `LEVI_POOL_HELDOUT` (for example `levi-hub/gold/frozen/plates-frozen-v1.json`) are matched by path and by video sha256; every copy, filtered variant or conversion of a held-out episode is held out too. A recipe cannot include them, and the export checks again — by path, by sha256 and against the index — and refuses the whole export if one slipped into a plan. This is a refusal, not a filter default.
 - **One recorded episode counts once.** Copies are grouped (see [Grouping](#grouping-copies-variants-conversions--副本与版本归并)); an export takes the canonical member unless the recipe names only other sources.
-- **Traceable.** Every export writes `pool_export.json`: the recipe, the task order, each episode's source path, group and fingerprint, every exclusion with its reason, the LEVI commit and the format parameters.
+- **Traceable.** Every export writes `pool_export.json`: the recipe, the task order, each episode's source path, group, fingerprint and policy fields (`policy_model`, `policy_checkpoint`, `policy_method`, `policy_phase`, `policy_label`), every exclusion with its reason, the LEVI commit and the format parameters.
 
 - **源数据只读**：只读取 `LEVI_POOL_ROOTS`；训练池自己的文件在 `<workspace>/pool/`；导出写到新目录，先写 `.<名称>.partial`，完成后改名。导出目录不能在任何已登记的源数据集内部（也不能包含源数据集），必须在 `LEVI_EXPORT_ROOTS` 之内，且事先不存在。
 - **留出（冻结测试）片段永不导出**：`LEVI_POOL_HELDOUT` 中的清单按路径和视频 sha256 匹配，留出片段的副本、过滤版本和转换结果同样视为留出。选择无法包含它们；导出时再按路径、sha256 和索引各查一遍，只要有一条混入就拒绝整个导出。
@@ -67,7 +67,24 @@ Skip, category and format rules are data, not code (`levi/pool/rules.py`); `<wor
 
 ### Index / 片段索引
 
-Columns of `pool/index.parquet` include `key`, `source`, `format`, `episode`, `task` (normalised) and `task_raw`, `frames`, `fps`, `cameras`, `state_dim`/`action_dim`, `category` and `category_reason`, `data_source`, `control_mode`, `policy` (a rollout's checkpoint name), `date`, `robot_flag` (a rollout's own success flag), `human_label` (from any LEVI workspace under the roots, read-only), `outcome` and `outcome_source` (human label first, then the robot's flag), `nonstandard`, `exportable`, `fingerprint`, `content_hash`, `recording`, `filtered`, `group`, `canonical`, `copies`, `heldout`, `heldout_set`, `heldout_id`.
+Columns of `pool/index.parquet` include `key`, `source`, `format`, `episode`, `task` (normalised) and `task_raw`, `frames`, `fps`, `cameras`, `state_dim`/`action_dim`, `category` and `category_reason`, `data_source`, `control_mode`, the policy columns below, `date`, `robot_flag` (a rollout's own success flag), `human_label` (from any LEVI workspace under the roots, read-only), `outcome` and `outcome_source` (human label first, then the robot's flag), `nonstandard`, `exportable`, `fingerprint`, `content_hash`, `recording`, `filtered`, `group`, `canonical`, `copies`, `heldout`, `heldout_set`, `heldout_id`.
+
+### Which policy produced a rollout / 是哪个策略产生的 rollout
+
+A rollout's `policy` used to be one value (the checkpoint name), so a direct deployment, an online-RL run and a student-policy run of one checkpoint looked alike. The index now keeps them apart (schema `levi.pool.index.v2`; an older index asks for a rescan). Code: `levi/pool/policy.py`; nothing in it is task specific.
+
+| Column | Meaning |
+| --- | --- |
+| `policy_model` | the model config, e.g. `pi05_fr3_all_state` (`policy.config`; then `policy.server_metadata.config`, a string `policy`, the `models/<policy>/` or `online_rl/<method>/<policy>/` folder) |
+| `policy_checkpoint` | the checkpoint folder name, e.g. `pi05_fr3_all_step49999` (`policy.checkpoint_dir`); two models may share one checkpoint name |
+| `policy_method` | how it was run: `direct` (direct deployment), `dsrl`, `rlt`, `sfe`, `student`, `other` (a method the pool does not know) or `unknown` (a rollout with no policy information at all) |
+| `policy_phase` | `policy.phase` (`eval_ckpt`, `prior`, `sac`, `student`, …) |
+| `policy_label` | the four above in one line: `pi05_fr3_all_state · step49999 · DSRL online RL` |
+| `policy` | the old column, kept for saved recipes: the checkpoint, else the model |
+
+`policy_method` is read in this order: `policy.method`, the top-level `method`, `control_mode` (`policy_rollout` = direct; `dsrl_online_rl`, `rlt_online_rl`, `sfe_online_rl`, `student_policy_rollout`), then the folder layout (`models/…` = direct, `online_rl/<method>/…`). A value the pool does not know never hides a known one further down. A teleoperation mode is not a policy method, so only rollouts get a method (or `unknown`); a human capture has all of these empty. A LeRobot rollout takes the fields of its linked raw capture (the existing conversion links, `rollout_source_demo` first), and for what that leaves empty its own `rollout_source_method` (`models` = direct), the folder in `rollout_source_demo` and `rollout_policy`.
+
+旧的 `policy` 只有一个值（检查点名），直接部署、在线 RL 和学生策略的同一检查点看起来一样。索引现在把它们分开：`policy_model`（模型配置）、`policy_checkpoint`（检查点）、`policy_method`（运行方式：`direct` 直接部署、`dsrl`、`rlt`、`sfe`、`student` 学生策略、`other`、`unknown` 未知）、`policy_phase` 和一行可读的 `policy_label`。运行方式按 `policy.method`、顶层 `method`、`control_mode`、文件夹路径的顺序判断；没有任何策略信息的 rollout 记为 `unknown`；LeRobot rollout 继承所链接原始采集的字段，缺的部分再用 `rollout_source_method` 和 `rollout_source_demo` 的路径补。旧列 `policy` 保留（检查点，否则模型），旧配方照常可用。索引版本升为 v2，旧索引会要求重新扫描。
 
 ### Grouping: copies, variants, conversions / 副本与版本归并
 
@@ -88,7 +105,8 @@ A recipe is a named, saved selection (`pool/recipes/<name>.json`):
 
 | Field | Meaning |
 | --- | --- |
-| `categories`, `sources`, `formats`, `policies`, `date_from`, `date_to` | filters (`sources` also orders episodes within a task) |
+| `categories`, `sources`, `formats`, `policies`, `date_from`, `date_to` | filters (`sources` also orders episodes within a task); `policies` is the old checkpoint filter |
+| `policy_models`, `policy_checkpoints`, `policy_methods` | policy filters (see above; `policy_methods` values: `direct`, `dsrl`, `rlt`, `sfe`, `student`, `other`, `unknown`); combined with AND, values within one list with OR |
 | `tasks` | ordered list of normalised tasks; the export follows this order |
 | `outcome` | `all`, `robot_flag_success` (the robot's flag), `verified_success` (a human label first, then the robot's flag; the preview counts `outcome_sources` and warns how many rest on the operator's key press only) or `human_verified_success` (a human label only). An episode whose human labels disagree is left out of both verified outcomes and of RECAP exports (`label_conflict`) |
 | `per_task_cap`, `seed` | at most this many episodes per task, drawn reproducibly |
@@ -105,7 +123,8 @@ The preview lists episodes and frames per task and every exclusion by reason (`h
 ```bash
 uv run levi pool recipe save pi05-mix --category human --task "pick fork into green plate" \
     --task "pick apple on green plate" [--per-task-cap 50 --seed 1] [--outcome verified_success] \
-    [--source <id>] [--policy <checkpoint>] [--date-from 2026-09-01] [--exclude <episode key>] \
+    [--source <id>] [--policy-model <config>] [--policy-checkpoint <name>] \
+    [--policy-method direct|dsrl|rlt|sfe|student|other|unknown] [--policy <checkpoint>] [--date-from 2026-09-01] [--exclude <episode key>] \
     [--task-text "pick fork into green plate=Pick the fork into the green plate"] [--file recipe.json]
 uv run levi pool recipe show pi05-mix [--format recap_value]     # the recipe and its preview
 uv run levi pool recipe list | delete <name>
@@ -137,14 +156,14 @@ Each episode row in `meta/episodes.jsonl` of a LeRobot export carries `pool_key`
 `/pool` (top navigation **Training pool / 训练池**, and a card on the Workbench). It is the same backend as `levi pool …`.
 
 - **Pool folders** (top): the roots, the last scan time and counts, **Scan now** with a progress bar and Cancel, and the recent jobs (scans, exports, pushes) with their status.
-- **Filters** (left): category (原始人工采集 / 原始 rollout / LEVI 处理后 / 外部 / 归档), source (searchable, counts), a task search, outcome (all / robot flag success / verified success), policy and date. *Show hidden* switches on held-out episodes (留出测试集), copies and the archive; each shows how many it hides.
-- **Tasks and episodes** (centre): the task table (episodes per category, frames, success rate, **+ Add** puts the task at the end of the composition; clicking a task narrows the episode table to it) and the paged episode table with source, category, task, frames, outcome and badges for held-out, copy, non-standard and not exportable. An episode of a source registered in LEVI links to the viewer; otherwise its path is shown. A held-out row has no checkbox and cannot be part of an export: the server excludes it whatever the page sends.
+- **Filters** (left): category (原始人工采集 / 原始 rollout / LEVI 处理后 / 外部 / 归档), source (searchable, counts), a task search, outcome (all / robot flag success / verified success), three policy facets (策略模型 / Policy model, 检查点 / Checkpoint, 运行方式 / How it was run: 直接部署, DSRL, RLT, SFE, 学生策略, 未知; each with counts and shown only when the selection holds rollouts) and date. *Show hidden* switches on held-out episodes (留出测试集), copies and the archive; each shows how many it hides.
+- **Tasks and episodes** (centre): the task table (episodes per category, frames, success rate, how its rollouts were run, **+ Add** puts the task at the end of the composition; clicking a task narrows the episode table to it) and the paged episode table with source, category, task, frames, outcome, the policy label (rollouts) and badges for held-out, copy, non-standard and not exportable. An episode of a source registered in LEVI links to the viewer; otherwise its path is shown. A held-out row has no checkbox and cannot be part of an export: the server excludes it whatever the page sends.
 - **Composition** (right): the ordered task list (drag a task, or use its up / down buttons; the order is the export order), per-task cap, seed, non-standard folders, the constraints taken from the filters, and a live preview (episodes, frames, held-out excluded, and every other exclusion with its reason). Recipes are saved, loaded and deleted by name.
 - **Export**: format, dataset name, output directory (a folder outside `LEVI_EXPORT_ROOTS` is flagged in the field and refused by the server), fps, camera mapping, hard links (raw capture copy only), **Dry run** and **Start export** with progress. A finished export links to its `pool_export.json` and offers **Send to remote / 传到远程**.
 
 Page routes beyond the table above: `GET /api/levi/pool/facets` (facet counts and what the toggles hide), `outcome=robot_flag_success|verified_success`, `date_from`, `date_to` on `tasks` and `episodes`, and each episode row carries `viewer` (its LEVI viewer path or `null`).
 
-页面在 `/pool`（顶部导航“训练池”，工作台也有入口），与 `levi pool …` 共用后端：顶部是池目录、上次扫描和“立即扫描”；左侧分面（类别、来源、任务搜索、结局、策略、日期，可显示留出测试集、副本、归档并显示被隐藏的数量）；中间是任务表和片段表（已登记的数据集可跳到片段查看器，否则显示路径）；右侧是组合（有序任务列表，可拖动或用上下按钮排序，每任务上限、种子、实时预览及各类排除原因、命名保存/载入/删除）和导出面板（格式、名称、输出目录、fps、相机映射、硬链接、试运行、进度、`pool_export.json` 链接）。留出片段在页面上不可选，服务端也会排除。
+页面在 `/pool`（顶部导航“训练池”，工作台也有入口），与 `levi pool …` 共用后端：顶部是池目录、上次扫描和“立即扫描”；左侧分面（类别、来源、任务搜索、结局、策略模型、检查点、运行方式、日期，可显示留出测试集、副本、归档并显示被隐藏的数量）；中间是任务表和片段表（已登记的数据集可跳到片段查看器，否则显示路径）；右侧是组合（有序任务列表，可拖动或用上下按钮排序，每任务上限、种子、实时预览及各类排除原因、命名保存/载入/删除）和导出面板（格式、名称、输出目录、fps、相机映射、硬链接、试运行、进度、`pool_export.json` 链接）。留出片段在页面上不可选，服务端也会排除。
 
 ## Remote transfer / 远程传输
 
@@ -169,14 +188,14 @@ All routes are behind the service's UI token and same-origin check.
 | --- | --- | --- |
 | GET | `/api/levi/pool/status` | Settings, the last scan's summary, recent jobs |
 | GET | `/api/levi/pool/sources?category=&show_archive=` | Sources with format, category, episodes, copies, held-out, exportable |
-| GET | `/api/levi/pool/tasks?category=&source=&search=&format=&show_heldout=&show_copies=&show_archive=` | Per task: episodes, frames, categories, success rate, spellings |
-| GET | `/api/levi/pool/episodes?…&task=&outcome=&policy=&limit=&offset=` | The index, paged |
+| GET | `/api/levi/pool/tasks?category=&source=&search=&format=&show_heldout=&show_copies=&show_archive=` | Per task: episodes, frames, categories, success rate, spellings, `policy_methods`; takes the same policy filters |
+| GET | `/api/levi/pool/episodes?…&task=&outcome=&policy=&policy_model=&policy_checkpoint=&policy_method=&limit=&offset=` | The index, paged |
 | POST | `/api/levi/pool/scan?rehash=` | Start a scan job |
 | GET | `/api/levi/pool/jobs`, `/api/levi/pool/jobs/{id}` | Scan and export jobs with progress and result |
 | GET / PUT / DELETE | `/api/levi/pool/recipes`, `/api/levi/pool/recipes/{name}` | Recipe CRUD (the body's `name` must match the URL) |
 | POST | `/api/levi/pool/preview` | `{ "recipe": {…}, "format": "recap_value" }` → counts and exclusions |
 | POST | `/api/levi/pool/export` | `{ "recipe_name": "…" or "recipe": {…}, "options": {"format", "name", "output_dir", "fps", "cameras", "camera_map", "hardlink", …}, "dry_run": false }`; 403 for a path outside `LEVI_EXPORT_ROOTS` or inside a source, 400 for an existing target or an empty selection |
-| GET | `/api/levi/pool/facets?category=&show_heldout=&show_copies=&show_archive=` | Facet counts for the page and what the toggles hide |
+| GET | `/api/levi/pool/facets?category=&show_heldout=&show_copies=&show_archive=` | Facet counts for the page (including `policy_models`, `policy_checkpoints`, `policy_methods`) and what the toggles hide |
 | POST | `/api/levi/pool/jobs/{id}/cancel` | Stop a running scan, export or push |
 | GET | `/api/levi/pool/jobs/{id}/summary` | `pool_export.json` of a finished export job |
 | GET | `/api/levi/pool/remotes` | Registered remote targets |
