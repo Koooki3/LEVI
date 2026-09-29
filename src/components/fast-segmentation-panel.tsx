@@ -393,6 +393,9 @@ export default function FastSegmentationPanel({
   const [liveNote, setLiveNote] = useState<string | null>(null);
   const [stats, setStats] = useState<LiveStats | null>(null);
   const sessionRef = useRef<string | null>(null);
+  // Bumped when the episode changes or the panel unmounts: a start request
+  // that returns afterwards belongs to nobody and is stopped at once.
+  const liveGeneration = useRef(0);
   const streamRef = useRef<EventSource | null>(null);
   const identRef = useRef(stableIdent);
   useEffect(() => {
@@ -481,12 +484,20 @@ export default function FastSegmentationPanel({
     setLiveError(null);
     setLiveNote(null);
     setStats(null);
+    const generation = liveGeneration.current;
     try {
       const started = await startLiveSession(stableIdent, {
         episode_index: episodeId,
         model: model.name,
         save,
       });
+      if (generation !== liveGeneration.current) {
+        // The episode changed (or the panel closed) while the model loaded:
+        // never adopt this session, or it would hold the GPU fed by another
+        // episode's clock.
+        void stopLiveSession(started.id, identRef.current).catch(() => {});
+        return;
+      }
       sessionRef.current = started.id;
       setSession(started);
       setLiveSession(
@@ -496,9 +507,9 @@ export default function FastSegmentationPanel({
       );
       openStream(started.id);
     } catch (error) {
-      setLiveError(message(error));
+      if (generation === liveGeneration.current) setLiveError(message(error));
     } finally {
-      setLiveBusy(null);
+      if (generation === liveGeneration.current) setLiveBusy(null);
     }
   };
 
@@ -515,6 +526,8 @@ export default function FastSegmentationPanel({
     };
     window.addEventListener("pagehide", onUnload);
     return () => {
+      liveGeneration.current += 1;
+      setLiveBusy(null);
       window.removeEventListener("pagehide", onUnload);
       onUnload();
       sessionRef.current = null;
@@ -533,7 +546,9 @@ export default function FastSegmentationPanel({
 
   // Push the player clock: play/pause/seek/rate events plus a 1 s heartbeat. Fire-and-forget, at most one request in flight.
   const liveId =
-    session && (session.state === "running" || session.state === "starting")
+    session &&
+    session.episode_index === episodeId &&
+    (session.state === "running" || session.state === "starting")
       ? session.id
       : null;
   useEffect(() => {
@@ -771,11 +786,23 @@ export default function FastSegmentationPanel({
       if (label) setLabelJob((current) => current ?? fromSegJob(label));
       if (distil) setDistilJob((current) => current ?? fromSegJob(distil));
     };
-    void load();
-    const timer = window.setInterval(() => void refreshStatus(), 15_000);
+    // The next poll is scheduled only after the previous answer arrived, so
+    // a slow backend never collects a queue of polls waiting on its lock.
+    // TODO(S2, pre-merge review): a whole-dataset label job is still
+    // published inside the one poll that finds it finished, with every row
+    // in the core process's memory; stream the publish per (episode,
+    // camera) pair or in batches before labelling large datasets.
+    let timer = 0;
+    const poll = async () => {
+      await refreshStatus();
+      if (!cancelled) timer = window.setTimeout(poll, 15_000);
+    };
+    void load().finally(() => {
+      if (!cancelled) timer = window.setTimeout(poll, 15_000);
+    });
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
     };
   }, [refreshStatus]);
 
