@@ -9,7 +9,7 @@ The training pool indexes every dataset under a set of read-only folders, one ro
 - **Sources are read-only.** The pool only reads `LEVI_POOL_ROOTS`. Its own files live in `<workspace>/pool/`; an export goes to a new folder, written as `.<name>.partial` and renamed when complete. An export may not lie inside (or contain) any indexed source dataset, must lie inside `LEVI_EXPORT_ROOTS`, and its folder must not exist yet.
 - **Held-out episodes are never exported.** The lists in `LEVI_POOL_HELDOUT` (for example `levi-hub/gold/frozen/plates-frozen-v1.json`) are matched by path and by video sha256; every copy, filtered variant or conversion of a held-out episode is held out too. A recipe cannot include them, and the export checks again — by path, by sha256 and against the index — and refuses the whole export if one slipped into a plan. This is a refusal, not a filter default.
 - **One recorded episode counts once.** Copies are grouped (see [Grouping](#grouping-copies-variants-conversions--副本与版本归并)); an export takes the canonical member unless the recipe names only other sources.
-- **Traceable.** Every export writes `pool_export.json`: the recipe, the task order, each episode's source path, group, fingerprint and policy fields (`policy_model`, `policy_checkpoint`, `policy_method`, `policy_phase`, `policy_label`), every exclusion with its reason, the LEVI commit and the format parameters.
+- **Traceable.** Every export writes `pool_export.json`: the recipe, the task order, each episode's source path, group, fingerprint, outcome and its source, policy fields (`policy_model`, `policy_checkpoint`, `policy_method`, `policy_phase`, `policy_label`) and why it was picked (`selection_stratum`, `quality_score`, `selection_reason`), per task what was asked for and what was picked (`selection`), every exclusion with its reason, the LEVI commit and the format parameters.
 
 - **源数据只读**：只读取 `LEVI_POOL_ROOTS`；训练池自己的文件在 `<workspace>/pool/`；导出写到新目录，先写 `.<名称>.partial`，完成后改名。导出目录不能在任何已登记的源数据集内部（也不能包含源数据集），必须在 `LEVI_EXPORT_ROOTS` 之内，且事先不存在。
 - **留出（冻结测试）片段永不导出**：`LEVI_POOL_HELDOUT` 中的清单按路径和视频 sha256 匹配，留出片段的副本、过滤版本和转换结果同样视为留出。选择无法包含它们；导出时再按路径、sha256 和索引各查一遍，只要有一条混入就拒绝整个导出。
@@ -107,28 +107,60 @@ A recipe is a named, saved selection (`pool/recipes/<name>.json`):
 | --- | --- |
 | `categories`, `sources`, `formats`, `policies`, `date_from`, `date_to` | filters (`sources` also orders episodes within a task); `policies` is the old checkpoint filter |
 | `policy_models`, `policy_checkpoints`, `policy_methods` | policy filters (see above; `policy_methods` values: `direct`, `dsrl`, `rlt`, `sfe`, `student`, `other`, `unknown`); combined with AND, values within one list with OR |
-| `tasks` | ordered list of normalised tasks; the export follows this order |
+| `tasks` | ordered list of task entries `{task, count, success_ratio, strategy}` (see [Choosing episodes](#choosing-how-many-episodes-a-task-contributes--每个任务取多少片段)); the export follows this order. A bare task text (the old form) still loads: it means `count` unset, `strategy: random` |
 | `outcome` | `all`, `robot_flag_success` (the robot's flag), `verified_success` (a human label first, then the robot's flag; the preview counts `outcome_sources` and warns how many rest on the operator's key press only) or `human_verified_success` (a human label only). An episode whose human labels disagree is left out of both verified outcomes and of RECAP exports (`label_conflict`) |
-| `per_task_cap`, `seed` | at most this many episodes per task, drawn reproducibly |
+| `per_task_cap`, `seed` | the count of a task entry that has none of its own (at most this many episodes per task); `seed` makes every draw reproducible |
 | `include_nonstandard`, `exclude` | non-standard folders in; episode keys out |
 | `allow_unlinked_sources` | see below |
 | `task_text` | normalised task → the text written into the export |
 
-The selection runs in this order: held-out out (always), `exclude`, non-standard and unsupported formats out, one episode per group, the outcome filter, the export format's own need (a raw copy takes raw captures; a RECAP value export needs an outcome), then `per_task_cap`. A task taken from raw captures **and** from a LeRobot dataset that no scan link ties to them (no provenance, different content hash) may be one recording twice. The preview warns (`possible_unlinked_conversion`) and planning an export refuses, unless the recipe names its `sources` or sets `allow_unlinked_sources`. Preview `warnings` also carry the held-out problems above; a `blocking` one stops an export.
+The selection runs in this order: held-out out (always), `exclude`, non-standard and unsupported formats out, one episode per group, the outcome filter, the export format's own need (a raw copy takes raw captures; a RECAP value export needs an outcome), then, per task in the task order, the choice of how many and which episodes. A task taken from raw captures **and** from a LeRobot dataset that no scan link ties to them (no provenance, different content hash) may be one recording twice. The preview warns (`possible_unlinked_conversion`) and planning an export refuses, unless the recipe names its `sources` or sets `allow_unlinked_sources`. Preview `warnings` also carry the held-out problems above; a `blocking` one stops an export.
 
 同一任务同时取自原始采集和无法关联的 LeRobot 数据集时，可能是同一批录制的重复：预览警告，导出默认拒绝，指定 `sources` 或设置 `allow_unlinked_sources` 后放行。
 
-The preview lists episodes and frames per task and every exclusion by reason (`heldout`, `duplicate`, `nonstandard`, `unsupported`, `outcome_filter`, `no_outcome`, `per_task_cap`, …).
+The preview lists episodes and frames per task and every exclusion by reason (`heldout`, `duplicate`, `nonstandard`, `unsupported`, `outcome_filter`, `no_outcome`, `not_selected` (over the task's count), `per_task_cap` (over the global cap), `already_in_composition`, …).
 
 ```bash
-uv run levi pool recipe save pi05-mix --category human --task "pick fork into green plate" \
+uv run levi pool recipe save pi05-mix --category human --task "pick fork into green plate:count=60,success=50%" \
     --task "pick apple on green plate" [--per-task-cap 50 --seed 1] [--outcome verified_success] \
     [--source <id>] [--policy-model <config>] [--policy-checkpoint <name>] \
     [--policy-method direct|dsrl|rlt|sfe|student|other|unknown] [--policy <checkpoint>] [--date-from 2026-09-01] [--exclude <episode key>] \
     [--task-text "pick fork into green plate=Pick the fork into the green plate"] [--file recipe.json]
 uv run levi pool recipe show pi05-mix [--format recap_value]     # the recipe and its preview
+uv run levi pool recipe episodes pi05-mix --task "<task>"          # the episodes picked for one task, with score and reason
+uv run levi pool recipe suggest pi05-mix --task "<task>"           # availability and a balanced default count for adding a task
 uv run levi pool recipe list | delete <name>
 ```
+
+### Choosing how many episodes a task contributes / 每个任务取多少片段
+
+Some tasks have hundreds of episodes. Each task entry says how many it contributes and which ones:
+
+| Field | Meaning |
+| --- | --- |
+| `count` | how many episodes; unset = the recipe's `per_task_cap`, else every episode left after the filters |
+| `success_ratio` | target share of successes among the picked episodes, 0..1; unset = keep the task's own share |
+| `strategy` | `quality` (default in the page and for an entry with options), `random` (a seeded draw), `first` (the first episodes of the index: source order, then episode number) |
+
+On the command line a task is `text` (the old form) or `text:count=50,success=0.6,strategy=quality`: `count` is a number or `all`; `success` is 0..1, `60%` or `natural`; `strategy` is `quality`, `random` or `first`. The options follow the last colon and count only when every part is a known `key=value`, so a task text may contain colons and commas.
+
+**How the pick works.** It runs per task, in the task order, on the episodes left after every filter above (held-out, duplicates, non-standard, unsupported formats, the outcome filter, the category, source, policy and date filters).
+
+1. *Split by outcome.* Successes and failures follow the same outcome the export writes: a human label first, then the robot's flag. Episodes with no outcome, and (for `quality`) episodes whose human labels disagree, are a last resort: they are picked only when the count cannot be met otherwise, and reported as `selected_unknown`. A task with no recorded outcome at all (human demonstrations) is taken as it is.
+2. *Quota.* Without `success_ratio`, `quality` keeps the natural share of the task's successes and failures (rounded); `random` and `first` draw over the whole task, which keeps it in expectation. With `success_ratio`, `round(count × ratio)` successes and the rest failures, for every strategy. If one side has too few, the other side fills the gap and the shortfall is reported (`shortfall_successes`, `shortfall_failures`, note `success_short` / `failure_short`). If fewer episodes exist than `count`, all are taken and `shortfall` says how many are missing.
+3. *Quality score* (strategy `quality`), 0..1: `0.40 × trust + 0.30 × completeness + 0.30 × fit`.
+   - *trust*: a human label 1.0, a demonstration 0.8, the robot's flag 0.6, no outcome 0.3, conflicting human labels 0.
+   - *completeness*: 1 for a frame count between half and twice the task's median; it falls to 0 at 0.15 × the median (an aborted recording) and at 4 × (a run that never ended).
+   - *fit* for a success (efficiency): the episode's frame count is ranked among the task's successes; the lower middle (15th to 55th percentile) scores 1, the shortest a little less (often truncated), the longest, slow and hesitant, down to 0. *Fit* for a failure: whether it is long enough to hold an attempt, `frames / (half the median success length)`, at most 1, so near-zero frames rank last.
+   - A LEVI workspace's RECAP advantage labels (`recap_values`, found by the scan) only break ties between episodes whose scores are within 0.02; they never outrank the score. Without them nothing changes.
+4. *Diversity.* Within each side, episodes are grouped into strata (`policy_method | policy_checkpoint | source | month`). The pick takes the best episode of the stratum that has given the fewest so far, round after round, so a task's picks do not all come from one run. An episode scoring under 0.4 waits until no stratum has a better one.
+5. *The composition as a whole.* A newly added task defaults to the median count of the tasks already added (100 when none; never more than what is available), so the composition stays balanced. An episode (or a copy of it) picked for an earlier task is not picked again (`already_in_composition`). If the composition leans to one category or method (80% or more), the preview shows it in `mix.lean`; nothing is reweighted.
+
+The choice is deterministic for a recipe, its `seed` and the index, and one function serves the preview, the export plan and `POST /selection`, so they cannot differ. `pool_export.json` records per episode `task`, `selection_stratum`, `quality_score`, `selection_reason`, `outcome` and `outcome_source`, and per task (`selection`) `requested`, `available`, `successes`, `failures`, `selected`, the selected successes and failures, `shortfall`, `shortfall_successes`, `shortfall_failures`, `notes` and `exported`.
+
+部分任务有数百个片段，任务条目因此可以指定取多少、取哪些：`count`（片段数，缺省用 `per_task_cap`，再缺省取全部）、`success_ratio`（成功占比 0..1，缺省保持该任务原有比例）、`strategy`（`quality` 智能选取、`random` 按种子随机、`first` 按索引顺序）。命令行写法 `文本:count=50,success=0.6,strategy=quality`（`count` 为数字或 `all`，`success` 为 0..1、`60%` 或 `natural`）；不带选项的文本仍是旧写法（按种子随机）。旧配方（任务文本列表加全局 `per_task_cap`）载入后含义不变。
+
+选取规则：在所有过滤之后，按任务顺序逐个任务进行。（1）按结果分成功/失败，口径与导出一致（人工标签优先，其次机器人标志）；没有结果的片段、以及人工标签互相矛盾的片段（智能选取时）只在凑不够数量时才用，并单独报告；完全没有结果的任务（人工示范）原样取。（2）配额：不指定成功占比时智能选取保持自然比例，指定后取 `round(片段数 × 占比)` 个成功，其余为失败；某一类不够时由另一类补足并报告缺口；可用片段少于要求时全部取走并报告缺少的数量。（3）质量分 = 0.40 × 标注可信度 + 0.30 × 完整度 + 0.30 × 适配度：人工标签 1.0、示范 0.8、机器人标志 0.6、无结果 0.3、标签矛盾 0；片段长度在任务中位数的 0.5–2 倍内为满分，短于 0.15 倍（中途中止）或长于 4 倍（一直没结束）降为 0；成功片段偏好“较高效”的（帧数排在该任务成功片段的 15%–55% 分位），失败片段需要足够长以包含一次尝试（帧数至少约为成功片段中位数的一半）；RECAP 优势标签只在分数相差不到 0.02 时用来打破平局。（4）多样性：按 策略方法 | 检查点 | 来源 | 月份 分层，轮流从已选最少的层里取最好的，避免全部来自同一次运行；低于 0.4 分的片段最后才用。（5）整体：新添加任务的默认片段数为已添加任务片段数的中位数（没有时为 100，不超过可用数）；前面任务已选的片段不会重复选取；组合明显偏向某一类别或方法（≥ 80%）时预览会显示，不会自动重新加权。预览、导出计划和 `POST /selection` 使用同一个函数，结果一致；`pool_export.json` 逐片段记录所属任务、分层、质量分、入选原因、结果及其来源，并按任务记录要求数、可用数、实际数和缺口。
 
 ## Exports / 导出
 
@@ -157,13 +189,13 @@ Each episode row in `meta/episodes.jsonl` of a LeRobot export carries `pool_key`
 
 - **Pool folders** (top): the roots, the last scan time and counts, **Scan now** with a progress bar and Cancel, and the recent jobs (scans, exports, pushes) with their status.
 - **Filters** (left): category (原始人工采集 / 原始 rollout / LEVI 处理后 / 外部 / 归档), source (searchable, counts), a task search, outcome (all / robot flag success / verified success), three policy facets (策略模型 / Policy model, 检查点 / Checkpoint, 运行方式 / How it was run: 直接部署, DSRL, RLT, SFE, 学生策略, 未知; each with counts and shown only when the selection holds rollouts) and date. *Show hidden* switches on held-out episodes (留出测试集), copies and the archive; each shows how many it hides.
-- **Tasks and episodes** (centre): the task table (episodes per category, frames, success rate, how its rollouts were run, **+ Add** puts the task at the end of the composition; clicking a task narrows the episode table to it) and the paged episode table with source, category, task, frames, outcome, the policy label (rollouts) and badges for held-out, copy, non-standard and not exportable. An episode of a source registered in LEVI links to the viewer; otherwise its path is shown. A held-out row has no checkbox and cannot be part of an export: the server excludes it whatever the page sends.
-- **Composition** (right): the ordered task list (drag a task, or use its up / down buttons; the order is the export order), per-task cap, seed, non-standard folders, the constraints taken from the filters, and a live preview (episodes, frames, held-out excluded, and every other exclusion with its reason). Recipes are saved, loaded and deleted by name.
+- **Tasks and episodes** (centre): the task table (episodes per category, frames, success rate, how its rollouts were run, **+ Add** puts the task at the end of the composition; a task with more than 100 available episodes, or more than the composition's balanced count, opens a chooser first: number of episodes (a number field and a slider, default the balanced count), share of successes (natural share / all successes / all failures / custom %) and how to pick (smart pick / random / in order), with a hint of the resulting split and a warning when the share cannot be met; clicking a task narrows the episode table to it) and the paged episode table with source, category, task, frames, outcome, the policy label (rollouts) and badges for held-out, copy, non-standard and not exportable. An episode of a source registered in LEVI links to the viewer; otherwise its path is shown. A held-out row has no checkbox and cannot be part of an export: the server excludes it whatever the page sends.
+- **Composition** (right): the ordered task list (drag a task by its grip, or use its up / down buttons; the order is the export order); each task shows *Picked N of M · successes a · failures b* with **Edit** (the same chooser), a warning when the requested mix or count cannot be met, and **Show picked episodes** (the episodes with quality score and why); the per-task cap (for tasks with no count of their own), seed, non-standard folders, the constraints taken from the filters, and a live preview (episodes, frames, held-out excluded, the overall success / failure mix with the category and method shares, and every other exclusion with its reason). Recipes are saved, loaded and deleted by name.
 - **Export**: format, dataset name, output directory (a folder outside `LEVI_EXPORT_ROOTS` is flagged in the field and refused by the server), fps, camera mapping, hard links (raw capture copy only), **Dry run** and **Start export** with progress. A finished export links to its `pool_export.json` and offers **Send to remote / 传到远程**.
 
 Page routes beyond the table above: `GET /api/levi/pool/facets` (facet counts and what the toggles hide), `outcome=robot_flag_success|verified_success`, `date_from`, `date_to` on `tasks` and `episodes`, and each episode row carries `viewer` (its LEVI viewer path or `null`).
 
-页面在 `/pool`（顶部导航“训练池”，工作台也有入口），与 `levi pool …` 共用后端：顶部是池目录、上次扫描和“立即扫描”；左侧分面（类别、来源、任务搜索、结局、策略模型、检查点、运行方式、日期，可显示留出测试集、副本、归档并显示被隐藏的数量）；中间是任务表和片段表（已登记的数据集可跳到片段查看器，否则显示路径）；右侧是组合（有序任务列表，可拖动或用上下按钮排序，每任务上限、种子、实时预览及各类排除原因、命名保存/载入/删除）和导出面板（格式、名称、输出目录、fps、相机映射、硬链接、试运行、进度、`pool_export.json` 链接）。留出片段在页面上不可选，服务端也会排除。
+页面在 `/pool`（顶部导航“训练池”，工作台也有入口），与 `levi pool …` 共用后端：顶部是池目录、上次扫描和“立即扫描”；左侧分面（类别、来源、任务搜索、结局、策略模型、检查点、运行方式、日期，可显示留出测试集、副本、归档并显示被隐藏的数量）；中间是任务表和片段表（已登记的数据集可跳到片段查看器，否则显示路径）；右侧是组合（有序任务列表，可拖动或用上下按钮排序；每个任务显示“选 N / 共 M · 成功 a · 失败 b”，可编辑片段数、成功占比和选取方式，可查看所选片段及质量分；片段数超过 100 的任务添加时先弹出选择面板；每任务上限、种子、实时预览（含成功/失败构成）及各类排除原因、命名保存/载入/删除）和导出面板（格式、名称、输出目录、fps、相机映射、硬链接、试运行、进度、`pool_export.json` 链接）。留出片段在页面上不可选，服务端也会排除。
 
 ## Remote transfer / 远程传输
 
@@ -193,7 +225,9 @@ All routes are behind the service's UI token and same-origin check.
 | POST | `/api/levi/pool/scan?rehash=` | Start a scan job |
 | GET | `/api/levi/pool/jobs`, `/api/levi/pool/jobs/{id}` | Scan and export jobs with progress and result |
 | GET / PUT / DELETE | `/api/levi/pool/recipes`, `/api/levi/pool/recipes/{name}` | Recipe CRUD (the body's `name` must match the URL) |
-| POST | `/api/levi/pool/preview` | `{ "recipe": {…}, "format": "recap_value" }` → counts and exclusions |
+| POST | `/api/levi/pool/preview` | `{ "recipe": {…}, "format": "recap_value" }` → counts and exclusions; per task `available`, `successes`, `failures`, `selected`, `selected_successes`, `selected_failures`, `shortfall`, `notes`; the overall `mix` |
+| POST | `/api/levi/pool/selection` | `{ "recipe": {…}, "task": "…" }` → the episodes picked for that task (`quality_score`, `sel_stratum`, `selection_reason`, `viewer`) and the task's report; 404 for a task the recipe lacks |
+| POST | `/api/levi/pool/suggest` | `{ "recipe": {…}, "task": "…" }` → `available`, `successes`, `failures`, `suggested_count` (the balanced default) for adding that task |
 | POST | `/api/levi/pool/export` | `{ "recipe_name": "…" or "recipe": {…}, "options": {"format", "name", "output_dir", "fps", "cameras", "camera_map", "hardlink", …}, "dry_run": false }`; 403 for a path outside `LEVI_EXPORT_ROOTS` or inside a source, 400 for an existing target or an empty selection |
 | GET | `/api/levi/pool/facets?category=&show_heldout=&show_copies=&show_archive=` | Facet counts for the page (including `policy_models`, `policy_checkpoints`, `policy_methods`) and what the toggles hide |
 | POST | `/api/levi/pool/jobs/{id}/cancel` | Stop a running scan, export or push |

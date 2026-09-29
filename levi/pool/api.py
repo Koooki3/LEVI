@@ -300,6 +300,45 @@ def preview(payload: Preview):
     )
 
 
+class TaskQuery(BaseModel):
+    recipe: Recipe
+    task: str = Field(min_length=1, max_length=1000)
+    format: Literal["lerobot_v21", "recap_value", "raw_capture"] | None = None
+    human_as_success: bool = False
+
+
+@router.post("/selection")
+def selection(payload: TaskQuery):
+    """The episodes the recipe picks for one task, each with its quality
+    score, stratum and reasons (what preview counts and export writes)."""
+    from .rules import normalize_task
+
+    try:
+        result = recipe.selected_episodes(
+            payload.recipe,
+            normalize_task(payload.task),
+            payload.format,
+            human_as_success=payload.human_as_success,
+        )
+    except KeyError:
+        raise HTTPException(404, "The recipe has no such task") from None
+    _viewer_links(result["episodes"])
+    return result
+
+
+@router.post("/suggest")
+def suggest(payload: TaskQuery):
+    """What adding a task offers: available episodes (successes, failures)
+    under the recipe's filters and a default count that keeps the
+    composition balanced."""
+    return recipe.suggest(
+        payload.recipe,
+        payload.task,
+        payload.format,
+        human_as_success=payload.human_as_success,
+    )
+
+
 class Export(BaseModel):
     recipe: Recipe | None = None
     recipe_name: str | None = None

@@ -83,7 +83,11 @@ def build_parser() -> argparse.ArgumentParser:
     save.add_argument("--category", action="append")
     save.add_argument("--source", action="append")
     save.add_argument(
-        "--task", action="append", help="repeatable; the export follows this order"
+        "--task",
+        action="append",
+        help="repeatable; the export follows this order. `text` or "
+        "`text:count=50,success=0.6,strategy=quality` (count: N or all; "
+        "success: 0..1, 60% or natural; strategy: quality, random, first)",
     )
     save.add_argument(
         "--outcome",
@@ -124,6 +128,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="recap_value: count human demonstrations without an outcome as success",
     )
+    picked = rsub.add_parser("episodes", help="the episodes a recipe picks for a task")
+    picked.add_argument("name")
+    picked.add_argument("--task", required=True)
+    picked.add_argument(
+        "--format", choices=["lerobot_v21", "recap_value", "raw_capture"]
+    )
+    suggest = rsub.add_parser(
+        "suggest", help="availability and a balanced default count for a new task"
+    )
+    suggest.add_argument("name")
+    suggest.add_argument("--task", required=True)
     rsub.add_parser("list", help="saved recipes")
     delete = rsub.add_parser("delete", help="delete a saved recipe")
     delete.add_argument("name")
@@ -230,7 +245,6 @@ def main(argv=None) -> int:
                 for key, given in (
                     ("categories", args.category),
                     ("sources", args.source),
-                    ("tasks", args.task),
                     ("outcome", args.outcome),
                     ("per_task_cap", args.per_task_cap),
                     ("seed", args.seed),
@@ -245,6 +259,8 @@ def main(argv=None) -> int:
                 ):
                     if given is not None:
                         value[key] = given
+                if args.task is not None:
+                    value["tasks"] = [recipe.parse_task_spec(t) for t in args.task]
                 if args.task_text:
                     value["task_text"] = dict(t.split("=", 1) for t in args.task_text)
                 if args.include_nonstandard:
@@ -260,6 +276,16 @@ def main(argv=None) -> int:
                         human_as_success=args.human_as_success,
                     )
                 )
+            elif args.recipe_action == "episodes":
+                from .rules import normalize_task
+
+                _print(
+                    recipe.selected_episodes(
+                        recipe.load(args.name), normalize_task(args.task), args.format
+                    )
+                )
+            elif args.recipe_action == "suggest":
+                _print(recipe.suggest(recipe.load(args.name), args.task))
             elif args.recipe_action == "list":
                 _print(recipe.listing())
             else:

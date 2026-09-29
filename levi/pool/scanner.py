@@ -1076,6 +1076,7 @@ def scan(progress_path: Path | None = None, rehash: bool = False) -> dict:
         ),
         "nonstandard": sum(1 for r in rows if r["nonstandard"]),
         "tasks": len({r["task"] for r in rows}),
+        "workspaces": sorted(str(w) for w in workspaces),
         "dedup": dedup_report,
         "heldout": heldout_report,
         "labels": label_report,

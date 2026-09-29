@@ -18,8 +18,9 @@ Formats:
 
 Everything is written to ``.<name>.partial`` next to the target and renamed
 when complete. ``pool_export.json`` records the recipe, the task order, every
-episode's source path and fingerprint, every exclusion and its reason, the
-LEVI commit and the format parameters. Held-out episodes are refused.
+episode's source path, fingerprint, outcome and why it was picked (stratum,
+quality score, reasons), per task the requested and achieved counts, every
+exclusion and its reason, the LEVI commit and the format parameters. Held-out episodes are refused.
 """
 
 import json
@@ -48,7 +49,7 @@ from ..conversion.outputs.recap_value import RECAP_COLUMNS, RecapOptions, RecapV
 from ..conversion.progress import Progress
 from ..conversion.report import InputReport, Requirement
 from . import heldout, index, scanner, settings
-from .recipe import NAME, Recipe, find_warnings, select
+from .recipe import NAME, Recipe, find_warnings, select_detailed
 
 SCHEMA = "levi.pool.export.v1"
 FORMATS = ("lerobot_v21", "recap_value", "raw_capture")
@@ -152,9 +153,10 @@ def _all_source_paths() -> list[str]:
 def plan(recipe: Recipe, options: ExportOptions) -> dict:
     """Freeze the selection now: the export is reproducible from its plan."""
     settings.require_heldout()
-    chosen, excluded = select(
+    selection = select_detailed(
         recipe, target=options.format, human_as_success=options.human_as_success
     )
+    chosen, excluded = selection.chosen, selection.excluded
     warnings = find_warnings(recipe, chosen)
     blocking = [w for w in warnings if w["blocking"]]
     if blocking:
@@ -209,6 +211,9 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "fingerprint",
         "group",
         "stat_sig",
+        "sel_stratum",
+        "quality_score",
+        "selection_reason",
     )
     episodes = [{k: row.get(k) for k in keep} for row in chosen]
     # The index's view of copies, checked at plan time too so a dry run
@@ -221,6 +226,7 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "target": str(target),
         "sources": sources,
         "episodes": episodes,
+        "selection": list(selection.tasks.values()),
         "excluded": excluded,
         "index": index.summary().get("scanned_at"),
         "pool_roots": [str(p) for p in settings.pool_roots()],
@@ -228,6 +234,22 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "heldout_disabled": settings.heldout_disabled(),
         "warnings": [w for w in warnings if not w["blocking"]],
     }
+
+
+def _selection_fields(ep: dict) -> dict:
+    """Why this episode is in: its stratum, quality score and reasons."""
+    return {
+        "selection_stratum": ep.get("sel_stratum"),
+        "quality_score": ep.get("quality_score"),
+        "selection_reason": ep.get("selection_reason"),
+    }
+
+
+def _selection_record(job: dict, episodes: list[dict]) -> list[dict]:
+    """Per task: what was asked for, available and planned, and how many
+    episodes the finished export holds."""
+    exported = Counter(e["task"] for e in episodes)
+    return [{**r, "exported": exported[r["task"]]} for r in job.get("selection") or []]
 
 
 def _policy_fields(ep: dict) -> dict:
@@ -572,6 +594,7 @@ def run(job: dict, progress_path: Path | None = None) -> dict:
             "levi_commit": _levi_commit(),
             "recipe": job["recipe"],
             "task_order": result["task_order"],
+            "selection": _selection_record(job, result["episodes"]),
             "params": options.model_dump(),
             "index_scanned_at": job.get("index"),
             "pool_roots": job["pool_roots"],
@@ -615,7 +638,10 @@ def _texts(job) -> dict:
 
 def _task_order(episodes, recipe) -> list[str]:
     present = list(dict.fromkeys(e["task"] for e in episodes))
-    order = [t for t in recipe.get("tasks") or [] if t in present]
+    listed = [
+        t["task"] if isinstance(t, dict) else t for t in recipe.get("tasks") or []
+    ]
+    order = [t for t in listed if t in present]
     return order + [t for t in present if t not in order]
 
 
@@ -661,6 +687,7 @@ def _raw_capture(job, options, staging, progress) -> dict:
                 "outcome": ep["outcome"],
                 "outcome_source": ep["outcome_source"],
                 **_policy_fields(ep),
+                **_selection_fields(ep),
                 "frames": ep["frames"],
             }
         )
@@ -873,6 +900,7 @@ def _lerobot(job, options, staging, progress, progress_path) -> dict:
                 "outcome": ep["outcome"],
                 "outcome_source": ep["outcome_source"],
                 **_policy_fields(ep),
+                **_selection_fields(ep),
                 "frames": n,
             }
         )

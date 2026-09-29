@@ -496,7 +496,11 @@ def test_recipe_preview_counts_and_saved_recipes(pool):
             seed=1,
         )
     )
-    assert saved["tasks"] == ["stack the plates", "pour water into cup"]
+    assert [t["task"] for t in saved["tasks"]] == [
+        "stack the plates",
+        "pour water into cup",
+    ]
+    assert {t["strategy"] for t in saved["tasks"]} == {"random"}  # the old form
     loaded = recipe.load("plates-then-water")
     preview = recipe.preview(loaded)
     assert [t["task"] for t in preview["tasks"]] == [
@@ -775,9 +779,9 @@ def test_api_routes(pool, client):
     body = {"name": "api", "categories": ["rollout"], "tasks": ["stack the plates"]}
     assert client.put("/api/levi/pool/recipes/api", json=body).status_code == 200
     assert client.put("/api/levi/pool/recipes/other", json=body).status_code == 400
-    assert client.get("/api/levi/pool/recipes/api").json()["tasks"] == [
-        "stack the plates"
-    ]
+    assert [
+        t["task"] for t in client.get("/api/levi/pool/recipes/api").json()["tasks"]
+    ] == ["stack the plates"]
     preview = client.post(
         "/api/levi/pool/preview", json={"recipe": body, "format": "recap_value"}
     ).json()
@@ -1131,8 +1135,11 @@ def test_s8_sources_are_unchanged_by_every_export_and_by_a_failure(pool):
     _export(pool, rec, format="lerobot_v21", name="s8-lerobot")
     _export(
         pool,
-        rec.model_copy(
-            update={"categories": ["rollout"], "tasks": ["stack the plates"]}
+        Recipe(
+            name="s8",
+            categories=["rollout"],
+            tasks=["stack the plates"],
+            per_task_cap=2,
         ),
         format="recap_value",
         name="s8-recap",
@@ -1178,3 +1185,106 @@ def test_nits_camera_maps_must_be_distinct_and_state_names_agree(pool):
             name="c",
             cameras={"x": "observation.images.hand", "y": "observation.images.hand"},
         )
+
+
+# ------------------------------------------------------------------ selection
+
+
+def test_preview_plan_and_export_record_the_same_selection(pool, client):
+    rec = Recipe.model_validate(
+        {
+            "name": "pick",
+            "categories": ["rollout"],
+            "tasks": [
+                {
+                    "task": "stack the plates",
+                    "count": 2,
+                    "success_ratio": 0.5,
+                    "strategy": "quality",
+                }
+            ],
+            "seed": 4,
+        }
+    )
+    view = recipe.preview(rec)
+    task = view["tasks"][0]
+    # demo_0001 is held out; demo_0002 has a human failure label.
+    assert (task["available"], task["successes"], task["failures"]) == (3, 2, 1)
+    assert (task["selected_successes"], task["selected_failures"]) == (1, 1)
+    chosen = recipe.select(rec)[0]
+    job, _, record = _export(pool, rec, format="raw_capture", name="picked")
+    assert [e["key"] for e in job["episodes"]] == [r["key"] for r in chosen]
+    assert [e["source_path"] for e in record["episodes"]] == [r["key"] for r in chosen]
+    assert view["episodes"] == len(record["episodes"]) == 2
+    for episode in record["episodes"]:
+        assert 0 < episode["quality_score"] <= 1
+        assert episode["selection_stratum"].startswith("direct | pi05_test")
+        assert episode["outcome"] in ("success", "failure")
+        assert episode["outcome_source"] in ("human", "robot_flag")
+        assert (
+            "efficient" in episode["selection_reason"]
+            or "full_attempt" in (episode["selection_reason"])
+        )
+    [selection] = record["selection"]
+    assert selection["task"] == "stack the plates" and selection["requested"] == 2
+    assert selection["selected"] == selection["exported"] == 2
+    assert selection["shortfall"] == 0 and selection["shortfall_failures"] == 0
+    # Asking for more failures than exist is reported, and filled.
+    more = Recipe.model_validate(
+        {
+            **rec.model_dump(),
+            "name": "more",
+            "tasks": [{"task": "stack the plates", "count": 3, "success_ratio": 0.0}],
+        }
+    )
+    short = recipe.preview(more)["tasks"][0]
+    assert short["selected"] == 3 and short["shortfall_failures"] == 2
+    assert "failure_short" in short["notes"]
+    # The API serves the same list and a balanced default for a new task.
+    body = {"recipe": rec.model_dump(), "task": "stack the plates"}
+    listed = client.post("/api/levi/pool/selection", json=body).json()
+    assert [e["key"] for e in listed["episodes"]] == [r["key"] for r in chosen]
+    assert listed["report"]["selected"] == 2
+    assert (
+        client.post(
+            "/api/levi/pool/selection", json={**body, "task": "nothing"}
+        ).status_code
+        == 404
+    )
+    tip = client.post(
+        "/api/levi/pool/suggest",
+        json={
+            "recipe": {"name": "x", "categories": ["rollout"]},
+            "task": "stack the plates",
+        },
+    ).json()
+    assert tip["available"] == 3 and tip["suggested_count"] == 3
+    shown = client.post(
+        "/api/levi/pool/preview", json={"recipe": rec.model_dump()}
+    ).json()
+    assert shown["mix"]["episodes"] == 2 and shown["tasks"][0]["available"] == 3
+
+
+def test_cli_saves_per_task_specs(pool, capsys):
+    from levi.pool import cli
+
+    code = cli.main(
+        [
+            "recipe",
+            "save",
+            "spec",
+            "--category",
+            "rollout",
+            "--task",
+            "stack the plates:count=2,success=50%,strategy=first",
+            "--task",
+            "pour water into cup",
+        ]
+    )
+    assert code == 0
+    loaded = recipe.load("spec")
+    assert loaded.tasks[0].count == 2 and loaded.tasks[0].success_ratio == 0.5
+    assert loaded.tasks[0].strategy == "first" and loaded.tasks[1].count is None
+    assert cli.main(["recipe", "suggest", "spec", "--task", "stack the plates"]) == 0
+    assert cli.main(["recipe", "episodes", "spec", "--task", "stack the plates"]) == 0
+    assert '"quality_score"' in capsys.readouterr().out

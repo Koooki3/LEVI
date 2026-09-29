@@ -15,27 +15,55 @@ the export follows it), date and policy (model, checkpoint, how it was run), the
    ``human_verified_success`` (a human label only). An episode whose human
    labels disagree (``label_conflict``) is out of every verified outcome and
    of RECAP exports;
-6. ``per_task_cap`` episodes per task, drawn with ``seed``.
+6. per task, in the task order, the episodes that go in: ``count`` of them
+   (else ``per_task_cap``, else all), with a ``success_ratio`` and a
+   ``strategy`` (``quality``, ``random``, ``first``; see ``select.py``), drawn
+   with ``seed``. An episode an earlier task picked is not picked again.
 
 Every episode left out is listed with its reason.
 """
 
 import json
 import os
-import random
 import re
 import time
 from collections import Counter, defaultdict
+from dataclasses import dataclass, field
 from typing import Literal
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from . import index, settings
+from . import index, recap_signal, settings
+from . import select as picker
 from .rules import CATEGORIES, normalize_task
 
 NAME = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
 DATE = r"^\d{4}-\d{2}-\d{2}$"
+
+
+class TaskEntry(BaseModel):
+    """One task of a recipe: how many episodes it contributes and how they
+    are picked. ``count`` None: the recipe's ``per_task_cap``, else all.
+    ``success_ratio`` None: keep the natural share of successes.
+
+    A bare string in a saved recipe is the old form (the task text; the
+    global cap drew a seeded random sample): it loads as
+    ``strategy="random"`` so the same episodes are picked as before."""
+
+    model_config = ConfigDict(extra="forbid")
+    task: str = Field(min_length=1, max_length=1000)
+    count: int | None = Field(None, ge=1, le=10_000_000)
+    success_ratio: float | None = Field(None, ge=0, le=1)
+    strategy: Literal["quality", "random", "first"] = "quality"
+
+    @field_validator("task")
+    @classmethod
+    def _task(cls, value):
+        value = normalize_task(value)
+        if not value:
+            raise ValueError("Tasks must be nonempty")
+        return value
 
 
 class Recipe(BaseModel):
@@ -47,7 +75,7 @@ class Recipe(BaseModel):
     formats: list[Literal["robot_capture", "lerobot", "droid_raw"]] = Field(
         default_factory=list
     )
-    tasks: list[str] = Field(default_factory=list, max_length=5000)
+    tasks: list[TaskEntry] = Field(default_factory=list, max_length=5000)
     outcome: Literal[
         "all", "robot_flag_success", "verified_success", "human_verified_success"
     ] = "all"
@@ -72,15 +100,47 @@ class Recipe(BaseModel):
     # normalized task itself).
     task_text: dict[str, str] = Field(default_factory=dict)
 
+    @field_validator("tasks", mode="before")
+    @classmethod
+    def _legacy_tasks(cls, value):
+        if not isinstance(value, list):
+            return value
+        return [
+            {"task": t, "strategy": "random"} if isinstance(t, str) else t
+            for t in value
+        ]
+
     @field_validator("tasks")
     @classmethod
     def _tasks(cls, value):
-        normalized = [normalize_task(t) for t in value]
-        if any(not t for t in normalized):
-            raise ValueError("Tasks must be nonempty")
-        if len(set(normalized)) != len(normalized):
+        names = [t.task for t in value]
+        if len(set(names)) != len(names):
             raise ValueError("A task is listed twice")
-        return normalized
+        return value
+
+    @property
+    def entries(self) -> list[TaskEntry]:
+        """The task entries (a bare string set by ``model_copy(update=...)``,
+        which skips validation, is the old form too)."""
+        return [
+            t if isinstance(t, TaskEntry) else TaskEntry(task=t, strategy="random")
+            for t in self.tasks
+        ]
+
+    @property
+    def task_names(self) -> list[str]:
+        return [t.task for t in self.entries]
+
+    def entry(self, task: str) -> TaskEntry:
+        """The task's entry; a task the recipe does not list (no task list
+        means every task) is the old form: random under the global cap."""
+        for item in self.entries:
+            if item.task == task:
+                return item
+        return TaskEntry(task=task, strategy="random")
+
+    def task_count(self, task: str) -> int | None:
+        return self.entry(task).count or self.per_task_cap
 
     @field_validator("task_text")
     @classmethod
@@ -94,6 +154,42 @@ class Recipe(BaseModel):
                 raise ValueError("task_text must be one line of at most 300 characters")
             out[normalize_task(key)] = text
         return out
+
+
+SPEC_KEYS = ("count", "success", "strategy")
+
+
+def parse_task_spec(text: str) -> "str | dict":
+    """A ``--task`` value: ``text`` (the old bare form) or
+    ``text:count=50,success=0.6,strategy=quality``.
+
+    ``count``: an integer or ``all``; ``success``: the target share of
+    successes as 0..1 or ``60%`` (``natural``: keep the task's own share);
+    ``strategy``: ``quality`` (default), ``random`` or ``first``. The options
+    follow the last colon and are recognised only when every part is a
+    known ``key=value``, so a task text may contain colons and commas."""
+    head, sep, tail = text.rpartition(":")
+    parts = [p.strip() for p in tail.split(",")] if sep else []
+    if not parts or not all(
+        "=" in p and p.split("=", 1)[0].strip() in SPEC_KEYS for p in parts
+    ):
+        return text
+    entry: dict = {"task": head}
+    for part in parts:
+        key, value = (x.strip() for x in part.split("=", 1))
+        low = value.lower()
+        if key == "count":
+            entry["count"] = None if low == "all" else int(value)
+        elif key == "success":
+            if low == "natural":
+                entry["success_ratio"] = None
+            elif low.endswith("%"):
+                entry["success_ratio"] = float(low[:-1]) / 100
+            else:
+                entry["success_ratio"] = float(value)
+        else:
+            entry["strategy"] = low
+    return entry
 
 
 def recipes_dir():
@@ -127,7 +223,11 @@ def listing() -> list[dict]:
     out = []
     for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
         try:
-            out.append(json.loads(path.read_text()))
+            value = json.loads(path.read_text())
+            saved_at = value.pop("saved_at", None)
+            out.append(
+                {**Recipe.model_validate(value).model_dump(), "saved_at": saved_at}
+            )
         except (OSError, ValueError):
             continue
     return out
@@ -157,24 +257,46 @@ def _rank(row: dict) -> tuple:
     )
 
 
+@dataclass
+class Selection:
+    """What a recipe selects: the ordered episodes (each annotated with
+    ``sel_stratum``, ``quality_score`` and ``selection_reason``), every
+    episode left out with its reason, and per task the report of how many
+    were asked for, available and picked."""
+
+    chosen: list[dict]
+    excluded: list[dict]
+    tasks: dict[str, dict] = field(default_factory=dict)
+
+
 def select(
     recipe: Recipe,
     df: pd.DataFrame | None = None,
     target: str | None = None,
     human_as_success: bool = False,
 ):
-    """Ordered episodes of a recipe, and every excluded one with its reason.
+    """Ordered episodes of a recipe, and every excluded one with its reason
+    (``select_detailed`` also returns the per-task report)."""
+    result = select_detailed(recipe, df, target, human_as_success)
+    return result.chosen, result.excluded
 
-    ``target`` adds the export format's own requirement: ``raw_capture`` copies
-    raw captures only, ``recap_value`` needs an outcome per episode
-    (``human_as_success``: a human demonstration without one counts as a
-    success)."""
+
+def select_detailed(
+    recipe: Recipe,
+    df: pd.DataFrame | None = None,
+    target: str | None = None,
+    human_as_success: bool = False,
+) -> Selection:
+    """See the module docstring. ``target`` adds the export format's own
+    requirement: ``raw_capture`` copies raw captures only, ``recap_value``
+    needs an outcome per episode (``human_as_success``: a human demonstration
+    without one counts as a success)."""
     df = index.frame() if df is None else df
     df = index._filter(
         df,
         categories=recipe.categories or None,
         sources=recipe.sources or None,
-        tasks=recipe.tasks or None,
+        tasks=recipe.task_names or None,
         formats=recipe.formats or None,
         policies=recipe.policies or None,
         policy_models=recipe.policy_models or None,
@@ -250,34 +372,59 @@ def select(
                 out(row, "no_outcome")
         else:
             passed.append(row)
-    task_order = recipe.tasks or sorted({r["task"] for r in passed})
+    task_order = recipe.task_names or sorted({r["task"] for r in passed})
     position = {t: i for i, t in enumerate(task_order)}
     source_order = {s: i for i, s in enumerate(recipe.sources)}
-    by_task = defaultdict(list)
-    for row in passed:
-        by_task[row["task"]].append(row)
-    chosen = []
-    for task in task_order:
-        members = sorted(by_task.get(task, []), key=lambda r: r["key"])
-        if recipe.per_task_cap and len(members) > recipe.per_task_cap:
-            rng = random.Random(f"{recipe.seed}:{task}")
-            keep = {r["key"] for r in rng.sample(members, recipe.per_task_cap)}
-            for row in members:
-                if row["key"] not in keep:
-                    out(row, "per_task_cap")
-            members = [r for r in members if r["key"] in keep]
-        chosen += members
-    chosen.sort(
-        key=lambda r: (
-            position[r["task"]],
+
+    def order_key(r):
+        return (
             source_order.get(
                 r["source"], source_order.get(r["source_path"], len(source_order))
             ),
             r["source"],
             _natural(r["episode"]),
         )
-    )
-    return chosen, excluded
+
+    by_task = defaultdict(list)
+    for row in passed:
+        by_task[row["task"]].append(row)
+    recap = None
+    chosen: list[dict] = []
+    reports: dict[str, dict] = {}
+    taken: set = set()
+    for task in task_order:
+        members = by_task.get(task, [])
+        entry = recipe.entry(task)
+        count = recipe.task_count(task)
+        if entry.strategy == "quality" and members and recap is None:
+            recap = recap_signal.load()
+        picked, report = picker.choose(
+            members,
+            task=task,
+            count=count,
+            success_ratio=entry.success_ratio,
+            strategy=entry.strategy,
+            seed=recipe.seed,
+            order_key=order_key,
+            recap=recap,
+            taken=taken,
+        )
+        reports[task] = report
+        keep = {r["key"] for r in picked}
+        reason = "per_task_cap" if entry.count is None else "not_selected"
+        for row in members:
+            if row["key"] in keep:
+                continue
+            if row["key"] in taken or (row.get("group") or row["key"]) in taken:
+                out(row, "already_in_composition")
+            else:
+                out(row, reason)
+        for row in picked:
+            taken.add(row["key"])
+            taken.add(row.get("group") or row["key"])
+        chosen += picked
+    chosen.sort(key=lambda r: (position[r["task"]], *order_key(r)))
+    return Selection(chosen, excluded, reports)
 
 
 def find_warnings(recipe: Recipe, chosen: list[dict], df=None) -> list[dict]:
@@ -358,13 +505,92 @@ def find_warnings(recipe: Recipe, chosen: list[dict], df=None) -> list[dict]:
     return out
 
 
+def _task_view(row: dict) -> dict:
+    return {
+        k: row.get(k)
+        for k in (
+            "key",
+            "source",
+            "source_path",
+            "format",
+            "episode",
+            "episode_index",
+            "frames",
+            "category",
+            "outcome",
+            "outcome_source",
+            "human_label",
+            "robot_flag",
+            "policy_label",
+            "policy_method",
+            "date",
+            "quality_score",
+            "sel_stratum",
+            "selection_reason",
+            "selection_parts",
+        )
+    }
+
+
+def selected_episodes(
+    recipe: Recipe,
+    task: str,
+    target: str | None = None,
+    df=None,
+    human_as_success: bool = False,
+) -> dict:
+    """The episodes the recipe picks for one task, with score, stratum and
+    reason: what preview counts and export writes."""
+    result = select_detailed(recipe, df, target, human_as_success)
+    if task not in result.tasks:
+        raise KeyError(task)
+    return {
+        "task": task,
+        "report": result.tasks[task],
+        "episodes": [_task_view(r) for r in result.chosen if r["task"] == task],
+    }
+
+
+def suggest(
+    recipe: Recipe,
+    task: str,
+    target: str | None = None,
+    df=None,
+    human_as_success: bool = False,
+) -> dict:
+    """What adding ``task`` (last in the order) to the composition offers:
+    its availability under the recipe's filters and the episodes the earlier
+    tasks already use, and a default count that keeps the composition
+    balanced (the median of the earlier tasks' counts, 100 when none)."""
+    task = normalize_task(task)
+    base = recipe.model_copy(
+        update={"tasks": [t for t in recipe.entries if t.task != task]}
+    )
+    counts = []
+    if base.tasks:
+        before = select_detailed(base, df, target, human_as_success)
+        counts = [r["selected"] for r in before.tasks.values() if r["selected"]]
+    probe = base.model_copy(update={"tasks": [*base.entries, TaskEntry(task=task)]})
+    report = select_detailed(probe, df, target, human_as_success).tasks[task]
+    return {
+        **{
+            k: report[k]
+            for k in ("available", "successes", "failures", "unknown", "already_used")
+        },
+        "task": task,
+        "suggested_count": picker.suggest_count(counts, report["available"]),
+        "earlier_counts": counts,
+    }
+
+
 def preview(
     recipe: Recipe,
     target: str | None = None,
     df=None,
     human_as_success: bool = False,
 ) -> dict:
-    chosen, excluded = select(recipe, df, target, human_as_success)
+    result = select_detailed(recipe, df, target, human_as_success)
+    chosen, excluded = result.chosen, result.excluded
     reasons = Counter(e["reason"] for e in excluded)
     per_task = defaultdict(lambda: {"episodes": 0, "frames": 0, "sources": Counter()})
     for row in chosen:
@@ -372,8 +598,8 @@ def preview(
         item["episodes"] += 1
         item["frames"] += int(row["frames"] or 0)
         item["sources"][row["source"]] += 1
-    order = list(dict.fromkeys(r["task"] for r in chosen))
-    missing = [t for t in recipe.tasks if t not in per_task]
+    order = [t for t in (recipe.task_names or result.tasks) if t in result.tasks]
+    missing = [t for t in recipe.task_names if t not in per_task]
     return {
         "recipe": recipe.model_dump(),
         "target": target,
@@ -386,9 +612,12 @@ def preview(
                 "episodes": per_task[t]["episodes"],
                 "frames": per_task[t]["frames"],
                 "sources": dict(per_task[t]["sources"]),
+                **result.tasks[t],
             }
             for t in order
         ],
+        "task_reports": list(result.tasks.values()),
+        "mix": picker.mix(chosen),
         "tasks_without_episodes": missing,
         "categories": dict(Counter(r["category"] for r in chosen)),
         "formats": dict(Counter(r["format"] for r in chosen)),
