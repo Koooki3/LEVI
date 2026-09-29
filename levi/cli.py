@@ -187,6 +187,10 @@ def main():
 
         sys.argv.pop(1)
         return clean()
+    if len(sys.argv) > 1 and sys.argv[1] == "pool":
+        from .pool.cli import main as pool
+
+        raise SystemExit(pool(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "namespace":
         configure()
         raise SystemExit(namespace_cli(sys.argv[2:]))
@@ -218,7 +222,8 @@ def main():
             "cache cleanup), migrate, convert, agent, sam3, recap (RECAP value "
             "model: checkpoints and advantage labels), export (training manifests: which "
             "frames enter a learner's loss, with what weight), sample (DROID test "
-            "samples), namespace (isolated experiments over one dataset), docs (check or regenerate the documentation). Each takes its own "
+            "samples), namespace (isolated experiments over one dataset), pool (training pool: "
+            "scan read-only pool roots, recipes, merged exports), docs (check or regenerate the documentation). Each takes its own "
             "--help."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,

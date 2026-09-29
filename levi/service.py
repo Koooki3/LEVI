@@ -46,6 +46,9 @@ async def lifespan(app):
     # Workers left running by a service that was killed rather than stopped.
     children.reclaim()
     jobs.recover_interrupted()
+    from .pool import jobs as pool_jobs
+
+    pool_jobs.recover_interrupted()
     from .agent.store import Store
 
     Store(STATE).recover()
@@ -91,6 +94,7 @@ async def lifespan(app):
 
         shutdown()
         jobs.stop_workers()
+        pool_jobs.stop_workers()
         from .segmentation import live as segmentation_live
 
         # Stop live overlays and discard their unsaved rows: saving needs an
@@ -114,6 +118,9 @@ app.include_router(pilot_router)
 from .inference.api import router as inference_router
 
 app.include_router(inference_router)
+from .pool.api import router as pool_router
+
+app.include_router(pool_router)
 
 
 @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)

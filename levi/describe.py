@@ -59,7 +59,11 @@ def describe(entry: dict) -> dict[str, Any]:
     conversion = _read(root / "meta/levi_conversion.json")
     recap = _read(root / "meta/levi_recap.json")
     export = _read(root / EXPORT_MARKER)
-    if export:
+    pool_export = _read(root / "pool_export.json")
+    if pool_export:
+        origin = "levi_pool_export"
+        result["pool_recipe"] = (pool_export.get("recipe") or {}).get("name")
+    elif export:
         origin = "levi_export"
         result["source"] = export.get("source_root")
     elif recap or conversion.get("target") == "recap_value":
