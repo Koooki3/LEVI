@@ -1,7 +1,12 @@
 "use client";
 import Link from "next/link";
 import { useLocale } from "@/components/levi-locale";
-import { CATEGORIES, CATEGORY_LABELS, type EpisodeRow, type TaskRow } from "./types";
+import {
+  CATEGORIES,
+  CATEGORY_LABELS,
+  type EpisodeRow,
+  type TaskRow,
+} from "./types";
 
 const CATEGORY_SHORT: Record<string, string> = {
   human: "Human",
@@ -90,7 +95,9 @@ export function TaskTable({
                 </td>
                 {columns.map((c) => (
                   <td key={c} className="num tabular">
-                    {row.categories[c] ? row.categories[c].toLocaleString() : "·"}
+                    {row.categories[c]
+                      ? row.categories[c].toLocaleString()
+                      : "·"}
                   </td>
                 ))}
                 <td className="num tabular">{row.episodes.toLocaleString()}</td>
@@ -278,7 +285,7 @@ export function EpisodeTable({
           disabled={offset === 0}
           onClick={() => onPage(Math.max(0, offset - pageSize))}
         >
-          ← {t("Previous")}
+          ← {t("Previous page")}
         </button>
         <span className="tabular text-xs">
           {total ? `${offset + 1}–${last}` : "0"} / {total.toLocaleString()}
@@ -289,7 +296,7 @@ export function EpisodeTable({
           disabled={offset + pageSize >= total}
           onClick={() => onPage(offset + pageSize)}
         >
-          {t("Next")} →
+          {t("Next page")} →
         </button>
       </nav>
     </div>

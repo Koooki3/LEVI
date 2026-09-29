@@ -63,7 +63,8 @@ function query(filters: Filters, extra: Record<string, string> = {}) {
 
 function when(value: number | string | undefined): string {
   if (!value) return "—";
-  const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
+  const date =
+    typeof value === "number" ? new Date(value * 1000) : new Date(value);
   return isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
 
@@ -202,7 +203,9 @@ export default function TrainingPool() {
           setPreview(value);
           setPreviewError("");
         })
-        .catch((e) => setPreviewError(e instanceof Error ? e.message : String(e)))
+        .catch((e) =>
+          setPreviewError(e instanceof Error ? e.message : String(e)),
+        )
         .finally(() => setPreviewing(false));
     }, 350);
     return () => clearTimeout(timer);
@@ -276,9 +279,10 @@ export default function TrainingPool() {
               </ul>
             )}
             <p className="levi-pool-hint">
-              {t("Last scan")}: {summary ? when(summary.scanned_at) : t("never")}
+              {t("Last scan")}:{" "}
+              {summary ? when(summary.scanned_at) : t("never")}
               {summary &&
-                ` · ${summary.episodes.toLocaleString()} ${t("episodes")} · ${summary.sources.toLocaleString()} ${t("sources")} · ${summary.tasks.toLocaleString()} ${t("tasks")}`}
+                ` · ${summary.episodes.toLocaleString()} ${t("episodes")} · ${summary.sources.toLocaleString()} ${t("sources")} · ${summary.tasks.toLocaleString()} ${t("Tasks").toLowerCase()}`}
               {status?.heldout_lists.length
                 ? ` · ${t("Held-out lists")}: ${status.heldout_lists.length}`
                 : ""}
@@ -345,7 +349,9 @@ export default function TrainingPool() {
                             : ""}
                       </code>
                     </td>
-                    <td>{when(j.finished_at || j.started_at || j.planned_at)}</td>
+                    <td>
+                      {when(j.finished_at || j.started_at || j.planned_at)}
+                    </td>
                     <td>
                       {RUNNING.has(j.status) && (
                         <button
@@ -396,10 +402,7 @@ export default function TrainingPool() {
             onChange={setFilters}
           />
           <div className="levi-pool-centre">
-            <section
-              className="levi-pool-card"
-              aria-labelledby="pool-tasks"
-            >
+            <section className="levi-pool-card" aria-labelledby="pool-tasks">
               <h2 id="pool-tasks">
                 {t("Tasks")}{" "}
                 <span className="levi-pool-muted">({tasks.length})</span>
@@ -418,10 +421,7 @@ export default function TrainingPool() {
                 }
               />
             </section>
-            <section
-              className="levi-pool-card"
-              aria-labelledby="pool-episodes"
-            >
+            <section className="levi-pool-card" aria-labelledby="pool-episodes">
               <h2 id="pool-episodes">
                 {t("Episodes")}
                 {focus && (

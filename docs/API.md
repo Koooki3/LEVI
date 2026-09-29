@@ -30,6 +30,12 @@ Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge fo
 | GET / PUT / DELETE | `/api/levi/pool/recipes/{name}` | Saved training-pool recipes (`GET /api/levi/pool/recipes` lists them) |
 | POST | `/api/levi/pool/preview` | Counts and exclusions of a recipe `{ "recipe": {…}, "format": "lerobot_v21" }` |
 | POST | `/api/levi/pool/export` | Plan (`dry_run`) or start an export `{ "recipe_name": "…", "options": {"format": "lerobot_v21", "name": "…"} }`; held-out episodes are refused, 403 for a folder outside `LEVI_EXPORT_ROOTS` or inside a source |
+| GET | `/api/levi/pool/facets` | Training pool facet counts and what the visibility toggles hide |
+| POST | `/api/levi/pool/jobs/{id}/cancel` | Stop a running pool scan, export or push |
+| GET | `/api/levi/pool/jobs/{id}/summary` | `pool_export.json` of a finished export job |
+| GET | `/api/levi/pool/remotes` | Remote targets for pool pushes |
+| PUT / DELETE | `/api/levi/pool/remotes/{name}` | Register `{ "spec": "[user@]host:/path", "port"?: n }` or forget a target (SSH keys only; a `password` field is refused) |
+| POST | `/api/levi/pool/push` | `{ "target": "…", "export_job": "…" \| "source": "<export dir>", "dry_run": false }`: rsync over SSH of a finished pool export, as a cancellable job |
 | GET | `/api/levi/manifest/operations` | Built-in training-manifest operations with their parameters ([Training manifests](TRAINING_MANIFEST.md)) |
 | GET | `/api/levi/manifest?repo_id=local/<name>` | Manifests written for a dataset: directory, time, operation, counts |
 | POST | `/api/levi/manifest` | Write a manifest `{ "repo_id": "local/<name>", "operation": "verified_success", "params": {"fallback": "exclude"}, "tasks": ["…"], "episodes": [0, 1], "anchored_run": null, "anchored_tasks": ["…"], "recap_revision": null, "allow_stale": false }`; returns the manifest without its per-episode table (that stays in `manifest.json`); 400 for an unknown operation or parameter, a missing anchored review or RECAP revision, or stale RECAP labels |

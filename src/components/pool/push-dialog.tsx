@@ -2,7 +2,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
-import { PoolJobProgress, RUNNING, StatusBadge, bytes, duration } from "./pool-progress";
+import {
+  PoolJobProgress,
+  RUNNING,
+  StatusBadge,
+  bytes,
+  duration,
+} from "./pool-progress";
 import type { PoolJob, RemoteTarget } from "./types";
 
 /** "Send to remote": pick or register a target ([user@]host:/path, SSH
@@ -150,14 +156,16 @@ export function PushDialog({
               <input
                 className="levi-input"
                 required
-                pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+                pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}"
                 placeholder="gpu-server"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
               />
             </label>
             <label className="wide">
-              <span>{t("[user@]host:/path (host may be an ~/.ssh/config alias)")}</span>
+              <span>
+                {t("[user@]host:/path (host may be an ~/.ssh/config alias)")}
+              </span>
               <input
                 className="levi-input"
                 required

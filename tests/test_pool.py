@@ -851,7 +851,8 @@ def test_page_routes_facets_outcomes_and_export_summary(pool, client):
     done = client.get(f"/api/levi/pool/jobs/{job['id']}").json()
     assert done["status"] == "succeeded", done.get("error")
     summary = client.get(f"/api/levi/pool/jobs/{job['id']}/summary").json()
-    assert summary["counts"]["episodes"] == 3 and summary["counts"]["excluded"][
-        "heldout"
-    ] == 1
+    assert (
+        summary["counts"]["episodes"] == 3
+        and summary["counts"]["excluded"]["heldout"] == 1
+    )
     assert client.get("/api/levi/pool/jobs/nope-1/summary").status_code in (400, 404)

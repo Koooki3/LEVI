@@ -144,23 +144,31 @@ def test_progress_parsing():
         "files_left": 5,
         "files_sent": 3,
     }
-    assert remote.parse_progress("          0   0%    0.00kB/s    0:00:00")[
-        "percent"
-    ] == 0
-    assert remote.parse_progress("  1,024 100%  1.00MB/s  1:02:03 (xfr#1, ir-chk=0/4)")[
-        "eta_seconds"
-    ] == 3723
+    assert (
+        remote.parse_progress("          0   0%    0.00kB/s    0:00:00")["percent"] == 0
+    )
+    assert (
+        remote.parse_progress("  1,024 100%  1.00MB/s  1:02:03 (xfr#1, ir-chk=0/4)")[
+            "eta_seconds"
+        ]
+        == 3723
+    )
     assert remote.parse_progress("sending incremental file list") is None
     assert remote.parse_progress("rsync error: some files could not be") is None
-    chunks = [b"  1 0%  1kB/s  0:00:01\r  2 50% 1kB/s 0:00:01\r", b"  3 100% 1kB/s 0:00:00\n"]
+    chunks = [
+        b"  1 0%  1kB/s  0:00:01\r  2 50% 1kB/s 0:00:01\r",
+        b"  3 100% 1kB/s 0:00:00\n",
+    ]
 
     class Stream:
         def read(self, _):
             return chunks.pop(0) if chunks else b""
 
-    assert [
-        remote.parse_progress(x)["percent"] for x in remote._updates(Stream())
-    ] == [0, 50, 100]
+    assert [remote.parse_progress(x)["percent"] for x in remote._updates(Stream())] == [
+        0,
+        50,
+        100,
+    ]
 
 
 # ------------------------------------------------------------------ sources
@@ -201,7 +209,9 @@ def test_real_push_through_ssh_stand_in_and_resume(exports, fake_ssh, tmp_path):
     assert dry["ok"] and not (landing / "mix-v1").exists()
     updates = []
     progress = tmp_path / "push.progress.json"
-    result = remote.push(exports["folder"], target, progress_path=progress, echo=updates.append)
+    result = remote.push(
+        exports["folder"], target, progress_path=progress, echo=updates.append
+    )
     assert result["ok"], result.get("error")
     assert result["destination"] == f"wk@box:{landing}/mix-v1/"
     copied = landing / "mix-v1"
@@ -286,7 +296,10 @@ def test_push_api_job_and_cancel(exports, fake_ssh, tmp_path, client, monkeypatc
     final = client.get(f"/api/levi/pool/jobs/{slow['id']}").json()
     assert final["status"] == "cancelled"
     alive = subprocess.run(
-        ["pgrep", "-f", str(fake_ssh["script"])], capture_output=True, text=True
+        ["pgrep", "-f", str(fake_ssh["script"])],
+        capture_output=True,
+        text=True,
+        check=False,
     ).stdout.split()
     assert not alive
     assert client.post(f"/api/levi/pool/jobs/{slow['id']}/cancel").status_code == 400
@@ -310,6 +323,7 @@ def _ssh_localhost_works() -> bool:
                 ],
                 capture_output=True,
                 timeout=15,
+                check=False,
             ).returncode
             == 0
         )

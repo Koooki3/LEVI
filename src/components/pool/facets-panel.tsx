@@ -81,7 +81,9 @@ export function FacetsPanel({
             <input
               type="checkbox"
               checked={filters.categories.includes(c)}
-              onChange={() => set({ categories: toggle(filters.categories, c) })}
+              onChange={() =>
+                set({ categories: toggle(filters.categories, c) })
+              }
             />
             <span className="grow">{t(CATEGORY_LABELS[c])}</span>
             <span className="levi-pool-count">

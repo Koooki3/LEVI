@@ -1,7 +1,12 @@
 "use client";
 import { useState } from "react";
 import { useLocale } from "@/components/levi-locale";
-import { CATEGORY_LABELS, REASON_LABELS, type Preview, type Recipe } from "./types";
+import {
+  CATEGORY_LABELS,
+  REASON_LABELS,
+  type Preview,
+  type Recipe,
+} from "./types";
 
 function move<T>(list: T[], from: number, to: number): T[] {
   if (to < 0 || to >= list.length || from === to) return list;
@@ -234,7 +239,11 @@ export function CompositionPanel({
         )}
       </div>
 
-      <div className="levi-pool-preview" aria-live="polite" aria-busy={previewing}>
+      <div
+        className="levi-pool-preview"
+        aria-live="polite"
+        aria-busy={previewing}
+      >
         <h3>{t("Preview")}</h3>
         {previewError ? (
           <p className="levi-error">{previewError}</p>
@@ -297,7 +306,7 @@ export function CompositionPanel({
             <input
               className="levi-input"
               value={recipe.name}
-              pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,99}"
+              pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,99}"
               title={t("Letters, digits, dot, dash and underscore")}
               onChange={(e) => set({ name: e.target.value })}
             />
@@ -321,7 +330,7 @@ export function CompositionPanel({
             <option value="">{t("Choose a saved recipe")}</option>
             {recipes.map((r) => (
               <option key={r.name} value={r.name}>
-                {r.name} · {r.tasks.length} {t("tasks")}
+                {r.name} · {r.tasks.length} {t("Tasks").toLowerCase()}
               </option>
             ))}
           </select>

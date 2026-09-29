@@ -39,7 +39,6 @@ REMOTE_PATH = r"^(?:/|~/)[A-Za-z0-9._/+@=,-]{0,1000}$"
 SPEC = re.compile(r"^(?:(?P<user>[^@:\s]+)@)?(?P<host>[^@:\s]+):(?P<path>\S+)$")
 
 
-
 def ssh_program() -> str:
     """``LEVI_POOL_SSH`` (default ``ssh``): the SSH client. Tests point it at
     a stand-in that runs the remote side locally."""

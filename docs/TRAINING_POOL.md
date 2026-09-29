@@ -22,6 +22,7 @@ The training pool indexes every dataset under a set of read-only folders, one ro
 | --- | --- | --- |
 | `LEVI_POOL_ROOTS` | Comma-separated folders the pool reads, never writes | unset: the training pool is idle |
 | `LEVI_EXPORT_ROOTS` | Comma-separated folders an export may be written under | the workspace |
+| `LEVI_POOL_SSH` | The SSH client of remote transfers (default `ssh`; tests point it at a stand-in) | `ssh` |
 | `LEVI_POOL_HELDOUT` | Comma-separated held-out lists (JSON with `episodes: [{path, sha256: {video: hex}, frame_count, frozen_id}]`; `path` relative to a pool root or absolute; other keys such as `dev_pool` are ignored) | none |
 
 A relative export name lands in `<workspace>/exports/pool/<name>`.
@@ -115,9 +116,39 @@ uv run levi pool export pi05-mix --format lerobot_v21 --name pi05-mix-v1 \
 | `recap_value` | The same plus RECAP rewards, returns and labels ([RECAP](RECAP.md)); raw captures are retimed without filtering (one row per executed step). The outcome is the human label, else the robot's flag; episodes with neither are left out (`no_outcome`). |
 | `raw_capture` | Raw capture folders copied (or with `--hardlink`, hard-linked: never edit such an export) into `<task>/demo_NNNN`, renumbered per task, with `task_description.txt`. |
 
-Each episode row in `meta/episodes.jsonl` of a LeRobot export carries `pool_key`, `pool_source` and `pool_fingerprint`; `meta/levi_provenance.jsonl` maps new to source episode indices. Not in this version: LeRobot v3 output (needs lerobot's v2.1→v3 converter; convert the v2.1 export with it), exporting a recipe as a training manifest without copying data, and remote transfer.
+Each episode row in `meta/episodes.jsonl` of a LeRobot export carries `pool_key`, `pool_source` and `pool_fingerprint`; `meta/levi_provenance.jsonl` maps new to source episode indices. Not in this version: LeRobot v3 output (needs lerobot's v2.1→v3 converter; convert the v2.1 export with it) and exporting a recipe as a training manifest without copying data. To move an export to another machine see [Remote transfer](#remote-transfer--远程传输).
 
-导出格式：LeRobot v2.1（多来源合并，按任务顺序→来源→片段排序，统一相机键和 fps，状态/动作维度或分辨率不一致时拒绝并列出差异）、RECAP 价值数据集（结局按“人工标签 > 机器人标志”，无结局的片段排除并列出）、原始采集目录（按任务重编号，可硬链接）。暂不支持：LeRobot v3 输出、导出为训练清单、远程传输。
+导出格式：LeRobot v2.1（多来源合并，按任务顺序→来源→片段排序，统一相机键和 fps，状态/动作维度或分辨率不一致时拒绝并列出差异）、RECAP 价值数据集（结局按“人工标签 > 机器人标志”，无结局的片段排除并列出）、原始采集目录（按任务重编号，可硬链接）。暂不支持：LeRobot v3 输出、导出为训练清单。传到其他机器见 [远程传输](#remote-transfer--远程传输)。
+
+
+## The page / 训练池页面
+
+`/pool` (top navigation **Training pool / 训练池**, and a card on the Workbench). It is the same backend as `levi pool …`.
+
+- **Pool folders** (top): the roots, the last scan time and counts, **Scan now** with a progress bar and Cancel, and the recent jobs (scans, exports, pushes) with their status.
+- **Filters** (left): category (原始人工采集 / 原始 rollout / LEVI 处理后 / 外部 / 归档), source (searchable, counts), a task search, outcome (all / robot flag success / verified success), policy and date. *Show hidden* switches on held-out episodes (留出测试集), copies and the archive; each shows how many it hides.
+- **Tasks and episodes** (centre): the task table (episodes per category, frames, success rate, **+ Add** puts the task at the end of the composition; clicking a task narrows the episode table to it) and the paged episode table with source, category, task, frames, outcome and badges for held-out, copy, non-standard and not exportable. An episode of a source registered in LEVI links to the viewer; otherwise its path is shown. A held-out row has no checkbox and cannot be part of an export: the server excludes it whatever the page sends.
+- **Composition** (right): the ordered task list (drag a task, or use its up / down buttons; the order is the export order), per-task cap, seed, non-standard folders, the constraints taken from the filters, and a live preview (episodes, frames, held-out excluded, and every other exclusion with its reason). Recipes are saved, loaded and deleted by name.
+- **Export**: format, dataset name, output directory (a folder outside `LEVI_EXPORT_ROOTS` is flagged in the field and refused by the server), fps, camera mapping, hard links (raw capture copy only), **Dry run** and **Start export** with progress. A finished export links to its `pool_export.json` and offers **Send to remote / 传到远程**.
+
+Page routes beyond the table above: `GET /api/levi/pool/facets` (facet counts and what the toggles hide), `outcome=robot_flag_success|verified_success`, `date_from`, `date_to` on `tasks` and `episodes`, and each episode row carries `viewer` (its LEVI viewer path or `null`).
+
+页面在 `/pool`（顶部导航“训练池”，工作台也有入口），与 `levi pool …` 共用后端：顶部是池目录、上次扫描和“立即扫描”；左侧分面（类别、来源、任务搜索、结局、策略、日期，可显示留出测试集、副本、归档并显示被隐藏的数量）；中间是任务表和片段表（已登记的数据集可跳到片段查看器，否则显示路径）；右侧是组合（有序任务列表，可拖动或用上下按钮排序，每任务上限、种子、实时预览及各类排除原因、命名保存/载入/删除）和导出面板（格式、名称、输出目录、fps、相机映射、硬链接、试运行、进度、`pool_export.json` 链接）。留出片段在页面上不可选，服务端也会排除。
+
+## Remote transfer / 远程传输
+
+```bash
+uv run levi pool remote add gpu1 wk@gpu1.lab:/data/datasets     # or an ~/.ssh/config alias: gpu1:/data/datasets
+uv run levi pool remote list | delete <name>
+uv run levi pool push <export-dir> --target gpu1 [--dry-run]
+```
+
+- **Targets** are named `[user@]host:/path` (host may be an `~/.ssh/config` alias; `--port`), kept in `<workspace>/pool/remotes.json`. Host, user and path are checked against strict patterns: nothing may start with `-`, the path is absolute (or `~/`), and spaces, quotes, `;`, `$`, backticks and `..` are refused. There is no password field anywhere; a spec such as `user:secret@host:/x` is refused.
+- **Transfer** is `rsync -a --partial --info=progress2 --protect-args` over `ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o PasswordAuthentication=no`, built as an argument list (no shell). Key or agent login only; the host key must already be in `known_hosts` (LEVI never relaxes host-key checking). The target path must exist on the remote; the export lands in `<path>/<export name>/`. An interrupted push keeps what arrived (`--partial`) and pushing again resumes.
+- **What can be pushed**: a finished export made by the pool (a folder holding `pool_export.json`, not a `.partial` one, not a symbolic link) inside `LEVI_EXPORT_ROOTS` or the workspace's export folder. Anything else is refused.
+- **Jobs**: `POST /api/levi/pool/push` runs the transfer as a pool job (worker process group tracked in `children.py`, progress parsed from rsync into the job, `POST /api/levi/pool/jobs/{id}/cancel` stops it). `--dry-run` uses `rsync -n`. The SSH client is `ssh`, or `LEVI_POOL_SSH` (used by tests).
+
+远程目标是命名的 `[user@]host:/路径`（host 可以是 `~/.ssh/config` 里的别名），存在工作区 `pool/remotes.json`；各部分严格校验，不允许以 `-` 开头，不接受也不保存密码。传输用 rsync over SSH（`BatchMode=yes`，主机密钥必须已在 `known_hosts`，不关闭 `StrictHostKeyChecking`），参数以列表传递，不经 shell；支持 `--partial` 续传、进度、取消。只有训练池生成的、位于 `LEVI_EXPORT_ROOTS` 内的完整导出目录可以传输。
 
 ## API
 
@@ -134,3 +165,9 @@ All routes are behind the service's UI token and same-origin check.
 | GET / PUT / DELETE | `/api/levi/pool/recipes`, `/api/levi/pool/recipes/{name}` | Recipe CRUD (the body's `name` must match the URL) |
 | POST | `/api/levi/pool/preview` | `{ "recipe": {…}, "format": "recap_value" }` → counts and exclusions |
 | POST | `/api/levi/pool/export` | `{ "recipe_name": "…" or "recipe": {…}, "options": {"format", "name", "output_dir", "fps", "cameras", "camera_map", "hardlink", …}, "dry_run": false }`; 403 for a path outside `LEVI_EXPORT_ROOTS` or inside a source, 400 for an existing target or an empty selection |
+| GET | `/api/levi/pool/facets?category=&show_heldout=&show_copies=&show_archive=` | Facet counts for the page and what the toggles hide |
+| POST | `/api/levi/pool/jobs/{id}/cancel` | Stop a running scan, export or push |
+| GET | `/api/levi/pool/jobs/{id}/summary` | `pool_export.json` of a finished export job |
+| GET | `/api/levi/pool/remotes` | Registered remote targets |
+| PUT / DELETE | `/api/levi/pool/remotes/{name}` | Register (`{"spec": "[user@]host:/path", "port"?}`) or forget a target; unknown fields such as `password` are refused |
+| POST | `/api/levi/pool/push` | `{ "target": "…", "export_job": "…" or "source": "<export dir>", "dry_run": false }`: rsync over SSH as a cancellable job |

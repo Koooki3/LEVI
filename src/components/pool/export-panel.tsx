@@ -28,19 +28,17 @@ function pairs(text: string): Record<string, string> {
 
 /** Where the export may go: a relative name lands in the workspace's export
  * folder; an absolute folder must lie inside LEVI_EXPORT_ROOTS. */
-export function outputDirProblem(
-  dir: string,
-  roots: string[],
-): string | null {
+export function outputDirProblem(dir: string, roots: string[]): string | null {
   const value = dir.trim();
   if (!value) return null;
   if (!value.startsWith("/") && !value.startsWith("~"))
     return "Give an absolute folder, or leave it empty for the workspace's export folder.";
   if (value.startsWith("~")) return null;
   const clean = value.replace(/\/+$/, "");
-  const inside = roots.some(
-    (root) => clean === root || clean.startsWith(root.replace(/\/+$/, "") + "/"),
-  );
+  const inside = roots.some((root) => {
+    const base = root.replace(/\/+$/, "");
+    return clean === base || clean.startsWith(base + "/");
+  });
   return inside ? null : "outside";
 }
 
@@ -251,8 +249,7 @@ export function ExportPanel({
             {t("episodes")} → <code>{plan.target}</code>
           </p>
           <p className="levi-pool-hint">
-            {plan.planned_excluded} {t("left out")} ·{" "}
-            {t("nothing was written")}
+            {plan.planned_excluded} {t("left out")} · {t("nothing was written")}
           </p>
         </div>
       )}
