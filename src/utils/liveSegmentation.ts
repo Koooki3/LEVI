@@ -67,17 +67,21 @@ export function liveSession(): {
   };
 }
 
-/** Insert into a bounded frame map, evicting the lowest frame indices. */
+/** Insert into a bounded frame map, evicting the results that arrived
+ * first. (Evicting the lowest frame indices would throw away every new
+ * result after the player loops or seeks back.) */
 export function insertBounded<T>(
   frames: Map<number, T>,
   frame: number,
   value: T,
   limit = LIVE_FRAMES_KEPT,
 ): void {
+  frames.delete(frame);
   frames.set(frame, value);
-  if (frames.size <= limit) return;
-  const excess = [...frames.keys()].sort((a, b) => a - b);
-  for (let i = 0; i < frames.size - limit; i += 1) frames.delete(excess[i]);
+  for (const oldest of frames.keys()) {
+    if (frames.size <= limit) break;
+    frames.delete(oldest);
+  }
 }
 
 export function pushLiveResult(result: LiveResult): void {
@@ -120,6 +124,17 @@ export function primaryLiveVideo(): {
   for (const entry of store.videos.values())
     if (entry.el.isConnected) return entry;
   return null;
+}
+
+/** Episode-local time each registered camera shows now. Cameras of one
+ * player drift apart by up to a few frames (more at high speed), so the
+ * worker follows each camera's own time. */
+export function liveCameraTimes(): Record<string, number> {
+  const times: Record<string, number> = {};
+  for (const [camera, entry] of store.videos)
+    if (entry.el.isConnected)
+      times[camera] = Math.max(0, entry.el.currentTime - entry.segmentStart);
+  return times;
 }
 
 /** Episode-local frame shown by a video at `currentTime` seconds. */

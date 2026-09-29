@@ -356,3 +356,26 @@ def test_live_without_model_is_refused(seg, video_dataset):
         json={"repo_id": repo, "episode_index": 7, "provider": "fake"},
     )
     assert unknown.status_code == 400, unknown.text
+
+
+def test_worker_clock_follows_each_camera_and_removes_transport_delay(monkeypatch):
+    """Cameras of one player drift apart (more at high speed), and a proxy
+    can delay a clock message by hundreds of milliseconds: each decoder
+    follows its own camera's time, measured when the player read it."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "integrations" / "segmentation"))
+    from levi_seg_worker.live import Clock
+
+    clock = Clock()
+    now = time.time()
+    clock.set(playing=True, position=2.0, rate=3.0, sent_at=now - 0.5, cameras={"a": 2.0, "b": 1.5})
+    at = time.monotonic()
+    # Half a second in transit at 3x: the player is 1.5 s further on.
+    assert clock.position(at, "a") == pytest.approx(3.5, abs=0.05)
+    assert clock.position(at, "b") == pytest.approx(3.0, abs=0.05)
+    assert clock.position(at) == pytest.approx(3.5, abs=0.05)
+    # A timestamp from another machine's clock (future or stale) is ignored.
+    clock.set(playing=False, position=1.0, sent_at=now + 30, cameras={"a": 1.2})
+    assert clock.position(None, "a") == pytest.approx(1.2)
+    assert clock.position(None, "unknown") == pytest.approx(1.0)

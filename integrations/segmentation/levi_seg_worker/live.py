@@ -59,13 +59,38 @@ class Clock:
         self.at = time.monotonic()
         self.version = 0
         self.last_message = time.monotonic()
+        self.offsets: dict[str, float] = {}
 
-    def set(self, *, playing: bool, position: float, rate: float = 1.0) -> None:
+    def set(
+        self,
+        *,
+        playing: bool,
+        position: float,
+        rate: float = 1.0,
+        sent_at: float | None = None,
+        cameras: dict[str, float] | None = None,
+    ) -> None:
+        """``sent_at`` (Unix seconds, when the player read ``position``)
+        takes the message's transport delay out of the clock; a value in the
+        future or more than 2 s old (clocks on different machines) is ignored."""
+        now = time.monotonic()
+        delay = 0.0
+        if sent_at is not None and math.isfinite(sent_at):
+            late = time.time() - float(sent_at)
+            if 0.0 <= late <= 2.0:
+                delay = late
         with self._cv:
             self.playing = bool(playing)
             self.time = max(0.0, float(position))
             self.rate = float(rate) if rate and math.isfinite(rate) and rate > 0 else 1.0
-            self.at = time.monotonic()
+            self.at = now - delay
+            # Per-camera offsets from ``position``: the player's cameras drift
+            # apart, and each decoder follows the frame its own video shows.
+            self.offsets = {
+                str(k): float(v) - self.time
+                for k, v in (cameras or {}).items()
+                if isinstance(v, (int, float)) and math.isfinite(v) and abs(float(v) - self.time) < 5.0
+            }
             self.version += 1
             self.last_message = self.at
             self._cv.notify_all()
@@ -74,11 +99,12 @@ class Clock:
         with self._cv:
             self.last_message = time.monotonic()
 
-    def position(self, now: float | None = None) -> float:
+    def position(self, now: float | None = None, camera: str | None = None) -> float:
         with self._cv:
+            offset = self.offsets.get(camera, 0.0) if camera else 0.0
             if not self.playing:
-                return self.time
-            return self.time + ((now or time.monotonic()) - self.at) * self.rate
+                return max(0.0, self.time + offset)
+            return max(0.0, self.time + offset + ((now or time.monotonic()) - self.at) * self.rate)
 
     def state(self) -> tuple[bool, float, float, int]:
         with self._cv:
@@ -187,7 +213,7 @@ class LiveRunner:
             while not self.stop.is_set():
                 playing, rate, _, version = self.clock.state()
                 now = time.monotonic()
-                position = self.clock.position(now)
+                position = self.clock.position(now, cam.key)
                 due = math.floor(position * self.fps + 1e-6)
                 target = min(max(0, due + (self.lead if playing else 0)), max(0, reader.length - 1))
                 last = cam.last_decoded
@@ -470,6 +496,8 @@ def serve(plan_path: Path) -> int:
                         playing=bool(message.get("playing")),
                         position=float(message.get("time", 0.0)),
                         rate=float(message.get("rate", 1.0)),
+                        sent_at=message.get("sent_at"),
+                        cameras=message.get("cameras") if isinstance(message.get("cameras"), dict) else None,
                     )
                 elif op == "ping":
                     clock.heartbeat()

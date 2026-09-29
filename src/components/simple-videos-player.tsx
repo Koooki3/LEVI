@@ -12,6 +12,7 @@ import { fetchObjectAnnotations } from "@/utils/annotationsClient";
 import { proxyHfUrl } from "@/utils/auth";
 import { VideoOverlayCanvas } from "./video-overlay-canvas";
 import { LiveSegmentationCanvas } from "./live-segmentation-canvas";
+import { liveSession, subscribeLive } from "@/utils/liveSegmentation";
 import { ColormappedVideo } from "./colormapped-video";
 
 const THRESHOLDS = {
@@ -30,6 +31,7 @@ type VideoPlayerProps = {
 };
 
 const videoEventCleanup = new WeakMap<HTMLVideoElement, () => void>();
+const NO_OBJECTS: ObjectAnnotation[] = [];
 
 export const SimpleVideosPlayer = ({
   videosInfo,
@@ -103,6 +105,19 @@ export const SimpleVideosPlayer = ({
   useEffect(() => {
     setObjectMarks(objectAnnotations.map((row) => row.timestamp));
   }, [objectAnnotations]);
+
+  // While the live overlay runs on this episode it replaces the stored
+  // objects on screen (two layers of masks and labels would be unreadable).
+  const liveActive = React.useSyncExternalStore(
+    subscribeLive,
+    () => {
+      const session = liveSession();
+      return (
+        !!session.sessionId && session.episodeIndex === annotationEpisodeId
+      );
+    },
+    () => false,
+  );
 
   const hiddenSet = React.useMemo(() => new Set(hiddenVideos), [hiddenVideos]);
 
@@ -476,7 +491,9 @@ export const SimpleVideosPlayer = ({
                     <VideoOverlayCanvas
                       videoEl={videoEls[idx] ?? null}
                       cameraKey={info.filename}
-                      objectAnnotations={objectAnnotations}
+                      objectAnnotations={
+                        liveActive ? NO_OBJECTS : objectAnnotations
+                      }
                     />
                     {/* Live segmentation (fast segmentation panel): drawn on
                     top, follows the video element's own clock. */}

@@ -53,6 +53,15 @@ describe("frame choice", () => {
     for (let i = 0; i < 10; i += 1) insertBounded(frames, i, i, 4);
     expect([...frames.keys()].sort((a, b) => a - b)).toEqual([6, 7, 8, 9]);
   });
+
+  test("keeps new results after the player loops back", () => {
+    const frames = new Map<number, number>();
+    for (let i = 100; i < 110; i += 1) insertBounded(frames, i, i, 4);
+    insertBounded(frames, 0, 0, 4);
+    insertBounded(frames, 1, 1, 4);
+    expect(frames.has(0) && frames.has(1)).toBe(true);
+    expect(frames.size).toBe(4);
+  });
 });
 
 describe("parseEpisodeList", () => {

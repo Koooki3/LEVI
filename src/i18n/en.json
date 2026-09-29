@@ -1382,5 +1382,6 @@
   "item(s) failed": "item(s) failed",
   "latency p50 / p95 (ms)": "latency p50 / p95 (ms)",
   "other dataset": "other dataset",
-  "ready": "ready"
+  "ready": "ready",
+  "held-out frames": "held-out frames"
 }

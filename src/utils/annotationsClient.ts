@@ -1027,7 +1027,13 @@ export function liveEventsUrl(
 export async function sendLiveClock(
   sessionId: string,
   ident: DatasetIdent,
-  clock: { playing: boolean; time: number; rate: number },
+  clock: {
+    playing: boolean;
+    time: number;
+    rate: number;
+    sent_at?: number;
+    cameras?: Record<string, number>;
+  },
 ): Promise<boolean> {
   const response = await fetch(liveUrl(sessionId, ident, "/clock"), {
     method: "POST",

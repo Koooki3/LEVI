@@ -185,6 +185,11 @@ class ClockRequest(BaseModel):
     playing: bool
     time: float = Field(ge=0)
     rate: float = Field(default=1.0, gt=0, le=16)
+    # Unix seconds when the player read ``time``: the worker removes the
+    # request's transport delay (a proxy can add hundreds of milliseconds).
+    sent_at: float | None = None
+    # Each camera's own episode-local time (cameras of one player drift).
+    cameras: dict[str, float] | None = None
 
 
 # ---------------------------------------------------------------- status
@@ -500,7 +505,7 @@ def segmentation_live_clock(
     session = _session(_state(repo_id, revision, local_path), session_id)
     if session.stopped_at is not None:
         raise HTTPException(409, "The live session has stopped")
-    sent = session.send({"op": "clock", **clock.model_dump()})
+    sent = session.send({"op": "clock", **clock.model_dump(exclude_none=True)})
     return JSONResponse({"ok": sent, "state": session.state})
 
 
@@ -523,7 +528,8 @@ def segmentation_live_events(
     return StreamingResponse(
         session.stream(after),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        # no-transform: a compressing proxy (Next.js) must not buffer events.
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
     )
 
 

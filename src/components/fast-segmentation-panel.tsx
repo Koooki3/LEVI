@@ -22,6 +22,7 @@ import {
   type DatasetIdent,
 } from "@/utils/annotationsClient";
 import {
+  liveCameraTimes,
   createCoalescer,
   parseEpisodeList,
   primaryLiveVideo,
@@ -295,7 +296,7 @@ function ModelCard({ model }: { model: SegModel }) {
             <span>
               {num(metrics?.ap50, 3)} / {num(metrics?.ap, 3)}
               {metrics?.images ? ` · ${metrics.images} ` : ""}
-              {metrics?.images ? <T>images</T> : null}
+              {metrics?.images ? <T>held-out frames</T> : null}
             </span>
             <span>
               <T>Recall (any class)</T>
@@ -538,8 +539,13 @@ export default function FastSegmentationPanel({
   useEffect(() => {
     if (!liveId) return;
     const send = createCoalescer(
-      (clock: { playing: boolean; time: number; rate: number }) =>
-        sendLiveClock(liveId, identRef.current, clock),
+      (clock: {
+        playing: boolean;
+        time: number;
+        rate: number;
+        sent_at: number;
+        cameras: Record<string, number>;
+      }) => sendLiveClock(liveId, identRef.current, clock),
     );
     let bound: { el: HTMLVideoElement; segmentStart: number } | null = null;
     const push = () => {
@@ -549,6 +555,10 @@ export default function FastSegmentationPanel({
         playing: !el.paused && !el.ended,
         time: Math.max(0, el.currentTime - segmentStart),
         rate: el.playbackRate > 0 ? Math.min(16, el.playbackRate) : 1,
+        // When currentTime was read: the worker removes the delay until the
+        // message arrives (a coalesced send can leave later still).
+        sent_at: Date.now() / 1000,
+        cameras: liveCameraTimes(),
       });
     };
     const events = [

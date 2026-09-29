@@ -1382,5 +1382,6 @@
   "item(s) failed": "项失败",
   "latency p50 / p95 (ms)": "延迟 p50 / p95（毫秒）",
   "other dataset": "其他数据集",
-  "ready": "就绪"
+  "ready": "就绪",
+  "held-out frames": "个留出帧"
 }

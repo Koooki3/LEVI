@@ -2113,3 +2113,8 @@
   padding: 0;
   accent-color: #d4f779;
 }
+.annotations-skin .fast-seg-panel .object-annotation-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
