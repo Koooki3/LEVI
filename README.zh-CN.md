@@ -89,6 +89,7 @@ LEVI 会对照数据目录校验解析出的任务规格，等你批准后才执
 | [Agents](docs/AGENTS.md) | 通道、任务生命周期、自然语言任务、证据、物体掩码、harness（成本、记忆、自改进、教师监督）、能力参考 |
 | [本地模型](docs/OLLAMA.zh-CN.md) · [English](docs/OLLAMA.md) | Ollama 安装、本地 vLLM 服务、模型绑定、精简提示模式、并发请求、GPU 错峰使用、师生学习循环 |
 | [Pilot](docs/PILOT.zh-CN.md) · [English](docs/PILOT.md) | 托管的 Codex / Claude Code 会话 |
+| [实时标注服务](docs/LIVE.zh-CN.md) · [English](docs/LIVE.md) | `levi live`：评测写 rollout 时在后台标注的 LEVI：已完成片段的镜像、GPU 策略、有审计的自动批准主体、资源限制、状态文件和 API |
 | [锚定复核](docs/ANCHORED_REVIEW.md) | 在每个记录到的机器人事件处判断片段：规格、起始检查与否决规则、锚点、记录、实测一致性 |
 | [数据质量](docs/QUALITY.md) | 结构化检查、内容审查、结局标签、审核标记与审核清单 |
 | [转换](docs/CONVERSION.md) | 输入格式、检查、帧时间模式、选项、性能、溯源 |

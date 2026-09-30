@@ -218,6 +218,10 @@ def main():
 
         sys.argv.pop(1)
         return clean()
+    if len(sys.argv) > 1 and sys.argv[1] == "live":
+        from .live.cli import main as live
+
+        raise SystemExit(live(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "pool":
         from .pool.cli import main as pool
 
@@ -254,7 +258,7 @@ def main():
             "model: checkpoints and advantage labels), export (training manifests: which "
             "frames enter a learner's loss, with what weight), sample (DROID test "
             "samples), namespace (isolated experiments over one dataset), pool (training pool: "
-            "scan read-only pool roots, recipes, merged exports), docs (check or regenerate the documentation). Each takes its own "
+            "scan read-only pool roots, recipes, merged exports), live (background annotation service for robot rollouts), docs (check or regenerate the documentation). Each takes its own "
             "--help."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,

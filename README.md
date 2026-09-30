@@ -89,6 +89,7 @@ LEVI checks the spec against the catalog and waits for your approval before anyt
 | [Agents](docs/AGENTS.md) | Channels, task lifecycle, natural-language tasks, evidence, object masks, the harness (cost, memory, self-improvement, teacher supervision), capability reference |
 | [Local models](docs/OLLAMA.md) · [中文](docs/OLLAMA.zh-CN.md) | Ollama setup, a local vLLM server, model binding, the lean prompt style, requests in flight, off-peak GPU use, the teacher/learner loop |
 | [Pilot](docs/PILOT.md) · [中文](docs/PILOT.zh-CN.md) | Managed Codex / Claude Code sessions |
+| [Live annotation service](docs/LIVE.md) · [中文](docs/LIVE.zh-CN.md) | `levi live`: a background LEVI that labels robot rollouts while an evaluation writes them: mirror of finished rollouts, GPU policy, the audited automatic approver, resource limits, status file and API |
 | [Anchored review](docs/ANCHORED_REVIEW.md) | Judge an episode at each recorded robot event: spec, start check and vetoes, anchors, records, measured agreement |
 | [Data quality](docs/QUALITY.md) | Structural checks, content review, labels, flags and review manifests |
 | [Conversion](docs/CONVERSION.md) | Input formats, inspection, timing modes, options, performance, provenance |

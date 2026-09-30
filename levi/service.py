@@ -118,6 +118,9 @@ app.include_router(pilot_router)
 from .inference.api import router as inference_router
 
 app.include_router(inference_router)
+from .live.api import router as live_router
+
+app.include_router(live_router)
 from .pool.api import router as pool_router
 
 app.include_router(pool_router)

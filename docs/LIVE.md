@@ -1,0 +1,258 @@
+# Live annotation service
+
+`levi live` is a background LEVI that labels robot rollouts while an evaluation is still writing them. It watches the rollout folders, takes each **finished** rollout into its own workspace, and has the local model (Qwen3.8 through vLLM) mark its subtask segments and their outcomes and judge whether the episode succeeded. A person can watch the progress on the live page and review the result in the ordinary LEVI viewer. [中文](LIVE.zh-CN.md)
+
+It is a **separate LEVI instance** (its own workspace, UI port 7880, core port 7881), so the long-running work never shares a process with the LEVI you use every day (ports 7860/7861). It is built to stay out of the way of the robot: it lowers its own priority, bounds its threads, costs next to nothing while idle, and starts the GPU model only when the GPU policy allows it.
+
+What it does **not** do: it never writes to a rollout folder, never connects to a robot or policy-server port, never writes a human success/failure label, and never takes part in building a gold set. Its verdicts are automatic and unreviewed, and are marked that way everywhere.
+
+## Quick start
+
+Two commands. The policy server gets the smaller memory pool the measurement recommends (`.22` = 7.6 GB instead of the old `.35`; inference latency is the same, about 59 ms); the live service starts and stops its own vLLM:
+
+```bash
+# Terminal D2: the policy server, as before but with MEM_FRACTION=.22
+cd ~/work/wenkai/openpi && XLA_PYTHON_CLIENT_MEM_FRACTION=.22 uv run scripts/serve_policy.py --port 8000 policy:checkpoint --policy.config pi05_fr3_all_state --policy.dir checkpoints/pi05_fr3_all_step49999
+
+# Any other terminal: the live service (once; it keeps running)
+cd ~/work/wenkai/LEVI && uv run levi live start --daemon --auto-approve
+```
+
+Then the evaluation client's "use background LEVI annotation?" answer is yes. More commands:
+
+```bash
+uv run levi live status                          # what it is doing
+uv run levi live doctor                          # CPU, memory, GPU, disk, warnings
+uv run levi live stop                            # stops only its own processes
+```
+
+`levi live once [--fake-vlm]` labels everything that is finished now and exits (with `--fake-vlm` against a stand-in model server, no GPU). `levi live init` writes `<workspace>/live.toml` with every default.
+
+Without `--auto-approve` the service still mirrors, builds views and **plans**, then waits: a person approves the plan in the LEVI page (the dataset shows `awaiting_approval`). With it, the audited automatic approver (below) takes those gates.
+
+The default workspace is `/home/marvel/work/wenkai/levi-live-ws`; the default watched root is `/home/marvel/work/wenkai/online_rollout_data/models` (the evaluation client's `--rollout-root` default). Status lives in `~/.levi-live/`.
+
+## How it works
+
+```
+evaluation client ──writes──▶ <root>/<group>/<task>/demo_NNNN/   (source: read only)
+                                 │ finished? (criteria.py)
+   supervisor (stdlib, ~25 MiB) ─┤ scans, reads sessions, decides, writes status.json
+                                 ▼
+   GPU policy ──▶ vLLM (started and stopped by the supervisor)
+                                 ▼
+   worker (one per batch, one dataset at a time)
+      mirror → view → temporal run → commit → release-review run → clean up
+                                 ▼
+   <workspace>/captures/<group>__<task>/demo_NNNN/    hard links
+   LEVI store: committed segments (levi.review = auto) + anchored-review records
+```
+
+- **Supervisor** (`levi live start`): a few megabytes and a few `stat` calls while idle. It imports no numerical library. It asks the GPU policy whether the model may run, starts vLLM, starts one **worker** process for one dataset, and stops vLLM when work ends or the GPU is wanted back.
+- **Worker** (`python -m levi.live.worker`): does the heavy imports, handles one dataset's batch, exits. Every step is resumable: a crash or preemption is continued by the next worker, nothing is labelled twice.
+- **Page and core**: `levi serve` for the live workspace (UI :7880, core :7881), started by `levi live start` (core only, with a notice, when there is no production build; `--no-ui` / `--no-core` skip them).
+
+A dataset is one `<group>/<task_folder>`; its catalog name is `<group>__<task_folder>`. Datasets are processed **one at a time**, longest-waiting first, because LEVI refuses a second writer to a dataset whose annotation baseline moved.
+
+## What counts as finished (interface C1)
+
+The client creates the empty file `.complete` as the very last step of `close()`. A `demo_NNNN` is taken only when
+
+1. `.complete` exists (a rollout from before the marker existed: nothing in it changed for 60 s);
+2. `metadata.json` has a non-empty `stopped_at`;
+3. `events.csv` has an `episode_end` row;
+4. no `*_raw.avi` is left (a capture not yet muxed).
+
+It is **rejected** (finished but unusable, never retried) when `media_storage.video_frames_match_csv` is not true or `cameras.stall_detection.stalled` is not empty. `incomplete_*` and `discarded_*` folders are never taken, only counted; `incomplete_*` with `eval.abort_reason == "fr3_fault"` mark the dataset as **FR3-faulted** on the page. The source's `.eval_sessions/` folder is read, never mirrored.
+
+Rollouts finished before the service's first start (or before the task's evaluation session began) are **backlog**: counted, never touched, unless `watch.backlog = "process"` / `--process-backlog`. A session that answered "no" to background annotation (`levi.enabled` false) is skipped. `eval.outcome == "unlabeled"` demos are the ones waiting for LEVI's verdict; `eval.run_id` is kept per demo.
+
+## The mirror
+
+A finished demo is hard-linked file by file into `<workspace>/captures/<name>/.partial-demo_NNNN` and renamed to `demo_NNNN`, so LEVI never sees a half-mirrored demo and a hard link costs no disk. If linking is impossible (another file system) the files are copied, and `levi live doctor` says so. The source is never written. It happens only **between batches**, so a run never sees its dataset move; if a demo finishes late and sorts before an already-labelled one, the view is rebuilt and LEVI re-keys the annotations by demo, which the service tests.
+
+## Settings (`live.toml`)
+
+`levi live init` writes the file with every default; an unknown key or a wrong type is an error, not a silent default. `--workspace`, `--root`, `--gpu-mode`, `--auto-approve`, `--process-backlog`, `--since`, `--ui-port`, `--core-port`, `--home` override it. Environment: `LEVI_LIVE_WORKSPACE`, `LEVI_LIVE_CONFIG`, `LEVI_LIVE_HOME` (where `status.json` lives; default `~/.levi-live`).
+
+| Table | Key | Default | Meaning |
+| --- | --- | --- | --- |
+| `service` | `workspace` | `/home/marvel/work/wenkai/levi-live-ws` | the live LEVI workspace |
+| | `ui_port`, `core_port`, `host` | 7880, 7881, 127.0.0.1 | never 7860/7861 (product), 5000/8000 (robot) |
+| | `poll_idle_s`, `poll_active_s`, `gate_poll_s`, `heartbeat_s` | 15, 3, 1, 4 | stat-only rollout scan interval idle/active; how often the gate is re-decided while a worker runs; status heartbeat |
+| `watch` | `roots` | `[".../online_rollout_data/models"]` | rollout roots |
+| | `include`, `exclude` | all | `fnmatch` over `group/task_folder` |
+| | `backlog`, `since` | `skip`, none | see above |
+| | `require_session` | false | only tasks with an evaluation session that enabled LEVI |
+| | `batch_max_episodes` | 40 | demos per batch |
+| `fr3` | `health_file` | `~/work/franka_control/run/fr3_health.json` | health monitor file |
+| `gpu` | `mode` | `auto` | `auto` (= `timeshare`), `timeshare`, `coexist`, `manual` |
+| | `policy_ports` | `[8000]` | looked up in `/proc/net/tcp`, never connected to |
+| | `busy_states` | `["running"]` | session states in which the policy is inferring |
+| | `lock_file`, `lock_agent` | `levi-hub/.gpu.lock`, `live` | the workspace's GPU `flock` |
+| | `settle_s` | 20 | wait after a policy server appears or goes before starting vLLM |
+| | `min_free_mib`, `policy_budget_mib` | 600, 8500 | vLLM sleeps when free VRAM falls below the first, or the policy server holds more than the second |
+| `vllm` | `script`, `stop_script`, `pid_dir`, `port` | `tools/vllm/serve-qwen38.sh`, `serve.sh`, `logs`, 8100 | the launch scripts |
+| | `gpu_memory_utilization`, `max_model_len`, `max_images`, `max_num_seqs`, `max_num_batched_tokens` | 0.72, 49152, 128, 2, 4096 | the measured shared profile |
+| | `sleep_mode`, `idle_action`, `margin_mib` | true, `auto`, 1400 | `--enable-sleep-mode` (+ `VLLM_SERVER_DEV_MODE=1`); `auto` = sleep while an evaluation is live, else stop; memory vLLM takes after its first requests |
+| | `idle_timeout_s`, `start_timeout_s` | 120, 1800 | idle before sleeping/stopping; give up starting |
+| | `adopt_external` | false | use a vLLM this service did not start |
+| `provider` | `name`, `prompt_style`, `requests_in_flight` | `live-qwen38`, `lean`, 2 | the model profile created and bound in the live workspace |
+| `pipeline` | `auto_approve` | **false** | the automatic approver |
+| | `coarse_step_seconds`, `refine` | 0.5, `always` | the evaluated temporal settings; the step widens for long episodes so frames fit `max_images` |
+| | `guideline`, `vocabulary`, `anchored`, `anchored_spec`, `anchored_min_valid` | generic v1 files, true, 1 | see "The generic configuration" |
+| | `max_attempts` | 2 | attempts per episode before it is left alone |
+| | `cleanup` | true | drop finished runs' inputs and evidence |
+| `resources` | `nice`, `ionice_class`, `threads`, `view_workers` | 19, 3 (idle), 2, 1 | see "Keeping it light" |
+| | `log_max_mb`, `log_backups`, `cache_max_gib`, `status_max_datasets` | 5, 3, 20, 64 | bounds |
+
+The service sets `LEVI_DROID_SAMPLE=off` (no sample download), `LEVI_GPU_SHARING=allow` (its own policy replaces LEVI's off-peak guard, see below), `LEVI_SYNC_DISCOVER=off` and `LEVI_SYNC_INTERVAL=30` for the live workspace.
+
+## GPU management
+
+One 32 GB GPU is shared with the robot's policy server. The measurement (`levi-hub/reports/live-gpu.md`) gives the rules:
+
+- With the policy server at `XLA_PYTHON_CLIENT_MEM_FRACTION=.22` (7.6 GB, inference p50 about 59 ms, the same as `.35`) and vLLM at `--gpu-memory-utilization 0.72` **both stay resident** (peak about 31.3 of 32.6 GB, 1.3 GB spare). The old `.35` (11.8 GB) does not fit with vLLM.
+- They **cannot infer at the same time**: while vLLM works, each policy inference takes about 120 ms instead of 59 ms, over the 100 ms control cycle, and the recorded time steps jitter. vLLM idle (loaded, no request) costs the policy nothing.
+
+So the default, **`timeshare`** (what `auto` means), keeps both resident and staggers the work with a **gate**:
+
+| State of the evaluation | Gate | The model |
+| --- | --- | --- |
+| a session is `running` (the policy infers) | **closed** | sends no request; one in flight is cancelled at once and the run backs off |
+| `homing`, `waiting_reset`, `standby`, `fault`, `stopped`, `finished`, a crashed client | open | works |
+| a policy server listens but no session file says anything | **closed** (someone we do not know may be using it) | waits |
+| no policy server | open | works |
+
+The supervisor re-decides the gate every second while a worker runs, writes it to `live/gate.json` (a stale file reads as closed, so a dead supervisor cannot leave it open), and the worker obeys: when it closes, the worker pauses its runs (pausing aborts the in-flight HTTP request, so the server stops generating), waits for the run's thread to let go of its lease, and resumes when the gate opens. Nothing is repeated: a run continues from its last finished episode. A worker that does not stand down within 8 s is stopped by the supervisor. Between episodes (`homing`, `waiting_reset`, about 20 s) the model labels; when the session ends it labels the rest in one go.
+
+| Mode | Behaviour |
+| --- | --- |
+| `timeshare` (`auto`) | as above |
+| `coexist` | the same two resident, but the gate never closes: the model works whenever it has work, each policy inference then takes about 60 ms longer. A manual choice |
+| `manual` | never starts vLLM: it uses the one already on `vllm.port` |
+
+**Starting, sleeping and waking.** vLLM starts when a batch is waiting and (a) free VRAM covers `gpu_memory_utilization` × vLLM's total + `margin_mib` (it grows about 1.3 GB after its first requests, so the idle reading is not the limit), (b) no policy server appeared or went in the last `gpu.settle_s` (one that is still loading preallocates its memory), (c) the workspace GPU lock is free. It checks `:8000` in `/proc/net/tcp` and VRAM with `nvidia-smi --query-gpu`; nothing connects to a policy port. A cold start takes **46-70 s** (`levi live doctor` says so); the status shows `gpu_wait` meanwhile. vLLM runs with `--enable-sleep-mode` and `VLLM_SERVER_DEV_MODE=1` (development endpoints on 127.0.0.1 only):
+
+- **Sleep** (level 1: 5.5 s down, 1.8 GB left, weights in host memory) when its memory is wanted: free VRAM falls below `gpu.min_free_mib`, or the policy server holds more than `gpu.policy_budget_mib` (8500 MiB: a larger fraction than `.22`, which no awake vLLM fits beside). The worker is stopped first. After `vllm.idle_timeout_s` without work it also sleeps while an evaluation is live (`idle_action = auto`), and is **stopped** once nothing evaluates any more (or at once with no evaluation live).
+- **Wake** (0.75 s) when work is waiting and free VRAM again covers it. With a larger policy server up it stays asleep and labels only after that server exits (the pre-measurement behaviour). Level 2 sleep is not used.
+
+Always true: the workspace GPU lock (`flock` on `levi-hub/.gpu.lock`, `LEVI_AGENT=live`) is held while this service has vLLM resident, awake or asleep; it stops only a server it started (verified by process identity), never another agent's; a vLLM it did not start is used only with `adopt_external` (or in `manual` mode) and never touched; a failed start is waited out for 60 s; `:5000` and the policy ports are never connected to. Residual risks (measured, see the report): only 1.3-1.5 GB spare; the first episode may see one 280 ms outlier from the policy; a policy server restarted with a larger `MEM_FRACTION` while vLLM is awake fails to load, so start it before vLLM wakes or stop the service first (`levi live stop`).
+
+## The automatic approver
+
+In every other LEVI workspace only a person approves a plan and commits annotations. The live service runs unattended, so its worker acts as the principal `live-auto` **only when all of this holds**:
+
+- the service was started with `--auto-approve` (`pipeline.auto_approve`); the worker then gets `LEVI_LIVE_AUTO_APPROVE=1`, the UI and core never do;
+- the workspace carries `live/workspace.json`, which only `levi live` writes;
+- a principal built from an HTTP request is never `auto`, so neither the page nor a connected agent can become it.
+
+What it may do: `runs.plan`, `plans.approve`, `runs.execute`/`resume`/`pause`/`cancel`, `runs.get`/`events`, `changes.diff`/`validate`/`approve`/`commit`, `anchored.get`; nothing else (no reset, clean, pilot review, knowledge or improvement publishing). It may approve, run and commit **only runs it planned itself**; a person's plan or draft in the same workspace is refused. Its plans waive the pilot episode inside the plan, which approving covers.
+
+What it leaves behind: `reviewer_type: auto` (and reviewer `live-auto`) on every change set it approves, `levi.review: "auto"` and `levi.origin.review: "auto"` on every segment it commits, and one line per call in `<workspace>/live/audit.jsonl` (plans, approvals, commits, and every refusal). If a person saves an auto segment with different text or times in the viewer, its mark becomes `edited`; saving it unchanged keeps `auto`. What a person wrote or changed is never replaced: a re-run replaces only segments still exactly as written by an earlier run, and the service skips an episode that already carries annotations it did not write (`skipped_human`).
+
+**No outcome labels.** Committing never writes a human outcome label (`annotations/outcomes/`), so neither the training pool nor a manifest can mistake an automatic verdict for ground truth. The episode's automatic verdict is the **anchored review record** (`anchored.get`), copied into the dataset state with `review: auto` and `evaluated: false`. The release-review run is left in `waiting_for_review` with an `outcome` proposal a person may accept in the LEVI page (that commit is then a human action and a human label); it is not committed by the service. A rollout from an unattended evaluation has `eval.outcome = "unlabeled"`; LEVI now reads that (and `aborted`) as "no robot label" instead of turning its placeholder `success_flag_final = 0` into a failure.
+
+## The generic configuration
+
+The evaluated tasks are not the ones LEVI was tuned on, so nothing is task-specific. Four files in `levi/live/specs/`, versioned by name and never edited once used (a change is a new file and a new setting):
+
+- `generic-guideline.v1.md`: the annotation guideline. It quotes the rollout's task instruction (`task_description.txt`, else the metadata's `task_description`, else the folder name) and judges every step against it. Six subtask ids as everywhere: `approach grasp transport place retreat other`.
+- `generic-definitions.v1.json` / `generic-vocabulary.v1.json`: their definitions (written once to each dataset's own vocabulary).
+- `generic-release.v1.json`: the release-review spec for the anchored review, **status `candidate`, not evaluated on any task**. One question at every gripper opening with the side camera at −2.5…+1.2 s and the wrist camera at −1.5…+0.4 s (the frames of the plates review), quoting the task instruction: was an object held, did it land at the destination the instruction names, does it stay. The episode succeeds when at least `pipeline.anchored_min_valid` (default 1) openings are valid. It cannot tell a task that needs two placements from one; set `anchored_min_valid = 2` for such a task. Its accuracy is unknown: evaluate it on development data before trusting a verdict, and read every verdict as "automatic, unreviewed".
+
+The temporal run is the evaluated configuration (coarse 0.5 s, refinement always, lean prompt, profile `qwen38-27b-vllm-48k-lean` with two requests in flight) on the side camera, with the step widened for long episodes so the frames fit the model's image limit (LEVI refuses to thin silently).
+
+## Keeping it light
+
+- **Priority**: every process the service starts (supervisor, worker, page, core, vLLM launch) is set to nice 19 and ionice class idle (failure is reported by `doctor`, not fatal).
+- **Threads**: `OMP/MKL/OPENBLAS/NUMEXPR/ARROW/OPENCV` thread variables are set to `resources.threads` (default 2) before those libraries load; the view build runs with `view_workers = 1`.
+- **Idle**: the supervisor lists rollout folders with `os.scandir`, reads the tiny session files when they change and rewrites `status.json`. It opens no video and imports no numerical library (tested). Idle scans happen every `poll_idle_s`; an unchanged task folder is not listed again.
+- **GPU**: vLLM starts for a batch, sleeps or stops after `idle_timeout_s`, and sleeps at once when its memory is wanted; the gate keeps it out of the policy's way.
+- **Disk**: the mirror is hard links (zero extra). A run's frozen input and evidence are deleted when its batch ends (the open release-review run keeps its evidence for review); leftover run folders are trimmed oldest first above `cache_max_gib`; logs rotate at `log_max_mb` × `log_backups`; `status.json` and every API body are bounded.
+- **Measured** (fake model, no vLLM, this machine, 10 minutes idle): see "Measured" below.
+
+## Files the service writes
+
+| Where | What |
+| --- | --- |
+| `~/.levi-live/status.json` | the status file (interface C4) |
+| `~/.levi-live/live.pid`, `live.lock` | single-instance lock and pid record |
+| `<workspace>/live.toml` | the configuration (created once) |
+| `<workspace>/live/effective.toml` | the effective configuration the worker reads |
+| `<workspace>/live/datasets/<name>.json` | per-dataset state: demos and their state, the batch in progress, last batch, verdicts |
+| `<workspace>/live/audit.jsonl` | the approver's audit log (rotates) |
+| `<workspace>/live/worker.json`, `gate.json`, `vllm.json`, `service.json` | worker progress, the gate, the vLLM this service started, first-start time |
+| `<workspace>/live/logs/` | `live.log`, `worker.log`, `ui.log`, `vllm-launch.log` (rotated) |
+| `<workspace>/captures/<name>/` | the mirrored capture LEVI registers |
+| `<workspace>/outputs/LEVI/…` | LEVI's own state: views, runs, committed annotations |
+
+## Status file (interface C4)
+
+`~/.levi-live/status.json`, rewritten atomically every `heartbeat_s` (4 s; ≤ 5 s). The evaluation client treats the service as usable only when **all** of this holds: `schema` starts with `levi.live.status.`; `updated_at` (epoch seconds) is less than 15 s old; `pid` is alive; `accepts_sessions` is true; `state` is one of `idle active annotating gpu_wait`; and one of `watch_roots` (absolute paths) equals or contains the client's `--rollout-root` (or the root contains it). Otherwise the client falls back to manual labelling. `accepts_sessions` is false while `starting` and after `stopped`/`error`. `gpu_wait` (work waiting for the model: the gate is closed, vLLM is starting or asleep) counts as usable.
+
+```json
+{
+  "schema": "levi.live.status.v1", "pid": 1234, "started_at": 1790000000.0, "updated_at": 1790000400.2,
+  "state": "idle|active|annotating|gpu_wait|starting|error|stopped",
+  "accepts_sessions": true, "ui_url": "http://127.0.0.1:7880", "core_port": 7881,
+  "workspace": "/home/marvel/work/wenkai/levi-live-ws", "config": null, "auto_approve": false,
+  "watch_roots": ["/home/marvel/work/wenkai/online_rollout_data/models"],
+  "gpu": {"mode": "timeshare", "configured_mode": "auto", "vllm_state": "ready|asleep|starting|stopped|error",
+          "vllm": {"state": "stopped", "port": 8100, "profile": null, "max_model_len": null, "started_at": null, "error": "", "owned": false},
+          "policy_server_seen": true,
+          "gate": {"open": false, "code": "policy_inferring|unknown_client|open", "reason": "…"},
+          "decision": {"allowed": false, "code": "policy_server", "reason": "a policy server is listening"},
+          "free_mib": 21574, "lock_held": false},
+  "datasets": {"pi05__stack_plates": {"episodes": 12, "pending": 2, "annotating": 0, "done": 9, "failed": 1,
+        "skipped": 0, "rejected": 0, "waiting": 1, "backlog": 0, "incomplete": 1, "fr3_fault": 1, "discarded": 0,
+        "available": true, "last_processed_at": 1790000300.0, "last_error": "",
+        "state": "idle|pending|annotating|awaiting_approval|error", "fault": true, "fault_reasons": ["…"]}},
+  "queue_depth": 1, "worker": {"pid": 99, "dataset": "…", "phase": "temporal", "note": null, "started_at": 1.0},
+  "sessions": [{"group": "pi05", "task_folder": "stack_plates", "state": "running", "reported_state": "running", "crashed": false,
+        "age_s": 0.4, "reason": "", "levi_enabled": true, "episode": {"no": 3, "target": 10, "counted": 2}, "last_episode": {},
+        "fr3": {}, "prompt": "…", "session_id": "…", "run_id": "…"}],
+  "fr3": {"state": "ok|red|offline|missing", "detail": "…", "age_s": 0.3, "robot_mode_name": "Idle", "current_errors": [], "reasons": []},
+  "events": [{"time": 1790000000.0, "level": "info|error", "text": "…"}],
+  "last_error": "",
+  "resources": {"rss_mb": 27.1, "threads": 1, "cpu_percent": 0.0}
+}
+```
+
+## Robot-side interfaces the service reads
+
+- **C2 sessions**: `<root>/.eval_sessions/<group>__<task_folder>.json`, schema `levi.eval.session.v1` (`state`: `standby homing running waiting_reset fault stopped finished`). A session is `crashed` when not updated for 10 s and its process is gone, or when it is older than an hour (a recycled pid must not keep it alive). `run_id` (the evaluation run being continued), `episode.no` (this session's episode number) and `episode.counted` (valid episodes of the run so far) are passed through to the page. Abort reasons of an `incomplete_*`: `fr3_fault`, `user_quit`, `interrupted`, `process_killed` (only `fr3_fault` marks the dataset faulted; all are counted by reason).
+- **C3 FR3 health**: `fr3_health.json`, schema `levi.fr3.health.v1` (`updated_at_epoch` preferred, else `updated_at`). Missing or older than `fr3.stale_s` is **offline**, never a red light. `red_light` also covers no live robot state for 5 s, an unreachable controller manager for 5 s, or no Franka hardware component; the service shows it, it does not act on it.
+
+## HTTP API (read-only, `/api/levi/live/*`)
+
+Served by the core of any workspace that has `live/workspace.json`; elsewhere every route answers `{"enabled": false}`. No route changes anything or returns a token.
+
+| Route | Answer |
+| --- | --- |
+| `GET /status` | `{"enabled", "alive", "age_s", "service": <status.json or null>, "faults": [{"dataset", "reasons": []}], "fr3_red"}`. `alive` = the pid exists and `updated_at` is under 15 s old and the state is not `stopped`. |
+| `GET /sessions` | `{"enabled", "sessions": [ {…session fields above…, "dataset", "fault"} ], "fr3": {…}, "active"}`, read fresh from the robot side's files (≤ 64 sessions). |
+| `GET /datasets` | `{"enabled", "datasets": {name: row}}` (the rows of `status.json`). |
+| `GET /datasets/{name}` | `{"enabled", "name", "repo_id" (LEVI dataset id once registered, else null), "group", "task_folder", "task_text", "counts": {mirrored, annotating, done, failed, skipped, rejected}, "total_demos", "demos": [ {"demo", "state", "episode_index", "run_id", "completed_at", "attempts", "reason", "segments", "committed_at", "verdict": {"outcome", "events", "valid_events", "undecided", "spec", "review": "auto", "evaluated": false, "at"} | null} ] (newest first, ≤ 200), "incomplete": {"count", "fr3_fault", "reasons"}, "discarded", "current": batch in progress | null, "last_batch", "last_processed_at", "last_error", "review": "auto", "evaluated": false}`. 404 for an unknown name. |
+| `GET /audit?limit=50` | `{"enabled", "audit": [ {"time", "principal": "live-auto", "tool", "run_id"?, "changeset_id"?, "revision"?, "repo_id"?, "episodes"?, "decision": "allowed|refused", "reason"?} ]}` newest first, ≤ 100. |
+
+Link a dataset to the viewer with its `repo_id` (`local/<name>`); the verdict's run can be opened in the LEVI page by its `run_id`.
+
+## When things go wrong
+
+- **FR3 fault**: the client aborts the episode (`incomplete_NNNN`, `abort_reason: fr3_fault`) and the session goes to `fault`. The page marks the dataset faulted. The aborted rollout is never labelled. After the operator clears the fault the client continues the run.
+- **Service or worker crash / `levi live stop`**: the batch in progress is remembered in the dataset state. The next start resumes it; LEVI's own run records hold the finished episodes, so nothing is annotated or committed twice (commits use an idempotency key). A worker stopped with `SIGTERM` pauses its runs and waits for their leases to be released; one killed with `SIGKILL` leaves leases that expire after 3 minutes.
+- **A person commits to the dataset meanwhile**: the plan's baseline is stale; the worker cancels the run and plans again.
+- **Model server fails**: the run blocks, the worker exits and the supervisor retries with back-off (30 s doubling to 10 min); a failed episode costs an attempt (`max_attempts`).
+- **`levi live doctor`** prints RSS/threads/nice of every service process, GPU use, vLLM state, disk and run-cache sizes, queue, FR3 state, and warnings (a supervisor over its budget, a process not at nice 19, vLLM up with nothing to do, a policy server listening while vLLM runs in timeshare, low disk, copied instead of linked files, a stale status file).
+
+## Measured
+
+MEASURED_PLACEHOLDER
+
+## Limits
+
+- The release-review spec and the generic guideline are **not evaluated** on any task; their accuracy is unknown.
+- The view of a dataset is rebuilt when demos are added (LEVI's raw-capture path): stream copies, seconds for tens of episodes, growing with the dataset.
+- Timeshare labelling depends on the client reporting its state: between episodes the model has about 20 s; a long session's batch is finished after it ends.
+- `inotify` is not used; polling with a slow idle interval is enough and works on any file system.
