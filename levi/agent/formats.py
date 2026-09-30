@@ -145,6 +145,11 @@ class AnnotationKind:
             app._validate_atom(atom)
             atoms.append(atom)
         elif self.layer == "outcome":
+            if (origin or {}).get("review") == "auto":
+                # A human outcome label is a person's (annotations/outcomes
+                # says source "human"): nothing the live service approved may
+                # write one, whatever called this.
+                raise ValueError("An automatic approval cannot write an outcome label")
             if proposal["outcome"] != "unknown":
                 app.outcomes.write_label(state.annotations_dir, ep, proposal["outcome"])
         elif self.layer == "review":

@@ -65,6 +65,9 @@ OWN_RUN_ONLY = frozenset(
         "changes.commit",
     }
 )
+# Calls on a changeset: only the subtask-segment drafts of a plain temporal run
+# may be approved or committed by the approver (see ``_segments_only``).
+CHANGESET_CALLS = frozenset({"changes.approve", "changes.commit"})
 _BRIEF = ("run_id", "changeset_id", "revision", "repo_id", "episodes", "pilot")
 
 
@@ -127,6 +130,29 @@ def brief(arguments: dict) -> dict:
     return out
 
 
+def _segments_only(store, run, changeset_id):
+    """The approver may approve and commit subtask segments of a temporal run,
+    nothing else. An anchored review proposes an *outcome*, whose commit writes
+    a human outcome label (``annotations/outcomes``): that is a person's call
+    (D5), however the run came about."""
+    from levi.agent.formats import ANNOTATIONS
+
+    flow = (run.get("context") or {}).get("workflow") or {}
+    if flow.get("kind") != "temporal" or flow.get("anchored"):
+        raise PermissionError(
+            "The automatic approver may approve and commit only subtask "
+            "segments of a temporal run, never a review or an outcome"
+        )
+    change = store.get("changes", changeset_id)
+    for proposal in change.get("proposals") or []:
+        kind = ANNOTATIONS.get(proposal.get("kind"))
+        if kind is None or kind.layer != "language":
+            raise PermissionError(
+                f"The automatic approver may not approve or commit a "
+                f"{proposal.get('kind')!r} proposal"
+            )
+
+
 def authorize(workbench, name: str, arguments: dict):
     """Refuse (PermissionError) unless this call is one the approver may make
     now; records the decision either way."""
@@ -148,6 +174,8 @@ def authorize(workbench, name: str, arguments: dict):
                 raise PermissionError(
                     "The automatic approver acts only on runs it planned itself"
                 )
+            if name in CHANGESET_CALLS:
+                _segments_only(store, run, arguments["changeset_id"])
     except PermissionError as exc:
         audit({**record, "decision": "refused", "reason": str(exc)})
         raise
