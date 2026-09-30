@@ -59,7 +59,10 @@ function Freshness({
         ? t("Loading…")
         : `${t("Updated")} ${ago((now - lastOk) / 1000, t)}`}
       {" · "}
-      {t("refreshes every")} {Math.round(delay / 1000)} s
+      {t("refreshes every {n} s").replace(
+        "{n}",
+        String(Math.round(delay / 1000)),
+      )}
       {failures > 0 && (
         <span className="levi-live-bad">
           {" · "}
@@ -77,7 +80,8 @@ export default function LivePage() {
   const poll = useLivePoll();
   const { status } = poll;
   const service = status?.service ?? null;
-  const sessions = poll.sessions?.sessions ?? service?.sessions ?? [];
+  const sessionList = poll.sessions?.sessions ?? service?.sessions;
+  const sessions = useMemo(() => sessionList ?? [], [sessionList]);
   const fr3 = poll.sessions?.fr3 ?? service?.fr3 ?? null;
   const rows = useMemo(() => service?.datasets ?? {}, [service]);
   // No answer at all (or the core stopped answering): nothing is current.
@@ -153,9 +157,11 @@ export default function LivePage() {
           )}
           <div className="levi-live-grid">
             <div className="levi-live-main">
-              <SessionsPanel sessions={sessions} />
+              <div className="levi-live-slot o1">
+                <SessionsPanel sessions={sessions} />
+              </div>
               <section
-                className="levi-live-section"
+                className="levi-live-section levi-live-slot o3"
                 aria-labelledby="live-pipeline"
               >
                 <h2 id="live-pipeline">
@@ -205,8 +211,12 @@ export default function LivePage() {
               </section>
             </div>
             <aside className="levi-live-side">
-              <Fr3Panel fr3={fr3} />
-              <ServicePanel status={status} alive={alive} now={now} />
+              <div className="levi-live-slot o2">
+                <Fr3Panel fr3={fr3} />
+              </div>
+              <div className="levi-live-slot o4">
+                <ServicePanel status={status} alive={alive} now={now} />
+              </div>
             </aside>
           </div>
         </>

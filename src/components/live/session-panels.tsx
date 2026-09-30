@@ -1,7 +1,13 @@
 "use client";
 import { useLocale } from "@/components/levi-locale";
 import { ago } from "@/components/pool/pool-progress";
-import { clock, isLost, shortDuration, type FaultInfo } from "./live-logic";
+import {
+  clock,
+  isLost,
+  shortDuration,
+  sortSessions,
+  type FaultInfo,
+} from "./live-logic";
 import type { Fr3Health, LiveSession } from "./types";
 
 export type Tone = "pass" | "warn" | "fail" | "";
@@ -55,15 +61,17 @@ export function FaultBanner({ fault }: { fault: FaultInfo }) {
         )}
       </p>
       {fault.sessions.length > 0 && (
-        <ul>
-          {fault.sessions.map((s) => (
-            <li key={`${s.group}/${s.task_folder}`}>
+        <p>
+          {t("Session in fault")}:{" "}
+          {fault.sessions.map((s, i) => (
+            <span key={`${s.group}/${s.task_folder}`}>
+              {i > 0 && ", "}
               <code>
                 {s.group} / {s.task_folder}
               </code>
-            </li>
+            </span>
           ))}
-        </ul>
+        </p>
       )}
       {fault.reasons.length > 0 && (
         <ul className="levi-live-reasons">
@@ -242,6 +250,7 @@ function SessionCard({ session: s }: { session: LiveSession }) {
 
 export function SessionsPanel({ sessions }: { sessions: LiveSession[] }) {
   const { t } = useLocale();
+  sessions = sortSessions(sessions);
   return (
     <section className="levi-live-section" aria-labelledby="live-sessions">
       <h2 id="live-sessions">

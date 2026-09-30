@@ -1741,7 +1741,6 @@
   "LEVI / LIVE": "LEVI / LIVE",
   "Live evaluation & annotation": "Live evaluation & annotation",
   "Watch a robot evaluation while it runs: the evaluation sessions, the FR3 arm, and how far the background LEVI has got with labelling the finished episodes. Everything here is read-only. Automatic results are unreviewed and their accuracy has not been evaluated.": "Watch a robot evaluation while it runs: the evaluation sessions, the FR3 arm, and how far the background LEVI has got with labelling the finished episodes. Everything here is read-only. Automatic results are unreviewed and their accuracy has not been evaluated.",
-  "refreshes every": "refreshes every",
   "last request failed": "last request failed",
   "retrying": "retrying",
   "read-only": "read-only",
@@ -1844,7 +1843,6 @@
   "Waiting for the GPU": "Waiting for the GPU",
   "Service and resources": "Service and resources",
   "No status file yet.": "No status file yet.",
-  "Not running (last known)": "Not running (last known)",
   "The audited automatic approver is on": "The audited automatic approver is on",
   "Automatic approver on": "Automatic approver on",
   "A person approves each plan in the LEVI page": "A person approves each plan in the LEVI page",
@@ -1912,5 +1910,9 @@
   "Not registered in LEVI yet: no viewer link.": "Not registered in LEVI yet: no viewer link.",
   "Hide episodes": "Hide episodes",
   "Show episodes": "Show episodes",
-  "Most recent episode": "Most recent episode"
+  "Most recent episode": "Most recent episode",
+  "refreshes every {n} s": "refreshes every {n} s",
+  "Session in fault": "Session in fault",
+  "Not running": "Not running",
+  "Everything below is the last known state.": "Everything below is the last known state."
 }

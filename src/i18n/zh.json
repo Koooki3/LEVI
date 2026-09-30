@@ -1741,7 +1741,6 @@
   "LEVI / LIVE": "LEVI / 实时评测",
   "Live evaluation & annotation": "实时评测与标注",
   "Watch a robot evaluation while it runs: the evaluation sessions, the FR3 arm, and how far the background LEVI has got with labelling the finished episodes. Everything here is read-only. Automatic results are unreviewed and their accuracy has not been evaluated.": "在机器人评测进行时实时查看：评测会话、FR3 机械臂，以及后台 LEVI 已标注完多少已结束的片段。这里的一切都是只读的。自动结果未经人工审核，其准确率也尚未评估。",
-  "refreshes every": "每隔",
   "last request failed": "上次请求失败",
   "retrying": "正在重试",
   "read-only": "只读",
@@ -1844,7 +1843,6 @@
   "Waiting for the GPU": "等待 GPU",
   "Service and resources": "服务与资源",
   "No status file yet.": "还没有状态文件。",
-  "Not running (last known)": "未运行（最后已知状态）",
   "The audited automatic approver is on": "已开启带审计的自动批准",
   "Automatic approver on": "自动批准：开",
   "A person approves each plan in the LEVI page": "由人在 LEVI 页面批准每个计划",
@@ -1912,5 +1910,9 @@
   "Not registered in LEVI yet: no viewer link.": "尚未在 LEVI 中登记，没有查看器链接。",
   "Hide episodes": "隐藏片段列表",
   "Show episodes": "显示片段列表",
-  "Most recent episode": "最近一个片段"
+  "Most recent episode": "最近一个片段",
+  "refreshes every {n} s": "每 {n} 秒刷新",
+  "Session in fault": "故障的会话",
+  "Not running": "未运行",
+  "Everything below is the last known state.": "下面都是最后已知的状态。"
 }

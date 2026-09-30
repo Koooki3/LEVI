@@ -11,6 +11,7 @@ import {
   reviewRuns,
   rowSignature,
   segmentSummary,
+  sortSessions,
   verdictTally,
 } from "../live-logic";
 import type {
@@ -80,7 +81,19 @@ describe("the FR3 banner", () => {
       [],
     );
     expect(f.active && f.redLight).toBe(true);
-    expect(f.reasons).toEqual(["robot_mode 4", "reflex"]);
+    expect(f.reasons).toEqual(["robot_mode 4"]);
+    // With no reason given, the errors themselves are listed.
+    expect(
+      detectFault({ state: "red", current_errors: ["reflex"] }, []).reasons,
+    ).toEqual(["reflex"]);
+  });
+  test("sessions sort faults first", () => {
+    const order = sortSessions([
+      session({ task_folder: "b", state: "finished" }),
+      session({ task_folder: "c", state: "running" }),
+      session({ task_folder: "a", state: "fault" }),
+    ]).map((s) => s.task_folder);
+    expect(order).toEqual(["a", "c", "b"]);
   });
   test("a session in fault raises it without a red light", () => {
     const f = detectFault({ state: "ok" }, [

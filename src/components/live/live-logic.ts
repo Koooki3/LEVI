@@ -69,7 +69,10 @@ export function detectFault(
   const reasons: string[] = [];
   if (redLight) {
     for (const r of fr3?.reasons ?? []) reasons.push(r);
-    for (const e of fr3?.current_errors ?? []) reasons.push(String(e));
+    // The monitor's reasons already name the errors; list them alone only
+    // when it gave no reason.
+    if (reasons.length === 0)
+      for (const e of fr3?.current_errors ?? []) reasons.push(String(e));
   }
   for (const s of faulted) if (s.reason) reasons.push(s.reason);
   return {
@@ -378,4 +381,23 @@ export function clock(value: number | string | null | undefined): string {
   const date =
     typeof value === "number" ? new Date(value * 1000) : new Date(value);
   return isNaN(date.getTime()) ? String(value) : date.toLocaleTimeString();
+}
+
+const SESSION_RANK: Record<string, number> = {
+  fault: 0,
+  crashed: 1,
+  running: 2,
+  homing: 3,
+  waiting_reset: 4,
+  standby: 5,
+};
+
+/** Faults first, then running sessions, then the rest; by name within. */
+export function sortSessions(sessions: LiveSession[]): LiveSession[] {
+  const rank = (s: LiveSession) => SESSION_RANK[s.state] ?? 9;
+  return [...sessions].sort(
+    (a, b) =>
+      rank(a) - rank(b) ||
+      datasetOfSession(a).localeCompare(datasetOfSession(b)),
+  );
 }

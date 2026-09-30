@@ -50,8 +50,12 @@ export function ServiceOffline({
           : t(
               "Finished rollouts are not being labelled. Evaluation sessions and the FR3 state below are still read straight from their files.",
             )}
-        {last != null && ` ${t("Last heard from it")} ${ago(last, t)}.`}
       </p>
+      {last != null && (
+        <p className="levi-pool-muted">
+          {t("Last heard from it")}: {ago(last, t)}
+        </p>
+      )}
       <div className="levi-row">
         <code className="levi-live-command">{START_COMMAND}</code>
         <button type="button" className="levi-secondary" onClick={copy}>
@@ -119,10 +123,13 @@ export function ServicePanel({
     >
       <h2 id="live-service">{t("Service and resources")}</h2>
       <div className="levi-live-chips">
-        <Chip tone={alive ? (SERVICE_TONES[state] ?? "") : "warn"}>
-          {t(SERVICE_LABELS[state] ?? state)}
-        </Chip>
-        {!alive && <Chip tone="warn">{t("Not running (last known)")}</Chip>}
+        {alive ? (
+          <Chip tone={SERVICE_TONES[state] ?? ""}>
+            {t(SERVICE_LABELS[state] ?? state)}
+          </Chip>
+        ) : (
+          <Chip tone="warn">{t("Not running")}</Chip>
+        )}
         {service.auto_approve ? (
           <Chip title={t("The audited automatic approver is on")}>
             {t("Automatic approver on")}
@@ -133,6 +140,11 @@ export function ServicePanel({
           </Chip>
         )}
       </div>
+      {!alive && (
+        <p className="levi-pool-muted">
+          {t("Everything below is the last known state.")}
+        </p>
+      )}
       {alive && serviceStateNote(state) && (
         <p className="levi-pool-hint">{t(serviceStateNote(state))}</p>
       )}
@@ -180,7 +192,7 @@ export function ServicePanel({
           <p>{t(gate.detail)}</p>
         </div>
       )}
-      {gpuModeNote(gpu.mode) && (
+      {alive && gpuModeNote(gpu.mode) && (
         <p className="levi-pool-muted">{t(gpuModeNote(gpu.mode))}</p>
       )}
 

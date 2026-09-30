@@ -172,6 +172,18 @@ The temporal run is the evaluated configuration (coarse 0.5 s, refinement always
 - **Disk**: the mirror is hard links (zero extra). A run's frozen input and evidence are deleted when its batch ends (the open release-review run keeps its evidence for review); leftover run folders are trimmed oldest first above `cache_max_gib`; logs rotate at `log_max_mb` × `log_backups`; `status.json` and every API body are bounded.
 - **Measured** (fake model, no vLLM, this machine, 10 minutes idle): see "Measured" below: 0.055 % CPU, 26 MiB.
 
+## The live page
+
+`/live` ("Live evaluation" in the top navigation) shows, read-only, what is happening while an evaluation runs. It needs the core of the live workspace (`levi live start`); another LEVI answers "not the live annotation workspace".
+
+- **Red banner** "FR3 fault detected: the evaluation was interrupted" whenever the health monitor reports the red light or a session is in `fault`; the affected dataset cards carry a red mark. A missing or stale monitor is *not* a red light (amber "Monitor offline").
+- **Evaluation sessions**: state, run id, episode `n / target` (valid episodes counted), step bar, policy config and checkpoint folder name, last episode, whether LEVI labelling is on, reset wait; "Lost contact" when the client's heartbeat is over 10 s old.
+- **FR3 robot arm**: mode, red light, errors, hardware and controller state, reasons.
+- **Annotation pipeline**: one card per dataset with mirrored, waiting, labelling, done and failed episodes, committed time segments, and the **automatic** outcome (dashed, tagged "auto", "not reviewed, accuracy not evaluated"; never drawn like a gold label). The review runs left for a person are listed (newest 3 by default; a per-browser view filter hides older ones without changing anything), with a link to the viewer.
+- **Service and resources**: state, GPU mode, vLLM state, the labelling gate explained in plain words (for example why labelling waits while the policy infers), queue, worker, last error, supervisor memory, threads and CPU. When the service is not running the page says so and offers `levi live start` to copy.
+
+It polls `/api/levi/live/status` and `/sessions` every 2 s while an evaluation runs and every 10 s otherwise, stops while the tab is hidden, backs off (up to 30 s) after failures, and loads a dataset's details only for the few cards that matter or are open, and again only when its row changed. It has no write action and shows no token.
+
 ## Files the service writes
 
 | Where | What |

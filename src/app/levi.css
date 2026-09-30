@@ -2892,10 +2892,23 @@ button.levi-pool-danger {
   .levi-live-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+  /* One column, in the order a person needs: sessions, the arm, the
+     pipeline, then the service. */
+  .levi-live-main,
   .levi-live-side {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
-    align-items: start;
+    display: contents;
+  }
+  .levi-live-slot.o1 {
+    order: 1;
+  }
+  .levi-live-slot.o2 {
+    order: 2;
+  }
+  .levi-live-slot.o3 {
+    order: 3;
+  }
+  .levi-live-slot.o4 {
+    order: 4;
   }
 }
 @media (max-width: 640px) {
