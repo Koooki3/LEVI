@@ -193,7 +193,11 @@ def run_episodes(step, episodes, width=1):
                 episode = next(queue, None)
                 if episode is None:
                     break
-                pending.add(pool.submit(step, episode))
+                # Each in the submitting thread's context: a run's model
+                # requests belong to it (transport.requests_of), so pausing or
+                # cancelling the run can cut them -- a pool thread without the
+                # context left them running.
+                pending.add(pool.submit(copy_context().run, step, episode))
             if not pending:
                 break
             done, pending = wait(pending, return_when=FIRST_COMPLETED)
