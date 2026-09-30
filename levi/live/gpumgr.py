@@ -183,7 +183,9 @@ class Gate:
     reason: str
 
 
-def gate(config, mode, sessions, policy_up: bool) -> Gate:
+def gate(
+    config, mode, sessions, policy_up: bool, policy_since: float | None = None
+) -> Gate:
     """May the model *work* (send requests) right now?
 
     Timeshare closes the gate while the policy infers: a session in a
@@ -206,13 +208,30 @@ def gate(config, mode, sessions, policy_up: bool) -> Gate:
             "policy_inferring",
             f"{s.group}/{s.task_folder} is {s.state}: the policy is inferring",
         )
-    if policy_up and not sessions:
+    if policy_up and not _witnesses(sessions, policy_since):
         return Gate(
             False,
             "unknown_client",
-            "a policy server is listening and no evaluation session says it is idle",
+            "a policy server is listening and no current evaluation session says "
+            "it is idle",
         )
     return Gate(True, "open", "the policy is not inferring")
+
+
+def _witnesses(sessions, policy_since) -> bool:
+    """Is there a session that can vouch for the policy server being idle?
+
+    One that has not ended (standby, homing, waiting for the reset, fault).
+    An ended one (finished, stopped, crashed) only if it ended after the
+    policy server appeared: session files are never deleted, and yesterday's
+    must not switch the protection off for a server some other client uses."""
+    for s in sessions.values():
+        if s.state not in ("finished", "stopped", "crashed"):
+            return True
+        ended = getattr(s, "updated_at", None)
+        if policy_since is not None and ended and ended > policy_since:
+            return True
+    return False
 
 
 def should_sleep(config, mode, *, free_mib: int | None, policy_mib: int | None):

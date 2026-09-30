@@ -104,12 +104,13 @@ def test_a_start_needs_room_and_a_settled_policy_server_not_an_idle_evaluation()
     assert decide(c, "manual").code == "manual"
 
 
-def session(state, crashed=False, group="g", task="t"):
+def session(state, crashed=False, group="g", task="t", updated_at=None):
     class S:
         pass
 
     s = S()
     s.state, s.crashed, s.group, s.task_folder = state, crashed, group, task
+    s.updated_at = updated_at
     return s
 
 
@@ -121,7 +122,7 @@ def test_the_gate_closes_only_while_the_policy_infers():
         gate(c, "timeshare", {("g", "t"): session("running")}, True).code
         == "policy_inferring"
     )
-    for state in ("homing", "waiting_reset", "standby", "fault", "stopped", "finished"):
+    for state in ("homing", "waiting_reset", "standby", "fault"):
         assert gate(c, "timeshare", {("g", "t"): session(state)}, True).open, state
     # A crashed client is not inferring.
     assert gate(
@@ -568,3 +569,28 @@ def test_a_failed_vllm_start_is_waited_out_not_retried_in_a_loop(ctl, tmp_path):
     ctl.tick(t + controller.ERROR_WAIT_S + 6)
     assert sum("starting vLLM" in e["text"] for e in ctl.events) == starts + 1
     assert ctl.status()["last_error"]
+
+
+def test_yesterday_s_finished_session_does_not_vouch_for_a_policy_server():
+    """Session files are never deleted. One that ended before the policy server
+    appeared says nothing about the server now listening (another client, a
+    --no-record run...): the gate stays closed."""
+    c = cfg_for()
+    old = {("g", "t"): session("finished", updated_at=50.0)}
+    closed = gpumgr.gate(c, "timeshare", old, True, 100.0)
+    assert not closed.open and closed.code == "unknown_client"
+    # Without knowing when the server appeared it is no witness either.
+    assert not gpumgr.gate(c, "timeshare", old, True, None).open
+    # One that ended after the server appeared did use it: the server is idle.
+    fresh_end = {("g", "t"): session("finished", updated_at=150.0)}
+    assert gpumgr.gate(c, "timeshare", fresh_end, True, 100.0).open
+    for state in ("stopped", "crashed"):
+        assert not gpumgr.gate(
+            c, "timeshare", {("g", "t"): session(state, updated_at=50.0)}, True, 100.0
+        ).open
+    # A live session (not ended) always vouches.
+    assert gpumgr.gate(
+        c, "timeshare", {("g", "t"): session("standby")}, True, 100.0
+    ).open
+    # No policy server: nothing to protect, an old file or none is fine.
+    assert gpumgr.gate(c, "timeshare", old, False, 100.0).open

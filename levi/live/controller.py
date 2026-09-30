@@ -254,7 +254,13 @@ class Controller:
         c = self.config
         mode = c.effective_gpu_mode()
         profile = c.vllm_profile()
-        self.gate = gpumgr.gate(c, mode, self.sessions, self.policy_up)
+        self.gate = gpumgr.gate(
+            c,
+            mode,
+            self.sessions,
+            self.policy_up,
+            self.policy_changed_at or self.started_at,
+        )
         mine = self.vllm.mine()
         state = (
             self.vllm.poll()
