@@ -126,7 +126,7 @@ uv run levi live stop                            # 只停自己的进程
 
 它留下的痕迹：它批准的每个变更集带 `reviewer_type: auto`（审核者 `live-auto`），它提交的每个时间片段带 `levi.review: "auto"` 和 `levi.origin.review: "auto"`，每次调用在 `<工作区>/live/audit.jsonl` 各一行（计划、批准、提交，以及每次拒绝）。人在查看器里保存时若改了 auto 时间片段的文字或时间，标记变为 `edited`；原样保存则保持 `auto`。人写过、改过的内容永远不会被替换：重跑只替换仍与上次运行所写完全一致的时间片段，服务也会跳过已有非自己写入标注的片段（`skipped_human`）。
 
-**不写成败标签。** 提交从不写人工成败标签（`annotations/outcomes/`），所以训练池和训练清单不会把自动判定当成真值。片段的自动判定是**锚定复核记录**（`anchored.get`），复制进数据集状态，带 `review: auto` 和 `evaluated: false`。释放复核运行停在 `waiting_for_review`，其中的 `outcome` 提议人可以在 LEVI 页面接受（那时的提交才是人的动作、人的标签）；服务自己不提交它。无人值守评测的 rollout 是 `eval.outcome = "unlabeled"`；LEVI 现在把它（和 `aborted`）读作“没有机器人标签”，而不是把占位的 `success_flag_final = 0` 当成失败。
+**不写成败标签。** 提交从不写人工成败标签（`annotations/outcomes/`），所以训练池不会把自动判定当成人工标签。（已知缺口，未修：按“最新锚定复核运行”生成的训练清单仍会采用它的判定，包括未评估的候选规格，也不标出 `review: auto` 的时间片段。修好之前，不要不检查就用实时数据集生成训练清单。）片段的自动判定是**锚定复核记录**（`anchored.get`），复制进数据集状态，带 `review: auto` 和 `evaluated: false`。释放复核运行停在 `waiting_for_review`，其中的 `outcome` 提议人可以在 LEVI 页面接受（那时的提交才是人的动作、人的标签）；服务自己不提交它。无人值守评测的 rollout 是 `eval.outcome = "unlabeled"`；LEVI 现在把它（和 `aborted`）读作“没有机器人标签”，而不是把占位的 `success_flag_final = 0` 当成失败。
 
 ## 通用配置
 
@@ -211,3 +211,19 @@ uv run levi live stop                            # 只停自己的进程
 - 数据集的视图在加入片段时重建（LEVI 的原始采集路径）：是流拷贝，几十个片段几秒，随数据集增长。
 - timeshare 的标注依赖客户端报告状态：两集之间模型约有 20 秒；长会话的批次在会话结束后标完。
 - 不使用 `inotify`；低频轮询足够，并且在任何文件系统上都可用。
+
+## 状态与已知问题（2026-10-01，暂停中）
+
+没有合并进 `main` 的分支：`feat/live-eval`（服务）、`fix/live-review`（两个审查修复）、`feat/live-ui`（`/live` 页面）。按这个顺序合并；合并会改产品运行代码，之后产品 LEVI 要重启（且只在没有作业运行时）。
+
+假件验证过：镜像、控制器、自动批准（不写成败标签）、闸门、资源占用。用真实 Qwen3.8 在 3 个开发集片段上验证过一次，**没有策略服务器在场**：整条管线含 63 秒 vLLM 冷启动共 209 秒；会话变成 `running` 后闸门 0.6–1.6 秒内关闭；结束后 vLLM 被释放。
+
+未解决的问题（来自两次独立审查和真实模型运行；没标“已修”的都还没修）：
+
+- **策略服务器已经加载好之后，默认的 `vllm.gpu_memory_utilization = 0.72` 起不来 vLLM**（KV 缓存 1.73 GiB，不够 49152 token 所需的 1.82 GiB）。“vLLM 先起、策略后起”的顺序可以。启动前的预检不会拦住它。修法：按启动时的空闲显存定预算，或降低 `max_model_len`，两种顺序都要实测。
+- vLLM 启动失败后每 60 秒无限重试（每次约 45 秒高 GPU 负载）。需要退避，失败几次后停止。
+- 会话处于 `running` 时也会冷启动 vLLM；应等闸门打开。
+- 核心没起来时 `levi live start --daemon` 仍报成功（原因在 `ui.log`）。
+- 已在 `fix/live-review` 修复：自动批准主体只能批准和提交时间片段（H1）；闸门不再相信旧的已结束会话（H2）。
+- 还没修（`levi-hub/reports/review-live-levi.md` 的 M1–M6、L1–L10）：闸门提前量、监督进程崩溃后 GPU 锁跟随 vLLM、没有 `--auto-approve` 时 worker 的重启循环、工作区防护、训练清单默认值、完不成的片段，以及较小的几项。
+- 通用释放复核规格**没有评估过**（只有 3 个开发集片段，其中 1 个假成功）。

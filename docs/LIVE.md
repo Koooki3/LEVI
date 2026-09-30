@@ -151,7 +151,7 @@ What it may do: `runs.plan`, `plans.approve`, `runs.execute`/`resume`/`pause`/`c
 
 What it leaves behind: `reviewer_type: auto` (and reviewer `live-auto`) on every change set it approves, `levi.review: "auto"` and `levi.origin.review: "auto"` on every segment it commits, and one line per call in `<workspace>/live/audit.jsonl` (plans, approvals, commits, and every refusal). If a person saves an auto segment with different text or times in the viewer, its mark becomes `edited`; saving it unchanged keeps `auto`. What a person wrote or changed is never replaced: a re-run replaces only segments still exactly as written by an earlier run, and the service skips an episode that already carries annotations it did not write (`skipped_human`).
 
-**No outcome labels.** Committing never writes a human outcome label (`annotations/outcomes/`), so neither the training pool nor a manifest can mistake an automatic verdict for ground truth. The episode's automatic verdict is the **anchored review record** (`anchored.get`), copied into the dataset state with `review: auto` and `evaluated: false`. The release-review run is left in `waiting_for_review` with an `outcome` proposal a person may accept in the LEVI page (that commit is then a human action and a human label); it is not committed by the service. A rollout from an unattended evaluation has `eval.outcome = "unlabeled"`; LEVI now reads that (and `aborted`) as "no robot label" instead of turning its placeholder `success_flag_final = 0` into a failure.
+**No outcome labels.** Committing never writes a human outcome label (`annotations/outcomes/`), so the training pool does not take an automatic verdict for a human label. (Known gap, open: a training manifest that asks for the latest anchored review run still takes its verdict, including the unevaluated candidate spec, and does not mark `review: auto` segments. Until that is fixed, do not build a manifest from a live dataset without checking.) The episode's automatic verdict is the **anchored review record** (`anchored.get`), copied into the dataset state with `review: auto` and `evaluated: false`. The release-review run is left in `waiting_for_review` with an `outcome` proposal a person may accept in the LEVI page (that commit is then a human action and a human label); it is not committed by the service. A rollout from an unattended evaluation has `eval.outcome = "unlabeled"`; LEVI now reads that (and `aborted`) as "no robot label" instead of turning its placeholder `success_flag_final = 0` into a failure.
 
 ## The generic configuration
 
@@ -264,3 +264,19 @@ While a batch runs (four demos, fake model): supervisor 29 MiB / 2 threads; the 
 - The view of a dataset is rebuilt when demos are added (LEVI's raw-capture path): stream copies, seconds for tens of episodes, growing with the dataset.
 - Timeshare labelling depends on the client reporting its state: between episodes the model has about 20 s; a long session's batch is finished after it ends.
 - `inotify` is not used; polling with a slow idle interval is enough and works on any file system.
+
+## Status and known issues (2026-10-01, paused)
+
+Branches not merged into `main`: `feat/live-eval` (service), `fix/live-review` (two review fixes), `feat/live-ui` (the `/live` page). Merge in that order; merging changes product runtime code, so the product LEVI needs a restart afterwards (only when no job runs).
+
+Verified with fakes: mirror, controller, automatic approver (no outcome labels), gate, resource use. Verified once with the real Qwen3.8 model on 3 development episodes, **without a policy server**: the whole pipeline takes 209 s including a 63 s vLLM cold start; the gate closes 0.6-1.6 s after a session turns `running`; vLLM is released afterwards.
+
+Open problems (from two independent reviews and the real-model run; none fixed yet unless marked):
+
+- **vLLM does not start beside a policy server that is already loaded** with the default `vllm.gpu_memory_utilization = 0.72` (KV cache 1.73 GiB < the 1.82 GiB needed for 49152 tokens). The start order "vLLM first, policy second" works. The pre-start check does not catch it. Fix: size the budget from the free memory at start, or lower `max_model_len`, and measure both orders.
+- A failed vLLM start is retried every 60 s without end (about 45 s of heavy GPU load each time). Needs back-off and a stop after a few failures.
+- vLLM cold starts even while a session is `running`; it should wait for the gate.
+- `levi live start --daemon` reports success even when the core did not come up (see `ui.log`).
+- Fixed on `fix/live-review`: the automatic approver can only approve and commit subtask segments (H1); the gate no longer trusts old finished sessions (H2).
+- Not fixed yet (M1-M6, L1-L10 of `levi-hub/reports/review-live-levi.md`): gate lead time, GPU lock following vLLM after a supervisor crash, the worker restart loop without `--auto-approve`, workspace guard, training-manifest default, stuck episodes, and smaller items.
+- The generic release-review spec is **not evaluated** (3 development episodes only: one false success).
