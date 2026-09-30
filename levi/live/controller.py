@@ -320,6 +320,10 @@ class Controller:
         if state == "starting":
             self.decision = gpumgr.Decision(True, "vLLM is starting", "ok")
             return False
+        if state == "asleep" and not want:
+            # Nothing to decide: no nvidia-smi call while it sleeps unneeded.
+            self.decision = gpumgr.Decision(True, "vLLM is asleep", "asleep")
+            return False
         free = self.free_mib(now)
         policy = self.policy_mib(now)
         if state == "ready":
@@ -330,9 +334,6 @@ class Controller:
             self.decision = gpumgr.Decision(True, "vLLM is ready", "ok")
             return True
         # asleep: wake when there is work and room for it
-        if not want:
-            self.decision = gpumgr.Decision(True, "vLLM is asleep", "asleep")
-            return False
         blocked = gpumgr.should_sleep(c, mode, free_mib=None, policy_mib=policy)
         need = self._need(profile, now, asleep=True)
         self.decision = (

@@ -41,7 +41,6 @@ class Env:
         c.resources.threads = 1
         self.config = c
         cli.prepare(c)
-        os.environ.update(cli.service_env(c))
         self.messages = []
 
     def controller(self, **probe):
