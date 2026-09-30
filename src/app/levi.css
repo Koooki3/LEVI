@@ -2586,3 +2586,326 @@ button.levi-pool-danger {
 .levi-pool-actions button {
   white-space: nowrap;
 }
+
+/* Live page (src/app/live/page.tsx, src/components/live/) */
+.levi-workbench.levi-live {
+  max-width: 1680px;
+  padding: 36px 3%;
+}
+.levi-live code {
+  overflow-wrap: anywhere;
+}
+.levi-live-fresh {
+  margin-bottom: 0;
+}
+.levi-live-bad {
+  color: #ff9c94;
+}
+.levi-live-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 400px;
+  gap: 18px;
+  align-items: start;
+  margin-top: 18px;
+}
+.levi-live-main,
+.levi-live-side {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.levi-live-section {
+  background: #1b231b;
+  border: 1px solid #ffffff20;
+  border-radius: 10px;
+  padding: 18px;
+  min-width: 0;
+}
+.levi-live-section.fault {
+  border-color: #ff6b5e;
+}
+.levi-live-section.stale {
+  opacity: 0.8;
+}
+.levi-live-section h2 {
+  font-size: 16px;
+  margin-bottom: 10px;
+}
+.levi-live-sub {
+  font-size: 13px;
+  margin: 14px 0 8px;
+  color: #dedfcf;
+}
+.levi-live-banner {
+  position: sticky;
+  top: 8px;
+  z-index: 40;
+  margin: 16px 0 0;
+  padding: 14px 18px;
+  border: 2px solid #ff6b5e;
+  border-radius: 8px;
+  background: #5a1410;
+  color: #ffe3df;
+  box-shadow: 0 6px 24px #00000080;
+}
+.levi-live-banner strong {
+  display: block;
+  font-size: 18px;
+  margin-bottom: 4px;
+}
+.levi-live-banner p {
+  color: #ffd2cc;
+  margin: 4px 0;
+}
+.levi-live-banner ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  list-style: disc;
+  font-size: 13px;
+}
+.levi-live-offline {
+  margin: 16px 0 0;
+  padding: 14px 18px;
+  border: 1px solid #f1c67780;
+  border-radius: 8px;
+  background: #2a2412;
+}
+.levi-live-offline strong {
+  color: #f1c677;
+}
+.levi-live-offline p {
+  margin: 6px 0;
+  font-size: 13px;
+}
+.levi-live-command {
+  background: #0f150d;
+  border: 1px solid #ffffff25;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font: 13px monospace;
+  color: #e5fbb6;
+}
+.levi-live-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 14px;
+}
+.levi-live-card {
+  background: #161d17;
+  border: 1px solid #ffffff18;
+  border-radius: 8px;
+  padding: 14px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.levi-live-card.fault {
+  border-color: #ff6b5e;
+  box-shadow: inset 4px 0 0 #ff6b5e;
+}
+.levi-live-card header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.levi-live-card h3 {
+  font-size: 14px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.levi-live-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.levi-live-chip {
+  display: inline-block;
+  padding: 3px 8px;
+}
+.levi-live-prompt {
+  color: #afb7a8;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.levi-live-dl {
+  display: grid;
+  grid-template-columns: minmax(84px, max-content) minmax(0, 1fr);
+  gap: 6px 12px;
+  font-size: 12px;
+  margin: 0;
+}
+.levi-live-dl dt {
+  color: #89927f;
+}
+.levi-live-dl dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.levi-live-bar {
+  margin-top: 4px;
+}
+.levi-live-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(56px, 1fr));
+  gap: 6px;
+}
+.levi-live-stats div {
+  border: 1px solid #ffffff1c;
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.levi-live-stats strong {
+  font-size: 18px;
+  font-weight: 500;
+}
+.levi-live-stats span {
+  font-size: 10px;
+  color: #89927f;
+  overflow-wrap: anywhere;
+}
+.levi-live-line {
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.levi-live-auto {
+  border: 1px dashed #89927f;
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+.levi-live-auto-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+}
+.levi-live-auto-tag {
+  border: 1px dashed #89927f;
+  border-radius: 3px;
+  padding: 0 5px;
+  font: 10px monospace;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #afb7a8;
+}
+.levi-live-autochip {
+  border: 1px dashed #89927f;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 11px;
+  color: #c7caba;
+}
+.levi-live-autochip.dim {
+  color: #89927f;
+}
+.levi-live-gate {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-left: 3px solid #89927f;
+  background: #11180f;
+  font-size: 12px;
+}
+.levi-live-gate.warn {
+  border-left-color: #f1c677;
+}
+.levi-live-gate.pass {
+  border-left-color: #d4f779;
+}
+.levi-live-gate p {
+  margin: 4px 0 0;
+  color: #afb7a8;
+  line-height: 1.6;
+}
+.levi-live-reasons {
+  list-style: disc;
+  padding-left: 18px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.levi-live-path {
+  display: block;
+  font-size: 11px;
+}
+.levi-live-reviews,
+.levi-live-demos {
+  border-top: 1px solid #ffffff15;
+  padding-top: 8px;
+  font-size: 12px;
+}
+.levi-live-reviews-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  justify-content: space-between;
+  align-items: center;
+}
+.levi-live-reviews select {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.levi-live-reviews ul,
+.levi-live-demos ul,
+.levi-live-events ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+}
+.levi-live-reviews li,
+.levi-live-demos li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  align-items: baseline;
+}
+.levi-live-actions {
+  gap: 8px 14px;
+}
+.levi-live-events {
+  margin-top: 12px;
+  font-size: 12px;
+}
+.levi-live-events summary {
+  cursor: pointer;
+  color: #c9d3bf;
+}
+.levi-live-events li {
+  overflow-wrap: anywhere;
+}
+.levi-live-events li.error {
+  color: #ffaaa3;
+}
+@media (max-width: 1100px) {
+  .levi-live-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .levi-live-side {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+    align-items: start;
+  }
+}
+@media (max-width: 640px) {
+  .levi-workbench.levi-live {
+    padding: 24px 16px;
+  }
+  .levi-live-section {
+    padding: 14px;
+  }
+  .levi-live-banner strong {
+    font-size: 16px;
+  }
+}

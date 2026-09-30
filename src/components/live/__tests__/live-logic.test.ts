@@ -1,0 +1,239 @@
+import { describe, expect, test } from "bun:test";
+import {
+  datasetFaultKind,
+  detectFault,
+  explainGate,
+  filterReviewRuns,
+  isEvaluating,
+  isLost,
+  nextDelay,
+  rankDatasets,
+  reviewRuns,
+  rowSignature,
+  segmentSummary,
+  verdictTally,
+} from "../live-logic";
+import type {
+  DatasetDetail,
+  DatasetRow,
+  DemoRow,
+  LiveSession,
+  ServiceStatus,
+} from "../types";
+
+const session = (over: Partial<LiveSession> = {}): LiveSession => ({
+  group: "pi05",
+  task_folder: "stack_plates",
+  state: "running",
+  age_s: 0.5,
+  ...over,
+});
+const row = (over: Partial<DatasetRow> = {}): DatasetRow => ({
+  episodes: 4,
+  pending: 0,
+  annotating: 0,
+  done: 4,
+  failed: 0,
+  ...over,
+});
+
+describe("polling", () => {
+  test("2 s while an evaluation runs, 10 s otherwise", () => {
+    expect(nextDelay(true, 0)).toBe(2000);
+    expect(nextDelay(false, 0)).toBe(10000);
+  });
+  test("backs off after failures and is capped", () => {
+    expect(nextDelay(true, 1)).toBe(4000);
+    expect(nextDelay(true, 2)).toBe(8000);
+    expect(nextDelay(false, 1)).toBe(20000);
+    expect(nextDelay(false, 5)).toBe(30000);
+    expect(nextDelay(true, 50)).toBe(30000);
+  });
+  test("an evaluation is going on when a session moves or the service works", () => {
+    expect(isEvaluating([session({ state: "waiting_reset" })], null)).toBe(
+      true,
+    );
+    expect(isEvaluating([session({ state: "finished" })], null)).toBe(false);
+    expect(
+      isEvaluating([session({ state: "running", crashed: true })], null),
+    ).toBe(false);
+    expect(isEvaluating([], { state: "annotating" } as ServiceStatus)).toBe(
+      true,
+    );
+    expect(isEvaluating([], { state: "idle" } as ServiceStatus)).toBe(false);
+  });
+});
+
+describe("lost contact", () => {
+  test("a silent live session is lost; an ended one is not", () => {
+    expect(isLost(session({ age_s: 12 }))).toBe(true);
+    expect(isLost(session({ age_s: 3 }))).toBe(false);
+    expect(isLost(session({ state: "finished", age_s: 9999 }))).toBe(false);
+    expect(isLost(session({ state: "crashed", age_s: 9999 }))).toBe(false);
+  });
+});
+
+describe("the FR3 banner", () => {
+  test("a red light raises it, with the monitor's reasons", () => {
+    const f = detectFault(
+      { state: "red", reasons: ["robot_mode 4"], current_errors: ["reflex"] },
+      [],
+    );
+    expect(f.active && f.redLight).toBe(true);
+    expect(f.reasons).toEqual(["robot_mode 4", "reflex"]);
+  });
+  test("a session in fault raises it without a red light", () => {
+    const f = detectFault({ state: "ok" }, [
+      session({ state: "fault", reason: "joint reflex" }),
+    ]);
+    expect(f.active).toBe(true);
+    expect(f.redLight).toBe(false);
+    expect(f.reasons).toEqual(["joint reflex"]);
+  });
+  test("an offline or missing monitor is not a red light", () => {
+    expect(detectFault({ state: "offline" }, []).active).toBe(false);
+    expect(detectFault({ state: "missing" }, []).active).toBe(false);
+    expect(detectFault(null, [session()]).active).toBe(false);
+  });
+  test("a dataset is marked now, or as an earlier fault, or not at all", () => {
+    const faulted = [session({ state: "fault" })];
+    const name = "pi05__stack_plates";
+    expect(datasetFaultKind(name, row(), faulted, false)).toBe("current");
+    expect(datasetFaultKind(name, row(), [session()], true)).toBe("current");
+    expect(datasetFaultKind(name, row({ fr3_fault: 2 }), [], false)).toBe(
+      "earlier",
+    );
+    expect(datasetFaultKind(name, row(), [], false)).toBeNull();
+    // A red light does not mark a dataset whose evaluation is over.
+    expect(
+      datasetFaultKind(name, row(), [session({ state: "finished" })], true),
+    ).toBeNull();
+  });
+});
+
+describe("the GPU gate in words", () => {
+  const service = (over: Partial<ServiceStatus>): ServiceStatus => ({
+    state: "gpu_wait",
+    gpu: { gate: { open: true }, decision: { allowed: true } },
+    ...over,
+  });
+  test("while the policy infers, it says labelling waits and why", () => {
+    const e = explainGate(
+      service({ gpu: { gate: { open: false, code: "policy_inferring" } } }),
+    );
+    expect(e?.tone).toBe("warn");
+    expect(e?.title).toContain("policy runs");
+    expect(e?.detail).toContain("jitter");
+  });
+  test("an unknown policy server is explained", () => {
+    const e = explainGate(
+      service({ gpu: { gate: { open: false, code: "unknown_client" } } }),
+    );
+    expect(e?.title).toContain("cannot see");
+  });
+  test("an open gate waiting for memory names the reason", () => {
+    const e = explainGate(
+      service({
+        gpu: {
+          gate: { open: true },
+          decision: { allowed: false, code: "vram" },
+        },
+      }),
+    );
+    expect(e?.detail).toContain("free GPU memory");
+  });
+  test("nothing without a service", () => {
+    expect(explainGate(null)).toBeNull();
+  });
+});
+
+const demos: DemoRow[] = [
+  {
+    demo: "demo_0003",
+    state: "done",
+    segments: 5,
+    committed_at: 10,
+    verdict: { run_id: "r2", outcome: "success", at: 300 },
+  },
+  {
+    demo: "demo_0002",
+    state: "done",
+    segments: 4,
+    committed_at: 9,
+    verdict: { run_id: "r1", outcome: "failure", at: 200 },
+  },
+  {
+    demo: "demo_0001",
+    state: "done",
+    segments: 3,
+    committed_at: 8,
+    verdict: { run_id: "r1", outcome: null, undecided: true, at: 190 },
+  },
+  { demo: "demo_0000", state: "done", segments: 0, verdict: null },
+  { demo: "demo_0004", state: "mirrored" },
+];
+const detail = { enabled: true, name: "x", demos } as DatasetDetail;
+
+describe("automatic results", () => {
+  test("tally keeps success, failure, undecided and missing apart", () => {
+    expect(verdictTally(demos)).toEqual({
+      success: 1,
+      failure: 1,
+      undecided: 1,
+      none: 1,
+    });
+    expect(verdictTally(undefined)).toEqual({
+      success: 0,
+      failure: 0,
+      undecided: 0,
+      none: 0,
+    });
+  });
+  test("time segments count committed demos only", () => {
+    expect(segmentSummary(demos)).toEqual({ committed: 3, segments: 12 });
+  });
+  test("review runs group by run id, newest first", () => {
+    const runs = reviewRuns(detail);
+    expect(runs.map((r) => r.runId)).toEqual(["r2", "r1"]);
+    expect(runs[1]).toMatchObject({ demos: 2, failure: 1, undecided: 1 });
+  });
+  test("the view filter hides but never drops", () => {
+    const many = Array.from({ length: 6 }, (_, i) => ({
+      runId: `r${i}`,
+      demos: 1,
+      success: 1,
+      failure: 0,
+      undecided: 0,
+      at: 1_000_000 - i * 50_000,
+    }));
+    const latest = filterReviewRuns(many, "latest", 1_000_000);
+    expect(latest.shown).toHaveLength(3);
+    expect(latest.hidden).toBe(3);
+    const day = filterReviewRuns(many, "day", 1_000_000);
+    expect(day.shown.length + day.hidden).toBe(6);
+    expect(day.shown.every((r) => 1_000_000 - r.at <= 86400)).toBe(true);
+    expect(filterReviewRuns(many, "all", 1_000_000).hidden).toBe(0);
+  });
+});
+
+describe("dataset cards", () => {
+  test("faulted and busy datasets come first", () => {
+    const rows = {
+      a__idle: row({ last_processed_at: 500 }),
+      b__busy: row({ state: "annotating", last_processed_at: 10 }),
+      c__fault: row({ last_processed_at: 1 }),
+    };
+    const order = rankDatasets(
+      rows,
+      [session({ group: "c", task_folder: "fault", state: "fault" })],
+      false,
+    );
+    expect(order).toEqual(["c__fault", "b__busy", "a__idle"]);
+  });
+  test("the signature changes when a row says something new", () => {
+    const a = rowSignature(row());
+    expect(rowSignature(row())).toBe(a);
+    expect(rowSignature(row({ done: 5 }))).not.toBe(a);
+    expect(rowSignature(row({ last_error: "x" }))).not.toBe(a);
+  });
+});

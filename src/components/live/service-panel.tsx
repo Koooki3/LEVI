@@ -1,0 +1,251 @@
+"use client";
+import { useState } from "react";
+import { useLocale } from "@/components/levi-locale";
+import { ago } from "@/components/pool/pool-progress";
+import {
+  clock,
+  explainGate,
+  gpuModeNote,
+  serviceStateNote,
+  shortDuration,
+  vllmLabel,
+} from "./live-logic";
+import { Chip, Field, type Tone } from "./session-panels";
+import type { LiveStatusResponse } from "./types";
+
+export const START_COMMAND = "levi live start";
+
+/** Shown instead of the service's numbers when it is not running. */
+export function ServiceOffline({
+  status,
+  coreError,
+}: {
+  status: LiveStatusResponse | null;
+  coreError: string;
+}) {
+  const { t } = useLocale();
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    void navigator.clipboard
+      ?.writeText(START_COMMAND)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      })
+      .catch(() => {});
+  };
+  const last = status?.service ? status.age_s : null;
+  return (
+    <section className="levi-live-offline" role="status">
+      <strong>
+        {coreError
+          ? t("The LEVI core is not answering")
+          : t("The background service is not running")}
+      </strong>
+      <p>
+        {coreError
+          ? t(
+              "This page cannot reach the live LEVI core, so nothing below is current. Check that `levi live start` is running and that this page belongs to it.",
+            )
+          : t(
+              "Finished rollouts are not being labelled. Evaluation sessions and the FR3 state below are still read straight from their files.",
+            )}
+        {last != null && ` ${t("Last heard from it")} ${ago(last, t)}.`}
+      </p>
+      <div className="levi-row">
+        <code className="levi-live-command">{START_COMMAND}</code>
+        <button type="button" className="levi-secondary" onClick={copy}>
+          {copied ? t("Copied") : t("Copy")}
+        </button>
+      </div>
+      <p className="levi-pool-muted">
+        {t(
+          "Add --daemon to keep it running in the background, and --auto-approve to let it approve its own plans.",
+        )}
+      </p>
+    </section>
+  );
+}
+
+const SERVICE_TONES: Record<string, Tone> = {
+  annotating: "pass",
+  active: "pass",
+  idle: "",
+  starting: "warn",
+  gpu_wait: "warn",
+  error: "fail",
+  stopped: "warn",
+};
+const SERVICE_LABELS: Record<string, string> = {
+  starting: "Starting",
+  idle: "Idle",
+  active: "Active",
+  annotating: "Annotating",
+  gpu_wait: "Waiting for the GPU",
+  error: "Error",
+  stopped: "Stopped",
+};
+
+export function ServicePanel({
+  status,
+  alive,
+  now,
+}: {
+  status: LiveStatusResponse | null;
+  alive: boolean;
+  now: number;
+}) {
+  const { t } = useLocale();
+  const service = status?.service;
+  if (!service) {
+    return (
+      <section className="levi-live-section" aria-labelledby="live-service">
+        <h2 id="live-service">{t("Service and resources")}</h2>
+        <p className="levi-pool-hint">{t("No status file yet.")}</p>
+      </section>
+    );
+  }
+  const gpu = service.gpu ?? {};
+  const gate = explainGate(service);
+  const vllm = gpu.vllm_state ?? gpu.vllm?.state;
+  const res = service.resources ?? {};
+  const state = service.state ?? "";
+  const vllmTone: Tone =
+    vllm === "ready" ? "pass" : vllm === "error" ? "fail" : vllm ? "" : "";
+  return (
+    <section
+      className={`levi-live-section${alive ? "" : " stale"}`}
+      aria-labelledby="live-service"
+    >
+      <h2 id="live-service">{t("Service and resources")}</h2>
+      <div className="levi-live-chips">
+        <Chip tone={alive ? (SERVICE_TONES[state] ?? "") : "warn"}>
+          {t(SERVICE_LABELS[state] ?? state)}
+        </Chip>
+        {!alive && <Chip tone="warn">{t("Not running (last known)")}</Chip>}
+        {service.auto_approve ? (
+          <Chip title={t("The audited automatic approver is on")}>
+            {t("Automatic approver on")}
+          </Chip>
+        ) : (
+          <Chip title={t("A person approves each plan in the LEVI page")}>
+            {t("Automatic approver off")}
+          </Chip>
+        )}
+      </div>
+      {alive && serviceStateNote(state) && (
+        <p className="levi-pool-hint">{t(serviceStateNote(state))}</p>
+      )}
+      {service.last_error && (
+        <p className="levi-error">
+          <strong>{t("Last error")}:</strong> {service.last_error}
+        </p>
+      )}
+
+      <h3 className="levi-live-sub">{t("GPU")}</h3>
+      <dl className="levi-live-dl">
+        <Field label={t("Mode")}>
+          <code>{gpu.mode ?? "—"}</code>
+        </Field>
+        <Field label={t("Model server (vLLM)")}>
+          <Chip tone={vllmTone}>{t(vllmLabel(vllm))}</Chip>
+          {gpu.vllm?.owned === false && vllm && vllm !== "stopped" && (
+            <span className="levi-pool-muted">
+              {" "}
+              {t("started by someone else")}
+            </span>
+          )}
+        </Field>
+        <Field label={t("Labelling gate")}>
+          <Chip tone={gpu.gate?.open === false ? "warn" : "pass"}>
+            {gpu.gate?.open === false ? t("Closed") : t("Open")}
+          </Chip>
+        </Field>
+        <Field label={t("Policy server")}>
+          {gpu.policy_server_seen == null
+            ? "—"
+            : gpu.policy_server_seen
+              ? t("listening")
+              : t("not seen")}
+        </Field>
+        <Field label={t("Free GPU memory")}>
+          {gpu.free_mib != null
+            ? `${(gpu.free_mib / 1024).toFixed(1)} GiB`
+            : "—"}
+        </Field>
+      </dl>
+      {alive && gate && (
+        <div className={`levi-live-gate ${gate.tone}`}>
+          <strong>{t(gate.title)}</strong>
+          <p>{t(gate.detail)}</p>
+        </div>
+      )}
+      {gpuModeNote(gpu.mode) && (
+        <p className="levi-pool-muted">{t(gpuModeNote(gpu.mode))}</p>
+      )}
+
+      <h3 className="levi-live-sub">{t("Work")}</h3>
+      <dl className="levi-live-dl">
+        <Field label={t("Queue")}>
+          {service.queue_depth ?? 0} {t("dataset(s) waiting")}
+        </Field>
+        <Field label={t("Worker")}>
+          {service.worker ? (
+            <>
+              <code>{service.worker.dataset ?? "—"}</code>
+              {service.worker.phase && (
+                <span className="levi-pool-muted">
+                  {" "}
+                  · {service.worker.phase}
+                </span>
+              )}
+            </>
+          ) : (
+            t("none")
+          )}
+        </Field>
+        <Field label={t("Watching")}>
+          {service.watch_roots?.length
+            ? service.watch_roots.map((r) => (
+                <code key={r} className="levi-live-path">
+                  {r}
+                </code>
+              ))
+            : "—"}
+        </Field>
+      </dl>
+
+      <h3 className="levi-live-sub">{t("Resources (supervisor)")}</h3>
+      <dl className="levi-live-dl">
+        <Field label={t("Memory")}>
+          {res.rss_mb != null ? `${res.rss_mb.toFixed(0)} MiB` : "—"}
+        </Field>
+        <Field label={t("Threads")}>{res.threads ?? "—"}</Field>
+        <Field label="CPU">
+          {res.cpu_percent != null ? `${res.cpu_percent.toFixed(1)} %` : "—"}
+        </Field>
+        <Field label={t("Running for")}>
+          {service.started_at
+            ? shortDuration(now / 1000 - service.started_at)
+            : "—"}
+        </Field>
+      </dl>
+
+      {service.events && service.events.length > 0 && (
+        <details className="levi-live-events">
+          <summary>
+            {t("Recent events")} ({service.events.length})
+          </summary>
+          <ul>
+            {service.events.slice(0, 12).map((e, i) => (
+              <li key={`${e.time}-${i}`} className={e.level}>
+                <span className="levi-pool-muted">{clock(e.time)}</span>{" "}
+                {e.text}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </section>
+  );
+}

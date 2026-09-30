@@ -20,6 +20,9 @@ export default function LeviHeader() {
             <Link href="/pool">
               <T>Training pool</T>
             </Link>
+            <Link href="/live">
+              <T>Live evaluation</T>
+            </Link>
             <Link href="/guide">
               <T>Guide</T>
             </Link>
