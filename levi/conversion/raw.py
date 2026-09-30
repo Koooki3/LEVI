@@ -427,6 +427,10 @@ def demo_outcome(demo: Path) -> str | None:
     outcome = meta.get("eval", {}).get("outcome")
     if outcome in ("success", "failure"):
         return outcome
+    if outcome in ("unlabeled", "aborted"):
+        # An unattended evaluation leaves the verdict to LEVI: its
+        # success_flag_final of 0 is a placeholder, not a recorded failure.
+        return None
     return "success" if meta.get("success_flag_final") == 1 else "failure"
 
 
