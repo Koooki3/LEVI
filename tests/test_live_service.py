@@ -98,6 +98,18 @@ def test_a_session_is_active_crashed_or_done(rollouts):
     assert s.fault and s.public()["reason"] == "robot reflex"
 
 
+def test_a_session_tells_the_page_which_model_runs_without_a_path(rollouts):
+    rollouts.session("waiting_reset")
+    (s,) = sessions.read_sessions([rollouts.root], time.time()).values()
+    public = s.public()
+    assert public["policy"] == {
+        "config": "pi05_fr3_all_state",
+        "checkpoint": "pi05_fr3_all_step49999",
+    }
+    assert public["reset_wait_s"] == 10.0 and public["started_at"] is not None
+    assert "/ckpt" not in json.dumps(public)
+
+
 def test_iso_and_epoch_times_are_both_read():
     assert sessions.parse_time(5.5) == 5.5
     assert sessions.parse_time("2026-10-01T10:00:00") is not None

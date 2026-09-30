@@ -75,6 +75,8 @@ class Session:
     prompt: str = ""
     session_id: str = ""
     run_id: str = ""
+    policy: dict = field(default_factory=dict)
+    reset_wait_s: float | None = None
 
     def active(self, states=DEFAULT_ACTIVE) -> bool:
         return self.state in states and not self.crashed
@@ -99,6 +101,9 @@ class Session:
             "prompt": self.prompt[:300],
             "session_id": self.session_id,
             "run_id": self.run_id,
+            "started_at": self.started_at,
+            "policy": self.policy,
+            "reset_wait_s": self.reset_wait_s,
         }
 
 
@@ -169,6 +174,9 @@ def _session(path, name, data, now):
         )
     )
     levi = data.get("levi") if isinstance(data.get("levi"), dict) else {}
+    wait = levi.get("reset_wait_s")
+    policy = data.get("policy") if isinstance(data.get("policy"), dict) else {}
+    checkpoint = str(policy.get("checkpoint_dir") or "").rstrip("/")
     enabled = levi.get("enabled") if isinstance(levi.get("enabled"), bool) else None
     return Session(
         path=path,
@@ -189,6 +197,15 @@ def _session(path, name, data, now):
         prompt=str(data.get("prompt") or ""),
         session_id=str(data.get("session_id") or ""),
         run_id=str(data.get("run_id") or ""),
+        # The page shows which model is being evaluated: its config name and
+        # the checkpoint's folder name (never the full path).
+        policy={
+            "config": str(policy.get("config") or "")[:120] or None,
+            "checkpoint": os.path.basename(checkpoint)[:120] or None,
+        },
+        reset_wait_s=float(wait)
+        if isinstance(wait, (int, float)) and not isinstance(wait, bool)
+        else None,
     )
 
 

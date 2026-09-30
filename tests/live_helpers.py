@@ -158,6 +158,10 @@ class Rollouts:
                     "prompt": self.text,
                     "group": self.group,
                     "task_folder": self.task,
+                    "policy": {
+                        "config": "pi05_fr3_all_state",
+                        "checkpoint_dir": "/ckpt/pi05_fr3_all_step49999/",
+                    },
                     "levi": {"enabled": levi, "reset_wait_s": 10},
                     "episode": {"no": 1, "target": 5},
                 }
