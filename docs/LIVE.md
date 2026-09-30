@@ -170,7 +170,7 @@ The temporal run is the evaluated configuration (coarse 0.5 s, refinement always
 - **Idle**: the supervisor lists rollout folders with `os.scandir`, reads the tiny session files when they change and rewrites `status.json`. It opens no video and imports no numerical library (tested). Idle scans happen every `poll_idle_s`; an unchanged task folder is not listed again.
 - **GPU**: vLLM starts for a batch, sleeps or stops after `idle_timeout_s`, and sleeps at once when its memory is wanted; the gate keeps it out of the policy's way.
 - **Disk**: the mirror is hard links (zero extra). A run's frozen input and evidence are deleted when its batch ends (the open release-review run keeps its evidence for review); leftover run folders are trimmed oldest first above `cache_max_gib`; logs rotate at `log_max_mb` × `log_backups`; `status.json` and every API body are bounded.
-- **Measured** (fake model, no vLLM, this machine, 10 minutes idle): see "Measured" below.
+- **Measured** (fake model, no vLLM, this machine, 10 minutes idle): see "Measured" below: 0.055 % CPU, 26 MiB.
 
 ## Files the service writes
 
@@ -248,7 +248,15 @@ Link a dataset to the viewer with its `repo_id` (`local/<name>`); the verdict's 
 
 ## Measured
 
-MEASURED_PLACEHOLDER
+Fake model server, no vLLM, this machine (32 threads, RTX 5090 not used), service started with `--daemon --no-ui` (supervisor + core API; the page itself needs a production build and was not running), nothing to do, 10 minutes after a 20 s settle:
+
+| Process | CPU (10 min) | Resident | Threads | Priority |
+| --- | --- | --- | --- | --- |
+| supervisor | 0.33 s = **0.055 %** of one core | **26 MiB** | 1 | nice 19 |
+| core (the API process `levi live` starts) | 0.14 s = 0.023 % | 177 MiB | 8 | nice 19 |
+
+While a batch runs (four demos, fake model): supervisor 29 MiB / 2 threads; the worker process peaks at about 215 MiB and 44 threads, the view build at 148 MiB (8 threads) plus a 134 MiB pool process, ffmpeg remuxes one thread each; all at nice 19. The worker exists only while there is a batch. A batch of 2 demos takes about 8 s end to end with the fake model; real times are dominated by the model (see the GPU measurement). `levi live doctor` reports the same numbers for a running service and warns when the supervisor exceeds 150 MiB or 12 threads.
+
 
 ## Limits
 

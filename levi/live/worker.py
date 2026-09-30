@@ -783,6 +783,9 @@ def main(argv=None) -> int:
     from levi.paths import configure
 
     configure()
+    from . import resources
+
+    resources.limit_cv2(config.resources.threads)
     worker = Worker(config, args.dataset, spec)
 
     def term(*_):

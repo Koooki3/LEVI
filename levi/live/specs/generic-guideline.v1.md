@@ -12,10 +12,11 @@ The robot's instruction for this episode is:
 
 A robot arm with a parallel two-finger gripper carries out that instruction.
 Decide what the instruction asks for (which object to pick, where it should
-end up) before you look at the frames, and judge every step against it. Use
-both cameras: the wrist camera (`hand`) looks down between the fingers and
-shows what is held and what lies under it; the side camera (`view1`) shows
-where the arm is and where objects are in the workspace.
+end up) before you look at the frames, and judge every step against it. You
+are shown the side camera (`view1`): it shows where the arm is and where the
+objects are in the workspace. (A run may also attach the wrist camera, `hand`,
+which looks down between the fingers and shows what is held and what lies
+under it.)
 
 ## Output
 For every episode, a list of subtask segments that covers the whole episode
