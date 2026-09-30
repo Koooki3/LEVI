@@ -69,6 +69,8 @@ PHRASES = {
 
 def channel(principal):
     """Which door this call came through, in the words the UI shows."""
+    if getattr(principal, "auto", False):
+        return "auto"
     if getattr(principal, "human", False):
         return "human"
     return "agent"

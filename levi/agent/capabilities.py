@@ -2185,7 +2185,11 @@ def _invoke(
                 }
             )
             value["status"] = "approved"
-            value["provenance"]["reviewer_type"] = "human"
+            # "auto": the live service's approver, stamped so nothing downstream
+            # mistakes it for a person's review (levi/live/auto.py).
+            value["provenance"]["reviewer_type"] = (
+                "auto" if getattr(principal, "auto", False) else "human"
+            )
             value["provenance"]["reviewer"] = principal.id
 
         return store.mutate("changes", args.changeset_id, approve)
@@ -2273,6 +2277,12 @@ def invoke(workbench, principal, name, arguments, key=None):
     # Those refusals are exactly what someone watching the panel needs to see,
     # so they are recorded here rather than only inside the dispatch below.
     try:
+        if getattr(principal, "auto", False):
+            # The live service's automatic approver: live workspace, explicit
+            # switch and a short list of calls, else refused (and audited).
+            from levi.live import auto
+
+            auto.authorize(workbench, name, arguments)
         principal.require(permission)
         args = schema.model_validate(arguments)
         if not principal.human and name == "runs.plan" and args.provider != "external":

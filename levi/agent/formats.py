@@ -132,6 +132,8 @@ class AnnotationKind:
                 for key in ("subtask_id", "outcome", "attempt", "uncertainty")
                 if proposal.get(key) not in (None, "")
             }
+            if origin and origin.get("review"):
+                atom["levi"]["review"] = origin["review"]
             if origin:
                 from .supersede import atom_key
 

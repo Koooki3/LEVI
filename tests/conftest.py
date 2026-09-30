@@ -140,3 +140,12 @@ def fresh_gpu_verdict():
     gpu._RECENT_FREE.clear()
     yield
     gpu._RECENT_FREE.clear()
+
+
+@pytest.fixture(scope="session")
+def demo_template(tmp_path_factory):
+    """One fake rollout demo (built once: ffmpeg is the slow part) for the
+    live-service tests to copy."""
+    from live_helpers import template
+
+    return template(tmp_path_factory)

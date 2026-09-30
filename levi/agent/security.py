@@ -49,6 +49,11 @@ class Principal:
     human: bool = False
     datasets: tuple[str, ...] = ()
     operations: tuple[str, ...] = ("read", "draft")
+    # The live service's automatic approver (levi/live/auto.py): acts with a
+    # person's permissions, but only in a live workspace, only for the calls
+    # that file lists, and every approval it gives is stamped ``auto`` and
+    # audited. Never true for a principal built from an HTTP request.
+    auto: bool = False
 
     def require(self, operation, repo_id=None):
         if not self.human and operation not in self.operations:

@@ -1361,6 +1361,10 @@ class Workbench:
                 grouped.setdefault(proposal["episode_index"], []).append(proposal)
             replaced = {}
             origin = {"run_id": run["id"], "changeset": id}
+            if change["provenance"].get("reviewer_type") == "auto":
+                # Approved by the live service, not a person: every segment it
+                # writes says so (formats.py copies it onto the atom).
+                origin["review"] = "auto"
             for ep, proposals in grouped.items():
                 response = app.get_episode_atoms(
                     ep,

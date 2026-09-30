@@ -932,6 +932,25 @@ def _coerce_v1_atoms(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return atoms
 
 
+def _mark_human_edit(atom: dict[str, Any]) -> None:
+    """A segment the live service wrote (``levi.review == "auto"``) that a
+    person saved with different text or times is the person's now: mark it
+    ``edited`` so nothing still presents it as unreviewed. A save that leaves
+    it as written keeps the ``auto`` mark (saving the page is not a review)."""
+    levi = atom.get("levi")
+    if not isinstance(levi, dict) or levi.get("review") != "auto":
+        return
+    written = (levi.get("origin") or {}).get("written")
+    end = atom.get("to")
+    key = (
+        atom.get("content"),
+        round(float(atom.get("timestamp", 0.0)), 3),
+        None if end is None else round(float(end), 3),
+    )
+    if not written or tuple(written) != key:
+        levi["review"] = "edited"
+
+
 def _write_episode_annotations(
     state: DatasetState, episode_index: int, atoms: list[dict[str, Any]]
 ) -> Path:
@@ -1956,6 +1975,7 @@ def set_episode_atoms(episode_index: int, payload: EpisodeAtomsPayload) -> JSONR
     atoms = [a.model_dump() for a in payload.atoms]
     for atom in atoms:
         _validate_atom(atom)
+        _mark_human_edit(atom)
     # Snap event timestamps to exact frame timestamps (matches lerobot#3471).
     frame_ts = _frame_timestamps(state, episode_index)
     for atom in atoms:
