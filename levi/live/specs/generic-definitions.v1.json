@@ -1,0 +1,50 @@
+[
+ {
+  "id": "approach",
+  "label": "approach",
+  "definition": "The empty gripper moves toward an object.",
+  "starts_when": "the empty gripper starts moving toward an object",
+  "ends_when": "the fingertips reach the object",
+  "success_when": "the object is one the task instruction asks the robot to pick"
+ },
+ {
+  "id": "grasp",
+  "label": "grasp",
+  "definition": "The fingers close on an object until it moves with the gripper.",
+  "starts_when": "the fingertips reach the object",
+  "ends_when": "the object first moves with the gripper",
+  "success_when": "the object is lifted between the fingertips"
+ },
+ {
+  "id": "transport",
+  "label": "transport",
+  "definition": "The gripper carries the object toward its target.",
+  "starts_when": "the object leaves its place",
+  "ends_when": "the gripper stops above the place where it will open",
+  "success_when": "that place is the target the task instruction names"
+ },
+ {
+  "id": "place",
+  "label": "place",
+  "definition": "The object is lowered or held above the target and released.",
+  "starts_when": "the object is lowered or held above the target",
+  "ends_when": "the fingers open",
+  "success_when": "the released object rests on or in the target the task instruction names"
+ },
+ {
+  "id": "retreat",
+  "label": "retreat",
+  "definition": "The opened gripper moves away from the target.",
+  "starts_when": "the fingers open",
+  "ends_when": "the gripper has moved clear of the target",
+  "success_when": "what was placed is not disturbed"
+ },
+ {
+  "id": "other",
+  "label": "other",
+  "definition": "A human hand acts, the robot is idle, or nothing recognisable happens.",
+  "starts_when": "a human hand acts, the robot is idle, or nothing recognisable happens",
+  "ends_when": "the robot resumes a recognisable subtask",
+  "success_when": "outcome is always unknown"
+ }
+]

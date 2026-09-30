@@ -1,0 +1,29 @@
+{
+ "subtasks": [
+  {
+   "id": "approach",
+   "label": "approach",
+   "definition": "The empty gripper moves toward an object."
+  },
+  {
+   "id": "grasp",
+   "label": "grasp",
+   "definition": "The fingers close on an object until it moves with the gripper."
+  },
+  {
+   "id": "transport",
+   "label": "transport",
+   "definition": "The gripper carries the object toward its target."
+  },
+  {
+   "id": "place",
+   "label": "place",
+   "definition": "The object is lowered or held above the target and released."
+  },
+  {
+   "id": "retreat",
+   "label": "retreat",
+   "definition": "The opened gripper moves away from the target."
+  }
+ ]
+}

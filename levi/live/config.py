@@ -1,0 +1,393 @@
+"""The live service's configuration: one TOML file, every default here.
+
+``levi live start`` reads ``<workspace>/live.toml`` (or ``--config``), creating
+it from these defaults when it is missing, so the file a person edits always
+lists every setting. Unknown keys are an error, not silently ignored: a typo
+in ``[gpu]`` must not leave the GPU policy at its default.
+
+Standard library only (the idle supervisor imports this).
+"""
+
+import dataclasses
+import tomllib
+from dataclasses import dataclass, field
+from pathlib import Path
+
+DEFAULT_WORKSPACE = "/home/marvel/work/wenkai/levi-live-ws"
+DEFAULT_HOME = "~/.levi-live"
+DEFAULT_ROOTS = ["/home/marvel/work/wenkai/online_rollout_data/models"]
+GPU_MODES = ("auto", "timeshare", "coexist", "manual")
+
+
+@dataclass
+class Service:
+    workspace: str = DEFAULT_WORKSPACE
+    # Where status.json, the pid file and the single-instance lock live.
+    home: str = DEFAULT_HOME
+    host: str = "127.0.0.1"
+    ui_port: int = 7880
+    core_port: int = 7881
+    # Polling: stat-only directory listings. Idle is slow, activity is fast.
+    poll_idle_s: float = 15.0
+    poll_active_s: float = 3.0
+    # While a worker runs beside an evaluation session: how often the gate
+    # (may the model work now?) is re-decided. A new episode closes it.
+    gate_poll_s: float = 1.0
+    heartbeat_s: float = 4.0
+
+
+@dataclass
+class Watch:
+    # Rollout roots: <root>/<group>/<task_folder>/demo_NNNN/
+    roots: list = field(default_factory=lambda: list(DEFAULT_ROOTS))
+    # fnmatch patterns over "<group>/<task_folder>"; empty means all.
+    include: list = field(default_factory=list)
+    exclude: list = field(default_factory=list)
+    # What to do with rollouts finished before the service (or the task's
+    # evaluation session) began: "skip" records them as backlog and never
+    # touches them, "process" annotates them too.
+    backlog: str = "skip"
+    # ISO time: overrides the service's first-start time as the backlog cutoff.
+    since: str = ""
+    # Only tasks that have an evaluation session file (levi.enabled) count.
+    require_session: bool = False
+    # A completion marker must be this old (seconds) before the demo is taken.
+    settle_s: float = 2.0
+    # Completed demos to take into one batch at most.
+    batch_max_episodes: int = 40
+
+
+@dataclass
+class Fr3:
+    health_file: str = "~/work/franka_control/run/fr3_health.json"
+    # A health file older than this is "monitor offline", not a red light.
+    stale_s: float = 3.0
+
+
+@dataclass
+class Gpu:
+    # timeshare (what auto means): the policy server (XLA_PYTHON_CLIENT_MEM_FRACTION=.22)
+    # and vLLM both stay resident, but vLLM only works while the policy is
+    # not inferring; a new episode cancels its requests at once. coexist:
+    # the same two resident, vLLM works whenever it has work (each policy
+    # inference then takes about twice as long). manual: never start vLLM,
+    # use the one already listening on vllm.port.
+    mode: str = "auto"
+    # Ports of a robot-side policy server. Only ever looked up in the kernel's
+    # socket table, never connected to.
+    policy_ports: list = field(default_factory=lambda: [8000])
+    # flock file shared by the workspace's GPU users (levi-hub/.gpu.lock).
+    lock_file: str = "/home/marvel/work/wenkai/levi-hub/.gpu.lock"
+    lock_agent: str = "live"
+    # Session states in which the policy is inferring (timeshare sends the
+    # model no request then). Homing, waiting for the reset, standby, fault,
+    # stopped and finished leave the GPU to the model.
+    busy_states: list = field(default_factory=lambda: ["running"])
+    # After a policy server appears or goes, wait this long before starting
+    # vLLM: a policy server that is still loading preallocates its memory.
+    settle_s: float = 20.0
+    # Free VRAM below which a resident vLLM is put to sleep (its memory is
+    # needed by someone else: a policy server that took more than expected).
+    min_free_mib: int = 600
+    # A policy server that holds more than this (MiB) cannot share the card
+    # with an awake vLLM: vLLM sleeps while it runs. 0 checks only free VRAM.
+    policy_budget_mib: int = 8500
+
+
+@dataclass
+class Vllm:
+    script: str = "/home/marvel/work/wenkai/tools/vllm/serve-qwen38.sh"
+    stop_script: str = "/home/marvel/work/wenkai/tools/vllm/serve.sh"
+    pid_dir: str = "/home/marvel/work/wenkai/tools/vllm/logs"
+    port: int = 8100
+    served_model: str = "qwen3.8-27b"
+    # The measured co-residence profile (levi-hub/reports/live-gpu.md): with
+    # the policy server at .22 both fit (peak about 31.3 GB of 32.6).
+    gpu_memory_utilization: float = 0.72
+    max_model_len: int = 49152
+    max_images: int = 128
+    max_num_seqs: int = 2
+    max_num_batched_tokens: int = 4096
+    # Seconds without work before vLLM is put to sleep (while an evaluation
+    # is live) or stopped, releasing the GPU.
+    idle_timeout_s: float = 120.0
+    start_timeout_s: float = 1800.0
+    # What an idle vLLM does: "auto" sleeps (level 1: 5 s down, under 1 s
+    # up, 1.8 GB left) while a policy server or session is live and stops
+    # otherwise; or always "sleep" / "stop".
+    idle_action: str = "auto"
+    # --enable-sleep-mode + VLLM_SERVER_DEV_MODE=1 (dev endpoints, loopback only).
+    sleep_mode: bool = True
+    # Memory vLLM takes after its first requests, beyond what it reports at
+    # start (measured: about 1.3 GB); counted when checking free VRAM.
+    margin_mib: int = 1400
+    # Greedy decoding, as the evaluated configuration.
+    temperature: float = 0.0
+    # Use a vLLM this service did not start (another agent's) instead of
+    # waiting for the port. Never stopped by this service either way; in
+    # manual mode it is always used.
+    adopt_external: bool = False
+
+
+@dataclass
+class Provider:
+    # The LEVI provider profile the worker creates and binds in the live
+    # workspace; context size and image limit follow the vLLM profile.
+    name: str = "live-qwen38"
+    prompt_style: str = "lean"
+    requests_in_flight: int = 2
+
+
+@dataclass
+class Pipeline:
+    # The automatic approver (docs/LIVE.md "The automatic approver"). Off:
+    # the service mirrors, builds views and plans, then waits for a person.
+    auto_approve: bool = False
+    coarse_step_seconds: float = 0.5
+    refine: str = "always"
+    # The generic subtask vocabulary and guideline shipped with LEVI.
+    guideline: str = "generic-guideline.v1.md"
+    vocabulary: str = "generic-vocabulary.v1.json"
+    anchored: bool = True
+    anchored_spec: str = "generic-release.v1.json"
+    # Valid releases an episode needs to be judged a success. The task
+    # instruction is not parsed: a task that needs two placements sets 2.
+    anchored_min_valid: int = 1
+    # An episode whose annotation fails this many attempts is left alone.
+    max_attempts: int = 2
+    # Seconds a waiting approval is re-checked when auto_approve is off.
+    human_recheck_s: float = 30.0
+    budget_seconds: int = 86400
+    # Drop a finished run's frozen input and evidence after its commit.
+    cleanup: bool = True
+
+
+@dataclass
+class Resources:
+    nice: int = 19
+    # ionice class 3 = idle
+    ionice_class: int = 3
+    threads: int = 2
+    view_workers: int = 1
+    log_max_mb: int = 5
+    log_backups: int = 3
+    # Cap on the regenerable run files (input, evidence) kept on disk.
+    cache_max_gib: float = 20.0
+    # Bound on status.json / API bodies.
+    status_max_datasets: int = 64
+    # Worker exits after this many idle seconds with nothing left to do.
+    worker_idle_exit_s: float = 5.0
+
+
+@dataclass
+class Config:
+    service: Service = field(default_factory=Service)
+    watch: Watch = field(default_factory=Watch)
+    fr3: Fr3 = field(default_factory=Fr3)
+    gpu: Gpu = field(default_factory=Gpu)
+    vllm: Vllm = field(default_factory=Vllm)
+    provider: Provider = field(default_factory=Provider)
+    pipeline: Pipeline = field(default_factory=Pipeline)
+    resources: Resources = field(default_factory=Resources)
+    # Where this configuration was read from (None: built-in defaults).
+    path: str | None = None
+
+    # --- derived locations -------------------------------------------------
+
+    @property
+    def workspace(self) -> Path:
+        return Path(self.service.workspace).expanduser()
+
+    @property
+    def home(self) -> Path:
+        return Path(self.service.home).expanduser()
+
+    @property
+    def live_dir(self) -> Path:
+        """Service state inside the workspace (not LEVI's own ``outputs/``)."""
+        return self.workspace / "live"
+
+    @property
+    def captures_dir(self) -> Path:
+        return self.workspace / "captures"
+
+    @property
+    def status_file(self) -> Path:
+        return self.home / "status.json"
+
+    @property
+    def logs_dir(self) -> Path:
+        return self.live_dir / "logs"
+
+    def effective_gpu_mode(self) -> str:
+        """``auto`` resolved: timeshare."""
+        return "timeshare" if self.gpu.mode == "auto" else self.gpu.mode
+
+    def vllm_profile(self) -> dict:
+        """The vLLM launch parameters (one profile for every mode)."""
+        v = self.vllm
+        return {
+            "gpu_memory_utilization": v.gpu_memory_utilization,
+            "max_model_len": v.max_model_len,
+            "max_images": v.max_images,
+            "max_num_seqs": v.max_num_seqs,
+            "max_num_batched_tokens": v.max_num_batched_tokens,
+            "sleep_mode": v.sleep_mode,
+            "profile": "shared",
+        }
+
+    def validate(self) -> "Config":
+        s, w, g, v, p, r = (
+            self.service,
+            self.watch,
+            self.gpu,
+            self.vllm,
+            self.pipeline,
+            self.resources,
+        )
+        problems = []
+        if g.mode not in GPU_MODES:
+            problems.append(f"gpu.mode must be one of {', '.join(GPU_MODES)}")
+        if w.backlog not in ("skip", "process"):
+            problems.append("watch.backlog must be skip or process")
+        if p.refine not in ("always", "auto"):
+            problems.append("pipeline.refine must be always or auto")
+        if s.ui_port == s.core_port:
+            problems.append("service.ui_port and service.core_port must differ")
+        for name, port in (("ui_port", s.ui_port), ("core_port", s.core_port)):
+            if port in (5000, 8000, 7860, 7861):
+                problems.append(
+                    f"service.{name} {port} is reserved (robot servers, product LEVI)"
+                )
+        if any(int(x) in (5000,) for x in g.policy_ports):
+            problems.append("gpu.policy_ports must not list the robot server port 5000")
+        if not 0.05 <= v.gpu_memory_utilization <= 0.98:
+            problems.append("vllm.gpu_memory_utilization must be 0.05-0.98")
+        if v.idle_action not in ("auto", "sleep", "stop"):
+            problems.append("vllm.idle_action must be auto, sleep or stop")
+        if s.poll_idle_s < 1 or s.poll_active_s < 0.5:
+            problems.append("service.poll_idle_s >= 1 and poll_active_s >= 0.5")
+        if not 0 <= r.nice <= 19:
+            problems.append("resources.nice must be 0-19")
+        if r.threads < 1 or r.view_workers < 1:
+            problems.append("resources.threads and view_workers must be >= 1")
+        if w.batch_max_episodes < 1:
+            problems.append("watch.batch_max_episodes must be >= 1")
+        if p.max_attempts < 1:
+            problems.append("pipeline.max_attempts must be >= 1")
+        if not (w.roots and all(isinstance(x, str) and x for x in w.roots)):
+            problems.append("watch.roots needs at least one directory")
+        if problems:
+            raise ValueError("Invalid live configuration: " + "; ".join(problems))
+        return self
+
+
+def _fill(cls, data: dict, where: str):
+    """A dataclass from a TOML table; unknown keys and wrong types are errors."""
+    known = {f.name: f for f in dataclasses.fields(cls)}
+    unknown = sorted(set(data) - set(known))
+    if unknown:
+        raise ValueError(f"Unknown key(s) in [{where}]: {', '.join(unknown)}")
+    kwargs = {}
+    for name, value in data.items():
+        default = getattr(cls(), name)
+        if dataclasses.is_dataclass(default):
+            if not isinstance(value, dict):
+                raise ValueError(f"[{where}.{name}] must be a table")
+            kwargs[name] = _fill(type(default), value, f"{where}.{name}")
+            continue
+        if isinstance(default, bool):
+            ok = isinstance(value, bool)
+        elif isinstance(default, int):
+            ok = isinstance(value, int) and not isinstance(value, bool)
+        elif isinstance(default, float):
+            ok = isinstance(value, (int, float)) and not isinstance(value, bool)
+            value = float(value) if ok else value
+        elif isinstance(default, list):
+            ok = isinstance(value, list)
+        else:
+            ok = isinstance(value, str)
+        if not ok:
+            raise ValueError(
+                f"{where}.{name} must be {type(default).__name__}, got {value!r}"
+            )
+        kwargs[name] = value
+    return cls(**kwargs)
+
+
+def from_dict(data: dict, path: str | None = None) -> Config:
+    known = {f.name for f in dataclasses.fields(Config)} - {"path"}
+    unknown = sorted(set(data) - known)
+    if unknown:
+        raise ValueError(f"Unknown table(s): {', '.join(unknown)}")
+    sections = {
+        name: _fill(type(getattr(Config(), name)), value, name)
+        for name, value in data.items()
+    }
+    return Config(**sections, path=path).validate()
+
+
+def load(path=None, workspace=None) -> Config:
+    """The configuration at ``path``, else ``<workspace>/live.toml`` when it
+    exists, else the defaults. ``workspace`` overrides ``service.workspace``."""
+    data: dict = {}
+    source = None
+    if path is None and workspace is not None:
+        candidate = Path(workspace).expanduser() / "live.toml"
+        path = candidate if candidate.is_file() else None
+    if path is not None:
+        source = str(Path(path).expanduser())
+        try:
+            data = tomllib.loads(Path(source).read_text())
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raise ValueError(f"Cannot read {source}: {exc}") from exc
+    config = from_dict(data, source)
+    if workspace is not None:
+        config.service.workspace = str(Path(workspace).expanduser())
+    return config
+
+
+def _toml_value(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return repr(value)
+    if isinstance(value, list):
+        return "[" + ", ".join(_toml_value(x) for x in value) + "]"
+    text = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{text}"'
+
+
+def render(config: Config | None = None) -> str:
+    """The configuration as a TOML file with a comment per table."""
+    config = config or Config()
+    notes = {
+        "service": "ports, polling and where the service keeps its state",
+        "watch": "which rollout directories to follow",
+        "fr3": "the FR3 health file the robot side writes",
+        "gpu": "when the local model may use the GPU",
+        "vllm": "how the local vLLM server is launched",
+        "provider": "the LEVI model profile created for the live workspace",
+        "pipeline": "what runs on each batch; auto_approve is off by default",
+        "resources": "keeping the service light",
+    }
+    lines = ["# LEVI live annotation service. docs/LIVE.md describes every setting.\n"]
+
+    def table(name, obj):
+        lines.append(f"[{name}]  # {notes.get(name, '')}".rstrip(" #"))
+        nested = []
+        for f in dataclasses.fields(obj):
+            value = getattr(obj, f.name)
+            if dataclasses.is_dataclass(value):
+                nested.append((f"{name}.{f.name}", value))
+            else:
+                lines.append(f"{f.name} = {_toml_value(value)}")
+        lines.append("")
+        for child, value in nested:
+            table(child, value)
+
+    for f in dataclasses.fields(config):
+        if f.name == "path":
+            continue
+        table(f.name, getattr(config, f.name))
+    return "\n".join(lines)

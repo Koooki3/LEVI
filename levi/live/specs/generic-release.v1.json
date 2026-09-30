@@ -1,0 +1,95 @@
+{
+ "id": "generic-release",
+ "version": 1,
+ "title": {
+  "en": "Generic release review, task-independent (candidate)",
+  "zh": "通用释放复核，与任务无关（候选）"
+ },
+ "status": "candidate",
+ "description": "One question at every gripper opening, for any pick-and-place style task: the question quotes the task instruction (filled in by the live service from the rollout's task description), shows the side camera at -2.5..+1.2 s and the wrist camera at -1.5..+0.4 s (the frames of the plates release review), and asks whether an object was held, whether it landed at the destination the instruction names, and whether it stays. An opening is valid when a held object lands at the target and does not slide off; the episode succeeds when at least `min_valid` openings are valid (1 unless the live configuration says otherwise). CANDIDATE, NOT EVALUATED on any task: written 2026-10-01 from the plates and screws specs with the task-specific words removed; its accuracy is unknown and it cannot tell a task that needs two placements from one placement. The live page shows its verdict as automatic and unreviewed.",
+ "anchor": {
+  "signal": "gripper",
+  "event": "open"
+ },
+ "views": [
+  {
+   "role": "side",
+   "camera": "observation.images.view1",
+   "offsets_seconds": [
+    -2.5,
+    -1.5,
+    -0.8,
+    -0.3,
+    -0.1,
+    0.4,
+    1.2
+   ]
+  },
+  {
+   "role": "wrist",
+   "camera": "observation.images.hand",
+   "offsets_seconds": [
+    -1.5,
+    -0.6,
+    -0.1,
+    0.4
+   ]
+  }
+ ],
+ "question": "A robot arm with a two-finger gripper is carrying out this instruction: \"{task}\". Work out what the instruction asks the robot to pick up and where it should end up.\nThe gripper receives an OPEN command at t=0; this is one release of the episode. Images 1-7 are the side camera at t=-2.5, -1.5, -0.8, -0.3, -0.1, +0.4, +1.2 s; images 8-11 are the wrist camera (looking down between the fingers) at t=-1.5, -0.6, -0.1, +0.4 s.\nThe gripper holds an object by pinching it, so a held object may hang tilted under the fingers; it counts as held if the whole object is off the surface it lay on and moves together with the gripper across the earlier images. An object that stays on the surface while the fingers close or drag it is NOT held.\nAnswer strictly from what the images show, not from what the robot seems to be trying to do:\n- held_before: just before the open, is an object held off the surface by the fingers?\n- landed: after the open, where is that object relative to what the instruction asks for: at_target if it rests on or in the place the instruction names as its destination; elsewhere if it rests somewhere else (the table, another object, a wrong container); still_in_gripper; nothing_released if no object was held.\n- stays: at t=+1.2 s does it stay where it landed (not sliding, rolling or falling off)?\nUse unclear whenever the images do not show it.",
+ "fields": [
+  {
+   "name": "held_before",
+   "enum": [
+    "yes",
+    "no",
+    "unclear"
+   ]
+  },
+  {
+   "name": "landed",
+   "enum": [
+    "at_target",
+    "elsewhere",
+    "still_in_gripper",
+    "nothing_released",
+    "unclear"
+   ]
+  },
+  {
+   "name": "stays",
+   "enum": [
+    "yes",
+    "no",
+    "unclear"
+   ]
+  }
+ ],
+ "valid_when": [
+  {
+   "field": "held_before",
+   "in": [
+    "yes"
+   ]
+  },
+  {
+   "field": "landed",
+   "in": [
+    "at_target"
+   ]
+  },
+  {
+   "field": "stays",
+   "not_in": [
+    "no"
+   ]
+  }
+ ],
+ "unknown_values": [
+  "unclear"
+ ],
+ "episode": {
+  "min_valid": 1
+ },
+ "max_output_tokens": 100
+}
