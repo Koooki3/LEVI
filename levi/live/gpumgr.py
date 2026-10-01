@@ -19,6 +19,7 @@ Standard library only.
 import contextlib
 import fcntl
 import json
+import math
 import os
 import re
 import signal
@@ -163,8 +164,8 @@ def plan_budget(config, *, free_mib, total_mib, policy_up: bool) -> Budget:
     The budget is the share of vLLM's own total (nvidia-smi's less
     ``VLLM_TOTAL_SLACK_MIB``) that the free VRAM allows after ``margin_mib``,
     capped at ``gpu_memory_utilization_max``; with no policy server on the
-    card it is the configured ``gpu_memory_utilization`` (room for one to start
-    later). The same number is what the start passes to vLLM, so the pre-check
+    card it is the configured ``gpu_memory_utilization`` (0.74, calibrated on a
+    warm compile cache: see ``config.Vllm``). The same number is what the start passes to vLLM, so the pre-check
     and the launch cannot disagree. If it is below what serves the context
     (``min_utilization_*``, less for a shorter context) the context steps down
     by 4096 to ``min_model_len``; if even that does not fit nothing is started:
@@ -721,8 +722,41 @@ class Vllm:
             r"^.*?\b(\w*(?:Error|Exception)\b[^\n]*)$", text, re.MULTILINE
         )
         if found:
-            return found[-1].strip()[:300]
+            return (self._explain_kv(found[-1]) or found[-1].strip())[:300]
         return (self.error or "vLLM failed to start")[:300]
+
+    def _explain_kv(self, line: str) -> str | None:
+        """vLLM's "1.82 GiB KV cache is needed ... available (1.68 GiB)" turned
+        into what it means here: the memory budget is too small, and by how
+        much (budget u leaves u * 31.36 GiB less a fixed amount for the KV
+        cache, so the missing GiB divided by vLLM's total is the budget to add)."""
+        m = re.search(
+            r"\(([\d.]+) GiB KV cache is needed.*?available KV cache memory "
+            r"\(([\d.]+) GiB\)(?:.*?estimated maximum model length is (\d+))?",
+            line,
+        )
+        if not m:
+            return None
+        need, have = float(m.group(1)), float(m.group(2))
+        used = (self.profile or {}).get("gpu_memory_utilization")
+        total_gib = (32607 - VLLM_TOTAL_SLACK_MIB) / 1024
+        text = (
+            f"the memory budget is too small: the KV cache needs {need:g} GiB "
+            f"but only {have:g} GiB fits"
+        )
+        if used:
+            suggested = (
+                math.ceil((used + (need - have) / total_gib + 0.002) * 1000) / 1000
+            )
+            text += (
+                f" at --gpu-memory-utilization {used:g}; use at least {suggested:g} "
+                "(vllm.gpu_memory_utilization)"
+            )
+        if m.group(3):
+            text += (
+                f", or a context of at most {m.group(3)} tokens (vllm.max_model_len)"
+            )
+        return text
 
     def _healthy(self) -> bool:
         """/health, asked at most once a second (the supervisor ticks four

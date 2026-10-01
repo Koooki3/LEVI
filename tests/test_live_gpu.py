@@ -86,8 +86,8 @@ def decide(c, mode, **kw):
 def test_the_memory_a_start_needs_follows_the_measured_profile():
     c = cfg_for()
     profile = c.vllm_profile()
-    # 0.72 of vLLM's total (nvidia-smi's less 500 MiB) plus the margin.
-    assert gpumgr.need_mib(c, profile, 32607) == int(0.72 * 32107) + 1100
+    # 0.74 of vLLM's total (nvidia-smi's less 500 MiB) plus the margin.
+    assert gpumgr.need_mib(c, profile, 32607) == int(0.74 * 32107) + 1100
 
 
 def test_a_start_needs_room_and_a_settled_policy_server_not_an_idle_evaluation():
@@ -173,7 +173,7 @@ def test_one_profile_for_every_mode_and_auto_is_timeshare():
     c = live_config.Config()
     assert c.effective_gpu_mode() == "timeshare"
     profile = c.vllm_profile()
-    assert profile["gpu_memory_utilization"] == 0.72 and profile["sleep_mode"]
+    assert profile["gpu_memory_utilization"] == 0.74 and profile["sleep_mode"]
     args = gpumgr.launch_args(c, profile)
     assert "--enable-sleep-mode" in args and "4096" in args
     assert "--max-num-batched-tokens" in args and '{"image":128,"video":0}' in args
@@ -268,7 +268,7 @@ def test_vllm_starts_sleeps_wakes_and_stops_only_what_it_started(live, serve):
     launched = (serve[1] / "launch.txt").read_text()
     assert (
         "dev=1" in launched
-        and "util=0.72" in launched
+        and "util=0.74" in launched
         and "--enable-sleep-mode" in launched
     )
     assert wait_for(lambda: vllm.poll() == "ready")
@@ -741,14 +741,29 @@ def test_the_budget_follows_the_memory_free_at_start_in_both_orders():
     )
     # The pre-check and the launch use the same number: free covers need.
     assert first.need_mib <= 32607 - 7685
-    # vLLM first (nothing else on the card): the configured 0.72, which leaves
-    # room for a policy server that starts later.
+    # vLLM first (nothing else on the card): the configured 0.74, the least
+    # that serves 49152 tokens with a warm compile cache (0.72 leaves a KV
+    # cache of 1.73 GiB, below the 1.82 GiB they need), and what is left
+    # beside it still holds a policy server at .22.
     alone = plan(32500, False)
     assert (
         alone.ok
-        and alone.utilization == pytest.approx(0.7195)
+        and alone.utilization == pytest.approx(0.7395)
         and alone.max_model_len == 49152
     )
+    assert 32607 - alone.need_mib >= 0  # it fits the card
+    # 0.72 alone is NOT enough for the full context (measured on an idle GPU,
+    # warm cache): with only that much free the context steps down, it never
+    # starts a vLLM that cannot serve max_model_len.
+    tight = plan(24300, False)
+    assert tight.ok and tight.max_model_len < 49152 and tight.utilization < 0.7255
+    # What the KV formula says a context needs, with the measured non-KV memory
+    # (20.85 GiB at warm cache): the planned budget always covers it.
+    for free in range(24000, 32500, 250):
+        got = plan(free, False)
+        if got.ok:
+            kv_mib = got.max_model_len * 39800 / 1048576
+            assert got.utilization * 32107 - 21400 >= kv_mib - 1, (free, got)
     # A bigger policy server (the old .35): nothing starts, the numbers say why.
     big = plan(32607 - 11863, True)
     assert not big.ok and big.code == "insufficient_vram"
@@ -762,6 +777,49 @@ def test_the_budget_follows_the_memory_free_at_start_in_both_orders():
         for f in range(20000, 32000, 500)
         if plan(f, True).ok
     )
+
+
+def test_the_defaults_are_the_warm_cache_calibration():
+    """Measured with a warm compile cache (live-validation.md section 5):
+    0.72 -> 1.73 GiB KV cache, 0.74 -> 2.36 GiB, so the memory that is not KV
+    cache is about 20.9 GiB of vLLM's 31.36 GiB; 49152 tokens need 1.82 GiB."""
+    v = live_config.Config().vllm
+    assert v.gpu_memory_utilization == 0.74
+    total = 32107.0
+    need_kv = v.max_model_len * v.kv_bytes_per_token / 1048576
+    floor_full = (21400 + need_kv) / total
+    assert v.min_utilization_alone >= floor_full - 0.0005
+    assert v.min_utilization_with_policy >= floor_full - 0.0005
+    assert v.gpu_memory_utilization > floor_full  # the default itself starts
+    assert 0.72 < floor_full  # ... and 0.72 does not
+
+
+REAL_LOG = """(EngineCore pid=1944469) ERROR 10-01 12:55:17 [core.py:1366] ValueError: To serve at least one request with the model's max seq len (49152), (1.82 GiB KV cache is needed, which is larger than the available KV cache memory (1.68 GiB). Based on the available memory, the estimated maximum model length is 45472. Try increasing `gpu_memory_utilization` (which also controls CPU memory on the CPU backend) or decreasing `max_model_len` when initializing the engine. See https://docs.vllm.ai/en/latest/configuration/conserving_memory/ for more details.
+"""
+
+
+def test_a_kv_cache_failure_says_the_budget_is_too_small_and_what_to_use(live):
+    c, _ = live
+    vllm = gpumgr.Vllm(c)
+    vllm.profile = {"gpu_memory_utilization": 0.72, "max_model_len": 49152}
+    log = vllm.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("INFO starting\n" + REAL_LOG)
+    reason = vllm.failure_reason()
+    assert "budget is too small" in reason and "KV cache" in reason
+    assert "1.82 GiB" in reason and "1.68 GiB" in reason
+    assert "0.72" in reason and "45472" in reason
+    # The suggestion: the used budget plus the missing 0.14 GiB (/ 31.35 GiB)
+    # and a margin -- enough for this very failure.
+    suggested = float(reason.split("at least ")[1].split()[0])
+    assert 0.7245 <= suggested <= 0.735
+    # Another error stays as vLLM said it.
+    log.write_text("RuntimeError: CUDA out of memory\n")
+    assert vllm.failure_reason().startswith("RuntimeError: CUDA out of memory")
+    # Without a profile (a restarted supervisor) the numbers still show.
+    vllm.profile = None
+    log.write_text(REAL_LOG)
+    assert "budget is too small" in vllm.failure_reason()
 
 
 def test_the_controller_starts_vllm_with_the_planned_budget_and_context(ctl, serve):
@@ -805,7 +863,7 @@ def test_a_policy_server_whose_memory_is_unknown_gets_the_conservative_budget(
     ctl.machine.ports, ctl.machine.free = {8000}, 26000
     ctl.machine.policy_mib = None  # nvidia-smi could not say
     assert step(ctl, time.time()) == "ok"
-    assert launched_util(serve) == "0.7195"  # as if alone: room for it to grow
+    assert launched_util(serve) == "0.7395"  # as if alone: room for it to grow
     ctl.vllm.stop()
 
 
@@ -838,7 +896,7 @@ def test_one_that_stays_small_is_given_up_waiting_for(ctl, serve):
     t = time.time()
     assert step(ctl, t) == "settling"
     assert step(ctl, t + ctl.config.gpu.policy_load_wait_s + 1) == "ok"
-    assert launched_util(serve) == "0.7195"
+    assert launched_util(serve) == "0.7395"
     ctl.vllm.stop()
 
 
