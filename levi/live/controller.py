@@ -908,7 +908,10 @@ class Controller:
         """``live/gate.json``: the worker's permission to send model requests.
         Rewritten on change and at least every 4 s (a stale gate reads as
         closed, so a dead supervisor cannot leave it open)."""
-        key = (self.gate.open, self.gate.code)
+        # Nothing to protect: no policy server listening, no evaluation. A gate
+        # file that goes stale in that state does not hold people back.
+        idle = not self.policy_up and not self._evaluating()
+        key = (self.gate.open, self.gate.code, idle)
         if key == self._gate_written[0] and now - self._gate_written[1] < 4.0:
             return
         self._gate_written = (key, now)
@@ -918,6 +921,7 @@ class Controller:
                 "open": self.gate.open,
                 "code": self.gate.code,
                 "reason": self.gate.reason,
+                "idle": idle,
                 "updated_at": now,
             },
         )

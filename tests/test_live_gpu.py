@@ -1648,3 +1648,27 @@ def test_a_group_member_that_outlives_the_leader_is_waited_for(ctl, monkeypatch)
     monkeypatch.setattr(gpumgr, "_group_alive", members)
     assert ctl.vllm.stop() is True
     assert len(calls) >= 4 and pid in calls
+
+
+def test_the_worker_uses_the_shared_stale_gate_rule(live):
+    from levi.live import jsonio, worker
+
+    c, _ = live
+    w = worker.Worker.__new__(worker.Worker)
+    w.config = c
+    path = c.live_dir / "gate.json"
+    old = time.time() - 60
+    jsonio.write(path, {"open": True, "idle": False, "updated_at": old})
+    assert w.gate_open() is False  # silent supervisor, a policy may be up
+    jsonio.write(path, {"open": True, "idle": True, "updated_at": old})
+    assert w.gate_open() is True  # silent, but nothing to protect
+    path.unlink()
+    assert w.gate_open() is True  # no supervisor gates this worker
+    # The supervisor writes "idle" with the gate.
+    ctl = started_controller(live)
+    ctl.tick(time.time())
+    assert json.loads(path.read_text())["idle"] is True  # no policy, no session
+    ctl.machine.ports = {8000}
+    ctl.rollouts.session("standby")
+    ctl.tick(time.time() + 5)
+    assert json.loads(path.read_text())["idle"] is False

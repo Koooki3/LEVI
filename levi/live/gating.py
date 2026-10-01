@@ -26,6 +26,36 @@ STALE_S = 20.0  # no heartbeat for this long: the supervisor is gone, not gating
 _CACHE: dict = {}
 
 
+def closed(gate, now=None) -> bool:
+    """Is this ``gate.json`` content a closed gate? One rule for the worker and
+    for people. A missing or unreadable file means no supervisor gates anyone:
+    open. A fresh file says what it says. A file nobody has refreshed for
+    ``STALE_S`` (the supervisor is gone) is read the careful way: closed,
+    unless its last word was ``idle`` (no policy server and no evaluation when
+    it was written, so nothing to protect)."""
+    if not isinstance(gate, dict):
+        return False
+    now = time.time() if now is None else now
+    if now - float(gate.get("updated_at") or 0) <= STALE_S:
+        return not gate.get("open", True)
+    return not gate.get("idle", False)
+
+
+def _message(gate) -> str:
+    if time.time() - float(gate.get("updated_at") or 0) > STALE_S:
+        return (
+            "The live service's gate file has not been refreshed for over "
+            f"{STALE_S:.0f} s (is the supervisor running? `levi live status`) and "
+            "a policy server or evaluation may be active: not sending model "
+            "requests"
+        )
+    return (
+        "The robot evaluation is inferring on the GPU "
+        f"({gate.get('reason') or gate.get('code') or 'gate closed'}): the "
+        "evaluation is inferring, try again shortly"
+    )
+
+
 def request_blocked(now=None) -> str | None:
     """Why the next model request must not be sent, or None. Called before
     every request of every run in a live workspace's core (a person's Run, the
@@ -48,17 +78,8 @@ def request_blocked(now=None) -> str | None:
     why = None
     if (live / auto.MARKER).is_file():
         gate = jsonio.read(live / "gate.json")
-        if (
-            isinstance(gate, dict)
-            and not gate.get("open", True)
-            and time.time() - float(gate.get("updated_at") or 0) <= STALE_S
-        ):
-            why = (
-                "The robot evaluation is inferring on the GPU "
-                f"({gate.get('reason') or gate.get('code') or 'gate closed'}): "
-                "the model request is not sent; the evaluation is inferring, "
-                "resume the run in a moment"
-            )
+        if closed(gate):
+            why = _message(gate)
     _CACHE[str(live)] = (stamp, why)
     return why
 
@@ -76,14 +97,8 @@ def check(principal, name: str, live_dir=None):
     if not (live / auto.MARKER).is_file():
         return
     gate = jsonio.read(live / "gate.json")
-    if not isinstance(gate, dict) or gate.get("open", True):
-        return
-    if time.time() - float(gate.get("updated_at") or 0) > STALE_S:
+    if not closed(gate):
         return
     from levi.agent.store import Conflict
 
-    raise Conflict(
-        "The robot evaluation is inferring on the GPU "
-        f"({gate.get('reason') or gate.get('code') or 'gate closed'}); "
-        "the evaluation is inferring, try again shortly"
-    )
+    raise Conflict(_message(gate))
