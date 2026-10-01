@@ -1813,9 +1813,11 @@ def test_the_service_environment_never_carries_the_worker_marker(live, monkeypat
         [
             sys.executable,
             "-c",
-            "import os; from levi.live import config, worker; "
-            f"worker.configure_process(config.load(r'{toml}')); "
-            "print(os.environ.get('LEVI_LIVE_WORKER'))",
+            (
+                "import os; from levi.live import config, worker; "
+                f"worker.configure_process(config.load(r'{toml}')); "
+                "print(os.environ.get('LEVI_LIVE_WORKER'))"
+            ),
         ],
         capture_output=True,
         text=True,
