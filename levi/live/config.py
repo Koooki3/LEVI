@@ -161,6 +161,10 @@ class Vllm:
     # waiting for the port. Never stopped by this service either way; in
     # manual mode it is always used.
     adopt_external: bool = False
+    # Bring vLLM up once the service starts (with no evaluation running) and
+    # keep it resident: idle only puts it to sleep, it stops with the service.
+    # The way to avoid any cold start while the robot evaluates.
+    prewarm: bool = False
 
 
 @dataclass

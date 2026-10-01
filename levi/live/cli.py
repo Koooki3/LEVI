@@ -59,6 +59,12 @@ def add_config_options(parser):
     parser.add_argument(
         "--since", help="ISO time: rollouts finished before it are backlog"
     )
+    parser.add_argument(
+        "--prewarm",
+        action="store_true",
+        help="start vLLM as soon as no evaluation is running and keep it resident "
+        "(idle only sleeps it): no cold start while the robot evaluates",
+    )
     parser.add_argument("--ui-port", type=int)
     parser.add_argument("--core-port", type=int)
     parser.add_argument(
@@ -86,6 +92,8 @@ def resolve_config(args):
         config.watch.backlog = "process"
     if args.since:
         config.watch.since = args.since
+    if getattr(args, "prewarm", False):
+        config.vllm.prewarm = True
     if args.ui_port:
         config.service.ui_port = args.ui_port
     if args.core_port:
@@ -477,6 +485,7 @@ def _forward(args) -> list:
         out += ["--root", root]
     for flag, on in (
         ("--auto-approve", args.auto_approve),
+        ("--prewarm", getattr(args, "prewarm", False)),
         ("--process-backlog", args.process_backlog),
         ("--adopt-workspace", args.adopt_workspace),
         ("--no-ui", args.no_ui),

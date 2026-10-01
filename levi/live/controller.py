@@ -268,6 +268,16 @@ class Controller:
             for s in self.sessions.values()
         )
 
+    def _evaluation_unfinished(self) -> bool:
+        """A session is on the robot or between episodes (running, homing,
+        waiting for the reset): the policy answers at any moment and a cold
+        start's effect on its latency is unmeasured. Standby, finished,
+        stopped, crashed and fault sessions do not count."""
+        return any(
+            s.state in ("running", "homing", "waiting_reset")
+            for s in self.sessions.values()
+        )
+
     def policy_mib(self, now, ttl=30.0):
         """VRAM the policy server holds (cached; None if not running/unknown)."""
         if not self.policy_up:
@@ -351,6 +361,15 @@ class Controller:
             # A cold start is 45 s of heavy GPU load: never while the policy infers.
             self.decision = gpumgr.Decision(
                 False, "waiting for the gate: " + self.gate.reason, "gate_closed"
+            )
+            return False
+        if mode != "manual" and self._evaluation_unfinished():
+            self.decision = gpumgr.Decision(
+                False,
+                "an evaluation is under way: no cold start (45-70 s of GPU load, "
+                "effect on the policy's latency unmeasured) until it is between "
+                "runs; `levi live start --prewarm` starts vLLM before",
+                "evaluation_active",
             )
             return False
         free = None
@@ -465,6 +484,13 @@ class Controller:
         )
         if not self.decision.allowed:
             return False
+        if mode != "manual" and not self.gate.open:
+            # ...and the policy is not inferring or about to (a wake is quick
+            # but not free): never during the evaluation's inference.
+            self.decision = gpumgr.Decision(
+                False, "waiting for the gate: " + self.gate.reason, "gate_closed"
+            )
+            return False
         if self.vllm.wake():
             self.event("vLLM woke up")
             return True
@@ -527,7 +553,7 @@ class Controller:
             self.idle_since = None
             return
         live = self.policy_up or self._evaluating()
-        if state == "asleep" and live:
+        if state == "asleep" and (live or v.prewarm):
             self.idle_since = None
             return
         if self.idle_since is None:
@@ -538,10 +564,16 @@ class Controller:
         sleeps = (
             v.sleep_mode
             and state == "ready"
-            and (v.idle_action == "sleep" or (v.idle_action == "auto" and live))
+            and (
+                v.prewarm
+                or v.idle_action == "sleep"
+                or (v.idle_action == "auto" and live)
+            )
         )
         if sleeps and self.vllm.sleep():
             self.event("no work: vLLM sleeps (the evaluation is live)")
+        elif v.prewarm:
+            pass  # a prewarmed vLLM is never stopped before the service is
         else:
             self.event("no work: stopping vLLM to free the GPU")
             self._stop_vllm()
@@ -758,7 +790,10 @@ class Controller:
         queue = self._queue(now)
         orphan = self._orphan_running()
         want = bool(queue) and not orphan
-        ready = self._gpu_step(now, want or self.worker is not None)
+        prewarm = (
+            self.config.vllm.prewarm and self.worker is None and not self.vllm.mine()
+        )
+        ready = self._gpu_step(now, want or self.worker is not None or prewarm)
         self._write_gate(now)
         self._police_worker(now)
         if self.worker is None and want and ready and not orphan and self.gate.open:

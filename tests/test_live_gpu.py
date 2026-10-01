@@ -370,7 +370,7 @@ def test_vllm_starts_beside_a_running_evaluation_and_the_gate_holds_the_work(ctl
     ctl.machine.ports = {8000}
     ctl.machine.policy_mib = 7685
     t = time.time()
-    ctl.rollouts.session("homing")
+    ctl.rollouts.session("standby")  # no cold start once an evaluation is under way
     up(ctl, t)
     assert ctl.vllm.mine() and ctl.lock.held
     ctl.spawned.clear()
@@ -513,7 +513,7 @@ def test_a_worker_that_does_not_stand_down_is_stopped_but_one_that_does_is_left(
     ctl.rollouts.write(0)
     t = time.time()
     ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
-    ctl.rollouts.session("homing")
+    ctl.rollouts.session("standby")
     up(ctl, t)
     worker = subprocess.Popen(["sleep", "60"], start_new_session=True)
     ctl.worker, ctl.worker_dataset = worker, "pi05_fake__stack_the_plates"
@@ -626,15 +626,104 @@ def test_the_launch_script_failing_is_reported_with_vllm_s_own_reason(ctl, tmp_p
     assert ctl.start_failures == 1 and "exited 7" in ctl.vllm.error
 
 
-def test_a_cold_start_waits_for_the_gate_but_a_wake_does_not(ctl):
+def test_no_cold_start_while_an_evaluation_is_unfinished(ctl):
+    """A cold start is 45-70 s of heavy GPU load and its effect on the policy's
+    latency is unmeasured: not while a session is running, homing or waiting
+    for the reset. It happens at standby, after the end, or with no session."""
     ctl.rollouts.write(0)
     ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
     t = time.time()
     ctl.rollouts.session("running")
     assert step(ctl, t) == "gate_closed" and not ctl.vllm.mine()
-    ctl.rollouts.session("waiting_reset")
-    up(ctl, t + 1)
+    for n, state in enumerate(("homing", "waiting_reset"), 1):
+        ctl.rollouts.session(state)
+        assert step(ctl, t + n) == "evaluation_active", state
+        assert not ctl.vllm.mine()
+    assert "evaluation" in ctl.decision.reason
+    ctl.rollouts.session("standby")
+    up(ctl, t + 5)
     assert ctl.vllm.mine()
+
+
+@pytest.mark.parametrize("state", ["finished", "stopped", "crashed", "fault"])
+def test_a_cold_start_is_allowed_once_the_evaluation_is_over_or_faulted(ctl, state):
+    ctl.rollouts.write(0)
+    ctl.machine.ports = {8000}
+    ctl.machine.policy_mib = 7685
+    ctl.rollouts.session(state)
+    t = time.time()
+    # A fault keeps the client alive (it witnesses); an ended session is
+    # compared with the policy server's age, so make that older.
+    ctl.tick(t - 100)
+    ctl.policy_changed_at = t - 200
+    up(ctl, t)
+    assert ctl.vllm.mine()
+
+
+def test_a_wake_needs_an_open_gate_and_no_imminent_episode(ctl):
+    ctl.rollouts.write(0)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    t = time.time()
+    ctl.rollouts.session("standby")
+    up(ctl, t)
+    ctl.sleep_vllm("test", "for the test")
+    assert ctl.vllm.state == "asleep"
+    # Work arrives while the policy infers: stay asleep.
+    ctl.rollouts.write(1)
+    ctl.rollouts.session("running")
+    assert step(ctl, t + 2) == "gate_closed" and ctl.vllm.state == "asleep"
+    # The reset is nearly over (episode_imminent): still asleep.
+    ctl.rollouts.session("waiting_reset")
+    paths = [x.path for x in ctl.sessions.values()]
+    ctl.sessions = {}  # (the next scan finds it again)
+    ctl._waiting_since = {path: t + 3 - 7.5 for path in paths}  # of 10 s
+    ctl.tick(t + 4)
+    assert ctl.gate.code == "episode_imminent"
+    assert ctl.decision.code == "gate_closed" and ctl.vllm.state == "asleep"
+    # Early in the reset the gate is open: it wakes.
+    ctl._waiting_since = {k: t + 4 for k in ctl._waiting_since}
+    ctl.tick(t + 4.5)
+    assert ctl.gate.open and ctl.vllm.state == "ready"
+
+
+def test_prewarm_brings_vllm_up_with_no_work_and_keeps_it(ctl):
+    ctl.config.vllm.prewarm = True
+    ctl.config.vllm.idle_timeout_s = 5
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    ctl.rollouts.session("standby")
+    t = time.time()
+    assert step(ctl, t) == "ok"  # no demo at all: started anyway
+    assert wait_for(lambda: ctl.vllm.poll() == "ready")
+    ctl.tick(t + 1)
+    # Idle past the timeout: asleep, never stopped.
+    for n in range(2, 40):
+        ctl.tick(t + n)
+    assert ctl.vllm.mine() and ctl.vllm.state == "asleep"
+    # An evaluation running does not stop or restart it.
+    ctl.rollouts.session("running")
+    ctl.tick(t + 41)
+    assert ctl.vllm.mine()
+
+
+def test_prewarm_waits_for_the_evaluation_to_be_between_runs(ctl):
+    ctl.config.vllm.prewarm = True
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    t = time.time()
+    ctl.rollouts.session("waiting_reset")
+    assert step(ctl, t) == "evaluation_active" and not ctl.vllm.mine()
+    ctl.rollouts.session("standby")
+    up(ctl, t + 1)
+
+
+def test_the_prewarm_flag_and_key_reach_the_config():
+    assert live_config.Config().vllm.prewarm is False
+    assert live_config.from_dict({"vllm": {"prewarm": True}}).vllm.prewarm is True
+    assert "prewarm = true" in live_config.render(
+        live_config.from_dict({"vllm": {"prewarm": True}})
+    )
+    args = cli.build_parser().parse_args(["start", "--prewarm", "--no-core"])
+    assert cli.resolve_config(args).vllm.prewarm is True
+    assert "--prewarm" in cli._forward(args)
 
 
 def test_the_budget_follows_the_memory_free_at_start_in_both_orders():
@@ -851,8 +940,10 @@ def test_the_controller_learns_when_a_session_began_waiting_and_closes_ahead(ctl
     ctl.rollouts.write(0)
     ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
     t = time.time()
-    ctl.rollouts.session("waiting_reset")  # reset_wait_s is 10
+    ctl.rollouts.session("standby")
     up(ctl, t)
+    ctl.rollouts.session("waiting_reset")  # reset_wait_s is 10
+    ctl.tick(t + 0.1)
     ctl.spawned.clear()
     assert ctl.gate.open
     ctl.tick(t + 6.0)
