@@ -9,7 +9,7 @@ export function friendlyError(
 ): string {
   if (GATE_REFUSAL.test(message))
     return t(
-      "Paused for the robot: the evaluation is running its policy on the GPU, so this action is refused for a moment. Nothing is lost; try again in a few seconds (between episodes).",
+      "Paused for the robot: the evaluation is running its policy on the GPU, so this action is refused for a moment. Nothing is lost; try again in a few seconds (between episodes). If the run stopped as blocked, press Resume once the gate is open.",
     );
   return message;
 }

@@ -303,6 +303,18 @@ const DECISION_NOTES: Record<string, [string, string]> = {
     "The model server could not be woken",
     "The service could not read the GPU state or wake the model server; see the last error.",
   ],
+  prewarm_waiting_for_policy: [
+    "Pre-warm is waiting: the policy server was started first",
+    "A policy server is already running and no evaluation session has appeared, so the gate is shut and the model cannot start. Order matters: live service with --prewarm first, then the policy server, then the evaluation. Restart in that order, or the model will cold-start when the client reaches standby.",
+  ],
+  standby_settling: [
+    "The evaluation client just reached standby: waiting a moment before starting the model",
+    "Its first episode may follow within seconds and a cold start is a heavy GPU load, so the service waits about 20 s. Starting the service with --prewarm before the evaluation avoids this wait.",
+  ],
+  gpu_not_free: [
+    "Waiting for the GPU memory to be released",
+    "The model server was stopped but its memory is not free yet. The service keeps the GPU lock and checks again until it is sure the card is free.",
+  ],
   evaluation_active: [
     "The model is not started while an evaluation is under way",
     "Starting the model is a heavy GPU load whose effect on the policy has not been measured, so it starts only before a session (standby) or after it ends. Start the service with --prewarm while the robot is idle to have it ready beforehand.",
@@ -324,8 +336,8 @@ const DECISION_NOTES: Record<string, [string, string]> = {
     "Its GPU memory is given back; it wakes in under a second when work arrives.",
   ],
   policy_large: [
-    "The model server sleeps: the policy server holds a lot of GPU memory",
-    "The policy server was started with a larger memory share than the model can share the card with. The model labels only after that server exits, or restart it with the smaller share from the guide.",
+    "The model server sleeps: the policy server holds too much GPU memory",
+    "The policy server was started with a larger memory share than the model can share the card with. Restart it with XLA_PYTHON_CLIENT_MEM_FRACTION=.22 (the model is labelling again once it fits); until then the model labels only after that server exits.",
   ],
 };
 
@@ -436,6 +448,30 @@ export const PAUSE_NOTES: Record<
     detail:
       "Even the shortest context the model can serve does not fit beside the other GPU users.",
     todo: "Free GPU memory (stop other GPU jobs), or restart the policy server with the smaller memory share from the guide (XLA_PYTHON_CLIENT_MEM_FRACTION=.22). Labelling resumes by itself.",
+  },
+  policy_large: {
+    title: "The policy server holds too much GPU memory",
+    detail:
+      "The model cannot share the card with a policy server started with a large memory share, so it sleeps and nothing is labelled.",
+    todo: "Restart the policy server with XLA_PYTHON_CLIENT_MEM_FRACTION=.22 (about 7.6 GB). Labelling resumes by itself.",
+  },
+  vram: {
+    title: "The model server has no room on the GPU",
+    detail:
+      "A sleeping model server cannot wake, or a start has no room, and this has lasted several minutes.",
+    todo: "Free GPU memory (stop other GPU jobs, check nvidia-smi). Labelling resumes by itself.",
+  },
+  lock: {
+    title: "Another job holds the GPU lock",
+    detail:
+      "Another agent has held the workspace GPU lock for several minutes, so the model cannot start.",
+    todo: "Wait for that job to finish, or ask whoever runs it. Labelling resumes by itself once the lock is free.",
+  },
+  external_busy: {
+    title: "Someone else's model server is on the port",
+    detail:
+      "A vLLM this service did not start is answering on its port, so the service leaves it alone and labels nothing.",
+    todo: "Stop that server, or set vllm.adopt_external = true in live.toml if you want the service to use it. Labelling resumes by itself once the port is free.",
   },
   unknown_client: {
     title: "A policy server runs that no evaluation session vouches for",

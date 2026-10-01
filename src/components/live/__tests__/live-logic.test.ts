@@ -327,6 +327,10 @@ describe("labelling paused and a stuck loop", () => {
       "vllm_error",
       "insufficient_vram",
       "unknown_client",
+      "policy_large",
+      "vram",
+      "lock",
+      "external_busy",
     ]) {
       expect(PAUSE_NOTES[code].title.length).toBeGreaterThan(10);
       expect(PAUSE_NOTES[code].todo.length).toBeGreaterThan(10);
@@ -365,6 +369,9 @@ describe("the new gate and decision codes", () => {
     "backoff",
     "needs_attention",
     "policy_large",
+    "prewarm_waiting_for_policy",
+    "standby_settling",
+    "gpu_not_free",
   ])("%s is explained", (code) => {
     const e = explainGate(
       svc({ gate: { open: true }, decision: { allowed: false, code } }),
