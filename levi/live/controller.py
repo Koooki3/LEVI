@@ -378,8 +378,22 @@ class Controller:
             free = self.free_mib(now)
             total = (self._vram[1] or {}).get("total_mib") or 32607
             if free is not None:
+                # Count the policy only when its memory is really held, read
+                # now (not the 30 s cache): a listening port may still be loading.
+                held = gpumgr.policy_loaded(c, self.policy_up, self.policy_mib(now, 0))
+                if held == "loading":
+                    waited = now - (self.policy_changed_at or self.started_at)
+                    if waited < c.gpu.policy_load_wait_s:
+                        self.decision = gpumgr.Decision(
+                            False,
+                            "the policy server is listening but holds only "
+                            f"{self._policy_mib[1]} MiB: still loading, waiting for "
+                            "its memory before planning vLLM's budget",
+                            "settling",
+                        )
+                        return False
                 plan = gpumgr.plan_budget(
-                    c, free_mib=free, total_mib=total, policy_up=self.policy_up
+                    c, free_mib=free, total_mib=total, policy_up=held == "loaded"
                 )
                 if not plan.ok:
                     self.decision = gpumgr.Decision(

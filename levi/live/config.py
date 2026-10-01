@@ -102,6 +102,14 @@ class Gpu:
     # A policy server that holds more than this (MiB) cannot share the card
     # with an awake vLLM: vLLM sleeps while it runs. 0 checks only free VRAM.
     policy_budget_mib: int = 8500
+    # A listening port is not a loaded policy server: only one that holds at
+    # least this much VRAM (the measured server holds 7.7 GB) counts as already
+    # on the card when vLLM's budget is planned. One that listens but holds
+    # less is still loading: vLLM waits (up to ``policy_load_wait_s`` after the
+    # port appeared, then plans as if alone). Memory that cannot be read is
+    # planned as alone too: the conservative budget leaves room to grow.
+    policy_loaded_min_mib: int = 6000
+    policy_load_wait_s: float = 120.0
 
 
 @dataclass

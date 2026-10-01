@@ -146,6 +146,17 @@ class Budget:
     reason: str = ""
 
 
+def policy_loaded(config, policy_up: bool, policy_mib) -> str:
+    """How the policy server counts for the budget: ``absent`` (not listening),
+    ``loaded`` (holds at least ``gpu.policy_loaded_min_mib``), ``loading``
+    (listens but holds less) or ``unknown`` (its memory cannot be read)."""
+    if not policy_up:
+        return "absent"
+    if policy_mib is None:
+        return "unknown"
+    return "loaded" if policy_mib >= config.gpu.policy_loaded_min_mib else "loading"
+
+
 def plan_budget(config, *, free_mib, total_mib, policy_up: bool) -> Budget:
     """The memory budget and context length to start vLLM with *now*.
 

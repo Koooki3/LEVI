@@ -776,6 +776,69 @@ def test_the_controller_starts_vllm_with_the_planned_budget_and_context(ctl, ser
     ctl.vllm.stop()
 
 
+def launched_util(serve):
+    return (serve[1] / "launch.txt").read_text().split("util=")[1].split()[0]
+
+
+def test_the_budget_counts_the_policy_only_once_its_memory_is_really_held(ctl, serve):
+    """A listening port is not a loaded policy server: only what it holds
+    (``policy_mib``) says whether the card is already shared."""
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    ctl.machine.ports, ctl.machine.free = {8000}, 26000
+    t = time.time()
+    # Held: 7685 MiB. vLLM takes what is free (up to the cap).
+    ctl.machine.policy_mib = 7685
+    assert step(ctl, t) == "ok"
+    assert launched_util(serve) == "0.7465"
+    ctl.vllm.stop()
+
+
+def test_a_policy_server_whose_memory_is_unknown_gets_the_conservative_budget(
+    ctl, serve
+):
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    ctl.machine.ports, ctl.machine.free = {8000}, 26000
+    ctl.machine.policy_mib = None  # nvidia-smi could not say
+    assert step(ctl, time.time()) == "ok"
+    assert launched_util(serve) == "0.7195"  # as if alone: room for it to grow
+    ctl.vllm.stop()
+
+
+def test_a_listening_policy_server_that_holds_almost_nothing_is_still_loading(
+    ctl, serve
+):
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    ctl.machine.ports, ctl.machine.free = {8000}, 26000
+    ctl.machine.policy_mib = 1500  # listening, weights not on the card yet
+    t = time.time()
+    assert step(ctl, t) == "settling" and not ctl.vllm.mine()
+    assert "still loading" in ctl.decision.reason
+    assert step(ctl, t + 60) == "settling"
+    # It loads: counted as held from then on.
+    ctl.machine.policy_mib, ctl.machine.free = 7685, 24200
+    fresh(ctl)
+    assert step(ctl, t + 70) == "ok"
+    assert launched_util(serve) == "0.719"
+    ctl.vllm.stop()
+
+
+def test_one_that_stays_small_is_given_up_waiting_for(ctl, serve):
+    """Something else listens on the port (or a policy that never loads):
+    after ``gpu.policy_load_wait_s`` the budget is the conservative one."""
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    ctl.machine.ports, ctl.machine.free = {8000}, 26000
+    ctl.machine.policy_mib = 1500
+    t = time.time()
+    assert step(ctl, t) == "settling"
+    assert step(ctl, t + ctl.config.gpu.policy_load_wait_s + 1) == "ok"
+    assert launched_util(serve) == "0.7195"
+    ctl.vllm.stop()
+
+
 def test_yesterday_s_finished_session_does_not_vouch_for_a_policy_server():
     """Session files are never deleted. One that ended before the policy server
     appeared says nothing about the server now listening (another client, a
