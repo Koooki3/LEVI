@@ -48,7 +48,10 @@ class Env:
         vram = probe.get("vram", lambda: None)
         return controller.Controller(
             self.config,
-            probes=controller.Probes(vram=vram, ports=ports),
+            # Every probe pinned: no test depends on this machine's GPU.
+            probes=controller.Probes(
+                vram=vram, ports=ports, holders=list, policy_vram=lambda p: None
+            ),
             log=lambda *a: self.messages.append(" ".join(map(str, a))),
         )
 
@@ -159,8 +162,9 @@ def test_a_batch_is_labelled_without_a_person_and_without_an_outcome_label(env):
         json.loads(x) for x in (e.ws / "live/audit.jsonl").read_text().splitlines()
     ]
     tools = [x["tool"] for x in lines]
-    assert tools.count("plans.approve") == 2 and tools.count("changes.commit") == 1
-    assert {x["decision"] for x in lines} == {"allowed"} and {
+    assert tools.count("plans.approve") == 4 and tools.count("changes.commit") == 2
+    # Each state-changing call is logged when allowed and again with its outcome.
+    assert {x["decision"] for x in lines} == {"allowed", "completed"} and {
         x["principal"] for x in lines
     } == {"live-auto"}
     # What the page shows.
@@ -330,14 +334,17 @@ def test_without_the_approver_the_plan_waits_for_a_person(env):
 
 
 def test_a_model_server_that_fails_is_retried_not_trusted(env):
+    """The first two requests fail with a server error: the batch still ends
+    with the episode annotated once, by the answers that did come, and the
+    failures cost requests, not a label."""
     e = env(fail=lambda n, payload: n <= 2)
     e.rollouts.write(0)
     e.run()
-    state = e.state()
-    # The failed requests cost an attempt or a resume, never a wrong label.
-    assert state["demos"]["demo_0000"]["state"] in ("done", "mirrored", "failed")
-    if state["demos"]["demo_0000"]["state"] == "done":
-        assert len(e.atoms(0)) == 5
+    row = e.state()["demos"]["demo_0000"]
+    assert row["state"] == "done" and row["attempts"] == 0
+    assert len(e.atoms(0)) == 5
+    assert len(e.fake.calls) >= 3  # the two that failed were asked again
+    assert len([c for c in e.records("changes") if c["status"] == "committed"]) == 1
 
 
 def test_a_second_pass_over_a_quiet_dataset_does_no_work(env):
@@ -378,7 +385,6 @@ def test_a_new_episode_cancels_the_request_in_flight_and_the_batch_resumes_after
     e = env(delay=3.0)
     e.config.gpu.mode = "timeshare"
     e.config.vllm.adopt_external = True  # the fake server stands in for vLLM
-    e.config.service.gate_poll_s = 0.3
     for n in range(2):
         e.rollouts.write(n)
     e.rollouts.session("homing")
@@ -393,6 +399,7 @@ def test_a_new_episode_cancels_the_request_in_flight_and_the_batch_resumes_after
         ):
             time.sleep(0.1)
         assert e.fake.started, "the model never got a request while the policy was idle"
+        flipped = time.time()
         e.rollouts.session("running")  # a new episode begins: the policy infers
         deadline = time.time() + 30
         while time.time() < deadline and progress().get("phase") != "gated":
@@ -407,11 +414,16 @@ def test_a_new_episode_cancels_the_request_in_flight_and_the_batch_resumes_after
             if r["context"]["workflow"]["kind"] == "temporal"
         ]
         assert run["status"] == "paused"
-        kinds = [
-            json.loads(b)["type"]
+        events = [
+            json.loads(b)
             for (b,) in e.sql("SELECT body FROM events WHERE run_id=?", run["id"])
         ]
-        assert "model_request_stopped" in kinds  # the in-flight request was cut
+        assert "model_request_stopped" in [x["type"] for x in events]
+        # The in-flight request was cut within a second of `running` appearing.
+        cut = next(x["time"] for x in events if x["type"] == "model_request_stopped")
+        assert 0 <= cut - flipped <= 1.0, (
+            f"cancelled {cut - flipped:.2f} s after running"
+        )
         sent = e.fake.started
         time.sleep(3)
         assert e.fake.started == sent  # nothing goes out while the policy infers
@@ -436,3 +448,146 @@ def test_a_new_episode_cancels_the_request_in_flight_and_the_batch_resumes_after
         ctl.wake.set()
         thread.join(60)
         ctl.shutdown()
+
+
+HUMAN = """
+import sys
+from levi import paths
+paths.configure()
+from levi.agent.capabilities import invoke
+from levi.agent.runtime import Workbench
+from levi.agent.security import Principal
+
+wb = Workbench(paths.STATE)
+human = Principal("a-person", human=True)
+mode, run_id = sys.argv[1], sys.argv[2]
+run = wb.store.get("runs", run_id)
+if mode == "plan":
+    invoke(wb, human, "plans.approve", {"run_id": run_id, "revision": run["plan"]["revision"]})
+else:
+    change = wb.store.get("changes", run["changes"])
+    invoke(wb, human, "changes.approve", {"changeset_id": change["id"], "revision": change["revision"]})
+    change = wb.store.get("changes", change["id"])
+    invoke(wb, human, "changes.commit", {"changeset_id": change["id"], "revision": change["revision"]}, key="person:" + change["id"])
+"""
+
+
+def as_a_person(e, mode, run_id):
+    import subprocess
+    import sys
+
+    from levi.live import resources
+
+    done = subprocess.run(
+        [sys.executable, "-c", HUMAN, mode, run_id],
+        env=resources.service_env(e.config),
+        cwd=Path(controller.__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr[-800:]
+
+
+def test_waiting_for_a_person_does_not_loop_and_a_person_s_commit_is_not_a_failure(env):
+    """Without the approver: the plan waits for a person; after the plan is
+    approved the draft waits for a person; the supervisor starts no worker for
+    either wait, and what the person commits is recorded as done (review
+    human), not as a failed attempt."""
+    e = env()
+    e.config.pipeline.auto_approve = False
+    e.rollouts.write(0)
+    started = lambda ctl: sum(m.startswith("batch started") for m in e.messages)
+    ctl = e.controller()
+    ctl.run(once=True, max_seconds=120)
+    assert ctl.awaiting[NAME]["kind"] == "plan"
+    assert started(ctl) == 1
+    (run,) = e.records("runs")
+    as_a_person(e, "plan", run["id"])
+    # Time passes: the plan is approved, so exactly one more worker runs it ...
+    ctl.awaiting[NAME]["at"] -= 1000
+    deadline = time.time() + 120
+    while time.time() < deadline and started(ctl) < 2:
+        ctl.tick()
+        time.sleep(0.3)
+    while time.time() < deadline and ctl.worker is not None:
+        ctl.tick()
+        time.sleep(0.3)
+    ctl.tick()
+    assert ctl.awaiting[NAME]["kind"] == "changes", ctl.awaiting
+    # ... and then nothing starts while the draft waits, however long it is.
+    for _ in range(6):
+        ctl.awaiting[NAME]["at"] -= 1000
+        ctl.tick()
+        time.sleep(0.2)
+    assert started(ctl) == 2 and ctl.worker is None
+    assert ctl.status()["datasets"][NAME]["state"] == "awaiting_approval"
+    assert ctl.vllm.state == "stopped" or not ctl.vllm.mine()
+    (run,) = [
+        r for r in e.records("runs") if r["context"]["workflow"]["kind"] == "temporal"
+    ]
+    as_a_person(e, "changes", run["id"])
+
+    # What the person committed is this batch's work, recorded as done by a
+    # person -- not a failed attempt. The release review (a second run) then
+    # waits for its own plan to be approved.
+    def settle(kind):
+        ctl.awaiting.get(NAME, {}).update(at=0.0)
+        deadline = time.time() + 150
+        while time.time() < deadline:
+            ctl.tick()
+            if ctl.worker is None and ctl.awaiting.get(NAME, {}).get("kind") == kind:
+                return
+            time.sleep(0.4)
+        raise AssertionError(("no wait for", kind, ctl.awaiting, e.messages[-5:]))
+
+    settle("plan")
+    row = e.state()["demos"]["demo_0000"]
+    assert row["state"] == "annotating" and row["attempts"] == 0 and "reason" not in row
+    assert row["temporal"]["review"] == "human" and row["temporal"]["segments"] == 5
+    anchored = [
+        r for r in e.records("runs") if r["context"]["workflow"].get("anchored")
+    ]
+    as_a_person(e, "plan", anchored[0]["id"])
+    ctl.awaiting[NAME]["at"] = 0.0
+    deadline = time.time() + 150
+    while time.time() < deadline:
+        ctl.tick()
+        if ctl.worker is None and e.state()["demos"]["demo_0000"]["state"] == "done":
+            break
+        time.sleep(0.4)
+    row = e.state()["demos"]["demo_0000"]
+    assert row["state"] == "done" and row["verdict"]["review"] == "auto"
+    ctl.shutdown()
+
+
+def test_open_review_runs_are_kept_up_to_a_limit_and_older_ones_archived(env):
+    """Every batch leaves its release review open (waiting_for_review) for a
+    person to accept; they must not pile up for ever. The newest keep_review_runs
+    keep their frozen input (committing one needs it); older ones are cancelled
+    and cleaned, their verdicts staying in the dataset state."""
+    e = env()
+    e.config.pipeline.keep_review_runs = 1
+    for n in range(3):
+        e.rollouts.write(n)
+        e.run()
+    reviews = [r for r in e.records("runs") if r["context"]["workflow"].get("anchored")]
+    assert len(reviews) == 3
+    open_runs = [r for r in reviews if r["status"] == "waiting_for_review"]
+    assert len(open_runs) == 1 and sum(r["status"] == "cancelled" for r in reviews) == 2
+    state = e.state()
+    assert state["review_runs_open"] == 1 and state["review_runs"] == [
+        open_runs[0]["id"]
+    ]
+    base = e.ws / f"outputs/LEVI/workbench/agent/datasets/{NAME}/runs"
+    assert (base / open_runs[0]["id"] / "input").is_dir()  # still committable
+    for r in reviews:
+        if r["status"] == "cancelled":
+            assert not (base / r["id"] / "input").exists()
+    # The verdicts of all three episodes are still there.
+    assert {d["verdict"]["outcome"] for d in state["demos"].values()} == {"success"}
+    assert len(state["demos"]) == 3
+    ctl = e.controller()
+    ctl._refresh(time.time(), True)
+    assert ctl.status()["datasets"][NAME]["review_runs_open"] == 1

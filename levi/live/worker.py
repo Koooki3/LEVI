@@ -57,7 +57,14 @@ class NeedModel(Exception):
 
 
 class AwaitHuman(Exception):
-    pass
+    """A person has to act: ``kind`` is ``plan`` (approve the plan) or
+    ``changes`` (approve and commit the draft). The supervisor learns which
+    gate through ``worker.json`` and does not start another worker until it
+    has been passed."""
+
+    def __init__(self, kind, run_id, changeset=None):
+        super().__init__(f"{kind} of {run_id}")
+        self.kind, self.run_id, self.changeset = kind, run_id, changeset
 
 
 class Worker:
@@ -283,6 +290,8 @@ class Worker:
     def start_batch(self):
         """Mirror what is finished and choose this batch's demos."""
         w, p = self.config.watch, self.config.pipeline
+        mirror.verify_sources(self.config, self.name)
+        mirror.refresh_changed(self.config, self.name)
         scanner = mirror.Scanner(self.config)
         scan = next((t for t in scanner.scan() if t.name == self.name), None)
         state = self.state()
@@ -366,7 +375,7 @@ class Worker:
         while not self.gate_open():
             self.check_stop()
             self.heartbeat("gated")
-            time.sleep(0.5)
+            time.sleep(0.2)
         self.progress(what, note="the gate opened: resuming")
 
     def drive(self, run_id, *, what):
@@ -374,6 +383,7 @@ class Worker:
         for review (or ends). Returns the run."""
         waits = 0
         resumes = 0
+        recovered = 0.0
         while True:
             self.check_stop()
             run = self.run_state(run_id)
@@ -388,7 +398,7 @@ class Worker:
                 continue
             if status == "planned" and not (run["plan"].get("approval")):
                 if self.auto is None:
-                    raise AwaitHuman(run_id)
+                    raise AwaitHuman("plan", run_id)
                 self.call(
                     "plans.approve",
                     {"run_id": run_id, "revision": run["plan"]["revision"]},
@@ -404,7 +414,11 @@ class Worker:
                         return self.run_state(run_id)
                     resumes += 1
                     if resumes > 3:
-                        return run
+                        # Give up on this run for good rather than leave a
+                        # blocked/interrupted one behind for every batch.
+                        with contextlib.suppress(Exception):
+                            self.call("runs.cancel", {"run_id": run_id})
+                        return self.run_state(run_id)
                     self.progress(what, note=f"resuming ({reason[:120]})")
                 try:
                     self.call("runs.execute", {"run_id": run_id, "pilot": False})
@@ -418,8 +432,13 @@ class Worker:
                     raise
                 continue
             if status in ("queued", "running"):
-                self.store.recover()
-                time.sleep(1.0)
+                # Short sleeps: a closed gate must be seen within a fraction
+                # of a second (the file read is tiny); the store's lease
+                # recovery is slower and runs every five seconds.
+                if time.monotonic() - recovered >= 5.0:
+                    self.store.recover()
+                    recovered = time.monotonic()
+                time.sleep(0.2)
                 continue
             return run
 
@@ -433,7 +452,7 @@ class Worker:
         revision = change["revision"]
         self.call("changes.validate", {"changeset_id": change["id"]})
         if self.auto is None:
-            raise AwaitHuman(run_id)
+            raise AwaitHuman("changes", run_id, change["id"])
         self.call(
             "changes.approve", {"changeset_id": change["id"], "revision": revision}
         )
@@ -476,8 +495,15 @@ class Worker:
                 attempt += 1
                 known = batch.setdefault("temporal", {}).get(str(step))
                 run_id = known["run_id"] if known else None
-                if run_id and self.run_state(run_id)["status"] in RUN_DONE:
-                    run_id = None
+                if run_id:
+                    seen = self.run_state(run_id)
+                    if self.committed(seen):
+                        # Approved and committed meanwhile (by a person when
+                        # the approver is off): the work is done, whoever did it.
+                        self.record_temporal(demos, index, seen, seen["changes"], batch)
+                        break
+                    if seen["status"] in RUN_DONE:
+                        run_id = None
                 if run_id is None:
                     context = self.context(
                         [index[d] for d in demos],
@@ -497,6 +523,9 @@ class Worker:
                     self.save_current(batch)
                 self.progress("temporal", run=run_id, step=step, episodes=len(demos))
                 run = self.drive(run_id, what="temporal")
+                if self.committed(run):
+                    self.record_temporal(demos, index, run, run["changes"], batch)
+                    break
                 if run["status"] == "cancelled":
                     batch["temporal"].pop(str(step), None)
                     self.save_current(batch)
@@ -518,13 +547,28 @@ class Worker:
                 self.record_temporal(demos, index, run, None, batch)
                 break
 
+    def committed(self, run) -> bool:
+        """Did this run's draft get committed (by anyone)?"""
+        if run["status"] not in ("succeeded", "partially_succeeded"):
+            return False
+        try:
+            return self.store.get("changes", run["changes"])["status"] == "committed"
+        except KeyError:
+            return False
+
     def record_temporal(self, demos, index, run, changeset, batch):
         completed = set(run.get("completed", []))
         failed = {f["episode"]: f for f in run.get("failed", [])}
         now = time.time()
         segments = {}
+        reviewer = "auto"
         if changeset:
             change = self.store.get("changes", changeset)
+            reviewer = (
+                "auto"
+                if change["provenance"].get("reviewer_type") == "auto"
+                else "human"
+            )
             for proposal in change["proposals"]:
                 segments[proposal["episode_index"]] = (
                     segments.get(proposal["episode_index"], 0) + 1
@@ -541,6 +585,7 @@ class Worker:
                             "run_id": run["id"],
                             "changeset": changeset,
                             "committed_at": now,
+                            "review": reviewer,
                             "segments": segments.get(ep, 0),
                         },
                         episode_index=ep,
@@ -676,25 +721,40 @@ class Worker:
             self.cleanup()
 
     def cleanup(self):
-        """Delete the frozen inputs and evidence of finished runs; keep the
-        evidence of the open anchored run (a person may review it)."""
-        import shutil
+        """Archive old open release-review runs, then delete the frozen inputs
+        and evidence of every finished run.
 
+        A release-review run is left open (``waiting_for_review``) so a person
+        can still accept its outcome proposals; committing one needs its frozen
+        input, so the newest ``pipeline.keep_review_runs`` of a dataset keep
+        theirs. Older ones are cancelled -- their verdicts live on in the
+        anchored records and the dataset state -- and cleaned like any
+        finished run."""
         from levi.agent import housekeeping
 
         def run_dir(run_id):
             return self.store.run_dir(run_id)
 
+        open_runs = sorted(
+            (
+                r
+                for r in self.store.list("runs")
+                if r["context"]["repo_id"] == self.repo_id
+                and r.get("principal") == "live-auto"
+                and r["status"] == "waiting_for_review"
+                and (r["context"].get("workflow") or {}).get("anchored")
+            ),
+            key=lambda r: r.get("created_at", 0),
+            reverse=True,
+        )
+        keep = self.config.pipeline.keep_review_runs
+        for run in open_runs[keep:]:
+            with contextlib.suppress(Exception):
+                self.call("runs.cancel", {"run_id": run["id"]})
+        kept = [r["id"] for r in open_runs[:keep]]
+        self.update(lambda v: v.update(review_runs_open=len(kept), review_runs=kept))
         with contextlib.suppress(Exception):
             housekeeping.apply(self.store, run_dir, dataset=self.repo_id)
-        for run in self.store.list("runs"):
-            if run["context"]["repo_id"] != self.repo_id:
-                continue
-            if (
-                run.get("principal") == "live-auto"
-                and run["status"] == "waiting_for_review"
-            ):
-                shutil.rmtree(run_dir(run["id"]) / "input", ignore_errors=True)
 
     # --- the whole batch ------------------------------------------------------------------------
 
@@ -721,7 +781,7 @@ class Worker:
         self.ensure_provider()
         entry = self.register_and_build()
         index, lengths, excluded = self.episode_map(entry)
-        batch["demos"] = self.filter_demos(batch["demos"], index, excluded)
+        batch["demos"] = self.filter_demos(batch["demos"], index, excluded, batch)
         self.save_current(batch)
         if batch["demos"]:
             self.temporal(batch, index, lengths)
@@ -730,8 +790,23 @@ class Worker:
         self.finish(batch)
         return OK
 
-    def filter_demos(self, demos, index, excluded):
+    def committed_here(self, batch) -> set:
+        """Episodes of this batch whose draft was committed (by the approver
+        or, with it off, by a person): their annotations are this batch's,
+        not "somebody else's"."""
+        episodes = set()
+        for known in ((batch or {}).get("temporal") or {}).values():
+            try:
+                run = self.run_state(known["run_id"])
+            except KeyError:
+                continue
+            if self.committed(run):
+                episodes |= set(run.get("completed", []))
+        return episodes
+
+    def filter_demos(self, demos, index, excluded, batch=None):
         keep = []
+        ours = self.committed_here(batch)
 
         def change_state(value):
             for demo in demos:
@@ -742,7 +817,11 @@ class Worker:
                         reason="left out of the view: "
                         + json.dumps(excluded.get(demo))[:200],
                     )
-                elif self.human_annotated(index[demo]) and not row.get("temporal"):
+                elif (
+                    index[demo] not in ours
+                    and self.human_annotated(index[demo])
+                    and not row.get("temporal")
+                ):
                     row.update(
                         state="skipped_human",
                         reason="a person already annotated this episode",
@@ -794,6 +873,7 @@ def main(argv=None) -> int:
     signal.signal(signal.SIGTERM, term)
     signal.signal(signal.SIGINT, term)
     code = ERROR
+    awaiting = None
     try:
         code = worker.run()
         worker.log("batch finished" if code == OK else "nothing to do")
@@ -820,7 +900,8 @@ def main(argv=None) -> int:
         worker.log("waiting for the model:", exc)
         code = NEED_MODEL
     except AwaitHuman as exc:
-        worker.log("waiting for a person to approve", exc)
+        worker.log("waiting for a person:", exc)
+        awaiting = {"kind": exc.kind, "run_id": exc.run_id, "changeset": exc.changeset}
         code = AWAIT_HUMAN
     except Exception as exc:  # noqa: BLE001 - the supervisor retries later
         worker.log("error:", type(exc).__name__, str(exc)[:500])
@@ -837,6 +918,7 @@ def main(argv=None) -> int:
                     "dataset": args.dataset,
                     "phase": "exited",
                     "exit": code,
+                    "awaiting": awaiting,
                     "updated_at": time.time(),
                 },
             )

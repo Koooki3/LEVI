@@ -111,7 +111,10 @@ def load_state(config, name: str):
     """A dataset's state (cached by file stamp), or None."""
     path = state_path(config, name)
     try:
-        stamp = path.stat().st_mtime_ns
+        st = path.stat()
+        # Inode and size as well as the time: two writes in one clock tick
+        # must not read as the same file.
+        stamp = (st.st_ino, st.st_size, st.st_mtime_ns)
     except OSError:
         _STATE_CACHE.pop(str(path), None)
         return None
@@ -142,6 +145,7 @@ def counts(state: dict) -> dict:
         "failed": 0,
         "skipped": 0,
         "rejected": 0,
+        "stuck": 0,
     }
     for row in (state.get("demos") or {}).values():
         key = row.get("state")
@@ -166,6 +170,8 @@ class TaskScan:
     abort_reasons: dict = field(default_factory=dict)
     discarded: int = 0
     rejected: int = 0
+    stuck: int = 0
+    stuck_marks: dict = field(default_factory=dict)
     last_seen: float = 0.0
     available: bool = True
 
@@ -224,7 +230,9 @@ class Scanner:
             key = (str(root), group, task)
             seen.add(key)
             try:
-                found = self._scan_task(key, path, sessions.get((group, task)), now)
+                found = self._scan_task(
+                    key, path, sessions.get((str(root), group, task)), now
+                )
             except OSError as exc:  # a folder vanishing mid-scan is not fatal
                 self.errors = [f"{path}: {exc}"][:5]
                 continue
@@ -235,6 +243,16 @@ class Scanner:
                 self._tasks[key].available = False
                 result.append(self._tasks[key])
         return result
+
+    @staticmethod
+    def _stuck_moved(scan, path) -> bool:
+        """A demo set aside as stuck changed since: look at the folder again.
+        (Files inside a demo changing does not change the task folder's own
+        time, so this is checked by the few stuck demos' own times.)"""
+        return any(
+            criteria.newest_mtime(Path(path) / name) != mark
+            for name, mark in scan.stuck_marks.items()
+        )
 
     def _cutoff(self, session):
         """Demos finished before this are backlog."""
@@ -262,6 +280,7 @@ class Scanner:
             and self._mtimes.get(key) == stamp
             and not previous.waiting
             and previous.available
+            and not self._stuck_moved(previous, path)
         ):
             previous.ready = [d for d in previous.ready if d not in known]
             return previous
@@ -278,6 +297,7 @@ class Scanner:
             scan.available = False
             return scan
         rejected = []
+        stuck = []
         for entry in sorted(entries, key=lambda e: e.name):
             kind = criteria.kind_of(entry.name)
             if kind is None or not entry.is_dir(follow_symlinks=False):
@@ -297,8 +317,15 @@ class Scanner:
                 if reason == "fr3_fault":
                     scan.fr3_fault += 1
                 continue
-            if entry.name in known:
-                continue
+            row = known.get(entry.name)
+            if row is not None:
+                if row.get("state") != "stuck":
+                    continue
+                mark = criteria.newest_mtime(entry.path)
+                if mark == row.get("mtime"):
+                    scan.stuck += 1
+                    scan.stuck_marks[entry.name] = mark
+                    continue
             try:
                 mtime = entry.stat().st_mtime
             except OSError:
@@ -317,24 +344,34 @@ class Scanner:
             elif done.state == "rejected":
                 rejected.append((entry.name, done.reason, done.completed_at))
             else:
-                scan.waiting.append(entry.name)
-                scan.waiting_reasons[entry.name] = done.reason
+                mark = criteria.newest_mtime(entry.path)
+                if now - mark > w.stuck_s:
+                    # Never going to finish (a leftover raw capture, a client
+                    # that died mid-write): not "waiting" any more, so it no
+                    # longer keeps the service active or the folder re-listed.
+                    scan.stuck += 1
+                    scan.stuck_marks[entry.name] = mark
+                    stuck.append((entry.name, done.reason, mark))
+                else:
+                    scan.waiting.append(entry.name)
+                    scan.waiting_reasons[entry.name] = done.reason
         scan.rejected = len(rejected)
         if (
             state is not None
             or scan.ready
             or scan.waiting
             or rejected
+            or stuck
             or scan.incomplete
             or scan.discarded
         ):
-            self._record(key, name, cutoff, scan, rejected, state)
+            self._record(key, name, cutoff, scan, rejected, state, stuck)
         # Remembered either way, so an unchanged folder is not listed again.
         self._tasks[key] = scan
         self._mtimes[key] = stamp
         return scan
 
-    def _record(self, key, name, cutoff, scan, rejected, state):
+    def _record(self, key, name, cutoff, scan, rejected, state, stuck=()):
         """Persist what a scan learned that nothing else will: rejected demos
         and the incomplete/discarded counts. Creates the state on first need."""
 
@@ -346,6 +383,13 @@ class Scanner:
                     demo,
                     {"state": "rejected", "reason": reason, "completed_at": at},
                 )
+            for demo, reason, mark in stuck:
+                value["demos"][demo] = {
+                    "state": "stuck",
+                    "reason": reason,
+                    "mtime": mark,
+                    "since": time.time(),
+                }
             value["incomplete"] = {
                 "count": scan.incomplete,
                 "fr3_fault": scan.fr3_fault,
@@ -421,6 +465,83 @@ def mirror_demo(src: Path, capture: Path, *, now: float, settle_s=0.0) -> dict:
     return {"status": "mirrored", "completed_at": done.completed_at, **stats}
 
 
+def source_signature(src: Path) -> dict:
+    """Inode and mtime of the two files a finished demo's identity rests on:
+    the completion marker and ``metadata.json``. A demo deleted and written
+    again under the same number, or a metadata file replaced after the marker,
+    changes it."""
+    out = {}
+    for name in (".complete", "metadata.json"):
+        try:
+            st = os.stat(Path(src) / name)
+            out[name] = [st.st_ino, st.st_mtime_ns]
+        except OSError:
+            out[name] = None
+    return out
+
+
+def verify_sources(config, name: str) -> list:
+    """Flag (``source_changed``) every mirrored demo whose source is now a
+    different file than the one linked; returns the newly flagged demos. A
+    source that is gone is not a change (the mirror keeps its own copy)."""
+    state = load_state(config, name)
+    if not state:
+        return []
+    source = Path(state["source"])
+    changed = []
+    for demo, row in (state.get("demos") or {}).items():
+        sig = row.get("sig")
+        if not sig or row.get("source_changed"):
+            continue
+        now = source_signature(source / demo)
+        if any(v is not None for v in now.values()) and now != sig:
+            changed.append(demo)
+    if changed:
+
+        def flag(value):
+            for demo in changed:
+                value["demos"][demo]["source_changed"] = time.time()
+            return value
+
+        jsonio.update(state_path(config, name), flag, default=dict)
+    return changed
+
+
+def refresh_changed(config, name: str) -> list:
+    """Mirror again the demos whose source changed and that nobody has
+    annotated yet; one that already carries annotations keeps its flag (what
+    was annotated is the old content, a person decides)."""
+    state = load_state(config, name)
+    if not state:
+        return []
+    capture, source = Path(state["capture"]), Path(state["source"])
+    again = [
+        d
+        for d, row in state["demos"].items()
+        if row.get("source_changed") and row.get("state") == "mirrored"
+    ]
+    done = []
+    for demo in again:
+        if criteria.check(source / demo, now=time.time(), legacy_quiet_s=0.0).ok:
+            shutil.rmtree(capture / demo, ignore_errors=True)
+            if (
+                mirror_demo(source / demo, capture, now=time.time())["status"]
+                == "mirrored"
+            ):
+                done.append(demo)
+
+    def clear(value):
+        for demo in done:
+            row = value["demos"][demo]
+            row.pop("source_changed", None)
+            row["sig"] = source_signature(source / demo)
+        return value
+
+    if done:
+        jsonio.update(state_path(config, name), clear, default=dict)
+    return done
+
+
 def task_text(source_task: Path, demo: Path | None = None) -> str:
     """The instruction of a task: its ``task_description.txt``, else the
     ``task_description`` of a demo's metadata, else the folder name."""
@@ -469,10 +590,11 @@ def mirror_dataset(config, state: dict, names, *, now: float | None = None) -> d
         for demo, result in results.items():
             row = value["demos"].get(demo) or {}
             if result["status"] in ("mirrored", "exists"):
-                if row.get("state") in (None, "rejected"):
+                if row.get("state") in (None, "rejected", "stuck"):
                     meta = jsonio.read(source / demo / "metadata.json") or {}
                     value["demos"][demo] = {
                         "state": "mirrored",
+                        "sig": source_signature(source / demo),
                         "run_id": (meta.get("eval") or {}).get("run_id"),
                         "outcome_recorded": (meta.get("eval") or {}).get("outcome"),
                         "mirrored_at": now,

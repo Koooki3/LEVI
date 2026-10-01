@@ -65,6 +65,10 @@ FRAMES_SCHEMA = pa.schema(
         ("subtask_id", pa.string()),
         ("subtask_outcome", pa.string()),
         ("subtask_attempt", pa.int64()),
+        # Who stands behind the subtask segment: "auto" (written by the live
+        # service, unreviewed), "edited" (an automatic one a person changed),
+        # null (a person or an agent a person reviewed).
+        ("subtask_review", pa.string()),
         ("recap_value", pa.float32()),
         ("recap_advantage", pa.float32()),
         ("recap_positive", pa.bool_()),
@@ -303,25 +307,44 @@ def _subtasks(folder: Path, episode: int) -> list[dict[str, Any]]:
                 "id": levi.get("subtask_id") or atom.get("content"),
                 "outcome": levi.get("outcome"),
                 "attempt": levi.get("attempt"),
+                "review": levi.get("review"),
             }
         )
     return out
 
 
-def _anchored(name: str, run_id: str | None) -> tuple[dict | None, dict[int, dict]]:
+def _anchored(
+    name: str, run_id: str | None, allow_candidate: bool = False
+) -> tuple[dict | None, dict[int, dict], list[str]]:
+    """(run, verdicts per episode, candidate runs passed over).
+
+    With no run named, the newest anchored review is used -- but one whose
+    spec is still a *candidate* (not validated: the live service's generic
+    release review, for one) is passed over, unless ``allow_candidate``. Naming
+    the run (``anchored_run``) is the explicit choice and is always honoured."""
     from .agent.anchored import records
     from .agent.store import Store
 
     if not (catalog.STATE / "agent/workbench.sqlite3").exists():
         if run_id:
             raise ManifestError(f"No anchored review run {run_id!r} on {name}")
-        return None, {}
+        return None, {}, []
+    passed_over = []
     for run, found in records(Store(catalog.STATE), name, run_id):
-        if found:
-            return run, found
+        if not found:
+            continue
+        spec = (run.get("context") or {}).get("workflow", {}).get("anchored") or {}
+        if (
+            not run_id
+            and not allow_candidate
+            and spec.get("status", "stable") == "candidate"
+        ):
+            passed_over.append(run["id"])
+            continue
+        return run, found, passed_over
     if run_id:
         raise ManifestError(f"Anchored review run {run_id!r} has no results on {name}")
-    return None, {}
+    return None, {}, passed_over
 
 
 def _recap(ds, revision_id: str | None):
@@ -365,6 +388,7 @@ def build(
     episodes: list[int] | None = None,
     anchored_run: str | None = None,
     anchored_tasks: list[str] | None = None,
+    allow_candidate_anchored: bool = False,
     recap_revision: str | None = None,
     allow_stale: bool = False,
     output: str | Path | None = None,
@@ -403,7 +427,7 @@ def build(
 
     from .agent.anchored import undecided as anchored_undecided
 
-    run, verdicts = _anchored(ds.name, anchored_run)
+    run, verdicts, skipped = _anchored(ds.name, anchored_run, allow_candidate_anchored)
     # Human labels alone are a verification too (a task without anchored-review
     # rules is verified by people); refuse only when nothing verifies the scope.
     if (
@@ -415,6 +439,13 @@ def build(
             f"{operation} needs an anchored review or human outcome labels on "
             f"{ds.name}; run one (levi agent, workflow.anchored), label episodes, "
             "or use robot_flag_success"
+            + (
+                f". The anchored review(s) {', '.join(skipped)} use a candidate "
+                "(not validated) spec and are not used by default: name one with "
+                "--anchored-run or pass --allow-candidate-anchored"
+                if skipped
+                else ""
+            )
         )
     applies = set(anchored_tasks) if anchored_tasks else None
     recap, stale = _recap(ds, recap_revision)
@@ -489,12 +520,14 @@ def build(
         sub_id: list[str | None] = [None] * n
         sub_out: list[str | None] = [None] * n
         sub_try: list[int | None] = [None] * n
+        sub_rev: list[str | None] = [None] * n
         for s in spans:
             hit = np.nonzero((timestamp >= s["start"] - 1e-6) & (timestamp < s["end"]))[
                 0
             ]
             for i in hit:
                 sub_id[i], sub_out[i], sub_try[i] = s["id"], s["outcome"], s["attempt"]
+                sub_rev[i] = s["review"]
 
         include = np.ones(n, dtype=bool)
         weight = np.ones(n, dtype=np.float32)
@@ -552,6 +585,7 @@ def build(
         columns["subtask_id"] += sub_id
         columns["subtask_outcome"] += sub_out
         columns["subtask_attempt"] += sub_try
+        columns["subtask_review"] += sub_rev
         columns["recap_value"] += [None if np.isnan(x) else float(x) for x in value]
         columns["recap_advantage"] += [None if np.isnan(x) else float(x) for x in adv]
         columns["recap_positive"] += positive
@@ -569,6 +603,8 @@ def build(
                 "episode_success_source": source,
                 "anchored_outcome": anchored_outcome,
                 "anchored_applied": bool(use_anchored),
+                "subtask_frames": sum(1 for x in sub_id if x is not None),
+                "subtask_frames_auto": sum(1 for x in sub_rev if x == "auto"),
             }
         )
 
@@ -604,13 +640,24 @@ def build(
             "frames": frames.num_rows,
             "fingerprint": fingerprint(ds),
         },
-        "annotation": annotation,
+        "annotation": {
+            **annotation,
+            # How much of the subtask labelling nobody has reviewed (written
+            # by the live service): frames, and the share of labelled frames.
+            "subtask_frames": sum(e["subtask_frames"] for e in per_episode),
+            "subtask_frames_auto": sum(e["subtask_frames_auto"] for e in per_episode),
+            "subtask_auto_share": round(
+                sum(e["subtask_frames_auto"] for e in per_episode)
+                / max(1, sum(e["subtask_frames"] for e in per_episode)),
+                4,
+            ),
+        },
         "outcomes": {
             "order": ["human", "anchored", "robot_flag"],
             "human_labels": len(ds.human),
             "robot_flags": sum(1 for e in per_episode if e["robot_flag"]),
         },
-        "anchored": _anchored_meta(run, verdicts, anchored_tasks),
+        "anchored": _anchored_meta(run, verdicts, anchored_tasks, skipped),
         "recap": _recap_meta(recap, stale),
         "counts": {
             "episodes_in_scope": len(scope),
@@ -639,9 +686,9 @@ def _dropper(include: np.ndarray, reason: list):
     return drop
 
 
-def _anchored_meta(run, verdicts, anchored_tasks):
+def _anchored_meta(run, verdicts, anchored_tasks, skipped=()):
     if run is None:
-        return None
+        return {"skipped_candidate_runs": list(skipped)} if skipped else None
     spec = run["context"]["workflow"]["anchored"]
     return {
         "run_id": run["id"],
@@ -659,6 +706,9 @@ def _anchored_meta(run, verdicts, anchored_tasks):
         },
         "episodes": len(verdicts),
         "applied_to_tasks": anchored_tasks,
+        # A candidate spec is not validated; using it takes an explicit choice.
+        "spec_status": spec.get("status", "stable"),
+        "skipped_candidate_runs": list(skipped),
     }
 
 
@@ -796,6 +846,12 @@ def main(argv=None) -> int:
     make.add_argument("--episodes", help="limit the scope: 0,3,5-9")
     make.add_argument("--anchored-run", help="anchored review run (default newest)")
     make.add_argument(
+        "--allow-candidate-anchored",
+        action="store_true",
+        help="also use a newest anchored review whose spec is only a candidate "
+        "(default: skipped; --anchored-run names one explicitly)",
+    )
+    make.add_argument(
         "--anchored-task",
         action="append",
         help="tasks the anchored verdict is valid for (default: every task it covers)",
@@ -828,6 +884,7 @@ def main(argv=None) -> int:
                 episodes=_episodes(args.episodes) if args.episodes else None,
                 anchored_run=args.anchored_run,
                 anchored_tasks=args.anchored_task,
+                allow_candidate_anchored=args.allow_candidate_anchored,
                 recap_revision=args.recap_revision,
                 allow_stale=args.allow_stale,
                 output=args.output,

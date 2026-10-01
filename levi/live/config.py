@@ -32,7 +32,7 @@ class Service:
     poll_active_s: float = 3.0
     # While a worker runs beside an evaluation session: how often the gate
     # (may the model work now?) is re-decided. A new episode closes it.
-    gate_poll_s: float = 1.0
+    gate_poll_s: float = 0.25
     heartbeat_s: float = 4.0
 
 
@@ -53,6 +53,10 @@ class Watch:
     require_session: bool = False
     # A completion marker must be this old (seconds) before the demo is taken.
     settle_s: float = 2.0
+    # A demo that has not finished and has not changed for this long (a
+    # leftover raw capture after a failed mux, a client that died mid-write)
+    # is "stuck": counted and listed, no longer waited for or re-read.
+    stuck_s: float = 600.0
     # Completed demos to take into one batch at most.
     batch_max_episodes: int = 40
 
@@ -83,6 +87,12 @@ class Gpu:
     # model no request then). Homing, waiting for the reset, standby, fault,
     # stopped and finished leave the GPU to the model.
     busy_states: list = field(default_factory=lambda: ["running"])
+    # The next episode follows a ``waiting_reset`` by the client's
+    # ``reset_wait_s``: the gate closes this many seconds before it (the
+    # policy's first inference must not meet a model request), and stays
+    # closed this long after the predicted start in case the client is late.
+    lead_s: float = 3.0
+    lead_grace_s: float = 5.0
     # After a policy server appears or goes, wait this long before starting
     # vLLM: a policy server that is still loading preallocates its memory.
     settle_s: float = 20.0
@@ -101,9 +111,25 @@ class Vllm:
     pid_dir: str = "/home/marvel/work/wenkai/tools/vllm/logs"
     port: int = 8100
     served_model: str = "qwen3.8-27b"
-    # The measured co-residence profile (levi-hub/reports/live-gpu.md): with
-    # the policy server at .22 both fit (peak about 31.3 GB of 32.6).
+    # The memory budget (a share of vLLM's own total) is chosen at each start
+    # from the VRAM that is free then (``gpumgr.plan_budget``). Alone on the
+    # card it asks for this much, which leaves room for a policy server that
+    # starts afterwards (measured: policy .22 beside vLLM 0.72 fits)...
     gpu_memory_utilization: float = 0.72
+    # ...beside a policy server that is already loaded it takes what is free
+    # up to this (measured: 0.74 works, 0.72 leaves a KV cache of 1.73 GiB,
+    # below the 1.82 GiB 49152 tokens need) and never below the floors.
+    gpu_memory_utilization_max: float = 0.747
+    gpu_memory_utilization_min: float = 0.70
+    # Smallest budget that serves max_model_len 49152 when another process
+    # (the policy server) is already on the card / when vLLM is alone.
+    min_utilization_with_policy: float = 0.724
+    min_utilization_alone: float = 0.70
+    # KV cache bytes per token (measured 39.8 KB): a shorter context needs
+    # less budget, so a start that does not fit at max_model_len tries
+    # shorter contexts down to min_model_len before it gives up.
+    kv_bytes_per_token: int = 39800
+    min_model_len: int = 32768
     max_model_len: int = 49152
     max_images: int = 128
     max_num_seqs: int = 2
@@ -118,9 +144,17 @@ class Vllm:
     idle_action: str = "auto"
     # --enable-sleep-mode + VLLM_SERVER_DEV_MODE=1 (dev endpoints, loopback only).
     sleep_mode: bool = True
-    # Memory vLLM takes after its first requests, beyond what it reports at
-    # start (measured: about 1.3 GB); counted when checking free VRAM.
-    margin_mib: int = 1400
+    # vLLM refuses a budget above its own free memory, which is about 930 MiB
+    # less than nvidia-smi's free (measured: 0.747 is the limit beside a policy
+    # server at .22); this much is kept free beyond the budget at start. The
+    # budget already covers the growth after the first requests (22.05 -> 23.4
+    # GB at 0.72).
+    margin_mib: int = 1100
+    # Failed starts in a row before the service stops trying and asks for a
+    # person (`levi live resume`); waits 60 s doubling to 600 s between tries.
+    max_start_failures: int = 3
+    start_backoff_s: float = 60.0
+    start_backoff_max_s: float = 600.0
     # Greedy decoding, as the evaluated configuration.
     temperature: float = 0.0
     # Use a vLLM this service did not start (another agent's) instead of
@@ -160,6 +194,11 @@ class Pipeline:
     budget_seconds: int = 86400
     # Drop a finished run's frozen input and evidence after its commit.
     cleanup: bool = True
+    # Release-review runs left open (waiting_for_review) so a person can still
+    # accept their outcome proposals per dataset: the newest this many keep
+    # their frozen input and evidence; older ones are cancelled (their
+    # verdicts stay in the dataset state and the anchored records) and cleaned.
+    keep_review_runs: int = 10
 
 
 @dataclass
@@ -263,6 +302,14 @@ class Config:
             problems.append("gpu.policy_ports must not list the robot server port 5000")
         if not 0.05 <= v.gpu_memory_utilization <= 0.98:
             problems.append("vllm.gpu_memory_utilization must be 0.05-0.98")
+        if not (
+            0.05 <= v.gpu_memory_utilization_min <= v.gpu_memory_utilization_max <= 0.98
+        ):
+            problems.append(
+                "vllm.gpu_memory_utilization_min/max must satisfy 0.05 <= min <= max <= 0.98"
+            )
+        if v.min_model_len < 4096 or v.min_model_len > v.max_model_len:
+            problems.append("vllm.min_model_len must be 4096..max_model_len")
         if v.idle_action not in ("auto", "sleep", "stop"):
             problems.append("vllm.idle_action must be auto, sleep or stop")
         if s.poll_idle_s < 1 or s.poll_active_s < 0.5:

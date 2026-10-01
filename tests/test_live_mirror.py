@@ -203,3 +203,136 @@ def test_dataset_names_are_stable_and_distinct():
     a, b = mirror.dataset_name("g", "a b"), mirror.dataset_name("g", "a/b")
     assert a != b and all(c.isalnum() or c in "._-" for c in a + b)
     assert mirror.dataset_name("g", "a b") == a
+
+
+# --- demos that never finish, source replacement, cache keys, two roots ------------------
+
+
+def age(path, seconds):
+    old = time.time() - seconds
+    for item in [path, *Path(path).rglob("*")]:
+        os.utime(item, (old, old))
+
+
+def test_a_demo_that_never_finishes_is_set_aside_not_waited_for_for_ever(
+    cfg, rollouts, monkeypatch
+):
+    cfg.watch.stuck_s = 600.0
+    demo = rollouts.write(0)
+    (demo / "side_camera_raw.avi").write_bytes(b"")  # the mux failed, the raw stayed
+    rollouts.begin(1)  # a demo still being written is not stuck
+    age(demo, 1200)
+    scanner = mirror.Scanner(cfg)
+    task = scanner.scan()[0]
+    assert task.stuck == 1 and task.waiting == ["demo_0001"] and task.ready == []
+    state = mirror.load_state(cfg, task.name)
+    assert state["demos"]["demo_0000"]["state"] == "stuck"
+    assert mirror.counts(state)["stuck"] == 1
+    # Once only the stuck demo is left nothing is waited for and the folder is
+    # not read again.
+    (rollouts.demo(1) / "side_camera_raw.avi").unlink()
+    rollouts.finish(1)
+    task = scanner.scan()[0]
+    assert task.waiting == [] and task.ready == ["demo_0001"]
+    reads = []
+    real = mirror.criteria.check
+    monkeypatch.setattr(
+        mirror.criteria, "check", lambda *a, **k: (reads.append(a), real(*a, **k))[1]
+    )
+    again = scanner.scan()[0]
+    assert again.waiting == [] and again.stuck == 1 and reads == []
+    # The client repairs it (removes the raw capture): it is looked at again.
+    (demo / "side_camera_raw.avi").unlink()
+    fixed = scanner.scan()[0]
+    assert "demo_0000" in fixed.ready and fixed.stuck == 0
+
+
+def test_the_controller_is_not_active_for_a_stuck_demo(cfg, rollouts):
+    from levi.live import controller
+
+    cfg.watch.stuck_s = 600.0
+    demo = rollouts.write(0)
+    (demo / "side_camera_raw.avi").write_bytes(b"")
+    age(demo, 1200)
+    ctl = controller.Controller(
+        cfg,
+        probes=controller.Probes(
+            vram=lambda: None, ports=set, policy_vram=lambda p: None
+        ),
+        log=lambda *a: None,
+    )
+    ctl.vllm.state = "stopped"
+    ctl._refresh(time.time(), True)
+    status = ctl.status()
+    row = status["datasets"]["pi05_fake__stack_the_plates"]
+    assert row["stuck"] == 1 and row["waiting"] == 0 and row["pending"] == 0
+    assert row["state"] == "idle"
+
+
+def test_a_source_replaced_after_mirroring_is_noticed_and_redone_if_unannotated(
+    cfg, rollouts
+):
+    rollouts.write(0)
+    rollouts.write(1)
+    scan = mirror.Scanner(cfg).scan()[0]
+    state = mirror.empty_state(cfg, scan.key, 0.0)
+    mirror.jsonio.write(mirror.state_path(cfg, scan.name), state)
+    mirror.mirror_dataset(cfg, state, scan.ready)
+    assert mirror.verify_sources(cfg, scan.name) == []
+    # The client replaced metadata.json after the marker (a new inode) on one
+    # demo; another demo was deleted and written again under the same number.
+    meta = rollouts.demo(0) / "metadata.json"
+    text = meta.read_text().replace('"unlabeled"', '"success"')
+    temp = meta.with_name("m.tmp")
+    temp.write_text(text)
+    os.replace(temp, meta)
+    import shutil
+
+    shutil.rmtree(rollouts.demo(1))
+    rollouts.write(1)
+    assert sorted(mirror.verify_sources(cfg, scan.name)) == ["demo_0000", "demo_0001"]
+
+    # One of them was already annotated: it keeps its flag and its old content.
+    def annotated(value):
+        value["demos"]["demo_0001"]["state"] = "done"
+        return value
+
+    mirror.jsonio.update(mirror.state_path(cfg, scan.name), annotated, default=dict)
+    redone = mirror.refresh_changed(cfg, scan.name)
+    assert redone == ["demo_0000"]
+    capture = Path(state["capture"])
+    assert '"success"' in (capture / "demo_0000/metadata.json").read_text()
+    after = mirror.load_state(cfg, scan.name)["demos"]
+    assert (
+        "source_changed" not in after["demo_0000"]
+        and after["demo_0001"]["source_changed"]
+    )
+    # Nothing is flagged twice.
+    assert mirror.verify_sources(cfg, scan.name) == []
+
+
+def test_two_writes_in_one_clock_tick_are_not_read_as_one(cfg):
+    path = mirror.state_path(cfg, "x")
+    mirror.jsonio.write(path, {"name": "x", "demos": {"a": 1}})
+    first = mirror.load_state(cfg, "x")
+    stamp = os.stat(path).st_mtime_ns
+    mirror.jsonio.write(path, {"name": "x", "demos": {"a": 1, "b": 2}})
+    os.utime(path, ns=(stamp, stamp))  # the same mtime_ns as before
+    second = mirror.load_state(cfg, "x")
+    assert first["demos"] == {"a": 1} and second["demos"] == {"a": 1, "b": 2}
+
+
+def test_sessions_of_one_task_under_two_roots_do_not_overwrite_each_other(
+    tmp_path, demo_template
+):
+    one = Rollouts(tmp_path / "root1", demo_template)
+    two = Rollouts(tmp_path / "root2", demo_template)
+    one.session("running")
+    two.session("finished")
+    found = sessions.read_sessions([tmp_path / "root1", tmp_path / "root2"])
+    assert len(found) == 2
+    by_root = {key[0]: s.state for key, s in found.items()}
+    assert by_root == {
+        str(tmp_path / "root1"): "running",
+        str(tmp_path / "root2"): "finished",
+    }

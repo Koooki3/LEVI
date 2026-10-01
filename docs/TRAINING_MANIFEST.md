@@ -6,7 +6,7 @@ A training manifest tells a fixed training recipe which frames of a dataset go i
 levi export operations                                    # built-in operations and their parameters
 levi export manifest local/<name> --operation verified_success [--param fallback=exclude] [--param undecided=include] \
     [--task "stack the plates of same color together"] [--episodes 0-49] \
-    [--anchored-run <run id>] [--anchored-task "<task it is valid for>"] \
+    [--anchored-run <run id>] [--allow-candidate-anchored] [--anchored-task "<task it is valid for>"] \
     [--recap-revision <id>] [--allow-stale] [--output <new dir in the workspace>] [--json]
 levi export list local/<name>                             # manifests written for a dataset
 levi export diff <manifest dir A> <manifest dir B>        # how different two training inputs are
@@ -39,6 +39,7 @@ The API is `GET /api/levi/manifest/operations`, `GET /api/levi/manifest?repo_id=
 | `episode_success`, `episode_success_source` | the verdict and where it came from: `human`, `anchored`, `robot_flag` |
 | `robot_flag`, `human_label`, `anchored_outcome`, `anchored_undecided` | each source on its own. `anchored_undecided` is true when the anchored outcome rests on something undecided: a required label with only unknown events or an unknown start-check waiver; for a success, also an undecided veto or a waiver its own events contest (see [Anchored review](ANCHORED_REVIEW.md#start-check-and-vetoes)). `verified_success` leaves an undecided anchored success out (`exclude_reason` `anchored_undecided`); pass `undecided=include` to keep it. Human labels are not affected |
 | `subtask_id`, `subtask_outcome`, `subtask_attempt` | the active annotation's subtask covering the frame |
+| `subtask_review` | who stands behind that segment: `auto` (written by the live service, unreviewed), `edited` (an automatic one a person changed), empty (a person, or an agent a person reviewed); `manifest.json` `annotation.subtask_auto_share` is the share of labelled frames that are `auto` |
 | `recap_value`, `recap_advantage`, `recap_positive` | RECAP V(o_t), A_t and its label (null where not labelled) |
 
 `manifest.json` records:
@@ -96,3 +97,5 @@ For openpi (`pi05_fr3_*` configs), without changing openpi's main branch:
 - `manifest.json`：记录 LEVI 提交、数据集内容指纹、命名空间、标注修订、锚定复核的运行与规格、RECAP 的检查点、修订与阈值，以及操作名与参数。
 
 **训练端读取**：用单文件读取器 `integrations/training_manifest/levi_manifest_reader.py`，提供片段过滤、加权采样、逐动作步掩码、RECAP 条件提示。训练后用 `audit` 核对：被排除的帧从未被抽到，且各片段的抽样比例符合权重。
+
+**Candidate anchored reviews.** The newest anchored review is used for the verdict column only when its spec is not a `candidate`. A candidate (not validated; the live service's generic release review is one) is passed over and listed in `manifest.json` under `anchored.skipped_candidate_runs`; name the run with `--anchored-run`, or pass `--allow-candidate-anchored` (API `allow_candidate_anchored`), to use it on purpose. The manifest then records `anchored.spec_status`.

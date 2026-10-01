@@ -76,6 +76,9 @@ class Session:
     session_id: str = ""
     run_id: str = ""
     policy: dict = field(default_factory=dict)
+    root: str = ""
+    # Seconds the client waits for the operator to reset the scene after an
+    # episode (``levi.reset_wait_s``): the next episode starts right after.
     reset_wait_s: float | None = None
 
     def active(self, states=DEFAULT_ACTIVE) -> bool:
@@ -103,6 +106,7 @@ class Session:
             "run_id": self.run_id,
             "started_at": self.started_at,
             "policy": self.policy,
+            "root": self.root,
             "reset_wait_s": self.reset_wait_s,
         }
 
@@ -137,13 +141,22 @@ def read_sessions(roots, now=None) -> dict:
                 continue
             session = _session(entry.path, entry.name, data, now)
             if session:
-                found[(session.group, session.task_folder)] = session
+                session.root = str(Path(root).expanduser())
+                found[(session.root, session.group, session.task_folder)] = session
     mine = {str(Path(r).expanduser()) for r in roots}
     for key in [
         k for k in _CACHE if k not in seen and str(Path(k).parent.parent) in mine
     ]:
         _CACHE.pop(key, None)
     return found
+
+
+def _number(value):
+    return (
+        float(value)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+        else None
+    )
 
 
 def _session(path, name, data, now):
@@ -174,7 +187,6 @@ def _session(path, name, data, now):
         )
     )
     levi = data.get("levi") if isinstance(data.get("levi"), dict) else {}
-    wait = levi.get("reset_wait_s")
     policy = data.get("policy") if isinstance(data.get("policy"), dict) else {}
     checkpoint = str(policy.get("checkpoint_dir") or "").rstrip("/")
     enabled = levi.get("enabled") if isinstance(levi.get("enabled"), bool) else None
@@ -203,9 +215,7 @@ def _session(path, name, data, now):
             "config": str(policy.get("config") or "")[:120] or None,
             "checkpoint": os.path.basename(checkpoint)[:120] or None,
         },
-        reset_wait_s=float(wait)
-        if isinstance(wait, (int, float)) and not isinstance(wait, bool)
-        else None,
+        reset_wait_s=_number(levi.get("reset_wait_s")),
     )
 
 

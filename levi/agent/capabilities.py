@@ -2383,6 +2383,10 @@ def invoke(workbench, principal, name, arguments, key=None):
         if name == "runs.plan":
             run = workbench.store.get("runs", value["id"])
             event("action.started")
+        if getattr(principal, "auto", False):
+            from levi.live import auto
+
+            auto.record_result(name, arguments)
         event(
             "action.completed",
             elapsed_seconds=time.monotonic() - started,
@@ -2418,6 +2422,10 @@ def invoke(workbench, principal, name, arguments, key=None):
                 refresh(workbench.store, run["id"])
         return value
     except Exception as exc:
+        if getattr(principal, "auto", False):
+            from levi.live import auto
+
+            auto.record_result(name, arguments, exc)
         event(
             "action.failed",
             error_type=type(exc).__name__,

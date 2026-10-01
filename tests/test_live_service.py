@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -434,3 +435,277 @@ def test_once_with_the_fake_model_labels_everything_and_exits(tmp_path, rollouts
     assert "pi05_fake__stack_the_plates: 0 / 0 / 2 / 0 / 1" in done.stdout
     audit = (tmp_path / "ws/live/audit.jsonl").read_text()
     assert "changes.commit" in audit and "refused" not in audit
+
+
+def test_doctor_warns_when_vllm_is_failing_and_resume_clears_the_wait(tmp_path):
+    c = cfg(tmp_path)
+    cli.prepare(c)
+    status = {
+        "schema": "levi.live.status.v1",
+        "pid": os.getpid(),
+        "updated_at": time.time(),
+        "state": "gpu_wait",
+        "gpu": {"vllm": {"state": "error", "error": "ValueError: 1.82 GiB KV cache"}},
+        "attention": {"code": "vllm_failed", "reason": "ValueError: 1.82 GiB KV cache"},
+        "datasets": {},
+    }
+    mirror.jsonio.write(c.status_file, status)
+    mirror.jsonio.write(
+        c.home / "live.pid",
+        {"pid": os.getpid(), "identity": controller.gpumgr.identity(os.getpid())},
+    )
+    report = cli.diagnose(c)
+    warning = next(w for w in report["warnings"] if "failing to start" in w)
+    assert "KV cache" in warning and "levi live resume" in warning
+    # Exited children are not listed with empty numbers.
+    assert all(p["rss_mb"] is not None for p in report["processes"])
+    done = cli_run(tmp_path, "resume")
+    assert done.returncode == 0 and "KV cache" in done.stdout
+    assert (tmp_path / "ws/live/resume.json").exists()
+
+
+# --- the page and the core must really be up -----------------------------------------
+
+
+def short_dir():
+    """A workspace short enough for the core's Unix socket (the repo's own
+    pytest base temp is not)."""
+    import tempfile
+
+    return Path(tempfile.mkdtemp(prefix="lvt", dir="/tmp"))
+
+
+def live_cmd(workspace, home, *args):
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "levi.live",
+            *args,
+            "--workspace",
+            str(workspace),
+            "--home",
+            str(home),
+            "--gpu-mode",
+            "manual",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=PROJECT,
+        env={**os.environ, "PYTHONPATH": str(PROJECT)},
+        timeout=240,
+        check=False,
+    )
+
+
+def test_a_workspace_path_too_long_for_the_core_socket_is_refused_up_front(tmp_path):
+    c = cfg(tmp_path)
+    c.service.workspace = str(tmp_path / ("w" * 90))
+    with pytest.raises(ValueError, match="Unix socket"):
+        cli.prepare(c, core=True)
+    done = live_cmd(tmp_path / ("w" * 90), tmp_path / "home2", "start", "--daemon")
+    assert done.returncode == 2 and "too long" in done.stderr
+    assert not (tmp_path / "home2/status.json").exists()  # nothing was started
+
+
+def test_a_daemon_whose_core_cannot_start_says_so_instead_of_claiming_success():
+    import shutil
+    import socket
+
+    base = short_dir()
+    try:
+        with socket.socket() as taken:
+            taken.bind(("127.0.0.1", 0))
+            taken.listen()
+            port = taken.getsockname()[1]
+            started = live_cmd(
+                base / "ws",
+                base / "home",
+                "start",
+                "--daemon",
+                "--no-ui",
+                "--core-port",
+                str(port),
+            )
+            try:
+                assert started.returncode == 2, started.stdout + started.stderr
+                assert "did not come up" in started.stdout
+                assert "Core failed to start" in started.stdout
+                status = json.loads((base / "home/status.json").read_text())
+                assert status["frontend"]["error"] and status["accepts_sessions"]
+            finally:
+                live_cmd(base / "ws", base / "home", "stop")
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def test_the_watchdog_gives_up_after_three_restarts_and_says_so_once(tmp_path):
+    front = cli.Frontend.__new__(cli.Frontend)
+    front.config, front.log, front.process, front.ui = cfg(tmp_path), print, None, False
+    front.state, front.attempts, front.started, front.error = "ok", 0, 0.0, ""
+    starts = []
+    front.start = lambda ui=False: (
+        starts.append(1),
+        setattr(front, "state", "starting"),
+    )
+    front._alive = lambda: False
+    front._tail_error = lambda: "RuntimeError: Core failed to start"
+    messages = []
+    now = 1000.0
+    for _ in range(12):
+        now += 400  # past every back-off
+        front.state = "ok" if front.state == "starting" else front.state
+        message = front.check(now)
+        if message:
+            messages.append(message)
+    assert len(starts) == 3  # three restarts, then it stops
+    assert len(messages) == 4 and "giving up" in messages[-1]
+    assert "Core failed to start" in messages[-1]
+    assert front.state == "failed" and front.check(now + 9999) is None
+
+
+# --- the workspace guard and the per-workspace lock --------------------------------------
+
+
+def test_the_service_refuses_a_workspace_that_is_not_a_live_one(tmp_path):
+    c = cfg(tmp_path)
+    c.service.workspace = str(tmp_path / "ws")
+    # The product LEVI's workspace: LEVI state, no live marker.
+    (tmp_path / "ws/outputs/LEVI/workbench").mkdir(parents=True)
+    with pytest.raises(ValueError, match="not a live one"):
+        cli.prepare(c)
+    assert not (tmp_path / "ws/live/workspace.json").exists()  # nothing written
+    assert not (tmp_path / "ws/live.toml").exists()
+    cli.prepare(c, adopt=True)  # explicit, and then it is a live workspace
+    assert (tmp_path / "ws/live/workspace.json").exists()
+    cli.prepare(c)  # now fine without the flag
+    # The checkout's own .state is refused whatever the flag says.
+    own = cfg(tmp_path)
+    own.service.workspace = str(PROJECT / ".state")
+    with pytest.raises(ValueError, match="product LEVI"):
+        cli.prepare(own, adopt=True)
+
+
+def test_init_and_start_respect_the_guard(tmp_path):
+    (tmp_path / "ws/outputs/LEVI").mkdir(parents=True)
+    done = cli_run(tmp_path, "init")
+    assert done.returncode == 2 and "not a live one" in done.stderr
+    assert cli_run(tmp_path, "start", "--no-core").returncode == 2
+
+
+def test_two_homes_cannot_run_on_one_workspace(tmp_path):
+    ws = tmp_path / "ws"
+    first = controller.Instance(tmp_path / "home1", ws)
+    second = controller.Instance(tmp_path / "home2", ws)
+    other_ws = controller.Instance(tmp_path / "home3", tmp_path / "ws2")
+    same_home = controller.Instance(tmp_path / "home1", tmp_path / "ws3")
+    assert first.acquire()
+    assert not second.acquire()  # a different home, the same workspace
+    assert not same_home.acquire()  # the same home, another workspace
+    assert other_ws.acquire()
+    first.release()
+    assert second.acquire()
+    for item in (second, other_ws):
+        item.release()
+
+
+# --- the heartbeat, the idle probe, --fake-vlm and the page's fields -------------------
+
+
+def test_the_status_heartbeat_continues_while_the_loop_is_busy(tmp_path):
+    """Stopping a worker or vLLM can block a tick for a minute; a client that
+    finds status.json stale falls back to manual labelling."""
+    c = cfg(tmp_path)
+    c.service.heartbeat_s = 0.5
+    ctl = controller.Controller(
+        c,
+        probes=controller.Probes(
+            vram=lambda: None, ports=set, holders=list, policy_vram=lambda p: None
+        ),
+        log=lambda *a: None,
+    )
+    ctl.hooks.append(lambda now: time.sleep(4.0))  # a tick that blocks for 4 s
+    thread = threading.Thread(target=ctl.run, kwargs={"max_seconds": 6})
+    thread.start()
+    stamps = set()
+    try:
+        deadline = time.time() + 4.0
+        while time.time() < deadline:
+            try:
+                stamps.add(json.loads(c.status_file.read_text())["updated_at"])
+            except (OSError, ValueError):
+                pass
+            time.sleep(0.2)
+    finally:
+        ctl.running = False
+        ctl.wake.set()
+        thread.join(30)
+    assert len(stamps) >= 4, f"status.json moved {len(stamps)} times in a blocked tick"
+
+
+def test_an_idle_tick_opens_no_connection_to_the_model_port(tmp_path):
+    from levi.live import fakevlm
+
+    server, fake, port = fakevlm.serve(0)
+    try:
+        c = cfg(tmp_path)
+        c.vllm.port = port
+        ctl = controller.Controller(
+            c,
+            probes=controller.Probes(
+                vram=lambda: None, ports=set, holders=list, policy_vram=lambda p: None
+            ),
+            log=lambda *a: None,
+        )
+        for n in range(6):
+            ctl.tick(time.time() + n)
+        assert fake.health_checks == 0  # nothing to label: :8100 is not touched
+    finally:
+        server.shutdown()
+
+
+def test_fake_vlm_refuses_the_live_workspace(tmp_path):
+    done = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "levi.live",
+            "once",
+            "--fake-vlm",
+            "--auto-approve",
+            "--home",
+            str(tmp_path / "home"),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=PROJECT,
+        env={
+            **{k: v for k, v in os.environ.items() if k != "LEVI_LIVE_WORKSPACE"},
+            "PYTHONPATH": str(PROJECT),
+        },
+        check=False,
+    )
+    assert done.returncode == 2 and "scratch" in done.stderr
+    assert not (tmp_path / "home/status.json").exists()
+
+
+def test_the_page_gets_the_reset_countdown_and_open_review_count(live_api, rollouts):
+    client, c = live_api
+    rollouts.write(0)
+    rollouts.session("waiting_reset")
+    ctl = controller.Controller(
+        c,
+        probes=controller.Probes(
+            vram=lambda: None, ports=set, holders=list, policy_vram=lambda p: None
+        ),
+        log=lambda *a: None,
+    )
+    ctl.tick()
+    ctl.write_status()
+    status = json.loads(c.status_file.read_text())
+    row = status["sessions"][0]
+    assert row["reset_wait_s"] == 10.0 and row["waiting_reset_since"] is not None
+    answer = client.get("/api/levi/live/sessions").json()["sessions"][0]
+    assert answer["reset_wait_s"] == 10.0
+    assert answer["waiting_reset_since"] == row["waiting_reset_since"]
+    assert status["datasets"]["pi05_fake__stack_the_plates"]["review_runs_open"] == 0

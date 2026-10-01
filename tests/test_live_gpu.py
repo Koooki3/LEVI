@@ -4,6 +4,7 @@ and a fake serve script, never a real GPU or a real model."""
 
 import json
 import os
+import signal
 import socket
 import stat
 import subprocess
@@ -85,13 +86,8 @@ def decide(c, mode, **kw):
 def test_the_memory_a_start_needs_follows_the_measured_profile():
     c = cfg_for()
     profile = c.vllm_profile()
-    # 0.72 of vLLM's total (nvidia-smi's less 500 MiB) plus the growth after
-    # the first requests.
-    assert gpumgr.need_mib(c, profile, 32607) == int(0.72 * 32107) + 1400
-    with_policy_free = 32607 - 7685  # the policy server at .22
-    assert with_policy_free >= gpumgr.need_mib(c, profile, 32607)
-    with_big_policy_free = 32607 - 11863  # the old .35
-    assert with_big_policy_free < gpumgr.need_mib(c, profile, 32607)
+    # 0.72 of vLLM's total (nvidia-smi's less 500 MiB) plus the margin.
+    assert gpumgr.need_mib(c, profile, 32607) == int(0.72 * 32107) + 1100
 
 
 def test_a_start_needs_room_and_a_settled_policy_server_not_an_idle_evaluation():
@@ -104,12 +100,15 @@ def test_a_start_needs_room_and_a_settled_policy_server_not_an_idle_evaluation()
     assert decide(c, "manual").code == "manual"
 
 
-def session(state, crashed=False, group="g", task="t"):
+def session(state, crashed=False, group="g", task="t", updated_at=None):
     class S:
         pass
 
     s = S()
     s.state, s.crashed, s.group, s.task_folder = state, crashed, group, task
+    s.updated_at = updated_at
+    s.path = f"/sessions/{group}__{task}.json"
+    s.reset_wait_s = None
     return s
 
 
@@ -121,7 +120,7 @@ def test_the_gate_closes_only_while_the_policy_infers():
         gate(c, "timeshare", {("g", "t"): session("running")}, True).code
         == "policy_inferring"
     )
-    for state in ("homing", "waiting_reset", "standby", "fault", "stopped", "finished"):
+    for state in ("homing", "waiting_reset", "standby", "fault"):
         assert gate(c, "timeshare", {("g", "t"): session(state)}, True).open, state
     # A crashed client is not inferring.
     assert gate(
@@ -359,7 +358,8 @@ def fresh(ctl):
 
 
 def up(ctl, t):
-    """Start vLLM and wait until it answers."""
+    """Start vLLM and wait until it answers (the gate is open: a cold start
+    never happens while the policy infers)."""
     assert step(ctl, t) == "ok"
     assert wait_for(lambda: ctl.vllm.poll() == "ready")
     ctl.tick(t + 0.5)
@@ -370,9 +370,12 @@ def test_vllm_starts_beside_a_running_evaluation_and_the_gate_holds_the_work(ctl
     ctl.machine.ports = {8000}
     ctl.machine.policy_mib = 7685
     t = time.time()
-    ctl.rollouts.session("running")
+    ctl.rollouts.session("homing")
     up(ctl, t)
     assert ctl.vllm.mine() and ctl.lock.held
+    ctl.spawned.clear()
+    ctl.rollouts.session("running")
+    ctl.tick(t + 1)
     # The policy infers: the model is resident and ready, but does no work.
     assert not ctl.gate.open and ctl.gate.code == "policy_inferring"
     assert ctl.spawned == [] and ctl.state == "gpu_wait"
@@ -409,7 +412,8 @@ def test_not_enough_memory_or_a_busy_lock_blocks_the_start(ctl):
     ctl.rollouts.write(0)
     t = time.time()
     ctl.machine.free = 12000  # the old .35 policy server is running
-    assert step(ctl, t) == "vram" and not ctl.vllm.mine()
+    assert step(ctl, t) == "insufficient_vram" and not ctl.vllm.mine()
+    assert "12000 MiB" in ctl.decision.reason
     ctl.machine.free = 26000
     fresh(ctl)
     other = gpumgr.GpuLock(ctl.config.gpu.lock_file)
@@ -477,6 +481,7 @@ def test_an_idle_vllm_sleeps_during_an_evaluation_and_stops_after_it(ctl):
     ctl.rollouts.write(0)
     t = time.time()
     ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    ctl.rollouts.session("standby")
     up(ctl, t)
     finish_work(ctl)
     ctl.tick(t + 2)
@@ -485,6 +490,7 @@ def test_an_idle_vllm_sleeps_during_an_evaluation_and_stops_after_it(ctl):
     assert ctl.vllm.state == "asleep" and ctl.lock.held  # the policy server is still up
     # The evaluation is over: nothing is live any more, so it is released.
     ctl.machine.ports, ctl.machine.policy_mib = set(), None
+    ctl.rollouts.session("finished")
     ctl.tick(t + 200)
     assert ctl.vllm.state == "asleep"
     ctl.tick(t + 200 + c.vllm.idle_timeout_s + 1)
@@ -548,23 +554,310 @@ def test_a_vllm_someone_else_started_is_used_only_when_adopted(ctl):
         server.shutdown()
 
 
-def test_a_failed_vllm_start_is_waited_out_not_retried_in_a_loop(ctl, tmp_path):
+def bad_vllm(
+    tmp_path,
+    ctl,
+    message="ValueError: To serve at least one request ... 1.82 GiB KV cache is needed",
+):
+    """A serve script whose vLLM dies at once and says why in its log."""
     bad = tmp_path / "bad.sh"
+    log = Path(ctl.config.vllm.pid_dir) / f"vllm_{ctl.config.vllm.port}.log"
+    bad.write_text(
+        f"""#!/usr/bin/env bash
+echo "INFO starting" > "{log}"
+echo "{message}" >> "{log}"
+sleep 0 &
+echo $! > "{ctl.config.vllm.pid_dir}/vllm_{ctl.config.vllm.port}.pid"
+"""
+    )
+    bad.chmod(0o755)
+    ctl.config.vllm.script = str(bad)
+    ctl.vllm = gpumgr.Vllm(ctl.config)
+
+
+def test_a_failing_vllm_start_backs_off_then_stops_and_names_the_reason(ctl, tmp_path):
+    bad_vllm(tmp_path, ctl)
+    ctl.rollouts.write(0)
+    t = time.time()
+    starts = lambda: sum("starting vLLM" in e["text"] for e in ctl.events)
+    step(ctl, t)
+    wait_for(lambda: ctl.vllm.poll() == "error", 5)
+    ctl.tick(t + 1)
+    assert starts() == 1 and ctl.start_failures == 1
+    assert "KV cache" in ctl.vllm.error and "KV cache" in ctl.status()["last_error"]
+    for n in range(2, 55):  # the first wait is 60 s
+        ctl.tick(t + n)
+    assert starts() == 1 and ctl.decision.code == "backoff"
+    # Second try after 60 s, third after another 120 s (doubling), then no more.
+    ctl.tick(t + 62)
+    wait_for(lambda: ctl.vllm.poll() == "error", 5)
+    ctl.tick(t + 63)
+    assert starts() == 2 and ctl.start_failures == 2
+    ctl.tick(t + 63 + 60)
+    assert starts() == 2  # now 120 s
+    ctl.tick(t + 63 + 125)
+    wait_for(lambda: ctl.vllm.poll() == "error", 5)
+    ctl.tick(t + 63 + 126)
+    assert starts() == 3 and ctl.attention and ctl.attention["code"] == "vllm_failed"
+    for n in (400, 2000, 90000):
+        ctl.tick(t + n)
+    assert starts() == 3  # asking for a person, not retrying
+    assert ctl.decision.code == "needs_attention" and "KV cache" in ctl.decision.reason
+    status = ctl.status(t + 90001)
+    assert status["attention"]["code"] == "vllm_failed"
+    # Labelling is paused but the service still takes sessions: the evaluation
+    # client only needs somewhere that is receiving its rollouts.
+    assert status["accepts_sessions"] and ctl.state == "gpu_wait"
+    # `levi live resume` clears it.
+    (ctl.config.live_dir / "resume.json").write_text("{}")
+    ctl.config.vllm.script = ctl.config.vllm.stop_script  # any script that works
+    ctl.tick(t + 90002)
+    assert ctl.attention is None and ctl.start_failures == 0
+
+
+def test_the_launch_script_failing_is_reported_with_vllm_s_own_reason(ctl, tmp_path):
+    bad = tmp_path / "bad2.sh"
     bad.write_text("#!/usr/bin/env bash\nexit 7\n")
     bad.chmod(0o755)
     ctl.config.vllm.script = str(bad)
     ctl.vllm = gpumgr.Vllm(ctl.config)
     ctl.rollouts.write(0)
+    step(ctl, time.time())
+    assert ctl.start_failures == 1 and "exited 7" in ctl.vllm.error
+
+
+def test_a_cold_start_waits_for_the_gate_but_a_wake_does_not(ctl):
+    ctl.rollouts.write(0)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
     t = time.time()
-    step(ctl, t)
-    assert ctl.vllm.state == "error"
-    starts = sum("starting vLLM" in e["text"] for e in ctl.events)
-    for n in range(1, 20):
-        ctl.tick(t + n)
+    ctl.rollouts.session("running")
+    assert step(ctl, t) == "gate_closed" and not ctl.vllm.mine()
+    ctl.rollouts.session("waiting_reset")
+    up(ctl, t + 1)
+    assert ctl.vllm.mine()
+
+
+def test_the_budget_follows_the_memory_free_at_start_in_both_orders():
+    c = cfg_for()
+    plan = lambda free, policy: gpumgr.plan_budget(
+        c, free_mib=free, total_mib=32607, policy_up=policy
+    )
+    # Policy server first (7685 MiB held): the budget the measurement says works.
+    first = plan(32607 - 7685, True)
     assert (
-        sum("starting vLLM" in e["text"] for e in ctl.events) == starts
-    )  # still waiting
-    ctl.tick(t + controller.ERROR_WAIT_S + 5)
-    ctl.tick(t + controller.ERROR_WAIT_S + 6)
-    assert sum("starting vLLM" in e["text"] for e in ctl.events) == starts + 1
-    assert ctl.status()["last_error"]
+        first.ok and 0.74 <= first.utilization <= 0.747 and first.max_model_len == 49152
+    )
+    # The pre-check and the launch use the same number: free covers need.
+    assert first.need_mib <= 32607 - 7685
+    # vLLM first (nothing else on the card): the configured 0.72, which leaves
+    # room for a policy server that starts later.
+    alone = plan(32500, False)
+    assert (
+        alone.ok
+        and alone.utilization == pytest.approx(0.7195)
+        and alone.max_model_len == 49152
+    )
+    # A bigger policy server (the old .35): nothing starts, the numbers say why.
+    big = plan(32607 - 11863, True)
+    assert not big.ok and big.code == "insufficient_vram"
+    assert "20744 MiB" in big.reason and "32768" in big.reason
+    # In between the context steps down rather than failing.
+    mid = plan(24200, True)
+    assert mid.ok and mid.max_model_len == 40960 and mid.utilization >= 0.719
+    # Never below the floor, never above the cap.
+    assert all(
+        plan(f, True).utilization <= 0.747
+        for f in range(20000, 32000, 500)
+        if plan(f, True).ok
+    )
+
+
+def test_the_controller_starts_vllm_with_the_planned_budget_and_context(ctl, serve):
+    ctl.rollouts.write(0)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    ctl.rollouts.session("standby")
+    ctl.machine.free = 24200  # a policy server already loaded, little room
+    t = time.time()
+    assert step(ctl, t) == "ok"
+    launched = (serve[1] / "launch.txt").read_text()
+    assert "util=0.719" in launched and "--max-model-len 40960" in launched
+    assert ctl.vllm.profile["max_model_len"] == 40960
+    assert ctl.provider_spec()["context_tokens"] == 40960
+    assert any("budget 0.719" in e["text"] and "40960" in e["text"] for e in ctl.events)
+    ctl.vllm.stop()
+
+
+def test_yesterday_s_finished_session_does_not_vouch_for_a_policy_server():
+    """Session files are never deleted. One that ended before the policy server
+    appeared says nothing about the server now listening (another client, a
+    --no-record run...): the gate stays closed."""
+    c = cfg_for()
+    old = {("g", "t"): session("finished", updated_at=50.0)}
+    closed = gpumgr.gate(c, "timeshare", old, True, 100.0)
+    assert not closed.open and closed.code == "unknown_client"
+    # Without knowing when the server appeared it is no witness either.
+    assert not gpumgr.gate(c, "timeshare", old, True, None).open
+    # One that ended after the server appeared did use it: the server is idle.
+    fresh_end = {("g", "t"): session("finished", updated_at=150.0)}
+    assert gpumgr.gate(c, "timeshare", fresh_end, True, 100.0).open
+    for state in ("stopped", "crashed"):
+        assert not gpumgr.gate(
+            c, "timeshare", {("g", "t"): session(state, updated_at=50.0)}, True, 100.0
+        ).open
+    # A live session (not ended) always vouches.
+    assert gpumgr.gate(
+        c, "timeshare", {("g", "t"): session("standby")}, True, 100.0
+    ).open
+    # No policy server: nothing to protect, an old file or none is fine.
+    assert gpumgr.gate(c, "timeshare", old, False, 100.0).open
+
+
+# --- the GPU lock follows the vLLM process ---------------------------------------------
+
+
+def started_controller(live, machine=None):
+    c, rollouts = live
+    machine = machine or Machine()
+    ctl = controller.Controller(c, probes=machine.probes(), log=lambda *a: None)
+    ctl._spawn = lambda name: None
+    ctl.machine, ctl.rollouts = machine, rollouts
+    return ctl
+
+
+def test_the_lock_stays_with_vllm_when_the_supervisor_dies(live):
+    c, _ = live
+    first = started_controller(live)
+    first.rollouts.write(0)
+    first.machine.ports, first.machine.policy_mib = {8000}, 7685
+    first.rollouts.session("standby")
+    t = time.time()
+    up(first, t)
+    assert first.lock.held
+    pid = first.vllm._pid()
+    # kill -9 of the supervisor: the kernel closes its descriptors, nothing
+    # else is cleaned up. vLLM keeps the descriptor it was started with.
+    first.lock.release()
+    other = gpumgr.GpuLock(c.gpu.lock_file)
+    assert not other.acquire()  # still locked: no lock-less orphan
+    # A restarted supervisor takes the running vLLM back without error.
+    second = started_controller(live, first.machine)
+    assert second.vllm.mine() and not any(e["level"] == "error" for e in second.events)
+    assert second.status()["gpu"]["lock_held"]
+    assert second.vllm.holds_lock(c.gpu.lock_file)
+    assert second._stop_vllm()
+    assert wait_for(lambda: gpumgr.identity(pid) is None)
+    assert other.acquire()  # released with the process
+    other.release()
+
+
+def test_a_vllm_that_would_run_without_the_lock_is_not_taken_over(live):
+    c, _ = live
+    vllm = gpumgr.Vllm(c)
+    assert vllm.start(c.vllm_profile())  # started without the lock descriptor
+    assert wait_for(lambda: vllm.poll() == "ready")
+    holder = gpumgr.GpuLock(c.gpu.lock_file)
+    assert holder.acquire()  # somebody else took the lock meanwhile
+    ctl = started_controller(live)
+    errors = [e["text"] for e in ctl.events if e["level"] == "error"]
+    assert errors and "another agent holds the GPU lock" in errors[0]
+    assert not ctl.vllm.mine()  # treated as someone else's server, never stopped
+    assert gpumgr.healthy(c.vllm.port)
+    holder.release()
+    gpumgr.Vllm.stop(vllm)  # the test's own cleanup (the record is gone: use pid)
+    pid = vllm._pid()
+    if pid:
+        os.killpg(pid, signal.SIGTERM)
+    assert wait_for(lambda: not gpumgr.healthy(c.vllm.port))
+
+
+def test_nobody_holding_the_lock_lets_the_new_supervisor_take_it(live):
+    c, _ = live
+    vllm = gpumgr.Vllm(c)
+    assert vllm.start(c.vllm_profile())
+    assert wait_for(lambda: vllm.poll() == "ready")
+    ctl = started_controller(live)
+    assert ctl.vllm.mine() and ctl.lock.held
+    assert ctl._stop_vllm()
+
+
+def test_the_lock_is_kept_while_vllm_will_not_die(ctl):
+    ctl.rollouts.write(0)
+    up(ctl, time.time())
+    assert ctl.lock.held
+    real = ctl.vllm.stop
+    ctl.vllm.stop = lambda: False  # "vLLM did not stop"
+    ctl.preempt("test", "forcing a stop that fails")
+    assert ctl.lock.held  # the process is still on the GPU
+    ctl.vllm.stop = real
+    assert ctl._stop_vllm() and not ctl.lock.held
+
+
+def test_doctor_reports_an_orphan_vllm_when_no_service_runs(live):
+    from levi.live import cli, jsonio
+
+    c, _ = live
+    sleeper = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    try:
+        jsonio.write(
+            c.live_dir / "vllm.json",
+            {
+                "pid": sleeper.pid,
+                "identity": gpumgr.identity(sleeper.pid),
+                "port": c.vllm.port,
+            },
+        )
+        report = cli.diagnose(c)
+        assert report["orphan_vllm"] == sleeper.pid
+        assert any("orphan vLLM" in w and "--stop" in w for w in report["warnings"])
+    finally:
+        sleeper.kill()
+        sleeper.wait()
+
+
+# --- the gate closes before the episode, not after it -------------------------------
+
+
+def waiting(reset_wait_s=10.0, group="g", task="t"):
+    s = session("waiting_reset", group=group, task=task)
+    s.reset_wait_s = reset_wait_s
+    return s
+
+
+def test_the_gate_closes_a_few_seconds_before_the_next_episode_starts():
+    c = cfg_for()
+    s = waiting(10.0)
+    sessions = {("r", "g", "t"): s}
+    began = {
+        s.path: 100.0
+    }  # waiting for the reset since t=100; the episode starts at 110
+    gate = lambda now: gpumgr.gate(
+        c, "timeshare", sessions, True, 50.0, now=now, waiting_since=began
+    )
+    assert gate(100.0).open and gate(106.9).open  # 3 s of lead: closes at 107
+    shut = gate(107.1)
+    assert not shut.open and shut.code == "episode_imminent"
+    assert "starts in" in shut.reason
+    assert not gate(110.0).open and not gate(114.9).open  # the client may be late
+    assert gate(115.5).open  # still waiting long after: nothing is coming
+    # No reset time known, or not waiting: the lead does not apply.
+    s.reset_wait_s = None
+    assert gate(108.0).open
+    s.reset_wait_s = 10.0
+    s.state = "homing"
+    assert gate(108.0).open
+
+
+def test_the_controller_learns_when_a_session_began_waiting_and_closes_ahead(ctl):
+    ctl.rollouts.write(0)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    t = time.time()
+    ctl.rollouts.session("waiting_reset")  # reset_wait_s is 10
+    up(ctl, t)
+    ctl.spawned.clear()
+    assert ctl.gate.open
+    ctl.tick(t + 6.0)
+    assert ctl.gate.open
+    ctl.tick(t + 7.5)
+    assert not ctl.gate.open and ctl.gate.code == "episode_imminent"
+    assert json.loads((ctl.config.live_dir / "gate.json").read_text())["open"] is False
+    assert ctl.status(t + 7.5)["sessions"][0]["reset_wait_s"] == 10.0

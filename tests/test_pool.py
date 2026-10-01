@@ -785,6 +785,17 @@ def test_incremental_rescan_reuses_unchanged_episodes(pool):
     assert again["categories"] == pool["summary"]["categories"]
 
 
+def test_an_index_from_older_scan_code_is_read_again(pool, monkeypatch):
+    """The scan caches what it derived from an episode's files; when what it
+    derives changes (an unattended rollout's robot flag), the cache must not
+    keep the old answer."""
+    again = scanner.scan()
+    assert again["reused"] == again["episodes"] > 0
+    monkeypatch.setattr(scanner, "FACTS_VERSION", scanner.FACTS_VERSION + 1)
+    fresh = scanner.scan()
+    assert fresh["reused"] == 0 and fresh["episodes"] == again["episodes"]
+
+
 def test_api_routes(pool, client):
     assert client.get("/api/levi/pool/status").json()["enabled"]
     sources = client.get("/api/levi/pool/sources").json()["sources"]

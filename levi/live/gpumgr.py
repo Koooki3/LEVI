@@ -20,6 +20,7 @@ import contextlib
 import fcntl
 import json
 import os
+import re
 import signal
 import subprocess
 import time
@@ -129,10 +130,70 @@ ASLEEP_RESIDENT_MIB = 2200
 
 
 def need_mib(config, profile, total_mib) -> int:
-    """Free VRAM a vLLM start or wake needs: its budget of vLLM's total, plus
-    what it takes after the first requests (measured about 1.3 GB)."""
+    """Free VRAM a start or a wake of a vLLM with this ``profile`` needs: its
+    budget of vLLM's total plus the configured margin."""
     budget = profile["gpu_memory_utilization"] * (total_mib - VLLM_TOTAL_SLACK_MIB)
     return int(budget) + config.vllm.margin_mib
+
+
+@dataclass
+class Budget:
+    ok: bool
+    utilization: float = 0.0
+    max_model_len: int = 0
+    need_mib: int = 0
+    code: str = "ok"  # ok | insufficient_vram
+    reason: str = ""
+
+
+def plan_budget(config, *, free_mib, total_mib, policy_up: bool) -> Budget:
+    """The memory budget and context length to start vLLM with *now*.
+
+    The budget is the share of vLLM's own total (nvidia-smi's less
+    ``VLLM_TOTAL_SLACK_MIB``) that the free VRAM allows after ``margin_mib``,
+    capped at ``gpu_memory_utilization_max``; with no policy server on the
+    card it is the configured ``gpu_memory_utilization`` (room for one to start
+    later). The same number is what the start passes to vLLM, so the pre-check
+    and the launch cannot disagree. If it is below what serves the context
+    (``min_utilization_*``, less for a shorter context) the context steps down
+    by 4096 to ``min_model_len``; if even that does not fit nothing is started:
+    ``insufficient_vram`` with the numbers."""
+    v = config.vllm
+    total_v = total_mib - VLLM_TOTAL_SLACK_MIB
+    cap = min(v.gpu_memory_utilization_max, (free_mib - v.margin_mib) / total_v)
+    target = cap if policy_up else min(v.gpu_memory_utilization, cap)
+    floor_full = v.min_utilization_with_policy if policy_up else v.min_utilization_alone
+    length = v.max_model_len
+    while True:
+        saved = (v.max_model_len - length) * v.kv_bytes_per_token / 1048576 / total_v
+        floor = max(v.gpu_memory_utilization_min, floor_full - saved)
+        util = round(target - 0.0005, 4)  # a hair under what is free
+        if util >= floor:
+            need = int(util * total_v) + v.margin_mib
+            return Budget(True, util, length, need)
+        if length - 4096 < v.min_model_len:
+            break
+        length -= 4096
+    floor = max(
+        v.gpu_memory_utilization_min,
+        floor_full
+        - (v.max_model_len - v.min_model_len)
+        * v.kv_bytes_per_token
+        / 1048576
+        / total_v,
+    )
+    need = int(floor * total_v) + v.margin_mib
+    return Budget(
+        False,
+        target,
+        0,
+        need,
+        "insufficient_vram",
+        f"{free_mib} MiB of VRAM free allows a vLLM budget of {target:.3f}; "
+        f"at least {floor:.3f} ({need} MiB free) is needed to serve even "
+        f"{v.min_model_len} tokens"
+        + (" beside the policy server" if policy_up else ""),
+    )
 
 
 def decide(
@@ -183,7 +244,16 @@ class Gate:
     reason: str
 
 
-def gate(config, mode, sessions, policy_up: bool) -> Gate:
+def gate(
+    config,
+    mode,
+    sessions,
+    policy_up: bool,
+    policy_since: float | None = None,
+    *,
+    now: float | None = None,
+    waiting_since: dict | None = None,
+) -> Gate:
     """May the model *work* (send requests) right now?
 
     Timeshare closes the gate while the policy infers: a session in a
@@ -206,13 +276,47 @@ def gate(config, mode, sessions, policy_up: bool) -> Gate:
             "policy_inferring",
             f"{s.group}/{s.task_folder} is {s.state}: the policy is inferring",
         )
-    if policy_up and not sessions:
+    # The next episode is due: a session waiting for the operator's reset
+    # starts running ``reset_wait_s`` after it began waiting. Close ahead of it.
+    if now is not None and waiting_since:
+        lead, grace = config.gpu.lead_s, config.gpu.lead_grace_s
+        for s in sessions.values():
+            began = waiting_since.get(s.path)
+            wait = getattr(s, "reset_wait_s", None)
+            if s.state != "waiting_reset" or s.crashed or began is None or not wait:
+                continue
+            due = began + wait
+            if due - lead <= now <= due + grace:
+                return Gate(
+                    False,
+                    "episode_imminent",
+                    f"{s.group}/{s.task_folder}: the next episode starts in "
+                    f"{max(0.0, due - now):.1f} s",
+                )
+    if policy_up and not _witnesses(sessions, policy_since):
         return Gate(
             False,
             "unknown_client",
-            "a policy server is listening and no evaluation session says it is idle",
+            "a policy server is listening and no current evaluation session says "
+            "it is idle",
         )
     return Gate(True, "open", "the policy is not inferring")
+
+
+def _witnesses(sessions, policy_since) -> bool:
+    """Is there a session that can vouch for the policy server being idle?
+
+    One that has not ended (standby, homing, waiting for the reset, fault).
+    An ended one (finished, stopped, crashed) only if it ended after the
+    policy server appeared: session files are never deleted, and yesterday's
+    must not switch the protection off for a server some other client uses."""
+    for s in sessions.values():
+        if s.state not in ("finished", "stopped", "crashed"):
+            return True
+        ended = getattr(s, "updated_at", None)
+        if policy_since is not None and ended and ended > policy_since:
+            return True
+    return False
 
 
 def should_sleep(config, mode, *, free_mib: int | None, policy_mib: int | None):
@@ -329,14 +433,20 @@ class GpuLock:
 
     def release(self):
         if self._handle:
-            with contextlib.suppress(OSError):
-                fcntl.flock(self._handle, fcntl.LOCK_UN)
+            # Close, do not LOCK_UN: an explicit unlock would release the
+            # lock for every process sharing the descriptor, vLLM included.
             self._handle.close()
             self._handle = None
 
     @property
     def held(self) -> bool:
         return self._handle is not None
+
+    def fileno(self):
+        """The descriptor of the held lock (None when not held): a vLLM
+        started with it open (``pass_fds``) keeps the lock for as long as it
+        lives, even if this process dies."""
+        return self._handle.fileno() if self._handle else None
 
 
 # --- vLLM -----------------------------------------------------------------------------
@@ -409,6 +519,29 @@ def is_sleeping(port) -> bool | None:
         return None
 
 
+def _group(pgid) -> list:
+    """Processes whose process group is ``pgid`` (vLLM's engine processes
+    share the group of the server serve.sh started)."""
+    members = []
+    try:
+        for entry in os.scandir("/proc"):
+            if entry.name.isdigit():
+                try:
+                    fields = (
+                        Path(f"/proc/{entry.name}/stat")
+                        .read_text()
+                        .rsplit(")", 1)[1]
+                        .split()
+                    )
+                except (OSError, IndexError):
+                    continue
+                if int(fields[2]) == pgid:
+                    members.append(int(entry.name))
+    except OSError:
+        pass
+    return members or [pgid]
+
+
 class Vllm:
     """The service's own vLLM server: start, watch, stop. It stops only a
     process it started (verified by its recorded identity), never another
@@ -423,6 +556,7 @@ class Vllm:
         self.started_at: float | None = None
         self.profile: dict | None = None
         self.error = ""
+        self._health = (0.0, False)
         self._adopt()
 
     # --- bookkeeping ---------------------------------------------------------
@@ -457,6 +591,32 @@ class Vllm:
             with contextlib.suppress(OSError):
                 self.record_path.unlink()
 
+    def holds_lock(self, lock_file) -> bool:
+        """Does the vLLM process (or a child) hold the GPU lock file open? It
+        does when the service passed it the lock's descriptor at launch, which
+        keeps the lock for as long as vLLM lives, even if the service dies."""
+        if not lock_file or not self.mine():
+            return False
+        pid = (jsonio.read(self.record_path) or {}).get("pid")
+        try:
+            target = os.stat(Path(lock_file).expanduser())
+        except OSError:
+            return False
+        for member in _group(pid):
+            try:
+                fds = os.scandir(f"/proc/{member}/fd")
+            except OSError:
+                continue
+            with fds:
+                for fd in fds:
+                    try:
+                        st = os.stat(fd.path)
+                    except OSError:
+                        continue
+                    if (st.st_ino, st.st_dev) == (target.st_ino, target.st_dev):
+                        return True
+        return False
+
     def mine(self) -> bool:
         record = jsonio.read(self.record_path)
         return bool(
@@ -471,7 +631,7 @@ class Vllm:
 
     # --- lifecycle -------------------------------------------------------------
 
-    def start(self, profile) -> bool:
+    def start(self, profile, fd=None) -> bool:
         """Launch vLLM with ``profile``; False (with ``error``) if it could not."""
         if self.state in ("starting", "ready") and self.mine():
             return True
@@ -501,6 +661,7 @@ class Vllm:
                     stderr=sink,
                     stdin=subprocess.DEVNULL,
                     start_new_session=True,
+                    pass_fds=(fd,) if fd is not None else (),
                 )
                 code = process.wait(timeout=120)
         except (OSError, subprocess.SubprocessError) as exc:
@@ -515,6 +676,7 @@ class Vllm:
                 "error",
                 f"serve script exited {code}; see vllm-launch.log",
             )
+            self.error = self.failure_reason()
             return False
         self.started_at = time.time()
         self.profile = profile
@@ -531,6 +693,34 @@ class Vllm:
         )
         return True
 
+    def log_path(self) -> Path:
+        return Path(self.config.vllm.pid_dir).expanduser() / f"vllm_{self.port}.log"
+
+    def failure_reason(self) -> str:
+        """Why the last start failed: the last error line of vLLM's own log
+        (``ValueError: ... KV cache ...``), else what the service knows."""
+        try:
+            with self.log_path().open("rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                handle.seek(max(0, handle.tell() - 65536))
+                text = handle.read().decode("utf-8", "replace")
+        except OSError:
+            text = ""
+        found = re.findall(
+            r"^.*?\b(\w*(?:Error|Exception)\b[^\n]*)$", text, re.MULTILINE
+        )
+        if found:
+            return found[-1].strip()[:300]
+        return (self.error or "vLLM failed to start")[:300]
+
+    def _healthy(self) -> bool:
+        """/health, asked at most once a second (the supervisor ticks four
+        times a second while a worker runs)."""
+        now = time.monotonic()
+        if now - self._health[0] >= 1.0:
+            self._health = (now, healthy(self.port))
+        return self._health[1]
+
     def poll(self) -> str:
         """Advance ``starting`` to ``ready`` (or ``error`` on timeout/death)."""
         if self.state == "asleep":
@@ -538,12 +728,13 @@ class Vllm:
                 self.state, self.error = "error", "vLLM exited while asleep"
             return self.state
         if self.state == "starting":
-            if healthy(self.port):
+            if self._healthy():
                 self.state = "ready"
                 if is_sleeping(self.port):  # adopted a server left asleep
                     self.state = "asleep"
             elif not self.mine():
                 self.state, self.error = "error", "vLLM exited while starting"
+                self.error = self.failure_reason()
             elif (
                 time.time() - (self.started_at or 0) > self.config.vllm.start_timeout_s
             ):
@@ -552,7 +743,7 @@ class Vllm:
         elif (
             self.state == "ready"
             and self.mine()
-            and not healthy(self.port)
+            and not self._healthy()
             and identity(self._pid() or 0) is None
         ):
             # Died after it was ready.
@@ -594,6 +785,7 @@ class Vllm:
             self.state = "stopped"
             return True
         self.state = "stopping"
+        self._health = (0.0, False)
         record = jsonio.read(self.record_path) or {}
         pid = record.get("pid")
         try:

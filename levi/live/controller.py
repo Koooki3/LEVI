@@ -37,7 +37,6 @@ from . import config as live_config
 
 SCHEMA = "levi.live.status.v1"
 WORKER_STALL_S = 600.0
-ERROR_WAIT_S = 60.0
 GATE_GRACE_S = 8.0
 MAX_EVENTS = 10
 STATES_WITH_WORK = ("mirrored",)
@@ -58,6 +57,24 @@ def peek_run(workspace, run_id) -> dict | None:
         try:
             row = db.execute(
                 "SELECT body FROM records WHERE kind='runs' AND id=?", (run_id,)
+            ).fetchone()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return None
+    return json.loads(row[0]) if row else None
+
+
+def peek_record(workspace, kind, record_id) -> dict | None:
+    """Any store record (``changes`` for a draft) read the same way."""
+    path = Path(workspace) / "outputs/LEVI/workbench/agent/workbench.sqlite3"
+    if not path.is_file():
+        return None
+    try:
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+        try:
+            row = db.execute(
+                "SELECT body FROM records WHERE kind=? AND id=?", (kind, record_id)
             ).fetchone()
         finally:
             db.close()
@@ -132,7 +149,12 @@ class Controller:
         self._gate_written = (None, 0.0)
         self._policy_mib = (0.0, None)
         self.idle_since: float | None = None
-        self._error_at: float | None = None
+        self._waiting_since: dict = {}
+        self._status_at = 0.0
+        self.start_failures = 0
+        self.next_start_at = 0.0
+        self.attention: dict | None = None
+        self._resume_seen = None
         self.decision = gpumgr.Decision(True, "no work", "ok")
         self.state = "starting"
         self.last_error = ""
@@ -149,7 +171,11 @@ class Controller:
         # Callables taking the time; a returned message is logged as an error
         # (the CLI registers the page/core watchdog here).
         self.hooks: list = []
+        # Callable returning the page/core state for the status file (set by
+        # the CLI when it starts them); None when they are not ours.
+        self.frontend = None
         self._adopt_orphan()
+        self._adopt_vllm()
 
     # --- events ------------------------------------------------------------------
 
@@ -171,6 +197,10 @@ class Controller:
     def _refresh(self, now, full):
         c = self.config
         self.sessions = sessions.read_sessions(c.watch.roots, now)
+        # When each session began waiting for the operator's reset (the gate
+        # closes shortly before the episode that follows).
+        waiting = {s.path for s in self.sessions.values() if s.state == "waiting_reset"}
+        self._waiting_since = {p: self._waiting_since.get(p, now) for p in waiting}
         ports = self.probes.ports()
         up = any(int(p) in ports for p in c.gpu.policy_ports)
         if up != self.policy_up and self.state != "starting":
@@ -208,19 +238,24 @@ class Controller:
         return [n for _, n in sorted(names)]
 
     def _human_acted(self, name, state) -> bool:
-        """After a person's gate: has the run the worker waited on moved?"""
+        """Has the person done what the worker waited for? A plan: approved (or
+        moved on). A draft: committed or rejected -- approval alone is not
+        enough, the worker cannot commit without the approver."""
         info = self.awaiting[name]
         if time.time() - info["at"] < self.config.pipeline.human_recheck_s:
             return False
-        batch = (state or {}).get("current") or {}
-        ids = [r["run_id"] for r in (batch.get("temporal") or {}).values()]
-        if batch.get("anchored"):
-            ids.append(batch["anchored"]["run_id"])
-        for run_id in ids:
-            run = peek_run(self.config.workspace, run_id)
-            if run and (run["plan"].get("approval") or run["status"] != "planned"):
-                self.awaiting.pop(name, None)
-                return True
+        ws = self.config.workspace
+        if info.get("kind") == "changes" and info.get("changeset"):
+            change = peek_record(ws, "changes", info["changeset"])
+            acted = bool(change and change.get("status") in ("committed", "rejected"))
+        else:
+            run = peek_run(ws, info.get("run_id")) if info.get("run_id") else None
+            acted = bool(
+                run and (run["plan"].get("approval") or run["status"] != "planned")
+            )
+        if acted:
+            self.awaiting.pop(name, None)
+            return True
         info["at"] = time.time()
         return False
 
@@ -254,30 +289,43 @@ class Controller:
         c = self.config
         mode = c.effective_gpu_mode()
         profile = c.vllm_profile()
-        self.gate = gpumgr.gate(c, mode, self.sessions, self.policy_up)
+        self.gate = gpumgr.gate(
+            c,
+            mode,
+            self.sessions,
+            self.policy_up,
+            self.policy_changed_at or self.started_at,
+            now=now,
+            waiting_since=self._waiting_since,
+        )
         mine = self.vllm.mine()
         state = (
             self.vllm.poll()
             if (mine or self.vllm.state in ("starting", "ready", "asleep"))
             else self.vllm.state
         )
+        self._check_resume(now)
         if state == "error":
-            # A failed start (or a vLLM that died) is waited out, not retried
-            # in a loop.
-            self.lock.release()
-            if self._error_at is None:
-                self._error_at = now
-                self.event("vLLM failed: " + (self.vllm.error or "unknown"), "error")
-            if now - self._error_at > ERROR_WAIT_S:
-                self.vllm.state, self._error_at = "stopped", None
+            # A failed start (or a vLLM that died): note it, back off, and
+            # after a few in a row stop and ask for a person.
+            if not self.vllm.mine():
+                self.lock.release()
+            self._vllm_failed(now)
+            self.vllm.state = "stopped"
+            state = "stopped"
+        if self.attention:
             self.decision = gpumgr.Decision(
-                False, self.vllm.error or "vLLM failed", "error"
+                False,
+                f"vLLM failed to start {self.start_failures} times: "
+                f"{self.attention['reason']}; `levi live resume` clears it",
+                "needs_attention",
             )
             return False
-        self._error_at = None
         if mine:
             return self._resident_step(now, want, state, mode, profile)
-        if self.vllm.external():
+        # Only look at :8100 when there is work for it (an idle tick opens no
+        # socket, and the port may be another agent's vLLM).
+        if want and self.vllm.external():
             if mode == "manual" or c.vllm.adopt_external:
                 self.decision = gpumgr.Decision(
                     True, "using the vLLM already serving", "external"
@@ -291,11 +339,40 @@ class Controller:
             return False
         if not want:
             return False
+        if now < self.next_start_at:
+            self.decision = gpumgr.Decision(
+                False,
+                f"the last vLLM start failed; trying again in "
+                f"{self.next_start_at - now:.0f} s ({self.vllm.error})",
+                "backoff",
+            )
+            return False
+        if not self.gate.open and mode != "manual":
+            # A cold start is 45 s of heavy GPU load: never while the policy infers.
+            self.decision = gpumgr.Decision(
+                False, "waiting for the gate: " + self.gate.reason, "gate_closed"
+            )
+            return False
         free = None
         need = 0
         if mode != "manual":
             free = self.free_mib(now)
-            need = self._need(profile, now)
+            total = (self._vram[1] or {}).get("total_mib") or 32607
+            if free is not None:
+                plan = gpumgr.plan_budget(
+                    c, free_mib=free, total_mib=total, policy_up=self.policy_up
+                )
+                if not plan.ok:
+                    self.decision = gpumgr.Decision(
+                        False, plan.reason, plan.code, plan.need_mib
+                    )
+                    return False
+                profile = {
+                    **profile,
+                    "gpu_memory_utilization": plan.utilization,
+                    "max_model_len": plan.max_model_len,
+                }
+                need = plan.need_mib
         since = None if self.policy_changed_at is None else now - self.policy_changed_at
         self.decision = gpumgr.decide(
             c, mode, free_mib=free, need=need, since_policy_change_s=since
@@ -307,16 +384,59 @@ class Controller:
                 False, "another agent holds the GPU lock", "lock", need
             )
             return False
-        self.event(f"starting vLLM ({mode}; a cold start takes 45-70 s)")
-        if not self.vllm.start(profile):
-            self.lock.release()
-            self._error_at = now
-            self.event("vLLM did not start: " + self.vllm.error, "error")
+        self.event(
+            f"starting vLLM (budget {profile['gpu_memory_utilization']}, "
+            f"max_model_len {profile['max_model_len']}, {free} MiB free, "
+            f"{'beside' if self.policy_up else 'no'} policy server; "
+            "a cold start takes 45-70 s)"
+        )
+        if not self.vllm.start(profile, fd=self.lock.fileno()):
+            if not self.vllm.mine():
+                self.lock.release()
+            self._vllm_failed(now)
+            self.vllm.state = "stopped"
         return False
+
+    def _vllm_failed(self, now):
+        """One failed start: wait 60 s doubling to 600 s; after
+        ``vllm.max_start_failures`` in a row stop and need a person."""
+        v = self.config.vllm
+        self.start_failures += 1
+        reason = self.vllm.failure_reason()
+        self.vllm.error = reason
+        wait = min(
+            v.start_backoff_max_s, v.start_backoff_s * 2 ** (self.start_failures - 1)
+        )
+        self.next_start_at = now + wait
+        self.event(
+            f"vLLM failed to start ({self.start_failures} of {v.max_start_failures}): {reason}",
+            "error",
+        )
+        if self.start_failures >= v.max_start_failures:
+            self.attention = {"code": "vllm_failed", "reason": reason, "since": now}
+            self.event(
+                "vLLM keeps failing: labelling is paused until `levi live resume`",
+                "error",
+            )
+
+    def _check_resume(self, now):
+        """``levi live resume`` leaves ``live/resume.json``: forget the failures."""
+        path = self.config.live_dir / "resume.json"
+        try:
+            stamp = path.stat().st_mtime_ns
+        except OSError:
+            return
+        if stamp != self._resume_seen:
+            self._resume_seen = stamp
+            if self.start_failures or self.attention:
+                self.event("resumed: vLLM may be started again")
+            self.start_failures, self.attention, self.next_start_at = 0, None, 0.0
 
     def _resident_step(self, now, want, state, mode, profile) -> bool:
         """vLLM is ours and up: keep it awake only while there is room."""
         c = self.config
+        if state == "ready":
+            self.start_failures = 0
         if state == "starting":
             self.decision = gpumgr.Decision(True, "vLLM is starting", "ok")
             return False
@@ -335,7 +455,7 @@ class Controller:
             return True
         # asleep: wake when there is work and room for it
         blocked = gpumgr.should_sleep(c, mode, free_mib=None, policy_mib=policy)
-        need = self._need(profile, now, asleep=True)
+        need = self._need(self.vllm.profile or profile, now, asleep=True)
         self.decision = (
             gpumgr.Decision(False, blocked[1], blocked[0], need)
             if blocked
@@ -358,8 +478,7 @@ class Controller:
         self._stop_worker()
         if not self.vllm.sleep():
             # No sleeping (not enabled, or it failed): free the GPU the hard way.
-            self.vllm.stop()
-            self.lock.release()
+            self._stop_vllm()
         self.idle_since = None
 
     def preempt(self, code, reason):
@@ -367,9 +486,36 @@ class Controller:
         self.event(f"giving the GPU back: {reason}")
         self.decision = gpumgr.Decision(False, reason, code)
         self._stop_worker()
-        self.vllm.stop()
-        self.lock.release()
+        self._stop_vllm()
         self.idle_since = None
+
+    def _stop_vllm(self) -> bool:
+        """Stop vLLM and let go of the GPU lock *only once the process is
+        gone*: the lock says "vLLM is on the GPU"."""
+        gone = self.vllm.stop()
+        if gone:
+            self.lock.release()
+        return gone
+
+    def _adopt_vllm(self):
+        """A vLLM this service started before a restart is still running. Its
+        GPU lock must still be held: by the vLLM process itself (it inherited
+        the descriptor) or, failing that, by us now. If somebody else holds
+        the lock while it runs, take no part in it and say so."""
+        if not self.vllm.mine():
+            return
+        if self.lock.acquire() or self.vllm.holds_lock(self.config.gpu.lock_file):
+            self.event("took back the vLLM that was running")
+            return
+        pid = (jsonio.read(self.vllm.record_path) or {}).get("pid")
+        with contextlib.suppress(OSError):
+            self.vllm.record_path.unlink()
+        self.vllm.state = "stopped"
+        self.event(
+            f"a vLLM (pid {pid}) is running but another agent holds the GPU lock: "
+            "not taking it over; it is treated as someone else's server",
+            "error",
+        )
 
     def _release_if_idle(self, now, work: bool):
         """After ``vllm.idle_timeout_s`` without work: sleep (while an
@@ -398,8 +544,7 @@ class Controller:
             self.event("no work: vLLM sleeps (the evaluation is live)")
         else:
             self.event("no work: stopping vLLM to free the GPU")
-            self.vllm.stop()
-            self.lock.release()
+            self._stop_vllm()
         self.idle_since = None
 
     # --- the worker ----------------------------------------------------------------------
@@ -505,8 +650,14 @@ class Controller:
         elif code == 13:
             self.event(f"batch for {name} paused")
         elif code == 11:
-            self.awaiting[name] = {"at": now}
-            self.event(f"{name}: waiting for a person to approve")
+            gate = (jsonio.read(self.config.live_dir / "worker.json") or {}).get(
+                "awaiting"
+            ) or {}
+            self.awaiting[name] = {"at": now, **gate}
+            what = (
+                "approve the plan" if gate.get("kind") == "plan" else "commit the draft"
+            )
+            self.event(f"{name}: waiting for a person to {what}")
         elif code == 10:
             self.backoff[name] = now + 20
             self.event(f"{name}: waiting for the model server")
@@ -632,7 +783,9 @@ class Controller:
             message = hook(now)
             if message:
                 self.event(message, "error")
-        self.write_status(now)
+        if now - self._status_at >= min(1.0, c.service.heartbeat_s):
+            self._status_at = now
+            self.write_status(now)
         if self.worker is not None and self.sessions:
             return c.service.gate_poll_s
         return (
@@ -647,6 +800,12 @@ class Controller:
         if self.worker is not None or now - self._cache_at < 600:
             return
         self._cache_at = now
+        for name in mirror.list_states(self.config):
+            changed = mirror.verify_sources(self.config, name)
+            if changed:
+                self.event(
+                    f"{name}: the source of {len(changed)} mirrored demo(s) changed"
+                )
         keep = []
         for state in mirror.list_states(self.config).values():
             batch = state.get("current") or {}
@@ -669,7 +828,7 @@ class Controller:
         scans = {t.name: t for t in self.tasks}
         fault_sessions = {
             mirror.dataset_name(g, t): s
-            for (g, t), s in self.sessions.items()
+            for (_r, g, t), s in self.sessions.items()
             if s.fault
         }
         rows = {}
@@ -679,7 +838,11 @@ class Controller:
             counts = mirror.counts(state) if state else {}
             ready = len(scan.ready) if scan else 0
             current = state.get("current")
+            demos = (state.get("demos") or {}).values()
             row = {
+                "review_runs_open": state.get("review_runs_open", 0),
+                "stuck": counts.get("stuck", 0),
+                "source_changed": sum(1 for d in demos if d.get("source_changed")),
                 "episodes": sum(counts.values()) + ready,
                 "pending": counts.get("mirrored", 0) + ready,
                 "annotating": len((current or {}).get("demos") or []),
@@ -721,6 +884,7 @@ class Controller:
                 row["state"] = "annotating"
             elif name in self.awaiting:
                 row["state"] = "awaiting_approval"
+                row["awaiting"] = self.awaiting[name].get("kind")
             elif name in self.backoff and self.backoff[name] > now:
                 row["state"] = "error"
             elif row["pending"] or row["waiting"]:
@@ -753,7 +917,13 @@ class Controller:
         cpu = self._meter.percent()
         if cpu is not None:
             self._cpu = cpu
-        session_rows = [s.public() for s in list(self.sessions.values())[:16]]
+        session_rows = []
+        for s in list(self.sessions.values())[:16]:
+            row = s.public()
+            # When it began waiting for the operator's reset (the page can
+            # count down to the next episode with reset_wait_s).
+            row["waiting_reset_since"] = self._waiting_since.get(s.path)
+            session_rows.append(row)
         pid = os.getpid()
         return {
             "schema": SCHEMA,
@@ -786,7 +956,8 @@ class Controller:
                     "reason": self.decision.reason[:200],
                 },
                 "free_mib": (self._vram[1] or {}).get("free_mib"),
-                "lock_held": self.lock.held,
+                "lock_held": self.lock.held
+                or self.vllm.holds_lock(self.config.gpu.lock_file),
             },
             "datasets": rows,
             "queue_depth": sum(1 for r in rows.values() if r["pending"]),
@@ -805,7 +976,11 @@ class Controller:
                     "reasons",
                 )
             },
-            "events": self.events,
+            # Set when the service gave up starting vLLM and needs a person
+            # (`levi live resume`); labelling is paused, sessions still welcome.
+            "attention": self.attention,
+            "frontend": self.frontend() if self.frontend else None,
+            "events": list(self.events),
             "last_error": self.last_error,
             "resources": {
                 "rss_mb": resources.rss_mb(pid),
@@ -823,6 +998,28 @@ class Controller:
         """The loop. ``once``: return when nothing is left to do."""
         started = time.time()
         idle_rounds = 0
+        beat = self._start_heartbeat()
+        try:
+            return self._loop(once, max_seconds, started, idle_rounds)
+        finally:
+            beat.set()
+
+    def _start_heartbeat(self):
+        """status.json keeps its heartbeat while the loop is busy: stopping a
+        worker, putting vLLM to sleep or stopping it can take a minute or two,
+        and a client that finds the file stale falls back to manual labelling.
+        A thread rewrites it every ``heartbeat_s`` whatever the loop is doing."""
+        stop = threading.Event()
+
+        def beat():
+            while not stop.wait(self.config.service.heartbeat_s):
+                with contextlib.suppress(Exception):
+                    self.write_status()
+
+        threading.Thread(target=beat, daemon=True, name="levi-live-heartbeat").start()
+        return stop
+
+    def _loop(self, once, max_seconds, started, idle_rounds):
         while self.running:
             wait = self.tick()
             if once:
@@ -851,7 +1048,7 @@ class Controller:
         self.wake.set()
         self._stop_worker(grace=30.0)
         if self.vllm.mine():
-            self.vllm.stop()
+            self._stop_vllm()
         self.lock.release()
         self.state = "stopped"
         with contextlib.suppress(Exception):
@@ -862,22 +1059,38 @@ class Controller:
 
 
 class Instance:
-    """The one running service per home directory: a flock and a pid file."""
+    """The one running service per home directory *and* per workspace: two
+    flocks (``<home>/live.lock``, ``<workspace>/live/service.lock``) and a pid
+    file. Two homes cannot both run on one workspace."""
 
-    def __init__(self, home):
+    def __init__(self, home, workspace=None):
         self.home = Path(home)
+        self.workspace = Path(workspace) if workspace else None
         self.lock_path = self.home / "live.lock"
         self.pid_path = self.home / "live.pid"
         self._handle = None
+        self._ws_handle = None
 
-    def acquire(self) -> bool:
-        self.home.mkdir(parents=True, exist_ok=True)
-        handle = open(self.lock_path, "a+")  # noqa: SIM115
+    @staticmethod
+    def _lock(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(path, "a+")  # noqa: SIM115
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             handle.close()
+            return None
+        return handle
+
+    def acquire(self) -> bool:
+        handle = self._lock(self.lock_path)
+        if handle is None:
             return False
+        if self.workspace is not None:
+            self._ws_handle = self._lock(self.workspace / "live" / "service.lock")
+            if self._ws_handle is None:
+                handle.close()
+                return False
         self._handle = handle
         jsonio.write(
             self.pid_path,
@@ -892,11 +1105,13 @@ class Instance:
     def release(self):
         with contextlib.suppress(OSError):
             self.pid_path.unlink()
-        if self._handle:
-            with contextlib.suppress(OSError):
-                fcntl.flock(self._handle, fcntl.LOCK_UN)
-            self._handle.close()
-            self._handle = None
+        for name in ("_handle", "_ws_handle"):
+            handle = getattr(self, name)
+            if handle:
+                with contextlib.suppress(OSError):
+                    fcntl.flock(handle, fcntl.LOCK_UN)
+                handle.close()
+                setattr(self, name, None)
 
     def holder(self) -> dict | None:
         """The running service's pid record, if its process is alive."""

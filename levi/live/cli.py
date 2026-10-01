@@ -19,6 +19,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 from . import auto, controller, gpumgr, jsonio, mirror, resources
@@ -61,6 +62,12 @@ def add_config_options(parser):
     parser.add_argument("--ui-port", type=int)
     parser.add_argument("--core-port", type=int)
     parser.add_argument(
+        "--adopt-workspace",
+        action="store_true",
+        help="turn an existing LEVI workspace that is not a live one into the live "
+        "workspace (refused otherwise)",
+    )
+    parser.add_argument(
         "--home", help="where status.json and the pid file live (default ~/.levi-live)"
     )
 
@@ -89,8 +96,57 @@ def resolve_config(args):
     return config.validate()
 
 
-def prepare(config):
-    """Create the workspace, the live.toml (if missing) and the marker."""
+SOCKET_LIMIT = 103  # bytes in a Unix socket path (sun_path, with the NUL)
+
+
+def socket_path(config) -> Path:
+    return config.workspace / "outputs/LEVI/workbench/agent/core/api.sock"
+
+
+def check_socket_path(config):
+    """The core listens on a Unix socket inside the workspace; a long
+    workspace path makes it too long and the core refuses to start. Say so
+    up front, not in ``ui.log`` after the service claims to be running."""
+    path = socket_path(config)
+    if len(os.fsencode(path)) > SOCKET_LIMIT:
+        raise ValueError(
+            f"the workspace path is too long for the core's Unix socket "
+            f"({len(os.fsencode(path))} > {SOCKET_LIMIT} bytes: {path}); "
+            "choose a shorter --workspace"
+        )
+
+
+def check_workspace(config, adopt=False):
+    """Refuse a workspace that is not a live one.
+
+    ``levi live`` writes a marker that switches on the automatic approver; it
+    must never land in the workspace of the product LEVI or any other LEVI
+    that people use. A workspace that already holds LEVI's own state
+    (``outputs/LEVI``, a catalog) without the live marker needs
+    ``--adopt-workspace``; the product checkout's ``.state`` is refused
+    always."""
+    root = config.workspace.expanduser().resolve()
+    if root == (controller.project_root() / ".state").resolve():
+        raise ValueError(
+            f"{root} is the checkout's own LEVI workspace (the product LEVI's): "
+            "the live service needs a workspace of its own"
+        )
+    live = (root / "live" / auto.MARKER).is_file()
+    holds = (root / "outputs/LEVI").exists() or (root / "datasets.json").exists()
+    if holds and not live and not adopt:
+        raise ValueError(
+            f"{root} already holds a LEVI workspace that is not a live one "
+            "(someone may be using it). Choose another --workspace, or pass "
+            "--adopt-workspace to turn it into the live workspace"
+        )
+
+
+def prepare(config, adopt=False, core=False):
+    """Create the workspace, the live.toml (if missing) and the marker.
+    ``core``: a page/core will be started, so its socket path must fit."""
+    if core:
+        check_socket_path(config)
+    check_workspace(config, adopt)
     config.live_dir.mkdir(parents=True, exist_ok=True)
     config.home.mkdir(parents=True, exist_ok=True)
     target = config.workspace / "live.toml"
@@ -150,6 +206,8 @@ class Frontend:
                 start_new_session=True,
             )
         resources.apply(c, pid=self.process.pid)
+        self.started = time.time()
+        self.state = "starting"
 
     def core_pid(self):
         record = jsonio.read(
@@ -158,24 +216,88 @@ class Frontend:
         pid = (record or {}).get("pid")
         return pid if isinstance(pid, int) and gpumgr.identity(pid) else None
 
+    # --- is it up? ----------------------------------------------------------
+
+    state = "starting"  # starting | ok | failed
+    error = ""
+    attempts = 0
+    started = 0.0
+
+    def public(self) -> dict:
+        return {
+            "state": self.state,
+            "error": self.error,
+            "attempts": self.attempts,
+            "ui": self.ui,
+            "core_port": self.config.service.core_port,
+        }
+
+    def _tail_error(self) -> str:
+        """The last error line of ui.log (what the core said when it died)."""
+        try:
+            lines = (
+                (self.config.logs_dir / "ui.log")
+                .read_text(errors="replace")
+                .splitlines()
+            )
+        except OSError:
+            return ""
+        for line in reversed(lines[-80:]):
+            if "Error" in line or "error" in line or "Traceback" in line:
+                return line.strip()[:300]
+        return lines[-1].strip()[:300] if lines else ""
+
+    def _core_answers(self) -> bool:
+        url = f"http://127.0.0.1:{self.config.service.core_port}/api/levi/health"
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        try:
+            with opener.open(url, timeout=1) as response:
+                return response.status == 200
+        except (OSError, ValueError):
+            return False
+
+    def _alive(self) -> bool:
+        if self.ui:
+            return self.process is not None and self.process.poll() is None
+        return self.core_pid() is not None
+
     def check(self, now) -> str | None:
-        """Restart the page or the core if it has died (at most every 30 s,
-        backing off to five minutes). Returns a message when it acted."""
-        if now < getattr(self, "_next", 0):
+        """The page/core watchdog: decide whether it came up, and restart it
+        if it dies (three attempts, 30 s then 60 s then 120 s apart); then
+        stop trying and say so once. Returns a message when something
+        happened."""
+        if self.state == "failed" or now < getattr(self, "_next", 0):
             return None
-        alive = (
-            self.process is not None and self.process.poll() is None
-            if self.ui
-            else self.core_pid() is not None
-        )
-        if alive:
-            self._failures = 0
+        if self.state == "starting":
+            up = self._alive() and (not self.ui or self._core_answers())
+            if up:
+                self.state, self.error = "ok", ""
+                return None
+            exited = self.process is not None and self.process.poll() is not None
+            core_only_done = not self.ui and exited and self.process.returncode == 0
+            if (exited and not core_only_done) or now - self.started > 120:
+                return self._failed(now, "did not come up")
+            if core_only_done and self.core_pid() is None:
+                return self._failed(now, "did not come up")
             return None
-        self._failures = getattr(self, "_failures", 0) + 1
-        self._next = now + min(300.0, 30.0 * 2 ** (self._failures - 1))
+        if self._alive():
+            return None
+        return self._failed(now, "stopped")
+
+    def _failed(self, now, what) -> str:
+        what_is = "page" if self.ui else "core"
+        reason = self._tail_error() or "no reason in ui.log"
+        if self.attempts >= 3:
+            self.state, self.error = "failed", reason
+            return (
+                f"the {what_is} {what} and was restarted {self.attempts} times: giving "
+                f"up (labelling is not affected): {reason}"
+            )
+        self.attempts += 1
+        self.error = reason
+        self._next = now + 30.0 * 2 ** (self.attempts - 1)
         self.start(ui=self.ui)
-        what = "page" if self.ui else "core"
-        return f"the {what} was not running: restarted it (attempt {self._failures})"
+        return f"the {what_is} {what}: {reason}; restarted (attempt {self.attempts})"
 
     def stop(self):
         if self.process and self.process.poll() is None:
@@ -215,8 +337,8 @@ def cmd_start(args) -> int:
     config = resolve_config(args)
     if args.daemon:
         return daemonize(args, config)
-    prepare(config)
-    instance = controller.Instance(config.home)
+    prepare(config, args.adopt_workspace, core=not args.no_core)
+    instance = controller.Instance(config.home, config.workspace)
     if not instance.acquire():
         holder = instance.holder() or {}
         print(
@@ -258,6 +380,7 @@ def cmd_start(args) -> int:
         )
         if frontend:
             ctl.hooks.append(frontend.check)
+            ctl.frontend = frontend.public
         ctl.run()
     finally:
         log("shutting down")
@@ -269,7 +392,10 @@ def cmd_start(args) -> int:
 
 
 def daemonize(args, config) -> int:
-    instance = controller.Instance(config.home)
+    if not args.no_core:
+        check_socket_path(config)
+    check_workspace(config, args.adopt_workspace)
+    instance = controller.Instance(config.home, config.workspace)
     if instance.holder():
         print(f"The live service is already running (pid {instance.holder()['pid']}).")
         return 1
@@ -285,22 +411,51 @@ def daemonize(args, config) -> int:
             stdin=subprocess.DEVNULL,
             start_new_session=True,
         )
-    deadline = time.time() + 40
+    wants_frontend = not args.no_core
+    deadline = time.time() + 150
     while time.time() < deadline:
         holder = instance.holder()
         status = jsonio.read(config.status_file) or {}
-        if (
+        up = bool(
             holder
             and status.get("pid") == holder["pid"]
             and status.get("state") not in (None, "starting")
-        ):
+        )
+        front = status.get("frontend") or {}
+        settled = (
+            not wants_frontend
+            or front.get("state") in ("ok", "failed")
+            or (front.get("attempts") or 0) >= 1  # it failed once: say why now
+        )
+        if up and settled:
+            log = config.logs_dir / "live.log"
+            if front.get("state") != "ok" and wants_frontend:
+                print(
+                    f"live service running in the background (pid {holder['pid']}) and "
+                    f"labelling works, but the {'page' if front.get('ui') else 'core API'} "
+                    f"did not come up ({'giving up' if front.get('state') == 'failed' else 'still retrying'}): "
+                    f"{front.get('error')}\nsee {config.logs_dir / 'ui.log'}"
+                )
+                return 2
+            where = (
+                f"page http://{config.service.host}:{config.service.ui_port}"
+                if front.get("ui")
+                else f"core API :{config.service.core_port}"
+                + (
+                    " (no production build: run `levi build` for the page)"
+                    if wants_frontend and not args.no_ui
+                    else ""
+                )
+            )
             print(
-                f"live service running in the background (pid {holder['pid']}); log {config.logs_dir / 'live.log'}"
+                f"live service running in the background (pid {holder['pid']}); "
+                f"{where if wants_frontend else 'no page or API'}; log {log}"
             )
             return 0
         time.sleep(0.5)
     print(
-        "The live service did not come up in 40 s; see", config.logs_dir / "daemon.log"
+        "The live service did not finish starting in 150 s; see",
+        config.logs_dir / "daemon.log",
     )
     return 1
 
@@ -323,6 +478,7 @@ def _forward(args) -> list:
     for flag, on in (
         ("--auto-approve", args.auto_approve),
         ("--process-backlog", args.process_backlog),
+        ("--adopt-workspace", args.adopt_workspace),
         ("--no-ui", args.no_ui),
         ("--no-core", args.no_core),
     ):
@@ -336,7 +492,7 @@ def _forward(args) -> list:
 
 def cmd_stop(args) -> int:
     config = resolve_config(args)
-    instance = controller.Instance(config.home)
+    instance = controller.Instance(config.home, config.workspace)
     holder = instance.holder()
     if not holder:
         print("The live service is not running.")
@@ -357,7 +513,7 @@ def cmd_stop(args) -> int:
 
 def read_status(config):
     value = jsonio.read(config.status_file)
-    holder = controller.Instance(config.home).holder()
+    holder = controller.Instance(config.home, config.workspace).holder()
     alive = bool(holder and value and value.get("pid") == holder["pid"])
     return value, alive, holder
 
@@ -439,6 +595,8 @@ def diagnose(config) -> dict:
         warnings.append("the live service is not running (levi live start)")
     if holder:
         for pid in resources.tree(holder["pid"]):
+            if resources.rss_mb(pid) is None:
+                continue  # exited while we looked
             report["processes"].append(
                 {
                     "pid": pid,
@@ -461,10 +619,30 @@ def diagnose(config) -> dict:
                 warnings.append(
                     f"pid {row['pid']} runs at nice {row['nice']}, not {config.resources.nice}"
                 )
+    record = jsonio.read(config.live_dir / "vllm.json")
+    if (
+        isinstance(record, dict)
+        and record.get("pid")
+        and gpumgr.identity(record["pid"]) == record.get("identity")
+        and not holder
+    ):
+        report["orphan_vllm"] = record["pid"]
+        warnings.append(
+            f"an orphan vLLM (pid {record['pid']}, port {record.get('port')}) is still "
+            "running with no live service: it holds the GPU. `levi live start` takes it "
+            f"back, or stop it with `{config.vllm.stop_script} --stop {record.get('port')}`"
+        )
     gpu = {"vram": gpumgr.vram(), "processes": gpumgr.gpu_holders()}
     report["gpu"] = gpu
     vllm = ((value or {}).get("gpu") or {}).get("vllm") or {}
     report["vllm"] = vllm
+    if vllm.get("state") == "error" or (value or {}).get("attention"):
+        warnings.append(
+            "vLLM is failing to start"
+            + (f": {vllm.get('error')}" if vllm.get("error") else "")
+            + "; labelling is paused"
+            + (" until `levi live resume`" if (value or {}).get("attention") else "")
+        )
     if vllm.get("state") in ("ready", "starting"):
         working = bool((value or {}).get("worker")) or bool(
             (value or {}).get("queue_depth")
@@ -538,6 +716,17 @@ def diagnose(config) -> dict:
             n: r.get("state") for n, r in ((value or {}).get("datasets") or {}).items()
         },
     }
+    for name, row in ((value or {}).get("datasets") or {}).items():
+        if row.get("stuck"):
+            warnings.append(
+                f"{name}: {row['stuck']} demo(s) never finished (a leftover raw capture "
+                "or a client that died mid-write); they are left alone"
+            )
+        if row.get("source_changed"):
+            warnings.append(
+                f"{name}: the source of {row['source_changed']} mirrored demo(s) was "
+                "replaced after it was mirrored (annotations belong to the old content)"
+            )
     for root in config.watch.roots:
         if not Path(root).expanduser().is_dir():
             warnings.append(f"watch root {root} does not exist")
@@ -615,14 +804,24 @@ def cmd_once(args) -> int:
     config = resolve_config(args)
     fake = None
     if args.fake_vlm:
+        if (
+            not args.workspace
+            or Path(args.workspace).expanduser().resolve()
+            == Path(live_config.DEFAULT_WORKSPACE).resolve()
+        ):
+            raise ValueError(
+                "--fake-vlm labels with a stand-in model and (with --auto-approve) "
+                "commits its output as automatic annotations: give it a scratch "
+                "--workspace, never the live workspace"
+            )
         from . import fakevlm
 
         server, fake, port = fakevlm.serve(0)
         config.gpu.mode = "manual"
         config.vllm.port = port
         print(f"fake vLLM on 127.0.0.1:{port}")
-    prepare(config)
-    instance = controller.Instance(config.home)
+    prepare(config, args.adopt_workspace)
+    instance = controller.Instance(config.home, config.workspace)
     if not instance.acquire():
         print(
             "The live service is running; stop it first (levi live stop) or let it work."
@@ -646,8 +845,27 @@ def cmd_once(args) -> int:
     return 1 if bad else 0
 
 
+def cmd_resume(args) -> int:
+    """Tell the running service to forget vLLM start failures (it gave up
+    after ``vllm.max_start_failures``) and try again."""
+    config = resolve_config(args)
+    value, alive, _ = read_status(config)
+    config.live_dir.mkdir(parents=True, exist_ok=True)
+    jsonio.write(config.live_dir / "resume.json", {"requested_at": time.time()})
+    attention = (value or {}).get("attention")
+    if attention:
+        print(f"was waiting for a person: {attention.get('reason')}")
+    print(
+        "resume requested; the service picks it up within seconds"
+        if alive
+        else "resume recorded; the service is not running, the next start sees it"
+    )
+    return 0
+
+
 def cmd_init(args) -> int:
     config = resolve_config(args)
+    check_workspace(config, args.adopt_workspace)
     target = config.workspace / "live.toml"
     config.workspace.mkdir(parents=True, exist_ok=True)
     if target.exists():
@@ -692,6 +910,10 @@ def build_parser():
         "--fake-vlm", action="store_true", help="use a fake model server (no GPU)"
     )
     once.add_argument("--max-seconds", type=float, default=None)
+    resume = sub.add_parser(
+        "resume", help="clear a vLLM start failure the service gave up on"
+    )
+    add_config_options(resume)
     init = sub.add_parser("init", help="write a live.toml with every default")
     add_config_options(init)
     return parser
@@ -705,6 +927,7 @@ def main(argv=None) -> int:
         "status": cmd_status,
         "doctor": cmd_doctor,
         "once": cmd_once,
+        "resume": cmd_resume,
         "init": cmd_init,
     }
     try:

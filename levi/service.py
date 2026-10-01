@@ -627,6 +627,7 @@ class TrainingManifest(BaseModel):
     episodes: list[int] | None = Field(default=None, max_length=100000)
     anchored_run: str | None = Field(default=None, max_length=128)
     anchored_tasks: list[str] | None = None
+    allow_candidate_anchored: bool = False
     recap_revision: str | None = Field(default=None, max_length=64)
     allow_stale: bool = False
 
@@ -657,6 +658,7 @@ def manifest_build(payload: TrainingManifest):
         episodes=payload.episodes,
         anchored_run=payload.anchored_run,
         anchored_tasks=payload.anchored_tasks,
+        allow_candidate_anchored=payload.allow_candidate_anchored,
         recap_revision=payload.recap_revision,
         allow_stale=payload.allow_stale,
     )

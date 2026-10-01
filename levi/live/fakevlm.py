@@ -47,6 +47,7 @@ class Fake:
         # vLLM's dev endpoints (--enable-sleep-mode): a sleeping server
         # refuses to generate.
         self.sleeping = False
+        self.health_checks = 0
         self.sleeps = 0
         self.wakes = 0
         # Requests started and finished (a test sees one in flight, and that
@@ -194,6 +195,7 @@ def handler(fake):
 
         def do_GET(self):
             if self.path == "/health":
+                fake.health_checks += 1
                 self._send(200, {})
             elif self.path == "/version":
                 self._send(200, {"version": "0.0.0-fake"})

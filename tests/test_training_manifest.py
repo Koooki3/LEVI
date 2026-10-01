@@ -99,12 +99,15 @@ def _name(repo):
     return repo.split("/", 1)[1]
 
 
-def _anchored(name, outcomes, run_id="anchored-20260928-0001", bases=None):
+def _anchored(
+    name, outcomes, run_id="anchored-20260928-0001", bases=None, status="stable"
+):
     from levi.agent.anchored import builtin
     from levi.agent.store import Store
 
     store = Store(catalog.STATE)
     spec = builtin()["plates-release"].model_dump(by_alias=True)
+    spec["status"] = status
     store.put(
         "runs",
         run_id,
@@ -507,3 +510,66 @@ def test_reader_masks_weights_and_audits(repo):
     (root / "meta/tasks.jsonl").write_text('{"task_index": 0, "task": "other"}\n')
     with pytest.raises(ValueError, match="differs"):
         reader.ManifestFrames.open(result["output_dir"], root)
+
+
+def test_a_candidate_anchored_review_is_not_used_unless_asked_for(repo):
+    """The live service's generic release review is a candidate spec nobody
+    has validated: a manifest must not take its verdicts as verified by
+    default."""
+    name = _name(repo)
+    run_id = _anchored(name, {0: "failure", 1: "failure"}, status="candidate")
+    default = tm.build(repo, "all_rollouts")
+    assert default["anchored"] == {"skipped_candidate_runs": [run_id]}
+    f = _frames(default)
+    assert set(f.episode_success_source) == {"robot_flag"}
+    assert f[f.episode_index == 0].anchored_outcome.isna().all()
+    # An operation that needs verification says why it cannot proceed.
+    with pytest.raises(tm.ManifestError, match="candidate"):
+        tm.build(repo, "verified_success")
+    # Asking for it, by flag or by naming the run, uses it and says what it is.
+    for kwargs in ({"allow_candidate_anchored": True}, {"anchored_run": run_id}):
+        used = tm.build(repo, "verified_success", **kwargs)
+        assert used["anchored"]["run_id"] == run_id
+        assert used["anchored"]["spec_status"] == "candidate"
+        assert (
+            _frames(used).query("episode_index == 0").episode_success_source.iloc[0]
+            == "anchored"
+        )
+
+
+def test_subtask_segments_written_by_the_live_service_are_marked_in_the_manifest(repo):
+    from levi.agent.store import resolve
+
+    name = _name(repo)
+    folder = resolve(catalog.STATE, name, "annotations")
+    folder.mkdir(parents=True, exist_ok=True)
+
+    def atom(sid, start, to, review):
+        levi = {"subtask_id": sid, "outcome": "success", "attempt": 1}
+        if review:
+            levi["review"] = review
+        return {
+            "role": "assistant",
+            "content": sid,
+            "style": "subtask",
+            "timestamp": start,
+            "to": to,
+            "levi": levi,
+        }
+
+    atoms = [atom("grasp", 0.0, 0.5, "auto"), atom("place", 0.5, None, None)]
+    (folder / "episode_000000.json").write_text(
+        json.dumps({"episode_index": 0, "atoms": atoms})
+    )
+    result = tm.build(repo, "all_rollouts")
+    f = _frames(result)
+    e0 = f[f.episode_index == 0]
+    assert (
+        list(e0.subtask_review[:5]) == ["auto"] * 5
+        and e0.subtask_review.iloc[5] is None
+    )
+    assert e0.subtask_review.iloc[-1] is None  # a person's segment is not marked
+    note = result["annotation"]
+    assert note["subtask_frames"] == 12 and note["subtask_frames_auto"] == 5
+    assert note["subtask_auto_share"] == pytest.approx(5 / 12, abs=1e-4)
+    assert f[f.episode_index == 1].subtask_review.isna().all()

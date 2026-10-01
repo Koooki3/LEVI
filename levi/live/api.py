@@ -104,11 +104,23 @@ def sessions_view():
         return _disabled()
     now = time.time()
     found = sessions.read_sessions(config.watch.roots, now)
+    # When each began waiting for the reset: only the supervisor sees that.
+    since = {
+        (r.get("root"), r.get("group"), r.get("task_folder")): r.get(
+            "waiting_reset_since"
+        )
+        for r in ((jsonio.read(config.status_file) or {}).get("sessions") or [])
+    }
     rows = []
-    for (group, task), session in sorted(found.items())[:64]:
+    for (_root, group, task), session in sorted(found.items())[:64]:
         row = session.public()
         row["dataset"] = mirror.dataset_name(group, task)
         row["fault"] = session.fault
+        row["waiting_reset_since"] = (
+            since.get((_root, group, task))
+            if session.state == "waiting_reset"
+            else None
+        )
         rows.append(row)
     fr3 = sessions.read_fr3(config.fr3.health_file, config.fr3.stale_s, now)
     return {

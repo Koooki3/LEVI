@@ -126,11 +126,16 @@ def test_an_approval_by_the_approver_is_stamped_auto_and_audited(
     assert [a["levi"]["review"] for a in atoms] == ["auto"]
     assert atoms[0]["levi"]["origin"]["review"] == "auto"
     assert not (folder / "annotations/outcomes").exists()  # no human outcome label
-    assert [x["tool"] for x in audit(live_ws)] == [
-        "runs.plan",
-        "plans.approve",
-        "changes.approve",
-        "changes.commit",
+    # Each state-changing call twice: allowed, then what it came to.
+    assert [(x["tool"], x["decision"]) for x in audit(live_ws)] == [
+        ("runs.plan", "allowed"),
+        ("runs.plan", "completed"),
+        ("plans.approve", "allowed"),
+        ("plans.approve", "completed"),
+        ("changes.approve", "allowed"),
+        ("changes.approve", "completed"),
+        ("changes.commit", "allowed"),
+        ("changes.commit", "completed"),
     ]
 
 
@@ -241,3 +246,107 @@ def test_the_atom_mark_survives_a_plain_save_and_turns_to_edited_when_a_person_c
     assert save(atom) == "auto"  # saving the page is not a review
     assert save({**atom, "content": "my wording"}) == "edited"
     assert save({**atom, "to": 1.5}) == "edited"
+
+
+def test_the_approver_cannot_approve_or_commit_a_review_or_an_outcome(
+    bench, dataset, live_ws
+):
+    """D5 is enforced by the authorization layer, not by the worker's manners:
+    an anchored review proposes an outcome, and committing one writes a human
+    outcome label."""
+    wb, context = bench
+    approver = auto.principal()
+    plan = TaskContext(
+        **{
+            **context.model_dump(),
+            "provider": "external",
+            "workflow": {"kind": "review", "require_human_pilot": False},
+        }
+    )
+    run = invoke(wb, approver, "runs.plan", plan.model_dump())
+    outcome = {
+        "episode_index": 0,
+        "kind": "outcome",
+        "content": "x",
+        "start": 0.0,
+        "outcome": "success",
+        "evidence_ids": ["e"],
+    }
+    wb.store.put(
+        "changes",
+        "c-review",
+        {
+            "id": "c-review",
+            "run_id": run["id"],
+            "status": "draft",
+            "revision": 0,
+            "proposals": [outcome],
+            "provenance": {},
+        },
+    )
+    for name in ("changes.approve", "changes.commit"):
+        with pytest.raises(PermissionError, match="never a review"):
+            invoke(
+                wb,
+                approver,
+                name,
+                {"changeset_id": "c-review", "revision": 0},
+                key="k",
+            )
+    # A temporal run with an outcome proposal smuggled in is refused too.
+    temporal_run = invoke(
+        wb, approver, "runs.plan", temporal(context, dataset).model_dump()
+    )
+    wb.store.put(
+        "changes",
+        "c-mixed",
+        {
+            "id": "c-mixed",
+            "run_id": temporal_run["id"],
+            "status": "draft",
+            "revision": 0,
+            "proposals": [outcome],
+            "provenance": {},
+        },
+    )
+    with pytest.raises(PermissionError, match="outcome"):
+        invoke(
+            wb, approver, "changes.approve", {"changeset_id": "c-mixed", "revision": 0}
+        )
+    refused = [x for x in audit(live_ws) if x["decision"] == "refused"]
+    assert [x["tool"] for x in refused] == [
+        "changes.approve",
+        "changes.commit",
+        "changes.approve",
+    ]
+    assert not list(live_ws.rglob("outcomes"))
+
+
+def test_writing_an_outcome_label_refuses_anything_the_approver_approved(tmp_path):
+    from levi.agent.formats import ANNOTATIONS
+
+    proposal = {"episode_index": 0, "outcome": "success", "kind": "outcome"}
+    with pytest.raises(ValueError, match="cannot write an outcome label"):
+        ANNOTATIONS["outcome"].apply(
+            proposal,
+            app=None,
+            state=None,
+            atoms=[],
+            folder=tmp_path,
+            origin={"review": "auto"},
+        )
+
+
+def test_a_failed_call_is_audited_with_its_error(bench, dataset, live_ws):
+    wb, context = bench
+    approver = auto.principal()
+    run = invoke(wb, approver, "runs.plan", temporal(context, dataset).model_dump())
+    with pytest.raises(Exception, match="revision"):
+        invoke(wb, approver, "plans.approve", {"run_id": run["id"], "revision": 99})
+    last = audit(live_ws)[-1]
+    assert (last["tool"], last["decision"]) == ("plans.approve", "failed")
+    assert "revision" in last["error"].lower()
+    # Pure reads are not logged.
+    before = len(audit(live_ws))
+    invoke(wb, approver, "runs.get", {"run_id": run["id"]})
+    assert len(audit(live_ws)) == before

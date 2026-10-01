@@ -252,7 +252,9 @@ class SidecarStore:
         revision_id = revision_id or self.current_revision()
         if not revision_id:
             return []
-        folder = self.revision_path(revision_id) / "masks" / f"episode-{episode_index:06d}"
+        folder = (
+            self.revision_path(revision_id) / "masks" / f"episode-{episode_index:06d}"
+        )
         rows: list[dict[str, Any]] = []
         for path in sorted(folder.glob("**/*.parquet")):
             rows.extend(
@@ -302,13 +304,16 @@ class SidecarStore:
         revision = self.revision_path(revision_id)
         masks_root = revision / "masks"
         if parent_root is not None and parent_root.is_dir():
+
             def table(name: str) -> list[dict[str, Any]]:
                 path = parent_root / name
                 return pq.read_table(path).to_pylist() if path.is_file() else []
 
             tracks = table("tracks.parquet")
             kept_tracks = [
-                t for t in tracks if (t["episode_index"], t["camera_key"]) not in replace
+                t
+                for t in tracks
+                if (t["episode_index"], t["camera_key"]) not in replace
             ]
             live_ids = {(t["episode_index"], t["object_id"]) for t in kept_tracks}
             dropped_ids = {
@@ -322,14 +327,25 @@ class SidecarStore:
                 if (o["episode_index"], o["object_id"]) not in dropped_ids
             ]
             kept_qa = [
-                q for q in table("qa.parquet") if (q["episode_index"], q["camera_key"]) not in replace
+                q
+                for q in table("qa.parquet")
+                if (q["episode_index"], q["camera_key"]) not in replace
             ]
             kept_events = table("events.parquet")
             for path in sorted((parent_root / "masks").glob("episode-*/*.parquet")):
-                meta = pq.read_table(path, columns=["episode_index", "camera_key"]).slice(0, 1).to_pylist()
-                if meta and (meta[0]["episode_index"], meta[0]["camera_key"]) in replace:
+                meta = (
+                    pq.read_table(path, columns=["episode_index", "camera_key"])
+                    .slice(0, 1)
+                    .to_pylist()
+                )
+                if (
+                    meta
+                    and (meta[0]["episode_index"], meta[0]["camera_key"]) in replace
+                ):
                     continue
-                kept_files.append((path, masks_root / path.relative_to(parent_root / "masks")))
+                kept_files.append(
+                    (path, masks_root / path.relative_to(parent_root / "masks"))
+                )
                 kept_count += pq.read_metadata(path).num_rows
         for source, target in kept_files:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -342,7 +358,9 @@ class SidecarStore:
         new_objects = self._objects(annotations)
         seen_objects = {(o["episode_index"], o["object_id"]) for o in kept_objects}
         object_rows = kept_objects + [
-            o for o in new_objects if (o["episode_index"], o["object_id"]) not in seen_objects
+            o
+            for o in new_objects
+            if (o["episode_index"], o["object_id"]) not in seen_objects
         ]
         track_rows = kept_tracks + [
             self._track_row(row) for row in self._derive_tracks(annotations)
