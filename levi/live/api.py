@@ -206,6 +206,9 @@ def dataset_view(name: str):
         "incomplete": state.get("incomplete"),
         "discarded": state.get("discarded"),
         "current": state.get("current"),
+        # The review runs still open for a person (their ids; the status row
+        # carries the count as ``review_runs_open``).
+        "review_runs": list(state.get("review_runs") or [])[:50],
         "last_batch": state.get("last_batch"),
         "last_processed_at": state.get("last_processed_at"),
         "last_error": state.get("last_error"),

@@ -263,6 +263,7 @@ def test_the_api_merges_sessions_health_progress_and_faults(
     detail = client.get(f"/api/levi/live/datasets/{name}").json()
     assert detail["task_text"] == "" or detail["task_text"]  # filled once mirrored
     assert detail["review"] == "auto" and detail["evaluated"] is False
+    assert detail["review_runs"] == []
     assert client.get("/api/levi/live/datasets/nope").status_code == 404
     assert client.get("/api/levi/live/datasets/..%2Fx").status_code == 404
 
