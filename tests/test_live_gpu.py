@@ -959,7 +959,9 @@ def test_the_lock_stays_with_vllm_when_the_supervisor_dies(live):
     assert second.vllm.holds_lock(c.gpu.lock_file)
     assert second._stop_vllm()
     assert wait_for(lambda: gpumgr.identity(pid) is None)
-    assert other.acquire()  # released with the process
+    # Released with the process (a moment of grace: a child forked by some
+    # other test thread while the descriptor was open may outlive it briefly).
+    assert wait_for(other.acquire, 5)
     other.release()
 
 
