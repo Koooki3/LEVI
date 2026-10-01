@@ -29,6 +29,7 @@ Standard library only apart from the ``Principal`` it returns.
 """
 
 import os
+import sys
 import time
 
 from . import jsonio
@@ -120,12 +121,30 @@ def principal():
     return Principal(PRINCIPAL_ID, human=True, auto=True)
 
 
+AUDIT_FAILURES = 0  # records that could not be written (this process)
+
+
 def audit(record: dict):
-    jsonio.append_line(
-        live_dir() / AUDIT,
-        {"time": time.time(), "principal": PRINCIPAL_ID, **record},
-        max_bytes=AUDIT_MAX_BYTES,
-    )
+    """Append to the audit log. A log that cannot be written (disk full,
+    permissions) must not turn a call that went through into a failure, nor
+    hide a refusal behind an OSError: it is counted and warned about, and
+    the call goes on."""
+    global AUDIT_FAILURES
+    try:
+        jsonio.append_line(
+            live_dir() / AUDIT,
+            {"time": time.time(), "principal": PRINCIPAL_ID, **record},
+            max_bytes=AUDIT_MAX_BYTES,
+        )
+    except Exception as exc:  # noqa: BLE001 - never fail the audited call
+        AUDIT_FAILURES += 1
+        print(
+            f"warning: the automatic approver's audit record for {record.get('tool')} "
+            f"could not be written ({type(exc).__name__}: {exc}); "
+            f"{AUDIT_FAILURES} so far",
+            file=sys.stderr,
+            flush=True,
+        )
 
 
 def brief(arguments: dict) -> dict:

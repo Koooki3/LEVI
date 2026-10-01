@@ -401,3 +401,30 @@ def test_a_person_s_execute_is_refused_while_the_gate_is_closed(
     write_gate(live_ws, False)
     (live_ws / auto.MARKER).unlink()
     gating.check(human, "runs.execute")
+
+
+def test_a_failing_audit_write_is_a_warning_not_a_failed_call(
+    bench, dataset, live_ws, monkeypatch, capsys
+):
+    wb, context = bench
+    approver = auto.principal()
+    run = invoke(wb, approver, "runs.plan", temporal(context, dataset).model_dump())
+
+    def broken(*a, **k):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(auto.jsonio, "append_line", broken)
+    before = auto.AUDIT_FAILURES
+    # The call succeeds (it already took effect) ...
+    approved = invoke(
+        wb, approver, "plans.approve", {"run_id": run["id"], "revision": 1}
+    )
+    assert approved
+    assert wb.store.get("runs", run["id"])["plan"].get("approval")
+    # ... the failures are counted (allowed + completed) and said once, loudly.
+    assert auto.AUDIT_FAILURES == before + 2
+    assert "audit" in capsys.readouterr().err.lower()
+    # A refusal is still a refusal, not an OSError.
+    with pytest.raises(PermissionError, match="may not call"):
+        invoke(wb, approver, "workspace.reset", {"apply": False})
+    assert auto.AUDIT_FAILURES >= before + 3

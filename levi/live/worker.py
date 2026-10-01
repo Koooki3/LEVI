@@ -39,6 +39,7 @@ import time
 from pathlib import Path
 
 from . import config as live_config
+from . import auto as approver_log
 from . import generic, gpumgr, jsonio, mirror
 
 OK, NEED_MODEL, AWAIT_HUMAN, ERROR, PREEMPTED, NOTHING = 0, 10, 11, 12, 13, 14
@@ -963,6 +964,8 @@ def main(argv=None) -> int:
                     "phase": "exited",
                     "exit": code,
                     "awaiting": awaiting,
+                    # audit records that could not be written (see auto.audit)
+                    "audit_failures": approver_log.AUDIT_FAILURES,
                     "updated_at": time.time(),
                 },
             )
