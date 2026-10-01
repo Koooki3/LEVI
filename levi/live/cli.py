@@ -439,6 +439,8 @@ def diagnose(config) -> dict:
         warnings.append("the live service is not running (levi live start)")
     if holder:
         for pid in resources.tree(holder["pid"]):
+            if resources.rss_mb(pid) is None:
+                continue  # exited while we looked
             report["processes"].append(
                 {
                     "pid": pid,
@@ -465,6 +467,13 @@ def diagnose(config) -> dict:
     report["gpu"] = gpu
     vllm = ((value or {}).get("gpu") or {}).get("vllm") or {}
     report["vllm"] = vllm
+    if vllm.get("state") == "error" or (value or {}).get("attention"):
+        warnings.append(
+            "vLLM is failing to start"
+            + (f": {vllm.get('error')}" if vllm.get("error") else "")
+            + "; labelling is paused"
+            + (" until `levi live resume`" if (value or {}).get("attention") else "")
+        )
     if vllm.get("state") in ("ready", "starting"):
         working = bool((value or {}).get("worker")) or bool(
             (value or {}).get("queue_depth")
@@ -646,6 +655,24 @@ def cmd_once(args) -> int:
     return 1 if bad else 0
 
 
+def cmd_resume(args) -> int:
+    """Tell the running service to forget vLLM start failures (it gave up
+    after ``vllm.max_start_failures``) and try again."""
+    config = resolve_config(args)
+    value, alive, _ = read_status(config)
+    config.live_dir.mkdir(parents=True, exist_ok=True)
+    jsonio.write(config.live_dir / "resume.json", {"requested_at": time.time()})
+    attention = (value or {}).get("attention")
+    if attention:
+        print(f"was waiting for a person: {attention.get('reason')}")
+    print(
+        "resume requested; the service picks it up within seconds"
+        if alive
+        else "resume recorded; the service is not running, the next start sees it"
+    )
+    return 0
+
+
 def cmd_init(args) -> int:
     config = resolve_config(args)
     target = config.workspace / "live.toml"
@@ -692,6 +719,10 @@ def build_parser():
         "--fake-vlm", action="store_true", help="use a fake model server (no GPU)"
     )
     once.add_argument("--max-seconds", type=float, default=None)
+    resume = sub.add_parser(
+        "resume", help="clear a vLLM start failure the service gave up on"
+    )
+    add_config_options(resume)
     init = sub.add_parser("init", help="write a live.toml with every default")
     add_config_options(init)
     return parser
@@ -705,6 +736,7 @@ def main(argv=None) -> int:
         "status": cmd_status,
         "doctor": cmd_doctor,
         "once": cmd_once,
+        "resume": cmd_resume,
         "init": cmd_init,
     }
     try:

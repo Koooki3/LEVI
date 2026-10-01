@@ -422,3 +422,30 @@ def test_once_with_the_fake_model_labels_everything_and_exits(tmp_path, rollouts
     assert "pi05_fake__stack_the_plates: 0 / 0 / 2 / 0 / 1" in done.stdout
     audit = (tmp_path / "ws/live/audit.jsonl").read_text()
     assert "changes.commit" in audit and "refused" not in audit
+
+
+def test_doctor_warns_when_vllm_is_failing_and_resume_clears_the_wait(tmp_path):
+    c = cfg(tmp_path)
+    cli.prepare(c)
+    status = {
+        "schema": "levi.live.status.v1",
+        "pid": os.getpid(),
+        "updated_at": time.time(),
+        "state": "gpu_wait",
+        "gpu": {"vllm": {"state": "error", "error": "ValueError: 1.82 GiB KV cache"}},
+        "attention": {"code": "vllm_failed", "reason": "ValueError: 1.82 GiB KV cache"},
+        "datasets": {},
+    }
+    mirror.jsonio.write(c.status_file, status)
+    mirror.jsonio.write(
+        c.home / "live.pid",
+        {"pid": os.getpid(), "identity": controller.gpumgr.identity(os.getpid())},
+    )
+    report = cli.diagnose(c)
+    warning = next(w for w in report["warnings"] if "failing to start" in w)
+    assert "KV cache" in warning and "levi live resume" in warning
+    # Exited children are not listed with empty numbers.
+    assert all(p["rss_mb"] is not None for p in report["processes"])
+    done = cli_run(tmp_path, "resume")
+    assert done.returncode == 0 and "KV cache" in done.stdout
+    assert (tmp_path / "ws/live/resume.json").exists()

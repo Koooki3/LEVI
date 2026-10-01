@@ -20,6 +20,7 @@ import contextlib
 import fcntl
 import json
 import os
+import re
 import signal
 import subprocess
 import time
@@ -129,10 +130,70 @@ ASLEEP_RESIDENT_MIB = 2200
 
 
 def need_mib(config, profile, total_mib) -> int:
-    """Free VRAM a vLLM start or wake needs: its budget of vLLM's total, plus
-    what it takes after the first requests (measured about 1.3 GB)."""
+    """Free VRAM a start or a wake of a vLLM with this ``profile`` needs: its
+    budget of vLLM's total plus the configured margin."""
     budget = profile["gpu_memory_utilization"] * (total_mib - VLLM_TOTAL_SLACK_MIB)
     return int(budget) + config.vllm.margin_mib
+
+
+@dataclass
+class Budget:
+    ok: bool
+    utilization: float = 0.0
+    max_model_len: int = 0
+    need_mib: int = 0
+    code: str = "ok"  # ok | insufficient_vram
+    reason: str = ""
+
+
+def plan_budget(config, *, free_mib, total_mib, policy_up: bool) -> Budget:
+    """The memory budget and context length to start vLLM with *now*.
+
+    The budget is the share of vLLM's own total (nvidia-smi's less
+    ``VLLM_TOTAL_SLACK_MIB``) that the free VRAM allows after ``margin_mib``,
+    capped at ``gpu_memory_utilization_max``; with no policy server on the
+    card it is the configured ``gpu_memory_utilization`` (room for one to start
+    later). The same number is what the start passes to vLLM, so the pre-check
+    and the launch cannot disagree. If it is below what serves the context
+    (``min_utilization_*``, less for a shorter context) the context steps down
+    by 4096 to ``min_model_len``; if even that does not fit nothing is started:
+    ``insufficient_vram`` with the numbers."""
+    v = config.vllm
+    total_v = total_mib - VLLM_TOTAL_SLACK_MIB
+    cap = min(v.gpu_memory_utilization_max, (free_mib - v.margin_mib) / total_v)
+    target = cap if policy_up else min(v.gpu_memory_utilization, cap)
+    floor_full = v.min_utilization_with_policy if policy_up else v.min_utilization_alone
+    length = v.max_model_len
+    while True:
+        saved = (v.max_model_len - length) * v.kv_bytes_per_token / 1048576 / total_v
+        floor = max(v.gpu_memory_utilization_min, floor_full - saved)
+        util = round(target - 0.0005, 4)  # a hair under what is free
+        if util >= floor:
+            need = int(util * total_v) + v.margin_mib
+            return Budget(True, util, length, need)
+        if length - 4096 < v.min_model_len:
+            break
+        length -= 4096
+    floor = max(
+        v.gpu_memory_utilization_min,
+        floor_full
+        - (v.max_model_len - v.min_model_len)
+        * v.kv_bytes_per_token
+        / 1048576
+        / total_v,
+    )
+    need = int(floor * total_v) + v.margin_mib
+    return Budget(
+        False,
+        target,
+        0,
+        need,
+        "insufficient_vram",
+        f"{free_mib} MiB of VRAM free allows a vLLM budget of {target:.3f}; "
+        f"at least {floor:.3f} ({need} MiB free) is needed to serve even "
+        f"{v.min_model_len} tokens"
+        + (" beside the policy server" if policy_up else ""),
+    )
 
 
 def decide(
@@ -357,6 +418,12 @@ class GpuLock:
     def held(self) -> bool:
         return self._handle is not None
 
+    def fileno(self):
+        """The descriptor of the held lock (None when not held): a vLLM
+        started with it open (``pass_fds``) keeps the lock for as long as it
+        lives, even if this process dies."""
+        return self._handle.fileno() if self._handle else None
+
 
 # --- vLLM -----------------------------------------------------------------------------
 
@@ -490,7 +557,7 @@ class Vllm:
 
     # --- lifecycle -------------------------------------------------------------
 
-    def start(self, profile) -> bool:
+    def start(self, profile, fd=None) -> bool:
         """Launch vLLM with ``profile``; False (with ``error``) if it could not."""
         if self.state in ("starting", "ready") and self.mine():
             return True
@@ -520,6 +587,7 @@ class Vllm:
                     stderr=sink,
                     stdin=subprocess.DEVNULL,
                     start_new_session=True,
+                    pass_fds=(fd,) if fd is not None else (),
                 )
                 code = process.wait(timeout=120)
         except (OSError, subprocess.SubprocessError) as exc:
@@ -534,6 +602,7 @@ class Vllm:
                 "error",
                 f"serve script exited {code}; see vllm-launch.log",
             )
+            self.error = self.failure_reason()
             return False
         self.started_at = time.time()
         self.profile = profile
@@ -550,6 +619,26 @@ class Vllm:
         )
         return True
 
+    def log_path(self) -> Path:
+        return Path(self.config.vllm.pid_dir).expanduser() / f"vllm_{self.port}.log"
+
+    def failure_reason(self) -> str:
+        """Why the last start failed: the last error line of vLLM's own log
+        (``ValueError: ... KV cache ...``), else what the service knows."""
+        try:
+            with self.log_path().open("rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                handle.seek(max(0, handle.tell() - 65536))
+                text = handle.read().decode("utf-8", "replace")
+        except OSError:
+            text = ""
+        found = re.findall(
+            r"^.*?\b(\w*(?:Error|Exception)\b[^\n]*)$", text, re.MULTILINE
+        )
+        if found:
+            return found[-1].strip()[:300]
+        return (self.error or "vLLM failed to start")[:300]
+
     def poll(self) -> str:
         """Advance ``starting`` to ``ready`` (or ``error`` on timeout/death)."""
         if self.state == "asleep":
@@ -563,6 +652,7 @@ class Vllm:
                     self.state = "asleep"
             elif not self.mine():
                 self.state, self.error = "error", "vLLM exited while starting"
+                self.error = self.failure_reason()
             elif (
                 time.time() - (self.started_at or 0) > self.config.vllm.start_timeout_s
             ):

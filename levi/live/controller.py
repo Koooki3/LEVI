@@ -37,7 +37,6 @@ from . import config as live_config
 
 SCHEMA = "levi.live.status.v1"
 WORKER_STALL_S = 600.0
-ERROR_WAIT_S = 60.0
 GATE_GRACE_S = 8.0
 MAX_EVENTS = 10
 STATES_WITH_WORK = ("mirrored",)
@@ -132,7 +131,10 @@ class Controller:
         self._gate_written = (None, 0.0)
         self._policy_mib = (0.0, None)
         self.idle_since: float | None = None
-        self._error_at: float | None = None
+        self.start_failures = 0
+        self.next_start_at = 0.0
+        self.attention: dict | None = None
+        self._resume_seen = None
         self.decision = gpumgr.Decision(True, "no work", "ok")
         self.state = "starting"
         self.last_error = ""
@@ -267,20 +269,23 @@ class Controller:
             if (mine or self.vllm.state in ("starting", "ready", "asleep"))
             else self.vllm.state
         )
+        self._check_resume(now)
         if state == "error":
-            # A failed start (or a vLLM that died) is waited out, not retried
-            # in a loop.
-            self.lock.release()
-            if self._error_at is None:
-                self._error_at = now
-                self.event("vLLM failed: " + (self.vllm.error or "unknown"), "error")
-            if now - self._error_at > ERROR_WAIT_S:
-                self.vllm.state, self._error_at = "stopped", None
+            # A failed start (or a vLLM that died): note it, back off, and
+            # after a few in a row stop and ask for a person.
+            if not self.vllm.mine():
+                self.lock.release()
+            self._vllm_failed(now)
+            self.vllm.state = "stopped"
+            state = "stopped"
+        if self.attention:
             self.decision = gpumgr.Decision(
-                False, self.vllm.error or "vLLM failed", "error"
+                False,
+                f"vLLM failed to start {self.start_failures} times: "
+                f"{self.attention['reason']}; `levi live resume` clears it",
+                "needs_attention",
             )
             return False
-        self._error_at = None
         if mine:
             return self._resident_step(now, want, state, mode, profile)
         if self.vllm.external():
@@ -297,11 +302,40 @@ class Controller:
             return False
         if not want:
             return False
+        if now < self.next_start_at:
+            self.decision = gpumgr.Decision(
+                False,
+                f"the last vLLM start failed; trying again in "
+                f"{self.next_start_at - now:.0f} s ({self.vllm.error})",
+                "backoff",
+            )
+            return False
+        if not self.gate.open and mode != "manual":
+            # A cold start is 45 s of heavy GPU load: never while the policy infers.
+            self.decision = gpumgr.Decision(
+                False, "waiting for the gate: " + self.gate.reason, "gate_closed"
+            )
+            return False
         free = None
         need = 0
         if mode != "manual":
             free = self.free_mib(now)
-            need = self._need(profile, now)
+            total = (self._vram[1] or {}).get("total_mib") or 32607
+            if free is not None:
+                plan = gpumgr.plan_budget(
+                    c, free_mib=free, total_mib=total, policy_up=self.policy_up
+                )
+                if not plan.ok:
+                    self.decision = gpumgr.Decision(
+                        False, plan.reason, plan.code, plan.need_mib
+                    )
+                    return False
+                profile = {
+                    **profile,
+                    "gpu_memory_utilization": plan.utilization,
+                    "max_model_len": plan.max_model_len,
+                }
+                need = plan.need_mib
         since = None if self.policy_changed_at is None else now - self.policy_changed_at
         self.decision = gpumgr.decide(
             c, mode, free_mib=free, need=need, since_policy_change_s=since
@@ -313,16 +347,59 @@ class Controller:
                 False, "another agent holds the GPU lock", "lock", need
             )
             return False
-        self.event(f"starting vLLM ({mode}; a cold start takes 45-70 s)")
-        if not self.vllm.start(profile):
-            self.lock.release()
-            self._error_at = now
-            self.event("vLLM did not start: " + self.vllm.error, "error")
+        self.event(
+            f"starting vLLM (budget {profile['gpu_memory_utilization']}, "
+            f"max_model_len {profile['max_model_len']}, {free} MiB free, "
+            f"{'beside' if self.policy_up else 'no'} policy server; "
+            "a cold start takes 45-70 s)"
+        )
+        if not self.vllm.start(profile, fd=self.lock.fileno()):
+            if not self.vllm.mine():
+                self.lock.release()
+            self._vllm_failed(now)
+            self.vllm.state = "stopped"
         return False
+
+    def _vllm_failed(self, now):
+        """One failed start: wait 60 s doubling to 600 s; after
+        ``vllm.max_start_failures`` in a row stop and need a person."""
+        v = self.config.vllm
+        self.start_failures += 1
+        reason = self.vllm.failure_reason()
+        self.vllm.error = reason
+        wait = min(
+            v.start_backoff_max_s, v.start_backoff_s * 2 ** (self.start_failures - 1)
+        )
+        self.next_start_at = now + wait
+        self.event(
+            f"vLLM failed to start ({self.start_failures} of {v.max_start_failures}): {reason}",
+            "error",
+        )
+        if self.start_failures >= v.max_start_failures:
+            self.attention = {"code": "vllm_failed", "reason": reason, "since": now}
+            self.event(
+                "vLLM keeps failing: labelling is paused until `levi live resume`",
+                "error",
+            )
+
+    def _check_resume(self, now):
+        """``levi live resume`` leaves ``live/resume.json``: forget the failures."""
+        path = self.config.live_dir / "resume.json"
+        try:
+            stamp = path.stat().st_mtime_ns
+        except OSError:
+            return
+        if stamp != self._resume_seen:
+            self._resume_seen = stamp
+            if self.start_failures or self.attention:
+                self.event("resumed: vLLM may be started again")
+            self.start_failures, self.attention, self.next_start_at = 0, None, 0.0
 
     def _resident_step(self, now, want, state, mode, profile) -> bool:
         """vLLM is ours and up: keep it awake only while there is room."""
         c = self.config
+        if state == "ready":
+            self.start_failures = 0
         if state == "starting":
             self.decision = gpumgr.Decision(True, "vLLM is starting", "ok")
             return False
@@ -341,7 +418,7 @@ class Controller:
             return True
         # asleep: wake when there is work and room for it
         blocked = gpumgr.should_sleep(c, mode, free_mib=None, policy_mib=policy)
-        need = self._need(profile, now, asleep=True)
+        need = self._need(self.vllm.profile or profile, now, asleep=True)
         self.decision = (
             gpumgr.Decision(False, blocked[1], blocked[0], need)
             if blocked
@@ -811,7 +888,10 @@ class Controller:
                     "reasons",
                 )
             },
-            "events": self.events,
+            # Set when the service gave up starting vLLM and needs a person
+            # (`levi live resume`); labelling is paused, sessions still welcome.
+            "attention": self.attention,
+            "events": list(self.events),
             "last_error": self.last_error,
             "resources": {
                 "rss_mb": resources.rss_mb(pid),
