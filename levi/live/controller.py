@@ -851,6 +851,18 @@ class Controller:
         code_now = None if self.gate.open else self.gate.code
         if self._gate_code_since[0] != code_now:
             self._gate_code_since = (code_now, now)
+        # A policy server too big for vLLM to share the card with: judged here,
+        # from its memory, not from whichever decision came first (the gate
+        # or an evaluation in progress hide it), so it is reported during the
+        # evaluation too and as one steady pause.
+        big = None
+        if wanted and self.policy_up:
+            big = gpumgr.should_sleep(
+                c,
+                c.effective_gpu_mode(),
+                free_mib=None,
+                policy_mib=self.policy_mib(now),
+            )
         if self.attention:
             code = self.attention.get("code") or "vllm_failed"
             reason = (
@@ -860,8 +872,8 @@ class Controller:
             since = self.attention.get("since")
         elif wanted and self.decision.code == "insufficient_vram":
             code, reason = "insufficient_vram", self.decision.reason
-        elif wanted and self.decision.code == "policy_large":
-            code, reason = "policy_large", self.decision.reason
+        elif big and big[0] == "policy_large":
+            code, reason = "policy_large", big[1]
         elif wanted and self._blocked_for(now) >= c.gpu.blocked_pause_s:
             code, reason = self.decision.code, self._blocked_reason()
             since = self._decision_since[1]

@@ -1717,3 +1717,23 @@ echo $! > "{ctl.config.vllm.pid_dir}/vllm_{ctl.config.vllm.port}.pid"
     assert starts() == before + 1  # not again in the same tick
     ctl.tick(t + 3)
     assert starts() == before + 1 and ctl.decision.code == "backoff"
+
+
+# --- L1: policy_large is reported whatever the gate says --------------------------------
+
+
+def test_policy_large_is_reported_during_the_evaluation_without_flicker(ctl):
+    ctl.rollouts.write(0)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 8575
+    ctl.machine.free = 32607 - 8575
+    t = time.time()
+    seen = []
+    for n, state in enumerate(
+        ("standby", "running", "waiting_reset", "homing", "running", "standby")
+    ):
+        ctl.rollouts.session(state)
+        ctl.tick(t + n)
+        seen.append(paused(ctl, t + n))
+    assert all(p and p["code"] == "policy_large" for p in seen), seen
+    assert len({p["since"] for p in seen}) == 1  # one pause, not six new ones
+    assert "XLA_PYTHON_CLIENT_MEM_FRACTION=.22" in seen[0]["reason"]
