@@ -506,6 +506,54 @@ def test_doctor_warns_when_vllm_is_failing_and_resume_clears_the_wait(tmp_path):
     assert (tmp_path / "ws/live/resume.json").exists()
 
 
+def _idle_status(c, **gpu):
+    now = time.time()
+    status = {
+        "schema": "levi.live.status.v1",
+        "pid": os.getpid(),
+        "updated_at": now,
+        "state": "idle",
+        "gpu": {
+            "vllm": {"state": "ready", "started_at": now - 5000},
+            "idle_since": now - c.vllm.idle_timeout_s - 500,
+            **gpu,
+        },
+        "datasets": {},
+    }
+    mirror.jsonio.write(c.status_file, status)
+    mirror.jsonio.write(
+        c.home / "live.pid",
+        {"pid": os.getpid(), "identity": controller.gpumgr.identity(os.getpid())},
+    )
+
+
+def test_doctor_says_a_vllm_nobody_uses_should_have_been_released(tmp_path):
+    c = cfg(tmp_path)
+    cli.prepare(c)
+    _idle_status(c)
+    assert any("nothing to do" in w for w in cli.diagnose(c)["warnings"])
+
+
+def test_doctor_does_not_call_a_prewarmed_or_a_loading_or_a_woken_vllm_idle(tmp_path):
+    c = cfg(tmp_path)
+    cli.prepare(c)
+    # Prewarmed on the command line (the file's own setting is still false) ...
+    _idle_status(c, prewarm=True)
+    assert not any("nothing to do" in w for w in cli.diagnose(c)["warnings"])
+    # ... prewarmed in the file ...
+    c.vllm.prewarm = True
+    _idle_status(c)
+    assert not any("nothing to do" in w for w in cli.diagnose(c)["warnings"])
+    c.vllm.prewarm = False
+    # ... still loading (no idle clock), however long ago it was launched ...
+    _idle_status(c, idle_since=None, vllm={"state": "starting", "started_at": 1.0})
+    assert not any("nothing to do" in w for w in cli.diagnose(c)["warnings"])
+    # ... and one that was woken a moment ago: its start time is long past, its
+    # idle time is not.
+    _idle_status(c, idle_since=time.time() - 5)
+    assert not any("nothing to do" in w for w in cli.diagnose(c)["warnings"])
+
+
 def test_doctor_warns_when_the_loop_has_stopped_ticking_though_the_status_is_fresh(
     tmp_path,
 ):

@@ -39,6 +39,8 @@ SCHEMA = "levi.live.status.v1"
 WORKER_STALL_S = 600.0
 GATE_GRACE_S = 8.0
 MAX_EVENTS = 10
+# A VRAM reading older than this is not shown as the free memory of now.
+FREE_FRESH_S = 30.0
 STATES_WITH_WORK = ("mirrored",)
 
 
@@ -653,6 +655,11 @@ class Controller:
         if work or self.worker is not None or not self.vllm.mine():
             self.idle_since = None
             return
+        if state not in ("ready", "asleep"):
+            # Loading is not idleness (a start takes 40-60 s): the clock starts
+            # when vLLM is ready, not when it was launched.
+            self.idle_since = None
+            return
         live = self.policy_up or self._evaluating()
         if state == "asleep" and (live or v.prewarm):
             self.idle_since = None
@@ -1189,7 +1196,17 @@ class Controller:
                     "code": self.decision.code,
                     "reason": self.decision.reason[:200],
                 },
-                "free_mib": (self._vram[1] or {}).get("free_mib"),
+                # The last nvidia-smi reading, only while it is recent: a
+                # sleeping vLLM is not probed on purpose, and a number from
+                # before it slept (2254 MiB) is not what is free now.
+                "free_mib": (self._vram[1] or {}).get("free_mib")
+                if now - self._vram[0] <= FREE_FRESH_S
+                else None,
+                "free_mib_at": self._vram[0] if self._vram[1] else None,
+                # When vLLM began to be idle (None while it works, loads or
+                # is meant to stay): ``levi live doctor`` reads it.
+                "idle_since": self.idle_since,
+                "prewarm": bool(c.vllm.prewarm),
                 "lock_held": self.lock.held
                 or self.vllm.holds_lock(self.config.gpu.lock_file),
             },

@@ -692,18 +692,19 @@ def diagnose(config) -> dict:
             + "; labelling is paused"
             + (" until `levi live resume`" if (value or {}).get("attention") else "")
         )
-    if vllm.get("state") in ("ready", "starting"):
-        working = bool((value or {}).get("worker")) or bool(
-            (value or {}).get("queue_depth")
-        )
-        if (
-            not working
-            and vllm.get("started_at")
-            and now - (vllm.get("started_at") or now) > config.vllm.idle_timeout_s + 120
-        ):
-            warnings.append(
-                "vLLM is up with nothing to do: it should have been released"
-            )
+    gpu_status = (value or {}).get("gpu") or {}
+    idle_since = gpu_status.get("idle_since")
+    if (
+        vllm.get("state") == "ready"
+        and idle_since
+        # A prewarmed vLLM is meant to stay up (it sleeps, it is not stopped);
+        # one still loading, or one with work, has no idle clock at all.
+        and not (gpu_status.get("prewarm") or config.vllm.prewarm)
+        and not (value or {}).get("worker")
+        and not (value or {}).get("queue_depth")
+        and now - float(idle_since) > config.vllm.idle_timeout_s + 120
+    ):
+        warnings.append("vLLM is up with nothing to do: it should have been released")
     ports = gpumgr.listening_ports()
     policy = [int(p) for p in config.gpu.policy_ports if int(p) in ports]
     report["policy_ports_listening"] = policy

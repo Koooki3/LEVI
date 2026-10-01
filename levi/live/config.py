@@ -116,10 +116,15 @@ class Gpu:
     # A wake of a sleeping vLLM keeps this much free beyond the budget less what
     # it still holds (``gpumgr.ASLEEP_RESIDENT_MIB``). A start needs
     # ``vllm.margin_mib`` (vLLM sees about 930 MiB less free than nvidia-smi
-    # when it starts); a wake makes no such check. NOT MEASURED on a real GPU:
-    # with the policy server at .22 and a sleeping vLLM about 22804 MiB are
-    # free and a wake at 0.7395 needs 21843 with this value.
-    wake_margin_mib: int = 300
+    # when it starts); a wake makes no such check. Measured on the real GPU
+    # (policy server at .22): a sleeping vLLM leaves 22768 MiB free, and waking
+    # and serving the first requests used about 21758 MiB, so 22.7 GB free is
+    # enough. With 300 the check passed at 21843 free, which would leave about
+    # 85 MiB, below ``min_free_mib`` (600): vLLM would be put back to sleep at
+    # once. With 800 the check needs 22343 and the measured 22768 passes with
+    # about 425 MiB to spare (the margin that is left is computed from those
+    # numbers; flapping itself was not observed).
+    wake_margin_mib: int = 800
     # A cold start (45-70 s of GPU load) waits until a session has been in
     # ``standby`` this long: a client leaves standby for its first episode within
     # seconds, and the cold start would overlap it. Not a guarantee (the operator

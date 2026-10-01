@@ -1520,16 +1520,17 @@ def test_somebody_else_s_vllm_on_the_port_is_reported_after_the_grace(ctl):
 
 def test_a_wake_uses_its_own_smaller_margin(ctl):
     """Starting keeps 1100 MiB beyond the budget because vLLM sees about 930
-    MiB less free than nvidia-smi; a wake does not make that check. The 300
-    MiB default needs a real GPU to confirm (measured: policy .22 + a sleeping
-    vLLM leave 22804 MiB free, a wake at 0.7395 needs 21843 with 300)."""
-    assert ctl.config.gpu.wake_margin_mib == 300
+    MiB less free than nvidia-smi; a wake does not make that check. Measured on
+    the real GPU: policy .22 + a sleeping vLLM leave 22768 MiB free and a wake
+    plus the first requests used about 21758, so the margin is 800 (300 let a
+    wake through that left about 85 MiB, below min_free_mib)."""
+    assert ctl.config.gpu.wake_margin_mib == 800
     ctl.rollouts.write(0)
     ctl.rollouts.session("standby")
     t = time.time()
     up(ctl, t)
     util = ctl.vllm.profile["gpu_memory_utilization"]
-    asleep_need = int(util * 32107) + 300 - gpumgr.ASLEEP_RESIDENT_MIB
+    asleep_need = int(util * 32107) + 800 - gpumgr.ASLEEP_RESIDENT_MIB
     ctl.machine.free = 300
     fresh(ctl)
     ctl.tick(t + 2)
@@ -1541,13 +1542,13 @@ def test_a_wake_uses_its_own_smaller_margin(ctl):
     ctl.machine.free = (
         asleep_need + 50
     )  # enough with the wake margin, not the start one
-    # With the start margin the same wake would have needed 800 MiB more than
-    # is free, and would not have happened.
+    # With the start margin (1100) the same wake would have needed 300 MiB more
+    # than is free, and would not have happened.
     start_style = (
         gpumgr.need_mib(ctl.config, ctl.vllm.profile, 32607)
         - gpumgr.ASLEEP_RESIDENT_MIB
     )
-    assert start_style == asleep_need + 800 > asleep_need + 50
+    assert start_style == asleep_need + 300 > asleep_need + 50
     fresh(ctl)
     ctl.tick(t + 6)
     assert ctl.vllm.state == "ready"
@@ -1827,3 +1828,51 @@ def test_the_service_environment_never_carries_the_worker_marker(live, monkeypat
         check=False,
     )
     assert done.stdout.strip() == "1", done.stderr[-300:]
+
+
+def test_the_wake_margin_leaves_room_for_what_a_wake_measured_to_use(ctl):
+    """Real GPU, policy at .22: 22768 MiB free asleep, 21758 used by the wake
+    and the first requests. The old 300 let a wake through at 21843 free, which
+    leaves 85 MiB (< min_free_mib 600, put back to sleep at once)."""
+    c = ctl.config
+    used_by_a_wake, free_asleep = 21758, 22768
+    profile = {**c.vllm_profile(), "gpu_memory_utilization": 0.7395}
+    need = gpumgr.need_mib(c, profile, 32607, wake=True)
+    assert need <= free_asleep  # the measured case wakes ...
+    assert free_asleep - used_by_a_wake >= c.gpu.min_free_mib  # ... and stays up
+    c.gpu.wake_margin_mib = 300
+    old = gpumgr.need_mib(c, profile, 32607, wake=True)
+    assert old - used_by_a_wake < c.gpu.min_free_mib  # what 300 would have let in
+
+
+def test_the_idle_clock_starts_when_vllm_is_ready_not_when_it_was_launched(ctl):
+    c = ctl.config
+    ctl.rollouts.write(0)
+    t = time.time()
+    up(ctl, t)
+    idle = c.vllm.idle_timeout_s
+    ctl.vllm.state = "starting"  # a (slow) load, longer than the timeout
+    ctl._release_if_idle(t + 1, False)
+    ctl._release_if_idle(t + 1 + idle + 50, False)
+    assert ctl.idle_since is None and ctl.vllm.mine()
+    ctl.vllm.state = "ready"
+    ready = t + 1 + idle + 60
+    ctl._release_if_idle(ready, False)
+    assert ctl.idle_since == ready  # idle from here
+    ctl._release_if_idle(ready + idle - 1, False)
+    assert ctl.vllm.mine()
+    ctl._release_if_idle(ready + idle + 1, False)
+    assert not ctl.vllm.mine()
+
+
+def test_the_status_does_not_show_a_free_memory_reading_that_is_old(ctl):
+    t = time.time()
+    ctl.machine.free = 2254
+    fresh(ctl)
+    ctl.free_mib(t)
+    now = ctl.status(t + 1)["gpu"]
+    assert now["free_mib"] == 2254 and now["free_mib_at"] == t
+    # A sleeping vLLM is not probed: the number stays, but is not "free now".
+    later = ctl.status(t + 600)["gpu"]
+    assert later["free_mib"] is None and later["free_mib_at"] == t
+    assert later["idle_since"] is None and later["prewarm"] is False
