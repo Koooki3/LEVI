@@ -159,6 +159,7 @@ class Controller:
         self.idle_since: float | None = None
         self._waiting_since: dict = {}
         self._status_at = 0.0
+        self.loop_at: float | None = None  # the last tick (the thread beats on)
         self.start_failures = 0
         self.next_start_at = 0.0
         self.attention: dict | None = None
@@ -896,6 +897,7 @@ class Controller:
             message = hook(now)
             if message:
                 self.event(message, "error")
+        self.loop_at = now
         if now - self._status_at >= min(1.0, c.service.heartbeat_s):
             self._status_at = now
             self.write_status(now)
@@ -1043,6 +1045,9 @@ class Controller:
             "pid": pid,
             "started_at": self.started_at,
             "updated_at": now,
+            # The last time the main loop ticked: the heartbeat thread keeps
+            # updated_at fresh even when the loop is stuck.
+            "loop_at": self.loop_at,
             "state": self.state,
             "accepts_sessions": self.state not in ("starting", "stopped", "error"),
             "ui_url": f"http://{c.service.host}:{c.service.ui_port}",

@@ -104,6 +104,8 @@ def resolve_config(args):
     return config.validate()
 
 
+LOOP_STALE_S = 300.0  # the doctor warns when the loop is this far behind
+
 SOCKET_LIMIT = 103  # bytes in a Unix socket path (sun_path, with the NUL)
 
 
@@ -628,6 +630,13 @@ def diagnose(config) -> dict:
                 warnings.append(
                     f"pid {row['pid']} runs at nice {row['nice']}, not {config.resources.nice}"
                 )
+    loop_at = (value or {}).get("loop_at")
+    if alive and loop_at and now - float(loop_at) > LOOP_STALE_S:
+        warnings.append(
+            f"the service's main loop has not ticked for {now - float(loop_at):.0f} s "
+            "although the process is alive (stuck?); see the service log, "
+            "`levi live stop` and start again"
+        )
     record = jsonio.read(config.live_dir / "vllm.json")
     if (
         isinstance(record, dict)

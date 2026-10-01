@@ -452,6 +452,50 @@ def test_doctor_warns_when_vllm_is_failing_and_resume_clears_the_wait(tmp_path):
     assert (tmp_path / "ws/live/resume.json").exists()
 
 
+def test_doctor_warns_when_the_loop_has_stopped_ticking_though_the_status_is_fresh(
+    tmp_path,
+):
+    """The heartbeat thread keeps ``updated_at`` fresh even if the main loop is
+    stuck; ``loop_at`` (the last tick) is what gives it away."""
+    c = cfg(tmp_path)
+    cli.prepare(c)
+    now = time.time()
+    status = {
+        "schema": "levi.live.status.v1",
+        "pid": os.getpid(),
+        "updated_at": now,
+        "loop_at": now - 900,
+        "state": "active",
+        "gpu": {},
+        "datasets": {},
+    }
+    mirror.jsonio.write(c.status_file, status)
+    mirror.jsonio.write(
+        c.home / "live.pid",
+        {"pid": os.getpid(), "identity": controller.gpumgr.identity(os.getpid())},
+    )
+    warnings = cli.diagnose(c)["warnings"]
+    assert any("not ticked" in w and "900" in w for w in warnings), warnings
+    mirror.jsonio.write(c.status_file, {**status, "loop_at": now - 2})
+    assert not any("not ticked" in w for w in cli.diagnose(c)["warnings"])
+    # A status from before loop_at existed says nothing.
+    status.pop("loop_at")
+    mirror.jsonio.write(c.status_file, status)
+    assert not any("not ticked" in w for w in cli.diagnose(c)["warnings"])
+
+
+def test_the_controller_writes_the_time_of_its_last_tick(tmp_path):
+    c = cfg(tmp_path)
+    cli.prepare(c)
+    ctl = controller.Controller(c, log=lambda *a: None)
+    try:
+        ctl.tick(1000.0)
+        assert json.loads(c.status_file.read_text())["loop_at"] == 1000.0
+        assert ctl.status(1005.0)["loop_at"] == 1000.0
+    finally:
+        ctl.shutdown()
+
+
 # --- the page and the core must really be up -----------------------------------------
 
 
