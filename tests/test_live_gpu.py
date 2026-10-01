@@ -1360,7 +1360,9 @@ def test_a_vllm_that_dies_between_two_identity_reads_is_not_ours(live, monkeypat
     finally:
         monkeypatch.undo()
         subprocess.run(
-            [c.vllm.stop_script, "--stop", str(c.vllm.port)], capture_output=True
+            [c.vllm.stop_script, "--stop", str(c.vllm.port)],
+            capture_output=True,
+            check=False,
         )
 
 
