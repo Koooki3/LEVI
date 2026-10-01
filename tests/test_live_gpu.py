@@ -1219,8 +1219,8 @@ def test_labelling_paused_names_a_vllm_that_needs_a_person(ctl):
 def test_labelling_paused_for_too_little_vram_until_there_is_room(ctl):
     ctl.rollouts.write(0)
     ctl.rollouts.session("standby")
-    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 11863
-    ctl.machine.free = 32607 - 11863
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    ctl.machine.free = 15000  # something else holds the rest of the card
     t = time.time()
     assert step(ctl, t) == "insufficient_vram"
     first = paused(ctl, t)
@@ -1386,3 +1386,131 @@ def test_a_record_without_an_identity_is_never_mine_and_is_never_signalled(
     vllm.record_path.write_text(json.dumps({"pid": os.getpid(), "identity": None}))
     again = gpumgr.Vllm(c)
     assert again.state == "stopped" and not again.mine()
+
+
+# --- M4: a policy server too big for vLLM, and the other long blocks --------------------
+
+
+def test_a_policy_server_over_the_budget_is_refused_before_a_cold_start(ctl):
+    """.25 holds 8575 MiB, over gpu.policy_budget_mib (8500): vLLM would start
+    (the plan fits) and go straight back to sleep for ever. Say so instead, and
+    do not spend a 45-70 s cold start on it."""
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 8575
+    ctl.machine.free = 32607 - 8575
+    t = time.time()
+    assert step(ctl, t) == "policy_large" and not ctl.vllm.mine()
+    assert not any("starting vLLM" in e["text"] for e in ctl.events)
+    p = paused(ctl, t)
+    assert p["code"] == "policy_large"
+    for word in ("8575", "8500", ".22", "XLA_PYTHON_CLIENT_MEM_FRACTION"):
+        assert word in p["reason"], p["reason"]
+    # The policy server restarted with .22: it starts.
+    ctl.machine.policy_mib, ctl.machine.free = 7685, 24922
+    fresh(ctl)
+    up(ctl, t + 30)
+    assert paused(ctl, t + 31) is None
+
+
+def test_a_sleeping_vllm_that_cannot_wake_for_a_big_policy_server_is_reported(ctl):
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    t = time.time()
+    up(ctl, t)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 8575
+    fresh(ctl)
+    ctl.tick(t + 2)
+    assert ctl.vllm.state == "asleep"
+    ctl.rollouts.write(1)
+    fresh(ctl)
+    assert step(ctl, t + 4) == "policy_large"
+    assert paused(ctl, t + 4)["code"] == "policy_large"
+
+
+def test_a_vllm_that_cannot_wake_for_lack_of_room_is_reported_after_the_grace(ctl):
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    t = time.time()
+    up(ctl, t)
+    ctl.machine.free = 300
+    fresh(ctl)
+    ctl.tick(t + 2)
+    assert ctl.vllm.state == "asleep"
+    ctl.machine.free = 3000
+    grace = ctl.config.gpu.blocked_pause_s
+    fresh(ctl)
+    assert step(ctl, t + 4) == "vram" and paused(ctl, t + 4) is None
+    fresh(ctl)
+    ctl.tick(t + 4 + grace + 1)
+    p = paused(ctl, t + 5 + grace)
+    assert p["code"] == "vram" and p["since"] == pytest.approx(t + 4, abs=2)
+    ctl.machine.free = 26000
+    fresh(ctl)
+    ctl.tick(t + 6 + grace)
+    assert ctl.vllm.state == "ready" and paused(ctl, t + 7 + grace) is None
+
+
+def test_another_agent_holding_the_gpu_lock_is_reported_after_the_grace(ctl):
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    other = gpumgr.GpuLock(ctl.config.gpu.lock_file, "someone-else")
+    assert other.acquire()
+    t = time.time()
+    grace = ctl.config.gpu.blocked_pause_s
+    try:
+        assert step(ctl, t) == "lock" and paused(ctl, t) is None
+        ctl.tick(t + grace + 1)
+        p = paused(ctl, t + grace + 1)
+        assert p["code"] == "lock" and "lock" in p["reason"]
+    finally:
+        other.release()
+    up(ctl, t + grace + 5)
+    assert paused(ctl, t + grace + 6) is None
+
+
+def test_somebody_else_s_vllm_on_the_port_is_reported_after_the_grace(ctl):
+    server, _fake, _port = fakevlm.serve(ctl.config.vllm.port)
+    try:
+        ctl.rollouts.write(0)
+        ctl.rollouts.session("standby")
+        t = time.time()
+        grace = ctl.config.gpu.blocked_pause_s
+        assert step(ctl, t) == "external_busy" and paused(ctl, t) is None
+        ctl.tick(t + grace + 1)
+        p = paused(ctl, t + grace + 1)
+        assert p["code"] == "external_busy" and str(ctl.config.vllm.port) in p["reason"]
+    finally:
+        server.shutdown()
+
+
+# --- M5: a wake needs less room than a start --------------------------------------------
+
+
+def test_a_wake_uses_its_own_smaller_margin(ctl):
+    """Starting keeps 1100 MiB beyond the budget because vLLM sees about 930
+    MiB less free than nvidia-smi; a wake does not make that check. The 300
+    MiB default needs a real GPU to confirm (measured: policy .22 + a sleeping
+    vLLM leave 22804 MiB free, a wake at 0.7395 needs 21843 with 300)."""
+    assert ctl.config.gpu.wake_margin_mib == 300
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    t = time.time()
+    up(ctl, t)
+    util = ctl.vllm.profile["gpu_memory_utilization"]
+    asleep_need = int(util * 32107) + 300 - gpumgr.ASLEEP_RESIDENT_MIB
+    ctl.machine.free = 300
+    fresh(ctl)
+    ctl.tick(t + 2)
+    assert ctl.vllm.state == "asleep"
+    ctl.machine.free = asleep_need - 50  # a little short: stays asleep
+    fresh(ctl)
+    assert step(ctl, t + 4) == "vram" and ctl.vllm.state == "asleep"
+    assert ctl.decision.need_mib == asleep_need
+    ctl.machine.free = (
+        asleep_need + 50
+    )  # enough with the wake margin, not the start one
+    assert asleep_need + 50 < asleep_need + 800  # (the old margin needed 800 more)
+    fresh(ctl)
+    ctl.tick(t + 6)
+    assert ctl.vllm.state == "ready"

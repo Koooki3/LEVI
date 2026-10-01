@@ -130,10 +130,13 @@ VLLM_TOTAL_SLACK_MIB = 500
 ASLEEP_RESIDENT_MIB = 2200
 
 
-def need_mib(config, profile, total_mib) -> int:
-    """Free VRAM a start or a wake of a vLLM with this ``profile`` needs: its
-    budget of vLLM's total plus the configured margin."""
+def need_mib(config, profile, total_mib, wake=False) -> int:
+    """Free VRAM a start of a vLLM with this ``profile`` needs: its budget of
+    vLLM's total plus ``vllm.margin_mib``. A *wake* needs the budget less what
+    the sleeping vLLM still holds, plus the smaller ``gpu.wake_margin_mib``."""
     budget = profile["gpu_memory_utilization"] * (total_mib - VLLM_TOTAL_SLACK_MIB)
+    if wake:
+        return max(0, int(budget) + config.gpu.wake_margin_mib - ASLEEP_RESIDENT_MIB)
     return int(budget) + config.vllm.margin_mib
 
 
@@ -344,7 +347,12 @@ def should_sleep(config, mode, *, free_mib: int | None, policy_mib: int | None):
     if budget and policy_mib is not None and policy_mib > budget:
         return (
             "policy_large",
-            f"the policy server holds {policy_mib} MiB (over {budget})",
+            (
+                f"the policy server holds {policy_mib} MiB, over "
+                f"gpu.policy_budget_mib ({budget} MiB): it cannot share the card "
+                "with an awake vLLM; start it with "
+                "XLA_PYTHON_CLIENT_MEM_FRACTION=.22 (7.6 GB)"
+            ),
         )
     if free_mib is not None and free_mib < config.gpu.min_free_mib:
         return "vram", f"free VRAM fell to {free_mib} MiB"

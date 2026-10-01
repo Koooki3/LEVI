@@ -165,6 +165,7 @@ class Controller:
         self.attention: dict | None = None
         self._paused: dict | None = None  # the status' labelling_paused
         self._gate_code_since: tuple = (None, 0.0)
+        self._decision_since: tuple = (None, 0.0)
         self._resume_seen = None
         self.decision = gpumgr.Decision(True, "no work", "ok")
         self.state = "starting"
@@ -323,8 +324,7 @@ class Controller:
 
     def _need(self, profile, now, asleep=False) -> int:
         total = (self._vram[1] or {}).get("total_mib") or 32607
-        need = gpumgr.need_mib(self.config, profile, total)
-        return max(0, need - gpumgr.ASLEEP_RESIDENT_MIB) if asleep else need
+        return gpumgr.need_mib(self.config, profile, total, wake=asleep)
 
     def _gpu_step(self, now, want: bool) -> bool:
         """Advance the GPU side; True when the model is awake and answering."""
@@ -413,6 +413,13 @@ class Controller:
                 # Count the policy only when its memory is really held, read
                 # now (not the 30 s cache): a listening port may still be loading.
                 held = gpumgr.policy_loaded(c, self.policy_up, self.policy_mib(now, 0))
+                big = gpumgr.should_sleep(
+                    c, mode, free_mib=None, policy_mib=self._policy_mib[1]
+                )
+                if big and held == "loaded":
+                    # It would start and go straight back to sleep for ever.
+                    self.decision = gpumgr.Decision(False, big[1], big[0])
+                    return False
                 if held == "loading":
                     waited = now - (self.policy_changed_at or self.started_at)
                     if waited < c.gpu.policy_load_wait_s:
@@ -791,6 +798,9 @@ class Controller:
         a settling policy server): those pass by themselves."""
         c = self.config
         code = reason = since = None
+        blocked = self.decision.code if wanted else None
+        if self._decision_since[0] != blocked:
+            self._decision_since = (blocked, now)
         code_now = None if self.gate.open else self.gate.code
         if self._gate_code_since[0] != code_now:
             self._gate_code_since = (code_now, now)
@@ -803,6 +813,11 @@ class Controller:
             since = self.attention.get("since")
         elif wanted and self.decision.code == "insufficient_vram":
             code, reason = "insufficient_vram", self.decision.reason
+        elif wanted and self.decision.code == "policy_large":
+            code, reason = "policy_large", self.decision.reason
+        elif wanted and self._blocked_for(now) >= c.gpu.blocked_pause_s:
+            code, reason = self.decision.code, self._blocked_reason()
+            since = self._decision_since[1]
         elif wanted and self.decision.code in ("backoff", "error"):
             code = "vllm_error"
             reason = self.vllm.error or self.decision.reason
@@ -822,6 +837,25 @@ class Controller:
         if self._paused is None or self._paused["code"] != code:
             self._paused = {"code": code, "since": since or now}
         self._paused["reason"] = str(reason)[:300]
+
+    LONG_BLOCKS = ("vram", "lock", "external_busy")
+
+    def _blocked_for(self, now) -> float:
+        """How long the same long-lived block (see ``LONG_BLOCKS``) has held."""
+        if self._decision_since[0] not in self.LONG_BLOCKS:
+            return 0.0
+        return now - self._decision_since[1]
+
+    def _blocked_reason(self) -> str:
+        code, why = self.decision.code, self.decision.reason
+        if code == "lock":
+            return (
+                f"{why}: another agent has held the GPU lock for a long time "
+                "(its flock may wait up to 4 hours)"
+            )
+        if code == "external_busy":
+            return f"{why} (port {self.config.vllm.port}); stop it or set vllm.adopt_external"
+        return f"vLLM cannot get the room it needs: {why}"
 
     def _write_gate(self, now):
         """``live/gate.json``: the worker's permission to send model requests.
