@@ -151,6 +151,9 @@ class Controller:
         # Callables taking the time; a returned message is logged as an error
         # (the CLI registers the page/core watchdog here).
         self.hooks: list = []
+        # Callable returning the page/core state for the status file (set by
+        # the CLI when it starts them); None when they are not ours.
+        self.frontend = None
         self._adopt_orphan()
 
     # --- events ------------------------------------------------------------------
@@ -891,6 +894,7 @@ class Controller:
             # Set when the service gave up starting vLLM and needs a person
             # (`levi live resume`); labelling is paused, sessions still welcome.
             "attention": self.attention,
+            "frontend": self.frontend() if self.frontend else None,
             "events": list(self.events),
             "last_error": self.last_error,
             "resources": {

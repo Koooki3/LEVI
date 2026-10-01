@@ -449,3 +449,103 @@ def test_doctor_warns_when_vllm_is_failing_and_resume_clears_the_wait(tmp_path):
     done = cli_run(tmp_path, "resume")
     assert done.returncode == 0 and "KV cache" in done.stdout
     assert (tmp_path / "ws/live/resume.json").exists()
+
+
+# --- the page and the core must really be up -----------------------------------------
+
+
+def short_dir():
+    """A workspace short enough for the core's Unix socket (the repo's own
+    pytest base temp is not)."""
+    import tempfile
+
+    return Path(tempfile.mkdtemp(prefix="lvt", dir="/tmp"))
+
+
+def live_cmd(workspace, home, *args):
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "levi.live",
+            *args,
+            "--workspace",
+            str(workspace),
+            "--home",
+            str(home),
+            "--gpu-mode",
+            "manual",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=PROJECT,
+        env={**os.environ, "PYTHONPATH": str(PROJECT)},
+        timeout=240,
+        check=False,
+    )
+
+
+def test_a_workspace_path_too_long_for_the_core_socket_is_refused_up_front(tmp_path):
+    c = cfg(tmp_path)
+    c.service.workspace = str(tmp_path / ("w" * 90))
+    with pytest.raises(ValueError, match="Unix socket"):
+        cli.prepare(c)
+    done = live_cmd(tmp_path / ("w" * 90), tmp_path / "home2", "start", "--daemon")
+    assert done.returncode == 2 and "too long" in done.stderr
+    assert not (tmp_path / "home2/status.json").exists()  # nothing was started
+
+
+def test_a_daemon_whose_core_cannot_start_says_so_instead_of_claiming_success():
+    import shutil
+    import socket
+
+    base = short_dir()
+    try:
+        with socket.socket() as taken:
+            taken.bind(("127.0.0.1", 0))
+            taken.listen()
+            port = taken.getsockname()[1]
+            started = live_cmd(
+                base / "ws",
+                base / "home",
+                "start",
+                "--daemon",
+                "--no-ui",
+                "--core-port",
+                str(port),
+            )
+            try:
+                assert started.returncode == 2, started.stdout + started.stderr
+                assert "did not come up" in started.stdout
+                assert "Core failed to start" in started.stdout
+                status = json.loads((base / "home/status.json").read_text())
+                assert status["frontend"]["error"] and status["accepts_sessions"]
+            finally:
+                live_cmd(base / "ws", base / "home", "stop")
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def test_the_watchdog_gives_up_after_three_restarts_and_says_so_once(tmp_path):
+    front = cli.Frontend.__new__(cli.Frontend)
+    front.config, front.log, front.process, front.ui = cfg(tmp_path), print, None, False
+    front.state, front.attempts, front.started, front.error = "ok", 0, 0.0, ""
+    starts = []
+    front.start = lambda ui=False: (
+        starts.append(1),
+        setattr(front, "state", "starting"),
+    )
+    front._alive = lambda: False
+    front._tail_error = lambda: "RuntimeError: Core failed to start"
+    messages = []
+    now = 1000.0
+    for _ in range(12):
+        now += 400  # past every back-off
+        front.state = "ok" if front.state == "starting" else front.state
+        message = front.check(now)
+        if message:
+            messages.append(message)
+    assert len(starts) == 3  # three restarts, then it stops
+    assert len(messages) == 4 and "giving up" in messages[-1]
+    assert "Core failed to start" in messages[-1]
+    assert front.state == "failed" and front.check(now + 9999) is None
