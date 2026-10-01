@@ -724,6 +724,9 @@ def test_the_prewarm_flag_and_key_reach_the_config():
     args = cli.build_parser().parse_args(["start", "--prewarm", "--no-core"])
     assert cli.resolve_config(args).vllm.prewarm is True
     assert "--prewarm" in cli._forward(args)
+    args = cli.build_parser().parse_args(["start", "--vllm-port", "18199"])
+    assert cli.resolve_config(args).vllm.port == 18199
+    assert ["--vllm-port", "18199"] == cli._forward(args)[-2:]
 
 
 def test_the_budget_follows_the_memory_free_at_start_in_both_orders():

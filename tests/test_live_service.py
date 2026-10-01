@@ -338,6 +338,14 @@ def test_logs_rotate_and_the_run_cache_is_capped(tmp_path):
 # --- the service as a process -----------------------------------------------------------------
 
 
+def free_port():
+    import socket
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
 def service(tmp_path, *args):
     return [
         sys.executable,
@@ -350,6 +358,9 @@ def service(tmp_path, *args):
         str(tmp_path / "home"),
         "--root",
         str(tmp_path / "rollouts"),
+        # Never the default :8100 (a real model server may be there).
+        "--vllm-port",
+        str(free_port()),
         "--gpu-mode",
         "manual",
     ]
@@ -518,6 +529,11 @@ def live_cmd(workspace, home, *args):
             str(workspace),
             "--home",
             str(home),
+            # Nothing of the machine's real rollouts directory or model server.
+            "--root",
+            str(Path(home).parent / "rollouts"),
+            "--vllm-port",
+            str(free_port()),
             "--gpu-mode",
             "manual",
         ],

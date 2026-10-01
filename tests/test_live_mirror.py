@@ -22,6 +22,7 @@ def cfg(tmp_path):
     config.watch.roots = [str(tmp_path / "rollouts")]
     config.watch.backlog = "process"
     config.watch.settle_s = 0.0
+    config.gpu.lock_file = str(tmp_path / "gpu.lock")  # never the shared one
     return config
 
 

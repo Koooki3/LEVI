@@ -65,6 +65,7 @@ def add_config_options(parser):
         help="start vLLM as soon as no evaluation is running and keep it resident "
         "(idle only sleeps it): no cold start while the robot evaluates",
     )
+    parser.add_argument("--vllm-port", type=int, help="the model server's port")
     parser.add_argument("--ui-port", type=int)
     parser.add_argument("--core-port", type=int)
     parser.add_argument(
@@ -94,6 +95,8 @@ def resolve_config(args):
         config.watch.since = args.since
     if getattr(args, "prewarm", False):
         config.vllm.prewarm = True
+    if getattr(args, "vllm_port", None):
+        config.vllm.port = args.vllm_port
     if args.ui_port:
         config.service.ui_port = args.ui_port
     if args.core_port:
@@ -479,6 +482,7 @@ def _forward(args) -> list:
         ("--since", args.since),
         ("--ui-port", args.ui_port),
         ("--core-port", args.core_port),
+        ("--vllm-port", getattr(args, "vllm_port", None)),
         ("--home", args.home),
     ):
         if value:
