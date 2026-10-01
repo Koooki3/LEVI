@@ -46,6 +46,9 @@ def project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+RUN_ENDED = ("cancelled", "failed", "succeeded", "partially_succeeded")
+
+
 def peek_run(workspace, run_id) -> dict | None:
     """A run record read straight from the store's SQLite file, read-only, so
     the idle supervisor need not import LEVI's agent package."""
@@ -142,7 +145,12 @@ class Controller:
         self.worker_started = 0.0
         self.backoff: dict = {}
         self.failures: dict = {}
+        # Datasets waiting for a person (plan not approved, draft not
+        # committed): remembered in the dataset state across restarts.
         self.awaiting: dict = {}
+        for name, state in mirror.list_states(config).items():
+            if isinstance(state.get("awaiting"), dict):
+                self.awaiting[name] = {**state["awaiting"], "at": 0.0}
         self.policy_changed_at: float | None = None
         self.gate = gpumgr.Gate(True, "open", "no evaluation")
         self.gate_closed_at: float | None = None
@@ -151,9 +159,12 @@ class Controller:
         self.idle_since: float | None = None
         self._waiting_since: dict = {}
         self._status_at = 0.0
+        self.loop_at: float | None = None  # the last tick (the thread beats on)
         self.start_failures = 0
         self.next_start_at = 0.0
         self.attention: dict | None = None
+        self._paused: dict | None = None  # the status' labelling_paused
+        self._gate_code_since: tuple = (None, 0.0)
         self._resume_seen = None
         self.decision = gpumgr.Decision(True, "no work", "ok")
         self.state = "starting"
@@ -199,8 +210,16 @@ class Controller:
         self.sessions = sessions.read_sessions(c.watch.roots, now)
         # When each session began waiting for the operator's reset (the gate
         # closes shortly before the episode that follows).
-        waiting = {s.path for s in self.sessions.values() if s.state == "waiting_reset"}
-        self._waiting_since = {p: self._waiting_since.get(p, now) for p in waiting}
+        # The client says when the wait began (``waiting_reset_since``); an older
+        # client does not: then it is when this service first saw it.
+        waiting = {
+            s.path: s.waiting_reset_since
+            for s in self.sessions.values()
+            if s.state == "waiting_reset"
+        }
+        self._waiting_since = {
+            p: told or self._waiting_since.get(p, now) for p, told in waiting.items()
+        }
         ports = self.probes.ports()
         up = any(int(p) in ports for p in c.gpu.policy_ports)
         if up != self.policy_up and self.state != "starting":
@@ -247,7 +266,14 @@ class Controller:
         ws = self.config.workspace
         if info.get("kind") == "changes" and info.get("changeset"):
             change = peek_record(ws, "changes", info["changeset"])
-            acted = bool(change and change.get("status") in ("committed", "rejected"))
+            run = peek_run(ws, info.get("run_id")) if info.get("run_id") else None
+            acted = bool(
+                (change and change.get("status") in ("committed", "rejected"))
+                # The person dealt with the run itself (cancelled it, it
+                # ended) or the draft is gone: nothing is left to wait for.
+                or (run and run.get("status") in RUN_ENDED)
+                or (change is None and run)
+            )
         else:
             run = peek_run(ws, info.get("run_id")) if info.get("run_id") else None
             acted = bool(
@@ -255,6 +281,12 @@ class Controller:
             )
         if acted:
             self.awaiting.pop(name, None)
+            with contextlib.suppress(Exception):
+                jsonio.update(
+                    mirror.state_path(self.config, name),
+                    lambda v: (v.pop("awaiting", None), v)[1],
+                    default=dict,
+                )
             return True
         info["at"] = time.time()
         return False
@@ -265,6 +297,16 @@ class Controller:
         """An evaluation session is live (not stopped, finished or crashed)."""
         return any(
             s.state not in ("stopped", "finished", "crashed")
+            for s in self.sessions.values()
+        )
+
+    def _evaluation_unfinished(self) -> bool:
+        """A session is on the robot or between episodes (running, homing,
+        waiting for the reset): the policy answers at any moment and a cold
+        start's effect on its latency is unmeasured. Standby, finished,
+        stopped, crashed and fault sessions do not count."""
+        return any(
+            s.state in ("running", "homing", "waiting_reset")
             for s in self.sessions.values()
         )
 
@@ -353,14 +395,37 @@ class Controller:
                 False, "waiting for the gate: " + self.gate.reason, "gate_closed"
             )
             return False
+        if mode != "manual" and self._evaluation_unfinished():
+            self.decision = gpumgr.Decision(
+                False,
+                "an evaluation is under way: no cold start (45-70 s of GPU load, "
+                "effect on the policy's latency unmeasured) until it is between "
+                "runs; `levi live start --prewarm` starts vLLM before",
+                "evaluation_active",
+            )
+            return False
         free = None
         need = 0
         if mode != "manual":
             free = self.free_mib(now)
             total = (self._vram[1] or {}).get("total_mib") or 32607
             if free is not None:
+                # Count the policy only when its memory is really held, read
+                # now (not the 30 s cache): a listening port may still be loading.
+                held = gpumgr.policy_loaded(c, self.policy_up, self.policy_mib(now, 0))
+                if held == "loading":
+                    waited = now - (self.policy_changed_at or self.started_at)
+                    if waited < c.gpu.policy_load_wait_s:
+                        self.decision = gpumgr.Decision(
+                            False,
+                            "the policy server is listening but holds only "
+                            f"{self._policy_mib[1]} MiB: still loading, waiting for "
+                            "its memory before planning vLLM's budget",
+                            "settling",
+                        )
+                        return False
                 plan = gpumgr.plan_budget(
-                    c, free_mib=free, total_mib=total, policy_up=self.policy_up
+                    c, free_mib=free, total_mib=total, policy_up=held == "loaded"
                 )
                 if not plan.ok:
                     self.decision = gpumgr.Decision(
@@ -465,6 +530,13 @@ class Controller:
         )
         if not self.decision.allowed:
             return False
+        if mode != "manual" and not self.gate.open:
+            # ...and the policy is not inferring or about to (a wake is quick
+            # but not free): never during the evaluation's inference.
+            self.decision = gpumgr.Decision(
+                False, "waiting for the gate: " + self.gate.reason, "gate_closed"
+            )
+            return False
         if self.vllm.wake():
             self.event("vLLM woke up")
             return True
@@ -527,7 +599,7 @@ class Controller:
             self.idle_since = None
             return
         live = self.policy_up or self._evaluating()
-        if state == "asleep" and live:
+        if state == "asleep" and (live or v.prewarm):
             self.idle_since = None
             return
         if self.idle_since is None:
@@ -538,10 +610,16 @@ class Controller:
         sleeps = (
             v.sleep_mode
             and state == "ready"
-            and (v.idle_action == "sleep" or (v.idle_action == "auto" and live))
+            and (
+                v.prewarm
+                or v.idle_action == "sleep"
+                or (v.idle_action == "auto" and live)
+            )
         )
         if sleeps and self.vllm.sleep():
             self.event("no work: vLLM sleeps (the evaluation is live)")
+        elif v.prewarm:
+            pass  # a prewarmed vLLM is never stopped before the service is
         else:
             self.event("no work: stopping vLLM to free the GPU")
             self._stop_vllm()
@@ -706,6 +784,45 @@ class Controller:
 
     # --- the tick ---------------------------------------------------------------------------
 
+    def _update_paused(self, now, wanted):
+        """``labelling_paused`` for the status: why nothing is being labelled
+        that a person (or the robot client's operator) can see and act on.
+        Not set for ordinary waits (the gate closing while the policy infers,
+        a settling policy server): those pass by themselves."""
+        c = self.config
+        code = reason = since = None
+        code_now = None if self.gate.open else self.gate.code
+        if self._gate_code_since[0] != code_now:
+            self._gate_code_since = (code_now, now)
+        if self.attention:
+            code = self.attention.get("code") or "vllm_failed"
+            reason = (
+                f"vLLM failed to start repeatedly: {self.attention.get('reason')}; "
+                "`levi live resume` clears it"
+            )
+            since = self.attention.get("since")
+        elif wanted and self.decision.code == "insufficient_vram":
+            code, reason = "insufficient_vram", self.decision.reason
+        elif wanted and self.decision.code in ("backoff", "error"):
+            code = "vllm_error"
+            reason = self.vllm.error or self.decision.reason
+        elif (
+            code_now == "unknown_client"
+            and now - self._gate_code_since[1] >= c.gpu.unknown_client_pause_s
+        ):
+            code = "unknown_client"
+            reason = (
+                "a policy server is running that no evaluation session of this "
+                f"service vouches for: {self.gate.reason}"
+            )
+            since = self._gate_code_since[1]
+        if code is None:
+            self._paused = None
+            return
+        if self._paused is None or self._paused["code"] != code:
+            self._paused = {"code": code, "since": since or now}
+        self._paused["reason"] = str(reason)[:300]
+
     def _write_gate(self, now):
         """``live/gate.json``: the worker's permission to send model requests.
         Rewritten on change and at least every 4 s (a stale gate reads as
@@ -758,7 +875,12 @@ class Controller:
         queue = self._queue(now)
         orphan = self._orphan_running()
         want = bool(queue) and not orphan
-        ready = self._gpu_step(now, want or self.worker is not None)
+        prewarm = (
+            self.config.vllm.prewarm and self.worker is None and not self.vllm.mine()
+        )
+        wanted = want or self.worker is not None or prewarm
+        ready = self._gpu_step(now, wanted)
+        self._update_paused(now, wanted)
         self._write_gate(now)
         self._police_worker(now)
         if self.worker is None and want and ready and not orphan and self.gate.open:
@@ -783,11 +905,16 @@ class Controller:
             message = hook(now)
             if message:
                 self.event(message, "error")
+        self.loop_at = now
         if now - self._status_at >= min(1.0, c.service.heartbeat_s):
             self._status_at = now
             self.write_status(now)
         if self.worker is not None and self.sessions:
             return c.service.gate_poll_s
+        if self._evaluation_unfinished():
+            # The gate's lead (episode_imminent) is a few seconds: look at least
+            # once a second while a session is on the robot or between episodes.
+            return min(1.0, c.service.heartbeat_s)
         return (
             c.service.heartbeat_s
             if not busy
@@ -930,6 +1057,9 @@ class Controller:
             "pid": pid,
             "started_at": self.started_at,
             "updated_at": now,
+            # The last time the main loop ticked: the heartbeat thread keeps
+            # updated_at fresh even when the loop is stuck.
+            "loop_at": self.loop_at,
             "state": self.state,
             "accepts_sessions": self.state not in ("starting", "stopped", "error"),
             "ui_url": f"http://{c.service.host}:{c.service.ui_port}",
@@ -979,6 +1109,10 @@ class Controller:
             # Set when the service gave up starting vLLM and needs a person
             # (`levi live resume`); labelling is paused, sessions still welcome.
             "attention": self.attention,
+            # null, or {code, reason, since} when nothing is being labelled for a
+            # reason that does not pass by itself (vllm_failed, vllm_error,
+            # insufficient_vram, unknown_client). Sessions are still accepted.
+            "labelling_paused": dict(self._paused) if self._paused else None,
             "frontend": self.frontend() if self.frontend else None,
             "events": list(self.events),
             "last_error": self.last_error,

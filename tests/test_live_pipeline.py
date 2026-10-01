@@ -504,6 +504,10 @@ def test_waiting_for_a_person_does_not_loop_and_a_person_s_commit_is_not_a_failu
     assert ctl.awaiting[NAME]["kind"] == "plan"
     assert started(ctl) == 1
     (run,) = e.records("runs")
+    # The wait is on disk too: a restarted supervisor does not have to start a
+    # model and a worker just to find out.
+    saved = e.state()["awaiting"]
+    assert saved["kind"] == "plan" and saved["run_id"] == run["id"]
     as_a_person(e, "plan", run["id"])
     # Time passes: the plan is approved, so exactly one more worker runs it ...
     ctl.awaiting[NAME]["at"] -= 1000
@@ -515,7 +519,8 @@ def test_waiting_for_a_person_does_not_loop_and_a_person_s_commit_is_not_a_failu
         ctl.tick()
         time.sleep(0.3)
     ctl.tick()
-    assert ctl.awaiting[NAME]["kind"] == "changes", ctl.awaiting
+    assert ctl.awaiting[NAME]["kind"] == "changes", (ctl.awaiting, e.messages[-8:])
+    assert e.state()["awaiting"]["kind"] == "changes"
     # ... and then nothing starts while the draft waits, however long it is.
     for _ in range(6):
         ctl.awaiting[NAME]["at"] -= 1000
@@ -560,6 +565,41 @@ def test_waiting_for_a_person_does_not_loop_and_a_person_s_commit_is_not_a_failu
     row = e.state()["demos"]["demo_0000"]
     assert row["state"] == "done" and row["verdict"]["review"] == "auto"
     ctl.shutdown()
+
+
+def test_a_worker_finding_a_person_s_wait_needs_no_model(env):
+    """With the approver off a plan that is not approved yet is a wait for a
+    person: the worker finds that out without the model server (down here),
+    exits 11 and not 10 ("waiting for the model server")."""
+    e = env()
+    e.config.pipeline.auto_approve = False
+    e.rollouts.write(0)
+    ctl = e.controller()
+    ctl.run(once=True, max_seconds=120)
+    assert ctl.awaiting[NAME]["kind"] == "plan"
+    ctl.shutdown()
+    # The supervisor restarts with the model server gone.
+    e.config.vllm.port = free_port()
+    ctl = e.controller()
+    assert ctl.awaiting[NAME]["kind"] == "plan"  # read back from the dataset state
+    ctl.awaiting.clear()  # ... and suppose it had not: the worker must cope
+    e.messages.clear()
+    ctl._spawn(NAME)  # (the supervisor itself would not: no model is up)
+    deadline = time.time() + 120
+    while time.time() < deadline and ctl.worker is not None:
+        ctl.tick()
+        time.sleep(0.3)
+    assert ctl.awaiting[NAME]["kind"] == "plan"
+    assert not any("waiting for the model server" in m for m in e.messages)
+    ctl.shutdown()
+
+
+def free_port():
+    import socket
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
 
 
 def test_open_review_runs_are_kept_up_to_a_limit_and_older_ones_archived(env):

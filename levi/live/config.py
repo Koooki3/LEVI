@@ -102,6 +102,18 @@ class Gpu:
     # A policy server that holds more than this (MiB) cannot share the card
     # with an awake vLLM: vLLM sleeps while it runs. 0 checks only free VRAM.
     policy_budget_mib: int = 8500
+    # A listening port is not a loaded policy server: only one that holds at
+    # least this much VRAM (the measured server holds 7.7 GB) counts as already
+    # on the card when vLLM's budget is planned. One that listens but holds
+    # less is still loading: vLLM waits (up to ``policy_load_wait_s`` after the
+    # port appeared, then plans as if alone). Memory that cannot be read is
+    # planned as alone too: the conservative budget leaves room to grow.
+    policy_loaded_min_mib: int = 6000
+    # A policy server listens but no session vouches for it (``unknown_client``
+    # keeps the gate closed): after this long the status says labelling is
+    # paused for it (``labelling_paused``).
+    unknown_client_pause_s: float = 600.0
+    policy_load_wait_s: float = 120.0
 
 
 @dataclass
@@ -112,19 +124,29 @@ class Vllm:
     port: int = 8100
     served_model: str = "qwen3.8-27b"
     # The memory budget (a share of vLLM's own total) is chosen at each start
-    # from the VRAM that is free then (``gpumgr.plan_budget``). Alone on the
-    # card it asks for this much, which leaves room for a policy server that
-    # starts afterwards (measured: policy .22 beside vLLM 0.72 fits)...
-    gpu_memory_utilization: float = 0.72
+    # from the VRAM that is free then (``gpumgr.plan_budget``). CALIBRATION
+    # (live-validation.md section 5, results/live-validation-20261001/b/): with
+    # a warm compile cache vLLM keeps 20.9 GiB of its 31.36 GiB for weights and
+    # other non-KV memory, so budget u leaves u*31.36 - 20.9 GiB of KV cache
+    # (0.72 -> 1.73 GiB, 0.74 -> 2.36 GiB, measured on an idle GPU), and 49152
+    # tokens need 1.82 GiB: the budget must be at least about 0.7245. 0.72,
+    # which worked once, was the first start with a cold cache (about 0.3 GiB
+    # less non-KV memory); every later start loads the compiled graphs and
+    # does not fit. Alone on the card it asks for this much (0.74 leaves
+    # about 0.6 GB beside it for a policy server that starts later: not
+    # verified on a real GPU)...
+    gpu_memory_utilization: float = 0.74
     # ...beside a policy server that is already loaded it takes what is free
-    # up to this (measured: 0.74 works, 0.72 leaves a KV cache of 1.73 GiB,
-    # below the 1.82 GiB 49152 tokens need) and never below the floors.
+    # up to this (measured: 0.747 is vLLM's own limit there) and never below
+    # the floors.
     gpu_memory_utilization_max: float = 0.747
     gpu_memory_utilization_min: float = 0.70
-    # Smallest budget that serves max_model_len 49152 when another process
-    # (the policy server) is already on the card / when vLLM is alone.
-    min_utilization_with_policy: float = 0.724
-    min_utilization_alone: float = 0.70
+    # Smallest budget that serves max_model_len 49152 (the formula above with a
+    # little to spare), with another process on the card and alone: the same,
+    # the non-KV memory does not depend on it. A shorter context needs less
+    # (``kv_bytes_per_token``).
+    min_utilization_with_policy: float = 0.725
+    min_utilization_alone: float = 0.725
     # KV cache bytes per token (measured 39.8 KB): a shorter context needs
     # less budget, so a start that does not fit at max_model_len tries
     # shorter contexts down to min_model_len before it gives up.
@@ -161,6 +183,10 @@ class Vllm:
     # waiting for the port. Never stopped by this service either way; in
     # manual mode it is always used.
     adopt_external: bool = False
+    # Bring vLLM up once the service starts (with no evaluation running) and
+    # keep it resident: idle only puts it to sleep, it stops with the service.
+    # The way to avoid any cold start while the robot evaluates.
+    prewarm: bool = False
 
 
 @dataclass

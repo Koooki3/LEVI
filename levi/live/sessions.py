@@ -80,6 +80,11 @@ class Session:
     # Seconds the client waits for the operator to reset the scene after an
     # episode (``levi.reset_wait_s``): the next episode starts right after.
     reset_wait_s: float | None = None
+    # Epoch seconds of the first entry into ``waiting_reset`` of the current
+    # wait, written by the client (None in every other state, or by an older
+    # client): the wait's true start, which the supervisor cannot see between
+    # its polls or before it started.
+    waiting_reset_since: float | None = None
 
     def active(self, states=DEFAULT_ACTIVE) -> bool:
         return self.state in states and not self.crashed
@@ -108,6 +113,7 @@ class Session:
             "policy": self.policy,
             "root": self.root,
             "reset_wait_s": self.reset_wait_s,
+            "waiting_reset_since": self.waiting_reset_since,
         }
 
 
@@ -157,6 +163,12 @@ def _number(value):
         if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
         else None
     )
+
+
+def _epoch(value, now):
+    """A time from the client, in the past: anything else is not believed."""
+    stamp = _number(parse_time(value))
+    return None if stamp is None or stamp > now + 5 else stamp
 
 
 def _session(path, name, data, now):
@@ -216,6 +228,7 @@ def _session(path, name, data, now):
             "checkpoint": os.path.basename(checkpoint)[:120] or None,
         },
         reset_wait_s=_number(levi.get("reset_wait_s")),
+        waiting_reset_since=_epoch(data.get("waiting_reset_since"), now),
     )
 
 

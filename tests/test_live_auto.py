@@ -350,3 +350,81 @@ def test_a_failed_call_is_audited_with_its_error(bench, dataset, live_ws):
     before = len(audit(live_ws))
     invoke(wb, approver, "runs.get", {"run_id": run["id"]})
     assert len(audit(live_ws)) == before
+
+
+# --- a person cannot start the model while the policy infers -------------------------------
+
+
+def write_gate(live, open_, age=0.0):
+    import time
+
+    (live / "gate.json").write_text(
+        json.dumps(
+            {
+                "open": open_,
+                "code": "ok" if open_ else "policy_inferring",
+                "reason": "" if open_ else "the policy is inferring",
+                "updated_at": time.time() - age,
+            }
+        )
+    )
+
+
+def test_a_person_s_execute_is_refused_while_the_gate_is_closed(
+    bench, dataset, live_ws
+):
+    from levi.agent.store import Conflict
+    from levi.live import gating
+
+    wb, context = bench
+    human = Principal("reviewer", human=True)
+    run = invoke(wb, human, "runs.plan", temporal(context, dataset).model_dump())
+    invoke(wb, human, "plans.approve", {"run_id": run["id"], "revision": 1})
+    write_gate(live_ws, False)
+    for name in ("runs.execute", "runs.resume"):
+        with pytest.raises(Conflict, match="inferring, try again shortly"):
+            invoke(wb, human, name, {"run_id": run["id"]})
+    # Only those two, only people: reads and the worker's own principals pass.
+    for who, name in (
+        (human, "runs.get"),
+        (human, "plans.approve"),
+        (Principal("live-planner", human=True), "runs.execute"),
+        (Principal("live-auto", human=True, auto=True), "runs.resume"),
+    ):
+        gating.check(who, name)
+    # A closed gate nobody refreshes (the supervisor died) blocks nothing, nor
+    # does an open one, nor a workspace that is not a live one.
+    write_gate(live_ws, False, age=gating.STALE_S + 5)
+    gating.check(human, "runs.execute")
+    write_gate(live_ws, True)
+    gating.check(human, "runs.execute")
+    write_gate(live_ws, False)
+    (live_ws / auto.MARKER).unlink()
+    gating.check(human, "runs.execute")
+
+
+def test_a_failing_audit_write_is_a_warning_not_a_failed_call(
+    bench, dataset, live_ws, monkeypatch, capsys
+):
+    wb, context = bench
+    approver = auto.principal()
+    run = invoke(wb, approver, "runs.plan", temporal(context, dataset).model_dump())
+
+    def broken(*a, **k):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(auto.jsonio, "append_line", broken)
+    before = auto.AUDIT_FAILURES
+    # The call succeeds (it already took effect) ...
+    approved = invoke(
+        wb, approver, "plans.approve", {"run_id": run["id"], "revision": 1}
+    )
+    assert approved
+    assert wb.store.get("runs", run["id"])["plan"].get("approval")
+    # ... the failures are counted (allowed + completed) and said once, loudly.
+    assert auto.AUDIT_FAILURES == before + 2
+    assert "audit" in capsys.readouterr().err.lower()
+    # A refusal is still a refusal, not an OSError.
+    with pytest.raises(PermissionError, match="may not call"):
+        invoke(wb, approver, "workspace.reset", {"apply": False})
+    assert auto.AUDIT_FAILURES >= before + 3

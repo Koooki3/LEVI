@@ -351,6 +351,14 @@ def test_logs_rotate_and_the_run_cache_is_capped(tmp_path):
 # --- the service as a process -----------------------------------------------------------------
 
 
+def free_port():
+    import socket
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
 def service(tmp_path, *args):
     return [
         sys.executable,
@@ -363,6 +371,9 @@ def service(tmp_path, *args):
         str(tmp_path / "home"),
         "--root",
         str(tmp_path / "rollouts"),
+        # Never the default :8100 (a real model server may be there).
+        "--vllm-port",
+        str(free_port()),
         "--gpu-mode",
         "manual",
     ]
@@ -465,6 +476,50 @@ def test_doctor_warns_when_vllm_is_failing_and_resume_clears_the_wait(tmp_path):
     assert (tmp_path / "ws/live/resume.json").exists()
 
 
+def test_doctor_warns_when_the_loop_has_stopped_ticking_though_the_status_is_fresh(
+    tmp_path,
+):
+    """The heartbeat thread keeps ``updated_at`` fresh even if the main loop is
+    stuck; ``loop_at`` (the last tick) is what gives it away."""
+    c = cfg(tmp_path)
+    cli.prepare(c)
+    now = time.time()
+    status = {
+        "schema": "levi.live.status.v1",
+        "pid": os.getpid(),
+        "updated_at": now,
+        "loop_at": now - 900,
+        "state": "active",
+        "gpu": {},
+        "datasets": {},
+    }
+    mirror.jsonio.write(c.status_file, status)
+    mirror.jsonio.write(
+        c.home / "live.pid",
+        {"pid": os.getpid(), "identity": controller.gpumgr.identity(os.getpid())},
+    )
+    warnings = cli.diagnose(c)["warnings"]
+    assert any("not ticked" in w and "900" in w for w in warnings), warnings
+    mirror.jsonio.write(c.status_file, {**status, "loop_at": now - 2})
+    assert not any("not ticked" in w for w in cli.diagnose(c)["warnings"])
+    # A status from before loop_at existed says nothing.
+    status.pop("loop_at")
+    mirror.jsonio.write(c.status_file, status)
+    assert not any("not ticked" in w for w in cli.diagnose(c)["warnings"])
+
+
+def test_the_controller_writes_the_time_of_its_last_tick(tmp_path):
+    c = cfg(tmp_path)
+    cli.prepare(c)
+    ctl = controller.Controller(c, log=lambda *a: None)
+    try:
+        ctl.tick(1000.0)
+        assert json.loads(c.status_file.read_text())["loop_at"] == 1000.0
+        assert ctl.status(1005.0)["loop_at"] == 1000.0
+    finally:
+        ctl.shutdown()
+
+
 # --- the page and the core must really be up -----------------------------------------
 
 
@@ -487,6 +542,11 @@ def live_cmd(workspace, home, *args):
             str(workspace),
             "--home",
             str(home),
+            # Nothing of the machine's real rollouts directory or model server.
+            "--root",
+            str(Path(home).parent / "rollouts"),
+            "--vllm-port",
+            str(free_port()),
             "--gpu-mode",
             "manual",
         ],
@@ -585,6 +645,39 @@ def test_the_service_refuses_a_workspace_that_is_not_a_live_one(tmp_path):
     own.service.workspace = str(PROJECT / ".state")
     with pytest.raises(ValueError, match="product LEVI"):
         cli.prepare(own, adopt=True)
+
+
+def test_the_main_checkout_and_the_environment_workspace_are_refused_even_adopted(
+    tmp_path, monkeypatch
+):
+    """Run from a worktree, the product checkout's .state is another path; and
+    LEVI_WORKSPACE names whichever workspace the shell's LEVI uses. Neither
+    may become the live workspace, whatever --adopt-workspace says."""
+    main = tmp_path / "LEVI"
+    (main / ".git/worktrees/live-fix").mkdir(parents=True)
+    tree = tmp_path / "LEVI-live-fix"
+    tree.mkdir()
+    (tree / ".git").write_text(f"gitdir: {main}/.git/worktrees/live-fix\n")
+    monkeypatch.setattr(controller, "project_root", lambda: tree)
+    c = cfg(tmp_path)
+    c.service.workspace = str(main / ".state")
+    (main / ".state/outputs/LEVI").mkdir(parents=True)
+    with pytest.raises(ValueError, match="product LEVI"):
+        cli.prepare(c, adopt=True)
+    assert not (main / ".state/live").exists()
+    # The shell's own LEVI workspace.
+    mine = tmp_path / "somebodys-ws"
+    (mine / "outputs/LEVI").mkdir(parents=True)
+    monkeypatch.setenv("LEVI_WORKSPACE", str(mine))
+    c.service.workspace = str(mine)
+    with pytest.raises(ValueError, match="LEVI_WORKSPACE"):
+        cli.prepare(c, adopt=True)
+    # Once it is a live workspace (made on purpose, with the variable unset),
+    # the variable naming it is no reason to refuse.
+    monkeypatch.delenv("LEVI_WORKSPACE")
+    cli.prepare(c, adopt=True)
+    monkeypatch.setenv("LEVI_WORKSPACE", str(mine))
+    cli.prepare(c)
 
 
 def test_init_and_start_respect_the_guard(tmp_path):

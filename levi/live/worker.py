@@ -38,6 +38,7 @@ import sys
 import time
 from pathlib import Path
 
+from . import auto as approver_log
 from . import config as live_config
 from . import generic, gpumgr, jsonio, mirror
 
@@ -420,6 +421,10 @@ class Worker:
                             self.call("runs.cancel", {"run_id": run_id})
                         return self.run_state(run_id)
                     self.progress(what, note=f"resuming ({reason[:120]})")
+                # The model is needed from here on, not before: a run waiting
+                # for a person must not make the service start one.
+                if not self.model_ready():
+                    raise NeedModel("the vLLM server is not answering")
                 try:
                     self.call("runs.execute", {"run_id": run_id, "pilot": False})
                 except Exception as exc:
@@ -776,6 +781,11 @@ class Worker:
         self.progress(
             "view", started_at=batch.get("started_at"), batch=len(batch["demos"])
         )
+        # What was waiting for a person is checked first, from the store alone:
+        # no model server, provider binding or view is needed to find out that
+        # the plan is still unapproved or the draft uncommitted.
+        self.update(lambda v: (v.pop("awaiting", None), v)[1])
+        self.guard_human(batch)
         if not self.model_ready():
             raise NeedModel("the vLLM server is not answering")
         self.ensure_provider()
@@ -789,6 +799,37 @@ class Worker:
                 self.anchored(batch, index)
         self.finish(batch)
         return OK
+
+    def guard_human(self, batch):
+        """With the approver off: still waiting for a person? Raises
+        ``AwaitHuman`` for a temporal run whose plan is not approved or whose
+        draft is neither committed nor rejected (a release review is judged
+        in ``drive`` once its plan has been approved)."""
+        if self.auto is not None:
+            return
+        runs = [k["run_id"] for k in (batch.get("temporal") or {}).values()]
+        if batch.get("anchored"):
+            runs.append(batch["anchored"]["run_id"])
+        for run_id in runs:
+            try:
+                run = self.run_state(run_id)
+            except KeyError:
+                continue
+            if run["status"] == "planned" and not run["plan"].get("approval"):
+                raise AwaitHuman("plan", run_id)
+        for known in (batch.get("temporal") or {}).values():
+            try:
+                run = self.run_state(known["run_id"])
+                if run["status"] != "waiting_for_review" or not run.get("changes"):
+                    continue
+                change = self.store.get("changes", run["changes"])
+            except KeyError:
+                continue
+            if change["proposals"] and change["status"] not in (
+                "committed",
+                "rejected",
+            ):
+                raise AwaitHuman("changes", run["id"], change["id"])
 
     def committed_here(self, batch) -> set:
         """Episodes of this batch whose draft was committed (by the approver
@@ -902,6 +943,10 @@ def main(argv=None) -> int:
     except AwaitHuman as exc:
         worker.log("waiting for a person:", exc)
         awaiting = {"kind": exc.kind, "run_id": exc.run_id, "changeset": exc.changeset}
+        # On disk too: a restarted supervisor reads it back instead of starting
+        # a model and a worker to find out.
+        with contextlib.suppress(Exception):
+            worker.update(lambda v: v.update(awaiting={**awaiting, "at": time.time()}))
         code = AWAIT_HUMAN
     except Exception as exc:  # noqa: BLE001 - the supervisor retries later
         worker.log("error:", type(exc).__name__, str(exc)[:500])
@@ -919,6 +964,8 @@ def main(argv=None) -> int:
                     "phase": "exited",
                     "exit": code,
                     "awaiting": awaiting,
+                    # audit records that could not be written (see auto.audit)
+                    "audit_failures": approver_log.AUDIT_FAILURES,
                     "updated_at": time.time(),
                 },
             )
