@@ -1804,10 +1804,24 @@ def test_the_service_environment_never_carries_the_worker_marker(live, monkeypat
     monkeypatch.setenv("LEVI_LIVE_WORKER", "1")  # a shell that set it
     env = resources.service_env(c)
     assert "LEVI_LIVE_WORKER" not in env
-    # Only the worker process sets it (configure_process).
-    from levi.live import worker
-
-    monkeypatch.delenv("LEVI_LIVE_WORKER")
-    worker.configure_process(c)
-    assert os.environ["LEVI_LIVE_WORKER"] == "1"
-    monkeypatch.delenv("LEVI_LIVE_WORKER")
+    # Only the worker process sets it (configure_process) -- checked in a child
+    # process: configure_process changes the whole process's environment and
+    # priority, which must not leak into the other tests.
+    toml = c.workspace / "live.toml"
+    assert toml.exists()
+    done = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import os; from levi.live import config, worker; "
+            f"worker.configure_process(config.load(r'{toml}')); "
+            "print(os.environ.get('LEVI_LIVE_WORKER'))",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=PROJECT,
+        env={k: v for k, v in os.environ.items() if k != "LEVI_LIVE_WORKER"},
+        timeout=60,
+        check=False,
+    )
+    assert done.stdout.strip() == "1", done.stderr[-300:]
