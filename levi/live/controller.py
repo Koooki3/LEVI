@@ -210,8 +210,16 @@ class Controller:
         self.sessions = sessions.read_sessions(c.watch.roots, now)
         # When each session began waiting for the operator's reset (the gate
         # closes shortly before the episode that follows).
-        waiting = {s.path for s in self.sessions.values() if s.state == "waiting_reset"}
-        self._waiting_since = {p: self._waiting_since.get(p, now) for p in waiting}
+        # The client says when the wait began (``waiting_reset_since``); an older
+        # client does not: then it is when this service first saw it.
+        waiting = {
+            s.path: s.waiting_reset_since
+            for s in self.sessions.values()
+            if s.state == "waiting_reset"
+        }
+        self._waiting_since = {
+            p: told or self._waiting_since.get(p, now) for p, told in waiting.items()
+        }
         ports = self.probes.ports()
         up = any(int(p) in ports for p in c.gpu.policy_ports)
         if up != self.policy_up and self.state != "starting":
@@ -903,6 +911,10 @@ class Controller:
             self.write_status(now)
         if self.worker is not None and self.sessions:
             return c.service.gate_poll_s
+        if self._evaluation_unfinished():
+            # The gate's lead (episode_imminent) is a few seconds: look at least
+            # once a second while a session is on the robot or between episodes.
+            return min(1.0, c.service.heartbeat_s)
         return (
             c.service.heartbeat_s
             if not busy

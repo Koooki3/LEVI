@@ -1184,3 +1184,69 @@ def test_labelling_paused_when_an_unknown_client_keeps_the_gate_shut(ctl):
     ctl.rollouts.session("standby")
     ctl.tick(t + pause + 10)
     assert paused(ctl, t + pause + 10) is None
+
+
+# --- the client says when the wait for the reset began ----------------------------------
+
+
+def set_session_field(ctl, **fields):
+    folder = ctl.rollouts.root / ".eval_sessions"
+    (path,) = list(folder.glob("*.json"))
+    data = json.loads(path.read_text())
+    data.update(fields)
+    path.write_text(json.dumps(data))
+
+
+def test_the_gate_uses_the_client_s_own_start_of_the_wait_not_a_guess(ctl):
+    from levi.live import sessions
+
+    ctl.rollouts.write(0)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    t = time.time()
+    ctl.rollouts.session("waiting_reset")  # reset_wait_s is 10
+    set_session_field(ctl, waiting_reset_since=t - 8.0)
+    (s,) = sessions.read_sessions([str(ctl.rollouts.root)], t).values()
+    assert s.waiting_reset_since == pytest.approx(t - 8.0)
+    assert s.public()["waiting_reset_since"] == pytest.approx(t - 8.0)
+    # The supervisor sees the session for the first time only now, but the
+    # reset began 8 s ago: the next episode is 2 s away, the gate is shut.
+    ctl.tick(t)
+    assert ctl.gate.code == "episode_imminent" and not ctl.gate.open
+    assert ctl.status(t)["sessions"][0]["waiting_reset_since"] == pytest.approx(t - 8)
+
+
+def test_without_the_field_the_first_sighting_stays_the_estimate(ctl):
+    ctl.rollouts.write(0)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    t = time.time()
+    ctl.rollouts.session("waiting_reset")
+    ctl.tick(t)
+    assert ctl.gate.open  # an older client: the wait is taken to begin now
+    set_session_field(ctl, waiting_reset_since=None)
+    assert ctl.status(t)["sessions"][0]["waiting_reset_since"] == pytest.approx(t)
+
+
+def test_a_nonsense_start_of_the_wait_is_ignored(ctl):
+    ctl.rollouts.write(0)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    t = time.time()
+    ctl.rollouts.session("waiting_reset")
+    set_session_field(ctl, waiting_reset_since="soon")
+    ctl.tick(t)
+    assert ctl.gate.open
+    set_session_field(ctl, waiting_reset_since=t + 3600)  # from the future
+    ctl.tick(t + 1)
+    assert ctl.status(t + 1)["sessions"][0]["waiting_reset_since"] <= t + 1
+
+
+def test_the_supervisor_ticks_at_least_once_a_second_while_an_evaluation_is_on(ctl):
+    t = time.time()
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    assert ctl.tick(t) > 1.0  # a standing session: no need
+    ctl.rollouts.session("waiting_reset")
+    assert ctl.tick(t + 5) <= 1.0
+    ctl.rollouts.session("running")
+    assert ctl.tick(t + 6) <= 1.0
+    ctl.rollouts.session("finished")
+    assert ctl.tick(t + 7) > 1.0
