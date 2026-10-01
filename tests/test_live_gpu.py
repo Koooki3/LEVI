@@ -241,6 +241,7 @@ def live(tmp_path, serve, demo_template):
     c.gpu.mode = "timeshare"
     c.gpu.lock_file = str(tmp_path / "gpu.lock")
     c.gpu.settle_s = 20.0
+    c.gpu.standby_min_s = 0.0  # (the tests of that wait set it themselves)
     c.vllm.script = str(script)
     c.vllm.stop_script = str(script)
     c.vllm.pid_dir = str(pid_dir)
@@ -1514,3 +1515,48 @@ def test_a_wake_uses_its_own_smaller_margin(ctl):
     fresh(ctl)
     ctl.tick(t + 6)
     assert ctl.vllm.state == "ready"
+
+
+# --- M2: prewarm behind a policy server, and a cold start at standby ----------------------
+
+
+def test_prewarm_says_it_is_blocked_when_the_policy_server_came_first(ctl):
+    """vLLM first, policy second, evaluation last. With the policy server
+    already listening and no session yet the gate is shut (unknown client) and
+    --prewarm cannot start: say so in plain words, and do not cold-start the
+    moment the session appears at standby (the first episode follows within
+    seconds)."""
+    ctl.config.vllm.prewarm = True
+    ctl.config.gpu.standby_min_s = 20.0
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    t = time.time()
+    assert step(ctl, t) == "prewarm_waiting_for_policy" and not ctl.vllm.mine()
+    reason = ctl.decision.reason
+    for word in ("--prewarm", "policy server", "before"):
+        assert word in reason, reason
+    # The client writes its standby session: the gate opens, but a session that
+    # has just reached standby may start its first episode any moment.
+    ctl.rollouts.session("standby")
+    assert step(ctl, t + 1) == "standby_settling" and not ctl.vllm.mine()
+    assert step(ctl, t + 15) == "standby_settling"
+    up(ctl, t + 22)
+    assert ctl.vllm.mine()
+
+
+def test_a_cold_start_waits_until_the_session_has_been_in_standby_a_while(ctl):
+    ctl.config.gpu.standby_min_s = 20.0
+    ctl.rollouts.write(0)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    t = time.time()
+    ctl.rollouts.session("standby")
+    assert step(ctl, t) == "standby_settling"
+    assert "standby" in ctl.decision.reason and "20" in ctl.decision.reason
+    # It goes on to run and back to standby: the clock restarts.
+    ctl.rollouts.session("running")
+    ctl.tick(t + 10)
+    ctl.rollouts.session("standby")
+    assert step(ctl, t + 25) == "standby_settling"
+    up(ctl, t + 50)
+    # No session at all (nobody's evaluation is near), and the default is a
+    # wait only for a session that has just arrived at standby.
+    assert ctl.config.gpu.standby_min_s == 20.0

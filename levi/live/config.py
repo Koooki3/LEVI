@@ -120,6 +120,12 @@ class Gpu:
     # with the policy server at .22 and a sleeping vLLM about 22804 MiB are
     # free and a wake at 0.7395 needs 21843 with this value.
     wake_margin_mib: int = 300
+    # A cold start (45-70 s of GPU load) waits until a session has been in
+    # ``standby`` this long: a client leaves standby for its first episode within
+    # seconds, and the cold start would overlap it. Not a guarantee (the operator
+    # may press start at any time): ``--prewarm`` before the evaluation is the
+    # way to have no cold start at all.
+    standby_min_s: float = 20.0
     # A block that does not pass by itself (the GPU lock held by another agent,
     # somebody else's vLLM on the port, a sleeping vLLM that cannot wake for
     # lack of room) is reported in ``labelling_paused`` after this long.

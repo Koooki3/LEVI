@@ -158,6 +158,7 @@ class Controller:
         self._policy_mib = (0.0, None)
         self.idle_since: float | None = None
         self._waiting_since: dict = {}
+        self._standby_since: dict = {}
         self._status_at = 0.0
         self.loop_at: float | None = None  # the last tick (the thread beats on)
         self.start_failures = 0
@@ -221,6 +222,9 @@ class Controller:
         self._waiting_since = {
             p: told or self._waiting_since.get(p, now) for p, told in waiting.items()
         }
+        # Since when each session has been in standby (a cold start waits).
+        standing = {s.path for s in self.sessions.values() if s.state == "standby"}
+        self._standby_since = {p: self._standby_since.get(p, now) for p in standing}
         ports = self.probes.ports()
         up = any(int(p) in ports for p in c.gpu.policy_ports)
         if up != self.policy_up and self.state != "starting":
@@ -391,8 +395,34 @@ class Controller:
             return False
         if not self.gate.open and mode != "manual":
             # A cold start is 45 s of heavy GPU load: never while the policy infers.
+            if c.vllm.prewarm and self.gate.code == "unknown_client":
+                self.decision = gpumgr.Decision(
+                    False,
+                    "--prewarm is waiting: a policy server is already running and "
+                    "no evaluation session has appeared, so the gate is shut. Start "
+                    "`levi live start --prewarm` before the policy server and wait "
+                    "for vLLM to be ready (levi live status), then start the "
+                    "policy server and the evaluation",
+                    "prewarm_waiting_for_policy",
+                )
+                return False
             self.decision = gpumgr.Decision(
                 False, "waiting for the gate: " + self.gate.reason, "gate_closed"
+            )
+            return False
+        young = [
+            now - since
+            for since in self._standby_since.values()
+            if now - since < c.gpu.standby_min_s
+        ]
+        if mode != "manual" and young:
+            self.decision = gpumgr.Decision(
+                False,
+                f"a session reached standby {min(young):.0f} s ago and its first "
+                f"episode may follow within seconds: a cold start waits until it "
+                f"has been in standby for {c.gpu.standby_min_s:.0f} s "
+                "(`levi live start --prewarm` before the evaluation avoids this)",
+                "standby_settling",
             )
             return False
         if mode != "manual" and self._evaluation_unfinished():
