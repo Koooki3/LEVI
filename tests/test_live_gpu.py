@@ -575,13 +575,27 @@ echo $! > "{ctl.config.vllm.pid_dir}/vllm_{ctl.config.vllm.port}.pid"
     ctl.vllm = gpumgr.Vllm(ctl.config)
 
 
+def failure_seen(ctl, count=None):
+    """Wait until the failed start is visible: the launch itself reported it
+    (the serve script's process was gone already) or poll() sees it die. The
+    count of failures must still be taken on the *next* tick."""
+    return wait_for(
+        lambda: (
+            ctl.vllm.state == "error"
+            or ctl.vllm.poll() == "error"
+            or (ctl.start_failures >= (count or 1) and not ctl.vllm.mine())
+        ),
+        5,
+    )
+
+
 def test_a_failing_vllm_start_backs_off_then_stops_and_names_the_reason(ctl, tmp_path):
     bad_vllm(tmp_path, ctl)
     ctl.rollouts.write(0)
     t = time.time()
     starts = lambda: sum("starting vLLM" in e["text"] for e in ctl.events)
     step(ctl, t)
-    wait_for(lambda: ctl.vllm.poll() == "error", 5)
+    assert failure_seen(ctl)
     ctl.tick(t + 1)
     assert starts() == 1 and ctl.start_failures == 1
     assert "KV cache" in ctl.vllm.error and "KV cache" in ctl.status()["last_error"]
@@ -590,13 +604,13 @@ def test_a_failing_vllm_start_backs_off_then_stops_and_names_the_reason(ctl, tmp
     assert starts() == 1 and ctl.decision.code == "backoff"
     # Second try after 60 s, third after another 120 s (doubling), then no more.
     ctl.tick(t + 62)
-    wait_for(lambda: ctl.vllm.poll() == "error", 5)
+    assert failure_seen(ctl, 2)
     ctl.tick(t + 63)
     assert starts() == 2 and ctl.start_failures == 2
     ctl.tick(t + 63 + 60)
     assert starts() == 2  # now 120 s
     ctl.tick(t + 63 + 125)
-    wait_for(lambda: ctl.vllm.poll() == "error", 5)
+    assert failure_seen(ctl, 3)
     ctl.tick(t + 63 + 126)
     assert starts() == 3 and ctl.attention and ctl.attention["code"] == "vllm_failed"
     for n in (400, 2000, 90000):
@@ -751,7 +765,9 @@ def test_the_budget_follows_the_memory_free_at_start_in_both_orders():
         and alone.utilization == pytest.approx(0.7395)
         and alone.max_model_len == 49152
     )
-    assert 32607 - alone.need_mib >= 0  # it fits the card
+    # What it needs free: the budget of vLLM's total plus the start margin.
+    assert alone.need_mib == int(alone.utilization * 32107) + 1100
+    assert alone.need_mib < 32607 - 7685  # leaves a policy server's .22 room
     # 0.72 alone is NOT enough for the full context (measured on an idle GPU,
     # warm cache): with only that much free the context steps down, it never
     # starts a vLLM that cannot serve max_model_len.
@@ -1224,7 +1240,7 @@ def test_labelling_paused_while_vllm_start_fails_and_backs_off(ctl, tmp_path):
     ctl.rollouts.write(0)
     t = time.time()
     step(ctl, t)
-    wait_for(lambda: ctl.vllm.poll() == "error", 5)
+    assert failure_seen(ctl)
     ctl.tick(t + 1)
     p = paused(ctl, t + 1)
     assert p["code"] == "vllm_error" and "KV cache" in p["reason"]
@@ -1313,3 +1329,58 @@ def test_the_supervisor_ticks_at_least_once_a_second_while_an_evaluation_is_on(c
     assert ctl.tick(t + 6) <= 1.0
     ctl.rollouts.session("finished")
     assert ctl.tick(t + 7) > 1.0
+
+
+# --- a process identity is read once and never None in a record ---------------------------
+
+
+def test_a_vllm_that_dies_between_two_identity_reads_is_not_ours(live, monkeypatch):
+    """The serve script's process exits right after it was checked: the record
+    must not store ``identity: null`` (None == None made ``mine()`` true for a
+    pid that is gone, holding the lock and a later ``killpg`` on a stranger)."""
+    c, _ = live
+    real = gpumgr.identity
+    calls = []
+
+    def flaky(pid):
+        calls.append(pid)
+        return real(pid) if len(calls) == 1 else None  # gone from the 2nd read on
+
+    monkeypatch.setattr(gpumgr, "identity", flaky)
+    vllm = gpumgr.Vllm(c)
+    try:
+        vllm.start(c.vllm_profile())
+        record = (
+            json.loads(vllm.record_path.read_text())
+            if vllm.record_path.exists()
+            else {}
+        )
+        assert record.get("identity") is not None  # read once, stored as read
+        assert not vllm.mine()
+    finally:
+        monkeypatch.undo()
+        subprocess.run(
+            [c.vllm.stop_script, "--stop", str(c.vllm.port)], capture_output=True
+        )
+
+
+def test_a_record_without_an_identity_is_never_mine_and_is_never_signalled(
+    live, monkeypatch
+):
+    c, _ = live
+    vllm = gpumgr.Vllm(c)
+    vllm.record_path.parent.mkdir(parents=True, exist_ok=True)
+    gone = 4_000_000  # no such process: identity() is None
+    vllm.record_path.write_text(json.dumps({"pid": gone, "identity": None}))
+    assert gpumgr.identity(gone) is None and not vllm.mine()
+
+    def forbidden(*a):
+        raise AssertionError("signalled a process that is not ours")
+
+    monkeypatch.setattr(os, "killpg", forbidden)
+    vllm.state = "starting"
+    assert vllm.stop() is True and vllm.state == "stopped"
+    # A restarted supervisor does not take such a record back either.
+    vllm.record_path.write_text(json.dumps({"pid": os.getpid(), "identity": None}))
+    again = gpumgr.Vllm(c)
+    assert again.state == "stopped" and not again.mine()

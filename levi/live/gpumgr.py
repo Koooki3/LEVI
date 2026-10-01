@@ -476,6 +476,13 @@ def identity(pid):
         return None
 
 
+def same_process(pid, recorded) -> bool:
+    """Is ``pid`` still the process that was recorded? A recorded identity of
+    None is never a match (None == None would make a pid that is gone, or was
+    never read, look alive and ours)."""
+    return bool(pid) and recorded is not None and identity(pid) == recorded
+
+
 def healthy(port, opener=urllib.request.urlopen) -> bool:
     """Whether a vLLM server answers /health on the loopback port."""
     try:
@@ -592,7 +599,7 @@ class Vllm:
         if not isinstance(record, dict):
             return
         pid = record.get("pid")
-        if pid and identity(pid) == record.get("identity") and self._pid() == pid:
+        if same_process(pid, record.get("identity")) and self._pid() == pid:
             if not healthy(self.port):
                 self.state = "starting"
             else:
@@ -631,10 +638,8 @@ class Vllm:
 
     def mine(self) -> bool:
         record = jsonio.read(self.record_path)
-        return bool(
-            isinstance(record, dict)
-            and record.get("pid")
-            and identity(record["pid"]) == record.get("identity")
+        return isinstance(record, dict) and same_process(
+            record.get("pid"), record.get("identity")
         )
 
     def external(self) -> bool:
@@ -683,7 +688,8 @@ class Vllm:
             )
             return False
         pid = self._pid()
-        if code != 0 or not pid or identity(pid) is None:
+        ident = identity(pid) if pid else None  # read once: this is what is stored
+        if code != 0 or not pid or ident is None:
             self.state, self.error = (
                 "error",
                 f"serve script exited {code}; see vllm-launch.log",
@@ -697,7 +703,7 @@ class Vllm:
             self.record_path,
             {
                 "pid": pid,
-                "identity": identity(pid),
+                "identity": ident,
                 "started_at": self.started_at,
                 "profile": profile,
                 "port": self.port,
@@ -846,17 +852,18 @@ class Vllm:
             )
         except (OSError, subprocess.SubprocessError):
             pass
-        if pid and identity(pid) == record.get("identity"):
+        recorded = record.get("identity")
+        if same_process(pid, recorded):
             # The script could not (missing pidfile): signal the group directly.
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(pid, signal.SIGTERM)
             deadline = time.time() + 30
-            while identity(pid) == record.get("identity") and time.time() < deadline:
+            while same_process(pid, recorded) and time.time() < deadline:
                 time.sleep(0.5)
-            if identity(pid) == record.get("identity"):
+            if same_process(pid, recorded):
                 with contextlib.suppress(ProcessLookupError, PermissionError):
                     os.killpg(pid, signal.SIGKILL)
-        gone = not pid or identity(pid) != record.get("identity")
+        gone = not same_process(pid, recorded)
         if gone:
             with contextlib.suppress(OSError):
                 self.record_path.unlink()
