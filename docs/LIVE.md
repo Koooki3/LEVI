@@ -26,7 +26,7 @@ uv run levi live doctor                          # CPU, memory, GPU, disk, warni
 uv run levi live stop                            # stops only its own processes
 ```
 
-`levi live once [--fake-vlm]` labels everything that is finished now and exits (with `--fake-vlm` against a stand-in model server, no GPU). `levi live init` writes `<workspace>/live.toml` with every default.
+`levi live once [--fake-vlm]` labels everything that is finished now and exits (with `--fake-vlm` against a stand-in model server, no GPU; it needs a scratch `--workspace`, never the live one). `levi live resume` clears a vLLM start failure the service gave up on. `levi live init` writes `<workspace>/live.toml` with every default.
 
 Without `--auto-approve` the service still mirrors, builds views and **plans**, then waits: a person approves the plan in the LEVI page (the dataset shows `awaiting_approval`). With it, the audited automatic approver (below) takes those gates.
 
@@ -73,28 +73,32 @@ A finished demo is hard-linked file by file into `<workspace>/captures/<name>/.p
 
 ## Settings (`live.toml`)
 
-`levi live init` writes the file with every default; an unknown key or a wrong type is an error, not a silent default. `--workspace`, `--root`, `--gpu-mode`, `--auto-approve`, `--process-backlog`, `--since`, `--ui-port`, `--core-port`, `--home` override it. Environment: `LEVI_LIVE_WORKSPACE`, `LEVI_LIVE_CONFIG`, `LEVI_LIVE_HOME` (where `status.json` lives; default `~/.levi-live`).
+`levi live init` writes the file with every default; an unknown key or a wrong type is an error, not a silent default. `--workspace`, `--root`, `--gpu-mode`, `--auto-approve`, `--process-backlog`, `--since`, `--ui-port`, `--core-port`, `--home` override it. `--adopt-workspace` is needed to turn an existing LEVI workspace that is not a live one into the live workspace; without it `levi live` refuses any workspace that holds LEVI state but no live marker (the product's `.state` above all: the approver's marker must never land there), and the checkout's own `.state` is always refused. One service runs per home *and* per workspace. Environment: `LEVI_LIVE_WORKSPACE`, `LEVI_LIVE_CONFIG`, `LEVI_LIVE_HOME` (where `status.json` lives; default `~/.levi-live`).
 
 | Table | Key | Default | Meaning |
 | --- | --- | --- | --- |
 | `service` | `workspace` | `/home/marvel/work/wenkai/levi-live-ws` | the live LEVI workspace |
 | | `ui_port`, `core_port`, `host` | 7880, 7881, 127.0.0.1 | never 7860/7861 (product), 5000/8000 (robot) |
-| | `poll_idle_s`, `poll_active_s`, `gate_poll_s`, `heartbeat_s` | 15, 3, 1, 4 | stat-only rollout scan interval idle/active; how often the gate is re-decided while a worker runs; status heartbeat |
+| | `poll_idle_s`, `poll_active_s`, `gate_poll_s`, `heartbeat_s` | 15, 3, 0.25, 4 | stat-only rollout scan interval idle/active; how often the gate is re-decided while a worker runs; status heartbeat |
 | `watch` | `roots` | `[".../online_rollout_data/models"]` | rollout roots |
 | | `include`, `exclude` | all | `fnmatch` over `group/task_folder` |
 | | `backlog`, `since` | `skip`, none | see above |
 | | `require_session` | false | only tasks with an evaluation session that enabled LEVI |
 | | `batch_max_episodes` | 40 | demos per batch |
+| | `stuck_s` | 600 | a demo that has not finished and not changed for this long (a leftover raw capture, a client that died mid-write) is `stuck`: counted and listed, no longer waited for or re-read |
 | `fr3` | `health_file` | `~/work/franka_control/run/fr3_health.json` | health monitor file |
 | `gpu` | `mode` | `auto` | `auto` (= `timeshare`), `timeshare`, `coexist`, `manual` |
 | | `policy_ports` | `[8000]` | looked up in `/proc/net/tcp`, never connected to |
 | | `busy_states` | `["running"]` | session states in which the policy is inferring |
+| | `lead_s`, `lead_grace_s` | 3, 5 | the gate closes this long before the next episode (a session waiting for the reset starts running `levi.reset_wait_s` after it began waiting) and stays closed this long after the predicted start |
 | | `lock_file`, `lock_agent` | `levi-hub/.gpu.lock`, `live` | the workspace's GPU `flock` |
 | | `settle_s` | 20 | wait after a policy server appears or goes before starting vLLM |
 | | `min_free_mib`, `policy_budget_mib` | 600, 8500 | vLLM sleeps when free VRAM falls below the first, or the policy server holds more than the second |
 | `vllm` | `script`, `stop_script`, `pid_dir`, `port` | `tools/vllm/serve-qwen38.sh`, `serve.sh`, `logs`, 8100 | the launch scripts |
-| | `gpu_memory_utilization`, `max_model_len`, `max_images`, `max_num_seqs`, `max_num_batched_tokens` | 0.72, 49152, 128, 2, 4096 | the measured shared profile |
-| | `sleep_mode`, `idle_action`, `margin_mib` | true, `auto`, 1400 | `--enable-sleep-mode` (+ `VLLM_SERVER_DEV_MODE=1`); `auto` = sleep while an evaluation is live, else stop; memory vLLM takes after its first requests |
+| | `gpu_memory_utilization`, `max_model_len`, `max_images`, `max_num_seqs`, `max_num_batched_tokens` | 0.72, 49152, 128, 2, 4096 | the measured shared profile; the budget and context actually used are chosen at each start from the free VRAM (see GPU management) |
+| | `gpu_memory_utilization_max`, `gpu_memory_utilization_min`, `min_utilization_with_policy`, `min_utilization_alone`, `kv_bytes_per_token`, `min_model_len` | 0.747, 0.70, 0.724, 0.70, 39800, 32768 | the limits of that choice: calibrated from `live-gpu.md` and `live-validation.md` (0.74 works beside a loaded policy server, 0.72 leaves a 1.73 GiB KV cache) |
+| | `sleep_mode`, `idle_action`, `margin_mib` | true, `auto`, 1100 | `--enable-sleep-mode` (+ `VLLM_SERVER_DEV_MODE=1`); `auto` = sleep while an evaluation is live, else stop; VRAM kept free beyond the budget (vLLM refuses a budget above its own free memory, about 930 MiB less than nvidia-smi's) |
+| | `max_start_failures`, `start_backoff_s`, `start_backoff_max_s` | 3, 60, 600 | failed starts in a row before the service stops and asks for a person; back-off between tries |
 | | `idle_timeout_s`, `start_timeout_s` | 120, 1800 | idle before sleeping/stopping; give up starting |
 | | `adopt_external` | false | use a vLLM this service did not start |
 | `provider` | `name`, `prompt_style`, `requests_in_flight` | `live-qwen38`, `lean`, 2 | the model profile created and bound in the live workspace |
@@ -103,6 +107,7 @@ A finished demo is hard-linked file by file into `<workspace>/captures/<name>/.p
 | | `guideline`, `vocabulary`, `anchored`, `anchored_spec`, `anchored_min_valid` | generic v1 files, true, 1 | see "The generic configuration" |
 | | `max_attempts` | 2 | attempts per episode before it is left alone |
 | | `cleanup` | true | drop finished runs' inputs and evidence |
+| | `keep_review_runs` | 10 | open release-review runs per dataset that keep their frozen input (committing one needs it); older ones are cancelled and cleaned |
 | `resources` | `nice`, `ionice_class`, `threads`, `view_workers` | 19, 3 (idle), 2, 1 | see "Keeping it light" |
 | | `log_max_mb`, `log_backups`, `cache_max_gib`, `status_max_datasets` | 5, 3, 20, 64 | bounds |
 
@@ -120,11 +125,12 @@ So the default, **`timeshare`** (what `auto` means), keeps both resident and sta
 | State of the evaluation | Gate | The model |
 | --- | --- | --- |
 | a session is `running` (the policy infers) | **closed** | sends no request; one in flight is cancelled at once and the run backs off |
-| `homing`, `waiting_reset`, `standby`, `fault`, `stopped`, `finished`, a crashed client | open | works |
-| a policy server listens but no session file says anything | **closed** (someone we do not know may be using it) | waits |
+| a session is `waiting_reset` and its next episode is due within `gpu.lead_s` (3 s) of `levi.reset_wait_s` after it began waiting | **closed** (`episode_imminent`) | the first inference of the new episode never meets a model request |
+| `homing`, `waiting_reset` (earlier), `standby`, `fault` | open | works |
+| a policy server listens and no live session vouches for it (a session that ended before the server appeared does not: session files are never deleted) | **closed** (someone we do not know may be using it) | waits |
 | no policy server | open | works |
 
-The supervisor re-decides the gate every second while a worker runs, writes it to `live/gate.json` (a stale file reads as closed, so a dead supervisor cannot leave it open), and the worker obeys: when it closes, the worker pauses its runs (pausing aborts the in-flight HTTP request, so the server stops generating), waits for the run's thread to let go of its lease, and resumes when the gate opens. Nothing is repeated: a run continues from its last finished episode. A worker that does not stand down within 8 s is stopped by the supervisor. Between episodes (`homing`, `waiting_reset`, about 20 s) the model labels; when the session ends it labels the rest in one go.
+The supervisor re-decides the gate every 0.25 s while a worker runs (the worker reads it every 0.2 s; a test asserts the in-flight request is cut within 1 s of `running` appearing), writes it to `live/gate.json` (a stale file reads as closed, so a dead supervisor cannot leave it open), and the worker obeys: when it closes, the worker pauses its runs (pausing aborts the in-flight HTTP request, so the server stops generating), waits for the run's thread to let go of its lease, and resumes when the gate opens. Nothing is repeated: a run continues from its last finished episode. A worker that does not stand down within 8 s is stopped by the supervisor. Between episodes (`homing`, `waiting_reset`, about 20 s) the model labels; when the session ends it labels the rest in one go.
 
 | Mode | Behaviour |
 | --- | --- |
@@ -132,12 +138,14 @@ The supervisor re-decides the gate every second while a worker runs, writes it t
 | `coexist` | the same two resident, but the gate never closes: the model works whenever it has work, each policy inference then takes about 60 ms longer. A manual choice |
 | `manual` | never starts vLLM: it uses the one already on `vllm.port` |
 
-**Starting, sleeping and waking.** vLLM starts when a batch is waiting and (a) free VRAM covers `gpu_memory_utilization` × vLLM's total + `margin_mib` (it grows about 1.3 GB after its first requests, so the idle reading is not the limit), (b) no policy server appeared or went in the last `gpu.settle_s` (one that is still loading preallocates its memory), (c) the workspace GPU lock is free. It checks `:8000` in `/proc/net/tcp` and VRAM with `nvidia-smi --query-gpu`; nothing connects to a policy port. A cold start takes **46-70 s** (`levi live doctor` says so); the status shows `gpu_wait` meanwhile. vLLM runs with `--enable-sleep-mode` and `VLLM_SERVER_DEV_MODE=1` (development endpoints on 127.0.0.1 only):
+**Starting, sleeping and waking.** vLLM starts when a batch is waiting and (a) **the gate is open** (a cold start is 45 s of heavy GPU load and never happens while the policy infers), (b) the free VRAM allows a budget: it is chosen at each start from the free memory, not fixed. Beside a policy server that is already loaded (`.22`: about 24.9 GB free) the budget is the free memory less `margin_mib`, at most 0.747 (about 0.74; the default 0.72 would leave a 1.73 GiB KV cache, below the 1.82 GiB that 49152 tokens need); alone on the card it is the configured 0.72, which leaves room for a policy server that starts later. If the budget does not serve `max_model_len` the context steps down by 4096 to `min_model_len` (32768); if even that does not fit nothing starts and the status says `insufficient_vram` with the numbers (the old `.35` policy server is such a case). The pre-check and the launch use the same number, and the event log says which values were used. (c) no policy server appeared or went in the last `gpu.settle_s` (one that is still loading preallocates its memory), (d) the workspace GPU lock is free. It checks `:8000` in `/proc/net/tcp` and VRAM with `nvidia-smi --query-gpu`; nothing connects to a policy port. A cold start takes **46-70 s** (`levi live doctor` says so); the status shows `gpu_wait` meanwhile. vLLM runs with `--enable-sleep-mode` and `VLLM_SERVER_DEV_MODE=1` (development endpoints on 127.0.0.1 only):
 
 - **Sleep** (level 1: 5.5 s down, 1.8 GB left, weights in host memory) when its memory is wanted: free VRAM falls below `gpu.min_free_mib`, or the policy server holds more than `gpu.policy_budget_mib` (8500 MiB: a larger fraction than `.22`, which no awake vLLM fits beside). The worker is stopped first. After `vllm.idle_timeout_s` without work it also sleeps while an evaluation is live (`idle_action = auto`), and is **stopped** once nothing evaluates any more (or at once with no evaluation live).
 - **Wake** (0.75 s) when work is waiting and free VRAM again covers it. With a larger policy server up it stays asleep and labels only after that server exits (the pre-measurement behaviour). Level 2 sleep is not used.
 
-Always true: the workspace GPU lock (`flock` on `levi-hub/.gpu.lock`, `LEVI_AGENT=live`) is held while this service has vLLM resident, awake or asleep; it stops only a server it started (verified by process identity), never another agent's; a vLLM it did not start is used only with `adopt_external` (or in `manual` mode) and never touched; a failed start is waited out for 60 s; `:5000` and the policy ports are never connected to. Residual risks (measured, see the report): only 1.3-1.5 GB spare; the first episode may see one 280 ms outlier from the policy; a policy server restarted with a larger `MEM_FRACTION` while vLLM is awake fails to load, so start it before vLLM wakes or stop the service first (`levi live stop`).
+**Failed starts.** A start that fails (vLLM's own last error line is read from its log, for example `ValueError ... KV cache ...`) is retried after 60 s, then 120 s, up to 600 s; after `vllm.max_start_failures` (3) in a row the service stops trying: labelling is paused (`status.attention`, `gpu.decision.code = needs_attention`), `levi live doctor` warns with the reason, and `levi live resume` clears it. The service keeps `accepts_sessions` true meanwhile: the evaluation client only needs somewhere that is receiving its rollouts, and the rollouts keep being mirrored and are labelled after the resume.
+
+Always true: the workspace GPU lock (`flock` on `levi-hub/.gpu.lock`, `LEVI_AGENT=live`) follows the vLLM process: vLLM is started with the lock's descriptor open, so the lock survives a `kill -9` of the supervisor for as long as vLLM lives, and a restarted supervisor takes the running vLLM back only if the lock is still held by it (else it refuses and says so); the lock is let go only once vLLM is really gone, and `levi live doctor` reports an orphan vLLM and how to stop it. It stops only a server it started (verified by process identity), never another agent's; a vLLM it did not start is used only with `adopt_external` (or in `manual` mode) and never touched; `:5000` and the policy ports are never connected to; an idle tick does not touch `:8100`. Residual risks (measured, see the report): only 1.3-1.5 GB spare; the first episode may see one 280 ms outlier from the policy; a policy server restarted with a larger `MEM_FRACTION` while vLLM is awake fails to load, so start it before vLLM wakes or stop the service first (`levi live stop`).
 
 ## The automatic approver
 
@@ -147,11 +155,15 @@ In every other LEVI workspace only a person approves a plan and commits annotati
 - the workspace carries `live/workspace.json`, which only `levi live` writes;
 - a principal built from an HTTP request is never `auto`, so neither the page nor a connected agent can become it.
 
-What it may do: `runs.plan`, `plans.approve`, `runs.execute`/`resume`/`pause`/`cancel`, `runs.get`/`events`, `changes.diff`/`validate`/`approve`/`commit`, `anchored.get`; nothing else (no reset, clean, pilot review, knowledge or improvement publishing). It may approve, run and commit **only runs it planned itself**; a person's plan or draft in the same workspace is refused. Its plans waive the pilot episode inside the plan, which approving covers.
+What it may do: `runs.plan`, `plans.approve`, `runs.execute`/`resume`/`pause`/`cancel`, `runs.get`/`events`, `changes.diff`/`validate`/`approve`/`commit`, `anchored.get`; nothing else (no reset, clean, pilot review, knowledge or improvement publishing). It may approve, run and commit **only runs it planned itself**; a person's plan or draft in the same workspace is refused. Its plans waive the pilot episode inside the plan, which approving covers. **It may approve and commit only the subtask segments of a plain temporal run**: `changes.approve` and `changes.commit` are refused for a review (anchored) run and for any proposal that is not a language segment, such as an outcome, whatever the caller, and the outcome writer itself refuses anything the approver approved. That a live dataset never gets a human outcome label is enforced by authorization, not by the worker's call order.
 
-What it leaves behind: `reviewer_type: auto` (and reviewer `live-auto`) on every change set it approves, `levi.review: "auto"` and `levi.origin.review: "auto"` on every segment it commits, and one line per call in `<workspace>/live/audit.jsonl` (plans, approvals, commits, and every refusal). If a person saves an auto segment with different text or times in the viewer, its mark becomes `edited`; saving it unchanged keeps `auto`. What a person wrote or changed is never replaced: a re-run replaces only segments still exactly as written by an earlier run, and the service skips an episode that already carries annotations it did not write (`skipped_human`).
+What it leaves behind: `reviewer_type: auto` (and reviewer `live-auto`) on every change set it approves, `levi.review: "auto"` and `levi.origin.review: "auto"` on every segment it commits, and `<workspace>/live/audit.jsonl` gets a line for every state-changing call when it is allowed and another with its outcome (`completed` or `failed` with the error), and for every refusal; pure reads are not logged. If a person saves an auto segment with different text or times in the viewer, its mark becomes `edited`; saving it unchanged keeps `auto`. What a person wrote or changed is never replaced: a re-run replaces only segments still exactly as written by an earlier run, and the service skips an episode that already carries annotations it did not write (`skipped_human`).
 
-**No outcome labels.** Committing never writes a human outcome label (`annotations/outcomes/`), so the training pool does not take an automatic verdict for a human label. (Known gap, open: a training manifest that asks for the latest anchored review run still takes its verdict, including the unevaluated candidate spec, and does not mark `review: auto` segments. Until that is fixed, do not build a manifest from a live dataset without checking.) The episode's automatic verdict is the **anchored review record** (`anchored.get`), copied into the dataset state with `review: auto` and `evaluated: false`. The release-review run is left in `waiting_for_review` with an `outcome` proposal a person may accept in the LEVI page (that commit is then a human action and a human label); it is not committed by the service. A rollout from an unattended evaluation has `eval.outcome = "unlabeled"`; LEVI now reads that (and `aborted`) as "no robot label" instead of turning its placeholder `success_flag_final = 0` into a failure.
+**No outcome labels.** Committing never writes a human outcome label (`annotations/outcomes/`), so the training pool does not take an automatic verdict for a human label. The episode's automatic verdict is the **anchored review record** (`anchored.get`), copied into the dataset state with `review: auto` and `evaluated: false`. The release-review run is left in `waiting_for_review` with an `outcome` proposal a person may accept in the LEVI page (that commit is then a human action and a human label); the service never commits it. The newest `pipeline.keep_review_runs` of these runs per dataset keep their frozen input (committing one needs it); older ones are cancelled and cleaned, their verdicts staying in the dataset state (`review_runs_open` counts the open ones). A rollout from an unattended evaluation has `eval.outcome = "unlabeled"`; LEVI now reads that (and `aborted`) as "no robot label" instead of turning its placeholder `success_flag_final = 0` into a failure. The training-pool scan signature carries a version, so an index written before that fix is read again after the product LEVI restarts (restart first, then scan unattended-evaluation data).
+
+**What a training manifest does with it.** Only a source of *outcomes* is at stake, and an automatic verdict is not a validated one: `levi export manifest` passes over an anchored review whose spec is a `candidate` (the generic release review is one) unless you name the run (`--anchored-run`) or pass `--allow-candidate-anchored`; the manifest then records `anchored.spec_status`. Automatic subtask segments carry `levi.review: auto` into `frames.parquet` as `subtask_review` and into `manifest.json` as `annotation.subtask_auto_share`, so a trainer can drop or down-weight them. Neither the verdicts nor the segments have been evaluated.
+
+**Without `--auto-approve`.** The service plans and waits. Two gates need a person per batch: the temporal plan, then its draft (approve and commit), then the release review's own plan. The supervisor learns which gate the worker waits at, starts no worker and keeps no vLLM for the dataset until it is passed (a plan approved; a draft committed or rejected), and what the person commits is recorded as done by a person (`review: human`), not as a failed attempt.
 
 ## The generic configuration
 
@@ -189,7 +201,7 @@ The temporal run is the evaluated configuration (coarse 0.5 s, refinement always
 
 ## Status file (interface C4)
 
-`~/.levi-live/status.json`, rewritten atomically every `heartbeat_s` (4 s; ≤ 5 s). The evaluation client treats the service as usable only when **all** of this holds: `schema` starts with `levi.live.status.`; `updated_at` (epoch seconds) is less than 15 s old; `pid` is alive; `accepts_sessions` is true; `state` is one of `idle active annotating gpu_wait`; and one of `watch_roots` (absolute paths) equals or contains the client's `--rollout-root` (or the root contains it). Otherwise the client falls back to manual labelling. `accepts_sessions` is false while `starting` and after `stopped`/`error`. `gpu_wait` (work waiting for the model: the gate is closed, vLLM is starting or asleep) counts as usable.
+`~/.levi-live/status.json`, rewritten atomically every `heartbeat_s` (4 s; ≤ 5 s). The evaluation client treats the service as usable only when **all** of this holds: `schema` starts with `levi.live.status.`; `updated_at` (epoch seconds) is less than 15 s old; `pid` is alive; `accepts_sessions` is true; `state` is one of `idle active annotating gpu_wait`; and one of `watch_roots` (absolute paths) equals or contains the client's `--rollout-root` (or the root contains it). Otherwise the client falls back to manual labelling. `accepts_sessions` is false while `starting` and after `stopped`/`error`. `attention` is set (and labelling paused) when the service gave up starting vLLM and needs a person (`levi live resume`); it does not change `accepts_sessions` or `state`. `frontend` says whether the page / core API the service starts really came up (`levi live start --daemon` prints a failure and exits 2 while labelling keeps running). `gpu_wait` (work waiting for the model: the gate is closed, vLLM is starting or asleep) counts as usable.
 
 ```json
 {
@@ -201,18 +213,22 @@ The temporal run is the evaluated configuration (coarse 0.5 s, refinement always
   "gpu": {"mode": "timeshare", "configured_mode": "auto", "vllm_state": "ready|asleep|starting|stopped|error",
           "vllm": {"state": "stopped", "port": 8100, "profile": null, "max_model_len": null, "started_at": null, "error": "", "owned": false},
           "policy_server_seen": true,
-          "gate": {"open": false, "code": "policy_inferring|unknown_client|open", "reason": "…"},
-          "decision": {"allowed": false, "code": "policy_server", "reason": "a policy server is listening"},
+          "gate": {"open": false, "code": "policy_inferring|episode_imminent|unknown_client|open", "reason": "…"},
+          "decision": {"allowed": false, "code": "ok|settling|insufficient_vram|vram|lock|gate_closed|backoff|needs_attention|external_busy|policy_large|manual|error|asleep", "reason": "…"},
           "free_mib": 21574, "lock_held": false},
   "datasets": {"pi05__stack_plates": {"episodes": 12, "pending": 2, "annotating": 0, "done": 9, "failed": 1,
         "skipped": 0, "rejected": 0, "waiting": 1, "backlog": 0, "incomplete": 1, "fr3_fault": 1, "discarded": 0,
         "available": true, "last_processed_at": 1790000300.0, "last_error": "",
-        "state": "idle|pending|annotating|awaiting_approval|error", "fault": true, "fault_reasons": ["…"]}},
+        "state": "idle|pending|annotating|awaiting_approval|error", "awaiting": "plan|changes (when awaiting_approval)",
+        "stuck": 0, "source_changed": 0, "review_runs_open": 3,
+        "fault": true, "fault_reasons": ["…"]}},
   "queue_depth": 1, "worker": {"pid": 99, "dataset": "…", "phase": "temporal", "note": null, "started_at": 1.0},
   "sessions": [{"group": "pi05", "task_folder": "stack_plates", "state": "running", "reported_state": "running", "crashed": false,
         "age_s": 0.4, "reason": "", "levi_enabled": true, "episode": {"no": 3, "target": 10, "counted": 2}, "last_episode": {},
-        "fr3": {}, "prompt": "…", "session_id": "…", "run_id": "…"}],
+        "fr3": {}, "prompt": "…", "session_id": "…", "run_id": "…", "root": "…", "reset_wait_s": 10.0, "waiting_reset_since": 1790000390.0}],
   "fr3": {"state": "ok|red|offline|missing", "detail": "…", "age_s": 0.3, "robot_mode_name": "Idle", "current_errors": [], "reasons": []},
+  "attention": null,
+  "frontend": {"state": "starting|ok|failed", "error": "", "attempts": 0, "ui": true, "core_port": 7881},
   "events": [{"time": 1790000000.0, "level": "info|error", "text": "…"}],
   "last_error": "",
   "resources": {"rss_mb": 27.1, "threads": 1, "cpu_percent": 0.0}
@@ -243,8 +259,10 @@ Link a dataset to the viewer with its `repo_id` (`local/<name>`); the verdict's 
 - **FR3 fault**: the client aborts the episode (`incomplete_NNNN`, `abort_reason: fr3_fault`) and the session goes to `fault`. The page marks the dataset faulted. The aborted rollout is never labelled. After the operator clears the fault the client continues the run.
 - **Service or worker crash / `levi live stop`**: the batch in progress is remembered in the dataset state. The next start resumes it; LEVI's own run records hold the finished episodes, so nothing is annotated or committed twice (commits use an idempotency key). A worker stopped with `SIGTERM` pauses its runs and waits for their leases to be released; one killed with `SIGKILL` leaves leases that expire after 3 minutes.
 - **A person commits to the dataset meanwhile**: the plan's baseline is stale; the worker cancels the run and plans again.
-- **Model server fails**: the run blocks, the worker exits and the supervisor retries with back-off (30 s doubling to 10 min); a failed episode costs an attempt (`max_attempts`).
-- **`levi live doctor`** prints RSS/threads/nice of every service process, GPU use, vLLM state, disk and run-cache sizes, queue, FR3 state, and warnings (a supervisor over its budget, a process not at nice 19, vLLM up with nothing to do, a policy server listening while vLLM runs in timeshare, low disk, copied instead of linked files, a stale status file).
+- **Model server fails**: the run blocks, the worker exits and the supervisor retries with back-off (30 s doubling to 10 min); a failed episode costs an attempt (`max_attempts`). vLLM itself failing to start is covered above (back-off, then `levi live resume`).
+- **A demo that never finishes** (a leftover raw capture after a failed mux, a client that died mid-write) becomes `stuck` after `watch.stuck_s`; it is counted, listed by `levi live doctor`, and looked at again only if it changes.
+- **A source replaced after it was mirrored** (a demo deleted and written again under the same number, `metadata.json` replaced after the marker): flagged `source_changed`; mirrored again if not yet annotated; an annotated one keeps the flag (what was annotated is the old content).
+- **`levi live doctor`** prints RSS/threads/nice of every service process, GPU use, vLLM state, disk and run-cache sizes, queue, FR3 state, and warnings (a supervisor over its budget, a process not at nice 19, vLLM up with nothing to do, vLLM failing to start, an orphan vLLM, low disk, copied instead of linked files, stuck demos, replaced sources, a stale status file) and notes (a cold start takes 45-70 s).
 
 ## Measured
 
@@ -265,18 +283,18 @@ While a batch runs (four demos, fake model): supervisor 29 MiB / 2 threads; the 
 - Timeshare labelling depends on the client reporting its state: between episodes the model has about 20 s; a long session's batch is finished after it ends.
 - `inotify` is not used; polling with a slow idle interval is enough and works on any file system.
 
-## Status and known issues (2026-10-01, paused)
+## Status and known issues (2026-10-01)
 
-Branches not merged into `main`: `feat/live-eval` (service), `fix/live-review` (two review fixes), `feat/live-ui` (the `/live` page). Merge in that order; merging changes product runtime code, so the product LEVI needs a restart afterwards (only when no job runs).
+Branches not merged into `main`: `feat/live-eval` (service), `fix/live-review` (review fixes and the items below), `feat/live-ui` (the `/live` page). Merge in that order; merging changes product runtime code, so the product LEVI needs a restart afterwards (only when no job runs).
 
-Verified with fakes: mirror, controller, automatic approver (no outcome labels), gate, resource use. Verified once with the real Qwen3.8 model on 3 development episodes, **without a policy server**: the whole pipeline takes 209 s including a 63 s vLLM cold start; the gate closes 0.6-1.6 s after a session turns `running`; vLLM is released afterwards.
+Verified with fakes (no GPU): mirror, controller, automatic approver, gate (including the lead and the one-second cancel), vLLM budget planning in both start orders, back-off and `resume`, GPU lock after a supervisor crash, the wait for a person, stuck and replaced demos, resource use. Verified once with the real Qwen3.8 model on 3 development episodes **without a policy server**: the whole pipeline takes 209 s including a 63 s vLLM cold start; the gate closes 0.6-1.6 s after a session turns `running`; vLLM is released afterwards.
 
-Open problems (from two independent reviews and the real-model run; none fixed yet unless marked):
+Open:
 
-- **vLLM does not start beside a policy server that is already loaded** with the default `vllm.gpu_memory_utilization = 0.72` (KV cache 1.73 GiB < the 1.82 GiB needed for 49152 tokens). The start order "vLLM first, policy second" works. The pre-start check does not catch it. Fix: size the budget from the free memory at start, or lower `max_model_len`, and measure both orders.
-- A failed vLLM start is retried every 60 s without end (about 45 s of heavy GPU load each time). Needs back-off and a stop after a few failures.
-- vLLM cold starts even while a session is `running`; it should wait for the gate.
-- `levi live start --daemon` reports success even when the core did not come up (see `ui.log`).
-- Fixed on `fix/live-review`: the automatic approver can only approve and commit subtask segments (H1); the gate no longer trusts old finished sessions (H2).
-- Not fixed yet (M1-M6, L1-L10 of `levi-hub/reports/review-live-levi.md`): gate lead time, GPU lock following vLLM after a supervisor crash, the worker restart loop without `--auto-approve`, workspace guard, training-manifest default, stuck episodes, and smaller items.
-- The generic release-review spec is **not evaluated** (3 development episodes only: one false success).
+- **The new vLLM budget has not been run on the GPU.** `plan_budget` is calibrated on the two measurements (`live-gpu.md`, `live-validation.md`: 0.74 works beside a loaded policy server, 0.72 does not) and tested only against fake `nvidia-smi` numbers. The start order "policy server first" with the planned budget (about 0.74) and with the context step-down needs one real run, in both orders, before it is trusted; `vllm.min_utilization_with_policy` (0.724) is the number to adjust.
+- **Co-residence in daemon mode, sleep and wake with a real policy server, idle release** were not verified with the real model.
+- **The generic release-review spec and the generic guideline are not evaluated** (3 development episodes only: one false success). Treat every verdict as automatic and unreviewed. The comparison against the task-specific specs on development data has not been run.
+- Training manifests skip candidate anchored reviews by default, but nothing validates automatic subtask segments; use `subtask_review` / `annotation.subtask_auto_share` to decide.
+- A release-review run is not committable by anyone once it is archived (older than `keep_review_runs`); its verdict remains in the dataset state and the anchored records.
+- Without `--auto-approve` each batch needs a person at three gates (temporal plan, draft, review plan).
+- Other limits are listed above under "Limits".
