@@ -1,9 +1,11 @@
 "use client";
+import { useEffect, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { ago } from "@/components/pool/pool-progress";
 import {
   clock,
   isLost,
+  resetRemaining,
   shortDuration,
   sortSessions,
   type FaultInfo,
@@ -112,6 +114,38 @@ function outcomeLabel(outcome: string | null | undefined): string {
     default:
       return outcome || "—";
   }
+}
+
+/** The reset wait, counting down in the browser between polls. */
+function ResetWait({ session }: { session: LiveSession }) {
+  const { t } = useLocale();
+  const [now, setNow] = useState(() => Date.now());
+  const counting = session.state === "waiting_reset";
+  useEffect(() => {
+    if (!counting) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "hidden") setNow(Date.now());
+    }, 500);
+    return () => clearInterval(timer);
+  }, [counting]);
+  const wait = session.reset_wait_s;
+  const left = resetRemaining(session, now / 1000);
+  if (wait == null) return <>—</>;
+  if (left == null) return <>{wait} s</>;
+  if (left <= 0)
+    return (
+      <>
+        {wait} s ·{" "}
+        <span className="levi-live-bad">
+          {t("the next episode should have started")}
+        </span>
+      </>
+    );
+  return (
+    <>
+      {wait} s · {t("next episode in")} <strong>{Math.ceil(left)} s</strong>
+    </>
+  );
 }
 
 function SessionCard({ session: s }: { session: LiveSession }) {
@@ -225,7 +259,7 @@ function SessionCard({ session: s }: { session: LiveSession }) {
           )}
         </Field>
         <Field label={t("Reset wait")}>
-          {s.reset_wait_s != null ? `${s.reset_wait_s} s` : "—"}
+          <ResetWait session={s} />
         </Field>
         <Field label={t("Robot (client's view)")}>
           {inband.ok === false || inbandProblems.length > 0 ? (

@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { ago } from "@/components/pool/pool-progress";
 import {
@@ -12,8 +12,86 @@ import {
 } from "./live-logic";
 import { Chip, Field, type Tone } from "./session-panels";
 import type { LiveStatusResponse } from "./types";
+import type { NeedsPerson } from "./live-logic";
 
 export const START_COMMAND = "levi live start";
+export const RESUME_COMMAND = "levi live resume";
+
+/** A command in a box with a Copy button. */
+export function CopyCommand({ command }: { command: string }) {
+  const { t } = useLocale();
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const copy = () => {
+    void navigator.clipboard
+      ?.writeText(command)
+      .then(() => {
+        setCopied(true);
+        timer.current = setTimeout(() => setCopied(false), 2000);
+      })
+      .catch(() => {});
+  };
+  return (
+    <div className="levi-row">
+      <code className="levi-live-command">{command}</code>
+      <button type="button" className="levi-secondary" onClick={copy}>
+        {copied ? t("Copied") : t("Copy")}
+      </button>
+    </div>
+  );
+}
+
+/** What a person has to do: resume the service, approve a plan or commit a
+ * draft in the LEVI page, or look at a page that did not start. */
+export function AttentionBanner({ need }: { need: NeedsPerson }) {
+  const { t } = useLocale();
+  if (!need.attention && !need.awaiting.length && !need.frontendFailed)
+    return null;
+  return (
+    <section className="levi-live-attention" role="alert" aria-live="polite">
+      <strong>{t("The live service needs a person")}</strong>
+      {need.attention && (
+        <>
+          <p>
+            {t(
+              "Labelling is paused: the model server failed to start several times in a row. Rollouts are still being collected and will be labelled after you resume.",
+            )}
+          </p>
+          {need.attention.reason && (
+            <p className="levi-live-reasons-line">
+              <span className="levi-pool-muted">{t("Reason")}:</span>{" "}
+              <code>{need.attention.reason}</code>
+            </p>
+          )}
+          <CopyCommand command={RESUME_COMMAND} />
+        </>
+      )}
+      {need.awaiting.map((a) => (
+        <p key={a.name}>
+          <code>{a.name.replace("__", " / ")}</code>:{" "}
+          {a.kind === "changes"
+            ? t(
+                "waiting for you to commit the draft in the LEVI page (Agent Workbench). Labelling of this dataset continues after that.",
+              )
+            : t(
+                "waiting for you to approve the plan in the LEVI page (Agent Workbench). Labelling of this dataset continues after that.",
+              )}
+        </p>
+      ))}
+      {need.frontendFailed && (
+        <p>
+          {t(
+            "The page or API the service starts did not come up. Labelling is not affected.",
+          )}{" "}
+          {need.frontendFailed.error && (
+            <code>{need.frontendFailed.error}</code>
+          )}
+        </p>
+      )}
+    </section>
+  );
+}
 
 /** Shown instead of the service's numbers when it is not running. */
 export function ServiceOffline({
@@ -24,16 +102,6 @@ export function ServiceOffline({
   coreError: string;
 }) {
   const { t } = useLocale();
-  const [copied, setCopied] = useState(false);
-  const copy = () => {
-    void navigator.clipboard
-      ?.writeText(START_COMMAND)
-      .then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      })
-      .catch(() => {});
-  };
   const last = status?.service ? status.age_s : null;
   return (
     <section className="levi-live-offline" role="status">
@@ -56,12 +124,7 @@ export function ServiceOffline({
           {t("Last heard from it")}: {ago(last, t)}
         </p>
       )}
-      <div className="levi-row">
-        <code className="levi-live-command">{START_COMMAND}</code>
-        <button type="button" className="levi-secondary" onClick={copy}>
-          {copied ? t("Copied") : t("Copy")}
-        </button>
-      </div>
+      <CopyCommand command={START_COMMAND} />
       <p className="levi-pool-muted">
         {t(
           "Add --daemon to keep it running in the background, and --auto-approve to let it approve its own plans.",
@@ -129,6 +192,12 @@ export function ServicePanel({
           </Chip>
         ) : (
           <Chip tone="warn">{t("Not running")}</Chip>
+        )}
+        {service.frontend?.state === "starting" && (
+          <Chip tone="warn">{t("Page starting")}</Chip>
+        )}
+        {service.frontend?.state === "failed" && (
+          <Chip tone="fail">{t("Page or API did not start")}</Chip>
         )}
         {service.auto_approve ? (
           <Chip title={t("The audited automatic approver is on")}>

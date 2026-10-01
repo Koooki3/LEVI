@@ -61,6 +61,8 @@ export interface LiveSession {
   started_at?: number | null;
   policy?: { config?: string | null; checkpoint?: string | null };
   reset_wait_s?: number | null;
+  /** Epoch seconds when it began waiting for the reset (supervisor's view). */
+  waiting_reset_since?: number | null;
 }
 
 export interface DatasetRow {
@@ -80,6 +82,11 @@ export interface DatasetRow {
   last_processed_at?: number | null;
   last_error?: string;
   state?: string;
+  /** What a person must do when state is awaiting_approval. */
+  awaiting?: "plan" | "changes" | null;
+  review_runs_open?: number;
+  stuck?: number;
+  source_changed?: number;
   fault?: boolean;
   fault_reasons?: string[];
 }
@@ -127,6 +134,16 @@ export interface ServiceStatus {
   } | null;
   sessions?: LiveSession[];
   fr3?: Fr3Health;
+  /** Set when the service needs a person (`levi live resume`). */
+  attention?: { code?: string; reason?: string; since?: number } | null;
+  /** Whether the page / core API the service starts came up. */
+  frontend?: {
+    state?: string;
+    error?: string;
+    attempts?: number;
+    ui?: boolean;
+    core_port?: number;
+  } | null;
   events?: { time: number; level?: string; text: string }[];
   last_error?: string;
   resources?: {
@@ -188,6 +205,8 @@ export interface DatasetDetail {
   demos?: DemoRow[];
   incomplete?: { count?: number; fr3_fault?: number; reasons?: unknown } | null;
   current?: { demos?: string[]; done?: string[] } | null;
+  /** Ids of the review runs still open for a person. */
+  review_runs?: string[];
   last_batch?: { anchored_run?: string | null; finished_at?: number } | null;
   last_processed_at?: number | null;
   last_error?: string;

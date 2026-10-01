@@ -6,6 +6,8 @@ import {
   filterReviewRuns,
   isEvaluating,
   isLost,
+  needsPerson,
+  resetRemaining,
   nextDelay,
   rankDatasets,
   reviewRuns,
@@ -248,5 +250,106 @@ describe("dataset cards", () => {
     expect(rowSignature(row())).toBe(a);
     expect(rowSignature(row({ done: 5 }))).not.toBe(a);
     expect(rowSignature(row({ last_error: "x" }))).not.toBe(a);
+  });
+});
+
+describe("reset countdown", () => {
+  const waiting = {
+    state: "waiting_reset",
+    reset_wait_s: 10,
+    waiting_reset_since: 1000,
+  };
+  test("counts down from when the wait began and goes negative when over", () => {
+    expect(resetRemaining(waiting, 1004)).toBe(6);
+    expect(resetRemaining(waiting, 1010)).toBe(0);
+    expect(resetRemaining(waiting, 1013)).toBe(-3);
+  });
+  test("nothing unless it is waiting and both numbers are known", () => {
+    expect(resetRemaining({ ...waiting, state: "running" }, 1004)).toBeNull();
+    expect(
+      resetRemaining({ ...waiting, waiting_reset_since: null }, 1004),
+    ).toBeNull();
+    expect(resetRemaining({ ...waiting, reset_wait_s: null }, 1004)).toBeNull();
+  });
+});
+
+describe("needs a person", () => {
+  test("lists the attention, the waiting datasets and a failed page", () => {
+    const need = needsPerson(
+      {
+        attention: { code: "vllm_failed", reason: "KV cache" },
+        frontend: { state: "failed", error: "port busy", attempts: 2 },
+      } as ServiceStatus,
+      {
+        a__x: row({ state: "awaiting_approval", awaiting: "plan" }),
+        b__y: row({ state: "awaiting_approval", awaiting: "changes" }),
+        c__z: row(),
+      },
+    );
+    expect(need.attention?.reason).toBe("KV cache");
+    expect(need.awaiting).toEqual([
+      { name: "a__x", kind: "plan" },
+      { name: "b__y", kind: "changes" },
+    ]);
+    expect(need.frontendFailed).toEqual({ error: "port busy", attempts: 2 });
+  });
+  test("nothing when all is well", () => {
+    const need = needsPerson(
+      { frontend: { state: "ok" } } as ServiceStatus,
+      {},
+    );
+    expect(need.attention).toBeNull();
+    expect(need.awaiting).toEqual([]);
+    expect(need.frontendFailed).toBeNull();
+  });
+});
+
+describe("the new gate and decision codes", () => {
+  const svc = (
+    gpu: ServiceStatus["gpu"],
+    state = "gpu_wait",
+  ): ServiceStatus => ({
+    state,
+    gpu,
+  });
+  test("an imminent episode closes the gate with its own words", () => {
+    const e = explainGate(
+      svc({ gate: { open: false, code: "episode_imminent" } }),
+    );
+    expect(e?.title).toContain("ahead of the next episode");
+  });
+  test.each([
+    "insufficient_vram",
+    "gate_closed",
+    "backoff",
+    "needs_attention",
+    "policy_large",
+  ])("%s is explained", (code) => {
+    const e = explainGate(
+      svc({ gate: { open: true }, decision: { allowed: false, code } }),
+    );
+    expect(e?.tone).toBe("warn");
+    expect(e?.detail.length).toBeGreaterThan(20);
+    expect(e?.title).not.toBe("Waiting for the local model to start");
+  });
+  test("an asleep model server is a calm note", () => {
+    const e = explainGate(
+      svc(
+        { gate: { open: true }, decision: { allowed: true, code: "asleep" } },
+        "idle",
+      ),
+    );
+    expect(e?.title).toContain("asleep");
+    expect(e?.tone).toBe("");
+  });
+});
+
+describe("open review runs", () => {
+  test("only the runs the service still holds open are listed", () => {
+    const runs = reviewRuns({
+      ...detail,
+      review_runs: ["r2"],
+    } as DatasetDetail);
+    expect(runs.map((r) => r.runId)).toEqual(["r2"]);
   });
 });

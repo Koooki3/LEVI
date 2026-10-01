@@ -192,15 +192,16 @@ export interface ReviewRun {
   at: number;
 }
 
-/** The release-review runs a dataset's verdicts come from. The service
- * leaves one per batch open for a person; the API does not say which a person
- * already settled, so this lists every run that holds a verdict. */
+/** The release-review runs a dataset's verdicts come from that are still
+ * open for a person (the service keeps the newest few per dataset). */
 export function reviewRuns(detail: DatasetDetail | undefined): ReviewRun[] {
   const runs = new Map<string, ReviewRun>();
+  // The service says which runs are still open; older ones were cancelled.
+  const open = detail?.review_runs ? new Set(detail.review_runs) : null;
   for (const d of detail?.demos ?? []) {
     const v = d.verdict;
     const id = v?.run_id;
-    if (!v || !id) continue;
+    if (!v || !id || (open && !open.has(id))) continue;
     const run = runs.get(id) ?? {
       runId: id,
       demos: 0,
@@ -268,6 +269,62 @@ export interface GateExplanation {
   tone: "pass" | "warn" | "";
 }
 
+/** Why the model server is not started or woken (gpu.decision.code). */
+const DECISION_NOTES: Record<string, [string, string]> = {
+  settling: [
+    "Waiting for the policy server to settle",
+    "A policy server just appeared or went away. The service waits a few seconds because a starting policy server grabs GPU memory.",
+  ],
+  vram: [
+    "Waiting for GPU memory",
+    "There is not enough free GPU memory to start or wake the local model yet.",
+  ],
+  insufficient_vram: [
+    "Not enough free GPU memory for the model",
+    "Even the smallest context the model can serve does not fit in the free memory beside the policy server. The service starts it when more memory is free.",
+  ],
+  lock: [
+    "Another job holds the GPU lock",
+    "The service starts the model when the lock is free.",
+  ],
+  manual: [
+    "No model server answers",
+    "The GPU mode is manual and no model server answers on the configured port.",
+  ],
+  external: [
+    "Using a model server that is already running",
+    "The service did not start it and leaves it alone.",
+  ],
+  external_busy: [
+    "Another model server is using the port",
+    "This service did not start it and leaves it alone.",
+  ],
+  error: [
+    "The model server could not be woken",
+    "The service could not read the GPU state or wake the model server; see the last error.",
+  ],
+  gate_closed: [
+    "Waiting for the robot policy to pause before starting the model",
+    "Starting the model is a heavy GPU load of about a minute, so it never starts while the policy is inferring. It starts between episodes.",
+  ],
+  backoff: [
+    "The last model start failed; trying again later",
+    "The service retries with growing waits and stops after a few failures (then it needs you).",
+  ],
+  needs_attention: [
+    "Labelling is paused until a person resumes it",
+    "The model server failed to start several times in a row. Fix the cause in the model log, then run the resume command shown above.",
+  ],
+  asleep: [
+    "The model server is asleep",
+    "Its GPU memory is given back; it wakes in under a second when work arrives.",
+  ],
+  policy_large: [
+    "The model server sleeps: the policy server holds a lot of GPU memory",
+    "The policy server was started with a larger memory share than the model can share the card with. The model labels only after that server exits, or restart it with the smaller share from the guide.",
+  ],
+};
+
 /** Why the model is or is not labelling right now, in words a person who is
  * running the robot understands. */
 export function explainGate(
@@ -284,6 +341,13 @@ export function explainGate(
           "The model and the policy share one GPU. A model request during inference would slow the policy and make the recorded time steps jitter, so labelling waits. It continues between episodes (returning home, waiting for the reset) and after the session ends.",
         tone: "warn",
       };
+    if (gate.code === "episode_imminent")
+      return {
+        title: "Labelling pauses ahead of the next episode",
+        detail:
+          "A session is about to start its next episode (the reset wait is nearly over). The service stops sending model requests a moment before, so the policy never waits for the model.",
+        tone: "warn",
+      };
     if (gate.code === "unknown_client")
       return {
         title: "Labelling waits for a policy server it cannot see",
@@ -298,39 +362,70 @@ export function explainGate(
     };
   }
   const d = gpu.decision;
-  if (d && d.allowed === false && service.state === "gpu_wait") {
-    const why: Record<string, string> = {
-      settling:
-        "A policy server just appeared or went away. The service waits a few seconds because a starting policy server grabs GPU memory.",
-      vram: "There is not enough free GPU memory to start the local model yet.",
-      lock: "Another job holds the GPU lock.",
-      manual:
-        "The GPU mode is manual and no model server answers on the configured port.",
-      external:
-        "Another model server is using the port; this service leaves it alone.",
-      external_busy:
-        "Another model server is busy; this service leaves it alone.",
-      error: "The service could not read the GPU state.",
-    };
+  const note = d?.code ? DECISION_NOTES[d.code] : undefined;
+  if (d && d.allowed === false && note)
+    return { title: note[0], detail: note[1], tone: "warn" };
+  if (d && d.allowed === false && service.state === "gpu_wait")
     return {
       title: "Waiting for the local model to start",
       detail:
-        why[d.code ?? ""] ||
         "The model is not ready yet; the service starts it when the GPU allows.",
       tone: "warn",
     };
-  }
   if (service.state === "annotating")
     return {
       title: "The model is labelling",
       detail: "The GPU gate is open and a worker is labelling rollouts.",
       tone: "pass",
     };
+  if (d?.code === "asleep" && note)
+    return { title: note[0], detail: note[1], tone: "" };
   return {
     title: "Labelling may run whenever work arrives",
     detail:
       "The GPU gate is open. The model starts when a finished rollout is waiting.",
     tone: "pass",
+  };
+}
+
+/** Seconds until the next episode of a session waiting for the reset: null
+ * when it is not waiting or the wait or its start is unknown; zero or less
+ * when the wait is over. */
+export function resetRemaining(
+  session: Pick<LiveSession, "state" | "reset_wait_s" | "waiting_reset_since">,
+  nowSeconds: number,
+): number | null {
+  if (session.state !== "waiting_reset") return null;
+  const wait = session.reset_wait_s;
+  const since = session.waiting_reset_since;
+  if (!wait || !since) return null;
+  return since + wait - nowSeconds;
+}
+
+export interface NeedsPerson {
+  /** The service gave up on something (`levi live resume`). */
+  attention: { code?: string; reason?: string } | null;
+  /** Datasets waiting for a person in the LEVI page. */
+  awaiting: { name: string; kind: "plan" | "changes" | null }[];
+  /** The page or core the service starts did not come up. */
+  frontendFailed: { error: string; attempts: number } | null;
+}
+
+export function needsPerson(
+  service: ServiceStatus | null | undefined,
+  rows: Record<string, DatasetRow>,
+): NeedsPerson {
+  const awaiting = Object.entries(rows)
+    .filter(([, r]) => r.state === "awaiting_approval")
+    .map(([name, r]) => ({ name, kind: r.awaiting ?? null }));
+  const front = service?.frontend;
+  return {
+    attention: service?.attention ?? null,
+    awaiting,
+    frontendFailed:
+      front?.state === "failed"
+        ? { error: front.error ?? "", attempts: front.attempts ?? 0 }
+        : null,
   };
 }
 

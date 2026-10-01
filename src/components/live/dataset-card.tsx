@@ -30,6 +30,7 @@ const DEMO_STATES: Record<string, string> = {
   failed: "failed",
   rejected: "rejected",
   skipped_human: "skipped (a person annotated it)",
+  stuck: "stuck (never finished)",
 };
 
 function Stat({ label, value }: { label: string; value: number }) {
@@ -88,24 +89,26 @@ function AutoOutcome({ detail }: { detail: DatasetDetail | undefined }) {
 
 function ReviewRuns({
   detail,
+  openCount,
   filter,
   onFilter,
   nowSeconds,
 }: {
   detail: DatasetDetail | undefined;
+  openCount: number;
   filter: ReviewFilter;
   onFilter: (value: ReviewFilter) => void;
   nowSeconds: number;
 }) {
   const { t } = useLocale();
   const runs = reviewRuns(detail);
-  if (runs.length === 0) return null;
+  if (runs.length === 0 && openCount === 0) return null;
   const { shown, hidden } = filterReviewRuns(runs, filter, nowSeconds);
   return (
     <div className="levi-live-reviews">
       <div className="levi-live-reviews-head">
         <strong>
-          {t("Review runs left for a person")} ({runs.length})
+          {t("Review runs left for a person")} ({openCount || runs.length})
         </strong>
         <label className="levi-pool-muted">
           {t("Show")}{" "}
@@ -250,6 +253,33 @@ export function DatasetCard({
         </h3>
         <div className="levi-live-chips">
           <Chip tone={stateTone}>{t(stateLabel)}</Chip>
+          {row.state === "awaiting_approval" && (
+            <Chip tone="warn">
+              {row.awaiting === "changes"
+                ? t("Waiting for you: commit the draft")
+                : t("Waiting for you: approve the plan")}
+            </Chip>
+          )}
+          {(row.stuck ?? 0) > 0 && (
+            <Chip
+              tone="warn"
+              title={t(
+                "Never finished and unchanged for a while: counted, no longer waited for.",
+              )}
+            >
+              {row.stuck} {t("stuck")}
+            </Chip>
+          )}
+          {(row.source_changed ?? 0) > 0 && (
+            <Chip
+              tone="warn"
+              title={t(
+                "The source was replaced after it was mirrored; an episode that was already labelled keeps the old content.",
+              )}
+            >
+              {row.source_changed} {t("source replaced")}
+            </Chip>
+          )}
           {fault === "current" && <Chip tone="fail">{t("FR3 fault")}</Chip>}
           {fault === "earlier" && (
             <Chip
@@ -302,6 +332,17 @@ export function DatasetCard({
           : ""}
       </p>
       <AutoOutcome detail={detail} />
+      {row.state === "awaiting_approval" && (
+        <p className="levi-live-await">
+          {row.awaiting === "changes"
+            ? t(
+                "The service finished the temporary work and waits for you to commit the draft in the LEVI page (Agent Workbench); nothing is written until you do.",
+              )
+            : t(
+                "The service made a plan and waits for you to approve it in the LEVI page (Agent Workbench); it does nothing on this dataset until you do.",
+              )}
+        </p>
+      )}
       {error && (
         <p className="levi-error">
           <strong>{t("Last error")}:</strong> {error}
@@ -309,6 +350,7 @@ export function DatasetCard({
       )}
       <ReviewRuns
         detail={detail}
+        openCount={row.review_runs_open ?? 0}
         filter={filter}
         onFilter={onFilter}
         nowSeconds={nowSeconds}

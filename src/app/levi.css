@@ -539,16 +539,20 @@ select optgroup {
     display: none;
   }
   .levi-header {
-    padding: 0 5%;
-    height: 64px;
+    padding: 10px 5%;
+    height: auto;
+    min-height: 64px;
+    flex-wrap: wrap;
+    row-gap: 8px;
   }
   .levi-header nav {
-    gap: 13px;
+    gap: 8px 13px;
     font-size: 11px;
-    /* Scroll the entries rather than widen the page on a phone. */
+    /* Wrap the entries onto more lines so every one is visible on a phone
+       and the page does not widen. */
+    flex: 1 1 100%;
     min-width: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
+    flex-wrap: wrap;
   }
   .levi-header nav > * {
     flex: 0 0 auto;
@@ -2921,4 +2925,34 @@ button.levi-pool-danger {
   .levi-live-banner strong {
     font-size: 16px;
   }
+}
+
+.levi-live-attention {
+  margin: 16px 0 0;
+  padding: 14px 18px;
+  border: 2px solid #f1c677;
+  border-radius: 8px;
+  background: #33280f;
+  color: #fbe9c3;
+}
+.levi-live-attention strong {
+  display: block;
+  font-size: 17px;
+  margin-bottom: 4px;
+  color: #f1c677;
+}
+.levi-live-attention p {
+  margin: 6px 0;
+  font-size: 13px;
+  color: #f5dcaa;
+  overflow-wrap: anywhere;
+}
+.levi-live-await {
+  font-size: 12px;
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 3px solid #f1c677;
+  background: #11180f;
+  color: #dbc58f;
+  line-height: 1.6;
 }

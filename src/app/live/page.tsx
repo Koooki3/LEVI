@@ -9,10 +9,15 @@ import { DatasetCard } from "@/components/live/dataset-card";
 import {
   datasetFaultKind,
   detectFault,
+  needsPerson,
   rankDatasets,
   type ReviewFilter,
 } from "@/components/live/live-logic";
-import { ServiceOffline, ServicePanel } from "@/components/live/service-panel";
+import {
+  AttentionBanner,
+  ServiceOffline,
+  ServicePanel,
+} from "@/components/live/service-panel";
 import {
   FaultBanner,
   Fr3Panel,
@@ -90,6 +95,7 @@ export default function LivePage() {
   const serviceDown = !!status?.enabled && !alive;
 
   const fault = useMemo(() => detectFault(fr3, sessions), [fr3, sessions]);
+  const need = useMemo(() => needsPerson(service, rows), [service, rows]);
 
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<ReviewFilter>("latest");
@@ -137,6 +143,7 @@ export default function LivePage() {
         error={poll.error}
       />
       <FaultBanner fault={fault} />
+      {alive && <AttentionBanner need={need} />}
 
       {status?.enabled === false ? (
         <section className="levi-live-offline" role="status">
