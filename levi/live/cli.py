@@ -129,6 +129,26 @@ def check_socket_path(config):
         )
 
 
+def protected_workspaces() -> list:
+    """The `.state` of this checkout and, when this is a git worktree, of the
+    main checkout it belongs to (the product LEVI runs there): never a live
+    workspace, whatever ``--adopt-workspace`` says."""
+    top = controller.project_root()
+    found = [(top / ".state").resolve()]
+    marker = top / ".git"
+    try:
+        if marker.is_file():
+            line = marker.read_text().strip()
+            if line.startswith("gitdir:"):
+                git_dir = Path(line.split(":", 1)[1].strip())
+                # <main>/.git/worktrees/<name> -> <main>
+                if git_dir.parent.name == "worktrees":
+                    found.append((git_dir.parent.parent.parent / ".state").resolve())
+    except OSError:
+        pass
+    return found
+
+
 def check_workspace(config, adopt=False):
     """Refuse a workspace that is not a live one.
 
@@ -139,12 +159,19 @@ def check_workspace(config, adopt=False):
     ``--adopt-workspace``; the product checkout's ``.state`` is refused
     always."""
     root = config.workspace.expanduser().resolve()
-    if root == (controller.project_root() / ".state").resolve():
-        raise ValueError(
-            f"{root} is the checkout's own LEVI workspace (the product LEVI's): "
-            "the live service needs a workspace of its own"
-        )
     live = (root / "live" / auto.MARKER).is_file()
+    for protected in protected_workspaces():
+        if root == protected:
+            raise ValueError(
+                f"{root} is the product LEVI's workspace (a checkout's own "
+                "`.state`): the live service needs a workspace of its own"
+            )
+    env = os.environ.get("LEVI_WORKSPACE")
+    if env and not live and root == Path(env).expanduser().resolve():
+        raise ValueError(
+            f"{root} is the workspace named by LEVI_WORKSPACE (some LEVI of "
+            "yours uses it): the live service needs a workspace of its own"
+        )
     holds = (root / "outputs/LEVI").exists() or (root / "datasets.json").exists()
     if holds and not live and not adopt:
         raise ValueError(

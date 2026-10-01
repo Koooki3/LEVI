@@ -634,6 +634,39 @@ def test_the_service_refuses_a_workspace_that_is_not_a_live_one(tmp_path):
         cli.prepare(own, adopt=True)
 
 
+def test_the_main_checkout_and_the_environment_workspace_are_refused_even_adopted(
+    tmp_path, monkeypatch
+):
+    """Run from a worktree, the product checkout's .state is another path; and
+    LEVI_WORKSPACE names whichever workspace the shell's LEVI uses. Neither
+    may become the live workspace, whatever --adopt-workspace says."""
+    main = tmp_path / "LEVI"
+    (main / ".git/worktrees/live-fix").mkdir(parents=True)
+    tree = tmp_path / "LEVI-live-fix"
+    tree.mkdir()
+    (tree / ".git").write_text(f"gitdir: {main}/.git/worktrees/live-fix\n")
+    monkeypatch.setattr(controller, "project_root", lambda: tree)
+    c = cfg(tmp_path)
+    c.service.workspace = str(main / ".state")
+    (main / ".state/outputs/LEVI").mkdir(parents=True)
+    with pytest.raises(ValueError, match="product LEVI"):
+        cli.prepare(c, adopt=True)
+    assert not (main / ".state/live").exists()
+    # The shell's own LEVI workspace.
+    mine = tmp_path / "somebodys-ws"
+    (mine / "outputs/LEVI").mkdir(parents=True)
+    monkeypatch.setenv("LEVI_WORKSPACE", str(mine))
+    c.service.workspace = str(mine)
+    with pytest.raises(ValueError, match="LEVI_WORKSPACE"):
+        cli.prepare(c, adopt=True)
+    # Once it is a live workspace (made on purpose, with the variable unset),
+    # the variable naming it is no reason to refuse.
+    monkeypatch.delenv("LEVI_WORKSPACE")
+    cli.prepare(c, adopt=True)
+    monkeypatch.setenv("LEVI_WORKSPACE", str(mine))
+    cli.prepare(c)
+
+
 def test_init_and_start_respect_the_guard(tmp_path):
     (tmp_path / "ws/outputs/LEVI").mkdir(parents=True)
     done = cli_run(tmp_path, "init")
