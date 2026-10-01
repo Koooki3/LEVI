@@ -130,10 +130,13 @@ VLLM_TOTAL_SLACK_MIB = 500
 ASLEEP_RESIDENT_MIB = 2200
 
 
-def need_mib(config, profile, total_mib) -> int:
-    """Free VRAM a start or a wake of a vLLM with this ``profile`` needs: its
-    budget of vLLM's total plus the configured margin."""
+def need_mib(config, profile, total_mib, wake=False) -> int:
+    """Free VRAM a start of a vLLM with this ``profile`` needs: its budget of
+    vLLM's total plus ``vllm.margin_mib``. A *wake* needs the budget less what
+    the sleeping vLLM still holds, plus the smaller ``gpu.wake_margin_mib``."""
     budget = profile["gpu_memory_utilization"] * (total_mib - VLLM_TOTAL_SLACK_MIB)
+    if wake:
+        return max(0, int(budget) + config.gpu.wake_margin_mib - ASLEEP_RESIDENT_MIB)
     return int(budget) + config.vllm.margin_mib
 
 
@@ -344,7 +347,12 @@ def should_sleep(config, mode, *, free_mib: int | None, policy_mib: int | None):
     if budget and policy_mib is not None and policy_mib > budget:
         return (
             "policy_large",
-            f"the policy server holds {policy_mib} MiB (over {budget})",
+            (
+                f"the policy server holds {policy_mib} MiB, over "
+                f"gpu.policy_budget_mib ({budget} MiB): it cannot share the card "
+                "with an awake vLLM; start it with "
+                "XLA_PYTHON_CLIENT_MEM_FRACTION=.22 (7.6 GB)"
+            ),
         )
     if free_mib is not None and free_mib < config.gpu.min_free_mib:
         return "vram", f"free VRAM fell to {free_mib} MiB"
@@ -476,6 +484,13 @@ def identity(pid):
         return None
 
 
+def same_process(pid, recorded) -> bool:
+    """Is ``pid`` still the process that was recorded? A recorded identity of
+    None is never a match (None == None would make a pid that is gone, or was
+    never read, look alive and ours)."""
+    return bool(pid) and recorded is not None and identity(pid) == recorded
+
+
 def healthy(port, opener=urllib.request.urlopen) -> bool:
     """Whether a vLLM server answers /health on the loopback port."""
     try:
@@ -554,6 +569,33 @@ def _group(pgid) -> list:
     return members or [pgid]
 
 
+STOP_CONFIRM_S = 60.0  # how long a stop waits for the GPU to be really free
+
+
+def _group_alive(pgid) -> list:
+    """Live (not zombie) processes of the group, without ``_group``'s fallback
+    to the leader's own pid: empty once the whole group is gone."""
+    alive = []
+    try:
+        for entry in os.scandir("/proc"):
+            if not entry.name.isdigit():
+                continue
+            try:
+                fields = (
+                    Path(f"/proc/{entry.name}/stat")
+                    .read_text()
+                    .rsplit(")", 1)[1]
+                    .split()
+                )
+            except (OSError, IndexError):
+                continue
+            if int(fields[2]) == pgid and fields[0] != "Z":
+                alive.append(int(entry.name))
+    except OSError:
+        pass
+    return alive
+
+
 class Vllm:
     """The service's own vLLM server: start, watch, stop. It stops only a
     process it started (verified by its recorded identity), never another
@@ -567,6 +609,7 @@ class Vllm:
         self.state = "stopped"
         self.started_at: float | None = None
         self.profile: dict | None = None
+        self._leaving: set = set()  # pids of a stop still waiting on the GPU
         self.error = ""
         self._health = (0.0, False)
         self._adopt()
@@ -592,7 +635,7 @@ class Vllm:
         if not isinstance(record, dict):
             return
         pid = record.get("pid")
-        if pid and identity(pid) == record.get("identity") and self._pid() == pid:
+        if same_process(pid, record.get("identity")) and self._pid() == pid:
             if not healthy(self.port):
                 self.state = "starting"
             else:
@@ -631,10 +674,8 @@ class Vllm:
 
     def mine(self) -> bool:
         record = jsonio.read(self.record_path)
-        return bool(
-            isinstance(record, dict)
-            and record.get("pid")
-            and identity(record["pid"]) == record.get("identity")
+        return isinstance(record, dict) and same_process(
+            record.get("pid"), record.get("identity")
         )
 
     def external(self) -> bool:
@@ -683,7 +724,8 @@ class Vllm:
             )
             return False
         pid = self._pid()
-        if code != 0 or not pid or identity(pid) is None:
+        ident = identity(pid) if pid else None  # read once: this is what is stored
+        if code != 0 or not pid or ident is None:
             self.state, self.error = (
                 "error",
                 f"serve script exited {code}; see vllm-launch.log",
@@ -697,7 +739,7 @@ class Vllm:
             self.record_path,
             {
                 "pid": pid,
-                "identity": identity(pid),
+                "identity": ident,
                 "started_at": self.started_at,
                 "profile": profile,
                 "port": self.port,
@@ -827,6 +869,9 @@ class Vllm:
     def stop(self) -> bool:
         """Stop this service's vLLM (only if it is ours). True when gone."""
         if not self.mine():
+            if self._leaving and self._on_gpu(self._leaving):
+                return False  # an earlier stop could not confirm the GPU is free
+            self._leaving = set()
             self.state = "stopped"
             return True
         self.state = "stopping"
@@ -846,17 +891,35 @@ class Vllm:
             )
         except (OSError, subprocess.SubprocessError):
             pass
-        if pid and identity(pid) == record.get("identity"):
+        recorded = record.get("identity")
+        self._leaving = set(_group_alive(pid)) | ({pid} if pid else set())
+        if same_process(pid, recorded):
             # The script could not (missing pidfile): signal the group directly.
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(pid, signal.SIGTERM)
             deadline = time.time() + 30
-            while identity(pid) == record.get("identity") and time.time() < deadline:
+            while same_process(pid, recorded) and time.time() < deadline:
                 time.sleep(0.5)
-            if identity(pid) == record.get("identity"):
+            if same_process(pid, recorded):
                 with contextlib.suppress(ProcessLookupError, PermissionError):
                     os.killpg(pid, signal.SIGKILL)
-        gone = not pid or identity(pid) != record.get("identity")
+        gone = not same_process(pid, recorded)
+        if gone:
+            # The leader is gone; the engine processes of its group may still
+            # be releasing the card. The lock says "vLLM is on the GPU": let go
+            # of it only once nothing of the group is alive or holds VRAM.
+            deadline = time.time() + STOP_CONFIRM_S
+            while time.time() < deadline and (
+                _group_alive(pid) or self._on_gpu(self._leaving)
+            ):
+                time.sleep(0.5)
+            if _group_alive(pid) or self._on_gpu(self._leaving):
+                self.state = "error"
+                self.error = (
+                    "vLLM's processes still hold GPU memory after the stop; "
+                    "the GPU lock is kept until they are gone"
+                )
+                return False
         if gone:
             with contextlib.suppress(OSError):
                 self.record_path.unlink()
@@ -865,6 +928,16 @@ class Vllm:
         else:
             self.state, self.error = "error", "vLLM did not stop"
         return gone
+
+    def leaving(self) -> bool:
+        """A stop is still waiting for vLLM's processes to leave the GPU."""
+        return bool(self._leaving) and self.state == "error"
+
+    @staticmethod
+    def _on_gpu(pids) -> bool:
+        """Does any of ``pids`` still appear among nvidia-smi's compute
+        processes? (An unreadable nvidia-smi says no: nothing can be told.)"""
+        return any(row["pid"] in pids for row in gpu_holders())
 
     def public(self) -> dict:
         return {

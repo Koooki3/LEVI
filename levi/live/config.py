@@ -113,6 +113,23 @@ class Gpu:
     # keeps the gate closed): after this long the status says labelling is
     # paused for it (``labelling_paused``).
     unknown_client_pause_s: float = 600.0
+    # A wake of a sleeping vLLM keeps this much free beyond the budget less what
+    # it still holds (``gpumgr.ASLEEP_RESIDENT_MIB``). A start needs
+    # ``vllm.margin_mib`` (vLLM sees about 930 MiB less free than nvidia-smi
+    # when it starts); a wake makes no such check. NOT MEASURED on a real GPU:
+    # with the policy server at .22 and a sleeping vLLM about 22804 MiB are
+    # free and a wake at 0.7395 needs 21843 with this value.
+    wake_margin_mib: int = 300
+    # A cold start (45-70 s of GPU load) waits until a session has been in
+    # ``standby`` this long: a client leaves standby for its first episode within
+    # seconds, and the cold start would overlap it. Not a guarantee (the operator
+    # may press start at any time): ``--prewarm`` before the evaluation is the
+    # way to have no cold start at all.
+    standby_min_s: float = 20.0
+    # A block that does not pass by itself (the GPU lock held by another agent,
+    # somebody else's vLLM on the port, a sleeping vLLM that cannot wake for
+    # lack of room) is reported in ``labelling_paused`` after this long.
+    blocked_pause_s: float = 300.0
     policy_load_wait_s: float = 120.0
 
 

@@ -355,7 +355,7 @@ def test_a_failed_call_is_audited_with_its_error(bench, dataset, live_ws):
 # --- a person cannot start the model while the policy infers -------------------------------
 
 
-def write_gate(live, open_, age=0.0):
+def write_gate(live, open_, age=0.0, idle=False):
     import time
 
     (live / "gate.json").write_text(
@@ -365,6 +365,7 @@ def write_gate(live, open_, age=0.0):
                 "code": "ok" if open_ else "policy_inferring",
                 "reason": "" if open_ else "the policy is inferring",
                 "updated_at": time.time() - age,
+                "idle": idle,
             }
         )
     )
@@ -392,9 +393,17 @@ def test_a_person_s_execute_is_refused_while_the_gate_is_closed(
         (Principal("live-auto", human=True, auto=True), "runs.resume"),
     ):
         gating.check(who, name)
-    # A closed gate nobody refreshes (the supervisor died) blocks nothing, nor
-    # does an open one, nor a workspace that is not a live one.
+    # A gate nobody refreshes (the supervisor died) is read the careful way,
+    # the same for a person and for the worker: closed, unless its last word
+    # was "nothing to protect" (no policy server, no evaluation). Open gates
+    # and workspaces that are not live ones block nothing.
     write_gate(live_ws, False, age=gating.STALE_S + 5)
+    with pytest.raises(Conflict, match="supervisor"):
+        gating.check(human, "runs.execute")
+    write_gate(live_ws, True, age=gating.STALE_S + 5)  # open, but a policy was up
+    with pytest.raises(Conflict, match="supervisor"):
+        gating.check(human, "runs.execute")
+    write_gate(live_ws, True, age=gating.STALE_S + 5, idle=True)
     gating.check(human, "runs.execute")
     write_gate(live_ws, True)
     gating.check(human, "runs.execute")
@@ -428,3 +437,89 @@ def test_a_failing_audit_write_is_a_warning_not_a_failed_call(
     with pytest.raises(PermissionError, match="may not call"):
         invoke(wb, approver, "workspace.reset", {"apply": False})
     assert auto.AUDIT_FAILURES >= before + 3
+
+
+# --- every model request obeys the gate, whoever started the run --------------------------
+
+
+def test_every_request_reads_the_gate_and_a_run_stops_when_it_closes(
+    live_ws, monkeypatch
+):
+    import time
+
+    from levi.inference import gpu
+    from levi.live import gating
+
+    monkeypatch.delenv(gating.WORKER_ENV, raising=False)
+    monkeypatch.setenv("LEVI_GPU_SHARING", "allow")  # the live core's setting
+    write_gate(live_ws, True)
+    assert gpu.require_free(None) is None  # started while the gate was open ...
+    write_gate(live_ws, False)
+    time.sleep(gating.CACHE_S + 0.05)  # (the read is cached for a moment)
+    # ... and the next request is not sent: a retryable error, which makes the
+    # run stop at that point (blocked, resumable by Resume once the gate opens).
+    with pytest.raises(gpu.GpuBusy, match="inferring"):
+        gpu.require_free(None)
+    assert issubclass(gpu.GpuBusy, ValueError)  # what the executor turns into 'blocked'
+    write_gate(live_ws, True)
+    time.sleep(gating.CACHE_S + 0.05)
+    assert gpu.require_free(None) is None
+    # The read is cheap: within the cache time the file is not read again.
+    write_gate(live_ws, False)
+    assert gating.request_blocked() is None
+
+
+def test_the_worker_and_other_workspaces_are_not_held_by_the_request_check(
+    live_ws, monkeypatch, tmp_path
+):
+    import time
+
+    from levi.live import gating
+
+    write_gate(live_ws, False)
+    time.sleep(gating.CACHE_S + 0.05)
+    monkeypatch.delenv(gating.WORKER_ENV, raising=False)
+    assert gating.request_blocked() is not None
+    monkeypatch.setenv(gating.WORKER_ENV, "1")  # the worker obeys by standing down
+    assert gating.request_blocked() is None
+    monkeypatch.delenv(gating.WORKER_ENV)
+    # A gate nobody refreshes (supervisor dead): careful, as for the worker,
+    # unless its last word was "nothing to protect".
+    write_gate(live_ws, False, age=gating.STALE_S + 5)
+    time.sleep(gating.CACHE_S + 0.05)
+    assert gating.request_blocked() is not None
+    write_gate(live_ws, False, age=gating.STALE_S + 5, idle=True)
+    time.sleep(gating.CACHE_S + 0.05)
+    assert gating.request_blocked() is None
+    # Not a live workspace: no marker, no check.
+    write_gate(live_ws, False)
+    (live_ws / auto.MARKER).unlink()
+    time.sleep(gating.CACHE_S + 0.05)
+    assert gating.request_blocked() is None
+
+
+def test_the_task_console_s_advance_is_guarded_like_run_and_resume(live_ws):
+    from levi.agent.store import Conflict
+    from levi.live import gating
+
+    write_gate(live_ws, False)
+    with pytest.raises(Conflict, match="inferring"):
+        gating.check(Principal("reviewer", human=True), "tasks.advance")
+
+
+def test_the_worker_reads_a_stale_gate_exactly_as_a_person_does(live_ws):
+    """One rule for both: gating.closed()."""
+    import time
+
+    from levi.live import gating
+
+    now = time.time()
+    fresh_closed = {"open": False, "updated_at": now}
+    assert gating.closed(fresh_closed) and not gating.closed(
+        {"open": True, "updated_at": now}
+    )
+    old = now - gating.STALE_S - 1
+    assert gating.closed({"open": True, "updated_at": old})  # was not idle
+    assert gating.closed({"open": False, "updated_at": old, "idle": False})
+    assert not gating.closed({"open": True, "updated_at": old, "idle": True})
+    assert not gating.closed(None) and not gating.closed("junk")  # no supervisor at all

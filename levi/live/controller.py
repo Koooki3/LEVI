@@ -49,41 +49,42 @@ def project_root() -> Path:
 RUN_ENDED = ("cancelled", "failed", "succeeded", "partially_succeeded")
 
 
-def peek_run(workspace, run_id) -> dict | None:
-    """A run record read straight from the store's SQLite file, read-only, so
-    the idle supervisor need not import LEVI's agent package."""
+class StoreUnreadable(Exception):
+    """The store's SQLite file is missing or could not be read (locked,
+    damaged): not the same as "no such record"."""
+
+
+def _peek(workspace, query, args):
     path = Path(workspace) / "outputs/LEVI/workbench/agent/workbench.sqlite3"
     if not path.is_file():
-        return None
+        raise StoreUnreadable(f"{path} does not exist")
     try:
         db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
         try:
-            row = db.execute(
-                "SELECT body FROM records WHERE kind='runs' AND id=?", (run_id,)
-            ).fetchone()
+            row = db.execute(query, args).fetchone()
         finally:
             db.close()
-    except sqlite3.Error:
-        return None
+    except sqlite3.Error as exc:
+        raise StoreUnreadable(str(exc)) from exc
     return json.loads(row[0]) if row else None
+
+
+def peek_run(workspace, run_id) -> dict | None:
+    """A run record read straight from the store's SQLite file, read-only, so
+    the idle supervisor need not import LEVI's agent package. None: there is
+    no such run; ``StoreUnreadable``: the file could not be read."""
+    return _peek(
+        workspace, "SELECT body FROM records WHERE kind='runs' AND id=?", (run_id,)
+    )
 
 
 def peek_record(workspace, kind, record_id) -> dict | None:
     """Any store record (``changes`` for a draft) read the same way."""
-    path = Path(workspace) / "outputs/LEVI/workbench/agent/workbench.sqlite3"
-    if not path.is_file():
-        return None
-    try:
-        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
-        try:
-            row = db.execute(
-                "SELECT body FROM records WHERE kind=? AND id=?", (kind, record_id)
-            ).fetchone()
-        finally:
-            db.close()
-    except sqlite3.Error:
-        return None
-    return json.loads(row[0]) if row else None
+    return _peek(
+        workspace,
+        "SELECT body FROM records WHERE kind=? AND id=?",
+        (kind, record_id),
+    )
 
 
 def release_leases(workspace, run_ids) -> int:
@@ -158,6 +159,7 @@ class Controller:
         self._policy_mib = (0.0, None)
         self.idle_since: float | None = None
         self._waiting_since: dict = {}
+        self._standby_since: dict = {}
         self._status_at = 0.0
         self.loop_at: float | None = None  # the last tick (the thread beats on)
         self.start_failures = 0
@@ -165,6 +167,7 @@ class Controller:
         self.attention: dict | None = None
         self._paused: dict | None = None  # the status' labelling_paused
         self._gate_code_since: tuple = (None, 0.0)
+        self._decision_since: tuple = (None, 0.0)
         self._resume_seen = None
         self.decision = gpumgr.Decision(True, "no work", "ok")
         self.state = "starting"
@@ -220,6 +223,9 @@ class Controller:
         self._waiting_since = {
             p: told or self._waiting_since.get(p, now) for p, told in waiting.items()
         }
+        # Since when each session has been in standby (a cold start waits).
+        standing = {s.path for s in self.sessions.values() if s.state == "standby"}
+        self._standby_since = {p: self._standby_since.get(p, now) for p in standing}
         ports = self.probes.ports()
         up = any(int(p) in ports for p in c.gpu.policy_ports)
         if up != self.policy_up and self.state != "starting":
@@ -264,21 +270,12 @@ class Controller:
         if time.time() - info["at"] < self.config.pipeline.human_recheck_s:
             return False
         ws = self.config.workspace
-        if info.get("kind") == "changes" and info.get("changeset"):
-            change = peek_record(ws, "changes", info["changeset"])
-            run = peek_run(ws, info.get("run_id")) if info.get("run_id") else None
-            acted = bool(
-                (change and change.get("status") in ("committed", "rejected"))
-                # The person dealt with the run itself (cancelled it, it
-                # ended) or the draft is gone: nothing is left to wait for.
-                or (run and run.get("status") in RUN_ENDED)
-                or (change is None and run)
-            )
-        else:
-            run = peek_run(ws, info.get("run_id")) if info.get("run_id") else None
-            acted = bool(
-                run and (run["plan"].get("approval") or run["status"] != "planned")
-            )
+        try:
+            acted = self._acted(ws, info)
+        except StoreUnreadable:
+            # A locked or missing store is not an answer: keep waiting.
+            info["at"] = time.time()
+            return False
         if acted:
             self.awaiting.pop(name, None)
             with contextlib.suppress(Exception):
@@ -290,6 +287,21 @@ class Controller:
             return True
         info["at"] = time.time()
         return False
+
+    @staticmethod
+    def _acted(ws, info) -> bool:
+        if info.get("kind") == "changes" and info.get("changeset"):
+            change = peek_record(ws, "changes", info["changeset"])
+            run = peek_run(ws, info.get("run_id")) if info.get("run_id") else None
+            return bool(
+                (change and change.get("status") in ("committed", "rejected"))
+                # The person dealt with the run itself (cancelled it, it
+                # ended) or the draft is gone: nothing is left to wait for.
+                or (run and run.get("status") in RUN_ENDED)
+                or (change is None and run)
+            )
+        run = peek_run(ws, info.get("run_id")) if info.get("run_id") else None
+        return bool(run and (run["plan"].get("approval") or run["status"] != "planned"))
 
     # --- GPU ---------------------------------------------------------------------------
 
@@ -323,8 +335,7 @@ class Controller:
 
     def _need(self, profile, now, asleep=False) -> int:
         total = (self._vram[1] or {}).get("total_mib") or 32607
-        need = gpumgr.need_mib(self.config, profile, total)
-        return max(0, need - gpumgr.ASLEEP_RESIDENT_MIB) if asleep else need
+        return gpumgr.need_mib(self.config, profile, total, wake=asleep)
 
     def _gpu_step(self, now, want: bool) -> bool:
         """Advance the GPU side; True when the model is awake and answering."""
@@ -347,6 +358,16 @@ class Controller:
             else self.vllm.state
         )
         self._check_resume(now)
+        if state == "error" and self.vllm.leaving():
+            # A stop that could not confirm the card is free: not a failed
+            # start. Keep the lock, look again each tick.
+            if self.vllm.stop():
+                self.lock.release()
+                self.event("vLLM has left the GPU: the lock is let go")
+            else:
+                self.decision = gpumgr.Decision(False, self.vllm.error, "gpu_not_free")
+                return False
+            state = self.vllm.state
         if state == "error":
             # A failed start (or a vLLM that died): note it, back off, and
             # after a few in a row stop and ask for a person.
@@ -391,8 +412,34 @@ class Controller:
             return False
         if not self.gate.open and mode != "manual":
             # A cold start is 45 s of heavy GPU load: never while the policy infers.
+            if c.vllm.prewarm and self.gate.code == "unknown_client":
+                self.decision = gpumgr.Decision(
+                    False,
+                    "--prewarm is waiting: a policy server is already running and "
+                    "no evaluation session has appeared, so the gate is shut. Start "
+                    "`levi live start --prewarm` before the policy server and wait "
+                    "for vLLM to be ready (levi live status), then start the "
+                    "policy server and the evaluation",
+                    "prewarm_waiting_for_policy",
+                )
+                return False
             self.decision = gpumgr.Decision(
                 False, "waiting for the gate: " + self.gate.reason, "gate_closed"
+            )
+            return False
+        young = [
+            now - since
+            for since in self._standby_since.values()
+            if now - since < c.gpu.standby_min_s
+        ]
+        if mode != "manual" and young:
+            self.decision = gpumgr.Decision(
+                False,
+                f"a session reached standby {min(young):.0f} s ago and its first "
+                f"episode may follow within seconds: a cold start waits until it "
+                f"has been in standby for {c.gpu.standby_min_s:.0f} s "
+                "(`levi live start --prewarm` before the evaluation avoids this)",
+                "standby_settling",
             )
             return False
         if mode != "manual" and self._evaluation_unfinished():
@@ -413,6 +460,13 @@ class Controller:
                 # Count the policy only when its memory is really held, read
                 # now (not the 30 s cache): a listening port may still be loading.
                 held = gpumgr.policy_loaded(c, self.policy_up, self.policy_mib(now, 0))
+                big = gpumgr.should_sleep(
+                    c, mode, free_mib=None, policy_mib=self._policy_mib[1]
+                )
+                if big and held == "loaded":
+                    # It would start and go straight back to sleep for ever.
+                    self.decision = gpumgr.Decision(False, big[1], big[0])
+                    return False
                 if held == "loading":
                     waited = now - (self.policy_changed_at or self.started_at)
                     if waited < c.gpu.policy_load_wait_s:
@@ -791,6 +845,9 @@ class Controller:
         a settling policy server): those pass by themselves."""
         c = self.config
         code = reason = since = None
+        blocked = self.decision.code if wanted else None
+        if self._decision_since[0] != blocked:
+            self._decision_since = (blocked, now)
         code_now = None if self.gate.open else self.gate.code
         if self._gate_code_since[0] != code_now:
             self._gate_code_since = (code_now, now)
@@ -803,6 +860,11 @@ class Controller:
             since = self.attention.get("since")
         elif wanted and self.decision.code == "insufficient_vram":
             code, reason = "insufficient_vram", self.decision.reason
+        elif wanted and self.decision.code == "policy_large":
+            code, reason = "policy_large", self.decision.reason
+        elif wanted and self._blocked_for(now) >= c.gpu.blocked_pause_s:
+            code, reason = self.decision.code, self._blocked_reason()
+            since = self._decision_since[1]
         elif wanted and self.decision.code in ("backoff", "error"):
             code = "vllm_error"
             reason = self.vllm.error or self.decision.reason
@@ -823,11 +885,33 @@ class Controller:
             self._paused = {"code": code, "since": since or now}
         self._paused["reason"] = str(reason)[:300]
 
+    LONG_BLOCKS = ("vram", "lock", "external_busy")
+
+    def _blocked_for(self, now) -> float:
+        """How long the same long-lived block (see ``LONG_BLOCKS``) has held."""
+        if self._decision_since[0] not in self.LONG_BLOCKS:
+            return 0.0
+        return now - self._decision_since[1]
+
+    def _blocked_reason(self) -> str:
+        code, why = self.decision.code, self.decision.reason
+        if code == "lock":
+            return (
+                f"{why}: another agent has held the GPU lock for a long time "
+                "(its flock may wait up to 4 hours)"
+            )
+        if code == "external_busy":
+            return f"{why} (port {self.config.vllm.port}); stop it or set vllm.adopt_external"
+        return f"vLLM cannot get the room it needs: {why}"
+
     def _write_gate(self, now):
         """``live/gate.json``: the worker's permission to send model requests.
         Rewritten on change and at least every 4 s (a stale gate reads as
         closed, so a dead supervisor cannot leave it open)."""
-        key = (self.gate.open, self.gate.code)
+        # Nothing to protect: no policy server listening, no evaluation. A gate
+        # file that goes stale in that state does not hold people back.
+        idle = not self.policy_up and not self._evaluating()
+        key = (self.gate.open, self.gate.code, idle)
         if key == self._gate_written[0] and now - self._gate_written[1] < 4.0:
             return
         self._gate_written = (key, now)
@@ -837,6 +921,7 @@ class Controller:
                 "open": self.gate.open,
                 "code": self.gate.code,
                 "reason": self.gate.reason,
+                "idle": idle,
                 "updated_at": now,
             },
         )

@@ -45,7 +45,6 @@ from . import generic, gpumgr, jsonio, mirror
 OK, NEED_MODEL, AWAIT_HUMAN, ERROR, PREEMPTED, NOTHING = 0, 10, 11, 12, 13, 14
 SIDE = "observation.images.view1"
 WRIST = "observation.images.hand"
-GATE_STALE_S = 20.0
 RUN_DONE = {"succeeded", "partially_succeeded", "failed", "cancelled"}
 
 
@@ -349,13 +348,11 @@ class Worker:
         """May model requests go out? The supervisor's ``live/gate.json``:
         closed while the policy infers (timeshare). A missing file means no
         supervisor gates this worker; a stale one (no heartbeat for 20 s) is
-        read as closed, so a dead supervisor cannot leave it open."""
-        gate = jsonio.read(self.config.live_dir / "gate.json")
-        if not isinstance(gate, dict):
-            return True
-        if time.time() - float(gate.get("updated_at") or 0) > GATE_STALE_S:
-            return False
-        return bool(gate.get("open", True))
+        read as closed (``gating.closed``: the same rule as for a person), so a
+        dead supervisor cannot leave it open -- unless its last word was idle."""
+        from . import gating
+
+        return not gating.closed(jsonio.read(self.config.live_dir / "gate.json"))
 
     def stand_down(self, run_id, what):
         """The gate closed: cancel the run's in-flight model request (pausing
@@ -882,6 +879,7 @@ def configure_process(config):
 
     resources.apply(config)
     os.environ["LEVI_WORKSPACE"] = str(config.workspace)
+    os.environ["LEVI_LIVE_WORKER"] = "1"  # obeys the gate by standing down
     os.environ.setdefault("LEVI_DROID_SAMPLE", "off")
     os.environ["LEVI_GPU_SHARING"] = "allow"
 

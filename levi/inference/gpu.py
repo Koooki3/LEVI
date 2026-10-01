@@ -557,6 +557,11 @@ _RECENT_FREE: dict = {}
 
 def require_free(config=None):
     """Refuse local inference in CPU-only mode; otherwise enforce GPU policy."""
+    from levi.live import gating
+
+    if why := gating.request_blocked():
+        # A live workspace: the robot's policy is inferring (levi/live/gating.py).
+        raise GpuBusy(why)
     if os.getenv("LEVI_CPU_ONLY") == "1":
         raise GpuBusy("LEVI_CPU_ONLY=1 forbids local accelerator-backed inference")
     if os.getenv("LEVI_GPU_SHARING") == "allow":

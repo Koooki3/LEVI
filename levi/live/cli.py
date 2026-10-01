@@ -672,7 +672,7 @@ def diagnose(config) -> dict:
     if (
         isinstance(record, dict)
         and record.get("pid")
-        and gpumgr.identity(record["pid"]) == record.get("identity")
+        and gpumgr.same_process(record["pid"], record.get("identity"))
         and not holder
     ):
         report["orphan_vllm"] = record["pid"]

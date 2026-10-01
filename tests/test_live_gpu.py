@@ -241,6 +241,7 @@ def live(tmp_path, serve, demo_template):
     c.gpu.mode = "timeshare"
     c.gpu.lock_file = str(tmp_path / "gpu.lock")
     c.gpu.settle_s = 20.0
+    c.gpu.standby_min_s = 0.0  # (the tests of that wait set it themselves)
     c.vllm.script = str(script)
     c.vllm.stop_script = str(script)
     c.vllm.pid_dir = str(pid_dir)
@@ -575,13 +576,27 @@ echo $! > "{ctl.config.vllm.pid_dir}/vllm_{ctl.config.vllm.port}.pid"
     ctl.vllm = gpumgr.Vllm(ctl.config)
 
 
+def failure_seen(ctl, count=None):
+    """Wait until the failed start is visible: the launch itself reported it
+    (the serve script's process was gone already) or poll() sees it die. The
+    count of failures must still be taken on the *next* tick."""
+    return wait_for(
+        lambda: (
+            ctl.vllm.state == "error"
+            or ctl.vllm.poll() == "error"
+            or (ctl.start_failures >= (count or 1) and not ctl.vllm.mine())
+        ),
+        5,
+    )
+
+
 def test_a_failing_vllm_start_backs_off_then_stops_and_names_the_reason(ctl, tmp_path):
     bad_vllm(tmp_path, ctl)
     ctl.rollouts.write(0)
     t = time.time()
     starts = lambda: sum("starting vLLM" in e["text"] for e in ctl.events)
     step(ctl, t)
-    wait_for(lambda: ctl.vllm.poll() == "error", 5)
+    assert failure_seen(ctl)
     ctl.tick(t + 1)
     assert starts() == 1 and ctl.start_failures == 1
     assert "KV cache" in ctl.vllm.error and "KV cache" in ctl.status()["last_error"]
@@ -590,13 +605,13 @@ def test_a_failing_vllm_start_backs_off_then_stops_and_names_the_reason(ctl, tmp
     assert starts() == 1 and ctl.decision.code == "backoff"
     # Second try after 60 s, third after another 120 s (doubling), then no more.
     ctl.tick(t + 62)
-    wait_for(lambda: ctl.vllm.poll() == "error", 5)
+    assert failure_seen(ctl, 2)
     ctl.tick(t + 63)
     assert starts() == 2 and ctl.start_failures == 2
     ctl.tick(t + 63 + 60)
     assert starts() == 2  # now 120 s
     ctl.tick(t + 63 + 125)
-    wait_for(lambda: ctl.vllm.poll() == "error", 5)
+    assert failure_seen(ctl, 3)
     ctl.tick(t + 63 + 126)
     assert starts() == 3 and ctl.attention and ctl.attention["code"] == "vllm_failed"
     for n in (400, 2000, 90000):
@@ -751,7 +766,9 @@ def test_the_budget_follows_the_memory_free_at_start_in_both_orders():
         and alone.utilization == pytest.approx(0.7395)
         and alone.max_model_len == 49152
     )
-    assert 32607 - alone.need_mib >= 0  # it fits the card
+    # What it needs free: the budget of vLLM's total plus the start margin.
+    assert alone.need_mib == int(alone.utilization * 32107) + 1100
+    assert alone.need_mib < 32607 - 7685  # leaves a policy server's .22 room
     # 0.72 alone is NOT enough for the full context (measured on an idle GPU,
     # warm cache): with only that much free the context steps down, it never
     # starts a vLLM that cannot serve max_model_len.
@@ -1112,10 +1129,40 @@ def test_a_draft_wait_ends_when_the_run_or_the_draft_is_no_longer_there(
 
 
 def test_an_unreadable_store_is_not_taken_for_an_answer(ctl, monkeypatch):
-    monkeypatch.setattr(controller, "peek_record", lambda *a: None)
-    monkeypatch.setattr(controller, "peek_run", lambda *a: None)
+    """A locked or unreadable SQLite file is not "the draft was deleted": the
+    wait goes on (and the awaiting record stays, here and on disk)."""
+    import sqlite3
+
+    db = Path(ctl.config.workspace) / "outputs/LEVI/workbench/agent/workbench.sqlite3"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE records (kind TEXT, id TEXT, body TEXT)")
+    con.execute(
+        "INSERT INTO records VALUES ('runs', 'r1', ?)",
+        (json.dumps({"status": "waiting_for_review", "plan": {}}),),
+    )
+    con.commit()
+    con.close()
+    real = sqlite3.connect
+    calls = []
+
+    def flaky(*a, **k):
+        calls.append(1)
+        if len(calls) == 1:  # the draft's read hits a lock; the run's does not
+            raise sqlite3.OperationalError("database is locked")
+        return real(*a, **k)
+
+    monkeypatch.setattr(controller.sqlite3, "connect", flaky)
     ctl.awaiting["d"] = {"kind": "changes", "run_id": "r1", "changeset": "c1", "at": 0}
     assert ctl._human_acted("d", {}) is False
+    assert "d" in ctl.awaiting
+    # Readable and the draft really is not there: the wait is over.
+    ctl.awaiting["d"]["at"] = 0
+    assert ctl._human_acted("d", {}) is True
+    # No store file at all: unknown, not an answer.
+    ctl.awaiting["e"] = {"kind": "plan", "run_id": "r1", "at": 0}
+    db.unlink()
+    assert ctl._human_acted("e", {}) is False
 
 
 def test_a_restarted_supervisor_reads_the_wait_for_a_person_and_starts_no_vllm(
@@ -1203,8 +1250,8 @@ def test_labelling_paused_names_a_vllm_that_needs_a_person(ctl):
 def test_labelling_paused_for_too_little_vram_until_there_is_room(ctl):
     ctl.rollouts.write(0)
     ctl.rollouts.session("standby")
-    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 11863
-    ctl.machine.free = 32607 - 11863
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    ctl.machine.free = 15000  # something else holds the rest of the card
     t = time.time()
     assert step(ctl, t) == "insufficient_vram"
     first = paused(ctl, t)
@@ -1224,7 +1271,7 @@ def test_labelling_paused_while_vllm_start_fails_and_backs_off(ctl, tmp_path):
     ctl.rollouts.write(0)
     t = time.time()
     step(ctl, t)
-    wait_for(lambda: ctl.vllm.poll() == "error", 5)
+    assert failure_seen(ctl)
     ctl.tick(t + 1)
     p = paused(ctl, t + 1)
     assert p["code"] == "vllm_error" and "KV cache" in p["reason"]
@@ -1313,3 +1360,315 @@ def test_the_supervisor_ticks_at_least_once_a_second_while_an_evaluation_is_on(c
     assert ctl.tick(t + 6) <= 1.0
     ctl.rollouts.session("finished")
     assert ctl.tick(t + 7) > 1.0
+
+
+# --- a process identity is read once and never None in a record ---------------------------
+
+
+def test_a_vllm_that_dies_between_two_identity_reads_is_not_ours(live, monkeypatch):
+    """The serve script's process exits right after it was checked: the record
+    must not store ``identity: null`` (None == None made ``mine()`` true for a
+    pid that is gone, holding the lock and a later ``killpg`` on a stranger)."""
+    c, _ = live
+    real = gpumgr.identity
+    calls = []
+
+    def flaky(pid):
+        calls.append(pid)
+        return real(pid) if len(calls) == 1 else None  # gone from the 2nd read on
+
+    monkeypatch.setattr(gpumgr, "identity", flaky)
+    vllm = gpumgr.Vllm(c)
+    try:
+        vllm.start(c.vllm_profile())
+        record = (
+            json.loads(vllm.record_path.read_text())
+            if vllm.record_path.exists()
+            else {}
+        )
+        assert record.get("identity") is not None  # read once, stored as read
+        assert not vllm.mine()
+    finally:
+        monkeypatch.undo()
+        subprocess.run(
+            [c.vllm.stop_script, "--stop", str(c.vllm.port)],
+            capture_output=True,
+            check=False,
+        )
+
+
+def test_a_record_without_an_identity_is_never_mine_and_is_never_signalled(
+    live, monkeypatch
+):
+    c, _ = live
+    vllm = gpumgr.Vllm(c)
+    vllm.record_path.parent.mkdir(parents=True, exist_ok=True)
+    gone = 4_000_000  # no such process: identity() is None
+    vllm.record_path.write_text(json.dumps({"pid": gone, "identity": None}))
+    assert gpumgr.identity(gone) is None and not vllm.mine()
+
+    def forbidden(*a):
+        raise AssertionError("signalled a process that is not ours")
+
+    monkeypatch.setattr(os, "killpg", forbidden)
+    vllm.state = "starting"
+    assert vllm.stop() is True and vllm.state == "stopped"
+    # A restarted supervisor does not take such a record back either.
+    vllm.record_path.write_text(json.dumps({"pid": os.getpid(), "identity": None}))
+    again = gpumgr.Vllm(c)
+    assert again.state == "stopped" and not again.mine()
+
+
+# --- M4: a policy server too big for vLLM, and the other long blocks --------------------
+
+
+def test_a_policy_server_over_the_budget_is_refused_before_a_cold_start(ctl):
+    """.25 holds 8575 MiB, over gpu.policy_budget_mib (8500): vLLM would start
+    (the plan fits) and go straight back to sleep for ever. Say so instead, and
+    do not spend a 45-70 s cold start on it."""
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 8575
+    ctl.machine.free = 32607 - 8575
+    t = time.time()
+    assert step(ctl, t) == "policy_large" and not ctl.vllm.mine()
+    assert not any("starting vLLM" in e["text"] for e in ctl.events)
+    p = paused(ctl, t)
+    assert p["code"] == "policy_large"
+    for word in ("8575", "8500", ".22", "XLA_PYTHON_CLIENT_MEM_FRACTION"):
+        assert word in p["reason"], p["reason"]
+    # The policy server restarted with .22: it starts.
+    ctl.machine.policy_mib, ctl.machine.free = 7685, 24922
+    fresh(ctl)
+    up(ctl, t + 30)
+    assert paused(ctl, t + 31) is None
+
+
+def test_a_sleeping_vllm_that_cannot_wake_for_a_big_policy_server_is_reported(ctl):
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    t = time.time()
+    up(ctl, t)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 8575
+    fresh(ctl)
+    ctl.tick(t + 2)
+    assert ctl.vllm.state == "asleep"
+    ctl.rollouts.write(1)
+    fresh(ctl)
+    assert step(ctl, t + 4) == "policy_large"
+    assert paused(ctl, t + 4)["code"] == "policy_large"
+
+
+def test_a_vllm_that_cannot_wake_for_lack_of_room_is_reported_after_the_grace(ctl):
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    t = time.time()
+    up(ctl, t)
+    ctl.machine.free = 300
+    fresh(ctl)
+    ctl.tick(t + 2)
+    assert ctl.vllm.state == "asleep"
+    ctl.machine.free = 3000
+    grace = ctl.config.gpu.blocked_pause_s
+    fresh(ctl)
+    assert step(ctl, t + 4) == "vram" and paused(ctl, t + 4) is None
+    fresh(ctl)
+    ctl.tick(t + 4 + grace + 1)
+    p = paused(ctl, t + 5 + grace)
+    assert p["code"] == "vram" and p["since"] == pytest.approx(t + 4, abs=2)
+    ctl.machine.free = 26000
+    fresh(ctl)
+    ctl.tick(t + 6 + grace)
+    assert ctl.vllm.state == "ready" and paused(ctl, t + 7 + grace) is None
+
+
+def test_another_agent_holding_the_gpu_lock_is_reported_after_the_grace(ctl):
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    other = gpumgr.GpuLock(ctl.config.gpu.lock_file, "someone-else")
+    assert other.acquire()
+    t = time.time()
+    grace = ctl.config.gpu.blocked_pause_s
+    try:
+        assert step(ctl, t) == "lock" and paused(ctl, t) is None
+        ctl.tick(t + grace + 1)
+        p = paused(ctl, t + grace + 1)
+        assert p["code"] == "lock" and "lock" in p["reason"]
+    finally:
+        other.release()
+    up(ctl, t + grace + 5)
+    assert paused(ctl, t + grace + 6) is None
+
+
+def test_somebody_else_s_vllm_on_the_port_is_reported_after_the_grace(ctl):
+    server, _fake, _port = fakevlm.serve(ctl.config.vllm.port)
+    try:
+        ctl.rollouts.write(0)
+        ctl.rollouts.session("standby")
+        t = time.time()
+        grace = ctl.config.gpu.blocked_pause_s
+        assert step(ctl, t) == "external_busy" and paused(ctl, t) is None
+        ctl.tick(t + grace + 1)
+        p = paused(ctl, t + grace + 1)
+        assert p["code"] == "external_busy" and str(ctl.config.vllm.port) in p["reason"]
+    finally:
+        server.shutdown()
+
+
+# --- M5: a wake needs less room than a start --------------------------------------------
+
+
+def test_a_wake_uses_its_own_smaller_margin(ctl):
+    """Starting keeps 1100 MiB beyond the budget because vLLM sees about 930
+    MiB less free than nvidia-smi; a wake does not make that check. The 300
+    MiB default needs a real GPU to confirm (measured: policy .22 + a sleeping
+    vLLM leave 22804 MiB free, a wake at 0.7395 needs 21843 with 300)."""
+    assert ctl.config.gpu.wake_margin_mib == 300
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    t = time.time()
+    up(ctl, t)
+    util = ctl.vllm.profile["gpu_memory_utilization"]
+    asleep_need = int(util * 32107) + 300 - gpumgr.ASLEEP_RESIDENT_MIB
+    ctl.machine.free = 300
+    fresh(ctl)
+    ctl.tick(t + 2)
+    assert ctl.vllm.state == "asleep"
+    ctl.machine.free = asleep_need - 50  # a little short: stays asleep
+    fresh(ctl)
+    assert step(ctl, t + 4) == "vram" and ctl.vllm.state == "asleep"
+    assert ctl.decision.need_mib == asleep_need
+    ctl.machine.free = (
+        asleep_need + 50
+    )  # enough with the wake margin, not the start one
+    assert asleep_need + 50 < asleep_need + 800  # (the old margin needed 800 more)
+    fresh(ctl)
+    ctl.tick(t + 6)
+    assert ctl.vllm.state == "ready"
+
+
+# --- M2: prewarm behind a policy server, and a cold start at standby ----------------------
+
+
+def test_prewarm_says_it_is_blocked_when_the_policy_server_came_first(ctl):
+    """vLLM first, policy second, evaluation last. With the policy server
+    already listening and no session yet the gate is shut (unknown client) and
+    --prewarm cannot start: say so in plain words, and do not cold-start the
+    moment the session appears at standby (the first episode follows within
+    seconds)."""
+    ctl.config.vllm.prewarm = True
+    ctl.config.gpu.standby_min_s = 20.0
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    t = time.time()
+    assert step(ctl, t) == "prewarm_waiting_for_policy" and not ctl.vllm.mine()
+    reason = ctl.decision.reason
+    for word in ("--prewarm", "policy server", "before"):
+        assert word in reason, reason
+    # The client writes its standby session: the gate opens, but a session that
+    # has just reached standby may start its first episode any moment.
+    ctl.rollouts.session("standby")
+    assert step(ctl, t + 1) == "standby_settling" and not ctl.vllm.mine()
+    assert step(ctl, t + 15) == "standby_settling"
+    up(ctl, t + 22)
+    assert ctl.vllm.mine()
+
+
+def test_a_cold_start_waits_until_the_session_has_been_in_standby_a_while(ctl):
+    ctl.config.gpu.standby_min_s = 20.0
+    ctl.rollouts.write(0)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    t = time.time()
+    ctl.rollouts.session("standby")
+    assert step(ctl, t) == "standby_settling"
+    assert "standby" in ctl.decision.reason and "20" in ctl.decision.reason
+    # It goes on to run and back to standby: the clock restarts.
+    ctl.rollouts.session("running")
+    ctl.tick(t + 10)
+    ctl.rollouts.session("standby")
+    assert step(ctl, t + 25) == "standby_settling"
+    up(ctl, t + 50)
+    # No session at all (nobody's evaluation is near), and the default is a
+    # wait only for a session that has just arrived at standby.
+    assert ctl.config.gpu.standby_min_s == 20.0
+
+
+# --- L2: the lock is let go only when vLLM has really left the GPU -----------------------
+
+
+def test_the_lock_is_kept_while_a_vllm_process_still_holds_gpu_memory(ctl, monkeypatch):
+    """The server's leader can be gone while an engine process of the group is
+    still releasing its VRAM: another agent that then gets the lock would
+    start into a card that is not free yet."""
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    t = time.time()
+    up(ctl, t)
+    pid = ctl.vllm._pid()
+    still = {"on": True}
+    monkeypatch.setattr(gpumgr, "STOP_CONFIRM_S", 1.0)
+    monkeypatch.setattr(
+        gpumgr,
+        "gpu_holders",
+        lambda *a, **k: (
+            [{"pid": pid, "name": "VLLM::EngineCore", "memory_mib": 21000}]
+            if still["on"]
+            else []
+        ),
+    )
+    assert ctl._stop_vllm() is False
+    assert ctl.vllm.state == "error" and "GPU" in ctl.vllm.error
+    assert ctl.lock.held  # not let go
+    other = gpumgr.GpuLock(ctl.config.gpu.lock_file, "someone-else")
+    assert not other.acquire()
+    # The next ticks neither let go of the lock nor call it a failed start.
+    ctl.tick(t + 5)
+    ctl.tick(t + 6)
+    assert ctl.lock.held and ctl.start_failures == 0
+    assert ctl.decision.code == "gpu_not_free"
+    assert not other.acquire()
+    # The memory is released: the next tick confirms it and lets go of the lock
+    # (work is waiting, so a new start may follow at once).
+    still["on"] = False
+    ctl.tick(t + 7)
+    assert any("has left the GPU" in e["text"] for e in ctl.events)
+    assert ctl.start_failures == 0 and ctl.vllm.state != "error"
+
+
+def test_a_group_member_that_outlives_the_leader_is_waited_for(ctl, monkeypatch):
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    up(ctl, time.time())
+    pid = ctl.vllm._pid()
+    calls = []
+
+    def members(pgid):
+        calls.append(pgid)
+        return [pgid + 1] if len(calls) < 4 else []
+
+    monkeypatch.setattr(gpumgr, "_group_alive", members)
+    assert ctl.vllm.stop() is True
+    assert len(calls) >= 4 and pid in calls
+
+
+def test_the_worker_uses_the_shared_stale_gate_rule(live):
+    from levi.live import jsonio, worker
+
+    c, _ = live
+    w = worker.Worker.__new__(worker.Worker)
+    w.config = c
+    path = c.live_dir / "gate.json"
+    old = time.time() - 60
+    jsonio.write(path, {"open": True, "idle": False, "updated_at": old})
+    assert w.gate_open() is False  # silent supervisor, a policy may be up
+    jsonio.write(path, {"open": True, "idle": True, "updated_at": old})
+    assert w.gate_open() is True  # silent, but nothing to protect
+    path.unlink()
+    assert w.gate_open() is True  # no supervisor gates this worker
+    # The supervisor writes "idle" with the gate.
+    ctl = started_controller(live)
+    ctl.tick(time.time())
+    assert json.loads(path.read_text())["idle"] is True  # no policy, no session
+    ctl.machine.ports = {8000}
+    ctl.rollouts.session("standby")
+    ctl.tick(time.time() + 5)
+    assert json.loads(path.read_text())["idle"] is False
