@@ -32,6 +32,7 @@ class Store:
 
     def __init__(self, runs):
         self.runs = {r["id"]: r for r in runs}
+        self.events = []
 
     def get(self, kind, id):
         return self.runs[id]
@@ -43,14 +44,24 @@ class Store:
         change(self.runs[id])
         return self.runs[id]
 
+    def event(self, run_id, type, **data):
+        self.events.append((run_id, type, data))
+
 
 class Bench:
     def __init__(self, store, fail=None):
         self.store = store
         self.launched = []
         self.fail = fail
+        self.before = None  # something that happens between the read and the launch
 
-    def launch(self, run_id, pilot=True):
+    def launch(self, run_id, pilot=True, expect=None):
+        from levi.agent.store import Conflict
+
+        if self.before:
+            self.before(self.store.runs[run_id])
+        if expect is not None and not expect(self.store.runs[run_id]):
+            raise Conflict("The run changed before it could be resumed")
         if self.fail:
             raise self.fail
         self.launched.append((run_id, pilot))
@@ -99,12 +110,14 @@ def rig(live_ws):
         res.scan()
         return res, store, wb
 
-    def gate(open_, **kw):
+    def gate(open_, opened_ago=None, **kw):
         write_gate(live_ws, open_, **kw)
         # write_gate stamps the real time; the resumer lives on the fake one.
         path = live_ws / "gate.json"
         value = json.loads(path.read_text())
         value["updated_at"] = clock.now - kw.get("age", 0.0)
+        if opened_ago is not None:  # what the supervisor writes since this change
+            value["opened_at"] = clock.now - opened_ago
         path.write_text(json.dumps(value))
 
     clock.make, clock.gate = make, gate
@@ -142,10 +155,15 @@ def test_a_run_the_gate_stopped_goes_on_once_the_gate_has_stayed_open(rig, live_
     (row,) = audit_lines(live_ws)
     assert row["principal"] == "live-resume" and row["tool"] == "runs.resume"
     assert row["decision"] == "auto_resumed" and row["run_id"] == "run-a"
+    assert row["run_principal"] == "local-human" and row["pilot"] is False
     assert row["gate"]["open"] is True and row["gate"]["code"] == "ok"
     assert row["gate"]["open_for_s"] >= 3.0
     assert "inferring" in row["reason"]
     assert store.runs["run-a"]["live_resume"]["bounces"] == 1
+    # It is in the run's own event history too (a person looking at the run).
+    (event,) = store.events
+    assert event[:2] == ("run-a", "auto_resumed")
+    assert event[2]["by"] == "live-resume" and event[2]["bounces"] == 1
 
 
 def audit_lines(live):
@@ -278,6 +296,80 @@ def test_an_episode_finished_in_between_resets_the_count(rig, live_ws):
     assert len(wb.launched) == 5
 
 
+def test_progress_is_a_finished_episode_or_tokens_spent_not_a_reserved_request(
+    rig, live_ws
+):
+    """``requests`` is counted when a call is reserved, so a call the gate
+    stopped has already raised it: only tokens (settled when an answer came) or
+    a finished episode count as getting somewhere."""
+    res, store, wb = rig.make(blocked(requests=0, tokens=0), max_bounces=2)
+    for n in range(2):
+        assert open_for(rig, res, 4) == ["run-a"], n
+        # Bounced at the first request: the reservation counted, nothing was spent.
+        store.runs["run-a"].update(
+            status="blocked", blocked_gate="live", requests=n + 1, tokens=0
+        )
+        resumer.note_blocked("run-a")
+        rig.gate(False)
+        res.tick()
+    assert open_for(rig, res, 8) == [] and len(wb.launched) == 2  # given up
+    # A call that came back before the next stop is progress, with no episode.
+    res, store, wb = rig.make(blocked(requests=0, tokens=0), max_bounces=2)
+    for n in range(5):
+        assert open_for(rig, res, 4) == ["run-a"], n
+        store.runs["run-a"].update(
+            status="blocked", blocked_gate="live", requests=n + 1, tokens=500 * (n + 1)
+        )
+        resumer.note_blocked("run-a")
+        rig.gate(False)
+        res.tick()
+    assert len(wb.launched) == 5
+
+
+def test_a_person_s_pause_between_the_read_and_the_launch_is_not_undone(rig, live_ws):
+    res, store, wb = rig.make(blocked())
+
+    def pause(run):  # the person presses Pause after the resumer looked
+        run.update(status="paused", control="pause")
+
+    wb.before = pause
+    assert open_for(rig, res, 8) == []
+    assert store.runs["run-a"]["status"] == "paused" and not wb.launched
+    rows = audit_lines(live_ws)
+    assert [r["decision"] for r in rows] == ["skipped"]  # once, not every tick
+    assert "changed" in rows[0]["reason"]
+
+
+def test_launch_re_checks_inside_its_own_transaction(client, dataset):
+    """The real ``Workbench.launch``: ``expect`` is evaluated on the record in
+    the same transaction that queues the run, so a pause that landed after the
+    caller's read is not overwritten."""
+    from test_ollama_integration import _unsupervised_run
+
+    from levi.agent.store import Conflict
+
+    wb, run_id = _unsupervised_run(client, dataset)
+    wb.store.release(run_id, "test-run")
+    wb.store.mutate(
+        "runs",
+        run_id,
+        lambda r: r.update(
+            status="blocked", blocked_by="gpu", blocked_gate="live", control=None
+        ),
+    )
+    wb.control(run_id, "pause")  # the person, after the caller's read
+    assert wb.store.get("runs", run_id)["status"] == "paused"
+    with pytest.raises(Conflict, match="changed"):
+        wb.launch(
+            run_id,
+            pilot=False,
+            expect=lambda r: resumer.GateResumer._gated(r) and not r.get("control"),
+        )
+    run = wb.store.get("runs", run_id)
+    assert run["status"] == "paused" and run["control"] == "pause"
+    assert wb.store.claim(run_id, "someone")  # the lease was given back
+
+
 def test_a_failed_launch_is_audited_and_not_retried_in_that_opening(rig, live_ws):
     res, _store, _wb = rig.make(blocked(), fail=ValueError("plan changed"))
     assert open_for(rig, res, 8) == []
@@ -296,6 +388,64 @@ def test_a_lease_that_is_still_being_released_is_tried_again(rig, live_ws):
     assert res.tick() == ["run-a"]
 
 
+def test_zero_bounces_switches_the_automatic_resume_off(rig, live_ws):
+    res, _store, wb = rig.make(blocked(), max_bounces=0)
+    assert open_for(rig, res, 8) == [] and not wb.launched
+    assert audit_lines(live_ws) == []
+    assert resumer.read_blocked(live_ws, rig.now)["needs_person"] == ["run-a"]
+
+
+@pytest.mark.parametrize(
+    "toml,message",
+    [
+        ("[gpu]\nresume_stable_s = 0.1\n", "resume_stable_s"),
+        ("[gpu]\nresume_stable_s = 120\n", "resume_stable_s"),
+        ("[gpu]\nresume_max_bounces = -1\n", "resume_max_bounces"),
+    ],
+)
+def test_the_resume_settings_are_range_checked(tmp_path, toml, message):
+    from levi.live import config as live_config
+
+    path = tmp_path / "live.toml"
+    path.write_text(toml)
+    with pytest.raises(ValueError, match=message):
+        live_config.load(path)
+    path.write_text("[gpu]\nresume_stable_s = 0.5\nresume_max_bounces = 0\n")
+    assert live_config.load(path).gpu.resume_max_bounces == 0
+
+
+def test_the_gate_s_own_opening_time_decides_when_it_has_been_open_long_enough(
+    rig, live_ws
+):
+    res, _store, wb = rig.make(blocked())
+    # Sampled as open for ages, but the supervisor says it opened 1 s ago (it
+    # closed and opened again between two samples): not yet.
+    for _ in range(6):
+        rig.gate(True, opened_ago=1.0)
+        assert res.tick() == []
+        rig.advance(1)
+    rig.gate(True, opened_ago=3.2)
+    assert res.tick() == ["run-a"]
+    row = audit_lines(live_ws)[0]
+    assert row["gate"]["open_for_s"] >= 3.0 and wb.launched
+
+
+def test_a_blocked_runs_file_that_cannot_be_written_does_not_stop_the_resume(
+    rig, live_ws, monkeypatch
+):
+    res, _store, wb = rig.make(blocked())
+    real = resumer.jsonio.write
+
+    def refuse(path, *args, **kwargs):
+        if str(path).endswith(resumer.FILE):
+            raise OSError("disk full")
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(resumer.jsonio, "write", refuse)
+    assert open_for(rig, res, 4) == ["run-a"] and wb.launched
+    assert res.report_failures >= 1
+
+
 def test_a_workspace_that_is_not_live_is_left_alone(rig, live_ws):
     res, _store, wb = rig.make(blocked())
     (live_ws / auto.MARKER).unlink()
@@ -307,11 +457,13 @@ def test_a_workspace_that_is_not_live_is_left_alone(rig, live_ws):
 def test_the_thread_exists_only_in_a_live_workspace(tmp_path, live_ws):
     plain = tmp_path / "plain"
     plain.mkdir()
-    assert resumer.start(Store([]), Bench(Store([])), plain) is None
+    built = []
+    assert resumer.start(plain, lambda: built.append(1)) is None
+    assert built == []  # nothing is even constructed outside a live workspace
     live_root = tmp_path / "root"
     (live_root / "live").mkdir(parents=True)
     auto.write_marker(live_root / "live")
-    thread = resumer.start(Store([]), Bench(Store([])), live_root)
+    thread = resumer.start(live_root, lambda: (Store([]), Bench(Store([]))))
     try:
         assert thread is not None and thread.thread.is_alive()
     finally:

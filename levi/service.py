@@ -86,7 +86,7 @@ async def lifespan(app):
 
     # A live workspace only: the person's runs the live gate stopped go on by
     # themselves once it has stayed open (None, and no thread, anywhere else).
-    gate_resumer = resumer.start(Store(STATE), Workbench(STATE), ROOT)
+    gate_resumer = resumer.start(ROOT, lambda: (Store(STATE), Workbench(STATE)))
     try:
         yield
     finally:

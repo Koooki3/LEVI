@@ -31,17 +31,29 @@ that can act on a person's run).
   are its own, and the automatic approver never gets to resume a run it did
   not plan (``levi/live/auto.py``): this thread is not that principal;
 - no control (pause/cancel) is pending, and a pilot episode still waiting for a
-  person's review is not resumed (the same rule as the guardian's).
+  person's review is not resumed (the same rule as the guardian's). The checks
+  are repeated *inside* ``Workbench.launch``'s own transaction (``expect``): a
+  person who presses Pause between this thread's read and its launch wins, and
+  the run stays paused (audited as ``skipped``).
 
 **When.** The gate file is fresh (the supervisor lives; ``gating.closed``'s
 careful reading of a stale file is for letting a person through, not for
 starting work unattended) and open, and it has stayed open for
 ``resume_stable_s`` (3 s by default) so a window that is about to close
-(``episode_imminent``) is not used. Each run is resumed at most once per
+(``episode_imminent``) is not used; the supervisor's own ``opened_at`` in
+``gate.json`` is used when present, so a close and a reopen between two of
+this thread's samples is seen too. Each run is resumed at most once per
 opening of the gate. A run that was resumed and stopped again by the gate
-``resume_max_bounces`` (3) times without finishing an episode in between is
-left alone (``given_up`` in ``live/blocked_runs.json``, which the status
-shows as ``blocked_runs``): a person presses Resume for it.
+``resume_max_bounces`` (3) times without progress in between (a finished
+episode, or tokens settled: an answer came back) is left alone (``given_up``
+in ``live/blocked_runs.json``, which the status shows as ``blocked_runs``): a
+person presses Resume for it. ``resume_max_bounces = 0`` switches the
+automatic resume off.
+
+Known limits: runs the gate stopped in *another process* than this core (for
+example one started with a CLI in the live workspace) are found only at the
+next core start; and a person's own Resume does not reset the count of a run
+that was given up (it resets as soon as the run makes progress).
 
 Every resume, every refusal to go on and every failure is a line in
 ``live/audit.jsonl`` (principal ``live-resume``).
@@ -75,6 +87,16 @@ def note_blocked(run_id):
     live one."""
     with _LOCK:
         _PENDING.add(run_id)
+
+
+def _progressed(run):
+    """Did the run get anywhere since this module last resumed it? A finished
+    episode, or tokens settled (an answer came back). Not ``requests``: a call
+    is counted when it is reserved, so one the gate stopped has raised it."""
+    record = run.get("live_resume") or {}
+    return len(run.get("completed", [])) > record.get("completed", -1) or int(
+        run.get("tokens") or 0
+    ) > record.get("tokens", -1)
 
 
 def _gate_snapshot(gate, open_for):
@@ -114,6 +136,7 @@ class GateResumer:
         self.reported: set = set()  # given-up runs already audited
         self.pending: set = set()
         self.written = (None, 0.0)
+        self.report_failures = 0
         self.stop = threading.Event()
         self.thread = None
 
@@ -129,6 +152,17 @@ class GateResumer:
         if self.wall() - float(gate.get("updated_at") or 0) > gating.STALE_S:
             return None
         return gate if gate.get("open", True) else None
+
+    def _open_for(self, gate, now):
+        """How long the gate has been open: by the supervisor's own clock
+        (``opened_at``, the last closed -> open change) when the file carries
+        it, so a close and a reopen between two samples is seen; otherwise by
+        this thread's samples. The shorter of the two when both exist."""
+        sampled = now - self.open_since
+        opened = gate.get("opened_at")
+        if isinstance(opened, (int, float)):
+            return min(sampled, max(0.0, self.wall() - float(opened)))
+        return sampled
 
     # -- the runs -----------------------------------------------------------
 
@@ -178,11 +212,11 @@ class GateResumer:
         accepted = (plan.get("pilot_review") or {}).get("accepted")
         if not accepted and plan.get("pilot_episode") in set(run.get("completed", [])):
             return "pilot_awaits_review"
-        record = run.get("live_resume") or {}
-        done = len(run.get("completed", []))
-        if done > record.get("completed", -1):
+        if self.max_bounces <= 0:
+            return "switched_off"
+        if _progressed(run):
             return None  # it got somewhere since the last time
-        if record.get("bounces", 0) >= self.max_bounces:
+        if (run.get("live_resume") or {}).get("bounces", 0) >= self.max_bounces:
             return "given_up"
         return None
 
@@ -203,7 +237,8 @@ class GateResumer:
         runs = self._refresh()
         verdicts = {run_id: self._verdict(run) for run_id, run in runs.items()}
         self._report(runs, verdicts)
-        if gate is None or now - self.open_since < self.stable_s:
+        open_for = None if gate is None else self._open_for(gate, now)
+        if gate is None or open_for < self.stable_s:
             return []
         resumed = []
         for run_id, run in runs.items():
@@ -212,7 +247,7 @@ class GateResumer:
             if verdicts[run_id]:
                 self._audit_skip(run_id, verdicts[run_id], run)
                 continue
-            if self._resume(run_id, run, gate, now - self.open_since):
+            if self._resume(run_id, run, gate, open_for):
                 resumed.append(run_id)
             break  # one run per tick: a resume starts model requests
         return resumed
@@ -224,19 +259,41 @@ class GateResumer:
         accepted = (plan.get("pilot_review") or {}).get("accepted")
         record = run.get("live_resume") or {}
         done = len(run.get("completed", []))
-        bounces = (
-            1 + record.get("bounces", 0) if done <= record.get("completed", -1) else 1
-        )
+        tokens = int(run.get("tokens") or 0)
+        bounces = 1 if _progressed(run) else 1 + record.get("bounces", 0)
         base = {
             "tool": "runs.resume",
             "run_id": run_id,
+            "run_principal": run.get("principal"),
+            "pilot": not accepted,
             "reason": run.get("reason"),
             "gate": _gate_snapshot(gate, open_for),
             "bounces": bounces,
         }
+        changed = []
+
+        def expect(current):
+            # Inside launch's own transaction: still the gate's blocked run,
+            # and nobody has paused or cancelled it since we looked.
+            ok = self._gated(current) and not current.get("control")
+            if not ok:
+                changed.append(current.get("status"))
+            return ok
+
         try:
-            self.workbench.launch(run_id, pilot=not accepted)
+            self.workbench.launch(run_id, pilot=not accepted, expect=expect)
         except Conflict as exc:
+            if changed:  # a person moved first (a pause, a cancel): hands off
+                self.done.add(run_id)
+                self._audit(
+                    {
+                        **base,
+                        "decision": "skipped",
+                        "reason": f"the run changed before it could be resumed "
+                        f"(now {changed[0]})",
+                    }
+                )
+                return False
             # Usually the lease is still being let go of (the executor that
             # blocked the run has not finished): look again next tick, a few
             # times. A conflict that stays (an approved draft waiting to be
@@ -257,10 +314,25 @@ class GateResumer:
             "runs",
             run_id,
             lambda r: r.update(
-                live_resume={"bounces": bounces, "completed": done, "at": self.wall()}
+                live_resume={
+                    "bounces": bounces,
+                    "completed": done,
+                    "tokens": tokens,
+                    "at": self.wall(),
+                }
             ),
         )
         self._audit({**base, "decision": "auto_resumed"})
+        try:  # what a person sees in the run's own event history
+            self.store.event(
+                run_id,
+                "auto_resumed",
+                by=PRINCIPAL_ID,
+                bounces=bounces,
+                gate=_gate_snapshot(gate, open_for),
+            )
+        except Exception as exc:  # noqa: BLE001 - the audit line is the record
+            LOG.warning("live resume event of %s could not be written: %s", run_id, exc)
         return True
 
     # -- what a person can see ------------------------------------------------
@@ -284,7 +356,8 @@ class GateResumer:
                     "run_id": run_id,
                     "decision": "given_up",
                     "reason": f"stopped by the live gate {self.max_bounces} times "
-                    "without finishing an episode in between: a person presses Resume",
+                    "without progress (no finished episode, no answer) in between: a person "
+                    "presses Resume",
                     "bounces": (run.get("live_resume") or {}).get("bounces"),
                 }
             )
@@ -303,7 +376,14 @@ class GateResumer:
         ):
             return
         self.written = (rows, now)
-        jsonio.write(self.live / FILE, {"updated_at": now, "runs": rows})
+        try:
+            jsonio.write(self.live / FILE, {"updated_at": now, "runs": rows})
+        except Exception as exc:  # noqa: BLE001 - the resume itself must go on
+            # (disk full, permissions): a warning once, then a count; the
+            # status reads a file that stops being fresh as "none".
+            if not self.report_failures:
+                LOG.warning("%s could not be written: %s", FILE, exc)
+            self.report_failures += 1
 
     # -- the thread -----------------------------------------------------------
 
@@ -342,12 +422,15 @@ def read_blocked(live_dir, now=None):
     }
 
 
-def start(store, workbench, root):
-    """Start the thread in a live workspace; None (and nothing running) in any
-    other. Configuration comes from the file the supervisor wrote."""
+def start(root, build):
+    """Start the thread in a live workspace; None (and nothing built, nothing
+    running) in any other. ``build()`` returns ``(store, workbench)`` and is
+    called only once the workspace is known to be a live one. Configuration
+    comes from the file the supervisor wrote."""
     live = root / "live"
     if not (live / auto.MARKER).is_file():
         return None
+    store, workbench = build()
     settings = config.Gpu()
     written = next(
         (p for p in (live / "effective.toml", root / "live.toml") if p.is_file()), None

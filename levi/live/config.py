@@ -121,10 +121,11 @@ class Gpu:
     # and serving the first requests used about 21758 MiB, so 22.7 GB free is
     # enough. With 300 the check passed at 21843 free, which would leave about
     # 85 MiB, below ``min_free_mib`` (600): vLLM would be put back to sleep at
-    # once. With 800 the check needs 22343 and the measured 22768 passes with
-    # about 425 MiB to spare (the margin that is left is computed from those
-    # numbers; flapping itself was not observed).
-    wake_margin_mib: int = 800
+    # once. With 850 the check needs 22393, which leaves 635 MiB after a wake
+    # even right at the line (at 800: 585, just under), and the measured 22768
+    # passes with about 375 MiB to spare (computed from those numbers; flapping
+    # itself was not observed).
+    wake_margin_mib: int = 850
     # A cold start (45-70 s of GPU load) waits until a session has been in
     # ``standby`` this long: a client leaves standby for its first episode within
     # seconds, and the cold start would overlap it. Not a guarantee (the operator
@@ -137,10 +138,11 @@ class Gpu:
     blocked_pause_s: float = 300.0
     policy_load_wait_s: float = 120.0
     # A person's run the gate stopped (``blocked``) continues by itself once the
-    # gate has stayed open this long (seconds: a window about to close, the
-    # ``episode_imminent`` lead, must not be used), at most once per opening.
-    # After ``resume_max_bounces`` stops in a row with no finished episode in
-    # between it is left for a person to resume (``levi/live/resumer.py``).
+    # gate has stayed open this long (seconds, 0.5-60: a window about to close,
+    # the ``episode_imminent`` lead, must not be used), at most once per opening.
+    # After ``resume_max_bounces`` stops in a row without progress (a finished
+    # episode or an answer from the model in between) it is left for a person to
+    # resume; 0 switches the automatic resume off (``levi/live/resumer.py``).
     resume_stable_s: float = 3.0
     resume_max_bounces: int = 3
 
@@ -373,6 +375,12 @@ class Config:
             problems.append("resources.nice must be 0-19")
         if r.threads < 1 or r.view_workers < 1:
             problems.append("resources.threads and view_workers must be >= 1")
+        if not 0.5 <= g.resume_stable_s <= 60:
+            problems.append("gpu.resume_stable_s must be 0.5-60 seconds")
+        if g.resume_max_bounces < 0:
+            problems.append(
+                "gpu.resume_max_bounces must be >= 0 (0 switches the automatic resume off)"
+            )
         if w.batch_max_episodes < 1:
             problems.append("watch.batch_max_episodes must be >= 1")
         if p.max_attempts < 1:

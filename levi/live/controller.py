@@ -161,6 +161,7 @@ class Controller:
         self._gate_written = (None, 0.0)
         self._policy_mib = (0.0, None)
         self.idle_since: float | None = None
+        self._gate_opened_at: float | None = None
         self._waiting_since: dict = {}
         self._standby_since: dict = {}
         self._status_at = 0.0
@@ -940,6 +941,12 @@ class Controller:
         if key == self._gate_written[0] and now - self._gate_written[1] < 4.0:
             return
         self._gate_written = (key, now)
+        # When the gate last went from closed to open, on this clock: a reader
+        # that samples cannot see a close and a reopen between two samples.
+        if not self.gate.open:
+            self._gate_opened_at = None
+        elif self._gate_opened_at is None:
+            self._gate_opened_at = now
         jsonio.write(
             self.config.live_dir / "gate.json",
             {
@@ -947,6 +954,7 @@ class Controller:
                 "code": self.gate.code,
                 "reason": self.gate.reason,
                 "idle": idle,
+                "opened_at": self._gate_opened_at,
                 "policy_ports": [int(p) for p in self.config.gpu.policy_ports],
                 "updated_at": now,
             },

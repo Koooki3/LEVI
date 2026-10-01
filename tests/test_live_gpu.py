@@ -382,11 +382,13 @@ def test_vllm_starts_beside_a_running_evaluation_and_the_gate_holds_the_work(ctl
     assert ctl.spawned == [] and ctl.state == "gpu_wait"
     gate = json.loads((ctl.config.live_dir / "gate.json").read_text())
     assert gate["open"] is False and gate["code"] == "policy_inferring"
+    assert gate["opened_at"] is None  # (it is not open)
     # Homing between episodes: the gate opens, the worker starts.
     ctl.rollouts.session("homing")
     ctl.tick(t + 2)
     assert ctl.gate.open and ctl.spawned == ["pi05_fake__stack_the_plates"]
-    assert json.loads((ctl.config.live_dir / "gate.json").read_text())["open"] is True
+    opened = json.loads((ctl.config.live_dir / "gate.json").read_text())
+    assert opened["open"] is True and opened["opened_at"] == t + 2
     status = ctl.status(t + 2)["gpu"]
     assert status["gate"]["open"] and status["vllm_state"] == "ready"
 
@@ -1522,15 +1524,15 @@ def test_a_wake_uses_its_own_smaller_margin(ctl):
     """Starting keeps 1100 MiB beyond the budget because vLLM sees about 930
     MiB less free than nvidia-smi; a wake does not make that check. Measured on
     the real GPU: policy .22 + a sleeping vLLM leave 22768 MiB free and a wake
-    plus the first requests used about 21758, so the margin is 800 (300 let a
+    plus the first requests used about 21758, so the margin is 850 (300 let a
     wake through that left about 85 MiB, below min_free_mib)."""
-    assert ctl.config.gpu.wake_margin_mib == 800
+    assert ctl.config.gpu.wake_margin_mib == 850
     ctl.rollouts.write(0)
     ctl.rollouts.session("standby")
     t = time.time()
     up(ctl, t)
     util = ctl.vllm.profile["gpu_memory_utilization"]
-    asleep_need = int(util * 32107) + 800 - gpumgr.ASLEEP_RESIDENT_MIB
+    asleep_need = int(util * 32107) + 850 - gpumgr.ASLEEP_RESIDENT_MIB
     ctl.machine.free = 300
     fresh(ctl)
     ctl.tick(t + 2)
@@ -1542,13 +1544,13 @@ def test_a_wake_uses_its_own_smaller_margin(ctl):
     ctl.machine.free = (
         asleep_need + 50
     )  # enough with the wake margin, not the start one
-    # With the start margin (1100) the same wake would have needed 300 MiB more
+    # With the start margin (1100) the same wake would have needed 250 MiB more
     # than is free, and would not have happened.
     start_style = (
         gpumgr.need_mib(ctl.config, ctl.vllm.profile, 32607)
         - gpumgr.ASLEEP_RESIDENT_MIB
     )
-    assert start_style == asleep_need + 300 > asleep_need + 50
+    assert start_style == asleep_need + 250 > asleep_need + 50
     fresh(ctl)
     ctl.tick(t + 6)
     assert ctl.vllm.state == "ready"
@@ -1832,17 +1834,24 @@ def test_the_service_environment_never_carries_the_worker_marker(live, monkeypat
 
 def test_the_wake_margin_leaves_room_for_what_a_wake_measured_to_use(ctl):
     """Real GPU, policy at .22: 22768 MiB free asleep, 21758 used by the wake
-    and the first requests. The old 300 let a wake through at 21843 free, which
-    leaves 85 MiB (< min_free_mib 600, put back to sleep at once)."""
+    and the first requests. The wake check lets a wake through once this much is
+    free; what is left afterwards must not be below ``min_free_mib`` (600), or
+    vLLM is put back to sleep at once. 300 let one through at 21843 free (85
+    left), 800 left about 585 at the line: only 850 holds at the line itself."""
     c = ctl.config
     used_by_a_wake, free_asleep = 21758, 22768
     profile = {**c.vllm_profile(), "gpu_memory_utilization": 0.7395}
-    need = gpumgr.need_mib(c, profile, 32607, wake=True)
-    assert need <= free_asleep  # the measured case wakes ...
-    assert free_asleep - used_by_a_wake >= c.gpu.min_free_mib  # ... and stays up
-    c.gpu.wake_margin_mib = 300
-    old = gpumgr.need_mib(c, profile, 32607, wake=True)
-    assert old - used_by_a_wake < c.gpu.min_free_mib  # what 300 would have let in
+
+    def left_at_the_line(margin):
+        c.gpu.wake_margin_mib = margin
+        need = gpumgr.need_mib(c, profile, 32607, wake=True)
+        return need, need - used_by_a_wake
+
+    need, left = left_at_the_line(850)
+    assert (need, left) == (22393, 635)
+    assert left >= c.gpu.min_free_mib and need <= free_asleep  # holds, and wakes
+    assert left_at_the_line(800)[1] == 585 < c.gpu.min_free_mib
+    assert left_at_the_line(300)[1] == 85 < c.gpu.min_free_mib
 
 
 def test_the_idle_clock_starts_when_vllm_is_ready_not_when_it_was_launched(ctl):
@@ -1876,3 +1885,28 @@ def test_the_status_does_not_show_a_free_memory_reading_that_is_old(ctl):
     later = ctl.status(t + 600)["gpu"]
     assert later["free_mib"] is None and later["free_mib_at"] == t
     assert later["idle_since"] is None and later["prewarm"] is False
+
+
+def test_the_gate_file_says_since_when_it_has_been_open(ctl):
+    """``opened_at`` is the supervisor's own clock of the last closed -> open
+    change, so a reader that samples (the live gate resumer) cannot be fooled by
+    a close and a reopen between two samples."""
+    t = time.time()
+    gate = ctl.config.live_dir / "gate.json"
+
+    def written():
+        return json.loads(gate.read_text())
+
+    ctl.rollouts.session("standby")
+    ctl.tick(t)
+    first = written()["opened_at"]
+    assert written()["open"] and first == t
+    ctl.tick(t + 5)  # rewritten (4 s), still the same opening
+    assert written()["opened_at"] == first and written()["updated_at"] == t + 5
+    ctl.rollouts.session("running")
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    ctl.tick(t + 6)
+    assert written()["open"] is False and written()["opened_at"] is None
+    ctl.rollouts.session("homing")
+    ctl.tick(t + 7)
+    assert written()["open"] and written()["opened_at"] == t + 7
