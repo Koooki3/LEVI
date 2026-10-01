@@ -1672,3 +1672,40 @@ def test_the_worker_uses_the_shared_stale_gate_rule(live):
     ctl.rollouts.session("standby")
     ctl.tick(time.time() + 5)
     assert json.loads(path.read_text())["idle"] is False
+
+
+# --- N1: a stop that was confirmed leaves nothing behind --------------------------------
+
+
+def test_a_start_failure_after_a_normal_stop_still_backs_off(ctl, tmp_path):
+    """After any normal stop, a later failed start (or a vLLM that exits) must
+    count, back off and not start again in the same tick: ``leaving()`` is true
+    only for a stop that kept the lock to wait for the GPU."""
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    t = time.time()
+    up(ctl, t)
+    assert ctl._stop_vllm() is True
+    assert not ctl.vllm.leaving()
+    bad = tmp_path / "dies-slowly.sh"
+    log = Path(ctl.config.vllm.pid_dir) / f"vllm_{ctl.config.vllm.port}.log"
+    bad.write_text(
+        f"""#!/usr/bin/env bash
+echo "ValueError: To serve at least one request ... 1.82 GiB KV cache is needed" > "{log}"
+sleep 2 &
+echo $! > "{ctl.config.vllm.pid_dir}/vllm_{ctl.config.vllm.port}.pid"
+"""
+    )
+    bad.chmod(0o755)
+    ctl.config.vllm.script = str(bad)  # the same Vllm object: it has stopped before
+    starts = lambda: sum("starting vLLM" in e["text"] for e in ctl.events)
+    before = starts()
+    ctl.tick(t + 1)
+    assert starts() == before + 1
+    assert wait_for(lambda: ctl.vllm.poll() == "error", 6)
+    ctl.tick(t + 2)
+    assert ctl.start_failures == 1, ctl.events[-4:]
+    assert ctl.decision.code == "backoff"
+    assert starts() == before + 1  # not again in the same tick
+    ctl.tick(t + 3)
+    assert starts() == before + 1 and ctl.decision.code == "backoff"

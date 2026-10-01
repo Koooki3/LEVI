@@ -609,7 +609,11 @@ class Vllm:
         self.state = "stopped"
         self.started_at: float | None = None
         self.profile: dict | None = None
-        self._leaving: set = set()  # pids of a stop still waiting on the GPU
+        # pids of a stop that kept the GPU lock to wait for the card to be free,
+        # and that flag: set only by such a stop, cleared when the release is
+        # confirmed and by ``start()``. ``leaving()`` reads nothing else.
+        self._leaving: set = set()
+        self._confirm_pending = False
         self.error = ""
         self._health = (0.0, False)
         self._adopt()
@@ -689,6 +693,7 @@ class Vllm:
         if self.state in ("starting", "ready") and self.mine():
             return True
         c = self.config.vllm
+        self._leaving, self._confirm_pending = set(), False
         env = dict(os.environ)
         env.update(
             PORT=str(self.port),
@@ -869,15 +874,18 @@ class Vllm:
     def stop(self) -> bool:
         """Stop this service's vLLM (only if it is ours). True when gone."""
         if not self.mine():
-            if self._leaving and self._on_gpu(self._leaving):
+            if self._confirm_pending and self._on_gpu(self._leaving):
                 return False  # an earlier stop could not confirm the GPU is free
-            self._leaving = set()
+            self._leaving, self._confirm_pending = set(), False
             self.state = "stopped"
             return True
         self.state = "stopping"
         self._health = (0.0, False)
         record = jsonio.read(self.record_path) or {}
         pid = record.get("pid")
+        # The processes of the group, before the script and the signals take
+        # them out of it: their memory is what the lock waits for.
+        self._leaving = set(_group_alive(pid)) | ({pid} if pid else set())
         try:
             self.runner(
                 [
@@ -892,7 +900,6 @@ class Vllm:
         except (OSError, subprocess.SubprocessError):
             pass
         recorded = record.get("identity")
-        self._leaving = set(_group_alive(pid)) | ({pid} if pid else set())
         if same_process(pid, recorded):
             # The script could not (missing pidfile): signal the group directly.
             with contextlib.suppress(ProcessLookupError, PermissionError):
@@ -915,12 +922,14 @@ class Vllm:
                 time.sleep(0.5)
             if _group_alive(pid) or self._on_gpu(self._leaving):
                 self.state = "error"
+                self._confirm_pending = True
                 self.error = (
                     "vLLM's processes still hold GPU memory after the stop; "
                     "the GPU lock is kept until they are gone"
                 )
                 return False
         if gone:
+            self._leaving, self._confirm_pending = set(), False
             with contextlib.suppress(OSError):
                 self.record_path.unlink()
             self.state = "stopped"
@@ -931,7 +940,7 @@ class Vllm:
 
     def leaving(self) -> bool:
         """A stop is still waiting for vLLM's processes to leave the GPU."""
-        return bool(self._leaving) and self.state == "error"
+        return self._confirm_pending and self.state == "error"
 
     @staticmethod
     def _on_gpu(pids) -> bool:
