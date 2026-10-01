@@ -155,6 +155,7 @@ class Controller:
         # the CLI when it starts them); None when they are not ours.
         self.frontend = None
         self._adopt_orphan()
+        self._adopt_vllm()
 
     # --- events ------------------------------------------------------------------
 
@@ -444,8 +445,7 @@ class Controller:
         self._stop_worker()
         if not self.vllm.sleep():
             # No sleeping (not enabled, or it failed): free the GPU the hard way.
-            self.vllm.stop()
-            self.lock.release()
+            self._stop_vllm()
         self.idle_since = None
 
     def preempt(self, code, reason):
@@ -453,9 +453,36 @@ class Controller:
         self.event(f"giving the GPU back: {reason}")
         self.decision = gpumgr.Decision(False, reason, code)
         self._stop_worker()
-        self.vllm.stop()
-        self.lock.release()
+        self._stop_vllm()
         self.idle_since = None
+
+    def _stop_vllm(self) -> bool:
+        """Stop vLLM and let go of the GPU lock *only once the process is
+        gone*: the lock says "vLLM is on the GPU"."""
+        gone = self.vllm.stop()
+        if gone:
+            self.lock.release()
+        return gone
+
+    def _adopt_vllm(self):
+        """A vLLM this service started before a restart is still running. Its
+        GPU lock must still be held: by the vLLM process itself (it inherited
+        the descriptor) or, failing that, by us now. If somebody else holds
+        the lock while it runs, take no part in it and say so."""
+        if not self.vllm.mine():
+            return
+        if self.lock.acquire() or self.vllm.holds_lock(self.config.gpu.lock_file):
+            self.event("took back the vLLM that was running")
+            return
+        pid = (jsonio.read(self.vllm.record_path) or {}).get("pid")
+        with contextlib.suppress(OSError):
+            self.vllm.record_path.unlink()
+        self.vllm.state = "stopped"
+        self.event(
+            f"a vLLM (pid {pid}) is running but another agent holds the GPU lock: "
+            "not taking it over; it is treated as someone else's server",
+            "error",
+        )
 
     def _release_if_idle(self, now, work: bool):
         """After ``vllm.idle_timeout_s`` without work: sleep (while an
@@ -484,8 +511,7 @@ class Controller:
             self.event("no work: vLLM sleeps (the evaluation is live)")
         else:
             self.event("no work: stopping vLLM to free the GPU")
-            self.vllm.stop()
-            self.lock.release()
+            self._stop_vllm()
         self.idle_since = None
 
     # --- the worker ----------------------------------------------------------------------
@@ -881,7 +907,8 @@ class Controller:
                     "reason": self.decision.reason[:200],
                 },
                 "free_mib": (self._vram[1] or {}).get("free_mib"),
-                "lock_held": self.lock.held,
+                "lock_held": self.lock.held
+                or self.vllm.holds_lock(self.config.gpu.lock_file),
             },
             "datasets": rows,
             "queue_depth": sum(1 for r in rows.values() if r["pending"]),
@@ -950,7 +977,7 @@ class Controller:
         self.wake.set()
         self._stop_worker(grace=30.0)
         if self.vllm.mine():
-            self.vllm.stop()
+            self._stop_vllm()
         self.lock.release()
         self.state = "stopped"
         with contextlib.suppress(Exception):

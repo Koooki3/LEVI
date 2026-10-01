@@ -409,8 +409,8 @@ class GpuLock:
 
     def release(self):
         if self._handle:
-            with contextlib.suppress(OSError):
-                fcntl.flock(self._handle, fcntl.LOCK_UN)
+            # Close, do not LOCK_UN: an explicit unlock would release the
+            # lock for every process sharing the descriptor, vLLM included.
             self._handle.close()
             self._handle = None
 
@@ -495,6 +495,29 @@ def is_sleeping(port) -> bool | None:
         return None
 
 
+def _group(pgid) -> list:
+    """Processes whose process group is ``pgid`` (vLLM's engine processes
+    share the group of the server serve.sh started)."""
+    members = []
+    try:
+        for entry in os.scandir("/proc"):
+            if entry.name.isdigit():
+                try:
+                    fields = (
+                        Path(f"/proc/{entry.name}/stat")
+                        .read_text()
+                        .rsplit(")", 1)[1]
+                        .split()
+                    )
+                except (OSError, IndexError):
+                    continue
+                if int(fields[2]) == pgid:
+                    members.append(int(entry.name))
+    except OSError:
+        pass
+    return members or [pgid]
+
+
 class Vllm:
     """The service's own vLLM server: start, watch, stop. It stops only a
     process it started (verified by its recorded identity), never another
@@ -542,6 +565,32 @@ class Vllm:
         else:
             with contextlib.suppress(OSError):
                 self.record_path.unlink()
+
+    def holds_lock(self, lock_file) -> bool:
+        """Does the vLLM process (or a child) hold the GPU lock file open? It
+        does when the service passed it the lock's descriptor at launch, which
+        keeps the lock for as long as vLLM lives, even if the service dies."""
+        if not lock_file or not self.mine():
+            return False
+        pid = (jsonio.read(self.record_path) or {}).get("pid")
+        try:
+            target = os.stat(Path(lock_file).expanduser())
+        except OSError:
+            return False
+        for member in _group(pid):
+            try:
+                fds = os.scandir(f"/proc/{member}/fd")
+            except OSError:
+                continue
+            with fds:
+                for fd in fds:
+                    try:
+                        st = os.stat(fd.path)
+                    except OSError:
+                        continue
+                    if (st.st_ino, st.st_dev) == (target.st_ino, target.st_dev):
+                        return True
+        return False
 
     def mine(self) -> bool:
         record = jsonio.read(self.record_path)

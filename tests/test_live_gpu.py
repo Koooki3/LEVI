@@ -4,6 +4,7 @@ and a fake serve script, never a real GPU or a real model."""
 
 import json
 import os
+import signal
 import socket
 import stat
 import subprocess
@@ -707,3 +708,105 @@ def test_yesterday_s_finished_session_does_not_vouch_for_a_policy_server():
     ).open
     # No policy server: nothing to protect, an old file or none is fine.
     assert gpumgr.gate(c, "timeshare", old, False, 100.0).open
+
+
+# --- the GPU lock follows the vLLM process ---------------------------------------------
+
+
+def started_controller(live, machine=None):
+    c, rollouts = live
+    machine = machine or Machine()
+    ctl = controller.Controller(c, probes=machine.probes(), log=lambda *a: None)
+    ctl._spawn = lambda name: None
+    ctl.machine, ctl.rollouts = machine, rollouts
+    return ctl
+
+
+def test_the_lock_stays_with_vllm_when_the_supervisor_dies(live):
+    c, _ = live
+    first = started_controller(live)
+    first.rollouts.write(0)
+    first.machine.ports, first.machine.policy_mib = {8000}, 7685
+    first.rollouts.session("standby")
+    t = time.time()
+    up(first, t)
+    assert first.lock.held
+    pid = first.vllm._pid()
+    # kill -9 of the supervisor: the kernel closes its descriptors, nothing
+    # else is cleaned up. vLLM keeps the descriptor it was started with.
+    first.lock.release()
+    other = gpumgr.GpuLock(c.gpu.lock_file)
+    assert not other.acquire()  # still locked: no lock-less orphan
+    # A restarted supervisor takes the running vLLM back without error.
+    second = started_controller(live, first.machine)
+    assert second.vllm.mine() and not any(e["level"] == "error" for e in second.events)
+    assert second.status()["gpu"]["lock_held"]
+    assert second.vllm.holds_lock(c.gpu.lock_file)
+    assert second._stop_vllm()
+    assert wait_for(lambda: gpumgr.identity(pid) is None)
+    assert other.acquire()  # released with the process
+    other.release()
+
+
+def test_a_vllm_that_would_run_without_the_lock_is_not_taken_over(live):
+    c, _ = live
+    vllm = gpumgr.Vllm(c)
+    assert vllm.start(c.vllm_profile())  # started without the lock descriptor
+    assert wait_for(lambda: vllm.poll() == "ready")
+    holder = gpumgr.GpuLock(c.gpu.lock_file)
+    assert holder.acquire()  # somebody else took the lock meanwhile
+    ctl = started_controller(live)
+    errors = [e["text"] for e in ctl.events if e["level"] == "error"]
+    assert errors and "another agent holds the GPU lock" in errors[0]
+    assert not ctl.vllm.mine()  # treated as someone else's server, never stopped
+    assert gpumgr.healthy(c.vllm.port)
+    holder.release()
+    gpumgr.Vllm.stop(vllm)  # the test's own cleanup (the record is gone: use pid)
+    pid = vllm._pid()
+    if pid:
+        os.killpg(pid, signal.SIGTERM)
+    assert wait_for(lambda: not gpumgr.healthy(c.vllm.port))
+
+
+def test_nobody_holding_the_lock_lets_the_new_supervisor_take_it(live):
+    c, _ = live
+    vllm = gpumgr.Vllm(c)
+    assert vllm.start(c.vllm_profile())
+    assert wait_for(lambda: vllm.poll() == "ready")
+    ctl = started_controller(live)
+    assert ctl.vllm.mine() and ctl.lock.held
+    assert ctl._stop_vllm()
+
+
+def test_the_lock_is_kept_while_vllm_will_not_die(ctl):
+    ctl.rollouts.write(0)
+    up(ctl, time.time())
+    assert ctl.lock.held
+    real = ctl.vllm.stop
+    ctl.vllm.stop = lambda: False  # "vLLM did not stop"
+    ctl.preempt("test", "forcing a stop that fails")
+    assert ctl.lock.held  # the process is still on the GPU
+    ctl.vllm.stop = real
+    assert ctl._stop_vllm() and not ctl.lock.held
+
+
+def test_doctor_reports_an_orphan_vllm_when_no_service_runs(live):
+    from levi.live import cli, jsonio
+
+    c, _ = live
+    sleeper = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    try:
+        jsonio.write(
+            c.live_dir / "vllm.json",
+            {
+                "pid": sleeper.pid,
+                "identity": gpumgr.identity(sleeper.pid),
+                "port": c.vllm.port,
+            },
+        )
+        report = cli.diagnose(c)
+        assert report["orphan_vllm"] == sleeper.pid
+        assert any("orphan vLLM" in w and "--stop" in w for w in report["warnings"])
+    finally:
+        sleeper.kill()
+        sleeper.wait()

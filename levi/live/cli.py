@@ -619,6 +619,19 @@ def diagnose(config) -> dict:
                 warnings.append(
                     f"pid {row['pid']} runs at nice {row['nice']}, not {config.resources.nice}"
                 )
+    record = jsonio.read(config.live_dir / "vllm.json")
+    if (
+        isinstance(record, dict)
+        and record.get("pid")
+        and gpumgr.identity(record["pid"]) == record.get("identity")
+        and not holder
+    ):
+        report["orphan_vllm"] = record["pid"]
+        warnings.append(
+            f"an orphan vLLM (pid {record['pid']}, port {record.get('port')}) is still "
+            "running with no live service: it holds the GPU. `levi live start` takes it "
+            f"back, or stop it with `{config.vllm.stop_script} --stop {record.get('port')}`"
+        )
     gpu = {"vram": gpumgr.vram(), "processes": gpumgr.gpu_holders()}
     report["gpu"] = gpu
     vllm = ((value or {}).get("gpu") or {}).get("vllm") or {}
