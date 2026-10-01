@@ -68,6 +68,9 @@ def service_env(config) -> dict:
         LEVI_AGENT=config.gpu.lock_agent,
     )
     env.pop("LEVI_LIVE_AUTO_APPROVE", None)
+    # Only the worker process sets this (worker.configure_process): the core
+    # must not inherit an exemption from the gate from somebody's shell.
+    env.pop("LEVI_LIVE_WORKER", None)
     return env
 
 

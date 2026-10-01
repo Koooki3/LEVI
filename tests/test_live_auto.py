@@ -498,28 +498,51 @@ def test_the_worker_and_other_workspaces_are_not_held_by_the_request_check(
     assert gating.request_blocked() is None
 
 
-def test_the_task_console_s_advance_is_guarded_like_run_and_resume(live_ws):
+def test_the_task_console_s_advance_is_guarded_like_run_and_resume(bench, live_ws):
+    """Through the dispatcher, as the page's task console calls it."""
     from levi.agent.store import Conflict
-    from levi.live import gating
 
+    wb, _context = bench
+    human = Principal("reviewer", human=True)
     write_gate(live_ws, False)
     with pytest.raises(Conflict, match="inferring"):
-        gating.check(Principal("reviewer", human=True), "tasks.advance")
+        invoke(wb, human, "tasks.advance", {"task_id": "task-20261001T1200"})
+    # Open: it gets past the gate (and fails on the task that is not there).
+    write_gate(live_ws, True)
+    with pytest.raises(Exception) as caught:
+        invoke(wb, human, "tasks.advance", {"task_id": "task-20261001T1200"})
+    assert not isinstance(caught.value, Conflict) or "inferring" not in str(
+        caught.value
+    )
 
 
-def test_the_worker_reads_a_stale_gate_exactly_as_a_person_does(live_ws):
-    """One rule for both: gating.closed()."""
+def test_a_stale_gate_is_read_strictly_by_the_worker_and_checked_for_people(
+    live_ws, monkeypatch
+):
+    """A supervisor that died while idle leaves ``idle: true`` behind. The
+    worker (a separate session that nobody supervises any more) never takes
+    that as open: it would keep sending requests when a policy server appears
+    later. A person is let through only if no policy port listens right now."""
     import time
 
-    from levi.live import gating
+    from levi.live import gating, gpumgr
 
     now = time.time()
-    fresh_closed = {"open": False, "updated_at": now}
-    assert gating.closed(fresh_closed) and not gating.closed(
-        {"open": True, "updated_at": now}
-    )
+    assert gating.closed({"open": False, "updated_at": now})
+    assert not gating.closed({"open": True, "updated_at": now})
     old = now - gating.STALE_S - 1
-    assert gating.closed({"open": True, "updated_at": old})  # was not idle
-    assert gating.closed({"open": False, "updated_at": old, "idle": False})
-    assert not gating.closed({"open": True, "updated_at": old, "idle": True})
-    assert not gating.closed(None) and not gating.closed("junk")  # no supervisor at all
+    stale_idle = {"open": True, "updated_at": old, "idle": True, "policy_ports": [8000]}
+    stale_busy = {"open": True, "updated_at": old, "idle": False}
+    monkeypatch.setattr(gpumgr, "listening_ports", lambda: set())
+    # People: idle and no policy server listening -> nothing to protect.
+    assert not gating.closed(stale_idle)
+    assert gating.closed(stale_busy) and gating.closed({**stale_busy, "open": False})
+    # ... but one has appeared since the supervisor died: closed.
+    monkeypatch.setattr(gpumgr, "listening_ports", lambda: {8000})
+    assert gating.closed(stale_idle)
+    # The worker: stale is closed, whatever it said.
+    monkeypatch.setattr(gpumgr, "listening_ports", lambda: set())
+    assert gating.closed(stale_idle, worker=True)
+    assert gating.closed(stale_busy, worker=True)
+    assert not gating.closed({"open": True, "updated_at": now}, worker=True)
+    assert not gating.closed(None) and not gating.closed("junk")

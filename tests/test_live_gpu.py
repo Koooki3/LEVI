@@ -1541,7 +1541,13 @@ def test_a_wake_uses_its_own_smaller_margin(ctl):
     ctl.machine.free = (
         asleep_need + 50
     )  # enough with the wake margin, not the start one
-    assert asleep_need + 50 < asleep_need + 800  # (the old margin needed 800 more)
+    # With the start margin the same wake would have needed 800 MiB more than
+    # is free, and would not have happened.
+    start_style = (
+        gpumgr.need_mib(ctl.config, ctl.vllm.profile, 32607)
+        - gpumgr.ASLEEP_RESIDENT_MIB
+    )
+    assert start_style == asleep_need + 800 > asleep_need + 50
     fresh(ctl)
     ctl.tick(t + 6)
     assert ctl.vllm.state == "ready"
@@ -1587,9 +1593,8 @@ def test_a_cold_start_waits_until_the_session_has_been_in_standby_a_while(ctl):
     ctl.rollouts.session("standby")
     assert step(ctl, t + 25) == "standby_settling"
     up(ctl, t + 50)
-    # No session at all (nobody's evaluation is near), and the default is a
-    # wait only for a session that has just arrived at standby.
-    assert ctl.config.gpu.standby_min_s == 20.0
+    # The shipped default is the 20 s this test set.
+    assert live_config.Config().gpu.standby_min_s == 20.0
 
 
 # --- L2: the lock is let go only when vLLM has really left the GPU -----------------------
@@ -1650,25 +1655,175 @@ def test_a_group_member_that_outlives_the_leader_is_waited_for(ctl, monkeypatch)
     assert len(calls) >= 4 and pid in calls
 
 
-def test_the_worker_uses_the_shared_stale_gate_rule(live):
-    from levi.live import jsonio, worker
+def test_the_worker_never_reads_a_stale_gate_as_open(live, monkeypatch):
+    """Supervisor dead while idle, then a policy server appears: the worker,
+    which nobody supervises, must not go on sending requests."""
+    from levi.live import gpumgr, jsonio, worker
 
     c, _ = live
     w = worker.Worker.__new__(worker.Worker)
     w.config = c
     path = c.live_dir / "gate.json"
     old = time.time() - 60
+    monkeypatch.setattr(gpumgr, "listening_ports", lambda: set())
     jsonio.write(path, {"open": True, "idle": False, "updated_at": old})
-    assert w.gate_open() is False  # silent supervisor, a policy may be up
+    assert w.gate_open() is False
     jsonio.write(path, {"open": True, "idle": True, "updated_at": old})
-    assert w.gate_open() is True  # silent, but nothing to protect
+    assert w.gate_open() is False  # idle was the last word, and it is stale
+    monkeypatch.setattr(gpumgr, "listening_ports", lambda: {8000})
+    assert w.gate_open() is False  # the policy server came up meanwhile
     path.unlink()
-    assert w.gate_open() is True  # no supervisor gates this worker
-    # The supervisor writes "idle" with the gate.
+    assert w.gate_open() is True  # no gate file at all: no supervisor gates it
+    # A live supervisor refreshes the file every tick, so labelling during idle
+    # time is never stalled by this: fresh, open.
     ctl = started_controller(live)
     ctl.tick(time.time())
-    assert json.loads(path.read_text())["idle"] is True  # no policy, no session
+    fresh_gate = json.loads(path.read_text())
+    assert fresh_gate["idle"] is True and fresh_gate["policy_ports"] == [8000]
+    assert w.gate_open() is True
     ctl.machine.ports = {8000}
     ctl.rollouts.session("standby")
     ctl.tick(time.time() + 5)
     assert json.loads(path.read_text())["idle"] is False
+
+
+# --- N1: a stop that was confirmed leaves nothing behind --------------------------------
+
+
+def test_a_start_failure_after_a_normal_stop_still_backs_off(ctl, tmp_path):
+    """After any normal stop, a later failed start (or a vLLM that exits) must
+    count, back off and not start again in the same tick: ``leaving()`` is true
+    only for a stop that kept the lock to wait for the GPU."""
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    t = time.time()
+    up(ctl, t)
+    assert ctl._stop_vllm() is True
+    assert not ctl.vllm.leaving()
+    bad = tmp_path / "dies-slowly.sh"
+    log = Path(ctl.config.vllm.pid_dir) / f"vllm_{ctl.config.vllm.port}.log"
+    bad.write_text(
+        f"""#!/usr/bin/env bash
+echo "ValueError: To serve at least one request ... 1.82 GiB KV cache is needed" > "{log}"
+sleep 2 &
+echo $! > "{ctl.config.vllm.pid_dir}/vllm_{ctl.config.vllm.port}.pid"
+"""
+    )
+    bad.chmod(0o755)
+    ctl.config.vllm.script = str(bad)  # the same Vllm object: it has stopped before
+    starts = lambda: sum("starting vLLM" in e["text"] for e in ctl.events)
+    before = starts()
+    ctl.tick(t + 1)
+    assert starts() == before + 1
+    assert wait_for(lambda: ctl.vllm.poll() == "error", 6)
+    ctl.tick(t + 2)
+    assert ctl.start_failures == 1, ctl.events[-4:]
+    assert ctl.decision.code == "backoff"
+    assert starts() == before + 1  # not again in the same tick
+    ctl.tick(t + 3)
+    assert starts() == before + 1 and ctl.decision.code == "backoff"
+
+
+# --- L1: policy_large is reported whatever the gate says --------------------------------
+
+
+def test_policy_large_is_reported_during_the_evaluation_without_flicker(ctl):
+    ctl.rollouts.write(0)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 8575
+    ctl.machine.free = 32607 - 8575
+    t = time.time()
+    seen = []
+    for n, state in enumerate(
+        ("standby", "running", "waiting_reset", "homing", "running", "standby")
+    ):
+        ctl.rollouts.session(state)
+        ctl.tick(t + n)
+        seen.append(paused(ctl, t + n))
+    assert all(p and p["code"] == "policy_large" for p in seen), seen
+    assert len({p["since"] for p in seen}) == 1  # one pause, not six new ones
+    assert "XLA_PYTHON_CLIENT_MEM_FRACTION=.22" in seen[0]["reason"]
+
+
+# --- L3, L4, L5: not-free GPU reported, gate kept fresh and removed, env ------------------
+
+
+def test_a_gpu_that_never_frees_is_reported_after_the_grace(ctl, monkeypatch):
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    t = time.time()
+    up(ctl, t)
+    pid = ctl.vllm._pid()
+    monkeypatch.setattr(gpumgr, "STOP_CONFIRM_S", 0.5)
+    monkeypatch.setattr(
+        gpumgr,
+        "gpu_holders",
+        lambda *a, **k: [{"pid": pid, "name": "VLLM::EngineCore", "memory_mib": 9}],
+    )
+    assert ctl._stop_vllm() is False
+    grace = ctl.config.gpu.blocked_pause_s
+    ctl.tick(t + 5)
+    assert ctl.decision.code == "gpu_not_free" and paused(ctl, t + 5) is None
+    ctl.tick(t + 6 + grace)
+    p = paused(ctl, t + 6 + grace)
+    assert p["code"] == "gpu_not_free" and "GPU" in p["reason"]
+
+
+def test_the_gate_is_kept_fresh_while_a_stop_waits_and_removed_at_shutdown(
+    ctl, monkeypatch
+):
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    t = time.time()
+    up(ctl, t)
+    pid = ctl.vllm._pid()
+    path = ctl.config.live_dir / "gate.json"
+    assert path.exists()
+    beats = []
+    real = ctl.vllm.keepalive
+    ctl.vllm.keepalive = lambda: (beats.append(1), real and real())
+    monkeypatch.setattr(gpumgr, "STOP_CONFIRM_S", 1.3)
+    monkeypatch.setattr(
+        gpumgr,
+        "gpu_holders",
+        lambda *a, **k: [{"pid": pid, "name": "VLLM::EngineCore", "memory_mib": 9}],
+    )
+    before = json.loads(path.read_text())["updated_at"]
+    ctl._stop_vllm()
+    assert beats  # the wait loop called it
+    assert json.loads(path.read_text())["updated_at"] >= before
+    monkeypatch.undo()
+    ctl.shutdown()
+    # A stopped service leaves no gate behind: nobody is gating anyone.
+    assert not path.exists()
+
+
+def test_the_service_environment_never_carries_the_worker_marker(live, monkeypatch):
+    from levi.live import resources
+
+    c, _ = live
+    monkeypatch.setenv("LEVI_LIVE_WORKER", "1")  # a shell that set it
+    env = resources.service_env(c)
+    assert "LEVI_LIVE_WORKER" not in env
+    # Only the worker process sets it (configure_process) -- checked in a child
+    # process: configure_process changes the whole process's environment and
+    # priority, which must not leak into the other tests.
+    toml = c.workspace / "live.toml"
+    assert toml.exists()
+    done = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import os; from levi.live import config, worker; "
+                f"worker.configure_process(config.load(r'{toml}')); "
+                "print(os.environ.get('LEVI_LIVE_WORKER'))"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=PROJECT,
+        env={k: v for k, v in os.environ.items() if k != "LEVI_LIVE_WORKER"},
+        timeout=60,
+        check=False,
+    )
+    assert done.stdout.strip() == "1", done.stderr[-300:]

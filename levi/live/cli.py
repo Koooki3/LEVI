@@ -543,7 +543,7 @@ def cmd_stop(args) -> int:
     os.kill(pid, signal.SIGTERM)
     deadline = time.time() + 150
     while time.time() < deadline:
-        if gpumgr.identity(pid) != holder["identity"]:
+        if not gpumgr.same_process(pid, holder["identity"]):
             print(f"stopped (pid {pid})")
             return 0
         time.sleep(0.5)

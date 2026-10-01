@@ -78,7 +78,7 @@ uv run levi live stop                            # 只停自己的进程
 
 ## 设置（`live.toml`）
 
-`levi live init` 写出带全部默认值的文件；未知键或类型不对是错误，不会悄悄取默认值。`--workspace`、`--root`、`--gpu-mode`、`--auto-approve`、`--prewarm`、`--process-backlog`、`--since`、`--vllm-port`、`--ui-port`、`--core-port`、`--home` 可覆盖文件。`--adopt-workspace`：把已有的、不是实时工作区的 LEVI 工作区改成实时工作区才需要它；没有它时，`levi live` 拒绝任何有 LEVI 状态却没有实时标记的工作区（尤其是产品的 `.state`：自动批准的标记绝不能落进去），本检出的 `.state`、（从 git worktree 运行时）主检出（产品 LEVI 运行的地方）的 `.state`，以及 `LEVI_WORKSPACE` 指向的工作区（除非它已经是实时工作区），不管有没有 `--adopt-workspace` 都拒绝。每个 home 和每个工作区各只运行一个服务。环境变量：`LEVI_LIVE_WORKSPACE`、`LEVI_LIVE_CONFIG`、`LEVI_LIVE_HOME`（`status.json` 所在目录，默认 `~/.levi-live`）。`LEVI_LIVE_WORKER=1` 由服务在 worker 进程里设置（不要自己设）：它让 worker 不受“每次模型请求前查闸门”的约束，因为 worker 自己会让路。
+`levi live init` 写出带全部默认值的文件；未知键或类型不对是错误，不会悄悄取默认值。`--workspace`、`--root`、`--gpu-mode`、`--auto-approve`、`--prewarm`、`--process-backlog`、`--since`、`--vllm-port`、`--ui-port`、`--core-port`、`--home` 可覆盖文件。`--adopt-workspace`：把已有的、不是实时工作区的 LEVI 工作区改成实时工作区才需要它；没有它时，`levi live` 拒绝任何有 LEVI 状态却没有实时标记的工作区（尤其是产品的 `.state`：自动批准的标记绝不能落进去），本检出的 `.state`、（从 git worktree 运行时）主检出（产品 LEVI 运行的地方）的 `.state`，以及 `LEVI_WORKSPACE` 指向的工作区（除非它已经是实时工作区），不管有没有 `--adopt-workspace` 都拒绝。每个 home 和每个工作区各只运行一个服务。环境变量：`LEVI_LIVE_WORKSPACE`、`LEVI_LIVE_CONFIG`、`LEVI_LIVE_HOME`（`status.json` 所在目录，默认 `~/.levi-live`）。`LEVI_LIVE_WORKER=1` 由服务在 worker 进程里设置（不要自己设）：它让 worker 不受“每次模型请求前查闸门”的约束，因为 worker 自己会让路。服务会把它从其他子进程的环境里去掉，所以 shell 里设了它也不会豁免任何东西。
 
 各表、各键、默认值和含义与英文版表格一致（`service`、`watch`、`fr3`、`gpu`、`vllm`、`provider`、`pipeline`、`resources`），见 [LIVE.md](LIVE.md#settings-livetoml)。要点：
 
@@ -107,7 +107,7 @@ uv run levi live stop                            # 只停自己的进程
 | 有策略服务器在监听，且没有仍然有效的会话为它作证（策略服务器出现之前就结束的会话不算：会话文件从不删除） | **关**（可能有我们不知道的客户端在用） | 等待 |
 | 没有策略服务器 | 开 | 工作 |
 
-监督进程在 worker 运行时每 0.25 秒重新决定闸门（worker 每 0.2 秒读一次；测试断言 `running` 出现后 1 秒内在途请求被切断），写到 `live/gate.json`（过期的文件读作关闭，所以监督进程死了也不会把闸门留在开着的状态），worker 遵守：闸门关闭时，worker 暂停自己的运行（暂停会中止在途的 HTTP 请求，服务器随即停止生成），等运行线程释放租约，闸门打开后继续。不会重复任何工作：运行从最后一个完成的片段接着做。8 秒内没有让路的 worker 会被监督进程停掉。两集之间（`homing`、`waiting_reset`，约 20 秒）模型标注；会话结束后一口气标完剩下的。
+监督进程在 worker 运行时每 0.25 秒重新决定闸门（worker 每 0.2 秒读一次；测试断言 `running` 出现后 1 秒内在途请求被切断），写到 `live/gate.json`（worker 把超过 20 秒没人刷新的文件一律读作关闭，不管它写了什么，所以监督进程死了也不会把闸门留在开着的状态；人的处理略有不同，见“出问题时”；监督进程停止时会删除该文件），worker 遵守：闸门关闭时，worker 暂停自己的运行（暂停会中止在途的 HTTP 请求，服务器随即停止生成），等运行线程释放租约，闸门打开后继续。不会重复任何工作：运行从最后一个完成的片段接着做。8 秒内没有让路的 worker 会被监督进程停掉。两集之间（`homing`、`waiting_reset`，约 20 秒）模型标注；会话结束后一口气标完剩下的。
 
 | 模式 | 行为 |
 | --- | --- |
@@ -193,7 +193,7 @@ uv run levi live stop                            # 只停自己的进程
 
 ## 状态文件（接口 C4）
 
-`~/.levi-live/status.json`，每 `heartbeat_s`（4 秒，≤ 5 秒）原子重写。评测客户端只有在**全部**满足时才认为服务可用：`schema` 以 `levi.live.status.` 开头；`updated_at`（纪元秒）不到 15 秒；`pid` 存活；`accepts_sessions` 为真；`state` 是 `idle active annotating gpu_wait` 之一；`watch_roots`（绝对路径）中有一个等于或包含客户端的 `--rollout-root`（或被它包含）。否则客户端退回手动标注。`accepts_sessions` 在 `starting` 以及 `stopped`/`error` 时为假；`gpu_wait`（有活在等模型：闸门关闭、vLLM 正在启动或在睡眠）算可用。`attention` 在服务放弃启动 vLLM、需要人（`levi live resume`）时设置，此时标注暂停，但不改变 `accepts_sessions` 和 `state`。**`labelling_paused`** 为 `null`，或在“没有标注、且原因不会自己消失”时为 `{code, reason, since}`：`vllm_failed`（放弃启动 vLLM，`levi live resume`）、`vllm_error`（启动失败、正在退避）、`insufficient_vram`（空闲显存连最短上下文也装不下）、`policy_large`（策略服务器占用超过 `gpu.policy_budget_mib`：改用 `.22`；立即报告）、`unknown_client`（没有会话为之作证的策略服务器让闸门关了 `gpu.unknown_client_pause_s` 以上），以及持续 `gpu.blocked_pause_s` 之后的 `vram`（睡眠的 vLLM 唤不醒，或启动没有足够显存）、`lock`（别的 agent 持有 GPU 锁）和 `external_busy`（`vllm.port` 上有别人的 vLLM）。策略推理时闸门关闭、策略服务器还在加载，都是正常等待，不设置它；它也不改变 `accepts_sessions`。`loop_at` 是主循环上次 tick 的时间（`updated_at` 来自单独的心跳线程，循环卡住时它仍然新鲜；`levi live doctor` 在 `loop_at` 超过 5 分钟时告警）。`frontend` 说明服务启动的页面/核心 API 是否真的起来（`levi live start --daemon` 失败时打印原因并以退出码 2 返回，标注继续运行）。新增字段：数据集行的 `stuck`、`source_changed`、`review_runs_open`、`awaiting`，会话的 `root`、`reset_wait_s`、`waiting_reset_since`，闸门代码 `episode_imminent`，决策代码 `evaluation_active`、`standby_settling`、`prewarm_waiting_for_policy`、`gpu_not_free`。完整 JSON 形状见 [LIVE.md](LIVE.md#status-file-interface-c4)。
+`~/.levi-live/status.json`，每 `heartbeat_s`（4 秒，≤ 5 秒）原子重写。评测客户端只有在**全部**满足时才认为服务可用：`schema` 以 `levi.live.status.` 开头；`updated_at`（纪元秒）不到 15 秒；`pid` 存活；`accepts_sessions` 为真；`state` 是 `idle active annotating gpu_wait` 之一；`watch_roots`（绝对路径）中有一个等于或包含客户端的 `--rollout-root`（或被它包含）。否则客户端退回手动标注。`accepts_sessions` 在 `starting` 以及 `stopped`/`error` 时为假；`gpu_wait`（有活在等模型：闸门关闭、vLLM 正在启动或在睡眠）算可用。`attention` 在服务放弃启动 vLLM、需要人（`levi live resume`）时设置，此时标注暂停，但不改变 `accepts_sessions` 和 `state`。**`labelling_paused`** 为 `null`，或在“没有标注、且原因不会自己消失”时为 `{code, reason, since}`：`vllm_failed`（放弃启动 vLLM，`levi live resume`）、`vllm_error`（启动失败、正在退避）、`insufficient_vram`（空闲显存连最短上下文也装不下）、`policy_large`（策略服务器占用超过 `gpu.policy_budget_mib`：改用 `.22`；立即报告，按服务器的显存判断，不管闸门或评测在做什么，是一次稳定的暂停）、`unknown_client`（没有会话为之作证的策略服务器让闸门关了 `gpu.unknown_client_pause_s` 以上），以及持续 `gpu.blocked_pause_s` 之后的 `vram`（睡眠的 vLLM 唤不醒，或启动没有足够显存）、`lock`（别的 agent 持有 GPU 锁）、`external_busy`（`vllm.port` 上有别人的 vLLM）和 `gpu_not_free`（vLLM 已停但它的进程仍占着显存，所以锁保留）。策略推理时闸门关闭、策略服务器还在加载，都是正常等待，不设置它；它也不改变 `accepts_sessions`。`loop_at` 是主循环上次 tick 的时间（`updated_at` 来自单独的心跳线程，循环卡住时它仍然新鲜；`levi live doctor` 在 `loop_at` 超过 5 分钟时告警）。`frontend` 说明服务启动的页面/核心 API 是否真的起来（`levi live start --daemon` 失败时打印原因并以退出码 2 返回，标注继续运行）。新增字段：数据集行的 `stuck`、`source_changed`、`review_runs_open`、`awaiting`，会话的 `root`、`reset_wait_s`、`waiting_reset_since`，闸门代码 `episode_imminent`，决策代码 `evaluation_active`、`standby_settling`、`prewarm_waiting_for_policy`、`gpu_not_free`。完整 JSON 形状见 [LIVE.md](LIVE.md#status-file-interface-c4)。
 
 ## 服务读取的机器人侧接口
 
@@ -218,7 +218,7 @@ uv run levi live stop                            # 只停自己的进程
 
 - **FR3 故障**：客户端中止该集（`incomplete_NNNN`，`abort_reason: fr3_fault`），会话进入 `fault`。页面把数据集标为故障。被中止的 rollout 不会被标注。操作员排除故障后客户端续跑。
 - **服务或 worker 崩溃 / `levi live stop`**：进行中的批次记在数据集状态里。下次启动接着做；LEVI 自己的运行记录保存了已完成的片段，所以不会重复标注或提交（提交用幂等键）。收到 `SIGTERM` 的 worker 会暂停运行并等租约释放；被 `SIGKILL` 杀掉的会留下租约，3 分钟后过期。
-- **策略推理时有人在页面点“运行”“继续”或任务控制台的推进**：实时工作区的核心读 `live/gate.json`，闸门关闭时拒绝（`409`，“评测正在推理，请稍后再试”）。闸门打开时启动的运行也会停：核心在**每一次**模型请求之前都读闸门（只 stat 工作区标记，小文件最多每 0.2 秒读一次；所有发请求的入口走同一个检查，`gpu.require_free`），闸门关着就让请求以 `GpuBusy` 失败，运行停在 `blocked`（闸门打开后用“继续”恢复；实时工作区里守卫不会自动恢复它）。worker 自己的运行不受它约束（它自己会让路）。闸门文件超过 20 秒没人刷新（监督进程没了）时，人和 worker 用同一条规则：当作关闭，除非它最后写的是 `idle`（没有策略服务器、没有评测：没有要保护的东西），那就不拦。
+- **策略推理时有人在页面点“运行”“继续”或任务控制台的推进**：实时工作区的核心读 `live/gate.json`，闸门关闭时拒绝（`409`，“评测正在推理，请稍后再试”）。闸门打开时启动的运行也会停：核心在**每一次**模型请求之前都读闸门（只 stat 工作区标记，小文件最多每 0.2 秒读一次；所有发请求的入口走同一个检查，`gpu.require_free`），闸门关着就让请求以 `GpuBusy` 失败，运行停在 `blocked`（闸门打开后用“继续”恢复；实时工作区里守卫不会自动恢复它）。worker 自己的运行不受它约束（它自己会让路）。闸门文件超过 20 秒没人刷新（监督进程没了）时，worker 一律当作关闭（没人再管它，而且之后可能出现了策略服务器）。人只有在文件最后写的是 `idle`（没有策略服务器、没有评测：没有要保护的东西）**并且**文件里列的策略端口此刻都没有在监听（读 `/proc/net/tcp`，不连接）时才放行；否则页面提示闸门文件已过期、请确认监督进程是否在运行。监督进程活着时，文件每次变化都重写、至少每 4 秒一次（vLLM 的长时间停止等待期间也刷新），所以空闲时的标注不会因此停摆；正常停止的服务会删除这个文件。
 - **等人**（自动批准关闭）：等待（`awaiting`：计划或草稿、哪个运行）存进数据集状态；重启的监督进程会读回它，不为它启动 vLLM 或 worker；万一 worker 还是被启动了，它只读存储就能发现计划未批准或草稿未提交，不需要模型。人批准、提交或拒绝、取消了运行，或草稿不在了，等待就结束。只有在运行真要执行之前才要求模型在线。
 - **期间有人提交了该数据集**：计划的基线过期；worker 取消该运行并重新规划。
 - **模型服务失败**：运行阻塞，worker 退出，监督进程按退避重试（30 秒起翻倍到 10 分钟）；失败的片段消耗一次尝试（`max_attempts`）。vLLM 自己起不来的情况见上文（退避，然后 `levi live resume`）。
@@ -264,6 +264,7 @@ uv run levi live stop                            # 只停自己的进程
 - **唤醒余量（300 MiB）和 standby 等待（20 秒）是取舍，不是测出来的。** 在测过的策略 `.22` 情形里唤醒还剩 960 MiB；standby 等待降低冷启动与第一集重叠的可能，不能消除。
 - **自动批准关闭（`auto_approve = false`）时，每道人工关仍可能让 vLLM 唤醒或冷启动一次**：监督进程只在 vLLM ready 时才派 worker，人提交草稿之后 worker 要规划释放复核，需要模型。有 `--prewarm` 时只是唤醒（便宜）；没有、且在评测期间，`evaluation_active` 把它推迟到评测之后。
 - **评测客户端不读 `loop_at`**：主循环卡住而心跳线程让 `updated_at` 保持新鲜时，只有 `levi live doctor` 能发现。
+- **闸门关闭时，任务控制台的“推进”整个被拒**，尽管它也做不发请求的步骤（刷新等待状态）；逐请求的检查本来就够了。影响很小。
 - **主体名字不是凭证。** worker 的主体 `live-planner`/`live-auto` 在“运行/继续”的检查里按名字豁免；逐请求的检查改用 worker 的环境变量。叫这个名字的人能启动运行（它的请求仍会在下一次请求时停下）。
 - **冷启动对策略的影响没测过。** 服务在会话 `running`、`homing`、`waiting_reset` 时从不冷启动 vLLM；想在评测前就绪用 `--prewarm`。
 - **守护模式下的共存、有真策略服务器时的睡眠与唤醒、空闲释放**没有用真实模型验证。
