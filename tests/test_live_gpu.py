@@ -1590,3 +1590,61 @@ def test_a_cold_start_waits_until_the_session_has_been_in_standby_a_while(ctl):
     # No session at all (nobody's evaluation is near), and the default is a
     # wait only for a session that has just arrived at standby.
     assert ctl.config.gpu.standby_min_s == 20.0
+
+
+# --- L2: the lock is let go only when vLLM has really left the GPU -----------------------
+
+
+def test_the_lock_is_kept_while_a_vllm_process_still_holds_gpu_memory(ctl, monkeypatch):
+    """The server's leader can be gone while an engine process of the group is
+    still releasing its VRAM: another agent that then gets the lock would
+    start into a card that is not free yet."""
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    t = time.time()
+    up(ctl, t)
+    pid = ctl.vllm._pid()
+    still = {"on": True}
+    monkeypatch.setattr(gpumgr, "STOP_CONFIRM_S", 1.0)
+    monkeypatch.setattr(
+        gpumgr,
+        "gpu_holders",
+        lambda *a, **k: (
+            [{"pid": pid, "name": "VLLM::EngineCore", "memory_mib": 21000}]
+            if still["on"]
+            else []
+        ),
+    )
+    assert ctl._stop_vllm() is False
+    assert ctl.vllm.state == "error" and "GPU" in ctl.vllm.error
+    assert ctl.lock.held  # not let go
+    other = gpumgr.GpuLock(ctl.config.gpu.lock_file, "someone-else")
+    assert not other.acquire()
+    # The next ticks neither let go of the lock nor call it a failed start.
+    ctl.tick(t + 5)
+    ctl.tick(t + 6)
+    assert ctl.lock.held and ctl.start_failures == 0
+    assert ctl.decision.code == "gpu_not_free"
+    assert not other.acquire()
+    # The memory is released: the next tick confirms it and lets go of the lock
+    # (work is waiting, so a new start may follow at once).
+    still["on"] = False
+    ctl.tick(t + 7)
+    assert any("has left the GPU" in e["text"] for e in ctl.events)
+    assert ctl.start_failures == 0 and ctl.vllm.state != "error"
+
+
+def test_a_group_member_that_outlives_the_leader_is_waited_for(ctl, monkeypatch):
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    up(ctl, time.time())
+    pid = ctl.vllm._pid()
+    calls = []
+
+    def members(pgid):
+        calls.append(pgid)
+        return [pgid + 1] if len(calls) < 4 else []
+
+    monkeypatch.setattr(gpumgr, "_group_alive", members)
+    assert ctl.vllm.stop() is True
+    assert len(calls) >= 4 and pid in calls

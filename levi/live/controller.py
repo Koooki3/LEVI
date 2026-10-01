@@ -358,6 +358,16 @@ class Controller:
             else self.vllm.state
         )
         self._check_resume(now)
+        if state == "error" and self.vllm.leaving():
+            # A stop that could not confirm the card is free: not a failed
+            # start. Keep the lock, look again each tick.
+            if self.vllm.stop():
+                self.lock.release()
+                self.event("vLLM has left the GPU: the lock is let go")
+            else:
+                self.decision = gpumgr.Decision(False, self.vllm.error, "gpu_not_free")
+                return False
+            state = self.vllm.state
         if state == "error":
             # A failed start (or a vLLM that died): note it, back off, and
             # after a few in a row stop and ask for a person.

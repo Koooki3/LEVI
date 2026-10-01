@@ -569,6 +569,33 @@ def _group(pgid) -> list:
     return members or [pgid]
 
 
+STOP_CONFIRM_S = 60.0  # how long a stop waits for the GPU to be really free
+
+
+def _group_alive(pgid) -> list:
+    """Live (not zombie) processes of the group, without ``_group``'s fallback
+    to the leader's own pid: empty once the whole group is gone."""
+    alive = []
+    try:
+        for entry in os.scandir("/proc"):
+            if not entry.name.isdigit():
+                continue
+            try:
+                fields = (
+                    Path(f"/proc/{entry.name}/stat")
+                    .read_text()
+                    .rsplit(")", 1)[1]
+                    .split()
+                )
+            except (OSError, IndexError):
+                continue
+            if int(fields[2]) == pgid and fields[0] != "Z":
+                alive.append(int(entry.name))
+    except OSError:
+        pass
+    return alive
+
+
 class Vllm:
     """The service's own vLLM server: start, watch, stop. It stops only a
     process it started (verified by its recorded identity), never another
@@ -582,6 +609,7 @@ class Vllm:
         self.state = "stopped"
         self.started_at: float | None = None
         self.profile: dict | None = None
+        self._leaving: set = set()  # pids of a stop still waiting on the GPU
         self.error = ""
         self._health = (0.0, False)
         self._adopt()
@@ -841,6 +869,9 @@ class Vllm:
     def stop(self) -> bool:
         """Stop this service's vLLM (only if it is ours). True when gone."""
         if not self.mine():
+            if self._leaving and self._on_gpu(self._leaving):
+                return False  # an earlier stop could not confirm the GPU is free
+            self._leaving = set()
             self.state = "stopped"
             return True
         self.state = "stopping"
@@ -861,6 +892,7 @@ class Vllm:
         except (OSError, subprocess.SubprocessError):
             pass
         recorded = record.get("identity")
+        self._leaving = set(_group_alive(pid)) | ({pid} if pid else set())
         if same_process(pid, recorded):
             # The script could not (missing pidfile): signal the group directly.
             with contextlib.suppress(ProcessLookupError, PermissionError):
@@ -873,6 +905,22 @@ class Vllm:
                     os.killpg(pid, signal.SIGKILL)
         gone = not same_process(pid, recorded)
         if gone:
+            # The leader is gone; the engine processes of its group may still
+            # be releasing the card. The lock says "vLLM is on the GPU": let go
+            # of it only once nothing of the group is alive or holds VRAM.
+            deadline = time.time() + STOP_CONFIRM_S
+            while time.time() < deadline and (
+                _group_alive(pid) or self._on_gpu(self._leaving)
+            ):
+                time.sleep(0.5)
+            if _group_alive(pid) or self._on_gpu(self._leaving):
+                self.state = "error"
+                self.error = (
+                    "vLLM's processes still hold GPU memory after the stop; "
+                    "the GPU lock is kept until they are gone"
+                )
+                return False
+        if gone:
             with contextlib.suppress(OSError):
                 self.record_path.unlink()
             self.state = "stopped"
@@ -880,6 +928,16 @@ class Vllm:
         else:
             self.state, self.error = "error", "vLLM did not stop"
         return gone
+
+    def leaving(self) -> bool:
+        """A stop is still waiting for vLLM's processes to leave the GPU."""
+        return bool(self._leaving) and self.state == "error"
+
+    @staticmethod
+    def _on_gpu(pids) -> bool:
+        """Does any of ``pids`` still appear among nvidia-smi's compute
+        processes? (An unreadable nvidia-smi says no: nothing can be told.)"""
+        return any(row["pid"] in pids for row in gpu_holders())
 
     def public(self) -> dict:
         return {
