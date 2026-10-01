@@ -1996,5 +1996,5 @@
   "Someone else's model server is on the port": "别人的模型服务器占着该端口",
   "A vLLM this service did not start is answering on its port, so the service leaves it alone and labels nothing.": "端口上有一个不是本服务启动的 vLLM 在响应，服务不会去动它，也就没有在标注。",
   "Stop that server, or set vllm.adopt_external = true in live.toml if you want the service to use it. Labelling resumes by itself once the port is free.": "请停掉那个服务器；如果想让本服务使用它，可在 live.toml 里设置 vllm.adopt_external = true。端口空闲后标注会自动恢复。",
-  "Paused for the robot: the evaluation is running its policy on the GPU, so this action is refused for a moment. Nothing is lost; try again in a few seconds (between episodes). If the run stopped as blocked, press Resume once the gate is open.": "为机器人让路：评测正在 GPU 上运行策略，所以这个操作暂时被拒绝。不会丢任何东西；请几秒后再试（片段之间）。如果运行已变成“blocked”，闸门打开后点 Resume 继续。"
+  "Paused for the robot: the evaluation is running its policy on the GPU, so this action is refused for a moment. Nothing is lost; try again in a few seconds (between episodes). A run that was already going stops as blocked and continues by itself once the gate has stayed open for a few seconds.": "为机器人让路：评测正在 GPU 上运行策略，所以这个操作暂时被拒绝。不会丢任何东西；请几秒后再试（片段之间）。已经在跑的运行会停成“blocked”，闸门连续打开几秒后会自己继续。"
 }

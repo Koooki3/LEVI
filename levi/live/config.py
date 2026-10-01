@@ -131,6 +131,13 @@ class Gpu:
     # lack of room) is reported in ``labelling_paused`` after this long.
     blocked_pause_s: float = 300.0
     policy_load_wait_s: float = 120.0
+    # A person's run the gate stopped (``blocked``) continues by itself once the
+    # gate has stayed open this long (seconds: a window about to close, the
+    # ``episode_imminent`` lead, must not be used), at most once per opening.
+    # After ``resume_max_bounces`` stops in a row with no finished episode in
+    # between it is left for a person to resume (``levi/live/resumer.py``).
+    resume_stable_s: float = 3.0
+    resume_max_bounces: int = 3
 
 
 @dataclass

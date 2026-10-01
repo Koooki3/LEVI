@@ -285,6 +285,36 @@ def test_a_dead_service_is_reported_not_alive_and_the_api_reveals_no_secret(live
         assert "human.key" not in text and "token" not in text
 
 
+def test_the_status_counts_the_runs_the_gate_stopped(live_api):
+    from levi.live import resumer
+
+    client, c = live_api
+    mirror.jsonio.write(
+        c.status_file,
+        {
+            "schema": "levi.live.status.v1",
+            "pid": 1,
+            "updated_at": time.time(),
+            "state": "idle",
+            "datasets": {},
+        },
+    )
+    none = client.get("/api/levi/live/status").json()["blocked_runs"]
+    assert none == {"count": 0, "waiting": [], "needs_person": []}
+    mirror.jsonio.write(
+        c.live_dir / resumer.FILE,
+        {
+            "updated_at": time.time(),
+            "runs": [
+                {"id": "run-a", "auto": True, "why": None},
+                {"id": "run-b", "auto": False, "why": "given_up"},
+            ],
+        },
+    )
+    shown = client.get("/api/levi/live/status").json()["blocked_runs"]
+    assert shown == {"count": 2, "waiting": ["run-a"], "needs_person": ["run-b"]}
+
+
 # --- resources --------------------------------------------------------------------------------
 
 

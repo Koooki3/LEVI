@@ -73,7 +73,14 @@ DEFAULT_POLICY = {
 
 
 class GpuBusy(ValueError):
-    pass
+    """The GPU may not be used for this request now. ``gate`` names who said so
+    when it is not the guardian: ``"live"`` is the live annotation service's
+    gate (levi/live/gating.py), whose runs ``levi.live.resumer`` takes up
+    again once the gate has stayed open."""
+
+    def __init__(self, *args, gate=None):
+        super().__init__(*args)
+        self.gate = gate
 
 
 # --- sampling -------------------------------------------------------------
@@ -561,7 +568,7 @@ def require_free(config=None):
 
     if why := gating.request_blocked():
         # A live workspace: the robot's policy is inferring (levi/live/gating.py).
-        raise GpuBusy(why)
+        raise GpuBusy(why, gate="live")
     if os.getenv("LEVI_CPU_ONLY") == "1":
         raise GpuBusy("LEVI_CPU_ONLY=1 forbids local accelerator-backed inference")
     if os.getenv("LEVI_GPU_SHARING") == "allow":
@@ -672,6 +679,8 @@ class Watch:
         for run in self.store.list("runs"):
             if run.get("status") != "blocked" or run.get("blocked_by") != "gpu":
                 continue
+            if run.get("blocked_gate") == "live":
+                continue  # the live gate's runs: levi/live/resumer.py decides
             if run["id"] in _ACTIVE:
                 continue
             plan = run.get("plan") or {}

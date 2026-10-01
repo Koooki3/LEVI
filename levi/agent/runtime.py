@@ -406,7 +406,12 @@ class Workbench:
                     RunStatus.RUNNING,
                 }:
                     raise Conflict("Run cannot be started in its current state")
-                run.update(status=RunStatus.QUEUED, control=None, reason=None)
+                run.update(
+                    status=RunStatus.QUEUED,
+                    control=None,
+                    reason=None,
+                    blocked_gate=None,
+                )
 
             self.store.mutate("runs", id, queued)
         except BaseException:
@@ -767,7 +772,10 @@ class Workbench:
                     else f"Execution blocked ({type(exc).__name__}); inspect provider configuration"
                 )
             blocked_by = "gpu" if isinstance(exc, GpuBusy) else None
-            self.store.mutate(
+            # Which gate said no: the live service's (``levi/live/resumer.py``
+            # continues such a run by itself once the gate has stayed open).
+            blocked_gate = "live" if getattr(exc, "gate", None) == "live" else None
+            blocked = self.store.mutate(
                 "runs",
                 id,
                 lambda r: r.update(
@@ -781,9 +789,14 @@ class Workbench:
                     reason=reason,
                     # The guardian resumes these by itself once the GPU clears.
                     blocked_by=blocked_by,
+                    blocked_gate=blocked_gate,
                 ),
             )
             self.store.event(id, "blocked", reason=reason)
+            if blocked_gate and blocked["status"] == RunStatus.BLOCKED:
+                from levi.live import resumer
+
+                resumer.note_blocked(id)
         finally:
             self.store.mutate(
                 "runs",

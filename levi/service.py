@@ -82,9 +82,16 @@ async def lifespan(app):
 
     # Off-peak GPU: unload the local model the moment someone else computes.
     gpu_watch = Watch(Store(STATE), workbench=Workbench(STATE)).start()
+    from .live import resumer
+
+    # A live workspace only: the person's runs the live gate stopped go on by
+    # themselves once it has stayed open (None, and no thread, anywhere else).
+    gate_resumer = resumer.start(Store(STATE), Workbench(STATE), ROOT)
     try:
         yield
     finally:
+        if gate_resumer:
+            gate_resumer.close()
         gpu_watch.close()
         SYNC.stop()
         from .agent.runtime import stop

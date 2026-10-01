@@ -49,17 +49,30 @@ def closed(gate, now=None, worker=False) -> bool:
     return bool(ports & gpumgr.listening_ports())
 
 
-def _message(gate) -> str:
+def _message(gate, run=False) -> str:
+    """``run``: the words for a run that stops at a request (it continues by
+    itself, ``resumer.py``); otherwise for a person's refused click."""
     if time.time() - float(gate.get("updated_at") or 0) > STALE_S:
         return (
             "The live service's gate file has not been refreshed for over "
             f"{STALE_S:.0f} s (is the supervisor running? `levi live status`) and "
             "a policy server or evaluation may be active: not sending model "
             "requests"
+            + (
+                "; the run is blocked until the gate is fresh and open again"
+                if run
+                else ""
+            )
+        )
+    why = gate.get("reason") or gate.get("code") or "gate closed"
+    if run:
+        return (
+            f"The robot evaluation is inferring on the GPU ({why}): the run "
+            "stopped here and continues by itself once the gate has stayed open"
         )
     return (
         "The robot evaluation is inferring on the GPU "
-        f"({gate.get('reason') or gate.get('code') or 'gate closed'}): the "
+        f"({why}): the "
         "evaluation is inferring, try again shortly"
     )
 
@@ -87,7 +100,7 @@ def request_blocked(now=None) -> str | None:
     if (live / auto.MARKER).is_file():
         gate = jsonio.read(live / "gate.json")
         if closed(gate):
-            why = _message(gate)
+            why = _message(gate, run=True)
     _CACHE[str(live)] = (stamp, why)
     return why
 

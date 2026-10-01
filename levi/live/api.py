@@ -16,7 +16,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from . import config as live_config
-from . import jsonio, mirror, sessions
+from . import jsonio, mirror, resumer, sessions
 
 router = APIRouter(prefix="/api/levi/live", tags=["Live annotation"])
 
@@ -92,6 +92,10 @@ def status():
         "service": value,
         "faults": faults,
         "fr3_red": bool(((value or {}).get("fr3") or {}).get("state") == "red"),
+        # Runs the gate stopped that a person started: ``waiting`` go on by
+        # themselves once the gate has stayed open, ``needs_person`` do not
+        # (``levi/live/resumer.py``).
+        "blocked_runs": resumer.read_blocked(config.live_dir, now),
     }
 
 

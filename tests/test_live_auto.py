@@ -457,7 +457,7 @@ def test_every_request_reads_the_gate_and_a_run_stops_when_it_closes(
     write_gate(live_ws, False)
     time.sleep(gating.CACHE_S + 0.05)  # (the read is cached for a moment)
     # ... and the next request is not sent: a retryable error, which makes the
-    # run stop at that point (blocked, resumable by Resume once the gate opens).
+    # run stop at that point (blocked; it continues by itself, levi/live/resumer.py).
     with pytest.raises(gpu.GpuBusy, match="inferring"):
         gpu.require_free(None)
     assert issubclass(gpu.GpuBusy, ValueError)  # what the executor turns into 'blocked'
