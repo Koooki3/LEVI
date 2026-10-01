@@ -109,6 +109,10 @@ class Gpu:
     # port appeared, then plans as if alone). Memory that cannot be read is
     # planned as alone too: the conservative budget leaves room to grow.
     policy_loaded_min_mib: int = 6000
+    # A policy server listens but no session vouches for it (``unknown_client``
+    # keeps the gate closed): after this long the status says labelling is
+    # paused for it (``labelling_paused``).
+    unknown_client_pause_s: float = 600.0
     policy_load_wait_s: float = 120.0
 
 

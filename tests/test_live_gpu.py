@@ -1106,3 +1106,81 @@ def test_a_restarted_supervisor_reads_the_wait_for_a_person_and_starts_no_vllm(
         assert "awaiting" not in mirror.load_state(ctl.config, name)
     finally:
         again.shutdown()
+
+
+# --- labelling_paused: why nothing is being labelled, for the client --------------------
+
+
+def paused(ctl, now):
+    return ctl.status(now)["labelling_paused"]
+
+
+def test_labelling_paused_is_null_when_all_is_well(ctl):
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    t = time.time()
+    up(ctl, t)
+    assert paused(ctl, t + 1) is None
+    status = ctl.status(t + 1)
+    assert status["accepts_sessions"] and "labelling_paused" in status
+
+
+def test_labelling_paused_names_a_vllm_that_needs_a_person(ctl):
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    t = time.time()
+    ctl.attention = {"code": "vllm_failed", "reason": "KV cache too small", "since": t}
+    ctl.tick(t + 5)
+    p = paused(ctl, t + 5)
+    assert p["code"] == "vllm_failed" and p["since"] == t
+    assert "KV cache" in p["reason"] and "resume" in p["reason"]
+    assert ctl.status(t + 5)["accepts_sessions"]  # unchanged: sessions are welcome
+
+
+def test_labelling_paused_for_too_little_vram_until_there_is_room(ctl):
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 11863
+    ctl.machine.free = 32607 - 11863
+    t = time.time()
+    assert step(ctl, t) == "insufficient_vram"
+    first = paused(ctl, t)
+    assert first["code"] == "insufficient_vram" and "MiB" in first["reason"]
+    fresh(ctl)
+    ctl.tick(t + 30)
+    assert paused(ctl, t + 30)["since"] == first["since"]  # one pause, not many
+    ctl.machine.ports, ctl.machine.policy_mib, ctl.machine.free = set(), None, 26000
+    fresh(ctl)
+    ctl.tick(t + 40)  # (the policy server going settles for gpu.settle_s)
+    up(ctl, t + 70)
+    assert paused(ctl, t + 71) is None
+
+
+def test_labelling_paused_while_vllm_start_fails_and_backs_off(ctl, tmp_path):
+    bad_vllm(tmp_path, ctl)
+    ctl.rollouts.write(0)
+    t = time.time()
+    step(ctl, t)
+    wait_for(lambda: ctl.vllm.poll() == "error", 5)
+    ctl.tick(t + 1)
+    p = paused(ctl, t + 1)
+    assert p["code"] == "vllm_error" and "KV cache" in p["reason"]
+
+
+def test_labelling_paused_when_an_unknown_client_keeps_the_gate_shut(ctl):
+    ctl.rollouts.write(0)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    pause = ctl.config.gpu.unknown_client_pause_s
+    t = time.time()
+    ctl.tick(t)
+    assert ctl.gate.code == "unknown_client" and paused(ctl, t) is None
+    ctl.tick(t + pause - 5)
+    assert paused(ctl, t + pause - 5) is None
+    ctl.tick(t + pause + 5)
+    p = paused(ctl, t + pause + 5)
+    assert p["code"] == "unknown_client" and "policy" in p["reason"].lower()
+    assert p["since"] == pytest.approx(t, abs=1)
+    # A session shows up (it vouches for the server): the pause is over.
+    ctl.rollouts.session("standby")
+    ctl.tick(t + pause + 10)
+    assert paused(ctl, t + pause + 10) is None

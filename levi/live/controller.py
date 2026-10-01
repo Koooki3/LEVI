@@ -162,6 +162,8 @@ class Controller:
         self.start_failures = 0
         self.next_start_at = 0.0
         self.attention: dict | None = None
+        self._paused: dict | None = None  # the status' labelling_paused
+        self._gate_code_since: tuple = (None, 0.0)
         self._resume_seen = None
         self.decision = gpumgr.Decision(True, "no work", "ok")
         self.state = "starting"
@@ -773,6 +775,45 @@ class Controller:
 
     # --- the tick ---------------------------------------------------------------------------
 
+    def _update_paused(self, now, wanted):
+        """``labelling_paused`` for the status: why nothing is being labelled
+        that a person (or the robot client's operator) can see and act on.
+        Not set for ordinary waits (the gate closing while the policy infers,
+        a settling policy server): those pass by themselves."""
+        c = self.config
+        code = reason = since = None
+        code_now = None if self.gate.open else self.gate.code
+        if self._gate_code_since[0] != code_now:
+            self._gate_code_since = (code_now, now)
+        if self.attention:
+            code = self.attention.get("code") or "vllm_failed"
+            reason = (
+                f"vLLM failed to start repeatedly: {self.attention.get('reason')}; "
+                "`levi live resume` clears it"
+            )
+            since = self.attention.get("since")
+        elif wanted and self.decision.code == "insufficient_vram":
+            code, reason = "insufficient_vram", self.decision.reason
+        elif wanted and self.decision.code in ("backoff", "error"):
+            code = "vllm_error"
+            reason = self.vllm.error or self.decision.reason
+        elif (
+            code_now == "unknown_client"
+            and now - self._gate_code_since[1] >= c.gpu.unknown_client_pause_s
+        ):
+            code = "unknown_client"
+            reason = (
+                "a policy server is running that no evaluation session of this "
+                f"service vouches for: {self.gate.reason}"
+            )
+            since = self._gate_code_since[1]
+        if code is None:
+            self._paused = None
+            return
+        if self._paused is None or self._paused["code"] != code:
+            self._paused = {"code": code, "since": since or now}
+        self._paused["reason"] = str(reason)[:300]
+
     def _write_gate(self, now):
         """``live/gate.json``: the worker's permission to send model requests.
         Rewritten on change and at least every 4 s (a stale gate reads as
@@ -828,7 +869,9 @@ class Controller:
         prewarm = (
             self.config.vllm.prewarm and self.worker is None and not self.vllm.mine()
         )
-        ready = self._gpu_step(now, want or self.worker is not None or prewarm)
+        wanted = want or self.worker is not None or prewarm
+        ready = self._gpu_step(now, wanted)
+        self._update_paused(now, wanted)
         self._write_gate(now)
         self._police_worker(now)
         if self.worker is None and want and ready and not orphan and self.gate.open:
@@ -1049,6 +1092,10 @@ class Controller:
             # Set when the service gave up starting vLLM and needs a person
             # (`levi live resume`); labelling is paused, sessions still welcome.
             "attention": self.attention,
+            # null, or {code, reason, since} when nothing is being labelled for a
+            # reason that does not pass by itself (vllm_failed, vllm_error,
+            # insufficient_vram, unknown_client). Sessions are still accepted.
+            "labelling_paused": dict(self._paused) if self._paused else None,
             "frontend": self.frontend() if self.frontend else None,
             "events": list(self.events),
             "last_error": self.last_error,
