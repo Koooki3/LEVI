@@ -952,22 +952,38 @@ class Controller:
 
 
 class Instance:
-    """The one running service per home directory: a flock and a pid file."""
+    """The one running service per home directory *and* per workspace: two
+    flocks (``<home>/live.lock``, ``<workspace>/live/service.lock``) and a pid
+    file. Two homes cannot both run on one workspace."""
 
-    def __init__(self, home):
+    def __init__(self, home, workspace=None):
         self.home = Path(home)
+        self.workspace = Path(workspace) if workspace else None
         self.lock_path = self.home / "live.lock"
         self.pid_path = self.home / "live.pid"
         self._handle = None
+        self._ws_handle = None
 
-    def acquire(self) -> bool:
-        self.home.mkdir(parents=True, exist_ok=True)
-        handle = open(self.lock_path, "a+")  # noqa: SIM115
+    @staticmethod
+    def _lock(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(path, "a+")  # noqa: SIM115
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             handle.close()
+            return None
+        return handle
+
+    def acquire(self) -> bool:
+        handle = self._lock(self.lock_path)
+        if handle is None:
             return False
+        if self.workspace is not None:
+            self._ws_handle = self._lock(self.workspace / "live" / "service.lock")
+            if self._ws_handle is None:
+                handle.close()
+                return False
         self._handle = handle
         jsonio.write(
             self.pid_path,
@@ -982,11 +998,13 @@ class Instance:
     def release(self):
         with contextlib.suppress(OSError):
             self.pid_path.unlink()
-        if self._handle:
-            with contextlib.suppress(OSError):
-                fcntl.flock(self._handle, fcntl.LOCK_UN)
-            self._handle.close()
-            self._handle = None
+        for name in ("_handle", "_ws_handle"):
+            handle = getattr(self, name)
+            if handle:
+                with contextlib.suppress(OSError):
+                    fcntl.flock(handle, fcntl.LOCK_UN)
+                handle.close()
+                setattr(self, name, None)
 
     def holder(self) -> dict | None:
         """The running service's pid record, if its process is alive."""

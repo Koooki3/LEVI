@@ -62,6 +62,12 @@ def add_config_options(parser):
     parser.add_argument("--ui-port", type=int)
     parser.add_argument("--core-port", type=int)
     parser.add_argument(
+        "--adopt-workspace",
+        action="store_true",
+        help="turn an existing LEVI workspace that is not a live one into the live "
+        "workspace (refused otherwise)",
+    )
+    parser.add_argument(
         "--home", help="where status.json and the pid file live (default ~/.levi-live)"
     )
 
@@ -110,9 +116,37 @@ def check_socket_path(config):
         )
 
 
-def prepare(config):
-    """Create the workspace, the live.toml (if missing) and the marker."""
-    check_socket_path(config)
+def check_workspace(config, adopt=False):
+    """Refuse a workspace that is not a live one.
+
+    ``levi live`` writes a marker that switches on the automatic approver; it
+    must never land in the workspace of the product LEVI or any other LEVI
+    that people use. A workspace that already holds LEVI's own state
+    (``outputs/LEVI``, a catalog) without the live marker needs
+    ``--adopt-workspace``; the product checkout's ``.state`` is refused
+    always."""
+    root = config.workspace.expanduser().resolve()
+    if root == (controller.project_root() / ".state").resolve():
+        raise ValueError(
+            f"{root} is the checkout's own LEVI workspace (the product LEVI's): "
+            "the live service needs a workspace of its own"
+        )
+    live = (root / "live" / auto.MARKER).is_file()
+    holds = (root / "outputs/LEVI").exists() or (root / "datasets.json").exists()
+    if holds and not live and not adopt:
+        raise ValueError(
+            f"{root} already holds a LEVI workspace that is not a live one "
+            "(someone may be using it). Choose another --workspace, or pass "
+            "--adopt-workspace to turn it into the live workspace"
+        )
+
+
+def prepare(config, adopt=False, core=False):
+    """Create the workspace, the live.toml (if missing) and the marker.
+    ``core``: a page/core will be started, so its socket path must fit."""
+    if core:
+        check_socket_path(config)
+    check_workspace(config, adopt)
     config.live_dir.mkdir(parents=True, exist_ok=True)
     config.home.mkdir(parents=True, exist_ok=True)
     target = config.workspace / "live.toml"
@@ -303,8 +337,8 @@ def cmd_start(args) -> int:
     config = resolve_config(args)
     if args.daemon:
         return daemonize(args, config)
-    prepare(config)
-    instance = controller.Instance(config.home)
+    prepare(config, args.adopt_workspace, core=not args.no_core)
+    instance = controller.Instance(config.home, config.workspace)
     if not instance.acquire():
         holder = instance.holder() or {}
         print(
@@ -358,8 +392,10 @@ def cmd_start(args) -> int:
 
 
 def daemonize(args, config) -> int:
-    check_socket_path(config)
-    instance = controller.Instance(config.home)
+    if not args.no_core:
+        check_socket_path(config)
+    check_workspace(config, args.adopt_workspace)
+    instance = controller.Instance(config.home, config.workspace)
     if instance.holder():
         print(f"The live service is already running (pid {instance.holder()['pid']}).")
         return 1
@@ -442,6 +478,7 @@ def _forward(args) -> list:
     for flag, on in (
         ("--auto-approve", args.auto_approve),
         ("--process-backlog", args.process_backlog),
+        ("--adopt-workspace", args.adopt_workspace),
         ("--no-ui", args.no_ui),
         ("--no-core", args.no_core),
     ):
@@ -455,7 +492,7 @@ def _forward(args) -> list:
 
 def cmd_stop(args) -> int:
     config = resolve_config(args)
-    instance = controller.Instance(config.home)
+    instance = controller.Instance(config.home, config.workspace)
     holder = instance.holder()
     if not holder:
         print("The live service is not running.")
@@ -476,7 +513,7 @@ def cmd_stop(args) -> int:
 
 def read_status(config):
     value = jsonio.read(config.status_file)
-    holder = controller.Instance(config.home).holder()
+    holder = controller.Instance(config.home, config.workspace).holder()
     alive = bool(holder and value and value.get("pid") == holder["pid"])
     return value, alive, holder
 
@@ -749,8 +786,8 @@ def cmd_once(args) -> int:
         config.gpu.mode = "manual"
         config.vllm.port = port
         print(f"fake vLLM on 127.0.0.1:{port}")
-    prepare(config)
-    instance = controller.Instance(config.home)
+    prepare(config, args.adopt_workspace)
+    instance = controller.Instance(config.home, config.workspace)
     if not instance.acquire():
         print(
             "The live service is running; stop it first (levi live stop) or let it work."
@@ -794,6 +831,7 @@ def cmd_resume(args) -> int:
 
 def cmd_init(args) -> int:
     config = resolve_config(args)
+    check_workspace(config, args.adopt_workspace)
     target = config.workspace / "live.toml"
     config.workspace.mkdir(parents=True, exist_ok=True)
     if target.exists():

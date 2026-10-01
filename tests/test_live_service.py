@@ -489,7 +489,7 @@ def test_a_workspace_path_too_long_for_the_core_socket_is_refused_up_front(tmp_p
     c = cfg(tmp_path)
     c.service.workspace = str(tmp_path / ("w" * 90))
     with pytest.raises(ValueError, match="Unix socket"):
-        cli.prepare(c)
+        cli.prepare(c, core=True)
     done = live_cmd(tmp_path / ("w" * 90), tmp_path / "home2", "start", "--daemon")
     assert done.returncode == 2 and "too long" in done.stderr
     assert not (tmp_path / "home2/status.json").exists()  # nothing was started
@@ -549,3 +549,48 @@ def test_the_watchdog_gives_up_after_three_restarts_and_says_so_once(tmp_path):
     assert len(messages) == 4 and "giving up" in messages[-1]
     assert "Core failed to start" in messages[-1]
     assert front.state == "failed" and front.check(now + 9999) is None
+
+
+# --- the workspace guard and the per-workspace lock --------------------------------------
+
+
+def test_the_service_refuses_a_workspace_that_is_not_a_live_one(tmp_path):
+    c = cfg(tmp_path)
+    c.service.workspace = str(tmp_path / "ws")
+    # The product LEVI's workspace: LEVI state, no live marker.
+    (tmp_path / "ws/outputs/LEVI/workbench").mkdir(parents=True)
+    with pytest.raises(ValueError, match="not a live one"):
+        cli.prepare(c)
+    assert not (tmp_path / "ws/live/workspace.json").exists()  # nothing written
+    assert not (tmp_path / "ws/live.toml").exists()
+    cli.prepare(c, adopt=True)  # explicit, and then it is a live workspace
+    assert (tmp_path / "ws/live/workspace.json").exists()
+    cli.prepare(c)  # now fine without the flag
+    # The checkout's own .state is refused whatever the flag says.
+    own = cfg(tmp_path)
+    own.service.workspace = str(PROJECT / ".state")
+    with pytest.raises(ValueError, match="product LEVI"):
+        cli.prepare(own, adopt=True)
+
+
+def test_init_and_start_respect_the_guard(tmp_path):
+    (tmp_path / "ws/outputs/LEVI").mkdir(parents=True)
+    done = cli_run(tmp_path, "init")
+    assert done.returncode == 2 and "not a live one" in done.stderr
+    assert cli_run(tmp_path, "start", "--no-core").returncode == 2
+
+
+def test_two_homes_cannot_run_on_one_workspace(tmp_path):
+    ws = tmp_path / "ws"
+    first = controller.Instance(tmp_path / "home1", ws)
+    second = controller.Instance(tmp_path / "home2", ws)
+    other_ws = controller.Instance(tmp_path / "home3", tmp_path / "ws2")
+    same_home = controller.Instance(tmp_path / "home1", tmp_path / "ws3")
+    assert first.acquire()
+    assert not second.acquire()  # a different home, the same workspace
+    assert not same_home.acquire()  # the same home, another workspace
+    assert other_ws.acquire()
+    first.release()
+    assert second.acquire()
+    for item in (second, other_ws):
+        item.release()
