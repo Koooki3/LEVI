@@ -1053,3 +1053,56 @@ def test_an_unreadable_store_is_not_taken_for_an_answer(ctl, monkeypatch):
     monkeypatch.setattr(controller, "peek_run", lambda *a: None)
     ctl.awaiting["d"] = {"kind": "changes", "run_id": "r1", "changeset": "c1", "at": 0}
     assert ctl._human_acted("d", {}) is False
+
+
+def test_a_restarted_supervisor_reads_the_wait_for_a_person_and_starts_no_vllm(
+    ctl, monkeypatch
+):
+    """The wait lives in the dataset state: after a restart the dataset is not
+    queued (so vLLM is not cold-started for a worker that would only find the
+    plan unapproved) until the person has acted."""
+    from levi.live import jsonio, mirror
+
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    t = time.time()
+    ctl.tick(t)  # the mirror creates the dataset state
+    ctl.preempt("test", "the old supervisor is gone")
+    (name,) = mirror.list_states(ctl.config)
+    jsonio.update(
+        mirror.state_path(ctl.config, name),
+        lambda v: v.update(awaiting={"kind": "plan", "run_id": "r1", "at": t}),
+        default=dict,
+    )
+    monkeypatch.setattr(
+        controller,
+        "peek_run",
+        lambda *a: {"status": "planned", "plan": {"approval": None}},
+    )
+    again = controller.Controller(
+        ctl.config, probes=ctl.machine.probes(), log=lambda *a: None
+    )
+    spawned = []
+    again._spawn = spawned.append
+    ctl.machine.ports = {8000}
+    ctl.machine.policy_mib = 7685
+    try:
+        assert again.awaiting[name]["kind"] == "plan"
+        for n in range(3):
+            again.tick(t + 10 + n)
+        assert spawned == [] and not again.vllm.mine()
+        assert not any("starting vLLM" in e["text"] for e in again.events)
+        assert again.status(t + 20)["datasets"][name]["state"] == "awaiting_approval"
+        # The person approves: the wait is forgotten (here and on disk) and the
+        # dataset is worked on.
+        monkeypatch.setattr(
+            controller,
+            "peek_run",
+            lambda *a: {"status": "planned", "plan": {"approval": {"by": "me"}}},
+        )
+        again.awaiting[name]["at"] = 0
+        again.tick(t + 30)
+        assert name not in again.awaiting
+        assert "awaiting" not in mirror.load_state(ctl.config, name)
+    finally:
+        again.shutdown()

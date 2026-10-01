@@ -145,7 +145,12 @@ class Controller:
         self.worker_started = 0.0
         self.backoff: dict = {}
         self.failures: dict = {}
+        # Datasets waiting for a person (plan not approved, draft not
+        # committed): remembered in the dataset state across restarts.
         self.awaiting: dict = {}
+        for name, state in mirror.list_states(config).items():
+            if isinstance(state.get("awaiting"), dict):
+                self.awaiting[name] = {**state["awaiting"], "at": 0.0}
         self.policy_changed_at: float | None = None
         self.gate = gpumgr.Gate(True, "open", "no evaluation")
         self.gate_closed_at: float | None = None
@@ -265,6 +270,12 @@ class Controller:
             )
         if acted:
             self.awaiting.pop(name, None)
+            with contextlib.suppress(Exception):
+                jsonio.update(
+                    mirror.state_path(self.config, name),
+                    lambda v: (v.pop("awaiting", None), v)[1],
+                    default=dict,
+                )
             return True
         info["at"] = time.time()
         return False
