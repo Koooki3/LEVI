@@ -2999,7 +2999,6 @@ button.levi-pool-danger {
 @keyframes levi-pulse-beat {
   50% {
     box-shadow: 0 0 0 6px #ffffff00;
-    opacity: 0.55;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -3020,7 +3019,8 @@ button.levi-pool-danger {
     sans-serif;
   text-align: center;
 }
-.levi-live-nav.is-red .levi-pulse-count {
+.levi-live-nav.is-red .levi-pulse-count,
+.levi-live-home.is-red .levi-pulse-count {
   background: var(--pulse-red);
   color: #2a0a07;
 }
@@ -3101,7 +3101,12 @@ button.levi-pool-danger {
     margin: 16px 0 0;
     padding: 14px 16px;
   }
+  .levi-live-home .levi-pulse-count {
+    order: 3;
+  }
   .levi-live-home-go {
-    flex: 1 1 100%;
+    order: 4;
+    flex: 1 1 0;
+    min-width: 0;
   }
 }

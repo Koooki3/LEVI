@@ -98,10 +98,13 @@ export function useLivePoll(): LivePoll {
           delay: nextDelay(evaluating, 0),
         }));
       }
+      // Not the live workspace (the explanation page): nothing to watch.
+      if (lastStatus?.enabled === false) return;
       schedule();
     }
     const onVisibility = () => {
       clearTimeout(timer);
+      if (lastStatus?.enabled === false) return;
       if (visible()) void tick();
       else controller?.abort();
     };
