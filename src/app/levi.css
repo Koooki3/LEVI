@@ -2956,3 +2956,8 @@ button.levi-pool-danger {
   color: #dbc58f;
   line-height: 1.6;
 }
+.levi-live-attention strong.levi-live-inline {
+  display: inline;
+  font-size: inherit;
+  margin: 0;
+}

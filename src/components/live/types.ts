@@ -135,6 +135,10 @@ export interface ServiceStatus {
   sessions?: LiveSession[];
   fr3?: Fr3Health;
   /** Set when the service needs a person (`levi live resume`). */
+  /** Why nothing is being labelled, when that does not pass by itself. */
+  labelling_paused?: { code?: string; reason?: string; since?: number } | null;
+  /** When the main loop last ticked (updated_at comes from another thread). */
+  loop_at?: number | null;
   attention?: { code?: string; reason?: string; since?: number } | null;
   /** Whether the page / core API the service starts came up. */
   frontend?: {

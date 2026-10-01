@@ -303,6 +303,10 @@ const DECISION_NOTES: Record<string, [string, string]> = {
     "The model server could not be woken",
     "The service could not read the GPU state or wake the model server; see the last error.",
   ],
+  evaluation_active: [
+    "The model is not started while an evaluation is under way",
+    "Starting the model is a heavy GPU load whose effect on the policy has not been measured, so it starts only before a session (standby) or after it ends. Start the service with --prewarm while the robot is idle to have it ready beforehand.",
+  ],
   gate_closed: [
     "Waiting for the robot policy to pause before starting the model",
     "Starting the model is a heavy GPU load of about a minute, so it never starts while the policy is inferring. It starts between episodes.",
@@ -407,7 +411,44 @@ export function resetRemaining(
   return since + wait - nowSeconds;
 }
 
+/** The main loop is called stuck after this long without a tick. */
+export const LOOP_STALE_S = 300;
+
+/** What a pause means and what to do about it, by `labelling_paused.code`. */
+export const PAUSE_NOTES: Record<
+  string,
+  { title: string; detail: string; todo: string; command?: string }
+> = {
+  vllm_failed: {
+    title: "The model server failed to start several times",
+    detail: "The service gave up and will not try again by itself.",
+    todo: "Fix the cause (see the reason; the model log is live/logs/vllm-launch.log in the live workspace), then resume:",
+    command: "levi live resume",
+  },
+  vllm_error: {
+    title: "The last model start failed",
+    detail:
+      "The service retries on its own with growing waits. If it keeps failing it pauses and asks you to resume.",
+    todo: "Nothing to do yet. If it does not recover, read the reason and the model log (live/logs/vllm-launch.log in the live workspace).",
+  },
+  insufficient_vram: {
+    title: "There is not enough free GPU memory for the model",
+    detail:
+      "Even the shortest context the model can serve does not fit beside the other GPU users.",
+    todo: "Free GPU memory (stop other GPU jobs), or restart the policy server with the smaller memory share from the guide (XLA_PYTHON_CLIENT_MEM_FRACTION=.22). Labelling resumes by itself.",
+  },
+  unknown_client: {
+    title: "A policy server runs that no evaluation session vouches for",
+    detail: "The service keeps the GPU free for it, so nothing is labelled.",
+    todo: "Start the evaluation client with LEVI labelling on (it reports its state), or stop the stray policy server. Labelling resumes by itself.",
+  },
+};
+
 export interface NeedsPerson {
+  /** Nothing is being labelled and it will not pass by itself. */
+  paused: { code?: string; reason?: string; since?: number } | null;
+  /** Seconds since the main loop last ticked, when that is too long. */
+  loopStalledS: number | null;
   /** The service gave up on something (`levi live resume`). */
   attention: { code?: string; reason?: string } | null;
   /** Datasets waiting for a person in the LEVI page. */
@@ -419,13 +460,19 @@ export interface NeedsPerson {
 export function needsPerson(
   service: ServiceStatus | null | undefined,
   rows: Record<string, DatasetRow>,
+  nowSeconds = Date.now() / 1000,
 ): NeedsPerson {
   const awaiting = Object.entries(rows)
     .filter(([, r]) => r.state === "awaiting_approval")
     .map(([name, r]) => ({ name, kind: r.awaiting ?? null }));
   const front = service?.frontend;
+  const loopAge = service?.loop_at ? nowSeconds - service.loop_at : null;
   return {
-    attention: service?.attention ?? null,
+    paused: service?.labelling_paused ?? null,
+    loopStalledS:
+      loopAge != null && loopAge > LOOP_STALE_S ? Math.round(loopAge) : null,
+    // `labelling_paused` says the same, with the reason a person needs.
+    attention: service?.labelling_paused ? null : (service?.attention ?? null),
     awaiting,
     frontendFailed:
       front?.state === "failed"

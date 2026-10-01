@@ -12,7 +12,7 @@ import {
 } from "./live-logic";
 import { Chip, Field, type Tone } from "./session-panels";
 import type { LiveStatusResponse } from "./types";
-import type { NeedsPerson } from "./live-logic";
+import { PAUSE_NOTES, type NeedsPerson } from "./live-logic";
 
 export const START_COMMAND = "levi live start";
 export const RESUME_COMMAND = "levi live resume";
@@ -46,11 +46,52 @@ export function CopyCommand({ command }: { command: string }) {
  * draft in the LEVI page, or look at a page that did not start. */
 export function AttentionBanner({ need }: { need: NeedsPerson }) {
   const { t } = useLocale();
-  if (!need.attention && !need.awaiting.length && !need.frontendFailed)
+  if (
+    !need.paused &&
+    !need.attention &&
+    !need.awaiting.length &&
+    !need.frontendFailed &&
+    need.loopStalledS == null
+  )
     return null;
+  const note = need.paused ? PAUSE_NOTES[need.paused.code ?? ""] : undefined;
   return (
     <section className="levi-live-attention" role="alert" aria-live="polite">
       <strong>{t("The live service needs a person")}</strong>
+      {need.paused && (
+        <>
+          <p>
+            <strong className="levi-live-inline">
+              {t("The service paused labelling")}
+            </strong>
+            {note ? `: ${t(note.title)}. ` : ". "}
+            {t(
+              "The evaluation is not affected and no episode is lost: they are collected and labelled after labelling resumes.",
+            )}
+          </p>
+          {note && (
+            <p>
+              {t(note.detail)} {t(note.todo)}
+            </p>
+          )}
+          {need.paused.reason && (
+            <p className="levi-live-reasons-line">
+              <span className="levi-pool-muted">{t("Reason")}:</span>{" "}
+              <code>{need.paused.reason}</code>
+            </p>
+          )}
+          {note?.command && <CopyCommand command={note.command} />}
+        </>
+      )}
+      {need.loopStalledS != null && (
+        <p>
+          {t("The service's main loop may be stuck")}:{" "}
+          {Math.round(need.loopStalledS / 60)} {t("min since its last tick")}.{" "}
+          {t(
+            "The status still updates, but nothing new is started. Run `levi live doctor`; if it stays stuck, `levi live stop` and start it again.",
+          )}
+        </p>
+      )}
       {need.attention && (
         <>
           <p>

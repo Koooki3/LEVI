@@ -20,6 +20,7 @@ import {
   writeBrowserStorage,
 } from "@/utils/browserStorage";
 import { T, useLocale } from "./levi-locale";
+import { friendlyError } from "./live/friendly-error";
 
 const base = "/api/levi/agent/v1";
 async function api<T>(path: string, value?: unknown): Promise<T> {
@@ -428,7 +429,7 @@ export default function AgentWorkbench() {
         </nav>
         {error && (
           <p role="alert" className="levi-agent-error">
-            {error}
+            {friendlyError(error, t)}
           </p>
         )}
         {notice && <p role="status">{t(notice)}</p>}

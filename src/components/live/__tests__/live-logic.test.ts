@@ -7,6 +7,7 @@ import {
   isEvaluating,
   isLost,
   needsPerson,
+  PAUSE_NOTES,
   resetRemaining,
   nextDelay,
   rankDatasets,
@@ -301,6 +302,46 @@ describe("needs a person", () => {
     expect(need.attention).toBeNull();
     expect(need.awaiting).toEqual([]);
     expect(need.frontendFailed).toBeNull();
+  });
+});
+
+describe("labelling paused and a stuck loop", () => {
+  const svc = {
+    labelling_paused: { code: "insufficient_vram", reason: "9 GiB free" },
+    attention: { code: "vllm_failed", reason: "x" },
+    loop_at: 1000,
+  } as ServiceStatus;
+  test("a pause is shown with its reason and replaces the older attention", () => {
+    const need = needsPerson(svc, {}, 1100);
+    expect(need.paused?.code).toBe("insufficient_vram");
+    expect(need.attention).toBeNull();
+    expect(need.loopStalledS).toBeNull();
+  });
+  test("the loop is stuck after 300 s without a tick", () => {
+    expect(needsPerson(svc, {}, 1300).loopStalledS).toBeNull();
+    expect(needsPerson(svc, {}, 1400).loopStalledS).toBe(400);
+  });
+  test("every pause code has words and a thing to do", () => {
+    for (const code of [
+      "vllm_failed",
+      "vllm_error",
+      "insufficient_vram",
+      "unknown_client",
+    ]) {
+      expect(PAUSE_NOTES[code].title.length).toBeGreaterThan(10);
+      expect(PAUSE_NOTES[code].todo.length).toBeGreaterThan(10);
+    }
+    expect(PAUSE_NOTES.vllm_failed.command).toBe("levi live resume");
+  });
+  test("an evaluation under way explains why the model waits", () => {
+    const e = explainGate({
+      state: "gpu_wait",
+      gpu: {
+        gate: { open: true },
+        decision: { allowed: false, code: "evaluation_active" },
+      },
+    });
+    expect(e?.title).toContain("evaluation is under way");
   });
 });
 

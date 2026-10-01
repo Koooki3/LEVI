@@ -95,7 +95,10 @@ export default function LivePage() {
   const serviceDown = !!status?.enabled && !alive;
 
   const fault = useMemo(() => detectFault(fr3, sessions), [fr3, sessions]);
-  const need = useMemo(() => needsPerson(service, rows), [service, rows]);
+  const need = useMemo(
+    () => needsPerson(service, rows, (poll.lastOk ?? Date.now()) / 1000),
+    [service, rows, poll.lastOk],
+  );
 
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<ReviewFilter>("latest");
