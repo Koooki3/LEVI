@@ -1129,10 +1129,40 @@ def test_a_draft_wait_ends_when_the_run_or_the_draft_is_no_longer_there(
 
 
 def test_an_unreadable_store_is_not_taken_for_an_answer(ctl, monkeypatch):
-    monkeypatch.setattr(controller, "peek_record", lambda *a: None)
-    monkeypatch.setattr(controller, "peek_run", lambda *a: None)
+    """A locked or unreadable SQLite file is not "the draft was deleted": the
+    wait goes on (and the awaiting record stays, here and on disk)."""
+    import sqlite3
+
+    db = Path(ctl.config.workspace) / "outputs/LEVI/workbench/agent/workbench.sqlite3"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE records (kind TEXT, id TEXT, body TEXT)")
+    con.execute(
+        "INSERT INTO records VALUES ('runs', 'r1', ?)",
+        (json.dumps({"status": "waiting_for_review", "plan": {}}),),
+    )
+    con.commit()
+    con.close()
+    real = sqlite3.connect
+    calls = []
+
+    def flaky(*a, **k):
+        calls.append(1)
+        if len(calls) == 1:  # the draft's read hits a lock; the run's does not
+            raise sqlite3.OperationalError("database is locked")
+        return real(*a, **k)
+
+    monkeypatch.setattr(controller.sqlite3, "connect", flaky)
     ctl.awaiting["d"] = {"kind": "changes", "run_id": "r1", "changeset": "c1", "at": 0}
     assert ctl._human_acted("d", {}) is False
+    assert "d" in ctl.awaiting
+    # Readable and the draft really is not there: the wait is over.
+    ctl.awaiting["d"]["at"] = 0
+    assert ctl._human_acted("d", {}) is True
+    # No store file at all: unknown, not an answer.
+    ctl.awaiting["e"] = {"kind": "plan", "run_id": "r1", "at": 0}
+    db.unlink()
+    assert ctl._human_acted("e", {}) is False
 
 
 def test_a_restarted_supervisor_reads_the_wait_for_a_person_and_starts_no_vllm(

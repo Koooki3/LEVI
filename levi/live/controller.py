@@ -49,41 +49,42 @@ def project_root() -> Path:
 RUN_ENDED = ("cancelled", "failed", "succeeded", "partially_succeeded")
 
 
-def peek_run(workspace, run_id) -> dict | None:
-    """A run record read straight from the store's SQLite file, read-only, so
-    the idle supervisor need not import LEVI's agent package."""
+class StoreUnreadable(Exception):
+    """The store's SQLite file is missing or could not be read (locked,
+    damaged): not the same as "no such record"."""
+
+
+def _peek(workspace, query, args):
     path = Path(workspace) / "outputs/LEVI/workbench/agent/workbench.sqlite3"
     if not path.is_file():
-        return None
+        raise StoreUnreadable(f"{path} does not exist")
     try:
         db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
         try:
-            row = db.execute(
-                "SELECT body FROM records WHERE kind='runs' AND id=?", (run_id,)
-            ).fetchone()
+            row = db.execute(query, args).fetchone()
         finally:
             db.close()
-    except sqlite3.Error:
-        return None
+    except sqlite3.Error as exc:
+        raise StoreUnreadable(str(exc)) from exc
     return json.loads(row[0]) if row else None
+
+
+def peek_run(workspace, run_id) -> dict | None:
+    """A run record read straight from the store's SQLite file, read-only, so
+    the idle supervisor need not import LEVI's agent package. None: there is
+    no such run; ``StoreUnreadable``: the file could not be read."""
+    return _peek(
+        workspace, "SELECT body FROM records WHERE kind='runs' AND id=?", (run_id,)
+    )
 
 
 def peek_record(workspace, kind, record_id) -> dict | None:
     """Any store record (``changes`` for a draft) read the same way."""
-    path = Path(workspace) / "outputs/LEVI/workbench/agent/workbench.sqlite3"
-    if not path.is_file():
-        return None
-    try:
-        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
-        try:
-            row = db.execute(
-                "SELECT body FROM records WHERE kind=? AND id=?", (kind, record_id)
-            ).fetchone()
-        finally:
-            db.close()
-    except sqlite3.Error:
-        return None
-    return json.loads(row[0]) if row else None
+    return _peek(
+        workspace,
+        "SELECT body FROM records WHERE kind=? AND id=?",
+        (kind, record_id),
+    )
 
 
 def release_leases(workspace, run_ids) -> int:
@@ -269,21 +270,12 @@ class Controller:
         if time.time() - info["at"] < self.config.pipeline.human_recheck_s:
             return False
         ws = self.config.workspace
-        if info.get("kind") == "changes" and info.get("changeset"):
-            change = peek_record(ws, "changes", info["changeset"])
-            run = peek_run(ws, info.get("run_id")) if info.get("run_id") else None
-            acted = bool(
-                (change and change.get("status") in ("committed", "rejected"))
-                # The person dealt with the run itself (cancelled it, it
-                # ended) or the draft is gone: nothing is left to wait for.
-                or (run and run.get("status") in RUN_ENDED)
-                or (change is None and run)
-            )
-        else:
-            run = peek_run(ws, info.get("run_id")) if info.get("run_id") else None
-            acted = bool(
-                run and (run["plan"].get("approval") or run["status"] != "planned")
-            )
+        try:
+            acted = self._acted(ws, info)
+        except StoreUnreadable:
+            # A locked or missing store is not an answer: keep waiting.
+            info["at"] = time.time()
+            return False
         if acted:
             self.awaiting.pop(name, None)
             with contextlib.suppress(Exception):
@@ -295,6 +287,21 @@ class Controller:
             return True
         info["at"] = time.time()
         return False
+
+    @staticmethod
+    def _acted(ws, info) -> bool:
+        if info.get("kind") == "changes" and info.get("changeset"):
+            change = peek_record(ws, "changes", info["changeset"])
+            run = peek_run(ws, info.get("run_id")) if info.get("run_id") else None
+            return bool(
+                (change and change.get("status") in ("committed", "rejected"))
+                # The person dealt with the run itself (cancelled it, it
+                # ended) or the draft is gone: nothing is left to wait for.
+                or (run and run.get("status") in RUN_ENDED)
+                or (change is None and run)
+            )
+        run = peek_run(ws, info.get("run_id")) if info.get("run_id") else None
+        return bool(run and (run["plan"].get("approval") or run["status"] != "planned"))
 
     # --- GPU ---------------------------------------------------------------------------
 
