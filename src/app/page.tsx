@@ -5,6 +5,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import HfAuthButton from "@/components/hf-auth-button";
 import { T, useLocale } from "@/components/levi-locale";
+import { LiveBanner } from "@/components/live/live-nav";
 // Public LeRobot datasets, checked reachable on 2026-09-20; keep in step with
 // DEMOS in levi/catalog.py.
 const DEMOS = ["lerobot/svla_so101_pickplace", "lerobot/aloha_static_coffee"];
@@ -61,6 +62,7 @@ function Landing() {
   }
   return (
     <main className="levi-home">
+      <LiveBanner />
       <section className="levi-hero">
         <div>
           <div className="levi-eyebrow">

@@ -1996,5 +1996,15 @@
   "Someone else's model server is on the port": "别人的模型服务器占着该端口",
   "A vLLM this service did not start is answering on its port, so the service leaves it alone and labels nothing.": "端口上有一个不是本服务启动的 vLLM 在响应，服务不会去动它，也就没有在标注。",
   "Stop that server, or set vllm.adopt_external = true in live.toml if you want the service to use it. Labelling resumes by itself once the port is free.": "请停掉那个服务器；如果想让本服务使用它，可在 live.toml 里设置 vllm.adopt_external = true。端口空闲后标注会自动恢复。",
-  "Paused for the robot: the evaluation is running its policy on the GPU, so this action is refused for a moment. Nothing is lost; try again in a few seconds (between episodes). A run that was already going stops as blocked and continues by itself once the gate has stayed open for a few seconds.": "为机器人让路：评测正在 GPU 上运行策略，所以这个操作暂时被拒绝。不会丢任何东西；请几秒后再试（片段之间）。已经在跑的运行会停成“blocked”，闸门连续打开几秒后会自己继续。"
+  "Paused for the robot: the evaluation is running its policy on the GPU, so this action is refused for a moment. Nothing is lost; try again in a few seconds (between episodes). A run that was already going stops as blocked and continues by itself once the gate has stayed open for a few seconds.": "为机器人让路：评测正在 GPU 上运行策略，所以这个操作暂时被拒绝。不会丢任何东西；请几秒后再试（片段之间）。已经在跑的运行会停成“blocked”，闸门连续打开几秒后会自己继续。",
+  "The live status cannot be read right now.": "暂时读不到实时状态。",
+  "The live service is not running. Open the live page for the command to start it.": "实时服务没有运行。打开实时评测页面查看启动命令。",
+  "The FR3 arm shows the red light, or an evaluation session reported a fault. Open the live page.": "FR3 机械臂亮红灯，或有评测会话报告了故障。请打开实时评测页面。",
+  "Labelling is paused and needs a person. Open the live page to see why.": "标注已暂停，需要人处理。打开实时评测页面查看原因。",
+  "A run stopped for the robot's policy and needs you to press Resume.": "有运行因机器人策略推理而停下，需要你点“继续”。",
+  "A plan or draft is waiting for you in the LEVI page.": "有计划或草稿在 LEVI 页面等你处理。",
+  "A run is paused for the robot's policy and will continue by itself.": "有运行因机器人策略推理而暂停，会自动继续。",
+  "Labelling finished episodes in the background.": "正在后台标注已完成的片段。",
+  "Running normally; nothing is being labelled right now.": "运行正常；目前没有在标注。",
+  "Open the live page": "打开实时评测页面"
 }

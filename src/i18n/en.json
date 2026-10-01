@@ -1996,5 +1996,15 @@
   "Someone else's model server is on the port": "Someone else's model server is on the port",
   "A vLLM this service did not start is answering on its port, so the service leaves it alone and labels nothing.": "A vLLM this service did not start is answering on its port, so the service leaves it alone and labels nothing.",
   "Stop that server, or set vllm.adopt_external = true in live.toml if you want the service to use it. Labelling resumes by itself once the port is free.": "Stop that server, or set vllm.adopt_external = true in live.toml if you want the service to use it. Labelling resumes by itself once the port is free.",
-  "Paused for the robot: the evaluation is running its policy on the GPU, so this action is refused for a moment. Nothing is lost; try again in a few seconds (between episodes). A run that was already going stops as blocked and continues by itself once the gate has stayed open for a few seconds.": "Paused for the robot: the evaluation is running its policy on the GPU, so this action is refused for a moment. Nothing is lost; try again in a few seconds (between episodes). A run that was already going stops as blocked and continues by itself once the gate has stayed open for a few seconds."
+  "Paused for the robot: the evaluation is running its policy on the GPU, so this action is refused for a moment. Nothing is lost; try again in a few seconds (between episodes). A run that was already going stops as blocked and continues by itself once the gate has stayed open for a few seconds.": "Paused for the robot: the evaluation is running its policy on the GPU, so this action is refused for a moment. Nothing is lost; try again in a few seconds (between episodes). A run that was already going stops as blocked and continues by itself once the gate has stayed open for a few seconds.",
+  "The live status cannot be read right now.": "The live status cannot be read right now.",
+  "The live service is not running. Open the live page for the command to start it.": "The live service is not running. Open the live page for the command to start it.",
+  "The FR3 arm shows the red light, or an evaluation session reported a fault. Open the live page.": "The FR3 arm shows the red light, or an evaluation session reported a fault. Open the live page.",
+  "Labelling is paused and needs a person. Open the live page to see why.": "Labelling is paused and needs a person. Open the live page to see why.",
+  "A run stopped for the robot's policy and needs you to press Resume.": "A run stopped for the robot's policy and needs you to press Resume.",
+  "A plan or draft is waiting for you in the LEVI page.": "A plan or draft is waiting for you in the LEVI page.",
+  "A run is paused for the robot's policy and will continue by itself.": "A run is paused for the robot's policy and will continue by itself.",
+  "Labelling finished episodes in the background.": "Labelling finished episodes in the background.",
+  "Running normally; nothing is being labelled right now.": "Running normally; nothing is being labelled right now.",
+  "Open the live page": "Open the live page"
 }

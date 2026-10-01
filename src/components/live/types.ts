@@ -164,6 +164,13 @@ export interface LiveStatusResponse {
   service?: ServiceStatus | null;
   faults?: { dataset: string; reasons: string[] }[];
   fr3_red?: boolean;
+  /** Runs the live gate stopped that a person started: `waiting` continue by
+   * themselves, `needs_person` do not (docs/LIVE.md). */
+  blocked_runs?: {
+    count?: number;
+    waiting?: string[];
+    needs_person?: string[];
+  };
 }
 
 export interface LiveSessionsResponse {

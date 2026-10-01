@@ -2961,3 +2961,147 @@ button.levi-pool-danger {
   font-size: inherit;
   margin: 0;
 }
+
+/* The live evaluation entry: navigation link and home banner, shown only in
+   the live annotation workspace (src/components/live/live-nav.tsx). The dot
+   colours say the state (green fine, blue labelling, amber needs attention,
+   red robot fault); the label and the hover say it in words. */
+:root {
+  --pulse-green: #6fdc8c;
+  --pulse-blue: #6cb8ff;
+  --pulse-amber: #f1c677;
+  --pulse-red: #ff6b5e;
+  --pulse-grey: #8a9285;
+}
+.levi-pulse-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--pulse-grey);
+  box-shadow: 0 0 0 3px #ffffff14;
+}
+.levi-pulse-dot.is-green {
+  background: var(--pulse-green);
+}
+.levi-pulse-dot.is-blue {
+  background: var(--pulse-blue);
+  animation: levi-pulse-beat 1.6s ease-in-out infinite;
+}
+.levi-pulse-dot.is-amber {
+  background: var(--pulse-amber);
+}
+.levi-pulse-dot.is-red {
+  background: var(--pulse-red);
+  animation: levi-pulse-beat 0.9s ease-in-out infinite;
+}
+@keyframes levi-pulse-beat {
+  50% {
+    box-shadow: 0 0 0 6px #ffffff00;
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .levi-pulse-dot.is-blue,
+  .levi-pulse-dot.is-red {
+    animation: none;
+  }
+}
+.levi-pulse-count {
+  display: inline-block;
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: var(--pulse-amber);
+  color: #1d1a0e;
+  font:
+    700 11px/16px Arial,
+    sans-serif;
+  text-align: center;
+}
+.levi-live-nav.is-red .levi-pulse-count {
+  background: var(--pulse-red);
+  color: #2a0a07;
+}
+.levi-header .levi-live-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid #d4f77960;
+  border-radius: 6px;
+  background: #d4f77914;
+  color: #f1efdf;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.levi-header .levi-live-nav:hover {
+  background: #d4f77928;
+  color: #d4f779;
+}
+.levi-header .levi-live-nav.is-amber {
+  border-color: #f1c67790;
+}
+.levi-header .levi-live-nav.is-red {
+  border-color: #ff6b5ea0;
+  background: #ff6b5e22;
+}
+.levi-live-home {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 24px 0 0;
+  padding: 18px 22px;
+  border: 1px solid #d4f77960;
+  border-radius: 12px;
+  background: #1d251e;
+  color: #f1efdf;
+}
+.levi-live-home:hover {
+  border-color: #d4f779;
+}
+.levi-live-home.is-amber {
+  border-color: #f1c67790;
+}
+.levi-live-home.is-red {
+  border-color: #ff6b5ea0;
+  background: #3a1613;
+}
+.levi-live-home .levi-pulse-dot {
+  width: 14px;
+  height: 14px;
+}
+.levi-live-home-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.levi-live-home-text strong {
+  font-size: 18px;
+}
+.levi-live-home-text span {
+  font-size: 13px;
+  color: #bec5b5;
+}
+.levi-live-home-go {
+  flex: 0 0 auto;
+  font-weight: 700;
+  color: #d4f779;
+  white-space: nowrap;
+}
+@media (max-width: 800px) {
+  .levi-header .levi-live-nav {
+    padding: 5px 9px;
+  }
+  .levi-live-home {
+    flex-wrap: wrap;
+    margin: 16px 0 0;
+    padding: 14px 16px;
+  }
+  .levi-live-home-go {
+    flex: 1 1 100%;
+  }
+}

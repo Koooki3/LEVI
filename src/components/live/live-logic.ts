@@ -7,6 +7,7 @@ import type {
   DemoRow,
   Fr3Health,
   LiveSession,
+  LiveStatusResponse,
   ServiceStatus,
 } from "./types";
 
@@ -583,4 +584,95 @@ export function sortSessions(sessions: LiveSession[]): LiveSession[] {
       rank(a) - rank(b) ||
       datasetOfSession(a).localeCompare(datasetOfSession(b)),
   );
+}
+
+/** The navigation entry's light: green idle/normal, blue labelling, amber
+ * paused or needs a person (including a blocked run), red FR3 fault or red
+ * light, grey when the status cannot be read. */
+export type PulseLight = "green" | "blue" | "amber" | "red" | "grey";
+
+/** What the one-sentence hover explains (a key into `PULSE_NOTES`). */
+export type PulseReason =
+  | "unreachable"
+  | "offline"
+  | "fault"
+  | "paused"
+  | "blocked_person"
+  | "awaiting"
+  | "blocked_waiting"
+  | "annotating"
+  | "idle";
+
+export interface Pulse {
+  light: PulseLight;
+  reason: PulseReason;
+  /** Things waiting for a person (shown as a number when above 0). */
+  count: number;
+}
+
+/** English sentences (looked up in the locale catalogs by the component). */
+export const PULSE_NOTES: Record<PulseReason, string> = {
+  unreachable: "The live status cannot be read right now.",
+  offline:
+    "The live service is not running. Open the live page for the command to start it.",
+  fault:
+    "The FR3 arm shows the red light, or an evaluation session reported a fault. Open the live page.",
+  paused:
+    "Labelling is paused and needs a person. Open the live page to see why.",
+  blocked_person:
+    "A run stopped for the robot's policy and needs you to press Resume.",
+  awaiting: "A plan or draft is waiting for you in the LEVI page.",
+  blocked_waiting:
+    "A run is paused for the robot's policy and will continue by itself.",
+  annotating: "Labelling finished episodes in the background.",
+  idle: "Running normally; nothing is being labelled right now.",
+};
+
+/** The pulse of the live service, from `/api/levi/live/status`. `failures`
+ * is the number of failed polls in a row (two make the answer stale). */
+export function livePulse(
+  status: LiveStatusResponse | null | undefined,
+  failures = 0,
+  nowSeconds = Date.now() / 1000,
+): Pulse {
+  if (!status?.enabled || failures >= 2)
+    return { light: "grey", reason: "unreachable", count: 0 };
+  if (!status.alive) return { light: "amber", reason: "offline", count: 1 };
+  const service = status.service ?? null;
+  const rows = service?.datasets ?? {};
+  const fault = detectFault(service?.fr3, service?.sessions ?? []);
+  const need = needsPerson(service, rows, nowSeconds);
+  const blocked = status.blocked_runs;
+  const stopped = need.paused || need.attention || need.loopStalledS != null;
+  const items =
+    (need.paused ? 1 : 0) +
+    (!need.paused && need.attention ? 1 : 0) +
+    (need.loopStalledS != null ? 1 : 0) +
+    (need.frontendFailed ? 1 : 0) +
+    need.awaiting.length +
+    (blocked?.count ?? 0);
+  const faults = fault.sessions.length + (fault.redLight ? 1 : 0);
+  if (fault.active || status.fr3_red)
+    return { light: "red", reason: "fault", count: faults + items };
+  const reason: PulseReason | null =
+    stopped || need.frontendFailed
+      ? "paused"
+      : (blocked?.needs_person?.length ?? 0) > 0
+        ? "blocked_person"
+        : need.awaiting.length > 0
+          ? "awaiting"
+          : (blocked?.count ?? 0) > 0
+            ? "blocked_waiting"
+            : null;
+  if (reason) return { light: "amber", reason, count: items };
+  const busy =
+    service?.state === "annotating" ||
+    service?.state === "gpu_wait" ||
+    service?.state === "active" ||
+    Object.values(rows).some(
+      (r) => r.state === "annotating" || r.annotating > 0,
+    );
+  return busy
+    ? { light: "blue", reason: "annotating", count: 0 }
+    : { light: "green", reason: "idle", count: 0 };
 }

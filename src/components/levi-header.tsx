@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { LanguageSwitch, T } from "./levi-locale";
+import { LiveNavLink } from "./live/live-nav";
 export default function LeviHeader() {
   return (
     <T>
@@ -11,6 +12,7 @@ export default function LeviHeader() {
             <span className="levi-wordmark-caption">ROBOT DATA ATELIER</span>
           </Link>
           <nav>
+            <LiveNavLink />
             <Link href="/explore">
               <T>Explore</T>
             </Link>
@@ -19,9 +21,6 @@ export default function LeviHeader() {
             </Link>
             <Link href="/pool">
               <T>Training pool</T>
-            </Link>
-            <Link href="/live">
-              <T>Live evaluation</T>
             </Link>
             <Link href="/guide">
               <T>Guide</T>
