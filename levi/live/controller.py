@@ -65,6 +65,24 @@ def peek_run(workspace, run_id) -> dict | None:
     return json.loads(row[0]) if row else None
 
 
+def peek_record(workspace, kind, record_id) -> dict | None:
+    """Any store record (``changes`` for a draft) read the same way."""
+    path = Path(workspace) / "outputs/LEVI/workbench/agent/workbench.sqlite3"
+    if not path.is_file():
+        return None
+    try:
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+        try:
+            row = db.execute(
+                "SELECT body FROM records WHERE kind=? AND id=?", (kind, record_id)
+            ).fetchone()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return None
+    return json.loads(row[0]) if row else None
+
+
 def release_leases(workspace, run_ids) -> int:
     """Delete the execution leases of runs whose worker is known to be dead.
 
@@ -220,19 +238,24 @@ class Controller:
         return [n for _, n in sorted(names)]
 
     def _human_acted(self, name, state) -> bool:
-        """After a person's gate: has the run the worker waited on moved?"""
+        """Has the person done what the worker waited for? A plan: approved (or
+        moved on). A draft: committed or rejected -- approval alone is not
+        enough, the worker cannot commit without the approver."""
         info = self.awaiting[name]
         if time.time() - info["at"] < self.config.pipeline.human_recheck_s:
             return False
-        batch = (state or {}).get("current") or {}
-        ids = [r["run_id"] for r in (batch.get("temporal") or {}).values()]
-        if batch.get("anchored"):
-            ids.append(batch["anchored"]["run_id"])
-        for run_id in ids:
-            run = peek_run(self.config.workspace, run_id)
-            if run and (run["plan"].get("approval") or run["status"] != "planned"):
-                self.awaiting.pop(name, None)
-                return True
+        ws = self.config.workspace
+        if info.get("kind") == "changes" and info.get("changeset"):
+            change = peek_record(ws, "changes", info["changeset"])
+            acted = bool(change and change.get("status") in ("committed", "rejected"))
+        else:
+            run = peek_run(ws, info.get("run_id")) if info.get("run_id") else None
+            acted = bool(
+                run and (run["plan"].get("approval") or run["status"] != "planned")
+            )
+        if acted:
+            self.awaiting.pop(name, None)
+            return True
         info["at"] = time.time()
         return False
 
@@ -625,8 +648,14 @@ class Controller:
         elif code == 13:
             self.event(f"batch for {name} paused")
         elif code == 11:
-            self.awaiting[name] = {"at": now}
-            self.event(f"{name}: waiting for a person to approve")
+            gate = (jsonio.read(self.config.live_dir / "worker.json") or {}).get(
+                "awaiting"
+            ) or {}
+            self.awaiting[name] = {"at": now, **gate}
+            what = (
+                "approve the plan" if gate.get("kind") == "plan" else "commit the draft"
+            )
+            self.event(f"{name}: waiting for a person to {what}")
         elif code == 10:
             self.backoff[name] = now + 20
             self.event(f"{name}: waiting for the model server")
@@ -852,6 +881,7 @@ class Controller:
                 row["state"] = "annotating"
             elif name in self.awaiting:
                 row["state"] = "awaiting_approval"
+                row["awaiting"] = self.awaiting[name].get("kind")
             elif name in self.backoff and self.backoff[name] > now:
                 row["state"] = "error"
             elif row["pending"] or row["waiting"]:

@@ -441,3 +441,115 @@ def test_a_new_episode_cancels_the_request_in_flight_and_the_batch_resumes_after
         ctl.wake.set()
         thread.join(60)
         ctl.shutdown()
+
+
+HUMAN = """
+import sys
+from levi import paths
+paths.configure()
+from levi.agent.capabilities import invoke
+from levi.agent.runtime import Workbench
+from levi.agent.security import Principal
+
+wb = Workbench(paths.STATE)
+human = Principal("a-person", human=True)
+mode, run_id = sys.argv[1], sys.argv[2]
+run = wb.store.get("runs", run_id)
+if mode == "plan":
+    invoke(wb, human, "plans.approve", {"run_id": run_id, "revision": run["plan"]["revision"]})
+else:
+    change = wb.store.get("changes", run["changes"])
+    invoke(wb, human, "changes.approve", {"changeset_id": change["id"], "revision": change["revision"]})
+    change = wb.store.get("changes", change["id"])
+    invoke(wb, human, "changes.commit", {"changeset_id": change["id"], "revision": change["revision"]}, key="person:" + change["id"])
+"""
+
+
+def as_a_person(e, mode, run_id):
+    import subprocess
+    import sys
+
+    from levi.live import resources
+
+    done = subprocess.run(
+        [sys.executable, "-c", HUMAN, mode, run_id],
+        env=resources.service_env(e.config),
+        cwd=Path(controller.__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr[-800:]
+
+
+def test_waiting_for_a_person_does_not_loop_and_a_person_s_commit_is_not_a_failure(env):
+    """Without the approver: the plan waits for a person; after the plan is
+    approved the draft waits for a person; the supervisor starts no worker for
+    either wait, and what the person commits is recorded as done (review
+    human), not as a failed attempt."""
+    e = env()
+    e.config.pipeline.auto_approve = False
+    e.rollouts.write(0)
+    started = lambda ctl: sum(m.startswith("batch started") for m in e.messages)
+    ctl = e.controller()
+    ctl.run(once=True, max_seconds=120)
+    assert ctl.awaiting[NAME]["kind"] == "plan"
+    assert started(ctl) == 1
+    (run,) = e.records("runs")
+    as_a_person(e, "plan", run["id"])
+    # Time passes: the plan is approved, so exactly one more worker runs it ...
+    ctl.awaiting[NAME]["at"] -= 1000
+    deadline = time.time() + 120
+    while time.time() < deadline and started(ctl) < 2:
+        ctl.tick()
+        time.sleep(0.3)
+    while time.time() < deadline and ctl.worker is not None:
+        ctl.tick()
+        time.sleep(0.3)
+    ctl.tick()
+    assert ctl.awaiting[NAME]["kind"] == "changes", ctl.awaiting
+    # ... and then nothing starts while the draft waits, however long it is.
+    for _ in range(6):
+        ctl.awaiting[NAME]["at"] -= 1000
+        ctl.tick()
+        time.sleep(0.2)
+    assert started(ctl) == 2 and ctl.worker is None
+    assert ctl.status()["datasets"][NAME]["state"] == "awaiting_approval"
+    assert ctl.vllm.state == "stopped" or not ctl.vllm.mine()
+    (run,) = [
+        r for r in e.records("runs") if r["context"]["workflow"]["kind"] == "temporal"
+    ]
+    as_a_person(e, "changes", run["id"])
+
+    # What the person committed is this batch's work, recorded as done by a
+    # person -- not a failed attempt. The release review (a second run) then
+    # waits for its own plan to be approved.
+    def settle(kind):
+        ctl.awaiting.get(NAME, {}).update(at=0.0)
+        deadline = time.time() + 150
+        while time.time() < deadline:
+            ctl.tick()
+            if ctl.worker is None and ctl.awaiting.get(NAME, {}).get("kind") == kind:
+                return
+            time.sleep(0.4)
+        raise AssertionError(("no wait for", kind, ctl.awaiting, e.messages[-5:]))
+
+    settle("plan")
+    row = e.state()["demos"]["demo_0000"]
+    assert row["state"] == "annotating" and row["attempts"] == 0 and "reason" not in row
+    assert row["temporal"]["review"] == "human" and row["temporal"]["segments"] == 5
+    anchored = [
+        r for r in e.records("runs") if r["context"]["workflow"].get("anchored")
+    ]
+    as_a_person(e, "plan", anchored[0]["id"])
+    ctl.awaiting[NAME]["at"] = 0.0
+    deadline = time.time() + 150
+    while time.time() < deadline:
+        ctl.tick()
+        if ctl.worker is None and e.state()["demos"]["demo_0000"]["state"] == "done":
+            break
+        time.sleep(0.4)
+    row = e.state()["demos"]["demo_0000"]
+    assert row["state"] == "done" and row["verdict"]["review"] == "auto"
+    ctl.shutdown()

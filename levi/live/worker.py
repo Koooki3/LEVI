@@ -57,7 +57,14 @@ class NeedModel(Exception):
 
 
 class AwaitHuman(Exception):
-    pass
+    """A person has to act: ``kind`` is ``plan`` (approve the plan) or
+    ``changes`` (approve and commit the draft). The supervisor learns which
+    gate through ``worker.json`` and does not start another worker until it
+    has been passed."""
+
+    def __init__(self, kind, run_id, changeset=None):
+        super().__init__(f"{kind} of {run_id}")
+        self.kind, self.run_id, self.changeset = kind, run_id, changeset
 
 
 class Worker:
@@ -391,7 +398,7 @@ class Worker:
                 continue
             if status == "planned" and not (run["plan"].get("approval")):
                 if self.auto is None:
-                    raise AwaitHuman(run_id)
+                    raise AwaitHuman("plan", run_id)
                 self.call(
                     "plans.approve",
                     {"run_id": run_id, "revision": run["plan"]["revision"]},
@@ -441,7 +448,7 @@ class Worker:
         revision = change["revision"]
         self.call("changes.validate", {"changeset_id": change["id"]})
         if self.auto is None:
-            raise AwaitHuman(run_id)
+            raise AwaitHuman("changes", run_id, change["id"])
         self.call(
             "changes.approve", {"changeset_id": change["id"], "revision": revision}
         )
@@ -484,8 +491,15 @@ class Worker:
                 attempt += 1
                 known = batch.setdefault("temporal", {}).get(str(step))
                 run_id = known["run_id"] if known else None
-                if run_id and self.run_state(run_id)["status"] in RUN_DONE:
-                    run_id = None
+                if run_id:
+                    seen = self.run_state(run_id)
+                    if self.committed(seen):
+                        # Approved and committed meanwhile (by a person when
+                        # the approver is off): the work is done, whoever did it.
+                        self.record_temporal(demos, index, seen, seen["changes"], batch)
+                        break
+                    if seen["status"] in RUN_DONE:
+                        run_id = None
                 if run_id is None:
                     context = self.context(
                         [index[d] for d in demos],
@@ -505,6 +519,9 @@ class Worker:
                     self.save_current(batch)
                 self.progress("temporal", run=run_id, step=step, episodes=len(demos))
                 run = self.drive(run_id, what="temporal")
+                if self.committed(run):
+                    self.record_temporal(demos, index, run, run["changes"], batch)
+                    break
                 if run["status"] == "cancelled":
                     batch["temporal"].pop(str(step), None)
                     self.save_current(batch)
@@ -526,13 +543,28 @@ class Worker:
                 self.record_temporal(demos, index, run, None, batch)
                 break
 
+    def committed(self, run) -> bool:
+        """Did this run's draft get committed (by anyone)?"""
+        if run["status"] not in ("succeeded", "partially_succeeded"):
+            return False
+        try:
+            return self.store.get("changes", run["changes"])["status"] == "committed"
+        except KeyError:
+            return False
+
     def record_temporal(self, demos, index, run, changeset, batch):
         completed = set(run.get("completed", []))
         failed = {f["episode"]: f for f in run.get("failed", [])}
         now = time.time()
         segments = {}
+        reviewer = "auto"
         if changeset:
             change = self.store.get("changes", changeset)
+            reviewer = (
+                "auto"
+                if change["provenance"].get("reviewer_type") == "auto"
+                else "human"
+            )
             for proposal in change["proposals"]:
                 segments[proposal["episode_index"]] = (
                     segments.get(proposal["episode_index"], 0) + 1
@@ -549,6 +581,7 @@ class Worker:
                             "run_id": run["id"],
                             "changeset": changeset,
                             "committed_at": now,
+                            "review": reviewer,
                             "segments": segments.get(ep, 0),
                         },
                         episode_index=ep,
@@ -729,7 +762,7 @@ class Worker:
         self.ensure_provider()
         entry = self.register_and_build()
         index, lengths, excluded = self.episode_map(entry)
-        batch["demos"] = self.filter_demos(batch["demos"], index, excluded)
+        batch["demos"] = self.filter_demos(batch["demos"], index, excluded, batch)
         self.save_current(batch)
         if batch["demos"]:
             self.temporal(batch, index, lengths)
@@ -738,8 +771,23 @@ class Worker:
         self.finish(batch)
         return OK
 
-    def filter_demos(self, demos, index, excluded):
+    def committed_here(self, batch) -> set:
+        """Episodes of this batch whose draft was committed (by the approver
+        or, with it off, by a person): their annotations are this batch's,
+        not "somebody else's"."""
+        episodes = set()
+        for known in ((batch or {}).get("temporal") or {}).values():
+            try:
+                run = self.run_state(known["run_id"])
+            except KeyError:
+                continue
+            if self.committed(run):
+                episodes |= set(run.get("completed", []))
+        return episodes
+
+    def filter_demos(self, demos, index, excluded, batch=None):
         keep = []
+        ours = self.committed_here(batch)
 
         def change_state(value):
             for demo in demos:
@@ -750,7 +798,11 @@ class Worker:
                         reason="left out of the view: "
                         + json.dumps(excluded.get(demo))[:200],
                     )
-                elif self.human_annotated(index[demo]) and not row.get("temporal"):
+                elif (
+                    index[demo] not in ours
+                    and self.human_annotated(index[demo])
+                    and not row.get("temporal")
+                ):
                     row.update(
                         state="skipped_human",
                         reason="a person already annotated this episode",
@@ -802,6 +854,7 @@ def main(argv=None) -> int:
     signal.signal(signal.SIGTERM, term)
     signal.signal(signal.SIGINT, term)
     code = ERROR
+    awaiting = None
     try:
         code = worker.run()
         worker.log("batch finished" if code == OK else "nothing to do")
@@ -828,7 +881,8 @@ def main(argv=None) -> int:
         worker.log("waiting for the model:", exc)
         code = NEED_MODEL
     except AwaitHuman as exc:
-        worker.log("waiting for a person to approve", exc)
+        worker.log("waiting for a person:", exc)
+        awaiting = {"kind": exc.kind, "run_id": exc.run_id, "changeset": exc.changeset}
         code = AWAIT_HUMAN
     except Exception as exc:  # noqa: BLE001 - the supervisor retries later
         worker.log("error:", type(exc).__name__, str(exc)[:500])
@@ -845,6 +899,7 @@ def main(argv=None) -> int:
                     "dataset": args.dataset,
                     "phase": "exited",
                     "exit": code,
+                    "awaiting": awaiting,
                     "updated_at": time.time(),
                 },
             )
