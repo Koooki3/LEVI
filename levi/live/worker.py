@@ -882,6 +882,7 @@ def configure_process(config):
 
     resources.apply(config)
     os.environ["LEVI_WORKSPACE"] = str(config.workspace)
+    os.environ["LEVI_LIVE_WORKER"] = "1"  # obeys the gate by standing down
     os.environ.setdefault("LEVI_DROID_SAMPLE", "off")
     os.environ["LEVI_GPU_SHARING"] = "allow"
 

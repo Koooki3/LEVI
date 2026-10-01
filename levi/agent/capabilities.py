@@ -2293,9 +2293,10 @@ def invoke(workbench, principal, name, arguments, key=None):
         run = scope(workbench.store, arguments)
         repo = arguments.get("repo_id") or (run["context"]["repo_id"] if run else None)
         principal.require(permission, repo)
-        if name in ("runs.execute", "runs.resume"):
+        if name in ("runs.execute", "runs.resume", "tasks.advance"):
             # In a live workspace a person may not start model requests while
-            # the robot's policy infers (the worker obeys the same gate).
+            # the robot's policy infers (the worker obeys the same gate); runs
+            # already going stop at their next request (gpu.require_free).
             from levi.live import gating
 
             gating.check(principal, name)
