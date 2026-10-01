@@ -75,6 +75,7 @@ class Session:
     prompt: str = ""
     session_id: str = ""
     run_id: str = ""
+    root: str = ""
 
     def active(self, states=DEFAULT_ACTIVE) -> bool:
         return self.state in states and not self.crashed
@@ -99,6 +100,7 @@ class Session:
             "prompt": self.prompt[:300],
             "session_id": self.session_id,
             "run_id": self.run_id,
+            "root": self.root,
         }
 
 
@@ -132,7 +134,8 @@ def read_sessions(roots, now=None) -> dict:
                 continue
             session = _session(entry.path, entry.name, data, now)
             if session:
-                found[(session.group, session.task_folder)] = session
+                session.root = str(Path(root).expanduser())
+                found[(session.root, session.group, session.task_folder)] = session
     mine = {str(Path(r).expanduser()) for r in roots}
     for key in [
         k for k in _CACHE if k not in seen and str(Path(k).parent.parent) in mine

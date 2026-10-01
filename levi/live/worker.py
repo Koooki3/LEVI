@@ -283,6 +283,8 @@ class Worker:
     def start_batch(self):
         """Mirror what is finished and choose this batch's demos."""
         w, p = self.config.watch, self.config.pipeline
+        mirror.verify_sources(self.config, self.name)
+        mirror.refresh_changed(self.config, self.name)
         scanner = mirror.Scanner(self.config)
         scan = next((t for t in scanner.scan() if t.name == self.name), None)
         state = self.state()

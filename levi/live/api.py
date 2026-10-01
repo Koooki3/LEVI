@@ -105,7 +105,7 @@ def sessions_view():
     now = time.time()
     found = sessions.read_sessions(config.watch.roots, now)
     rows = []
-    for (group, task), session in sorted(found.items())[:64]:
+    for (_root, group, task), session in sorted(found.items())[:64]:
         row = session.public()
         row["dataset"] = mirror.dataset_name(group, task)
         row["fault"] = session.fault

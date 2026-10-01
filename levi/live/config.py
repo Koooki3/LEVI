@@ -53,6 +53,10 @@ class Watch:
     require_session: bool = False
     # A completion marker must be this old (seconds) before the demo is taken.
     settle_s: float = 2.0
+    # A demo that has not finished and has not changed for this long (a
+    # leftover raw capture after a failed mux, a client that died mid-write)
+    # is "stuck": counted and listed, no longer waited for or re-read.
+    stuck_s: float = 600.0
     # Completed demos to take into one batch at most.
     batch_max_episodes: int = 40
 

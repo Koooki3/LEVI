@@ -703,6 +703,17 @@ def diagnose(config) -> dict:
             n: r.get("state") for n, r in ((value or {}).get("datasets") or {}).items()
         },
     }
+    for name, row in ((value or {}).get("datasets") or {}).items():
+        if row.get("stuck"):
+            warnings.append(
+                f"{name}: {row['stuck']} demo(s) never finished (a leftover raw capture "
+                "or a client that died mid-write); they are left alone"
+            )
+        if row.get("source_changed"):
+            warnings.append(
+                f"{name}: the source of {row['source_changed']} mirrored demo(s) was "
+                "replaced after it was mirrored (annotations belong to the old content)"
+            )
     for root in config.watch.roots:
         if not Path(root).expanduser().is_dir():
             warnings.append(f"watch root {root} does not exist")

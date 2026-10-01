@@ -733,6 +733,12 @@ class Controller:
         if self.worker is not None or now - self._cache_at < 600:
             return
         self._cache_at = now
+        for name in mirror.list_states(self.config):
+            changed = mirror.verify_sources(self.config, name)
+            if changed:
+                self.event(
+                    f"{name}: the source of {len(changed)} mirrored demo(s) changed"
+                )
         keep = []
         for state in mirror.list_states(self.config).values():
             batch = state.get("current") or {}
@@ -755,7 +761,7 @@ class Controller:
         scans = {t.name: t for t in self.tasks}
         fault_sessions = {
             mirror.dataset_name(g, t): s
-            for (g, t), s in self.sessions.items()
+            for (_r, g, t), s in self.sessions.items()
             if s.fault
         }
         rows = {}
@@ -765,7 +771,10 @@ class Controller:
             counts = mirror.counts(state) if state else {}
             ready = len(scan.ready) if scan else 0
             current = state.get("current")
+            demos = (state.get("demos") or {}).values()
             row = {
+                "stuck": counts.get("stuck", 0),
+                "source_changed": sum(1 for d in demos if d.get("source_changed")),
                 "episodes": sum(counts.values()) + ready,
                 "pending": counts.get("mirrored", 0) + ready,
                 "annotating": len((current or {}).get("demos") or []),

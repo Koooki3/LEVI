@@ -87,6 +87,7 @@ def _has_episode_end(path: Path) -> bool:
 def newest_mtime(demo: Path) -> float:
     """The latest modification time of the demo directory and its files."""
     newest = 0.0
+    demo = Path(demo)
     try:
         newest = demo.stat().st_mtime
         with os.scandir(demo) as entries:
