@@ -368,7 +368,7 @@ class Worker:
         while not self.gate_open():
             self.check_stop()
             self.heartbeat("gated")
-            time.sleep(0.5)
+            time.sleep(0.2)
         self.progress(what, note="the gate opened: resuming")
 
     def drive(self, run_id, *, what):
@@ -376,6 +376,7 @@ class Worker:
         for review (or ends). Returns the run."""
         waits = 0
         resumes = 0
+        recovered = 0.0
         while True:
             self.check_stop()
             run = self.run_state(run_id)
@@ -420,8 +421,13 @@ class Worker:
                     raise
                 continue
             if status in ("queued", "running"):
-                self.store.recover()
-                time.sleep(1.0)
+                # Short sleeps: a closed gate must be seen within a fraction
+                # of a second (the file read is tiny); the store's lease
+                # recovery is slower and runs every five seconds.
+                if time.monotonic() - recovered >= 5.0:
+                    self.store.recover()
+                    recovered = time.monotonic()
+                time.sleep(0.2)
                 continue
             return run
 

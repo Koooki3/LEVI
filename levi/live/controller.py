@@ -131,6 +131,8 @@ class Controller:
         self._gate_written = (None, 0.0)
         self._policy_mib = (0.0, None)
         self.idle_since: float | None = None
+        self._waiting_since: dict = {}
+        self._status_at = 0.0
         self.start_failures = 0
         self.next_start_at = 0.0
         self.attention: dict | None = None
@@ -177,6 +179,10 @@ class Controller:
     def _refresh(self, now, full):
         c = self.config
         self.sessions = sessions.read_sessions(c.watch.roots, now)
+        # When each session began waiting for the operator's reset (the gate
+        # closes shortly before the episode that follows).
+        waiting = {s.path for s in self.sessions.values() if s.state == "waiting_reset"}
+        self._waiting_since = {p: self._waiting_since.get(p, now) for p in waiting}
         ports = self.probes.ports()
         up = any(int(p) in ports for p in c.gpu.policy_ports)
         if up != self.policy_up and self.state != "starting":
@@ -266,6 +272,8 @@ class Controller:
             self.sessions,
             self.policy_up,
             self.policy_changed_at or self.started_at,
+            now=now,
+            waiting_since=self._waiting_since,
         )
         mine = self.vllm.mine()
         state = (
@@ -744,7 +752,9 @@ class Controller:
             message = hook(now)
             if message:
                 self.event(message, "error")
-        self.write_status(now)
+        if now - self._status_at >= min(1.0, c.service.heartbeat_s):
+            self._status_at = now
+            self.write_status(now)
         if self.worker is not None and self.sessions:
             return c.service.gate_poll_s
         return (

@@ -76,6 +76,9 @@ class Session:
     session_id: str = ""
     run_id: str = ""
     root: str = ""
+    # Seconds the client waits for the operator to reset the scene after an
+    # episode (``levi.reset_wait_s``): the next episode starts right after.
+    reset_wait_s: float | None = None
 
     def active(self, states=DEFAULT_ACTIVE) -> bool:
         return self.state in states and not self.crashed
@@ -101,6 +104,7 @@ class Session:
             "session_id": self.session_id,
             "run_id": self.run_id,
             "root": self.root,
+            "reset_wait_s": self.reset_wait_s,
         }
 
 
@@ -142,6 +146,14 @@ def read_sessions(roots, now=None) -> dict:
     ]:
         _CACHE.pop(key, None)
     return found
+
+
+def _number(value):
+    return (
+        float(value)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+        else None
+    )
 
 
 def _session(path, name, data, now):
@@ -192,6 +204,7 @@ def _session(path, name, data, now):
         prompt=str(data.get("prompt") or ""),
         session_id=str(data.get("session_id") or ""),
         run_id=str(data.get("run_id") or ""),
+        reset_wait_s=_number(levi.get("reset_wait_s")),
     )
 
 

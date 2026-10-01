@@ -32,7 +32,7 @@ class Service:
     poll_active_s: float = 3.0
     # While a worker runs beside an evaluation session: how often the gate
     # (may the model work now?) is re-decided. A new episode closes it.
-    gate_poll_s: float = 1.0
+    gate_poll_s: float = 0.25
     heartbeat_s: float = 4.0
 
 
@@ -87,6 +87,12 @@ class Gpu:
     # model no request then). Homing, waiting for the reset, standby, fault,
     # stopped and finished leave the GPU to the model.
     busy_states: list = field(default_factory=lambda: ["running"])
+    # The next episode follows a ``waiting_reset`` by the client's
+    # ``reset_wait_s``: the gate closes this many seconds before it (the
+    # policy's first inference must not meet a model request), and stays
+    # closed this long after the predicted start in case the client is late.
+    lead_s: float = 3.0
+    lead_grace_s: float = 5.0
     # After a policy server appears or goes, wait this long before starting
     # vLLM: a policy server that is still loading preallocates its memory.
     settle_s: float = 20.0

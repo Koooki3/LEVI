@@ -378,7 +378,6 @@ def test_a_new_episode_cancels_the_request_in_flight_and_the_batch_resumes_after
     e = env(delay=3.0)
     e.config.gpu.mode = "timeshare"
     e.config.vllm.adopt_external = True  # the fake server stands in for vLLM
-    e.config.service.gate_poll_s = 0.3
     for n in range(2):
         e.rollouts.write(n)
     e.rollouts.session("homing")
@@ -393,6 +392,7 @@ def test_a_new_episode_cancels_the_request_in_flight_and_the_batch_resumes_after
         ):
             time.sleep(0.1)
         assert e.fake.started, "the model never got a request while the policy was idle"
+        flipped = time.time()
         e.rollouts.session("running")  # a new episode begins: the policy infers
         deadline = time.time() + 30
         while time.time() < deadline and progress().get("phase") != "gated":
@@ -407,11 +407,16 @@ def test_a_new_episode_cancels_the_request_in_flight_and_the_batch_resumes_after
             if r["context"]["workflow"]["kind"] == "temporal"
         ]
         assert run["status"] == "paused"
-        kinds = [
-            json.loads(b)["type"]
+        events = [
+            json.loads(b)
             for (b,) in e.sql("SELECT body FROM events WHERE run_id=?", run["id"])
         ]
-        assert "model_request_stopped" in kinds  # the in-flight request was cut
+        assert "model_request_stopped" in [x["type"] for x in events]
+        # The in-flight request was cut within a second of `running` appearing.
+        cut = next(x["time"] for x in events if x["type"] == "model_request_stopped")
+        assert 0 <= cut - flipped <= 1.0, (
+            f"cancelled {cut - flipped:.2f} s after running"
+        )
         sent = e.fake.started
         time.sleep(3)
         assert e.fake.started == sent  # nothing goes out while the policy infers

@@ -245,7 +245,14 @@ class Gate:
 
 
 def gate(
-    config, mode, sessions, policy_up: bool, policy_since: float | None = None
+    config,
+    mode,
+    sessions,
+    policy_up: bool,
+    policy_since: float | None = None,
+    *,
+    now: float | None = None,
+    waiting_since: dict | None = None,
 ) -> Gate:
     """May the model *work* (send requests) right now?
 
@@ -269,6 +276,23 @@ def gate(
             "policy_inferring",
             f"{s.group}/{s.task_folder} is {s.state}: the policy is inferring",
         )
+    # The next episode is due: a session waiting for the operator's reset
+    # starts running ``reset_wait_s`` after it began waiting. Close ahead of it.
+    if now is not None and waiting_since:
+        lead, grace = config.gpu.lead_s, config.gpu.lead_grace_s
+        for s in sessions.values():
+            began = waiting_since.get(s.path)
+            wait = getattr(s, "reset_wait_s", None)
+            if s.state != "waiting_reset" or s.crashed or began is None or not wait:
+                continue
+            due = began + wait
+            if due - lead <= now <= due + grace:
+                return Gate(
+                    False,
+                    "episode_imminent",
+                    f"{s.group}/{s.task_folder}: the next episode starts in "
+                    f"{max(0.0, due - now):.1f} s",
+                )
     if policy_up and not _witnesses(sessions, policy_since):
         return Gate(
             False,
@@ -532,6 +556,7 @@ class Vllm:
         self.started_at: float | None = None
         self.profile: dict | None = None
         self.error = ""
+        self._health = (0.0, False)
         self._adopt()
 
     # --- bookkeeping ---------------------------------------------------------
@@ -688,6 +713,14 @@ class Vllm:
             return found[-1].strip()[:300]
         return (self.error or "vLLM failed to start")[:300]
 
+    def _healthy(self) -> bool:
+        """/health, asked at most once a second (the supervisor ticks four
+        times a second while a worker runs)."""
+        now = time.monotonic()
+        if now - self._health[0] >= 1.0:
+            self._health = (now, healthy(self.port))
+        return self._health[1]
+
     def poll(self) -> str:
         """Advance ``starting`` to ``ready`` (or ``error`` on timeout/death)."""
         if self.state == "asleep":
@@ -695,7 +728,7 @@ class Vllm:
                 self.state, self.error = "error", "vLLM exited while asleep"
             return self.state
         if self.state == "starting":
-            if healthy(self.port):
+            if self._healthy():
                 self.state = "ready"
                 if is_sleeping(self.port):  # adopted a server left asleep
                     self.state = "asleep"
@@ -710,7 +743,7 @@ class Vllm:
         elif (
             self.state == "ready"
             and self.mine()
-            and not healthy(self.port)
+            and not self._healthy()
             and identity(self._pid() or 0) is None
         ):
             # Died after it was ready.
@@ -752,6 +785,7 @@ class Vllm:
             self.state = "stopped"
             return True
         self.state = "stopping"
+        self._health = (0.0, False)
         record = jsonio.read(self.record_path) or {}
         pid = record.get("pid")
         try:

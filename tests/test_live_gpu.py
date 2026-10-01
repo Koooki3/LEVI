@@ -107,6 +107,8 @@ def session(state, crashed=False, group="g", task="t", updated_at=None):
     s = S()
     s.state, s.crashed, s.group, s.task_folder = state, crashed, group, task
     s.updated_at = updated_at
+    s.path = f"/sessions/{group}__{task}.json"
+    s.reset_wait_s = None
     return s
 
 
@@ -810,3 +812,52 @@ def test_doctor_reports_an_orphan_vllm_when_no_service_runs(live):
     finally:
         sleeper.kill()
         sleeper.wait()
+
+
+# --- the gate closes before the episode, not after it -------------------------------
+
+
+def waiting(reset_wait_s=10.0, group="g", task="t"):
+    s = session("waiting_reset", group=group, task=task)
+    s.reset_wait_s = reset_wait_s
+    return s
+
+
+def test_the_gate_closes_a_few_seconds_before_the_next_episode_starts():
+    c = cfg_for()
+    s = waiting(10.0)
+    sessions = {("r", "g", "t"): s}
+    began = {
+        s.path: 100.0
+    }  # waiting for the reset since t=100; the episode starts at 110
+    gate = lambda now: gpumgr.gate(
+        c, "timeshare", sessions, True, 50.0, now=now, waiting_since=began
+    )
+    assert gate(100.0).open and gate(106.9).open  # 3 s of lead: closes at 107
+    shut = gate(107.1)
+    assert not shut.open and shut.code == "episode_imminent"
+    assert "starts in" in shut.reason
+    assert not gate(110.0).open and not gate(114.9).open  # the client may be late
+    assert gate(115.5).open  # still waiting long after: nothing is coming
+    # No reset time known, or not waiting: the lead does not apply.
+    s.reset_wait_s = None
+    assert gate(108.0).open
+    s.reset_wait_s = 10.0
+    s.state = "homing"
+    assert gate(108.0).open
+
+
+def test_the_controller_learns_when_a_session_began_waiting_and_closes_ahead(ctl):
+    ctl.rollouts.write(0)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    t = time.time()
+    ctl.rollouts.session("waiting_reset")  # reset_wait_s is 10
+    up(ctl, t)
+    ctl.spawned.clear()
+    assert ctl.gate.open
+    ctl.tick(t + 6.0)
+    assert ctl.gate.open
+    ctl.tick(t + 7.5)
+    assert not ctl.gate.open and ctl.gate.code == "episode_imminent"
+    assert json.loads((ctl.config.live_dir / "gate.json").read_text())["open"] is False
+    assert ctl.status(t + 7.5)["sessions"][0]["reset_wait_s"] == 10.0
