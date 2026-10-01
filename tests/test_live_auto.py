@@ -507,19 +507,33 @@ def test_the_task_console_s_advance_is_guarded_like_run_and_resume(live_ws):
         gating.check(Principal("reviewer", human=True), "tasks.advance")
 
 
-def test_the_worker_reads_a_stale_gate_exactly_as_a_person_does(live_ws):
-    """One rule for both: gating.closed()."""
+def test_a_stale_gate_is_read_strictly_by_the_worker_and_checked_for_people(
+    live_ws, monkeypatch
+):
+    """A supervisor that died while idle leaves ``idle: true`` behind. The
+    worker (a separate session that nobody supervises any more) never takes
+    that as open: it would keep sending requests when a policy server appears
+    later. A person is let through only if no policy port listens right now."""
     import time
 
-    from levi.live import gating
+    from levi.live import gating, gpumgr
 
     now = time.time()
-    fresh_closed = {"open": False, "updated_at": now}
-    assert gating.closed(fresh_closed) and not gating.closed(
-        {"open": True, "updated_at": now}
-    )
+    assert gating.closed({"open": False, "updated_at": now})
+    assert not gating.closed({"open": True, "updated_at": now})
     old = now - gating.STALE_S - 1
-    assert gating.closed({"open": True, "updated_at": old})  # was not idle
-    assert gating.closed({"open": False, "updated_at": old, "idle": False})
-    assert not gating.closed({"open": True, "updated_at": old, "idle": True})
-    assert not gating.closed(None) and not gating.closed("junk")  # no supervisor at all
+    stale_idle = {"open": True, "updated_at": old, "idle": True, "policy_ports": [8000]}
+    stale_busy = {"open": True, "updated_at": old, "idle": False}
+    monkeypatch.setattr(gpumgr, "listening_ports", lambda: set())
+    # People: idle and no policy server listening -> nothing to protect.
+    assert not gating.closed(stale_idle)
+    assert gating.closed(stale_busy) and gating.closed({**stale_busy, "open": False})
+    # ... but one has appeared since the supervisor died: closed.
+    monkeypatch.setattr(gpumgr, "listening_ports", lambda: {8000})
+    assert gating.closed(stale_idle)
+    # The worker: stale is closed, whatever it said.
+    monkeypatch.setattr(gpumgr, "listening_ports", lambda: set())
+    assert gating.closed(stale_idle, worker=True)
+    assert gating.closed(stale_busy, worker=True)
+    assert not gating.closed({"open": True, "updated_at": now}, worker=True)
+    assert not gating.closed(None) and not gating.closed("junk")

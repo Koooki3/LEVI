@@ -922,6 +922,7 @@ class Controller:
                 "code": self.gate.code,
                 "reason": self.gate.reason,
                 "idle": idle,
+                "policy_ports": [int(p) for p in self.config.gpu.policy_ports],
                 "updated_at": now,
             },
         )

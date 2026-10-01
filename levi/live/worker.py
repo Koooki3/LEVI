@@ -348,11 +348,13 @@ class Worker:
         """May model requests go out? The supervisor's ``live/gate.json``:
         closed while the policy infers (timeshare). A missing file means no
         supervisor gates this worker; a stale one (no heartbeat for 20 s) is
-        read as closed (``gating.closed``: the same rule as for a person), so a
-        dead supervisor cannot leave it open -- unless its last word was idle."""
+        read as closed whatever it said (``gating.closed(worker=True)``), so a
+        dead supervisor cannot leave it open."""
         from . import gating
 
-        return not gating.closed(jsonio.read(self.config.live_dir / "gate.json"))
+        return not gating.closed(
+            jsonio.read(self.config.live_dir / "gate.json"), worker=True
+        )
 
     def stand_down(self, run_id, what):
         """The gate closed: cancel the run's in-flight model request (pausing

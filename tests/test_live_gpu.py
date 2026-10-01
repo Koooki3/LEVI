@@ -1650,24 +1650,32 @@ def test_a_group_member_that_outlives_the_leader_is_waited_for(ctl, monkeypatch)
     assert len(calls) >= 4 and pid in calls
 
 
-def test_the_worker_uses_the_shared_stale_gate_rule(live):
-    from levi.live import jsonio, worker
+def test_the_worker_never_reads_a_stale_gate_as_open(live, monkeypatch):
+    """Supervisor dead while idle, then a policy server appears: the worker,
+    which nobody supervises, must not go on sending requests."""
+    from levi.live import gpumgr, jsonio, worker
 
     c, _ = live
     w = worker.Worker.__new__(worker.Worker)
     w.config = c
     path = c.live_dir / "gate.json"
     old = time.time() - 60
+    monkeypatch.setattr(gpumgr, "listening_ports", lambda: set())
     jsonio.write(path, {"open": True, "idle": False, "updated_at": old})
-    assert w.gate_open() is False  # silent supervisor, a policy may be up
+    assert w.gate_open() is False
     jsonio.write(path, {"open": True, "idle": True, "updated_at": old})
-    assert w.gate_open() is True  # silent, but nothing to protect
+    assert w.gate_open() is False  # idle was the last word, and it is stale
+    monkeypatch.setattr(gpumgr, "listening_ports", lambda: {8000})
+    assert w.gate_open() is False  # the policy server came up meanwhile
     path.unlink()
-    assert w.gate_open() is True  # no supervisor gates this worker
-    # The supervisor writes "idle" with the gate.
+    assert w.gate_open() is True  # no gate file at all: no supervisor gates it
+    # A live supervisor refreshes the file every tick, so labelling during idle
+    # time is never stalled by this: fresh, open.
     ctl = started_controller(live)
     ctl.tick(time.time())
-    assert json.loads(path.read_text())["idle"] is True  # no policy, no session
+    fresh_gate = json.loads(path.read_text())
+    assert fresh_gate["idle"] is True and fresh_gate["policy_ports"] == [8000]
+    assert w.gate_open() is True
     ctl.machine.ports = {8000}
     ctl.rollouts.session("standby")
     ctl.tick(time.time() + 5)

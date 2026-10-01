@@ -26,19 +26,27 @@ STALE_S = 20.0  # no heartbeat for this long: the supervisor is gone, not gating
 _CACHE: dict = {}
 
 
-def closed(gate, now=None) -> bool:
+def closed(gate, now=None, worker=False) -> bool:
     """Is this ``gate.json`` content a closed gate? One rule for the worker and
     for people. A missing or unreadable file means no supervisor gates anyone:
     open. A fresh file says what it says. A file nobody has refreshed for
-    ``STALE_S`` (the supervisor is gone) is read the careful way: closed,
-    unless its last word was ``idle`` (no policy server and no evaluation when
-    it was written, so nothing to protect)."""
+    ``STALE_S`` (the supervisor is gone) is read the careful way. The worker
+    (``worker=True``), which nobody supervises any more, takes it as closed
+    always. A person is let through only if its last word was ``idle`` (no
+    policy server and no evaluation when it was written) *and* no policy port
+    listens right now (a read of the kernel's socket table, no connection): a
+    server that appeared after the supervisor died is protected too."""
     if not isinstance(gate, dict):
         return False
     now = time.time() if now is None else now
     if now - float(gate.get("updated_at") or 0) <= STALE_S:
         return not gate.get("open", True)
-    return not gate.get("idle", False)
+    if worker or not gate.get("idle", False):
+        return True
+    from . import gpumgr
+
+    ports = {int(p) for p in gate.get("policy_ports") or [] if str(p).isdigit()}
+    return bool(ports & gpumgr.listening_ports())
 
 
 def _message(gate) -> str:
