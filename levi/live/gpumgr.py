@@ -614,6 +614,9 @@ class Vllm:
         # confirmed and by ``start()``. ``leaving()`` reads nothing else.
         self._leaving: set = set()
         self._confirm_pending = False
+        # Called while a stop waits (every 0.5 s): the controller keeps the
+        # gate file fresh with it, or a long stop would let it go stale.
+        self.keepalive = None
         self.error = ""
         self._health = (0.0, False)
         self._adopt()
@@ -906,6 +909,7 @@ class Vllm:
                 os.killpg(pid, signal.SIGTERM)
             deadline = time.time() + 30
             while same_process(pid, recorded) and time.time() < deadline:
+                self._beat()
                 time.sleep(0.5)
             if same_process(pid, recorded):
                 with contextlib.suppress(ProcessLookupError, PermissionError):
@@ -919,6 +923,7 @@ class Vllm:
             while time.time() < deadline and (
                 _group_alive(pid) or self._on_gpu(self._leaving)
             ):
+                self._beat()
                 time.sleep(0.5)
             if _group_alive(pid) or self._on_gpu(self._leaving):
                 self.state = "error"
@@ -937,6 +942,11 @@ class Vllm:
         else:
             self.state, self.error = "error", "vLLM did not stop"
         return gone
+
+    def _beat(self):
+        if self.keepalive:
+            with contextlib.suppress(Exception):
+                self.keepalive()
 
     def leaving(self) -> bool:
         """A stop is still waiting for vLLM's processes to leave the GPU."""

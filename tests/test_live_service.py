@@ -790,3 +790,16 @@ def test_the_page_gets_the_reset_countdown_and_open_review_count(live_api, rollo
     assert answer["reset_wait_s"] == 10.0
     assert answer["waiting_reset_since"] == row["waiting_reset_since"]
     assert status["datasets"]["pi05_fake__stack_the_plates"]["review_runs_open"] == 0
+
+
+def test_a_pid_record_without_an_identity_is_no_running_service(tmp_path):
+    c = cfg(tmp_path)
+    instance = controller.Instance(c.home, c.workspace)
+    c.home.mkdir(parents=True, exist_ok=True)
+    mirror.jsonio.write(instance.pid_path, {"pid": os.getpid(), "identity": None})
+    assert instance.holder() is None  # None == None must not match a live pid
+    mirror.jsonio.write(
+        instance.pid_path,
+        {"pid": os.getpid(), "identity": controller.gpumgr.identity(os.getpid())},
+    )
+    assert instance.holder()["pid"] == os.getpid()

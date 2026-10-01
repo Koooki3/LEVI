@@ -1541,7 +1541,13 @@ def test_a_wake_uses_its_own_smaller_margin(ctl):
     ctl.machine.free = (
         asleep_need + 50
     )  # enough with the wake margin, not the start one
-    assert asleep_need + 50 < asleep_need + 800  # (the old margin needed 800 more)
+    # With the start margin the same wake would have needed 800 MiB more than
+    # is free, and would not have happened.
+    start_style = (
+        gpumgr.need_mib(ctl.config, ctl.vllm.profile, 32607)
+        - gpumgr.ASLEEP_RESIDENT_MIB
+    )
+    assert start_style == asleep_need + 800 > asleep_need + 50
     fresh(ctl)
     ctl.tick(t + 6)
     assert ctl.vllm.state == "ready"
@@ -1587,9 +1593,8 @@ def test_a_cold_start_waits_until_the_session_has_been_in_standby_a_while(ctl):
     ctl.rollouts.session("standby")
     assert step(ctl, t + 25) == "standby_settling"
     up(ctl, t + 50)
-    # No session at all (nobody's evaluation is near), and the default is a
-    # wait only for a session that has just arrived at standby.
-    assert ctl.config.gpu.standby_min_s == 20.0
+    # The shipped default is the 20 s this test set.
+    assert live_config.Config().gpu.standby_min_s == 20.0
 
 
 # --- L2: the lock is let go only when vLLM has really left the GPU -----------------------
@@ -1737,3 +1742,72 @@ def test_policy_large_is_reported_during_the_evaluation_without_flicker(ctl):
     assert all(p and p["code"] == "policy_large" for p in seen), seen
     assert len({p["since"] for p in seen}) == 1  # one pause, not six new ones
     assert "XLA_PYTHON_CLIENT_MEM_FRACTION=.22" in seen[0]["reason"]
+
+
+# --- L3, L4, L5: not-free GPU reported, gate kept fresh and removed, env ------------------
+
+
+def test_a_gpu_that_never_frees_is_reported_after_the_grace(ctl, monkeypatch):
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    t = time.time()
+    up(ctl, t)
+    pid = ctl.vllm._pid()
+    monkeypatch.setattr(gpumgr, "STOP_CONFIRM_S", 0.5)
+    monkeypatch.setattr(
+        gpumgr,
+        "gpu_holders",
+        lambda *a, **k: [{"pid": pid, "name": "VLLM::EngineCore", "memory_mib": 9}],
+    )
+    assert ctl._stop_vllm() is False
+    grace = ctl.config.gpu.blocked_pause_s
+    ctl.tick(t + 5)
+    assert ctl.decision.code == "gpu_not_free" and paused(ctl, t + 5) is None
+    ctl.tick(t + 6 + grace)
+    p = paused(ctl, t + 6 + grace)
+    assert p["code"] == "gpu_not_free" and "GPU" in p["reason"]
+
+
+def test_the_gate_is_kept_fresh_while_a_stop_waits_and_removed_at_shutdown(
+    ctl, monkeypatch
+):
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    t = time.time()
+    up(ctl, t)
+    pid = ctl.vllm._pid()
+    path = ctl.config.live_dir / "gate.json"
+    assert path.exists()
+    beats = []
+    real = ctl.vllm.keepalive
+    ctl.vllm.keepalive = lambda: (beats.append(1), real and real())
+    monkeypatch.setattr(gpumgr, "STOP_CONFIRM_S", 1.3)
+    monkeypatch.setattr(
+        gpumgr,
+        "gpu_holders",
+        lambda *a, **k: [{"pid": pid, "name": "VLLM::EngineCore", "memory_mib": 9}],
+    )
+    before = json.loads(path.read_text())["updated_at"]
+    ctl._stop_vllm()
+    assert beats  # the wait loop called it
+    assert json.loads(path.read_text())["updated_at"] >= before
+    monkeypatch.undo()
+    ctl.shutdown()
+    # A stopped service leaves no gate behind: nobody is gating anyone.
+    assert not path.exists()
+
+
+def test_the_service_environment_never_carries_the_worker_marker(live, monkeypatch):
+    from levi.live import resources
+
+    c, _ = live
+    monkeypatch.setenv("LEVI_LIVE_WORKER", "1")  # a shell that set it
+    env = resources.service_env(c)
+    assert "LEVI_LIVE_WORKER" not in env
+    # Only the worker process sets it (configure_process).
+    from levi.live import worker
+
+    monkeypatch.delenv("LEVI_LIVE_WORKER")
+    worker.configure_process(c)
+    assert os.environ["LEVI_LIVE_WORKER"] == "1"
+    monkeypatch.delenv("LEVI_LIVE_WORKER")

@@ -498,13 +498,22 @@ def test_the_worker_and_other_workspaces_are_not_held_by_the_request_check(
     assert gating.request_blocked() is None
 
 
-def test_the_task_console_s_advance_is_guarded_like_run_and_resume(live_ws):
+def test_the_task_console_s_advance_is_guarded_like_run_and_resume(bench, live_ws):
+    """Through the dispatcher, as the page's task console calls it."""
     from levi.agent.store import Conflict
-    from levi.live import gating
 
+    wb, _context = bench
+    human = Principal("reviewer", human=True)
     write_gate(live_ws, False)
     with pytest.raises(Conflict, match="inferring"):
-        gating.check(Principal("reviewer", human=True), "tasks.advance")
+        invoke(wb, human, "tasks.advance", {"task_id": "task-20261001T1200"})
+    # Open: it gets past the gate (and fails on the task that is not there).
+    write_gate(live_ws, True)
+    with pytest.raises(Exception) as caught:
+        invoke(wb, human, "tasks.advance", {"task_id": "task-20261001T1200"})
+    assert not isinstance(caught.value, Conflict) or "inferring" not in str(
+        caught.value
+    )
 
 
 def test_a_stale_gate_is_read_strictly_by_the_worker_and_checked_for_people(

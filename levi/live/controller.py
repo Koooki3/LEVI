@@ -137,6 +137,7 @@ class Controller:
         self.log = log or (lambda *a: print(time.strftime("%H:%M:%S"), *a, flush=True))
         self.scanner = mirror.Scanner(config)
         self.vllm = vllm or gpumgr.Vllm(config)
+        self.vllm.keepalive = lambda: self._write_gate(time.time())
         self.lock = gpumgr.GpuLock(config.gpu.lock_file, config.gpu.lock_agent)
         self.started_at = time.time()
         self.running = True
@@ -897,7 +898,7 @@ class Controller:
             self._paused = {"code": code, "since": since or now}
         self._paused["reason"] = str(reason)[:300]
 
-    LONG_BLOCKS = ("vram", "lock", "external_busy")
+    LONG_BLOCKS = ("vram", "lock", "external_busy", "gpu_not_free")
 
     def _blocked_for(self, now) -> float:
         """How long the same long-lived block (see ``LONG_BLOCKS``) has held."""
@@ -914,6 +915,11 @@ class Controller:
             )
         if code == "external_busy":
             return f"{why} (port {self.config.vllm.port}); stop it or set vllm.adopt_external"
+        if code == "gpu_not_free":
+            return (
+                f"{why}: the card is not free (a stuck CUDA context or driver?); "
+                "the GPU lock is kept until it is. `nvidia-smi` shows who holds it"
+            )
         return f"vLLM cannot get the room it needs: {why}"
 
     def _write_gate(self, now):
@@ -1283,6 +1289,10 @@ class Controller:
             self._stop_vllm()
         self.lock.release()
         self.state = "stopped"
+        # No supervisor, no gate: a file left behind would go stale and turn
+        # people away ("supervisor not running") for as long as it lies there.
+        with contextlib.suppress(OSError):
+            (self.config.live_dir / "gate.json").unlink()
         with contextlib.suppress(Exception):
             self.write_status()
 
@@ -1351,7 +1361,7 @@ class Instance:
         if (
             isinstance(record, dict)
             and record.get("pid")
-            and gpumgr.identity(record["pid"]) == record.get("identity")
+            and gpumgr.same_process(record["pid"], record.get("identity"))
         ):
             return record
         return None
