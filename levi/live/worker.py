@@ -38,8 +38,8 @@ import sys
 import time
 from pathlib import Path
 
-from . import config as live_config
 from . import auto as approver_log
+from . import config as live_config
 from . import generic, gpumgr, jsonio, mirror
 
 OK, NEED_MODEL, AWAIT_HUMAN, ERROR, PREEMPTED, NOTHING = 0, 10, 11, 12, 13, 14
