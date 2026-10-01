@@ -333,6 +333,11 @@ export function explainGate(
   const gpu = service?.gpu;
   if (!service || !gpu) return null;
   const gate = gpu.gate;
+  // A paused service says so before anything about the gate.
+  if (gpu.decision?.code === "needs_attention") {
+    const n = DECISION_NOTES.needs_attention;
+    return { title: n[0], detail: n[1], tone: "warn" };
+  }
   if (gate && gate.open === false) {
     if (gate.code === "policy_inferring")
       return {
