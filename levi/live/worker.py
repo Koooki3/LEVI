@@ -414,7 +414,11 @@ class Worker:
                         return self.run_state(run_id)
                     resumes += 1
                     if resumes > 3:
-                        return run
+                        # Give up on this run for good rather than leave a
+                        # blocked/interrupted one behind for every batch.
+                        with contextlib.suppress(Exception):
+                            self.call("runs.cancel", {"run_id": run_id})
+                        return self.run_state(run_id)
                     self.progress(what, note=f"resuming ({reason[:120]})")
                 try:
                     self.call("runs.execute", {"run_id": run_id, "pilot": False})
@@ -717,25 +721,40 @@ class Worker:
             self.cleanup()
 
     def cleanup(self):
-        """Delete the frozen inputs and evidence of finished runs; keep the
-        evidence of the open anchored run (a person may review it)."""
-        import shutil
+        """Archive old open release-review runs, then delete the frozen inputs
+        and evidence of every finished run.
 
+        A release-review run is left open (``waiting_for_review``) so a person
+        can still accept its outcome proposals; committing one needs its frozen
+        input, so the newest ``pipeline.keep_review_runs`` of a dataset keep
+        theirs. Older ones are cancelled -- their verdicts live on in the
+        anchored records and the dataset state -- and cleaned like any
+        finished run."""
         from levi.agent import housekeeping
 
         def run_dir(run_id):
             return self.store.run_dir(run_id)
 
+        open_runs = sorted(
+            (
+                r
+                for r in self.store.list("runs")
+                if r["context"]["repo_id"] == self.repo_id
+                and r.get("principal") == "live-auto"
+                and r["status"] == "waiting_for_review"
+                and (r["context"].get("workflow") or {}).get("anchored")
+            ),
+            key=lambda r: r.get("created_at", 0),
+            reverse=True,
+        )
+        keep = self.config.pipeline.keep_review_runs
+        for run in open_runs[keep:]:
+            with contextlib.suppress(Exception):
+                self.call("runs.cancel", {"run_id": run["id"]})
+        kept = [r["id"] for r in open_runs[:keep]]
+        self.update(lambda v: v.update(review_runs_open=len(kept), review_runs=kept))
         with contextlib.suppress(Exception):
             housekeeping.apply(self.store, run_dir, dataset=self.repo_id)
-        for run in self.store.list("runs"):
-            if run["context"]["repo_id"] != self.repo_id:
-                continue
-            if (
-                run.get("principal") == "live-auto"
-                and run["status"] == "waiting_for_review"
-            ):
-                shutil.rmtree(run_dir(run["id"]) / "input", ignore_errors=True)
 
     # --- the whole batch ------------------------------------------------------------------------
 

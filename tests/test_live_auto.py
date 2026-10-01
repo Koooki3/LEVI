@@ -126,11 +126,16 @@ def test_an_approval_by_the_approver_is_stamped_auto_and_audited(
     assert [a["levi"]["review"] for a in atoms] == ["auto"]
     assert atoms[0]["levi"]["origin"]["review"] == "auto"
     assert not (folder / "annotations/outcomes").exists()  # no human outcome label
-    assert [x["tool"] for x in audit(live_ws)] == [
-        "runs.plan",
-        "plans.approve",
-        "changes.approve",
-        "changes.commit",
+    # Each state-changing call twice: allowed, then what it came to.
+    assert [(x["tool"], x["decision"]) for x in audit(live_ws)] == [
+        ("runs.plan", "allowed"),
+        ("runs.plan", "completed"),
+        ("plans.approve", "allowed"),
+        ("plans.approve", "completed"),
+        ("changes.approve", "allowed"),
+        ("changes.approve", "completed"),
+        ("changes.commit", "allowed"),
+        ("changes.commit", "completed"),
     ]
 
 
@@ -330,3 +335,18 @@ def test_writing_an_outcome_label_refuses_anything_the_approver_approved(tmp_pat
             folder=tmp_path,
             origin={"review": "auto"},
         )
+
+
+def test_a_failed_call_is_audited_with_its_error(bench, dataset, live_ws):
+    wb, context = bench
+    approver = auto.principal()
+    run = invoke(wb, approver, "runs.plan", temporal(context, dataset).model_dump())
+    with pytest.raises(Exception, match="revision"):
+        invoke(wb, approver, "plans.approve", {"run_id": run["id"], "revision": 99})
+    last = audit(live_ws)[-1]
+    assert (last["tool"], last["decision"]) == ("plans.approve", "failed")
+    assert "revision" in last["error"].lower()
+    # Pure reads are not logged.
+    before = len(audit(live_ws))
+    invoke(wb, approver, "runs.get", {"run_id": run["id"]})
+    assert len(audit(live_ws)) == before

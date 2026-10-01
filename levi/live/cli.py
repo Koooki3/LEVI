@@ -804,6 +804,16 @@ def cmd_once(args) -> int:
     config = resolve_config(args)
     fake = None
     if args.fake_vlm:
+        if (
+            not args.workspace
+            or Path(args.workspace).expanduser().resolve()
+            == Path(live_config.DEFAULT_WORKSPACE).resolve()
+        ):
+            raise ValueError(
+                "--fake-vlm labels with a stand-in model and (with --auto-approve) "
+                "commits its output as automatic annotations: give it a scratch "
+                "--workspace, never the live workspace"
+            )
         from . import fakevlm
 
         server, fake, port = fakevlm.serve(0)

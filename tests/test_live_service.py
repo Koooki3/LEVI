@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -594,3 +595,105 @@ def test_two_homes_cannot_run_on_one_workspace(tmp_path):
     assert second.acquire()
     for item in (second, other_ws):
         item.release()
+
+
+# --- the heartbeat, the idle probe, --fake-vlm and the page's fields -------------------
+
+
+def test_the_status_heartbeat_continues_while_the_loop_is_busy(tmp_path):
+    """Stopping a worker or vLLM can block a tick for a minute; a client that
+    finds status.json stale falls back to manual labelling."""
+    c = cfg(tmp_path)
+    c.service.heartbeat_s = 0.5
+    ctl = controller.Controller(
+        c,
+        probes=controller.Probes(
+            vram=lambda: None, ports=set, holders=list, policy_vram=lambda p: None
+        ),
+        log=lambda *a: None,
+    )
+    ctl.hooks.append(lambda now: time.sleep(4.0))  # a tick that blocks for 4 s
+    thread = threading.Thread(target=ctl.run, kwargs={"max_seconds": 6})
+    thread.start()
+    stamps = set()
+    try:
+        deadline = time.time() + 4.0
+        while time.time() < deadline:
+            try:
+                stamps.add(json.loads(c.status_file.read_text())["updated_at"])
+            except (OSError, ValueError):
+                pass
+            time.sleep(0.2)
+    finally:
+        ctl.running = False
+        ctl.wake.set()
+        thread.join(30)
+    assert len(stamps) >= 4, f"status.json moved {len(stamps)} times in a blocked tick"
+
+
+def test_an_idle_tick_opens_no_connection_to_the_model_port(tmp_path):
+    from levi.live import fakevlm
+
+    server, fake, port = fakevlm.serve(0)
+    try:
+        c = cfg(tmp_path)
+        c.vllm.port = port
+        ctl = controller.Controller(
+            c,
+            probes=controller.Probes(
+                vram=lambda: None, ports=set, holders=list, policy_vram=lambda p: None
+            ),
+            log=lambda *a: None,
+        )
+        for n in range(6):
+            ctl.tick(time.time() + n)
+        assert fake.health_checks == 0  # nothing to label: :8100 is not touched
+    finally:
+        server.shutdown()
+
+
+def test_fake_vlm_refuses_the_live_workspace(tmp_path):
+    done = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "levi.live",
+            "once",
+            "--fake-vlm",
+            "--auto-approve",
+            "--home",
+            str(tmp_path / "home"),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=PROJECT,
+        env={
+            **{k: v for k, v in os.environ.items() if k != "LEVI_LIVE_WORKSPACE"},
+            "PYTHONPATH": str(PROJECT),
+        },
+        check=False,
+    )
+    assert done.returncode == 2 and "scratch" in done.stderr
+    assert not (tmp_path / "home/status.json").exists()
+
+
+def test_the_page_gets_the_reset_countdown_and_open_review_count(live_api, rollouts):
+    client, c = live_api
+    rollouts.write(0)
+    rollouts.session("waiting_reset")
+    ctl = controller.Controller(
+        c,
+        probes=controller.Probes(
+            vram=lambda: None, ports=set, holders=list, policy_vram=lambda p: None
+        ),
+        log=lambda *a: None,
+    )
+    ctl.tick()
+    ctl.write_status()
+    status = json.loads(c.status_file.read_text())
+    row = status["sessions"][0]
+    assert row["reset_wait_s"] == 10.0 and row["waiting_reset_since"] is not None
+    answer = client.get("/api/levi/live/sessions").json()["sessions"][0]
+    assert answer["reset_wait_s"] == 10.0
+    assert answer["waiting_reset_since"] == row["waiting_reset_since"]
+    assert status["datasets"]["pi05_fake__stack_the_plates"]["review_runs_open"] == 0

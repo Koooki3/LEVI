@@ -323,7 +323,9 @@ class Controller:
             return False
         if mine:
             return self._resident_step(now, want, state, mode, profile)
-        if self.vllm.external():
+        # Only look at :8100 when there is work for it (an idle tick opens no
+        # socket, and the port may be another agent's vLLM).
+        if want and self.vllm.external():
             if mode == "manual" or c.vllm.adopt_external:
                 self.decision = gpumgr.Decision(
                     True, "using the vLLM already serving", "external"
@@ -838,6 +840,7 @@ class Controller:
             current = state.get("current")
             demos = (state.get("demos") or {}).values()
             row = {
+                "review_runs_open": state.get("review_runs_open", 0),
                 "stuck": counts.get("stuck", 0),
                 "source_changed": sum(1 for d in demos if d.get("source_changed")),
                 "episodes": sum(counts.values()) + ready,
@@ -914,7 +917,13 @@ class Controller:
         cpu = self._meter.percent()
         if cpu is not None:
             self._cpu = cpu
-        session_rows = [s.public() for s in list(self.sessions.values())[:16]]
+        session_rows = []
+        for s in list(self.sessions.values())[:16]:
+            row = s.public()
+            # When it began waiting for the operator's reset (the page can
+            # count down to the next episode with reset_wait_s).
+            row["waiting_reset_since"] = self._waiting_since.get(s.path)
+            session_rows.append(row)
         pid = os.getpid()
         return {
             "schema": SCHEMA,
@@ -989,6 +998,28 @@ class Controller:
         """The loop. ``once``: return when nothing is left to do."""
         started = time.time()
         idle_rounds = 0
+        beat = self._start_heartbeat()
+        try:
+            return self._loop(once, max_seconds, started, idle_rounds)
+        finally:
+            beat.set()
+
+    def _start_heartbeat(self):
+        """status.json keeps its heartbeat while the loop is busy: stopping a
+        worker, putting vLLM to sleep or stopping it can take a minute or two,
+        and a client that finds the file stale falls back to manual labelling.
+        A thread rewrites it every ``heartbeat_s`` whatever the loop is doing."""
+        stop = threading.Event()
+
+        def beat():
+            while not stop.wait(self.config.service.heartbeat_s):
+                with contextlib.suppress(Exception):
+                    self.write_status()
+
+        threading.Thread(target=beat, daemon=True, name="levi-live-heartbeat").start()
+        return stop
+
+    def _loop(self, once, max_seconds, started, idle_rounds):
         while self.running:
             wait = self.tick()
             if once:

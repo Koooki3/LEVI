@@ -48,7 +48,10 @@ class Env:
         vram = probe.get("vram", lambda: None)
         return controller.Controller(
             self.config,
-            probes=controller.Probes(vram=vram, ports=ports),
+            # Every probe pinned: no test depends on this machine's GPU.
+            probes=controller.Probes(
+                vram=vram, ports=ports, holders=list, policy_vram=lambda p: None
+            ),
             log=lambda *a: self.messages.append(" ".join(map(str, a))),
         )
 
@@ -159,8 +162,9 @@ def test_a_batch_is_labelled_without_a_person_and_without_an_outcome_label(env):
         json.loads(x) for x in (e.ws / "live/audit.jsonl").read_text().splitlines()
     ]
     tools = [x["tool"] for x in lines]
-    assert tools.count("plans.approve") == 2 and tools.count("changes.commit") == 1
-    assert {x["decision"] for x in lines} == {"allowed"} and {
+    assert tools.count("plans.approve") == 4 and tools.count("changes.commit") == 2
+    # Each state-changing call is logged when allowed and again with its outcome.
+    assert {x["decision"] for x in lines} == {"allowed", "completed"} and {
         x["principal"] for x in lines
     } == {"live-auto"}
     # What the page shows.
@@ -330,14 +334,17 @@ def test_without_the_approver_the_plan_waits_for_a_person(env):
 
 
 def test_a_model_server_that_fails_is_retried_not_trusted(env):
+    """The first two requests fail with a server error: the batch still ends
+    with the episode annotated once, by the answers that did come, and the
+    failures cost requests, not a label."""
     e = env(fail=lambda n, payload: n <= 2)
     e.rollouts.write(0)
     e.run()
-    state = e.state()
-    # The failed requests cost an attempt or a resume, never a wrong label.
-    assert state["demos"]["demo_0000"]["state"] in ("done", "mirrored", "failed")
-    if state["demos"]["demo_0000"]["state"] == "done":
-        assert len(e.atoms(0)) == 5
+    row = e.state()["demos"]["demo_0000"]
+    assert row["state"] == "done" and row["attempts"] == 0
+    assert len(e.atoms(0)) == 5
+    assert len(e.fake.calls) >= 3  # the two that failed were asked again
+    assert len([c for c in e.records("changes") if c["status"] == "committed"]) == 1
 
 
 def test_a_second_pass_over_a_quiet_dataset_does_no_work(env):
@@ -553,3 +560,34 @@ def test_waiting_for_a_person_does_not_loop_and_a_person_s_commit_is_not_a_failu
     row = e.state()["demos"]["demo_0000"]
     assert row["state"] == "done" and row["verdict"]["review"] == "auto"
     ctl.shutdown()
+
+
+def test_open_review_runs_are_kept_up_to_a_limit_and_older_ones_archived(env):
+    """Every batch leaves its release review open (waiting_for_review) for a
+    person to accept; they must not pile up for ever. The newest keep_review_runs
+    keep their frozen input (committing one needs it); older ones are cancelled
+    and cleaned, their verdicts staying in the dataset state."""
+    e = env()
+    e.config.pipeline.keep_review_runs = 1
+    for n in range(3):
+        e.rollouts.write(n)
+        e.run()
+    reviews = [r for r in e.records("runs") if r["context"]["workflow"].get("anchored")]
+    assert len(reviews) == 3
+    open_runs = [r for r in reviews if r["status"] == "waiting_for_review"]
+    assert len(open_runs) == 1 and sum(r["status"] == "cancelled" for r in reviews) == 2
+    state = e.state()
+    assert state["review_runs_open"] == 1 and state["review_runs"] == [
+        open_runs[0]["id"]
+    ]
+    base = e.ws / f"outputs/LEVI/workbench/agent/datasets/{NAME}/runs"
+    assert (base / open_runs[0]["id"] / "input").is_dir()  # still committable
+    for r in reviews:
+        if r["status"] == "cancelled":
+            assert not (base / r["id"] / "input").exists()
+    # The verdicts of all three episodes are still there.
+    assert {d["verdict"]["outcome"] for d in state["demos"].values()} == {"success"}
+    assert len(state["demos"]) == 3
+    ctl = e.controller()
+    ctl._refresh(time.time(), True)
+    assert ctl.status()["datasets"][NAME]["review_runs_open"] == 1

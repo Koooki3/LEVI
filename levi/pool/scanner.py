@@ -122,6 +122,10 @@ RC_FACTS = (
     "video_bytes",
     "video_sha256",
 )
+# Bump when what a scan derives from an episode's files changes: the signature
+# below includes it, so an index written by older code is read again instead of
+# trusted (2: an unattended rollout's robot flag is None, not "failure").
+FACTS_VERSION = 2
 VIDEO_SUFFIXES = (".mp4", ".avi", ".mkv")
 EXPORT_MARKERS = {"pool_export.json", ".levi-export.json"}
 
@@ -164,7 +168,7 @@ def _sig(folder: Path, extra: list[Path] = ()) -> str:
             rows.append((str(path), st.st_size, st.st_mtime_ns))
         except OSError:
             pass
-    return _md5(json.dumps(sorted(rows)).encode())
+    return _md5(json.dumps([FACTS_VERSION, sorted(rows)]).encode())
 
 
 def _read_json(path: Path):

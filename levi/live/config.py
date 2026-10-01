@@ -194,6 +194,11 @@ class Pipeline:
     budget_seconds: int = 86400
     # Drop a finished run's frozen input and evidence after its commit.
     cleanup: bool = True
+    # Release-review runs left open (waiting_for_review) so a person can still
+    # accept their outcome proposals per dataset: the newest this many keep
+    # their frozen input and evidence; older ones are cancelled (their
+    # verdicts stay in the dataset state and the anchored records) and cleaned.
+    keep_review_runs: int = 10
 
 
 @dataclass
