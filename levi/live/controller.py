@@ -46,6 +46,9 @@ def project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+RUN_ENDED = ("cancelled", "failed", "succeeded", "partially_succeeded")
+
+
 def peek_run(workspace, run_id) -> dict | None:
     """A run record read straight from the store's SQLite file, read-only, so
     the idle supervisor need not import LEVI's agent package."""
@@ -247,7 +250,14 @@ class Controller:
         ws = self.config.workspace
         if info.get("kind") == "changes" and info.get("changeset"):
             change = peek_record(ws, "changes", info["changeset"])
-            acted = bool(change and change.get("status") in ("committed", "rejected"))
+            run = peek_run(ws, info.get("run_id")) if info.get("run_id") else None
+            acted = bool(
+                (change and change.get("status") in ("committed", "rejected"))
+                # The person dealt with the run itself (cancelled it, it
+                # ended) or the draft is gone: nothing is left to wait for.
+                or (run and run.get("status") in RUN_ENDED)
+                or (change is None and run)
+            )
         else:
             run = peek_run(ws, info.get("run_id")) if info.get("run_id") else None
             acted = bool(

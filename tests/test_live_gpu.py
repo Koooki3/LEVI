@@ -1015,3 +1015,41 @@ def test_the_controller_learns_when_a_session_began_waiting_and_closes_ahead(ctl
     assert not ctl.gate.open and ctl.gate.code == "episode_imminent"
     assert json.loads((ctl.config.live_dir / "gate.json").read_text())["open"] is False
     assert ctl.status(t + 7.5)["sessions"][0]["reset_wait_s"] == 10.0
+
+
+# --- what counts as the person having acted --------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "change, run_status, acted",
+    [
+        ({"status": "draft"}, "waiting_for_review", False),
+        ({"status": "approved"}, "waiting_for_review", False),
+        ({"status": "committed"}, "succeeded", True),
+        ({"status": "rejected"}, "waiting_for_review", True),
+        # The person cancelled or discarded the run instead: nothing to wait for.
+        ({"status": "draft"}, "cancelled", True),
+        ({"status": "draft"}, "failed", True),
+        ({"status": "draft"}, "succeeded", True),
+        ({"status": "draft"}, "partially_succeeded", True),
+        # The draft is gone (deleted, archived with its run): same.
+        (None, "waiting_for_review", True),
+    ],
+)
+def test_a_draft_wait_ends_when_the_run_or_the_draft_is_no_longer_there(
+    ctl, monkeypatch, change, run_status, acted
+):
+    monkeypatch.setattr(controller, "peek_record", lambda *a: change)
+    monkeypatch.setattr(
+        controller, "peek_run", lambda *a: {"status": run_status, "plan": {}}
+    )
+    ctl.awaiting["d"] = {"kind": "changes", "run_id": "r1", "changeset": "c1", "at": 0}
+    assert ctl._human_acted("d", {}) is acted
+    assert ("d" not in ctl.awaiting) is acted
+
+
+def test_an_unreadable_store_is_not_taken_for_an_answer(ctl, monkeypatch):
+    monkeypatch.setattr(controller, "peek_record", lambda *a: None)
+    monkeypatch.setattr(controller, "peek_run", lambda *a: None)
+    ctl.awaiting["d"] = {"kind": "changes", "run_id": "r1", "changeset": "c1", "at": 0}
+    assert ctl._human_acted("d", {}) is False
