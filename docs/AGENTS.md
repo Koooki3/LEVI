@@ -126,6 +126,8 @@ Every run that ends — committed, cancelled or failed — is closed exactly onc
 | Dataset memory — only human-committed facts: segments per `episode_NNNNNN`, subtask and outcome statistics, recurring uncertainty, definitions, lessons, cost profiles | `workbench/memory/<name>.json` |
 | Improvement candidates | `workbench/improvements/<name>/<slug>.json` |
 
+**What the ledger's time means.** `wall_seconds` is the run's *working* time: from its creation to its last event, minus `idle_seconds`. Idle time is the time a plan waited for approval (`planned` to `plan_approved`), the time from `waiting_for_review` (or a pause or cancel request) to the next launch (`Workbench.launch` writes a `launched` event; a refused call or a `tasks.advance` that only says "review the pilot" does not end a wait) or, when nothing launches it again, to the end of the journal, and the pauses the live service's worker asks for while the policy server infers. `idle_seconds` is the union, with `waiting_for_person_seconds` and `stood_down_seconds` (the worker's pauses) kept apart. Ledgers written before this change used the whole span, and the per-agent history that `cost.fold` keeps (the median seconds per episode that a new run is compared with, for the `cost-rise-*` improvement) is in the old measure until it fills with new runs, so for a while old and new runs are compared with each other.
+
 A new run freezes a snapshot of the dataset's memory and harness parameters at plan time (`run.harness`), so knowledge gained while it works reaches the next run, not this one.
 
 ### Cost

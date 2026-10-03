@@ -44,40 +44,88 @@ def channel(event):
     return "human" if event.get("principal") in LEGACY_HUMAN else "agent"
 
 
-# A run is not working while it waits for a person's review, or from the
-# moment someone asks it to pause or cancel; it works again when something
-# starts it (the executor's capabilities, the live service's auto-resume, a
-# revised plan). The time between is the person's, not the task's.
-IDLE_STARTS = {"waiting_for_review", "pause_requested", "cancel_requested"}
-RESUMING_TOOLS = {"runs.execute", "runs.resume", "tasks.advance"}
+# A run is not working while it waits for a person (its plan to be approved,
+# its review, a pause or cancel someone asked for) or while the live service's
+# worker stands down for the policy server. It works again when the executor
+# is launched (``Workbench.launch`` writes ``launched`` once a launch has been
+# accepted; a refused ``runs.execute`` or a ``tasks.advance`` that only says
+# "review the pilot" starts nothing and writes none). The time between is not
+# the task's.
+LIVE_PRINCIPALS = {"live-auto", "live-planner"}  # the live worker's own calls
+# Journals from before ``launched`` existed: a completed (not failed) call.
+LEGACY_RESUMING_TOOLS = {"runs.execute", "runs.resume"}
 
 
-def _resumes(event):
-    kind = event.get("type")
-    return kind in {"auto_resumed", "plan_revised"} or (
-        kind == "action.started" and event.get("tool") in RESUMING_TOOLS
-    )
+def _merged(spans):
+    """Total length of the union of ``(start, end)`` spans."""
+    total, end = 0.0, None
+    for start, stop in sorted(spans):
+        if end is None or start > end:
+            total += max(0.0, stop - start)
+            end = stop
+        elif stop > end:
+            total += stop - end
+            end = stop
+    return total
 
 
-def idle_seconds(events, finished):
-    """Seconds the run spent waiting for a person (review, a pause, a cancel
-    that came late), up to ``finished`` for a wait that never ended: a run
-    cancelled long after it finished its work did not take that long. Events
-    are in journal order."""
-    idle, since = 0.0, None
+def idle_spans(events, finished) -> dict:
+    """``{idle, waiting_for_person, stood_down}`` seconds of a run's journal.
+
+    ``waiting_for_person``: from ``planned`` (or a revised plan) to its
+    approval, from ``waiting_for_review`` or a person's pause or cancel to the
+    next launch, up to ``finished`` when nothing launched it again (a run
+    cancelled long after it finished its work did not take that long). An
+    unapproved plan with no approval in the journal is not counted (an
+    external agent may work without one). ``stood_down``: pauses the live
+    worker asked for while the policy server infers. ``idle`` is the union of
+    both. Events are in journal order."""
+    legacy = not any(e.get("type") == "launched" for e in events)
+    person, stood = [], []
+    plan_since = run_since = run_kind = None
+    pause_by = None  # who last asked for runs.pause / runs.cancel
     for event in events:
         when = event.get("time")
-        if when is None or event.get("type") in {"closed", "closure_failed"}:
+        kind = event.get("type")
+        if when is None or kind in {"closed", "closure_failed"}:
             continue
-        if since is None:
-            if event.get("type") in IDLE_STARTS:
-                since = when
-        elif _resumes(event):
-            idle += max(0.0, when - since)
-            since = None
-    if since is not None and finished:
-        idle += max(0.0, finished - since)
-    return idle
+        if kind == "action.started" and event.get("tool") in {
+            "runs.pause",
+            "runs.cancel",
+        }:
+            pause_by = event.get("principal")
+        if kind in {"planned", "plan_revised"}:
+            plan_since = when
+        elif kind == "plan_approved" and plan_since is not None:
+            person.append((plan_since, when))
+            plan_since = None
+        if run_since is None:
+            if kind in {"waiting_for_review", "pause_requested", "cancel_requested"}:
+                run_since = when
+                run_kind = (
+                    stood
+                    if kind == "pause_requested" and pause_by in LIVE_PRINCIPALS
+                    else person
+                )
+        elif kind == "launched" or (
+            legacy
+            and (
+                kind == "auto_resumed"
+                or (
+                    kind == "action.completed"
+                    and event.get("tool") in LEGACY_RESUMING_TOOLS
+                )
+            )
+        ):
+            run_kind.append((run_since, when))
+            run_since = None
+    if run_since is not None and finished:
+        run_kind.append((run_since, finished))
+    return {
+        "idle": _merged(person + stood),
+        "waiting_for_person": _merged(person),
+        "stood_down": _merged(stood),
+    }
 
 
 def _tools(events):
@@ -176,7 +224,8 @@ def build(store, run_id):
     finished = times[-1] if times else None
     # Time spent waiting for a person (a review left open, a late cancel) is
     # not the task's: it would otherwise read as a run that got slow.
-    waited = idle_seconds(events, finished)
+    idle = idle_spans(events, finished)
+    waited = idle["idle"]
     delivered_bytes = sum(t["response_bytes"] for t in tools.values())
     delivered_pixels = sum(t["image_pixels"] for t in tools.values())
     samples = [s for s in store.list("usage_samples") if s.get("run_id") == run_id]
@@ -202,7 +251,9 @@ def build(store, run_id):
         "wall_seconds": round(max(0.0, finished - started - waited), 1)
         if started and finished
         else None,
-        "waiting_for_person_seconds": round(waited, 1),
+        "idle_seconds": round(idle["idle"], 1),
+        "waiting_for_person_seconds": round(idle["waiting_for_person"], 1),
+        "stood_down_seconds": round(idle["stood_down"], 1),
         "started_at": started,
         "finished_at": finished,
         "tools": tools,

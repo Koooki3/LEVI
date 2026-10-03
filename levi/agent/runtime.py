@@ -424,6 +424,9 @@ class Workbench:
         except BaseException:
             self.store.release(id, owner)
             raise
+        # The run's clock restarts here (harness.ledger leaves out the waiting
+        # before it); a refused launch raised above and writes nothing.
+        self.store.event(id, "launched", pilot=pilot)
         ctx = copy_context()
 
         def work():
