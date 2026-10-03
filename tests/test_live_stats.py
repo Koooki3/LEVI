@@ -1,6 +1,7 @@
 """``live/stats.jsonl``: one structured record per labelled demo."""
 
 import json
+import time
 
 from test_live_gpu import live, serve, wait_for  # noqa: F401  (fixtures, helper)
 from test_live_pipeline import NAME, env  # noqa: F401  (fixture)
@@ -202,18 +203,81 @@ def test_a_labelled_batch_writes_one_complete_record_per_demo(env):  # noqa: F81
     json.loads(text.splitlines()[0])
 
 
-def test_a_cold_start_and_a_wake_are_timed_for_the_next_batch(live, serve):  # noqa: F811
+def test_a_cold_start_and_a_wake_are_timed_until_a_batch_finishes(live, serve):  # noqa: F811
     c, _ = live
     vllm = gpumgr.Vllm(c)
-    assert vllm.take_timings() == {}
+    now = time.time
+    assert vllm.pending_timings(now(), 600) == {}
     assert vllm.start(c.vllm_profile())
     assert wait_for(lambda: vllm.poll() == "ready")
-    timings = vllm.take_timings()
-    assert set(timings) == {"vllm_cold_start_s"} and timings["vllm_cold_start_s"] >= 0
-    assert vllm.take_timings() == {}  # handed over once
+    given = vllm.pending_timings(now(), 600)
+    assert set(given) == {"vllm_cold_start_s"} and given["vllm_cold_start_s"]["s"] >= 0
+    # Reading is not consuming: a batch that did not finish leaves it.
+    assert set(vllm.pending_timings(now(), 600)) == {"vllm_cold_start_s"}
     assert vllm.sleep() and vllm.wake()
-    assert set(vllm.take_timings()) == {"vllm_wake_s"}
+    assert set(vllm.pending_timings(now(), 600)) == {
+        "vllm_cold_start_s",
+        "vllm_wake_s",
+    }
+    # Clearing drops what was handed over, not a wake measured since.
+    vllm.clear_timings(given)
+    assert set(vllm.timings) == {"vllm_wake_s"}
+    # Stale ones are dropped.
+    assert vllm.pending_timings(now() + 601, 600) == {}
     vllm.stop()
+
+
+class FakeProcess:
+    pid = 4242
+
+    def __init__(self, *args, **kwargs):
+        self.env = kwargs.get("env")
+        self.code = None
+
+    def poll(self):
+        return self.code
+
+
+def spawned_with(fixture):
+    from levi.live import controller
+
+    c, _ = fixture
+    made = []
+
+    def popen(*args, **kwargs):
+        made.append(FakeProcess(*args, **kwargs))
+        return made[-1]
+
+    ctl = controller.Controller(c, log=lambda *a: None, popen=popen)
+    return ctl, made
+
+
+def test_timings_survive_a_worker_that_does_not_finish_a_batch(live, serve):  # noqa: F811
+    ctl, made = spawned_with(live)
+    ctl.vllm.timings["vllm_wake_s"] = {"s": 0.74, "at": time.time()}
+    for code in (14, 10, 11, 13, 12):  # nothing to do, model, person, paused, error
+        ctl._spawn("ds")
+        assert json.loads(made[-1].env["LEVI_LIVE_VLLM_TIMINGS"]) == {
+            "vllm_wake_s": 0.74
+        }
+        ctl._reaped(code)
+        assert "vllm_wake_s" in ctl.vllm.timings, code
+    # The batch that finishes takes them; the next one gets none.
+    ctl._spawn("ds")
+    ctl._reaped(0)
+    assert ctl.vllm.timings == {}
+    ctl._spawn("ds")
+    assert "LEVI_LIVE_VLLM_TIMINGS" not in made[-1].env
+    ctl._reaped(14)
+
+
+def test_a_wake_that_is_hours_old_is_not_given_to_a_later_batch(live, serve):  # noqa: F811
+    ctl, made = spawned_with(live)
+    ctl.vllm.timings["vllm_cold_start_s"] = {"s": 55.0, "at": time.time() - 3 * 3600}
+    ctl._spawn("ds")
+    assert "LEVI_LIVE_VLLM_TIMINGS" not in made[-1].env
+    assert ctl.vllm.timings == {}
+    ctl._reaped(14)
 
 
 def test_the_worker_reads_what_the_supervisor_timed(monkeypatch):

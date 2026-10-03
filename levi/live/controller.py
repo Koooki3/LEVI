@@ -39,6 +39,7 @@ SCHEMA = "levi.live.status.v1"
 WORKER_STALL_S = 600.0
 GATE_GRACE_S = 8.0
 MAX_EVENTS = 10
+TIMINGS_MAX_AGE_S = 600.0  # a wake or cold start older than this is not handed on
 GATE_HISTORY_SHOWN = 5  # gate transitions kept for the status file
 # A VRAM reading older than this is not shown as the free memory of now.
 FREE_FRESH_S = 30.0
@@ -163,6 +164,7 @@ class Controller:
         # Gate transitions: the last (open, code) written to live/gate.jsonl,
         # and the latest few for the status file (seeded from the file, so a
         # restart keeps them).
+        self._timings_given: dict = {}
         self._gate_logged: tuple | None = None
         self._gate_lock = threading.Lock()
         self.gate_history: list = gating.history(config.live_dir, GATE_HISTORY_SHOWN)
@@ -721,12 +723,17 @@ class Controller:
         env = resources.service_env(c)
         if c.pipeline.auto_approve:
             env[auto.ENABLE_ENV] = "1"
-        # What it cost to get the model ready for this batch (a wake or a cold
-        # start since the previous worker): the worker records it with the
-        # batch's statistics.
-        timings = self.vllm.take_timings()
-        if timings:
-            env["LEVI_LIVE_VLLM_TIMINGS"] = json.dumps(timings)
+        # What it cost to get the model ready (a wake or a cold start in the
+        # last TIMINGS_MAX_AGE_S): handed to this worker, which records it on
+        # its batch's first demo. They are forgotten only when that batch
+        # finished (``_reaped``, exit 0); a worker that found nothing to do,
+        # waited for the model or a person, or failed leaves them for the next
+        # worker, unless they have grown stale.
+        self._timings_given = self.vllm.pending_timings(time.time(), TIMINGS_MAX_AGE_S)
+        if self._timings_given:
+            env["LEVI_LIVE_VLLM_TIMINGS"] = json.dumps(
+                {k: v["s"] for k, v in self._timings_given.items()}
+            )
         c.logs_dir.mkdir(parents=True, exist_ok=True)
         log = c.logs_dir / "worker.log"
         resources.rotate_file(log, c.resources.log_max_mb, c.resources.log_backups)
@@ -798,6 +805,7 @@ class Controller:
             self.event(f"batch for {name} paused")
         elif code == 0:
             self.failures.pop(name, None)
+            self.vllm.clear_timings(self._timings_given)
             self.event(f"batch finished for {name}")
         elif code == 14:
             self.failures.pop(name, None)

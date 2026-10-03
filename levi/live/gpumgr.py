@@ -619,8 +619,10 @@ class Vllm:
         self.keepalive = None
         self.error = ""
         self._health = (0.0, False)
-        # How long a cold start and a wake took, until the controller hands
-        # them to the worker it starts next (``take_timings``).
+        # How long a cold start and a wake took, each ``{"s": seconds, "at":
+        # when}``: the controller hands the fresh ones to the worker it starts
+        # (``pending_timings``) and forgets them once that worker's batch
+        # finished (``clear_timings``).
         self.timings: dict = {}
         self._cold_pending = False
         self._adopt()
@@ -832,9 +834,10 @@ class Vllm:
                 self.state = "ready"
                 if self._cold_pending:
                     self._cold_pending = False
-                    self.timings["vllm_cold_start_s"] = round(
-                        time.time() - (self.started_at or time.time()), 1
-                    )
+                    self.timings["vllm_cold_start_s"] = {
+                        "s": round(time.time() - (self.started_at or time.time()), 1),
+                        "at": time.time(),
+                    }
                 if is_sleeping(self.port):  # adopted a server left asleep
                     self.state = "asleep"
             elif not self.mine():
@@ -857,11 +860,21 @@ class Vllm:
                 self.record_path.unlink()
         return self.state
 
-    def take_timings(self) -> dict:
-        """The cold start and wake durations since the last call (for the
-        batch the controller starts now), then forgotten."""
-        taken, self.timings = self.timings, {}
-        return taken
+    def pending_timings(self, now, max_age_s) -> dict:
+        """``{name: {"s", "at"}}`` of the cold start and wake no older than
+        ``max_age_s``; older ones are dropped (they belong to nothing that is
+        still running). Not cleared: see ``clear_timings``."""
+        self.timings = {
+            k: v for k, v in self.timings.items() if now - v["at"] <= max_age_s
+        }
+        return dict(self.timings)
+
+    def clear_timings(self, given) -> None:
+        """Forget what was handed over (``{name: {"at"}}``), unless a newer
+        one has been measured since."""
+        for key, row in given.items():
+            if (self.timings.get(key) or {}).get("at") == row.get("at"):
+                self.timings.pop(key, None)
 
     def sleep(self) -> bool:
         """Level-1 sleep: weights to host memory, KV dropped, most of the VRAM
@@ -887,7 +900,10 @@ class Vllm:
             and is_sleeping(self.port) is False
         ):
             self.state, self.error = "ready", ""
-            self.timings["vllm_wake_s"] = round(time.time() - began, 2)
+            self.timings["vllm_wake_s"] = {
+                "s": round(time.time() - began, 2),
+                "at": time.time(),
+            }
             return True
         self.error = "vLLM did not wake up"
         return False

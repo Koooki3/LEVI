@@ -78,7 +78,7 @@ uv run levi live stop                            # 只停自己的进程
 
 ## 设置（`live.toml`）
 
-`levi live init` 写出带全部默认值的文件；未知键或类型不对是错误，不会悄悄取默认值。`--workspace`、`--root`、`--gpu-mode`、`--auto-approve`、`--prewarm`、`--process-backlog`、`--since`、`--vllm-port`、`--ui-port`、`--core-port`、`--home` 可覆盖文件。`--adopt-workspace`：把已有的、不是实时工作区的 LEVI 工作区改成实时工作区才需要它；没有它时，`levi live` 拒绝任何有 LEVI 状态却没有实时标记的工作区（尤其是产品的 `.state`：自动批准的标记绝不能落进去），本检出的 `.state`、（从 git worktree 运行时）主检出（产品 LEVI 运行的地方）的 `.state`，以及 `LEVI_WORKSPACE` 指向的工作区（除非它已经是实时工作区），不管有没有 `--adopt-workspace` 都拒绝。每个 home 和每个工作区各只运行一个服务。环境变量：`LEVI_LIVE_WORKSPACE`、`LEVI_LIVE_CONFIG`、`LEVI_LIVE_HOME`（`status.json` 所在目录，默认 `~/.levi-live`）。`LEVI_LIVE_WORKER=1` 由服务在 worker 进程里设置（不要自己设）：它让 worker 不受“每次模型请求前查闸门”的约束，因为 worker 自己会让路。服务会把它从其他子进程的环境里去掉，所以 shell 里设了它也不会豁免任何东西。`LEVI_LIVE_VLLM_TIMINGS` 同样只由监督进程为它启动的 worker 设置：一个小 JSON，写着这个批次之前 vLLM 唤醒或冷启动花的秒数（`vllm_wake_s`、`vllm_cold_start_s`），worker 把它抄进 `stats.jsonl`；服务也会把它从其他进程的环境里去掉。
+`levi live init` 写出带全部默认值的文件；未知键或类型不对是错误，不会悄悄取默认值。`--workspace`、`--root`、`--gpu-mode`、`--auto-approve`、`--prewarm`、`--process-backlog`、`--since`、`--vllm-port`、`--ui-port`、`--core-port`、`--home` 可覆盖文件。`--adopt-workspace`：把已有的、不是实时工作区的 LEVI 工作区改成实时工作区才需要它；没有它时，`levi live` 拒绝任何有 LEVI 状态却没有实时标记的工作区（尤其是产品的 `.state`：自动批准的标记绝不能落进去），本检出的 `.state`、（从 git worktree 运行时）主检出（产品 LEVI 运行的地方）的 `.state`，以及 `LEVI_WORKSPACE` 指向的工作区（除非它已经是实时工作区），不管有没有 `--adopt-workspace` 都拒绝。每个 home 和每个工作区各只运行一个服务。环境变量：`LEVI_LIVE_WORKSPACE`、`LEVI_LIVE_CONFIG`、`LEVI_LIVE_HOME`（`status.json` 所在目录，默认 `~/.levi-live`）。`LEVI_LIVE_WORKER=1` 由服务在 worker 进程里设置（不要自己设）：它让 worker 不受“每次模型请求前查闸门”的约束，因为 worker 自己会让路。服务会把它从其他子进程的环境里去掉，所以 shell 里设了它也不会豁免任何东西。`LEVI_LIVE_VLLM_TIMINGS` 同样只由监督进程为它启动的 worker 设置：一个小 JSON，写着这个批次之前 vLLM 唤醒或冷启动花的秒数（`vllm_wake_s`、`vllm_cold_start_s`），worker 把它抄进 `stats.jsonl`；只传最近 10 分钟内的唤醒或冷启动，做完一个批次后就忘掉。服务也会把它从其他进程的环境里去掉。
 
 各表、各键、默认值和含义与英文版表格一致（`service`、`watch`、`fr3`、`gpu`、`vllm`、`provider`、`pipeline`、`resources`），见 [LIVE.md](LIVE.md#settings-livetoml)。要点：
 
@@ -225,7 +225,7 @@ uv run levi live stop                            # 只停自己的进程
 | `model.images` | 发送的图片数 |
 | `model.external_tokens` | 恒为 0：没有任何东西离开这台机器 |
 | `gate.closed_wait_s`、`gate.interruptions` | worker 因闸门关闭而让路的秒数和次数，按这个片段所在的整个批次算（一个批次有多个片段，每个都带批次的数字） |
-| `gate.vllm_wake_s`、`gate.vllm_cold_start_s` | 监督进程在启动这个批次的 worker 之前做的唤醒（约 0.75 秒）或冷启动的耗时；只记在批次的第一个片段上，其余是 `null` |
+| `gate.vllm_wake_s`、`gate.vllm_cold_start_s` | 监督进程在启动 worker 之前 10 分钟内做的唤醒（约 0.75 秒）或冷启动的耗时。它记在做完的那个批次的第一个片段上；worker 没活可做、在等模型或等人、或失败时，会把它留给下一个 worker，超过 10 分钟的丢弃，所以不会记到几小时后的批次上。其余片段为 `null` |
 | `result.state`、`result.reason` | `done`、`failed` 或 `mirrored`（之后重试）；没做完时的原因 |
 | `result.segments`、`result.segment_labels` | 提交的时间片段数，以及按子任务 id 的计数 |
 | `result.verdict` | 自动释放复核的 `{outcome, events, valid_events, undecided}`，或 `null` |
