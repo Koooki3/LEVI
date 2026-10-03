@@ -118,7 +118,7 @@ def sessions_view():
     rows = []
     for (_root, group, task), session in sorted(found.items())[:64]:
         row = session.public()
-        row["dataset"] = mirror.dataset_name(group, task)
+        row["dataset"] = mirror.resolve_name(config, _root, group, task)
         row["fault"] = session.fault
         row["waiting_reset_since"] = (
             (session.waiting_reset_since or since.get((_root, group, task)))

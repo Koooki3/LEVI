@@ -164,6 +164,9 @@ class Controller:
         # Gate transitions: the last (open, code) written to live/gate.jsonl,
         # and the latest few for the status file (seeded from the file, so a
         # restart keeps them).
+        # Datasets whose worker found nothing to do, in a row: {name: {n,
+        # until}}. They wait out an exponential delay before the next worker.
+        self.nothing: dict = {}
         self._timings_given: dict = {}
         self._gate_logged: tuple | None = None
         self._gate_lock = threading.Lock()
@@ -269,6 +272,10 @@ class Controller:
             if not (state.get("current") or todo or (scan and scan.ready)):
                 continue
             if self.backoff.get(name, 0) > now:
+                continue
+            if (self.nothing.get(name) or {}).get("until", 0) > now:
+                continue
+            if not mirror.is_available(self.config, name, state):
                 continue
             if name in self.awaiting and not self._human_acted(name, state):
                 continue
@@ -759,7 +766,8 @@ class Controller:
                 start_new_session=True,
             )
         self.worker_dataset, self.worker_started = name, time.time()
-        self.event(f"batch started for {name}")
+        if name not in self.nothing:  # a repeat is summarised when it ends
+            self.event(f"batch started for {name}")
 
     def _stop_worker(self, grace=30.0):
         proc = self.worker
@@ -793,13 +801,15 @@ class Controller:
                 )
                 self._stop_worker(grace=10.0)
             return
-        self._reaped(code)
+        self._reaped(code, now=now)
 
-    def _reaped(self, code, requested=False):
+    def _reaped(self, code, requested=False, now=None):
         name = self.worker_dataset
         self.worker = None
         self.worker_dataset = None
-        now = time.time()
+        now = time.time() if now is None else now
+        if code != 14:
+            self.nothing.pop(name, None)
         if requested and code not in (0, 14):
             self._let_go_of_runs(name)
             self.event(f"batch for {name} paused")
@@ -809,6 +819,7 @@ class Controller:
             self.event(f"batch finished for {name}")
         elif code == 14:
             self.failures.pop(name, None)
+            self._nothing_to_do(name, now)
         elif code == 13:
             self.event(f"batch for {name} paused")
         elif code == 11:
@@ -831,6 +842,23 @@ class Controller:
             self.event(
                 f"batch for {name} failed (exit {code}); retry in {self.backoff[name] - now:.0f} s",
                 "error",
+            )
+
+    def _nothing_to_do(self, name, now):
+        """A worker that found nothing although a batch looked due: wait
+        2, 4, 8 ... s (at most ``poll_idle_s``) before another, say so once
+        for each doubling, and when the source folder is the reason mark the
+        dataset unavailable until it returns."""
+        n = (self.nothing.get(name) or {}).get("n", 0) + 1
+        delay = min(max(self.config.service.poll_idle_s, 5.0), 2.0 * 2 ** (n - 1))
+        self.nothing[name] = {"n": n, "until": now + delay}
+        problem = mirror.source_problem(mirror.load_state(self.config, name))
+        if problem and mirror.is_available(self.config, name):
+            mirror.set_available(self.config, name, problem)
+            self.event(f"{name}: {problem}; not labelling it until it is back", "error")
+        elif n == 1 or n & (n - 1) == 0:
+            self.event(
+                f"{name}: nothing to do ({n} in a row); next try in {delay:.0f} s"
             )
 
     def _let_go_of_runs(self, name):
@@ -1140,8 +1168,8 @@ class Controller:
         states = mirror.list_states(self.config)
         scans = {t.name: t for t in self.tasks}
         fault_sessions = {
-            mirror.dataset_name(g, t): s
-            for (_r, g, t), s in self.sessions.items()
+            self.scanner.known_name((r, g, t)): s
+            for (r, g, t), s in self.sessions.items()
             if s.fault
         }
         rows = {}
@@ -1176,7 +1204,9 @@ class Controller:
                     else (state.get("incomplete") or {}).get("fr3_fault", 0)
                 ),
                 "discarded": scan.discarded if scan else state.get("discarded", 0),
-                "available": scan.available if scan else False,
+                "available": bool(scan and scan.available)
+                and not state.get("unavailable"),
+                "unavailable_reason": (state.get("unavailable") or {}).get("reason"),
                 "last_processed_at": state.get("last_processed_at") or None,
                 "last_error": (state.get("last_error") or "")[:200],
                 "fault": False,

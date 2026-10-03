@@ -1,7 +1,8 @@
 """Follow rollout directories and mirror finished demos into the workspace.
 
 Each ``<group>/<task_folder>`` under a watched root becomes one LEVI dataset,
-named ``<group>__<task_folder>``; its raw capture lives in
+named ``<group>__<task_folder>`` (``resolve_name``: the same task under another
+root gets ``<name>__at__<root mark>``); its raw capture lives in
 ``<workspace>/captures/<name>/demo_NNNN/``. The source tree is never written.
 
 **Scanning** is stat-only. A task folder whose modification time has not
@@ -47,6 +48,60 @@ def dataset_name(group: str, task: str) -> str:
     return name
 
 
+ROOT_MARK = "__at__"  # <name>__at__<root mark>: the same task under another root
+MARK_MAX = 20  # characters of the root's last folder name kept in a mark
+NAME_MAX = 140  # what the live API accepts of a dataset name
+
+
+def root_mark(root) -> str:
+    """A short, filename-safe label for a rollout root: its last folder name
+    (``models`` for ``.../online_rollout_data/models``)."""
+    last = Path(str(root)).name
+    mark = re.sub(r"[^A-Za-z0-9.-]+", "_", last).strip("_").lstrip(".")
+    return mark[:MARK_MAX] or "root"
+
+
+def same_root(a, b) -> bool:
+    """Do two recorded roots name one folder? A state without a recorded root
+    (written before roots were recorded) counts as matching."""
+    if not a or not b:
+        return True
+    try:
+        return os.path.realpath(str(a)) == os.path.realpath(str(b))
+    except OSError:
+        return str(a) == str(b)
+
+
+def resolve_name(config, root, group: str, task: str, claimed=None) -> str:
+    """The dataset a ``(root, group, task)`` is, by name.
+
+    One ``(group, task)`` under two roots is two datasets: the name alone
+    (``dataset_name``) would make the second inherit the first's state, source
+    and capture. The plain name stays with the root whose state already holds
+    it (names already in use are never changed or moved); another root gets
+    ``<name>__at__<root mark>``, and ``-<hash of the root>`` after that when two
+    roots share a last folder name. A state that already belongs to this root
+    is always found again, whichever candidate it sits under, so a restart
+    resolves the same way. ``claimed`` (``{name: root}``) is the names taken
+    earlier in one scan by roots that have no state yet."""
+    import hashlib
+
+    base = dataset_name(group, task)
+    short = base[: NAME_MAX - len(ROOT_MARK) - MARK_MAX - 8]
+    mark = f"{short}{ROOT_MARK}{root_mark(root)}"
+    digest = hashlib.sha256(os.path.realpath(str(root)).encode()).hexdigest()[:6]
+    candidates = [base, mark, f"{mark}-{digest}"]
+    states = [(name, load_state(config, name)) for name in candidates]
+    for name, state in states:
+        if state is not None and same_root(state.get("root"), root):
+            return name
+    for name, state in states:
+        owner = (claimed or {}).get(name)
+        if state is None and (owner is None or same_root(owner, root)):
+            return name
+    return candidates[-1]
+
+
 def datasets_dir(config) -> Path:
     return config.live_dir / "datasets"
 
@@ -80,9 +135,9 @@ def service_epoch(config) -> float:
     return float(value["first_started_at"])
 
 
-def empty_state(config, key, cutoff: float) -> dict:
+def empty_state(config, key, cutoff: float, name: str | None = None) -> dict:
     root, group, task = key
-    name = dataset_name(group, task)
+    name = name or dataset_name(group, task)
     return {
         "schema": SCHEMA,
         "name": name,
@@ -184,6 +239,8 @@ class Scanner:
         self._tasks: dict = {}
         self._mtimes: dict = {}
         self._aborts: dict = {}
+        self._names: dict = {}  # (root, group, task) -> dataset name, once chosen
+        self._claimed: dict = {}  # name -> root, for roots that have no state yet
         self.epoch = None
         self.errors: list = []
 
@@ -207,6 +264,22 @@ class Scanner:
                 ]
         except OSError:
             return []
+
+    def name_of(self, key) -> str:
+        """The dataset name of ``(root, group, task)``, chosen once per
+        scanner (``resolve_name``) so it cannot change under a running scan."""
+        name = self._names.get(key)
+        if name is None:
+            root, group, task = key
+            name = resolve_name(self.config, root, group, task, self._claimed)
+            self._names[key] = name
+            self._claimed.setdefault(name, root)
+        return name
+
+    def known_name(self, key) -> str:
+        """``name_of`` for a reader (status, fault lookups): the chosen name
+        if there is one, else what ``resolve_name`` says, without taking it."""
+        return self._names.get(key) or resolve_name(self.config, *key)
 
     def tasks(self):
         """(root, group, task_folder, path) for every selected task folder."""
@@ -264,8 +337,7 @@ class Scanner:
         return cutoff
 
     def _scan_task(self, key, path, session, now):
-        _root, group, task = key
-        name = dataset_name(group, task)
+        name = self.name_of(key)
         if self.config.watch.require_session and not (session and session.levi_enabled):
             return None
         if session is not None and session.levi_enabled is False:
@@ -377,7 +449,7 @@ class Scanner:
 
         def change(value):
             if not value:
-                value = empty_state(self.config, key, cutoff)
+                value = empty_state(self.config, key, cutoff, name)
             for demo, reason, at in rejected:
                 value["demos"].setdefault(
                     demo,
@@ -505,6 +577,46 @@ def verify_sources(config, name: str) -> list:
 
         jsonio.update(state_path(config, name), flag, default=dict)
     return changed
+
+
+def source_problem(state) -> str | None:
+    """Why this dataset's source cannot supply demos, or None: its folder is
+    gone, is not a folder, or holds nothing."""
+    source = Path(str((state or {}).get("source") or ""))
+    try:
+        with os.scandir(source) as entries:
+            if next(entries, None) is None:
+                return f"the source folder {source} is empty"
+    except OSError:
+        return f"the source folder {source} is missing"
+    return None
+
+
+def set_available(config, name: str, reason: str | None) -> None:
+    """Mark a dataset's source unavailable (with the reason) or available
+    again; the queue skips an unavailable dataset until its source returns."""
+
+    def change(value):
+        if reason is None:
+            value.pop("unavailable", None)
+        else:
+            value["unavailable"] = {"reason": reason, "since": time.time()}
+        return value
+
+    if load_state(config, name) is not None:
+        jsonio.update(state_path(config, name), change, default=dict)
+
+
+def is_available(config, name: str, state=None) -> bool:
+    """False while a dataset is marked unavailable and its source has not come
+    back (which clears the mark)."""
+    state = state if state is not None else load_state(config, name)
+    if not (state or {}).get("unavailable"):
+        return True
+    if source_problem(state) is None:
+        set_available(config, name, None)
+        return True
+    return False
 
 
 def refresh_changed(config, name: str) -> list:
