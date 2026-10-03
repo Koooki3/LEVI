@@ -32,7 +32,17 @@ import threading
 import time
 from pathlib import Path
 
-from . import auto, exclusion, gating, gpumgr, jsonio, mirror, resources, sessions
+from . import (
+    auto,
+    exclusion,
+    gating,
+    gpumgr,
+    jsonio,
+    mirror,
+    report,
+    resources,
+    sessions,
+)
 from . import config as live_config
 
 SCHEMA = "levi.live.status.v1"
@@ -40,6 +50,7 @@ WORKER_STALL_S = 600.0
 GATE_GRACE_S = 8.0
 MAX_EVENTS = 10
 TIMINGS_MAX_AGE_S = 600.0  # a wake or cold start older than this is not handed on
+REPORT_EVERY_S = 30.0  # how often finished sessions are looked for
 GATE_HISTORY_SHOWN = 5  # gate transitions kept for the status file
 # A VRAM reading older than this is not shown as the free memory of now.
 FREE_FRESH_S = 30.0
@@ -198,6 +209,7 @@ class Controller:
         self._meter = resources.Meter()
         self._cpu = None
         self._cache_at = time.time()
+        self._report_at = 0.0
         # Callables taking the time; a returned message is logged as an error
         # (the CLI registers the page/core watchdog here).
         self.hooks: list = []
@@ -1110,6 +1122,7 @@ class Controller:
         ):
             self.last_error = ""
         self._maintain(now)
+        self._reports(now)
         for hook in self.hooks:
             message = hook(now)
             if message:
@@ -1156,6 +1169,21 @@ class Controller:
             self.event(
                 f"cache trimmed: {result['before'] >> 20} -> {result['after'] >> 20} MiB"
             )
+
+    def _reports(self, now):
+        """The report of every evaluation session that has ended and whose
+        episodes are all labelled (``report.py``), checked every 30 s and
+        never while a batch runs. A record, not part of the labelling: a
+        failure here is only logged."""
+        if self.worker is not None or now - self._report_at < REPORT_EVERY_S:
+            return
+        self._report_at = now
+        busy = {t.name for t in self.tasks if t.ready or t.waiting}
+        try:
+            for done in report.auto(self.config, self.sessions, busy, now):
+                self.event(f"session report written: {done['stem']}")
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"session report failed: {exc}")
 
     # --- status ------------------------------------------------------------------------------
 

@@ -5,6 +5,8 @@
     levi live status [--json]
     levi live doctor [--json]
     levi live once [--fake-vlm]
+    levi live report [--dataset X] [--session Y] [--format md|json|csv] [--out P]
+    levi live stats backfill [--dataset X] [--dry-run]
     levi live init
 
 Standard library only until the service needs more: the supervisor imports no
@@ -22,8 +24,20 @@ import time
 import urllib.request
 from pathlib import Path
 
-from . import auto, controller, gpumgr, jsonio, mirror, resources
+from . import (
+    auto,
+    backfill,
+    controller,
+    gpumgr,
+    jsonio,
+    mirror,
+    resources,
+    statsfmt,
+    statsview,
+)
 from . import config as live_config
+from . import report as live_report
+from . import sessions as live_sessions
 
 ENV_WORKSPACE = "LEVI_LIVE_WORKSPACE"
 ENV_HOME = "LEVI_LIVE_HOME"
@@ -1047,6 +1061,57 @@ def cmd_exclude(args) -> int:
         if any(counts.values())
         else "counts now: none"
     )
+
+
+def cmd_report(args) -> int:
+    """The statistics of a scope as a report: Markdown (default), JSON or the
+    per-episode CSV, to the terminal or ``--out``. Reads the workspace's files
+    only; the service need not be running."""
+    config = resolve_config(args)
+    dataset, session = args.dataset, args.session
+    if args.format == "csv":
+        payload = statsview.build(config, dataset=dataset, session=session, limit=None)
+        text = statsfmt.to_csv(payload)
+    else:
+        policy = None
+        if dataset and session:
+            found = live_sessions.read_sessions(config.watch.roots)
+            policy = live_report.policy_of(found, dataset, session)
+        built = live_report.build(config, dataset, session, policy=policy)
+        text = (
+            statsfmt.to_json(built)
+            if args.format == "json"
+            else live_report.render(built, args.lang)
+        )
+    if args.out:
+        target = Path(args.out).expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        partial = target.with_name(target.name + ".partial")
+        partial.write_text(text, encoding="utf-8")
+        os.replace(partial, target)
+        print(f"wrote {target}")
+    else:
+        sys.stdout.write(text if text.endswith("\n") else text + "\n")
+    return 0
+
+
+def cmd_stats(args) -> int:
+    """``levi live stats backfill``: rebuild the records of demos labelled
+    before ``stats.jsonl`` existed, from the ledger and the run journals."""
+    config = resolve_config(args)
+    items = backfill.plan(config, args.dataset)
+    if args.dry_run:
+        if args.json:
+            print(json.dumps(items, ensure_ascii=False, indent=1, default=str))
+            return 0
+        for item in items:
+            print(f"{item['dataset']} {item['demo']}")
+            for path, source in sorted(item["sources"].items()):
+                print(f"  {path:34} <- {source}")
+        print(f"dry run: {len(items)} demo(s) would be backfilled; nothing written")
+        return 0
+    written = backfill.apply(config, items)
+    print(f"backfilled {written} demo(s)")
     return 0
 
 
@@ -1116,6 +1181,29 @@ def build_parser():
     exclude.add_argument("--restore", action="store_true", help="put them back instead")
     init = sub.add_parser("init", help="write a live.toml with every default")
     add_config_options(init)
+    rep = sub.add_parser(
+        "report", help="the statistics of a dataset or session as a report"
+    )
+    add_config_options(rep)
+    rep.add_argument("--dataset", help="only this live dataset (<group>__<task>)")
+    rep.add_argument("--session", help="only this evaluation session (run id)")
+    rep.add_argument("--format", choices=("md", "json", "csv"), default="md")
+    rep.add_argument("--lang", choices=("en", "zh"), default="en")
+    rep.add_argument("--out", help="write here instead of the terminal")
+    stat = sub.add_parser("stats", help="maintain the per-episode statistics")
+    stat_sub = stat.add_subparsers(dest="stats_command", required=True)
+    back = stat_sub.add_parser(
+        "backfill",
+        help="rebuild records for demos labelled before stats.jsonl existed",
+    )
+    add_config_options(back)
+    back.add_argument("--dataset", help="only this live dataset")
+    back.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="list the demos and where each field would come from; write nothing",
+    )
+    back.add_argument("--json", action="store_true", help="with --dry-run: as JSON")
     return parser
 
 
@@ -1130,6 +1218,8 @@ def main(argv=None) -> int:
         "resume": cmd_resume,
         "exclude": cmd_exclude,
         "init": cmd_init,
+        "report": cmd_report,
+        "stats": cmd_stats,
     }
     try:
         return handlers[args.command](args)

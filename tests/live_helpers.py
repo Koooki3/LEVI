@@ -35,7 +35,9 @@ def template(tmp_factory) -> Path:
     return _TEMPLATE["demo"]
 
 
-def metadata(n, *, text, finished=True, outcome="unlabeled", stalled=(), match=True):
+def metadata(
+    n, *, text, finished=True, outcome="unlabeled", stalled=(), match=True, run_id=None
+):
     meta = {
         "data_source": "policy_rollout",
         "task_description": text,
@@ -47,6 +49,8 @@ def metadata(n, *, text, finished=True, outcome="unlabeled", stalled=(), match=T
         "cameras": {"stall_detection": {"stalled": list(stalled)}},
         "eval": {"outcome": outcome, "counted": True, "verdict_by": "pending-levi"},
     }
+    if run_id:
+        meta["eval"]["run_id"] = run_id
     if finished:
         meta["stopped_at"] = "2026-10-01T10:01:00"
     return meta
@@ -137,7 +141,15 @@ class Rollouts:
         self.demo(n).rename(self.dir / f"discarded_{n:04d}")
 
     def session(
-        self, state, *, started_at=None, levi=True, pid=None, updated_at=None, reason=""
+        self,
+        state,
+        *,
+        started_at=None,
+        levi=True,
+        pid=None,
+        updated_at=None,
+        reason="",
+        run_id="",
     ):
         folder = self.root / ".eval_sessions"
         folder.mkdir(exist_ok=True)
@@ -149,6 +161,7 @@ class Rollouts:
                 {
                     "schema": "levi.eval.session.v1",
                     "session_id": "s1",
+                    "run_id": run_id,
                     "pid": pid if pid is not None else os.getpid(),
                     "host": __import__("socket").gethostname(),
                     "started_at": started_at if started_at is not None else now - 30,

@@ -269,6 +269,9 @@ class Resources:
     log_backups: int = 3
     # Cap on the regenerable run files (input, evidence) kept on disk.
     cache_max_gib: float = 20.0
+    # Session reports kept in live/reports/ (the newest this many; the oldest
+    # are deleted when a new one is written).
+    report_keep: int = 20
     # Bound on status.json / API bodies.
     status_max_datasets: int = 64
     # Worker exits after this many idle seconds with nothing left to do.
@@ -385,6 +388,8 @@ class Config:
             problems.append("watch.batch_max_episodes must be >= 1")
         if p.max_attempts < 1:
             problems.append("pipeline.max_attempts must be >= 1")
+        if r.report_keep < 1:
+            problems.append("resources.report_keep must be >= 1")
         if not (w.roots and all(isinstance(x, str) and x for x in w.roots)):
             problems.append("watch.roots needs at least one directory")
         if problems:

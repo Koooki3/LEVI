@@ -351,7 +351,9 @@ def to_markdown(
         (t["segments"], num(segments.get("segments_total"))),
         (
             t["segments_per"],
-            f"{num(per.get('mean'))} ({num(per.get('min'))}-{num(per.get('max'))})",
+            "-"
+            if per.get("mean") is None
+            else f"{num(per.get('mean'))} ({num(per.get('min'))}-{num(per.get('max'))})",
         ),
         (t["labels"], ", ".join(f"{k} {v}" for k, v in labels.items()) or "-"),
         (
@@ -509,7 +511,7 @@ def to_markdown(
         for key, dotted in KEY_FIGURES:
             now = lookup(s, dotted)
             before = lookup(previous.get("summary") or {}, dotted)
-            digits = 2 if key == "realtime" else 1
+            digits = {"realtime": 2, "episodes": 0, "tokens_per_episode": 0}.get(key, 1)
             if key == "in_session":
                 a, b = pct(now), pct(before)
             else:

@@ -36,7 +36,7 @@ def test_the_schema_is_fixed_and_a_record_is_filled_with_nulls():
     assert sorted(leaves(stats.TEMPLATE)) == sorted(
         [
             "schema", "at", "dataset", "demo", "episode_index", "session",
-            "attempts", "excluded", "batch.id", "batch.size",
+            "attempts", "excluded", "backfilled", "batch.id", "batch.size",
             "episode.frames", "episode.episode_seconds",
             "timeline.to_mirror_s", "timeline.to_plan_s",
             "timeline.to_first_request_s", "timeline.to_commit_s",

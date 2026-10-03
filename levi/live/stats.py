@@ -24,6 +24,9 @@ a value that could not be measured is ``null``.
                        dataset (``exclusion.py``) by the time the record was
                        written; normally false (the episode of a running batch
                        cannot be removed, and a removed one is not labelled)
+    backfilled         true on a record rebuilt afterwards from the ledger and
+                       the run journals (``levi live stats backfill``); what
+                       could not be recovered is null
     batch:     id (epoch seconds the batch started), size (demos in it)
     episode:   frames, episode_seconds
     timeline:  to_mirror_s, to_plan_s, to_first_request_s, to_commit_s,
@@ -72,6 +75,7 @@ TEMPLATE = {
     "session": None,
     "attempts": None,
     "excluded": None,
+    "backfilled": None,
     "batch": {"id": None, "size": None},
     "episode": {"frames": None, "episode_seconds": None},
     "timeline": {
@@ -150,6 +154,19 @@ def record(live_dir, row, max_bytes=None, keep=3):
         )
 
 
+def num_or_zero(value):
+    return (
+        value if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
+    )
+
+
+def leaves(value, prefix=""):
+    """Every dotted path of a nested dict (the schema's fields)."""
+    if not isinstance(value, dict):
+        return [prefix]
+    return [p for k, v in value.items() for p in leaves(v, f"{prefix}.{k}".strip("."))]
+
+
 def _lines(path):
     try:
         with Path(path).open("rb") as handle:
@@ -189,6 +206,14 @@ def read(live_dir, limit=None, since=None) -> list:
             if since is not None and (row["at"] or 0) < since:
                 continue
             rows.append(row)
+    # A backfilled record is written later than the moment it describes: order
+    # by that moment (the sort is stable, so equal times keep the file order).
+    # A record without a time keeps its place after the one before it.
+    keys, carried = [], 0
+    for row in rows:
+        carried = num_or_zero(row["at"]) if row["at"] is not None else carried
+        keys.append(carried)
+    rows = [row for _, row in sorted(zip(keys, rows, strict=True), key=lambda p: p[0])]
     return rows[-limit:] if limit else rows
 
 
