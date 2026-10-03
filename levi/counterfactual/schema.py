@@ -132,8 +132,12 @@ def register(contract: ActionContract) -> ActionContract:
         raise ValueError("Dimension names must be unique")
     if not 0 <= contract.gripper_index < contract.dimension:
         raise ValueError("gripper_index is outside the dimensions")
-    if contract.action_horizon < 1 or not math.isfinite(contract.control_hz):
-        raise ValueError("action_horizon and control_hz must be positive")
+    if contract.action_horizon < 1:
+        raise ValueError("action_horizon must be at least 1")
+    if not math.isfinite(contract.control_hz) or contract.control_hz <= 0:
+        raise ValueError("control_hz must be a positive number")
+    if not 1 <= contract.executed_horizon <= contract.action_horizon:
+        raise ValueError("executed_horizon must be between 1 and action_horizon")
     _REGISTRY[key] = contract
     return contract
 

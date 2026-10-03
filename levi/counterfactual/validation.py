@@ -105,6 +105,9 @@ def validate_action_block(
         contract,
         checks,
     )
+    _rx_continuity(
+        values if finite else None, metadata.get("representation"), contract, checks
+    )
     extra = sorted(k for k in metadata if k not in KNOWN_METADATA)
     if extra:
         checks.append(
@@ -314,3 +317,30 @@ def _ranges(values, representation, contract, checks) -> None:
         if notes
         else Check("value_ranges", PASS, "positions and angles within plausible bounds")
     )
+
+
+def _rx_continuity(values, representation, contract, checks) -> None:
+    """A jump of about 2 pi in rx between steps: the block mixes the [0, 2 pi)
+    and (-pi, pi] conventions. Training's wrap absorbs it, so only a warning,
+    but it points at a convention error in whatever made the block."""
+    if values is None or representation != "absolute":
+        checks.append(
+            Check(
+                "rx_continuity",
+                SKIP,
+                "needs a finite absolute block of the right shape",
+            )
+        )
+        return
+    jump = float(np.abs(np.diff(values[:, contract.rebase_euler_index])).max())
+    if jump > math.pi:
+        checks.append(
+            Check(
+                "rx_continuity",
+                WARN,
+                f"rx jumps {jump:.2f} rad between neighbouring steps, about a full "
+                "turn; two angle conventions mixed in one block?",
+            )
+        )
+    else:
+        checks.append(Check("rx_continuity", PASS, "rx is continuous across steps"))

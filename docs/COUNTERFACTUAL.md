@@ -41,6 +41,7 @@ A candidate block is checked in the stored (absolute) space, before that trainin
 | `representation` | not declared, or different from the contract's (`absolute`) |
 | `time_scale` | not a positive finite number. A missing value or a deviation above 5 % from 1.0 is a **warning** |
 | `action_mask` | missing, not a 1-D list of flags with one entry per step, or no step valid |
+| `rx_continuity` | never fails: warns when `rx` jumps by more than pi between neighbouring steps of an absolute block (the [0, 2 pi) and (-pi, pi] conventions mixed; training's wrap absorbs it, the generator's convention is what is wrong) |
 | `value_ranges` | never fails: warns about a position beyond 2 m or an angle beyond 4 pi (millimetres or degrees by mistake) in an absolute block |
 
 `time_scale` is the block's control rate divided by the contract's: 1.0 is exactly 10 Hz and 0.95 is 9.5 Hz (rollouts are recorded at about 9.5 to 9.96 fps). A check that cannot run because an earlier one failed is reported as `skipped`. `passed` is false when any check fails; warnings do not fail.

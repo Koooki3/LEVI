@@ -183,7 +183,17 @@ def test_a_contract_is_immutable_and_never_replaced():
         register(contract)
     with pytest.raises(ValueError, match="gripper_index"):
         register(_variant(contract, id="bad-grip", gripper_index=9))
-    assert hash(contract) == hash(contract)
+    assert get("fr3-robotiq@1") is get("fr3-robotiq") is contract
+    for bad in (
+        {"id": "bad-hz", "control_hz": 0.0},
+        {"id": "bad-hz2", "control_hz": -10.0},
+        {"id": "bad-hz3", "control_hz": float("inf")},
+        {"id": "bad-exec", "executed_horizon": 0},
+        {"id": "bad-exec2", "executed_horizon": 11},
+    ):
+        with pytest.raises(ValueError, match="control_hz|executed_horizon"):
+            register(_variant(contract, **bad))
+    assert "bad-hz@1" not in ids()
 
 
 def _variant(contract, **changes):
@@ -307,3 +317,18 @@ def test_the_training_side_files_still_carry_the_contract_values():
     for key in ("action", "observation.state"):
         assert meta["features"][key]["names"] == list(c.dimension_names)
         assert meta["features"][key]["shape"] == [c.dimension]
+
+
+def test_a_block_that_jumps_two_pi_in_rx_between_steps_warns():
+    block = _block()
+    block[5:, 3] -= 2 * math.pi  # the [0, 2 pi) and (-pi, pi] conventions mixed
+    result = validate_action_block(block, "fr3-robotiq", META)
+    assert result.passed and _status(result, "rx_continuity") == "warning"
+    assert (
+        _status(validate_action_block(_block(), "fr3-robotiq", META), "rx_continuity")
+        == "pass"
+    )
+    delta = validate_action_block(
+        block, "fr3-robotiq", {**META, "representation": "delta"}
+    )
+    assert _status(delta, "rx_continuity") == "skipped"
