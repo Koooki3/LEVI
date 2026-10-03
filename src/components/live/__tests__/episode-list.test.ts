@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import en from "@/i18n/en.json";
 import zh from "@/i18n/zh.json";
 import { EpisodeList, RemoveDialog } from "../episode-list";
+import { RemovedInLive } from "@/components/pool/facets-panel";
 import { friendlyError } from "../friendly-error";
 import {
   applyChange,
@@ -152,7 +153,7 @@ describe("the calls", () => {
   });
 
   test("a confirmed removal ends in a sentence about what changed", async () => {
-    const { request } = recorder(answer({ cancelled_runs: ["review-1"] }));
+    const { request } = recorder(answer({ review_hidden: ["review-1"] }));
     const outcome = await applyChange(
       "remove",
       "pi05__plates",
@@ -164,7 +165,7 @@ describe("the calls", () => {
     expect(outcome.ok).toBe(true);
     if (outcome.ok)
       expect(outcome.notice).toBe(
-        "2 episode(s) removed (restorable) · 1 review run(s) cancelled",
+        "2 episode(s) removed (restorable) · 1 review run(s) no longer counted",
       );
   });
 
@@ -244,6 +245,21 @@ describe("the list", () => {
     expect((out.match(/checked=""/g) ?? []).length).toBeGreaterThanOrEqual(2);
   });
 
+  test("with more than ten rows only the shown ones can be selected", () => {
+    const many = detail({
+      demos: Array.from({ length: 12 }, (_, i) =>
+        demo(`demo_${String(i).padStart(4, "0")}`),
+      ),
+    });
+    const out = html({}, many);
+    expect(out).toContain("Select the shown");
+    expect(out).not.toContain("Select all");
+    expect(out).toContain("Show all 12");
+    expect(out).toContain('aria-label="Select demo_0009"');
+    expect(out).not.toContain('aria-label="Select demo_0010"');
+    expect(html({}, detail())).toContain("Select all");
+  });
+
   test("the removed view lists them with their reason and a Restore", () => {
     const out = html({ initialShowRemoved: true });
     expect(out).toContain("Removed episodes (not counted, not labelled)");
@@ -312,11 +328,16 @@ describe("the confirmation", () => {
     expect(out).toContain("Cancel");
   });
 
-  test("a bulk removal names them and counts them", () => {
+  test("a bulk removal names the first few and always gives the total", () => {
     const out = dialog(["demo_0001", "demo_0002", "demo_0003"]);
     expect(out).toContain("Remove episodes (restorable)");
     expect(out).toContain("demo_0001, demo_0002, demo_0003");
-    expect(out).toContain("(3)");
+    expect(out).toContain("3 episodes in total");
+    const names = Array.from({ length: 40 }, (_, i) => `demo_${i}`);
+    const long = dialog(names);
+    expect(long).toContain("+34");
+    expect(long).toContain("40 episodes in total");
+    expect(dialog(["demo_0001"])).toContain("1 episodes in total");
   });
 
   test("a refusal is shown in plain words inside it", () => {
@@ -349,7 +370,10 @@ describe("both languages", () => {
     "{n} episode(s) restored",
     "{n} already removed",
     "{n} were not removed",
-    "{n} review run(s) cancelled",
+    "{n} review run(s) no longer counted",
+    "{n} episodes in total",
+    "Select the shown",
+    "Episodes removed on the live page",
     "Being labelled now: part of the batch in progress",
     "Never taken into the dataset",
     "removed by a person (not counted)",
@@ -371,5 +395,20 @@ describe("both languages", () => {
     expect((zh as Record<string, string>)["Remove episode (restorable)"]).toBe(
       "删除片段（可恢复）",
     );
+  });
+});
+
+describe("the pool page says why it shows fewer", () => {
+  test("the number of recordings removed on the live page, or nothing", () => {
+    const out = renderToStaticMarkup(
+      createElement(RemovedInLive, { count: 1234 }),
+    );
+    expect(out).toContain("Episodes removed on the live page");
+    expect(out).toContain("1,234");
+    expect(out).toContain("not listed, counted or exported");
+    expect(
+      renderToStaticMarkup(createElement(RemovedInLive, { count: 0 })),
+    ).toBe("");
+    expect(renderToStaticMarkup(createElement(RemovedInLive, {}))).toBe("");
   });
 });

@@ -2048,11 +2048,15 @@
   "{n} episode(s) restored": "已恢复 {n} 个片段",
   "{n} already removed": "{n} 个此前已排除",
   "{n} were not removed": "{n} 个本来就未排除",
-  "{n} review run(s) cancelled": "已取消 {n} 个复核运行",
   "Being labelled right now (part of the batch in progress). Try again when the batch has finished; nothing was removed.": "正在标注（属于进行中的批次），请在批次结束后再试；没有排除任何片段。",
   "This episode was never taken into the dataset, so there is nothing to remove.": "这个片段从未纳入数据集，没有可排除的内容。",
   "removed by a person (not counted)": "人工排除（不计入）",
   "Watch a robot evaluation while it runs: the evaluation sessions, the FR3 arm, and how far the background LEVI has got with labelling the finished episodes. Nothing here starts, stops or approves anything; the only change you can make is to remove an episode from a dataset (restorable, nothing is deleted). Automatic results are unreviewed and their accuracy has not been evaluated.": "在机器人评测进行时观看：评测会话、FR3 机械臂，以及后台 LEVI 标注已完成片段的进度。这里不会启动、停止或批准任何东西；唯一能做的改动是把片段从数据集中排除（可恢复，不删除任何数据）。自动结果未经复核，其准确度也没有评估过。",
   "read-only except removing episodes": "除排除片段外均为只读",
-  "Removed on the live page": "已在实时页面排除"
+  "Removed on the live page": "已在实时页面排除",
+  "{n} review run(s) no longer counted": "{n} 个复核运行不再计入",
+  "Episodes removed on the live page": "在实时页面被删除的片段数",
+  "Removed by a person on the live page: not listed, counted or exported. They can be restored there.": "由人在实时页面删除：不列出、不计数、不导出，可在实时页面恢复。",
+  "{n} episodes in total": "共 {n} 个片段",
+  "Select the shown": "全选当前显示的片段"
 }

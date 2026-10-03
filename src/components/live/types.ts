@@ -199,8 +199,6 @@ export interface Removal {
   at?: number | null;
   by?: string;
   reason?: string;
-  /** Review runs cancelled because every episode in them was removed. */
-  cancelled_runs?: string[];
 }
 
 export interface DemoRow {
@@ -249,8 +247,7 @@ export interface ChangeResult {
   counts?: Record<string, number>;
   excluded_count?: number;
   review_runs_open?: number;
-  /** Review runs cancelled by a removal (every episode in them is out). */
-  cancelled_runs?: string[];
-  /** Review runs a restored episode had lost (they stay cancelled). */
-  review_cancelled?: string[];
+  /** Open review runs all of whose episodes are removed: still open, only
+   * left out of the count. */
+  review_hidden?: string[];
 }

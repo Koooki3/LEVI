@@ -65,7 +65,11 @@ export function RemoveDialog({
     >
       <p>
         <code>{nameList(demos)}</code>
-        {many && ` (${demos.length})`}
+      </p>
+      <p>
+        <strong>
+          {t("{n} episodes in total").replace("{n}", String(demos.length))}
+        </strong>
       </p>
       <p>
         {t(
@@ -241,10 +245,12 @@ export function EpisodeList({
   const batch = detail?.current?.demos;
   const removedCount = detail?.excluded_count ?? 0;
   const demos = shownDemos(detail, showRemoved);
-  // What can be chosen in this view; anything else drops out of the choice.
+  const shown = all ? demos : demos.slice(0, 10);
+  // What can be chosen is what is on screen: "select all" and the choice
+  // itself never reach rows nobody can see (collapsing the list drops them).
   const candidates = showRemoved
-    ? demos.map((d) => d.demo)
-    : removableDemos(demos, batch);
+    ? shown.map((d) => d.demo)
+    : removableDemos(shown, batch);
   const key = candidates.join(",");
   useEffect(() => {
     setSelected((prev) => pruneSelection(prev, key ? key.split(",") : []));
@@ -252,7 +258,6 @@ export function EpisodeList({
 
   if (!detail || ((detail.demos ?? []).length === 0 && removedCount === 0))
     return null;
-  const shown = all ? demos : demos.slice(0, 10);
   const chosen = [...selected];
 
   async function act(kind: "remove" | "restore", names: string[]) {
@@ -304,7 +309,9 @@ export function EpisodeList({
               checked={candidates.every((d) => selected.has(d))}
               onChange={() => setSelected(toggleAll(selected, candidates))}
             />{" "}
-            {t("Select all")}
+            {shown.length < demos.length
+              ? t("Select the shown")
+              : t("Select all")}
           </label>
           {chosen.length > 0 && (
             <>

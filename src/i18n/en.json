@@ -2048,11 +2048,15 @@
   "{n} episode(s) restored": "{n} episode(s) restored",
   "{n} already removed": "{n} already removed",
   "{n} were not removed": "{n} were not removed",
-  "{n} review run(s) cancelled": "{n} review run(s) cancelled",
   "Being labelled right now (part of the batch in progress). Try again when the batch has finished; nothing was removed.": "Being labelled right now (part of the batch in progress). Try again when the batch has finished; nothing was removed.",
   "This episode was never taken into the dataset, so there is nothing to remove.": "This episode was never taken into the dataset, so there is nothing to remove.",
   "removed by a person (not counted)": "removed by a person (not counted)",
   "Watch a robot evaluation while it runs: the evaluation sessions, the FR3 arm, and how far the background LEVI has got with labelling the finished episodes. Nothing here starts, stops or approves anything; the only change you can make is to remove an episode from a dataset (restorable, nothing is deleted). Automatic results are unreviewed and their accuracy has not been evaluated.": "Watch a robot evaluation while it runs: the evaluation sessions, the FR3 arm, and how far the background LEVI has got with labelling the finished episodes. Nothing here starts, stops or approves anything; the only change you can make is to remove an episode from a dataset (restorable, nothing is deleted). Automatic results are unreviewed and their accuracy has not been evaluated.",
   "read-only except removing episodes": "read-only except removing episodes",
-  "Removed on the live page": "Removed on the live page"
+  "Removed on the live page": "Removed on the live page",
+  "{n} review run(s) no longer counted": "{n} review run(s) no longer counted",
+  "Episodes removed on the live page": "Episodes removed on the live page",
+  "Removed by a person on the live page: not listed, counted or exported. They can be restored there.": "Removed by a person on the live page: not listed, counted or exported. They can be restored there.",
+  "{n} episodes in total": "{n} episodes in total",
+  "Select the shown": "Select the shown"
 }

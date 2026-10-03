@@ -56,9 +56,9 @@ export function changeNotice(
         result.unchanged.length,
       ),
     );
-  if (result.cancelled_runs?.length)
+  if (result.review_hidden?.length)
     parts.push(
-      fill("{n} review run(s) cancelled", result.cancelled_runs.length),
+      fill("{n} review run(s) no longer counted", result.review_hidden.length),
     );
   return parts.join(" · ");
 }

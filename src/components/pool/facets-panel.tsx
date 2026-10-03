@@ -95,6 +95,24 @@ function PolicyFacet({
 
 /** Left column: category, source, task search, outcome, policy (model,
  * checkpoint, how it was run) and date facets with counts; held-out, copies and archive are hidden by default. */
+/** Recordings a person removed on the live page: never listed, counted or
+ * exported, so the number says why the page shows fewer. Nothing when none. */
+export function RemovedInLive({ count }: { count?: number }) {
+  const { t } = useLocale();
+  if (!count) return null;
+  return (
+    <p
+      className="levi-pool-check"
+      title={t(
+        "Removed by a person on the live page: not listed, counted or exported. They can be restored there.",
+      )}
+    >
+      <span className="grow">{t("Episodes removed on the live page")}</span>
+      <span className="levi-pool-count">{count.toLocaleString()}</span>
+    </p>
+  );
+}
+
 export function FacetsPanel({
   facets,
   filters,
@@ -333,6 +351,7 @@ export function FacetsPanel({
             </span>
           )}
         </label>
+        <RemovedInLive count={facets?.removed_in_live} />
       </fieldset>
       <button
         type="button"
