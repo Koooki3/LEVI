@@ -360,9 +360,8 @@ def refuse_heldout(episodes: list[dict], roots: list[Path], lists: list[Path]):
 def refuse_heldout_groups(episodes: list[dict]):
     """The current index's view: no planned episode may share a group (a
     copy, a filtered variant or a conversion) with a held-out episode."""
-    try:
-        df = index.frame()
-    except ValueError:
+    df = index.heldout_view()
+    if df is None:  # no scan yet: nothing to compare with
         return
     held = set(df.loc[df.heldout.astype(bool), "group"])
     groups = dict(zip(df.key, df.group, strict=True))

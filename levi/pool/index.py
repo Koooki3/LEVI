@@ -22,6 +22,17 @@ def frame() -> pd.DataFrame:
     return df
 
 
+def heldout_view() -> pd.DataFrame | None:
+    """``key``, ``group`` and ``heldout`` of the index, whatever else it holds
+    (an index from an older LEVI has them too), or ``None`` when no scan has
+    written one. A damaged file raises: the held-out check never passes by
+    silence."""
+    path = scanner.index_path()
+    if not path.is_file():
+        return None
+    return pd.read_parquet(path, columns=["key", "group", "heldout"])
+
+
 def summary() -> dict:
     try:
         return json.loads(scanner.scan_path().read_text())

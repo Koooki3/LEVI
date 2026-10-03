@@ -664,3 +664,54 @@ def test_cli_flags(scanned, capsys):
     cli.main(["recipe", "show", "c", "--format", "raw_capture"])
     shown = json.loads(capsys.readouterr().out)
     assert shown["grippers"]
+
+
+# ------------------------------------------- an older index during the window
+
+
+def _old_index_with_a_heldout_copy(drop="gripper"):
+    """The index an older LEVI wrote (no embodiment columns), with the group of
+    one episode marked held out; returns that episode's key."""
+    frame = index.frame()
+    target = frame[frame.source == "lab_a"].iloc[0]
+    frame.loc[frame.group == target.group, "heldout"] = True
+    frame.drop(columns=list(embodiment.COLUMNS)).to_parquet(
+        scanner.index_path(), index=False
+    )
+    return target.key, target.group
+
+
+def test_the_group_check_still_runs_on_an_older_index(scanned):
+    key, group = _old_index_with_a_heldout_copy()
+    with pytest.raises(ValueError, match="older LEVI"):
+        index.frame()
+    with pytest.raises(PermissionError, match="held-out"):
+        export.refuse_heldout_groups([{"key": key, "group": group}])
+    # Unrelated episodes pass.
+    export.refuse_heldout_groups([{"key": "/elsewhere/demo_0000", "group": "none"}])
+
+
+def test_without_an_index_the_group_check_has_nothing_to_compare(scanned):
+    scanner.index_path().unlink()
+    export.refuse_heldout_groups([{"key": "/x", "group": "g"}])
+
+
+def test_a_broken_index_is_an_error_not_a_pass(scanned):
+    scanner.index_path().write_bytes(b"not a parquet file")
+    with pytest.raises(Exception):  # noqa: B017 -- any error, never silence
+        export.refuse_heldout_groups([{"key": "/x", "group": "g"}])
+
+
+def test_a_run_on_an_older_index_still_refuses_a_heldout_copy(scanned):
+    rec = Recipe(name="r", sources=["lab_a"])
+    out = scanner.settings.workspace().parent / "out"
+    job = jobs.plan_export(
+        rec, export.ExportOptions(format="raw_capture", name="w", output_dir=str(out))
+    )
+    key, _ = _old_index_with_a_heldout_copy()
+    assert key in {e["key"] for e in job["episodes"]}
+    with pytest.raises(PermissionError, match="held-out"):
+        export.run(job)  # also what an automatic resume at start-up calls
+    with pytest.raises(PermissionError, match="held-out"):
+        export.run(job, resume=True)
+    assert not (out / "w").exists()
