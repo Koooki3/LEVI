@@ -52,6 +52,50 @@ class Stop(Exception):
     """SIGTERM arrived: pause the run and leave."""
 
 
+def model_use(events, episode) -> dict:
+    """What the model cost one episode in one run, from the run's journal:
+    requests sent (cache hits are not requests), tokens and seconds the
+    ``model_step`` events report."""
+    use = {"requests": 0, "tokens": 0, "model_s": 0.0}
+    for event in events:
+        if event.get("type") != "model_step" or event.get("episode") != episode:
+            continue
+        usage = event.get("usage") or {}
+        use["requests"] += 0 if usage.get("cached") else 1
+        use["tokens"] += int(usage.get("tokens") or 0)
+        use["model_s"] += float(usage.get("elapsed_seconds") or 0.0)
+    return use
+
+
+def episode_line(demo, episode, size, stages, row, gated) -> str:
+    """One readable, greppable line for a labelled demo (``episode demo=...``).
+
+    ``stages`` is ``{name: (wall_s, use)}``: the stage's wall clock (shared by
+    the batch) and this episode's model use in it; ``gated`` is ``(count,
+    seconds)`` the batch spent standing down for the policy server."""
+    parts = [f"episode demo={demo} ep={episode} batch={size}"]
+    for name, (wall, use) in stages.items():
+        parts.append(
+            f"{name}_wall={wall:.1f}s {name}_model={use['model_s']:.1f}s "
+            f"{name}_requests={use['requests']} {name}_tokens={use['tokens']}"
+        )
+    temporal = row.get("temporal") or {}
+    verdict = row.get("verdict")
+    parts.append(f"segments={temporal.get('segments', 0)}")
+    if verdict:
+        parts.append(
+            f"verdict={verdict.get('outcome')} valid_events={verdict.get('valid_events')}"
+            + (" undecided" if verdict.get("undecided") else "")
+        )
+    else:
+        parts.append("verdict=none")
+    parts.append(f"gated={gated[0]}x/{gated[1]:.1f}s" if gated[0] else "gated=no")
+    parts.append(f"state={row.get('state')}")
+    if row.get("reason") and not temporal:
+        parts.append(f"reason={str(row['reason'])[:120]!r}")
+    return " ".join(parts)
+
+
 class NeedModel(Exception):
     pass
 
@@ -92,6 +136,9 @@ class Worker:
         self.planner = self.auto or Principal("live-planner", human=True)
         self.repo_id = ""
         self.entry: dict = {}
+        # This batch's clock, for the per-episode summary line (finish).
+        self.walls: dict = {}
+        self.gated = [0, 0.0]  # times the gate stopped it, and for how long
 
     # --- plumbing -------------------------------------------------------------
 
@@ -362,6 +409,7 @@ class Worker:
         let go of its lease, then wait for the gate to open. The run resumes
         from its last finished episode; nothing is repeated."""
         self.progress("standing_down", note="the policy is inferring")
+        stood = time.monotonic()
         run = self.run_state(run_id)
         if run["status"] in ("queued", "running"):
             self.call("runs.pause", {"run_id": run_id})
@@ -376,6 +424,8 @@ class Worker:
             self.check_stop()
             self.heartbeat("gated")
             time.sleep(0.2)
+        self.gated[0] += 1
+        self.gated[1] += time.monotonic() - stood
         self.progress(what, note="the gate opened: resuming")
 
     def drive(self, run_id, *, what):
@@ -693,7 +743,39 @@ class Worker:
     def save_current(self, batch):
         self.update(lambda v: v.update(current=batch))
 
-    def finish(self, batch):
+    def log_episodes(self, batch, index):
+        """One line per demo of the finished batch in worker.log. The summary
+        is a record, never part of the labelling: it cannot fail the batch."""
+        from levi.harness.ledger import all_events
+
+        state = self.state()
+        # A temporal batch may span several runs (one per coarse step).
+        journals = [
+            ("temporal", all_events(self.store, k["run_id"]))
+            for k in (batch.get("temporal") or {}).values()
+        ]
+        if batch.get("anchored"):
+            journals.append(
+                ("review", all_events(self.store, batch["anchored"]["run_id"]))
+            )
+        for demo in batch["demos"]:
+            row = state["demos"].get(demo) or {}
+            episode = (index or {}).get(demo, row.get("episode_index"))
+            stages = {}
+            for stage, wall in self.walls.items():
+                use = {"requests": 0, "tokens": 0, "model_s": 0.0}
+                for name, events in journals:
+                    if name == stage:
+                        for key, value in model_use(events, episode).items():
+                            use[key] += value
+                stages[stage] = (wall, use)
+            self.log(
+                episode_line(
+                    demo, episode, len(batch["demos"]), stages, row, self.gated
+                )
+            )
+
+    def finish(self, batch, index=None):
         now = time.time()
 
         def change_state(value):
@@ -721,6 +803,8 @@ class Worker:
             return value
 
         self.update(change_state)
+        with contextlib.suppress(Exception):
+            self.log_episodes(batch, index)
         if self.config.pipeline.cleanup:
             self.cleanup()
 
@@ -792,11 +876,16 @@ class Worker:
         index, lengths, excluded = self.episode_map(entry)
         batch["demos"] = self.filter_demos(batch["demos"], index, excluded, batch)
         self.save_current(batch)
+        self.walls, self.gated = {}, [0, 0.0]
         if batch["demos"]:
+            began = time.monotonic()
             self.temporal(batch, index, lengths)
+            self.walls["temporal"] = time.monotonic() - began
             if self.config.pipeline.anchored:
+                began = time.monotonic()
                 self.anchored(batch, index)
-        self.finish(batch)
+                self.walls["review"] = time.monotonic() - began
+        self.finish(batch, index)
         return OK
 
     def guard_human(self, batch):
