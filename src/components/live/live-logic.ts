@@ -140,6 +140,8 @@ export function rowSignature(row: DatasetRow | undefined): string {
     row.last_processed_at ?? 0,
     row.state ?? "",
     row.last_error ?? "",
+    row.excluded ?? 0,
+    row.review_runs_open ?? 0,
   ].join("|");
 }
 
@@ -685,4 +687,77 @@ export function blockedRunsSummary(
     waiting: blocked?.waiting?.length ?? 0,
     needsPerson: blocked?.needs_person?.length ?? 0,
   };
+}
+
+// --- removing episodes (restorable) -------------------------------------------
+
+/** States of an episode a person may remove: taken into the dataset and not
+ * being worked on. A rejected or stuck demo was never taken in. */
+export const REMOVABLE_STATES = ["mirrored", "done", "failed", "skipped_human"];
+
+/** Why an episode cannot be removed now: `busy` (it is in the batch in
+ * progress), `not_part` (never taken into the dataset), or null. */
+export type RemovalBlock = "busy" | "not_part" | null;
+
+export function removalBlock(
+  demo: DemoRow,
+  batch: string[] | null | undefined,
+): RemovalBlock {
+  if (demo.excluded) return null;
+  if ((batch ?? []).includes(demo.demo)) return "busy";
+  return REMOVABLE_STATES.includes(demo.state ?? "") ? null : "not_part";
+}
+
+/** The episodes of `demos` that can be removed now. */
+export function removableDemos(
+  demos: DemoRow[] | undefined,
+  batch: string[] | null | undefined,
+): string[] {
+  return (demos ?? [])
+    .filter((d) => removalBlock(d, batch) === null)
+    .map((d) => d.demo);
+}
+
+/** The list the page shows: the episodes in the dataset, or the removed ones. */
+export function shownDemos(
+  detail: DatasetDetail | undefined,
+  showRemoved: boolean,
+): DemoRow[] {
+  return (showRemoved ? detail?.excluded_demos : detail?.demos) ?? [];
+}
+
+export function toggleSelection(
+  selected: ReadonlySet<string>,
+  demo: string,
+): Set<string> {
+  const next = new Set(selected);
+  if (next.has(demo)) next.delete(demo);
+  else next.add(demo);
+  return next;
+}
+
+/** "Select all": everything in `candidates`, or nothing when it is all
+ * selected already. */
+export function toggleAll(
+  selected: ReadonlySet<string>,
+  candidates: string[],
+): Set<string> {
+  return candidates.length > 0 && candidates.every((d) => selected.has(d))
+    ? new Set()
+    : new Set(candidates);
+}
+
+/** Drop what can no longer be chosen (a batch started, a list refreshed). */
+export function pruneSelection(
+  selected: ReadonlySet<string>,
+  candidates: string[],
+): Set<string> {
+  const allowed = new Set(candidates);
+  return new Set([...selected].filter((d) => allowed.has(d)));
+}
+
+/** The names in a sentence: the first few, then "+n more". */
+export function nameList(demos: string[], limit = 6): string {
+  const shown = demos.slice(0, limit).join(", ");
+  return demos.length > limit ? `${shown} +${demos.length - limit}` : shown;
 }

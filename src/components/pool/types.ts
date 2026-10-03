@@ -288,6 +288,8 @@ export interface Facets {
   date_min: string | null;
   date_max: string | null;
   hidden_heldout: number;
+  /** Episodes removed on the live page (never listed or exported). */
+  removed_in_live?: number;
   hidden_copies: number;
   archive: number;
 }
@@ -569,6 +571,7 @@ export interface Preview {
   declared?: Record<string, number>;
   excluded: Record<string, number>;
   excluded_heldout: number;
+  excluded_in_live?: number;
   excluded_duplicates: number;
   excluded_nonstandard: number;
   excluded_unsupported: number;
@@ -597,6 +600,7 @@ export const REASON_LABELS: Record<string, string> = {
   not_selected: "Not picked (over the task's count)",
   already_in_composition: "Already picked for an earlier task",
   excluded_by_recipe: "Excluded by hand",
+  excluded_in_live: "Removed on the live page",
   label_conflict: "Conflicting human labels",
   conversion_preflight: "Failed capture checks",
   convert_error: "Conversion failed",

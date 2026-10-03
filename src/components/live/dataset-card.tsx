@@ -1,6 +1,5 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { ago } from "@/components/pool/pool-progress";
 import {
@@ -11,8 +10,9 @@ import {
   verdictTally,
   type ReviewFilter,
 } from "./live-logic";
+import { EpisodeList } from "./episode-list";
 import { Chip, type Tone } from "./session-panels";
-import type { DatasetDetail, DatasetRow, DemoRow } from "./types";
+import type { DatasetDetail, DatasetRow } from "./types";
 import type { DetailEntry } from "./use-live";
 
 const STATE_LABELS: Record<string, [string, Tone]> = {
@@ -21,16 +21,6 @@ const STATE_LABELS: Record<string, [string, Tone]> = {
   annotating: ["Being labelled", "pass"],
   awaiting_approval: ["Awaiting a person's approval", "warn"],
   error: ["Error, retrying later", "fail"],
-};
-
-const DEMO_STATES: Record<string, string> = {
-  mirrored: "waiting",
-  annotating: "labelling",
-  done: "done",
-  failed: "failed",
-  rejected: "rejected",
-  skipped_human: "skipped (a person annotated it)",
-  stuck: "stuck (never finished)",
 };
 
 function Stat({ label, value }: { label: string; value: number }) {
@@ -150,54 +140,6 @@ function ReviewRuns({
   );
 }
 
-function DemoList({ demos }: { demos: DemoRow[] }) {
-  const { t } = useLocale();
-  const [all, setAll] = useState(false);
-  const shown = all ? demos : demos.slice(0, 10);
-  if (demos.length === 0) return null;
-  return (
-    <div className="levi-live-demos">
-      <strong>{t("Episodes (newest first)")}</strong>
-      <ul>
-        {shown.map((d) => (
-          <li key={d.demo}>
-            <code>{d.demo}</code>
-            <span>{t(DEMO_STATES[d.state ?? ""] ?? d.state ?? "—")}</span>
-            <span>
-              {d.segments != null ? `${d.segments} ${t("time segments")}` : "—"}
-            </span>
-            <span className="levi-live-autocell">
-              {d.verdict ? (
-                <>
-                  <span className="levi-live-auto-tag">{t("auto")}</span>{" "}
-                  {d.verdict.undecided || !d.verdict.outcome
-                    ? t("undecided")
-                    : t(d.verdict.outcome)}
-                  {d.verdict.events != null &&
-                    ` (${d.verdict.valid_events ?? 0}/${d.verdict.events})`}
-                </>
-              ) : d.reason ? (
-                <span className="levi-pool-muted">{d.reason}</span>
-              ) : (
-                "—"
-              )}
-            </span>
-          </li>
-        ))}
-      </ul>
-      {demos.length > 10 && (
-        <button
-          type="button"
-          className="levi-pool-link"
-          onClick={() => setAll((v) => !v)}
-        >
-          {all ? t("Show fewer") : `${t("Show all")} ${demos.length}`}
-        </button>
-      )}
-    </div>
-  );
-}
-
 export function DatasetCard({
   name,
   row,
@@ -209,6 +151,7 @@ export function DatasetCard({
   filter,
   onFilter,
   nowSeconds,
+  onChanged,
 }: {
   name: string;
   row: DatasetRow;
@@ -220,6 +163,8 @@ export function DatasetCard({
   filter: ReviewFilter;
   onFilter: (value: ReviewFilter) => void;
   nowSeconds: number;
+  /** An episode was removed or restored: fetch this card's detail again. */
+  onChanged: () => void;
 }) {
   const { t } = useLocale();
   const detail = entry?.data ?? undefined;
@@ -237,6 +182,7 @@ export function DatasetCard({
     ["older than the service (not touched)", row.backlog],
     ["aborted or incomplete", row.incomplete],
     ["discarded", row.discarded],
+    ["removed by a person (not counted)", row.excluded],
   ];
   const shownExtras = extras.filter(([, n]) => (n ?? 0) > 0);
   const title = detail?.group
@@ -389,7 +335,7 @@ export function DatasetCard({
         (entry?.error && !detail ? (
           <p className="levi-error">{entry.error}</p>
         ) : (
-          <DemoList demos={detail?.demos ?? []} />
+          <EpisodeList dataset={name} detail={detail} onChanged={onChanged} />
         ))}
     </article>
   );

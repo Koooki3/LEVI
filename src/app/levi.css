@@ -2878,6 +2878,33 @@ button.levi-pool-danger {
 .levi-live-actions {
   gap: 8px 14px;
 }
+.levi-live-demos-head,
+.levi-live-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+.levi-live-bulk {
+  justify-content: flex-start;
+  margin: 6px 0;
+}
+.levi-live-demos li input[type="checkbox"] {
+  align-self: center;
+}
+.levi-live-demo-detail {
+  flex-basis: 100%;
+  border-left: 2px solid #ffffff22;
+  padding: 4px 10px;
+  margin: 2px 0 6px 20px;
+}
+.levi-live-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
 .levi-live-events {
   margin-top: 12px;
   font-size: 12px;

@@ -1,7 +1,9 @@
 "use client";
 // Live page: evaluation sessions, the FR3 arm, the annotation pipeline and the
-// background service, all read-only. Data comes from `/api/levi/live/*`
-// (docs/LIVE.md); nothing here starts, stops or approves anything.
+// background service. Data comes from `/api/levi/live/*` (docs/LIVE.md);
+// nothing here starts, stops or approves anything. The one thing a person can
+// change is to remove an episode from a dataset and restore it (a soft
+// delete: no file is deleted).
 import { useEffect, useMemo, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { ago } from "@/components/pool/pool-progress";
@@ -76,7 +78,7 @@ function Freshness({
         </span>
       )}
       {" · "}
-      {t("read-only")}
+      {t("read-only except removing episodes")}
     </p>
   );
 }
@@ -115,7 +117,7 @@ export default function LivePage() {
     ],
     [ranked, open],
   );
-  const details = useDatasetDetails(
+  const { details, refresh } = useDatasetDetails(
     wanted,
     rows,
     open,
@@ -137,7 +139,7 @@ export default function LivePage() {
       <h1>{t("Live evaluation & annotation")}</h1>
       <p>
         {t(
-          "Watch a robot evaluation while it runs: the evaluation sessions, the FR3 arm, and how far the background LEVI has got with labelling the finished episodes. Everything here is read-only. Automatic results are unreviewed and their accuracy has not been evaluated.",
+          "Watch a robot evaluation while it runs: the evaluation sessions, the FR3 arm, and how far the background LEVI has got with labelling the finished episodes. Nothing here starts, stops or approves anything; the only change you can make is to remove an episode from a dataset (restorable, nothing is deleted). Automatic results are unreviewed and their accuracy has not been evaluated.",
         )}
       </p>
       <Freshness
@@ -216,6 +218,7 @@ export default function LivePage() {
                           writeBrowserStorage("local", FILTER_KEY, value);
                         }}
                         nowSeconds={now / 1000}
+                        onChanged={() => refresh(name)}
                       />
                     ))}
                   </div>

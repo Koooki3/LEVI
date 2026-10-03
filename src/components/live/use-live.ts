@@ -135,7 +135,11 @@ export function useDatasetDetails(
   rows: Record<string, DatasetRow>,
   open: Set<string>,
   enabled: boolean,
-): Record<string, DetailEntry> {
+): {
+  details: Record<string, DetailEntry>;
+  /** Fetch one dataset's detail again now (after a removal or a restore). */
+  refresh: (name: string) => void;
+} {
   const [details, setDetails] = useState<Record<string, DetailEntry>>({});
   const inflight = useRef(new Set<string>());
   const known = useRef<Record<string, DetailEntry>>({});
@@ -199,5 +203,12 @@ export function useDatasetDetails(
     }, DETAIL_REFRESH_MS);
     return () => clearInterval(timer);
   }, [enabled, anyBusy]);
-  return details;
+  const refresh = useCallback(
+    (name: string) => {
+      if (!inflight.current.has(name))
+        void fetchOne(name, known.current[name]?.signature ?? "");
+    },
+    [fetchOne],
+  );
+  return { details, refresh };
 }

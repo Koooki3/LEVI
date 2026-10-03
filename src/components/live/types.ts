@@ -1,4 +1,5 @@
-// Shapes of the read-only live API (`/api/levi/live/*`, docs/LIVE.md).
+// Shapes of the live API (`/api/levi/live/*`, docs/LIVE.md): read-only except
+// removing an episode and restoring it.
 // Every field is optional on purpose: the page shows what the service gave it.
 
 export type Fr3State = "ok" | "red" | "offline" | "missing";
@@ -89,6 +90,8 @@ export interface DatasetRow {
   source_changed?: number;
   fault?: boolean;
   fault_reasons?: string[];
+  /** Episodes a person removed (restorable); not counted above. */
+  excluded?: number;
 }
 
 export interface VllmInfo {
@@ -191,8 +194,19 @@ export interface Verdict {
   at?: number | null;
 }
 
+/** Who removed an episode, when and why (`excluded` of a dataset's demo). */
+export interface Removal {
+  at?: number | null;
+  by?: string;
+  reason?: string;
+  /** Review runs cancelled because every episode in them was removed. */
+  cancelled_runs?: string[];
+}
+
 export interface DemoRow {
   demo: string;
+  /** Set when a person removed the episode (it is in `excluded_demos`). */
+  excluded?: Removal | null;
   state?: string;
   episode_index?: number | null;
   run_id?: string | null;
@@ -214,6 +228,9 @@ export interface DatasetDetail {
   counts?: Record<string, number>;
   total_demos?: number;
   demos?: DemoRow[];
+  /** Removed episodes, newest first (kept apart from `demos`). */
+  excluded_count?: number;
+  excluded_demos?: DemoRow[];
   incomplete?: { count?: number; fr3_fault?: number; reasons?: unknown } | null;
   current?: { demos?: string[]; done?: string[] } | null;
   /** Ids of the review runs still open for a person. */
@@ -221,4 +238,19 @@ export interface DatasetDetail {
   last_batch?: { anchored_run?: string | null; finished_at?: number } | null;
   last_processed_at?: number | null;
   last_error?: string;
+}
+
+/** The answer of removing or restoring episodes. */
+export interface ChangeResult {
+  enabled?: boolean;
+  dataset: string;
+  changed: string[];
+  unchanged: string[];
+  counts?: Record<string, number>;
+  excluded_count?: number;
+  review_runs_open?: number;
+  /** Review runs cancelled by a removal (every episode in them is out). */
+  cancelled_runs?: string[];
+  /** Review runs a restored episode had lost (they stay cancelled). */
+  review_cancelled?: string[];
 }
