@@ -44,6 +44,42 @@ def channel(event):
     return "human" if event.get("principal") in LEGACY_HUMAN else "agent"
 
 
+# A run is not working while it waits for a person's review, or from the
+# moment someone asks it to pause or cancel; it works again when something
+# starts it (the executor's capabilities, the live service's auto-resume, a
+# revised plan). The time between is the person's, not the task's.
+IDLE_STARTS = {"waiting_for_review", "pause_requested", "cancel_requested"}
+RESUMING_TOOLS = {"runs.execute", "runs.resume", "tasks.advance"}
+
+
+def _resumes(event):
+    kind = event.get("type")
+    return kind in {"auto_resumed", "plan_revised"} or (
+        kind == "action.started" and event.get("tool") in RESUMING_TOOLS
+    )
+
+
+def idle_seconds(events, finished):
+    """Seconds the run spent waiting for a person (review, a pause, a cancel
+    that came late), up to ``finished`` for a wait that never ended: a run
+    cancelled long after it finished its work did not take that long. Events
+    are in journal order."""
+    idle, since = 0.0, None
+    for event in events:
+        when = event.get("time")
+        if when is None or event.get("type") in {"closed", "closure_failed"}:
+            continue
+        if since is None:
+            if event.get("type") in IDLE_STARTS:
+                since = when
+        elif _resumes(event):
+            idle += max(0.0, when - since)
+            since = None
+    if since is not None and finished:
+        idle += max(0.0, finished - since)
+    return idle
+
+
 def _tools(events):
     return {
         who: _tally([e for e in events if channel(e) == who])
@@ -138,6 +174,9 @@ def build(store, run_id):
     ]
     started = run.get("created_at") or (times[0] if times else None)
     finished = times[-1] if times else None
+    # Time spent waiting for a person (a review left open, a late cancel) is
+    # not the task's: it would otherwise read as a run that got slow.
+    waited = idle_seconds(events, finished)
     delivered_bytes = sum(t["response_bytes"] for t in tools.values())
     delivered_pixels = sum(t["image_pixels"] for t in tools.values())
     samples = [s for s in store.list("usage_samples") if s.get("run_id") == run_id]
@@ -160,7 +199,10 @@ def build(store, run_id):
         "harness": run.get("harness", {}),
         "episodes_in_scope": len(run["context"]["episodes"]),
         "episodes_completed": len(run.get("completed", [])),
-        "wall_seconds": round(finished - started, 1) if started and finished else None,
+        "wall_seconds": round(max(0.0, finished - started - waited), 1)
+        if started and finished
+        else None,
+        "waiting_for_person_seconds": round(waited, 1),
         "started_at": started,
         "finished_at": finished,
         "tools": tools,
