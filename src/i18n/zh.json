@@ -2008,5 +2008,16 @@
   "Open the live page": "打开实时评测页面",
   "{n} run(s) stopped for the robot's policy will continue by themselves once the evaluation lets the model work again.": "有 {n} 个运行因机器人策略推理而停下，评测让出模型后会自己继续。",
   "{n} run(s) stopped for the robot's policy need you to press Resume in the LEVI page.": "有 {n} 个运行因机器人策略推理而停下，需要你在 LEVI 页面点“继续”。",
-  "auto_resumed": "已自动继续（实时闸门重新打开）"
+  "auto_resumed": "已自动继续（实时闸门重新打开）",
+  "Robotiq 2F-85": "Robotiq 2F-85",
+  "Franka Hand": "Franka 原装夹爪",
+  "Unknown gripper": "未知夹爪",
+  "Gripper": "夹爪",
+  "Allow mixing grippers in one export": "允许一次导出混用夹爪",
+  "The selection mixes grippers: {counts}. An export takes one gripper: filter by gripper, or allow mixing.": "所选片段混用了夹爪：{counts}。一次导出只取一种夹爪：请按夹爪筛选，或明确允许混用。",
+  "The selection mixes episodes of a known gripper with episodes whose gripper is not recorded: {counts}. Filter by gripper, list Unknown gripper on purpose, or allow mixing.": "所选片段里既有已知夹爪，也有未记录夹爪的片段：{counts}。请按夹爪筛选、有意勾选“未知夹爪”，或明确允许混用。",
+  "Grippers are mixed on purpose: {counts}.": "已明确允许混用夹爪：{counts}。",
+  "{count} episode(s) have no recorded gripper (unknown): their metadata does not say which gripper was used.": "{count} 个片段没有记录夹爪（未知）：它们的元数据没有说明用的是哪种夹爪。",
+  "Grippers": "夹爪构成",
+  "No gripper is recorded for these episodes (older data); they export as unknown.": "这些片段没有夹爪记录（旧数据），导出时记为未知。"
 }

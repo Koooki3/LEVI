@@ -6,6 +6,7 @@ import {
   CATEGORY_LABELS,
   METHOD_LABELS,
   POLICY_METHODS,
+  gripperLabel,
   type Facets,
   type OutcomeFilter,
 } from "./types";
@@ -19,6 +20,7 @@ export interface Filters {
   policyModels: string[];
   policyCheckpoints: string[];
   policyMethods: string[];
+  grippers: string[];
   dateFrom: string;
   dateTo: string;
   showHeldout: boolean;
@@ -35,6 +37,7 @@ export const EMPTY_FILTERS: Filters = {
   policyModels: [],
   policyCheckpoints: [],
   policyMethods: [],
+  grippers: [],
   dateFrom: "",
   dateTo: "",
   showHeldout: false,
@@ -120,6 +123,7 @@ export function FacetsPanel({
   const methods = POLICY_METHODS.filter((m) => facets?.policy_methods?.[m]).map(
     (m) => [m, facets?.policy_methods?.[m] || 0] as [string, number],
   );
+  const grippers = byCount(facets?.grippers);
   const categories = CATEGORIES.filter(
     (c) => c !== "archive" || filters.showArchive,
   );
@@ -250,6 +254,15 @@ export function FacetsPanel({
           onToggle={(v) =>
             set({ policyMethods: toggle(filters.policyMethods, v) })
           }
+        />
+      )}
+      {grippers.length > 0 && (
+        <PolicyFacet
+          legend="Gripper"
+          entries={grippers}
+          selected={filters.grippers}
+          label={(v) => gripperLabel(v, t)}
+          onToggle={(v) => set({ grippers: toggle(filters.grippers, v) })}
         />
       )}
       <fieldset>

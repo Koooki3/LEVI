@@ -5,6 +5,7 @@ import { useLocale } from "@/components/levi-locale";
 import { SelectionFields } from "./selection-fields";
 import {
   METHOD_LABELS,
+  gripperLabel,
   PICK_REASONS,
   SELECTION_NOTES,
   STRATEGY_LABELS,
@@ -206,6 +207,38 @@ function shortName(episode: string): string {
 
 function share(n: number, total: number): string {
   return total ? `${Math.round((n / total) * 100)}%` : "—";
+}
+
+/** Which grippers the composition's episodes recorded; unknown ones (older
+ * data, nothing in the metadata) are counted, not hidden. */
+export function GripperMix({
+  grippers,
+}: {
+  grippers?: Record<string, number>;
+}) {
+  const { t } = useLocale();
+  const entries = Object.entries(grippers || {}).filter(([, n]) => n > 0);
+  if (!entries.length) return null;
+  const known = entries.some(([g]) => g !== "unknown");
+  return (
+    <div className="levi-pool-mix">
+      <h4>{t("Grippers")}</h4>
+      <div className="levi-pool-constraints">
+        {entries.map(([g, n]) => (
+          <span key={g} className="levi-pool-chip">
+            {gripperLabel(g, t)} {n.toLocaleString()}
+          </span>
+        ))}
+      </div>
+      {!known && (
+        <p className="levi-pool-hint">
+          {t(
+            "No gripper is recorded for these episodes (older data); they export as unknown.",
+          )}
+        </p>
+      )}
+    </div>
+  );
 }
 
 /** The composition's overall mix: successes and failures, categories and

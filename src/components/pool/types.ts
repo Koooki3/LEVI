@@ -39,6 +39,57 @@ export const METHOD_LABELS: Record<string, string> = {
   unknown: "Unknown method",
 };
 
+/** Gripper classes the index records (levi/pool/embodiment.py); anything else
+ * a workspace's rules add is shown as recorded. */
+export const GRIPPER_LABELS: Record<string, string> = {
+  robotiq_2f85: "Robotiq 2F-85",
+  franka_hand: "Franka Hand",
+  unknown: "Unknown gripper",
+};
+
+export function gripperLabel(
+  gripper: string | null | undefined,
+  t: (key: string) => string,
+): string {
+  const value = gripper || "unknown";
+  return t(GRIPPER_LABELS[value] || value);
+}
+
+/** ``Robotiq 2F-85 120 · Franka Hand 30`` (largest first, unknown last on a tie). */
+export function gripperCounts(
+  counts: Record<string, number>,
+  t: (key: string) => string,
+): string {
+  return Object.entries(counts)
+    .sort(
+      (a, b) =>
+        b[1] - a[1] ||
+        Number(a[0] === "unknown") - Number(b[0] === "unknown") ||
+        a[0].localeCompare(b[0]),
+    )
+    .map(([g, n]) => `${gripperLabel(g, t)} ${n.toLocaleString("en-US")}`)
+    .join(" · ");
+}
+
+/** Tooltip of the gripper cell: the four recorded fields and what decided
+ * the gripper (index columns, not translated). */
+export function gripperTitle(
+  row: Pick<
+    EpisodeRow,
+    "robot" | "gripper" | "action_mode" | "ee_frame" | "embodiment_evidence"
+  >,
+  t: (key: string) => string,
+): string | undefined {
+  if (row.gripper === undefined && row.robot === undefined) return undefined;
+  const why = row.embodiment_evidence?.gripper;
+  return [
+    `${t("Gripper")}: ${row.gripper || "unknown"}${why ? ` (${why})` : ""}`,
+    `robot: ${row.robot || "unknown"}`,
+    `action_mode: ${row.action_mode || "unknown"}`,
+    `ee_frame: ${row.ee_frame || "unknown"}`,
+  ].join("\n");
+}
+
 /** ``pi05_fr3_all_step49999`` -> ``step49999`` (as the server's label). */
 export function shortCheckpoint(checkpoint: string | null): string | null {
   if (!checkpoint) return null;
@@ -219,6 +270,8 @@ export interface Facets {
   policy_models: Record<string, number>;
   policy_checkpoints: Record<string, number>;
   policy_methods: Record<string, number>;
+  robots?: Record<string, number>;
+  grippers?: Record<string, number>;
   outcomes: Record<string, number>;
   date_min: string | null;
   date_max: string | null;
@@ -238,6 +291,7 @@ export interface TaskRow {
   success_rate: number | null;
   sources: string[];
   policy_methods?: Record<string, number>;
+  grippers?: Record<string, number>;
 }
 
 export interface EpisodeRow {
@@ -261,6 +315,11 @@ export interface EpisodeRow {
   policy_method: string | null;
   policy_phase: string | null;
   policy_label: string | null;
+  robot?: string | null;
+  gripper?: string | null;
+  action_mode?: string | null;
+  ee_frame?: string | null;
+  embodiment_evidence?: Record<string, string>;
   date: string | null;
   heldout: boolean;
   heldout_id: string | null;
@@ -298,6 +357,9 @@ export interface Recipe {
   policy_models?: string[];
   policy_checkpoints?: string[];
   policy_methods?: string[];
+  robots?: string[];
+  grippers?: string[];
+  allow_mixed_gripper?: boolean;
   include_nonstandard: boolean;
   allow_unlinked_sources?: boolean;
   exclude: string[];
@@ -316,6 +378,11 @@ export interface PoolWarning {
   refused?: boolean;
   /** "info" notes inform; they never block. */
   level?: "info";
+  /** mixed_gripper: why (mixed_known, known_and_unknown), whether the recipe
+   * allowed it, and the count per gripper class. */
+  problem?: "mixed_known" | "known_and_unknown" | null;
+  allowed?: boolean;
+  counts?: Record<string, number>;
   export_fps?: number;
   min_source_fps?: number;
   suggested_fps?: number;
@@ -343,11 +410,30 @@ const TIMING_WARNING_TEXT: Record<string, (w: PoolWarning) => string> = {
       : "Retime: the time axis of {count} raw episode(s) becomes up to {percent}% shorter than recorded (motion plays that much faster).",
 };
 
-/** A warning as UI text; the timing notes carry their numbers. */
+const GRIPPER_TEXT = {
+  mixed_known:
+    "The selection mixes grippers: {counts}. An export takes one gripper: filter by gripper, or allow mixing.",
+  known_and_unknown:
+    "The selection mixes episodes of a known gripper with episodes whose gripper is not recorded: {counts}. Filter by gripper, list Unknown gripper on purpose, or allow mixing.",
+  allowed: "Grippers are mixed on purpose: {counts}.",
+  unknown:
+    "{count} episode(s) have no recorded gripper (unknown): their metadata does not say which gripper was used.",
+};
+
+/** A warning as UI text; the timing and gripper notes carry their numbers. */
 export function warningText(
   w: PoolWarning,
   t: (key: string) => string,
 ): string {
+  if (w.code === "mixed_gripper") {
+    const key = w.allowed
+      ? GRIPPER_TEXT.allowed
+      : GRIPPER_TEXT[w.problem || "mixed_known"];
+    return t(key).replace("{counts}", gripperCounts(w.counts || {}, t));
+  }
+  if (w.code === "gripper_unknown") {
+    return t(GRIPPER_TEXT.unknown).replace("{count}", String(w.episodes ?? 0));
+  }
   const template = TIMING_WARNING_TEXT[w.code];
   if (!template) return t(WARNING_LABELS[w.code] || w.message);
   return t(template(w))
@@ -445,6 +531,8 @@ export interface Preview {
   formats: Record<string, number>;
   outcomes: Record<string, number>;
   policy_methods?: Record<string, number>;
+  grippers?: Record<string, number>;
+  robots?: Record<string, number>;
   excluded: Record<string, number>;
   excluded_heldout: number;
   excluded_duplicates: number;

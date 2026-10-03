@@ -55,6 +55,8 @@ const EMPTY_RECIPE: Recipe = {
   policy_models: [],
   policy_checkpoints: [],
   policy_methods: [],
+  grippers: [],
+  allow_mixed_gripper: false,
   include_nonstandard: false,
   exclude: [],
 };
@@ -67,6 +69,7 @@ function query(filters: Filters, extra: Record<string, string> = {}) {
   for (const p of filters.policyModels) q.append("policy_model", p);
   for (const p of filters.policyCheckpoints) q.append("policy_checkpoint", p);
   for (const p of filters.policyMethods) q.append("policy_method", p);
+  for (const g of filters.grippers) q.append("gripper", g);
   if (filters.search) q.set("search", filters.search);
   if (filters.outcome !== "all") q.set("outcome", filters.outcome);
   if (filters.dateFrom) q.set("date_from", filters.dateFrom);
@@ -124,6 +127,7 @@ export default function TrainingPool() {
       policy_models: filters.policyModels,
       policy_checkpoints: filters.policyCheckpoints,
       policy_methods: filters.policyMethods,
+      grippers: filters.grippers,
       outcome: filters.outcome,
       date_from: filters.dateFrom || null,
       date_to: filters.dateTo || null,
@@ -526,6 +530,9 @@ export default function TrainingPool() {
                       policy_models: recipe.policy_models || [],
                       policy_checkpoints: recipe.policy_checkpoints || [],
                       policy_methods: recipe.policy_methods || [],
+                      robots: recipe.robots || [],
+                      grippers: recipe.grippers || [],
+                      allow_mixed_gripper: recipe.allow_mixed_gripper || false,
                       include_nonstandard: recipe.include_nonstandard,
                       allow_unlinked_sources:
                         recipe.allow_unlinked_sources || false,
@@ -552,6 +559,7 @@ export default function TrainingPool() {
                     policyModels: loaded.policy_models || [],
                     policyCheckpoints: loaded.policy_checkpoints || [],
                     policyMethods: loaded.policy_methods || [],
+                    grippers: loaded.grippers || [],
                     outcome: loaded.outcome,
                     dateFrom: loaded.date_from || "",
                     dateTo: loaded.date_to || "",

@@ -7,6 +7,8 @@ import {
   CATEGORIES,
   CATEGORY_LABELS,
   METHOD_LABELS,
+  gripperLabel,
+  gripperTitle,
   POLICY_METHODS,
   policyLabel,
   type EpisodeRow,
@@ -317,6 +319,7 @@ export function EpisodeTable({
               <th scope="col">{t("Category")}</th>
               <th scope="col">{t("Task")}</th>
               {showPolicy && <th scope="col">{t("Policy")}</th>}
+              <th scope="col">{t("Gripper")}</th>
               <th scope="col" className="num">
                 {t("Frames")}
               </th>
@@ -391,6 +394,16 @@ export function EpisodeTable({
                       )}
                     </td>
                   )}
+                  <td
+                    className={
+                      row.gripper && row.gripper !== "unknown"
+                        ? undefined
+                        : "levi-pool-muted"
+                    }
+                    title={gripperTitle(row, t)}
+                  >
+                    {gripperLabel(row.gripper, t)}
+                  </td>
                   <td className="num tabular">
                     {row.frames?.toLocaleString() ?? "—"}
                   </td>
@@ -418,7 +431,7 @@ export function EpisodeTable({
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={showPolicy ? 8 : 7} className="levi-pool-muted">
+                <td colSpan={showPolicy ? 9 : 8} className="levi-pool-muted">
                   {t("No episodes match these filters.")}
                 </td>
               </tr>

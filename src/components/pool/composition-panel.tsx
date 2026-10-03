@@ -1,11 +1,12 @@
 "use client";
 import { useState } from "react";
 import { useLocale } from "@/components/levi-locale";
-import { MixSummary, PickedList, TaskPick } from "./task-pick";
+import { GripperMix, MixSummary, PickedList, TaskPick } from "./task-pick";
 import {
   CATEGORY_LABELS,
   METHOD_LABELS,
   REASON_LABELS,
+  gripperLabel,
   TIMING_WARNING_CODES,
   stopsExport,
   warningText,
@@ -119,6 +120,10 @@ export function CompositionPanel({
     ...(recipe.policy_methods || []).map(
       (p) => `${t("How it was run")}: ${t(METHOD_LABELS[p] || p)}`,
     ),
+    ...(recipe.grippers || []).map(
+      (g) => `${t("Gripper")}: ${gripperLabel(g, t)}`,
+    ),
+    ...(recipe.robots || []).map((r) => `robot: ${r}`),
     ...(recipe.outcome !== "all"
       ? [
           t(
@@ -299,6 +304,19 @@ export function CompositionPanel({
           {t("Allow raw captures and unlinked LeRobot data of one task")}
         </span>
       </label>
+      {(recipe.allow_mixed_gripper ||
+        preview?.warnings?.some((w) => w.code === "mixed_gripper")) && (
+        <label className="levi-pool-check">
+          <input
+            type="checkbox"
+            checked={!!recipe.allow_mixed_gripper}
+            onChange={() =>
+              set({ allow_mixed_gripper: !recipe.allow_mixed_gripper })
+            }
+          />
+          <span>{t("Allow mixing grippers in one export")}</span>
+        </label>
+      )}
       <div className="levi-pool-constraints">
         <span className="levi-pool-label">{t("Constraints")}</span>
         {constraints.length ? (
@@ -392,6 +410,7 @@ export function CompositionPanel({
               </p>
             )}
             {preview.mix && <MixSummary mix={preview.mix} />}
+            <GripperMix grippers={preview.grippers} />
             <PoolWarnings warnings={preview.warnings} />
             {preview.tasks_without_episodes.length > 0 && (
               <p className="levi-warnings">

@@ -2008,5 +2008,16 @@
   "Open the live page": "Open the live page",
   "{n} run(s) stopped for the robot's policy will continue by themselves once the evaluation lets the model work again.": "{n} run(s) stopped for the robot's policy will continue by themselves once the evaluation lets the model work again.",
   "{n} run(s) stopped for the robot's policy need you to press Resume in the LEVI page.": "{n} run(s) stopped for the robot's policy need you to press Resume in the LEVI page.",
-  "auto_resumed": "auto_resumed"
+  "auto_resumed": "auto_resumed",
+  "Robotiq 2F-85": "Robotiq 2F-85",
+  "Franka Hand": "Franka Hand",
+  "Unknown gripper": "Unknown gripper",
+  "Gripper": "Gripper",
+  "Allow mixing grippers in one export": "Allow mixing grippers in one export",
+  "The selection mixes grippers: {counts}. An export takes one gripper: filter by gripper, or allow mixing.": "The selection mixes grippers: {counts}. An export takes one gripper: filter by gripper, or allow mixing.",
+  "The selection mixes episodes of a known gripper with episodes whose gripper is not recorded: {counts}. Filter by gripper, list Unknown gripper on purpose, or allow mixing.": "The selection mixes episodes of a known gripper with episodes whose gripper is not recorded: {counts}. Filter by gripper, list Unknown gripper on purpose, or allow mixing.",
+  "Grippers are mixed on purpose: {counts}.": "Grippers are mixed on purpose: {counts}.",
+  "{count} episode(s) have no recorded gripper (unknown): their metadata does not say which gripper was used.": "{count} episode(s) have no recorded gripper (unknown): their metadata does not say which gripper was used.",
+  "Grippers": "Grippers",
+  "No gripper is recorded for these episodes (older data); they export as unknown.": "No gripper is recorded for these episodes (older data); they export as unknown."
 }
