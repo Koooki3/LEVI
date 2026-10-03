@@ -189,17 +189,17 @@ uv run levi live stop                            # 只停自己的进程
 
 - **存放位置**：数据集状态文件（`live/datasets/<名字>.json`）里该片段自己的那一行：`"excluded": {"at": <epoch>, "by": "person", "reason": "…"}`。没有这个键就是没排除，所以旧文件不用迁移；恢复就是删掉这个键。文件仍按原来的方式在锁内原子写入。
 - **计数**：被排除的片段不进任何计数：状态行里的 `episodes`、`pending`、`done`、`failed`、`skipped` 不含它，数据集详情的 `counts`、`total_demos` 不含它，卡片上的自动成败统计也不含它。状态行和详情另带 `excluded` / `excluded_count`，详情把被排除的片段单独列出（`excluded_demos`）。
-- **工作进程**：队列、批次选择和工作进程最后的过滤都会跳过被排除且尚未标注的片段；它保持 `mirrored`，恢复后再标注。被排除片段的源发生变化时不会重新镜像。
+- **工作进程**：队列、批次选择和工作进程最后的过滤都会跳过被排除且尚未标注的片段；它保持 `mirrored`，恢复后再标注。被排除片段的源发生变化时不会重新镜像（刷新在重建镜像前会在状态文件的锁内再看一次是否已被排除）。
 - **已标注的片段**：标注留在 LEVI 里，但不再计入计数、数据集总数和自动成败统计。
-- **正在标注的片段会被拒绝**：属于进行中批次（数据集状态的 `current`）的片段不能排除（HTTP 409，“being labelled (part of the batch in progress); try again after the batch”）：它的运行已经带着它做了计划，点一下列表不该把做到一半的工作打断。检查和写入在状态文件的锁内一起完成，工作进程的过滤（`Worker.filter_demos`）也在同一把锁内跳过被排除的行，所以恰好在选批次时点下去，要么被拒绝、要么生效，不会各做一半。数据集的批次在跑时，仍在等待的片段可以排除。（服务停止时批次仍保存在状态文件里，所以它的片段在批次结束前一直被拒绝。）
-- **复核运行**：一个复核运行里的片段*全部*被排除时，该运行会被取消，不会有等人审的项挂在已不存在的片段上（判定仍留在数据集状态里，和清理取消的旧运行一样；`review_runs_open` 重新计数）。复核运行里还有没排除的片段时，该运行保持打开：一个运行没法单独交还一个片段，它对被排除片段的提案仍在里面。恢复不会重新打开已取消的运行，返回的 `review_cancelled` 会列出这样的运行。
+- **正在标注的片段会被拒绝**：属于进行中批次（数据集状态的 `current`）的片段不能排除（HTTP 409，“being labelled (part of the batch in progress); try again after the batch”）：它的运行已经带着它做了计划，点一下列表不该把做到一半的工作打断。检查和写入在状态文件的锁内一起完成，工作进程的过滤（`Worker.filter_demos`）也在同一把锁内跳过被排除的行，所以恰好在选批次时点下去，要么被拒绝、要么生效，不会各做一半。数据集的批次在跑时，仍在等待的片段可以排除。（服务停止时，以及批次在等人批准计划或提交草稿时（`awaiting`，自动批准关闭），批次都保存在状态文件里，所以它的片段在批次结束前一直被拒绝。）
+- **复核运行不会被取消**：一个复核运行里的片段*全部*被排除时，该运行保持打开，冻结输入和提案都还在：取消会让清理把它们删掉，恢复后的片段就再也没法被接受。它只是不再计入“待复核”数量（`review_runs_open`、卡片上的“留待人工复核的复核运行”和数据集详情的 `review_runs`），这样这个数字和其他数字一致；恢复其中任何一个片段，它就重新计入。它的存续仍由 `pipeline.keep_review_runs` 决定，和其他运行一样。复核运行里还有没排除的片段时照常计入，它对被排除片段的提案仍在里面。响应里 `review_hidden` 列出不计入的运行。状态文件加锁期间只写 `excluded` 标记：那里不调用运行存储。
 - **不能排除**：被拒收或卡住的片段（从未纳入数据集），以及服务还没镜像的 rollout（它还没有行，等它出现在列表里再排除）。
 - **训练池**：见下。
 - **查看器**：镜像和 LEVI 据此建的数据集视图里仍然有这个片段，所以普通查看器，以及从实时工作区自己的数据集导出的训练清单仍会列出它。只有实时页面、计数、工作进程和训练池遵守排除。
 
-**这是人的操作，并有审计。** 两个调用都要界面令牌（和页面其他写操作同样的检查：页面的代理会带上它）；智能体凭据（`Authorization: Bearer`）即使同时带着有效令牌也会被拒绝（403）；Agent API 的任何能力、自动批准主体的任何调用（`auto.ALLOWED`）都做不了这件事。每次改动，每个片段在 `live/audit.jsonl` 写一行：`{"time", "principal": "local-human", "actor": "person", "tool": "episode.exclude" | "episode.restore", "dataset", "demo", "reason"?, "runs_cancelled"?, "decision": "completed"}`，不记录令牌。排除已排除的片段、恢复未排除的片段什么都不改，也不写审计。
+**这是人的操作，并有审计。** 两个调用都要界面令牌（和页面其他写操作同样的检查）；智能体凭据（`Authorization: Bearer`）即使同时带着有效令牌也会被拒绝（403）；拒绝*任何* Bearer 是有意的，因为 LEVI 认识的 Bearer 凭据只有智能体的。Agent API 的任何能力、自动批准主体的任何调用（`auto.ALLOWED`）都做不了这件事。路由自己也做这个检查，不只靠服务的中间件，两道检查各自独立有效。实际上“人”指的是带界面令牌的请求，或经页面自己代理发来的请求；代理会给没有 `Origin` 头的本机请求自动加上令牌，所以本机任何进程不带 Bearer 直接 POST 到页面端口，也能以“人”的身份操作。页面其他写操作也是这样，不是本分支引入的。每次改动，每个片段在 `live/audit.jsonl` 写一行：`{"time", "principal": "local-human", "actor": "person", "tool": "episode.exclude" | "episode.restore", "dataset", "demo", "reason"?, "decision": "completed"}`，不记录令牌。排除已排除的片段、恢复未排除的片段什么都不改，也不写审计。
 
-**训练池**：实时工作区在池根目录之下时，它的镜像会像任何原始采集一样被登记，而同一次录制还会从镜像所链接的 rollout 目录再登记一次（同一指纹、同一组；rollout 目录是规范副本）。所以训练池不只看镜像：它在**被查询时**读实时工作区的数据集状态（不需要重新扫描），把整组当作已排除，和一个副本上的标签或留出标记对所有副本生效一样。被排除的录制不会被列出或计数（`facets.removed_in_live` 给出数量），任何配方都会跳过它（预览的排除原因里是 `excluded_in_live`，不管配方本来会选哪个副本），导出在规划、运行和续跑时都会拒绝它（“removed on the live page”），所以计划冻结之后才做的排除也能拦住导出。只读取上次扫描在池根下找到的实时工作区（以及训练池自己的工作区）：池根之外的实时工作区，它的镜像不在索引里，它对应的 rollout 副本要等扫描见过这个工作区后才会被识别。
+**训练池**：实时工作区在池根目录之下时，它的镜像会像任何原始采集一样被登记，而同一次录制还会从镜像所链接的 rollout 目录再登记一次（同一指纹、同一组；rollout 目录是规范副本）。所以训练池不只看镜像：它在**被查询时**读实时工作区的数据集状态（不需要重新扫描），把整组当作已排除，和一个副本上的标签或留出标记对所有副本生效一样。训练池除了认镜像的目录，也按状态文件自己的 `source` 路径认 rollout 原件，所以扫描先于镜像、或源在镜像之后被替换（指纹变了，不再和镜像同组）时，原件也照样被排除；这些路径只和索引里的键比较，从不打开。被排除的录制不会被列出或计数（`facets.removed_in_live` 给出录制数，一个录制算一个，不管有几个副本；训练池页面把这个数显示为“在实时页面被删除的片段数”，数字不会悄悄变少），任何配方都会跳过它（预览的排除原因里是 `excluded_in_live`，不管配方本来会选哪个副本），导出在规划、运行和续跑时都会拒绝它（“removed on the live page”），所以计划冻结之后才做的排除也能拦住导出。只读取上次扫描在池根下找到的实时工作区（以及训练池自己的工作区）：上次扫描没见过的实时工作区不会被读，新起一个之后要重新扫描。
 
 ## 服务写的文件
 
@@ -275,10 +275,10 @@ uv run levi live stop                            # 只停自己的进程
 | `GET /status` | `{"enabled", "alive", "age_s", "service": <status.json 或 null>, "faults": [{"dataset", "reasons": []}], "fr3_red", "blocked_runs": {"count", "waiting", "needs_person"}}`。`alive` = pid 存在、`updated_at` 不到 15 秒、状态不是 `stopped`。 |
 | `GET /sessions` | `{"enabled", "sessions": [ {会话字段, "dataset", "fault"} ], "fr3": {…}, "active"}`，直接读机器人侧文件（≤ 64 个）。 |
 | `GET /datasets` | `{"enabled", "datasets": {名字: 行}}`（`status.json` 里的行）。 |
-| `GET /datasets/{name}` | 数据集详情：`repo_id`（登记后的 LEVI 数据集 id，否则 null）、任务文本、各状态计数（被排除的片段不计入）、`total_demos`（数据集里的片段数）、片段列表（最新在前，≤ 200；每项有 `excluded`（null）、状态、集序号、`run_id`、尝试次数、时间片段数、提交时间、自动判定 `verdict`：`outcome/events/valid_events/undecided/spec/review: "auto"/evaluated: false`）、`excluded_count` 和 `excluded_demos`（被排除的片段，行的格式相同，带 `excluded: {at, by: "person", reason}`，最新在前，≤ 200）、`incomplete`（含按原因计数）、进行中的批次、上一批、`last_error`。未知名字返回 404。 |
-| `GET /audit?limit=50` | 自动批准主体的审计记录，最新在前，≤ 100 条，每条含 `tool`、`decision: allowed/refused`、`run_id` 等。人排除或恢复片段的行是 `principal: "local-human"`、`actor: "person"`、`tool: "episode.exclude"` 或 `"episode.restore"`、`dataset`、`demo`、可选的 `reason` 和 `runs_cancelled`、`decision: "completed"`。 |
-| `POST /datasets/{name}/exclude` | 请求体 `{"demos": ["demo_0003", …], "reason": "…"?}`（1 到 500 个名字，原因最长 300 字符）。排除这些片段（要么全部成功，要么都不改）。回答 `{"enabled", "dataset", "changed": [...], "unchanged": [...]（本来就已排除）, "counts", "excluded_count", "review_runs_open", "cancelled_runs": [...]}`。404：数据集或片段不存在（会点名），或不是实时工作区；409：片段在进行中的批次里（“being labelled …”），或从未纳入数据集（被拒收、卡住）；401/403：不是人在操作（见上）。 |
-| `POST /datasets/{name}/restore` | 请求体 `{"demos": [...]}`。把已排除的片段放回来；回答同上，但带 `review_cancelled`（恢复的片段曾失去的复核运行，它们保持已取消）而不是 `cancelled_runs`；没排除的片段在 `unchanged` 里。片段不存在返回 404。 |
+| `GET /datasets/{name}` | 数据集详情：`repo_id`（登记后的 LEVI 数据集 id，否则 null）、任务文本、各状态计数（被排除的片段不计入）、`total_demos`（数据集里的片段数）、片段列表（最新在前，≤ 200；每项有 `excluded`（null）、状态、集序号、`run_id`、尝试次数、时间片段数、提交时间、自动判定 `verdict`：`outcome/events/valid_events/undecided/spec/review: "auto"/evaluated: false`）、`excluded_count` 和 `excluded_demos`（被排除的片段，行的格式相同，带 `excluded: {at, by: "person", reason}`，最新在前，全部列出，不在 200 处截断）、`incomplete`（含按原因计数）、进行中的批次、上一批、`last_error`。未知名字返回 404。 |
+| `GET /audit?limit=50` | 自动批准主体的审计记录，最新在前，≤ 100 条，每条含 `tool`、`decision: allowed/refused`、`run_id` 等。人排除或恢复片段的行是 `principal: "local-human"`、`actor: "person"`、`tool: "episode.exclude"` 或 `"episode.restore"`、`dataset`、`demo`、可选的 `reason`、`decision: "completed"`。 |
+| `POST /datasets/{name}/exclude` | 请求体 `{"demos": ["demo_0003", …], "reason": "…"?}`（1 到 500 个名字，原因最长 300 字符）。排除这些片段（要么全部成功，要么都不改）。回答 `{"enabled", "dataset", "changed": [...], "unchanged": [...]（本来就已排除）, "counts", "excluded_count", "review_runs_open", "review_hidden": [...]（片段已全部排除、不计入的待复核运行）}`。404：数据集或片段不存在（会点名），或不是实时工作区；409：片段在进行中的批次里（“being labelled …”），或从未纳入数据集（被拒收、卡住）；401/403：不是人在操作（见上）。 |
+| `POST /datasets/{name}/restore` | 请求体 `{"demos": [...]}`。把已排除的片段放回来；回答同上（`review_hidden` 是恢复之后仍不计入的运行）；没排除的片段在 `unchanged` 里。片段不存在返回 404。 |
 | `POST /datasets/{name}/demos/{demo}/exclude`、`…/restore` | 对单个片段做同样的事（前者可带可选请求体 `{"reason"}`）。 |
 
 用 `repo_id`（`local/<名字>`）链接到查看器；判定对应的运行可按 `run_id` 在 LEVI 页面打开。
