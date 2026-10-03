@@ -145,6 +145,14 @@ describe("the calls", () => {
     ]);
   });
 
+  test("a dataset name with a suffix is one path segment", async () => {
+    const { calls, request } = recorder(answer());
+    await removeEpisodes("pi05__plates@root-2", ["demo_0001"], "", request);
+    await restoreEpisodes("a/b@c", ["demo_0001"], request);
+    expect(calls[0].path).toBe("live/datasets/pi05__plates%40root-2/exclude");
+    expect(calls[1].path).toBe("live/datasets/a%2Fb%40c/restore");
+  });
+
   test("restoring posts the names and nothing else", async () => {
     const { calls, request } = recorder(answer());
     await restoreEpisodes("pi05__plates", ["demo_0004"], request);
