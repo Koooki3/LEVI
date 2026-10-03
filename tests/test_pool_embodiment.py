@@ -3,10 +3,12 @@ metadata only (never from folder or task names), and the export that refuses
 to mix grippers."""
 
 import json
+from pathlib import Path
 
+import pandas as pd
 import pytest
 
-from levi.pool import embodiment, rules
+from levi.pool import embodiment, export, index, rules, scanner
 
 ROBOTIQ_JOINTS = ["robotiq_85_left_knuckle_joint"]
 FRANKA_JOINTS = ["fr3_finger_joint1", "fr3_finger_joint2"]
@@ -185,3 +187,231 @@ def test_gripper_mix_conditions():
     assert mix(["robotiq_2f85", "franka_hand"], allow=True)["problem"] is None
     assert mix(["robotiq_2f85", "franka_hand"], allow=True)["mixed"] is True
     assert mix(["robotiq_2f85", "robotiq_2f85"], allow=True)["mixed"] is False
+
+
+# ------------------------------------------------------------ index and scan
+
+COUNTER = 0
+
+
+def demo(path: Path, meta: dict | None = None, task="stack plates") -> Path:
+    """A raw capture without videos; every call records other data."""
+    global COUNTER
+    COUNTER += 1
+    path.mkdir(parents=True)
+    t = [COUNTER * 1000 + i / 10 for i in range(8)]
+    pd.DataFrame({"timestamp_sec": t, "frame_index": range(8)}).to_csv(
+        path / "frames.csv", index=False
+    )
+    pd.DataFrame({"timestamp_sec": t, "success_flag": 1, "px": t}).to_csv(
+        path / "end_effector_pose.csv", index=False
+    )
+    stamp = f"2026-09-{1 + COUNTER % 27:02d}T10:{COUNTER % 60:02d}:00"
+    body = {
+        "task_description": task,
+        "created_at": stamp,
+        "stopped_at": stamp[:-2] + "59",
+        "frame_count": 8,
+        "success_flag_final": 1,
+        "data_source": "human_teleop",
+        **(meta or {}),
+    }
+    (path / "metadata.json").write_text(json.dumps(body))
+    return path
+
+
+def lerobot(root: Path, episodes: list[dict], conversion: dict | None = None) -> Path:
+    (root / "meta").mkdir(parents=True)
+    (root / "meta/info.json").write_text(
+        json.dumps(
+            {
+                "codebase_version": "v2.1",
+                "fps": 10,
+                "chunks_size": 1000,
+                "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
+                "features": {
+                    "observation.state": {"dtype": "float32", "shape": [7]},
+                    "action": {"dtype": "float32", "shape": [7]},
+                },
+            }
+        )
+    )
+    (root / "meta/tasks.jsonl").write_text(
+        json.dumps({"task_index": 0, "task": "stack plates"}) + "\n"
+    )
+    rows = [
+        {"episode_index": i, "tasks": ["stack plates"], "length": 8 + i, **row}
+        for i, row in enumerate(episodes)
+    ]
+    (root / "meta/episodes.jsonl").write_text(
+        "".join(json.dumps(r) + "\n" for r in rows)
+    )
+    if conversion is not None:
+        (root / "meta/levi_conversion.json").write_text(json.dumps(conversion))
+    return root
+
+
+ROBOTIQ = {"gripper_joint_names": ROBOTIQ_JOINTS, "robot_joint_names": FR3}
+FRANKA = {"gripper_joint_names": FRANKA_JOINTS, "robot_joint_names": FR3}
+SERVER = {"policy": {"server_metadata": {"ee_frame": "franka_hand_tcp"}}}
+
+
+@pytest.fixture(scope="module")
+def pool_root(tmp_path_factory):
+    root = tmp_path_factory.mktemp("embodiment") / "data"
+    # Folder names say nothing the metadata does not: the "franka" folder
+    # holds a Robotiq capture on purpose.
+    for i in range(3):
+        demo(root / f"lab_a/stack/demo_{i:04d}", ROBOTIQ)
+    for i in range(2):
+        demo(root / f"lab_franka/stack/demo_{i:04d}", ROBOTIQ if i else FRANKA)
+    demo(
+        root / "rollouts/stack/demo_0000",
+        {**ROBOTIQ, **SERVER, "data_source": "policy_rollout"},
+    )
+    demo(root / "mystery/stack/demo_0000")
+    demo(root / "mystery/stack/demo_0001", {"gripper_state_topic": "/franka_gripper/x"})
+    demo(
+        root / "mystery/stack/demo_0002",
+        {**ROBOTIQ, "gripper_state_topic": "/franka_gripper/x"},
+    )
+    # LeRobot: linked to captures, with a conversion record, and with nothing.
+    lerobot(
+        root / "converted",
+        [
+            {"rollout_source_demo": str(root / "lab_a/stack/demo_0000")},
+            {"rollout_source_demo": str(root / "mystery/stack/demo_0000")},
+            {"rollout_source_demo": str(root / "rollouts/stack/demo_0000")},
+            {},
+        ],
+    )
+    lerobot(root / "recorded", [{}, {}], conversion={"action_semantics": "state"})
+    lerobot(root / "plain", [{}, {}, {}])
+    return root
+
+
+@pytest.fixture
+def scanned(pool_root, tmp_path, monkeypatch):
+    monkeypatch.setenv("LEVI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.setenv("LEVI_POOL_ROOTS", str(pool_root))
+    monkeypatch.setenv("LEVI_POOL_HELDOUT", "none")
+    monkeypatch.setenv("LEVI_EXPORT_ROOTS", str(tmp_path))
+    monkeypatch.setattr(export, "_levi_commit", lambda: "test")
+    return scanner.scan()
+
+
+def by_episode(source: str | None = None, **filters):
+    rows = index.episodes(limit=1000, show_copies=True, **filters)["episodes"]
+    return {
+        (r["source"], r["episode"]): r
+        for r in rows
+        if source is None or r["source"] == source
+    }
+
+
+def fields(row):
+    return {f: row[f] for f in embodiment.FIELDS}
+
+
+def test_raw_captures_carry_the_fields(scanned):
+    rows = by_episode()
+    assert fields(rows[("lab_a", "stack/demo_0000")]) == {
+        "robot": "franka_fr3",
+        "gripper": "robotiq_2f85",
+        "action_mode": "ee_pose_abs_next",
+        "ee_frame": "unknown",
+    }
+    assert rows[("lab_franka", "stack/demo_0000")]["gripper"] == "franka_hand"
+    # The folder is called franka, the capture says Robotiq: the capture wins.
+    assert rows[("lab_franka", "stack/demo_0001")]["gripper"] == "robotiq_2f85"
+    assert rows[("rollouts", "stack/demo_0000")]["ee_frame"] == "franka_hand_tcp"
+    assert rows[("mystery", "stack/demo_0000")]["gripper"] == "unknown"
+    assert rows[("mystery", "stack/demo_0000")]["robot"] == "unknown"
+    assert rows[("mystery", "stack/demo_0001")]["gripper"] == "franka_hand"
+    # Contradicting keys: unknown, with the reason in the evidence.
+    conflict = rows[("mystery", "stack/demo_0002")]
+    assert conflict["gripper"] == "unknown"
+    assert "conflict" in conflict["embodiment_evidence"]["gripper"]
+    evidence = rows[("lab_a", "stack/demo_0000")]["embodiment_evidence"]
+    assert "gripper_joint_names" in evidence["gripper"]
+
+
+def test_lerobot_rows_inherit_only_from_the_linked_capture(scanned):
+    rows = by_episode("converted")
+    linked = rows[("converted", "0")]
+    assert (linked["robot"], linked["gripper"]) == ("franka_fr3", "robotiq_2f85")
+    assert "linked" in linked["embodiment_evidence"]["gripper"]
+    # Linked to a capture that says nothing: unknown stays unknown.
+    assert rows[("converted", "1")]["gripper"] == "unknown"
+    assert rows[("converted", "2")]["ee_frame"] == "franka_hand_tcp"
+    # The dataset's action is its own business, not the capture's.
+    assert rows[("converted", "0")]["action_mode"] == "unknown"
+    assert rows[("converted", "3")]["gripper"] == "unknown"
+    recorded = by_episode("recorded")
+    assert {r["action_mode"] for r in recorded.values()} == {"ee_pose_abs_current"}
+    assert {r["gripper"] for r in recorded.values()} == {"unknown"}
+    plain = by_episode("plain")
+    assert {tuple(fields(r).values()) for r in plain.values()} == {("unknown",) * 4}
+
+
+def test_filters_facets_tasks_sources_and_summary(scanned):
+    def count(**f):
+        return index.episodes(limit=1, show_copies=True, **f)["total"]
+
+    # lab_a 3 + lab_franka demo_0001 + rollout + converted 0 and 2
+    assert count(grippers=["robotiq_2f85"]) == 3 + 1 + 1 + 2
+    assert count(grippers=["franka_hand"]) == 2
+    assert count(grippers=["unknown"]) == count() - 7 - 2
+    assert count(grippers=["franka_hand", "unknown"]) == count() - 7
+    # seven captures with FR3 joint names, two converted copies of them
+    assert count(robots=["franka_fr3"]) == 9
+    facets = index.facets(show_copies=True)
+    assert facets["grippers"]["franka_hand"] == 2
+    assert set(facets["grippers"]) == {"robotiq_2f85", "franka_hand", "unknown"}
+    assert "franka_fr3" in facets["robots"]
+    task = next(t for t in index.tasks(show_copies=True) if t["task"] == "stack plates")
+    assert task["grippers"]["franka_hand"] == 2
+    sources = {s["id"]: s for s in index.sources()}
+    assert sources["lab_a"]["grippers"] == {"robotiq_2f85": 3}
+    assert sources["mystery"]["grippers"] == {"unknown": 2, "franka_hand": 1}
+    assert scanned["grippers"]["franka_hand"] == 2
+
+
+def test_old_index_asks_for_a_rescan_and_is_read_again(scanned):
+    frame = index.frame()
+    assert {"robot", "gripper", "action_mode", "ee_frame"} <= set(frame.columns)
+    old = frame.drop(columns=["gripper"])
+    old["stat_sig"] = "signature-of-an-older-scan"
+    old.to_parquet(scanner.index_path(), index=False)
+    with pytest.raises(ValueError, match="older LEVI"):
+        index.frame()
+    again = scanner.scan()
+    # An older signature never matches: every episode is read again.
+    assert again["reused"] == 0
+    assert index.frame().gripper.eq("franka_hand").sum() == 2
+
+
+def test_a_changed_rule_table_reads_the_captures_again(scanned):
+    assert {r["gripper"] for r in by_episode("lab_a").values()} == {"robotiq_2f85"}
+    assert scanner.scan()["reused"] >= 10  # nothing changed: everything reused
+    table = rules.DEFAULTS["embodiment"]
+    changed = {
+        "version": table["version"] + 1,
+        "rules": [r for r in table["rules"] if r.get("value") != "robotiq_2f85"],
+    }
+    (scanner.settings.pool_dir() / "rules.json").write_text(
+        json.dumps({"embodiment": changed})
+    )
+    scanner.scan()
+    assert {r["gripper"] for r in by_episode("lab_a").values()} == {"unknown"}
+
+
+def test_a_plan_with_an_older_signature_still_counts_as_unchanged(scanned):
+    rows = index.episodes(limit=1000, show_copies=True)["episodes"]
+    raw = [r for r in rows if r["format"] == "robot_capture"][:2]
+    for r in raw:
+        r["stat_sig"] = scanner.legacy_raw_sig(Path(r["key"]))
+    export._unchanged(raw)  # an interrupted export planned before the upgrade
+    raw[0]["stat_sig"] = "somebody changed the files"
+    with pytest.raises(ValueError, match="changed since the pool was scanned"):
+        export._unchanged(raw)

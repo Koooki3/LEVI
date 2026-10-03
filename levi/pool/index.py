@@ -5,7 +5,7 @@ from collections import Counter, defaultdict
 
 import pandas as pd
 
-from . import scanner
+from . import embodiment, scanner
 
 
 def frame() -> pd.DataFrame:
@@ -13,10 +13,11 @@ def frame() -> pd.DataFrame:
     if not path.is_file():
         raise ValueError("The pool has not been scanned yet: run `levi pool scan`")
     df = pd.read_parquet(path)
-    if "policy_method" not in df.columns:
+    missing = [c for c in ("policy_method", *embodiment.COLUMNS) if c not in df.columns]
+    if missing:
         raise ValueError(
-            "The pool index is from an older LEVI (no policy columns): "
-            "run `levi pool scan`"
+            "The pool index is from an older LEVI (no "
+            f"{', '.join(missing)} column): run `levi pool scan`"
         )
     return df
 
@@ -55,6 +56,8 @@ def _filter(
     policy_models=None,
     policy_checkpoints=None,
     policy_methods=None,
+    robots=None,
+    grippers=None,
     date_from=None,
     date_to=None,
     show_heldout=False,
@@ -91,6 +94,10 @@ def _filter(
         df = df[df.policy_checkpoint.isin(policy_checkpoints)]
     if policy_methods:
         df = df[df.policy_method.isin(policy_methods)]
+    if robots:
+        df = df[df.robot.fillna("unknown").isin(robots)]
+    if grippers:
+        df = df[df.gripper.fillna("unknown").isin(grippers)]
     if date_from:
         df = df[df.date.fillna("") >= date_from]
     if date_to:
@@ -113,6 +120,7 @@ def episodes(limit: int = 200, offset: int = 0, **filters) -> dict:
         row["cameras"] = json.loads(row.get("cameras") or "[]")
         row.pop("video_sha256", None)
         row.pop("stat_sig", None)
+        row["embodiment_evidence"] = json.loads(row.get("embodiment_evidence") or "{}")
     return {"total": len(df), "offset": offset, "episodes": rows}
 
 
@@ -120,7 +128,7 @@ def facets(**filters) -> dict:
     """Counts for the page's facets over the rows the visibility toggles
     (``show_heldout``, ``show_copies``, ``show_archive``) and ``categories``
     leave: categories, sources, formats, policies (the old single field: the
-    checkpoint), policy_models, policy_checkpoints, policy_methods, outcomes,
+    checkpoint), policy_models, policy_checkpoints, policy_methods, robots, grippers, outcomes,
     dates, plus how
     many held-out episodes and copies the toggles hide."""
     full = frame()
@@ -147,6 +155,8 @@ def facets(**filters) -> dict:
         "policy_models": dict(Counter(scoped.policy_model.dropna())),
         "policy_checkpoints": dict(Counter(scoped.policy_checkpoint.dropna())),
         "policy_methods": dict(Counter(scoped.policy_method.dropna())),
+        "robots": dict(Counter(scoped.robot.fillna("unknown"))),
+        "grippers": dict(Counter(scoped.gripper.fillna("unknown"))),
         "outcomes": {
             "success": int((scoped.outcome == "success").sum()),
             "failure": int((scoped.outcome == "failure").sum()),
@@ -187,6 +197,7 @@ def tasks(**filters) -> list[dict]:
             "outcome",
             "source",
             "policy_method",
+            "gripper",
         ]
     ].itertuples(index=False):
         by_task[row.task].append(row)
@@ -203,6 +214,7 @@ def tasks(**filters) -> list[dict]:
                 "policy_methods": dict(
                     Counter(m.policy_method for m in members if m.policy_method)
                 ),
+                "grippers": dict(Counter(m.gripper or "unknown" for m in members)),
                 "success": outcomes.get("success", 0),
                 "failure": outcomes.get("failure", 0),
                 "success_rate": round(outcomes.get("success", 0) / decided, 3)

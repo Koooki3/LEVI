@@ -40,7 +40,7 @@ import pyarrow.parquet as pq
 
 from ..conversion import raw
 from ..conversion.progress import Progress
-from . import heldout, labels, settings
+from . import embodiment, heldout, labels, settings
 from . import policy as policy_mod
 from . import rules as rules_mod
 
@@ -66,6 +66,11 @@ COLUMNS = [
     "category_reason",
     "data_source",
     "control_mode",
+    "robot",
+    "gripper",
+    "action_mode",
+    "ee_frame",
+    "embodiment_evidence",
     "policy",
     "policy_model",
     "policy_checkpoint",
@@ -110,6 +115,7 @@ RC_FACTS = (
     "task_raw",
     "data_source",
     "control_mode",
+    *embodiment.COLUMNS,
     "policy_model",
     "policy_checkpoint",
     "policy_method",
@@ -153,7 +159,7 @@ def _md5(data: bytes) -> str:
     return hashlib.md5(data, usedforsecurity=False).hexdigest()
 
 
-def _sig(folder: Path, extra: list[Path] = ()) -> str:
+def _sig(folder: Path, extra: list[Path] = (), salt: str = "") -> str:
     rows = []
     try:
         for entry in os.scandir(folder):
@@ -168,7 +174,25 @@ def _sig(folder: Path, extra: list[Path] = ()) -> str:
             rows.append((str(path), st.st_size, st.st_mtime_ns))
         except OSError:
             pass
-    return _md5(json.dumps([FACTS_VERSION, sorted(rows)]).encode())
+    # Without a salt this is the signature older scans wrote.
+    head = [FACTS_VERSION, salt] if salt else [FACTS_VERSION]
+    return _md5(json.dumps([*head, sorted(rows)]).encode())
+
+
+def raw_sig(demo: Path, rules: dict) -> str:
+    """A raw capture's scan signature: its files and the embodiment rules
+    its facts were read with (a changed table reads it again)."""
+    return _sig(
+        demo,
+        [demo.parent / "task_description.txt"],
+        "embodiment:" + embodiment.signature(rules),
+    )
+
+
+def legacy_raw_sig(demo: Path) -> str:
+    """The signature before the embodiment rules joined it (plans made by an
+    older LEVI carry it; it still says whether the files changed)."""
+    return _sig(demo, [demo.parent / "task_description.txt"])
 
 
 def _read_json(path: Path):
@@ -331,8 +355,9 @@ def _videos(folder: Path) -> list[tuple[str, int]]:
     return sorted(out)
 
 
-def rc_facts(demo: Path) -> dict:
-    """Everything about a raw episode that depends only on its own files."""
+def rc_facts(demo: Path, rules: dict | None = None) -> dict:
+    """Everything about a raw episode that depends only on its own files
+    (and on the embodiment rules)."""
     meta = _read_json(demo / "metadata.json") or {}
     table = demo / "frames.csv"
     if not table.is_file():
@@ -371,6 +396,9 @@ def rc_facts(demo: Path) -> dict:
         "task_raw": str(text),
         "data_source": meta.get("data_source"),
         "control_mode": meta.get("control_mode"),
+        **embodiment.columns(
+            embodiment.read({"metadata": meta}, "robot_capture", rules)
+        ),
         **policy_mod.from_metadata(meta),
         "date": str(meta.get("created_at") or "")[:10] or None,
         "robot_flag": raw.demo_outcome(demo),
@@ -411,7 +439,7 @@ def _rc_rows(ctx, demos, previous, progress) -> list[dict]:
 
     def one(demo: Path) -> dict:
         key = str(demo)
-        sig = _sig(demo, [demo.parent / "task_description.txt"])
+        sig = raw_sig(demo, ctx.rules)
         old = previous.get(key)
         if (
             old
@@ -423,7 +451,7 @@ def _rc_rows(ctx, demos, previous, progress) -> list[dict]:
             if facts["policy_method"] == "unknown":
                 facts["policy_method"] = None  # decided again by the category
         else:
-            facts = rc_facts(demo)
+            facts = rc_facts(demo, ctx.rules)
         source, nested = _rc_source(ctx, demo, task_dirs)
         reason = nested or (
             None
@@ -573,8 +601,15 @@ def _lerobot_rows(ctx, dataset: Path, rc_keys: dict, previous) -> tuple[list, di
             category,
             row.get("rollout_source_demo"),
         )
+        found = embodiment.inherit(
+            embodiment.read(
+                {"info": info, "conversion": conversion}, "lerobot", ctx.rules
+            ),
+            rc_keys.get(link) if link else None,
+        )
         return {
             **fields,
+            **embodiment.columns(found),
             "key": key,
             "source": ctx.source_id(dataset),
             "source_path": str(dataset),
@@ -651,6 +686,7 @@ def _droid_rows(ctx, demos, previous) -> list[dict]:
                 "data_source": None,
                 "control_mode": None,
                 **policy_mod.finish({}, category),
+                **embodiment.columns(embodiment.read({}, "droid_raw", ctx.rules)),
                 "date": None,
                 "robot_flag": (
                     ("success" if success else "failure")
@@ -955,6 +991,7 @@ def _sources(ctx, rows, extra_sources, unsupported, dataset_paths) -> list[dict]
                 "levi_markers": extra.get("levi_markers", []),
                 "cameras": json.loads(first["cameras"] or "[]"),
                 "fps": first["fps"],
+                "grippers": dict(Counter(r["gripper"] or "unknown" for r in members)),
             }
         )
     for path, extra in extra_sources.items():
@@ -1087,6 +1124,9 @@ def scan(progress_path: Path | None = None, rehash: bool = False) -> dict:
             Counter(r["category"] for r in rows if r["canonical"])
         ),
         "nonstandard": sum(1 for r in rows if r["nonstandard"]),
+        "grippers": dict(
+            Counter(r["gripper"] or "unknown" for r in rows if r["canonical"])
+        ),
         "tasks": len({r["task"] for r in rows}),
         "workspaces": sorted(str(w) for w in workspaces),
         "dedup": dedup_report,

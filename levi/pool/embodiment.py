@@ -37,6 +37,13 @@ from . import rules as rules_mod
 
 UNKNOWN = "unknown"
 FIELDS = ("robot", "gripper", "action_mode", "ee_frame")
+# The index columns: the four fields and the evidence (JSON text) behind them.
+COLUMNS = (*FIELDS, "embodiment_evidence")
+INHERITED = (
+    "robot",
+    "gripper",
+    "ee_frame",
+)  # a conversion shares these with its capture
 SOURCES = ("metadata", "info", "conversion", "format")
 _CLEAN = re.compile(r"[^a-z0-9_.-]+")
 MAX_COPY = 40
@@ -143,6 +150,32 @@ def read(
                 evidence[field] = "conflict: " + "; ".join(
                     f"{v} ({', '.join(w)})" for v, w in sorted(values.items())
                 )
+    out["evidence"] = evidence
+    return out
+
+
+def columns(result: dict) -> dict:
+    """``read``'s result as index columns."""
+    return {
+        **{f: result[f] for f in FIELDS},
+        "embodiment_evidence": json.dumps(result["evidence"], sort_keys=True),
+    }
+
+
+def inherit(result: dict, linked: dict | None) -> dict:
+    """A converted episode takes the robot, gripper and frame its linked raw
+    capture recorded when its own files say nothing; the action mode is the
+    dataset's own and is never copied."""
+    if not linked:
+        return result
+    evidence = dict(result["evidence"])
+    out = dict(result)
+    for field in INHERITED:
+        value = linked.get(field)
+        if out[field] == UNKNOWN and value and value != UNKNOWN:
+            out[field] = value
+            was = json.loads(linked.get("embodiment_evidence") or "{}").get(field, "")
+            evidence[field] = f"linked capture: {was}"
     out["evidence"] = evidence
     return out
 

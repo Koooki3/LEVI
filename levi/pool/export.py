@@ -357,18 +357,20 @@ def refuse_heldout_groups(episodes: list[dict]):
 
 def _unchanged(episodes: list[dict]):
     changed = []
+    rules = scanner.rules_mod.load(settings.pool_dir())
     for ep in episodes:
         if ep["format"] == "robot_capture":
-            if (
-                scanner._sig(
-                    Path(ep["key"]), [Path(ep["key"]).parent / "task_description.txt"]
-                )
-                != ep["stat_sig"]
+            demo = Path(ep["key"])
+            # A plan or an interrupted export made before the embodiment
+            # rules joined the signature carries the older one.
+            if ep["stat_sig"] not in (
+                scanner.raw_sig(demo, rules),
+                scanner.legacy_raw_sig(demo),
             ):
                 changed.append(ep["key"])
         elif ep["format"] == "lerobot":
             root = Path(ep["source_path"])
-            markers = scanner.rules_mod.load(settings.pool_dir())["levi_markers"]
+            markers = rules["levi_markers"]
             if (
                 scanner._sig(
                     root / "meta", [root / m for m in markers if (root / m).is_file()]
