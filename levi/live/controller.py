@@ -980,8 +980,10 @@ class Controller:
 
     def _write_gate(self, now):
         """``live/gate.json``: the worker's permission to send model requests.
-        Rewritten on change and at least every 4 s (a stale gate reads as
-        closed, so a dead supervisor cannot leave it open)."""
+        Rewritten on change and otherwise at the first tick 4 s or more after
+        the last write (ticks are 1-4 s apart, so an idle file is rewritten
+        every 4-8 s; a stale gate reads as closed, so a dead supervisor cannot
+        leave it open)."""
         # Nothing to protect: no policy server listening, no evaluation. A gate
         # file that goes stale in that state does not hold people back.
         idle = not self.policy_up and not self._evaluating()
