@@ -1,6 +1,7 @@
 """Data-driven scan and classification rules (docs/TRAINING_POOL.md#rules).
 
-Nothing here names a task, a robot or a machine. The defaults can be
+Nothing here names a task or a machine; the ``embodiment`` table names the
+robots and grippers its metadata evidence points to. The defaults can be
 overridden per workspace with ``<workspace>/pool/rules.json``: each top-level
 key replaces the default of the same name.
 """
@@ -76,6 +77,96 @@ DEFAULTS: dict[str, Any] = {
     "unsupported_min_bytes": 1_000_000,
     # Standard episode folder name of a raw capture.
     "demo_pattern": r"demo_\d+",
+    # Evidence for the robot, gripper, action mode and end-effector frame
+    # (levi/pool/embodiment.py explains the rule format). Metadata only:
+    # no folder or task name is evidence. Raise ``version`` when a rule
+    # changes; the scan signature follows the table, so episodes are read again.
+    "embodiment": {
+        "version": 1,
+        "rules": [
+            # Gripper: the joint the capture recorded, or the driver that moved it.
+            {
+                "field": "gripper",
+                "value": "robotiq_2f85",
+                "in": "metadata",
+                "key": "gripper_joint_names",
+                "regex": "robotiq_85",
+            },
+            {
+                "field": "gripper",
+                "value": "robotiq_2f85",
+                "in": "metadata",
+                "key": "gripper.joint_name",
+                "regex": "robotiq_85",
+            },
+            {
+                "field": "gripper",
+                "value": "franka_hand",
+                "in": "metadata",
+                "key": "gripper_joint_names",
+                "regex": r"(fr3|panda)_finger_joint",
+            },
+            {
+                "field": "gripper",
+                "value": "franka_hand",
+                "in": "metadata",
+                "key": "gripper_state_topic",
+                "regex": "^/?franka_gripper/",
+            },
+            {
+                "field": "gripper",
+                "value": "franka_hand",
+                "in": "metadata",
+                "key": "gripper_control.move_action_topic",
+                "regex": "^/?franka_gripper/",
+            },
+            # Robot: its joint names.
+            {
+                "field": "robot",
+                "value": "franka_fr3",
+                "in": "metadata",
+                "key": "robot_joint_names",
+                "regex": r"\bfr3_joint\d",
+            },
+            {
+                "field": "robot",
+                "value": "franka_panda",
+                "in": "metadata",
+                "key": "robot_joint_names",
+                "regex": r"\bpanda_joint\d",
+            },
+            # End-effector frame: as a policy server declares it.
+            {
+                "field": "ee_frame",
+                "copy": True,
+                "in": "metadata",
+                "key": "policy.server_metadata.ee_frame",
+            },
+            # Action mode. LEVI's conversion records what it wrote; a raw
+            # capture has no action column and the pool's export derives the
+            # action as the next recorded pose (``next_state``).
+            {
+                "field": "action_mode",
+                "value": "ee_pose_abs_next",
+                "in": "conversion",
+                "key": "action_semantics",
+                "regex": "^next_state$",
+            },
+            {
+                "field": "action_mode",
+                "value": "ee_pose_abs_current",
+                "in": "conversion",
+                "key": "action_semantics",
+                "regex": "^state$",
+            },
+            {
+                "field": "action_mode",
+                "value": "ee_pose_abs_next",
+                "in": "format",
+                "regex": "^robot_capture$",
+            },
+        ],
+    },
 }
 
 CATEGORIES = ("human", "rollout", "levi", "external", "archive")
