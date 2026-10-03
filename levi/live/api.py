@@ -30,7 +30,7 @@ router = APIRouter(prefix="/api/levi/live", tags=["Live annotation"])
 
 NAME = re.compile(r"^[A-Za-z0-9._-]{1,140}$")
 # A dataset's name is whatever ``mirror.dataset_name`` made of it (a clash of
-# two roots adds a suffix such as ``@<root mark>``): no assumption about the
+# two roots adds ``__at__<root mark>``, see ``mirror.dataset_name``): no assumption about the
 # characters beyond "one file name under live/datasets" -- no separator, no
 # leading dot, no control character. Whether it exists is the state file's
 # say.

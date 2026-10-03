@@ -18,7 +18,10 @@ a value that could not be measured is ``null``.
     episode_index      the episode's index in the dataset view
     session            the evaluation run id the demo came from (metadata)
     attempts           how many times labelling this demo was tried
-    excluded           false (reserved for episodes a person set aside)
+    excluded           true when a person had removed the episode from the
+                       dataset (``exclusion.py``) by the time the record was
+                       written; normally false (the episode of a running batch
+                       cannot be removed, and a removed one is not labelled)
     episode:   frames, episode_seconds
     timeline:  to_mirror_s, to_plan_s, to_first_request_s, to_commit_s,
                to_verdict_s -- seconds after the demo's ``.complete``

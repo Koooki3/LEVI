@@ -40,7 +40,7 @@ from pathlib import Path
 
 from . import auto as approver_log
 from . import config as live_config
-from . import generic, gpumgr, jsonio, mirror, stats
+from . import exclusion, generic, gpumgr, jsonio, mirror, stats
 
 OK, NEED_MODEL, AWAIT_HUMAN, ERROR, PREEMPTED, NOTHING = 0, 10, 11, 12, 13, 14
 SIDE = "observation.images.view1"
@@ -853,7 +853,10 @@ class Worker:
             "episode_index": episode,
             "session": row.get("run_id"),
             "attempts": row.get("attempts"),
-            "excluded": False,
+            # A person's soft delete (exclusion.py) in force when the record is
+            # written: normally false, since an episode of the batch cannot be
+            # removed and one removed is not labelled.
+            "excluded": exclusion.is_excluded(row),
             "episode": {
                 "frames": frames,
                 "episode_seconds": None

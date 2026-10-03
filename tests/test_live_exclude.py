@@ -654,13 +654,22 @@ def test_the_person_check_works_by_itself_when_the_middleware_is_bypassed(
 
 def renamed(e, new):
     """The dataset's state under another name (what a clash of two roots
-    gives it: ``<name>@<root mark>``)."""
+    gives it: ``<name>__at__<root mark>``)."""
     state = e.state()
     state["name"] = new
     jsonio.write(mirror.state_path(e.config, new), state)
 
 
-@pytest.mark.parametrize("new", [NAME + "@root-2", NAME + "@a.b_c", "x+y=z@r"])
+@pytest.mark.parametrize(
+    "new",
+    [
+        NAME + mirror.ROOT_MARK + "root-2",
+        NAME + mirror.ROOT_MARK + "a.b_c-1f2e3d",
+        # Not the service's own style: the check does not depend on it.
+        NAME + "@root-2",
+        "x+y=z@r",
+    ],
+)
 def test_a_dataset_name_with_a_suffix_works_everywhere(live_api, new):
     from urllib.parse import quote
 
@@ -702,11 +711,12 @@ def test_the_pool_reads_a_suffixed_dataset_by_its_own_name(live_api):
 
     _, e = live_api
     mirror_only(e, 0)
-    renamed(e, NAME + "@root-2")
-    exclusion.exclude(e.config, NAME + "@root-2", ["demo_0000"])
+    suffixed = NAME + mirror.ROOT_MARK + "root-2"
+    renamed(e, suffixed)
+    exclusion.exclude(e.config, suffixed, ["demo_0000"])
     found = exclusions.workspace_exclusions(e.ws)
-    assert any("@root-2" in key for key in found)
-    assert {v["dataset"] for v in found.values()} == {NAME + "@root-2"}
+    assert any("__at__root-2" in key for key in found)
+    assert {v["dataset"] for v in found.values()} == {suffixed}
 
 
 # --- levi live exclude (the command line) ----------------------------------------------------------
@@ -815,10 +825,37 @@ def test_the_command_needs_the_persons_key_and_an_agents_is_refused(served, caps
 
 def test_the_command_takes_a_suffixed_dataset_name(served, capsys):
     e, _ = served
-    renamed(e, NAME + "@root-2")
-    assert run_cli(e, NAME + "@root-2", "demo_0001") == 0
+    suffixed = NAME + mirror.ROOT_MARK + "root-2"
+    renamed(e, suffixed)
+    assert run_cli(e, suffixed, "demo_0001") == 0
     assert "removed" in capsys.readouterr().out
     assert exclusion.is_excluded(
-        mirror.load_state(e.config, NAME + "@root-2")["demos"]["demo_0001"]
+        mirror.load_state(e.config, suffixed)["demos"]["demo_0001"]
     )
     assert not exclusion.excluded_count(e.state())
+
+
+# --- the statistics record --------------------------------------------------------------------
+
+
+def test_the_stats_record_says_whether_the_episode_is_removed(env):
+    e = env()
+    mirror_only(e, 0)
+
+    class Stub(worker.Worker):
+        def __init__(self, config, name):
+            self.config, self.name = config, name
+            self.lengths, self.gated, self.store = {}, (0, 0.0), None
+            self.provider_spec = {"name": "p", "model": "m"}
+
+    stub = Stub(e.config, NAME)
+
+    def record():
+        row = e.state()["demos"]["demo_0000"]
+        return stub.stats_row("demo_0000", 0, row, [], first=True, frames=20, waking={})
+
+    assert record()["excluded"] is False
+    exclusion.exclude(e.config, NAME, ["demo_0000"])
+    assert record()["excluded"] is True
+    exclusion.restore(e.config, NAME, ["demo_0000"])
+    assert record()["excluded"] is False
