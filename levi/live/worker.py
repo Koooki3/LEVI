@@ -40,7 +40,7 @@ from pathlib import Path
 
 from . import auto as approver_log
 from . import config as live_config
-from . import generic, gpumgr, jsonio, mirror
+from . import generic, gpumgr, jsonio, mirror, stats
 
 OK, NEED_MODEL, AWAIT_HUMAN, ERROR, PREEMPTED, NOTHING = 0, 10, 11, 12, 13, 14
 SIDE = "observation.images.view1"
@@ -138,6 +138,8 @@ class Worker:
         self.entry: dict = {}
         # This batch's clock, for the per-episode summary line (finish).
         self.walls: dict = {}
+        self.lengths: dict = {}
+        self.view: Path | None = None
         self.gated = [0, 0.0]  # times the gate stopped it, and for how long
 
     # --- plumbing -------------------------------------------------------------
@@ -304,6 +306,7 @@ class Worker:
     def episode_map(self, entry):
         """``{demo: episode_index}`` and ``{demo: seconds}`` from the view."""
         view = Path(entry["view"])
+        self.view = view
         fps = float(jsonio.read(view / "meta/info.json", {}).get("fps") or 10.0)
         rows = {}
         for line in (view / "meta/episodes.jsonl").read_text().splitlines():
@@ -744,8 +747,9 @@ class Worker:
         self.update(lambda v: v.update(current=batch))
 
     def log_episodes(self, batch, index):
-        """One line per demo of the finished batch in worker.log. The summary
-        is a record, never part of the labelling: it cannot fail the batch."""
+        """After a batch: one line per demo in worker.log and one record per
+        demo in ``live/stats.jsonl`` (``stats.py``). Both are records, never
+        part of the labelling: neither can fail the batch."""
         from levi.harness.ledger import all_events
 
         state = self.state()
@@ -758,7 +762,9 @@ class Worker:
             journals.append(
                 ("review", all_events(self.store, batch["anchored"]["run_id"]))
             )
-        for demo in batch["demos"]:
+        frames = self.frame_counts()
+        waking = self.vllm_timings()
+        for number, demo in enumerate(batch["demos"]):
             row = state["demos"].get(demo) or {}
             episode = (index or {}).get(demo, row.get("episode_index"))
             stages = {}
@@ -774,6 +780,129 @@ class Worker:
                     demo, episode, len(batch["demos"]), stages, row, self.gated
                 )
             )
+            with contextlib.suppress(Exception):
+                c = self.config
+                stats.record(
+                    c.live_dir,
+                    self.stats_row(
+                        demo,
+                        episode,
+                        row,
+                        journals,
+                        first=number == 0,
+                        frames=frames.get(episode),
+                        waking=waking if number == 0 else {},
+                    ),
+                    c.resources.log_max_mb * 1024 * 1024,
+                    c.resources.log_backups,
+                )
+
+    def frame_counts(self) -> dict:
+        """``{episode_index: frames}`` from the view's episode list."""
+        counts = {}
+        if self.view is not None:
+            with contextlib.suppress(OSError, ValueError, KeyError):
+                for line in (
+                    (self.view / "meta/episodes.jsonl").read_text().splitlines()
+                ):
+                    if line.strip():
+                        item = json.loads(line)
+                        counts[int(item["episode_index"])] = item.get("length")
+        return counts
+
+    @staticmethod
+    def vllm_timings() -> dict:
+        """What the supervisor says the model's wake or cold start cost for
+        this batch (``LEVI_LIVE_VLLM_TIMINGS``)."""
+        with contextlib.suppress(ValueError, TypeError):
+            value = json.loads(os.environ.get("LEVI_LIVE_VLLM_TIMINGS") or "{}")
+            if isinstance(value, dict):
+                return value
+        return {}
+
+    def stats_row(self, demo, episode, row, journals, *, first, frames, waking):
+        """The ``live/stats.jsonl`` record of one demo (schema in stats.py)."""
+        p = self.config.pipeline
+        temporal = row.get("temporal") or {}
+        verdict = row.get("verdict") or {}
+        base = row.get("completed_at")
+        use = stats.usage_of(journals, episode, probe=first)
+        planned = [
+            e["time"]
+            for stage, events in journals
+            if stage == "temporal"
+            and any(
+                x.get("type") == "model_step" and x.get("episode") == episode
+                for x in events
+            )
+            for e in events
+            if e.get("type") == "planned" and e.get("time") is not None
+        ]
+        labels: dict = {}
+        if temporal.get("changeset"):
+            with contextlib.suppress(KeyError):
+                change = self.store.get("changes", temporal["changeset"])
+                for proposal in change["proposals"]:
+                    if proposal.get("episode_index") == episode:
+                        label = proposal.get("subtask_id") or "unlabeled"
+                        labels[label] = labels.get(label, 0) + 1
+        fps_seconds = self.lengths.get(demo)
+        return {
+            "schema": stats.SCHEMA,
+            "at": round(time.time(), 3),
+            "dataset": self.name,
+            "demo": demo,
+            "episode_index": episode,
+            "session": row.get("run_id"),
+            "attempts": row.get("attempts"),
+            "excluded": False,
+            "episode": {
+                "frames": frames,
+                "episode_seconds": None
+                if fps_seconds is None
+                else round(fps_seconds, 2),
+            },
+            "timeline": {
+                "to_mirror_s": stats.after(row.get("mirrored_at"), base),
+                "to_plan_s": stats.after(min(planned) if planned else None, base),
+                "to_first_request_s": stats.after(use.pop("first_request_at"), base),
+                "to_commit_s": stats.after(temporal.get("committed_at"), base),
+                "to_verdict_s": stats.after(verdict.get("at"), base),
+            },
+            "model": use,
+            "gate": {
+                "closed_wait_s": round(self.gated[1], 2),
+                "interruptions": self.gated[0],
+                "vllm_wake_s": waking.get("vllm_wake_s"),
+                "vllm_cold_start_s": waking.get("vllm_cold_start_s"),
+            },
+            "result": {
+                "state": row.get("state"),
+                "reason": None
+                if temporal
+                else (str(row["reason"])[:200] if row.get("reason") else None),
+                "segments": temporal.get("segments") if temporal else None,
+                "segment_labels": labels if temporal else None,
+                "verdict": {
+                    "outcome": verdict.get("outcome"),
+                    "events": verdict.get("events"),
+                    "valid_events": verdict.get("valid_events"),
+                    "undecided": verdict.get("undecided"),
+                }
+                if verdict
+                else None,
+                "review": temporal.get("review") or verdict.get("review"),
+                "spec": {
+                    "guideline": p.guideline,
+                    "release_review": verdict.get("spec") or p.anchored_spec
+                    if p.anchored
+                    else None,
+                    "sha256": generic.manifest(self.config),
+                },
+                "provider": self.provider_spec.get("name"),
+                "model": self.provider_spec.get("model"),
+            },
+        }
 
     def finish(self, batch, index=None):
         now = time.time()
@@ -874,6 +1003,7 @@ class Worker:
         self.ensure_provider()
         entry = self.register_and_build()
         index, lengths, excluded = self.episode_map(entry)
+        self.lengths = lengths
         batch["demos"] = self.filter_demos(batch["demos"], index, excluded, batch)
         self.save_current(batch)
         self.walls, self.gated = {}, [0, 0.0]

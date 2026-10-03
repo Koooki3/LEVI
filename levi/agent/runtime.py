@@ -1062,6 +1062,8 @@ class Workbench:
         usage = {
             **usage,
             "elapsed_seconds": time.monotonic() - began,
+            # Images this request carried (the live statistics count them).
+            "images": sum(1 for row in evidence if row.get("artifact")),
             "usage_kind": usage.get(
                 "usage_kind",
                 "reported" if "tokens" in usage else "conservative_reservation",

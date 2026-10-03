@@ -1114,6 +1114,7 @@ def ask(wb, id, config, context, episode, phase, spec, schema, shown, started):
     usage = {
         **usage,
         "elapsed_seconds": time.monotonic() - began,
+        "images": len(shown),
         "usage_kind": usage.get(
             "usage_kind",
             "reported" if "tokens" in usage else "conservative_reservation",

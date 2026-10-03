@@ -721,6 +721,12 @@ class Controller:
         env = resources.service_env(c)
         if c.pipeline.auto_approve:
             env[auto.ENABLE_ENV] = "1"
+        # What it cost to get the model ready for this batch (a wake or a cold
+        # start since the previous worker): the worker records it with the
+        # batch's statistics.
+        timings = self.vllm.take_timings()
+        if timings:
+            env["LEVI_LIVE_VLLM_TIMINGS"] = json.dumps(timings)
         c.logs_dir.mkdir(parents=True, exist_ok=True)
         log = c.logs_dir / "worker.log"
         resources.rotate_file(log, c.resources.log_max_mb, c.resources.log_backups)

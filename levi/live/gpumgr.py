@@ -619,6 +619,10 @@ class Vllm:
         self.keepalive = None
         self.error = ""
         self._health = (0.0, False)
+        # How long a cold start and a wake took, until the controller hands
+        # them to the worker it starts next (``take_timings``).
+        self.timings: dict = {}
+        self._cold_pending = False
         self._adopt()
 
     # --- bookkeeping ---------------------------------------------------------
@@ -741,6 +745,7 @@ class Vllm:
             self.error = self.failure_reason()
             return False
         self.started_at = time.time()
+        self._cold_pending = True
         self.profile = profile
         self.state, self.error = "starting", ""
         jsonio.write(
@@ -825,6 +830,11 @@ class Vllm:
         if self.state == "starting":
             if self._healthy():
                 self.state = "ready"
+                if self._cold_pending:
+                    self._cold_pending = False
+                    self.timings["vllm_cold_start_s"] = round(
+                        time.time() - (self.started_at or time.time()), 1
+                    )
                 if is_sleeping(self.port):  # adopted a server left asleep
                     self.state = "asleep"
             elif not self.mine():
@@ -847,6 +857,12 @@ class Vllm:
                 self.record_path.unlink()
         return self.state
 
+    def take_timings(self) -> dict:
+        """The cold start and wake durations since the last call (for the
+        batch the controller starts now), then forgotten."""
+        taken, self.timings = self.timings, {}
+        return taken
+
     def sleep(self) -> bool:
         """Level-1 sleep: weights to host memory, KV dropped, most of the VRAM
         freed (5 s down). Only this service's own, awake server."""
@@ -865,11 +881,13 @@ class Vllm:
         that the free VRAM covers it."""
         if not self.mine() or self.state != "asleep":
             return self.state == "ready"
+        began = time.time()
         if (
             _post(self.port, "/wake_up", timeout=60.0)
             and is_sleeping(self.port) is False
         ):
             self.state, self.error = "ready", ""
+            self.timings["vllm_wake_s"] = round(time.time() - began, 2)
             return True
         self.error = "vLLM did not wake up"
         return False
