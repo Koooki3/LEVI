@@ -587,17 +587,25 @@ def format_status(value, alive) -> str:
         f"gpu        mode {gpu.get('mode')}, vLLM {gpu.get('vllm_state')}, policy server "
         f"{'seen' if gpu.get('policy_server_seen') else 'not seen'}; {((gpu.get('decision') or {}).get('reason')) or ''}"
     )
-    for row in ((gpu.get("gate") or {}).get("history") or [])[-5:]:
+    history = (gpu.get("gate") or {}).get("history")
+    for row in (history if isinstance(history, list) else [])[-5:]:
+        if not isinstance(row, dict):
+            continue
+        at = row.get("at")
+        when = (
+            time.strftime("%H:%M:%S", time.localtime(at))
+            if type(at) in (int, float)
+            else "--:--:--"
+        )
         shown = (
             "open"
-            if row.get("open")
+            if row.get("open") is True
             else "CLOSED"
             if row.get("open") is False
             else "gone"
         )
         lines.append(
-            f"gate       {time.strftime('%H:%M:%S', time.localtime(row.get('at') or 0))} "
-            f"{shown} ({row.get('code')}) {row.get('reason') or ''}"
+            f"gate       {when} {shown} ({row.get('code')}) {row.get('reason') or ''}"
         )
     res = value.get("resources") or {}
     lines.append(

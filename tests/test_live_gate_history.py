@@ -94,3 +94,67 @@ def test_a_damaged_history_is_read_without_crashing(tmp_path):
     gating.record_transition(folder, {"at": 4, "to": {}})
     gating.record_transition(folder, {"bad": object()})  # default=str keeps it
     gating.record_transition(folder / gating.HISTORY / "nope", {"at": 5})  # unwritable
+
+
+def test_a_failing_history_never_holds_up_the_gate_file_or_the_tick(ctl):  # noqa: F811
+    ctl.rollouts.write(0)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    t = time.time()
+    ctl.rollouts.session("standby")
+    up(ctl, t)
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("history broke")
+
+    ctl._note_gate = broken
+    ctl.rollouts.session("running")
+    ctl.tick(t + 1)  # does not raise
+    gate = json.loads((ctl.config.live_dir / "gate.json").read_text())
+    assert gate["open"] is False and gate["code"] == "policy_inferring"
+
+
+def test_a_line_that_was_not_written_is_tried_again_on_the_next_tick(
+    ctl,  # noqa: F811
+    monkeypatch,
+):
+    ctl.rollouts.write(0)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    t = time.time()
+    ctl.rollouts.session("standby")
+    up(ctl, t)
+    ctl.rollouts.session("running")
+    real = gating.record_transition
+    monkeypatch.setattr(gating, "record_transition", lambda *a, **k: False)
+    ctl.tick(t + 1)
+    assert ctl._gate_logged != (False, "policy_inferring")  # not remembered
+    monkeypatch.setattr(gating, "record_transition", real)
+    ctl.tick(t + 2)
+    codes = [h["to"]["code"] for h in gating.history(ctl.config.live_dir)]
+    assert codes[-1] == "policy_inferring"
+
+
+def test_a_damaged_status_row_does_not_crash_levi_live_status():
+    status = {
+        "state": "idle",
+        "updated_at": time.time(),
+        "gpu": {
+            "gate": {
+                "history": [
+                    {"at": "x", "open": "yes", "code": 5, "reason": None},
+                    "junk",
+                    {"at": None},
+                    {"at": 1790000000.0, "open": False, "code": "policy_inferring"},
+                ]
+            }
+        },
+    }
+    text = cli.format_status(status, True)
+    assert "CLOSED (policy_inferring)" in text and "--:--:--" in text
+    assert cli.format_status({**status, "gpu": {"gate": {"history": "junk"}}}, True)
+    assert gating.brief({"at": "x", "to": {"open": "yes", "code": 5}}) == {
+        "at": None,
+        "open": None,
+        "code": "5",
+        "reason": "",
+    }
+    assert gating.brief({"at": True})["at"] is None

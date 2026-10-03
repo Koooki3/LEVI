@@ -32,23 +32,28 @@ HISTORY_TAIL = 64 * 1024  # the most that ``history`` reads from the end of the 
 _CACHE: dict = {}
 
 
-def record_transition(live_dir, row: dict, max_bytes=None, keep=3):
+def record_transition(live_dir, row: dict, max_bytes=None, keep=3) -> bool:
     """Append one gate transition (a dict) to ``<live>/gate.jsonl``; the file
     rotates to ``.1``, ``.2``... like the other logs. Never raises: the history
-    is a record, not part of the gate."""
-    with contextlib.suppress(OSError, TypeError, ValueError):
+    is a record, not part of the gate. True when the line was written."""
+    try:
         jsonio.append_line(
             Path(live_dir) / HISTORY, row, max_bytes=max_bytes, keep=keep
         )
+    except (OSError, TypeError, ValueError):
+        return False
+    return True
 
 
 def brief(row) -> dict:
-    """A transition reduced to what the status file shows."""
+    """A transition reduced to what the status file shows. A value of the
+    wrong type (a hand-edited or damaged line) reads as ``None``."""
     to = row.get("to") if isinstance(row.get("to"), dict) else {}
+    at = row.get("at")
     return {
-        "at": row.get("at"),
-        "open": to.get("open"),
-        "code": to.get("code"),
+        "at": float(at) if type(at) in (int, float) else None,
+        "open": to.get("open") if isinstance(to.get("open"), bool) else None,
+        "code": str(to["code"]) if to.get("code") is not None else None,
         "reason": str(row.get("reason") or "")[:120],
     }
 

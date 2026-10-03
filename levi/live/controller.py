@@ -963,7 +963,6 @@ class Controller:
             before = self._gate_logged
             if state == before:
                 return
-            self._gate_logged = state
             row = {
                 "at": round(now, 3),
                 "time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)),
@@ -981,9 +980,11 @@ class Controller:
                 ],
             }
             r = self.config.resources
-            gating.record_transition(
+            if not gating.record_transition(
                 self.config.live_dir, row, r.log_max_mb * 1024 * 1024, r.log_backups
-            )
+            ):
+                return  # not written: the next tick tries again
+            self._gate_logged = state
             self.gate_history = [*self.gate_history, row][-GATE_HISTORY_SHOWN:]
 
     def _write_gate(self, now):
@@ -995,9 +996,12 @@ class Controller:
         # Nothing to protect: no policy server listening, no evaluation. A gate
         # file that goes stale in that state does not hold people back.
         idle = not self.policy_up and not self._evaluating()
-        self._note_gate(now, idle)
         key = (self.gate.open, self.gate.code, idle)
         if key == self._gate_written[0] and now - self._gate_written[1] < 4.0:
+            if self._gate_logged != (self.gate.open, self.gate.code):
+                # A history line that failed to write is tried again.
+                with contextlib.suppress(Exception):
+                    self._note_gate(now, idle)
             return
         self._gate_written = (key, now)
         # When the gate last went from closed to open, on this clock: a reader
@@ -1018,6 +1022,10 @@ class Controller:
                 "updated_at": now,
             },
         )
+        # The history is a record, written after the gate itself and never
+        # able to hold it up.
+        with contextlib.suppress(Exception):
+            self._note_gate(now, idle)
 
     def _police_worker(self, now):
         """A worker that does not stand down while the gate is closed is
