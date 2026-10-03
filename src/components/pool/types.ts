@@ -84,10 +84,18 @@ export function gripperTitle(
   const why = row.embodiment_evidence?.gripper;
   return [
     `${t("Gripper")}: ${row.gripper || "unknown"}${why ? ` (${why})` : ""}`,
-    `robot: ${row.robot || "unknown"}`,
-    `action_mode: ${row.action_mode || "unknown"}`,
-    `ee_frame: ${row.ee_frame || "unknown"}`,
+    `${t("Robot")}: ${row.robot || "unknown"}`,
+    `${t("Action mode")}: ${row.action_mode || "unknown"}`,
+    `${t("End-effector frame")}: ${row.ee_frame || "unknown"}`,
   ].join("\n");
+}
+
+/** The gripper was declared by a person for its source, not read from the
+ * episode's metadata. */
+export function gripperDeclared(
+  row: Pick<EpisodeRow, "embodiment_evidence">,
+): boolean {
+  return !!row.embodiment_evidence?.gripper?.startsWith("declared");
 }
 
 /** ``pi05_fr3_all_step49999`` -> ``step49999`` (as the server's label). */
@@ -380,9 +388,11 @@ export interface PoolWarning {
   level?: "info";
   /** mixed_gripper: why (mixed_known, known_and_unknown), whether the recipe
    * allowed it, and the count per gripper class. */
-  problem?: "mixed_known" | "known_and_unknown" | null;
+  problem?: "mixed_known" | "known_and_unknown" | "unknown_multi_source" | null;
   allowed?: boolean;
   counts?: Record<string, number>;
+  /** Episodes with no recorded gripper, per source. */
+  unknown_sources?: Record<string, number>;
   export_fps?: number;
   min_source_fps?: number;
   suggested_fps?: number;
@@ -415,10 +425,24 @@ const GRIPPER_TEXT = {
     "The selection mixes grippers: {counts}. An export takes one gripper: filter by gripper, or allow mixing.",
   known_and_unknown:
     "The selection mixes episodes of a known gripper with episodes whose gripper is not recorded: {counts}. Filter by gripper, list Unknown gripper on purpose, or allow mixing.",
+  unknown_multi_source:
+    "The selection takes episodes with no recorded gripper from several sources: {sources}. A source with no gripper record may hold either gripper. Declare each source's gripper in pool/rules.json, list Unknown gripper on purpose, or allow mixing.",
   allowed: "Grippers are mixed on purpose: {counts}.",
   unknown:
-    "{count} episode(s) have no recorded gripper (unknown): their metadata does not say which gripper was used.",
+    "{count} episode(s) from {sources} have no recorded gripper (unknown): their metadata does not say which gripper was used.",
 };
+
+/** ``legacy 2 · legacy2 2`` (the first five sources, then how many more). */
+export function sourceCounts(counts: Record<string, number>): string {
+  const entries = Object.entries(counts).sort(
+    (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+  );
+  const shown = entries
+    .slice(0, 5)
+    .map(([s, n]) => `${s} ${n.toLocaleString("en-US")}`)
+    .join(" · ");
+  return entries.length > 5 ? `${shown} · +${entries.length - 5}` : shown;
+}
 
 /** A warning as UI text; the timing and gripper notes carry their numbers. */
 export function warningText(
@@ -429,10 +453,14 @@ export function warningText(
     const key = w.allowed
       ? GRIPPER_TEXT.allowed
       : GRIPPER_TEXT[w.problem || "mixed_known"];
-    return t(key).replace("{counts}", gripperCounts(w.counts || {}, t));
+    return t(key)
+      .replace("{counts}", gripperCounts(w.counts || {}, t))
+      .replace("{sources}", sourceCounts(w.unknown_sources || {}));
   }
   if (w.code === "gripper_unknown") {
-    return t(GRIPPER_TEXT.unknown).replace("{count}", String(w.episodes ?? 0));
+    return t(GRIPPER_TEXT.unknown)
+      .replace("{count}", String(w.episodes ?? 0))
+      .replace("{sources}", sourceCounts(w.unknown_sources || {}));
   }
   const template = TIMING_WARNING_TEXT[w.code];
   if (!template) return t(WARNING_LABELS[w.code] || w.message);

@@ -123,7 +123,7 @@ export function CompositionPanel({
     ...(recipe.grippers || []).map(
       (g) => `${t("Gripper")}: ${gripperLabel(g, t)}`,
     ),
-    ...(recipe.robots || []).map((r) => `robot: ${r}`),
+    ...(recipe.robots || []).map((r) => `${t("Robot")}: ${r}`),
     ...(recipe.outcome !== "all"
       ? [
           t(

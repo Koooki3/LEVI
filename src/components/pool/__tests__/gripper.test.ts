@@ -4,7 +4,11 @@ import zh from "@/i18n/zh.json";
 import {
   GRIPPER_LABELS,
   gripperCounts,
+  gripperDeclared,
+  gripperDeclared,
   gripperLabel,
+  gripperTitle,
+  sourceCounts,
   stopsExport,
   warningText,
   type PoolWarning,
@@ -67,6 +71,26 @@ describe("gripper warnings", () => {
     expect(warningText(w, zhT)).toContain("未记录");
   });
 
+  test("several sources with no gripper record block and name the sources", () => {
+    const w: PoolWarning = {
+      ...base,
+      problem: "unknown_multi_source",
+      counts: { unknown: 7 },
+      unknown_sources: {
+        "data_collection/a": 4,
+        "data_collection_robotiq/b": 3,
+      },
+    };
+    expect(stopsExport(w)).toBe(true);
+    expect(warningText(w, enT)).toContain(
+      "data_collection/a 4 · data_collection_robotiq/b 3",
+    );
+    expect(warningText(w, zhT)).toContain("多个没有夹爪记录的来源");
+    expect(sourceCounts({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 })).toContain(
+      "+1",
+    );
+  });
+
   test("an allowed mix and the unknown note do not block", () => {
     const allowed: PoolWarning = {
       ...base,
@@ -81,9 +105,49 @@ describe("gripper warnings", () => {
       message: "",
       blocking: false,
       episodes: 4,
+      unknown_sources: { legacy: 4 },
     };
-    expect(warningText(unknown, enT)).toContain("4 episode(s)");
-    expect(warningText(unknown, zhT)).toContain("4 个片段");
+    expect(warningText(unknown, enT)).toContain("4 episode(s) from legacy 4");
+    expect(warningText(unknown, zhT)).toContain("来自 legacy 4 的 4 个片段");
+    const where: PoolWarning = {
+      ...unknown,
+      unknown_sources: { legacy: 3, legacy2: 1 },
+    };
+    expect(warningText(where, enT)).toContain("from legacy 3 · legacy2 1");
+  });
+
+  test("unknown from several sources blocks and names the sources", () => {
+    const w: PoolWarning = {
+      code: "mixed_gripper",
+      blocking: true,
+      problem: "unknown_multi_source",
+      message: "",
+      counts: { unknown: 4 },
+      unknown_sources: { legacy: 2, legacy2: 2 },
+    };
+    expect(stopsExport(w)).toBe(true);
+    expect(warningText(w, enT)).toContain(
+      "several sources: legacy 2 · legacy2 2",
+    );
+    const zhText = warningText(w, zhT);
+    expect(zhText).toContain("legacy 2 · legacy2 2");
+    expect(zhText).toContain("pool/rules.json");
+    expect(zhText).not.toContain("旧数据");
+    const many: Record<string, number> = {};
+    for (let i = 0; i < 8; i++) many[`s${i}`] = 8 - i;
+    expect(sourceCounts(many)).toBe("s0 8 · s1 7 · s2 6 · s3 5 · s4 4 · +3");
+  });
+
+  test("a declared gripper is told apart from a read one", () => {
+    expect(
+      gripperDeclared({ embodiment_evidence: { gripper: "declared: plain" } }),
+    ).toBe(true);
+    expect(
+      gripperDeclared({
+        embodiment_evidence: { gripper: "metadata:gripper_joint_names" },
+      }),
+    ).toBe(false);
+    expect(gripperDeclared({})).toBe(false);
   });
 
   test("every sentence is translated", () => {
@@ -91,10 +155,34 @@ describe("gripper warnings", () => {
       "The selection mixes grippers: {counts}. An export takes one gripper: filter by gripper, or allow mixing.",
       "The selection mixes episodes of a known gripper with episodes whose gripper is not recorded: {counts}. Filter by gripper, list Unknown gripper on purpose, or allow mixing.",
       "Grippers are mixed on purpose: {counts}.",
-      "{count} episode(s) have no recorded gripper (unknown): their metadata does not say which gripper was used.",
+      "{count} episode(s) from {sources} have no recorded gripper (unknown): their metadata does not say which gripper was used.",
+      "The selection takes episodes with no recorded gripper from several sources: {sources}. A source with no gripper record may hold either gripper. Declare each source's gripper in pool/rules.json, list Unknown gripper on purpose, or allow mixing.",
+      "No gripper is recorded for these sources; their episodes export as unknown.",
+      "Robot",
+      "Action mode",
+      "End-effector frame",
+      "declared",
     ]) {
       expect(key in en).toBe(true);
       expect(zhT(key)).not.toBe(key);
     }
+  });
+});
+
+describe("declared grippers", () => {
+  test("a declaration is told apart from a reading and the tooltip is translated", () => {
+    expect(
+      gripperDeclared({ embodiment_evidence: { gripper: "declared: a (me)" } }),
+    ).toBe(true);
+    expect(
+      gripperDeclared({
+        embodiment_evidence: { gripper: "metadata:gripper_joint_names" },
+      }),
+    ).toBe(false);
+    expect(gripperDeclared({})).toBe(false);
+    const row = { robot: "franka_fr3", gripper: "franka_hand" };
+    const text = gripperTitle(row, zhT) || "";
+    expect(text).toContain("机器人: franka_fr3");
+    expect(text).toContain("末端坐标系: unknown");
   });
 });

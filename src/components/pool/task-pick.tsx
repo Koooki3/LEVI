@@ -233,7 +233,7 @@ export function GripperMix({
       {!known && (
         <p className="levi-pool-hint">
           {t(
-            "No gripper is recorded for these episodes (older data); they export as unknown.",
+            "No gripper is recorded for these sources; their episodes export as unknown.",
           )}
         </p>
       )}

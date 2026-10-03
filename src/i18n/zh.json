@@ -2017,7 +2017,12 @@
   "The selection mixes grippers: {counts}. An export takes one gripper: filter by gripper, or allow mixing.": "所选片段混用了夹爪：{counts}。一次导出只取一种夹爪：请按夹爪筛选，或明确允许混用。",
   "The selection mixes episodes of a known gripper with episodes whose gripper is not recorded: {counts}. Filter by gripper, list Unknown gripper on purpose, or allow mixing.": "所选片段里既有已知夹爪，也有未记录夹爪的片段：{counts}。请按夹爪筛选、有意勾选“未知夹爪”，或明确允许混用。",
   "Grippers are mixed on purpose: {counts}.": "已明确允许混用夹爪：{counts}。",
-  "{count} episode(s) have no recorded gripper (unknown): their metadata does not say which gripper was used.": "{count} 个片段没有记录夹爪（未知）：它们的元数据没有说明用的是哪种夹爪。",
   "Grippers": "夹爪构成",
-  "No gripper is recorded for these episodes (older data); they export as unknown.": "这些片段没有夹爪记录（旧数据），导出时记为未知。"
+  "Robot": "机器人",
+  "Action mode": "动作模式",
+  "End-effector frame": "末端坐标系",
+  "declared": "已声明",
+  "No gripper is recorded for these sources; their episodes export as unknown.": "这些来源没有夹爪记录，其中的片段导出时记为未知。",
+  "The selection takes episodes with no recorded gripper from several sources: {sources}. A source with no gripper record may hold either gripper. Declare each source's gripper in pool/rules.json, list Unknown gripper on purpose, or allow mixing.": "所选片段来自多个没有夹爪记录的来源：{sources}。没有夹爪记录的来源可能是任一种夹爪。请在 pool/rules.json 里声明各来源的夹爪、有意勾选“未知夹爪”，或明确允许混用。",
+  "{count} episode(s) from {sources} have no recorded gripper (unknown): their metadata does not say which gripper was used.": "来自 {sources} 的 {count} 个片段没有记录夹爪（未知）：它们的元数据没有说明用的是哪种夹爪。"
 }

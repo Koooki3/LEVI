@@ -14,7 +14,7 @@ describe("gripper parts render", () => {
     );
     expect(html).toContain("Robotiq 2F-85 1,200");
     expect(html).toContain("Franka Hand 30");
-    expect(html).not.toContain("older data");
+    expect(html.toLowerCase()).not.toContain("no gripper is recorded");
   });
 
   test("only unknown grippers say so", () => {
@@ -22,7 +22,7 @@ describe("gripper parts render", () => {
       createElement(GripperMix, { grippers: { unknown: 7 } }),
     );
     expect(html).toContain("Unknown gripper 7");
-    expect(html).toContain("older data");
+    expect(html).toContain("No gripper is recorded for these sources");
     expect(
       renderToStaticMarkup(createElement(GripperMix, { grippers: {} })),
     ).toBe("");

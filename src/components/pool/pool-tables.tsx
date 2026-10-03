@@ -7,6 +7,7 @@ import {
   CATEGORIES,
   CATEGORY_LABELS,
   METHOD_LABELS,
+  gripperDeclared,
   gripperLabel,
   gripperTitle,
   POLICY_METHODS,
@@ -403,6 +404,9 @@ export function EpisodeTable({
                     title={gripperTitle(row, t)}
                   >
                     {gripperLabel(row.gripper, t)}
+                    {gripperDeclared(row) && (
+                      <span className="levi-pool-badge">{t("declared")}</span>
+                    )}
                   </td>
                   <td className="num tabular">
                     {row.frames?.toLocaleString() ?? "—"}
