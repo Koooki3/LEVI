@@ -637,6 +637,8 @@ class TrainingManifest(BaseModel):
     allow_candidate_anchored: bool = False
     recap_revision: str | None = Field(default=None, max_length=64)
     allow_stale: bool = False
+    prompt_subtask: bool = False
+    allow_auto_subtask: bool = False
 
 
 @app.get("/api/levi/manifest/operations")
@@ -668,6 +670,8 @@ def manifest_build(payload: TrainingManifest):
         allow_candidate_anchored=payload.allow_candidate_anchored,
         recap_revision=payload.recap_revision,
         allow_stale=payload.allow_stale,
+        prompt_subtask=payload.prompt_subtask,
+        allow_auto_subtask=payload.allow_auto_subtask,
     )
     # The per-episode table stays in manifest.json on disk.
     return {k: v for k, v in result.items() if k != "episodes"}
