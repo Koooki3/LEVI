@@ -629,11 +629,27 @@ def short(tmp_path_factory):
 
 
 def _start_until_the_core(tmp_path, monkeypatch, *flags):  # tmp_path: a short one
+    # Every patch is undone when this returns, so a test can look at what is
+    # left of the process afterwards.
+    with monkeypatch.context() as inner:
+        return _start_inside(tmp_path, inner, *flags)
+
+
+def _start_inside(tmp_path, monkeypatch, *flags):
     """Run ``levi live start`` up to the moment the core would be started and
     return what ``resumer.start`` would read there."""
+    import logging
+    import os
+
     from levi.live import cli
     from levi.live import config as live_config
 
+    # cmd_start changes its own process (environment, priority, a logger):
+    # none of that may reach the rest of the pytest session.
+    monkeypatch.setattr(os, "environ", dict(os.environ))
+    monkeypatch.setattr(cli.resources, "apply", lambda config, **kw: {})
+    logger = logging.getLogger("levi.live")
+    handlers = list(logger.handlers)
     seen = {}
 
     class StopHere(Exception):
@@ -671,6 +687,10 @@ def _start_until_the_core(tmp_path, monkeypatch, *flags):  # tmp_path: a short o
     finally:
         thread.close()
         assert live_config  # (the module the core reads with)
+        for handler in list(logger.handlers):
+            if handler not in handlers:
+                logger.removeHandler(handler)
+                handler.close()
 
 
 def test_a_new_setting_in_live_toml_reaches_the_core_over_a_stale_effective_file(
@@ -710,3 +730,16 @@ def test_a_configuration_the_core_cannot_read_is_warned_about(tmp_path, caplog):
         thread.close()
     text = " ".join(r.getMessage() for r in caplog.records)
     assert "cannot read" in text and "automatic resume is ON" in text
+
+
+def test_the_start_path_leaves_the_test_process_alone(short, monkeypatch):
+    """``cmd_start`` lowers the priority and rewrites the environment of its
+    own process (``resources.apply``, ``service_env``): run in a test it must
+    not do that to the whole pytest session (it broke later tests)."""
+    import os
+
+    before_env = dict(os.environ)
+    before_nice = os.getpriority(os.PRIO_PROCESS, 0)
+    _start_until_the_core(short, monkeypatch)
+    assert dict(os.environ) == before_env
+    assert os.getpriority(os.PRIO_PROCESS, 0) == before_nice
