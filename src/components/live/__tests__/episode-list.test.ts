@@ -236,6 +236,44 @@ describe("the list", () => {
     expect(out).not.toContain("Remove selected");
   });
 
+  test("a verdict under the terminal-aware rule says why, in both languages", () => {
+    const verdict = {
+      outcome: "failure",
+      events: 2,
+      valid_events: 1,
+      rule: "last_valid_not_regrasped",
+      closes_after_last_valid: 1,
+      place_outcome: "success",
+    };
+    const out = html(
+      {},
+      detail({ demos: [demo("demo_0003", { verdict }), demo("demo_0002")] }),
+    );
+    expect(out).toContain("(1/2)");
+    expect(out).toContain("the gripper closed again after the last release");
+    // The default rule's row has no reason.
+    const plain = html(
+      {},
+      detail({
+        demos: [
+          demo("demo_0003", { verdict: { outcome: "failure", events: 1 } }),
+        ],
+      }),
+    );
+    expect(plain).not.toContain("closed again");
+    for (const key of [
+      "the gripper closed again after the last release",
+      "the last placement is a failure",
+      "no placement time segment",
+      "the last placement is undecided",
+      "placement not checked: no time segments",
+    ]) {
+      expect((en as Record<string, string>)[key]).toBe(key);
+      expect((zh as Record<string, string>)[key]).toBeTruthy();
+      expect((zh as Record<string, string>)[key]).not.toBe(key);
+    }
+  });
+
   test("an episode of the batch in progress cannot be chosen, and says why", () => {
     const out = html({}, detail({ current: { demos: ["demo_0002"] } }));
     const box = (name: string) =>

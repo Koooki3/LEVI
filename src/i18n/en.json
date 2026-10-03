@@ -2100,5 +2100,10 @@
   "Episodes removed on the live page": "Episodes removed on the live page",
   "Removed by a person on the live page: not listed, counted or exported. They can be restored there.": "Removed by a person on the live page: not listed, counted or exported. They can be restored there.",
   "{n} episodes in total": "{n} episodes in total",
-  "Select the shown": "Select the shown"
+  "Select the shown": "Select the shown",
+  "the gripper closed again after the last release": "the gripper closed again after the last release",
+  "the last placement is a failure": "the last placement is a failure",
+  "no placement time segment": "no placement time segment",
+  "the last placement is undecided": "the last placement is undecided",
+  "placement not checked: no time segments": "placement not checked: no time segments"
 }

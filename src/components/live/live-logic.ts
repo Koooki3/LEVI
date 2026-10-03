@@ -9,6 +9,7 @@ import type {
   LiveSession,
   LiveStatusResponse,
   ServiceStatus,
+  Verdict,
 } from "./types";
 
 /** Session states in which the evaluation is going on. */
@@ -170,6 +171,28 @@ export function verdictTally(demos: DemoRow[] | undefined): Tally {
     else out.undecided += 1;
   }
   return out;
+}
+
+/** Why a verdict made under a terminal-aware rule is not a plain success, as
+ * the English catalog key to translate; null when the rule explains nothing
+ * (the default rule, no valid release, or a success that held). */
+export function verdictReason(v: Verdict | null | undefined): string | null {
+  if (!v?.rule || v.rule === "any_valid" || (v.valid_events ?? 0) < 1)
+    return null;
+  if ((v.closes_after_last_valid ?? 0) > 0)
+    return "the gripper closed again after the last release";
+  switch (v.place_outcome) {
+    case "failure":
+      return "the last placement is a failure";
+    case "none":
+      return "no placement time segment";
+    case "unknown":
+      return "the last placement is undecided";
+    case "missing":
+      return "placement not checked: no time segments";
+    default:
+      return null;
+  }
 }
 
 /** Demos with committed time segments, and how many segments that is. */

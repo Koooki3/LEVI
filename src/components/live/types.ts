@@ -188,6 +188,13 @@ export interface Verdict {
   events?: number | null;
   valid_events?: number | null;
   undecided?: boolean | null;
+  /** Set only under a rule beyond "any valid release" (`last_valid_not_regrasped`). */
+  rule?: string | null;
+  /** Last `place` time segment's outcome: success, failure, unknown, none (no
+   * such segment) or missing (no time segments to read). */
+  place_outcome?: string | null;
+  /** Times the gripper closed again after the last valid release. */
+  closes_after_last_valid?: number | null;
   spec?: string | null;
   review?: string;
   evaluated?: boolean;

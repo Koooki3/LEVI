@@ -15,6 +15,7 @@ import {
   rowSignature,
   segmentSummary,
   sortSessions,
+  verdictReason,
   verdictTally,
 } from "../live-logic";
 import type {
@@ -23,6 +24,7 @@ import type {
   DemoRow,
   LiveSession,
   ServiceStatus,
+  Verdict,
 } from "../types";
 
 const session = (over: Partial<LiveSession> = {}): LiveSession => ({
@@ -399,5 +401,49 @@ describe("open review runs", () => {
       review_runs: ["r2"],
     } as DatasetDetail);
     expect(runs.map((r) => r.runId)).toEqual(["r2"]);
+  });
+});
+
+describe("why a terminal-aware verdict is not a plain success", () => {
+  const under = (over: Partial<Verdict>): Verdict => ({
+    outcome: "failure",
+    events: 2,
+    valid_events: 1,
+    rule: "last_valid_not_regrasped",
+    ...over,
+  });
+  test("the default rule explains nothing, nor does a held success", () => {
+    expect(verdictReason(null)).toBeNull();
+    expect(verdictReason({ outcome: "failure", valid_events: 1 })).toBeNull();
+    expect(verdictReason(under({ rule: "any_valid" }))).toBeNull();
+    expect(
+      verdictReason(
+        under({
+          outcome: "success",
+          closes_after_last_valid: 0,
+          place_outcome: "success",
+        }),
+      ),
+    ).toBeNull();
+  });
+  test("a release with no valid event keeps the ordinary explanation", () => {
+    expect(
+      verdictReason(under({ valid_events: 0, place_outcome: "failure" })),
+    ).toBeNull();
+  });
+  test("picked up again comes before the placement", () => {
+    expect(
+      verdictReason(
+        under({ closes_after_last_valid: 2, place_outcome: "failure" }),
+      ),
+    ).toBe("the gripper closed again after the last release");
+  });
+  test("each placement outcome has its own wording", () => {
+    const why = (place_outcome: string) =>
+      verdictReason(under({ closes_after_last_valid: 0, place_outcome }));
+    expect(why("failure")).toBe("the last placement is a failure");
+    expect(why("none")).toBe("no placement time segment");
+    expect(why("unknown")).toBe("the last placement is undecided");
+    expect(why("missing")).toBe("placement not checked: no time segments");
   });
 });

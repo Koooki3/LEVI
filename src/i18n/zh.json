@@ -2100,5 +2100,10 @@
   "Episodes removed on the live page": "在实时页面被删除的片段数",
   "Removed by a person on the live page: not listed, counted or exported. They can be restored there.": "由人在实时页面删除：不列出、不计数、不导出，可在实时页面恢复。",
   "{n} episodes in total": "共 {n} 个片段",
-  "Select the shown": "全选当前显示的片段"
+  "Select the shown": "全选当前显示的片段",
+  "the gripper closed again after the last release": "夹爪在最后一次释放后又闭合（重新抓起）",
+  "the last placement is a failure": "最后一个放置时间片段是失败",
+  "no placement time segment": "没有放置时间片段",
+  "the last placement is undecided": "最后一个放置时间片段未定",
+  "placement not checked: no time segments": "没有时间片段，未核对放置"
 }

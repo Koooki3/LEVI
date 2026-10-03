@@ -13,6 +13,7 @@ import {
   shownDemos,
   toggleAll,
   toggleSelection,
+  verdictReason,
 } from "./live-logic";
 import type { DatasetDetail, DemoRow } from "./types";
 
@@ -155,6 +156,12 @@ function Row({
               : t(demo.verdict.outcome)}
             {demo.verdict.events != null &&
               ` (${demo.verdict.valid_events ?? 0}/${demo.verdict.events})`}
+            {verdictReason(demo.verdict) && (
+              <span className="levi-pool-muted">
+                {" · "}
+                {t(verdictReason(demo.verdict) as string)}
+              </span>
+            )}
           </>
         ) : demo.reason ? (
           <span className="levi-pool-muted">{demo.reason}</span>
