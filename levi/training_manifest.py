@@ -79,6 +79,7 @@ FRAMES_SCHEMA = pa.schema(
         ("prompt_has_subtask", pa.bool_()),
         ("prompt_subtask_skip", pa.string()),
         ("prompt_subtask_source", pa.string()),
+        ("prompt_subtask_origin", pa.string()),
         ("episode_task_count", pa.int64()),
     ]
 )
@@ -92,6 +93,10 @@ PROMPT_COLUMNS = {
     "prompt_subtask_skip": "why prompt_subtask carries no subtask (null when it does)",
     "prompt_subtask_source": (
         "which time segment the subtask came from and who stands behind it"
+    ),
+    "prompt_subtask_origin": (
+        "human, agent_run (an agent run's segment with no review mark: a person "
+        "or a script with a person's identity approved it) or edited"
     ),
     "episode_task_count": "how many task texts the episode lists (only the first is used)",
 }
@@ -347,6 +352,7 @@ def _subtasks(folder: Path, episode: int) -> list[dict[str, Any]]:
         if end is None:
             end = float(spans[i + 1]["timestamp"]) if i + 1 < len(spans) else np.inf
         levi = atom.get("levi") or {}
+        origin = levi.get("origin") or {}
         out.append(
             {
                 "start": start,
@@ -356,6 +362,8 @@ def _subtasks(folder: Path, episode: int) -> list[dict[str, Any]]:
                 "outcome": levi.get("outcome"),
                 "attempt": levi.get("attempt"),
                 "review": levi.get("review"),
+                "origin": origin.get("kind"),
+                "run_id": origin.get("run_id"),
             }
         )
     return out
@@ -668,9 +676,13 @@ def build(
             manifest_prompts.segment_source(segment_of[i]) if p[2] else None
             for i, p in enumerate(prompts)
         ]
+        columns["prompt_subtask_origin"] += [
+            manifest_prompts.origin_class(segment_of[i]) if p[2] else None
+            for i, p in enumerate(prompts)
+        ]
         columns["episode_task_count"] += [_task_count(row)] * n
-        for p, keep in zip(prompts, include.tolist(), strict=True):
-            prompt_stats.add(p[3], p[2], p[4], keep)
+        for i, (p, keep) in enumerate(zip(prompts, include.tolist(), strict=True)):
+            prompt_stats.add(p, keep, segment_of[i])
         per_episode.append(
             {
                 "episode_index": ep,
@@ -776,9 +788,23 @@ class _PromptStats:
         self.with_subtask = 0
         self.truncated = 0
         self.skipped: dict[str, int] = {}
+        self.origins = dict.fromkeys(manifest_prompts.ORIGINS, 0)
+        self.agent_runs: dict[str, int] = {}
+        self.longest_chars = 0
+        self.longest_bytes = 0
         self.included = {"frames": 0, "with_subtask": 0, "rejected_unreviewed": 0}
 
-    def add(self, skip, has_subtask, cut, included):
+    def add(self, prompt, included, segment):
+        _, text, has_subtask, skip, cut = prompt
+        if text:
+            self.longest_chars = max(self.longest_chars, len(text))
+            self.longest_bytes = max(self.longest_bytes, len(text.encode()))
+        if has_subtask:
+            origin = manifest_prompts.origin_class(segment)
+            self.origins[origin] += 1
+            if origin == "agent_run":
+                run = segment.get("run_id") or "unknown"
+                self.agent_runs[run] = self.agent_runs.get(run, 0) + 1
         self.frames += 1
         self.with_subtask += bool(has_subtask)
         self.truncated += bool(cut)
@@ -794,15 +820,25 @@ class _PromptStats:
             "template_version": version,
             "template": template,
             "subtask_max_chars": max_chars,
-            "source": "time segments a person stands behind (subtask_review "
-            "empty or edited); automatic and unrecognised ones are never used",
+            "source": "time segments with subtask_review empty or edited; "
+            "automatic and unrecognised ones are never used. An empty review "
+            "also covers an agent run's segment approved without the live "
+            "service's mark (see frames_with_subtask_by_origin)",
             "frames": self.frames,
             "frames_with_subtask": self.with_subtask,
             "subtask_skipped": dict(sorted(self.skipped.items())),
             "frames_rejected_unreviewed": sum(
                 self.skipped.get(k, 0) for k in UNREVIEWED
             ),
+            "frames_with_subtask_by_origin": dict(self.origins),
+            "frames_with_subtask_from_agent_runs": self.origins["agent_run"],
+            "frames_with_subtask_by_agent_run": dict(sorted(self.agent_runs.items())),
             "truncated_frames": self.truncated,
+            # The longest second prompt, before the RECAP suffix: openpi cuts a
+            # prompt at max_token_len tokens (200 pi05, 48 pi0) from the end.
+            # Bytes bound the token count from above for any language.
+            "max_prompt_chars": self.longest_chars,
+            "max_prompt_utf8_bytes": self.longest_bytes,
             "included_frames": dict(self.included),
             "episodes_with_several_tasks": several_tasks,
         }

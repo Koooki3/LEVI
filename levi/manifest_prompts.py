@@ -14,17 +14,22 @@ model, so the words LEVI adds follow the task text, not the interface language.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from .annotations.vocabulary import SPECIAL
 
 # Template version -> template. A new wording is a new version; a version's
 # wording never changes once a manifest has been written with it.
-PROMPT_TEMPLATES = {"v1": "{task}; current subtask: {subtask}"}
-DEFAULT_TEMPLATE = "v1"
-DEFAULT_SUBTASK_MAX_CHARS = 120
+PROMPT_TEMPLATES = {"v1-en": "{task}; current subtask: {subtask}"}
+DEFAULT_TEMPLATE = "v1-en"
+# Characters, not tokens: openpi cuts a prompt at max_token_len (200 for pi05,
+# 48 for pi0) from the end, which would drop "State: ... Action: ". 80 leaves
+# room for a task text, the template and the RECAP suffix in pi05's budget.
+DEFAULT_SUBTASK_MAX_CHARS = 80
 
 # ``subtask_review`` values whose segment a person stands behind: empty (a
-# person, or an agent a person reviewed) and "edited" (an automatic segment a
+# person, or an agent segment approved without the live service's "auto" mark;
+# see ``origin_class``) and "edited" (an automatic segment a
 # person changed). "auto" and anything else this code does not know are out.
 REVIEWED = (None, "edited")
 
@@ -35,8 +40,17 @@ SKIP_REASONS = (
     "unreviewed",
     "review_unrecognised",
     "special",
+    "reserved_word",
     "empty_text",
 )
+
+# Where a used subtask came from (``prompt_subtask_origin``). "agent_run" is a
+# segment an agent run proposed whose review mark is empty: a person approved
+# it, or a script did with a person's identity; the manifest cannot tell.
+ORIGINS = ("human", "agent_run", "edited")
+
+# Text that would pass for the prompt's own structure or the RECAP condition.
+_RESERVED = re.compile(r"\b(advantage|task|state|action)\s*:", re.IGNORECASE)
 
 # Punctuation trimmed from both ends of a subtask text (ASCII and CJK).
 _EDGE = " \t\r\n.,;:!?-–—…、。，；：！？"
@@ -53,21 +67,38 @@ def template_text(version: str) -> str:
         ) from None
 
 
+def _plain(text) -> str:
+    """Whitespace runs as one space; control and format characters (zero-width,
+    bidi marks, escapes) removed."""
+    value = _SPACES.sub(" ", str(text or ""))
+    value = "".join(c for c in value if unicodedata.category(c) not in ("Cc", "Cf"))
+    return _SPACES.sub(" ", value).strip()
+
+
 def clean_subtask(text: str | None, max_chars: int) -> tuple[str, bool]:
     """(the subtask text as it enters a prompt, whether it was cut).
 
     Surrounding whitespace and edge punctuation go, inner whitespace runs
     collapse to one space, the wording and its capitalisation stay as written.
     A longer text is cut at ``max_chars`` characters (and trimmed again)."""
-    value = _SPACES.sub(" ", str(text or "")).strip(_EDGE)
+    value = _plain(text).strip(_EDGE)
     if len(value) <= max_chars:
         return value, False
     return value[:max_chars].strip(_EDGE), True
 
 
 def is_special(*names) -> bool:
-    """``other`` / ``unknown`` / ``background``: not a subtask of the robot."""
-    return any(str(n or "").strip().lower() in SPECIAL for n in names)
+    """``other`` / ``unknown`` / ``background``: not a subtask of the robot.
+    Judged after cleaning, so ``Unknown.`` and `` background! `` count too."""
+    return any(_plain(n).strip(_EDGE).lower() in SPECIAL for n in names)
+
+
+def origin_class(segment: dict) -> str:
+    """``edited`` (an automatic segment a person changed), ``agent_run`` (an
+    agent run's segment with no review mark) or ``human``."""
+    if segment.get("review") == "edited":
+        return "edited"
+    return "agent_run" if segment.get("origin") == "agent" else "human"
 
 
 def frame_prompts(
@@ -90,6 +121,8 @@ def frame_prompts(
         return task, task, False, reason, False
     if is_special(segment.get("id"), segment.get("text")):
         return task, task, False, "special", False
+    if _RESERVED.search(_plain(segment.get("text"))):
+        return task, task, False, "reserved_word", False
     text, cut = clean_subtask(segment.get("text"), max_chars)
     if not text:
         return task, task, False, "empty_text", False
@@ -100,7 +133,10 @@ def segment_source(segment: dict) -> str:
     """Where a prompt's subtask came from: the segment's span and its review."""
     end = segment.get("end")
     stop = "end" if end is None or end == float("inf") else f"{end:.3f}"
+    origin = "human"
+    if segment.get("origin") == "agent":
+        origin = f"agent run={segment.get('run_id') or 'unknown'}"
     return (
         f"segment {segment['start']:.3f}-{stop} "
-        f"review={segment.get('review') or 'human'}"
+        f"review={segment.get('review') or 'human'} origin={origin}"
     )
