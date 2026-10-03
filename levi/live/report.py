@@ -113,24 +113,23 @@ def spec_of(rows) -> dict | None:
 
 def previous_of(config, dataset, before_at, skip=None) -> dict | None:
     """The newest report of ``dataset`` whose last record is older than
-    ``before_at`` (and that is not ``skip``'s own file), or None."""
+    ``before_at`` (and that is not ``skip``'s own), or None. Found through the
+    index; only the one chosen report is read."""
     best = None
-    for path in reports_dir(config).glob("*.json"):
-        if skip and path.stem == skip:
+    for name, entry in (index_of(config).get("reports") or {}).items():
+        if name == skip or entry.get("dataset") != dataset:
             continue
-        found = jsonio.read(path)
-        if not isinstance(found, dict) or found.get("schema") != SCHEMA:
-            continue
-        if found.get("dataset") != dataset:
-            continue
-        last = ((found.get("summary") or {}).get("window") or {}).get("last_at")
+        last = entry.get("last_at")
         if not isinstance(last, (int, float)) or (
             before_at is not None and last >= before_at
         ):
             continue
         if best is None or last > best[0]:
-            best = (last, found)
-    return best[1] if best else None
+            best = (last, name)
+    if best is None:
+        return None
+    found = jsonio.read(reports_dir(config) / f"{best[1]}.json")
+    return found if isinstance(found, dict) and found.get("schema") == SCHEMA else None
 
 
 def build(
@@ -157,18 +156,16 @@ def build(
     rows, _ = statsview.scoped_rows(
         config, dataset, session, include_excluded=include_excluded
     )
-    last = [r.get("at") for r in rows if isinstance(r.get("at"), (int, float))]
+    everything = statsview.scoped_rows(config, dataset, session, include_excluded=True)[
+        0
+    ]
     report = {
         "schema": SCHEMA,
         "dataset": dataset,
         "session": session,
         "generated_at": round(now, 3),
         # Inputs of the report: when they are the same the report is too.
-        "signature": {
-            "records": len(rows),
-            "last_at": max(last) if last else None,
-            "excluded_demos": payload["excluded_demos"],
-        },
+        "signature": statsview.signature(everything),
         "include_excluded": bool(include_excluded),
         "excluded_demos": payload["excluded_demos"],
         "settings": {
@@ -227,67 +224,152 @@ def _write(path: Path, text: str):
             temp.unlink()
 
 
-def write(config, dataset, session, *, force=False, now=None, policy=None) -> dict:
+INDEX = "index.json"
+INDEX_SCHEMA = "levi.live.report_index.v1"
+PRUNED_MAX = 2000
+
+
+def index_of(config) -> dict:
+    """``reports/index.json``: for every report on disk its dataset, session,
+    signature (what it was built from) and times; and ``pruned``, the stems
+    deleted to stay within ``resources.report_keep``, which the service does not
+    write again. The index, not the files, is how the service decides whether a
+    report is current: it never reads a report to find out."""
+    found = jsonio.read(reports_dir(config) / INDEX)
+    if not isinstance(found, dict) or found.get("schema") != INDEX_SCHEMA:
+        return {"schema": INDEX_SCHEMA, "reports": {}, "pruned": []}
+    found.setdefault("reports", {})
+    found.setdefault("pruned", [])
+    return found
+
+
+def _update_index(config, change):
+    path = reports_dir(config) / INDEX
+    return jsonio.update(
+        path,
+        lambda value: change(
+            value
+            if isinstance(value, dict) and value.get("schema") == INDEX_SCHEMA
+            else {"schema": INDEX_SCHEMA, "reports": {}, "pruned": []}
+        ),
+        default=dict,
+    )
+
+
+def current_signature(config, dataset, session) -> dict:
+    rows = statsview.scoped_rows(config, dataset, session, include_excluded=True)[0]
+    return statsview.signature(rows)
+
+
+def write(
+    config,
+    dataset,
+    session,
+    *,
+    force=False,
+    now=None,
+    policy=None,
+    signature=None,
+) -> dict:
     """Write (or update) the report of one session. Returns ``{"stem",
     "written", "files"}``; ``written`` is False when the stored report was
-    built from the same records."""
+    built from the same records (decided from the index and a cheap signature,
+    before anything is built). The three texts are rendered before any file is
+    touched, so a failure leaves the old report whole."""
     name = stem(dataset, session)
     folder = reports_dir(config)
-    existing = jsonio.read(folder / f"{name}.json")
-    report = build(config, dataset, session, now=now, policy=policy)
     files = [f"{name}.md", f"{name}.zh-CN.md", f"{name}.json"]
+    if signature is None:
+        signature = current_signature(config, dataset, session)
+    entry = (index_of(config).get("reports") or {}).get(name)
     if (
         not force
-        and isinstance(existing, dict)
-        and existing.get("signature") == report["signature"]
+        and isinstance(entry, dict)
+        and entry.get("signature") == signature
         and all((folder / f).is_file() for f in files)
     ):
         return {"stem": name, "written": False, "files": files}
-    # Markdown first, JSON last: the JSON is what marks a report complete.
-    _write(folder / files[0], render(report, "en"))
-    _write(folder / files[1], render(report, "zh"))
-    _write(
-        folder / files[2],
+    report = build(config, dataset, session, now=now, policy=policy)
+    texts = [
+        render(report, "en"),
+        render(report, "zh"),
         json.dumps(report, ensure_ascii=False, indent=1, allow_nan=False),
-    )
+    ]
+    for file, text in zip(files, texts, strict=True):
+        _write(folder / file, text)
+
+    def record(index):
+        index["reports"][name] = {
+            "dataset": dataset,
+            "session": session,
+            "signature": report["signature"],
+            "last_at": report["signature"].get("last_at"),
+            "generated_at": report["generated_at"],
+        }
+        if name in index["pruned"]:
+            index["pruned"].remove(name)
+        return index
+
+    _update_index(config, record)
     prune(config)
     return {"stem": name, "written": True, "files": files}
 
 
 def listing(config) -> list:
-    """The reports there are, newest first: ``{stem, dataset, session,
+    """The reports there are, newest session first: ``{stem, dataset, session,
     generated_at}``."""
-    out = []
-    for path in reports_dir(config).glob("*.json"):
-        found = jsonio.read(path)
-        if isinstance(found, dict) and found.get("schema") == SCHEMA:
-            out.append(
-                {
-                    "stem": path.stem,
-                    "dataset": found.get("dataset"),
-                    "session": found.get("session"),
-                    "generated_at": found.get("generated_at"),
-                }
-            )
-    out.sort(key=lambda r: -(r["generated_at"] or 0))
+    out = [
+        {
+            "stem": name,
+            "dataset": entry.get("dataset"),
+            "session": entry.get("session"),
+            "generated_at": entry.get("generated_at"),
+            "last_at": entry.get("last_at"),
+        }
+        for name, entry in (index_of(config).get("reports") or {}).items()
+        if isinstance(entry, dict)
+    ]
+    out.sort(key=lambda r: (-(r["last_at"] or 0), -(r["generated_at"] or 0)))
     return out
 
 
 def prune(config, keep=None) -> list:
-    """Delete the oldest reports beyond ``keep`` (default
-    ``resources.report_keep``); returns the stems removed. A damaged JSON
-    (not a report) is left alone."""
+    """Delete the reports of the oldest sessions beyond ``keep`` (default
+    ``resources.report_keep``); returns the stems removed. They are remembered
+    in the index so the service does not write them again. A file that is not
+    in the index is left alone."""
     keep = config.resources.report_keep if keep is None else keep
-    removed = []
-    for row in listing(config)[max(1, keep) :]:
+    removed = [row["stem"] for row in listing(config)[max(1, keep) :]]
+    if not removed:
+        return []
+    for name in removed:
         for suffix in (".json", ".md", ".zh-CN.md"):
             with contextlib.suppress(OSError):
-                (reports_dir(config) / (row["stem"] + suffix)).unlink()
-        removed.append(row["stem"])
+                (reports_dir(config) / (name + suffix)).unlink()
+
+    def forget(index):
+        for name in removed:
+            index["reports"].pop(name, None)
+            if name not in index["pruned"]:
+                index["pruned"].append(name)
+        del index["pruned"][:-PRUNED_MAX]
+        return index
+
+    _update_index(config, forget)
     return removed
 
 
 # --- when a session is over ------------------------------------------------------
+
+
+def names_of(config, sessions) -> dict:
+    """``{dataset name: Session}`` for the robot side's sessions, named the way
+    the service names the datasets (a task under a second root carries a root
+    mark, ``mirror.resolve_name``)."""
+    return {
+        mirror.resolve_name(config, root, group, task): session
+        for (root, group, task), session in (sessions or {}).items()
+    }
 
 
 def finished_sessions(config, sessions=None, busy=()) -> list:
@@ -299,9 +381,7 @@ def finished_sessions(config, sessions=None, busy=()) -> list:
     the supervisor holds); a session still ``running``, ``homing``, ``standby``
     or waiting for a reset, with the same run id, is not over. ``busy`` names
     datasets that have episodes waiting or a batch in progress."""
-    live = {}
-    for (_root, group, task), session in (sessions or {}).items():
-        live[mirror.dataset_name(group, task)] = session
+    live = names_of(config, sessions)
     found = []
     for name, state in mirror.list_states(config).items():
         if name in busy or state.get("current"):
@@ -329,30 +409,68 @@ def finished_sessions(config, sessions=None, busy=()) -> list:
     return sorted(found)
 
 
-def policy_of(sessions, dataset, session) -> dict | None:
+def policy_of(config, sessions, dataset, session) -> dict | None:
     """The evaluated policy's config name and checkpoint folder name, from the
     robot side's session file (never a path)."""
-    for (_root, group, task), current in (sessions or {}).items():
-        if mirror.dataset_name(group, task) == dataset and current.run_id == session:
-            policy = {k: v for k, v in (current.policy or {}).items() if v}
-            return policy or None
+    current = names_of(config, sessions).get(dataset)
+    if current is not None and current.run_id == session:
+        return {k: v for k, v in (current.policy or {}).items() if v} or None
     return None
 
 
-def auto(config, sessions=None, busy=(), now=None) -> list:
+AUTO_LIMIT = 2  # reports built per call: a catch-up is spread over cycles
+
+
+def auto(config, sessions=None, busy=(), now=None, limit=AUTO_LIMIT) -> list:
     """Write the report of every finished session whose records changed;
     returns the results of the ones written. Never raises (a report is a
-    record, not part of the labelling)."""
-    done = []
-    for dataset, session in finished_sessions(config, sessions, busy):
-        with contextlib.suppress(Exception):
-            result = write(
-                config,
-                dataset,
-                session,
-                now=now,
-                policy=policy_of(sessions, dataset, session),
-            )
-            if result["written"]:
-                done.append(result)
+    record, not part of the labelling).
+
+    Cheap when nothing changed: one pass over the records gives every
+    session's signature, and a report is built only for a session whose
+    signature differs from the index's. Only the newest ``report_keep``
+    sessions are considered (the older ones would be deleted at once), a
+    report the service deleted to keep within that is not written again, and
+    at most ``limit`` reports are built per call."""
+    done: list = []
+    try:
+        finished = finished_sessions(config, sessions, busy)
+        signatures = statsview.signatures(config)
+        index = index_of(config)
+        pruned = set(index.get("pruned") or [])
+        known = index.get("reports") or {}
+        keep = config.resources.report_keep
+        wanted = sorted(
+            (
+                (signatures[key].get("last_at") or 0, key)
+                for key in finished
+                if key in signatures
+            ),
+            reverse=True,
+        )[:keep]
+        for _, (dataset, session) in wanted:
+            name = stem(dataset, session)
+            sig = signatures[(dataset, session)]
+            if name in pruned or (known.get(name) or {}).get("signature") == sig:
+                folder = reports_dir(config)
+                if name in pruned or all(
+                    (folder / f).is_file()
+                    for f in (f"{name}.md", f"{name}.zh-CN.md", f"{name}.json")
+                ):
+                    continue
+            if len(done) >= limit:
+                break
+            with contextlib.suppress(Exception):
+                result = write(
+                    config,
+                    dataset,
+                    session,
+                    now=now,
+                    policy=policy_of(config, sessions, dataset, session),
+                    signature=sig,
+                )
+                if result["written"]:
+                    done.append(result)
+    except Exception:  # noqa: BLE001 - a report is a record, not the labelling
+        return done
     return done

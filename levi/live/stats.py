@@ -63,6 +63,9 @@ from . import jsonio
 SCHEMA = "levi.live.episode_stats.v1"
 FILE = "stats.jsonl"
 KINDS = ("coarse", "refine", "review", "probe")
+# ``probe`` (request-cost calibration) belongs to a batch, not to an episode:
+# per-episode requests and tokens leave it out.
+PER_EPISODE_KINDS = ("coarse", "refine", "review")
 TAIL_BYTES = 8 * 1024 * 1024  # the most that ``read`` takes from one file
 
 # The record with every field, all ``None``: what ``normalize`` fills in.
@@ -167,6 +170,10 @@ def leaves(value, prefix=""):
     return [p for k, v in value.items() for p in leaves(v, f"{prefix}.{k}".strip("."))]
 
 
+def _reject(constant):
+    raise ValueError(f"{constant} is not JSON")
+
+
 def _lines(path):
     try:
         with Path(path).open("rb") as handle:
@@ -195,7 +202,8 @@ def read(live_dir, limit=None, since=None) -> list:
     for path in [*names, base]:
         for line in _lines(path):
             try:
-                value = json.loads(line)
+                # NaN and Infinity are not JSON: a line that holds one is damaged.
+                value = json.loads(line, parse_constant=_reject)
             except ValueError:
                 continue
             row = normalize(value)
@@ -289,7 +297,9 @@ def usage_of(journals, episode, probe=False) -> dict:
         "tokens": {k: (v if k in counted else None) for k, v in tokens.items()},
         "prompt_tokens": prompt if reported else None,
         "completion_tokens": completion if reported else None,
-        "total_tokens": prompt + completion,
+        # None when no step reported usage (or there was no request): "not
+        # measured", never 0.
+        "total_tokens": prompt + completion if reported else None,
         "probe_tokens": probes if probed else None,
         "reserved_tokens": reserved if unreported else None,
         "unreported_steps": unreported,
@@ -395,20 +405,23 @@ def ratio(top, bottom, digits=3):
     return round(top / bottom, digits)
 
 
-def mark_excluded(rows, excluded=None) -> list:
-    """The records with ``excluded`` set to True for every demo in
-    ``excluded`` (``{(dataset, demo)}``: what the datasets' state files say a
-    person removed *since* the record was written). Other records are kept as
-    they are; no record is changed in place."""
+def mark_excluded(rows, excluded=None, known=None) -> list:
+    """The records with ``excluded`` decided by the datasets' state files.
+
+    ``excluded`` is ``{(dataset, demo)}`` a person has removed, ``known`` the
+    datasets whose state file could be read. For a record of a known dataset the
+    state is the truth: removed means ``excluded: True``, and an episode that
+    was restored since has ``excluded: False`` whatever the record said when it
+    was written. A record of a dataset with no readable state keeps its own
+    flag. No record is changed in place."""
     excluded = excluded or set()
+    known = known if known is not None else {d for d, _ in excluded}
     out = []
     for row in rows:
-        if (
-            isinstance(row, dict)
-            and row.get("excluded") is not True
-            and (row.get("dataset"), row.get("demo")) in excluded
-        ):
-            row = {**row, "excluded": True}
+        if isinstance(row, dict) and row.get("dataset") in known:
+            flag = (row.get("dataset"), row.get("demo")) in excluded
+            if row.get("excluded") is not flag:
+                row = {**row, "excluded": flag}
         out.append(row)
     return out
 
@@ -529,32 +542,47 @@ def in_session(rows, session_ends=None) -> dict:
 
 def gate_window(gate_rows, start, end) -> dict | None:
     """Seconds the gate was closed between ``start`` and ``end`` (epoch
-    seconds) and how many times it closed, from the transitions in
-    ``gate.jsonl`` (oldest first). None when the window or the history is
-    unknown. The gate is closed while the policy server infers, so this is the
-    time labelling was *not allowed*, not time the worker waited."""
+    seconds), how many times it closed, and how long its state was unknown, from
+    the transitions in ``gate.jsonl`` (oldest first). None when the window or
+    the history is unknown. The gate is closed while the policy server infers,
+    so this is the time labelling was *not allowed*, not time the worker waited.
+
+    A closure is counted when the gate goes from open (or from unknown) to
+    closed: a change of the reason code while it stays closed is not another
+    one. A transition whose ``open`` is null (the service stopped) ends the
+    interval before it: nothing is known until the next transition, so that
+    time is not counted as closed and is reported as ``unknown_s``."""
     start, end = num(start), num(end)
     steps = []
     for row in gate_rows or []:
         at = num(row.get("at")) if isinstance(row, dict) else None
         opened = dig(row, "to", "open")
-        if at is not None and isinstance(opened, bool):
-            steps.append((at, opened))
+        if at is not None:
+            steps.append((at, opened if isinstance(opened, bool) else None))
     if start is None or end is None or end <= start or not steps:
         return None
-    steps.sort()
-    closed_s = 0.0
+    steps.sort(key=lambda step: step[0])
+    closed_s = unknown_s = 0.0
     closures = 0
-    for index, (at, opened) in enumerate(steps):
+    before = None  # the state before the first transition is unknown
+    for index, (at, state) in enumerate(steps):
+        if state is False and before is not False and start <= at <= end:
+            closures += 1
         stop = steps[index + 1][0] if index + 1 < len(steps) else end
-        if not opened:
-            closed_s += max(0.0, min(stop, end) - max(at, start))
-            if start <= at <= end:
-                closures += 1
+        span = max(0.0, min(stop, end) - max(at, start))
+        if state is False:
+            closed_s += span
+        elif state is None:
+            unknown_s += span
+        before = state
+    first = steps[0][0]
+    if first > start:
+        unknown_s += min(first, end) - start
     window = end - start
     return {
         "closed_s": round(closed_s, 2),
         "closures": closures,
+        "unknown_s": round(unknown_s, 2),
         "window_s": round(window, 2),
         "closed_share": round(closed_s / window, 3),
     }
@@ -580,10 +608,13 @@ def summarize(rows, *, gate=None, session_ends=None) -> dict:
         "done": states.get("done", 0),
         "failed": states.get("failed", 0),
         "retrying": states.get("mirrored", 0),
+        # ``attempts`` counts the earlier tries that failed: a done episode that
+        # needed a retry has 1 or more, a failed one (given up) 2 or more.
         "retried": sum(
             1
             for r in last
-            if (num(r.get("attempts")) or 0) >= 2
+            if (num(r.get("attempts")) or 0)
+            >= (2 if dig(r, "result", "state") == "failed" else 1)
             or (r.get("dataset"), r.get("demo")) in tried
         ),
         "superseded": superseded,
@@ -619,7 +650,8 @@ def summarize(rows, *, gate=None, session_ends=None) -> dict:
         "episode_seconds": _round(
             total(dig(r, "episode", "episode_seconds") for r in last)
         ),
-        "model_seconds": _round(total(_model_seconds(r) for r in rows)),
+        # The latest attempt of each episode, like every figure in this group.
+        "model_seconds": _round(total(_model_seconds(r) for r in last)),
         "realtime_factor": ratio(episode_s, model_s),
         "realtime_factor_n": len(both),
         "span_s": _round(span),
@@ -633,14 +665,18 @@ def summarize(rows, *, gate=None, session_ends=None) -> dict:
     kind_seconds = {k: kind_total("model_seconds", k, rows) for k in KINDS}
     kind_tokens = {k: kind_total("tokens", k, rows) for k in KINDS}
     seconds_sum = total(kind_seconds.values())
-    tokens_sum = total(kind_tokens.values())
+    # Shares are of the tokens in ``tokens_total``: the calibration (``probe``)
+    # is not part of it and has no share.
+    tokens_sum = total(kind_tokens[k] for k in PER_EPISODE_KINDS)
     for kind in KINDS:
         by_kind[kind] = {
             "requests": kind_total("requests", kind, rows),
             "seconds": _round(kind_seconds[kind]),
             "seconds_share": ratio(kind_seconds[kind], seconds_sum),
             "tokens": kind_tokens[kind],
-            "tokens_share": ratio(kind_tokens[kind], tokens_sum),
+            "tokens_share": ratio(kind_tokens[kind], tokens_sum)
+            if kind in PER_EPISODE_KINDS
+            else None,
         }
     prompts = [
         (
@@ -653,9 +689,11 @@ def summarize(rows, *, gate=None, session_ends=None) -> dict:
     prompt_sum = total(p for p, _ in prompts)
     completion_sum = total(c for _, c in prompts)
     request_totals = [
-        total(dig(r, "model", "requests", k) for k in KINDS)
+        total(dig(r, "model", "requests", k) for k in PER_EPISODE_KINDS)
         for r in last
-        if any(num(dig(r, "model", "requests", k)) is not None for k in KINDS)
+        if any(
+            num(dig(r, "model", "requests", k)) is not None for k in PER_EPISODE_KINDS
+        )
     ]
     model = {
         "requests_per_episode": dist(request_totals),
@@ -776,7 +814,7 @@ def _episode_row(row, ends) -> dict:
         "to_first_request_s": dig(row, "timeline", "to_first_request_s"),
         "to_commit_s": dig(row, "timeline", "to_commit_s"),
         "to_verdict_s": dig(row, "timeline", "to_verdict_s"),
-        "requests": total(dig(row, "model", "requests", k) for k in KINDS),
+        "requests": total(dig(row, "model", "requests", k) for k in PER_EPISODE_KINDS),
         "model_seconds": _round(_model_seconds(row)),
         "total_tokens": dig(row, "model", "total_tokens"),
         "prompt_tokens": dig(row, "model", "prompt_tokens"),
@@ -812,7 +850,7 @@ def episode_rows(rows, session_ends=None) -> list:
     return [_episode_row(r, ends) for r in last]
 
 
-def session_rows(rows, *, gate=None, session_ends=None) -> list:
+def session_rows(rows, *, session_ends=None) -> list:
     """One dict per (dataset, evaluation session), newest session first."""
     groups: dict = {}
     for row in rows:
@@ -820,7 +858,10 @@ def session_rows(rows, *, gate=None, session_ends=None) -> list:
             groups.setdefault((row.get("dataset"), row.get("session")), []).append(row)
     out = []
     for (dataset, session), members in groups.items():
-        found = summarize(members, gate=gate, session_ends=session_ends)
+        # No gate history here: the per-session table does not show it, and
+        # walking the whole history once per session costs far more than the
+        # rest of the table.
+        found = summarize(members, session_ends=session_ends)
         verdicts = found["outcome"]["verdicts"]
         out.append(
             {

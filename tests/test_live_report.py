@@ -44,7 +44,9 @@ def test_a_report_has_settings_facts_tables_and_no_path(tmp_path):
     result = report.write(c, "g__t", "s1", now=2000.0, policy={"config": "pi05"})
     assert result["written"] and result["stem"] == "g__t__s1"
     folder = report.reports_dir(c)
-    assert sorted(p.name for p in folder.iterdir()) == [
+    assert sorted(
+        p.name for p in folder.iterdir() if not p.name.startswith("index.json")
+    ) == [
         "g__t__s1.json",
         "g__t__s1.md",
         "g__t__s1.zh-CN.md",
@@ -109,7 +111,11 @@ def test_only_the_newest_reports_are_kept(tmp_path):
         session_rows(c, f"s{n}", 1000.0 + 100 * n, n=2)
         report.write(c, "g__t", f"s{n}", now=2000.0 + n)
     assert [r["session"] for r in report.listing(c)] == ["s3", "s2"]
-    names = sorted(p.name for p in report.reports_dir(c).iterdir())
+    names = sorted(
+        p.name
+        for p in report.reports_dir(c).iterdir()
+        if not p.name.startswith("index.json")
+    )
     assert len(names) == 6 and not any("s0" in n or "s1" in n for n in names)
     # A file that is not a report is never deleted.
     (report.reports_dir(c) / "notes.json").write_text("{}")
@@ -184,6 +190,8 @@ def test_the_service_writes_the_report_itself_once_the_session_is_over(env):  # 
     ctl._report_at = 0.0
     ctl._refresh(time.time(), True)  # the scan after the batch: nothing is ready
     ctl._reports(time.time())
+    ctl._report_thread.join(30)  # the check runs in its own thread
+    ctl._reports(time.time())  # the next tick announces what it wrote
     assert (e.ws / "live/reports" / f"{NAME}__run-A.json").is_file()
     assert any(
         "session report written" in m
@@ -192,6 +200,8 @@ def test_the_service_writes_the_report_itself_once_the_session_is_over(env):  # 
     before = ctl._report_at
     ctl._reports(before + 1)  # throttled
     assert ctl._report_at == before
+    # Not announced twice.
+    assert sum("session report written" in x["text"] for x in ctl.events) == 1
 
 
 def test_levi_live_report_prints_or_writes_the_same_report(tmp_path, capsys):

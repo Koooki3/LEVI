@@ -1083,7 +1083,7 @@ def cmd_report(args) -> int:
         policy = None
         if dataset and session:
             found = live_sessions.read_sessions(config.watch.roots)
-            policy = live_report.policy_of(found, dataset, session)
+            policy = live_report.policy_of(config, found, dataset, session)
         built = live_report.build(
             config,
             dataset,
@@ -1119,12 +1119,28 @@ def cmd_stats(args) -> int:
             return 0
         for item in items:
             print(f"{item['dataset']} {item['demo']}")
+            if item.get("error"):
+                print(f"  READ FAILED, would be skipped: {item['error']}")
+                continue
             for path, source in sorted(item["sources"].items()):
                 print(f"  {path:34} <- {source}")
-        print(f"dry run: {len(items)} demo(s) would be backfilled; nothing written")
-        return 0
+        bad = len(backfill.failures(items))
+        print(
+            f"dry run: {len(items) - bad} demo(s) would be backfilled"
+            + (f", {bad} could not be read" if bad else "")
+            + "; nothing written"
+        )
+        return 1 if bad else 0
     written = backfill.apply(config, items)
     print(f"backfilled {written} demo(s)")
+    bad = len(backfill.failures(items))
+    if bad:
+        print(
+            f"{bad} demo(s) skipped: their run journal could not be read "
+            "(is the store locked?); run the command again",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 

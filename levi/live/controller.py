@@ -210,6 +210,8 @@ class Controller:
         self._cpu = None
         self._cache_at = time.time()
         self._report_at = 0.0
+        self._report_thread: threading.Thread | None = None
+        self._report_events: list = []
         # Callables taking the time; a returned message is logged as an error
         # (the CLI registers the page/core watchdog here).
         self.hooks: list = []
@@ -1173,17 +1175,34 @@ class Controller:
     def _reports(self, now):
         """The report of every evaluation session that has ended and whose
         episodes are all labelled (``report.py``), checked every 30 s and
-        never while a batch runs. A record, not part of the labelling: a
-        failure here is only logged."""
+        never while a batch runs. It is a record, not part of the labelling,
+        and it can take seconds on a long history, so it runs in its own
+        thread: this tick (the GPU hand-over, ``gate.json``'s refresh) never
+        waits for it. What it wrote is announced on a later tick."""
+        while self._report_events:
+            self.event(self._report_events.pop(0))
+        busy_thread = self._report_thread
+        if busy_thread is not None and busy_thread.is_alive():
+            return
         if self.worker is not None or now - self._report_at < REPORT_EVERY_S:
             return
         self._report_at = now
         busy = {t.name for t in self.tasks if t.ready or t.waiting}
-        try:
-            for done in report.auto(self.config, self.sessions, busy, now):
-                self.event(f"session report written: {done['stem']}")
-        except Exception as exc:  # noqa: BLE001
-            self.log(f"session report failed: {exc}")
+        found = self.sessions  # replaced, never edited, on each refresh
+
+        def job():
+            try:
+                for done in report.auto(self.config, found, busy, now):
+                    self._report_events.append(
+                        f"session report written: {done['stem']}"
+                    )
+            except Exception as exc:  # noqa: BLE001
+                self.log(f"session report failed: {exc}")
+
+        self._report_thread = threading.Thread(
+            target=job, name="live-reports", daemon=True
+        )
+        self._report_thread.start()
 
     # --- status ------------------------------------------------------------------------------
 

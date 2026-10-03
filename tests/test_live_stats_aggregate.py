@@ -218,10 +218,12 @@ def test_vllm_wakes_and_cold_starts_and_the_gate_window():
     }  # fmt: skip
     assert s["gpu"]["vllm_sleeps"] is None  # not recorded: unknown, not 0
     # Window 100 (first end) .. 145 (last write = 120 + 25): closed 110..118
-    # and 125..145.
+    # and 125..126; the row at 126 says nothing about the gate (a damaged
+    # transition), so the time after it is unknown rather than closed.
     window = s["gpu"]["gate_window"]
-    assert window["closed_s"] == 28.0 and window["closures"] == 2
-    assert window["window_s"] == 45.0 and window["closed_share"] == round(28 / 45, 3)
+    assert window["closed_s"] == 9.0 and window["closures"] == 2
+    assert window["window_s"] == 45.0 and window["closed_share"] == round(9 / 45, 3)
+    assert window["unknown_s"] == 19.0
     assert stats.gate_window([], 0, 10) is None
     assert stats.gate_window(gate, None, 10) is None
 

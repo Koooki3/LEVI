@@ -99,14 +99,14 @@ def test_usage_is_summed_by_kind_from_the_journals():
     # Without the batch's probes (not the first demo) and for an unknown episode.
     assert stats.usage_of([("temporal", temporal)], 3)["requests"]["probe"] == 0
     none = stats.usage_of([("temporal", temporal)], 99)
-    assert none["total_tokens"] == 0 and none["first_request_at"] is None
+    assert none["total_tokens"] is None and none["first_request_at"] is None
     assert stats.usage_of([("temporal", temporal)], 3)["probe_tokens"] is None
     # A step the server reported no usage for carries a reservation, which is
     # not spent tokens: it is kept apart and out of total and completion.
     unreported = [{"type": "model_step", "episode": 1, "phase": "coarse",
                    "usage": {"tokens": 800, "elapsed_seconds": 1.0}}]  # fmt: skip
     got = stats.usage_of([("temporal", unreported)], 1)
-    assert got["total_tokens"] == 0 and got["prompt_tokens"] is None
+    assert got["total_tokens"] is None and got["prompt_tokens"] is None
     assert got["completion_tokens"] is None
     assert got["reserved_tokens"] == 800 and got["unreported_steps"] == 1
 

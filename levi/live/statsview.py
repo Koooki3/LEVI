@@ -48,14 +48,17 @@ def records(live_dir) -> list:
     return rows
 
 
-def session_ends(config) -> dict:
+def session_ends(config, include_excluded=False) -> dict:
     """``{(dataset, session): latest completed_at}`` over every demo the
     datasets' state files know, labelled or not yet: the end of a session as
-    far as the service has seen it."""
+    far as the service has seen it. Episodes a person removed do not move it
+    unless ``include_excluded``."""
     ends: dict = {}
     for name, state in mirror.list_states(config).items():
         for row in (state.get("demos") or {}).values():
             if not isinstance(row, dict):
+                continue
+            if exclusion.is_excluded(row) and not include_excluded:
                 continue
             run, stamp = row.get("run_id"), stats.num(row.get("completed_at"))
             if run and stamp is not None:
@@ -64,15 +67,50 @@ def session_ends(config) -> dict:
     return ends
 
 
-def excluded_demos(config) -> set:
-    """``{(dataset, demo)}`` a person has removed (``exclusion.py``): the state
-    files are the truth, a record only says what was so when it was written."""
-    found = set()
+def excluded_demos(config) -> tuple:
+    """``({(dataset, demo)} a person has removed, {datasets whose state could
+    be read})`` (``exclusion.py``). The state files are the truth: a record
+    only says what was so when it was written, and an episode may have been
+    restored since."""
+    found: set = set()
+    known: set = set()
     for name, state in mirror.list_states(config).items():
+        known.add(name)
         for demo, row in (state.get("demos") or {}).items():
             if isinstance(row, dict) and exclusion.is_excluded(row):
                 found.add((name, demo))
-    return found
+    return found, known
+
+
+def marked_records(config) -> list:
+    """Every record, with ``excluded`` decided by the state files."""
+    removed, known = excluded_demos(config)
+    return stats.mark_excluded(records(config.live_dir), removed, known)
+
+
+def signature(rows) -> dict:
+    """What a report is built from, cheaply: the records of a scope that
+    count (removed episodes left out), when the newest was written, and how
+    many removed demos the scope holds. Equal signature, equal report."""
+    kept = [r for r in rows if r.get("excluded") is not True]
+    stamps = [t for t in (stats.num(r.get("at")) for r in kept) if t is not None]
+    hidden = {
+        (r.get("dataset"), r.get("demo")) for r in rows if r.get("excluded") is True
+    }
+    return {
+        "records": len(kept),
+        "last_at": max(stamps) if stamps else None,
+        "excluded_demos": len(hidden),
+    }
+
+
+def signatures(config) -> dict:
+    """``{(dataset, session): signature}`` for every session with records, in
+    one pass over the records."""
+    groups: dict = {}
+    for row in marked_records(config):
+        groups.setdefault((row.get("dataset"), row.get("session")), []).append(row)
+    return {key: signature(rows) for key, rows in groups.items()}
 
 
 def gate_rows(config) -> list:
@@ -87,13 +125,40 @@ def scoped_rows(config, dataset=None, session=None, since=None, include_excluded
     """``(records, hidden)``: the records of a scope, without the episodes a
     person removed unless ``include_excluded``, and how many removed demos the
     scope holds."""
-    everything = stats.mark_excluded(records(config.live_dir), excluded_demos(config))
-    scoped = stats.select(everything, dataset, session, since)
+    scoped = stats.select(marked_records(config), dataset, session, since)
     hidden = {
         (r.get("dataset"), r.get("demo")) for r in scoped if r.get("excluded") is True
     }
     rows = scoped if include_excluded else stats.select(scoped, include_excluded=False)
     return rows, len(hidden)
+
+
+def _stamps(paths) -> tuple:
+    out = []
+    for path in paths:
+        try:
+            st = Path(path).stat()
+        except OSError:
+            out.append((str(path), None))
+        else:
+            out.append((str(path), st.st_ino, st.st_size, st.st_mtime_ns))
+    return tuple(out)
+
+
+def _inputs(config) -> tuple:
+    """A stamp of every file ``build`` reads: when none changed, neither did
+    its answer."""
+    live = config.live_dir
+    gate = [live / gating.HISTORY, live / (gating.HISTORY + ".1")]
+    try:
+        states = sorted(mirror.datasets_dir(config).glob("*.json"))
+    except OSError:
+        states = []
+    return (_stamp(live), _stamps(gate), _stamps(states))
+
+
+_BUILT: dict = {}
+BUILT_MAX = 32
 
 
 def build(
@@ -110,18 +175,32 @@ def build(
     """The statistics of a scope. ``limit`` and ``offset`` page the episode
     table (newest first); ``limit=None`` returns every episode. Episodes a
     person removed are left out unless ``include_excluded`` (the answer says
-    how many demos that hid)."""
+    how many demos that hid). The answer is kept while no input file changes,
+    so a page that polls does not recompute it."""
     now = time.time() if now is None else now
+    key = (
+        str(config.live_dir),
+        _inputs(config),
+        dataset,
+        session,
+        since,
+        limit,
+        offset,
+        bool(include_excluded),
+    )
+    cached = _BUILT.get(key)
+    if cached is not None:
+        return {**cached, "generated_at": round(now, 3)}
     rows, hidden = scoped_rows(config, dataset, session, since, include_excluded)
-    ends = session_ends(config)
+    ends = session_ends(config, include_excluded)
     gate = gate_rows(config)
     episodes = stats.episode_rows(rows, ends)
     episodes.sort(key=lambda r: -(stats.num(r.get("at")) or 0))
     total = len(episodes)
     if limit is not None:
         episodes = episodes[offset : offset + limit]
-    sessions = stats.session_rows(rows, gate=gate, session_ends=ends)
-    return {
+    sessions = stats.session_rows(rows, session_ends=ends)
+    payload = {
         "enabled": True,
         "schema": SCHEMA,
         "generated_at": round(now, 3),
@@ -141,6 +220,10 @@ def build(
             "rows": episodes,
         },
     }
+    if len(_BUILT) >= BUILT_MAX:
+        _BUILT.clear()
+    _BUILT[key] = payload
+    return payload
 
 
 def last_modified(config) -> float | None:

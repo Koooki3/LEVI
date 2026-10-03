@@ -7,7 +7,10 @@ demo's times, attempts, segment count, verdict), the run journals in the
 workspace's store (model requests, tokens and their time, read-only) and the
 committed changeset (the segment labels). A field none of these holds is
 ``null``: the settings that were in force (guideline, provider, model), the
-gate's waits, the vLLM wake times, the batch, the episode's length. Nothing is
+gate's waits, the vLLM wake times, the batch, the episode's length. A store
+that exists but cannot be read (locked, damaged) is a failure, not an empty
+journal: that demo is skipped and reported, so a later run can fill it in.
+Nothing is
 estimated or copied from today's configuration. An episode a person removed
 (``exclusion.py``) is backfilled too, with ``excluded: true``: the cost was
 real and the record stays, and the statistics leave it out by default.
@@ -30,19 +33,30 @@ NULL = "null: not recorded anywhere"
 STORE = "outputs/LEVI/workbench/agent/workbench.sqlite3"
 
 
+class Unreadable(Exception):
+    """The store could not be read right now (locked, damaged, not openable).
+    Not the same as "there is nothing to read": a record built from it would
+    have its model fields empty for good, because the demo then counts as
+    having a record."""
+
+
 def _open(workspace):
+    """The store read-only; None when the workspace has no store at all (then
+    there is no journal to find); ``Unreadable`` when it exists but cannot be
+    opened."""
     path = Path(workspace) / STORE
     if not path.is_file():
         return None
     try:
         return sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
-    except sqlite3.Error:
-        return None
+    except sqlite3.Error as exc:
+        raise Unreadable(f"store cannot be opened: {exc}") from exc
 
 
 def run_events(workspace, run_id) -> list:
     """A run's journal, oldest first, read straight from the store's SQLite
-    file in read-only mode; ``[]`` when there is none or it cannot be read."""
+    file in read-only mode. ``[]`` when there is none (no such run, no store);
+    ``Unreadable`` when the store could not be read."""
     if not run_id:
         return []
     db = _open(workspace)
@@ -55,25 +69,28 @@ def run_events(workspace, run_id) -> list:
                 "SELECT seq,body FROM events WHERE run_id=? ORDER BY seq", (run_id,)
             )
         ]
-    except (sqlite3.Error, ValueError):
-        return []
+    except (sqlite3.Error, ValueError) as exc:
+        raise Unreadable(f"run journal cannot be read: {exc}") from exc
     finally:
         db.close()
 
 
 def change_labels(workspace, changeset, episode) -> dict | None:
     """``{subtask_id: count}`` of the segments a committed changeset gave one
-    episode; None when the changeset cannot be read."""
+    episode; None when there is no such changeset; ``Unreadable`` when the
+    store could not be read."""
+    if not changeset:
+        return None
     db = _open(workspace)
-    if db is None or not changeset:
+    if db is None:
         return None
     try:
         row = db.execute(
             "SELECT body FROM records WHERE kind='changes' AND id=?", (changeset,)
         ).fetchone()
         proposals = json.loads(row[0]).get("proposals") if row else None
-    except (sqlite3.Error, ValueError, AttributeError):
-        return None
+    except (sqlite3.Error, ValueError, AttributeError) as exc:
+        raise Unreadable(f"changeset cannot be read: {exc}") from exc
     finally:
         db.close()
     if not isinstance(proposals, list):
@@ -224,22 +241,43 @@ def plan(config, dataset=None, *, events=run_events, labels=change_labels) -> li
                 continue
             if (name, demo) in have:
                 continue
-            record, sources = rebuild(
-                config.workspace, name, demo, row, events=events, labels=labels
-            )
+            try:
+                record, sources = rebuild(
+                    config.workspace, name, demo, row, events=events, labels=labels
+                )
+            except Unreadable as exc:
+                # Not written, and not "no data": it is tried again next time.
+                out.append(
+                    {
+                        "dataset": name,
+                        "demo": demo,
+                        "record": None,
+                        "sources": {},
+                        "error": str(exc)[:200],
+                    }
+                )
+                continue
             out.append(
                 {"dataset": name, "demo": demo, "record": record, "sources": sources}
             )
     return out
 
 
+def failures(items) -> list:
+    """The planned demos whose journal could not be read."""
+    return [i for i in items if i.get("error") or i.get("record") is None]
+
+
 def apply(config, items) -> int:
     """Append the planned records; returns how many were written. A demo that
-    got a record since the plan was made is skipped."""
+    got a record since the plan was made, and a demo whose journal could not be
+    read (``failures``), are skipped."""
     have = {(r.get("dataset"), r.get("demo")) for r in stats.read(config.live_dir)}
     r = config.resources
     written = 0
     for item in items:
+        if item.get("error") or item.get("record") is None:
+            continue
         if (item["dataset"], item["demo"]) in have:
             continue
         stats.record(

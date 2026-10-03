@@ -19,6 +19,7 @@ import re
 import secrets
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
@@ -390,10 +391,22 @@ def restore_demo(name: str, demo: str, request: Request):
     return _restore(name, [demo])
 
 
+def _attachment(stem: str, extension: str) -> str:
+    """A ``Content-Disposition`` that is always valid: the plain ``filename``
+    holds only safe ASCII (a quote, a newline or a non-Latin-1 letter in a
+    dataset name must not break a header), and when the real name differs it
+    follows as RFC 5987 ``filename*``."""
+    plain = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("_") or "live-stats"
+    value = f'attachment; filename="{plain}.{extension}"'
+    if plain != stem:
+        value += f"; filename*=UTF-8''{quote(f'{stem}.{extension}', safe='')}"
+    return value
+
+
 def _scope(dataset, session, since):
     if dataset is not None and not DATASET.fullmatch(dataset):
         raise HTTPException(400, "Not a live dataset name")
-    if session is not None and not SESSION_ID.match(session):
+    if session is not None and not SESSION_ID.fullmatch(session):
         raise HTTPException(400, "Not a session id")
     if since is not None and not (0 <= since < 4e9):
         raise HTTPException(400, "since is epoch seconds")
@@ -464,7 +477,7 @@ def stats_export(
         body,
         media_type=EXPORTS[format],
         headers={
-            "Content-Disposition": f'attachment; filename="{stem}.{format}"',
+            "Content-Disposition": _attachment(stem, format),
             "Cache-Control": "no-store",
         },
     )

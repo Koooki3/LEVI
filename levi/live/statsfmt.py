@@ -144,7 +144,7 @@ TEXT = {
             "Per-episode figures use the newest record of each episode; token, request and gate totals count every attempt.",
             "Latency is measured from the episode's completion marker. p90 is the 90th percentile by linear interpolation.",
             "Real-time factor = total episode seconds / total model seconds (model time is the sum of request durations, not wall-clock). Above 1 means the model labels faster than the episode ran.",
-            "Labelled during the session = share of episodes whose first model request started before the last episode of their session ended; the last episode never counts.",
+            "Labelled during the session = share of episodes whose first model request started before the last episode of their session ended; the last episode can never count, so the figure is at most (n-1)/n.",
             "A dash means the figure was not measured (an older record, an episode that made no request). It is not zero.",
             "The automatic success/failure and the time segments are unreviewed; their accuracy has not been evaluated.",
         ],
@@ -245,7 +245,7 @@ TEXT = {
             "逐片段的数字取每个片段最新的一条记录；token、请求数和门控的合计包含每一次尝试。",
             "延迟从片段的完成标记算起。p90 是第 90 百分位（线性插值）。",
             "实时倍率 = 片段总秒数 ÷ 模型总秒数（模型时间是各请求耗时之和，不是墙钟）。大于 1 表示模型标注得比片段本身的时长快。",
-            "会话内标注比例 = 首个模型请求早于所属会话最后一个片段结束的片段占比；最后一个片段本身不计入。",
+            "会话内标注比例 = 首个模型请求早于所属会话最后一个片段结束的片段占比；最后一个片段本身永远不可能计入，所以最大是 (n−1)/n。",
             "“-”表示没有测到（旧记录，或该片段没有发出请求），不是 0。",
             "自动成败判定和时间片段未经人工审核，准确率没有评估过。",
         ],
@@ -289,14 +289,26 @@ def cell(value) -> str:
 # --- CSV and JSON ------------------------------------------------------------
 
 
+FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_cell(value):
+    """A cell a spreadsheet will not run as a formula: a text that starts with
+    ``= + - @`` or a tab or return gets a leading apostrophe. Numbers and
+    booleans are written as they are."""
+    if value is None:
+        return ""
+    if isinstance(value, str) and value.startswith(FORMULA_START):
+        return "'" + value
+    return value
+
+
 def to_csv(payload) -> str:
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n")
     writer.writerow(EPISODE_COLUMNS)
     for row in (payload.get("episodes") or {}).get("rows") or []:
-        writer.writerow(
-            ["" if row.get(c) is None else row.get(c) for c in EPISODE_COLUMNS]
-        )
+        writer.writerow([csv_cell(row.get(c)) for c in EPISODE_COLUMNS])
     return out.getvalue()
 
 
