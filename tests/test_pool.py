@@ -91,6 +91,9 @@ def make_demo(
     )
     meta = {
         "task_description": task or demo.parent.name,
+        # The capture records its gripper (not declared by anyone), so the
+        # scan cache of raw captures is covered by these tests.
+        "gripper_joint_names": ["robotiq_85_left_knuckle_joint"],
         "created_at": created,
         "stopped_at": created,
         "frame_count": n,
@@ -315,9 +318,10 @@ def pool_root(tmp_path_factory):
 
 
 def declare_grippers(root: Path) -> None:
-    """The fixture data records no gripper: declare one for every top-level
-    folder of the pool root, as a person would in ``pool/rules.json``, so the
-    exports these tests cover are not refused for several unknown sources."""
+    """The LeRobot fixtures record no gripper: declare one for every top-level
+    folder of the pool root that holds such a dataset, as a person would in
+    ``pool/rules.json``, so exports mixing them with the captures (which
+    record theirs) are not refused."""
     folder = scanner.settings.pool_dir()
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "rules.json").write_text(
@@ -326,7 +330,7 @@ def declare_grippers(root: Path) -> None:
                 "embodiment_declared": [
                     {"field": "gripper", "value": "robotiq_2f85", "source": p.name}
                     for p in sorted(root.iterdir())
-                    if p.is_dir()
+                    if p.is_dir() and any(p.rglob("meta/info.json"))
                 ]
             }
         )
