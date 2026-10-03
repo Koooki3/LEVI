@@ -8,12 +8,14 @@ The training pool indexes every dataset under a set of read-only folders, one ro
 
 - **Sources are read-only.** The pool only reads `LEVI_POOL_ROOTS`. Its own files live in `<workspace>/pool/`; an export goes to a new folder, written as `.<name>.partial` and renamed when complete. An export may not lie inside (or contain) any indexed source dataset, must lie inside `LEVI_EXPORT_ROOTS`, and its folder must not exist yet.
 - **Held-out episodes are never exported.** The lists in `LEVI_POOL_HELDOUT` (for example `/data/frozen/heldout.json`) are matched by path and by video sha256; every copy, filtered variant or conversion of a held-out episode is held out too. A recipe cannot include them, and the export checks again — by path, by sha256 and against the index — and refuses the whole export if one slipped into a plan. This is a refusal, not a filter default.
+- **One export holds one gripper.** When the selected episodes carry more than one known gripper, or one known gripper next to episodes whose gripper is not recorded, the whole export is refused, unless the recipe allows it (`allow_mixed_gripper`) or names `unknown` on purpose. See [Robot and gripper](#robot-gripper-action-mode-and-end-effector-frame--机器人夹爪动作模式与末端坐标系).
 - **One recorded episode counts once.** Copies are grouped (see [Grouping](#grouping-copies-variants-conversions--副本与版本归并)); an export takes the canonical member unless the recipe names only other sources.
-- **Traceable.** Every export writes `pool_export.json`: the recipe, the task order, each episode's source path, group, fingerprint, outcome and its source, policy fields (`policy_model`, `policy_checkpoint`, `policy_method`, `policy_phase`, `policy_label`) and why it was picked (`selection_stratum`, `quality_score`, `selection_reason`), per task what was asked for and what was picked (`selection`), every exclusion with its reason, the LEVI commit and the format parameters.
+- **Traceable.** Every export writes `pool_export.json`: the recipe, the task order, each episode's source path, group, fingerprint, outcome and its source, policy fields (`policy_model`, `policy_checkpoint`, `policy_method`, `policy_phase`, `policy_label`), robot, gripper, action mode and end-effector frame (`robot`, `gripper`, `action_mode`, `ee_frame`) and why it was picked (`selection_stratum`, `quality_score`, `selection_reason`), per task what was asked for and what was picked (`selection`), every exclusion with its reason, the LEVI commit and the format parameters.
 
 - **源数据只读**：只读取 `LEVI_POOL_ROOTS`；训练池自己的文件在 `<workspace>/pool/`；导出写到新目录，先写 `.<名称>.partial`，完成后改名。导出目录不能在任何已登记的源数据集内部（也不能包含源数据集），必须在 `LEVI_EXPORT_ROOTS` 之内，且事先不存在。
 - **留出（冻结测试）片段永不导出**：`LEVI_POOL_HELDOUT` 中的清单按路径和视频 sha256 匹配，留出片段的副本、过滤版本和转换结果同样视为留出。选择无法包含它们；导出时再按路径、sha256 和索引各查一遍，只要有一条混入就拒绝整个导出。
 - **同一次录制只算一次**：副本归为一组，导出默认只用规范来源。
+- **一次导出只取一种夹爪**：所选片段含有一种以上已知夹爪（或已知夹爪加上未记录夹爪的片段）时，整次导出被拒绝，除非配方明确允许（`allow_mixed_gripper`）或有意选了“未知”。见[机器人与夹爪](#robot-gripper-action-mode-and-end-effector-frame--机器人夹爪动作模式与末端坐标系)。
 - **可追溯**：每次导出写 `pool_export.json`（选择条件、任务顺序、每个片段的来源路径与指纹、排除清单及原因、LEVI commit、格式参数）。
 
 ## Settings / 设置
@@ -73,7 +75,7 @@ Skip, category and format rules are data, not code (`levi/pool/rules.py`); `<wor
 
 ### Index / 片段索引
 
-Columns of `pool/index.parquet` include `key`, `source`, `format`, `episode`, `task` (normalised) and `task_raw`, `frames`, `fps` (the nominal rate), `measured_fps` (the rate the collector measured, `collection_freq_hz`; raw captures only), `cameras`, `state_dim`/`action_dim`, `category` and `category_reason`, `data_source`, `control_mode`, the policy columns below, `date`, `robot_flag` (a rollout's own success flag), `human_label` (from any LEVI workspace under the roots, read-only), `outcome` and `outcome_source` (human label first, then the robot's flag), `nonstandard`, `exportable`, `fingerprint`, `content_hash`, `recording`, `filtered`, `group`, `canonical`, `copies`, `heldout`, `heldout_set`, `heldout_id`.
+Columns of `pool/index.parquet` include `key`, `source`, `format`, `episode`, `task` (normalised) and `task_raw`, `frames`, `fps` (the nominal rate), `measured_fps` (the rate the collector measured, `collection_freq_hz`; raw captures only), `cameras`, `state_dim`/`action_dim`, `category` and `category_reason`, `data_source`, `control_mode`, the policy columns below, the robot and gripper columns (`robot`, `gripper`, `action_mode`, `ee_frame`, `embodiment_evidence`; see [Robot and gripper](#robot-gripper-action-mode-and-end-effector-frame--机器人夹爪动作模式与末端坐标系)), `date`, `robot_flag` (a rollout's own success flag), `human_label` (from any LEVI workspace under the roots, read-only), `outcome` and `outcome_source` (human label first, then the robot's flag), `nonstandard`, `exportable`, `fingerprint`, `content_hash`, `recording`, `filtered`, `group`, `canonical`, `copies`, `heldout`, `heldout_set`, `heldout_id`.
 
 ### Which policy produced a rollout / 是哪个策略产生的 rollout
 
@@ -91,6 +93,41 @@ A rollout's `policy` used to be one value (the checkpoint name), so a direct dep
 `policy_method` is read in this order: `policy.method`, the top-level `method`, `control_mode` (`policy_rollout` = direct; `dsrl_online_rl`, `rlt_online_rl`, `sfe_online_rl`, `student_policy_rollout`), then the folder layout (`models/…` = direct, `online_rl/<method>/…`). A value the pool does not know never hides a known one further down. A teleoperation mode is not a policy method, so only rollouts get a method (or `unknown`); a human capture has all of these empty. A LeRobot rollout takes the fields of its linked raw capture (the existing conversion links, `rollout_source_demo` first), and for what that leaves empty its own `rollout_source_method` (`models` = direct), the folder in `rollout_source_demo` and `rollout_policy`.
 
 旧的 `policy` 只有一个值（检查点名），直接部署、在线 RL 和学生策略的同一检查点看起来一样。索引现在把它们分开：`policy_model`（模型配置）、`policy_checkpoint`（检查点）、`policy_method`（运行方式：`direct` 直接部署、`dsrl`、`rlt`、`sfe`、`student` 学生策略、`other`、`unknown` 未知）、`policy_phase` 和一行可读的 `policy_label`。运行方式按 `policy.method`、顶层 `method`、`control_mode`、文件夹路径的顺序判断；没有任何策略信息的 rollout 记为 `unknown`；LeRobot rollout 继承所链接原始采集的字段，缺的部分再用 `rollout_source_method` 和 `rollout_source_demo` 的路径补。旧列 `policy` 保留（检查点，否则模型），旧配方照常可用。索引版本升为 v2，旧索引会要求重新扫描。
+
+### Robot, gripper, action mode and end-effector frame / 机器人、夹爪、动作模式与末端坐标系
+
+Training on the episodes of two different grippers teaches one policy two meanings of "closed", and a state of seven numbers looks the same for both. So the index records four fields per episode, and an export refuses to mix grippers. Code: `levi/pool/embodiment.py`; nothing in it names a task.
+
+| Column | Values | Read from |
+| --- | --- | --- |
+| `robot` | `franka_fr3`, `franka_panda`, `unknown` | `robot_joint_names` in a raw capture's `metadata.json` (`fr3_joint1…`, `panda_joint1…`) |
+| `gripper` | `robotiq_2f85`, `franka_hand`, `unknown` | `gripper_joint_names` (`robotiq_85_left_knuckle_joint`; `fr3_finger_joint1/2`), `gripper.joint_name` (spacemouse captures), `gripper_state_topic` or `gripper_control.move_action_topic` under `/franka_gripper/` |
+| `action_mode` | `ee_pose_abs_next`, `ee_pose_abs_current`, `unknown` | a LEVI conversion's `meta/levi_conversion.json` (`action_semantics`: `next_state` or `state`); for a raw capture, which has no action column, the format itself: the pool's export derives the action as the next recorded pose |
+| `ee_frame` | the name a policy server declares (`franka_hand_tcp`), else `unknown` | `policy.server_metadata.ee_frame` of a rollout |
+| `embodiment_evidence` | JSON | per field, which key decided it (shown as the tooltip of the gripper cell; `conflict: …` when two rules disagree) |
+
+**`unknown` means the episode's own metadata does not say**, and nothing is guessed: not from the folder name, the source name or the task text. Two rules that give different values for one field (a Robotiq joint name next to a Franka gripper topic) make that field `unknown` and the evidence says so. A LeRobot episode converted from a raw capture the pool indexed (its `rollout_source_demo`, `processed_demos.json` or LEVI's `source_demo`) takes `robot`, `gripper` and `ee_frame` from that capture when its own files say nothing; its `action_mode` is its own (a LeRobot `info.json` does not record whether an action is the next pose, so it is `unknown` unless a conversion record says). A LeRobot dataset with no link and no record, for example an older conversion with no `processed_demos.json`, is `unknown` throughout.
+
+The evidence is a table of rules in `levi/pool/rules.py` (`embodiment`: a `version` and `rules`), data not code. Each rule is `{field, value | copy, in, key, regex}`: look at `key` (a dotted path) in `metadata` (a raw capture's `metadata.json`), `info` (`meta/info.json`), `conversion` (`meta/levi_conversion.json`) or the episode's `format`; when the text matches `regex` the field gets `value` (or, with `copy`, that text cleaned to `[a-z0-9_.-]`). A workspace replaces the whole table in `<workspace>/pool/rules.json` (`{"embodiment": {"version": 2, "rules": [...]}}`) to teach the pool a new gripper. A raw capture's scan signature contains a hash of the table, so changing it (or upgrading LEVI to a new table) reads every raw capture's `metadata.json` again at the next scan.
+
+**First scan after upgrading.** An index written before these columns exists asks for a rescan (`levi pool scan`, or Scan now on the page) and the page shows that message until then. The scan re-reads every raw capture's metadata (not the videos) once, so the first scan after the product service restarts on this version is slower than the incremental ones; LeRobot datasets keep their cached content hashes.
+
+**The mix rule** (`embodiment.gripper_mix`, used by the preview, the plan and the run). Count the selected episodes per gripper class (`unknown` is its own class):
+
+| Selected | Result |
+| --- | --- |
+| one known gripper | allowed |
+| only `unknown` (older data) | allowed; the export is recorded as `gripper: unknown` |
+| more than one known gripper | refused (`mixed_gripper`, `problem: mixed_known`) unless `allow_mixed_gripper` |
+| one known gripper and some `unknown` | refused (`problem: known_and_unknown`) unless `allow_mixed_gripper` or the recipe lists `unknown` in `grippers` |
+
+The refusal lists the counts per class and the sources holding each. It is a blocking warning in the preview, the plan refuses it (nothing is written), and the run checks again from the frozen plan, so an edited plan or a resumed export cannot slip a mix through. A plan or an interrupted export made before this version carries no gripper fields and counts as `unknown`: it resumes as before. `pool_export.json` gets an `embodiment` block (`gripper`: the single class or `mixed`, `grippers`, `robots`, `action_modes`, `ee_frames` as counts, `mixed`, `allow_mixed_gripper`, `rules_version`) and every episode row carries its four fields.
+
+Why: the user's decision of 2026-10-03: when training a policy for the Robotiq gripper, human demonstrations recorded with the original Franka gripper are left out; with the field in the index the pool selects by it (`--gripper robotiq_2f85`, or Gripper in the filters) instead of by source folder.
+
+训练池为每个片段记录四个字段：`robot`（机器人）、`gripper`（夹爪：`robotiq_2f85`、`franka_hand`、`unknown`）、`action_mode`（动作模式）、`ee_frame`（末端坐标系），并拒绝一次导出混用夹爪。字段只来自片段自己的元数据（原始采集的 `metadata.json`、LeRobot 的 `meta/info.json` 和 `meta/levi_conversion.json`、策略服务器声明的 `ee_frame`），**读不出就是 `unknown`，不从目录名、来源名或任务文本推断**；两条证据互相矛盾时也记 `unknown`，并在 `embodiment_evidence` 里写明。由原始采集转换来的 LeRobot 片段在自己的文件没有说明时，从关联的原始采集取机器人、夹爪和末端坐标系（动作模式不继承）。证据规则是 `levi/pool/rules.py` 里的一张数据表（带版本号），工作区可用 `pool/rules.json` 整体替换；规则表的哈希进入原始采集的扫描签名，规则变了或升级到新表，下次扫描会重新读取元数据。旧索引会要求重新扫描，产品服务升级后的第一次扫描会读取全部原始采集的元数据（不读视频），比增量扫描慢。
+
+混合规则：所选片段含一种以上已知夹爪，或一种已知夹爪加上 `unknown`（且配方没有在 `grippers` 里明确列出 `unknown`），整次导出被拒绝，并列出各类数量和涉及的来源；`allow_mixed_gripper: true` 明确允许后放行。全是 `unknown`（旧数据）仍可导出，记录为 `gripper: unknown`。预览里是阻止导出的提示，计划阶段拒绝，执行时再查一遍。`pool_export.json` 记录 `embodiment` 块和每个片段的四个字段。原因（用户 2026-10-03 的决定）：给 Robotiq 夹爪的策略训练时，先排除 Franka 原装夹爪的人工数据；有了字段就按字段筛选，不再按来源目录。
 
 ### Grouping: copies, variants, conversions / 副本与版本归并
 
@@ -113,6 +150,8 @@ A recipe is a named, saved selection (`pool/recipes/<name>.json`):
 | --- | --- |
 | `categories`, `sources`, `formats`, `policies`, `date_from`, `date_to` | filters (`sources` also orders episodes within a task); `policies` is the old checkpoint filter |
 | `policy_models`, `policy_checkpoints`, `policy_methods` | policy filters (see above; `policy_methods` values: `direct`, `dsrl`, `rlt`, `sfe`, `student`, `other`, `unknown`); combined with AND, values within one list with OR |
+| `robots`, `grippers` | filters on the recorded robot and gripper (`unknown` selects the episodes whose metadata says nothing); one gripper per export unless `allow_mixed_gripper` |
+| `allow_mixed_gripper` | `false` by default: an export of more than one known gripper (or one known next to unknown, unless `grippers` lists `unknown`) is refused; `true` lets it through and `pool_export.json` records the mix |
 | `tasks` | ordered list of task entries `{task, count, success_ratio, strategy}` (see [Choosing episodes](#choosing-how-many-episodes-a-task-contributes--每个任务取多少片段)); the export follows this order. A bare task text (the old form) still loads: it means `count` unset, `strategy: random` |
 | `outcome` | `all`, `robot_flag_success` (the robot's flag), `verified_success` (a human label first, then the robot's flag; the preview counts `outcome_sources` and warns how many rest on the operator's key press only) or `human_verified_success` (a human label only). An episode whose human labels disagree is left out of both verified outcomes and of RECAP exports (`label_conflict`) |
 | `per_task_cap`, `seed` | the count of a task entry that has none of its own (at most this many episodes per task); `seed` makes every draw reproducible |
@@ -130,7 +169,8 @@ The preview lists episodes and frames per task and every exclusion by reason (`h
 uv run levi pool recipe save pi05-mix --category human --task "pick fork into green plate:count=60,success=50%" \
     --task "pick apple on green plate" [--per-task-cap 50 --seed 1] [--outcome verified_success] \
     [--source <id>] [--policy-model <config>] [--policy-checkpoint <name>] \
-    [--policy-method direct|dsrl|rlt|sfe|student|other|unknown] [--policy <checkpoint>] [--date-from 2026-09-01] [--exclude <episode key>] \
+    [--policy-method direct|dsrl|rlt|sfe|student|other|unknown] [--policy <checkpoint>] \
+    [--gripper robotiq_2f85|franka_hand|unknown] [--robot franka_fr3] [--allow-mixed-gripper] [--date-from 2026-09-01] [--exclude <episode key>] \
     [--task-text "pick fork into green plate=Pick the fork into the green plate"] [--file recipe.json]
 uv run levi pool recipe show pi05-mix [--format recap_value]     # the recipe and its preview
 uv run levi pool recipe episodes pi05-mix --task "<task>"          # the episodes picked for one task, with score and reason
@@ -307,7 +347,7 @@ Every removal is appended to `<workspace>/pool/deleted.jsonl` (time, job, what, 
 `/pool` (top navigation **Training pool / 训练池**, and a card on the Workbench). It is the same backend as `levi pool …`.
 
 - **Pool folders** (top): the roots, the last scan time and counts, **Scan now** with a progress bar and Cancel, and the recent jobs (scans, exports, pushes) with their status.
-- **Filters** (left): category (原始人工采集 / 原始 rollout / LEVI 处理后 / 外部 / 归档), source (searchable, counts), a task search, outcome (all / robot flag success / verified success), three policy facets (策略模型 / Policy model, 检查点 / Checkpoint, 运行方式 / How it was run: 直接部署, DSRL, RLT, SFE, 学生策略, 未知; each with counts and shown only when the selection holds rollouts) and date. *Show hidden* switches on held-out episodes (留出测试集), copies and the archive; each shows how many it hides.
+- **Filters** (left): category (原始人工采集 / 原始 rollout / LEVI 处理后 / 外部 / 归档), source (searchable, counts), a task search, outcome (all / robot flag success / verified success), a gripper facet, three policy facets (策略模型 / Policy model, 检查点 / Checkpoint, 运行方式 / How it was run: 直接部署, DSRL, RLT, SFE, 学生策略, 未知; each with counts and shown only when the selection holds rollouts) and date. *Show hidden* switches on held-out episodes (留出测试集), copies and the archive; each shows how many it hides.
 - **Tasks and episodes** (centre): the task table (episodes per category, frames, success rate, how its rollouts were run, **+ Add** puts the task at the end of the composition; a task with more than 100 available episodes, or more than the composition's balanced count, opens a chooser first: number of episodes (a number field and a slider, default the balanced count), share of successes (natural share / all successes / all failures / custom %) and how to pick (smart pick / random / in order), with a hint of the resulting split and a warning when the share cannot be met; clicking a task narrows the episode table to it) and the paged episode table with source, category, task, frames, outcome, the policy label (rollouts) and badges for held-out, copy, non-standard and not exportable. An episode of a source registered in LEVI links to the viewer; otherwise its path is shown. A held-out row has no checkbox and cannot be part of an export: the server excludes it whatever the page sends.
 - **Composition** (right): the ordered task list (drag a task by its grip, or use its up / down buttons; the order is the export order); each task shows *Picked N of M · successes a · failures b* with **Edit** (the same chooser), a warning when the requested mix or count cannot be met, and **Show picked episodes** (the episodes with quality score and why); the per-task cap (for tasks with no count of their own), seed, non-standard folders, the constraints taken from the filters, and a live preview (episodes, frames, held-out excluded, the overall success / failure mix with the category and method shares, and every other exclusion with its reason). Recipes are saved, loaded and deleted by name.
 - **Export**: format, dataset name, output directory (a folder outside `LEVI_EXPORT_ROOTS` is flagged in the field and refused by the server), fps, timing (LeRobot and RECAP: a select with a one-line explanation), camera mapping, hard links (raw capture copy only), **Dry run** and **Start export** with progress. A finished export links to its `pool_export.json` and offers **Send to remote / 传到远程**.
@@ -339,8 +379,8 @@ All routes are behind the service's UI token and same-origin check.
 | --- | --- | --- |
 | GET | `/api/levi/pool/status` | Settings, the last scan's summary, recent jobs, free space of the export volumes |
 | GET | `/api/levi/pool/sources?category=&show_archive=` | Sources with format, category, episodes, copies, held-out, exportable |
-| GET | `/api/levi/pool/tasks?category=&source=&search=&format=&show_heldout=&show_copies=&show_archive=` | Per task: episodes, frames, categories, success rate, spellings, `policy_methods`; takes the same policy filters |
-| GET | `/api/levi/pool/episodes?…&task=&outcome=&policy=&policy_model=&policy_checkpoint=&policy_method=&limit=&offset=` | The index, paged |
+| GET | `/api/levi/pool/tasks?category=&source=&search=&format=&show_heldout=&show_copies=&show_archive=` | Per task: episodes, frames, categories, success rate, spellings, `policy_methods`, `grippers`; takes the same policy, `robot` and `gripper` filters |
+| GET | `/api/levi/pool/episodes?…&task=&outcome=&policy=&policy_model=&policy_checkpoint=&policy_method=&robot=&gripper=&limit=&offset=` | The index, paged |
 | POST | `/api/levi/pool/scan?rehash=` | Start a scan job |
 | GET | `/api/levi/pool/jobs`, `/api/levi/pool/jobs/{id}` | Scan and export jobs with progress and result |
 | GET / PUT / DELETE | `/api/levi/pool/recipes`, `/api/levi/pool/recipes/{name}` | Recipe CRUD (the body's `name` must match the URL) |
@@ -348,7 +388,7 @@ All routes are behind the service's UI token and same-origin check.
 | POST | `/api/levi/pool/selection` | `{ "recipe": {…}, "task": "…" }` → the episodes picked for that task (`quality_score`, `sel_stratum`, `selection_reason`, `viewer`) and the task's report; 404 for a task the recipe lacks |
 | POST | `/api/levi/pool/suggest` | `{ "recipe": {…}, "task": "…" }` → `available`, `successes`, `failures`, `suggested_count` (the balanced default) for adding that task |
 | POST | `/api/levi/pool/export` | `{ "recipe_name": "…" or "recipe": {…}, "options": {"format", "name", "output_dir", "fps", "timing", "cameras", "camera_map", "hardlink", …}, "dry_run": false }`; 403 for a path outside `LEVI_EXPORT_ROOTS` or inside a source, 400 for an existing target or an empty selection |
-| GET | `/api/levi/pool/facets?category=&show_heldout=&show_copies=&show_archive=` | Facet counts for the page (including `policy_models`, `policy_checkpoints`, `policy_methods`) and what the toggles hide |
+| GET | `/api/levi/pool/facets?category=&show_heldout=&show_copies=&show_archive=` | Facet counts for the page (including `policy_models`, `policy_checkpoints`, `policy_methods`, `robots`, `grippers`) and what the toggles hide |
 | POST | `/api/levi/pool/jobs/{id}/cancel` | Stop a running job for good (an export's partial is removed); an interrupted or failed job becomes cancelled and loses its partial |
 | POST | `/api/levi/pool/jobs/{id}/resume` | Continue an interrupted or failed job (409 with the reason when an export's unfinished output cannot be trusted) |
 | POST | `/api/levi/pool/jobs/{id}/rerun` | Plan the job again from its saved recipe and options and start it |
