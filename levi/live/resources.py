@@ -137,6 +137,26 @@ def thread_count(pid) -> int | None:
         return None
 
 
+def fd_count(pid) -> int | None:
+    """Open file descriptors of the process (a read of /proc/<pid>/fd)."""
+    try:
+        return len(os.listdir(f"/proc/{pid}/fd"))
+    except OSError:
+        return None
+
+
+def fd_soft_limit(pid) -> int | None:
+    """The process's soft limit on open files, from /proc/<pid>/limits."""
+    try:
+        for line in Path(f"/proc/{pid}/limits").read_text().splitlines():
+            if line.startswith("Max open files"):
+                word = line.split()[3]
+                return None if word == "unlimited" else int(word)
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
 def cpu_seconds(pid) -> float | None:
     """User + system CPU seconds the process has used."""
     try:

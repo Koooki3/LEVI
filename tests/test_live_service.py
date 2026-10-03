@@ -451,6 +451,8 @@ def test_the_service_idles_cheaply_heartbeats_and_stops_on_request(tmp_path, rol
         doctor = json.loads(cli_run(tmp_path, "doctor", "--json").stdout)
         assert doctor["alive"] and doctor["processes"][0]["nice"] == 19
         assert not [w for w in doctor["warnings"] if "supervisor holds" in w]
+        assert doctor["processes"][0]["fds"] > 0 and doctor["processes"][0]["fd_limit"]
+        assert not [w for w in doctor["warnings"] if "open files" in w]
     finally:
         stopped = cli_run(tmp_path, "stop", timeout=200)
     assert stopped.returncode == 0 and "stopped" in stopped.stdout

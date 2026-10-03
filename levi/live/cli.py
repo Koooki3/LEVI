@@ -108,6 +108,7 @@ def resolve_config(args):
 
 
 LOOP_STALE_S = 300.0  # the doctor warns when the loop is this far behind
+FD_WARN_FRACTION = 0.5  # ... and when a process holds this share of its fd limit
 
 SOCKET_LIMIT = 103  # bytes in a Unix socket path (sun_path, with the NUL)
 
@@ -638,6 +639,19 @@ def nice_of(pid):
         return None
 
 
+def fd_warning(row) -> str | None:
+    """The doctor's words for a process (a row of ``diagnose``) that holds more
+    than ``FD_WARN_FRACTION`` of its open-file soft limit, else None."""
+    fds, limit = row.get("fds"), row.get("fd_limit")
+    if not fds or not limit or fds <= FD_WARN_FRACTION * limit:
+        return None
+    return (
+        f"pid {row['pid']} holds {fds} open files, over {FD_WARN_FRACTION:.0%} of its "
+        f"soft limit {limit} (a descriptor leak? `ls -l /proc/{row['pid']}/fd`); "
+        "restart the service before it runs out"
+    )
+
+
 def diagnose(config) -> dict:
     """What the service is using right now, and what looks wrong."""
     value, alive, holder = read_status(config)
@@ -656,6 +670,8 @@ def diagnose(config) -> dict:
                     "cmd": _cmd(pid),
                     "rss_mb": resources.rss_mb(pid),
                     "threads": resources.thread_count(pid),
+                    "fds": resources.fd_count(pid),
+                    "fd_limit": resources.fd_soft_limit(pid),
                     "nice": nice_of(pid),
                     "cpu_seconds": resources.cpu_seconds(pid),
                 }
@@ -668,6 +684,8 @@ def diagnose(config) -> dict:
         if sup["threads"] and sup["threads"] > 12:
             warnings.append(f"the supervisor has {sup['threads']} threads")
         for row in report["processes"]:
+            if fd_warning(row):
+                warnings.append(fd_warning(row))
             if row["nice"] is not None and row["nice"] < config.resources.nice:
                 warnings.append(
                     f"pid {row['pid']} runs at nice {row['nice']}, not {config.resources.nice}"
@@ -825,7 +843,7 @@ def cmd_doctor(args) -> int:
         print(f"service    {'running' if report['alive'] else 'NOT running'}")
         for p in report["processes"]:
             print(
-                f"  pid {p['pid']}: rss {p['rss_mb']} MiB, {p['threads']} threads, nice {p['nice']}, cpu {p['cpu_seconds']} s  {p['cmd'][:70]}"
+                f"  pid {p['pid']}: rss {p['rss_mb']} MiB, {p['threads']} threads, {p['fds']}/{p['fd_limit']} fds, nice {p['nice']}, cpu {p['cpu_seconds']} s  {p['cmd'][:70]}"
             )
         vram = (report["gpu"] or {}).get("vram") or {}
         print(

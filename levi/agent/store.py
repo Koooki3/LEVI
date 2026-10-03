@@ -4,6 +4,7 @@ A SQLite COMMIT publishes the annotation pointer and its idempotency receipt
 in the SAME transaction. Prepared directories are never visible to readers.
 """
 
+import contextlib
 import hashlib
 import json
 import os
@@ -20,6 +21,36 @@ from pathlib import Path
 from .schema import RunStatus
 
 _CONNECTIONS = threading.local()
+
+
+class _ThreadConnections(OrderedDict):
+    """One thread's cached connections, closed when the thread goes away.
+
+    ``threading.local`` drops a finished thread's values, but a dropped
+    ``sqlite3.Connection`` is not closed promptly: it sits in a reference cycle
+    with its statement cache and, once it has run statements, the file handle
+    stays open after the object is collected. Every finished run thread, episode
+    worker and heartbeat thread then left a ``workbench.sqlite3`` descriptor
+    (and its ``-wal``) behind. Closing explicitly when the cache dies releases
+    them."""
+
+    def close(self):
+        while self:
+            _, conn = self.popitem()
+            with contextlib.suppress(sqlite3.Error):
+                conn.close()
+
+    def __del__(self):
+        self.close()
+
+
+def close_thread_connections():
+    """Close this thread's cached connections now (a thread that is about to
+    finish, or a test). The next ``Store.connect`` opens a fresh one."""
+    cache = getattr(_CONNECTIONS, "items", None)
+    if cache is not None:
+        cache.close()
+
 
 _PIN: ContextVar[dict | None] = ContextVar("agent_bundle", default=None)
 
@@ -55,10 +86,10 @@ class Store:
     @contextmanager
     def connect(self):
         # Bounded thread-local connections avoid a WAL checkpoint on every
-        # polling request. sqlite connections close when their owning thread
-        # exits; no connection crosses a FastAPI worker-thread boundary.
+        # polling request. A thread's connections are closed when it exits
+        # (``_ThreadConnections``); none crosses a FastAPI worker-thread boundary.
         if not hasattr(_CONNECTIONS, "items"):
-            _CONNECTIONS.items = OrderedDict()
+            _CONNECTIONS.items = _ThreadConnections()
         cache = _CONNECTIONS.items
         path = str((self.root / "workbench.sqlite3").resolve())
         db = cache.get(path)
