@@ -8,6 +8,7 @@ pick, and without a new scan."""
 
 import json
 import shutil
+from pathlib import Path
 
 import pytest
 from test_pool import make_demo
@@ -128,7 +129,7 @@ def test_a_removed_episode_leaves_the_listings_and_recipes_with_every_copy(pool)
     (source,) = {r["source"] for k, r in episodes().items() if "liveworkspace" in k}
     mirrored = recipe.preview(Recipe(name="r", sources=[source]))
     assert mirrored["episodes"] == 1 and mirrored["excluded_in_live"] == 1
-    assert index.facets()["removed_in_live"] == 2
+    assert index.facets()["removed_in_live"] == 1  # one recording, two copies
     # Restoring brings both copies back.
     exclusion.restore(pool["config"], DATASET, ["demo_0000"])
     assert len(episodes()) == 5
@@ -185,13 +186,100 @@ def test_an_export_leaves_the_removed_recording_out_and_a_stale_plan_is_refused(
     assert len(list(copied)) == 2
 
 
-def test_a_removal_the_scan_could_not_have_seen_still_counts_for_the_mirror_keys(pool):
+def test_a_removal_names_the_mirror_and_the_rollout_it_was_linked_from(pool):
     exclusion.exclude(pool["config"], DATASET, ["demo_0001"])
     found = exclusions.workspace_exclusions(pool["config"].workspace)
-    assert set(found) == {str(pool["config"].captures_dir / DATASET / "demo_0001")}
+    assert set(found) == {
+        str(pool["config"].captures_dir / DATASET / "demo_0001"),
+        str(pool["task"] / "demo_0001"),
+    }
     assert found[next(iter(found))]["reason"] == ""
     # Another workspace, or a folder with no live marker, has none.
     assert exclusions.workspace_exclusions(pool["task"]) == {}
+
+
+def test_a_rollout_is_kept_out_when_the_scan_ran_before_the_demo_was_mirrored(
+    pool,
+):
+    """The live workspace was in the index, its mirror of demo_0001 was not:
+    the rollout original is the only row, and the removal must still find it."""
+    shutil.rmtree(pool["config"].captures_dir / DATASET / "demo_0001")
+    scanner.scan()
+    assert not any(k.endswith(f"captures/{DATASET}/demo_0001") for k in episodes())
+    exclusion.exclude(pool["config"], DATASET, ["demo_0001"])
+    original = str(pool["task"] / "demo_0001")
+    assert original not in episodes()
+    assert original not in {
+        r["key"] for r in recipe.select_detailed(Recipe(name="a")).chosen
+    }
+    reasons = {
+        e["key"]: e["reason"] for e in recipe.select_detailed(Recipe(name="a")).excluded
+    }
+    assert reasons[original] == "excluded_in_live"
+    assert index.facets()["removed_in_live"] == 1
+    job = jobs.plan_export(
+        Recipe(name="r", categories=["rollout"]),
+        export.ExportOptions(
+            format="raw_capture", name="early", output_dir=str(pool["out"] / "exports")
+        ),
+    )
+    assert original not in {e["key"] for e in job["episodes"]}
+    with pytest.raises(PermissionError, match="removed on the live page"):
+        export.refuse_removed([{"key": original}])
+
+
+def test_a_rollout_is_kept_out_when_the_source_was_replaced_after_mirroring(pool):
+    """The mirror no longer matches the rollout (different fingerprint and
+    recording, so another group): removing the mirror's episode still keeps
+    the original out."""
+    mirrored = pool["config"].captures_dir / DATASET / "demo_0001"
+    for name in ("frames.csv", "metadata.json"):  # break the hard links
+        text = (mirrored / name).read_text()
+        (mirrored / name).unlink()
+        (mirrored / name).write_text(
+            text.replace("2026-09-11", "2026-09-27")
+            + ("\n" if name == "frames.csv" else "")
+        )
+    scanner.scan()
+    shown = episodes()
+    original = str(pool["task"] / "demo_0001")
+    copy = str(mirrored)
+    assert original in shown and copy in shown
+    assert shown[original]["group"] != shown[copy]["group"]
+    exclusion.exclude(pool["config"], DATASET, ["demo_0001"])
+    shown = episodes()
+    assert original not in shown and copy not in shown
+    assert original not in {
+        r["key"] for r in recipe.select_detailed(Recipe(name="a")).chosen
+    }
+    export.refuse_removed([{"key": str(pool["task"] / "demo_0002")}])
+    with pytest.raises(PermissionError):
+        export.refuse_removed(
+            [{"key": original, "group": shown.get(original, {}).get("group")}]
+        )
+    job = jobs.plan_export(
+        Recipe(name="r", categories=["rollout"]),
+        export.ExportOptions(
+            format="raw_capture",
+            name="replaced",
+            output_dir=str(pool["out"] / "exports"),
+        ),
+    )
+    assert original not in {e["key"] for e in job["episodes"]}
+
+
+def test_a_state_file_can_only_make_the_pool_leave_out_more(pool):
+    """Whatever the file says, the paths are only compared with the index's
+    keys: an odd one matches nothing and nothing is opened."""
+    jsonio_update = mirror.jsonio.update
+    jsonio_update(
+        mirror.state_path(pool["config"], DATASET),
+        lambda v: v.update(source="/definitely/not/here"),
+    )
+    exclusion.exclude(pool["config"], DATASET, ["demo_0001"])
+    found = exclusions.workspace_exclusions(pool["config"].workspace)
+    assert str(Path("/definitely/not/here/demo_0001")) in found
+    assert len(episodes()) == 3
 
 
 def test_an_index_without_the_live_workspace_still_refuses_the_mirror_by_key(pool):

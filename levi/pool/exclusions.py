@@ -13,10 +13,17 @@ a click on the live page counts at once, without a new scan) and treats the
 whole group as removed, the same way a label or a held-out mark on one copy
 applies to every copy.
 
+The key set holds, for each removed episode, **both** the mirror's folder and
+the rollout folder the state file says it was linked from
+(``state["source"]``): the rollout copy is recognised even when the index has
+no mirror of it (the scan ran before the demo was mirrored) or the mirror is
+no longer a copy of it (the source was replaced after mirroring, so the
+fingerprints differ and the two are in different groups). The paths are only
+compared with the index's keys, never opened, so a state file can at worst
+make the pool leave out more.
+
 Only workspaces the last scan found under the pool roots (and the pool's own
-workspace) are consulted: a live workspace outside the roots has no mirror in
-the index, and its rollout copies can be recognised only after a scan has
-seen it.
+workspace) are consulted; a live workspace the scan has not seen is not.
 
 Nothing here writes.
 """
@@ -56,9 +63,12 @@ def workspace_exclusions(workspace: Path) -> dict[str, dict]:
         name = state.get("name") or file.stem
         # Where the capture is now, and where the state says it was made (the
         # workspace may have been moved).
-        captures = {workspace / "captures" / name}
+        folders = {workspace / "captures" / name}
         if state.get("capture"):
-            captures.add(Path(state["capture"]))
+            folders.add(Path(state["capture"]))
+        # The rollout task folder the mirror was linked from.
+        if state.get("source"):
+            folders.add(Path(str(state["source"])))
         for demo, row in (state.get("demos") or {}).items():
             mark = row.get("excluded") if isinstance(row, dict) else None
             if not mark:
@@ -70,8 +80,8 @@ def workspace_exclusions(workspace: Path) -> dict[str, dict]:
                 "at": mark.get("at") if isinstance(mark, dict) else None,
                 "reason": mark.get("reason") if isinstance(mark, dict) else None,
             }
-            for capture in captures:
-                found[str((capture / demo).resolve())] = info
+            for folder in folders:
+                found[str((folder / demo).resolve())] = info
     return found
 
 

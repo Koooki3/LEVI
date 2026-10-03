@@ -242,8 +242,9 @@ def facets(**filters) -> dict:
         if not toggles.get("show_copies")
         else 0,
         "archive": int((full.category == "archive").sum()),
-        # Removed on a live page (never listed, counted or exported).
-        "removed_in_live": int(full.excluded.astype(bool).sum()),
+        # Recordings removed on a live page (one per recording, not per copy;
+        # never listed, counted or exported).
+        "removed_in_live": int(full.loc[full.excluded.astype(bool), "group"].nunique()),
     }
 
 
