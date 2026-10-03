@@ -2003,8 +2003,9 @@
   "Labelling is paused and needs a person. Open the live page to see why.": "标注已暂停，需要人处理。打开实时评测页面查看原因。",
   "A run stopped for the robot's policy and needs you to press Resume.": "有运行因机器人策略推理而停下，需要你点“继续”。",
   "A plan or draft is waiting for you in the LEVI page.": "有计划或草稿在 LEVI 页面等你处理。",
-  "A run is paused for the robot's policy and will continue by itself.": "有运行因机器人策略推理而暂停，会自动继续。",
   "Labelling finished episodes in the background.": "正在后台标注已完成的片段。",
   "Running normally; nothing is being labelled right now.": "运行正常；目前没有在标注。",
-  "Open the live page": "打开实时评测页面"
+  "Open the live page": "打开实时评测页面",
+  "{n} run(s) stopped for the robot's policy will continue by themselves once the evaluation lets the model work again.": "有 {n} 个运行因机器人策略推理而停下，评测让出模型后会自己继续。",
+  "{n} run(s) stopped for the robot's policy need you to press Resume in the LEVI page.": "有 {n} 个运行因机器人策略推理而停下，需要你在 LEVI 页面点“继续”。"
 }

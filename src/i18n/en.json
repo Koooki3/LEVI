@@ -2003,8 +2003,9 @@
   "Labelling is paused and needs a person. Open the live page to see why.": "Labelling is paused and needs a person. Open the live page to see why.",
   "A run stopped for the robot's policy and needs you to press Resume.": "A run stopped for the robot's policy and needs you to press Resume.",
   "A plan or draft is waiting for you in the LEVI page.": "A plan or draft is waiting for you in the LEVI page.",
-  "A run is paused for the robot's policy and will continue by itself.": "A run is paused for the robot's policy and will continue by itself.",
   "Labelling finished episodes in the background.": "Labelling finished episodes in the background.",
   "Running normally; nothing is being labelled right now.": "Running normally; nothing is being labelled right now.",
-  "Open the live page": "Open the live page"
+  "Open the live page": "Open the live page",
+  "{n} run(s) stopped for the robot's policy will continue by themselves once the evaluation lets the model work again.": "{n} run(s) stopped for the robot's policy will continue by themselves once the evaluation lets the model work again.",
+  "{n} run(s) stopped for the robot's policy need you to press Resume in the LEVI page.": "{n} run(s) stopped for the robot's policy need you to press Resume in the LEVI page."
 }

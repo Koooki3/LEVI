@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { ago } from "@/components/pool/pool-progress";
 import {
+  blockedRunsSummary,
   clock,
   explainGate,
   gpuModeNote,
@@ -39,6 +40,44 @@ export function CopyCommand({ command }: { command: string }) {
         {copied ? t("Copied") : t("Copy")}
       </button>
     </div>
+  );
+}
+
+/** Runs the live gate stopped (a person's runs started in the LEVI page):
+ * the ones that go on by themselves are told as a quiet line, the ones that
+ * need a press on Resume get the attention colour. */
+export function BlockedRunsNote({
+  status,
+}: {
+  status: LiveStatusResponse | null;
+}) {
+  const { t } = useLocale();
+  const { waiting, needsPerson } = blockedRunsSummary(status);
+  if (!waiting && !needsPerson) return null;
+  const say = (text: string, n: number) => t(text).replace("{n}", String(n));
+  return (
+    <section
+      className={needsPerson ? "levi-live-attention" : "levi-live-blocked"}
+      role="status"
+      aria-live="polite"
+    >
+      {needsPerson > 0 && (
+        <p>
+          {say(
+            "{n} run(s) stopped for the robot's policy need you to press Resume in the LEVI page.",
+            needsPerson,
+          )}
+        </p>
+      )}
+      {waiting > 0 && (
+        <p className="levi-pool-hint">
+          {say(
+            "{n} run(s) stopped for the robot's policy will continue by themselves once the evaluation lets the model work again.",
+            waiting,
+          )}
+        </p>
+      )}
+    </section>
   );
 }
 

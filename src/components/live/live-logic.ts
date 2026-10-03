@@ -599,7 +599,6 @@ export type PulseReason =
   | "paused"
   | "blocked_person"
   | "awaiting"
-  | "blocked_waiting"
   | "annotating"
   | "idle";
 
@@ -622,8 +621,6 @@ export const PULSE_NOTES: Record<PulseReason, string> = {
   blocked_person:
     "A run stopped for the robot's policy and needs you to press Resume.",
   awaiting: "A plan or draft is waiting for you in the LEVI page.",
-  blocked_waiting:
-    "A run is paused for the robot's policy and will continue by itself.",
   annotating: "Labelling finished episodes in the background.",
   idle: "Running normally; nothing is being labelled right now.",
 };
@@ -650,7 +647,10 @@ export function livePulse(
     (need.loopStalledS != null ? 1 : 0) +
     (need.frontendFailed ? 1 : 0) +
     need.awaiting.length +
-    (blocked?.count ?? 0);
+    // A run the gate stopped that goes on by itself (`waiting`) needs nobody:
+    // every robot episode stops one, and a light that turns amber for each
+    // would teach people to ignore it. The live page lists them.
+    (blocked?.needs_person?.length ?? 0);
   const faults = fault.sessions.length + (fault.redLight ? 1 : 0);
   if (fault.active || status.fr3_red)
     return { light: "red", reason: "fault", count: faults + items };
@@ -661,9 +661,7 @@ export function livePulse(
         ? "blocked_person"
         : need.awaiting.length > 0
           ? "awaiting"
-          : (blocked?.count ?? 0) > 0
-            ? "blocked_waiting"
-            : null;
+          : null;
   if (reason) return { light: "amber", reason, count: items };
   const busy =
     service?.state === "annotating" ||
@@ -675,4 +673,16 @@ export function livePulse(
   return busy
     ? { light: "blue", reason: "annotating", count: 0 }
     : { light: "green", reason: "idle", count: 0 };
+}
+
+/** The runs the live gate stopped, as the live page tells them: those that
+ * continue by themselves and those that need a person to press Resume. */
+export function blockedRunsSummary(
+  status: LiveStatusResponse | null | undefined,
+): { waiting: number; needsPerson: number } {
+  const blocked = status?.blocked_runs;
+  return {
+    waiting: blocked?.waiting?.length ?? 0,
+    needsPerson: blocked?.needs_person?.length ?? 0,
+  };
 }

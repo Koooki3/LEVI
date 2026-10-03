@@ -63,7 +63,8 @@ export class PulseStore {
 
   /** The tab was hidden or shown (the page wires `visibilitychange` to it). */
   visibilityChanged() {
-    if (!this.running) return;
+    // Not the live workspace: nothing to ask, not even on coming back to the tab.
+    if (!this.running || this.state.enabled === false) return;
     this.clear();
     if (this.deps.visible()) void this.tick();
     else this.controller?.abort();

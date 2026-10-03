@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { livePulse, PULSE_NOTES } from "../live-logic";
+import { blockedRunsSummary, livePulse, PULSE_NOTES } from "../live-logic";
 import {
   PULSE_POLL_MS,
   PulseStore,
@@ -69,7 +69,7 @@ describe("the light of the live entry", () => {
     );
     expect(pulse).toEqual({ light: "amber", reason: "awaiting", count: 2 });
   });
-  test("amber for a blocked run, in two kinds of words", () => {
+  test("amber only for a blocked run that needs a person; one that goes on by itself is not counted", () => {
     const waiting = livePulse(
       live(
         {},
@@ -78,11 +78,7 @@ describe("the light of the live entry", () => {
       0,
       NOW,
     );
-    expect(waiting).toEqual({
-      light: "amber",
-      reason: "blocked_waiting",
-      count: 1,
-    });
+    expect(waiting).toEqual({ light: "green", reason: "idle", count: 0 });
     const person = livePulse(
       live(
         {},
@@ -94,8 +90,37 @@ describe("the light of the live entry", () => {
     expect(person).toEqual({
       light: "amber",
       reason: "blocked_person",
-      count: 2,
+      count: 1,
     });
+  });
+  test("a run that goes on by itself does not hide that labelling is going on", () => {
+    const pulse = livePulse(
+      live(
+        { state: "annotating" },
+        { blocked_runs: { count: 1, waiting: ["r1"], needs_person: [] } },
+      ),
+      0,
+      NOW,
+    );
+    expect(pulse.light).toBe("blue");
+  });
+  test("what the live page says about blocked runs", () => {
+    expect(blockedRunsSummary(live())).toEqual({ waiting: 0, needsPerson: 0 });
+    expect(blockedRunsSummary(null)).toEqual({ waiting: 0, needsPerson: 0 });
+    expect(
+      blockedRunsSummary(
+        live(
+          {},
+          {
+            blocked_runs: {
+              count: 3,
+              waiting: ["a"],
+              needs_person: ["b", "c"],
+            },
+          },
+        ),
+      ),
+    ).toEqual({ waiting: 1, needsPerson: 2 });
   });
   test("amber when the service itself is not running", () => {
     expect(livePulse(live({}, { alive: false }), 0, NOW)).toEqual({
@@ -197,13 +222,13 @@ describe("the status store", () => {
     expect(h.store.getSnapshot().enabled).toBe(false);
     expect(h.timers.length).toBe(0); // no timer, so no later request
     h.setVisible(false);
-    h.setVisible(true);
+    h.setVisible(true); // back to the tab: still nothing to ask
     await settle();
     expect(h.timers.length).toBe(0);
     off();
     h.store.subscribe(() => {})(); // a new subscriber does not ask again
     await settle();
-    expect(h.calls()).toBe(1 + 1); // only the visibility refresh above
+    expect(h.calls()).toBe(1);
   });
   test("a live workspace is refreshed every 8 s, and not while hidden", async () => {
     const h = harness([live(), live({ state: "annotating" })]);

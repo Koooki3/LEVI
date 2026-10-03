@@ -15,6 +15,7 @@ import {
 } from "@/components/live/live-logic";
 import {
   AttentionBanner,
+  BlockedRunsNote,
   ServiceOffline,
   ServicePanel,
 } from "@/components/live/service-panel";
@@ -147,6 +148,7 @@ export default function LivePage() {
       />
       <FaultBanner fault={fault} />
       {alive && <AttentionBanner need={need} />}
+      {alive && <BlockedRunsNote status={status} />}
 
       {status?.enabled === false ? (
         <section className="levi-live-offline" role="status">
