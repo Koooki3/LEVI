@@ -33,6 +33,7 @@ EPISODE_COLUMNS = (
     "verdict",
     "review",
     "in_session",
+    "excluded",
 )
 
 KEY_FIGURES = (
@@ -62,7 +63,8 @@ TEXT = {
         "failed": "failed",
         "retrying": "waiting for a retry",
         "retried": "needed a retry",
-        "excluded": "set aside by a person",
+        "excluded": "removed by a person (left out of these figures)",
+        "excluded_included": "removed by a person (included in these figures)",
         "segments": "Time segments",
         "segments_per": "time segments per episode",
         "labels": "Time-segment labels",
@@ -89,6 +91,8 @@ TEXT = {
         "prompt_share": "prompt share of tokens",
         "images_per": "images per episode (mean)",
         "external": "external tokens",
+        "probe_tokens": "request-cost calibration tokens (not in the total)",
+        "reserved": "reserved tokens for steps without server usage (steps; not in the total)",
         "by_kind": "By kind of request",
         "kind": "kind",
         "requests": "requests",
@@ -135,6 +139,8 @@ TEXT = {
             "gate_wait": "waited for a closed gate (s)",
         },
         "notes_text": [
+            "Tokens are what the server reported for the steps it reported (total = prompt + completion); calibration and reserved tokens are listed apart and not added in.",
+            "Episodes a person removed are left out unless this report says it includes them.",
             "Per-episode figures use the newest record of each episode; token, request and gate totals count every attempt.",
             "Latency is measured from the episode's completion marker. p90 is the 90th percentile by linear interpolation.",
             "Real-time factor = total episode seconds / total model seconds (model time is the sum of request durations, not wall-clock). Above 1 means the model labels faster than the episode ran.",
@@ -158,7 +164,8 @@ TEXT = {
         "failed": "失败",
         "retrying": "等待重试",
         "retried": "重试过",
-        "excluded": "被人工排除",
+        "excluded": "被人工排除（不计入这些数字）",
+        "excluded_included": "被人工排除（计入这些数字）",
         "segments": "时间片段",
         "segments_per": "每个片段的时间片段数",
         "labels": "时间片段标签",
@@ -185,6 +192,8 @@ TEXT = {
         "prompt_share": "提示词占 token 比例",
         "images_per": "每个片段的图片数（均值）",
         "external": "外部 token",
+        "probe_tokens": "请求开销校准的 token（不计入总数）",
+        "reserved": "服务器没给用量的步骤的预留 token（步数；不计入总数）",
         "by_kind": "按请求种类",
         "kind": "种类",
         "requests": "请求数",
@@ -231,6 +240,8 @@ TEXT = {
             "gate_wait": "等门控关闭的秒数",
         },
         "notes_text": [
+            "token 取服务器报告了用量的步骤的数字（总数 = prompt + completion）；校准和预留 token 单独列出，不加进总数。",
+            "被人排除的片段不计入，除非本报告注明包含它们。",
             "逐片段的数字取每个片段最新的一条记录；token、请求数和门控的合计包含每一次尝试。",
             "延迟从片段的完成标记算起。p90 是第 90 百分位（线性插值）。",
             "实时倍率 = 片段总秒数 ÷ 模型总秒数（模型时间是各请求耗时之和，不是墙钟）。大于 1 表示模型标注得比片段本身的时长快。",
@@ -347,7 +358,12 @@ def to_markdown(
         (t["failed"], num(ep.get("failed"))),
         (t["retrying"], num(ep.get("retrying"))),
         (t["retried"], num(ep.get("retried"))),
-        (t["excluded"], num(ep.get("excluded"))),
+        (
+            t["excluded_included"]
+            if payload.get("include_excluded")
+            else t["excluded"],
+            num(payload.get("excluded_demos")),
+        ),
         (t["segments"], num(segments.get("segments_total"))),
         (
             t["segments_per"],
@@ -412,6 +428,11 @@ def to_markdown(
             ),
             (t["prompt_share"], pct(m.get("prompt_share"))),
             (t["images_per"], num((m.get("images_per_episode") or {}).get("mean"))),
+            (t["probe_tokens"], num(m.get("probe_tokens"))),
+            (
+                t["reserved"],
+                f"{num(m.get('reserved_tokens'))} ({num(m.get('unreported_steps'))})",
+            ),
             (t["external"], num(m.get("external_tokens"))),
         ],
         t,

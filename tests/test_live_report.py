@@ -9,7 +9,7 @@ import time
 from test_live_pipeline import NAME, env  # noqa: F401  (fixture)
 from test_live_stats_aggregate import full
 
-from levi.live import backfill, cli, report, stats
+from levi.live import backfill, cli, mirror, report, stats
 from levi.live import config as live_config
 
 
@@ -182,6 +182,7 @@ def test_the_service_writes_the_report_itself_once_the_session_is_over(env):  # 
     e.rollouts.session("finished", run_id="run-A")
     ctl = e.run()
     ctl._report_at = 0.0
+    ctl._refresh(time.time(), True)  # the scan after the batch: nothing is ready
     ctl._reports(time.time())
     assert (e.ws / "live/reports" / f"{NAME}__run-A.json").is_file()
     assert any(
@@ -243,10 +244,12 @@ def test_backfill_rebuilds_what_survives_and_nulls_the_rest(env):  # noqa: F811
     for key in ("to_mirror_s", "to_commit_s", "to_verdict_s", "to_first_request_s"):
         assert got["timeline"][key] == was["timeline"][key], key
     assert got["model"]["requests"]["coarse"] == was["model"]["requests"]["coarse"]
-    # The batch's calibration requests were carried by its first demo and are
-    # not recoverable: left out, and said to be unknown.
-    probe = (was["model"]["tokens"]["probe"] or 0) if was["model"]["tokens"] else 0
-    assert got["model"]["total_tokens"] == was["model"]["total_tokens"] - probe
+    # The batch's calibration was carried by its first demo and is not
+    # recoverable: left out and unknown, and never part of the total.
+    assert got["model"]["total_tokens"] == was["model"]["total_tokens"]
+    assert (
+        got["model"]["probe_tokens"] is None and got["model"]["tokens"]["probe"] is None
+    )
     assert got["model"]["requests"]["probe"] is None
     # Not recorded anywhere: null, not today's configuration.
     assert got["gate"] == {k: None for k in got["gate"]}
@@ -327,3 +330,76 @@ def test_backfill_survives_missing_journals_and_damaged_state(env):  # noqa: F81
     assert backfill.change_labels(e.tmp / "nowhere", "c", 0) is None
     with contextlib.redirect_stdout(io.StringIO()):
         assert backfill.apply(e.config, list(backfill.plan(e.config))) == 2
+
+
+def test_reports_leave_removed_episodes_out_and_a_removal_updates_them(tmp_path):
+    c = synthetic(tmp_path)
+    name = "g__t__at__models"
+    session_rows(c, "s1", 1000.0, dataset=name, n=3)
+    report.write(c, name, "s1", now=2000.0)
+    path = report.reports_dir(c) / f"{report.stem(name, 's1')}.json"
+    assert json.loads(path.read_text())["summary"]["episodes"]["count"] == 3
+    mirror.jsonio.write(
+        mirror.state_path(c, name),
+        {
+            "name": name,
+            "demos": {
+                "demo_s1_0001": {"state": "done", "run_id": "s1", "excluded": {"at": 1}}
+            },
+        },
+    )
+    again = report.write(c, name, "s1", now=3000.0)
+    assert again["written"]  # a removal changes the inputs
+    data = json.loads(path.read_text())
+    assert data["summary"]["episodes"]["count"] == 2 and data["excluded_demos"] == 1
+    md = path.with_suffix(".md").read_text()
+    assert "removed by a person (left out of these figures) | 1" in md
+    assert "demo_s1_0001" not in md
+    assert report.write(c, name, "s1", now=4000.0)["written"] is False
+    forced = report.build(c, name, "s1", include_excluded=True)
+    assert forced["summary"]["episodes"]["count"] == 3
+
+
+def test_a_removed_episode_does_not_hold_a_session_report_back(env):  # noqa: F811
+    e = env()
+    for n in (0, 1):
+        e.rollouts.write(n, run_id="run-A")
+    e.rollouts.session("finished", run_id="run-A")
+    e.run()
+    state = e.state()
+    state["demos"]["demo_0001"]["state"] = "mirrored"  # not labelled ...
+    state["demos"]["demo_0001"]["excluded"] = {"at": 1.0, "by": "person"}  # ... removed
+    mirror.jsonio.write(mirror.state_path(e.config, NAME), state)
+    from levi.live import sessions
+
+    ended = sessions.read_sessions(e.config.watch.roots)
+    assert report.finished_sessions(e.config, ended) == [(NAME, "run-A")]
+    del state["demos"]["demo_0001"]["excluded"]
+    mirror.jsonio.write(mirror.state_path(e.config, NAME), state)
+    assert report.finished_sessions(e.config, ended) == []
+
+
+def test_backfill_keeps_a_removed_episode_marked_and_handles_root_marks(env):  # noqa: F811
+    e = env()
+    e.rollouts.write(0, run_id="run-A")
+    e.run()
+    (e.ws / "live/stats.jsonl").unlink()
+    state = e.state()
+    state["demos"]["demo_0000"]["excluded"] = {"at": 1.0, "by": "person"}
+    mirror.jsonio.write(mirror.state_path(e.config, NAME), state)
+    (item,) = backfill.plan(e.config, NAME)
+    assert item["record"]["excluded"] is True
+    assert "excluded" in item["sources"]["excluded"]
+    assert backfill.apply(e.config, [item]) == 1
+    # The statistics leave it out by default, and the record is still there.
+    rows = stats.read(e.ws / "live")
+    assert len(rows) == 1 and rows[0]["excluded"] is True
+    assert stats.select(rows, include_excluded=False) == []
+    # A dataset named with a root mark is found by the filter like any other.
+    marked = f"{NAME}__at__models"
+    src = e.ws / "live/datasets"
+    (src / f"{marked}.json").write_text((src / f"{NAME}.json").read_text())
+    (e.ws / "live/stats.jsonl").unlink()
+    names = {i["dataset"] for i in backfill.plan(e.config)}
+    assert names == {NAME, marked}
+    assert {i["dataset"] for i in backfill.plan(e.config, marked)} == {marked}

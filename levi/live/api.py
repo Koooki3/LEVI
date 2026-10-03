@@ -407,6 +407,7 @@ def stats_view(
     since: float | None = None,
     limit: int = 100,
     offset: int = 0,
+    include_excluded: bool = False,
 ):
     """The quantitative statistics of the labelling (docs/LIVE.md, "Statistics
     and reports"): aggregates, one row per evaluation session and a page of
@@ -423,6 +424,7 @@ def stats_view(
         since=since,
         limit=max(1, min(int(limit), statsview.MAX_PAGE)),
         offset=max(0, int(offset)),
+        include_excluded=include_excluded,
     )
 
 
@@ -433,6 +435,7 @@ def stats_export(
     session: str | None = None,
     since: float | None = None,
     lang: str = "en",
+    include_excluded: bool = False,
 ):
     """The same statistics as a download: ``csv`` (one row per episode),
     ``json`` (everything) or ``md`` (a readable report)."""
@@ -448,6 +451,7 @@ def stats_export(
         session=session,
         since=since,
         limit=MAX_EXPORT_ROWS,
+        include_excluded=include_excluded,
     )
     if format == "csv":
         body = statsfmt.to_csv(payload)

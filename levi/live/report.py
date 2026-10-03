@@ -22,7 +22,7 @@ import re
 import time
 from pathlib import Path
 
-from . import jsonio, mirror, statsfmt, statsview
+from . import exclusion, jsonio, mirror, statsfmt, statsview
 
 SCHEMA = "levi.live.report.v1"
 DIR = "reports"
@@ -133,20 +133,30 @@ def previous_of(config, dataset, before_at, skip=None) -> dict | None:
     return best[1] if best else None
 
 
-def build(config, dataset=None, session=None, *, now=None, policy=None) -> dict:
+def build(
+    config,
+    dataset=None,
+    session=None,
+    *,
+    now=None,
+    policy=None,
+    include_excluded=False,
+) -> dict:
     """Everything a report says, as one dict (the JSON file's content).
     ``policy`` is ``{config, checkpoint}`` of the evaluation session when the
     robot side's file is at hand."""
     now = time.time() if now is None else now
     payload = statsview.build(
-        config, dataset=dataset, session=session, limit=None, now=now
+        config,
+        dataset=dataset,
+        session=session,
+        limit=None,
+        include_excluded=include_excluded,
+        now=now,
     )
-    rows = [
-        r
-        for r in statsview.records(config.live_dir)
-        if (dataset is None or r.get("dataset") == dataset)
-        and (session is None or r.get("session") == session)
-    ]
+    rows, _ = statsview.scoped_rows(
+        config, dataset, session, include_excluded=include_excluded
+    )
     last = [r.get("at") for r in rows if isinstance(r.get("at"), (int, float))]
     report = {
         "schema": SCHEMA,
@@ -154,7 +164,13 @@ def build(config, dataset=None, session=None, *, now=None, policy=None) -> dict:
         "session": session,
         "generated_at": round(now, 3),
         # Inputs of the report: when they are the same the report is too.
-        "signature": {"records": len(rows), "last_at": max(last) if last else None},
+        "signature": {
+            "records": len(rows),
+            "last_at": max(last) if last else None,
+            "excluded_demos": payload["excluded_demos"],
+        },
+        "include_excluded": bool(include_excluded),
+        "excluded_demos": payload["excluded_demos"],
         "settings": {
             **settings(config),
             **({"spec": spec_of(rows)} if spec_of(rows) else {}),
@@ -292,7 +308,12 @@ def finished_sessions(config, sessions=None, busy=()) -> list:
             continue
         runs: dict = {}
         for row in (state.get("demos") or {}).values():
-            if isinstance(row, dict) and row.get("run_id"):
+            # A removed episode is not waited for (exclusion.py).
+            if (
+                isinstance(row, dict)
+                and row.get("run_id")
+                and not exclusion.is_excluded(row)
+            ):
                 runs.setdefault(str(row["run_id"]), []).append(row.get("state"))
         for run, states in runs.items():
             if any(s in OPEN for s in states) or not any(s in DONE for s in states):

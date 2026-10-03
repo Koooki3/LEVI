@@ -185,3 +185,64 @@ def test_a_workspace_without_records_answers_empty_not_error(
     assert body["enabled"] and body["summary"]["episodes"]["count"] == 0
     assert body["sessions"] == [] and body["episodes"]["rows"] == []
     assert client.get("/api/levi/live/stats/export?format=csv").text.count("\n") == 1
+
+
+def test_removed_episodes_are_hidden_by_default_and_can_be_included(live_stats):
+    client, c, _ = live_stats
+    mirror.jsonio.write(
+        mirror.state_path(c, "g__t"),
+        {
+            "name": "g__t",
+            "demos": {
+                "demo_0001": {
+                    "state": "done",
+                    "run_id": "s1",
+                    "excluded": {"at": 1.0, "by": "person", "reason": ""},
+                },
+            },
+        },
+    )
+    base = client.get("/api/levi/live/stats?dataset=g__t").json()
+    assert base["include_excluded"] is False and base["excluded_demos"] == 1
+    assert base["summary"]["episodes"]["count"] == 3
+    assert "demo_0001" not in {r["demo"] for r in base["episodes"]["rows"]}
+    both = client.get("/api/levi/live/stats?dataset=g__t&include_excluded=true").json()
+    assert both["include_excluded"] is True and both["excluded_demos"] == 1
+    assert both["summary"]["episodes"]["count"] == 4
+    assert both["summary"]["episodes"]["excluded"] == 1
+    row = next(r for r in both["episodes"]["rows"] if r["demo"] == "demo_0001")
+    assert row["excluded"] is True
+    # The exports follow the same switch.
+    csv_default = client.get("/api/levi/live/stats/export?format=csv").text
+    rows = list(csv.DictReader(io.StringIO(csv_default)))
+    assert not [r for r in rows if r["dataset"] == "g__t" and r["demo"] == "demo_0001"]
+    rows = list(
+        csv.DictReader(
+            io.StringIO(
+                client.get(
+                    "/api/levi/live/stats/export?format=csv&include_excluded=true"
+                ).text
+            )
+        )
+    )
+    assert [r for r in rows if r["dataset"] == "g__t" and r["demo"] == "demo_0001"]
+
+
+def test_a_dataset_name_with_a_root_mark_works_in_filters_exports_and_urls(
+    client, tmp_path, monkeypatch
+):
+    c = cfg(tmp_path)
+    cli.prepare(c)
+    monkeypatch.setattr(api, "_workspace", lambda: Path(c.service.workspace))
+    name = "pi05__stack__at__models"
+    for n in range(2):
+        stats.record(c.live_dir, full(f"demo_{n:04d}", n, dataset=name, session="s1"))
+    body = client.get(f"/api/levi/live/stats?dataset={name}").json()
+    assert body["datasets"] == [name] and body["summary"]["episodes"]["count"] == 2
+    export = client.get(f"/api/levi/live/stats/export?format=csv&dataset={name}")
+    assert f'filename="live-stats-{name}.csv"' in export.headers["content-disposition"]
+    # A name with characters the sanitiser would have replaced is encoded, not
+    # trusted: a slash or a leading dot is refused.
+    assert client.get("/api/levi/live/stats?dataset=%2E%2E").status_code == 400
+    assert client.get("/api/levi/live/stats?dataset=a%2Fb").status_code == 400
+    assert client.get("/api/levi/live/stats?dataset=a%20b").status_code == 200

@@ -269,3 +269,49 @@ def test_select_filters_and_the_tables_are_flat():
     assert one["episodes"] == 3 and one["tokens"] == 5400
     assert one["in_session_ratio"] == round(2 / 3, 3)
     assert one["failure"] == 3 and one["success"] == 0
+
+
+def test_tokens_follow_the_reported_figures_and_never_total_minus_prompt():
+    row = full(
+        "demo_0000",
+        0,
+        model__prompt_tokens=1500,
+        model__completion_tokens=300,
+        model__total_tokens=1800,
+        model__probe_tokens=700,
+        model__reserved_tokens=900,
+        model__unreported_steps=1,
+    )
+    other = full("demo_0001", 1, model__probe_tokens=None, model__reserved_tokens=None)
+    s = stats.summarize([row, other])
+    m = s["model"]
+    # total = prompt + completion of the reported steps; the others apart.
+    assert m["tokens_total"] == 3600 and m["prompt_tokens"] == 3000
+    assert m["completion_tokens"] == 600
+    assert m["probe_tokens"] == 700 and m["reserved_tokens"] == 900
+    assert m["unreported_steps"] == 1
+    # A record from before the fields existed gives null, not a derived number.
+    old = stats.summarize([full("demo_0002", 2, model__probe_tokens=None)])["model"]
+    assert old["probe_tokens"] is None and old["reserved_tokens"] is None
+    assert old["unreported_steps"] is None
+    # A split that was not reported is not made up from total - prompt.
+    none = stats.summarize(
+        [full("demo_0003", 3, model__completion_tokens=None, model__prompt_tokens=1500)]
+    )["model"]
+    assert none["completion_tokens"] is None and none["prompt_share"] is None
+
+
+def test_removed_episodes_are_left_out_unless_asked_for():
+    rows = [full(f"demo_{n:04d}", n) for n in range(4)]
+    removed = {("g__t", "demo_0001")}
+    marked = stats.mark_excluded(rows, removed)
+    assert marked[1]["excluded"] is True and rows[1]["excluded"] in (None, False)
+    assert [r["excluded"] for r in marked] != [True] * 4
+    kept = stats.select(marked, include_excluded=False)
+    assert [r["demo"] for r in kept] == ["demo_0000", "demo_0002", "demo_0003"]
+    assert len(stats.select(marked)) == 4
+    # A record that says so itself counts too.
+    own = full("demo_0009", 9, excluded=True)
+    assert stats.select([own], include_excluded=False) == []
+    assert stats.summarize(kept)["episodes"]["count"] == 3
+    assert stats.summarize(stats.select(marked))["episodes"]["excluded"] == 1

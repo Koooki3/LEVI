@@ -1061,6 +1061,7 @@ def cmd_exclude(args) -> int:
         if any(counts.values())
         else "counts now: none"
     )
+    return 0
 
 
 def cmd_report(args) -> int:
@@ -1070,14 +1071,26 @@ def cmd_report(args) -> int:
     config = resolve_config(args)
     dataset, session = args.dataset, args.session
     if args.format == "csv":
-        payload = statsview.build(config, dataset=dataset, session=session, limit=None)
+        payload = statsview.build(
+            config,
+            dataset=dataset,
+            session=session,
+            limit=None,
+            include_excluded=args.include_excluded,
+        )
         text = statsfmt.to_csv(payload)
     else:
         policy = None
         if dataset and session:
             found = live_sessions.read_sessions(config.watch.roots)
             policy = live_report.policy_of(found, dataset, session)
-        built = live_report.build(config, dataset, session, policy=policy)
+        built = live_report.build(
+            config,
+            dataset,
+            session,
+            policy=policy,
+            include_excluded=args.include_excluded,
+        )
         text = (
             statsfmt.to_json(built)
             if args.format == "json"
@@ -1190,6 +1203,11 @@ def build_parser():
     rep.add_argument("--format", choices=("md", "json", "csv"), default="md")
     rep.add_argument("--lang", choices=("en", "zh"), default="en")
     rep.add_argument("--out", help="write here instead of the terminal")
+    rep.add_argument(
+        "--include-excluded",
+        action="store_true",
+        help="count the episodes a person removed too (left out by default)",
+    )
     stat = sub.add_parser("stats", help="maintain the per-episode statistics")
     stat_sub = stat.add_subparsers(dest="stats_command", required=True)
     back = stat_sub.add_parser(

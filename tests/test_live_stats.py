@@ -189,7 +189,9 @@ def test_a_labelled_batch_writes_one_complete_record_per_demo(env):  # noqa: F81
         assert m["total_tokens"] > 0 and m["images"] > 0 and m["external_tokens"] == 0
         assert m["prompt_tokens"] + m["completion_tokens"] == m["total_tokens"]
         assert m["model_seconds"]["probe"] is None
-        assert sum(m["tokens"].values()) == m["total_tokens"]
+        kinds = m["tokens"]
+        assert kinds["coarse"] + kinds["refine"] + kinds["review"] == m["total_tokens"]
+        assert kinds["probe"] == m["probe_tokens"]
         assert m["tokens"]["coarse"] > 0 and m["tokens"]["review"] > 0
         # Absolute moments (later additions to the schema) and the batch.
         assert t["completed_at"] > 1e9 and t["first_request_at"] > t["completed_at"]

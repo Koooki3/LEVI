@@ -8,7 +8,9 @@ workspace's store (model requests, tokens and their time, read-only) and the
 committed changeset (the segment labels). A field none of these holds is
 ``null``: the settings that were in force (guideline, provider, model), the
 gate's waits, the vLLM wake times, the batch, the episode's length. Nothing is
-estimated or copied from today's configuration.
+estimated or copied from today's configuration. An episode a person removed
+(``exclusion.py``) is backfilled too, with ``excluded: true``: the cost was
+real and the record stays, and the statistics leave it out by default.
 
 The rebuilt record says ``backfilled: true``; its ``at`` is the moment it
 describes (the verdict, else the commit, else the mirroring), so a filter by
@@ -22,7 +24,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from . import mirror, stats
+from . import exclusion, mirror, stats
 
 NULL = "null: not recorded anywhere"
 STORE = "outputs/LEVI/workbench/agent/workbench.sqlite3"
@@ -110,7 +112,11 @@ def rebuild(workspace, name, demo, row, *, events=run_events, labels=change_labe
     put("episode_index", episode, f"{state}: episode_index")
     put("session", row.get("run_id"), f"{state}: run_id (eval.run_id of the demo)")
     put("attempts", row.get("attempts"), f"{state}: attempts")
-    put("excluded", False, "constant")
+    put(
+        "excluded",
+        exclusion.is_excluded(row),
+        f"{state}: excluded (a person's removal; the record is kept, marked)",
+    )
     put("backfilled", True, "constant")
     put("timeline.completed_at", base, f"{state}: completed_at")
     put(
@@ -157,6 +163,8 @@ def rebuild(workspace, name, demo, row, *, events=run_events, labels=change_labe
             "run journal: planned event",
         )
         for key, value in use.items():
+            if key == "probe_tokens":
+                continue  # the batch's calibration: carried by its first demo
             if key in ("requests", "model_seconds", "tokens"):
                 for kind, amount in value.items():
                     # The batch's request-cost calibrations belong to the

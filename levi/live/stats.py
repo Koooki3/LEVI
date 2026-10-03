@@ -395,9 +395,29 @@ def ratio(top, bottom, digits=3):
     return round(top / bottom, digits)
 
 
-def select(rows, dataset=None, session=None, since=None) -> list:
+def mark_excluded(rows, excluded=None) -> list:
+    """The records with ``excluded`` set to True for every demo in
+    ``excluded`` (``{(dataset, demo)}``: what the datasets' state files say a
+    person removed *since* the record was written). Other records are kept as
+    they are; no record is changed in place."""
+    excluded = excluded or set()
+    out = []
+    for row in rows:
+        if (
+            isinstance(row, dict)
+            and row.get("excluded") is not True
+            and (row.get("dataset"), row.get("demo")) in excluded
+        ):
+            row = {**row, "excluded": True}
+        out.append(row)
+    return out
+
+
+def select(rows, dataset=None, session=None, since=None, include_excluded=True) -> list:
     """The records of one dataset and/or evaluation session and/or written at
-    or after ``since`` (epoch seconds). ``None`` means no filter."""
+    or after ``since`` (epoch seconds). ``None`` means no filter. With
+    ``include_excluded`` False the records marked ``excluded`` (see
+    ``mark_excluded``) are left out."""
     out = []
     for row in rows:
         if not isinstance(row, dict):
@@ -407,6 +427,8 @@ def select(rows, dataset=None, session=None, since=None) -> list:
         if session is not None and row.get("session") != session:
             continue
         if since is not None and (num(row.get("at")) or 0) < since:
+            continue
+        if not include_excluded and row.get("excluded") is True:
             continue
         out.append(row)
     return out
@@ -638,7 +660,13 @@ def summarize(rows, *, gate=None, session_ends=None) -> dict:
     model = {
         "requests_per_episode": dist(request_totals),
         "requests": {k: by_kind[k]["requests"] for k in KINDS},
+        # What the server reported for the steps it reported (total = prompt +
+        # completion). The calibration cost and the reservations LEVI holds for
+        # steps whose server gave no usage are kept apart, never added in.
         "tokens_total": total(dig(r, "model", "total_tokens") for r in rows),
+        "probe_tokens": total(dig(r, "model", "probe_tokens") for r in rows),
+        "reserved_tokens": total(dig(r, "model", "reserved_tokens") for r in rows),
+        "unreported_steps": total(dig(r, "model", "unreported_steps") for r in rows),
         "tokens_per_episode": dist(dig(r, "model", "total_tokens") for r in last),
         "prompt_tokens": prompt_sum,
         "completion_tokens": completion_sum,
@@ -759,6 +787,7 @@ def _episode_row(row, ends) -> dict:
         "verdict": dig(row, "result", "verdict", "outcome"),
         "review": dig(row, "result", "review"),
         "in_session": during,
+        "excluded": row.get("excluded") is True,
     }
 
 
