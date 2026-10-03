@@ -155,8 +155,42 @@ uv run levi live stop                            # 只停自己的进程
 - `generic-guideline.v1.md`：标注指南。引用 rollout 的任务指令（`task_description.txt`，否则元数据的 `task_description`，否则目录名），逐步按它判断。六个子任务 id 与其他地方一致：`approach grasp transport place retreat other`。
 - `generic-definitions.v1.json` / `generic-vocabulary.v1.json`：定义（每个数据集的词表只写一次）。
 - `generic-release.v1.json`：锚定复核用的释放复核规格，**状态 `candidate`，未在任何任务上评估**。每次夹爪张开问一个问题：侧视 −2.5…+1.2 s、腕部 −1.5…+0.4 s（plates 复核用的那些帧），引用任务指令：是否夹着物体、物体是否落在指令指定的目的地、是否稳定不滑落。片段在至少 `pipeline.anchored_min_valid`（默认 1）次张开有效时判成功。它分不清需要两次放置的任务和一次放置的任务；这类任务设 `anchored_min_valid = 2`。它的准确率未知：信任判定前要先在开发数据上评估；每个判定都只能读作“自动、未审”。
+- `generic-release.v2.json`：同一个释放复核，判定还会看片段怎么结束（最后一次有效释放之后没有再抓，最后一个放置不是失败）；候选，不是默认，只适用于只放一次的任务。见[终态感知的判定](#终态感知的判定候选)。
 
 时间片段运行使用评测过的配置（粗步 0.5 s、始终精修、lean 提示、`qwen38-27b-vllm-48k-lean` 配置同时两个请求），只用侧视相机；长片段会放宽步长，使帧数不超过模型的图像上限（LEVI 拒绝悄悄稀疏化）。
+
+## 终态感知的判定（候选）
+
+默认判定只要有一次有效释放就判片段成功。策略放好物体后又把它抓走，或者在桌面上方松手后再次抓住，也会被判成功。`generic-release.v2.json` 是同一个释放复核，只是判定会看片段怎么结束。**它是候选：不是默认，不会自动切换，什么时候成为默认由人决定。**
+
+**规则。** 同时满足三条才判成功：
+
+1. 有效释放至少 `min_valid` 次（和以前一样，现在是必要条件）；
+2. 最后一次有效释放之后夹爪没有再闭合（`episode.rule = "last_valid_not_regrasped"`：物体没有被重新抓起）；
+3. 服务为该片段提交的时间片段里，起点最晚的 `place` 时间片段，结局既不是失败也不是未知（`episode.require_place = true`；没有 `place` 时间片段则不满足）。结局是未知时判定为**未定**：记为失败，界面显示“未定”。
+
+规则里没有任务用词，只用复核的回答、夹爪通道和时间片段的结局。用哪条规则是规格的字段（`episode.rule`：默认 `any_valid`，或 `last_valid_not_regrasped`；`episode.require_place`，默认 false），每个规格自己选；其他规格（`generic-release.v1.json`、plates 和 screws 的规格）的判定和以前完全一致，记录也逐字节不变。
+
+**怎么启用。** 只能通过配置；默认仍是 `generic-release.v1.json`：
+
+```toml
+[pipeline]
+anchored_spec = "generic-release.v2.json"
+```
+
+对服务重启之后规划的批次生效；数据集状态里已有的判定不重算。`anchored_min_valid` 仍然设置需要的有效释放次数。
+
+**各部分在哪里运行。** 复核运行（`levi/agent/anchored.py`）知道夹爪：它把夹爪闭合的帧记进 `anchored` 记录的 `closes`（只有规则要读它的规格才写），它的结果应用第 1、2 条（`basis`：`rule`、`last_valid_frame`、`closes_after_last_valid`、`require_place`）。时间片段是同一批里的另一个步骤，先于复核提交；实时 worker（`levi/live/judge.py`）读取它们并应用第 3 条，在判定里加上 `place_outcome`（`success`、`failure`、`unknown`；`none` 表示没有 place 时间片段；`missing` 表示没有可读的时间片段）。所以人在 LEVI 页面里可以接受的、来自复核运行的成败建议只含第 1、2 条；数据集状态和实时页面里的判定含全部三条。判定的 `rule`、`place_outcome`、`closes_after_last_valid`（以及 `basis`）出现在数据集状态和 `GET /datasets/{name}` 里，其中 `rule` 和 `place_outcome` 也写进统计记录；默认规则下的判定没有这几项。实时页面在“(有效/事件)”后写明原因：夹爪又闭合、最后一个放置是失败、未定或不存在，或者放置没法核对。
+
+**缺少输入从不当作成功。** 该片段没有已提交的时间片段（时间片段步骤失败）时，判定退回第 1、2 条，`basis.missing_inputs` 写明 `place`，成功判为未定。没有 `closes` 的复核记录同样处理（`closes`）。
+
+**证据和局限。** 规则是在一个任务上离线选出的（把物体放进盘子，一台机器人，一个模型，两个策略共 91 个计分片段，由 agent 看视频核对，人没有确认）：默认规则在 61 个失败片段里有 12 个假成功；这条规则 0 个，30 个成功一个也没漏。这是小样本、单任务，不是测得的准确率；假成功率的 95% 区间上限约 0.06。它纠正的一部分来自第二个信号盖住了复核的错误回答（物体落在目标外却答“落在目标”）；改进复核的提问和取帧是另一项改动。已知局限：
+
+- **只适用于只放一次的任务。** 放完又合理地再抓一次的任务（叠多个盘子）会被这条规则判成失败，这类任务用版本 1。
+- 放好之后策略又碰物体或闭合夹爪，会被判失败；评估过的成功片段里没有这种情况。
+- 依赖时间片段的 `place` 结局，那是模型的第二次读图；换模型、相机或任务后，两个信号不一定还在不同的片段上出错。
+- 复核回答为未知时按“无效”处理（离线评估把它们当不确定输入；评估过的片段里没有这种情况）。
+- 夹爪通道按二值命令（开/合）读取；测得宽度得到的闭合帧会滞后于命令。
 
 ## 保持轻量
 
@@ -259,7 +293,7 @@ uv run levi live stop                            # 只停自己的进程
 | `gate.vllm_wake_s`、`gate.vllm_cold_start_s` | 监督进程在启动 worker 之前 10 分钟内做的唤醒（约 0.75 秒）或冷启动的耗时。它记在做完的那个批次的第一个片段上；worker 没活可做、在等模型或等人、或失败时，会把它留给下一个 worker，超过 10 分钟的丢弃，所以不会记到几小时后的批次上。其余片段为 `null` |
 | `result.state`、`result.reason` | `done`、`failed` 或 `mirrored`（之后重试）；没做完时的原因 |
 | `result.segments`、`result.segment_labels` | 提交的时间片段数，以及按子任务 id 的计数 |
-| `result.verdict` | 自动释放复核的 `{outcome, events, valid_events, undecided}`，或 `null` |
+| `result.verdict` | 自动释放复核的 `{outcome, events, valid_events, undecided}`，或 `null`；终态感知规则下的判定另有 `rule` 和 `place_outcome` |
 | `result.review` | `auto` 或 `human`（谁提交的时间片段） |
 | `result.spec` | `{guideline, release_review, sha256}`：用到的文件和它们的哈希 |
 | `result.provider`、`result.model` | 模型配置名和服务的模型 |
@@ -309,7 +343,7 @@ uv run levi live stop                            # 只停自己的进程
 | `GET /status` | `{"enabled", "alive", "age_s", "service": <status.json 或 null>, "faults": [{"dataset", "reasons": []}], "fr3_red", "blocked_runs": {"count", "waiting", "needs_person"}}`。`alive` = pid 存在、`updated_at` 不到 15 秒、状态不是 `stopped`。 |
 | `GET /sessions` | `{"enabled", "sessions": [ {会话字段, "dataset", "fault"} ], "fr3": {…}, "active"}`，直接读机器人侧文件（≤ 64 个）。 |
 | `GET /datasets` | `{"enabled", "datasets": {名字: 行}}`（`status.json` 里的行）。 |
-| `GET /datasets/{name}` | 数据集详情：`repo_id`（登记后的 LEVI 数据集 id，否则 null）、任务文本、各状态计数（被排除的片段不计入）、`total_demos`（数据集里的片段数）、片段列表（最新在前，≤ 200；每项有 `excluded`（null）、状态、集序号、`run_id`、尝试次数、时间片段数、提交时间、自动判定 `verdict`：`outcome/events/valid_events/undecided/spec/review: "auto"/evaluated: false`）、`excluded_count` 和 `excluded_demos`（被排除的片段，行的格式相同，带 `excluded: {at, by: "person", reason}`，最新在前，全部列出，不在 200 处截断）、`incomplete`（含按原因计数）、进行中的批次、上一批、`last_error`。未知名字返回 404。 |
+| `GET /datasets/{name}` | 数据集详情：`repo_id`（登记后的 LEVI 数据集 id，否则 null）、任务文本、各状态计数（被排除的片段不计入）、`total_demos`（数据集里的片段数）、片段列表（最新在前，≤ 200；每项有 `excluded`（null）、状态、集序号、`run_id`、尝试次数、时间片段数、提交时间、自动判定 `verdict`：`outcome/events/valid_events/undecided/spec/review: "auto"/evaluated: false`，另有 `rule/place_outcome/closes_after_last_valid`，默认规则下为空）、`excluded_count` 和 `excluded_demos`（被排除的片段，行的格式相同，带 `excluded: {at, by: "person", reason}`，最新在前，全部列出，不在 200 处截断）、`incomplete`（含按原因计数）、进行中的批次、上一批、`last_error`。未知名字返回 404。 |
 | `GET /stats?dataset=&session=&since=&limit=100&offset=0&include_excluded=false` | `{"enabled", "schema": "levi.live.stats.v1", "generated_at", "scope", "datasets": [有记录的数据集名], "summary": {…各项聚合，见“统计与报告”}, "sessions": [每个（数据集，会话）一行，最新在前，≤ 200], "sessions_total", "episodes": {"total", "offset", "limit", "rows": [每个片段一行，最新在前，limit ≤ 500]}}`。`dataset` 和 `session` 只能是普通名字（否则 400）；`since` 是纪元秒。不含路径、令牌或密钥。 |
 | `GET /stats/export?format=csv\|json\|md&dataset=&session=&since=&lang=en\|zh&include_excluded=false` | 同样的统计，作为下载（`Content-Disposition: attachment`）：`csv` 每个片段一行（以 `=`、`+`、`-`、`@`、制表符或回车开头的文本单元格前面会加一个撇号，电子表格不会把它当公式执行），`json` 含全部片段的完整数据，`md` 一份可读报告。 |
 | `GET /audit?limit=50` | 自动批准主体的审计记录，最新在前，≤ 100 条，每条含 `tool`、`decision: allowed/refused`、`run_id` 等。人排除或恢复片段的行是 `principal: "local-human"`、`actor: "person"`、`tool: "episode.exclude"` 或 `"episode.restore"`、`dataset`、`demo`、可选的 `reason`、`decision: "completed"`。 |

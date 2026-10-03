@@ -193,8 +193,42 @@ The evaluated tasks are not the ones LEVI was tuned on, so nothing is task-speci
 - `generic-guideline.v1.md`: the annotation guideline. It quotes the rollout's task instruction (`task_description.txt`, else the metadata's `task_description`, else the folder name) and judges every step against it. Six subtask ids as everywhere: `approach grasp transport place retreat other`.
 - `generic-definitions.v1.json` / `generic-vocabulary.v1.json`: their definitions (written once to each dataset's own vocabulary).
 - `generic-release.v1.json`: the release-review spec for the anchored review, **status `candidate`, not evaluated on any task**. One question at every gripper opening with the side camera at −2.5…+1.2 s and the wrist camera at −1.5…+0.4 s (the frames of the plates review), quoting the task instruction: was an object held, did it land at the destination the instruction names, does it stay. The episode succeeds when at least `pipeline.anchored_min_valid` (default 1) openings are valid. It cannot tell a task that needs two placements from one; set `anchored_min_valid = 2` for such a task. Its accuracy is unknown: evaluate it on development data before trusting a verdict, and read every verdict as "automatic, unreviewed".
+- `generic-release.v2.json`: the same review with a verdict that also looks at how the episode ends (no grasp after the last valid release, last placement not a failure); a candidate, never the default, for tasks that place once. See [Terminal-aware verdict](#terminal-aware-verdict-candidate).
 
 The temporal run is the evaluated configuration (coarse 0.5 s, refinement always, lean prompt, profile `qwen38-27b-vllm-48k-lean` with two requests in flight) on the side camera, with the step widened for long episodes so the frames fit the model's image limit (LEVI refuses to thin silently).
+
+## Terminal-aware verdict (candidate)
+
+The default verdict calls an episode a success when any release was valid. That reads a policy that places the object and then picks it up again, or lets go over the table and grips it again, as a success. `generic-release.v2.json` is the same review with a verdict that looks at how the episode ends. **It is a candidate: it is not the default, nothing switches to it by itself, and a person decides when it becomes the default.**
+
+**The rule.** An episode is a success when all three hold:
+
+1. at least `min_valid` releases are valid (as before, now a necessary condition);
+2. the gripper does not close again after the last valid release (`episode.rule = "last_valid_not_regrasped"`: the object was not picked up again);
+3. the last `place` time segment the service committed for the episode (the one that starts last) is neither a failure nor unknown (`episode.require_place = true`; no `place` segment fails it). An unknown outcome makes the verdict **undecided**: it is recorded as a failure and shown as undecided.
+
+The rule names no task and reads only the review's answers, the gripper channel and the time segments' outcomes. Which rule applies is a field of the spec (`episode.rule`: `any_valid`, the default, or `last_valid_not_regrasped`; `episode.require_place`, default false), so every spec chooses its own and the others (`generic-release.v1.json`, the plates and screws specs) judge exactly as before, down to the bytes of their records.
+
+**Enabling it.** Only by the configuration; the default stays `generic-release.v1.json`:
+
+```toml
+[pipeline]
+anchored_spec = "generic-release.v2.json"
+```
+
+It applies to the batches planned after the service restarts; verdicts already in a dataset's state are not recomputed. `anchored_min_valid` still sets the number of valid releases needed.
+
+**Where each part runs.** The review run (`levi/agent/anchored.py`) knows the gripper: it records the frames where the gripper closes (`closes` in the `anchored` record, written only by a spec whose rule reads them), and its outcome applies conditions 1 and 2 (`basis`: `rule`, `last_valid_frame`, `closes_after_last_valid`, `require_place`). The time segments are the other step of the same batch, committed before the review; the live worker (`levi/live/judge.py`) reads them and applies condition 3, adding `place_outcome` (`success`, `failure`, `unknown`, `none` for no place segment, `missing` for no time segments to read) to the verdict. So the outcome proposal a person may accept from the review run in the LEVI page carries conditions 1 and 2 only; the verdict in the dataset state and on the live page carries all three. The verdict's `rule`, `place_outcome` and `closes_after_last_valid` (and `basis`) appear in the dataset state, `GET /datasets/{name}` and, for `rule` and `place_outcome`, in the statistics records; a verdict under the default rule has none of them. The live page says why after "(valid/events)": the gripper closed again, the last placement is a failure, undecided or absent, or the placement could not be checked.
+
+**A missing input is never read as a success.** With no committed time segments for the episode (the time-segment step failed for it), the verdict falls back to conditions 1 and 2, `basis.missing_inputs` names `place`, and a success is undecided. A review record made without `closes` is treated the same way (`closes`).
+
+**Evidence, and limits.** The rule was chosen offline on one task (an object into a plate, one robot, one model, 91 scored episodes of two policies, checked by an agent from the video and not confirmed by a person): the default rule had 12 false successes in 61 failures; this rule had none and missed none of the 30 successes. That is a small, single-task sample, not a measured accuracy; the 95 % interval of the false-success rate is up to 0.06. Part of what it fixes comes from the second signal covering for a wrong review answer (an object left outside the target, answered "at the target"); improving the review's question and frames is a separate change. Known limits:
+
+- **Only for tasks that place once.** A task that legitimately grasps again after a placement (stacking several plates) is judged a failure by this rule. Use version 1 there.
+- A policy that touches the object or closes the gripper after a good placement is judged a failure; the evaluated successes had no such case.
+- It depends on the time segments' `place` outcome, a second model reading; with a different model, camera or task the two signals may no longer err in different episodes.
+- Unknown review answers count as not valid (the offline evaluation treated them as unknown inputs; no evaluated episode had one).
+- The gripper channel is read as a binary command (open/close); a measured width gives closes that lag the command.
 
 ## Keeping it light
 
@@ -297,7 +331,7 @@ A person can take an episode out of a live dataset from the live page (a mishap,
 | `gate.vllm_wake_s`, `gate.vllm_cold_start_s` | the wake (about 0.75 s) or cold start the supervisor did in the 10 minutes before it started the worker. It is recorded on the first demo of the batch that finishes; a worker that finds nothing to do, waits for the model or a person, or fails passes it on to the next worker, and one older than 10 minutes is dropped, so it never lands on a batch hours later. Other demos: `null` |
 | `result.state`, `result.reason` | `done`, `failed` or `mirrored` (to be tried again); why, when not done |
 | `result.segments`, `result.segment_labels` | time segments committed, and their count per subtask id |
-| `result.verdict` | `{outcome, events, valid_events, undecided}` of the automatic release review, or `null` |
+| `result.verdict` | `{outcome, events, valid_events, undecided}` of the automatic release review, or `null`; a verdict made under the terminal-aware rule adds `rule` and `place_outcome` |
 | `result.review` | `auto` or `human` (who committed the segments) |
 | `result.spec` | `{guideline, release_review, sha256}`: the files used and their hashes |
 | `result.provider`, `result.model` | the provider profile name and the served model |
@@ -381,7 +415,7 @@ Served by the core of any workspace that has `live/workspace.json`; elsewhere ev
 | `GET /status` | `{"enabled", "alive", "age_s", "service": <status.json or null>, "faults": [{"dataset", "reasons": []}], "fr3_red", "blocked_runs": {"count", "waiting", "needs_person"}}`. `alive` = the pid exists and `updated_at` is under 15 s old and the state is not `stopped`. |
 | `GET /sessions` | `{"enabled", "sessions": [ {…session fields above…, "dataset", "fault"} ], "fr3": {…}, "active"}`, read fresh from the robot side's files (≤ 64 sessions). |
 | `GET /datasets` | `{"enabled", "datasets": {name: row}}` (the rows of `status.json`). |
-| `GET /datasets/{name}` | `{"enabled", "name", "repo_id" (LEVI dataset id once registered, else null), "group", "task_folder", "task_text", "counts": {mirrored, annotating, done, failed, skipped, rejected, stuck} (removed episodes are not counted), "total_demos" (episodes in the dataset), "demos": [ {"demo", "excluded": null, "state", "episode_index", "run_id", "completed_at", "attempts", "reason", "segments", "committed_at", "verdict": {"outcome", "events", "valid_events", "undecided", "spec", "review": "auto", "evaluated": false, "at"} | null} ] (newest first, ≤ 200), "excluded_count", "excluded_demos": [ the same rows of the removed episodes, each with `"excluded": {"at", "by": "person", "reason"}`] (newest first, all of them, not cut at 200), "incomplete": {"count", "fr3_fault", "reasons"}, "discarded", "current": batch in progress | null, "review_runs", "last_batch", "last_processed_at", "last_error", "review": "auto", "evaluated": false}`. 404 for an unknown name. |
+| `GET /datasets/{name}` | `{"enabled", "name", "repo_id" (LEVI dataset id once registered, else null), "group", "task_folder", "task_text", "counts": {mirrored, annotating, done, failed, skipped, rejected, stuck} (removed episodes are not counted), "total_demos" (episodes in the dataset), "demos": [ {"demo", "excluded": null, "state", "episode_index", "run_id", "completed_at", "attempts", "reason", "segments", "committed_at", "verdict": {"outcome", "events", "valid_events", "undecided", "rule", "place_outcome", "closes_after_last_valid" (these three are null under the default rule), "spec", "review": "auto", "evaluated": false, "at"} | null} ] (newest first, ≤ 200), "excluded_count", "excluded_demos": [ the same rows of the removed episodes, each with `"excluded": {"at", "by": "person", "reason"}`] (newest first, all of them, not cut at 200), "incomplete": {"count", "fr3_fault", "reasons"}, "discarded", "current": batch in progress | null, "review_runs", "last_batch", "last_processed_at", "last_error", "review": "auto", "evaluated": false}`. 404 for an unknown name. |
 | `GET /stats?dataset=&session=&since=&limit=100&offset=0&include_excluded=false` | `{"enabled", "schema": "levi.live.stats.v1", "generated_at", "scope", "datasets": [names that have records], "summary": {…aggregates, see "Statistics and reports"}, "sessions": [one row per (dataset, session), newest first, ≤ 200], "sessions_total", "episodes": {"total", "offset", "limit", "rows": [one row per episode, newest first, limit ≤ 500]}}`. `dataset` and `session` are plain names (anything else: 400); `since` is epoch seconds. No path, token or key is in it. |
 | `GET /stats/export?format=csv\|json\|md&dataset=&session=&since=&lang=en\|zh&include_excluded=false` | the same statistics as a download (`Content-Disposition: attachment`): `csv` one row per episode (a text cell that starts with `=`, `+`, `-`, `@`, a tab or a return gets a leading apostrophe, so a spreadsheet never runs it), `json` everything with every episode, `md` a readable report. |
 | `GET /audit?limit=50` | `{"enabled", "audit": [ {"time", "principal": "live-auto", "tool", "run_id"?, "changeset_id"?, "revision"?, "repo_id"?, "episodes"?, "decision": "allowed|refused", "reason"?} ]}` newest first, ≤ 100. Lines of a person's removal or restore have `"principal": "local-human"`, `"actor": "person"`, `"tool": "episode.exclude"` or `"episode.restore"`, `"dataset"`, `"demo"`, `"reason"?`, `"decision": "completed"`. |
