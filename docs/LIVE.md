@@ -249,7 +249,7 @@ It polls `/api/levi/live/status` and `/sessions` every 2 s while an evaluation r
 | `schema`, `at` | `levi.live.episode_stats.v1`; epoch seconds the line was written |
 | `dataset`, `demo`, `episode_index` | the live dataset (`<group>__<task>`), the rollout folder (`demo_0003`), the episode's index in the dataset view |
 | `session` | the evaluation run id the demo came from (`eval.run_id` in its metadata) |
-| `attempts`, `excluded` | tries so far; `false` (reserved for an episode a person set aside) |
+| `attempts`, `excluded` | how many earlier tries at this demo failed (0 when the first try succeeded); `false` (reserved for an episode a person set aside) |
 | `episode.frames`, `episode.episode_seconds` | frames and the episode's own length |
 | `timeline.to_mirror_s` | from `.complete` (the episode's end) until it was mirrored |
 | `timeline.to_plan_s` | until the temporal plan of the batch existed |
@@ -257,7 +257,9 @@ It polls `/api/levi/live/status` and `/sessions` every 2 s while an evaluation r
 | `timeline.to_commit_s`, `timeline.to_verdict_s` | until the segments were committed; until the automatic verdict |
 | `model.requests.{coarse,refine,review,probe}` | model requests by kind: the coarse pass, boundary refinement (one or more), the release review (one per question), and request-cost calibration (a run-level cost, carried by the first demo of the batch). Cache hits are not requests |
 | `model.model_seconds.{coarse,refine,review,probe}` | seconds the model spent on those requests (`probe` is not timed: `null`) |
-| `model.prompt_tokens`, `completion_tokens`, `total_tokens` | tokens as the server reported them; the first two are `null` when it did not report a split |
+| `model.prompt_tokens`, `completion_tokens`, `total_tokens` | tokens the server reported, summed over the requests it reported usage for (`total_tokens` = prompt + completion; the first two are `null` when no request reported). Calibration probes and reservations are not in them |
+| `model.probe_tokens` | tokens of the batch's request-cost calibration (a run-level cost, carried by the first demo of the batch only); `null` otherwise |
+| `model.reserved_tokens`, `model.unreported_steps` | for requests whose server gave no usage, LEVI holds a reservation as their cost: the sum of those reservations (not tokens spent; `null` if none) and how many such requests there were |
 | `model.images` | images sent |
 | `model.external_tokens` | always 0: nothing leaves the machine |
 | `gate.closed_wait_s`, `gate.interruptions` | seconds the worker stood down for a closed gate and how many times, for the whole batch the demo was in (a batch has several demos; each carries the batch's figure) |

@@ -211,7 +211,7 @@ uv run levi live stop                            # 只停自己的进程
 | `schema`、`at` | `levi.live.episode_stats.v1`；这一行写入的纪元秒 |
 | `dataset`、`demo`、`episode_index` | 实时数据集（`<group>__<task>`）、采集文件夹（`demo_0003`）、片段在数据集视图里的编号 |
 | `session` | 该片段所属的评测运行 id（其 metadata 里的 `eval.run_id`） |
-| `attempts`、`excluded` | 已尝试次数；`false`（留给被人排除的片段） |
+| `attempts`、`excluded` | 此前对这个片段失败了几次（第一次就成功为 0）；`false`（留给被人排除的片段） |
 | `episode.frames`、`episode.episode_seconds` | 帧数和片段自身的时长 |
 | `timeline.to_mirror_s` | 从 `.complete`（片段结束）到镜像完成 |
 | `timeline.to_plan_s` | 到该批次的时间片段计划生成 |
@@ -219,7 +219,9 @@ uv run levi live stop                            # 只停自己的进程
 | `timeline.to_commit_s`、`timeline.to_verdict_s` | 到时间片段提交；到自动判定出来 |
 | `model.requests.{coarse,refine,review,probe}` | 按种类的模型请求数：粗标、边界精修（一次或多次）、释放复核（每个问题一次）、请求开销校准（运行级的开销，记在批次的第一个片段上）。缓存命中不算请求 |
 | `model.model_seconds.{coarse,refine,review,probe}` | 模型在这些请求上花的秒数（`probe` 不计时：`null`） |
-| `model.prompt_tokens`、`completion_tokens`、`total_tokens` | 服务器报告的 token；服务器没报告拆分时前两项是 `null` |
+| `model.prompt_tokens`、`completion_tokens`、`total_tokens` | 服务器报告了用量的那些请求的 token 之和（`total_tokens` = prompt + completion；没有请求报告时前两项是 `null`）。校准探测和预留不在其中 |
+| `model.probe_tokens` | 该批次请求开销校准的 token（运行级的开销，只记在批次的第一个片段上）；其余为 `null` |
+| `model.reserved_tokens`、`model.unreported_steps` | 服务器没给用量的请求，LEVI 按预留额度记账：这些预留之和（不是实际花掉的 token；没有则 `null`）和这类请求的个数 |
 | `model.images` | 发送的图片数 |
 | `model.external_tokens` | 恒为 0：没有任何东西离开这台机器 |
 | `gate.closed_wait_s`、`gate.interruptions` | worker 因闸门关闭而让路的秒数和次数，按这个片段所在的整个批次算（一个批次有多个片段，每个都带批次的数字） |

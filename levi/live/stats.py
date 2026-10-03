@@ -23,8 +23,10 @@ a value that could not be measured is ``null``.
     timeline:  to_mirror_s, to_plan_s, to_first_request_s, to_commit_s,
                to_verdict_s -- seconds after the demo's ``.complete``
     model:     requests{coarse,refine,review,probe}, model_seconds{same},
-               prompt_tokens, completion_tokens, total_tokens, images,
-               external_tokens (always 0: no external model is used)
+               prompt_tokens, completion_tokens, total_tokens (what the
+               server reported for the steps it reported; total = prompt +
+               completion), probe_tokens, reserved_tokens, unreported_steps,
+               images, external_tokens (always 0: no external model is used)
     gate:      closed_wait_s, interruptions (for the whole batch the demo was
                in), vllm_wake_s, vllm_cold_start_s (set on the first demo of
                the batch the wake or cold start was for)
@@ -72,6 +74,9 @@ TEMPLATE = {
         "prompt_tokens": None,
         "completion_tokens": None,
         "total_tokens": None,
+        "probe_tokens": None,
+        "reserved_tokens": None,
+        "unreported_steps": None,
         "images": None,
         "external_tokens": None,
     },
@@ -191,15 +196,16 @@ def usage_of(journals, episode, probe=False) -> dict:
     the earliest request's start time for the timeline."""
     requests = {k: 0 for k in KINDS}
     seconds = {k: 0.0 for k in KINDS}
-    totals = {"prompt": 0, "total": 0, "images": 0}
-    completion_known = False
+    prompt = completion = images = reserved = unreported = probes = 0
+    reported = probed = False
     first = None
     for stage, events in journals:
         for event in events:
             kind = event.get("type")
             if kind == "request_cost_calibrated" and probe and stage == "temporal":
                 requests["probe"] += 2
-                totals["total"] += int(event.get("tokens") or 0)
+                probes += int(event.get("tokens") or 0)
+                probed = True
                 continue
             if kind != "model_step" or event.get("episode") != episode:
                 continue
@@ -210,13 +216,19 @@ def usage_of(journals, episode, probe=False) -> dict:
             took = float(usage.get("elapsed_seconds") or 0.0)
             requests[which] += 1
             seconds[which] += took
-            total = int(usage.get("tokens") or 0)
-            totals["total"] += total
-            totals["images"] += int(usage.get("images") or 0)
-            prompt = usage.get("prompt_tokens")
-            if isinstance(prompt, int) and usage.get("reported_tokens") is not None:
-                totals["prompt"] += prompt
-                completion_known = True
+            images += int(usage.get("images") or 0)
+            seen = usage.get("reported_tokens")
+            asked = usage.get("prompt_tokens")
+            if isinstance(seen, int) and isinstance(asked, int) and seen >= asked:
+                # The server said what it used: split into prompt and answer.
+                prompt += asked
+                completion += seen - asked
+                reported = True
+            else:
+                # No usage from the server: ``tokens`` is the reservation
+                # LEVI held for the call, not something that was spent.
+                unreported += 1
+                reserved += int(usage.get("tokens") or 0)
             if event.get("time") is not None:
                 begun = float(event["time"]) - took
                 first = begun if first is None else min(first, begun)
@@ -225,12 +237,13 @@ def usage_of(journals, episode, probe=False) -> dict:
         "model_seconds": {
             k: (None if k == "probe" else round(v, 2)) for k, v in seconds.items()
         },
-        "prompt_tokens": totals["prompt"] if completion_known else None,
-        "completion_tokens": (totals["total"] - totals["prompt"])
-        if completion_known
-        else None,
-        "total_tokens": totals["total"],
-        "images": totals["images"],
+        "prompt_tokens": prompt if reported else None,
+        "completion_tokens": completion if reported else None,
+        "total_tokens": prompt + completion,
+        "probe_tokens": probes if probed else None,
+        "reserved_tokens": reserved if unreported else None,
+        "unreported_steps": unreported,
+        "images": images,
         "external_tokens": 0,
         "first_request_at": first,
     }

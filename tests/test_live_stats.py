@@ -45,7 +45,8 @@ def test_the_schema_is_fixed_and_a_record_is_filled_with_nulls():
             "model.model_seconds.coarse", "model.model_seconds.refine",
             "model.model_seconds.review", "model.model_seconds.probe",
             "model.prompt_tokens", "model.completion_tokens",
-            "model.total_tokens", "model.images", "model.external_tokens",
+            "model.total_tokens", "model.probe_tokens", "model.reserved_tokens",
+            "model.unreported_steps", "model.images", "model.external_tokens",
             "gate.closed_wait_s", "gate.interruptions", "gate.vllm_wake_s",
             "gate.vllm_cold_start_s",
             "result.state", "result.reason", "result.segments",
@@ -82,21 +83,50 @@ def test_usage_is_summed_by_kind_from_the_journals():
     assert use["model_seconds"] == {
         "coarse": 4.0, "refine": 4.0, "review": 1.0, "probe": None,
     }  # fmt: skip
-    assert use["total_tokens"] == 1000 + 500 + 500 + 300 + 700
+    # The calibration probe is its own number, not part of total or completion.
+    assert use["total_tokens"] == 1000 + 500 + 500 + 300
+    assert use["probe_tokens"] == 700 and use["reserved_tokens"] is None
+    assert use["unreported_steps"] == 0
     assert use["prompt_tokens"] == 900 + 400 + 400 + 250
-    assert use["completion_tokens"] == use["total_tokens"] - use["prompt_tokens"]
+    assert use["completion_tokens"] == (1000 - 900) + 100 + 100 + 50
+    assert use["total_tokens"] == use["prompt_tokens"] + use["completion_tokens"]
     assert use["images"] == 16 and use["external_tokens"] == 0
     assert use["first_request_at"] == 106.0  # 110 - 4
     # Without the batch's probes (not the first demo) and for an unknown episode.
     assert stats.usage_of([("temporal", temporal)], 3)["requests"]["probe"] == 0
     none = stats.usage_of([("temporal", temporal)], 99)
     assert none["total_tokens"] == 0 and none["first_request_at"] is None
-    # Tokens the server did not report are not split.
+    assert stats.usage_of([("temporal", temporal)], 3)["probe_tokens"] is None
+    # A step the server reported no usage for carries a reservation, which is
+    # not spent tokens: it is kept apart and out of total and completion.
     unreported = [{"type": "model_step", "episode": 1, "phase": "coarse",
                    "usage": {"tokens": 800, "elapsed_seconds": 1.0}}]  # fmt: skip
     got = stats.usage_of([("temporal", unreported)], 1)
-    assert got["total_tokens"] == 800 and got["prompt_tokens"] is None
+    assert got["total_tokens"] == 0 and got["prompt_tokens"] is None
     assert got["completion_tokens"] is None
+    assert got["reserved_tokens"] == 800 and got["unreported_steps"] == 1
+
+
+def test_a_probe_a_reported_step_and_a_reserved_step_stay_apart():
+    """The reviewer's case: probe 5000; one step prompt 1000, total 1200; one
+    step with no usage from the server, reserved 8192."""
+    journal = [
+        {"type": "request_cost_calibrated", "tokens": 5000, "time": 1.0},
+        {"type": "model_step", "episode": 7, "phase": "coarse", "time": 5.0,
+         "usage": {"tokens": 1200, "prompt_tokens": 1000, "reported_tokens": 1200,
+                   "elapsed_seconds": 2.0}},
+        {"type": "model_step", "episode": 7, "phase": "refine", "time": 9.0,
+         "usage": {"tokens": 8192, "prompt_tokens": None, "reported_tokens": None,
+                   "elapsed_seconds": 2.0}},
+    ]  # fmt: skip
+    use = stats.usage_of([("temporal", journal)], 7, probe=True)
+    assert use["completion_tokens"] == 200 and use["prompt_tokens"] == 1000
+    assert use["total_tokens"] == 1200
+    assert use["probe_tokens"] == 5000 and use["reserved_tokens"] == 8192
+    assert use["unreported_steps"] == 1
+    # An older record without the new fields reads them as null.
+    old = stats.normalize({"model": {"total_tokens": 3}})["model"]
+    assert old["probe_tokens"] is None and old["reserved_tokens"] is None
 
 
 def test_records_rotate_and_a_damaged_file_is_read_without_crashing(tmp_path):
