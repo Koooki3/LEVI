@@ -314,6 +314,25 @@ def pool_root(tmp_path_factory):
     return root
 
 
+def declare_grippers(root: Path) -> None:
+    """The fixture data records no gripper: declare one for every top-level
+    folder of the pool root, as a person would in ``pool/rules.json``, so the
+    exports these tests cover are not refused for several unknown sources."""
+    folder = scanner.settings.pool_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "rules.json").write_text(
+        json.dumps(
+            {
+                "embodiment_declared": [
+                    {"field": "gripper", "value": "robotiq_2f85", "source": p.name}
+                    for p in sorted(root.iterdir())
+                    if p.is_dir()
+                ]
+            }
+        )
+    )
+
+
 @pytest.fixture
 def pool(pool_root, tmp_path, monkeypatch):
     """A scanned pool in a fresh workspace, exports allowed under tmp_path."""
@@ -323,6 +342,7 @@ def pool(pool_root, tmp_path, monkeypatch):
     monkeypatch.setenv("LEVI_POOL_HELDOUT", str(pool_root / "frozen.json"))
     monkeypatch.setenv("LEVI_EXPORT_ROOTS", str(tmp_path))
     monkeypatch.setattr(export, "_levi_commit", lambda: "test")
+    declare_grippers(pool_root)
     summary = scanner.scan()
     return {
         "root": pool_root,
@@ -943,6 +963,7 @@ def small(tmp_path, monkeypatch):
     monkeypatch.setenv("LEVI_POOL_HELDOUT", "none")
     monkeypatch.setenv("LEVI_EXPORT_ROOTS", str(tmp_path))
     monkeypatch.setattr(export, "_levi_commit", lambda: "test")
+    declare_grippers(root)
     scanner.scan()
     return {"root": root, "tmp": tmp_path}
 
@@ -1055,6 +1076,7 @@ def test_s3_exports_inside_the_pool_root_are_not_originals(small):
 def test_s4_raw_and_unlinked_lerobot_of_one_task_is_refused(small):
     root = small["root"]
     make_lerobot(root / "lerobot/pick_x_v", 7, task="pick x")
+    declare_grippers(root)
     scanner.scan()
     rec = Recipe(name="r", tasks=["pick x"])
     codes = {w["code"]: w for w in recipe.preview(rec)["warnings"]}
@@ -1353,6 +1375,7 @@ def slow(tmp_path, monkeypatch):
     monkeypatch.setenv("LEVI_POOL_HELDOUT", "none")
     monkeypatch.setenv("LEVI_EXPORT_ROOTS", str(tmp_path))
     monkeypatch.setattr(export, "_levi_commit", lambda: "test")
+    declare_grippers(root)
     scanner.scan()
     return {"root": root, "tmp": tmp_path}
 

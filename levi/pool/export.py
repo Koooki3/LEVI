@@ -255,6 +255,7 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "pool_roots": [str(p) for p in settings.pool_roots()],
         "heldout_lists": [str(p) for p in settings.heldout_files()],
         "heldout_disabled": settings.heldout_disabled(),
+        "embodiment_check": 1,
         "embodiment_rules": index.summary().get("embodiment_rules"),
         "warnings": [w for w in warnings if not w["blocking"]]
         + timing_mod.warnings(chosen, options.fps, options.timing),
@@ -297,15 +298,43 @@ def _embodiment_fields(ep: dict) -> dict:
 # ------------------------------------------------------------------ guards
 
 
+def verify_embodiment(episodes: list[dict]):
+    """The planned episodes' ``source`` and ``gripper`` are what the index says
+    now: a plan is data on disk, and the mix check must not rest on values
+    somebody edited. Refuses on any difference (plan again after a scan)."""
+    view = index.embodiment_view()
+    if view is None:
+        raise ValueError(
+            "The pool has not been scanned yet: run `levi pool scan` and plan again"
+        )
+    now = {
+        k: (s, g or embodiment.UNKNOWN)
+        for k, s, g in zip(view.key, view.source, view.gripper, strict=True)
+    }
+    wrong = []
+    for e in episodes:
+        have = now.get(e["key"])
+        planned = (e.get("source"), e.get("gripper") or embodiment.UNKNOWN)
+        if have != planned:
+            wrong.append(f"{e['key']} (plan: {planned[1]}, index: {have and have[1]})")
+    if wrong:
+        raise ValueError(
+            f"{len(wrong)} planned episode(s) differ from the index in source or "
+            "gripper (the plan was edited, or the index changed since it was "
+            "made; scan and plan again): " + "; ".join(wrong[:5])
+        )
+
+
 def refuse_mixed_gripper(episodes: list[dict], recipe: dict):
     """Independent of the preview: the planned episodes may hold one known
     gripper (or only unknown ones: older data), unless the recipe allows a
     mix (``allow_mixed_gripper``) or names ``unknown`` on purpose. Refuses the
     whole export. A plan from an LEVI without these fields counts as unknown."""
     mix = embodiment.gripper_mix(
-        (e.get("gripper") for e in episodes),
+        [e.get("gripper") for e in episodes],
         recipe.get("grippers"),
         bool(recipe.get("allow_mixed_gripper")),
+        [e.get("source") for e in episodes],
     )
     if mix["problem"]:
         raise ValueError(
@@ -871,7 +900,10 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
         [Path(p) for p in job["heldout_lists"]],
     )
     refuse_heldout_groups(episodes)
-    refuse_mixed_gripper(episodes, job["recipe"])
+    if job.get("embodiment_check"):
+        # A plan from before the gripper fields has nothing to check.
+        verify_embodiment(episodes)
+        refuse_mixed_gripper(episodes, job["recipe"])
     _unchanged(episodes)
     check_space(job, staging if resume else None)
     check_fps(job, options)

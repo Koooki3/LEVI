@@ -81,6 +81,11 @@ DEFAULTS: dict[str, Any] = {
     # (levi/pool/embodiment.py explains the rule format). Metadata only:
     # no folder or task name is evidence. Raise ``version`` when a rule
     # changes; the scan signature follows the table, so episodes are read again.
+    # What a person declares about a source whose metadata records nothing
+    # (levi/pool/embodiment.py ``declare``): [{"field": "gripper", "value":
+    # "franka_hand", "source": "<path relative to a pool root>", "evidence":
+    # "declared", "note": "who/when"}]. Nothing is declared by default.
+    "embodiment_declared": [],
     "embodiment": {
         "version": 1,
         "rules": [

@@ -47,6 +47,8 @@ INHERITED = (
 SOURCES = ("metadata", "info", "conversion", "format")
 _CLEAN = re.compile(r"[^a-z0-9_.-]+")
 MAX_COPY = 40
+# The names a recipe can select (recipe.py): rule values must be selectable.
+NAME = re.compile(r"[a-z0-9][a-z0-9_.-]{0,39}")
 
 
 def _table(rules: dict | None) -> dict:
@@ -65,6 +67,10 @@ def _table(rules: dict | None) -> dict:
             problem = f"in must be one of {list(SOURCES)}"
         elif ("value" in rule) == bool(rule.get("copy")):
             problem = "give exactly one of value and copy"
+        elif "value" in rule and not (
+            isinstance(rule["value"], str) and NAME.fullmatch(rule["value"])
+        ):
+            problem = f"value must look like {NAME.pattern}"
         elif rule["in"] != "format" and not rule.get("key"):
             problem = "key is required"
         elif "regex" in rule:
@@ -78,11 +84,45 @@ def _table(rules: dict | None) -> dict:
 
 
 def signature(rules: dict | None = None) -> str:
-    """A short hash of the rule table: part of a raw capture's scan signature,
-    so a changed table (or a new default) reads every episode again."""
-    table = _table(rules)
+    """A short hash of the rule table and the declarations: part of a raw
+    capture's scan signature, so a changed table (or a new default) reads
+    every episode again."""
+    table = [_table(rules), _declarations(rules)]
     text = json.dumps(table, sort_keys=True, ensure_ascii=False)
     return hashlib.md5(text.encode(), usedforsecurity=False).hexdigest()[:12]
+
+
+def _declarations(rules: dict | None) -> list[dict]:
+    """The workspace's declared embodiment of a source (``embodiment_declared``
+    in ``pool/rules.json``); empty by default. Each one is
+    ``{field, value, source, evidence?: "declared", note?}``: ``source`` is a
+    path relative to a pool root (a dataset or a folder holding captures)."""
+    items = (rules or rules_mod.DEFAULTS).get("embodiment_declared") or []
+    if not isinstance(items, list):
+        raise ValueError(  # noqa: TRY004 -- a config problem, reported as one
+            "pool rules: embodiment_declared must be a list"
+        )
+    for i, item in enumerate(items):
+        problem = None
+        source = item.get("source") if isinstance(item, dict) else None
+        if not isinstance(item, dict):
+            problem = "not an object"
+        elif item.get("field") not in FIELDS:
+            problem = f"field must be one of {list(FIELDS)}"
+        elif not (isinstance(item.get("value"), str) and NAME.fullmatch(item["value"])):
+            problem = f"value must look like {NAME.pattern}"
+        elif not (
+            isinstance(source, str)
+            and source.strip("/")
+            and not source.startswith("/")
+            and ".." not in source.split("/")
+        ):
+            problem = "source must be a path relative to a pool root"
+        elif item.get("evidence", "declared") != "declared":
+            problem = 'evidence, when given, must be "declared"'
+        if problem:
+            raise ValueError(f"pool rules: declared embodiment {i}: {problem}")
+    return items
 
 
 def _lookup(document, key: str):
@@ -124,7 +164,8 @@ def read(
     found: dict[str, dict[str, list[str]]] = {f: {} for f in FIELDS}
     for rule in _table(rules)["rules"]:
         if rule["in"] == "format":
-            text, where = fmt, f"format:{fmt}"
+            # Not read from the episode's metadata: a fixed fact of the format.
+            text, where = fmt, f"derived:format:{fmt}"
         else:
             document = sources.get(rule["in"])
             raw = _lookup(document, rule["key"]) if isinstance(document, dict) else None
@@ -162,20 +203,88 @@ def columns(result: dict) -> dict:
     }
 
 
-def inherit(result: dict, linked: dict | None) -> dict:
+def from_columns(row: dict) -> dict:
+    """The inverse of ``columns`` for a stored row."""
+    return {
+        **{f: row.get(f) or UNKNOWN for f in FIELDS},
+        "evidence": json.loads(row.get("embodiment_evidence") or "{}"),
+    }
+
+
+def _under(relative: str, prefix: str) -> bool:
+    prefix = prefix.strip("/")
+    return relative == prefix or relative.startswith(prefix + "/")
+
+
+def declare(result: dict, relative: str, rules: dict | None = None) -> dict:
+    """Apply the workspace's declarations for the source at ``relative`` (a path
+    relative to a pool root). A declaration only fills a field the metadata
+    leaves without any evidence; when it contradicts the metadata the field is
+    ``unknown`` (the evidence names both); metadata that contradicts itself
+    stays ``unknown``. Several matching declarations that disagree are
+    ``unknown`` too."""
+    declared = _declarations(rules)
+    out = dict(result)
+    evidence = dict(result["evidence"])
+    for field in FIELDS:
+        matches = [
+            d for d in declared if d["field"] == field and _under(relative, d["source"])
+        ]
+        if not matches:
+            continue
+        values = {d["value"]: d for d in matches}
+        where = "; ".join(
+            f"declared: {d['source']}" + (f" ({d['note']})" if d.get("note") else "")
+            for d in values.values()
+        )
+        have = evidence.get(field)
+        if have and have.startswith("conflict"):
+            continue
+        if len(values) > 1:
+            out[field] = UNKNOWN
+            evidence[field] = "conflict: declarations " + ", ".join(sorted(values))
+        elif have is None:
+            out[field] = next(iter(values))
+            evidence[field] = where
+        elif out[field] == next(iter(values)):
+            evidence[field] = f"{have}; declared agrees ({where[10:]})"
+        else:
+            evidence[field] = (
+                f"conflict: metadata {out[field]} ({have}); "
+                f"declared {next(iter(values))} ({where[10:]})"
+            )
+            out[field] = UNKNOWN
+    out["evidence"] = evidence
+    return out
+
+
+def inherit(result: dict, linked: list[dict] | None) -> dict:
     """A converted episode takes the robot, gripper and frame its linked raw
-    capture recorded when its own files say nothing; the action mode is the
-    dataset's own and is never copied."""
+    captures recorded when its own files say nothing; the action mode is the
+    dataset's own and is never copied. Linked captures that disagree on a
+    field leave it ``unknown`` (the evidence says so); one that says nothing
+    does not hide another that does."""
     if not linked:
         return result
     evidence = dict(result["evidence"])
     out = dict(result)
     for field in INHERITED:
-        value = linked.get(field)
-        if out[field] == UNKNOWN and value and value != UNKNOWN:
+        if out[field] != UNKNOWN:
+            continue
+        values: dict[str, str] = {}
+        for row in linked:
+            value = row.get(field)
+            if value and value != UNKNOWN:
+                values.setdefault(
+                    value,
+                    json.loads(row.get("embodiment_evidence") or "{}").get(field, ""),
+                )
+        if len(values) == 1:
+            value, was = next(iter(values.items()))
             out[field] = value
-            was = json.loads(linked.get("embodiment_evidence") or "{}").get(field, "")
             evidence[field] = f"linked capture: {was}"
+        elif values:
+            evidence[field] = "conflict: linked captures " + ", ".join(sorted(values))
     out["evidence"] = evidence
     return out
 
@@ -187,32 +296,55 @@ def gripper_mix(
     grippers,
     chosen: list[str] | None = None,
     allow: bool = False,
+    sources=None,
 ) -> dict:
     """The gripper composition of a selection and whether an export may take it.
 
     ``grippers``: one value per selected episode (``None`` counts as
     ``unknown``). ``chosen``: the recipe's own ``grippers`` list. ``allow``:
-    the recipe's ``allow_mixed_gripper``. ``problem`` is
+    the recipe's ``allow_mixed_gripper``. ``sources``: the source of each
+    episode, same order (optional). ``problem`` is
 
     - ``mixed_known``: more than one known gripper (unless ``allow``);
     - ``known_and_unknown``: one known gripper next to episodes whose gripper
       is unknown, unless the recipe names ``unknown`` on purpose or ``allow``;
-    - ``None``: one known gripper, or nothing but ``unknown`` (older data,
-      allowed and recorded as unknown)."""
+    - ``unknown_multi_source``: nothing but ``unknown``, from two or more
+      sources (a source with no gripper record may hold either gripper, and
+      two of them together may be a Franka and a Robotiq set), unless the
+      recipe names ``unknown`` or ``allow``;
+    - ``None``: one known gripper, or nothing but ``unknown`` from one source
+      (allowed, recorded as unknown)."""
+    grippers = list(grippers)
     counts = Counter(g or UNKNOWN for g in grippers)
     known = sorted(g for g in counts if g != UNKNOWN)
     unknown = counts.get(UNKNOWN, 0)
+    unknown_sources = (
+        dict(
+            Counter(
+                str(s)
+                for g, s in zip(grippers, list(sources), strict=True)
+                if not g or g == UNKNOWN
+            )
+        )
+        if sources is not None
+        else {}
+    )
     problem = None
     if not allow:
         if len(known) > 1:
             problem = "mixed_known"
         elif known and unknown and UNKNOWN not in (chosen or []):
             problem = "known_and_unknown"
+        elif not known and len(unknown_sources) > 1 and UNKNOWN not in (chosen or []):
+            problem = "unknown_multi_source"
     return {
         "counts": dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))),
         "known": known,
         "unknown": unknown,
         "mixed": len(known) > 1 or bool(known and unknown),
+        "sources": dict(
+            sorted(unknown_sources.items(), key=lambda kv: (-kv[1], kv[0]))
+        ),
         "problem": problem,
     }
 
@@ -222,7 +354,7 @@ def mix_message(mix: dict, sources: dict[str, list[str]] | None = None) -> str:
     the code, the CLI and logs show this)."""
     parts = ", ".join(f"{g} {n}" for g, n in mix["counts"].items())
     where = ""
-    if sources:
+    if sources and mix["problem"] != "unknown_multi_source":
         where = (
             " Sources: "
             + "; ".join(
@@ -236,6 +368,19 @@ def mix_message(mix: dict, sources: dict[str, list[str]] | None = None) -> str:
         fix = (
             " Filter to one gripper (recipe `grippers`), or set "
             "`allow_mixed_gripper` if mixing them is intended."
+        )
+    elif mix["problem"] == "unknown_multi_source":
+        listed = ", ".join(f"{s}: {n}" for s, n in list(mix["sources"].items())[:6])
+        head = (
+            f"The selection takes {mix['unknown']} episodes with no recorded gripper "
+            f"from {len(mix['sources'])} sources ({listed}"
+            + (", ..." if len(mix["sources"]) > 6 else "")
+            + "). Sources with no gripper record may hold different grippers."
+        )
+        fix = (
+            " Declare each source's gripper in the workspace `pool/rules.json` "
+            "(`embodiment_declared`), list `unknown` in the recipe's `grippers` "
+            "to take them on purpose, or set `allow_mixed_gripper`."
         )
     else:
         head = (
@@ -266,6 +411,7 @@ def record(rows, recipe: dict, rules_version=None) -> dict:
     rows = list(rows)
     allow = bool(recipe.get("allow_mixed_gripper"))
     mix = gripper_mix((r.get("gripper") for r in rows), None, True)
+    classes = len({r.get("source") for r in rows})
 
     def counts(field):
         return dict(Counter(r.get(field) or UNKNOWN for r in rows))
@@ -277,6 +423,7 @@ def record(rows, recipe: dict, rules_version=None) -> dict:
         "action_modes": counts("action_mode"),
         "ee_frames": counts("ee_frame"),
         "mixed": mix["mixed"],
+        "sources": classes,
         "allow_mixed_gripper": allow,
         "rules_version": rules_version,
     }

@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
-from test_pool import make_demo
+from test_pool import declare_grippers, make_demo
 
 from levi import children
 from levi.conversion import pipeline
@@ -47,6 +47,7 @@ def _env(monkeypatch, root: Path, tmp_path: Path, **more):
     for key, value in more.items():
         monkeypatch.setenv(key, str(value))
     monkeypatch.setattr(export, "_levi_commit", lambda: "test")
+    declare_grippers(root)
     scanner.scan()
 
 

@@ -446,12 +446,21 @@ def _rc_rows(ctx, demos, previous, progress) -> list[dict]:
             and old.get("stat_sig") == sig
             and old.get("fingerprint_kind") == "raw"
             and all(k in old for k in RC_FACTS)
+            # A declared value hides the metadata's own; read it again.
+            and "declared" not in (old.get("embodiment_evidence") or "")
         ):
             facts = {k: old.get(k) for k in RC_FACTS}
             if facts["policy_method"] == "unknown":
                 facts["policy_method"] = None  # decided again by the category
         else:
             facts = rc_facts(demo, ctx.rules)
+        facts.update(
+            embodiment.columns(
+                embodiment.declare(
+                    embodiment.from_columns(facts), ctx.relative(demo), ctx.rules
+                )
+            )
+        )
         source, nested = _rc_source(ctx, demo, task_dirs)
         reason = nested or (
             None
@@ -601,11 +610,15 @@ def _lerobot_rows(ctx, dataset: Path, rc_keys: dict, previous) -> tuple[list, di
             category,
             row.get("rollout_source_demo"),
         )
-        found = embodiment.inherit(
-            embodiment.read(
-                {"info": info, "conversion": conversion}, "lerobot", ctx.rules
+        found = embodiment.declare(
+            embodiment.inherit(
+                embodiment.read(
+                    {"info": info, "conversion": conversion}, "lerobot", ctx.rules
+                ),
+                [rc_keys[k] for k in linked],
             ),
-            rc_keys.get(link) if link else None,
+            ctx.relative(dataset),
+            ctx.rules,
         )
         return {
             **fields,

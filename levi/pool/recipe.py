@@ -527,43 +527,48 @@ def find_warnings(recipe: Recipe, chosen: list[dict], df=None) -> list[dict]:
 
 def gripper_warnings(recipe: Recipe, chosen: list[dict]) -> list[dict]:
     """The gripper mix of a selection: a blocking ``mixed_gripper`` when an
-    export would be refused, or ``gripper_unknown`` when the recipe took
-    episodes with no recorded gripper together with a known gripper on
-    purpose (``embodiment.gripper_mix`` decides). A selection of nothing but
-    unknown episodes (older data) has no warning; ``preview["grippers"]``
-    carries its count."""
-    grippers = [r.get("gripper") for r in chosen]
-    mix = embodiment.gripper_mix(grippers, recipe.grippers, allow=False)
+    export would be refused (``problem``: ``mixed_known``,
+    ``known_and_unknown`` or ``unknown_multi_source``), the same note
+    non-blocking when ``allow_mixed_gripper`` lifts it, and ``gripper_unknown``
+    (non-blocking) when some selected episodes have no recorded gripper
+    (``embodiment.gripper_mix`` decides)."""
+    mix = embodiment.gripper_mix(
+        [r.get("gripper") for r in chosen],
+        recipe.grippers,
+        allow=False,
+        sources=[r.get("source") for r in chosen],
+    )
     sources = embodiment.sources_by_gripper(chosen)
-    if mix["problem"] and not recipe.allow_mixed_gripper:
-        return [
+    if mix["problem"]:
+        note = {
+            "code": "mixed_gripper",
+            "problem": mix["problem"],
+            "counts": mix["counts"],
+            "sources": sources,
+            "unknown_sources": mix["sources"],
+        }
+        if not recipe.allow_mixed_gripper:
+            return [
+                {
+                    **note,
+                    "blocking": True,
+                    "allowed": False,
+                    "message": embodiment.mix_message(mix, sources),
+                }
+            ]
+        out = [
             {
-                "code": "mixed_gripper",
-                "blocking": True,
-                "allowed": False,
-                "problem": mix["problem"],
-                "message": embodiment.mix_message(mix, sources),
-                "counts": mix["counts"],
-                "sources": sources,
-            }
-        ]
-    out = []
-    if recipe.allow_mixed_gripper and mix["problem"]:
-        out.append(
-            {
-                "code": "mixed_gripper",
+                **note,
                 "blocking": False,
                 "allowed": True,
-                "problem": None,
                 "message": "The selection mixes grippers on purpose "
                 "(allow_mixed_gripper): "
                 + ", ".join(f"{g} {n}" for g, n in mix["counts"].items()),
-                "counts": mix["counts"],
-                "sources": sources,
             }
-        )
-    # Only unknown (older data) stays quiet: the composition shows the count.
-    if mix["unknown"] and mix["known"]:
+        ]
+    else:
+        out = []
+    if mix["unknown"]:
         out.append(
             {
                 "code": "gripper_unknown",
@@ -571,6 +576,7 @@ def gripper_warnings(recipe: Recipe, chosen: list[dict]) -> list[dict]:
                 "message": f"{mix['unknown']} episode(s) have no recorded gripper "
                 "(unknown): their metadata does not say which gripper was used",
                 "episodes": mix["unknown"],
+                "unknown_sources": mix["sources"],
             }
         )
     return out

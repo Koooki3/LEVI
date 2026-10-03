@@ -4,8 +4,16 @@ import json
 from collections import Counter, defaultdict
 
 import pandas as pd
+import pyarrow.parquet as pq
 
 from . import embodiment, scanner
+
+OLDER = (
+    "The pool index is from an older LEVI (no {columns} column): scan again "
+    "(Scan now on the page, or `levi pool scan`) / "
+    "训练池索引由旧版 LEVI 写成（缺少 {columns} 列）：请重新扫描"
+    "（页面上点“立即扫描”，或运行 `levi pool scan`）"
+)
 
 
 def frame() -> pd.DataFrame:
@@ -15,10 +23,7 @@ def frame() -> pd.DataFrame:
     df = pd.read_parquet(path)
     missing = [c for c in ("policy_method", *embodiment.COLUMNS) if c not in df.columns]
     if missing:
-        raise ValueError(
-            "The pool index is from an older LEVI (no "
-            f"{', '.join(missing)} column): run `levi pool scan`"
-        )
+        raise ValueError(OLDER.format(columns=", ".join(missing)))
     return df
 
 
@@ -31,6 +36,18 @@ def heldout_view() -> pd.DataFrame | None:
     if not path.is_file():
         return None
     return pd.read_parquet(path, columns=["key", "group", "heldout"])
+
+
+def embodiment_view() -> pd.DataFrame | None:
+    """``key``, ``source`` and ``gripper`` of the index (``None`` before the
+    first scan). An index from an older LEVI lacks ``gripper``: that raises, an
+    export cannot check its plan against it."""
+    path = scanner.index_path()
+    if not path.is_file():
+        return None
+    if "gripper" not in pq.read_schema(path).names:
+        raise ValueError(OLDER.format(columns="gripper"))
+    return pd.read_parquet(path, columns=["key", "source", "gripper"])
 
 
 def summary() -> dict:

@@ -70,15 +70,6 @@ def test_nothing_recorded_is_unknown_not_a_guess():
     assert {empty[f] for f in embodiment.FIELDS} == {"unknown"}
 
 
-def test_names_of_folders_and_tasks_are_not_evidence():
-    got = embodiment.read(
-        {"metadata": {"task_description": "robotiq franka_hand"}},
-        "robot_capture",
-        path="/data/robotiq_collection/franka_hand_task/demo_0000",
-    )
-    assert got["gripper"] == "unknown"
-
-
 def test_conflicting_evidence_is_unknown_and_says_so():
     got = read(
         {
@@ -280,6 +271,10 @@ def pool_root(tmp_path_factory):
     # Older captures: nothing in the metadata names a gripper.
     for i in range(2):
         demo(root / f"legacy/stack/demo_{i:04d}")
+    for i in range(2):
+        demo(root / f"legacy2/stack/demo_{i:04d}")
+    # Names that look like evidence, metadata that says nothing.
+    demo(root / "robotiq_cell/franka_hand_task/demo_0000", task="robotiq franka_hand")
     # LeRobot: linked to captures, with a conversion record, and with nothing.
     lerobot(
         root / "converted",
@@ -469,10 +464,13 @@ def test_a_filtered_recipe_is_clean_and_unknown_gets_a_note(scanned):
     one = recipe.preview(Recipe(name="one", grippers=["robotiq_2f85"]), "raw_capture")
     assert "mixed_gripper" not in codes(one["warnings"])
     assert "gripper_unknown" not in codes(one["warnings"])
-    # Only older captures: allowed, no warning; the count says what they are.
+    # One source with no gripper record: allowed, with a plain note.
     old = recipe.preview(Recipe(name="old", sources=["legacy"]), "raw_capture")
     assert old["grippers"] == {"unknown": 2}
-    assert old["warnings"] == []
+    note = codes(old["warnings"])["gripper_unknown"]
+    assert note["blocking"] is False and note["episodes"] == 2
+    assert note["unknown_sources"] == {"legacy": 2}
+    assert set(codes(old["warnings"])) == {"gripper_unknown"}
     # Naming unknown on purpose lifts the known-with-unknown refusal.
     chosen = recipe.preview(
         Recipe(name="c", grippers=["robotiq_2f85", "unknown"]), "raw_capture"
@@ -594,6 +592,7 @@ def test_a_plan_from_an_older_level_runs_as_unknown(scanned):
     for ep in job["episodes"]:
         for f in embodiment.FIELDS:
             ep.pop(f)
+    job.pop("embodiment_check")
     job["recipe"].pop("allow_mixed_gripper")
     job["recipe"].pop("grippers")
     result = jobs.execute(job)
@@ -715,3 +714,308 @@ def test_a_run_on_an_older_index_still_refuses_a_heldout_copy(scanned):
     with pytest.raises(PermissionError, match="held-out"):
         export.run(job, resume=True)
     assert not (out / "w").exists()
+
+
+# ---------------------------------------- unknown from several sources, declared
+
+
+def test_names_of_folders_and_tasks_are_not_evidence(scanned):
+    row = by_episode("robotiq_cell")[("robotiq_cell", "franka_hand_task/demo_0000")]
+    assert (
+        row["gripper"] == "unknown"
+        and row["embodiment_evidence"].get("gripper") is None
+    )
+
+
+def test_format_evidence_is_marked_derived_not_metadata():
+    got = read({})
+    assert got["evidence"]["action_mode"].startswith("derived:")
+    assert "metadata" not in got["evidence"]["action_mode"]
+
+
+def test_rule_values_follow_the_names_a_recipe_can_select(tmp_path):
+    bad = {"embodiment": {"version": 1, "rules": [
+        {"field": "gripper", "value": "Robotiq-2F85", "in": "format", "regex": "x"}]}}  # fmt: skip
+    (tmp_path / "rules.json").write_text(json.dumps(bad))
+    with pytest.raises(ValueError, match="value"):
+        embodiment.read({}, "robot_capture", rules=rules.load(tmp_path))
+
+
+def declared_rules(*items):
+    return {**rules.DEFAULTS, "embodiment_declared": list(items)}
+
+
+def test_nothing_is_declared_by_default():
+    assert rules.DEFAULTS["embodiment_declared"] == []
+
+
+def test_a_declaration_fills_only_what_the_metadata_leaves_open():
+    rule = declared_rules(
+        {"field": "gripper", "value": "franka_hand", "source": "arm_a/old", "evidence": "declared", "note": "by Wenkai 2026-10-03"}
+    )  # fmt: skip
+    silent = embodiment.read({}, "lerobot")
+    got = embodiment.declare(silent, "arm_a/old/set1", rule)
+    assert got["gripper"] == "franka_hand"
+    assert got["evidence"]["gripper"] == "declared: arm_a/old (by Wenkai 2026-10-03)"
+    # Metadata and declaration agree.
+    agree = embodiment.declare(
+        embodiment.read({"metadata": {"gripper_joint_names": FRANKA_JOINTS}}, "robot_capture"),
+        "arm_a/old/set1",
+        rule,
+    )  # fmt: skip
+    assert (
+        agree["gripper"] == "franka_hand"
+        and "declared agrees" in agree["evidence"]["gripper"]
+    )
+    # They disagree: unknown, and the evidence says both.
+    clash = embodiment.declare(
+        embodiment.read({"metadata": {"gripper_joint_names": ROBOTIQ_JOINTS}}, "robot_capture"),
+        "arm_a/old/set1",
+        rule,
+    )  # fmt: skip
+    assert clash["gripper"] == "unknown"
+    assert "conflict" in clash["evidence"]["gripper"]
+    assert (
+        "declared" in clash["evidence"]["gripper"]
+        and "robotiq_2f85" in clash["evidence"]["gripper"]
+    )
+    # Contradicting metadata stays unknown whatever is declared.
+    both = embodiment.declare(
+        read({"gripper_joint_names": ROBOTIQ_JOINTS, "gripper_state_topic": "/franka_gripper/x"}),
+        "arm_a/old/set1",
+        rule,
+    )  # fmt: skip
+    assert both["gripper"] == "unknown"
+
+
+def test_a_declaration_matches_whole_path_components_only():
+    rule = declared_rules(
+        {"field": "gripper", "value": "franka_hand", "source": "arm_a", "evidence": "declared"}
+    )  # fmt: skip
+    silent = embodiment.read({}, "lerobot")
+    assert embodiment.declare(silent, "arm_a", rule)["gripper"] == "franka_hand"
+    assert embodiment.declare(silent, "arm_a/x/y", rule)["gripper"] == "franka_hand"
+    assert embodiment.declare(silent, "arm_ab/x", rule)["gripper"] == "unknown"
+    assert embodiment.declare(silent, "other/arm_a", rule)["gripper"] == "unknown"
+    two = declared_rules(
+        {"field": "gripper", "value": "franka_hand", "source": "arm_a"},
+        {"field": "gripper", "value": "robotiq_2f85", "source": "arm_a/x"},
+    )
+    assert embodiment.declare(silent, "arm_a/x/1", two)["gripper"] == "unknown"
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        {"field": "colour", "value": "x", "source": "a"},
+        {"field": "gripper", "value": "Franka Hand", "source": "a"},
+        {"field": "gripper", "value": "franka_hand", "source": "/abs/a"},
+        {"field": "gripper", "value": "franka_hand", "source": "../a"},
+        {"field": "gripper", "value": "franka_hand", "source": ""},
+        {"field": "gripper", "value": "franka_hand", "source": "a", "evidence": "metadata"},
+        {"field": "gripper", "source": "a"},
+    ],
+)  # fmt: skip
+def test_a_malformed_declaration_is_refused(item):
+    with pytest.raises(ValueError, match="declared"):
+        embodiment.declare(embodiment.read({}, "lerobot"), "a", declared_rules(item))
+
+
+def test_inheritance_from_captures_that_disagree_is_unknown():
+    own = embodiment.read({}, "lerobot")
+    one = {
+        "robot": "franka_fr3",
+        "gripper": "robotiq_2f85",
+        "ee_frame": "unknown",
+        "embodiment_evidence": "{}",
+    }
+    other = {**one, "gripper": "franka_hand"}  # fmt: skip
+    same = embodiment.inherit(own, [one, dict(one)])
+    assert same["gripper"] == "robotiq_2f85"
+    differ = embodiment.inherit(own, [one, other])
+    assert differ["gripper"] == "unknown"
+    assert "conflict" in differ["evidence"]["gripper"]
+    assert differ["robot"] == "franka_fr3"
+    # One linked capture that says nothing does not hide another that does.
+    quiet = {**one, "gripper": "unknown"}
+    assert embodiment.inherit(own, [quiet, one])["gripper"] == "robotiq_2f85"
+
+
+def test_mix_of_unknown_from_several_sources():
+    mix = embodiment.gripper_mix
+    two = mix(["unknown"] * 3, sources=["a", "a", "b"])
+    assert two["problem"] == "unknown_multi_source"
+    assert two["sources"] == {"a": 2, "b": 1}
+    assert mix(["unknown"] * 3, sources=["a", "a", "a"])["problem"] is None
+    assert (
+        mix(["unknown"] * 3, sources=["a", "b", "b"], chosen=["unknown"])["problem"]
+        is None
+    )
+    assert mix(["unknown"] * 3, sources=["a", "b", "b"], allow=True)["problem"] is None
+    # Without source information nothing new is claimed.
+    assert mix(["unknown"] * 3)["problem"] is None
+    assert "no recorded gripper" in embodiment.mix_message(two)
+    assert "a: 2" in embodiment.mix_message(two) and "b: 1" in embodiment.mix_message(
+        two
+    )
+
+
+def test_several_sources_without_a_gripper_record_are_refused(scanned):
+    rec = Recipe(name="u", sources=["legacy", "legacy2"])
+    preview = recipe.preview(rec, "raw_capture")
+    warning = codes(preview["warnings"])["mixed_gripper"]
+    assert warning["blocking"] is True and warning["problem"] == "unknown_multi_source"
+    assert warning["unknown_sources"] == {"legacy": 2, "legacy2": 2}
+    with pytest.raises(ValueError) as caught:
+        plan(rec)
+    text = str(caught.value)
+    assert "legacy: 2" in text and "legacy2: 2" in text
+    assert "embodiment_declared" in text and "allow_mixed_gripper" in text
+    assert not (scanner.settings.workspace().parent / "out").exists()
+
+
+def test_naming_unknown_or_allowing_lifts_it_and_one_source_passes(scanned):
+    both = ["legacy", "legacy2"]
+    named = Recipe(name="n", sources=both, grippers=["unknown"])
+    got = codes(recipe.preview(named, "raw_capture")["warnings"])
+    assert "mixed_gripper" not in got and got["gripper_unknown"]["episodes"] == 4
+    allowed = Recipe(name="a", sources=both, allow_mixed_gripper=True)
+    got = codes(recipe.preview(allowed, "raw_capture")["warnings"])
+    assert (
+        got["mixed_gripper"]["allowed"] is True
+        and got["mixed_gripper"]["blocking"] is False
+    )
+    _, _, record = run_export(named, "named")
+    assert record["embodiment"]["gripper"] == "unknown"
+    assert record["embodiment"]["sources"] == 2
+    one = plan(Recipe(name="o", sources=["legacy"]), "single")
+    assert one["warnings"] and {w["code"] for w in one["warnings"]} == {
+        "gripper_unknown"
+    }
+
+
+def test_the_run_cannot_be_talked_out_of_the_source_rule(scanned):
+    rec = Recipe(name="m", sources=["legacy", "legacy2"], grippers=["unknown"])
+    job = jobs.plan_export(
+        rec,
+        export.ExportOptions(
+            format="raw_capture", name="e1", output_dir=str(scanner.settings.workspace().parent / "out")
+        ),
+    )  # fmt: skip
+    job["recipe"]["grippers"] = []
+    with pytest.raises(ValueError, match="no recorded gripper"):
+        export.run(job)
+
+
+def test_the_run_checks_each_planned_gripper_against_the_index(scanned):
+    out = str(scanner.settings.workspace().parent / "out")
+    base = Recipe(name="g", sources=["lab_a", "lab_franka"], allow_mixed_gripper=True)
+    options = export.ExportOptions(format="raw_capture", name="e2", output_dir=out)
+    job = jobs.plan_export(base, options)
+    # Somebody makes a Franka episode look like a Robotiq one.
+    franka = next(e for e in job["episodes"] if e["gripper"] == "franka_hand")
+    franka["gripper"] = "robotiq_2f85"
+    job["recipe"]["allow_mixed_gripper"] = False
+    with pytest.raises(ValueError, match="differ from the index"):
+        export.run(job)
+    # Or a source name edited so several sources look like one.
+    job = jobs.plan_export(
+        Recipe(name="s", sources=["legacy", "legacy2"], grippers=["unknown"]),
+        export.ExportOptions(format="raw_capture", name="e3", output_dir=out),
+    )
+    for e in job["episodes"]:
+        e["source"] = "legacy"
+    job["recipe"]["grippers"] = []
+    with pytest.raises(ValueError, match="differ from the index"):
+        export.run(job)
+
+
+def test_a_new_plan_on_an_older_index_cannot_be_checked(scanned):
+    out = str(scanner.settings.workspace().parent / "out")
+    job = jobs.plan_export(
+        Recipe(name="g", sources=["lab_a"]),
+        export.ExportOptions(format="raw_capture", name="e4", output_dir=out),
+    )
+    index.frame().drop(columns=["gripper"]).to_parquet(
+        scanner.index_path(), index=False
+    )
+    with pytest.raises(ValueError, match="older LEVI"):
+        export.run(job)
+
+
+def test_the_older_index_message_is_bilingual_and_the_api_returns_it(scanned, client):
+    index.frame().drop(columns=list(embodiment.COLUMNS)).to_parquet(
+        scanner.index_path(), index=False
+    )
+    for route in ("facets", "tasks", "episodes"):
+        response = client.get(f"/api/levi/pool/{route}")
+        assert response.status_code == 400
+        text = response.text
+        assert "older LEVI" in text and "立即扫描" in text, route
+    got = client.post("/api/levi/pool/preview", json={"recipe": {"name": "p"}})
+    assert got.status_code == 400 and "立即扫描" in got.text
+    # The status route (settings, last scan, Scan now) keeps working.
+    assert client.get("/api/levi/pool/status").status_code == 200
+
+
+# ---------------------------------------------------------- declared sources
+
+
+def declare_in_workspace(*items):
+    (scanner.settings.pool_dir() / "rules.json").write_text(
+        json.dumps({"embodiment_declared": list(items)})
+    )
+
+
+def test_a_declared_source_gets_its_gripper_and_says_so(scanned):
+    assert by_episode("plain")[("plain", "0")]["gripper"] == "unknown"
+    declare_in_workspace(
+        {"field": "gripper", "value": "franka_hand", "source": "plain", "evidence": "declared", "note": "by the collector"},
+        {"field": "gripper", "value": "robotiq_2f85", "source": "legacy"},
+        {"field": "gripper", "value": "franka_hand", "source": "lab_a"},
+    )  # fmt: skip
+    scanner.scan()
+    plain = by_episode("plain")[("plain", "0")]
+    assert plain["gripper"] == "franka_hand"
+    assert (
+        plain["embodiment_evidence"]["gripper"] == "declared: plain (by the collector)"
+    )
+    legacy = by_episode("legacy")[("legacy", "stack/demo_0000")]
+    assert legacy["gripper"] == "robotiq_2f85"
+    assert legacy["embodiment_evidence"]["gripper"].startswith("declared: legacy")
+    # The metadata says Robotiq, the declaration says Franka: unknown.
+    clash = by_episode("lab_a")[("lab_a", "stack/demo_0000")]
+    assert clash["gripper"] == "unknown"
+    assert "conflict" in clash["embodiment_evidence"]["gripper"]
+    # Unchanged files and unchanged declarations: a second scan agrees.
+    scanner.scan()
+    assert (
+        by_episode("legacy")[("legacy", "stack/demo_0000")]["gripper"] == "robotiq_2f85"
+    )
+    assert by_episode("lab_a")[("lab_a", "stack/demo_0000")]["gripper"] == "unknown"
+    # Taking a declaration away restores what the metadata says.
+    declare_in_workspace()
+    scanner.scan()
+    assert by_episode("legacy")[("legacy", "stack/demo_0000")]["gripper"] == "unknown"
+    assert (
+        by_episode("lab_a")[("lab_a", "stack/demo_0000")]["gripper"] == "robotiq_2f85"
+    )
+
+
+def test_declaring_both_unknown_sources_makes_them_exportable(scanned):
+    declare_in_workspace(
+        {"field": "gripper", "value": "robotiq_2f85", "source": "legacy"},
+        {"field": "gripper", "value": "robotiq_2f85", "source": "legacy2"},
+    )
+    scanner.scan()
+    got = recipe.preview(Recipe(name="d", sources=["legacy", "legacy2"]), "raw_capture")
+    assert got["grippers"] == {"robotiq_2f85": 4} and got["warnings"] == []
+
+
+def test_a_declared_lerobot_source_is_inherited_by_nothing_else(scanned):
+    declare_in_workspace(
+        {"field": "gripper", "value": "franka_hand", "source": "recorded"}
+    )
+    scanner.scan()
+    assert {r["gripper"] for r in by_episode("recorded").values()} == {"franka_hand"}
+    assert {r["gripper"] for r in by_episode("plain").values()} == {"unknown"}
