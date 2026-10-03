@@ -426,6 +426,32 @@ describe("why a terminal-aware verdict is not a plain success", () => {
       ),
     ).toBeNull();
   });
+  test("too few valid releases keeps the ordinary explanation", () => {
+    expect(
+      verdictReason(
+        under({ valid_events: 1, min_valid: 2, place_outcome: "failure" }),
+      ),
+    ).toBeNull();
+    expect(
+      verdictReason(
+        under({ valid_events: 2, min_valid: 2, place_outcome: "failure" }),
+      ),
+    ).toBe("the last placement is a failure");
+  });
+  test("a record without close frames cannot be checked for a new grasp", () => {
+    const why = (v: Partial<Verdict>) =>
+      verdictReason(under({ closes_after_last_valid: null, ...v }));
+    expect(why({ place_outcome: "success" })).toBe(
+      "no gripper close frames recorded: a new grasp cannot be checked",
+    );
+    // A failed placement is the reason that matters, and 0 closes is a check done.
+    expect(why({ place_outcome: "failure" })).toBe(
+      "the last placement is a failure",
+    );
+    expect(
+      why({ place_outcome: "success", closes_after_last_valid: 0 }),
+    ).toBeNull();
+  });
   test("a release with no valid event keeps the ordinary explanation", () => {
     expect(
       verdictReason(under({ valid_events: 0, place_outcome: "failure" })),

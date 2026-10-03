@@ -193,9 +193,14 @@ export interface Verdict {
   /** Last `place` time segment's outcome: success, failure, unknown, none (no
    * such segment) or missing (no time segments to read). */
   place_outcome?: string | null;
-  /** Times the gripper closed again after the last valid release. */
+  /** Times the gripper closed again after the last valid release (null: the
+   * record has no close frames to check). */
   closes_after_last_valid?: number | null;
+  /** Valid releases the rule needs (set with `rule`). */
+  min_valid?: number | null;
   spec?: string | null;
+  /** The spec's version (null on a verdict made before it was kept). */
+  spec_version?: number | null;
   review?: string;
   evaluated?: boolean;
   at?: number | null;

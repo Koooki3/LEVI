@@ -2105,5 +2105,6 @@
   "the last placement is a failure": "the last placement is a failure",
   "no placement time segment": "no placement time segment",
   "the last placement is undecided": "the last placement is undecided",
-  "placement not checked: no time segments": "placement not checked: no time segments"
+  "placement not checked: no time segments": "placement not checked: no time segments",
+  "no gripper close frames recorded: a new grasp cannot be checked": "no gripper close frames recorded: a new grasp cannot be checked"
 }

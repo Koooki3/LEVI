@@ -177,8 +177,9 @@ export function verdictTally(demos: DemoRow[] | undefined): Tally {
  * the English catalog key to translate; null when the rule explains nothing
  * (the default rule, no valid release, or a success that held). */
 export function verdictReason(v: Verdict | null | undefined): string | null {
-  if (!v?.rule || v.rule === "any_valid" || (v.valid_events ?? 0) < 1)
-    return null;
+  if (!v?.rule || v.rule === "any_valid") return null;
+  // Too few valid releases is the ordinary explanation, not the terminal rule.
+  if ((v.valid_events ?? 0) < Math.max(1, v.min_valid ?? 1)) return null;
   if ((v.closes_after_last_valid ?? 0) > 0)
     return "the gripper closed again after the last release";
   switch (v.place_outcome) {
@@ -190,6 +191,10 @@ export function verdictReason(v: Verdict | null | undefined): string | null {
       return "the last placement is undecided";
     case "missing":
       return "placement not checked: no time segments";
+    case "success":
+      return v.closes_after_last_valid == null
+        ? "no gripper close frames recorded: a new grasp cannot be checked"
+        : null;
     default:
       return null;
   }

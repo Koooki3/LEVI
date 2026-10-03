@@ -267,6 +267,7 @@ describe("the list", () => {
       "no placement time segment",
       "the last placement is undecided",
       "placement not checked: no time segments",
+      "no gripper close frames recorded: a new grasp cannot be checked",
     ]) {
       expect((en as Record<string, string>)[key]).toBe(key);
       expect((zh as Record<string, string>)[key]).toBeTruthy();

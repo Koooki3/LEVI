@@ -2105,5 +2105,6 @@
   "the last placement is a failure": "最后一个放置时间片段是失败",
   "no placement time segment": "没有放置时间片段",
   "the last placement is undecided": "最后一个放置时间片段未定",
-  "placement not checked: no time segments": "没有时间片段，未核对放置"
+  "placement not checked: no time segments": "没有时间片段，未核对放置",
+  "no gripper close frames recorded: a new grasp cannot be checked": "没有夹爪闭合帧的记录，无法核对是否重新抓起"
 }
