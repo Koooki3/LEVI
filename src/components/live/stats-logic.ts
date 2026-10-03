@@ -121,6 +121,8 @@ export interface StatsEpisode {
   verdict?: string | null;
   review?: string | null;
   in_session?: boolean | null;
+  /** The episode was removed by a person (shown only when included). */
+  excluded?: boolean;
 }
 
 export interface StatsResponse {
@@ -128,6 +130,9 @@ export interface StatsResponse {
   schema?: string;
   generated_at?: number;
   scope?: { dataset?: string | null; session?: string | null };
+  include_excluded?: boolean;
+  /** Removed episodes in this scope (left out unless included). */
+  excluded_demos?: number;
   datasets?: string[];
   summary?: StatsSummary;
   sessions?: StatsSession[];
@@ -143,6 +148,8 @@ export interface StatsResponse {
 export interface StatsScope {
   dataset: string;
   session: string;
+  /** Count the episodes a person removed too (off by default). */
+  includeExcluded?: boolean;
 }
 
 export const EPISODE_PAGE = 25;
@@ -153,6 +160,7 @@ function query(scope: StatsScope, extra: Record<string, string>): string {
   const params = new URLSearchParams();
   if (scope.dataset) params.set("dataset", scope.dataset);
   if (scope.session) params.set("session", scope.session);
+  if (scope.includeExcluded) params.set("include_excluded", "true");
   for (const [key, value] of Object.entries(extra)) params.set(key, value);
   const text = params.toString();
   return text ? `?${text}` : "";

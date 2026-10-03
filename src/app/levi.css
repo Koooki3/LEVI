@@ -2795,6 +2795,17 @@ button.levi-pool-danger {
 .levi-live-scope select {
   max-width: 260px;
 }
+.levi-live-check {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px !important;
+  color: #c7caba !important;
+  font-size: 13px !important;
+}
+.levi-live-check small {
+  color: #89927f;
+  font-size: 11px;
+}
 .levi-live-export {
   margin: 0 0 0 auto;
   font-size: 13px;

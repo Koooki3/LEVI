@@ -137,6 +137,11 @@ export function EpisodesTable({
                 {cols.map((c) => (
                   <td key={c.key} className={c.numeric ? "num" : undefined}>
                     {c.numeric ? c.cell(r) : t(c.cell(r))}
+                    {c.key === "demo" && r.excluded && (
+                      <span className="levi-status levi-live-chip warn">
+                        {t("removed")}
+                      </span>
+                    )}
                   </td>
                 ))}
               </tr>
@@ -189,6 +194,7 @@ export function StatsView({
 }) {
   const { t } = useLocale();
   const datasets = data.datasets ?? [];
+  const removed = data.excluded_demos ?? 0;
   return (
     <>
       <div className="levi-live-scope">
@@ -196,7 +202,13 @@ export function StatsView({
           {t("Dataset")}
           <select
             value={scope.dataset}
-            onChange={(e) => onScope({ dataset: e.target.value, session: "" })}
+            onChange={(e) =>
+              onScope({
+                ...scope,
+                dataset: e.target.value,
+                session: "",
+              })
+            }
           >
             <option value="">{t("All datasets")}</option>
             {datasets.map((d) => (
@@ -219,6 +231,23 @@ export function StatsView({
               </option>
             ))}
           </select>
+        </label>
+        <label className="levi-live-check">
+          <input
+            type="checkbox"
+            checked={!!scope.includeExcluded}
+            onChange={(e) =>
+              onScope({ ...scope, includeExcluded: e.target.checked })
+            }
+          />
+          {t("Include removed episodes")}
+          <small>
+            {removed > 0
+              ? fill(t("{n} removed episode(s) in this scope"), {
+                  n: count(removed),
+                })
+              : t("none removed in this scope")}
+          </small>
         </label>
         <ExportLinks scope={scope} />
       </div>
@@ -266,7 +295,11 @@ export function StatsPanel({
   enabled: boolean;
 }) {
   const { t } = useLocale();
-  const [scope, setScope] = useState<StatsScope>({ dataset: "", session: "" });
+  const [scope, setScope] = useState<StatsScope>({
+    dataset: "",
+    session: "",
+    includeExcluded: false,
+  });
   const [limit, setLimit] = useState(EPISODE_PAGE);
   const [view, setView] = useState<EpisodeView>("latency");
   const { data, error } = useLiveStats(scope, limit, tick, evaluating, enabled);
@@ -282,7 +315,9 @@ export function StatsPanel({
     scope.session,
   );
   const empty = !!data && (data.summary?.episodes?.count ?? 0) === 0;
-  const filtered = !!scope.dataset || !!scope.session;
+  // Removed episodes can be what hides everything: keep the switch in reach.
+  const filtered =
+    !!scope.dataset || !!scope.session || (data?.excluded_demos ?? 0) > 0;
   return (
     <section
       className="levi-live-section levi-live-slot o5"

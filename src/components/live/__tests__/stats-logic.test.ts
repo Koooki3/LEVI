@@ -47,6 +47,31 @@ describe("requests", () => {
       "stats?dataset=g__t&session=run+1%2Fa&limit=50",
     );
   });
+  test("removed episodes are asked for only when switched on", () => {
+    expect(
+      statsPath(
+        { dataset: "x__at__models", session: "", includeExcluded: true },
+        25,
+      ),
+    ).toBe("stats?dataset=x__at__models&include_excluded=true&limit=25");
+    expect(
+      statsPath({ dataset: "", session: "", includeExcluded: false }, 25),
+    ).toBe("stats?limit=25");
+    expect(
+      exportHref(
+        "csv",
+        { dataset: "", session: "", includeExcluded: true },
+        "en",
+      ),
+    ).toBe(
+      "/api/levi/live/stats/export?include_excluded=true&format=csv&lang=en",
+    );
+  });
+  test("a dataset name with a root mark is encoded like any other", () => {
+    expect(
+      statsPath({ dataset: "a b__at__my models", session: "s/1" }, 5),
+    ).toBe("stats?dataset=a+b__at__my+models&session=s%2F1&limit=5");
+  });
   test("an export link names the format, the scope and the language", () => {
     expect(exportHref("csv", none, "en")).toBe(
       "/api/levi/live/stats/export?format=csv&lang=en",

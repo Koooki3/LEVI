@@ -129,6 +129,47 @@ describe("statistics panel render", () => {
     expect(html).toContain("a dash means the figure was not measured");
   });
 
+  test("the switch for removed episodes is there and says how many are left out", () => {
+    const render = (over: Partial<StatsResponse>, includeExcluded: boolean) =>
+      renderToStaticMarkup(
+        createElement(StatsView, {
+          data: { ...data, ...over },
+          scope: { dataset: "", session: "", includeExcluded },
+          onScope: noop,
+          view: "latency",
+          onView: noop,
+          onMore: noop,
+          choices: [],
+        }),
+      );
+    const off = render({ excluded_demos: 2 }, false);
+    expect(off).toContain("Include removed episodes");
+    expect(off).toContain("2 removed episode(s) in this scope");
+    expect(off).not.toContain("checked");
+    expect(render({ excluded_demos: 0 }, false)).toContain(
+      "none removed in this scope",
+    );
+    const on = render({ excluded_demos: 2 }, true);
+    expect(on).toContain("checked");
+    expect(on).toContain("include_excluded=true");
+  });
+
+  test("a removed episode is tagged in the table", () => {
+    const html = renderToStaticMarkup(
+      createElement(EpisodesTable, {
+        data: {
+          total: 1,
+          rows: [{ dataset: "g__t", demo: "demo_0004", excluded: true }],
+        },
+        view: "latency",
+        onView: noop,
+        onMore: noop,
+      }),
+    );
+    expect(html).toContain("demo_0004");
+    expect(html).toContain("removed");
+  });
+
   test("with nothing recorded the panel says why and how to fill it", () => {
     const first = renderToStaticMarkup(
       createElement(StatsEmpty, { filtered: false }),
