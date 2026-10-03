@@ -32,13 +32,14 @@ import threading
 import time
 from pathlib import Path
 
-from . import auto, gpumgr, jsonio, mirror, resources, sessions
+from . import auto, gating, gpumgr, jsonio, mirror, resources, sessions
 from . import config as live_config
 
 SCHEMA = "levi.live.status.v1"
 WORKER_STALL_S = 600.0
 GATE_GRACE_S = 8.0
 MAX_EVENTS = 10
+GATE_HISTORY_SHOWN = 5  # gate transitions kept for the status file
 # A VRAM reading older than this is not shown as the free memory of now.
 FREE_FRESH_S = 30.0
 STATES_WITH_WORK = ("mirrored",)
@@ -159,6 +160,12 @@ class Controller:
         self.gate = gpumgr.Gate(True, "open", "no evaluation")
         self.gate_closed_at: float | None = None
         self._gate_written = (None, 0.0)
+        # Gate transitions: the last (open, code) written to live/gate.jsonl,
+        # and the latest few for the status file (seeded from the file, so a
+        # restart keeps them).
+        self._gate_logged: tuple | None = None
+        self._gate_lock = threading.Lock()
+        self.gate_history: list = gating.history(config.live_dir, GATE_HISTORY_SHOWN)
         self._policy_mib = (0.0, None)
         self.idle_since: float | None = None
         self._gate_opened_at: float | None = None
@@ -930,6 +937,41 @@ class Controller:
             )
         return f"vLLM cannot get the room it needs: {why}"
 
+    def _note_gate(self, now, idle, stopped=False):
+        """Append a line to ``live/gate.jsonl`` when the gate's state or reason
+        code differs from the last one written: when, from and to, the reason,
+        and what it was about (sessions, policy server). No tokens or paths of
+        the person's data: only states the status file shows anyway."""
+        state = (
+            (None, "service_stopped") if stopped else (self.gate.open, self.gate.code)
+        )
+        with self._gate_lock:
+            before = self._gate_logged
+            if state == before:
+                return
+            self._gate_logged = state
+            row = {
+                "at": round(now, 3),
+                "time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)),
+                "from": None
+                if before is None
+                else {"open": before[0], "code": before[1]},
+                "to": {"open": state[0], "code": state[1]},
+                "reason": "service stopping" if stopped else self.gate.reason[:200],
+                "idle": idle,
+                "policy_up": self.policy_up,
+                "policy_ports": [int(p) for p in self.config.gpu.policy_ports],
+                "sessions": [
+                    {"group": s.group, "task": s.task_folder, "state": s.state}
+                    for s in list(self.sessions.values())[:8]
+                ],
+            }
+            r = self.config.resources
+            gating.record_transition(
+                self.config.live_dir, row, r.log_max_mb * 1024 * 1024, r.log_backups
+            )
+            self.gate_history = [*self.gate_history, row][-GATE_HISTORY_SHOWN:]
+
     def _write_gate(self, now):
         """``live/gate.json``: the worker's permission to send model requests.
         Rewritten on change and at least every 4 s (a stale gate reads as
@@ -937,6 +979,7 @@ class Controller:
         # Nothing to protect: no policy server listening, no evaluation. A gate
         # file that goes stale in that state does not hold people back.
         idle = not self.policy_up and not self._evaluating()
+        self._note_gate(now, idle)
         key = (self.gate.open, self.gate.code, idle)
         if key == self._gate_written[0] and now - self._gate_written[1] < 4.0:
             return
@@ -1198,6 +1241,8 @@ class Controller:
                     "open": self.gate.open,
                     "code": self.gate.code,
                     "reason": self.gate.reason[:200],
+                    # The last few transitions (the file is live/gate.jsonl).
+                    "history": [gating.brief(h) for h in self.gate_history],
                 },
                 "decision": {
                     "allowed": self.decision.allowed,
@@ -1318,6 +1363,8 @@ class Controller:
         # people away ("supervisor not running") for as long as it lies there.
         with contextlib.suppress(OSError):
             (self.config.live_dir / "gate.json").unlink()
+        with contextlib.suppress(Exception):
+            self._note_gate(time.time(), True, stopped=True)
         with contextlib.suppress(Exception):
             self.write_status()
 

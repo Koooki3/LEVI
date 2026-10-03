@@ -9,7 +9,10 @@ core imports it on every ``runs.execute`` in a live workspace.
 
 from __future__ import annotations
 
+import contextlib
+import json
 import time
+from pathlib import Path
 
 from . import jsonio
 
@@ -23,7 +26,61 @@ EXEMPT = frozenset({"live-auto", "live-planner"})
 STALE_S = 20.0  # no heartbeat for this long: the supervisor is gone, not gating
 
 
+HISTORY = "gate.jsonl"  # one line per gate transition, next to gate.json
+HISTORY_TAIL = 64 * 1024  # the most that ``history`` reads from the end of the file
+
 _CACHE: dict = {}
+
+
+def record_transition(live_dir, row: dict, max_bytes=None, keep=3):
+    """Append one gate transition (a dict) to ``<live>/gate.jsonl``; the file
+    rotates to ``.1``, ``.2``... like the other logs. Never raises: the history
+    is a record, not part of the gate."""
+    with contextlib.suppress(OSError, TypeError, ValueError):
+        jsonio.append_line(
+            Path(live_dir) / HISTORY, row, max_bytes=max_bytes, keep=keep
+        )
+
+
+def brief(row) -> dict:
+    """A transition reduced to what the status file shows."""
+    to = row.get("to") if isinstance(row.get("to"), dict) else {}
+    return {
+        "at": row.get("at"),
+        "open": to.get("open"),
+        "code": to.get("code"),
+        "reason": str(row.get("reason") or "")[:120],
+    }
+
+
+def history(live_dir, limit=5) -> list:
+    """The last ``limit`` transitions, oldest first. Lines that do not parse
+    (a torn write, a hand edit) are skipped; a missing file is an empty list.
+    Reads only the tail of the file, and of ``.1`` when the file is short."""
+    path = Path(live_dir) / HISTORY
+    rows: list = []
+    for candidate in (path, path.with_name(path.name + ".1")):
+        try:
+            with candidate.open("rb") as handle:
+                handle.seek(0, 2)
+                size = handle.tell()
+                handle.seek(max(0, size - HISTORY_TAIL))
+                data = handle.read()
+        except OSError:
+            continue
+        lines = data.splitlines()
+        if size > HISTORY_TAIL:
+            lines = lines[1:]  # the first line of a tail is cut
+        found = []
+        for line in lines:
+            with contextlib.suppress(ValueError):
+                value = json.loads(line)
+                if isinstance(value, dict):
+                    found.append(value)
+        rows = found + rows
+        if len(rows) >= limit:
+            break
+    return rows[-limit:]
 
 
 def closed(gate, now=None, worker=False) -> bool:

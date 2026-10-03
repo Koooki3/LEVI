@@ -587,6 +587,18 @@ def format_status(value, alive) -> str:
         f"gpu        mode {gpu.get('mode')}, vLLM {gpu.get('vllm_state')}, policy server "
         f"{'seen' if gpu.get('policy_server_seen') else 'not seen'}; {((gpu.get('decision') or {}).get('reason')) or ''}"
     )
+    for row in ((gpu.get("gate") or {}).get("history") or [])[-5:]:
+        shown = (
+            "open"
+            if row.get("open")
+            else "CLOSED"
+            if row.get("open") is False
+            else "gone"
+        )
+        lines.append(
+            f"gate       {time.strftime('%H:%M:%S', time.localtime(row.get('at') or 0))} "
+            f"{shown} ({row.get('code')}) {row.get('reason') or ''}"
+        )
     res = value.get("resources") or {}
     lines.append(
         f"resources  rss {res.get('rss_mb')} MiB, {res.get('threads')} threads, cpu {res.get('cpu_percent')}%"
