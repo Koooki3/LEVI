@@ -249,7 +249,7 @@ uv run levi live stop                            # 只停自己的进程
 | `timeline.completed_at`、`timeline.first_request_at` | 片段的结束时刻（`.complete`）和它第一个模型请求的开始时刻，都是纪元秒（没发过请求的片段和旧记录里是 `null`）：“会话内标注比例”由它们算出 |
 | `model.requests.{coarse,refine,review,probe}` | 按种类的模型请求数：粗标、边界精修（一次或多次）、释放复核（每个问题一次）、请求开销校准（运行级的开销，记在批次的第一个片段上）。缓存命中不算请求 |
 | `model.model_seconds.{coarse,refine,review,probe}` | 模型在这些请求上花的秒数（`probe` 不计时：`null`） |
-| `model.tokens.{coarse,refine,review,probe}` | 按同样种类分开的 token 总数（旧记录里是 `null`） |
+| `model.tokens.{coarse,refine,review,probe}` | 按同样种类分开的、服务器报告的 token（`probe` 是校准开销，即 `probe_tokens`）；某种类没有报告用量的请求时为 `null`，旧记录里也是 `null` |
 | `model.prompt_tokens`、`completion_tokens`、`total_tokens` | 服务器报告了用量的那些请求的 token 之和（`total_tokens` = prompt + completion；没有请求报告时前两项是 `null`）。校准探测和预留不在其中 |
 | `model.probe_tokens` | 该批次请求开销校准的 token（运行级的开销，只记在批次的第一个片段上）；其余为 `null` |
 | `model.reserved_tokens`、`model.unreported_steps` | 服务器没给用量的请求，LEVI 按预留额度记账：这些预留之和（不是实际花掉的 token；没有则 `null`）和这类请求的个数 |
@@ -276,12 +276,12 @@ uv run levi live stop                            # 只停自己的进程
 
 | 数字 | 定义 |
 | --- | --- |
-| 片段数 | 有记录的片段；`done`（已标注）、`failed`、`retrying`（状态 `mirrored`，之后重试）、`retried`（尝试两次以上）、`excluded` |
+| 片段数 | 有记录的片段；`done`（已标注）、`failed`、`retrying`（状态 `mirrored`，之后重试）、`retried`（尝试两次以上）、`excluded`。**被人排除的片段**（数据集状态文件里有 `excluded`，或记录里 `excluded: true`）默认不计入任何数字和报告，除非要求 `include_excluded`（页面上的“包含已排除的片段”开关、`--include-excluded`）；回答里的 `excluded_demos` 说明这个范围内有多少已排除的片段。以状态文件为准：记录是在没人能排除它之前写下的 |
 | 延迟 | `timeline.to_mirror_s`、`to_plan_s`、`to_first_request_s`、`to_commit_s`、`to_verdict_s`：个数、中位、p90、最大、均值。都是片段 `.complete` 之后的秒数。p90 是第 90 百分位（相邻名次之间线性插值） |
 | 实时倍率 | 片段总秒数 ÷ 模型总秒数，只统计两者都有的片段。模型秒数是各模型请求耗时之和（粗标、精修、释放复核），不是墙钟时间：0.2 表示每 1 秒片段模型要用 5 秒，大于 1 表示标注得比片段本身的时长快 |
 | 每墙钟秒标注的片段秒数 | 片段总秒数 ÷（最后一次判定（没有则提交）到达的时刻 − 第一个片段结束的时刻）。这段时间包含机器人还在运行的部分 |
-| 模型开销 | 每个片段的请求数；每个片段的 token（均值、中位）和总数；提示词占比 = prompt ÷（prompt + completion），只统计服务器报告了拆分的记录；每个片段的图片数；外部 token（恒为 0）。按种类（`coarse`、`refine`、`review`、`probe`）：请求数、模型秒数、token 及各自占总数的比例。`probe` 是批次的请求开销校准，记在批次第一个片段上，不计时 |
-| GPU 与门控 | `closed_wait_s` 和 `interruptions`：worker 因闸门关闭而让路的秒数和次数，**每个批次只算一次**（批次由 `batch.id` 确定；没有它的记录，写入时间相差不超过 5 秒且数字相同的算同一批）；vLLM 唤醒和冷启动（次数、合计、最长），记在它们所服务批次的第一个片段上；`gate_window`：第一个片段结束到最后一条记录之间闸门关闭的秒数和占比、关闭次数，来自 `live/gate.jsonl`（策略推理时闸门关闭，所以这是不允许标注的时间，不是 worker 等待的时间）。vLLM 睡眠没有任何地方记录，显示“未记录” |
+| 模型开销 | 每个片段的请求数；每个片段的 token（均值、中位）和总数；提示词占比 = prompt ÷（prompt + completion），只统计服务器报告了拆分的记录；每个片段的图片数；外部 token（恒为 0）。**token 取服务器报告的数字**（只含它报告了用量的请求，`total_tokens` = prompt + completion）；校准开销（`probe_tokens`）、服务器没给用量的请求 LEVI 按预留额度记的账（`reserved_tokens`）以及这类请求的个数（`unreported_steps`）单独列出，从不加进去；这些字段出现之前的记录读作 `null`，completion 也绝不再用 total − prompt 推出来。按种类（`coarse`、`refine`、`review`、`probe`）：请求数、模型秒数、token 及各自占所列 token 的比例。`probe` 是批次的请求开销校准，记在批次第一个片段上，不计时 |
+| GPU 与门控 | `closed_wait_s` 和 `interruptions`：worker 因闸门关闭而让路的秒数和次数，**每个批次只算一次**（批次由 `batch.id` 确定；没有它的记录，写入时间相差不超过 5 秒且数字相同的算同一批）；vLLM 唤醒和冷启动（次数、合计、最长），记在它们所服务批次的第一个片段上；`gate_window`：第一个片段结束到最后一条记录之间闸门关闭的秒数和占比、关闭次数，来自 `live/gate.jsonl`（策略推理时闸门关闭，所以这是不允许标注的时间，不是 worker 等待的时间）。`closed_wait_s` 就是运行账本里的 `stood_down_seconds`（账本的 `wall_seconds` 已经扣掉它，以及运行等人的时间，见“账本里的运行时间”）；这些统计不读账本，这里所有墙钟数字（`span_s`、各延迟）都是包含这些等待的实际经过时间。vLLM 睡眠没有任何地方记录，显示“未记录” |
 | 会话内标注比例 | **首个模型请求发生在所属评测会话最后一个片段结束之前**的片段占比：衡量标注有多“实时”。会话的结束时刻取它各片段 `timeline.completed_at` 的最大值，数据集状态里已知但还没有记录的片段也算进去（还在进行的会话不会显得比实际更实时）。会话的最后一个片段永远不计入，因为它的请求不可能早于它自己的结束。没发过请求的片段算“不在会话内”。没有会话 id（`eval.run_id`）或没有 `completed_at`（旧记录）的片段不进分子也不进分母；一个都不剩时显示“—” |
 | 结果 | 时间片段总数和每个片段的数量（均值、范围、直方图）、各标签的计数、自动成败判定（`success`、`failure`、`none`）及未决数、谁提交的时间片段（`auto`、`human`） |
 
@@ -289,7 +289,7 @@ uv run levi live stop                            # 只停自己的进程
 
 `levi live report [--dataset X] [--session Y] [--format md|json|csv] [--lang en|zh] [--out PATH]` 按工作区里的文件为任意范围生成同样的报告（服务不必在运行）；`csv` 是逐片段表。
 
-**回填。** `levi live stats backfill [--dataset X] [--dry-run] [--json]` 为数据集状态里是 `done` 或 `failed`、但没有记录的片段（在 `stats.jsonl` 出现之前标注的）补记录。它重建还留得下来的内容：片段的各个时刻、尝试次数、时间片段数和判定来自数据集状态；模型请求、token 和耗时来自工作区存储里的运行日志（只读方式打开）；时间片段标签来自已提交的变更集。记录带 `backfilled: true`，`at` 是它所描述的那个时刻。没有任何文件保存的内容保持 `null`：当时生效的设置（标注指南、模型配置、模型）、门控等待、vLLM 唤醒耗时、批次、片段时长，以及批次的请求开销校准（`probe`）。不估算，也不拿今天的配置充数。它从不改动已有的行，已经有记录的片段会跳过，所以运行两次不会多出东西。`--dry-run` 列出每个片段，以及 schema 里每个字段的取值来源（或“没有记录”），什么也不写。
+**回填。** `levi live stats backfill [--dataset X] [--dry-run] [--json]` 为数据集状态里是 `done` 或 `failed`、但没有记录的片段（在 `stats.jsonl` 出现之前标注的）补记录。它重建还留得下来的内容：片段的各个时刻、尝试次数、时间片段数和判定来自数据集状态；模型请求、token 和耗时来自工作区存储里的运行日志（只读方式打开）；时间片段标签来自已提交的变更集。记录带 `backfilled: true`，`at` 是它所描述的那个时刻。被人排除的片段也会回填，带 `excluded: true`（开销是真的，记录保留，统计默认不计入）。数据集名可能带根标记（`<group>__<task>__at__<root>`）：`--dataset` 要写成 `levi live status` 显示的名字。没有任何文件保存的内容保持 `null`：当时生效的设置（标注指南、模型配置、模型）、门控等待、vLLM 唤醒耗时、批次、片段时长，以及批次的请求开销校准（`probe`）。不估算，也不拿今天的配置充数。它从不改动已有的行，已经有记录的片段会跳过，所以运行两次不会多出东西。`--dry-run` 列出每个片段，以及 schema 里每个字段的取值来源（或“没有记录”），什么也不写。
 
 ## 状态文件（接口 C4）
 
@@ -310,8 +310,8 @@ uv run levi live stop                            # 只停自己的进程
 | `GET /sessions` | `{"enabled", "sessions": [ {会话字段, "dataset", "fault"} ], "fr3": {…}, "active"}`，直接读机器人侧文件（≤ 64 个）。 |
 | `GET /datasets` | `{"enabled", "datasets": {名字: 行}}`（`status.json` 里的行）。 |
 | `GET /datasets/{name}` | 数据集详情：`repo_id`（登记后的 LEVI 数据集 id，否则 null）、任务文本、各状态计数（被排除的片段不计入）、`total_demos`（数据集里的片段数）、片段列表（最新在前，≤ 200；每项有 `excluded`（null）、状态、集序号、`run_id`、尝试次数、时间片段数、提交时间、自动判定 `verdict`：`outcome/events/valid_events/undecided/spec/review: "auto"/evaluated: false`）、`excluded_count` 和 `excluded_demos`（被排除的片段，行的格式相同，带 `excluded: {at, by: "person", reason}`，最新在前，全部列出，不在 200 处截断）、`incomplete`（含按原因计数）、进行中的批次、上一批、`last_error`。未知名字返回 404。 |
-| `GET /stats?dataset=&session=&since=&limit=100&offset=0` | `{"enabled", "schema": "levi.live.stats.v1", "generated_at", "scope", "datasets": [有记录的数据集名], "summary": {…各项聚合，见“统计与报告”}, "sessions": [每个（数据集，会话）一行，最新在前，≤ 200], "sessions_total", "episodes": {"total", "offset", "limit", "rows": [每个片段一行，最新在前，limit ≤ 500]}}`。`dataset` 和 `session` 只能是普通名字（否则 400）；`since` 是纪元秒。不含路径、令牌或密钥。 |
-| `GET /stats/export?format=csv\|json\|md&dataset=&session=&since=&lang=en\|zh` | 同样的统计，作为下载（`Content-Disposition: attachment`）：`csv` 每个片段一行，`json` 含全部片段的完整数据，`md` 一份可读报告。 |
+| `GET /stats?dataset=&session=&since=&limit=100&offset=0&include_excluded=false` | `{"enabled", "schema": "levi.live.stats.v1", "generated_at", "scope", "datasets": [有记录的数据集名], "summary": {…各项聚合，见“统计与报告”}, "sessions": [每个（数据集，会话）一行，最新在前，≤ 200], "sessions_total", "episodes": {"total", "offset", "limit", "rows": [每个片段一行，最新在前，limit ≤ 500]}}`。`dataset` 和 `session` 只能是普通名字（否则 400）；`since` 是纪元秒。不含路径、令牌或密钥。 |
+| `GET /stats/export?format=csv\|json\|md&dataset=&session=&since=&lang=en\|zh&include_excluded=false` | 同样的统计，作为下载（`Content-Disposition: attachment`）：`csv` 每个片段一行，`json` 含全部片段的完整数据，`md` 一份可读报告。 |
 | `GET /audit?limit=50` | 自动批准主体的审计记录，最新在前，≤ 100 条，每条含 `tool`、`decision: allowed/refused`、`run_id` 等。人排除或恢复片段的行是 `principal: "local-human"`、`actor: "person"`、`tool: "episode.exclude"` 或 `"episode.restore"`、`dataset`、`demo`、可选的 `reason`、`decision: "completed"`。 |
 | `POST /datasets/{name}/exclude` | 请求体 `{"demos": ["demo_0003", …], "reason": "…"?}`（1 到 500 个名字，原因最长 300 字符）。排除这些片段（要么全部成功，要么都不改）。回答 `{"enabled", "dataset", "changed": [...], "unchanged": [...]（本来就已排除）, "counts", "excluded_count", "review_runs_open", "review_hidden": [...]（片段已全部排除、不计入的待复核运行）}`。404：数据集或片段不存在（会点名），或不是实时工作区；409：片段在进行中的批次里（“being labelled …”），或从未纳入数据集（被拒收、卡住）；401/403：不是人在操作（见上）。 |
 | `POST /datasets/{name}/restore` | 请求体 `{"demos": [...]}`。把已排除的片段放回来；回答同上（`review_hidden` 是恢复之后仍不计入的运行）；没排除的片段在 `unchanged` 里。片段不存在返回 404。 |
