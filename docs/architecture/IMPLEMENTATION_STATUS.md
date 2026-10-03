@@ -78,6 +78,7 @@ its measurements and limits.
   [Fast segmentation](../SEGMENTATION.md).
 - RECAP value model, per-frame values and advantage labels: [RECAP](../RECAP.md).
 - Training manifests: [Training manifests](../TRAINING_MANIFEST.md).
+- Counterfactual action contract and validator (contract only, no generation): [Counterfactual data](../COUNTERFACTUAL.md).
 - Training pool: [Training pool](../TRAINING_POOL.md).
 - Namespaces, the DROID test sample and the report page:
   [Workspace](../WORKSPACE.md), [API](../API.md#technical-report--技术报告).
