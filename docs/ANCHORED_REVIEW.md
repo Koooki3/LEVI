@@ -63,7 +63,7 @@ A spec is JSON (`levi/agent/anchored_specs/<id>.json` for the built-in ones):
 | `fields` | Ordered answer fields, each with its `enum`. The server decodes them in this order, all required. |
 | `valid_when` | Conditions `{"field", "in": [...]}` or `{"field", "not_in": [...]}`; an event is valid when all hold. |
 | `unknown_values` | Answers that mean "cannot tell" (default `["unclear"]`). |
-| `episode` | `{"label_field", "require_labels": [...]}`: success when every label has a valid event; or `{"min_valid": n}`. |
+| `episode` | `{"label_field", "require_labels": [...]}`: success when every label has a valid event; or `{"min_valid": n}`, optionally with `"rule": "last_valid_not_regrasped"` (also needs the gripper not to close again after the last valid event; `basis` gets `rule`, `last_valid_frame`, `closes_after_last_valid`, `require_place`, and the record gets `closes`, the frames where the gripper closes) and `"require_place": true` (the live service also requires the episode's last `place` time segment not to be a failure or unknown; the review cannot see time segments). The default `"rule": "any_valid"` is left out of the frozen form. See [Live annotation service](LIVE.md#terminal-aware-verdict-candidate). |
 | `max_output_tokens` | The answer's allowance (default 200). |
 | `start` | Optional [start check](#start-check-and-vetoes): one question per episode on frames at its start, whose answer can waive required labels. |
 | `vetoes` | Optional [vetoes](#start-check-and-vetoes): rules any event can break, each read from the event's answer or asked as its own question. |
@@ -117,7 +117,7 @@ An undecided `episode` veto does not change the outcome: like an undecided label
 
 Each start check and veto question is one more request with the same safeguards as the spec's own (budget, cache, an answer outside its fields sets the episode aside); the plan's estimate names them, and with a start check its `minimum_requests` is one per episode.
 
-**What an outcome is undecided on** (`anchored.undecided`, the manifest's `anchored_undecided`): a required label with no valid event but an unknown one, or with an unknown waiver (for either outcome); for a success, also an undecided `episode` veto or a contested waiver.
+**What an outcome is undecided on** (`anchored.undecided`, the manifest's `anchored_undecided`): a required label with no valid event but an unknown one, or with an unknown waiver (for either outcome); for a success, also an undecided `episode` veto, a contested waiver or an input its rule needed and did not have (`basis.missing_inputs`: the closes of a record made without them).
 
 **Cited frames.** The outcome proposal cites, in order: for an event whose `episode` veto was confirmed, the frames that veto's own question looked at, then the event's frames nearest the anchor; the episode's last frame when it has no event; the start check's frames when a waiver decided the outcome; then the valid events' frames (at most 32).
 

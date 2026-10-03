@@ -172,6 +172,17 @@ class EpisodeRule(Contract):
     label_field: str | None = None
     require_labels: list[str] = Field(default_factory=list, max_length=16)
     min_valid: int = Field(default=1, ge=1, le=100)
+    # Without labels, what else the valid events must satisfy. ``any_valid``:
+    # nothing (min_valid valid events are enough). ``last_valid_not_regrasped``:
+    # the gripper does not close again after the last valid event, so the
+    # object is not picked up again. Both assume the task places once: a task
+    # that legitimately grasps again after a placement must not use it.
+    rule: Literal["any_valid", "last_valid_not_regrasped"] = "any_valid"
+    # Also require that the episode's last time segment of the subtask
+    # ``place`` (the one that starts last) is not a failure or unknown. The
+    # review cannot see time segments: the live service applies this part
+    # (levi/live/judge.py) and the review's own outcome leaves it out.
+    require_place: bool = False
 
 
 class AnchoredSpec(Contract):
@@ -209,6 +220,21 @@ class AnchoredSpec(Contract):
                 raise ValueError("episode.label_field must name an answer field")
             if set(rule.require_labels) - values[rule.label_field]:
                 raise ValueError("episode.require_labels must be values of label_field")
+        if rule.rule != "any_valid" or rule.require_place:
+            if rule.require_labels:
+                raise ValueError(
+                    "episode.rule and episode.require_place apply to a spec "
+                    "without require_labels"
+                )
+            if self.anchor.event != "open":
+                raise ValueError(
+                    "episode.rule reads the closes after an opening: the anchor "
+                    "event must be open"
+                )
+        if rule.require_place and rule.rule == "any_valid":
+            raise ValueError(
+                "episode.require_place goes with episode.rule last_valid_not_regrasped"
+            )
         _roles(self.views, "View")
         if any(v.at != "anchor" for v in self.views):
             # Every event would be shown the same frames; the start check
@@ -305,6 +331,7 @@ def _roles(views, what):
 # Keys a spec that does not use them leaves out of its frozen form, so a plan
 # for an older spec freezes exactly what it froze before they existed.
 _OPTIONAL = {"status": "stable", "start": None, "vetoes": []}
+_OPTIONAL_EPISODE = {"rule": "any_valid", "require_place": False}
 
 
 def dump(spec):
@@ -318,6 +345,10 @@ def dump(spec):
         for v in listed or []:
             if v.get("at") == "anchor":
                 v.pop("at")
+
+    for key, empty in _OPTIONAL_EPISODE.items():
+        if out["episode"].get(key) == empty:
+            out["episode"].pop(key)
 
     views(out["views"])
     if "start" in out:
@@ -497,11 +528,23 @@ def crossings(values, bounds, open_level="high"):
     return out
 
 
-def anchors(table, info, stats, anchor):
-    """(row positions of the anchor events, channel description)."""
+def anchor_rows(table, info, stats, anchor):
+    """(row positions of the anchor events, row positions where the gripper
+    closes, channel description). The closes are every closing the channel
+    crosses, whatever the anchor event is."""
     key, name, values, bounds = _gripper_channel(table, info, stats, anchor)
     found = crossings(values, bounds, anchor.open_level)
-    return [i for i, kind in found if kind == anchor.event], f"{key}.{name}"
+    return (
+        [i for i, kind in found if kind == anchor.event],
+        [i for i, kind in found if kind == "close"],
+        f"{key}.{name}",
+    )
+
+
+def anchors(table, info, stats, anchor):
+    """(row positions of the anchor events, channel description)."""
+    rows, _, channel = anchor_rows(table, info, stats, anchor)
+    return rows, channel
 
 
 def view_offsets(view, fps):
@@ -591,9 +634,12 @@ def waivers(spec, start_answer):
     return waived, [x for x in unsure if x not in waived]
 
 
-def outcome(spec, events, start_answer=None):
+def outcome(spec, events, start_answer=None, closes=None):
     """The episode's outcome from its judged events (and the start check's
-    answer), and what it rests on."""
+    answer, and the frames where the gripper closes, ``closes``), and what it
+    rests on. ``closes`` is None when the record has none (a record made
+    before they were kept): a rule that needs them then falls back to the
+    valid events alone and says so in ``basis.missing_inputs``."""
     valid = [e for e in events if e["valid"]]
     rule = spec.episode
     if rule.require_labels:
@@ -640,10 +686,25 @@ def outcome(spec, events, start_answer=None):
             ]
     else:
         ok = len(valid) >= rule.min_valid
-        verdict, basis = (
-            "success" if ok else "failure",
-            {"valid_events": len(valid), "min_valid": rule.min_valid},
-        )
+        basis = {"valid_events": len(valid), "min_valid": rule.min_valid}
+        if rule.rule != "any_valid":
+            last = max((e["frame_index"] for e in valid), default=None)
+            after = (
+                None
+                if closes is None or last is None
+                else sum(1 for c in closes if c > last)
+            )
+            basis |= {
+                "rule": rule.rule,
+                "last_valid_frame": last,
+                "closes_after_last_valid": after,
+                "require_place": rule.require_place,
+            }
+            if closes is None:
+                basis["missing_inputs"] = ["closes"]
+            elif after:
+                ok = False
+        verdict = "success" if ok else "failure"
     if any(v.effect == "episode" for v in spec.vetoes):
 
         def found(state):
@@ -663,12 +724,17 @@ def outcome(spec, events, start_answer=None):
 
 def undecided(verdict, basis):
     """Whether an outcome rests on something undecided: a required label (or
-    its waiver), or -- for a success -- a veto or a contested waiver."""
+    its waiver), or -- for a success -- a veto, a contested waiver or an input
+    its rule needed and did not have (``missing_inputs``)."""
     return bool(
         basis.get("undecided_labels")
         or (
             verdict == "success"
-            and (basis.get("undecided_vetoes") or basis.get("contested_waivers"))
+            and (
+                basis.get("undecided_vetoes")
+                or basis.get("contested_waivers")
+                or basis.get("missing_inputs")
+            )
         )
     )
 
@@ -726,7 +792,7 @@ def review_episode(wb, id, config, context, episode, started):
         except ValueError:
             stats = None
     fps = float(info.get("fps") or 0) or 1.0
-    positions, channel = anchors(table, info, stats, spec.anchor)
+    positions, close_rows, channel = anchor_rows(table, info, stats, spec.anchor)
     last = len(table) - 1
     frames = table.frame_index.to_numpy(dtype=int)
     times = table.timestamp.to_numpy(dtype=float)
@@ -880,7 +946,8 @@ def review_episode(wb, id, config, context, episode, started):
             event["verdict"] = settle(verdict, results)
             event["valid"] = event["verdict"] == "supported"
         events.append(event)
-    verdict, basis = outcome(spec, events, start and start["answer"])
+    closes = [int(frames[i]) for i in close_rows]
+    verdict, basis = outcome(spec, events, start and start["answer"], closes)
     record = {
         "schema": "levi.anchored.v1",
         "run_id": id,
@@ -896,6 +963,11 @@ def review_episode(wb, id, config, context, episode, started):
     }
     if start is not None:
         record["start"] = start
+    if spec.episode.rule != "any_valid":
+        # Frames where the gripper closes, for the rule that reads them. A
+        # spec with the default rule leaves them out, so its records stay as
+        # they were (a record without them reads as unknown to ``outcome``).
+        record["closes"] = closes
     wb.store.put("anchored", f"{id}:{episode}", record)
     (directory / f"episode_{episode:06d}-anchored.json").write_text(
         json.dumps(record, ensure_ascii=False)
@@ -976,6 +1048,11 @@ def review_episode(wb, id, config, context, episode, started):
         if "valid_labels" in basis
         else f"{basis['valid_events']} valid event(s)"
     )
+    if basis.get("closes_after_last_valid"):
+        note += (
+            f"; the gripper closed {basis['closes_after_last_valid']} time(s) "
+            "after the last valid event"
+        )
     if basis.get("waived_labels"):
         note += "; not required at the start: " + ", ".join(basis["waived_labels"])
     if basis.get("vetoes"):
