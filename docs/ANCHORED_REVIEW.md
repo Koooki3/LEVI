@@ -117,7 +117,7 @@ An undecided `episode` veto does not change the outcome: like an undecided label
 
 Each start check and veto question is one more request with the same safeguards as the spec's own (budget, cache, an answer outside its fields sets the episode aside); the plan's estimate names them, and with a start check its `minimum_requests` is one per episode.
 
-**What an outcome is undecided on** (`anchored.undecided`, the manifest's `anchored_undecided`): a required label with no valid event but an unknown one, or with an unknown waiver (for either outcome); for a success, also an undecided `episode` veto, a contested waiver or an input its rule needed and did not have (`basis.missing_inputs`: the closes of a record made without them).
+**What an outcome is undecided on** (`anchored.undecided`, the manifest's `anchored_undecided`): a required label with no valid event but an unknown one, or with an unknown waiver (for either outcome); for a success, also an undecided `episode` veto, a contested waiver or an input its rule needed and did not have (`basis.missing_inputs`: the closes of a record made without them, or `place` under `require_place`, which only the live service can apply).
 
 **Cited frames.** The outcome proposal cites, in order: for an event whose `episode` veto was confirmed, the frames that veto's own question looked at, then the event's frames nearest the anchor; the episode's last frame when it has no event; the start check's frames when a waiver decided the outcome; then the valid events' frames (at most 32).
 
