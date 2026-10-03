@@ -199,7 +199,7 @@ uv run levi live stop                            # 只停自己的进程
 
 **命令行。** `levi live exclude <数据集> <demo>... [--reason "…"] [--restore] [--workspace <实时工作区>]` 通过该实时工作区正在运行的核心做同样的事（一次可排除同一数据集的多个片段；要么全部成功要么都不改；回答和审计行都相同）。数据集名就是 `levi live status` 显示的那个。它和页面一样是人的操作：命令从核心自己持有的文件读取人的密钥（`<工作区>/outputs/LEVI/workbench/agent/core/human.key`，仅属主可读），放进请求头发送，从不打印；智能体凭据照旧被路由拒绝。需要核心在运行（`levi live start`）；核心没运行或没有密钥文件时会说明并以 2 退出；核心拒绝时（例如片段在进行中的批次里）以 1 退出。
 
-**数据集名。** 路由接受服务生成的数据集名，包括两个根目录里有同一 group 和任务时加的后缀（如 `@<根目录标记>`）：唯一的规则是它是 `live/datasets/` 下的一个文件名（没有 `/`、`\`、控制字符，不以点开头）并且对应的状态文件存在。排除功能不依赖名字怎么构造。
+**数据集名。** 路由接受服务生成的数据集名，包括两个根目录里有同一 group 和任务时加的后缀 `__at__<根目录标记>`：唯一的规则是它是 `live/datasets/` 下的一个文件名（没有 `/`、`\`、控制字符，不以点开头）并且对应的状态文件存在。排除功能不依赖名字怎么构造，别的字符（例如 `@`）同样可用。
 
 **这是人的操作，并有审计。** 两个调用都要界面令牌（和页面其他写操作同样的检查）；智能体凭据（`Authorization: Bearer`）即使同时带着有效令牌也会被拒绝（403）；拒绝*任何* Bearer 是有意的，因为 LEVI 认识的 Bearer 凭据只有智能体的。Agent API 的任何能力、自动批准主体的任何调用（`auto.ALLOWED`）都做不了这件事。路由自己也做这个检查，不只靠服务的中间件，两道检查各自独立有效。实际上“人”指的是带界面令牌的请求，或经页面自己代理发来的请求；代理会给没有 `Origin` 头的本机请求自动加上令牌，所以本机任何进程不带 Bearer 直接 POST 到页面端口，也能以“人”的身份操作。页面其他写操作也是这样，不是本分支引入的。每次改动，每个片段在 `live/audit.jsonl` 写一行：`{"time", "principal": "local-human", "actor": "person", "tool": "episode.exclude" | "episode.restore", "dataset", "demo", "reason"?, "decision": "completed"}`，不记录令牌。排除已排除的片段、恢复未排除的片段什么都不改，也不写审计。
 
@@ -235,7 +235,7 @@ uv run levi live stop                            # 只停自己的进程
 | `schema`、`at` | `levi.live.episode_stats.v1`；这一行写入的纪元秒 |
 | `dataset`、`demo`、`episode_index` | 实时数据集（`<group>__<task>`）、采集文件夹（`demo_0003`）、片段在数据集视图里的编号 |
 | `session` | 该片段所属的评测运行 id（其 metadata 里的 `eval.run_id`） |
-| `attempts`、`excluded` | 此前对这个片段失败了几次（第一次就成功为 0）；`false`（留给被人排除的片段） |
+| `attempts`、`excluded` | 此前对这个片段失败了几次（第一次就成功为 0）；写记录时若人已排除该片段（可恢复）则为 `true`，通常是 `false`：运行中批次里的片段不能排除，被排除的片段也不会被标注 |
 | `episode.frames`、`episode.episode_seconds` | 帧数和片段自身的时长 |
 | `timeline.to_mirror_s` | 从 `.complete`（片段结束）到镜像完成 |
 | `timeline.to_plan_s` | 到该批次的时间片段计划生成 |
