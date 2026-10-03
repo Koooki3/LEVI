@@ -125,6 +125,46 @@ def _declarations(rules: dict | None) -> list[dict]:
     return items
 
 
+def declarations(rules: dict | None = None) -> list[dict]:
+    """The validated declarations of a rule set (copies, for records)."""
+    return [dict(d) for d in _declarations(rules)]
+
+
+_DECLARED = re.compile(r"^(?:linked capture: )?declared: (.*?)(?: \(|;|$)")
+
+
+def evidence_of(row: dict) -> dict:
+    """A row's ``embodiment_evidence`` as a dict (the index stores JSON text)."""
+    value = row.get("embodiment_evidence")
+    if isinstance(value, dict):
+        return value
+    try:
+        return json.loads(value) if value else {}
+    except (TypeError, ValueError):
+        return {}
+
+
+def declared_sources(row: dict) -> dict[str, str]:
+    """Per field, the declared source a row's value comes from, directly or
+    through its linked capture; a value the metadata gave (or that a
+    declaration merely agrees with) is not listed."""
+    out = {}
+    for field, text in evidence_of(row).items():
+        found = _DECLARED.match(str(text))
+        if found:
+            out[field] = found.group(1)
+    return out
+
+
+def declared_counts(rows) -> dict[str, int]:
+    """How many of the rows have each field's value from a declaration."""
+    counts: Counter = Counter()
+    for row in rows:
+        for field in declared_sources(row):
+            counts[field] += 1
+    return dict(counts)
+
+
 def _lookup(document, key: str):
     node = document
     for part in key.split("."):
@@ -405,7 +445,28 @@ def sources_by_gripper(rows) -> dict[str, list[str]]:
     return {g: sorted(s)[:10] for g, s in sorted(found.items())}
 
 
-def record(rows, recipe: dict, rules_version=None) -> dict:
+def declared_record(rows, declared: list[dict] | None) -> dict:
+    """What an export took from declarations: episodes, per field and source
+    the episodes, and copies of the declarations of those sources (value, note,
+    who decided). Empty when every value was read from metadata."""
+    by_field: dict[str, Counter] = {}
+    episodes = 0
+    for row in rows:
+        found = declared_sources(row)
+        episodes += bool(found)
+        for field, source in found.items():
+            by_field.setdefault(field, Counter())[source] += 1
+    used = {s for counts in by_field.values() for s in counts}
+    return {
+        "episodes": episodes,
+        "by_field": {f: dict(c) for f, c in sorted(by_field.items())},
+        "declarations": [d for d in (declared or []) if d.get("source") in used],
+    }
+
+
+def record(
+    rows, recipe: dict, rules_version=None, declared: list[dict] | None = None
+) -> dict:
     """What an export holds, for ``pool_export.json``: the gripper (one value,
     or ``mixed``), the counts of every field and whether mixing was allowed."""
     rows = list(rows)
@@ -424,6 +485,7 @@ def record(rows, recipe: dict, rules_version=None) -> dict:
         "ee_frames": counts("ee_frame"),
         "mixed": mix["mixed"],
         "sources": classes,
+        "declared": declared_record(rows, declared),
         "allow_mixed_gripper": allow,
         "rules_version": rules_version,
     }

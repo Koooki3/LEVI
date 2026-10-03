@@ -229,7 +229,7 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "policy_method",
         "policy_phase",
         "policy_label",
-        *embodiment.FIELDS,
+        *embodiment.COLUMNS,
         "fingerprint",
         "group",
         "stat_sig",
@@ -238,6 +238,8 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "selection_reason",
     )
     episodes = [{k: row.get(k) for k in keep} for row in chosen]
+    for ep in episodes:  # the index keeps the evidence as JSON text
+        ep["embodiment_evidence"] = embodiment.evidence_of(ep)
     # The index's view of copies, checked at plan time too so a dry run
     # cannot pass what the export would refuse.
     refuse_heldout_groups(episodes)
@@ -256,6 +258,9 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "heldout_lists": [str(p) for p in settings.heldout_files()],
         "heldout_disabled": settings.heldout_disabled(),
         "embodiment_check": 1,
+        "embodiment_declared": embodiment.declarations(
+            scanner.rules_mod.load(settings.pool_dir())
+        ),
         "embodiment_rules": index.summary().get("embodiment_rules"),
         "warnings": [w for w in warnings if not w["blocking"]]
         + timing_mod.warnings(chosen, options.fps, options.timing),
@@ -292,7 +297,10 @@ def _policy_fields(ep: dict) -> dict:
 
 
 def _embodiment_fields(ep: dict) -> dict:
-    return {f: ep.get(f) or embodiment.UNKNOWN for f in embodiment.FIELDS}
+    return {
+        **{f: ep.get(f) or embodiment.UNKNOWN for f in embodiment.FIELDS},
+        "embodiment_evidence": embodiment.evidence_of(ep),
+    }
 
 
 # ------------------------------------------------------------------ guards
@@ -900,8 +908,9 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
         [Path(p) for p in job["heldout_lists"]],
     )
     refuse_heldout_groups(episodes)
-    if job.get("embodiment_check"):
-        # A plan from before the gripper fields has nothing to check.
+    if job.get("embodiment_check") or any("gripper" in e for e in episodes):
+        # A plan from before the gripper fields (no marker, no gripper key
+        # on any episode) has nothing to check.
         verify_embodiment(episodes)
         refuse_mixed_gripper(episodes, job["recipe"])
     _unchanged(episodes)
@@ -946,6 +955,7 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
                 result["episodes"],
                 job["recipe"],
                 (job.get("embodiment_rules") or {}).get("version"),
+                job.get("embodiment_declared"),
             ),
             "counts": {
                 "episodes": len(result["episodes"]),

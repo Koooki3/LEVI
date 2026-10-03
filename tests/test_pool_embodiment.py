@@ -1019,3 +1019,103 @@ def test_a_declared_lerobot_source_is_inherited_by_nothing_else(scanned):
     scanner.scan()
     assert {r["gripper"] for r in by_episode("recorded").values()} == {"franka_hand"}
     assert {r["gripper"] for r in by_episode("plain").values()} == {"unknown"}
+
+
+# ------------------------------------- declared values in records, the scan cache
+
+
+def declared_legacy(note="collector, 2026-10-03"):
+    declare_in_workspace(
+        {"field": "gripper", "value": "robotiq_2f85", "source": "legacy", "evidence": "declared", "note": note},
+        {"field": "gripper", "value": "robotiq_2f85", "source": "mystery/stack/demo_0000"},
+    )  # fmt: skip
+    scanner.scan()
+
+
+def test_a_declared_gripper_shows_in_the_preview(scanned):
+    declared_legacy()
+    preview = recipe.preview(Recipe(name="d", sources=["legacy"]), "raw_capture")
+    assert preview["grippers"] == {"robotiq_2f85": 2}
+    assert preview["declared"] == {"gripper": 2}
+    plain = recipe.preview(Recipe(name="p", sources=["lab_a"]), "raw_capture")
+    assert plain["declared"] == {}
+
+
+def test_a_declared_gripper_is_readable_in_the_plan_and_the_export_record(scanned):
+    declared_legacy("collector, 2026-10-03")
+    rec = Recipe(name="d", sources=["legacy"])
+    planned = plan(rec, "declared-plan")
+    for ep in planned["episodes"]:
+        assert ep["embodiment_evidence"]["gripper"].startswith("declared: legacy")
+    assert planned["embodiment_declared"][0]["note"] == "collector, 2026-10-03"
+    _, _, record = run_export(rec, "declared")
+    info = record["embodiment"]
+    assert info["gripper"] == "robotiq_2f85"
+    assert info["declared"]["by_field"] == {"gripper": {"legacy": 2}}
+    assert info["declared"]["episodes"] == 2
+    [entry] = info["declared"]["declarations"]
+    assert entry["source"] == "legacy" and entry["note"] == "collector, 2026-10-03"
+    assert entry["value"] == "robotiq_2f85"
+    assert all(
+        e["embodiment_evidence"]["gripper"].startswith("declared: legacy")
+        for e in record["episodes"]
+    )
+
+
+def test_a_gripper_taken_from_a_declared_capture_counts_as_declared(scanned):
+    declared_legacy()
+    row = by_episode("converted")[("converted", "1")]  # linked to the declared demo
+    assert row["gripper"] == "robotiq_2f85"
+    assert row["embodiment_evidence"]["gripper"].startswith("linked capture: declared:")
+    assert embodiment.declared_counts([row]) == {"gripper": 1}
+    own = by_episode("lab_a")[("lab_a", "stack/demo_0000")]
+    assert embodiment.declared_counts([own]) == {}
+
+
+def test_an_export_without_a_declaration_records_none(scanned):
+    _, _, record = run_export(Recipe(name="n", sources=["lab_a"]), "plain-export")
+    assert record["embodiment"]["declared"] == {
+        "episodes": 0, "by_field": {}, "declarations": []
+    }  # fmt: skip
+
+
+def test_declared_rows_come_from_the_cache_when_nothing_changed(scanned, monkeypatch):
+    declared_legacy()
+    calls = []
+    real = scanner.rc_facts
+    monkeypatch.setattr(
+        scanner, "rc_facts", lambda *a, **k: calls.append(a) or real(*a, **k)
+    )
+    again = scanner.scan()
+    assert calls == [] and again["reused"] == again["episodes"]
+    assert (
+        by_episode("legacy")[("legacy", "stack/demo_0000")]["gripper"] == "robotiq_2f85"
+    )
+    # A changed declaration changes the signature: those captures are read again.
+    declare_in_workspace(
+        {"field": "gripper", "value": "franka_hand", "source": "legacy"}
+    )
+    changed = scanner.scan()
+    assert calls and changed["reused"] < changed["episodes"]
+    assert (
+        by_episode("legacy")[("legacy", "stack/demo_0000")]["gripper"] == "franka_hand"
+    )
+
+
+def test_removing_the_gate_key_does_not_skip_the_checks(scanned):
+    out = str(scanner.settings.workspace().parent / "out")
+    job = jobs.plan_export(
+        Recipe(name="m", sources=["lab_a", "lab_franka"], allow_mixed_gripper=True),
+        export.ExportOptions(format="raw_capture", name="gate", output_dir=out),
+    )
+    job["recipe"]["allow_mixed_gripper"] = False
+    job.pop("embodiment_check")
+    with pytest.raises(ValueError, match="mixes grippers"):
+        export.run(job)
+    # Edited gripper values are found by the comparison with the index too.
+    job["recipe"]["allow_mixed_gripper"] = True
+    next(e for e in job["episodes"] if e["gripper"] == "franka_hand")["gripper"] = (
+        "robotiq_2f85"
+    )
+    with pytest.raises(ValueError, match="differ from the index"):
+        export.run(job)

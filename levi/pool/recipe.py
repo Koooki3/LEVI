@@ -711,6 +711,7 @@ def preview(
             Counter(r["policy_model"] for r in chosen if r.get("policy_model"))
         ),
         "grippers": dict(Counter(r.get("gripper") or "unknown" for r in chosen)),
+        "declared": embodiment.declared_counts(chosen),
         "robots": dict(Counter(r.get("robot") or "unknown" for r in chosen)),
         "outcomes": dict(Counter(r["outcome"] or "none" for r in chosen)),
         "outcome_sources": dict(Counter(r["outcome_source"] or "none" for r in chosen)),
