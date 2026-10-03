@@ -192,7 +192,8 @@ def list_states(config) -> dict:
 
 
 def counts(state: dict) -> dict:
-    """Per-state demo counts of a dataset state."""
+    """Per-state demo counts of a dataset state. An excluded episode
+    (``levi/live/exclusion.py``) is not counted in any state."""
     out = {
         "mirrored": 0,
         "annotating": 0,
@@ -203,12 +204,26 @@ def counts(state: dict) -> dict:
         "stuck": 0,
     }
     for row in (state.get("demos") or {}).values():
+        if row.get("excluded"):
+            continue
         key = row.get("state")
         if key in out:
             out[key] += 1
         elif key == "skipped_human":
             out["skipped"] += 1
     return out
+
+
+def waiting_demos(state: dict, max_attempts: int) -> list:
+    """The mirrored demos still to label: not out of attempts and not
+    excluded by a person."""
+    return [
+        d
+        for d, row in (state.get("demos") or {}).items()
+        if row.get("state") == "mirrored"
+        and row.get("attempts", 0) < max_attempts
+        and not row.get("excluded")
+    ]
 
 
 @dataclass
@@ -630,7 +645,10 @@ def refresh_changed(config, name: str) -> list:
     again = [
         d
         for d, row in state["demos"].items()
-        if row.get("source_changed") and row.get("state") == "mirrored"
+        if row.get("source_changed")
+        and row.get("state") == "mirrored"
+        # Left as it is: a person took it out, and its mirror is kept.
+        and not row.get("excluded")
     ]
     done = []
     for demo in again:

@@ -1,0 +1,532 @@
+"""Taking an episode out of a live dataset and putting it back: the state it
+leaves, what the worker and the counts do with it, the review runs, the
+audit, and who may do it. Fake model server and temporary workspaces only:
+no GPU, no live service, no robot."""
+
+import json
+import threading
+import time
+from pathlib import Path
+
+import pytest
+from test_live_pipeline import NAME, Env
+
+from levi.live import api, auto, exclusion, jsonio, mirror, worker
+
+
+@pytest.fixture
+def env(tmp_path, demo_template):
+    made = []
+
+    def make(**fake_options):
+        made.append(Env(tmp_path, demo_template, **fake_options))
+        return made[-1]
+
+    yield make
+    for item in made:
+        item.close()
+
+
+def mirror_only(e, *numbers):
+    """Mirror finished demos without labelling them: rows in state
+    ``mirrored``, the capture in place."""
+    for n in numbers:
+        e.rollouts.write(n)
+    scan = next(t for t in mirror.Scanner(e.config).scan() if t.name == NAME)
+    mirror.mirror_dataset(e.config, e.state(), scan.ready)
+
+
+def cancel_with_the_store(e):
+    from levi.agent.runtime import Workbench
+
+    wb = Workbench(e.ws / "outputs/LEVI/workbench")
+    return lambda run_id: wb.control(run_id, "cancel")
+
+
+def audit_lines(e):
+    path = e.ws / "live/audit.jsonl"
+    return (
+        [json.loads(x) for x in path.read_text().splitlines()] if path.exists() else []
+    )
+
+
+# --- the data model ----------------------------------------------------------------------
+
+
+def test_an_old_state_file_without_the_key_is_simply_not_excluded(env):
+    e = env()
+    mirror_only(e, 0, 1)
+    state = e.state()
+    assert all("excluded" not in r for r in state["demos"].values())
+    assert exclusion.excluded_count(state) == 0
+    assert mirror.counts(state)["mirrored"] == 2
+
+
+def test_excluding_adds_one_key_and_restoring_gives_the_row_back_as_it_was(env):
+    e = env()
+    mirror_only(e, 0, 1)
+    before = e.state()
+    result = exclusion.exclude(
+        e.config, NAME, ["demo_0000"], "  the arm hit\nthe table  ", now=123.0
+    )
+    assert result["changed"] == ["demo_0000"] and result["unchanged"] == []
+    after = e.state()
+    row = dict(after["demos"]["demo_0000"])
+    assert row.pop("excluded") == {
+        "at": 123.0,
+        "by": "person",
+        "reason": "the arm hit the table",
+    }
+    # Nothing else moved: the row, the other row and every other key.
+    assert row == before["demos"]["demo_0000"]
+    assert after["demos"]["demo_0001"] == before["demos"]["demo_0001"]
+    assert {k: v for k, v in after.items() if k != "demos"} == {
+        k: v for k, v in before.items() if k != "demos"
+    }
+    assert mirror.counts(after)["mirrored"] == 1
+    assert result["counts"]["mirrored"] == 1 and result["excluded_count"] == 1
+    back = exclusion.restore(e.config, NAME, ["demo_0000"])
+    assert back["changed"] == ["demo_0000"] and back["excluded_count"] == 0
+    assert e.state()["demos"] == before["demos"]
+    assert mirror.counts(e.state())["mirrored"] == 2
+
+
+def test_the_reason_is_optional_and_bounded(env):
+    e = env()
+    mirror_only(e, 0)
+    exclusion.exclude(e.config, NAME, ["demo_0000"], "x" * 1000)
+    assert len(e.state()["demos"]["demo_0000"]["excluded"]["reason"]) == 300
+    exclusion.restore(e.config, NAME, ["demo_0000"])
+    exclusion.exclude(e.config, NAME, ["demo_0000"])
+    assert e.state()["demos"]["demo_0000"]["excluded"]["reason"] == ""
+
+
+def test_both_directions_are_idempotent_and_leave_the_first_record(env):
+    e = env()
+    mirror_only(e, 0)
+    first = exclusion.exclude(e.config, NAME, ["demo_0000"], "one", now=1.0)
+    again = exclusion.exclude(e.config, NAME, ["demo_0000"], "two", now=2.0)
+    assert first["changed"] == ["demo_0000"]
+    assert again["changed"] == [] and again["unchanged"] == ["demo_0000"]
+    assert e.state()["demos"]["demo_0000"]["excluded"] == {
+        "at": 1.0,
+        "by": "person",
+        "reason": "one",
+    }
+    exclusion.restore(e.config, NAME, ["demo_0000"])
+    nothing = exclusion.restore(e.config, NAME, ["demo_0000"])
+    assert nothing["changed"] == [] and nothing["unchanged"] == ["demo_0000"]
+    # Only the two real changes were audited.
+    assert [x["tool"] for x in audit_lines(e)] == ["episode.exclude", "episode.restore"]
+
+
+def test_a_request_is_all_or_nothing_and_says_why(env):
+    e = env()
+    mirror_only(e, 0, 1)
+    jsonio.update(
+        mirror.state_path(e.config, NAME),
+        lambda v: v["demos"].update(
+            demo_0002={"state": "rejected", "reason": "unusable video"}
+        ),
+    )
+    before = e.state()
+    with pytest.raises(exclusion.Unknown) as unknown:
+        exclusion.exclude(e.config, NAME, ["demo_0000", "demo_0099"])
+    assert unknown.value.demos == ["demo_0099"]
+    with pytest.raises(exclusion.NotPart) as part:
+        exclusion.exclude(e.config, NAME, ["demo_0000", "demo_0002"])
+    assert part.value.demos == ["demo_0002"]
+    jsonio.update(
+        mirror.state_path(e.config, NAME),
+        lambda v: v.update(current={"demos": ["demo_0001"], "done": []}),
+    )
+    before = e.state()
+    with pytest.raises(exclusion.Busy) as busy:
+        exclusion.exclude(e.config, NAME, ["demo_0000", "demo_0001"])
+    assert busy.value.demos == ["demo_0001"]
+    with pytest.raises(exclusion.Unknown):
+        exclusion.restore(e.config, NAME, ["demo_0099"])
+    assert e.state() == before  # not one of them was removed
+    assert audit_lines(e) == []
+
+
+# --- the worker --------------------------------------------------------------------------
+
+
+def test_the_worker_does_not_label_an_excluded_episode_and_the_numbers_leave_it_out(
+    env,
+):
+    e = env()
+    mirror_only(e, 0, 1, 2, 3)
+    exclusion.exclude(e.config, NAME, ["demo_0003"], "robot reflex")
+    ctl = e.run()
+    state = e.state()
+    states = {d: r["state"] for d, r in state["demos"].items()}
+    assert states == {
+        "demo_0000": "done",
+        "demo_0001": "done",
+        "demo_0002": "done",
+        "demo_0003": "mirrored",  # never touched
+    }
+    assert state["demos"]["demo_0003"]["attempts"] == 0
+    assert state["demos"]["demo_0003"]["excluded"]["reason"] == "robot reflex"
+    episodes = {
+        p["episode_index"]
+        for c in e.records("changes")
+        if c["status"] == "committed"
+        for p in c["proposals"]
+    }
+    assert episodes == {0, 1, 2}
+    # The capture keeps its mirror: nothing is deleted.
+    assert (Path(state["capture"]) / "demo_0003").is_dir()
+    row = ctl.status()["datasets"][NAME]
+    assert (row["episodes"], row["done"], row["pending"], row["excluded"]) == (
+        3,
+        3,
+        0,
+        1,
+    )
+    # Nothing waits, so the service is idle rather than "pending" for ever.
+    assert row["state"] == "idle" and ctl.status()["queue_depth"] == 0
+
+
+def test_restoring_makes_it_wait_again_and_the_next_batch_labels_it(env):
+    e = env()
+    mirror_only(e, 0, 1)
+    exclusion.exclude(e.config, NAME, ["demo_0001"])
+    e.run()
+    assert e.state()["demos"]["demo_0001"]["state"] == "mirrored"
+    exclusion.restore(e.config, NAME, ["demo_0001"])
+    ctl = e.controller()
+    ctl._refresh(time.time(), True)
+    assert ctl.status()["datasets"][NAME]["pending"] == 1
+    e.run()
+    assert {r["state"] for r in e.state()["demos"].values()} == {"done"}
+
+
+def test_an_annotated_episode_keeps_its_annotations_but_stops_counting(env):
+    e = env()
+    e.rollouts.write(0)
+    e.rollouts.write(1)
+    e.run()
+    atoms = e.atoms(1)
+    exclusion.exclude(e.config, NAME, ["demo_0001"])
+    ctl = e.controller()
+    ctl._refresh(time.time(), True)
+    row = ctl.status()["datasets"][NAME]
+    assert (row["episodes"], row["done"], row["excluded"]) == (1, 1, 1)
+    assert e.atoms(1) == atoms  # the committed segments stay in LEVI
+    assert e.state()["demos"]["demo_0001"]["verdict"]["outcome"] == "success"
+
+
+def test_the_filter_passes_over_a_demo_excluded_after_the_batch_was_chosen(
+    env,
+):
+    """The window between choosing a batch and saving it: the click wins, the
+    worker leaves the row exactly as it was."""
+    e = env()
+    mirror_only(e, 0, 1)
+
+    class Stub(worker.Worker):
+        def __init__(self, config, name):
+            self.config, self.name = config, name
+
+        def committed_here(self, batch):
+            return set()
+
+        def human_annotated(self, episode):
+            return False
+
+    exclusion.exclude(e.config, NAME, ["demo_0000"])
+    before = e.state()["demos"]["demo_0000"]
+    keep = Stub(e.config, NAME).filter_demos(
+        ["demo_0000", "demo_0001"], {"demo_0000": 0, "demo_0001": 1}, {}
+    )
+    assert keep == ["demo_0001"]
+    assert e.state()["demos"]["demo_0000"] == before
+
+
+def test_excluding_while_a_batch_runs_is_refused_for_its_episodes_only(env):
+    e = env(delay=0.3)
+    mirror_only(e, 0, 1, 2, 3)
+    e.config.watch.batch_max_episodes = 2
+    ctl = e.controller()
+    thread = threading.Thread(target=lambda: ctl.run(once=True, max_seconds=240))
+    thread.start()
+    try:
+        deadline = time.time() + 90
+        while time.time() < deadline and not (e.state() or {}).get("current"):
+            time.sleep(0.05)
+        batch = e.state()["current"]["demos"]
+        assert batch == ["demo_0000", "demo_0001"]
+        with pytest.raises(exclusion.Busy):
+            exclusion.exclude(e.config, NAME, ["demo_0000"])
+        # The waiting ones are free to go, whatever the worker is doing.
+        exclusion.exclude(e.config, NAME, ["demo_0003"], "while a batch ran")
+    finally:
+        e.fake.delay = 0
+        thread.join(240)
+    state = e.state()
+    states = {d: r["state"] for d, r in state["demos"].items()}
+    assert (
+        states["demo_0003"] == "mirrored" and "excluded" in state["demos"]["demo_0003"]
+    )
+    assert states["demo_0000"] == states["demo_0001"] == states["demo_0002"] == "done"
+    assert "excluded" not in state["demos"]["demo_0000"]
+
+
+def test_a_source_that_changed_is_not_mirrored_again_while_the_episode_is_out(env):
+    e = env()
+    mirror_only(e, 0)
+    exclusion.exclude(e.config, NAME, ["demo_0000"])
+    jsonio.update(
+        mirror.state_path(e.config, NAME),
+        lambda v: v["demos"]["demo_0000"].update(source_changed=time.time()),
+    )
+    capture = Path(e.state()["capture"]) / "demo_0000"
+    inode = capture.stat().st_ino
+    assert mirror.refresh_changed(e.config, NAME) == []
+    assert capture.stat().st_ino == inode
+    ctl = e.controller()
+    ctl._refresh(time.time(), True)
+    assert ctl.status()["datasets"][NAME]["source_changed"] == 0
+
+
+# --- review runs ---------------------------------------------------------------------------
+
+
+def test_a_review_run_is_cancelled_when_all_its_episodes_are_out(env):
+    e = env()
+    e.rollouts.write(0)
+    e.rollouts.write(1)
+    e.run()
+    state = e.state()
+    (run_id,) = state["review_runs"]
+    assert state["review_runs_open"] == 1
+    cancel = cancel_with_the_store(e)
+
+    def status():
+        return next(r["status"] for r in e.records("runs") if r["id"] == run_id)
+
+    # One of two episodes out: the run is still needed for the other.
+    one = exclusion.exclude(e.config, NAME, ["demo_0000"], cancel_run=cancel)
+    assert one["cancelled_runs"] == [] and status() == "waiting_for_review"
+    assert e.state()["review_runs"] == [run_id]
+    # The last one out: nobody is left to review, so the run is cancelled.
+    both = exclusion.exclude(e.config, NAME, ["demo_0001"], cancel_run=cancel)
+    assert both["cancelled_runs"] == [run_id] and status() == "cancelled"
+    state = e.state()
+    assert state["review_runs"] == [] and state["review_runs_open"] == 0
+    assert both["review_runs_open"] == 0
+    assert state["demos"]["demo_0001"]["verdict"]["run_id"] == run_id  # kept
+    assert audit_lines(e)[-1]["runs_cancelled"] == [run_id]
+    ctl = e.controller()
+    ctl._refresh(time.time(), True)
+    assert ctl.status()["datasets"][NAME]["review_runs_open"] == 0
+    # Restoring does not reopen it, and says so.
+    back = exclusion.restore(e.config, NAME, ["demo_0000", "demo_0001"])
+    assert back["review_cancelled"] == [run_id] and status() == "cancelled"
+    assert e.state()["demos"]["demo_0000"]["state"] == "done"
+
+
+def test_a_run_that_is_already_over_does_not_stop_the_exclusion(env):
+    e = env()
+    mirror_only(e, 0)
+    jsonio.update(
+        mirror.state_path(e.config, NAME),
+        lambda v: v.update(
+            review_runs=["gone"],
+            review_runs_open=1,
+            demos={
+                "demo_0000": {**v["demos"]["demo_0000"], "verdict": {"run_id": "gone"}}
+            },
+        ),
+    )
+
+    def cancel(run_id):
+        raise KeyError(run_id)
+
+    result = exclusion.exclude(e.config, NAME, ["demo_0000"], cancel_run=cancel)
+    assert result["cancelled_runs"] == ["gone"]
+    assert e.state()["review_runs"] == []
+
+
+# --- the audit -------------------------------------------------------------------------------
+
+
+def test_every_change_is_an_audit_line_without_a_secret(env):
+    e = env()
+    mirror_only(e, 0, 1)
+    exclusion.exclude(e.config, NAME, ["demo_0000", "demo_0001"], "bad takes", now=5.0)
+    exclusion.restore(e.config, NAME, ["demo_0001"], now=6.0)
+    lines = audit_lines(e)
+    assert [(x["tool"], x["demo"]) for x in lines] == [
+        ("episode.exclude", "demo_0000"),
+        ("episode.exclude", "demo_0001"),
+        ("episode.restore", "demo_0001"),
+    ]
+    first = lines[0]
+    assert first["time"] == 5.0 and first["dataset"] == NAME
+    assert first["reason"] == "bad takes" and first["actor"] == "person"
+    assert first["decision"] == "completed" and first["principal"] == "local-human"
+    assert "reason" not in lines[2] and lines[2]["time"] == 6.0
+    text = (e.ws / "live/audit.jsonl").read_text().lower()
+    assert "token" not in text and "key" not in text
+
+
+def test_an_audit_log_that_cannot_be_written_does_not_undo_the_change(env, monkeypatch):
+    e = env()
+    mirror_only(e, 0)
+
+    def broken(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(jsonio, "append_line", broken)
+    exclusion.exclude(e.config, NAME, ["demo_0000"])
+    assert exclusion.is_excluded(e.state()["demos"]["demo_0000"])
+
+
+# --- who may do it -----------------------------------------------------------------------------
+
+
+def test_the_automatic_approver_has_no_such_call():
+    for tool in (exclusion.TOOL_EXCLUDE, exclusion.TOOL_RESTORE):
+        assert tool not in auto.ALLOWED
+
+
+@pytest.fixture
+def live_api(client, env, monkeypatch):
+    e = env()
+    monkeypatch.setattr(api, "_workspace", lambda: e.ws)
+    monkeypatch.setenv("LEVI_LIVE_HOME", e.config.service.home)
+    return client, e
+
+
+ROUTES = [
+    ("/exclude", {"demos": ["demo_0000"], "reason": "x"}),
+    ("/restore", {"demos": ["demo_0000"]}),
+    ("/demos/demo_0000/exclude", {"reason": "x"}),
+    ("/demos/demo_0000/restore", None),
+]
+
+
+def test_removing_and_restoring_need_the_ui_token_and_refuse_an_agent(
+    live_api, monkeypatch
+):
+    client, e = live_api
+    mirror_only(e, 0)
+    monkeypatch.setenv("LEVI_UI_TOKEN", "test-ui-token")
+    monkeypatch.setenv("LEVI_AGENT_TOKEN", "test-scoped-token")
+    person = {"x-levi-ui-token": "test-ui-token"}
+    agent = {"Authorization": "Bearer test-scoped-token"}
+    both = {**agent, **person}
+    for suffix, body in ROUTES:
+        url = f"/api/levi/live/datasets/{NAME}{suffix}"
+        assert client.post(url, json=body).status_code == 401, url
+        assert client.post(url, json=body, headers=agent).status_code == 403, url
+        # Even carrying the UI token as well: an agent credential is refused.
+        assert client.post(url, json=body, headers=both).status_code == 403, url
+    assert not exclusion.is_excluded(e.state()["demos"]["demo_0000"])
+    assert audit_lines(e) == []
+    url = f"/api/levi/live/datasets/{NAME}/exclude"
+    assert client.post(url, json=ROUTES[0][1], headers=person).status_code == 200
+    assert exclusion.is_excluded(e.state()["demos"]["demo_0000"])
+
+
+def test_an_agent_cannot_reach_it_through_its_own_capabilities(live_api, monkeypatch):
+    client, _ = live_api
+    monkeypatch.setenv("LEVI_UI_TOKEN", "test-ui-token")
+    monkeypatch.setenv("LEVI_AGENT_TOKEN", "test-scoped-token")
+    agent = {"Authorization": "Bearer test-scoped-token"}
+    listed = client.get("/api/levi/agent/v1/capabilities", headers=agent)
+    assert listed.status_code == 200
+    text = listed.text.lower()
+    assert "exclude" not in text and "episode.restore" not in text
+    call = client.post(
+        "/api/levi/agent/v1/tools",
+        headers=agent,
+        json={"name": "episode.exclude", "arguments": {"demos": ["demo_0000"]}},
+    )
+    assert call.status_code >= 400
+
+
+def test_the_routes_do_nothing_outside_a_live_workspace(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "_workspace", lambda: tmp_path)
+    for suffix, body in ROUTES:
+        url = f"/api/levi/live/datasets/{NAME}{suffix}"
+        assert client.post(url, json=body).status_code == 404
+
+
+# --- the API ---------------------------------------------------------------------------------
+
+
+def test_the_api_removes_lists_and_restores_with_the_new_counts(live_api):
+    client, e = live_api
+    mirror_only(e, 0, 1, 2)
+    base = f"/api/levi/live/datasets/{NAME}"
+    answer = client.post(
+        f"{base}/exclude", json={"demos": ["demo_0001", "demo_0002"], "reason": "r"}
+    ).json()
+    assert answer["changed"] == ["demo_0001", "demo_0002"]
+    assert answer["counts"]["mirrored"] == 1 and answer["excluded_count"] == 2
+    detail = client.get(base).json()
+    assert [d["demo"] for d in detail["demos"]] == ["demo_0000"]
+    assert [d["demo"] for d in detail["excluded_demos"]] == ["demo_0002", "demo_0001"]
+    assert detail["excluded_demos"][0]["excluded"]["reason"] == "r"
+    assert detail["total_demos"] == 1 and detail["excluded_count"] == 2
+    assert detail["counts"]["mirrored"] == 1
+    # The same click twice changes nothing.
+    again = client.post(f"{base}/demos/demo_0001/exclude").json()
+    assert again["changed"] == [] and again["unchanged"] == ["demo_0001"]
+    back = client.post(f"{base}/demos/demo_0001/restore").json()
+    assert back["changed"] == ["demo_0001"] and back["excluded_count"] == 1
+    nothing = client.post(f"{base}/restore", json={"demos": ["demo_0001"]}).json()
+    assert nothing["changed"] == [] and nothing["unchanged"] == ["demo_0001"]
+    detail = client.get(base).json()
+    assert [d["demo"] for d in detail["demos"]] == ["demo_0001", "demo_0000"]
+    # The audit view shows it, newest first.
+    shown = client.get("/api/levi/live/audit").json()["audit"]
+    assert shown[0]["tool"] == "episode.restore"
+    assert {x["tool"] for x in shown} == {"episode.exclude", "episode.restore"}
+
+
+def test_the_api_names_what_it_refused(live_api):
+    client, e = live_api
+    mirror_only(e, 0, 1)
+    jsonio.update(
+        mirror.state_path(e.config, NAME),
+        lambda v: v.update(current={"demos": ["demo_0001"], "done": []}),
+    )
+    base = f"/api/levi/live/datasets/{NAME}"
+    missing = client.post(f"{base}/exclude", json={"demos": ["demo_0042"]})
+    assert missing.status_code == 404 and "demo_0042" in missing.json()["detail"]
+    busy = client.post(f"{base}/demos/demo_0001/exclude")
+    assert busy.status_code == 409
+    assert "being labelled" in busy.json()["detail"]
+    assert (
+        client.post(
+            "/api/levi/live/datasets/nope/exclude", json={"demos": ["a"]}
+        ).status_code
+        == 404
+    )
+    assert client.post(f"{base}/exclude", json={"demos": []}).status_code == 422
+    assert client.post(f"{base}/exclude", json={"demos": ["../x"]}).status_code == 404
+    assert (
+        client.post(f"{base}/restore", json={"demos": ["demo_0042"]}).status_code == 404
+    )
+    assert not exclusion.excluded_count(e.state())
+
+
+def test_the_api_cancels_a_review_run_in_the_workspace_store(live_api):
+    client, e = live_api
+    e.rollouts.write(0)
+    e.rollouts.write(1)
+    e.run()
+    (run_id,) = e.state()["review_runs"]
+    base = f"/api/levi/live/datasets/{NAME}"
+    done = client.post(f"{base}/exclude", json={"demos": ["demo_0000", "demo_0001"]})
+    assert done.json()["cancelled_runs"] == [run_id]
+    assert (
+        next(r["status"] for r in e.records("runs") if r["id"] == run_id) == "cancelled"
+    )
+    assert client.get(base).json()["review_runs"] == []

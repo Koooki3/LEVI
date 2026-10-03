@@ -345,24 +345,16 @@ class Worker:
         scanner = mirror.Scanner(self.config)
         scan = next((t for t in scanner.scan() if t.name == self.name), None)
         state = self.state()
-        pending = [
-            d
-            for d, row in state["demos"].items()
-            if row.get("state") == "mirrored"
-            and row.get("attempts", 0) < p.max_attempts
-        ]
+        pending = mirror.waiting_demos(state, p.max_attempts)
         room = max(0, w.batch_max_episodes - len(pending))
         ready = list(scan.ready[:room]) if scan else []
         if ready:
             self.progress("mirror", ready=len(ready))
             mirror.mirror_dataset(self.config, state, ready)
         state = self.state()
-        demos = sorted(
-            d
-            for d, row in state["demos"].items()
-            if row.get("state") == "mirrored"
-            and row.get("attempts", 0) < p.max_attempts
-        )[: w.batch_max_episodes]
+        demos = sorted(mirror.waiting_demos(state, p.max_attempts))[
+            : w.batch_max_episodes
+        ]
         return demos
 
     # --- runs ---------------------------------------------------------------------------
@@ -1089,6 +1081,10 @@ class Worker:
         def change_state(value):
             for demo in demos:
                 row = value["demos"].setdefault(demo, {})
+                if row.get("excluded"):
+                    # A person took it out after the batch was chosen (the
+                    # API refuses once it is saved as the batch): leave it.
+                    continue
                 if demo not in index:
                     row.update(
                         state="rejected",

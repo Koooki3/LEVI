@@ -1,22 +1,30 @@
-"""Read-only HTTP views for the live page (``/api/levi/live/*``).
+"""HTTP views for the live page (``/api/levi/live/*``).
 
-Every route only reads files the supervisor and the robot side write; none
-changes anything, and none returns a token or a path outside the live
-workspace's own state. In any workspace that is not a live workspace (no
-``live/workspace.json``) the routes answer ``{"enabled": false}``.
+The GET routes only read files the supervisor and the robot side write, and
+none returns a token or a path outside the live workspace's own state. In any
+workspace that is not a live workspace (no ``live/workspace.json``) they
+answer ``{"enabled": false}``.
+
+The only routes that change anything take an episode out of a dataset and put
+it back (``exclusion.py``; a soft delete that keeps every file). They are a
+person's action: the UI token is required (the same check as every other
+write of the page), a LEVI Agent credential is refused, and there is no
+capability an agent or the automatic approver could call instead.
 
 The JSON shapes are documented in ``docs/LIVE.md``.
 """
 
 import os
 import re
+import secrets
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 
 from . import config as live_config
-from . import jsonio, mirror, resumer, sessions
+from . import exclusion, jsonio, mirror, resumer, sessions
 
 router = APIRouter(prefix="/api/levi/live", tags=["Live annotation"])
 
@@ -149,6 +157,7 @@ def _demo_row(name, row):
     verdict = row.get("verdict") or {}
     return {
         "demo": name,
+        "excluded": row.get("excluded") or None,
         "state": row.get("state"),
         "episode_index": row.get("episode_index"),
         "run_id": row.get("run_id"),
@@ -188,7 +197,13 @@ def dataset_view(name: str):
     if not state:
         raise HTTPException(404, "Unknown live dataset")
     demos = state.get("demos") or {}
-    rows = [_demo_row(d, demos[d]) for d in sorted(demos, reverse=True)[:MAX_DEMOS]]
+    names = sorted(demos, reverse=True)
+    # Removed episodes (``exclusion.py``) are listed apart, so the list a
+    # person works with and every number on the page leave them out.
+    kept = [d for d in names if not exclusion.is_excluded(demos[d])]
+    removed = [d for d in names if exclusion.is_excluded(demos[d])]
+    rows = [_demo_row(d, demos[d]) for d in kept[:MAX_DEMOS]]
+    removed_rows = [_demo_row(d, demos[d]) for d in removed[:MAX_DEMOS]]
     repo_id = None
     try:
         from levi import catalog
@@ -205,8 +220,10 @@ def dataset_view(name: str):
         "task_folder": state.get("task_folder"),
         "task_text": state.get("task_text"),
         "counts": mirror.counts(state),
-        "total_demos": len(demos),
+        "total_demos": len(kept),
         "demos": rows,
+        "excluded_count": len(removed),
+        "excluded_demos": removed_rows,
         "incomplete": state.get("incomplete"),
         "discarded": state.get("discarded"),
         "current": state.get("current"),
@@ -240,3 +257,124 @@ def audit_view(limit: int = 50):
         except ValueError:
             continue
     return {"enabled": True, "audit": rows}
+
+
+# --- removing an episode (a person's action) --------------------------------------
+
+
+class Removal(BaseModel):
+    demos: list[str] = Field(min_length=1, max_length=500)
+    reason: str = Field("", max_length=exclusion.REASON_MAX)
+
+
+class Restoration(BaseModel):
+    demos: list[str] = Field(min_length=1, max_length=500)
+
+
+class OneRemoval(BaseModel):
+    reason: str = Field("", max_length=exclusion.REASON_MAX)
+
+
+def _person(request: Request) -> None:
+    """Only a person at the page may do this. The service's middleware has
+    already turned an agent's Bearer credential away from every route but the
+    Agent API and demanded the UI token; this refuses again here, so the rule
+    does not depend on how the router is mounted."""
+    if request.headers.get("authorization", "").lower().startswith("bearer "):
+        raise HTTPException(
+            403, "Removing an episode is a person's action; agents cannot do it"
+        )
+    secret = os.getenv("LEVI_UI_TOKEN")
+    if secret and not secrets.compare_digest(
+        request.headers.get("x-levi-ui-token", ""), secret
+    ):
+        raise HTTPException(401, "Use the LEVI Web UI")
+
+
+def _live_config(name: str):
+    config = _config()
+    if config is None:
+        raise HTTPException(404, "This is not a live workspace")
+    if not NAME.match(name) or not mirror.load_state(config, name):
+        raise HTTPException(404, "Unknown live dataset")
+    return config
+
+
+def _cancel_run(run_id):
+    """Cancel a review run in this workspace's store (nothing in it is left
+    waiting for a person once all its episodes are removed)."""
+    from levi.agent.runtime import Workbench
+
+    Workbench(_workspace() / "outputs/LEVI/workbench").control(run_id, "cancel")
+
+
+def _demo_names(demos):
+    bad = [d for d in demos if not NAME.match(d)]
+    if bad:
+        raise HTTPException(404, f"Unknown episode: {', '.join(bad[:5])}")
+
+
+def _refusal(exc: exclusion.Refused) -> HTTPException:
+    names = ", ".join(exc.demos[:10]) + (" ..." if len(exc.demos) > 10 else "")
+    if isinstance(exc, exclusion.Unknown):
+        return HTTPException(404, f"Unknown episode: {names}")
+    if isinstance(exc, exclusion.Busy):
+        return HTTPException(
+            409,
+            f"{names}: being labelled (part of the batch in progress); "
+            "try again after the batch",
+        )
+    return HTTPException(
+        409, f"{names}: was never taken into the dataset, nothing to remove"
+    )
+
+
+def _exclude(name, demos, reason):
+    config = _live_config(name)
+    _demo_names(demos)
+    try:
+        done = exclusion.exclude(config, name, demos, reason, cancel_run=_cancel_run)
+    except exclusion.Refused as exc:
+        raise _refusal(exc) from exc
+    return {"enabled": True, "dataset": name, **done}
+
+
+def _restore(name, demos):
+    config = _live_config(name)
+    _demo_names(demos)
+    try:
+        done = exclusion.restore(config, name, demos)
+    except exclusion.Refused as exc:
+        raise _refusal(exc) from exc
+    return {"enabled": True, "dataset": name, **done}
+
+
+@router.post("/datasets/{name}/exclude")
+def exclude_demos(name: str, body: Removal, request: Request):
+    """Remove episodes from the dataset (restorable). All or nothing: 404 for
+    an episode the dataset does not have, 409 for one in the batch in
+    progress. An episode already removed is reported in ``unchanged``."""
+    _person(request)
+    return _exclude(name, body.demos, body.reason)
+
+
+@router.post("/datasets/{name}/restore")
+def restore_demos(name: str, body: Restoration, request: Request):
+    """Put removed episodes back. An episode that is not removed is reported
+    in ``unchanged``."""
+    _person(request)
+    return _restore(name, body.demos)
+
+
+@router.post("/datasets/{name}/demos/{demo}/exclude")
+def exclude_demo(
+    name: str, demo: str, request: Request, body: OneRemoval | None = None
+):
+    _person(request)
+    return _exclude(name, [demo], body.reason if body else "")
+
+
+@router.post("/datasets/{name}/demos/{demo}/restore")
+def restore_demo(name: str, demo: str, request: Request):
+    _person(request)
+    return _restore(name, [demo])

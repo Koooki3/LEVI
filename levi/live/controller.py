@@ -32,7 +32,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import auto, gating, gpumgr, jsonio, mirror, resources, sessions
+from . import auto, exclusion, gating, gpumgr, jsonio, mirror, resources, sessions
 from . import config as live_config
 
 SCHEMA = "levi.live.status.v1"
@@ -263,12 +263,7 @@ class Controller:
         for name in set(states) | set(scans):
             state = states.get(name) or {}
             scan = scans.get(name)
-            todo = [
-                d
-                for d, row in (state.get("demos") or {}).items()
-                if row.get("state") == "mirrored"
-                and row.get("attempts", 0) < p.max_attempts
-            ]
+            todo = mirror.waiting_demos(state, p.max_attempts)
             if not (state.get("current") or todo or (scan and scan.ready)):
                 continue
             if self.backoff.get(name, 0) > now:
@@ -1179,12 +1174,15 @@ class Controller:
             counts = mirror.counts(state) if state else {}
             ready = len(scan.ready) if scan else 0
             current = state.get("current")
-            demos = (state.get("demos") or {}).values()
+            demos = [
+                d for d in (state.get("demos") or {}).values() if not d.get("excluded")
+            ]
             row = {
                 "review_runs_open": state.get("review_runs_open", 0),
                 "stuck": counts.get("stuck", 0),
                 "source_changed": sum(1 for d in demos if d.get("source_changed")),
                 "episodes": sum(counts.values()) + ready,
+                "excluded": exclusion.excluded_count(state),
                 "pending": counts.get("mirrored", 0) + ready,
                 "annotating": len((current or {}).get("demos") or []),
                 "done": counts.get("done", 0),
