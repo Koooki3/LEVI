@@ -31,7 +31,7 @@ uv run levi live doctor                          # CPU、内存、GPU、磁盘�
 uv run levi live stop                            # 只停自己的进程
 ```
 
-`levi live once [--fake-vlm]` 标完当前已完成的片段就退出（加 `--fake-vlm` 时使用假的模型服务，不需要 GPU）。`levi live init` 把所有默认值写成 `<工作区>/live.toml`。`levi live start` 在启动核心之前，把它校验过的配置（文件、`--config`、命令行覆盖）写到 `<工作区>/live/effective.toml`，所以核心读到的是本次会话的设置，而不是上一次的。`levi live resume` 清除服务放弃了的 vLLM 启动失败。`once --fake-vlm` 必须指定临时的 `--workspace`，不能是实时工作区。
+`levi live once [--fake-vlm]` 标完当前已完成的片段就退出（加 `--fake-vlm` 时使用假的模型服务，不需要 GPU）。`levi live init` 把所有默认值写成 `<工作区>/live.toml`。`levi live report` 把某个数据集或会话的统计打印成报告，`levi live stats backfill` 为统计功能出现之前标注的片段补记录（见“统计与报告”）。`levi live start` 在启动核心之前，把它校验过的配置（文件、`--config`、命令行覆盖）写到 `<工作区>/live/effective.toml`，所以核心读到的是本次会话的设置，而不是上一次的。`levi live resume` 清除服务放弃了的 vLLM 启动失败。`once --fake-vlm` 必须指定临时的 `--workspace`，不能是实时工作区。
 
 不加 `--auto-approve` 时，服务仍会镜像、建视图并**生成计划**，然后等待：由人在 LEVI 页面批准计划（数据集显示 `awaiting_approval`）。加上它，由下文的“自动批准主体”（有审计）代为通过这些关口。
 
@@ -84,6 +84,7 @@ uv run levi live stop                            # 只停自己的进程
 
 - `gpu.mode` 默认 `auto`：等于 `timeshare`（两者常驻 + 闸门）；`coexist` 和 `manual` 是手动选项。`gpu.busy_states` 默认 `["running"]`；`gpu.min_free_mib` 600、`gpu.policy_budget_mib` 8500 决定 vLLM 何时睡眠。
 - `pipeline.auto_approve` 默认 **false**。`pipeline.keep_review_runs` 10：每个数据集保留冻结输入的开着的释放复核运行数（提交它需要输入），更旧的被取消并清理。`watch.stuck_s` 600：没有完成、也没有变化的片段超过这个时间算 `stuck`。`gpu.lead_s`/`lead_grace_s` 3/5：闸门在下一集开始前提前关闭。`service.gate_poll_s` 0.25。
+- `resources.report_keep` 默认 20：`live/reports/` 里保留的会话报告份数，写入新报告时删除最旧的。
 - `gpu.policy_ports` 默认 `[8000]`，只在内核的 socket 表里查，从不连接。`gpu.policy_loaded_min_mib` 6000、`gpu.policy_load_wait_s` 120：监听着的策略端口只有进程占用到这么多显存才算“策略服务器已加载”（用于预算规划）；占得更少说明还在加载，vLLM 等待（`settling`），端口出现 `policy_load_wait_s` 秒后按“只有 vLLM”规划；读不到显存同样按“只有 vLLM”的保守预算。`gpu.standby_min_s` 20：冷启动要等会话在 `standby` 待满这么久（它的第一集几秒内就会开始）；这是缓解，不是保证，评测前用 `--prewarm`。`gpu.wake_margin_mib` 850：唤醒时在预算（减去睡眠中的 vLLM 仍占的部分）之外保留的空闲显存；启动用 `vllm.margin_mib`。**在真 GPU 上测过**（策略服务器 `.22`）：睡眠的 vLLM 旁空闲 22768 MiB，唤醒并做完第一批请求用了约 21758 MiB。原来的 300 会在空闲 21843 MiB 时放行唤醒，唤醒后只剩约 85 MiB，低于 `min_free_mib`（600），vLLM 会立刻又被放睡；800 在放行线上仍只剩约 585；850 时唤醒需要 22393，正好在线上也剩 635 MiB，实测的 22768 放行，富余约 375 MiB（按这些数字算出来的，没有观察到真正的来回抖动）。`gpu.blocked_pause_s` 300：GPU 锁被别的 agent 持有、:8100 上有别人的 vLLM、睡眠的 vLLM 因显存不够唤不醒，持续这么久后写进 `labelling_paused`。`gpu.resume_stable_s` 3（0.5–60 秒）、`gpu.resume_max_bounces` 3：人的运行被实时闸门拦住（`blocked`）后，闸门连续开着这么久就自动继续（避开 `episode_imminent` 窗口；用监督进程写在 `gate.json` 里的 `opened_at`，所以两次采样之间的关上又打开也算），每次打开一次；连续被拦这么多次、中间没有进展（完成片段或结算了 token），就留给人点“继续”；0 表示关闭自动恢复。`gpu.unknown_client_pause_s` 600：没有会话为之作证的策略服务器让闸门一直关着，超过这么久状态里 `labelling_paused` 写 `unknown_client`。
 - `vllm.prewarm` 默认 false（`levi live start --prewarm`）：服务启动后、没有评测在跑时就把 vLLM 拉起来并保持常驻，空闲只睡眠，服务停止才停。这是**评测期间不冷启动**的办法。
 - vLLM 的显存预算和上下文长度在每次启动时按**当时的空闲显存**选择（见下），`gpu_memory_utilization_max/min`、`min_utilization_with_policy/alone`（都是 0.725）、`kv_bytes_per_token`、`min_model_len` 是这个选择的界限（按**热**编译缓存下的实测校准，见下）；`margin_mib` 1100；`max_start_failures` 3、`start_backoff_s` 60、`start_backoff_max_s` 600。
@@ -176,6 +177,7 @@ uv run levi live stop                            # 只停自己的进程
 - **评测会话**：状态、评测编号、片段 `第几个 / 目标`（有效片段数）、步数进度条、策略 config 和 checkpoint 文件夹名、最近一个片段、是否启用 LEVI 标注、复位等待；客户端心跳超过 10 s 显示“已失联”。
 - **FR3 机械臂**：模式、红灯、错误、硬件和控制器状态、原因。
 - **标注管线**：每个数据集一张卡片，显示已镜像、等待、标注中、完成、失败的片段数，已提交的时间片段，以及**自动**成败结果（虚线框、标“自动”，写明“未经审核，准确率未评估”，不会画得像金标准）。留待人工复核的复核运行会列出（默认最新 3 个；按浏览器保存的只读筛选可隐藏较早的，不改变任何数据），并链接到查看器。“显示片段”列出数据集的片段（先 10 个最新的，可展开全部）；每个片段可在列表或详情里排除，也可多选后一起排除；“已排除（n）”列出被排除的片段，带“恢复”按钮。
+- **统计**：当前范围（全部、某个数据集、某个会话）的关键数字：片段数、中位和 p90 延迟、实时倍率、每个片段的 token、等 GPU 门控的时间、会话内标注比例；评测会话表；逐片段表（延迟或模型开销两种视图）；下载（Markdown、JSON、CSV）。随页面的轮询更新，评测进行时最多每 5 s 一次，否则每 30 s 一次；还没有记录时会明确说明。口径见“统计与报告”。
 - **服务与资源**：状态、GPU 模式、vLLM 状态、用人话解释的标注闸门（例如策略推理时为什么暂不标注）、队列、工作进程、最近错误、监督进程的内存、线程和 CPU。服务未运行时页面会说明，并提供可复制的 `levi live start`。
 - **需要人处理**：服务放弃启动模型服务器（`attention`，写明原因并给出可复制的 `levi live resume`）、数据集在等你于 LEVI 页面批准计划或提交草稿（`awaiting`）、或服务启动的页面/核心没起来（`frontend`）时，出现琥珀色横幅。数据集卡片还会显示卡住的片段和被替换的源。复位等待在两次轮询之间由浏览器倒计时（`reset_wait_s`、`waiting_reset_since`），过期后提示“下一个片段应已开始”。GPU 闸门和决定的每个代码都有中英文的人话解释。当服务因不会自行消失的原因暂停了标注（`labelling_paused`：`vllm_failed`、`vllm_error`、`insufficient_vram`、`policy_large`、`unknown_client`、`vram`、`lock`、`external_busy`），横幅会说明原因、评测不受影响且片段不会丢，以及该怎么做（需要恢复时附可复制的 `levi live resume`）；主循环超过 5 分钟没动作（`loop_at`）也会提示。在 Agent 工作台里，策略推理期间被拒绝的 Run 或 Resume 会显示一句人话（几秒后再试；已经在跑的运行会自己继续），而不是核心的日志原文。
 
@@ -218,6 +220,7 @@ uv run levi live stop                            # 只停自己的进程
 | `<工作区>/live/worker.json`、`gate.json`、`vllm.json`、`service.json` | worker 进度、闸门、本服务启动的 vLLM、首次启动时间 |
 | `<工作区>/live/gate.jsonl` | 闸门的每一次变化（轮转；见“历史与统计”） |
 | `<工作区>/live/stats.jsonl` | 每个已标片段一条记录（轮转；见“历史与统计”） |
+| `<工作区>/live/reports/` | 每个结束的评测会话一份报告：`<数据集>__<会话>.md`、`.zh-CN.md`、`.json`（见“统计与报告”） |
 | `<工作区>/live/logs/` | `live.log`、`worker.log`、`ui.log`、`vllm-launch.log`（轮转） |
 | `<工作区>/captures/<名字>/` | LEVI 登记的镜像采集 |
 | `<工作区>/outputs/LEVI/…` | LEVI 自己的状态：视图、运行、已提交标注 |
@@ -236,13 +239,17 @@ uv run levi live stop                            # 只停自己的进程
 | `dataset`、`demo`、`episode_index` | 实时数据集（`<group>__<task>`）、采集文件夹（`demo_0003`）、片段在数据集视图里的编号 |
 | `session` | 该片段所属的评测运行 id（其 metadata 里的 `eval.run_id`） |
 | `attempts`、`excluded` | 此前对这个片段失败了几次（第一次就成功为 0）；写记录时若人已排除该片段（可恢复）则为 `true`，通常是 `false`：运行中批次里的片段不能排除，被排除的片段也不会被标注 |
+| `backfilled` | 由 `levi live stats backfill` 事后重建的记录为 `true`，否则 `null` |
+| `batch.id`、`batch.size` | 该片段所在的标注批次：批次开始时间（纪元秒）和批次里的片段数；这两个字段出现之前写的记录里是 `null` |
 | `episode.frames`、`episode.episode_seconds` | 帧数和片段自身的时长 |
 | `timeline.to_mirror_s` | 从 `.complete`（片段结束）到镜像完成 |
 | `timeline.to_plan_s` | 到该批次的时间片段计划生成 |
 | `timeline.to_first_request_s` | 到这个片段的第一个模型请求开始 |
 | `timeline.to_commit_s`、`timeline.to_verdict_s` | 到时间片段提交；到自动判定出来 |
+| `timeline.completed_at`、`timeline.first_request_at` | 片段的结束时刻（`.complete`）和它第一个模型请求的开始时刻，都是纪元秒（没发过请求的片段和旧记录里是 `null`）：“会话内标注比例”由它们算出 |
 | `model.requests.{coarse,refine,review,probe}` | 按种类的模型请求数：粗标、边界精修（一次或多次）、释放复核（每个问题一次）、请求开销校准（运行级的开销，记在批次的第一个片段上）。缓存命中不算请求 |
 | `model.model_seconds.{coarse,refine,review,probe}` | 模型在这些请求上花的秒数（`probe` 不计时：`null`） |
+| `model.tokens.{coarse,refine,review,probe}` | 按同样种类分开的 token 总数（旧记录里是 `null`） |
 | `model.prompt_tokens`、`completion_tokens`、`total_tokens` | 服务器报告了用量的那些请求的 token 之和（`total_tokens` = prompt + completion；没有请求报告时前两项是 `null`）。校准探测和预留不在其中 |
 | `model.probe_tokens` | 该批次请求开销校准的 token（运行级的开销，只记在批次的第一个片段上）；其余为 `null` |
 | `model.reserved_tokens`、`model.unreported_steps` | 服务器没给用量的请求，LEVI 按预留额度记账：这些预留之和（不是实际花掉的 token；没有则 `null`）和这类请求的个数 |
@@ -260,6 +267,29 @@ uv run levi live stop                            # 只停自己的进程
 这个文件是本服务工作的记录，LEVI 自己从不读取，也不是训练数据。
 
 **账本里的运行时间。** 运行账本的 `wall_seconds`（`cost-rise-*` 改进提议拿它比较）不含运行在等人、或为策略服务器让路的时间：一个释放复核运行停在 `waiting_for_review`、四十分钟后被取消，不再读作 2400 秒的运行。扣掉的总数是 `idle_seconds`，拆成 `waiting_for_person_seconds` 和 `stood_down_seconds`；准确规则见 `docs/AGENTS.md`。旧账本保持旧值，成本基线（取历史中位数）的历史里还有一部分是旧口径，所以一段时间内新旧运行会混着比较。
+
+## 统计与报告
+
+标注工作的定量记录：片段结束后每个阶段花多久、模型花了多少、GPU 门控挡了多少、产出是什么。所有数字都由 `levi/live/stats.py` 里的纯函数从 `live/stats.jsonl`（以及 `live/gate.jsonl`，和用来确定会话结束时刻的数据集状态文件）算出；页面、API、`levi live report` 和会话报告显示的是同一套数字。没测到的数字是 `null`，显示为“—”，从不显示成 0。
+
+**哪条记录算数。** 一个片段可能有多条记录（重试过）。逐片段的数字（个数、延迟、每个片段的 token、结果）取每个片段**最新**的一条。按次数花掉的合计（token、请求数、门控和 vLLM 的数字）取**全部**记录，所以失败的第一次尝试按它实际的开销计入。
+
+| 数字 | 定义 |
+| --- | --- |
+| 片段数 | 有记录的片段；`done`（已标注）、`failed`、`retrying`（状态 `mirrored`，之后重试）、`retried`（尝试两次以上）、`excluded` |
+| 延迟 | `timeline.to_mirror_s`、`to_plan_s`、`to_first_request_s`、`to_commit_s`、`to_verdict_s`：个数、中位、p90、最大、均值。都是片段 `.complete` 之后的秒数。p90 是第 90 百分位（相邻名次之间线性插值） |
+| 实时倍率 | 片段总秒数 ÷ 模型总秒数，只统计两者都有的片段。模型秒数是各模型请求耗时之和（粗标、精修、释放复核），不是墙钟时间：0.2 表示每 1 秒片段模型要用 5 秒，大于 1 表示标注得比片段本身的时长快 |
+| 每墙钟秒标注的片段秒数 | 片段总秒数 ÷（最后一次判定（没有则提交）到达的时刻 − 第一个片段结束的时刻）。这段时间包含机器人还在运行的部分 |
+| 模型开销 | 每个片段的请求数；每个片段的 token（均值、中位）和总数；提示词占比 = prompt ÷（prompt + completion），只统计服务器报告了拆分的记录；每个片段的图片数；外部 token（恒为 0）。按种类（`coarse`、`refine`、`review`、`probe`）：请求数、模型秒数、token 及各自占总数的比例。`probe` 是批次的请求开销校准，记在批次第一个片段上，不计时 |
+| GPU 与门控 | `closed_wait_s` 和 `interruptions`：worker 因闸门关闭而让路的秒数和次数，**每个批次只算一次**（批次由 `batch.id` 确定；没有它的记录，写入时间相差不超过 5 秒且数字相同的算同一批）；vLLM 唤醒和冷启动（次数、合计、最长），记在它们所服务批次的第一个片段上；`gate_window`：第一个片段结束到最后一条记录之间闸门关闭的秒数和占比、关闭次数，来自 `live/gate.jsonl`（策略推理时闸门关闭，所以这是不允许标注的时间，不是 worker 等待的时间）。vLLM 睡眠没有任何地方记录，显示“未记录” |
+| 会话内标注比例 | **首个模型请求发生在所属评测会话最后一个片段结束之前**的片段占比：衡量标注有多“实时”。会话的结束时刻取它各片段 `timeline.completed_at` 的最大值，数据集状态里已知但还没有记录的片段也算进去（还在进行的会话不会显得比实际更实时）。会话的最后一个片段永远不计入，因为它的请求不可能早于它自己的结束。没发过请求的片段算“不在会话内”。没有会话 id（`eval.run_id`）或没有 `completed_at`（旧记录）的片段不进分子也不进分母；一个都不剩时显示“—” |
+| 结果 | 时间片段总数和每个片段的数量（均值、范围、直方图）、各标签的计数、自动成败判定（`success`、`failure`、`none`）及未决数、谁提交的时间片段（`auto`、`human`） |
+
+**会话报告。** 评测会话结束（会话文件是 `stopped`、`finished` 或已崩溃，或被更新的会话取代），且它的每个片段都已标完或放弃（没有 `mirrored`、`annotating` 或在队列里等待的）后，服务写出 `<工作区>/live/reports/<数据集>__<会话>.md`（英文）、`.zh-CN.md` 和 `.json`。每 30 s 检查一次，批次运行期间不检查。报告内容：设置（当时生效的模型配置、管线、vLLM 和 GPU 设置，取自生效配置，不含路径、端口或密钥；标注指南和释放复核规格及各文件哈希的前 12 位；会话文件里的策略 config 和 checkpoint 文件夹名）、事实、延迟和开销表、GPU 与门控数字、每个片段一行的明细、与同一数据集上一份报告的对比、口径说明。写入是幂等的：记录没变的报告不会重写，迟到的记录会就地更新报告，每个文件先写 `.partial` 再改名，只保留最新的 `resources.report_keep` 份（默认 20）。报告里没有令牌和路径。
+
+`levi live report [--dataset X] [--session Y] [--format md|json|csv] [--lang en|zh] [--out PATH]` 按工作区里的文件为任意范围生成同样的报告（服务不必在运行）；`csv` 是逐片段表。
+
+**回填。** `levi live stats backfill [--dataset X] [--dry-run] [--json]` 为数据集状态里是 `done` 或 `failed`、但没有记录的片段（在 `stats.jsonl` 出现之前标注的）补记录。它重建还留得下来的内容：片段的各个时刻、尝试次数、时间片段数和判定来自数据集状态；模型请求、token 和耗时来自工作区存储里的运行日志（只读方式打开）；时间片段标签来自已提交的变更集。记录带 `backfilled: true`，`at` 是它所描述的那个时刻。没有任何文件保存的内容保持 `null`：当时生效的设置（标注指南、模型配置、模型）、门控等待、vLLM 唤醒耗时、批次、片段时长，以及批次的请求开销校准（`probe`）。不估算，也不拿今天的配置充数。它从不改动已有的行，已经有记录的片段会跳过，所以运行两次不会多出东西。`--dry-run` 列出每个片段，以及 schema 里每个字段的取值来源（或“没有记录”），什么也不写。
 
 ## 状态文件（接口 C4）
 
@@ -280,6 +310,8 @@ uv run levi live stop                            # 只停自己的进程
 | `GET /sessions` | `{"enabled", "sessions": [ {会话字段, "dataset", "fault"} ], "fr3": {…}, "active"}`，直接读机器人侧文件（≤ 64 个）。 |
 | `GET /datasets` | `{"enabled", "datasets": {名字: 行}}`（`status.json` 里的行）。 |
 | `GET /datasets/{name}` | 数据集详情：`repo_id`（登记后的 LEVI 数据集 id，否则 null）、任务文本、各状态计数（被排除的片段不计入）、`total_demos`（数据集里的片段数）、片段列表（最新在前，≤ 200；每项有 `excluded`（null）、状态、集序号、`run_id`、尝试次数、时间片段数、提交时间、自动判定 `verdict`：`outcome/events/valid_events/undecided/spec/review: "auto"/evaluated: false`）、`excluded_count` 和 `excluded_demos`（被排除的片段，行的格式相同，带 `excluded: {at, by: "person", reason}`，最新在前，全部列出，不在 200 处截断）、`incomplete`（含按原因计数）、进行中的批次、上一批、`last_error`。未知名字返回 404。 |
+| `GET /stats?dataset=&session=&since=&limit=100&offset=0` | `{"enabled", "schema": "levi.live.stats.v1", "generated_at", "scope", "datasets": [有记录的数据集名], "summary": {…各项聚合，见“统计与报告”}, "sessions": [每个（数据集，会话）一行，最新在前，≤ 200], "sessions_total", "episodes": {"total", "offset", "limit", "rows": [每个片段一行，最新在前，limit ≤ 500]}}`。`dataset` 和 `session` 只能是普通名字（否则 400）；`since` 是纪元秒。不含路径、令牌或密钥。 |
+| `GET /stats/export?format=csv\|json\|md&dataset=&session=&since=&lang=en\|zh` | 同样的统计，作为下载（`Content-Disposition: attachment`）：`csv` 每个片段一行，`json` 含全部片段的完整数据，`md` 一份可读报告。 |
 | `GET /audit?limit=50` | 自动批准主体的审计记录，最新在前，≤ 100 条，每条含 `tool`、`decision: allowed/refused`、`run_id` 等。人排除或恢复片段的行是 `principal: "local-human"`、`actor: "person"`、`tool: "episode.exclude"` 或 `"episode.restore"`、`dataset`、`demo`、可选的 `reason`、`decision: "completed"`。 |
 | `POST /datasets/{name}/exclude` | 请求体 `{"demos": ["demo_0003", …], "reason": "…"?}`（1 到 500 个名字，原因最长 300 字符）。排除这些片段（要么全部成功，要么都不改）。回答 `{"enabled", "dataset", "changed": [...], "unchanged": [...]（本来就已排除）, "counts", "excluded_count", "review_runs_open", "review_hidden": [...]（片段已全部排除、不计入的待复核运行）}`。404：数据集或片段不存在（会点名），或不是实时工作区；409：片段在进行中的批次里（“being labelled …”），或从未纳入数据集（被拒收、卡住）；401/403：不是人在操作（见上）。 |
 | `POST /datasets/{name}/restore` | 请求体 `{"demos": [...]}`。把已排除的片段放回来；回答同上（`review_hidden` 是恢复之后仍不计入的运行）；没排除的片段在 `unchanged` 里。片段不存在返回 404。 |
