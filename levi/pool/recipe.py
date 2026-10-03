@@ -34,7 +34,7 @@ from typing import Literal
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from . import index, recap_signal, settings
+from . import embodiment, index, recap_signal, settings
 from . import select as picker
 from . import timing as timing_mod
 from .rules import CATEGORIES, normalize_task
@@ -91,6 +91,14 @@ class Recipe(BaseModel):
     policy_methods: list[
         Literal["direct", "dsrl", "rlt", "sfe", "student", "other", "unknown"]
     ] = Field(default_factory=list)
+    # The robot and gripper the episodes recorded (``unknown`` selects those
+    # whose metadata says nothing). Empty: any.
+    robots: list[str] = Field(default_factory=list, max_length=20)
+    grippers: list[str] = Field(default_factory=list, max_length=20)
+    # Take more than one known gripper (or one known next to unknown) into a
+    # single export. Refused otherwise: a policy trained on episodes of
+    # different grippers learns what "closed" means from both.
+    allow_mixed_gripper: bool = False
     include_nonstandard: bool = False
     # A task taken from raw captures and from a LeRobot source that is not
     # linked to them may be one recording twice: refused unless sources are
@@ -100,6 +108,14 @@ class Recipe(BaseModel):
     # Normalized task -> the text written into the export (default: the
     # normalized task itself).
     task_text: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("robots", "grippers")
+    @classmethod
+    def _embodiment_names(cls, value):
+        for item in value:
+            if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,39}", item):
+                raise ValueError(f"{item!r} is not a robot or gripper name")
+        return list(dict.fromkeys(value))
 
     @field_validator("tasks", mode="before")
     @classmethod
@@ -303,6 +319,8 @@ def select_detailed(
         policy_models=recipe.policy_models or None,
         policy_checkpoints=recipe.policy_checkpoints or None,
         policy_methods=recipe.policy_methods or None,
+        robots=recipe.robots or None,
+        grippers=recipe.grippers or None,
         date_from=recipe.date_from,
         date_to=recipe.date_to,
         show_heldout=True,
@@ -487,6 +505,7 @@ def find_warnings(recipe: Recipe, chosen: list[dict], df=None) -> list[dict]:
                 "lerobot_sources": sorted({s for t in both for s in loose[t]})[:10],
             }
         )
+    out += gripper_warnings(recipe, chosen)
     fallback = sum(
         1
         for r in chosen
@@ -501,6 +520,57 @@ def find_warnings(recipe: Recipe, chosen: list[dict], df=None) -> list[dict]:
                 "the operator's key press (no human label); use the human-labelled "
                 "outcome to leave them out",
                 "episodes": fallback,
+            }
+        )
+    return out
+
+
+def gripper_warnings(recipe: Recipe, chosen: list[dict]) -> list[dict]:
+    """The gripper mix of a selection: a blocking ``mixed_gripper`` when an
+    export would be refused, or ``gripper_unknown`` when the recipe took
+    episodes with no recorded gripper together with a known gripper on
+    purpose (``embodiment.gripper_mix`` decides). A selection of nothing but
+    unknown episodes (older data) has no warning; ``preview["grippers"]``
+    carries its count."""
+    grippers = [r.get("gripper") for r in chosen]
+    mix = embodiment.gripper_mix(grippers, recipe.grippers, allow=False)
+    sources = embodiment.sources_by_gripper(chosen)
+    if mix["problem"] and not recipe.allow_mixed_gripper:
+        return [
+            {
+                "code": "mixed_gripper",
+                "blocking": True,
+                "allowed": False,
+                "problem": mix["problem"],
+                "message": embodiment.mix_message(mix, sources),
+                "counts": mix["counts"],
+                "sources": sources,
+            }
+        ]
+    out = []
+    if recipe.allow_mixed_gripper and mix["problem"]:
+        out.append(
+            {
+                "code": "mixed_gripper",
+                "blocking": False,
+                "allowed": True,
+                "problem": None,
+                "message": "The selection mixes grippers on purpose "
+                "(allow_mixed_gripper): "
+                + ", ".join(f"{g} {n}" for g, n in mix["counts"].items()),
+                "counts": mix["counts"],
+                "sources": sources,
+            }
+        )
+    # Only unknown (older data) stays quiet: the composition shows the count.
+    if mix["unknown"] and mix["known"]:
+        out.append(
+            {
+                "code": "gripper_unknown",
+                "blocking": False,
+                "message": f"{mix['unknown']} episode(s) have no recorded gripper "
+                "(unknown): their metadata does not say which gripper was used",
+                "episodes": mix["unknown"],
             }
         )
     return out
@@ -524,6 +594,7 @@ def _task_view(row: dict) -> dict:
             "robot_flag",
             "policy_label",
             "policy_method",
+            "gripper",
             "date",
             "quality_score",
             "sel_stratum",
@@ -633,6 +704,8 @@ def preview(
         "policy_models": dict(
             Counter(r["policy_model"] for r in chosen if r.get("policy_model"))
         ),
+        "grippers": dict(Counter(r.get("gripper") or "unknown" for r in chosen)),
+        "robots": dict(Counter(r.get("robot") or "unknown" for r in chosen)),
         "outcomes": dict(Counter(r["outcome"] or "none" for r in chosen)),
         "outcome_sources": dict(Counter(r["outcome_source"] or "none" for r in chosen)),
         "human_as_success": human_as_success,

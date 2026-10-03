@@ -50,7 +50,7 @@ from ..conversion.outputs.lerobot_v21 import LeRobotV21
 from ..conversion.outputs.recap_value import RECAP_COLUMNS, RecapOptions, RecapValue
 from ..conversion.progress import Progress
 from ..conversion.report import InputReport, Requirement
-from . import heldout, index, joblog, scanner, settings
+from . import embodiment, heldout, index, joblog, scanner, settings
 from . import journal as journal_mod
 from . import timing as timing_mod
 from .recipe import NAME, Recipe, find_warnings, select_detailed
@@ -229,6 +229,7 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "policy_method",
         "policy_phase",
         "policy_label",
+        *embodiment.FIELDS,
         "fingerprint",
         "group",
         "stat_sig",
@@ -254,6 +255,7 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "pool_roots": [str(p) for p in settings.pool_roots()],
         "heldout_lists": [str(p) for p in settings.heldout_files()],
         "heldout_disabled": settings.heldout_disabled(),
+        "embodiment_rules": index.summary().get("embodiment_rules"),
         "warnings": [w for w in warnings if not w["blocking"]]
         + timing_mod.warnings(chosen, options.fps, options.timing),
     }
@@ -288,7 +290,28 @@ def _policy_fields(ep: dict) -> dict:
     }
 
 
+def _embodiment_fields(ep: dict) -> dict:
+    return {f: ep.get(f) or embodiment.UNKNOWN for f in embodiment.FIELDS}
+
+
 # ------------------------------------------------------------------ guards
+
+
+def refuse_mixed_gripper(episodes: list[dict], recipe: dict):
+    """Independent of the preview: the planned episodes may hold one known
+    gripper (or only unknown ones: older data), unless the recipe allows a
+    mix (``allow_mixed_gripper``) or names ``unknown`` on purpose. Refuses the
+    whole export. A plan from an LEVI without these fields counts as unknown."""
+    mix = embodiment.gripper_mix(
+        (e.get("gripper") for e in episodes),
+        recipe.get("grippers"),
+        bool(recipe.get("allow_mixed_gripper")),
+    )
+    if mix["problem"]:
+        raise ValueError(
+            "Refusing to export: "
+            + embodiment.mix_message(mix, embodiment.sources_by_gripper(episodes))
+        )
 
 
 def refuse_heldout(episodes: list[dict], roots: list[Path], lists: list[Path]):
@@ -849,6 +872,7 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
         [Path(p) for p in job["heldout_lists"]],
     )
     refuse_heldout_groups(episodes)
+    refuse_mixed_gripper(episodes, job["recipe"])
     _unchanged(episodes)
     check_space(job, staging if resume else None)
     check_fps(job, options)
@@ -887,6 +911,11 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
             "heldout_disabled": bool(job.get("heldout_disabled")),
             "conversion": result.get("conversion"),
             "timing": result.get("timing"),
+            "embodiment": embodiment.record(
+                result["episodes"],
+                job["recipe"],
+                (job.get("embodiment_rules") or {}).get("version"),
+            ),
             "counts": {
                 "episodes": len(result["episodes"]),
                 "frames": result["frames"],
@@ -1043,6 +1072,7 @@ def _raw_capture(ctx: RunContext) -> dict:
                 "outcome": ep["outcome"],
                 "outcome_source": ep["outcome_source"],
                 **_policy_fields(ep),
+                **_embodiment_fields(ep),
                 **_selection_fields(ep),
                 "frames": ep["frames"],
             }
@@ -1491,6 +1521,7 @@ def _lerobot(ctx: RunContext) -> dict:
                 "outcome": ep["outcome"],
                 "outcome_source": ep["outcome_source"],
                 **_policy_fields(ep),
+                **_embodiment_fields(ep),
                 **_selection_fields(ep),
                 "frames": n,
                 "source_fps": timing_mod.rounded(source_fps),

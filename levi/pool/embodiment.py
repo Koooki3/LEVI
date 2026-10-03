@@ -247,3 +247,36 @@ def mix_message(mix: dict, sources: dict[str, list[str]] | None = None) -> str:
             "`grippers` to take those on purpose, or set `allow_mixed_gripper`."
         )
     return head + where + fix
+
+
+def sources_by_gripper(rows) -> dict[str, list[str]]:
+    """Which sources hold each gripper class (``rows`` have ``source`` and
+    ``gripper``), at most ten per class."""
+    found: dict[str, set[str]] = {}
+    for row in rows:
+        found.setdefault(row.get("gripper") or UNKNOWN, set()).add(
+            str(row.get("source"))
+        )
+    return {g: sorted(s)[:10] for g, s in sorted(found.items())}
+
+
+def record(rows, recipe: dict, rules_version=None) -> dict:
+    """What an export holds, for ``pool_export.json``: the gripper (one value,
+    or ``mixed``), the counts of every field and whether mixing was allowed."""
+    rows = list(rows)
+    allow = bool(recipe.get("allow_mixed_gripper"))
+    mix = gripper_mix((r.get("gripper") for r in rows), None, True)
+
+    def counts(field):
+        return dict(Counter(r.get(field) or UNKNOWN for r in rows))
+
+    return {
+        "gripper": next(iter(mix["counts"])) if len(mix["counts"]) == 1 else "mixed",
+        "grippers": mix["counts"],
+        "robots": counts("robot"),
+        "action_modes": counts("action_mode"),
+        "ee_frames": counts("ee_frame"),
+        "mixed": mix["mixed"],
+        "allow_mixed_gripper": allow,
+        "rules_version": rules_version,
+    }

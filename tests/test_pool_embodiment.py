@@ -3,12 +3,14 @@ metadata only (never from folder or task names), and the export that refuses
 to mix grippers."""
 
 import json
+from collections import Counter
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
-from levi.pool import embodiment, export, index, rules, scanner
+from levi.pool import embodiment, export, index, jobs, recipe, rules, scanner
+from levi.pool.recipe import Recipe
 
 ROBOTIQ_JOINTS = ["robotiq_85_left_knuckle_joint"]
 FRANKA_JOINTS = ["fr3_finger_joint1", "fr3_finger_joint2"]
@@ -275,6 +277,9 @@ def pool_root(tmp_path_factory):
         root / "mystery/stack/demo_0002",
         {**ROBOTIQ, "gripper_state_topic": "/franka_gripper/x"},
     )
+    # Older captures: nothing in the metadata names a gripper.
+    for i in range(2):
+        demo(root / f"legacy/stack/demo_{i:04d}")
     # LeRobot: linked to captures, with a conversion record, and with nothing.
     lerobot(
         root / "converted",
@@ -415,3 +420,185 @@ def test_a_plan_with_an_older_signature_still_counts_as_unchanged(scanned):
     raw[0]["stat_sig"] = "somebody changed the files"
     with pytest.raises(ValueError, match="changed since the pool was scanned"):
         export._unchanged(raw)
+
+
+# ---------------------------------------------------------- recipes
+
+
+def codes(warnings):
+    return {w["code"]: w for w in warnings}
+
+
+def chosen_grippers(rec):
+    chosen, _ = recipe.select(rec)
+    return Counter(r["gripper"] for r in chosen)
+
+
+def test_recipe_filters_by_gripper_and_robot(scanned):
+    rec = Recipe(name="r", grippers=["robotiq_2f85"])
+    assert set(chosen_grippers(rec)) == {"robotiq_2f85"}
+    assert set(chosen_grippers(Recipe(name="r", grippers=["franka_hand"]))) == {
+        "franka_hand"
+    }
+    both = chosen_grippers(Recipe(name="r", grippers=["franka_hand", "unknown"]))
+    assert set(both) == {"franka_hand", "unknown"}
+    robots = Counter(
+        r["robot"] for r in recipe.select(Recipe(name="r", robots=["franka_fr3"]))[0]
+    )
+    assert set(robots) == {"franka_fr3"}
+    with pytest.raises(ValueError):
+        Recipe(name="r", grippers=["Robotiq 2F85!"])
+    # Recipes saved before the field existed load unchanged.
+    old = Recipe.model_validate({"name": "old", "categories": ["human"]})
+    assert old.grippers == [] and old.robots == [] and old.allow_mixed_gripper is False
+
+
+def test_preview_shows_the_gripper_mix_and_blocks_a_mixed_one(scanned):
+    preview = recipe.preview(Recipe(name="all"), "raw_capture")
+    assert set(preview["grippers"]) == {"robotiq_2f85", "franka_hand", "unknown"}
+    assert preview["robots"]["franka_fr3"] >= 1
+    mixed = codes(preview["warnings"])["mixed_gripper"]
+    assert mixed["blocking"] is True
+    assert mixed["counts"] == preview["grippers"]
+    assert mixed["problem"] == "mixed_known"
+    assert "mixes grippers" in mixed["message"]
+    assert mixed["sources"]["franka_hand"]
+
+
+def test_a_filtered_recipe_is_clean_and_unknown_gets_a_note(scanned):
+    one = recipe.preview(Recipe(name="one", grippers=["robotiq_2f85"]), "raw_capture")
+    assert "mixed_gripper" not in codes(one["warnings"])
+    assert "gripper_unknown" not in codes(one["warnings"])
+    # Only older captures: allowed, no warning; the count says what they are.
+    old = recipe.preview(Recipe(name="old", sources=["legacy"]), "raw_capture")
+    assert old["grippers"] == {"unknown": 2}
+    assert old["warnings"] == []
+    # Naming unknown on purpose lifts the known-with-unknown refusal.
+    chosen = recipe.preview(
+        Recipe(name="c", grippers=["robotiq_2f85", "unknown"]), "raw_capture"
+    )
+    assert "mixed_gripper" not in codes(chosen["warnings"])
+    assert codes(chosen["warnings"])["gripper_unknown"]["episodes"] >= 1
+    # Two known grippers need the explicit permission.
+    two = Recipe(name="t", grippers=["robotiq_2f85", "franka_hand"])
+    assert codes(recipe.preview(two, "raw_capture")["warnings"])["mixed_gripper"][
+        "blocking"
+    ]
+    allowed = two.model_copy(update={"allow_mixed_gripper": True})
+    got = codes(recipe.preview(allowed, "raw_capture")["warnings"])
+    assert got["mixed_gripper"]["blocking"] is False
+    assert got["mixed_gripper"]["allowed"] is True
+
+
+# ---------------------------------------------------------- export
+
+
+def plan(rec, name="x", fmt="raw_capture"):
+    return export.plan(
+        rec,
+        export.ExportOptions(
+            format=fmt,
+            name=name,
+            output_dir=str(scanner.settings.workspace().parent / "out"),
+        ),
+    )
+
+
+def run_export(rec, name):
+    out = scanner.settings.workspace().parent / "out"
+    options = export.ExportOptions(format="raw_capture", name=name, output_dir=str(out))
+    job = jobs.plan_export(rec, options)
+    result = jobs.execute(job)
+    return job, result, json.loads((out / name / "pool_export.json").read_text())
+
+
+def test_export_refuses_a_mixed_selection_and_says_what_it_holds(scanned):
+    with pytest.raises(ValueError) as caught:
+        plan(Recipe(name="all"))
+    text = str(caught.value)
+    assert "grippers" in text or "gripper" in text
+    assert "franka_hand" in text and "robotiq_2f85" in text
+    assert "lab_franka" in text  # the sources involved
+    # Nothing was written.
+    assert not (scanner.settings.workspace().parent / "out").exists()
+    with pytest.raises(ValueError, match="allow_mixed_gripper"):
+        plan(Recipe(name="two", grippers=["robotiq_2f85", "franka_hand"]))
+
+
+def test_export_records_a_single_gripper(scanned):
+    _, _, record = run_export(
+        Recipe(name="r", grippers=["robotiq_2f85"], categories=["human"]), "one"
+    )
+    info = record["embodiment"]
+    assert info["gripper"] == "robotiq_2f85"
+    assert info["grippers"] == {"robotiq_2f85": len(record["episodes"])}
+    assert info["allow_mixed_gripper"] is False and info["mixed"] is False
+    assert info["robots"] == {"franka_fr3": len(record["episodes"])}
+    assert info["rules_version"] == rules.DEFAULTS["embodiment"]["version"]
+    ep = record["episodes"][0]
+    assert ep["gripper"] == "robotiq_2f85" and ep["robot"] == "franka_fr3"
+    assert record["recipe"]["grippers"] == ["robotiq_2f85"]
+
+
+def test_allow_mixed_gripper_is_recorded_with_the_real_mix(scanned):
+    rec = Recipe(
+        name="m",
+        grippers=["robotiq_2f85", "franka_hand"],
+        categories=["human"],
+        allow_mixed_gripper=True,
+    )
+    _, _, record = run_export(rec, "mixed")
+    info = record["embodiment"]
+    assert info["allow_mixed_gripper"] is True and info["mixed"] is True
+    assert info["gripper"] == "mixed"
+    assert set(info["grippers"]) == {"robotiq_2f85", "franka_hand"}
+    assert record["recipe"]["allow_mixed_gripper"] is True
+
+
+def test_all_unknown_still_exports_and_says_unknown(scanned):
+    _, _, record = run_export(Recipe(name="l", sources=["legacy"]), "legacy")
+    info = record["embodiment"]
+    assert info["gripper"] == "unknown" and info["grippers"] == {"unknown": 2}
+    assert info["mixed"] is False
+
+
+def test_the_run_checks_again_whatever_the_plan_says(scanned):
+    job = jobs.plan_export(
+        Recipe(
+            name="m",
+            grippers=["robotiq_2f85", "franka_hand"],
+            allow_mixed_gripper=True,
+            categories=["human"],
+        ),
+        export.ExportOptions(
+            format="raw_capture",
+            name="edited",
+            output_dir=str(scanner.settings.workspace().parent / "out"),
+        ),
+    )
+    job["recipe"]["allow_mixed_gripper"] = False  # a plan edited by hand
+    with pytest.raises(ValueError, match="gripper"):
+        export.run(job)
+    assert not (scanner.settings.workspace().parent / "out/edited").exists()
+
+
+def test_a_plan_from_an_older_level_runs_as_unknown(scanned):
+    job = jobs.plan_export(
+        Recipe(name="o", sources=["legacy"]),
+        export.ExportOptions(
+            format="raw_capture",
+            name="older",
+            output_dir=str(scanner.settings.workspace().parent / "out"),
+        ),
+    )
+    for ep in job["episodes"]:
+        for f in embodiment.FIELDS:
+            ep.pop(f)
+    job["recipe"].pop("allow_mixed_gripper")
+    job["recipe"].pop("grippers")
+    result = jobs.execute(job)
+    assert result["ok"]
+    record = json.loads(
+        (scanner.settings.workspace().parent / "out/older/pool_export.json").read_text()
+    )
+    assert record["embodiment"]["gripper"] == "unknown"

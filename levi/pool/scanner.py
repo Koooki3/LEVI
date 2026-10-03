@@ -1127,6 +1127,10 @@ def scan(progress_path: Path | None = None, rehash: bool = False) -> dict:
         "grippers": dict(
             Counter(r["gripper"] or "unknown" for r in rows if r["canonical"])
         ),
+        "embodiment_rules": {
+            "version": rules["embodiment"].get("version"),
+            "signature": embodiment.signature(rules),
+        },
         "tasks": len({r["task"] for r in rows}),
         "workspaces": sorted(str(w) for w in workspaces),
         "dedup": dedup_report,
