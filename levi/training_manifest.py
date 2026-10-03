@@ -33,7 +33,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from . import catalog, naming, paths
+from . import catalog, manifest_prompts, naming, paths
 
 SCHEMA = "levi.training_manifest.v1"
 FRAMES = "frames.parquet"
@@ -72,8 +72,53 @@ FRAMES_SCHEMA = pa.schema(
         ("recap_value", pa.float32()),
         ("recap_advantage", pa.float32()),
         ("recap_positive", pa.bool_()),
+        # Per-frame prompts (docs/TRAINING_MANIFEST.md, "Prompt columns"):
+        # additive, a reader that does not know them ignores them.
+        ("prompt_task", pa.string()),
+        ("prompt_subtask", pa.string()),
+        ("prompt_has_subtask", pa.bool_()),
+        ("prompt_subtask_skip", pa.string()),
+        ("prompt_subtask_source", pa.string()),
+        ("prompt_subtask_origin", pa.string()),
+        ("episode_task_count", pa.int64()),
     ]
 )
+PROMPT_COLUMNS = {
+    "prompt_task": "the episode's task text alone (the first of its tasks)",
+    "prompt_subtask": (
+        "the task text with the current subtask from the prompt template; "
+        "the task alone when prompt_has_subtask is false"
+    ),
+    "prompt_has_subtask": "whether prompt_subtask carries a subtask",
+    "prompt_subtask_skip": "why prompt_subtask carries no subtask (null when it does)",
+    "prompt_subtask_source": (
+        "which time segment the subtask came from and who stands behind it"
+    ),
+    "prompt_subtask_origin": (
+        "human, agent_run (an agent run's segment with no review mark: a person "
+        "or a script with a person's identity approved it) or edited"
+    ),
+    "episode_task_count": "how many task texts the episode lists (only the first is used)",
+}
+
+
+def _frames_schema(template: str, max_chars: int) -> pa.Schema:
+    """FRAMES_SCHEMA with each prompt column's template version and rule."""
+    fields = []
+    for column in FRAMES_SCHEMA:
+        if column.name in PROMPT_COLUMNS:
+            column = column.with_metadata(
+                {
+                    "levi.description": PROMPT_COLUMNS[column.name],
+                    "levi.prompt_template": template,
+                    "levi.prompt_template_text": manifest_prompts.template_text(
+                        template
+                    ),
+                    "levi.subtask_max_chars": str(max_chars),
+                }
+            )
+        fields.append(column)
+    return pa.schema(fields)
 
 
 class ManifestError(ValueError):
@@ -268,6 +313,13 @@ def _task(ds, row: dict[str, Any]) -> str | None:
     return None
 
 
+def _task_count(row: dict[str, Any]) -> int:
+    tasks = row.get("tasks")
+    if isinstance(tasks, list):
+        return len([t for t in tasks if t])
+    return 1 if "task_index" in row else 0
+
+
 def _annotation(name: str) -> tuple[Path, dict[str, Any]]:
     from .agent.store import Store, annotation_digest, resolve
 
@@ -300,14 +352,18 @@ def _subtasks(folder: Path, episode: int) -> list[dict[str, Any]]:
         if end is None:
             end = float(spans[i + 1]["timestamp"]) if i + 1 < len(spans) else np.inf
         levi = atom.get("levi") or {}
+        origin = levi.get("origin") or {}
         out.append(
             {
                 "start": start,
                 "end": float(end),
                 "id": levi.get("subtask_id") or atom.get("content"),
+                "text": atom.get("content"),
                 "outcome": levi.get("outcome"),
                 "attempt": levi.get("attempt"),
                 "review": levi.get("review"),
+                "origin": origin.get("kind"),
+                "run_id": origin.get("run_id"),
             }
         )
     return out
@@ -392,9 +448,19 @@ def build(
     recap_revision: str | None = None,
     allow_stale: bool = False,
     output: str | Path | None = None,
+    prompt_template: str = manifest_prompts.DEFAULT_TEMPLATE,
+    subtask_max_chars: int = manifest_prompts.DEFAULT_SUBTASK_MAX_CHARS,
 ) -> dict[str, Any]:
     """Write ``manifest.json`` and ``frames.parquet`` for one dataset and
     operation; returns the manifest (with ``output_dir``)."""
+    try:
+        template_text = manifest_prompts.template_text(prompt_template)
+    except ValueError as exc:
+        raise ManifestError(str(exc)) from exc
+    if isinstance(subtask_max_chars, bool) or not (
+        isinstance(subtask_max_chars, int) and 1 <= subtask_max_chars <= 2000
+    ):
+        raise ManifestError("subtask_max_chars is a whole number from 1 to 2000")
     if operation not in OPERATIONS:
         raise ManifestError(
             f"Unknown operation {operation!r}; known: " + ", ".join(OPERATIONS)
@@ -464,6 +530,7 @@ def build(
     folder, annotation = _annotation(ds.name)
 
     columns: dict[str, list] = {f.name: [] for f in FRAMES_SCHEMA}
+    prompt_stats = _PromptStats()
     per_episode = []
     for ep in known:
         row = ds.rows[ep]
@@ -521,6 +588,7 @@ def build(
         sub_out: list[str | None] = [None] * n
         sub_try: list[int | None] = [None] * n
         sub_rev: list[str | None] = [None] * n
+        segment_of: list[dict[str, Any] | None] = [None] * n
         for s in spans:
             hit = np.nonzero((timestamp >= s["start"] - 1e-6) & (timestamp < s["end"]))[
                 0
@@ -528,6 +596,17 @@ def build(
             for i in hit:
                 sub_id[i], sub_out[i], sub_try[i] = s["id"], s["outcome"], s["attempt"]
                 sub_rev[i] = s["review"]
+                segment_of[i] = s
+        task_text = task_of[ep]
+        prompts = [
+            manifest_prompts.frame_prompts(
+                task_text,
+                segment_of[i],
+                template=template_text,
+                max_chars=subtask_max_chars,
+            )
+            for i in range(n)
+        ]
 
         include = np.ones(n, dtype=bool)
         weight = np.ones(n, dtype=np.float32)
@@ -589,6 +668,21 @@ def build(
         columns["recap_value"] += [None if np.isnan(x) else float(x) for x in value]
         columns["recap_advantage"] += [None if np.isnan(x) else float(x) for x in adv]
         columns["recap_positive"] += positive
+        columns["prompt_task"] += [p[0] for p in prompts]
+        columns["prompt_subtask"] += [p[1] for p in prompts]
+        columns["prompt_has_subtask"] += [p[2] for p in prompts]
+        columns["prompt_subtask_skip"] += [p[3] for p in prompts]
+        columns["prompt_subtask_source"] += [
+            manifest_prompts.segment_source(segment_of[i]) if p[2] else None
+            for i, p in enumerate(prompts)
+        ]
+        columns["prompt_subtask_origin"] += [
+            manifest_prompts.origin_class(segment_of[i]) if p[2] else None
+            for i, p in enumerate(prompts)
+        ]
+        columns["episode_task_count"] += [_task_count(row)] * n
+        for i, (p, keep) in enumerate(zip(prompts, include.tolist(), strict=True)):
+            prompt_stats.add(p, keep, segment_of[i])
         per_episode.append(
             {
                 "episode_index": ep,
@@ -605,10 +699,14 @@ def build(
                 "anchored_applied": bool(use_anchored),
                 "subtask_frames": sum(1 for x in sub_id if x is not None),
                 "subtask_frames_auto": sum(1 for x in sub_rev if x == "auto"),
+                "task_count": _task_count(row),
+                "prompt_subtask_frames": sum(1 for p in prompts if p[2]),
             }
         )
 
-    frames = pa.table(columns, schema=FRAMES_SCHEMA)
+    frames = pa.table(
+        columns, schema=_frames_schema(prompt_template, subtask_max_chars)
+    )
     target = _target(ds.name, operation, output)
     temp = target / f".{FRAMES}.tmp"
     pq.write_table(frames, temp)
@@ -652,6 +750,12 @@ def build(
                 4,
             ),
         },
+        "prompt": prompt_stats.record(
+            prompt_template,
+            template_text,
+            subtask_max_chars,
+            sum(1 for e in per_episode if e["task_count"] > 1),
+        ),
         "outcomes": {
             "order": ["human", "anchored", "robot_flag"],
             "human_labels": len(ds.human),
@@ -673,6 +777,74 @@ def build(
     }
     catalog.atomic(target / MANIFEST, manifest)
     return {**manifest, "output_dir": str(target)}
+
+
+class _PromptStats:
+    """What became of the second prompt's subtask, over every frame and over
+    the frames that are included in the loss."""
+
+    def __init__(self):
+        self.frames = 0
+        self.with_subtask = 0
+        self.truncated = 0
+        self.skipped: dict[str, int] = {}
+        self.origins = dict.fromkeys(manifest_prompts.ORIGINS, 0)
+        self.agent_runs: dict[str, int] = {}
+        self.longest_chars = 0
+        self.longest_bytes = 0
+        self.included = {"frames": 0, "with_subtask": 0, "rejected_unreviewed": 0}
+
+    def add(self, prompt, included, segment):
+        _, text, has_subtask, skip, cut = prompt
+        if text:
+            self.longest_chars = max(self.longest_chars, len(text))
+            self.longest_bytes = max(self.longest_bytes, len(text.encode()))
+        if has_subtask:
+            origin = manifest_prompts.origin_class(segment)
+            self.origins[origin] += 1
+            if origin == "agent_run":
+                run = segment.get("run_id") or "unknown"
+                self.agent_runs[run] = self.agent_runs.get(run, 0) + 1
+        self.frames += 1
+        self.with_subtask += bool(has_subtask)
+        self.truncated += bool(cut)
+        if skip:
+            self.skipped[skip] = self.skipped.get(skip, 0) + 1
+        if included:
+            self.included["frames"] += 1
+            self.included["with_subtask"] += bool(has_subtask)
+            self.included["rejected_unreviewed"] += skip in UNREVIEWED
+
+    def record(self, version, template, max_chars, several_tasks):
+        return {
+            "template_version": version,
+            "template": template,
+            "subtask_max_chars": max_chars,
+            "source": "time segments with subtask_review empty or edited; "
+            "automatic and unrecognised ones are never used. An empty review "
+            "also covers an agent run's segment approved without the live "
+            "service's mark (see frames_with_subtask_by_origin)",
+            "frames": self.frames,
+            "frames_with_subtask": self.with_subtask,
+            "subtask_skipped": dict(sorted(self.skipped.items())),
+            "frames_rejected_unreviewed": sum(
+                self.skipped.get(k, 0) for k in UNREVIEWED
+            ),
+            "frames_with_subtask_by_origin": dict(self.origins),
+            "frames_with_subtask_from_agent_runs": self.origins["agent_run"],
+            "frames_with_subtask_by_agent_run": dict(sorted(self.agent_runs.items())),
+            "truncated_frames": self.truncated,
+            # The longest second prompt, before the RECAP suffix: openpi cuts a
+            # prompt at max_token_len tokens (200 pi05, 48 pi0) from the end.
+            # Bytes bound the token count from above for any language.
+            "max_prompt_chars": self.longest_chars,
+            "max_prompt_utf8_bytes": self.longest_bytes,
+            "included_frames": dict(self.included),
+            "episodes_with_several_tasks": several_tasks,
+        }
+
+
+UNREVIEWED = ("unreviewed", "review_unrecognised")
 
 
 def _dropper(include: np.ndarray, reason: list):
@@ -858,6 +1030,18 @@ def main(argv=None) -> int:
     )
     make.add_argument("--recap-revision", help="RECAP revision (default current)")
     make.add_argument("--allow-stale", action="store_true")
+    make.add_argument(
+        "--prompt-template",
+        default=manifest_prompts.DEFAULT_TEMPLATE,
+        help="version of the per-frame prompt template (default: %(default)s)",
+    )
+    make.add_argument(
+        "--subtask-max-chars",
+        type=int,
+        default=manifest_prompts.DEFAULT_SUBTASK_MAX_CHARS,
+        help="a longer subtask text is cut to this many characters "
+        "(default: %(default)s)",
+    )
     make.add_argument("--output", help="a new directory inside the workspace")
     make.add_argument("--json", action="store_true", help="print the whole manifest")
     sub.add_parser("operations", help="the built-in operations and their parameters")
@@ -888,11 +1072,20 @@ def main(argv=None) -> int:
                 recap_revision=args.recap_revision,
                 allow_stale=args.allow_stale,
                 output=args.output,
+                prompt_template=args.prompt_template,
+                subtask_max_chars=args.subtask_max_chars,
             )
             if not args.json:
                 result = {
                     k: result[k]
-                    for k in ("output_dir", "operation", "counts", "anchored", "recap")
+                    for k in (
+                        "output_dir",
+                        "operation",
+                        "counts",
+                        "anchored",
+                        "recap",
+                        "prompt",
+                    )
                 }
             print(json.dumps(result, indent=1, ensure_ascii=False))
     except ValueError as exc:

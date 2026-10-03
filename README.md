@@ -96,6 +96,7 @@ LEVI checks the spec against the catalog and waits for your approval before anyt
 | [RECAP](docs/RECAP.md) | The RECAP value-dataset export, and running a RECAP value model in LEVI: checkpoints, per-frame values, advantage labels |
 | [Training pool](docs/TRAINING_POOL.md) | Scan read-only data folders, group copies, hold out test sets, compose and export merged training datasets |
 | [Training manifests](docs/TRAINING_MANIFEST.md) | Which frames enter a learner's loss and with what weight, with provenance; the trainer-side reader |
+| [Counterfactual data](docs/COUNTERFACTUAL.md) · [中文](docs/COUNTERFACTUAL.zh-CN.md) | The action contract of an embodiment (FR3-Robotiq) and a deterministic validator for candidate action blocks; no generation or interface yet |
 | [SAM3](docs/SAM3.md) | Optional model-assisted object masks |
 | [Fast segmentation](docs/SEGMENTATION.md) | Live instance-segmentation overlay while an episode plays, fast dataset labelling, distilling a student from SAM3 |
 | [Evaluation records](docs/EVALUATION.md) | Recording human annotation work; per-mode quality and cost records of human and agent subtask annotation |

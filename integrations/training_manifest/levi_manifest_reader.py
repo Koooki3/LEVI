@@ -12,6 +12,9 @@ Typical use in a LeRobot-based loader (openpi ``create_torch_dataset``)::
     weights = m.sampling_weights(dataset)       # WeightedRandomSampler
     mask = m.action_mask(ep, frame, horizon)    # [H] bool per action target
     prompt = m.prompt(task, ep, frame, rng)     # RECAP CFG conditioning
+    prompt = m.prompt(task, ep, frame, rng, mode="mix", seed=0)  # + subtask
+    # seed fixed: a frame keeps its version in every epoch; seed=epoch would
+    # draw the mix again each epoch.
 
 and in the loss: ``sum(mask * loss) / max(sum(mask), 1)`` instead of
 ``mean(loss)`` (openpi train.py takes ``jnp.mean`` over [B, H]).
@@ -27,6 +30,8 @@ import numpy as np
 import pyarrow.parquet as pq
 
 SCHEMA = "levi.training_manifest.v1"
+PROMPT_MODES = ("task", "subtask", "mix")
+SUBTASK_ORIGINS = ("human", "agent_run", "edited")
 
 
 def _sha256(path: Path) -> str:
@@ -48,6 +53,12 @@ class ManifestFrames:
         self.include = np.asarray(cols["include"], dtype=bool)
         self.weight = np.asarray(cols["weight"], dtype=np.float64)
         self.positive = cols["recap_positive"]
+        # Per-frame prompts exist only in manifests written by a LEVI that
+        # has them; an older manifest reads exactly as before.
+        self.has_prompt_columns = "prompt_subtask" in cols
+        self.prompt_subtask = cols.get("prompt_subtask")
+        self.prompt_has_subtask = cols.get("prompt_has_subtask")
+        self.prompt_subtask_origin = cols.get("prompt_subtask_origin")
         self._row = {
             (int(e), int(f)): i
             for i, (e, f) in enumerate(zip(self.episode, self.frame))
@@ -115,15 +126,85 @@ class ManifestFrames:
         rng: np.random.Generator,
         *,
         p_conditioned: float = 0.9,
+        mode: str = "task",
+        mix_ratio: float = 0.5,
+        seed: int = 0,
+        subtask_origins=None,
     ) -> str:
-        """RLinf's ``positive_only_conditional``: a positive frame carries
-        ``"\\nAdvantage: positive"`` with probability ``p_conditioned``;
-        negative and unlabelled frames stay unconditioned. At inference the
-        policy is prompted with the positive suffix."""
+        """The text the policy is prompted with for one frame.
+
+        ``mode`` picks the base text. ``"task"`` (the default) is ``task``, as
+        always. ``"subtask"`` is the manifest's task-plus-current-subtask
+        prompt (``prompt_subtask``, built from a reviewed time segment with
+        the template named in ``manifest.json`` ``prompt``) where the frame
+        has one, else ``task``. ``"mix"`` draws between those two: the
+        subtask version with probability ``mix_ratio`` (0.5 is 1:1), and the
+        draw is a fixed function of (episode, frame, ``seed``), so a frame
+        keeps its version in every epoch until the caller passes another
+        seed. A manifest written before these columns existed raises for
+        ``"subtask"`` and ``"mix"`` instead of silently training on the task
+        alone. In subtask versions the task wording is the manifest's own.
+        ``subtask_origins`` (default None: all) keeps only subtasks of those
+        origins, from ``("human", "agent_run", "edited")``; a frame whose
+        subtask came from another origin gets the task alone. ``agent_run``
+        is an agent run's segment with an empty review mark: a person, or a
+        script with a person's identity, approved it.
+
+        Then RLinf's ``positive_only_conditional``: a positive frame carries
+        ``"\\nAdvantage: positive"`` with probability ``p_conditioned`` (drawn
+        from ``rng``, whichever base text was chosen); negative and
+        unlabelled frames stay unconditioned. The suffix is always last. At
+        inference the policy is prompted with the positive suffix."""
+        text = self._base_prompt(
+            task, episode, frame, mode, mix_ratio, seed, subtask_origins
+        )
         i = self._row.get((int(episode), int(frame)))
         if i is not None and self.positive[i] is True and rng.random() < p_conditioned:
-            return task + "\nAdvantage: positive"
-        return task
+            return text + "\nAdvantage: positive"
+        return text
+
+    def _base_prompt(
+        self, task, episode, frame, mode, mix_ratio, seed, subtask_origins=None
+    ) -> str:
+        if mode not in PROMPT_MODES:
+            raise ValueError(f"mode is one of {PROMPT_MODES}, not {mode!r}")
+        if not 0.0 <= float(mix_ratio) <= 1.0:
+            raise ValueError("mix_ratio is a share from 0 to 1")
+        if subtask_origins is not None:
+            unknown = set(subtask_origins) - set(SUBTASK_ORIGINS)
+            if unknown:
+                raise ValueError(
+                    f"subtask_origins are from {SUBTASK_ORIGINS}, not {sorted(unknown)}"
+                )
+        if mode == "task":
+            return task
+        if not self.has_prompt_columns:
+            raise ValueError(
+                f"mode {mode!r} needs the prompt columns, which this manifest "
+                "lacks (written by an older LEVI): rebuild it or use mode='task'"
+            )
+        i = self._row.get((int(episode), int(frame)))
+        if i is None or self.prompt_has_subtask[i] is not True:
+            return task
+        if subtask_origins is not None:
+            if self.prompt_subtask_origin is None:
+                raise ValueError(
+                    "subtask_origins needs the prompt_subtask_origin column, "
+                    "which this manifest lacks"
+                )
+            if self.prompt_subtask_origin[i] not in subtask_origins:
+                return task
+        if mode == "mix" and _unit(seed, episode, frame) >= float(mix_ratio):
+            return task
+        return self.prompt_subtask[i]
+
+
+def _unit(seed: int, episode: int, frame: int) -> float:
+    """A number in [0, 1) fixed by (seed, episode, frame)."""
+    digest = hashlib.blake2b(
+        f"{int(seed)}:{int(episode)}:{int(frame)}".encode(), digest_size=8
+    ).digest()
+    return int.from_bytes(digest, "big") / 2**64
 
 
 def audit(manifest: ManifestFrames, drawn) -> dict:
