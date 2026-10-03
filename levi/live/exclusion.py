@@ -14,18 +14,21 @@ reset that went wrong, a take nobody wants labelled). It is a **soft delete**:
   dataset's totals), is not labelled any more (the queue, the batch selection
   and the worker's filter pass over it), and is not exported by the training
   pool (``levi/pool/exclusions.py`` reads the same files);
-- a review run whose episodes are *all* excluded is cancelled, so no review
-  waits for a person for an episode that is gone (the verdict stays in the
-  dataset state, as for the runs the cleanup cancels). A review run shared
-  with episodes that are still in the dataset stays open: a run cannot give
-  one episode back.
+- a review run whose episodes are *all* excluded is **not cancelled** (a
+  cancelled run is cleaned up and could not be accepted again after a
+  restore): it stays as it is, under the same ``keep_review_runs`` cleanup as
+  every other run, and is simply left out of the open-review count
+  (``open_reviews``), which then agrees with the other numbers. Restoring an
+  episode counts its run again.
 
 An episode that belongs to the batch in progress is refused (``Busy``): its
 run is already planned with it, and cancelling work mid-flight is not what a
 click on a list should do. The check and the write happen under the dataset
 state's lock, and the worker's own filter (``Worker.filter_demos``) passes
 over excluded rows under the same lock, so a click that lands while a batch
-is being chosen is either refused or honoured, never half of each.
+is being chosen is either refused or honoured, never half of each. Nothing else is written
+under that lock: it validates, sets the ``excluded`` marks and counts, and no
+call into the run store is made (that store is a SQLite file of its own).
 
 Only people do this: the API refuses an agent's credential (``api.py``), and
 the automatic approver's call list (``auto.ALLOWED``) has no such call. Every
@@ -95,41 +98,36 @@ def _verdict_run(row):
     return (row.get("verdict") or {}).get("run_id")
 
 
-def _drop_dead_reviews(value: dict, cancel_run) -> list:
-    """Cancel the open review runs all of whose episodes are excluded; returns
-    the run ids. ``value`` is the dataset state, changed in place."""
-    demos = value.get("demos") or {}
-    cancelled = []
-    for run_id in list(value.get("review_runs") or []):
-        members = [r for r in demos.values() if _verdict_run(r) == run_id]
-        if not members or not all(is_excluded(r) for r in members):
-            continue
-        if cancel_run is not None:
-            try:
-                cancel_run(run_id)
-            except (KeyError, ValueError):
-                pass  # gone, or already ended: nothing is waiting any more
-        cancelled.append(run_id)
-    if cancelled:
-        keep = [r for r in value["review_runs"] if r not in cancelled]
-        value["review_runs"] = keep
-        value["review_runs_open"] = len(keep)
-        for row in demos.values():
-            if is_excluded(row) and _verdict_run(row) in cancelled:
-                row["excluded"].setdefault("cancelled_runs", []).append(
-                    _verdict_run(row)
-                )
-    return cancelled
+def hidden_reviews(state: dict) -> list:
+    """The open review runs all of whose episodes are excluded (a run with no
+    episode on record is not hidden)."""
+    demos = (state.get("demos") or {}).values()
+    hidden = []
+    for run_id in state.get("review_runs") or []:
+        members = [r for r in demos if _verdict_run(r) == run_id]
+        if members and all(is_excluded(r) for r in members):
+            hidden.append(run_id)
+    return hidden
 
 
-def exclude(
-    config, name, demos, reason="", *, now=None, cancel_run=None, by=ACTOR
-) -> dict:
+def open_reviews(state: dict) -> list:
+    """The review runs still open for a person, as the page counts them: the
+    hidden ones (``hidden_reviews``) are left out."""
+    hidden = set(hidden_reviews(state))
+    return [r for r in state.get("review_runs") or [] if r not in hidden]
+
+
+def open_review_count(state: dict) -> int:
+    if "review_runs" in state:
+        return len(open_reviews(state))
+    return state.get("review_runs_open", 0)
+
+
+def exclude(config, name, demos, reason="", *, now=None, by=ACTOR) -> dict:
     """Exclude ``demos`` of dataset ``name`` (all or nothing). Raises
     ``Unknown`` (a demo the dataset does not have), ``Busy`` (in the batch in
     progress) or ``NotPart`` (never taken into the dataset). Excluding an
-    episode that is already excluded changes nothing. ``cancel_run(run_id)``
-    cancels a review run (the API passes the workbench's)."""
+    episode that is already excluded changes nothing."""
     now = time.time() if now is None else now
     demos = list(dict.fromkeys(demos))
     reason = clean_reason(reason)
@@ -151,7 +149,6 @@ def exclude(
             rows[d]["excluded"] = {"at": now, "by": by, "reason": reason}
         outcome["changed"] = todo
         outcome["unchanged"] = [d for d in demos if d not in todo]
-        outcome["cancelled_runs"] = _drop_dead_reviews(value, cancel_run)
         return value
 
     value = jsonio.update(mirror.state_path(config, name), change, default=dict)
@@ -163,15 +160,13 @@ def exclude(
             demo,
             reason=reason,
             at=now,
-            runs_cancelled=outcome["cancelled_runs"] or None,
         )
     return {**outcome, **summary(value)}
 
 
 def restore(config, name, demos, *, now=None) -> dict:
     """Put ``demos`` back (all or nothing). Raises ``Unknown``; restoring an
-    episode that is not excluded changes nothing. A review run cancelled when
-    the episode was excluded is not reopened."""
+    episode that is not excluded changes nothing."""
     now = time.time() if now is None else now
     demos = list(dict.fromkeys(demos))
     outcome: dict = {}
@@ -182,13 +177,6 @@ def restore(config, name, demos, *, now=None) -> dict:
         if unknown:
             raise Unknown(unknown)
         todo = [d for d in demos if is_excluded(rows[d])]
-        outcome["review_cancelled"] = sorted(
-            {
-                run
-                for d in todo
-                for run in (rows[d]["excluded"].get("cancelled_runs") or [])
-            }
-        )
         for d in todo:
             del rows[d]["excluded"]
         outcome["changed"] = todo
@@ -206,11 +194,12 @@ def summary(state: dict) -> dict:
     return {
         "counts": mirror.counts(state),
         "excluded_count": excluded_count(state),
-        "review_runs_open": state.get("review_runs_open", 0),
+        "review_runs_open": open_review_count(state),
+        "review_hidden": hidden_reviews(state),
     }
 
 
-def audit(config, tool, dataset, demo, *, reason=None, at=None, runs_cancelled=None):
+def audit(config, tool, dataset, demo, *, reason=None, at=None):
     """One line per episode in ``live/audit.jsonl``. A log that cannot be
     written is reported but does not undo a change that was made."""
     record = {
@@ -224,8 +213,6 @@ def audit(config, tool, dataset, demo, *, reason=None, at=None, runs_cancelled=N
     }
     if reason is not None:
         record["reason"] = reason
-    if runs_cancelled:
-        record["runs_cancelled"] = list(runs_cancelled)
     try:
         jsonio.append_line(
             config.live_dir / auto.AUDIT, record, max_bytes=auto.AUDIT_MAX_BYTES

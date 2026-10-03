@@ -652,7 +652,18 @@ def refresh_changed(config, name: str) -> list:
     ]
     done = []
     for demo in again:
-        if criteria.check(source / demo, now=time.time(), legacy_quiet_s=0.0).ok:
+        if not criteria.check(source / demo, now=time.time(), legacy_quiet_s=0.0).ok:
+            continue
+        # Under the state's lock, and looking again: a person may have
+        # removed the episode since the state was read above, and the mirror
+        # of a removed episode is left exactly as it is. A removal waits for
+        # this (a few hard links) rather than the other way round.
+        with jsonio.locked(state_path(config, name)):
+            row = (
+                (jsonio.read(state_path(config, name)) or {}).get("demos") or {}
+            ).get(demo) or {}
+            if row.get("excluded"):
+                continue
             shutil.rmtree(capture / demo, ignore_errors=True)
             if (
                 mirror_demo(source / demo, capture, now=time.time())["status"]

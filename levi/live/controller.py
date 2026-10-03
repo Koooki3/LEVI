@@ -1178,7 +1178,7 @@ class Controller:
                 d for d in (state.get("demos") or {}).values() if not d.get("excluded")
             ]
             row = {
-                "review_runs_open": state.get("review_runs_open", 0),
+                "review_runs_open": exclusion.open_review_count(state),
                 "stuck": counts.get("stuck", 0),
                 "source_changed": sum(1 for d in demos if d.get("source_changed")),
                 "episodes": sum(counts.values()) + ready,

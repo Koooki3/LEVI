@@ -203,7 +203,9 @@ def dataset_view(name: str):
     kept = [d for d in names if not exclusion.is_excluded(demos[d])]
     removed = [d for d in names if exclusion.is_excluded(demos[d])]
     rows = [_demo_row(d, demos[d]) for d in kept[:MAX_DEMOS]]
-    removed_rows = [_demo_row(d, demos[d]) for d in removed[:MAX_DEMOS]]
+    # Not cut at MAX_DEMOS: a person removes few, and cutting the list would
+    # hide episodes that could not then be restored from the page.
+    removed_rows = [_demo_row(d, demos[d]) for d in removed]
     repo_id = None
     try:
         from levi import catalog
@@ -229,7 +231,7 @@ def dataset_view(name: str):
         "current": state.get("current"),
         # The review runs still open for a person (their ids; the status row
         # carries the count as ``review_runs_open``).
-        "review_runs": list(state.get("review_runs") or [])[:50],
+        "review_runs": exclusion.open_reviews(state)[:50],
         "last_batch": state.get("last_batch"),
         "last_processed_at": state.get("last_processed_at"),
         "last_error": state.get("last_error"),
@@ -280,6 +282,9 @@ def _person(request: Request) -> None:
     already turned an agent's Bearer credential away from every route but the
     Agent API and demanded the UI token; this refuses again here, so the rule
     does not depend on how the router is mounted."""
+    # Refusing *any* Bearer is deliberate: the only Bearer credentials LEVI
+    # knows are agents' (the page's own requests carry the UI token in a
+    # header of their own), and an agent must never act as the person.
     if request.headers.get("authorization", "").lower().startswith("bearer "):
         raise HTTPException(
             403, "Removing an episode is a person's action; agents cannot do it"
@@ -298,14 +303,6 @@ def _live_config(name: str):
     if not NAME.match(name) or not mirror.load_state(config, name):
         raise HTTPException(404, "Unknown live dataset")
     return config
-
-
-def _cancel_run(run_id):
-    """Cancel a review run in this workspace's store (nothing in it is left
-    waiting for a person once all its episodes are removed)."""
-    from levi.agent.runtime import Workbench
-
-    Workbench(_workspace() / "outputs/LEVI/workbench").control(run_id, "cancel")
 
 
 def _demo_names(demos):
@@ -333,7 +330,7 @@ def _exclude(name, demos, reason):
     config = _live_config(name)
     _demo_names(demos)
     try:
-        done = exclusion.exclude(config, name, demos, reason, cancel_run=_cancel_run)
+        done = exclusion.exclude(config, name, demos, reason)
     except exclusion.Refused as exc:
         raise _refusal(exc) from exc
     return {"enabled": True, "dataset": name, **done}

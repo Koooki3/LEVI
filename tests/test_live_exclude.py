@@ -36,13 +36,6 @@ def mirror_only(e, *numbers):
     mirror.mirror_dataset(e.config, e.state(), scan.ready)
 
 
-def cancel_with_the_store(e):
-    from levi.agent.runtime import Workbench
-
-    wb = Workbench(e.ws / "outputs/LEVI/workbench")
-    return lambda run_id: wb.control(run_id, "cancel")
-
-
 def audit_lines(e):
     path = e.ws / "live/audit.jsonl"
     return (
@@ -295,7 +288,13 @@ def test_a_source_that_changed_is_not_mirrored_again_while_the_episode_is_out(en
 # --- review runs ---------------------------------------------------------------------------
 
 
-def test_a_review_run_is_cancelled_when_all_its_episodes_are_out(env):
+def run_status(e, run_id):
+    return next(r["status"] for r in e.records("runs") if r["id"] == run_id)
+
+
+def test_a_review_run_is_not_cancelled_it_only_stops_counting(env):
+    """Cancelling would let the cleanup delete its frozen input, and a restored
+    episode could then never be accepted. The run is left alone."""
     e = env()
     e.rollouts.write(0)
     e.rollouts.write(1)
@@ -303,52 +302,93 @@ def test_a_review_run_is_cancelled_when_all_its_episodes_are_out(env):
     state = e.state()
     (run_id,) = state["review_runs"]
     assert state["review_runs_open"] == 1
-    cancel = cancel_with_the_store(e)
+    base = e.ws / f"outputs/LEVI/workbench/agent/datasets/{NAME}/runs"
+    assert (base / run_id / "input").is_dir()
 
-    def status():
-        return next(r["status"] for r in e.records("runs") if r["id"] == run_id)
+    def counted():
+        ctl = e.controller()
+        ctl._refresh(time.time(), True)
+        return ctl.status()["datasets"][NAME]["review_runs_open"]
 
-    # One of two episodes out: the run is still needed for the other.
-    one = exclusion.exclude(e.config, NAME, ["demo_0000"], cancel_run=cancel)
-    assert one["cancelled_runs"] == [] and status() == "waiting_for_review"
-    assert e.state()["review_runs"] == [run_id]
-    # The last one out: nobody is left to review, so the run is cancelled.
-    both = exclusion.exclude(e.config, NAME, ["demo_0001"], cancel_run=cancel)
-    assert both["cancelled_runs"] == [run_id] and status() == "cancelled"
+    # One of two out: the run is still the other one's.
+    one = exclusion.exclude(e.config, NAME, ["demo_0000"])
+    assert one["review_hidden"] == [] and one["review_runs_open"] == 1
+    assert counted() == 1
+    # Both out: nothing is left to review, so it no longer counts...
+    both = exclusion.exclude(e.config, NAME, ["demo_0001"])
+    assert both["review_hidden"] == [run_id] and both["review_runs_open"] == 0
+    assert counted() == 0
+    # ...but it is untouched: open, with its input, in the dataset state.
+    assert run_status(e, run_id) == "waiting_for_review"
+    assert (base / run_id / "input").is_dir()
     state = e.state()
-    assert state["review_runs"] == [] and state["review_runs_open"] == 0
-    assert both["review_runs_open"] == 0
-    assert state["demos"]["demo_0001"]["verdict"]["run_id"] == run_id  # kept
-    assert audit_lines(e)[-1]["runs_cancelled"] == [run_id]
-    ctl = e.controller()
-    ctl._refresh(time.time(), True)
-    assert ctl.status()["datasets"][NAME]["review_runs_open"] == 0
-    # Restoring does not reopen it, and says so.
+    assert state["review_runs"] == [run_id]
+    assert state["demos"]["demo_0001"]["verdict"]["run_id"] == run_id
+    assert audit_lines(e)[-1]["tool"] == "episode.exclude"
+    assert "runs_cancelled" not in audit_lines(e)[-1]
+    # Restoring brings the count back and the run is as it was.
     back = exclusion.restore(e.config, NAME, ["demo_0000", "demo_0001"])
-    assert back["review_cancelled"] == [run_id] and status() == "cancelled"
+    assert back["review_runs_open"] == 1 and back["review_hidden"] == []
+    assert counted() == 1 and run_status(e, run_id) == "waiting_for_review"
     assert e.state()["demos"]["demo_0000"]["state"] == "done"
+    # Every count is back too, and no run anywhere was cancelled.
+    assert back["counts"]["done"] == 2 and back["excluded_count"] == 0
+    assert not [r for r in e.records("runs") if r["status"] == "cancelled"]
 
 
-def test_a_run_that_is_already_over_does_not_stop_the_exclusion(env):
+def test_the_exclusion_makes_no_call_into_the_run_store(env, monkeypatch):
+    """Under the state file's lock it validates and writes marks only."""
+    e = env()
+    e.rollouts.write(0)
+    e.run()
+    from levi.agent import store
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("the run store was touched")
+
+    for name in ("mutate", "get", "list"):
+        monkeypatch.setattr(store.Store, name, forbidden)
+    exclusion.exclude(e.config, NAME, ["demo_0000"])
+    exclusion.restore(e.config, NAME, ["demo_0000"])
+
+
+def test_an_old_file_without_a_run_list_keeps_its_stored_count(env):
     e = env()
     mirror_only(e, 0)
     jsonio.update(
         mirror.state_path(e.config, NAME),
-        lambda v: v.update(
-            review_runs=["gone"],
-            review_runs_open=1,
-            demos={
-                "demo_0000": {**v["demos"]["demo_0000"], "verdict": {"run_id": "gone"}}
-            },
-        ),
+        lambda v: v.update(review_runs_open=2),
     )
+    assert exclusion.open_review_count(e.state()) == 2
 
-    def cancel(run_id):
-        raise KeyError(run_id)
 
-    result = exclusion.exclude(e.config, NAME, ["demo_0000"], cancel_run=cancel)
-    assert result["cancelled_runs"] == ["gone"]
-    assert e.state()["review_runs"] == []
+def test_a_refresh_leaves_the_mirror_of_an_episode_removed_meanwhile(env, monkeypatch):
+    """The state read before the lock says "not excluded"; the check under the
+    lock must see the removal and keep the mirror as it is."""
+    e = env()
+    mirror_only(e, 0)
+    jsonio.update(
+        mirror.state_path(e.config, NAME),
+        lambda v: v["demos"]["demo_0000"].update(source_changed=time.time()),
+    )
+    capture = Path(e.state()["capture"]) / "demo_0000"
+    inode = capture.stat().st_ino
+    real_load = mirror.load_state
+    first = {"done": False}
+
+    def stale_then_remove(config, name):
+        value = real_load(config, name)
+        if not first["done"]:
+            first["done"] = True
+            snapshot = json.loads(json.dumps(value))
+            exclusion.exclude(config, name, ["demo_0000"])  # the click lands now
+            return snapshot
+        return value
+
+    monkeypatch.setattr(mirror, "load_state", stale_then_remove)
+    assert mirror.refresh_changed(e.config, NAME) == []
+    assert capture.stat().st_ino == inode
+    assert exclusion.is_excluded(e.state()["demos"]["demo_0000"])
 
 
 # --- the audit -------------------------------------------------------------------------------
@@ -517,7 +557,7 @@ def test_the_api_names_what_it_refused(live_api):
     assert not exclusion.excluded_count(e.state())
 
 
-def test_the_api_cancels_a_review_run_in_the_workspace_store(live_api):
+def test_the_api_hides_a_review_run_without_cancelling_it(live_api):
     client, e = live_api
     e.rollouts.write(0)
     e.rollouts.write(1)
@@ -525,8 +565,85 @@ def test_the_api_cancels_a_review_run_in_the_workspace_store(live_api):
     (run_id,) = e.state()["review_runs"]
     base = f"/api/levi/live/datasets/{NAME}"
     done = client.post(f"{base}/exclude", json={"demos": ["demo_0000", "demo_0001"]})
-    assert done.json()["cancelled_runs"] == [run_id]
-    assert (
-        next(r["status"] for r in e.records("runs") if r["id"] == run_id) == "cancelled"
-    )
+    body = done.json()
+    assert body["review_hidden"] == [run_id] and body["review_runs_open"] == 0
+    assert "cancelled_runs" not in body
+    assert run_status(e, run_id) == "waiting_for_review"
     assert client.get(base).json()["review_runs"] == []
+    back = client.post(f"{base}/restore", json={"demos": ["demo_0000", "demo_0001"]})
+    assert back.json()["review_runs_open"] == 1
+    assert client.get(base).json()["review_runs"] == [run_id]
+
+
+def test_the_list_of_removed_episodes_is_not_cut_at_the_page_limit(
+    live_api, monkeypatch
+):
+    client, e = live_api
+    mirror_only(e, 0, 1, 2)
+    monkeypatch.setattr(api, "MAX_DEMOS", 1)
+    base = f"/api/levi/live/datasets/{NAME}"
+    client.post(f"{base}/exclude", json={"demos": ["demo_0000", "demo_0001"]})
+    detail = client.get(base).json()
+    assert [d["demo"] for d in detail["excluded_demos"]] == ["demo_0001", "demo_0000"]
+    assert detail["excluded_count"] == 2 and len(detail["demos"]) == 1
+
+
+def request_with(headers):
+    from starlette.requests import Request
+
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/",
+            "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],
+        }
+    )
+
+
+def test_the_person_check_works_by_itself_when_the_middleware_is_bypassed(
+    env, monkeypatch
+):
+    """The route's own check, with no service middleware in front of it."""
+    from fastapi import FastAPI, HTTPException
+    from fastapi.testclient import TestClient
+
+    e = env()
+    mirror_only(e, 0)
+    monkeypatch.setattr(api, "_workspace", lambda: e.ws)
+    monkeypatch.setenv("LEVI_UI_TOKEN", "test-ui-token")
+    # The function alone.
+    api._person(request_with({"x-levi-ui-token": "test-ui-token"}))
+    for headers, code in (
+        ({}, 401),
+        ({"x-levi-ui-token": "wrong"}, 401),
+        ({"authorization": "Bearer anything"}, 403),
+        ({"authorization": "bearer x", "x-levi-ui-token": "test-ui-token"}, 403),
+    ):
+        with pytest.raises(HTTPException) as refused:
+            api._person(request_with(headers))
+        assert refused.value.status_code == code, headers
+    # And mounted without the service's middleware.
+    app = FastAPI()
+    app.include_router(api.router)
+    bare = TestClient(app)
+    url = f"/api/levi/live/datasets/{NAME}/exclude"
+    body = {"demos": ["demo_0000"]}
+    assert bare.post(url, json=body).status_code == 401
+    assert (
+        bare.post(url, json=body, headers={"Authorization": "Bearer t"}).status_code
+        == 403
+    )
+    assert not exclusion.excluded_count(e.state())
+    ok = bare.post(url, json=body, headers={"x-levi-ui-token": "test-ui-token"})
+    assert ok.status_code == 200 and exclusion.excluded_count(e.state()) == 1
+    # Without a configured token (a development run) the Bearer rule still holds.
+    monkeypatch.delenv("LEVI_UI_TOKEN")
+    assert (
+        bare.post(
+            f"/api/levi/live/datasets/{NAME}/restore",
+            json=body,
+            headers={"Authorization": "Bearer t"},
+        ).status_code
+        == 403
+    )
