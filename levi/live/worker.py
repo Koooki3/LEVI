@@ -790,6 +790,7 @@ class Worker:
                         first=number == 0,
                         frames=frames.get(episode),
                         waking=waking if number == 0 else {},
+                        batch=batch,
                     ),
                     c.resources.log_max_mb * 1024 * 1024,
                     c.resources.log_backups,
@@ -818,13 +819,17 @@ class Worker:
                 return value
         return {}
 
-    def stats_row(self, demo, episode, row, journals, *, first, frames, waking):
+    def stats_row(
+        self, demo, episode, row, journals, *, first, frames, waking, batch=None
+    ):
         """The ``live/stats.jsonl`` record of one demo (schema in stats.py)."""
         p = self.config.pipeline
         temporal = row.get("temporal") or {}
         verdict = row.get("verdict") or {}
         base = row.get("completed_at")
         use = stats.usage_of(journals, episode, probe=first)
+        first_request = use.pop("first_request_at")
+        batch = batch or {}
         planned = [
             e["time"]
             for stage, events in journals
@@ -857,6 +862,9 @@ class Worker:
             # written: normally false, since an episode of the batch cannot be
             # removed and one removed is not labelled.
             "excluded": exclusion.is_excluded(row),
+            "batch": {"id": batch.get("started_at"), "size": len(batch["demos"])}
+            if batch.get("demos")
+            else {"id": None, "size": None},
             "episode": {
                 "frames": frames,
                 "episode_seconds": None
@@ -866,9 +874,13 @@ class Worker:
             "timeline": {
                 "to_mirror_s": stats.after(row.get("mirrored_at"), base),
                 "to_plan_s": stats.after(min(planned) if planned else None, base),
-                "to_first_request_s": stats.after(use.pop("first_request_at"), base),
+                "to_first_request_s": stats.after(first_request, base),
                 "to_commit_s": stats.after(temporal.get("committed_at"), base),
                 "to_verdict_s": stats.after(verdict.get("at"), base),
+                "completed_at": base,
+                "first_request_at": None
+                if first_request is None
+                else round(first_request, 3),
             },
             "model": use,
             "gate": {

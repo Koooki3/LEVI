@@ -36,15 +36,18 @@ def test_the_schema_is_fixed_and_a_record_is_filled_with_nulls():
     assert sorted(leaves(stats.TEMPLATE)) == sorted(
         [
             "schema", "at", "dataset", "demo", "episode_index", "session",
-            "attempts", "excluded",
+            "attempts", "excluded", "batch.id", "batch.size",
             "episode.frames", "episode.episode_seconds",
             "timeline.to_mirror_s", "timeline.to_plan_s",
             "timeline.to_first_request_s", "timeline.to_commit_s",
-            "timeline.to_verdict_s",
+            "timeline.to_verdict_s", "timeline.completed_at",
+            "timeline.first_request_at",
             "model.requests.coarse", "model.requests.refine",
             "model.requests.review", "model.requests.probe",
             "model.model_seconds.coarse", "model.model_seconds.refine",
             "model.model_seconds.review", "model.model_seconds.probe",
+            "model.tokens.coarse", "model.tokens.refine",
+            "model.tokens.review", "model.tokens.probe",
             "model.prompt_tokens", "model.completion_tokens",
             "model.total_tokens", "model.probe_tokens", "model.reserved_tokens",
             "model.unreported_steps", "model.images", "model.external_tokens",
@@ -186,6 +189,12 @@ def test_a_labelled_batch_writes_one_complete_record_per_demo(env):  # noqa: F81
         assert m["total_tokens"] > 0 and m["images"] > 0 and m["external_tokens"] == 0
         assert m["prompt_tokens"] + m["completion_tokens"] == m["total_tokens"]
         assert m["model_seconds"]["probe"] is None
+        assert sum(m["tokens"].values()) == m["total_tokens"]
+        assert m["tokens"]["coarse"] > 0 and m["tokens"]["review"] > 0
+        # Absolute moments (later additions to the schema) and the batch.
+        assert t["completed_at"] > 1e9 and t["first_request_at"] > t["completed_at"]
+        assert row["batch"] == {"id": rows[0]["batch"]["id"], "size": 2}
+        assert row["batch"]["id"] > 1e9
         g = row["gate"]
         assert g["closed_wait_s"] == 0 and g["interruptions"] == 0
         assert g["vllm_wake_s"] is None and g["vllm_cold_start_s"] is None
