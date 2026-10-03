@@ -4,6 +4,7 @@ driven by protocol fakes -- never a real server, model or GPU."""
 import base64
 import builtins
 import json
+from itertools import pairwise
 
 import cv2
 import httpx
@@ -748,6 +749,148 @@ def test_a_refinement_that_does_not_fit_keeps_the_coarse_draft(
     assert "frame cap" in skipped[0]["reason"]
     steps = [e["phase"] for e in events if e["type"] == "model_step"]
     assert steps == ["coarse"]
+
+
+def coarse_run(dataset, max_images, **workflow):
+    """A one-episode pilot (20 frames at 10 fps, step 0.5 s: 5 coarse frames)
+    on a profile that accepts ``max_images`` images per request."""
+    from levi import catalog, service
+    from levi.agent.planning import approve
+    from levi.agent.runtime import Workbench
+
+    camera = camera_dataset(dataset)
+    entry = catalog.register(str(dataset))
+    wb = Workbench(service.STATE)
+    context = TaskContext(
+        repo_id=entry["id"],
+        episodes=[0],
+        instruction="Mark the motion",
+        provider="vllm",
+        cameras=[camera],
+        allow_media_egress=True,
+        workflow={**WORKFLOW, "coarse_step_seconds": 0.5, **workflow},
+        budget=Budget(max_calls=12, max_tokens=None, max_seconds=600),
+    )
+    wb.store.put("providers", "vllm", config(max_images=max_images).model_dump())
+    run = wb.plan(context)
+    approve(wb, run["id"], 1, "human")
+    assert wb.store.claim(run["id"], "test-owner")
+    wb.execute(run["id"], "test-owner", pilot=True)
+    return wb, run["id"], context
+
+
+def adjusted(wb, run_id):
+    return [e for e in wb.store.events(run_id) if e["type"] == "coarse_step_adjusted"]
+
+
+def test_a_coarse_pass_that_fits_the_provider_is_not_touched(client, dataset, server):
+    from levi.agent import observations
+
+    # Exactly at the limit still fits.
+    wb, run_id, context = coarse_run(dataset, 5)
+    assert wb.store.get("runs", run_id)["status"] == "waiting_for_review"
+    assert adjusted(wb, run_id) == []
+    assert len(sent_images(server.chats()[0])) == 5
+    record = wb.store.get("evidence", f"{run_id}:0")
+    assert "coarse_step_seconds" not in record["summary"]
+    root = wb.store.run_dir(run_id) / "input"
+    # No limit (a cloud profile) and a roomy one never adjust; the frames are
+    # the plan's own grid.
+    for limit in (None, 5, 128):
+        assert observations.fit_coarse_step(context, root, 0, limit) is None
+    assert observations.frame_scope(context, root, 0) == [0, 5, 10, 15, 19]
+
+
+def test_a_coarse_pass_over_max_images_is_thinned_not_blocked(client, dataset, server):
+    from levi.agent import observations
+
+    wb, run_id, context = coarse_run(dataset, 4)
+    result = wb.store.get("runs", run_id)
+    assert result["status"] == "waiting_for_review", result
+    # The request carried no more than the server accepts, the whole span.
+    first = server.chats()[0]
+    assert len(sent_images(first)) <= 4
+    (event,) = adjusted(wb, run_id)
+    assert event["episode"] == 0 and event["max_images"] == 4
+    assert event["from_step_seconds"] == 0.5 and event["from_images"] == 5
+    assert event["step_seconds"] > 0.5 and event["images"] == len(sent_images(first))
+    record = wb.store.get("evidence", f"{run_id}:0")
+    assert record["summary"]["coarse_step_seconds"] == event["step_seconds"]
+    # Even, first to last frame; the refinement window frames come on top.
+    root = wb.store.run_dir(run_id) / "input"
+    frames = observations.frame_scope(context, root, 0, spacing=event["step_seconds"])
+    assert frames[0] == 0 and frames[-1] == 19 and len(frames) == event["images"]
+    held = {r["frame_index"] for r in record["items"]}
+    assert set(frames) <= held
+    # A later pass's own summary keeps the widened step on the ledger.
+    observations.persist(wb, run_id, 0, {"episode_index": 0}, [])
+    kept = wb.store.get("evidence", f"{run_id}:0")["summary"]
+    assert kept["coarse_step_seconds"] == event["step_seconds"]
+    ranked = observations.changes(wb, wb.store.get("runs", run_id), 0, 3)
+    assert len(ranked["intervals"]) <= event["images"] - 1
+
+
+def test_a_thinned_pass_is_even_and_fits_for_any_limit(client, dataset, server):
+    from levi.agent import observations
+
+    wb, run_id, context = coarse_run(dataset, 128)
+    root = wb.store.run_dir(run_id) / "input"
+    for limit in (2, 3, 4):
+        found = observations.fit_coarse_step(context, root, 0, limit)
+        frames = observations.frame_scope(
+            context, root, 0, spacing=found["step_seconds"]
+        )
+        assert len(frames) == found["images"] <= limit
+        assert frames[0] == 0 and frames[-1] == 19
+        gaps = {b - a for a, b in pairwise(frames)}
+        assert max(gaps) - min(gaps) <= 1
+    # Two cameras share the limit: 4 images are 2 frames of each.
+    context.cameras.append("observation.images.other")
+    found = observations.fit_coarse_step(context, root, 0, 4)
+    assert found["images"] == 4 and found["from_images"] == 10
+
+
+def test_nothing_to_thin_is_named_not_looped(client, dataset, server):
+    from levi.agent import observations
+
+    wb, run_id, context = coarse_run(dataset, 128)
+    root = wb.store.run_dir(run_id) / "input"
+    with pytest.raises(observations.ContextOverflow, match="max_images"):
+        observations.fit_coarse_step(context, root, 0, 1)
+    context.cameras.append("observation.images.other")
+    with pytest.raises(observations.ContextOverflow, match="2 cameras"):
+        observations.fit_coarse_step(context, root, 0, 3)
+
+
+def test_a_run_whose_limit_cannot_be_met_blocks_with_the_reason(
+    client, dataset, server
+):
+    wb, run_id, _ = coarse_run(dataset, 1)
+    result = wb.store.get("runs", run_id)
+    assert result["status"] == "blocked"
+    assert (
+        "max_images" in result["reason"] and "first and last frame" in result["reason"]
+    )
+    assert server.chats() == []
+
+
+def test_a_thinned_run_still_keeps_the_coarse_draft_when_refinement_does_not_fit(
+    client, dataset, server, monkeypatch
+):
+    from levi.agent import observations
+
+    def overflow(*args, **kwargs):
+        raise observations.ContextOverflow("does not fit the frame cap (3)")
+
+    monkeypatch.setattr(observations, "plan_refinement", overflow)
+    wb, run_id, _ = coarse_run(dataset, 4)
+    assert wb.store.get("runs", run_id)["status"] == "waiting_for_review"
+    events = wb.store.events(run_id)
+    assert [e["type"] for e in events if e["type"].startswith("coarse_step")] == [
+        "coarse_step_adjusted"
+    ]
+    assert [e["episode"] for e in events if e["type"] == "refinement_skipped"] == [0]
+    assert [e["phase"] for e in events if e["type"] == "model_step"] == ["coarse"]
 
 
 def test_a_sentence_becomes_a_task_on_a_local_server(tmp_path, server, monkeypatch):

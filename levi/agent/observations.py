@@ -1,6 +1,7 @@
 """Deterministic observation policy and bounded, exact evidence retrieval."""
 
 import json
+import math
 from itertools import pairwise
 from pathlib import Path
 
@@ -47,19 +48,36 @@ def skills(context):
     }
 
 
-def frame_scope(
-    context, root, episode, proposals=None, spacing=None, limit=None, cap=None
-):
-    flow = Workflow.model_validate(context.workflow)
+def episode_times(context, root, episode):
+    """The episode's frame table and its timestamps, which must increase."""
     table = media.episode_table(media.snapshot_state(context, root), episode)
     times = table.timestamp.to_numpy(dtype=float)
     if len(times) > 1 and (np.diff(times) <= 0).any():
         raise ValueError(
             "Non-monotonic or duplicate timestamps require a corrected source ledger"
         )
-    step = flow.coarse_step_seconds
+    return table, times
+
+
+def coarse_positions(times, step):
+    """Frame positions of a coarse pass: the frame nearest each grid target
+    (``step`` apart from the first frame) plus the last one."""
     targets = list(np.arange(times[0], times[-1], step)) + [times[-1]]
-    if proposals is not None:
+    return sorted({int(np.abs(times - t).argmin()) for t in targets})
+
+
+def frame_scope(
+    context, root, episode, proposals=None, spacing=None, limit=None, cap=None
+):
+    """Frame indices of one observation: the coarse grid (``spacing`` stands in
+    for the plan's coarse step, see ``fit_coarse_step``) or, given
+    ``proposals``, the windows around their boundaries sampled ``spacing``
+    apart."""
+    flow = Workflow.model_validate(context.workflow)
+    table, times = episode_times(context, root, episode)
+    if proposals is None:
+        positions = coarse_positions(times, spacing or flow.coarse_step_seconds)
+    else:
         targets = []
         for p in proposals:
             for boundary in [p.start, p.end, *p.boundary_candidates]:
@@ -74,7 +92,7 @@ def frame_scope(
                     )
         if not targets:
             targets = [times[0], times[-1]]
-    positions = sorted({int(np.abs(times - t).argmin()) for t in targets})
+        positions = sorted({int(np.abs(times - t).argmin()) for t in targets})
     # Never silently thin a policy that does not fit the approved resource cap.
     cap = flow.max_evidence_frames if cap is None else cap
     if len(positions) * max(1, len(context.cameras)) > cap:
@@ -87,6 +105,57 @@ def frame_scope(
             f"{images} images exceed the {limit} the model's context holds"
         )
     return [int(table.iloc[i].frame_index) for i in positions]
+
+
+def fit_coarse_step(context, root, episode, max_images):
+    """The coarse step that keeps an episode's frames within the provider's
+    ``max_images``, or None when the plan's own step already does.
+
+    A long episode at the plan's step can carry more images than one request
+    may (167 against 128 at 0.5 s); the provider refuses that before the GPU
+    is touched, which used to block the whole run. The step is widened
+    instead -- the smallest step, in 0.01 s, whose grid (all cameras
+    together) fits, so the frames stay evenly spread -- and the caller records
+    it (``coarse_step_adjusted``). An episode that fits is untouched. When not
+    even the first and last frame of every camera fit, there is nothing to
+    thin: ContextOverflow says so. Returns the step with the numbers for the
+    record.
+    """
+    if not max_images:
+        return None
+    nominal = Workflow.model_validate(context.workflow).coarse_step_seconds
+    _, times = episode_times(context, root, episode)
+    cameras = max(1, len(context.cameras))
+    images = len(coarse_positions(times, nominal)) * cameras
+    if images <= max_images:
+        return None
+    per_camera = max_images // cameras
+    if per_camera < 2:
+        raise ContextOverflow(
+            f"{images} images at the plan's {nominal:g} s coarse step exceed the "
+            f"{max_images} this model accepts per request (max_images), and even "
+            f"the first and last frame of each of {cameras} cameras do not fit; "
+            "raise max_images with the server's limit or select fewer cameras"
+        )
+    step = max(
+        nominal, math.ceil((times[-1] - times[0]) / (per_camera - 1) * 100) / 100
+    )
+    for _ in range(200):
+        fitted = len(coarse_positions(times, step)) * cameras
+        if fitted <= max_images:
+            return {
+                "step_seconds": step,
+                "from_step_seconds": nominal,
+                "images": fitted,
+                "from_images": images,
+                "max_images": max_images,
+            }
+        step = math.ceil(step * 1.02 * 100) / 100
+    raise ContextOverflow(
+        f"No coarse step brings {images} images under the {max_images} this "
+        "model accepts per request (max_images); raise max_images with the "
+        "server's limit"
+    )
 
 
 def image_limit(config, usage, evidence, draft, prompt_chars=None, costs=None):
@@ -292,7 +361,12 @@ class CapExceeded(ValueError):
 
 def persist(wb, id, episode, summary, evidence):
     try:
-        old = wb.store.get("evidence", f"{id}:{episode}")["items"]
+        record = wb.store.get("evidence", f"{id}:{episode}")
+        old = record["items"]
+        # A later pass's summary must not forget a widened coarse step.
+        widened = record["summary"].get("coarse_step_seconds")
+        if widened and "coarse_step_seconds" not in summary:
+            summary = {**summary, "coarse_step_seconds": widened}
     except KeyError:
         old = []
     combined = {r["id"]: r for r in old}
@@ -776,7 +850,11 @@ def changes(wb, run, episode, top_k=None):
         raise ValueError("Episode outside approved scope")
     record = wb.store.get("evidence", f"{run['id']}:{episode}")
     folder = wb.store.run_dir(run["id"]) / "evidence"
-    step = run["context"]["workflow"]["coarse_step_seconds"]
+    # The step the coarse pass was widened to, when it did not fit max_images.
+    step = (
+        record["summary"].get("coarse_step_seconds")
+        or run["context"]["workflow"]["coarse_step_seconds"]
+    )
     ranked = rank_intervals(folder, record["items"], step)
     if top_k is None:
         top_k = (run.get("harness") or {}).get("parameters", {}).get(

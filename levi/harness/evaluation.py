@@ -22,7 +22,8 @@ def refine_top_k(store, candidate, probes):
         ranked = rank_intervals(
             store.run_dir(run["id"]) / "evidence",
             record["items"],
-            run["context"]["workflow"]["coarse_step_seconds"],
+            record["summary"].get("coarse_step_seconds")
+            or run["context"]["workflow"]["coarse_step_seconds"],
         )
         hit = next(
             (

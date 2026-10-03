@@ -550,13 +550,34 @@ class Workbench:
                             self, id, config, context, episode, started
                         )
                     else:
+                        # A long episode would carry more coarse frames than one
+                        # request may: widen the step (recorded) instead of
+                        # blocking the run on the provider's refusal.
+                        fitted = (
+                            observations.fit_coarse_step(
+                                context,
+                                directory / "input",
+                                episode,
+                                config.max_images,
+                            )
+                            if context.workflow["kind"] == "temporal"
+                            else None
+                        )
                         summary, evidence = observations.observe(
                             context,
                             directory / "input",
                             episode,
                             directory / "evidence",
+                            spacing=fitted["step_seconds"] if fitted else None,
                         )
                         summary["workflow"] = context.workflow
+                        if fitted:
+                            # Where the coarse pass really sampled: the ranking of
+                            # changed intervals rebuilds it from here.
+                            summary["coarse_step_seconds"] = fitted["step_seconds"]
+                            self.store.event(
+                                id, "coarse_step_adjusted", episode=episode, **fitted
+                            )
                         observations.persist(self, id, episode, summary, evidence)
                         output, usage = self.model_step(
                             id, config, context, summary, evidence, "coarse", started
