@@ -45,7 +45,9 @@ a value that could not be measured is ``null``.
                in), vllm_wake_s, vllm_cold_start_s (set on the first demo of
                the batch the wake or cold start was for)
     result:    state, reason, segments, segment_labels{label: count},
-               verdict{outcome,events,valid_events,undecided}, review,
+               verdict{outcome,events,valid_events,undecided} (plus rule and
+               place_outcome when the release review uses a rule beyond "any
+               valid release"; the template does not list them), review,
                spec{guideline,release_review,sha256{file: hash}}, provider,
                model
 

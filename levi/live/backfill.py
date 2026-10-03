@@ -201,6 +201,10 @@ def rebuild(workspace, name, demo, row, *, events=run_events, labels=change_labe
         put("result.segment_labels", got, "committed changeset: proposals")
     for key in ("outcome", "events", "valid_events", "undecided"):
         put(f"result.verdict.{key}", verdict.get(key), f"{state}: verdict.{key}")
+    # Only a verdict made under a rule beyond "any valid release" has these.
+    for key in ("rule", "place_outcome"):
+        if key in verdict:
+            put(f"result.verdict.{key}", verdict[key], f"{state}: verdict.{key}")
     put(
         "result.review",
         temporal.get("review") or verdict.get("review"),

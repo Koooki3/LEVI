@@ -40,12 +40,16 @@ from pathlib import Path
 
 from . import auto as approver_log
 from . import config as live_config
-from . import exclusion, generic, gpumgr, jsonio, mirror, stats
+from . import exclusion, generic, gpumgr, jsonio, judge, mirror, stats
 
 OK, NEED_MODEL, AWAIT_HUMAN, ERROR, PREEMPTED, NOTHING = 0, 10, 11, 12, 13, 14
 SIDE = "observation.images.view1"
 WRIST = "observation.images.hand"
 RUN_DONE = {"succeeded", "partially_succeeded", "failed", "cancelled"}
+# What a rule beyond "any valid release" adds to a verdict's basis, and the
+# part of it a verdict carries at its top level for the page and statistics.
+VERDICT_RULE_KEYS = ("rule", "place_outcome", "closes_after_last_valid")
+RULE_KEYS = (*VERDICT_RULE_KEYS, "last_valid_frame", "require_place", "missing_inputs")
 
 
 class Stop(Exception):
@@ -688,6 +692,9 @@ class Worker:
             self.save_current(batch)
         self.progress("anchored", run=run_id, episodes=len(demos))
         run = self.drive(run_id, what="anchored")
+        # The time segments were committed earlier in this batch: a rule that
+        # asks for the last placement (``basis.require_place``) reads them.
+        rows = self.state().get("demos") or {}
         results = {}
         for demo in demos:
             try:
@@ -699,12 +706,18 @@ class Worker:
                 results[demo] = None
                 continue
             events = record.get("events") or []
+            outcome = record.get("outcome")
             basis = record.get("basis") or {}
+            extra = False
+            if basis.get("require_place"):
+                outcome, basis, extra = judge.merge(
+                    outcome, basis, self.place_of(rows.get(demo), index[demo])
+                )
             results[demo] = {
-                "outcome": record.get("outcome"),
+                "outcome": outcome,
                 "events": len(events),
                 "valid_events": sum(1 for e in events if e.get("valid")),
-                "undecided": anchored_mod.undecided(record.get("outcome"), basis),
+                "undecided": anchored_mod.undecided(outcome, basis) or extra,
                 "basis": {
                     k: basis[k]
                     for k in (
@@ -713,6 +726,7 @@ class Worker:
                         "valid_labels",
                         "missing_labels",
                         "vetoes",
+                        *RULE_KEYS,
                     )
                     if k in basis
                 },
@@ -722,6 +736,9 @@ class Worker:
                 "review": "auto",
                 "evaluated": False,
             }
+            # What a rule other than "any valid release" decided on, where the
+            # page and the statistics read it (absent for the default rule).
+            results[demo].update({k: basis[k] for k in VERDICT_RULE_KEYS if k in basis})
 
         def change_state(value):
             for demo, verdict in results.items():
@@ -735,6 +752,21 @@ class Worker:
 
         self.update(change_state)
         batch["anchored"]["status"] = run["status"]
+
+    def place_of(self, row, episode):
+        """The episode's last ``place`` time segment (``judge.place_state``)
+        from the change set its time segments were committed in; ``missing``
+        when it has none, the row is not this episode's, or the set cannot be
+        read."""
+        temporal = (row or {}).get("temporal") or {}
+        changeset = temporal.get("changeset")
+        if not changeset or (row or {}).get("episode_index") != episode:
+            return "missing"
+        try:
+            proposals = self.store.get("changes", changeset)["proposals"]
+        except KeyError:
+            return "missing"
+        return judge.place_state(proposals, episode)
 
     # --- finishing ---------------------------------------------------------------------------
 
@@ -901,6 +933,9 @@ class Worker:
                     "events": verdict.get("events"),
                     "valid_events": verdict.get("valid_events"),
                     "undecided": verdict.get("undecided"),
+                    **{
+                        k: verdict[k] for k in ("rule", "place_outcome") if k in verdict
+                    },
                 }
                 if verdict
                 else None,

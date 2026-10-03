@@ -631,3 +631,117 @@ def test_open_review_runs_are_kept_up_to_a_limit_and_older_ones_archived(env):
     ctl = e.controller()
     ctl._refresh(time.time(), True)
     assert ctl.status()["datasets"][NAME]["review_runs_open"] == 1
+
+
+def rewrite_gripper(e, n, commands):
+    """A demo whose gripper command is ``commands`` (one per frame)."""
+    import pandas as pd
+
+    demo = e.rollouts.begin(n)
+    rows = pd.read_csv(demo / "gripper_state.csv")
+    rows["last_gripper_command"] = commands
+    rows.to_csv(demo / "gripper_state.csv", index=False)
+    e.rollouts.finish(n)
+
+
+def test_the_terminal_aware_review_judges_by_what_the_episode_ends_on(env):
+    """generic-release.v2, named in the configuration: a release that is
+    followed by a grasp is a failure whatever the model said about it, one that
+    is not is a success, and the default rule still calls both a success."""
+    from levi.live import api
+
+    frames = 30
+    e = env()
+    e.config.pipeline.anchored_spec = "generic-release.v2.json"
+    # The template: close, open at frame 18 (the release), close at 24 again.
+    e.rollouts.write(0)
+    # Closed, released at 18, open until the end.
+    rewrite_gripper(e, 1, ["open"] * 6 + ["close"] * 12 + ["open"] * (frames - 18))
+    e.run()
+    state = e.state()
+    again, held = (state["demos"][f"demo_000{n}"]["verdict"] for n in (0, 1))
+    assert again["outcome"] == "failure" and again["undecided"] is False
+    assert again["valid_events"] == 1 and again["events"] == 1
+    assert again["rule"] == "last_valid_not_regrasped"
+    assert again["closes_after_last_valid"] == 1
+    assert again["place_outcome"] == "success"
+    assert again["basis"]["last_valid_frame"] == 18
+    assert held["outcome"] == "success" and held["undecided"] is False
+    assert held["closes_after_last_valid"] == 0 and held["place_outcome"] == "success"
+    assert held["basis"]["require_place"] is True
+    assert "missing_inputs" not in held["basis"]
+    # The review record keeps the closes the rule read.
+    records = {
+        r["episode_index"]: r
+        for r in e.records("anchored")
+        if r["spec"]["version"] == 2
+    }
+    assert records[0]["closes"] == [6, 24] and records[1]["closes"] == [6]
+    # The statistics records and a backfill carry the rule and the place
+    # outcome, and the aggregates still count the verdicts.
+    from levi.live import backfill, stats
+
+    rows = {r["demo"]: r for r in stats.read(e.ws / "live")}
+    got = rows["demo_0000"]["result"]["verdict"]
+    assert got["outcome"] == "failure" and got["rule"] == again["rule"]
+    assert got["place_outcome"] == "success"
+    summary = stats.summarize(list(rows.values()))
+    assert summary["outcome"]["verdicts"] == {"failure": 1, "success": 1}
+    (e.ws / "live/stats.jsonl").unlink()
+    rebuilt = {i["demo"]: i["record"] for i in backfill.plan(e.config)}
+    assert rebuilt["demo_0000"]["result"]["verdict"] == got
+    # The page's rows carry the new fields.
+    row = api._demo_row("demo_0000", state["demos"]["demo_0000"])["verdict"]
+    assert row["rule"] == "last_valid_not_regrasped"
+    assert row["place_outcome"] == "success" and row["closes_after_last_valid"] == 1
+
+
+def test_the_default_review_is_the_same_with_the_terminal_rule_available(env):
+    from levi.live import api
+
+    e = env()
+    e.rollouts.write(0)
+    e.run()
+    verdict = e.state()["demos"]["demo_0000"]["verdict"]
+    assert verdict["outcome"] == "success"
+    assert not {"rule", "place_outcome", "closes_after_last_valid"} & set(verdict)
+    assert set(verdict["basis"]) == {"valid_events", "min_valid"}
+    assert all(r["spec"]["version"] == 1 for r in e.records("anchored"))
+    assert "closes" not in e.records("anchored")[0]
+    row = api._demo_row("demo_0000", e.state()["demos"]["demo_0000"])["verdict"]
+    assert row["rule"] is None and row["place_outcome"] is None
+
+
+def test_a_demo_without_committed_time_segments_is_judged_on_the_gripper_alone():
+    """No time segments to read (the temporal step failed for the demo, or its
+    row belongs to another episode number): ``missing``, which the rule reads
+    as a missing input, never as a success."""
+    from levi.live.worker import Worker
+
+    class Store:
+        def get(self, kind, key):
+            if key != "cs1":
+                raise KeyError(key)
+            return {
+                "proposals": [
+                    {
+                        "episode_index": 4,
+                        "style": "subtask",
+                        "subtask_id": "place",
+                        "start": 3.0,
+                        "outcome": "failure",
+                    }
+                ]
+            }
+
+    worker = Worker.__new__(Worker)
+    worker.store = Store()
+    row = {"temporal": {"changeset": "cs1"}, "episode_index": 4}
+    assert worker.place_of(row, 4) == "failure"
+    assert worker.place_of(row, 5) == "missing"  # not this episode's row
+    assert worker.place_of(None, 4) == "missing"
+    assert worker.place_of({"temporal": {}, "episode_index": 4}, 4) == "missing"
+    assert (
+        worker.place_of({"temporal": {"changeset": "gone"}, "episode_index": 4}, 4)
+        == "missing"
+    )
