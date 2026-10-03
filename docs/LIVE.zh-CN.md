@@ -168,18 +168,38 @@ uv run levi live stop                            # 只停自己的进程
 
 ## 实时页面
 
-`/live` 以只读方式显示评测进行时发生的事。它需要实时工作区的核心（`levi live start`）；在其他 LEVI 里手动打开这个地址，会提示“当前 LEVI 不是实时标注工作区”。
+`/live` 显示评测进行时发生的事。它不会启动、停止或批准任何东西；在这里唯一能改的是把片段从数据集中排除、再恢复（见[排除片段（可恢复）](#排除片段可恢复)）。它需要实时工作区的核心（`levi live start`）；在其他 LEVI 里手动打开这个地址，会提示“当前 LEVI 不是实时标注工作区”。
 
 **入口只在实时工作区出现，并且在那里是最显眼的一个。** 在其他 LEVI（你平时用的那个）里，顶部导航没有“实时评测”，首页也不变。在实时工作区里，它是导航的第一项，带轮廓，有一个状态小圆点（绿：运行正常且空闲；蓝：正在标注；琥珀：标注已暂停，或有事在等人处理，包括被闸门拦住、需要你点“继续”的运行（会自己继续的被拦运行不改变圆点和数字，实时页只显示数量，不列出运行编号）；红：FR3 红灯，或评测会话出了故障；灰：读不到状态），有事等人时显示数字，悬停有一句中文或英文的说明。实时工作区的首页（`/`）顶部是一条大横幅，圆点和说明相同，点击进入 `/live`；这是横幅而不是跳转，所以首页的 LEVI 标识和 `?path=`/`?dataset=` 链接照常工作，其他页面也只差一次点击。页面靠每次加载时问一次 `/api/levi/live/status` 判断是不是实时工作区：返回 `{"enabled": false}` 就到此为止（没有定时器，不再请求，产品 LEVI 不增加负载）；在实时工作区里，标签页可见时每 8 秒再问一次来更新圆点（失败后最长 30 秒）。
 
 - **红色横幅**“检测到 FR3 出错，评测已中断”：健康监视器报告红灯或有会话处于 `fault` 时出现，相关数据集卡片带红色标记。监视器缺失或陈旧**不算**红灯（琥珀色“监视器离线”）。
 - **评测会话**：状态、评测编号、片段 `第几个 / 目标`（有效片段数）、步数进度条、策略 config 和 checkpoint 文件夹名、最近一个片段、是否启用 LEVI 标注、复位等待；客户端心跳超过 10 s 显示“已失联”。
 - **FR3 机械臂**：模式、红灯、错误、硬件和控制器状态、原因。
-- **标注管线**：每个数据集一张卡片，显示已镜像、等待、标注中、完成、失败的片段数，已提交的时间片段，以及**自动**成败结果（虚线框、标“自动”，写明“未经审核，准确率未评估”，不会画得像金标准）。留待人工复核的复核运行会列出（默认最新 3 个；按浏览器保存的只读筛选可隐藏较早的，不改变任何数据），并链接到查看器。
+- **标注管线**：每个数据集一张卡片，显示已镜像、等待、标注中、完成、失败的片段数，已提交的时间片段，以及**自动**成败结果（虚线框、标“自动”，写明“未经审核，准确率未评估”，不会画得像金标准）。留待人工复核的复核运行会列出（默认最新 3 个；按浏览器保存的只读筛选可隐藏较早的，不改变任何数据），并链接到查看器。“显示片段”列出数据集的片段（先 10 个最新的，可展开全部）；每个片段可在列表或详情里排除，也可多选后一起排除；“已排除（n）”列出被排除的片段，带“恢复”按钮。
 - **服务与资源**：状态、GPU 模式、vLLM 状态、用人话解释的标注闸门（例如策略推理时为什么暂不标注）、队列、工作进程、最近错误、监督进程的内存、线程和 CPU。服务未运行时页面会说明，并提供可复制的 `levi live start`。
 - **需要人处理**：服务放弃启动模型服务器（`attention`，写明原因并给出可复制的 `levi live resume`）、数据集在等你于 LEVI 页面批准计划或提交草稿（`awaiting`）、或服务启动的页面/核心没起来（`frontend`）时，出现琥珀色横幅。数据集卡片还会显示卡住的片段和被替换的源。复位等待在两次轮询之间由浏览器倒计时（`reset_wait_s`、`waiting_reset_since`），过期后提示“下一个片段应已开始”。GPU 闸门和决定的每个代码都有中英文的人话解释。当服务因不会自行消失的原因暂停了标注（`labelling_paused`：`vllm_failed`、`vllm_error`、`insufficient_vram`、`policy_large`、`unknown_client`、`vram`、`lock`、`external_busy`），横幅会说明原因、评测不受影响且片段不会丢，以及该怎么做（需要恢复时附可复制的 `levi live resume`）；主循环超过 5 分钟没动作（`loop_at`）也会提示。在 Agent 工作台里，策略推理期间被拒绝的 Run 或 Resume 会显示一句人话（几秒后再试；已经在跑的运行会自己继续），而不是核心的日志原文。
 
-评测运行时每 2 s、空闲时每 10 s 轮询 `/api/levi/live/status` 和 `/sessions`；标签页不可见时暂停；失败后退避（最长 30 s）；答复是 `{"enabled": false}`（不是实时工作区的说明页）时永久停止；只为少数重要或已展开的卡片加载数据集详情，且仅在该行变化后再次加载。页面没有任何写操作，也不显示令牌。
+评测运行时每 2 s、空闲时每 10 s 轮询 `/api/levi/live/status` 和 `/sessions`；标签页不可见时暂停；失败后退避（最长 30 s）；答复是 `{"enabled": false}`（不是实时工作区的说明页）时永久停止；只为少数重要或已展开的卡片加载数据集详情，且仅在该行变化后再次加载。页面唯一的写操作是排除和恢复片段（由人用页面自己的令牌发起），也不显示令牌。
+
+## 排除片段（可恢复）
+
+人可以在实时页面把一个片段从实时数据集里拿掉（机器人出了意外、复位没做好、某一条没人想标）：片段详情里的**删除片段（可恢复）**，每个片段前的复选框加**删除所选（n）**用于批量，确认框会写清后果，原因可选。卡片上的**已排除（n）**列出被排除的片段（带原因和时间），**恢复**（或**恢复所选**）把它们放回来。
+
+**它做什么、不做什么。** 这是软删除：rollout 源目录不会被动（LEVI 本来就从不写它），`captures/` 下的镜像保留，已经写进 LEVI 的标注和证据也保留。片段只是不再*被计数*、不再*被处理*：
+
+- **存放位置**：数据集状态文件（`live/datasets/<名字>.json`）里该片段自己的那一行：`"excluded": {"at": <epoch>, "by": "person", "reason": "…"}`。没有这个键就是没排除，所以旧文件不用迁移；恢复就是删掉这个键。文件仍按原来的方式在锁内原子写入。
+- **计数**：被排除的片段不进任何计数：状态行里的 `episodes`、`pending`、`done`、`failed`、`skipped` 不含它，数据集详情的 `counts`、`total_demos` 不含它，卡片上的自动成败统计也不含它。状态行和详情另带 `excluded` / `excluded_count`，详情把被排除的片段单独列出（`excluded_demos`）。
+- **工作进程**：队列、批次选择和工作进程最后的过滤都会跳过被排除且尚未标注的片段；它保持 `mirrored`，恢复后再标注。被排除片段的源发生变化时不会重新镜像。
+- **已标注的片段**：标注留在 LEVI 里，但不再计入计数、数据集总数和自动成败统计。
+- **正在标注的片段会被拒绝**：属于进行中批次（数据集状态的 `current`）的片段不能排除（HTTP 409，“being labelled (part of the batch in progress); try again after the batch”）：它的运行已经带着它做了计划，点一下列表不该把做到一半的工作打断。检查和写入在状态文件的锁内一起完成，工作进程的过滤（`Worker.filter_demos`）也在同一把锁内跳过被排除的行，所以恰好在选批次时点下去，要么被拒绝、要么生效，不会各做一半。数据集的批次在跑时，仍在等待的片段可以排除。（服务停止时批次仍保存在状态文件里，所以它的片段在批次结束前一直被拒绝。）
+- **复核运行**：一个复核运行里的片段*全部*被排除时，该运行会被取消，不会有等人审的项挂在已不存在的片段上（判定仍留在数据集状态里，和清理取消的旧运行一样；`review_runs_open` 重新计数）。复核运行里还有没排除的片段时，该运行保持打开：一个运行没法单独交还一个片段，它对被排除片段的提案仍在里面。恢复不会重新打开已取消的运行，返回的 `review_cancelled` 会列出这样的运行。
+- **不能排除**：被拒收或卡住的片段（从未纳入数据集），以及服务还没镜像的 rollout（它还没有行，等它出现在列表里再排除）。
+- **训练池**：见下。
+- **查看器**：镜像和 LEVI 据此建的数据集视图里仍然有这个片段，所以普通查看器，以及从实时工作区自己的数据集导出的训练清单仍会列出它。只有实时页面、计数、工作进程和训练池遵守排除。
+
+**这是人的操作，并有审计。** 两个调用都要界面令牌（和页面其他写操作同样的检查：页面的代理会带上它）；智能体凭据（`Authorization: Bearer`）即使同时带着有效令牌也会被拒绝（403）；Agent API 的任何能力、自动批准主体的任何调用（`auto.ALLOWED`）都做不了这件事。每次改动，每个片段在 `live/audit.jsonl` 写一行：`{"time", "principal": "local-human", "actor": "person", "tool": "episode.exclude" | "episode.restore", "dataset", "demo", "reason"?, "runs_cancelled"?, "decision": "completed"}`，不记录令牌。排除已排除的片段、恢复未排除的片段什么都不改，也不写审计。
+
+**训练池**：实时工作区在池根目录之下时，它的镜像会像任何原始采集一样被登记，而同一次录制还会从镜像所链接的 rollout 目录再登记一次（同一指纹、同一组；rollout 目录是规范副本）。所以训练池不只看镜像：它在**被查询时**读实时工作区的数据集状态（不需要重新扫描），把整组当作已排除，和一个副本上的标签或留出标记对所有副本生效一样。被排除的录制不会被列出或计数（`facets.removed_in_live` 给出数量），任何配方都会跳过它（预览的排除原因里是 `excluded_in_live`，不管配方本来会选哪个副本），导出在规划、运行和续跑时都会拒绝它（“removed on the live page”），所以计划冻结之后才做的排除也能拦住导出。只读取上次扫描在池根下找到的实时工作区（以及训练池自己的工作区）：池根之外的实时工作区，它的镜像不在索引里，它对应的 rollout 副本要等扫描见过这个工作区后才会被识别。
 
 ## 服务写的文件
 
@@ -189,8 +209,8 @@ uv run levi live stop                            # 只停自己的进程
 | `~/.levi-live/live.pid`、`live.lock` | 单实例锁和 pid 记录 |
 | `<工作区>/live.toml` | 配置（只创建一次） |
 | `<工作区>/live/effective.toml` | worker 读取的生效配置 |
-| `<工作区>/live/datasets/<名字>.json` | 每个数据集的状态：各片段及状态、进行中的批次、上一批、判定 |
-| `<工作区>/live/audit.jsonl` | 自动批准主体的审计日志（轮转） |
+| `<工作区>/live/datasets/<名字>.json` | 每个数据集的状态：各片段及状态（被人排除的带 `excluded`）、进行中的批次、上一批、判定 |
+| `<工作区>/live/audit.jsonl` | 自动批准主体的审计日志，以及人排除或恢复每个片段的一行（轮转） |
 | `<工作区>/live/worker.json`、`gate.json`、`vllm.json`、`service.json` | worker 进度、闸门、本服务启动的 vLLM、首次启动时间 |
 | `<工作区>/live/gate.jsonl` | 闸门的每一次变化（轮转；见“历史与统计”） |
 | `<工作区>/live/stats.jsonl` | 每个已标片段一条记录（轮转；见“历史与统计”） |
@@ -246,17 +266,20 @@ uv run levi live stop                            # 只停自己的进程
 - **C2 会话**：`<根>/.eval_sessions/<group>__<task_folder>.json`，schema `levi.eval.session.v1`（`state`：`standby homing running waiting_reset fault stopped finished`）。10 秒没有更新且进程已不在，或超过一小时未更新（回收的 pid 不能让它复活），会话算 `crashed`。`waiting_reset_since`（本次等待第一次进入 `waiting_reset` 的纪元秒；闸门的提前量从它算起，旧客户端不写时从本服务第一次看到该会话算起；会话在机器人上或在两集之间时，监督进程至少每秒看一次）、`run_id`（被续跑的评测轮）、`episode.no`（本次会话的集序号）、`episode.counted`（该轮累计有效片段数）原样传给页面。`incomplete_*` 的中止原因：`fr3_fault`、`user_quit`、`interrupted`、`process_killed`（只有 `fr3_fault` 把数据集标成故障；所有原因都按类计数）。
 - **C3 FR3 健康**：`fr3_health.json`，schema `levi.fr3.health.v1`（优先 `updated_at_epoch`，否则 `updated_at`）。缺失或超过 `fr3.stale_s` 是**离线**，不是红灯。`red_light` 还包括：5 秒没有实时机器人状态、5 秒连不上 controller manager、没有 Franka 硬件组件；服务只显示，不据此行动。
 
-## HTTP API（只读，`/api/levi/live/*`）
+## HTTP API（`/api/levi/live/*`）
 
-任何有 `live/workspace.json` 的工作区的核心都提供这些路由；其他工作区全部回答 `{"enabled": false}`。没有任何路由会改东西或返回令牌。
+任何有 `live/workspace.json` 的工作区的核心都提供这些路由；其他工作区的 GET 都回答 `{"enabled": false}`，POST 回答 404。GET 路由不改任何东西，任何路由都不返回令牌。唯一会改东西的是排除和恢复片段的路由（见[上文](#排除片段可恢复)）。
 
 | 路由 | 回答 |
 | --- | --- |
 | `GET /status` | `{"enabled", "alive", "age_s", "service": <status.json 或 null>, "faults": [{"dataset", "reasons": []}], "fr3_red", "blocked_runs": {"count", "waiting", "needs_person"}}`。`alive` = pid 存在、`updated_at` 不到 15 秒、状态不是 `stopped`。 |
 | `GET /sessions` | `{"enabled", "sessions": [ {会话字段, "dataset", "fault"} ], "fr3": {…}, "active"}`，直接读机器人侧文件（≤ 64 个）。 |
 | `GET /datasets` | `{"enabled", "datasets": {名字: 行}}`（`status.json` 里的行）。 |
-| `GET /datasets/{name}` | 数据集详情：`repo_id`（登记后的 LEVI 数据集 id，否则 null）、任务文本、各状态计数、片段列表（最新在前，≤ 200；每项有状态、集序号、`run_id`、尝试次数、时间片段数、提交时间、自动判定 `verdict`：`outcome/events/valid_events/undecided/spec/review: "auto"/evaluated: false`）、`incomplete`（含按原因计数）、进行中的批次、上一批、`last_error`。未知名字返回 404。 |
-| `GET /audit?limit=50` | 自动批准主体的审计记录，最新在前，≤ 100 条，每条含 `tool`、`decision: allowed/refused`、`run_id` 等。 |
+| `GET /datasets/{name}` | 数据集详情：`repo_id`（登记后的 LEVI 数据集 id，否则 null）、任务文本、各状态计数（被排除的片段不计入）、`total_demos`（数据集里的片段数）、片段列表（最新在前，≤ 200；每项有 `excluded`（null）、状态、集序号、`run_id`、尝试次数、时间片段数、提交时间、自动判定 `verdict`：`outcome/events/valid_events/undecided/spec/review: "auto"/evaluated: false`）、`excluded_count` 和 `excluded_demos`（被排除的片段，行的格式相同，带 `excluded: {at, by: "person", reason}`，最新在前，≤ 200）、`incomplete`（含按原因计数）、进行中的批次、上一批、`last_error`。未知名字返回 404。 |
+| `GET /audit?limit=50` | 自动批准主体的审计记录，最新在前，≤ 100 条，每条含 `tool`、`decision: allowed/refused`、`run_id` 等。人排除或恢复片段的行是 `principal: "local-human"`、`actor: "person"`、`tool: "episode.exclude"` 或 `"episode.restore"`、`dataset`、`demo`、可选的 `reason` 和 `runs_cancelled`、`decision: "completed"`。 |
+| `POST /datasets/{name}/exclude` | 请求体 `{"demos": ["demo_0003", …], "reason": "…"?}`（1 到 500 个名字，原因最长 300 字符）。排除这些片段（要么全部成功，要么都不改）。回答 `{"enabled", "dataset", "changed": [...], "unchanged": [...]（本来就已排除）, "counts", "excluded_count", "review_runs_open", "cancelled_runs": [...]}`。404：数据集或片段不存在（会点名），或不是实时工作区；409：片段在进行中的批次里（“being labelled …”），或从未纳入数据集（被拒收、卡住）；401/403：不是人在操作（见上）。 |
+| `POST /datasets/{name}/restore` | 请求体 `{"demos": [...]}`。把已排除的片段放回来；回答同上，但带 `review_cancelled`（恢复的片段曾失去的复核运行，它们保持已取消）而不是 `cancelled_runs`；没排除的片段在 `unchanged` 里。片段不存在返回 404。 |
+| `POST /datasets/{name}/demos/{demo}/exclude`、`…/restore` | 对单个片段做同样的事（前者可带可选请求体 `{"reason"}`）。 |
 
 用 `repo_id`（`local/<名字>`）链接到查看器；判定对应的运行可按 `run_id` 在 LEVI 页面打开。
 
