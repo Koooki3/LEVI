@@ -410,7 +410,10 @@ export function CompositionPanel({
               </p>
             )}
             {preview.mix && <MixSummary mix={preview.mix} />}
-            <GripperMix grippers={preview.grippers} />
+            <GripperMix
+              grippers={preview.grippers}
+              declared={preview.declared?.gripper}
+            />
             <PoolWarnings warnings={preview.warnings} />
             {preview.tasks_without_episodes.length > 0 && (
               <p className="levi-warnings">

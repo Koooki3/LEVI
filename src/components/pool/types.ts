@@ -95,7 +95,11 @@ export function gripperTitle(
 export function gripperDeclared(
   row: Pick<EpisodeRow, "embodiment_evidence">,
 ): boolean {
-  return !!row.embodiment_evidence?.gripper?.startsWith("declared");
+  // "declared: <source>", or taken from a linked capture that was declared;
+  // "declared agrees" and conflicts are not declarations the value rests on.
+  return /^(linked capture: )?declared: /.test(
+    row.embodiment_evidence?.gripper ?? "",
+  );
 }
 
 /** ``pi05_fr3_all_step49999`` -> ``step49999`` (as the server's label). */
@@ -561,6 +565,8 @@ export interface Preview {
   policy_methods?: Record<string, number>;
   grippers?: Record<string, number>;
   robots?: Record<string, number>;
+  /** Episodes whose robot / gripper / frame comes from a declaration, per field. */
+  declared?: Record<string, number>;
   excluded: Record<string, number>;
   excluded_heldout: number;
   excluded_duplicates: number;

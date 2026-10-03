@@ -2024,5 +2024,6 @@
   "declared": "declared",
   "No gripper is recorded for these sources; their episodes export as unknown.": "No gripper is recorded for these sources; their episodes export as unknown.",
   "The selection takes episodes with no recorded gripper from several sources: {sources}. A source with no gripper record may hold either gripper. Declare each source's gripper in pool/rules.json, list Unknown gripper on purpose, or allow mixing.": "The selection takes episodes with no recorded gripper from several sources: {sources}. A source with no gripper record may hold either gripper. Declare each source's gripper in pool/rules.json, list Unknown gripper on purpose, or allow mixing.",
-  "{count} episode(s) from {sources} have no recorded gripper (unknown): their metadata does not say which gripper was used.": "{count} episode(s) from {sources} have no recorded gripper (unknown): their metadata does not say which gripper was used."
+  "{count} episode(s) from {sources} have no recorded gripper (unknown): their metadata does not say which gripper was used.": "{count} episode(s) from {sources} have no recorded gripper (unknown): their metadata does not say which gripper was used.",
+  "{count} episode(s): the gripper comes from a declaration in pool/rules.json, not from the metadata.": "{count} episode(s): the gripper comes from a declaration in pool/rules.json, not from the metadata."
 }

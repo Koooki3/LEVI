@@ -5,7 +5,6 @@ import {
   GRIPPER_LABELS,
   gripperCounts,
   gripperDeclared,
-  gripperDeclared,
   gripperLabel,
   gripperTitle,
   sourceCounts,
@@ -138,18 +137,6 @@ describe("gripper warnings", () => {
     expect(sourceCounts(many)).toBe("s0 8 · s1 7 · s2 6 · s3 5 · s4 4 · +3");
   });
 
-  test("a declared gripper is told apart from a read one", () => {
-    expect(
-      gripperDeclared({ embodiment_evidence: { gripper: "declared: plain" } }),
-    ).toBe(true);
-    expect(
-      gripperDeclared({
-        embodiment_evidence: { gripper: "metadata:gripper_joint_names" },
-      }),
-    ).toBe(false);
-    expect(gripperDeclared({})).toBe(false);
-  });
-
   test("every sentence is translated", () => {
     for (const key of [
       "The selection mixes grippers: {counts}. An export takes one gripper: filter by gripper, or allow mixing.",
@@ -162,6 +149,7 @@ describe("gripper warnings", () => {
       "Action mode",
       "End-effector frame",
       "declared",
+      "{count} episode(s): the gripper comes from a declaration in pool/rules.json, not from the metadata.",
     ]) {
       expect(key in en).toBe(true);
       expect(zhT(key)).not.toBe(key);
@@ -180,6 +168,20 @@ describe("declared grippers", () => {
       }),
     ).toBe(false);
     expect(gripperDeclared({})).toBe(false);
+    // Taken from a declared linked capture: still a declaration.
+    expect(
+      gripperDeclared({
+        embodiment_evidence: { gripper: "linked capture: declared: a" },
+      }),
+    ).toBe(true);
+    // Agreeing with the metadata, or contradicting it, is not.
+    for (const text of [
+      "metadata:x; declared agrees (a)",
+      "conflict: metadata robotiq_2f85 (m); declared franka_hand (a)",
+    ])
+      expect(gripperDeclared({ embodiment_evidence: { gripper: text } })).toBe(
+        false,
+      );
     const row = { robot: "franka_fr3", gripper: "franka_hand" };
     const text = gripperTitle(row, zhT) || "";
     expect(text).toContain("机器人: franka_fr3");

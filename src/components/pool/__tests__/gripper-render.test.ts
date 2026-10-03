@@ -17,6 +17,23 @@ describe("gripper parts render", () => {
     expect(html.toLowerCase()).not.toContain("no gripper is recorded");
   });
 
+  test("episodes whose gripper was declared are counted", () => {
+    const html = renderToStaticMarkup(
+      createElement(GripperMix, {
+        grippers: { robotiq_2f85: 1628 },
+        declared: 1628,
+      }),
+    );
+    expect(html).toContain(
+      "1,628 episode(s): the gripper comes from a declaration",
+    );
+    expect(
+      renderToStaticMarkup(
+        createElement(GripperMix, { grippers: { robotiq_2f85: 3 } }),
+      ),
+    ).not.toContain("declaration");
+  });
+
   test("only unknown grippers say so", () => {
     const html = renderToStaticMarkup(
       createElement(GripperMix, { grippers: { unknown: 7 } }),

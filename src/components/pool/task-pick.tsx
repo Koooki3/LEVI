@@ -213,8 +213,10 @@ function share(n: number, total: number): string {
  * data, nothing in the metadata) are counted, not hidden. */
 export function GripperMix({
   grippers,
+  declared,
 }: {
   grippers?: Record<string, number>;
+  declared?: number;
 }) {
   const { t } = useLocale();
   const entries = Object.entries(grippers || {}).filter(([, n]) => n > 0);
@@ -230,6 +232,13 @@ export function GripperMix({
           </span>
         ))}
       </div>
+      {!!declared && (
+        <p className="levi-pool-hint">
+          {t(
+            "{count} episode(s): the gripper comes from a declaration in pool/rules.json, not from the metadata.",
+          ).replace("{count}", declared.toLocaleString())}
+        </p>
+      )}
       {!known && (
         <p className="levi-pool-hint">
           {t(
