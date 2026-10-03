@@ -20,11 +20,11 @@ import secrets
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from . import config as live_config
-from . import exclusion, jsonio, mirror, resumer, sessions
+from . import exclusion, jsonio, mirror, resumer, sessions, statsfmt, statsview
 
 router = APIRouter(prefix="/api/levi/live", tags=["Live annotation"])
 
@@ -35,6 +35,13 @@ NAME = re.compile(r"^[A-Za-z0-9._-]{1,140}$")
 # leading dot, no control character. Whether it exists is the state file's
 # say.
 DATASET = re.compile(r"^(?![.])[^/\\\x00-\x1f\x7f]{1,200}$")
+SESSION_ID = re.compile(r"^[A-Za-z0-9._:+-]{1,160}$")
+EXPORTS = {
+    "csv": "text/csv; charset=utf-8",
+    "json": "application/json",
+    "md": "text/markdown; charset=utf-8",
+}
+MAX_EXPORT_ROWS = 20000
 ALIVE_S = 15.0
 MAX_DEMOS = 200
 MAX_AUDIT = 100
@@ -381,3 +388,79 @@ def exclude_demo(
 def restore_demo(name: str, demo: str, request: Request):
     _person(request)
     return _restore(name, [demo])
+
+
+def _scope(dataset, session, since):
+    if dataset is not None and not DATASET.fullmatch(dataset):
+        raise HTTPException(400, "Not a live dataset name")
+    if session is not None and not SESSION_ID.match(session):
+        raise HTTPException(400, "Not a session id")
+    if since is not None and not (0 <= since < 4e9):
+        raise HTTPException(400, "since is epoch seconds")
+    return dataset or None, session or None, since
+
+
+@router.get("/stats")
+def stats_view(
+    dataset: str | None = None,
+    session: str | None = None,
+    since: float | None = None,
+    limit: int = 100,
+    offset: int = 0,
+):
+    """The quantitative statistics of the labelling (docs/LIVE.md, "Statistics
+    and reports"): aggregates, one row per evaluation session and a page of
+    per-episode rows (newest first), for everything or one dataset, session
+    or time range. Read from ``live/stats.jsonl``; no path, token or key."""
+    config = _config()
+    if config is None:
+        return _disabled()
+    dataset, session, since = _scope(dataset, session, since)
+    return statsview.build(
+        config,
+        dataset=dataset,
+        session=session,
+        since=since,
+        limit=max(1, min(int(limit), statsview.MAX_PAGE)),
+        offset=max(0, int(offset)),
+    )
+
+
+@router.get("/stats/export")
+def stats_export(
+    format: str = "json",
+    dataset: str | None = None,
+    session: str | None = None,
+    since: float | None = None,
+    lang: str = "en",
+):
+    """The same statistics as a download: ``csv`` (one row per episode),
+    ``json`` (everything) or ``md`` (a readable report)."""
+    config = _config()
+    if config is None:
+        return _disabled()
+    if format not in EXPORTS:
+        raise HTTPException(400, "format is csv, json or md")
+    dataset, session, since = _scope(dataset, session, since)
+    payload = statsview.build(
+        config,
+        dataset=dataset,
+        session=session,
+        since=since,
+        limit=MAX_EXPORT_ROWS,
+    )
+    if format == "csv":
+        body = statsfmt.to_csv(payload)
+    elif format == "md":
+        body = statsfmt.to_markdown(payload, "zh" if lang == "zh" else "en")
+    else:
+        body = statsfmt.to_json(payload)
+    stem = "-".join(["live-stats", *[x for x in (dataset, session) if x]])
+    return Response(
+        body,
+        media_type=EXPORTS[format],
+        headers={
+            "Content-Disposition": f'attachment; filename="{stem}.{format}"',
+            "Cache-Control": "no-store",
+        },
+    )

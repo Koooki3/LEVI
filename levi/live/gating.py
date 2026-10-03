@@ -58,10 +58,11 @@ def brief(row) -> dict:
     }
 
 
-def history(live_dir, limit=5) -> list:
+def history(live_dir, limit=5, tail_bytes=HISTORY_TAIL) -> list:
     """The last ``limit`` transitions, oldest first. Lines that do not parse
     (a torn write, a hand edit) are skipped; a missing file is an empty list.
-    Reads only the tail of the file, and of ``.1`` when the file is short."""
+    Reads only the last ``tail_bytes`` of the file, and of ``.1`` when the file
+    is short."""
     path = Path(live_dir) / HISTORY
     rows: list = []
     for candidate in (path, path.with_name(path.name + ".1")):
@@ -69,12 +70,12 @@ def history(live_dir, limit=5) -> list:
             with candidate.open("rb") as handle:
                 handle.seek(0, 2)
                 size = handle.tell()
-                handle.seek(max(0, size - HISTORY_TAIL))
+                handle.seek(max(0, size - tail_bytes))
                 data = handle.read()
         except OSError:
             continue
         lines = data.splitlines()
-        if size > HISTORY_TAIL:
+        if size > tail_bytes:
             lines = lines[1:]  # the first line of a tail is cut
         found = []
         for line in lines:
