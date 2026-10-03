@@ -418,3 +418,45 @@ export function sessionChoices(
   if (chosen && !ids.includes(chosen)) ids.push(chosen);
   return [...new Set(ids)];
 }
+
+export interface StatsLoader {
+  /** Ask for a scope; a newer ask abandons the one before it. Resolves with
+   * the answer, or null when it was abandoned. Rejects on a failed request. */
+  load: (scope: StatsScope, limit: number) => Promise<StatsResponse | null>;
+  /** Abandon whatever is in flight. */
+  stop: () => void;
+  /** The path of the last ask (what the panel is showing the answer to). */
+  last: () => string | null;
+}
+
+/** The request side of the panel, without React: it always asks for the
+ * scope it is given (every part of it, the removed-episodes switch included)
+ * and drops the answer to an ask that a newer one replaced. */
+export function createStatsLoader(
+  fetcher: (
+    path: string,
+    init: { cache: "no-store"; signal: AbortSignal },
+  ) => Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>,
+): StatsLoader {
+  let controller: AbortController | null = null;
+  let path: string | null = null;
+  return {
+    async load(scope, limit) {
+      controller?.abort();
+      const mine = new AbortController();
+      controller = mine;
+      path = statsPath(scope, limit);
+      const response = await fetcher(`/api/levi/live/${path}`, {
+        cache: "no-store",
+        signal: mine.signal,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = (await response.json()) as StatsResponse;
+      return mine.signal.aborted ? null : data;
+    },
+    stop() {
+      controller?.abort();
+    },
+    last: () => path,
+  };
+}

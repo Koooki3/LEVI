@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   columns,
+  createStatsLoader,
   count,
   dueForRefresh,
   exportHref,
@@ -205,5 +206,66 @@ describe("tables", () => {
     expect(sessionChoices(sessions, "", "")).toEqual(["s1", "s2"]);
     expect(sessionChoices(sessions, "b", "")).toEqual(["s2"]);
     expect(sessionChoices(sessions, "b", "gone")).toEqual(["s2", "gone"]);
+  });
+});
+
+describe("the request follows the whole scope", () => {
+  const answer = (body: unknown) => ({
+    ok: true,
+    status: 200,
+    json: async () => body,
+  });
+  test("switching on removed episodes asks again with include_excluded", async () => {
+    const asked: string[] = [];
+    const loader = createStatsLoader(async (path) => {
+      asked.push(path);
+      return answer({ enabled: true });
+    });
+    const base = { dataset: "g__t", session: "", includeExcluded: false };
+    await loader.load(base, 25);
+    await loader.load({ ...base, includeExcluded: true }, 25);
+    expect(asked).toEqual([
+      "/api/levi/live/stats?dataset=g__t&limit=25",
+      "/api/levi/live/stats?dataset=g__t&include_excluded=true&limit=25",
+    ]);
+    expect(loader.last()).toContain("include_excluded=true");
+  });
+  test("every part of the scope changes the request", () => {
+    const paths = [
+      { dataset: "", session: "", includeExcluded: false },
+      { dataset: "a", session: "", includeExcluded: false },
+      { dataset: "a", session: "s", includeExcluded: false },
+      { dataset: "a", session: "s", includeExcluded: true },
+    ].map((scope) => statsPath(scope, 25));
+    expect(new Set(paths).size).toBe(4);
+    expect(statsPath({ dataset: "", session: "" }, 25)).not.toBe(
+      statsPath({ dataset: "", session: "" }, 50),
+    );
+  });
+  test("the answer to an ask that a newer one replaced is dropped", async () => {
+    let release: (v: unknown) => void = () => {};
+    const slow = new Promise((resolve) => (release = resolve));
+    let calls = 0;
+    const loader = createStatsLoader(async () => {
+      calls += 1;
+      if (calls === 1) await slow;
+      return answer({ enabled: true, n: calls });
+    });
+    const scope = { dataset: "", session: "" };
+    const first = loader.load(scope, 25);
+    const second = await loader.load({ ...scope, includeExcluded: true }, 25);
+    release(null);
+    expect(await first).toBeNull();
+    expect(second).toEqual({ enabled: true, n: 2 });
+  });
+  test("a failed request rejects", async () => {
+    const loader = createStatsLoader(async () => ({
+      ok: false,
+      status: 500,
+      json: async () => ({}),
+    }));
+    await expect(loader.load({ dataset: "", session: "" }, 5)).rejects.toThrow(
+      "HTTP 500",
+    );
   });
 });

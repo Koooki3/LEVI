@@ -1,10 +1,13 @@
 "use client";
 // The statistics panel's data: `GET /api/levi/live/stats`, read-only. It does
 // not poll on its own: it asks again when the page's poll has moved (`tick`),
-// at most every 5 s while an evaluation runs and every 30 s otherwise, and
-// not at all while the tab is hidden (the page's poll stops then).
-import { useCallback, useEffect, useRef, useState } from "react";
+// at most every 5 s while an evaluation runs and every 30 s otherwise, and not
+// at all while the tab is hidden (the page's poll stops then). The request is
+// a function of the whole scope (`statsPath`), so anything that changes it,
+// the removed-episodes switch included, asks again at once.
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  createStatsLoader,
   dueForRefresh,
   statsPath,
   type StatsResponse,
@@ -30,54 +33,42 @@ export function useLiveStats(
     loading: false,
   });
   const last = useRef<number | null>(null);
-  const inflight = useRef<AbortController | null>(null);
-  const key = `${scope.dataset}|${scope.session}|${limit}`;
-  const keyRef = useRef(key);
+  const loader = useMemo(() => createStatsLoader(fetch), []);
+  // The one thing the request depends on, whole.
+  const path = statsPath(scope, limit);
+  const wanted = useRef({ scope, limit });
+  wanted.current = { scope, limit };
 
-  const load = useCallback(async () => {
-    inflight.current?.abort();
-    const controller = new AbortController();
-    inflight.current = controller;
+  const run = useRef(async () => {});
+  run.current = async () => {
     last.current = Date.now();
     setState((s) => ({ ...s, loading: true }));
     try {
-      const response = await fetch(
-        `/api/levi/live/${statsPath(scope, limit)}`,
-        {
-          cache: "no-store",
-          signal: controller.signal,
-        },
-      );
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data: StatsResponse = await response.json();
-      if (controller.signal.aborted) return;
-      setState({ data, error: "", loading: false });
+      const { scope: now, limit: size } = wanted.current;
+      const data = await loader.load(now, size);
+      if (data) setState({ data, error: "", loading: false });
     } catch (e) {
-      if (controller.signal.aborted) return;
+      if (e instanceof DOMException && e.name === "AbortError") return;
       setState((s) => ({
         data: s.data,
         error: e instanceof Error ? e.message : String(e),
         loading: false,
       }));
     }
-    // `key` stands for scope and limit.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  };
 
-  // A changed scope or page size loads at once.
+  // A changed request loads at once.
   useEffect(() => {
-    if (!enabled) return;
-    keyRef.current = key;
-    void load();
-  }, [key, enabled, load]);
+    if (enabled) void run.current();
+  }, [path, enabled]);
 
   // The page's poll moved: refresh when it is due.
   useEffect(() => {
     if (!enabled || tick == null) return;
     if (document.visibilityState === "hidden") return;
-    if (dueForRefresh(Date.now(), last.current, evaluating)) void load();
-  }, [tick, enabled, evaluating, load]);
+    if (dueForRefresh(Date.now(), last.current, evaluating)) void run.current();
+  }, [tick, enabled, evaluating]);
 
-  useEffect(() => () => inflight.current?.abort(), []);
+  useEffect(() => () => loader.stop(), [loader]);
   return state;
 }
