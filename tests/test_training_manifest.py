@@ -575,286 +575,275 @@ def test_subtask_segments_written_by_the_live_service_are_marked_in_the_manifest
     assert f[f.episode_index == 1].subtask_review.isna().all()
 
 
-# --------------------------------------------------- per-frame prompt columns
-
-PROMPT_COLUMNS = (
-    "prompt_task",
-    "prompt_subtask",
-    "prompt_template",
-    "prompt_subtask_source",
-)
+# ------------------------------------------------- per-frame prompt columns
 
 
-def _write_segments(name, episode, segments):
-    """``segments`` are (id, start, to, review); review None is a person's."""
+def _segments(name, ep, spans):
+    """Subtask segments for one episode: (content, start, to, review, subtask_id)."""
     from levi.agent.store import resolve
 
     folder = resolve(catalog.STATE, name, "annotations")
     folder.mkdir(parents=True, exist_ok=True)
     atoms = []
-    for sid, start, to, review in segments:
-        levi = {"subtask_id": sid, "outcome": "success", "attempt": 1}
+    for content, start, to, review, sid in spans:
+        levi = {"subtask_id": sid or content, "outcome": "success", "attempt": 1}
         if review:
             levi["review"] = review
         atoms.append(
             {
                 "role": "assistant",
-                "content": f"free text for {sid}",
+                "content": content,
                 "style": "subtask",
                 "timestamp": start,
                 "to": to,
                 "levi": levi,
             }
         )
-    (folder / f"episode_{episode:06d}.json").write_text(
-        json.dumps({"episode_index": episode, "atoms": atoms})
+    (folder / f"episode_{ep:06d}.json").write_text(
+        json.dumps({"episode_index": ep, "atoms": atoms})
     )
-    return folder
 
 
-def test_prompt_columns_are_absent_unless_asked_for(repo):
-    """Existing exports do not change: no new columns, no prompt record."""
-    _write_segments(_name(repo), 0, [("grasp", 0.0, 0.5, None)])
+def test_prompt_columns_hold_the_task_and_the_task_with_a_reviewed_subtask(repo):
+    name = _name(repo)
+    _segments(
+        name,
+        0,
+        [
+            ("Pick up the red plate.", 0.0, 0.5, None, "grasp"),
+            ("move to the stack", 0.5, None, "edited", "transfer"),
+        ],
+    )
     result = tm.build(repo, "all_rollouts")
-    frames = _frames(result)
-    assert [c for c in frames.columns if c.startswith("prompt")] == []
-    assert list(frames.columns) == [f.name for f in tm.FRAMES_SCHEMA]
-    assert "prompt" not in result["annotation"]
-    assert "prompt_subtask" not in result["episodes"][0]
-
-
-def test_prompt_subtask_comes_from_reviewed_segments_only(repo):
-    name = _name(repo)
-    _write_segments(
-        name,
-        0,
-        [("grasp", 0.0, 0.5, None), ("place", 0.5, None, "auto")],
-    )
-    result = tm.build(repo, "all_rollouts", prompt_subtask=True)
     f = _frames(result)
-    assert all(c in f.columns for c in PROMPT_COLUMNS)
     e0 = f[f.episode_index == 0]
-    # A person's segment: task and the vocabulary's name for the subtask.
-    assert list(e0.prompt_subtask[:5]) == ["stack the plates；当前子任务：grasp"] * 5
-    assert all(e0.prompt_task == "stack the plates")
-    assert all(e0.prompt_template == "task-subtask-v1")
-    assert e0.prompt_subtask_source.iloc[0].endswith("review=human")
-    # An automatic segment is not used; the frame keeps only the task prompt.
-    assert e0.prompt_subtask[5:].isna().all()
-    assert e0.prompt_subtask_source[5:].isna().all()
-    # Every frame has the task-only prompt, also frames of other episodes.
-    assert list(f.prompt_task) == list(f.task)
-    assert f[f.episode_index != 0].prompt_subtask.isna().all()
-    note = result["annotation"]["prompt"]
-    assert note["template"] == "task-subtask-v1"
-    assert note["frames_with_subtask"] == 5
-    assert note["frames_with_subtask_share"] == pytest.approx(5 / 30, abs=1e-4)
-    assert note["frames_auto_rejected"] == 7
-    assert note["allow_auto_subtask"] is False
-    assert note["frames_auto_used"] == 0
-    assert note["annotation_revision"] == result["annotation"]["revision"]
-    assert note["vocabulary"]["source"] == "builtin"
-    assert note["vocabulary"]["text"] == {"grasp": "grasp"}
-    assert note["task_rule"].startswith("first")
-    assert result["episodes"][0]["prompt_subtask_frames"] == 5
-
-
-def test_automatic_segments_can_be_allowed_and_are_recorded(repo):
-    name = _name(repo)
-    _write_segments(
-        name,
-        0,
-        [("grasp", 0.0, 0.5, "auto"), ("place", 0.5, None, "edited")],
+    assert (e0.prompt_task == "stack the plates").all()
+    assert e0.prompt_subtask.iloc[0] == (
+        "stack the plates; current subtask: Pick up the red plate"
     )
-    refused = tm.build(repo, "all_rollouts", prompt_subtask=True)
-    assert refused["annotation"]["prompt"]["frames_with_subtask"] == 7
-    assert refused["annotation"]["prompt"]["frames_auto_rejected"] == 5
-    used = tm.build(repo, "all_rollouts", prompt_subtask=True, allow_auto_subtask=True)
-    f = _frames(used)
-    e0 = f[f.episode_index == 0]
-    assert e0.prompt_subtask.notna().all()
-    assert e0.prompt_subtask_source.iloc[0].endswith("review=auto")
-    assert e0.prompt_subtask_source.iloc[-1].endswith("review=edited")
-    note = used["annotation"]["prompt"]
-    assert note["allow_auto_subtask"] is True
-    assert note["frames_auto_used"] == 5 and note["frames_auto_rejected"] == 0
-    with pytest.raises(tm.ManifestError, match="prompt_subtask"):
-        tm.build(repo, "all_rollouts", allow_auto_subtask=True)
+    assert e0.prompt_subtask.iloc[-1] == (
+        "stack the plates; current subtask: move to the stack"
+    )
+    assert e0.prompt_has_subtask.all() and e0.prompt_subtask_skip.isna().all()
+    assert e0.prompt_subtask_source.iloc[0] == "segment 0.000-0.500 review=human"
+    assert e0.prompt_subtask_source.iloc[-1] == "segment 0.500-end review=edited"
+    assert f[f.episode_index == 1].prompt_subtask_source.isna().all()
+    # No time segment: the second prompt falls back to the task alone.
+    e1 = f[f.episode_index == 1]
+    assert (e1.prompt_subtask == e1.prompt_task).all()
+    assert not e1.prompt_has_subtask.any()
+    assert set(e1.prompt_subtask_skip) == {"no_segment"}
+    meta = result["prompt"]
+    assert meta["template_version"] == "v1"
+    assert meta["template"] == "{task}; current subtask: {subtask}"
+    assert meta["frames"] == 30 and meta["frames_with_subtask"] == 12
+    assert meta["subtask_skipped"] == {"no_segment": 18}
+    assert meta["subtask_max_chars"] == 120
 
 
-def test_prompt_text_is_the_vocabulary_label_and_unknown_ids_are_skipped(repo):
-    from levi.annotations import vocabulary
-
+def test_only_reviewed_segments_become_subtask_prompts(repo):
+    """The hard rule: a segment the live service wrote and nobody reviewed
+    (``auto``), and any review state the manifest does not know, never reaches
+    a prompt; the manifest counts the frames refused."""
     name = _name(repo)
-    folder = _write_segments(
+    _segments(
         name,
         0,
         [
-            ("grasp", 0.0, 0.3, None),
-            ("other", 0.3, 0.6, None),  # not a task phase
-            ("polish", 0.6, 0.9, None),  # not in the vocabulary in force
-            ("place", 0.9, None, None),
+            ("grasp", 0.0, 0.3, "auto", None),
+            ("lift", 0.3, 0.6, "pending-review", None),
+            ("place", 0.6, None, None, None),
         ],
     )
-    vocabulary.write(
-        folder,
-        [
-            {"id": "grasp", "label": "  pick   up\nthe object "},
-            {"id": "place", "label": "place"},
-        ],
-    )
-    result = tm.build(repo, "all_rollouts", prompt_subtask=True)
+    result = tm.build(repo, "all_rollouts")
     f = _frames(result)
-    e0 = f[f.episode_index == 0].reset_index(drop=True)
-    assert e0.prompt_subtask[0] == "stack the plates；当前子任务：pick up the object"
-    assert e0.prompt_subtask[3:9].isna().all()  # other + polish
-    assert e0.prompt_subtask[9] == "stack the plates；当前子任务：place"
-    note = result["annotation"]["prompt"]
-    assert note["vocabulary"]["source"] == "dataset"
-    assert note["vocabulary"]["text"] == {
-        "grasp": "pick up the object",
-        "place": "place",
-    }
-    assert note["frames_not_in_vocabulary"] == 6
+    e0 = f[f.episode_index == 0]
+    assert list(e0.prompt_has_subtask[:3]) == [False] * 3  # frames 0-2: auto
+    assert set(e0.prompt_subtask_skip[:3]) == {"unreviewed"}
+    assert set(e0.prompt_subtask_skip[3:6]) == {"review_unrecognised"}
+    assert list(e0.prompt_has_subtask[6:]) == [True] * 6
+    assert (e0.prompt_subtask[:6] == e0.prompt_task[:6]).all()
+    assert "grasp" not in " ".join(e0.prompt_subtask) and "lift" not in " ".join(
+        e0.prompt_subtask
+    )
+    skipped = result["prompt"]["subtask_skipped"]
+    assert skipped["unreviewed"] == 3 and skipped["review_unrecognised"] == 3
+    assert result["prompt"]["frames_rejected_unreviewed"] == 6
+    # An operation that leaves the frames out still counts only included ones here.
+    kept = tm.build(repo, "robot_flag_success", episodes=[1, 2])
+    assert kept["prompt"]["included_frames"]["rejected_unreviewed"] == 0
 
 
-def test_prompt_task_is_the_first_task_of_a_multi_task_episode(repo):
+def test_other_unknown_background_and_empty_text_give_no_subtask(repo):
+    name = _name(repo)
+    _segments(
+        name,
+        0,
+        [
+            ("something", 0.0, 0.2, None, "other"),
+            ("Unknown", 0.2, 0.4, None, None),
+            ("anything", 0.4, 0.6, None, "background"),
+            ("  .  ", 0.6, 0.8, None, "grasp"),
+            ("   ", 0.8, None, None, "place"),
+        ],
+    )
+    f = _frames(tm.build(repo, "all_rollouts"))
+    e0 = f[f.episode_index == 0]
+    assert not e0.prompt_has_subtask.any()
+    assert (e0.prompt_subtask == e0.prompt_task).all()
+    assert list(e0.prompt_subtask_skip[:6]) == ["special"] * 6
+    assert list(e0.prompt_subtask_skip[6:]) == ["empty_text"] * 6
+
+
+def test_subtask_text_is_cleaned_and_long_text_is_cut_and_counted(repo):
+    from levi import manifest_prompts as mp
+
+    assert mp.clean_subtask("  Pick up\n the   plate;  ", 120) == (
+        "Pick up the plate",
+        False,
+    )
+    assert mp.clean_subtask("...place it, ", 120) == ("place it", False)
+    assert mp.clean_subtask("放到盘子上。", 120) == ("放到盘子上", False)
+    assert mp.clean_subtask("Keep Case", 120) == ("Keep Case", False)  # no re-casing
+    text, cut = mp.clean_subtask("a" * 50 + " " + "b" * 50, 60)
+    assert cut and len(text) <= 60 and text.startswith("a" * 50)
+    assert mp.clean_subtask("x" * 10, 10) == ("x" * 10, False)
+
+    name = _name(repo)
+    _segments(name, 0, [("word " * 40, 0.0, None, None, "grasp")])
+    result = tm.build(repo, "all_rollouts", subtask_max_chars=30)
+    f = _frames(result)
+    e0 = f[f.episode_index == 0]
+    assert e0.prompt_has_subtask.all()
+    suffix = e0.prompt_subtask.iloc[0].split("current subtask: ", 1)[1]
+    assert len(suffix) <= 30
+    assert result["prompt"]["truncated_frames"] == 12
+    assert result["prompt"]["subtask_max_chars"] == 30
+    with pytest.raises(tm.ManifestError, match="subtask_max_chars"):
+        tm.build(repo, "all_rollouts", subtask_max_chars=0)
+    with pytest.raises(tm.ManifestError, match="prompt template"):
+        tm.build(repo, "all_rollouts", prompt_template="nope")
+
+
+def test_a_task_with_several_texts_keeps_the_first_and_is_flagged(repo):
     root = catalog.local_root(repo)
-    rows = [
-        json.loads(x)
-        for x in (root / "meta/episodes.jsonl").read_text().split("\n")
-        if x
-    ]
-    rows[0]["tasks"] = ["stack the plates", "pick the screws"]
-    (root / "meta/episodes.jsonl").write_text(
-        "".join(json.dumps(r) + "\n" for r in rows)
-    )
-    result = tm.build(repo, "all_rollouts", prompt_subtask=True)
+    path = root / "meta/episodes.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    rows[0]["tasks"] = ["stack the plates", "put plates on top of each other"]
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    result = tm.build(repo, "all_rollouts")
     f = _frames(result)
-    assert set(f[f.episode_index == 0].prompt_task) == {"stack the plates"}
-    assert result["annotation"]["prompt"]["multi_task_episodes"] == 1
+    assert (f[f.episode_index == 0].prompt_task == "stack the plates").all()
+    assert set(f[f.episode_index == 0].episode_task_count) == {2}
+    assert set(f[f.episode_index == 1].episode_task_count) == {1}
+    assert result["prompt"]["episodes_with_several_tasks"] == 1
+    assert {e["episode_index"]: e["task_count"] for e in result["episodes"]} == {
+        0: 2,
+        1: 1,
+        2: 1,
+    }
 
 
-def test_prompt_options_reach_the_cli_and_the_api(repo, client, capsys):
+def test_prompt_columns_are_documented_in_the_file_and_reachable_from_the_cli(
+    repo, capsys
+):
+    result = tm.build(repo, "all_rollouts")
+    schema = pq.read_schema(Path(result["output_dir"]) / tm.FRAMES)
+    for column in ("prompt_task", "prompt_subtask"):
+        note = schema.field(column).metadata
+        assert note[b"levi.prompt_template"] == b"v1"
+        assert b"levi.description" in note
+    assert tm.main(["manifest", repo, "--operation", "all_rollouts",
+                    "--subtask-max-chars", "40", "--prompt-template", "v1",
+                    "--json"]) == 0  # fmt: skip
+    assert json.loads(capsys.readouterr().out)["prompt"]["subtask_max_chars"] == 40
+
+
+def _rewrite_frames(directory, drop=()):
+    """Rewrite a manifest as an older LEVI wrote it: without some columns."""
+    import hashlib
+
+    directory = Path(directory)
+    table = pq.read_table(directory / tm.FRAMES)
+    table = table.drop_columns([c for c in drop if c in table.column_names])
+    pq.write_table(table, directory / tm.FRAMES)
+    meta = json.loads((directory / tm.MANIFEST).read_text())
+    meta["files"][tm.FRAMES]["sha256"] = hashlib.sha256(
+        (directory / tm.FRAMES).read_bytes()
+    ).hexdigest()
+    (directory / tm.MANIFEST).write_text(json.dumps(meta))
+
+
+PROMPT_COLUMNS = (
+    "prompt_task",
+    "prompt_subtask",
+    "prompt_has_subtask",
+    "prompt_subtask_skip",
+    "prompt_subtask_source",
+    "episode_task_count",
+)
+
+
+def test_reader_modes_mix_deterministically_and_keep_the_recap_suffix_last(repo):
+    reader = _reader()
     name = _name(repo)
-    _write_segments(name, 0, [("grasp", 0.0, 0.5, "auto")])
-    assert tm.main(["manifest", repo, "--operation", "all_rollouts",
-                    "--prompt-subtask", "--allow-auto-subtask", "--json"]) == 0  # fmt: skip
-    printed = json.loads(capsys.readouterr().out)
-    assert printed["annotation"]["prompt"]["frames_auto_used"] == 5
-    assert tm.main(["manifest", repo, "--operation", "all_rollouts",
-                    "--allow-auto-subtask"]) == 1  # fmt: skip
-    assert "prompt_subtask" in capsys.readouterr().out
-    made = client.post(
-        "/api/levi/manifest",
-        json={"repo_id": repo, "operation": "all_rollouts", "prompt_subtask": True},
-    )
-    assert made.status_code == 200, made.text
-    assert made.json()["annotation"]["prompt"]["frames_with_subtask"] == 0
-    assert made.json()["annotation"]["prompt"]["frames_auto_rejected"] == 5
-    default = client.post(
-        "/api/levi/manifest", json={"repo_id": repo, "operation": "all_rollouts"}
-    )
-    assert "prompt" not in default.json()["annotation"]
-
-
-# ---------------------------------------------------- reader: prompt modes
-
-
-def _prompt_manifest(repo, **kwargs):
-    reader = _reader()
-    _write_segments(
-        _name(repo),
-        0,
-        [("grasp", 0.0, 0.5, None), ("place", 0.5, None, None)],
-    )
-    result = tm.build(repo, "all_rollouts", **kwargs)
-    return reader, reader.ManifestFrames.open(
-        result["output_dir"], catalog.local_root(repo)
-    )
-
-
-def test_reader_default_mode_is_unchanged_on_old_and_new_manifests(repo):
-    _, old = _prompt_manifest(repo)
-    _, new = _prompt_manifest(repo, prompt_subtask=True)
-    rng = np.random.default_rng(0)
-    for m in (old, new):
-        assert m.prompt("stack the plates", 0, 0, rng) == "stack the plates"
-        assert (
-            m.prompt("stack the plates", 0, 0, rng, mode="task") == "stack the plates"
-        )
-    assert old.has_subtask_prompts is False and old.prompt_template is None
-    assert new.has_subtask_prompts is True and new.prompt_template == "task-subtask-v1"
-    # An old manifest has no subtask text: asking for it is an error, not a
-    # silent fallback to training without subtasks.
-    with pytest.raises(ValueError, match="no subtask prompts"):
-        old.prompt("stack the plates", 0, 0, rng, mode="subtask")
-    with pytest.raises(ValueError, match="mode"):
-        new.prompt("stack the plates", 0, 0, rng, mode="bogus")
-    with pytest.raises(ValueError, match="subtask_ratio"):
-        new.prompt("stack the plates", 0, 0, rng, mode="mixed", subtask_ratio=1.5)
-
-
-def test_reader_subtask_mode_falls_back_to_the_task_per_frame(repo):
-    _, m = _prompt_manifest(repo, prompt_subtask=True)
-    rng = np.random.default_rng(0)
-    assert (
-        m.prompt("stack the plates", 0, 0, rng, mode="subtask")
-        == "stack the plates；当前子任务：grasp"
-    )
-    assert (
-        m.prompt("stack the plates", 0, 7, rng, mode="subtask")
-        == "stack the plates；当前子任务：place"
-    )
-    # Episode 1 has no segment; an unlisted frame has none either.
-    assert m.prompt("pick the screws", 2, 0, rng, mode="subtask") == "pick the screws"
-    assert m.prompt("x", 99, 0, rng, mode="subtask") == "x"
-
-
-def test_reader_mixed_mode_is_deterministic_per_frame_and_seed(repo):
-    reader, m = _prompt_manifest(repo, prompt_subtask=True)
-    task = "stack the plates"
-    sub = "stack the plates；当前子任务：grasp"
-    pick = lambda f, seed, ratio=0.5: m.prompt(
-        task,
-        0,
-        f,
-        np.random.default_rng(f),
-        mode="mixed",
-        subtask_ratio=ratio,
-        seed=seed,
-    )
-    # The same frame and seed always choose the same version, whatever the rng.
-    first = [pick(f, 3) for f in range(5)]
-    assert first == [
-        m.prompt(task, 0, f, np.random.default_rng(99), mode="mixed", seed=3)
-        for f in range(5)
-    ]
-    assert set(first) <= {task, sub}
-    # The extremes are exact.
-    assert [pick(f, 3, 0.0) for f in range(5)] == [task] * 5
-    assert [pick(f, 3, 1.0) for f in range(5)] == [sub] * 5
-    # The share over many frames follows the ratio (a hash, not an rng stream).
-    draws = [reader.mixed_draw(7, e, f) for e in range(40) for f in range(100)]
-    assert 0.45 < sum(d < 0.5 for d in draws) / len(draws) < 0.55
-    assert reader.mixed_draw(7, 1, 2) == reader.mixed_draw(7, 1, 2)
-    assert reader.mixed_draw(7, 1, 2) != reader.mixed_draw(8, 1, 2)
-
-
-def test_reader_puts_the_recap_suffix_last_in_every_mode(repo):
     _recap(repo)
-    reader = _reader()
-    _write_segments(_name(repo), 0, [("grasp", 0.0, None, None)])
-    result = tm.build(repo, "advantage_weighted", prompt_subtask=True)
+    _segments(
+        name, 0, [("grasp", 0.0, 0.5, None, None), ("place", 0.5, None, "auto", None)]
+    )
+    result = tm.build(repo, "advantage_positive_mask")
     m = reader.ManifestFrames.open(result["output_dir"], catalog.local_root(repo))
     rng = np.random.default_rng(0)
-    # Frame 0 is positive and has a subtask; p_conditioned=1 always tags it.
     task = "stack the plates"
-    sub = f"{task}；当前子任务：grasp"
-    tag = "\nAdvantage: positive"
-    assert m.prompt(task, 0, 0, rng, p_conditioned=1.0) == task + tag
-    assert m.prompt(task, 0, 0, rng, p_conditioned=1.0, mode="subtask") == sub + tag
-    mixed = m.prompt(task, 0, 0, rng, p_conditioned=1.0, mode="mixed")
-    assert mixed in (task + tag, sub + tag)
-    # A negative frame is never tagged.
-    assert m.prompt(task, 0, 1, rng, p_conditioned=1.0, mode="subtask") == sub
+    sub = "stack the plates; current subtask: grasp"
+    # Frame 0 of episode 0: positive advantage, reviewed segment.
+    assert m.prompt(task, 0, 0, rng, p_conditioned=0.0) == task
+    assert m.prompt(task, 0, 0, rng, p_conditioned=0.0, mode="subtask") == sub
+    assert m.prompt(task, 0, 0, rng, p_conditioned=1.0, mode="subtask") == (
+        sub + "\nAdvantage: positive"
+    )
+    # Frame 6 is in the auto segment: no subtask, so the task alone.
+    assert m.prompt(task, 0, 6, rng, p_conditioned=0.0, mode="subtask") == task
+    # mix: the same frame gets the same version every time; the share follows
+    # mix_ratio; another seed may choose differently.
+    first = [
+        m.prompt(task, 0, 0, rng, p_conditioned=0.0, mode="mix", seed=3)
+        for _ in range(20)
+    ]
+    assert len(set(first)) == 1
+    for ratio, expected in ((0.0, task), (1.0, sub)):
+        assert (
+            m.prompt(task, 0, 0, rng, p_conditioned=0.0, mode="mix", mix_ratio=ratio)
+            == expected
+        )
+    picks = [
+        m.prompt(task, 0, 0, rng, p_conditioned=0.0, mode="mix", seed=s) == sub
+        for s in range(2000)
+    ]
+    assert 0.45 < sum(picks) / 2000 < 0.55
+    # The suffix stays last whichever version is drawn.
+    for seed in range(20):
+        text = m.prompt(task, 0, 0, rng, p_conditioned=1.0, mode="mix", seed=seed)
+        assert text in (task + "\nAdvantage: positive", sub + "\nAdvantage: positive")
+    with pytest.raises(ValueError, match="mode"):
+        m.prompt(task, 0, 0, rng, mode="both")
+    with pytest.raises(ValueError, match="mix_ratio"):
+        m.prompt(task, 0, 0, rng, mode="mix", mix_ratio=1.5)
+
+
+def test_reader_leaves_a_manifest_without_prompt_columns_exactly_as_before(repo):
+    reader = _reader()
+    _recap(repo)
+    result = tm.build(repo, "advantage_positive_mask")
+    new = reader.ManifestFrames.open(result["output_dir"], catalog.local_root(repo))
+    _rewrite_frames(result["output_dir"], drop=PROMPT_COLUMNS)
+    old = reader.ManifestFrames.open(result["output_dir"], catalog.local_root(repo))
+    assert not old.has_prompt_columns and new.has_prompt_columns
+    a, b = np.random.default_rng(7), np.random.default_rng(7)
+    for frame in range(10):
+        assert old.prompt("stack", 0, frame, a) == new.prompt("stack", 0, frame, b)
+    # Asking an old manifest for subtask prompts is an error, not a silent task-only run.
+    for mode in ("subtask", "mix"):
+        with pytest.raises(ValueError, match="prompt columns"):
+            old.prompt("stack", 0, 0, a, mode=mode)
+    assert old.episodes() == new.episodes()

@@ -12,7 +12,7 @@ Typical use in a LeRobot-based loader (openpi ``create_torch_dataset``)::
     weights = m.sampling_weights(dataset)       # WeightedRandomSampler
     mask = m.action_mask(ep, frame, horizon)    # [H] bool per action target
     prompt = m.prompt(task, ep, frame, rng)     # RECAP CFG conditioning
-    prompt = m.prompt(task, ep, frame, rng, mode="mixed")   # + subtask prompts
+    prompt = m.prompt(task, ep, frame, rng, mode="mix", seed=epoch)  # + subtask
 
 and in the loss: ``sum(mask * loss) / max(sum(mask), 1)`` instead of
 ``mean(loss)`` (openpi train.py takes ``jnp.mean`` over [B, H]).
@@ -28,7 +28,7 @@ import numpy as np
 import pyarrow.parquet as pq
 
 SCHEMA = "levi.training_manifest.v1"
-PROMPT_MODES = ("task", "subtask", "mixed")
+PROMPT_MODES = ("task", "subtask", "mix")
 
 
 def _sha256(path: Path) -> str:
@@ -37,14 +37,6 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: stream.read(1 << 20), b""):
             digest.update(block)
     return digest.hexdigest()
-
-
-def mixed_draw(seed: int, episode: int, frame: int) -> float:
-    """A number in [0, 1) fixed by (seed, episode, frame): the same frame gets
-    the same draw in every epoch, process and machine. ``mixed`` mode compares
-    it with ``subtask_ratio``."""
-    digest = hashlib.sha256(f"{int(seed)}:{int(episode)}:{int(frame)}".encode())
-    return int.from_bytes(digest.digest()[:8], "big") / 2.0**64
 
 
 class ManifestFrames:
@@ -58,9 +50,11 @@ class ManifestFrames:
         self.include = np.asarray(cols["include"], dtype=bool)
         self.weight = np.asarray(cols["weight"], dtype=np.float64)
         self.positive = cols["recap_positive"]
-        # Per-frame subtask prompts exist only in a manifest exported with
-        # prompt_subtask; an older manifest simply lacks the column.
-        self.subtask_prompt = cols.get("prompt_subtask")
+        # Per-frame prompts exist only in manifests written by a LEVI that
+        # has them; an older manifest reads exactly as before.
+        self.has_prompt_columns = "prompt_subtask" in cols
+        self.prompt_subtask = cols.get("prompt_subtask")
+        self.prompt_has_subtask = cols.get("prompt_has_subtask")
         self._row = {
             (int(e), int(f)): i
             for i, (e, f) in enumerate(zip(self.episode, self.frame))
@@ -118,26 +112,7 @@ class ManifestFrames:
             [self.included(episode, frame + k) for k in range(horizon)], dtype=bool
         )
 
-    # -- prompts ----------------------------------------------------------------
-
-    @property
-    def has_subtask_prompts(self) -> bool:
-        return self.subtask_prompt is not None
-
-    @property
-    def prompt_template(self) -> str | None:
-        """The template id the subtask prompts follow (``task-subtask-v1``),
-        or None for a manifest without them."""
-        note = (self.manifest.get("annotation") or {}).get("prompt") or {}
-        return note.get("template")
-
-    def subtask_text(self, episode: int, frame: int) -> str | None:
-        """The frame's task-plus-subtask prompt, or None when no reviewed
-        segment covers it (or the manifest has no subtask prompts)."""
-        i = self._row.get((int(episode), int(frame)))
-        if i is None or self.subtask_prompt is None:
-            return None
-        return self.subtask_prompt[i] or None
+    # -- RECAP classifier-free-guidance conditioning -------------------------
 
     def prompt(
         self,
@@ -148,45 +123,60 @@ class ManifestFrames:
         *,
         p_conditioned: float = 0.9,
         mode: str = "task",
-        subtask_ratio: float = 0.5,
+        mix_ratio: float = 0.5,
         seed: int = 0,
     ) -> str:
-        """The prompt for one frame.
+        """The text the policy is prompted with for one frame.
 
-        ``mode`` picks the text: ``"task"`` (default) is ``task`` as given;
-        ``"subtask"`` is the frame's subtask prompt (``prompt_subtask``) and
-        falls back to ``task`` for a frame that has none; ``"mixed"`` uses the
-        subtask prompt for a share ``subtask_ratio`` of the frames and
-        ``task`` for the rest. Which frames get it is fixed by ``seed`` and
-        the frame, not by ``rng``, so a frame has the same prompt in every
-        epoch. A manifest exported without ``prompt_subtask`` has no subtask
-        prompts: ``subtask`` and ``mixed`` refuse it instead of silently
-        training without them.
+        ``mode`` picks the base text. ``"task"`` (the default) is ``task``, as
+        always. ``"subtask"`` is the manifest's task-plus-current-subtask
+        prompt (``prompt_subtask``, built from a reviewed time segment with
+        the template named in ``manifest.json`` ``prompt``) where the frame
+        has one, else ``task``. ``"mix"`` draws between those two: the
+        subtask version with probability ``mix_ratio`` (0.5 is 1:1), and the
+        draw is a fixed function of (episode, frame, ``seed``), so a frame
+        keeps its version in every epoch until the caller passes another
+        seed. A manifest written before these columns existed raises for
+        ``"subtask"`` and ``"mix"`` instead of silently training on the task
+        alone. In subtask versions the task wording is the manifest's own.
 
         Then RLinf's ``positive_only_conditional``: a positive frame carries
-        ``"\\nAdvantage: positive"`` with probability ``p_conditioned``
-        (always last, whatever the mode); negative and unlabelled frames stay
-        unconditioned. At inference the policy is prompted with the positive
-        suffix."""
-        if mode not in PROMPT_MODES:
-            raise ValueError(f"mode must be one of {', '.join(PROMPT_MODES)}")
-        if not 0.0 <= subtask_ratio <= 1.0:
-            raise ValueError("subtask_ratio must be between 0 and 1")
-        text = task
-        if mode != "task":
-            if not self.has_subtask_prompts:
-                raise ValueError(
-                    "this manifest has no subtask prompts (export it with "
-                    "prompt_subtask); use mode='task'"
-                )
-            use = mode == "subtask" or (
-                mixed_draw(seed, episode, frame) < subtask_ratio
-            )
-            text = (self.subtask_text(episode, frame) if use else None) or task
+        ``"\\nAdvantage: positive"`` with probability ``p_conditioned`` (drawn
+        from ``rng``, whichever base text was chosen); negative and
+        unlabelled frames stay unconditioned. The suffix is always last. At
+        inference the policy is prompted with the positive suffix."""
+        text = self._base_prompt(task, episode, frame, mode, mix_ratio, seed)
         i = self._row.get((int(episode), int(frame)))
         if i is not None and self.positive[i] is True and rng.random() < p_conditioned:
             return text + "\nAdvantage: positive"
         return text
+
+    def _base_prompt(self, task, episode, frame, mode, mix_ratio, seed) -> str:
+        if mode not in PROMPT_MODES:
+            raise ValueError(f"mode is one of {PROMPT_MODES}, not {mode!r}")
+        if not 0.0 <= float(mix_ratio) <= 1.0:
+            raise ValueError("mix_ratio is a share from 0 to 1")
+        if mode == "task":
+            return task
+        if not self.has_prompt_columns:
+            raise ValueError(
+                f"mode {mode!r} needs the prompt columns, which this manifest "
+                "lacks (written by an older LEVI): rebuild it or use mode='task'"
+            )
+        i = self._row.get((int(episode), int(frame)))
+        if i is None or self.prompt_has_subtask[i] is not True:
+            return task
+        if mode == "mix" and _unit(seed, episode, frame) >= float(mix_ratio):
+            return task
+        return self.prompt_subtask[i]
+
+
+def _unit(seed: int, episode: int, frame: int) -> float:
+    """A number in [0, 1) fixed by (seed, episode, frame)."""
+    digest = hashlib.blake2b(
+        f"{int(seed)}:{int(episode)}:{int(frame)}".encode(), digest_size=8
+    ).digest()
+    return int.from_bytes(digest, "big") / 2**64
 
 
 def audit(manifest: ManifestFrames, drawn) -> dict:
