@@ -11,6 +11,7 @@ import { DatasetCard } from "@/components/live/dataset-card";
 import {
   datasetFaultKind,
   detectFault,
+  isEvaluating,
   needsPerson,
   rankDatasets,
   type ReviewFilter,
@@ -26,6 +27,7 @@ import {
   Fr3Panel,
   SessionsPanel,
 } from "@/components/live/session-panels";
+import { StatsPanel } from "@/components/live/stats-panel";
 import { useDatasetDetails, useLivePoll } from "@/components/live/use-live";
 import {
   readBrowserStorage,
@@ -224,6 +226,11 @@ export default function LivePage() {
                   </div>
                 )}
               </section>
+              <StatsPanel
+                tick={poll.lastOk}
+                evaluating={isEvaluating(sessions, service)}
+                enabled={status?.enabled === true}
+              />
             </div>
             <aside className="levi-live-side">
               <div className="levi-live-slot o2">

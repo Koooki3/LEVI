@@ -2776,6 +2776,86 @@ button.levi-pool-danger {
   color: #89927f;
   overflow-wrap: anywhere;
 }
+/* Live statistics panel (src/components/live/stats-panel.tsx) */
+.levi-live-scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+.levi-live-scope label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #89927f;
+  min-width: 0;
+}
+.levi-live-scope select {
+  max-width: 260px;
+}
+.levi-live-export {
+  margin: 0 0 0 auto;
+  font-size: 13px;
+}
+.levi-live-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.levi-live-kpi {
+  border: 1px solid #ffffff1c;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.levi-live-kpi span {
+  font-size: 12px;
+  color: #c7caba;
+}
+.levi-live-kpi strong {
+  font-size: 22px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.levi-live-kpi small {
+  font-size: 11px;
+  color: #89927f;
+  overflow-wrap: anywhere;
+}
+.levi-live-section h3 {
+  font-size: 14px;
+  margin: 16px 0 8px;
+}
+.levi-live-toggle {
+  border: 1px solid #ffffff30;
+  border-radius: 6px;
+  background: transparent;
+  color: #c7caba;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.levi-live-toggle.on {
+  border-color: #d4f779;
+  color: #d4f779;
+}
+.levi-live-stats-table {
+  font-size: 12px;
+}
+.levi-live-more {
+  margin-top: 8px;
+}
+@media (max-width: 1100px) {
+  .levi-live-slot.o5 {
+    order: 5;
+  }
+}
 .levi-live-line {
   font-size: 12px;
   margin: 0;
