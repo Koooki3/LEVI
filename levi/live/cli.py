@@ -962,6 +962,94 @@ def cmd_resume(args) -> int:
     return 0
 
 
+def core_dir(config) -> Path:
+    """Where the live workspace's core keeps its socket and the person's key
+    (``levi/agent/core.py``): derived from the workspace, not from the
+    environment of this command."""
+    return config.workspace / "outputs/LEVI/workbench/agent/core"
+
+
+def call_core(config, path, payload):
+    """POST ``payload`` to the live workspace's core over its own socket,
+    as the person: the UI token is read from the key file the core owns
+    (owner-only) and goes into the request header, never to the screen.
+    Returns ``(status, body)``; ``ValueError`` when there is no core to ask."""
+    import http.client
+
+    from levi.agent.core import UnixConnection
+
+    root = core_dir(config)
+    try:
+        key = (root / "human.key").read_text().strip()
+    except OSError as exc:
+        raise ValueError(
+            f"cannot read the person's key under {root}: is this the live "
+            "workspace, and has its core ever run? (levi live start)"
+        ) from exc
+    sock = root / "api.sock"
+    if not sock.exists():
+        raise ValueError(
+            f"the live workspace's core is not running (no {sock.name}): "
+            "levi live start"
+        )
+    conn = UnixConnection(sock)
+    try:
+        conn.request(
+            "POST",
+            path,
+            json.dumps(payload),
+            {"Content-Type": "application/json", "x-levi-ui-token": key},
+        )
+        response = conn.getresponse()
+        data = response.read(16 * 1024 * 1024)
+    except (OSError, http.client.HTTPException) as exc:
+        raise ValueError(f"the core did not answer: {type(exc).__name__}") from exc
+    finally:
+        conn.close()
+    try:
+        body = json.loads(data)
+    except ValueError:
+        body = {"detail": data.decode("utf-8", "replace")[:300]}
+    return response.status, body
+
+
+def cmd_exclude(args) -> int:
+    """Remove (or ``--restore``) episodes of one dataset through the running
+    core: a person's action, so the person's key is needed and the route
+    refuses an agent's credential (docs/LIVE.md, "Removing an episode")."""
+    from urllib.parse import quote
+
+    config = resolve_config(args)
+    action = "restore" if args.restore else "exclude"
+    payload = {"demos": list(args.demos)}
+    if not args.restore:
+        payload["reason"] = args.reason or ""
+    status, body = call_core(
+        config,
+        f"/api/levi/live/datasets/{quote(args.dataset, safe='')}/{action}",
+        payload,
+    )
+    if status >= 400:
+        detail = body.get("detail", body)
+        if isinstance(detail, list):  # a validation error
+            detail = "; ".join(str(d.get("msg", d)) for d in detail)
+        print(f"levi live: {action} refused (HTTP {status}): {detail}", file=sys.stderr)
+        return 1
+    verb = "restored" if args.restore else "removed"
+    print(
+        f"{args.dataset}: {len(body['changed'])} episode(s) {verb}"
+        + (f", {len(body['unchanged'])} already as asked" if body["unchanged"] else "")
+        + f"; {body.get('excluded_count', 0)} removed in all"
+    )
+    counts = body.get("counts") or {}
+    print(
+        "counts now: " + ", ".join(f"{k} {v}" for k, v in counts.items() if v)
+        if any(counts.values())
+        else "counts now: none"
+    )
+    return 0
+
+
 def cmd_init(args) -> int:
     config = resolve_config(args)
     check_workspace(config, args.adopt_workspace)
@@ -1013,6 +1101,19 @@ def build_parser():
         "resume", help="clear a vLLM start failure the service gave up on"
     )
     add_config_options(resume)
+    exclude = sub.add_parser(
+        "exclude",
+        help="remove episodes of a dataset (restorable; the running core, a person's action)",
+    )
+    add_config_options(exclude)
+    exclude.add_argument("dataset", help="the dataset's name (see `levi live status`)")
+    exclude.add_argument(
+        "demos", nargs="+", help="episode folder names, e.g. demo_0003"
+    )
+    exclude.add_argument(
+        "--reason", default="", help="why (kept, at most 300 characters)"
+    )
+    exclude.add_argument("--restore", action="store_true", help="put them back instead")
     init = sub.add_parser("init", help="write a live.toml with every default")
     add_config_options(init)
     return parser
@@ -1027,6 +1128,7 @@ def main(argv=None) -> int:
         "doctor": cmd_doctor,
         "once": cmd_once,
         "resume": cmd_resume,
+        "exclude": cmd_exclude,
         "init": cmd_init,
     }
     try:

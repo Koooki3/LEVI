@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from test_live_pipeline import NAME, Env
 
-from levi.live import api, auto, exclusion, jsonio, mirror, worker
+from levi.live import api, auto, cli, exclusion, jsonio, mirror, worker
 
 
 @pytest.fixture
@@ -647,3 +647,178 @@ def test_the_person_check_works_by_itself_when_the_middleware_is_bypassed(
         ).status_code
         == 403
     )
+
+
+# --- dataset names with a suffix ---------------------------------------------------------------
+
+
+def renamed(e, new):
+    """The dataset's state under another name (what a clash of two roots
+    gives it: ``<name>@<root mark>``)."""
+    state = e.state()
+    state["name"] = new
+    jsonio.write(mirror.state_path(e.config, new), state)
+
+
+@pytest.mark.parametrize("new", [NAME + "@root-2", NAME + "@a.b_c", "x+y=z@r"])
+def test_a_dataset_name_with_a_suffix_works_everywhere(live_api, new):
+    from urllib.parse import quote
+
+    client, e = live_api
+    mirror_only(e, 0, 1)
+    renamed(e, new)
+    base = f"/api/levi/live/datasets/{quote(new, safe='')}"
+    assert client.get(base).json()["name"] == new
+    done = client.post(f"{base}/exclude", json={"demos": ["demo_0000"], "reason": "r"})
+    assert done.status_code == 200 and done.json()["dataset"] == new
+    assert exclusion.is_excluded(mirror.load_state(e.config, new)["demos"]["demo_0000"])
+    # The other dataset of that task is untouched.
+    assert not exclusion.excluded_count(e.state())
+    assert client.get(base).json()["excluded_count"] == 1
+    # An unencoded @ in the URL is the same name.
+    plain = f"/api/levi/live/datasets/{new}"
+    assert (
+        client.post(f"{plain}/restore", json={"demos": ["demo_0000"]}).status_code
+        == 200
+    )
+    assert not exclusion.excluded_count(mirror.load_state(e.config, new))
+    assert audit_lines(e)[0]["dataset"] == new
+
+
+def test_a_dataset_name_cannot_name_another_path(live_api):
+    client, e = live_api
+    mirror_only(e, 0)
+    for bad in ("..", ".hidden", "a%2Fb", "..%2Fx", "a%5Cb", "a%00b", "a%0Ab"):
+        url = f"/api/levi/live/datasets/{bad}"
+        assert client.get(url).status_code == 404, bad
+        assert (
+            client.post(f"{url}/exclude", json={"demos": ["demo_0000"]}).status_code
+            == 404
+        ), bad
+
+
+def test_the_pool_reads_a_suffixed_dataset_by_its_own_name(live_api):
+    from levi.pool import exclusions
+
+    _, e = live_api
+    mirror_only(e, 0)
+    renamed(e, NAME + "@root-2")
+    exclusion.exclude(e.config, NAME + "@root-2", ["demo_0000"])
+    found = exclusions.workspace_exclusions(e.ws)
+    assert any("@root-2" in key for key in found)
+    assert {v["dataset"] for v in found.values()} == {NAME + "@root-2"}
+
+
+# --- levi live exclude (the command line) ----------------------------------------------------------
+
+
+@pytest.fixture
+def served(client, env, monkeypatch):
+    """The real service app (its middleware included) on a Unix socket, with
+    the person's key file where the command looks for it."""
+    import shutil
+    import tempfile
+
+    import uvicorn
+
+    from levi import service
+
+    e = env()
+    mirror_only(e, 0, 1, 2)
+    monkeypatch.setattr(api, "_workspace", lambda: e.ws)
+    # A short path: a Unix socket's name is limited to about 100 bytes.
+    root = Path(tempfile.mkdtemp(prefix="lvx", dir="/tmp"))
+    root.chmod(0o700)
+    (root / "human.key").write_text("test-human-key")
+    monkeypatch.setattr(cli, "core_dir", lambda config: root)
+    monkeypatch.setenv("LEVI_UI_TOKEN", "test-human-key")
+    monkeypatch.setenv("LEVI_AGENT_TOKEN", "test-scoped-token")
+    server = uvicorn.Server(
+        uvicorn.Config(
+            service.app, uds=str(root / "api.sock"), lifespan="off", log_level="warning"
+        )
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.time() + 30
+    while not server.started and time.time() < deadline:
+        time.sleep(0.05)
+    assert server.started
+    yield e, root
+    server.should_exit = True
+    thread.join(30)
+    shutil.rmtree(root, ignore_errors=True)
+
+
+def run_cli(e, *args):
+    return cli.main(["exclude", *args, "--workspace", str(e.ws)])
+
+
+def test_the_command_removes_and_restores_through_the_core(served, capsys):
+    e, _ = served
+    code = run_cli(e, NAME, "demo_0000", "demo_0002", "--reason", "pre-test takes")
+    out = capsys.readouterr()
+    assert code == 0 and "2 episode(s) removed" in out.out
+    assert "test-human-key" not in out.out + out.err
+    state = e.state()
+    assert state["demos"]["demo_0000"]["excluded"]["reason"] == "pre-test takes"
+    assert exclusion.is_excluded(state["demos"]["demo_0002"])
+    assert not exclusion.is_excluded(state["demos"]["demo_0001"])
+    assert [x["tool"] for x in audit_lines(e)] == ["episode.exclude"] * 2
+    # The same again changes nothing and says so.
+    assert run_cli(e, NAME, "demo_0000") == 0
+    assert "1 already as asked" in capsys.readouterr().out
+    assert len(audit_lines(e)) == 2
+    assert run_cli(e, NAME, "demo_0000", "--restore") == 0
+    assert "1 episode(s) restored" in capsys.readouterr().out
+    assert not exclusion.is_excluded(e.state()["demos"]["demo_0000"])
+
+
+def test_the_command_reports_what_the_core_refused(served, capsys):
+    e, _ = served
+    jsonio.update(
+        mirror.state_path(e.config, NAME),
+        lambda v: v.update(current={"demos": ["demo_0001"], "done": []}),
+    )
+    assert run_cli(e, NAME, "demo_0000", "demo_0001") == 1
+    err = capsys.readouterr().err
+    assert "HTTP 409" in err and "being labelled" in err
+    assert run_cli(e, NAME, "demo_0042") == 1
+    err = capsys.readouterr().err
+    assert "HTTP 404" in err and "demo_0042" in err
+    assert run_cli(e, "nope", "demo_0000") == 1
+    assert not exclusion.excluded_count(e.state())  # all or nothing
+
+
+def test_the_command_needs_the_persons_key_and_an_agents_is_refused(served, capsys):
+    e, root = served
+    # Not the core's key: the middleware turns it away.
+    (root / "human.key").write_text("someone-elses-key")
+    assert run_cli(e, NAME, "demo_0000") == 1
+    err = capsys.readouterr().err
+    assert "HTTP 401" in err and "someone-elses-key" not in err
+    # An agent's scoped token is not the person's: refused by name.
+    (root / "human.key").write_text("test-scoped-token")
+    assert run_cli(e, NAME, "demo_0000") == 1
+    assert "HTTP 401" in capsys.readouterr().err
+    assert not exclusion.excluded_count(e.state())
+    # No key file, no core: a plain message and exit 2, nothing sent.
+    (root / "human.key").unlink()
+    assert run_cli(e, NAME, "demo_0000") == 2
+    assert "cannot read the person's key" in capsys.readouterr().err
+    (root / "human.key").write_text("test-human-key")
+    (root / "api.sock").unlink()
+    assert run_cli(e, NAME, "demo_0000") == 2
+    assert "core is not running" in capsys.readouterr().err
+    assert not exclusion.excluded_count(e.state())
+
+
+def test_the_command_takes_a_suffixed_dataset_name(served, capsys):
+    e, _ = served
+    renamed(e, NAME + "@root-2")
+    assert run_cli(e, NAME + "@root-2", "demo_0001") == 0
+    assert "removed" in capsys.readouterr().out
+    assert exclusion.is_excluded(
+        mirror.load_state(e.config, NAME + "@root-2")["demos"]["demo_0001"]
+    )
+    assert not exclusion.excluded_count(e.state())

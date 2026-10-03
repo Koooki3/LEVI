@@ -29,6 +29,12 @@ from . import exclusion, jsonio, mirror, resumer, sessions
 router = APIRouter(prefix="/api/levi/live", tags=["Live annotation"])
 
 NAME = re.compile(r"^[A-Za-z0-9._-]{1,140}$")
+# A dataset's name is whatever ``mirror.dataset_name`` made of it (a clash of
+# two roots adds a suffix such as ``@<root mark>``): no assumption about the
+# characters beyond "one file name under live/datasets" -- no separator, no
+# leading dot, no control character. Whether it exists is the state file's
+# say.
+DATASET = re.compile(r"^(?![.])[^/\\\x00-\x1f\x7f]{1,200}$")
 ALIVE_S = 15.0
 MAX_DEMOS = 200
 MAX_AUDIT = 100
@@ -191,7 +197,7 @@ def dataset_view(name: str):
     config = _config()
     if config is None:
         return _disabled()
-    if not NAME.match(name):
+    if not DATASET.fullmatch(name):
         raise HTTPException(404, "Unknown live dataset")
     state = mirror.load_state(config, name)
     if not state:
@@ -300,7 +306,7 @@ def _live_config(name: str):
     config = _config()
     if config is None:
         raise HTTPException(404, "This is not a live workspace")
-    if not NAME.match(name) or not mirror.load_state(config, name):
+    if not DATASET.fullmatch(name) or not mirror.load_state(config, name):
         raise HTTPException(404, "Unknown live dataset")
     return config
 
