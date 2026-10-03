@@ -6,7 +6,7 @@ from collections import Counter, defaultdict
 import pandas as pd
 import pyarrow.parquet as pq
 
-from . import embodiment, scanner
+from . import embodiment, exclusions, scanner
 
 OLDER = (
     "The pool index is from an older LEVI (no {columns} column): scan again "
@@ -24,6 +24,37 @@ def frame() -> pd.DataFrame:
     missing = [c for c in ("policy_method", *embodiment.COLUMNS) if c not in df.columns]
     if missing:
         raise ValueError(OLDER.format(columns=", ".join(missing)))
+    return mark_excluded(df)
+
+
+def removed_groups(keys=None) -> tuple[set, set]:
+    """``(keys, groups)`` of the episodes a person removed on a live page
+    (``exclusions.py``), read now: the removed episodes' keys and the groups
+    they belong to. ``keys`` is ``{key: group}`` of the index (read when not
+    given); without an index only the keys are known."""
+    removed = exclusions.current(summary().get("workspaces"))
+    if not removed:
+        return set(), set()
+    if keys is None:
+        path = scanner.index_path()
+        if path.is_file():
+            frame = pd.read_parquet(path, columns=["key", "group"])
+            keys = dict(zip(frame.key, frame.group, strict=True))
+        else:
+            keys = {}
+    return set(removed), {keys[k] for k in removed if k in keys}
+
+
+def mark_excluded(df: pd.DataFrame) -> pd.DataFrame:
+    """Add ``excluded``: the episode, or a copy of it, was removed on a live
+    workspace's page (``exclusions.py``; always read fresh, no scan needed)."""
+    removed = exclusions.current(summary().get("workspaces"))
+    df = df.copy()
+    if not removed:
+        df["excluded"] = False
+        return df
+    groups = set(df.loc[df.key.isin(list(removed)), "group"])
+    df["excluded"] = df.key.isin(list(removed)) | df.group.isin(groups)
     return df
 
 
@@ -92,6 +123,7 @@ def _filter(
     show_copies=False,
     show_nonstandard=True,
     show_archive=False,
+    show_excluded=False,
 ) -> pd.DataFrame:
     if categories:
         df = df[df.category.isin(categories)]
@@ -132,6 +164,9 @@ def _filter(
         df = df[df.date.fillna("9999") <= date_to]
     if not show_heldout:
         df = df[~df.heldout.astype(bool)]
+    if not show_excluded and "excluded" in df.columns:
+        # Removed on a live page: not listed, counted or exported.
+        df = df[~df.excluded.astype(bool)]
     if not show_copies:
         df = df[df.canonical.astype(bool)]
     if not show_nonstandard:
@@ -207,6 +242,8 @@ def facets(**filters) -> dict:
         if not toggles.get("show_copies")
         else 0,
         "archive": int((full.category == "archive").sum()),
+        # Removed on a live page (never listed, counted or exported).
+        "removed_in_live": int(full.excluded.astype(bool).sum()),
     }
 
 

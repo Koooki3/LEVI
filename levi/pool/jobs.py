@@ -694,6 +694,7 @@ def verify_resume(job: dict) -> None:
             [Path(p) for p in job["heldout_lists"]],
         )
         export.refuse_heldout_groups(episodes)
+        export.refuse_removed(episodes)
         export._unchanged(episodes)
     except journal.ResumeRefused:
         raise

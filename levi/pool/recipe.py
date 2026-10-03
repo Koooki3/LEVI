@@ -327,6 +327,7 @@ def select_detailed(
         show_copies=True,
         show_nonstandard=True,
         show_archive=bool(recipe.categories),
+        show_excluded=True,
     )
     rows = df.astype(object).where(pd.notna(df), None).to_dict("records")
     excluded: list[dict] = []
@@ -347,6 +348,10 @@ def select_detailed(
     for row in rows:
         if row["heldout"]:
             out(row, "heldout", heldout_id=row["heldout_id"])
+        elif row.get("excluded"):
+            # A person removed this recording on the live page (index.py
+            # ``mark_excluded``; every copy of it is out, not only the mirror).
+            out(row, "excluded_in_live")
         elif row["key"] in skip:
             out(row, "excluded_by_recipe")
         elif row["nonstandard"] and not recipe.include_nonstandard:
@@ -727,6 +732,7 @@ def preview(
         "excluded": dict(reasons),
         "excluded_label_conflicts": reasons.get("label_conflict", 0),
         "excluded_heldout": reasons.get("heldout", 0),
+        "excluded_in_live": reasons.get("excluded_in_live", 0),
         "excluded_duplicates": reasons.get("duplicate", 0),
         "excluded_nonstandard": reasons.get("nonstandard", 0),
         "excluded_unsupported": reasons.get("unsupported", 0)

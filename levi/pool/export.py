@@ -243,6 +243,7 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
     # The index's view of copies, checked at plan time too so a dry run
     # cannot pass what the export would refuse.
     refuse_heldout_groups(episodes)
+    refuse_removed(episodes)
     check_space({"episodes": episodes, "target": str(target)})
     return {
         "schema": SCHEMA,
@@ -411,6 +412,21 @@ def refuse_heldout_groups(episodes: list[dict]):
         raise PermissionError(
             f"Refusing to export {len(hits)} held-out episode(s) (copies of a "
             "frozen test episode): " + ", ".join(hits[:10])
+        )
+
+
+def refuse_removed(episodes: list[dict]):
+    """Independent of the scan: no planned episode may be one a person removed
+    on a live page, or a copy of one (read from the live workspace's files now,
+    so a removal made after the plan was frozen still stops the export)."""
+    keys, groups = index.removed_groups()
+    hits = [e["key"] for e in episodes if e["key"] in keys or e.get("group") in groups]
+    if hits:
+        raise PermissionError(
+            f"Refusing to export {len(hits)} episode(s) removed on the live page "
+            "(or copies of one): "
+            + ", ".join(hits[:10])
+            + (" …" if len(hits) > 10 else "")
         )
 
 
@@ -908,6 +924,7 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
         [Path(p) for p in job["heldout_lists"]],
     )
     refuse_heldout_groups(episodes)
+    refuse_removed(episodes)
     if job.get("embodiment_check") or any("gripper" in e for e in episodes):
         # A plan from before the gripper fields (no marker, no gripper key
         # on any episode) has nothing to check.

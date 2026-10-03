@@ -1,0 +1,92 @@
+"""Episodes a person removed on a live workspace's page, read-only.
+
+``levi live`` mirrors the rollouts it labels into ``<workspace>/captures/
+<dataset>/demo_NNNN`` and records, in ``<workspace>/live/datasets/<dataset>.
+json``, which episodes a person removed (``levi/live/exclusion.py``: a soft
+delete, the mirror and the annotations stay). When that workspace lies under
+a pool root the scan indexes its mirror like any raw capture, and the same
+recording is usually indexed a second time from the rollout folder the mirror
+was linked from (one fingerprint, one *group*; the rollout copy is the
+canonical one). Removing the episode must keep the recording out of every
+export, so the pool reads those files **at query time** (not at scan time:
+a click on the live page counts at once, without a new scan) and treats the
+whole group as removed, the same way a label or a held-out mark on one copy
+applies to every copy.
+
+Only workspaces the last scan found under the pool roots (and the pool's own
+workspace) are consulted: a live workspace outside the roots has no mirror in
+the index, and its rollout copies can be recognised only after a scan has
+seen it.
+
+Nothing here writes.
+"""
+
+import json
+from pathlib import Path
+
+from . import settings
+
+LIVE = Path("live")
+STATES = LIVE / "datasets"
+MARKER = LIVE / "workspace.json"
+
+
+def _read(path: Path):
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def workspace_exclusions(workspace: Path) -> dict[str, dict]:
+    """Pool episode key (the mirror's demo folder) -> who removed it, of one
+    live workspace; empty for any other workspace."""
+    workspace = Path(workspace)
+    if not (workspace / MARKER).is_file():
+        return {}
+    found: dict[str, dict] = {}
+    try:
+        files = sorted((workspace / STATES).glob("*.json"))
+    except OSError:
+        return {}
+    for file in files:
+        state = _read(file)
+        if not isinstance(state, dict):
+            continue
+        name = state.get("name") or file.stem
+        # Where the capture is now, and where the state says it was made (the
+        # workspace may have been moved).
+        captures = {workspace / "captures" / name}
+        if state.get("capture"):
+            captures.add(Path(state["capture"]))
+        for demo, row in (state.get("demos") or {}).items():
+            mark = row.get("excluded") if isinstance(row, dict) else None
+            if not mark:
+                continue
+            info = {
+                "workspace": str(workspace),
+                "dataset": name,
+                "demo": demo,
+                "at": mark.get("at") if isinstance(mark, dict) else None,
+                "reason": mark.get("reason") if isinstance(mark, dict) else None,
+            }
+            for capture in captures:
+                found[str((capture / demo).resolve())] = info
+    return found
+
+
+def workspaces(scanned) -> list[Path]:
+    """The workspaces to consult: those the last scan listed, and the pool's."""
+    seen = {Path(w) for w in scanned or []}
+    seen.add(settings.workspace())
+    return sorted(seen)
+
+
+def current(scanned) -> dict[str, dict]:
+    """Every removed episode's key over ``workspaces(scanned)`` (the scan
+    summary's ``workspaces``)."""
+    found: dict[str, dict] = {}
+    for workspace in workspaces(scanned):
+        for key, info in workspace_exclusions(workspace).items():
+            found.setdefault(key, info)
+    return found
