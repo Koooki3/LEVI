@@ -22,6 +22,17 @@ def _policy_flags(parser) -> None:
     )
 
 
+def _embodiment_flags(parser) -> None:
+    parser.add_argument(
+        "--robot", action="append", help="e.g. franka_fr3 (unknown: none recorded)"
+    )
+    parser.add_argument(
+        "--gripper",
+        action="append",
+        help="e.g. robotiq_2f85, franka_hand (unknown: none recorded); repeatable",
+    )
+
+
 def _filters(parser) -> None:
     parser.add_argument("--category", action="append", help="repeatable")
     parser.add_argument("--source", action="append", help="source id or path")
@@ -31,6 +42,7 @@ def _filters(parser) -> None:
     parser.add_argument("--outcome", choices=["success", "failure"])
     parser.add_argument("--policy", action="append", help="checkpoint name (old)")
     _policy_flags(parser)
+    _embodiment_flags(parser)
     parser.add_argument("--show-heldout", action="store_true")
     parser.add_argument("--show-copies", action="store_true")
     parser.add_argument("--show-archive", action="store_true")
@@ -48,6 +60,8 @@ def _filter_args(args) -> dict:
         "policy_models": args.policy_model,
         "policy_checkpoints": args.policy_checkpoint,
         "policy_methods": args.policy_method,
+        "robots": args.robot,
+        "grippers": args.gripper,
         "show_heldout": args.show_heldout,
         "show_copies": args.show_copies,
         "show_archive": args.show_archive,
@@ -102,6 +116,12 @@ def build_parser() -> argparse.ArgumentParser:
     save.add_argument("--seed", type=int)
     save.add_argument("--policy", action="append", help="checkpoint name (old)")
     _policy_flags(save)
+    _embodiment_flags(save)
+    save.add_argument(
+        "--allow-mixed-gripper",
+        action="store_true",
+        help="let one export hold more than one gripper (refused otherwise)",
+    )
     save.add_argument("--date-from")
     save.add_argument("--date-to")
     save.add_argument("--include-nonstandard", action="store_true")
@@ -334,6 +354,8 @@ def main(argv=None) -> int:
                     ("policy_models", args.policy_model),
                     ("policy_checkpoints", args.policy_checkpoint),
                     ("policy_methods", args.policy_method),
+                    ("robots", args.robot),
+                    ("grippers", args.gripper),
                     ("date_from", args.date_from),
                     ("date_to", args.date_to),
                     ("formats", args.formats),
@@ -349,6 +371,8 @@ def main(argv=None) -> int:
                     value["include_nonstandard"] = True
                 if args.allow_unlinked_sources:
                     value["allow_unlinked_sources"] = True
+                if args.allow_mixed_gripper:
+                    value["allow_mixed_gripper"] = True
                 _print(recipe.save(recipe.Recipe.model_validate(value)))
             elif args.recipe_action == "show":
                 _print(

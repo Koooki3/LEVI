@@ -602,3 +602,65 @@ def test_a_plan_from_an_older_level_runs_as_unknown(scanned):
         (scanner.settings.workspace().parent / "out/older/pool_export.json").read_text()
     )
     assert record["embodiment"]["gripper"] == "unknown"
+
+
+# ---------------------------------------------------------- API and CLI
+
+
+def test_api_filters_facets_and_recipe(scanned, client):
+    facets = client.get("/api/levi/pool/facets", params={"show_copies": True}).json()
+    assert facets["grippers"]["franka_hand"] == 2
+    page = client.get(
+        "/api/levi/pool/episodes",
+        params={"gripper": ["franka_hand"], "show_copies": True},
+    ).json()
+    assert page["total"] == 2
+    assert {e["gripper"] for e in page["episodes"]} == {"franka_hand"}
+    assert page["episodes"][0]["embodiment_evidence"]["gripper"]
+    robots = client.get(
+        "/api/levi/pool/episodes", params={"robot": ["franka_fr3"], "limit": 1}
+    ).json()
+    assert robots["total"] >= 1
+    tasks = client.get(
+        "/api/levi/pool/tasks", params={"gripper": ["franka_hand"], "show_copies": True}
+    ).json()["tasks"]
+    assert tasks[0]["grippers"] == {"franka_hand": 2}
+    body = {"recipe": {"name": "p"}, "format": "raw_capture"}
+    got = client.post("/api/levi/pool/preview", json=body).json()
+    assert {w["code"] for w in got["warnings"]} >= {"mixed_gripper"}
+    ok = client.post(
+        "/api/levi/pool/preview",
+        json={
+            "recipe": {"name": "p", "grippers": ["robotiq_2f85"]},
+            "format": "raw_capture",
+        },
+    ).json()
+    assert "mixed_gripper" not in {w["code"] for w in ok["warnings"]}
+    saved = client.put(
+        "/api/levi/pool/recipes/g",
+        json={"name": "g", "grippers": ["robotiq_2f85"], "allow_mixed_gripper": True},
+    ).json()
+    assert saved["grippers"] == ["robotiq_2f85"] and saved["allow_mixed_gripper"]
+    assert client.get("/api/levi/pool/recipes/g").json()["allow_mixed_gripper"] is True
+
+
+def test_cli_flags(scanned, capsys):
+    from levi.pool import cli
+
+    cli.main(["episodes", "--gripper", "franka_hand", "--show-copies"])
+    assert json.loads(capsys.readouterr().out)["total"] == 2
+    cli.main(
+        ["episodes", "--robot", "franka_fr3", "--gripper", "unknown", "--show-copies"]
+    )
+    assert json.loads(capsys.readouterr().out)["total"] >= 1
+    cli.main(
+        ["recipe", "save", "c", "--gripper", "robotiq_2f85", "--gripper", "franka_hand",
+         "--robot", "franka_fr3", "--allow-mixed-gripper"]
+    )  # fmt: skip
+    saved = recipe.load("c")
+    assert saved.grippers == ["robotiq_2f85", "franka_hand"]
+    assert saved.robots == ["franka_fr3"] and saved.allow_mixed_gripper
+    capsys.readouterr()
+    cli.main(["recipe", "show", "c", "--format", "raw_capture"])
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["grippers"]
