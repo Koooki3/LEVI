@@ -202,7 +202,7 @@ uv run levi live stop                            # 只停自己的进程
 
 **闸门历史（`live/gate.jsonl`）。** 闸门的状态或原因代码每变化一次就加一行：`at`（纪元秒）和 `time`（本地时间）、`from` 与 `to`（`{open, code}`；第一行的 `from` 是 null，服务写的最后一行 `to.code = service_stopped`）、`reason`、`idle`、`policy_up`、`policy_ports`（配置的端口）、`sessions`（各会话的 group、任务和状态，最多 8 个）。不含令牌和密钥。它按 `resources.log_max_mb` 轮转，保留 `resources.log_backups` 个旧文件；读取时跳过损坏的行。最近五次转换在状态文件里（`gpu.gate.history`），`levi live status` 以 `gate` 行打印。事后要回答“策略推理时闸门有没有关着”，看它。
 
-**worker 日志。** 一个批次做完后，`logs/worker.log` 对批次里的每个片段写一行，方便 grep：`episode demo=demo_0003 ep=3 batch=2 temporal_wall=28.3s temporal_model=10.6s temporal_requests=2 temporal_tokens=21034 review_wall=6.0s ... segments=3 verdict=failure valid_events=0 gated=no state=done`。`*_wall` 是该阶段对整个批次的墙钟；模型的数字是这个片段自己的。`gated=1x/5.2s` 表示闸门让批次停了一次、共 5.2 秒。
+**worker 日志。** 一个批次做完后，`logs/worker.log` 对批次里的每个片段写一行，方便 grep：`episode demo=demo_0003 ep=3 batch=2 temporal_wall=28.3s temporal_model=10.6s temporal_requests=2 temporal_tokens=21034 review_wall=6.0s ... segments=3 verdict=failure valid_events=0 gated=no state=done`。`*_wall` 是该阶段对整个批次的墙钟；模型的数字是这个片段自己的。`gated=1x/5.2s` 表示闸门让批次停了一次、共 5.2 秒。一个批次由多个 worker 进程做完时（重启、为策略服务器停过），墙钟和闸门数字跨进程累加：每个阶段结束时存进批次，所以只有被无预警杀掉的 worker 会丢它当前阶段的那一份。某个片段的行或记录写不出来，不影响其他片段。
 
 **每个片段的统计（`live/stats.jsonl`）。** 批次做完后，worker 对批次里的每个片段（做完的或失败的）追加一行 JSON，schema 是 `levi.live.episode_stats.v1`，轮转方式同闸门历史。`levi.live.stats.read(live_dir, limit=None, since=None)` 按从旧到新返回记录，跳过损坏的行，缺的字段读作 `null`；请用它，不要自己写解析。字段名和单位是稳定的：可能新增字段，不会改名。所有时长的单位是秒，没能测到的值是 `null`。
 

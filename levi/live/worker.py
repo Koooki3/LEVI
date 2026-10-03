@@ -413,22 +413,25 @@ class Worker:
         from its last finished episode; nothing is repeated."""
         self.progress("standing_down", note="the policy is inferring")
         stood = time.monotonic()
-        run = self.run_state(run_id)
-        if run["status"] in ("queued", "running"):
-            self.call("runs.pause", {"run_id": run_id})
-            deadline = time.time() + 40
-            while time.time() < deadline:
+        try:
+            run = self.run_state(run_id)
+            if run["status"] in ("queued", "running"):
+                self.call("runs.pause", {"run_id": run_id})
+                deadline = time.time() + 40
+                while time.time() < deadline:
+                    self.check_stop()
+                    if self.run_state(run_id)["status"] not in ("queued", "running"):
+                        break
+                    time.sleep(0.2)
+            self.progress("gated", note="the policy is inferring: the model waits")
+            while not self.gate_open():
                 self.check_stop()
-                if self.run_state(run_id)["status"] not in ("queued", "running"):
-                    break
+                self.heartbeat("gated")
                 time.sleep(0.2)
-        self.progress("gated", note="the policy is inferring: the model waits")
-        while not self.gate_open():
-            self.check_stop()
-            self.heartbeat("gated")
-            time.sleep(0.2)
-        self.gated[0] += 1
-        self.gated[1] += time.monotonic() - stood
+        finally:
+            # Counted however it ends (a stop while waiting included).
+            self.gated[0] += 1
+            self.gated[1] += time.monotonic() - stood
         self.progress(what, note="the gate opened: resuming")
 
     def drive(self, run_id, *, what):
@@ -765,21 +768,24 @@ class Worker:
         frames = self.frame_counts()
         waking = self.vllm_timings()
         for number, demo in enumerate(batch["demos"]):
+            # The line and the record are independent, and one demo failing
+            # must not cost the others theirs.
             row = state["demos"].get(demo) or {}
             episode = (index or {}).get(demo, row.get("episode_index"))
-            stages = {}
-            for stage, wall in self.walls.items():
-                use = {"requests": 0, "tokens": 0, "model_s": 0.0}
-                for name, events in journals:
-                    if name == stage:
-                        for key, value in model_use(events, episode).items():
-                            use[key] += value
-                stages[stage] = (wall, use)
-            self.log(
-                episode_line(
-                    demo, episode, len(batch["demos"]), stages, row, self.gated
+            with contextlib.suppress(Exception):
+                stages = {}
+                for stage, wall in self.walls.items():
+                    use = {"requests": 0, "tokens": 0, "model_s": 0.0}
+                    for name, events in journals:
+                        if name == stage:
+                            for key, value in model_use(events, episode).items():
+                                use[key] += value
+                    stages[stage] = (wall, use)
+                self.log(
+                    episode_line(
+                        demo, episode, len(batch["demos"]), stages, row, self.gated
+                    )
                 )
-            )
             with contextlib.suppress(Exception):
                 c = self.config
                 stats.record(
@@ -1006,17 +1012,30 @@ class Worker:
         self.lengths = lengths
         batch["demos"] = self.filter_demos(batch["demos"], index, excluded, batch)
         self.save_current(batch)
-        self.walls, self.gated = {}, [0, 0.0]
+        # The batch's clock adds up across worker processes (a resumed batch
+        # keeps what earlier workers spent): each phase's share is stored in
+        # the batch when it ends, however it ends (a stop included). Only a
+        # worker killed without warning loses its current phase's share.
+        self.walls = dict(batch.get("walls") or {})
+        self.gated = list(batch.get("gated") or [0, 0.0])
         if batch["demos"]:
-            began = time.monotonic()
-            self.temporal(batch, index, lengths)
-            self.walls["temporal"] = time.monotonic() - began
+            self.timed(batch, "temporal", lambda: self.temporal(batch, index, lengths))
             if self.config.pipeline.anchored:
-                began = time.monotonic()
-                self.anchored(batch, index)
-                self.walls["review"] = time.monotonic() - began
+                self.timed(batch, "review", lambda: self.anchored(batch, index))
         self.finish(batch, index)
         return OK
+
+    def timed(self, batch, stage, work):
+        """Run one phase, adding its wall clock (and the gate time it saw) to
+        the batch's totals, which are saved with the batch."""
+        began = time.monotonic()
+        try:
+            work()
+        finally:
+            self.walls[stage] = self.walls.get(stage, 0.0) + time.monotonic() - began
+            batch["walls"], batch["gated"] = dict(self.walls), list(self.gated)
+            with contextlib.suppress(Exception):
+                self.save_current(batch)
 
     def guard_human(self, batch):
         """With the approver off: still waiting for a person? Raises
