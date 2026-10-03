@@ -382,9 +382,9 @@ class Workbench:
     def launch(self, id, *, pilot=True, expect=None):
         """Queue the run and start its executor. ``expect`` (a callable on the
         run record) is checked inside the transaction that queues it: a caller
-        that decided from an earlier read (the live gate resumer, the GPU
-        guardian) must not start a run whose state moved since, for example one
-        a person has just paused."""
+        that decided from an earlier read (the live gate resumer) must not
+        start a run whose state moved since, for example one a person has just
+        paused."""
         from .planning import require
 
         require(self, self.store.get("runs", id), bulk=not pilot)

@@ -2007,5 +2007,6 @@
   "Running normally; nothing is being labelled right now.": "Running normally; nothing is being labelled right now.",
   "Open the live page": "Open the live page",
   "{n} run(s) stopped for the robot's policy will continue by themselves once the evaluation lets the model work again.": "{n} run(s) stopped for the robot's policy will continue by themselves once the evaluation lets the model work again.",
-  "{n} run(s) stopped for the robot's policy need you to press Resume in the LEVI page.": "{n} run(s) stopped for the robot's policy need you to press Resume in the LEVI page."
+  "{n} run(s) stopped for the robot's policy need you to press Resume in the LEVI page.": "{n} run(s) stopped for the robot's policy need you to press Resume in the LEVI page.",
+  "auto_resumed": "auto_resumed"
 }
