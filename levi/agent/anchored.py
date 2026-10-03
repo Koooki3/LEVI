@@ -700,9 +700,16 @@ def outcome(spec, events, start_answer=None, closes=None):
                 "closes_after_last_valid": after,
                 "require_place": rule.require_place,
             }
-            if closes is None:
-                basis["missing_inputs"] = ["closes"]
-            elif after:
+            # The place condition needs the time segments, which the review
+            # cannot see: until the live service applies it (judge.merge), a
+            # success rests on an input it does not have.
+            missing = [
+                *(["closes"] if closes is None else []),
+                *(["place"] if rule.require_place else []),
+            ]
+            if missing:
+                basis["missing_inputs"] = missing
+            if closes is not None and after:
                 ok = False
         verdict = "success" if ok else "failure"
     if any(v.effect == "episode" for v in spec.vetoes):
@@ -1064,6 +1071,10 @@ def review_episode(wb, id, config, context, episode, started):
         doubts.append(
             "waived at the start but with events that are not valid: "
             + ", ".join(basis["contested_waivers"])
+        )
+    if basis.get("require_place"):
+        doubts.append(
+            "the last-placement condition is not applied here: the live verdict decides"
         )
     if verdict == "success" and basis.get("undecided_vetoes"):
         doubts.append(

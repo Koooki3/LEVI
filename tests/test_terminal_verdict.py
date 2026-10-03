@@ -34,8 +34,14 @@ def event(frame, valid=True, verdict=None):
     return {"frame_index": frame, "valid": valid, "verdict": verdict, "answer": {}}
 
 
+def change(proposals, decisions=None):
+    """A committed change set as the worker reads it."""
+    return {"proposals": proposals, "decisions": decisions or {}}
+
+
 def seg(subtask, start, result, episode=0):
     return {
+        "kind": "segment",
         "episode_index": episode,
         "style": "subtask",
         "subtask_id": subtask,
@@ -99,7 +105,7 @@ def test_the_rule_without_the_place_condition_matches_the_offline_rule_2():
 
 def test_the_full_rule_matches_the_offline_rule_5_episode_by_episode():
     for row in episodes():
-        place = judge.place_state(proposals_of(row), 0)
+        place = judge.place_state(change(proposals_of(row)), 0)
         result, basis, undecided = verdict(events_of(row), row["closes"], place)
         offline = row["offline"]["R5"]
         got = "undecided" if undecided else result
@@ -114,7 +120,7 @@ def test_the_full_rule_has_no_false_success_and_misses_no_success():
     for row in episodes():
         if row["truth"] not in ("success", "failure"):
             continue
-        place = judge.place_state(proposals_of(row), 0)
+        place = judge.place_state(change(proposals_of(row)), 0)
         result, _, _ = verdict(events_of(row), row["closes"], place)
         if row["truth"] == "success":
             tp += result == "success"
@@ -181,7 +187,7 @@ def test_min_valid_stays_a_necessary_condition():
 def test_a_record_without_closes_falls_back_and_says_so():
     result, basis = outcome(V2, [event(100)], closes=None)
     assert result == "success"
-    assert basis["missing_inputs"] == ["closes"]
+    assert basis["missing_inputs"] == ["closes", "place"]
     assert basis["closes_after_last_valid"] is None
     # Not silently a success: it is undecided for a person.
     assert anchored.undecided(result, basis)
@@ -283,21 +289,38 @@ def test_the_last_place_is_the_one_that_starts_last():
         seg("retreat", 9.0, "failure"),
         seg("place", 3.0, "failure", episode=1),
     ]
-    assert judge.place_state(proposals, 0) == "success"
-    assert judge.place_state(proposals, 1) == "failure"
-    assert judge.place_state(proposals, 2) == "none"
-    assert judge.place_state([], 0) == "none"
+    got = change(proposals)
+    assert judge.place_state(got, 0) == "success"
+    assert judge.place_state(got, 1) == "failure"
+    assert judge.place_state(got, 2) == "none"
+    assert judge.place_state(change([]), 0) == "none"
     # Of two that start together, the one listed last.
-    assert (
-        judge.place_state(
-            [seg("place", 1.0, "success"), seg("place", 1.0, "failure")], 0
-        )
-        == "failure"
-    )
+    both = change([seg("place", 1.0, "success"), seg("place", 1.0, "failure")])
+    assert judge.place_state(both, 0) == "failure"
     # A segment with no outcome is unknown, never a success.
-    assert judge.place_state([seg("place", 1.0, None)], 0) == "unknown"
-    assert judge.place_state([seg("place", 1.0, "unknown")], 0) == "unknown"
+    assert judge.place_state(change([seg("place", 1.0, None)]), 0) == "unknown"
+    assert judge.place_state(change([seg("place", 1.0, "unknown")]), 0) == "unknown"
     assert judge.place_state(None, 0) == "missing"
+
+
+def test_a_segment_a_person_rejected_does_not_count():
+    proposals = [
+        seg("place", 2.0, "success"),
+        seg("place", 8.0, "failure"),  # index 1, rejected in review
+        seg("retreat", 9.0, "success"),
+    ]
+    assert judge.place_state(change(proposals), 0) == "failure"
+    assert judge.place_state(change(proposals, {"1": "rejected"}), 0) == "success"
+    # Accepted or undecided ones stay; rejecting the only place leaves none.
+    assert judge.place_state(change(proposals, {"1": "accepted"}), 0) == "failure"
+    only = change([seg("place", 2.0, "success")], {"0": "rejected"})
+    assert judge.place_state(only, 0) == "none"
+
+
+def test_only_segments_count_as_place_segments():
+    other = {**seg("place", 9.0, "failure"), "kind": "outcome"}
+    got = change([seg("place", 2.0, "success"), other])
+    assert judge.place_state(got, 0) == "success"
 
 
 def test_the_place_outcome_decides_a_release_that_held():
@@ -309,6 +332,9 @@ def test_the_place_outcome_decides_a_release_that_held():
         assert basis["place_outcome"] == place
     result, basis, undecided = verdict(events, closes, "unknown")
     assert (result, undecided) == ("failure", True)
+    # Once the place is read, the review's "place is missing" is gone.
+    result, basis, undecided = verdict(events, closes, "success")
+    assert "missing_inputs" not in basis and basis["place_outcome"] == "success"
 
 
 def test_a_failure_already_stays_a_failure_and_is_not_undecided():
@@ -320,17 +346,49 @@ def test_a_failure_already_stays_a_failure_and_is_not_undecided():
     assert verdict([], [], "success")[0] == "failure"
 
 
-def test_without_time_segments_the_rule_falls_back_and_says_so():
+def test_without_time_segments_it_is_a_failure_that_is_undecided_and_says_so():
     result, basis, undecided = verdict([event(100)], [40], "missing")
-    assert result == "success" and undecided
+    assert (result, undecided) == ("failure", True)  # same as an unknown place
     assert basis["missing_inputs"] == ["place"]
     assert basis["place_outcome"] == "missing"
+    assert verdict([event(100)], [40], "unknown")[0::2] == (result, undecided)
     # Both inputs missing are both named.
     result, basis = outcome(V2, [event(100)], closes=None)
+    assert basis["missing_inputs"] == ["closes", "place"]
     result, basis, _ = judge.merge(result, basis, "missing")
     assert basis["missing_inputs"] == ["closes", "place"]
-    # Failing on what is known stays a failure.
-    assert verdict([event(100)], [150], "missing")[0] == "failure"
+    # With the place read, only the closes stay missing, and a success is undecided.
+    result, basis, undecided = judge.merge(
+        *outcome(V2, [event(100)], closes=None), "success"
+    )
+    assert basis["missing_inputs"] == ["closes"]
+    assert result == "success" and undecided is False
+    assert anchored.undecided(result, basis)
+    # Failing on what is known stays a failure and is not undecided.
+    assert verdict([event(100)], [150], "missing")[0::2] == ("failure", False)
+
+
+def test_the_review_record_alone_never_holds_a_certain_success():
+    """The review cannot see the time segments, so under require_place its own
+    success names the missing place: undecided for a training manifest or a
+    person accepting the proposal, until the live verdict applies it."""
+    result, basis = outcome(V2, [event(100)], closes=[40])
+    assert result == "success" and basis["missing_inputs"] == ["place"]
+    assert anchored.undecided(result, basis)
+    # A failure needs no doubt; the default rule and the closes-only rule have none.
+    result, basis = outcome(V2, [event(100)], closes=[150])
+    assert result == "failure" and not anchored.undecided(result, basis)
+    result, basis = outcome(V1, [event(100)])
+    assert "missing_inputs" not in basis and not anchored.undecided(result, basis)
+    only = AnchoredSpec.model_validate(
+        {
+            **json.loads(generic.text("generic-release.v2.json")),
+            "question": "Did it land? {task}",
+            "episode": {"rule": "last_valid_not_regrasped"},
+        }
+    )
+    result, basis = outcome(only, [event(100)], closes=[40])
+    assert result == "success" and not anchored.undecided(result, basis)
 
 
 def test_a_review_without_the_place_rule_passes_through_untouched():
@@ -347,3 +405,30 @@ def test_a_review_without_the_place_rule_passes_through_untouched():
     result, basis = outcome(spec, [event(100)], closes=[])
     assert basis["require_place"] is False
     assert judge.merge(result, basis, "failure") == (result, basis, False)
+
+
+def test_a_verdict_without_the_time_segments_is_not_counted_as_a_success():
+    from levi.live import stats
+
+    def row(demo, outcome, undecided, **extra):
+        return stats.normalize(
+            {
+                "dataset": "g__t",
+                "demo": demo,
+                "session": "s",
+                "result": {
+                    "state": "done",
+                    "verdict": {"outcome": outcome, "undecided": undecided, **extra},
+                },
+            }
+        )
+
+    _, basis, undecided = verdict([event(100)], [40], "missing")
+    result = verdict([event(100)], [40], "missing")[0]
+    rows = [
+        row("demo_0000", result, undecided, place_outcome=basis["place_outcome"]),
+        row("demo_0001", "success", False, place_outcome="success"),
+    ]
+    summary = stats.summarize(rows)["outcome"]
+    assert summary["verdicts"] == {"failure": 1, "success": 1}
+    assert summary["undecided"] == 1

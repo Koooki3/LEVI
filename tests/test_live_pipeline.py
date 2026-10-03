@@ -666,6 +666,8 @@ def test_the_terminal_aware_review_judges_by_what_the_episode_ends_on(env):
     assert again["closes_after_last_valid"] == 1
     assert again["place_outcome"] == "success"
     assert again["basis"]["last_valid_frame"] == 18
+    assert held["spec_version"] == again["spec_version"] == 2
+    assert held["min_valid"] == 1
     assert held["outcome"] == "success" and held["undecided"] is False
     assert held["closes_after_last_valid"] == 0 and held["place_outcome"] == "success"
     assert held["basis"]["require_place"] is True
@@ -677,6 +679,18 @@ def test_the_terminal_aware_review_judges_by_what_the_episode_ends_on(env):
         if r["spec"]["version"] == 2
     }
     assert records[0]["closes"] == [6, 24] and records[1]["closes"] == [6]
+    # The review's own outcome proposal says the place condition is the live
+    # verdict's to apply.
+    proposals = [
+        p
+        for c in e.records("changes")
+        for p in c["proposals"]
+        if p["kind"] == "outcome"
+    ]
+    assert proposals and all(
+        "last-placement condition is not applied" in p["uncertainty"] for p in proposals
+    )
+    assert all(r["basis"]["missing_inputs"] == ["place"] for r in records.values())
     # The statistics records and a backfill carry the rule and the place
     # outcome, and the aggregates still count the verdicts.
     from levi.live import backfill, stats
@@ -685,11 +699,13 @@ def test_the_terminal_aware_review_judges_by_what_the_episode_ends_on(env):
     got = rows["demo_0000"]["result"]["verdict"]
     assert got["outcome"] == "failure" and got["rule"] == again["rule"]
     assert got["place_outcome"] == "success"
+    assert rows["demo_0000"]["result"]["spec"]["release_review_version"] == 2
     summary = stats.summarize(list(rows.values()))
     assert summary["outcome"]["verdicts"] == {"failure": 1, "success": 1}
     (e.ws / "live/stats.jsonl").unlink()
     rebuilt = {i["demo"]: i["record"] for i in backfill.plan(e.config)}
     assert rebuilt["demo_0000"]["result"]["verdict"] == got
+    assert rebuilt["demo_0000"]["result"]["spec"]["release_review_version"] == 2
     # The page's rows carry the new fields.
     row = api._demo_row("demo_0000", state["demos"]["demo_0000"])["verdict"]
     assert row["rule"] == "last_valid_not_regrasped"
@@ -710,6 +726,14 @@ def test_the_default_review_is_the_same_with_the_terminal_rule_available(env):
     assert "closes" not in e.records("anchored")[0]
     row = api._demo_row("demo_0000", e.state()["demos"]["demo_0000"])["verdict"]
     assert row["rule"] is None and row["place_outcome"] is None
+    assert row["spec_version"] == 1 and row["min_valid"] is None
+    # No placement doubt on a default-rule proposal.
+    assert not any(
+        "last-placement" in p["uncertainty"]
+        for c in e.records("changes")
+        for p in c["proposals"]
+        if p["kind"] == "outcome"
+    )
 
 
 def test_a_demo_without_committed_time_segments_is_judged_on_the_gripper_alone():
@@ -722,21 +746,26 @@ def test_a_demo_without_committed_time_segments_is_judged_on_the_gripper_alone()
         def get(self, kind, key):
             if key != "cs1":
                 raise KeyError(key)
+            place = {
+                "kind": "segment",
+                "episode_index": 4,
+                "style": "subtask",
+                "subtask_id": "place",
+                "outcome": "failure",
+            }
             return {
                 "proposals": [
-                    {
-                        "episode_index": 4,
-                        "style": "subtask",
-                        "subtask_id": "place",
-                        "start": 3.0,
-                        "outcome": "failure",
-                    }
-                ]
+                    {**place, "start": 3.0},
+                    # The last place, rejected by the person who reviewed it.
+                    {**place, "start": 6.0, "outcome": "success"},
+                ],
+                "decisions": {"1": "rejected"},
             }
 
     worker = Worker.__new__(Worker)
     worker.store = Store()
     row = {"temporal": {"changeset": "cs1"}, "episode_index": 4}
+    # The rejected, later place does not count: the earlier failure stands.
     assert worker.place_of(row, 4) == "failure"
     assert worker.place_of(row, 5) == "missing"  # not this episode's row
     assert worker.place_of(None, 4) == "missing"

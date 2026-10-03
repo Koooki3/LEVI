@@ -48,7 +48,12 @@ WRIST = "observation.images.hand"
 RUN_DONE = {"succeeded", "partially_succeeded", "failed", "cancelled"}
 # What a rule beyond "any valid release" adds to a verdict's basis, and the
 # part of it a verdict carries at its top level for the page and statistics.
-VERDICT_RULE_KEYS = ("rule", "place_outcome", "closes_after_last_valid")
+VERDICT_RULE_KEYS = (
+    "rule",
+    "place_outcome",
+    "closes_after_last_valid",
+    "min_valid",
+)
 RULE_KEYS = (*VERDICT_RULE_KEYS, "last_valid_frame", "require_place", "missing_inputs")
 
 
@@ -732,13 +737,18 @@ class Worker:
                 },
                 "run_id": run_id,
                 "spec": (record.get("spec") or {}).get("id"),
+                # Null for a verdict made before the version was kept.
+                "spec_version": (record.get("spec") or {}).get("version"),
                 "at": time.time(),
                 "review": "auto",
                 "evaluated": False,
             }
             # What a rule other than "any valid release" decided on, where the
             # page and the statistics read it (absent for the default rule).
-            results[demo].update({k: basis[k] for k in VERDICT_RULE_KEYS if k in basis})
+            if "rule" in basis:
+                results[demo].update(
+                    {k: basis[k] for k in VERDICT_RULE_KEYS if k in basis}
+                )
 
         def change_state(value):
             for demo, verdict in results.items():
@@ -763,10 +773,10 @@ class Worker:
         if not changeset or (row or {}).get("episode_index") != episode:
             return "missing"
         try:
-            proposals = self.store.get("changes", changeset)["proposals"]
+            change = self.store.get("changes", changeset)
         except KeyError:
             return "missing"
-        return judge.place_state(proposals, episode)
+        return judge.place_state(change, episode)
 
     # --- finishing ---------------------------------------------------------------------------
 
@@ -945,6 +955,7 @@ class Worker:
                     "release_review": verdict.get("spec") or p.anchored_spec
                     if p.anchored
                     else None,
+                    "release_review_version": verdict.get("spec_version"),
                     "sha256": generic.manifest(self.config),
                 },
                 "provider": self.provider_spec.get("name"),

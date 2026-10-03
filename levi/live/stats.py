@@ -48,7 +48,8 @@ a value that could not be measured is ``null``.
                verdict{outcome,events,valid_events,undecided} (plus rule and
                place_outcome when the release review uses a rule beyond "any
                valid release"; the template does not list them), review,
-               spec{guideline,release_review,sha256{file: hash}}, provider,
+               spec{guideline,release_review,release_review_version,
+               sha256{file: hash}}, provider,
                model
 
 Standard library only.

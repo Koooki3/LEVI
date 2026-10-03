@@ -15,21 +15,29 @@ Standard library only.
 PLACE = "place"
 
 
-def place_state(proposals, episode):
+def place_state(change, episode):
     """What the episode's last ``place`` time segment says: ``success``,
     ``failure``, ``unknown``, ``none`` (the episode has no ``place`` segment),
-    or ``missing`` (``proposals`` is None: there is no committed time-segment
-    set to read).
+    or ``missing`` (``change`` is None: there is no committed time-segment set
+    to read).
 
-    "Last" is the segment that starts latest; of two that start together, the
-    one listed last. A segment with no recorded outcome counts as unknown."""
-    if proposals is None:
+    ``change`` is the committed change set (a dict with ``proposals`` and, when
+    a person reviewed it, ``decisions``). A segment a person rejected is not
+    part of the episode's labels and is left out. "Last" is the segment that
+    starts latest; of two that start together, the one listed last. A segment
+    with no recorded outcome counts as unknown."""
+    if change is None:
         return "missing"
+    rejected = {
+        k for k, v in (change.get("decisions") or {}).items() if v == "rejected"
+    }
     places = sorted(
         (
             p
-            for p in proposals
-            if p.get("episode_index") == episode
+            for i, p in enumerate(change.get("proposals") or [])
+            if str(i) not in rejected
+            and p.get("kind") == "segment"
+            and p.get("episode_index") == episode
             and p.get("style", "subtask") == "subtask"
             and p.get("subtask_id") == PLACE
         ),
@@ -45,18 +53,27 @@ def merge(outcome, basis, place):
     a review outcome and its basis; a review without ``basis.require_place``
     passes through unchanged.
 
+    The review's own outcome does not apply the condition, so its basis names
+    ``place`` in ``missing_inputs`` (a success is undecided wherever the review
+    record alone is read: the training manifest, a person accepting the
+    proposal). Here the input is given, and the name is dropped.
+
     The condition holds when the last place segment is a success. A failure,
-    or no place segment, makes a success a failure. An unknown outcome makes it
-    a failure that is also undecided (a person looks at it). With no time
-    segments to read (``missing``) the outcome stands on the rest of the rule
-    and ``basis.missing_inputs`` says so; ``anchored.undecided`` then marks a
-    success as undecided. A failure stays a failure whatever the place says."""
+    or no place segment, makes a success a failure. An unknown outcome, or no
+    time segments to read at all (``missing``, which ``basis.missing_inputs``
+    keeps), makes it a failure that is also undecided: an input that could not
+    be read is never taken for a success. A failure stays a failure whatever
+    the place says."""
     if not basis.get("require_place"):
         return outcome, basis, False
     basis = {**basis, "place_outcome": place}
+    missing = sorted(set(basis.get("missing_inputs", [])) - {PLACE})
     if place == "missing":
-        basis["missing_inputs"] = sorted({*basis.get("missing_inputs", []), PLACE})
-        return outcome, basis, False
+        missing = sorted({*missing, PLACE})
+    if missing:
+        basis["missing_inputs"] = missing
+    else:
+        basis.pop("missing_inputs", None)
     if outcome != "success" or place == "success":
         return outcome, basis, False
-    return "failure", basis, place == "unknown"
+    return "failure", basis, place in ("unknown", "missing")

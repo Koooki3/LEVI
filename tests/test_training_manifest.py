@@ -237,6 +237,46 @@ def test_a_contested_waiver_leaves_an_anchored_success_undecided(repo):
     assert set(kept[kept.include].episode_index) == {0, 1, 2}
 
 
+def test_a_review_that_needs_the_place_condition_is_never_a_certain_success(repo):
+    """Under the terminal-aware spec the review record cannot apply the last
+    placement (the live service does, in its own verdict), so its success is
+    undecided in a training manifest; the default rule's success is not."""
+    import json
+
+    from levi.agent.anchored import AnchoredSpec, outcome
+    from levi.live import generic
+
+    def basis(name):
+        spec = AnchoredSpec.model_validate(generic.anchored_spec("put it away", name))
+        events = [
+            {"frame_index": 9, "valid": True, "verdict": "supported", "answer": {}}
+        ]
+        result, found = outcome(spec, events, closes=[3])
+        assert result == "success"
+        return json.loads(json.dumps(found))
+
+    name = _name(repo)
+    _anchored(
+        name,
+        {0: "success", 1: "success"},
+        bases={
+            0: basis("generic-release.v2.json"),
+            1: basis("generic-release.v1.json"),
+        },
+    )
+    f = _frames(tm.build(repo, "all_rollouts"))
+    flags = {
+        ep: bool(f[f.episode_index == ep].anchored_undecided.iloc[0]) for ep in (0, 1)
+    }
+    assert flags == {0: True, 1: False}
+    verified = _frames(tm.build(repo, "verified_success"))
+    kept = set(verified[verified.include].episode_index)
+    assert 1 in kept and 0 not in kept
+    assert set(verified[verified.episode_index == 0].exclude_reason) == {
+        "anchored_undecided"
+    }
+
+
 def test_operations_decide_include_and_weight(repo):
     name = _name(repo)
     run_id = _anchored(name, {0: "failure", 1: "failure"})

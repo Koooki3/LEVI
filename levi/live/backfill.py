@@ -213,7 +213,12 @@ def rebuild(workspace, name, demo, row, *, events=run_events, labels=change_labe
     if verdict.get("spec"):
         put(
             "result.spec",
-            {"guideline": None, "release_review": verdict["spec"], "sha256": None},
+            {
+                "guideline": None,
+                "release_review": verdict["spec"],
+                "release_review_version": verdict.get("spec_version"),
+                "sha256": None,
+            },
             f"{state}: verdict.spec (the guideline and file hashes are not recorded)",
         )
     at = (
