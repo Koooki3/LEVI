@@ -437,8 +437,14 @@ def start(root, build):
     )
     try:
         settings = config.load(written).gpu
-    except (ValueError, OSError):
-        pass
+    except (ValueError, OSError) as exc:
+        LOG.warning(
+            "live gate resumer: cannot read %s (%s); using the defaults, so the "
+            "automatic resume is ON (resume_max_bounces = %s)",
+            written,
+            exc,
+            settings.resume_max_bounces,
+        )
     resumer = GateResumer(
         store,
         workbench,

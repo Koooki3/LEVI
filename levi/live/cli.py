@@ -373,6 +373,16 @@ class Frontend:
 # --- start ------------------------------------------------------------------------------------------
 
 
+def write_effective(config):
+    """``live/effective.toml``: the configuration this session runs with, as
+    validated, ``--config`` and command-line overrides included. The core reads
+    it at start (the automatic resume's settings, the API's view), so it must
+    be written before the core starts, not left from the last session."""
+    target = config.live_dir / "effective.toml"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(live_config.render(config))
+
+
 def cmd_start(args) -> int:
     config = resolve_config(args)
     if args.daemon:
@@ -388,6 +398,7 @@ def cmd_start(args) -> int:
     os.environ.update(service_env(config))
     os.environ.pop(ENV_CONFIG, None)
     resources.apply(config)
+    write_effective(config)  # before the core starts: it reads this session's
     logger = resources.rotating_logger(
         "levi.live",
         config.logs_dir / "live.log",

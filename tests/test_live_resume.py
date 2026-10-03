@@ -611,3 +611,102 @@ def test_a_person_s_pause_is_a_pause_not_a_gate_block(
     assert run_id not in resumer._PENDING
     res = resumer.GateResumer(wb.store, wb, live_ws, stable_s=0.0)
     assert res._gated(run) is False
+
+
+# --- the settings the core starts with are this session's --------------------------------
+
+
+@pytest.fixture
+def short(tmp_path_factory):
+    """A short path: the core's Unix socket path must fit in 103 bytes."""
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    root = Path(tempfile.mkdtemp(prefix="lv", dir="/tmp"))
+    yield root
+    shutil.rmtree(root, ignore_errors=True)
+
+
+def _start_until_the_core(tmp_path, monkeypatch, *flags):  # tmp_path: a short one
+    """Run ``levi live start`` up to the moment the core would be started and
+    return what ``resumer.start`` would read there."""
+    from levi.live import cli
+    from levi.live import config as live_config
+
+    seen = {}
+
+    class StopHere(Exception):
+        pass
+
+    class Core:
+        def __init__(self, config, log):
+            self.config = config
+
+        def start(self, ui=True):
+            seen["config"] = self.config
+            raise StopHere
+
+        def stop(self):
+            pass
+
+    monkeypatch.setattr(cli, "Frontend", Core)
+    args = cli.build_parser().parse_args(
+        [
+            "start",
+            "--workspace",
+            str(tmp_path / "ws"),
+            "--home",
+            str(tmp_path / "h"),
+            *flags,
+        ]
+    )
+    with pytest.raises(StopHere):
+        cli.cmd_start(args)
+    root = tmp_path / "ws"
+    store, wb = Store([]), Bench(Store([]))
+    thread = resumer.start(root, lambda: (store, wb))
+    try:
+        return thread.max_bounces, thread.stable_s
+    finally:
+        thread.close()
+        assert live_config  # (the module the core reads with)
+
+
+def test_a_new_setting_in_live_toml_reaches_the_core_over_a_stale_effective_file(
+    short, monkeypatch
+):
+    from levi.live import config as live_config
+
+    tmp_path = short
+    ws = tmp_path / "ws"
+    (ws / "live").mkdir(parents=True)
+    old = live_config.Config()  # the last session's file: the defaults
+    (ws / "live" / "effective.toml").write_text(live_config.render(old))
+    (ws / "live.toml").write_text("[gpu]\nresume_max_bounces = 0\n")
+    assert _start_until_the_core(tmp_path, monkeypatch) == (0, 3.0)
+
+
+def test_a_config_given_with_dash_dash_config_reaches_the_core(short, monkeypatch):
+    tmp_path = short
+    other = tmp_path / "other.toml"
+    other.write_text("[gpu]\nresume_max_bounces = 7\nresume_stable_s = 9\n")
+    assert _start_until_the_core(tmp_path, monkeypatch, "--config", str(other)) == (
+        7,
+        9.0,
+    )
+
+
+def test_a_configuration_the_core_cannot_read_is_warned_about(tmp_path, caplog):
+    root = tmp_path / "root"
+    (root / "live").mkdir(parents=True)
+    auto.write_marker(root / "live")
+    (root / "live" / "effective.toml").write_text("[gpu]\nresume_stable_s = 0.1\n")
+    with caplog.at_level("WARNING", logger="levi.live.resumer"):
+        thread = resumer.start(root, lambda: (Store([]), Bench(Store([]))))
+    try:
+        assert thread.max_bounces == 3  # the defaults
+    finally:
+        thread.close()
+    text = " ".join(r.getMessage() for r in caplog.records)
+    assert "cannot read" in text and "automatic resume is ON" in text
