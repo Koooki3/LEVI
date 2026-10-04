@@ -1,0 +1,389 @@
+/* LEVI global frame (design stage 2): top bar, command palette, shortcut
+ * list, Agent Workbench drawer.
+ *
+ * Tokens only (`--ds-*`); a test fails on any colour literal here. The
+ * pages below the bar keep their own styles until their stage.
+ */
+
+:root {
+  --levi-header-height: 56px;
+}
+
+/* Until the pages use the tokens they stay dark: a light/dark choice must
+   not turn their native controls (scrollbars, select lists) light. The
+   frame's own layers set their scheme themselves. */
+:root[data-theme] {
+  color-scheme: dark;
+}
+
+/* ── Top bar ───────────────────────────────────────────────────────── */
+.levi-shell-header {
+  position: relative;
+  z-index: calc(var(--ds-z-overlay) + 5);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "brand nav actions";
+  align-items: center;
+  column-gap: var(--ds-space-6);
+  height: var(--levi-header-height);
+  padding: 0 var(--ds-space-6);
+  border-bottom: 1px solid var(--ds-separator);
+  /* Opaque for now: the bar does not stay on top while the page scrolls
+     (pages have sticky parts of their own at top: 0), so a translucent
+     material would only show the older pages' dark background through it
+     and lower the text contrast. It becomes ds-material once it is sticky. */
+  background: var(--ds-bg);
+  color: var(--ds-text-primary);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-body-size);
+  line-height: var(--ds-text-body-line);
+  -webkit-font-smoothing: antialiased;
+}
+.levi-shell-brand {
+  grid-area: brand;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  height: var(--ds-control-md);
+  padding: 0 var(--ds-space-1);
+  border-radius: var(--ds-radius-sm);
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-title-3-size);
+  font-weight: var(--ds-weight-semibold);
+  letter-spacing: 0.08em;
+  text-decoration: none;
+}
+/* The mark: a graphite square with a cut corner (no Unicode glyph). */
+.levi-shell-mark {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--ds-radius-xs);
+  background: var(--ds-accent);
+}
+.levi-shell-mark::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  top: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--ds-on-accent);
+}
+
+.levi-shell-nav {
+  grid-area: nav;
+  display: flex;
+  align-items: stretch;
+  gap: var(--ds-space-1);
+  height: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.levi-shell-nav::-webkit-scrollbar {
+  display: none;
+}
+.levi-shell-link,
+.levi-shell-nav .levi-live-nav {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--ds-space-2);
+  padding: 0 var(--ds-space-3);
+  color: var(--ds-text-secondary);
+  font-weight: var(--ds-weight-medium);
+  white-space: nowrap;
+  text-decoration: none;
+  transition: color var(--ds-dur-fast) var(--ds-ease-standard);
+}
+.levi-shell-link:hover,
+.levi-shell-nav .levi-live-nav:hover {
+  color: var(--ds-text-primary);
+}
+.levi-shell-link[aria-current="page"],
+.levi-shell-nav .levi-live-nav[aria-current="page"] {
+  color: var(--ds-text-primary);
+  font-weight: var(--ds-weight-semibold);
+}
+/* Current page: a 2 px bar under the label. */
+.levi-shell-link[aria-current="page"]::after,
+.levi-shell-nav .levi-live-nav[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  left: var(--ds-space-3);
+  right: var(--ds-space-3);
+  bottom: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ds-selected-indicator);
+}
+.levi-shell-link:focus-visible,
+.levi-shell-nav .levi-live-nav:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: -4px;
+  border-radius: var(--ds-radius-sm);
+}
+/* The live entry's status dot and count in status colours. */
+.levi-shell-nav .ds-tooltip-anchor {
+  display: flex;
+  flex: none;
+  align-items: stretch;
+}
+.levi-shell-nav .levi-pulse-dot {
+  background: var(--ds-text-tertiary);
+}
+.levi-shell-nav .levi-pulse-dot.is-green {
+  background: var(--ds-success);
+}
+.levi-shell-nav .levi-pulse-dot.is-blue {
+  background: var(--ds-info);
+}
+.levi-shell-nav .levi-pulse-dot.is-amber {
+  background: var(--ds-warning);
+}
+.levi-shell-nav .levi-pulse-dot.is-red {
+  background: var(--ds-danger);
+}
+.levi-shell-nav .levi-pulse-count {
+  background: var(--ds-warning-bg);
+  color: var(--ds-text-primary);
+}
+.levi-shell-nav .levi-live-nav.is-red .levi-pulse-count {
+  background: var(--ds-danger-bg);
+  color: var(--ds-text-primary);
+}
+
+.levi-shell-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-1);
+}
+.levi-shell-search {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  height: var(--ds-control-md);
+  min-width: 180px;
+  margin-right: var(--ds-space-2);
+  padding: 0 var(--ds-space-2) 0 var(--ds-space-3);
+  border: 1px solid var(--ds-border-control);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-field-bg);
+  color: var(--ds-text-secondary);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color var(--ds-dur-fast) var(--ds-ease-standard);
+}
+.levi-shell-search:hover {
+  background: var(--ds-surface-hover);
+  color: var(--ds-text-primary);
+}
+.levi-shell-search__label {
+  flex: 1;
+  text-align: left;
+}
+.levi-shell-search__keys {
+  display: inline-flex;
+  gap: 2px;
+}
+.levi-shell-language .ds-btn__label,
+.levi-shell-language span[lang] {
+  min-width: 2.5em;
+  text-align: left;
+}
+
+/* Narrow screens: actions beside the wordmark, the navigation on its own
+   scrolling row below. */
+@media (max-width: 899px) {
+  :root {
+    --levi-header-height: 100px;
+  }
+  .levi-shell-header {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: 56px 44px;
+    grid-template-areas:
+      "brand actions"
+      "nav nav";
+    padding: 0 var(--ds-space-4);
+  }
+  .levi-shell-actions {
+    justify-content: flex-end;
+    min-width: 0;
+  }
+  .levi-shell-nav {
+    margin: 0 calc(-1 * var(--ds-space-4));
+    padding: 0 var(--ds-space-1);
+    border-top: 1px solid var(--ds-separator);
+  }
+  .levi-shell-search {
+    min-width: 0;
+    margin-right: 0;
+    padding: 0 var(--ds-space-2);
+  }
+  .levi-shell-search__label,
+  .levi-shell-search__keys {
+    display: none;
+  }
+}
+@media (max-width: 380px) {
+  .levi-shell-language .ds-icon {
+    display: none;
+  }
+}
+
+/* ── Command palette ───────────────────────────────────────────────── */
+.levi-palette {
+  align-self: start;
+  margin-top: 12vh;
+  gap: var(--ds-space-2);
+}
+.levi-palette .ds-dialog__title {
+  font-size: var(--ds-text-callout-size);
+  line-height: var(--ds-text-callout-line);
+  color: var(--ds-text-secondary);
+  font-weight: var(--ds-weight-medium);
+}
+.levi-palette__search {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  padding: 0 var(--ds-space-3);
+  border: 1px solid var(--ds-border-control-on-raised, var(--ds-border-control));
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-field-bg);
+  color: var(--ds-text-secondary);
+}
+.levi-palette__input {
+  flex: 1;
+  min-width: 0;
+  height: var(--ds-control-lg);
+  border: 0;
+  background: transparent;
+  color: var(--ds-text-primary);
+  font: inherit;
+  font-size: var(--ds-text-reading-size);
+}
+.levi-palette__input:focus-visible {
+  outline: none;
+}
+.levi-palette__search:focus-within {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
+.levi-palette__input::placeholder {
+  color: var(--ds-text-tertiary-on-raised, var(--ds-text-secondary));
+}
+.levi-palette__list {
+  max-height: min(52vh, 420px);
+  overflow-y: auto;
+  margin: 0 calc(-1 * var(--ds-space-2));
+  padding: 0 var(--ds-space-2);
+}
+.levi-palette__group {
+  padding: var(--ds-space-3) var(--ds-space-2) var(--ds-space-1);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+  line-height: var(--ds-text-caption-line);
+  font-weight: var(--ds-weight-medium);
+}
+.levi-palette__option {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  min-height: var(--ds-control-md);
+  padding: 0 var(--ds-space-2);
+  border-radius: var(--ds-radius-sm);
+  color: var(--ds-text-primary);
+  cursor: pointer;
+}
+.levi-palette__option[aria-selected="true"] {
+  background: var(--ds-surface-hover-on-raised, var(--ds-surface-hover));
+}
+.levi-palette__label {
+  flex: 1;
+}
+.levi-palette__current,
+.levi-palette__enter {
+  display: inline-flex;
+  color: var(--ds-text-secondary);
+}
+.levi-palette__empty {
+  padding: var(--ds-space-4) var(--ds-space-2);
+  color: var(--ds-text-secondary);
+}
+.levi-palette__hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-1);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+  line-height: var(--ds-text-caption-line);
+}
+
+/* ── Keyboard shortcuts ────────────────────────────────────────────── */
+.levi-shortcuts__group + .levi-shortcuts__group {
+  margin-top: var(--ds-space-4);
+}
+.levi-shortcuts__title {
+  margin-bottom: var(--ds-space-2);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+  line-height: var(--ds-text-caption-line);
+  font-weight: var(--ds-weight-medium);
+}
+.levi-shortcuts__list {
+  margin: 0;
+}
+.levi-shortcuts__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-4);
+  padding: var(--ds-space-2) 0;
+  border-top: 1px solid var(--ds-separator);
+}
+.levi-shortcuts__row dd {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--ds-space-1);
+  margin: 0;
+}
+.levi-shortcuts__combo {
+  display: inline-flex;
+  gap: 2px;
+}
+.levi-shortcuts__or {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+
+/* ── Agent Workbench drawer ────────────────────────────────────────── */
+/* Below the top bar, so the bar (and its toggle) stays usable beside it. */
+.ds-sheet.levi-agent-sheet {
+  top: var(--levi-header-height);
+  width: min(490px, 100vw);
+  max-width: 100vw;
+  min-width: min(360px, 100vw);
+  padding: 0;
+  gap: 0;
+}
+.levi-agent-sheet .ds-dialog__header {
+  align-items: center;
+  padding: var(--ds-space-3) var(--ds-space-4) var(--ds-space-3)
+    var(--ds-space-6);
+  border-bottom: 1px solid var(--ds-separator);
+}
+.levi-agent-sheet .ds-dialog__title {
+  font-size: var(--ds-text-title-3-size);
+  line-height: var(--ds-text-title-3-line);
+}
+.levi-agent-sheet .ds-dialog__body {
+  flex: 1;
+}
