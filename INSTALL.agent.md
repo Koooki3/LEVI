@@ -16,13 +16,13 @@ For Claude Code, Codex or any agent with a shell that installs LEVI for a person
 | 1 | `command -v git uv ffmpeg ffprobe` | each prints a path; a missing `uv` or `ffmpeg` is a person's step (root, or a download they approve) |
 | 2 | `git clone https://github.com/Koooki3/LEVI.git && cd LEVI` | `git status` is clean |
 | 3 | `export LEVI_WORKSPACE=<folder the person chose>` | path short (the core's socket path must stay within 103 bytes; doctor checks it) |
-| 4 | `uv run --locked levi install --profile core --plan --json` | exit 0 (nothing to do), 1 (automatic steps left) or 10 (a person's steps left); read `steps[]`. A `stop-service` step means this checkout's LEVI is running: the frontend is not rebuilt under it; ask the person to stop it (`uv run levi stop`), never stop it yourself |
+| 4 | `uv run --locked levi install --profile core --plan --json` | exit 0 (nothing to do), 1 (automatic steps left) or 10 (a person's steps left); read `steps[]`. A `stop-service` step means this checkout's LEVI is running: neither `uv sync` nor the frontend dependencies nor the build run under it (those steps are `human`); ask the person to stop it (`uv run --no-sync levi stop`), never stop it yourself |
 | 5 | `uv run --locked levi install --profile core --json` | exit 0, or 10 with only person steps left; `steps[].result` |
 | 6 | `uv run levi doctor --json` | `status` `ok` or `warn`; every `fail` has a `fix` |
 | 7 | optional profiles: `uv run levi install --profile <name> --plan --json`, then without `--plan` (add `--yes` only after the person agreed to the download) | as 4-6 |
 | 8 | acceptance (below) | all pass |
 
-`levi install` is idempotent: run it again after the person finished their steps, and it only does what is still missing. Updating an installed LEVI is always **stop, install, start**, and the person decides when the running service stops. A `build` step with `needs_yes` and a `confirm` reason (a build without a source stamp) is rebuilt only with `--yes`, and only while nothing serves the checkout. With `--json`, the steps' own output (uv, bun, the build) goes to standard error; standard output is one JSON document.
+`levi install` is idempotent: run it again after the person finished their steps, and it only does what is still missing. Updating an installed LEVI is always **stop, install, start**, every step included (the Python dependencies too), and the person decides when the running service stops. While it runs, call LEVI with `uv run --no-sync` (plain `uv run`, and `uv run --locked`, sync the environment first and so change packages under the running service); after the stop, `uv run --locked levi install` as in the table. A `build` step with `needs_yes` and a `confirm` reason (a build without a source stamp) is rebuilt only with `--yes`, and only while nothing serves the checkout. With `--json`, the steps' own output (uv, bun, the build) goes to standard error; standard output is one JSON document.
 
 ## The JSON
 

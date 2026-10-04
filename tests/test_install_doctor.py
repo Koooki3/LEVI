@@ -241,6 +241,32 @@ def test_build_state_classifies_a_temporary_next(tmp_path, monkeypatch):
     assert install._build_state() == "missing"
 
 
+def test_python_dependencies_wait_for_a_stop_while_this_checkout_serves(
+    isolated, monkeypatch
+):
+    """``uv sync`` changes the packages a running LEVI imports: while it
+    runs, the step is a person's and a ``stop-service`` step comes first."""
+    monkeypatch.setattr(install, "_build_state", lambda: "current")
+    monkeypatch.setattr(install, "_has", lambda module: False)
+    monkeypatch.setattr(
+        install, "serving", lambda ui_port=7860: "port 7860 is listening"
+    )
+    steps = install.plan(["core"])
+    ids = [s.id for s in steps]
+    deps = _step(steps, "python-deps")
+    assert deps.kind == "human" and not deps.done
+    assert "stop it first" in deps.note
+    assert ids.index("stop-service") < ids.index("python-deps")
+    assert not deps.public()["needs_yes"]
+    result = install.execute([deps], log=lambda *a, **k: None)
+    assert result["steps"][0]["result"] == "for a person"
+    # Not serving: LEVI runs it itself, and there is nothing to stop.
+    monkeypatch.setattr(install, "serving", lambda ui_port=7860: "")
+    steps = install.plan(["core"])
+    assert _step(steps, "python-deps").kind == "auto"
+    assert "stop-service" not in [s.id for s in steps]
+
+
 def test_serving_reads_the_socket_table(monkeypatch):
     monkeypatch.setattr(doctor, "listening_ports", lambda: {7860})
     assert "7860" in install.serving()

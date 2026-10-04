@@ -21,9 +21,10 @@ Exit code: 0 everything done; 2 a step failed; 10 steps are left for a
 person (or for ``--yes``). With ``--plan``: 0 nothing to do, 1 only
 automatic steps are left, 10 a person's steps are left.
 
-The frontend (``node_modules``, ``.next``) is never rebuilt while this
-checkout's LEVI runs (``serving``): those steps are handed to a person
-("stop, install, start"). A build without a source stamp is "unknown" and
+Nothing a running LEVI uses is changed under it: while this checkout's LEVI
+runs (``serving``), the Python dependencies (``uv sync``), the frontend
+dependencies (``node_modules``) and the build (``.next``) are handed to a
+person, after a ``stop-service`` step ("stop, install, start"). A build without a source stamp is "unknown" and
 is rebuilt only with ``--yes``.
 """
 
@@ -170,6 +171,26 @@ def serving(ui_port: int = 7860) -> str:
     return ""
 
 
+def stop_first(busy: str) -> Step:
+    """A person's step: stop this checkout's LEVI before ``uv sync``, the
+    frontend dependencies or the build change what it runs (stop, install,
+    start)."""
+    return Step(
+        "stop-service",
+        "core",
+        "stop the running LEVI first: its Python dependencies, frontend "
+        "dependencies and build are changed only while nothing uses them",
+        "human",
+        [
+            "uv run --no-sync levi stop   # plain `uv run` would sync first",
+            "uv run --locked levi install --profile core",
+            "uv run levi   # start it again",
+        ],
+        note=busy,
+        docs="INSTALL.md",
+    )
+
+
 def plan(profiles) -> list:
     """The steps of these profiles, in order, each with ``done`` filled in."""
     profiles = list(dict.fromkeys(["core", *profiles]))
@@ -204,6 +225,8 @@ def plan(profiles) -> list:
                 )
             )
             break
+    busy = serving()
+    at_python = len(steps)
     extras = _extras(profiles)
     synced = all(_has(m) for m in ("fastapi", "pandas")) and (
         "agent" not in extras or all(_has(m) for m in ("pydantic_ai", "mcp"))
@@ -221,7 +244,13 @@ def plan(profiles) -> list:
             network=True,
             download_bytes=600 << 20,
             done=synced,
-            note="--inexact keeps packages already installed (a developer's dev group)",
+            note="--inexact keeps packages already installed (a developer's dev group)"
+            + (
+                "; this LEVI is running: stop it first, install, then start it"
+                if busy and not synced
+                else ""
+            ),
+            kind_override="human" if busy and not synced else "",
         )
     )
     steps.append(
@@ -261,28 +290,16 @@ def plan(profiles) -> list:
                 docs="INSTALL.md",
             )
         )
-    busy = serving()
     deps_done = (
         bun is not None
         and bun.exists()
         and (PROJECT / "node_modules/next/package.json").is_file()
     )
     build = _build_state()
-    stop_first = Step(
-        "stop-service",
-        "core",
-        "stop the running LEVI first: the frontend is rebuilt only while nothing uses it",
-        "human",
-        [
-            "uv run levi stop",
-            "uv run levi install --profile core",
-            "uv run levi   # start it again",
-        ],
-        note=busy,
-        docs="INSTALL.md",
-    )
-    if busy and (not deps_done or build != "current") and bun is not None:
-        steps.append(stop_first)
+    frontend_waits = bun is not None and (not deps_done or build != "current")
+    if busy and (frontend_waits or not synced):
+        # Before the first step that would change what the running LEVI uses.
+        steps.insert(at_python, stop_first(busy))
     steps.append(
         Step(
             "frontend-deps",
