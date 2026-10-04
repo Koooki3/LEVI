@@ -108,6 +108,26 @@ Import from `@/components/ds`. The root layout imports `@/styles/tokens.css`, `@
 
 **Tailwind** does not scan `docs/` (`@source not "../../docs"` in `globals.css`): the Markdown is not UI code and its words must not add utilities.
 
+## Pages (stage 4)
+
+Live evaluation (`/live`), Conversion & review (`/workbench`), the training pool (`/pool`), Explore (`/explore`) and the content of the Agent Workbench drawer use the tokens and follow the theme. Their API calls, jobs and data are unchanged; only markup, classes and feedback changed.
+
+| What | Where |
+| --- | --- |
+| Page styles (classes `pg-*`) | `src/components/pages-ui/pages.css`, imported by the four pages |
+| Agent Workbench content styles | `src/components/pages-ui/agent-content.css` (rules under `.levi-agent-sheet`; the drawer itself is the frame's) |
+| Feedback pieces | `src/components/pages-ui/feedback.tsx` |
+| Tests | `src/components/pages-ui/__tests__/`, `src/components/pool/__tests__/composition-order.test.tsx` |
+
+- **Classes.** The pages' former `levi-*` classes from `levi.css` are restated as `pg-*` with the same layout and token colours; buttons, fields and tables use `ds-btn`, `ds-input` and `ds-table` (or the components). The Agent Workbench content keeps its `levi-agent-*`, `levi-activity-*` and `levi-connection-*` names (they are shared with the drawer); `agent-content.css` restates them under `.levi-agent-sheet`, and its buttons and fields carry `ds-btn` / `ds-input`, with a pressed button (tabs, toggles) drawn as the selected state. Neither stylesheet has a colour literal (tested), and the hex lint rule covers these pages' TSX (`PAGE_FILES` in `eslint.config.mjs`).
+- **Feedback** (candidates for `ds`): `Problem` is the three-part error (what happened, why — usually the server's sentence —, what to do, optional collapsed technical details; `role="alert"`, or `live={false}` for a standing error); `RequestProblem` names the failed action and shows the server's message as the reason; `Note` is an inline info/success/warning note; `JobCard` is the job card every page uses for a running or finished job (status badge, title, meta, then the page's progress and results); `EmptyLine` is a one-line empty state inside a card.
+- **Status** is a `Badge` or `StatusDot` (shape, colour and words): pool job states, conversion requirement checks, live session and service states (a running session breathes), episode outcomes. Progress bars are `Progress`.
+- **Loading and results.** Skeletons where a layout is known (pool preview, picked episodes, live statistics); results that land away from the action (a recipe saved, records cleared, space freed) are toasts; errors stay next to the action that failed.
+- **Training pool task order** is a `ReorderList` (Motion): drag by the handle or press ↑/↓ on it; each task keeps its move-up, move-down and remove buttons.
+- **One primary button per screen**: Register & browse (Conversion & review), Start export (training pool; Scan now while the pool was never scanned), Run conversion once a plan exists.
+- **Shared components drawn on these pages** but used elsewhere too (`dataset-format.tsx`, `hf-auth-button.tsx`) are restyled only inside these pages, by class, until their owners move them.
+- **Known gaps**: table cells whose text is cut keep a native `title` with the full text; the live session list can warn about a duplicate React key when two sessions report the same model and task folder (data-dependent, not changed here).
+
 ## Motion
 
 | Interaction | Motion | Reduced motion |

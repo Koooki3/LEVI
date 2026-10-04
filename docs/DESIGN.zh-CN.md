@@ -108,6 +108,26 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 
 **Tailwind** 不扫描 `docs/`（`globals.css` 里的 `@source not "../../docs"`）：Markdown 不是界面代码，其中的词不应生成样式。
 
+## 页面（第 4 阶段）
+
+实时评测（`/live`）、转换与审核（`/workbench`）、训练池（`/pool`）、探索数据（`/explore`）和 Agent 工作台抽屉里的内容都已改用令牌，随主题切换。接口调用、作业和数据都没变，只改了标记、类名和反馈方式。
+
+| 内容 | 位置 |
+| --- | --- |
+| 页面样式（类名 `pg-*`） | `src/components/pages-ui/pages.css`，由四个页面引入 |
+| Agent 工作台内容样式 | `src/components/pages-ui/agent-content.css`（规则都在 `.levi-agent-sheet` 之下；抽屉本身属于全局框架） |
+| 反馈组件 | `src/components/pages-ui/feedback.tsx` |
+| 测试 | `src/components/pages-ui/__tests__/`、`src/components/pool/__tests__/composition-order.test.tsx` |
+
+- **类名**：这些页面原来用 `levi.css` 里的 `levi-*` 类，现在改写为 `pg-*`，布局不变，颜色换成令牌；按钮、输入框和表格直接用 `ds-btn`、`ds-input`、`ds-table`（或对应组件）。Agent 工作台内容保留 `levi-agent-*`、`levi-activity-*`、`levi-connection-*` 类名（与抽屉共用），`agent-content.css` 在 `.levi-agent-sheet` 下用令牌重写；其中的按钮和输入框加了 `ds-btn` / `ds-input`，按下的按钮（标签、开关）显示为选中态。两份样式表都没有颜色字面量（有测试），这些页面的 TSX 也受十六进制颜色的 lint 规则约束（`eslint.config.mjs` 的 `PAGE_FILES`）。
+- **反馈组件**（以后可提升进 `ds`）：`Problem` 是三段式错误（发生了什么、为什么——通常是服务端原话——、怎么办，可选折叠的“技术细节”；默认 `role="alert"`，常驻的错误用 `live={false}`）；`RequestProblem` 写明哪个操作失败，并把服务端消息作为原因；`Note` 是行内的信息/成功/警告提示；`JobCard` 是各页统一的作业卡（状态徽章、标题、右侧元数据，下面放该页的进度和结果）；`EmptyLine` 是卡片内的一行空状态。
+- **状态**一律用 `Badge` 或 `StatusDot`（形状、颜色、文字）：训练池作业状态、转换的检查项、实时评测的会话和服务状态（运行中的会话会呼吸）、片段结局。进度条用 `Progress`。
+- **加载和结果**：布局已知的地方用骨架屏（训练池预览、选中片段、实时评测统计）；结果不在操作旁边时（配方已保存、记录已清除、已释放空间）用 Toast；错误留在出错的操作旁边。
+- **训练池的任务顺序**改用 `ReorderList`（Motion）：拖动手柄，或聚焦手柄后按 ↑/↓；每个任务仍保留上移、下移和移除按钮。
+- **每屏一个主要按钮**：登记并浏览（转换与审核）、开始导出（训练池；从未扫描时是“立即扫描”）、有计划后的“运行转换”。
+- **这些页面里用到、但别处也用的共享组件**（`dataset-format.tsx`、`hf-auth-button.tsx`）只在这些页面内按类名改了外观，等其所有者迁移。
+- **已知缺口**：被截断的表格单元格仍用原生 `title` 显示全文；两个会话报告同一模型和任务目录时，实时评测会话列表可能出现 React 重复 key 警告（取决于数据，这里没改）。
+
 ## 动效
 
 | 交互 | 动效 | 减少动态效果时 |
