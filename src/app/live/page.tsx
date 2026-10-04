@@ -33,6 +33,7 @@ import {
 } from "@/components/live/session-panels";
 import { disabledText } from "@/components/live/embedding";
 import { StatsPanel } from "@/components/live/stats-panel";
+import { LiveSummaryBar, liveSummary } from "@/components/live/live-summary";
 import { useDatasetDetails, useLivePoll } from "@/components/live/use-live";
 import {
   readBrowserStorage,
@@ -155,11 +156,16 @@ export default function LivePage() {
           )}
         </Note>
       )}
-      <p>
+      <Note tone="info">
         {t(
           "Watch a robot evaluation while it runs: the evaluation sessions, the FR3 arm, and how far the background LEVI has got with labelling the finished episodes. Nothing here starts, stops or approves anything; the only change you can make is to remove an episode from a dataset (restorable, nothing is deleted). Automatic results are unreviewed and their accuracy has not been evaluated.",
         )}
-      </p>
+      </Note>
+      {status?.enabled !== false && (
+        <LiveSummaryBar
+          summary={liveSummary(sessions, rows, service?.last_error)}
+        />
+      )}
       <Freshness
         lastOk={poll.lastOk}
         delay={poll.delay}

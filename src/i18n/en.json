@@ -2213,5 +2213,9 @@
   "Running jobs are also listed in the Jobs menu of the top bar.": "Running jobs are also listed in the Jobs menu of the top bar.",
   "The token was not accepted": "The token was not accepted",
   "Check the token on huggingface.co and paste it again.": "Check the token on huggingface.co and paste it again.",
-  "Export steps": "Export steps"
+  "Export steps": "Export steps",
+  "Summary": "Summary",
+  "Running sessions": "Running sessions",
+  "Labelled / finished episodes": "Labelled / finished episodes",
+  "Most recent error": "Most recent error"
 }
