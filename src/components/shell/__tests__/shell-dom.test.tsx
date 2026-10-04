@@ -409,29 +409,36 @@ describe("command palette", () => {
 });
 
 describe("a native modal dialog keeps the keys", () => {
-  // Without the guard the palette opens behind the native dialog and the two
-  // pull focus back and forth (under happy-dom that loops without end).
+  // Only the frame's state is checked, not the palette itself: a palette
+  // opened behind a native dialog would fight it for focus, and under
+  // happy-dom that loops without end instead of failing.
   test("Ctrl+K and ? do nothing while a showModal() dialog is open", async () => {
+    let state = { palette: false, shortcuts: false };
+    function Probe() {
+      const shell = useShell();
+      state = { palette: shell.paletteOpen, shortcuts: shell.shortcutsOpen };
+      return null;
+    }
     await withModalSupport(async () => {
       await render(
-        <Frame>
+        <ShellProvider>
+          <Probe />
           <dialog id="native">
             <button type="button" id="in-native">
               In
             </button>
           </dialog>
-        </Frame>,
+        </ShellProvider>,
       );
       const native = document.querySelector<HTMLDialogElement>("#native")!;
       await act(async () => native.showModal());
       const inside = document.querySelector("#in-native");
       await press(inside, "k", { ctrlKey: true });
       await press(inside, "?", { shiftKey: true });
-      expect(document.querySelector(".levi-palette")).toBeNull();
-      expect(document.querySelector(".levi-shortcuts")).toBeNull();
+      expect(state).toEqual({ palette: false, shortcuts: false });
       await act(async () => native.close());
       await press(document.body, "k", { ctrlKey: true });
-      expect(document.querySelector(".levi-palette")).not.toBeNull();
+      expect(state.palette).toBe(true);
     });
   });
 });
