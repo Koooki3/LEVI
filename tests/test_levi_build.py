@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from levi import bootstrap, doctor
+from levi import bootstrap, doctor, install
 from levi import cli as levi_cli
 
 
@@ -29,6 +29,8 @@ def checkout(tmp_path, monkeypatch):
     (project / "src/page.tsx").write_text("x")
     for module in (bootstrap, levi_cli, doctor):
         monkeypatch.setattr(module, "PROJECT", project)
+    # Nothing of this checkout serves, unless a test says so.
+    monkeypatch.setattr(install, "serving", lambda ui_port=7860: "")
     return project
 
 
@@ -113,3 +115,32 @@ def test_a_failed_build_points_at_the_dependencies(checkout, calls, capsys):
     err = capsys.readouterr().err
     assert "frontend dependencies" in err and "levi setup" in err
     assert not (checkout / doctor.BUILD_STAMP).exists()
+
+
+def test_build_is_refused_while_this_checkout_serves(
+    checkout, calls, capsys, monkeypatch
+):
+    """The product's and the live service's ``next start`` read this
+    checkout's node_modules and .next: neither install nor build runs."""
+    ran, _codes = calls
+    monkeypatch.setattr(
+        install, "serving", lambda ui_port=7860: "port 7860 is listening"
+    )
+    assert levi_cli.build_frontend("/x/bun") == levi_cli.EXIT_SERVING
+    assert ran == []
+    err = capsys.readouterr().err
+    assert "levi stop" in err and "levi live stop" in err
+    assert "--while-serving" in err
+    assert not (checkout / doctor.BUILD_STAMP).exists()
+
+
+def test_while_serving_builds_but_never_installs(checkout, calls, capsys, monkeypatch):
+    ran, _codes = calls
+    install_all(checkout, names=("next",))  # dependencies missing
+    monkeypatch.setattr(
+        install, "serving", lambda ui_port=7860: "port 7860 is listening"
+    )
+    assert levi_cli.build_frontend("/x/bun", while_serving=True) == 0
+    assert ran == [["run", "build"]]
+    err = capsys.readouterr().err
+    assert "warning" in err and "lacks lucide-react, motion" in err

@@ -29,7 +29,7 @@ uv run levi doctor
 uv run levi                                           # 启动网页（7860）和 API（7861）
 ```
 
-`uv run` 第一次使用时建好 Python 环境。core 组件接着运行 `uv sync --locked --inexact`（保留已经装的包，例如开发者的 dev 依赖组），没有 `.env` 时把 `.env.example` 复制成 `.env`（已有的 `.env` 绝不改动），建工作区，运行 `levi setup`（Bun 和 `bun install --frozen-lockfile`）和 `levi build`。然后打开 http://127.0.0.1:7860。`node_modules` 与 `bun.lock`/`package.json` 不一致时（不存在、它们比上次安装新，或缺少 `package.json` 列出的某个依赖），`levi build` 会先用 LEVI 自带的 Bun 运行 `bun install --frozen-lockfile` 再构建；仍然构建失败时，它提示运行 `uv run levi setup`。
+`uv run` 第一次使用时建好 Python 环境。core 组件接着运行 `uv sync --locked --inexact`（保留已经装的包，例如开发者的 dev 依赖组），没有 `.env` 时把 `.env.example` 复制成 `.env`（已有的 `.env` 绝不改动），建工作区，运行 `levi setup`（Bun 和 `bun install --frozen-lockfile`）和 `levi build`。然后打开 http://127.0.0.1:7860。`node_modules` 与 `bun.lock`/`package.json` 不一致时（不存在、它们比上次安装新，或缺少 `package.json` 列出的某个依赖），`levi build` 会先用 LEVI 自带的 Bun 运行 `bun install --frozen-lockfile` 再构建；仍然构建失败时，它提示运行 `uv run levi setup`。本检出的 LEVI 在运行时（产品 LEVI，或从本检出启动的实时服务：两者的 `next start` 都读本检出的 `node_modules` 和 `.next`），`levi build` 拒绝构建（退出码 3），并说明要先停什么（`uv run --no-sync levi stop`、`uv run --no-sync levi live stop`）；`levi build --while-serving` 仍然构建，但会给出警告、不安装依赖，正在运行的页面在重启之前可能出错。
 
 工作区路径有长度要求：核心在工作区里监听一个 Unix socket，socket 路径不能超过 103 字节，路径太长时 `levi doctor` 报失败。新工作区不会自己下载任何东西；需要 DROID 测试样本时运行 `uv run levi sample fetch droid`（500 个片段，约 11.6 GiB，见[工作区](docs/WORKSPACE.md#droid-test-sample)）。
 

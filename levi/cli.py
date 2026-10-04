@@ -143,15 +143,50 @@ def namespace_cli(argv) -> int:
     return 0
 
 
-def build_frontend(bun: str) -> int:
+EXIT_SERVING = 3  # levi build refused: a LEVI of this checkout is running
+
+
+def build_frontend(bun: str, while_serving: bool = False) -> int:
     """``levi build``: install the frontend dependencies first when
     ``node_modules`` does not match ``bun.lock``/``package.json``
     (``bun install --frozen-lockfile``, with the Bun given), then the
     production build and its source stamp. A failed build names the
-    dependencies as a likely cause."""
-    from .bootstrap import frontend_deps_problem, mark_frontend_deps
+    dependencies as a likely cause.
 
+    A running LEVI of this checkout (the product's ``next start``, or the
+    live service's, which share ``node_modules`` and ``.next``;
+    ``install.serving``) refuses the build with ``EXIT_SERVING`` and says
+    what to stop. ``while_serving`` builds anyway, with a warning, but never
+    reinstalls the dependencies under it."""
+    from .bootstrap import frontend_deps_problem, mark_frontend_deps
+    from .install import serving
+
+    busy = serving()
+    if busy and not while_serving:
+        print(
+            f"levi build refused: {busy}. `next start` reads node_modules and "
+            ".next of this checkout, so stop every LEVI that uses it first: "
+            "`uv run --no-sync levi stop` (the product LEVI) and, if the live "
+            "service runs from this checkout, `uv run --no-sync levi live stop`; "
+            "then `uv run levi build` and start them again. "
+            "`levi build --while-serving` builds anyway (no dependency install).",
+            file=sys.stderr,
+        )
+        return EXIT_SERVING
     problem = frontend_deps_problem()
+    if busy:
+        print(
+            f"warning: building while {busy} (--while-serving): the running "
+            "page may break until it is restarted"
+            + (
+                f"; frontend dependencies not installed ({problem}): stop it "
+                "and run `uv run levi build`"
+                if problem
+                else ""
+            ),
+            file=sys.stderr,
+        )
+        problem = ""
     if problem:
         print(
             f"frontend dependencies: {problem}; running bun install --frozen-lockfile"
@@ -338,6 +373,12 @@ def main():
         default=7861,
         help="Internal API port / 内部 API 端口 (default: 7861)",
     )
+    parser.add_argument(
+        "--while-serving",
+        action="store_true",
+        help="build: build even while a LEVI of this checkout runs (no dependency "
+        "install; the running page may break until it is restarted)",
+    )
     args = parser.parse_args()
     configure()
     from .bootstrap import bun_path, setup
@@ -377,7 +418,7 @@ def main():
     if not Path(bun).exists():
         parser.error("Bun is required: see README installation instructions")
     if args.command == "build":
-        raise SystemExit(build_frontend(bun))
+        raise SystemExit(build_frontend(bun, args.while_serving))
     if args.command == "check":
         # Frontend (type-check/lint/format/tests) and the Python lint, in one
         # command — CI runs both too (see .github/workflows/test.yml); this
