@@ -45,16 +45,18 @@ describe("theme preference", () => {
     expect(readThemePreference()).toBe("dark");
   });
 
-  test("persists in localStorage; an explicit system is stored, the default removes the key", () => {
+  test("persists every explicit choice in localStorage, the default included", () => {
     expect(writeThemePreference("light")).toBe(true);
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("light");
     expect(readThemePreference()).toBe("light");
     writeThemePreference("system");
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("system");
     expect(readThemePreference()).toBe("system");
-    writeThemePreference(THEME_DEFAULT_PREFERENCE);
-    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBeNull();
-    expect(readThemePreference()).toBe(THEME_DEFAULT_PREFERENCE);
+    // Choosing dark (the transitional default) is a choice too: kept, so it
+    // still holds when stage 5 makes "system" the default.
+    writeThemePreference("dark");
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
+    expect(readThemePreference()).toBe("dark");
   });
 
   test("a throwing storage falls back to the default and never throws", () => {

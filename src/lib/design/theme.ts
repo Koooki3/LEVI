@@ -14,7 +14,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   readBrowserStorage,
-  removeBrowserStorage,
   writeBrowserStorage,
 } from "@/utils/browserStorage";
 
@@ -48,14 +47,12 @@ export function readThemePreference(): ThemePreference {
 }
 
 /**
- * Store the preference; the default (THEME_DEFAULT_PREFERENCE) removes the
- * key, so no stored value always means "the default". False when storage
- * fails.
+ * Store an explicit choice, whichever it is (the default included), so it
+ * survives a later change of THEME_DEFAULT_PREFERENCE; only someone who never
+ * chose has no stored value. False when storage fails.
  */
 export function writeThemePreference(preference: ThemePreference): boolean {
-  return preference === THEME_DEFAULT_PREFERENCE
-    ? removeBrowserStorage("local", THEME_STORAGE_KEY)
-    : writeBrowserStorage("local", THEME_STORAGE_KEY, preference);
+  return writeBrowserStorage("local", THEME_STORAGE_KEY, preference);
 }
 
 export function resolveTheme(
