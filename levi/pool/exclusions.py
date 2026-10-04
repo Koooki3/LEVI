@@ -22,8 +22,10 @@ fingerprints differ and the two are in different groups). The paths are only
 compared with the index's keys, never opened, so a state file can at worst
 make the pool leave out more.
 
-Only workspaces the last scan found under the pool roots (and the pool's own
-workspace) are consulted; a live workspace the scan has not seen is not.
+Only workspaces the last scan found under the pool roots, the pool's own
+workspace and the live workspace this LEVI's live page shows
+(``levi/live/locate.py``) are consulted; any other live workspace the scan
+has not seen is not.
 
 Nothing here writes.
 """
@@ -86,9 +88,21 @@ def workspace_exclusions(workspace: Path) -> dict[str, dict]:
 
 
 def workspaces(scanned) -> list[Path]:
-    """The workspaces to consult: those the last scan listed, and the pool's."""
+    """The workspaces to consult: those the last scan listed, the pool's, and
+    the live workspace the live page of this LEVI shows (``levi/live/
+    locate.py``): a person removes episodes on the product LEVI's page too,
+    and that must reach this pool even when the live workspace lies outside
+    the pool roots (its states name the rollout folders they came from)."""
     seen = {Path(w) for w in scanned or []}
     seen.add(settings.workspace())
+    try:
+        from levi.live import locate
+
+        found = locate.find(settings.workspace()).workspace
+    except Exception:  # noqa: BLE001 - never let the live side break the pool
+        found = None
+    if found is not None:
+        seen.add(Path(found))
     return sorted(seen)
 
 

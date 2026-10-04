@@ -7,6 +7,7 @@ index listings, the recipes and the exports, whichever copy a recipe would
 pick, and without a new scan."""
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -289,3 +290,30 @@ def test_an_index_without_the_live_workspace_still_refuses_the_mirror_by_key(poo
     with pytest.raises(PermissionError):
         export.refuse_removed([{"key": mirror_key}])
     export.refuse_removed([{"key": str(pool["task"] / "demo_0000")}])
+
+
+def test_a_removal_on_the_product_page_reaches_the_pool_outside_the_pool_roots(
+    pool, tmp_path
+):
+    """The product LEVI's live page removes episodes in a live workspace that
+    may lie outside the pool roots (the scan never sees it): the pool still
+    consults the live workspace that page shows (``levi/live/locate.py``)."""
+    outside = tmp_path / "live-elsewhere"
+    config = live_config.Config()
+    config.service.workspace = str(outside)
+    (outside / "live").mkdir(parents=True)
+    (outside / "live/workspace.json").write_text("{}")
+    state = mirror.empty_state(
+        config,
+        (str(pool["root"] / "rollouts/models"), "pi05_test", "stack_the_plates"),
+        0,
+    )
+    state["demos"] = {"demo_0002": {"state": "done", "episode_index": 2}}
+    mirror.jsonio.write(mirror.state_path(config, DATASET), state)
+    exclusion.exclude(config, DATASET, ["demo_0002"], via="product")
+    original = str(pool["task"] / "demo_0002")
+    assert original in episodes()  # nothing names that live workspace yet
+    home = Path(os.environ["LEVI_LIVE_HOME"])
+    mirror.jsonio.write(home / "status.json", {"workspace": str(outside)})
+    assert original not in episodes()
+    assert recipe.preview(Recipe(name="r", categories=["rollout"]))["episodes"] == 2
