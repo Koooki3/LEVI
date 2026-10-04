@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -71,6 +72,29 @@ def test_a_killed_owner_leaves_groups_the_next_start_reclaims():
     finally:
         children.stop_owned(grace=2)
         mine.wait(timeout=5)
+
+
+@pytest.mark.parametrize("state", ["Z", "X", "x"])
+def test_an_exited_process_has_no_identity(monkeypatch, state):
+    """Zombie and dead (X, shown while a process is reaped) both mean exited."""
+    pid = os.getpid()
+    alive = children.identity(pid)
+    assert alive is not None
+    real = children.Path
+    stat = Path(f"/proc/{pid}/stat").read_text()
+    head, tail = stat.rsplit(")", 1)
+    fields = tail.split()
+    fields[0] = state
+    text = head + ") " + " ".join(fields) + "\n"
+
+    class FakePath(type(real())):
+        def read_text(self, *args, **kwargs):
+            if str(self) == f"/proc/{pid}/stat":
+                return text
+            return super().read_text(*args, **kwargs)
+
+    monkeypatch.setattr(children, "Path", FakePath)
+    assert children.identity(pid) is None
 
 
 def test_a_reused_pid_is_never_signalled():

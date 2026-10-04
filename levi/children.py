@@ -32,12 +32,17 @@ def _path() -> Path:
     return STATE / "processes.json"
 
 
+# /proc/<pid>/stat states of an exited process: zombie, and dead (X, x) for
+# the moment it is being reaped.
+EXITED = frozenset("ZXx")
+
+
 def identity(pid):
     """What makes a PID this process and not a later one: None once it has
-    exited (including a zombie awaiting its parent)."""
+    exited (including a zombie awaiting its parent, or one being reaped)."""
     try:
         stat = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
-        if stat[0] == "Z":
+        if stat[0] in EXITED:
             return None
         return {
             "start_ticks": stat[19],
@@ -136,7 +141,7 @@ def _members(row) -> list[int]:
             stat = (entry / "stat").read_text().rsplit(")", 1)[1].split()
         except (OSError, IndexError):
             continue
-        if stat[0] == "Z" or int(stat[2]) != leader:
+        if stat[0] in EXITED or int(stat[2]) != leader:
             continue
         if int(stat[19]) < int(row["identity"]["start_ticks"]):
             continue

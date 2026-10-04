@@ -504,11 +504,19 @@ class GpuLock:
 # --- vLLM -----------------------------------------------------------------------------
 
 
+# /proc/<pid>/stat states of a process that has exited: a zombie, and "dead"
+# (X, x: shown for a moment while it is being reaped). A process that dies
+# can read Z and then X before it disappears, so treating X as alive made a
+# stopped vLLM look alive again for an instant.
+EXITED = frozenset("ZXx")
+
+
 def identity(pid):
-    """(start ticks, boot id) of a process, None once it is gone or a zombie."""
+    """(start ticks, boot id) of a process, None once it is gone, a zombie or
+    being reaped."""
     try:
         stat = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
-        if stat[0] == "Z":
+        if stat[0] in EXITED:
             return None
         boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
         return {"start_ticks": stat[19], "boot": boot}
@@ -635,7 +643,7 @@ def _group_alive(pgid) -> list:
                 )
             except (OSError, IndexError):
                 continue
-            if int(fields[2]) == pgid and fields[0] != "Z":
+            if int(fields[2]) == pgid and fields[0] not in EXITED:
                 alive.append(int(entry.name))
     except OSError:
         pass

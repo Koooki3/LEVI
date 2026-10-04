@@ -33,6 +33,34 @@ def table(rows):
     return head + "\n".join(lines) + "\n"
 
 
+def fake_stat(monkeypatch, module, state, pid=4242, pgrp=4242, start=777):
+    """``/proc/<pid>/stat`` of ``pid`` reads ``state`` in ``module``."""
+    after = [state, "1", str(pgrp)] + ["0"] * 16 + [str(start)] + ["0"] * 5
+    text = f"{pid} (python3) " + " ".join(after) + "\n"
+    real = module.Path
+
+    class FakePath(type(real())):
+        def read_text(self, *args, **kwargs):
+            if str(self) == f"/proc/{pid}/stat":
+                return text
+            return super().read_text(*args, **kwargs)
+
+    monkeypatch.setattr(module, "Path", FakePath)
+
+
+@pytest.mark.parametrize("state", ["Z", "X", "x"])
+def test_a_process_that_has_exited_has_no_identity(monkeypatch, state):
+    """A dying process reads Z and then, for a moment, X (dead) before it is
+    gone. X counted as alive: a stopped vLLM looked alive again right after
+    the stop checked it was not, and the stop reported "vLLM did not stop"
+    (an intermittent CI failure)."""
+    fake_stat(monkeypatch, gpumgr, "S")
+    assert gpumgr.identity(4242)["start_ticks"] == "777"
+    fake_stat(monkeypatch, gpumgr, state)
+    assert gpumgr.identity(4242) is None
+    assert not gpumgr.same_process(4242, {"start_ticks": "777", "boot": "b"})
+
+
 def test_listening_ports_come_from_the_socket_table_not_a_connection(tmp_path):
     tcp = tmp_path / "tcp"
     tcp.write_text(table([(8000, "0A"), (5000, "01"), (8100, "0A"), (22, "0A")]))
