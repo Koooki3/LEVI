@@ -18,7 +18,7 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 
 ## 新代码的规则
 
-- **禁止硬编码颜色。** 用语义令牌（`var(--ds-text-secondary)`、`var(--ds-surface-1)`）或 `ds-*` 类。新的 CSS 和 TSX 里不写十六进制、`rgb()`、`hsl()`，也不写 Tailwind 任意值；`ds.css`、`shell.css`、样张页 CSS、组件和样张页的 TSX 里出现就会让测试失败；全局框架的 TSX 里出现十六进制字符串时 ESLint 报错（`no-restricted-syntax`，文件清单是 `eslint.config.mjs` 的 `FRAME_FILES`）。旧页面在第 6 阶段清理。数据配色（时间片段、掩码、图表序列）是单独一套，第 4 阶段定义。
+- **禁止硬编码颜色。** 用语义令牌（`var(--ds-text-secondary)`、`var(--ds-surface-1)`）或 `ds-*` 类。新的 CSS 和 TSX 里不写十六进制、`rgb()`、`hsl()`，也不写 Tailwind 任意值；`ds.css`、`shell.css`、样张页 CSS、组件和样张页的 TSX 里出现就会让测试失败；全局框架的 TSX 里出现十六进制颜色时 ESLint 报错（`no-restricted-syntax`，文件清单是 `eslint.config.mjs` 的 `FRAME_FILES`；颜色指字符串开头或空格、`(`、`,`、`:` 之后的 `#` 加 3、4、6 或 8 位十六进制数字；`href`、`to`、`id`、`htmlFor` 的值是链接，不检查；测试在 `src/__tests__/eslint-hex.test.ts`）。旧页面在第 6 阶段清理。数据配色（时间片段、掩码、图表序列）是单独一套，第 4 阶段定义。
 - **组件里只用语义令牌。** 原始灰阶 `--ds-gray-l-*`、`--ds-gray-d-*` 只用来定义语义令牌。
 - **每屏一个主要按钮。** 强调色 A“石墨”是最深的灰，只用于主要按钮、焦点环、选中态和进度。正文中的链接用主文字色加下划线。
 - **状态不只靠颜色。** 状态色（成功、警告、错误、信息）只出现在徽章、状态点、Toast 和行内提示上，并且总带图标形状和文字（`Badge`、`StatusDot`）。
@@ -56,7 +56,7 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 
 默认浅色。系统为深色（`prefers-color-scheme: dark`）且祖先元素没有 `data-theme="light"` 时用深色；`data-theme="dark"` 下总是深色。`data-theme` 可以放在任何元素上，单独给一个子树换主题（样张页就是这样并排显示两套）。`prefers-contrast: more` 时，分隔线、控件边界和次要文字各提高一级。
 
-`useThemePreference()` 返回 `{ preference, resolved, setPreference }`：取值 `"system" | "light" | "dark"`，存在 `localStorage` 的 `levi-theme` 键下（`"system"` 会删除该键）。读写都经过不会抛异常的 `browserStorage`；存储不可用时为“跟随系统”。它跟随系统外观的变化和其他标签页的修改。这个 hook 本身不改 `<html>`，`applyTheme(element, preference)` 才改。从第 2 阶段起，全局框架（`ShellProvider`）持有唯一的偏好并把它作用到 `<html>`；根布局 `<head>` 里的一小段脚本（`theme-boot.ts`）在首次绘制前写入已存的浅色/深色选择，顶栏不会先闪一下另一套外观。页面还是深色时，`<html>` 的 `color-scheme` 保持深色，页面里的原生控件仍是深色外观。`ThemePicker` 是“跟随系统 / 浅色 / 深色”的切换控件；顶栏用一个有同样三个选项的菜单。
+`useThemePreference()` 返回 `{ preference, resolved, setPreference }`：取值 `"system" | "light" | "dark"`，存在 `localStorage` 的 `levi-theme` 键下。没有存储值（或存储不可用）时取 `THEME_DEFAULT_PREFERENCE`，选择这个值会删除该键；其他选择（包括 `"system"`）都会保存。**过渡期默认深色。** 页面改用令牌（第 5 阶段）之前，浅色顶栏压在深色页面上很别扭，所以默认是 `"dark"`；第 5 阶段改回 `"system"`（跟随系统）。这个值是 `src/lib/design/theme.ts` 里的一个常量，`theme-boot.ts` 里重复了一份，有测试保证两者相同。读写都经过不会抛异常的 `browserStorage`。它跟随系统外观的变化和其他标签页的修改。这个 hook 本身不改 `<html>`，`applyTheme(element, preference)` 才改。从第 2 阶段起，全局框架（`ShellProvider`）持有唯一的偏好并把它作用到 `<html>`；根布局 `<head>` 里的一小段脚本（`theme-boot.ts`）在首次绘制前应用同一个偏好（已存浅色/深色就写入；已存“跟随系统”就不写；没有存储值时用默认值），顶栏不会先闪一下另一套外观。页面还是深色时，`<html>` 的 `color-scheme` 保持深色，页面里的原生控件仍是深色外观。`ThemePicker` 是“跟随系统 / 浅色 / 深色”的切换控件；顶栏用一个有同样三个选项的菜单。
 
 给容器加 `ds-root` 类，它就使用设计系统的字体、文字色和背景，`color-scheme` 也随主题变化。
 

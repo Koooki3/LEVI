@@ -7,6 +7,7 @@ import {
 import { afterEach, describe, expect, test } from "bun:test";
 import { act } from "react";
 import {
+  THEME_DEFAULT_PREFERENCE,
   THEME_STORAGE_KEY,
   applyTheme,
   normalizeThemePreference,
@@ -28,25 +29,35 @@ afterEach(() => {
 });
 
 describe("theme preference", () => {
-  test("normalises unknown values to system and resolves", () => {
+  test("normalises unknown values to the default and resolves", () => {
     expect(normalizeThemePreference("dark")).toBe("dark");
-    expect(normalizeThemePreference("purple")).toBe("system");
-    expect(normalizeThemePreference(null)).toBe("system");
+    expect(normalizeThemePreference("system")).toBe("system");
+    expect(normalizeThemePreference("purple")).toBe(THEME_DEFAULT_PREFERENCE);
+    expect(normalizeThemePreference(null)).toBe(THEME_DEFAULT_PREFERENCE);
     expect(resolveTheme("system", true)).toBe("dark");
     expect(resolveTheme("system", false)).toBe("light");
     expect(resolveTheme("light", true)).toBe("light");
   });
 
-  test("persists in localStorage; system removes the key", () => {
-    expect(readThemePreference()).toBe("system");
-    expect(writeThemePreference("dark")).toBe(true);
-    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
+  test("transitional default: no stored value means dark (until stage 5)", () => {
+    expect(THEME_DEFAULT_PREFERENCE).toBe("dark");
+    window.localStorage.removeItem(THEME_STORAGE_KEY);
     expect(readThemePreference()).toBe("dark");
-    writeThemePreference("system");
-    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBeNull();
   });
 
-  test("a throwing storage falls back to system and never throws", () => {
+  test("persists in localStorage; an explicit system is stored, the default removes the key", () => {
+    expect(writeThemePreference("light")).toBe(true);
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("light");
+    expect(readThemePreference()).toBe("light");
+    writeThemePreference("system");
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("system");
+    expect(readThemePreference()).toBe("system");
+    writeThemePreference(THEME_DEFAULT_PREFERENCE);
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBeNull();
+    expect(readThemePreference()).toBe(THEME_DEFAULT_PREFERENCE);
+  });
+
+  test("a throwing storage falls back to the default and never throws", () => {
     const descriptor = Object.getOwnPropertyDescriptor(window, "localStorage");
     Object.defineProperty(window, "localStorage", {
       configurable: true,
@@ -55,8 +66,8 @@ describe("theme preference", () => {
       },
     });
     try {
-      expect(readThemePreference()).toBe("system");
-      expect(writeThemePreference("dark")).toBe(false);
+      expect(readThemePreference()).toBe(THEME_DEFAULT_PREFERENCE);
+      expect(writeThemePreference("light")).toBe(false);
     } finally {
       if (descriptor) Object.defineProperty(window, "localStorage", descriptor);
     }
@@ -90,7 +101,7 @@ describe("theme preference", () => {
       await click(host.querySelector("button"));
       expect(state!.preference).toBe("system");
       expect(host.textContent).toBe("dark");
-      expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBeNull();
+      expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("system");
       // Another tab changes it.
       window.localStorage.setItem(THEME_STORAGE_KEY, "light");
       await act(async () => {

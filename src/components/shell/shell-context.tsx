@@ -1,7 +1,8 @@
 "use client";
 /**
  * State the global frame shares: the theme preference (one instance, applied
- * to <html>), and whether the command palette or the shortcut list is open.
+ * to <html>; without a stored choice it is dark until design stage 5, see
+ * THEME_DEFAULT_PREFERENCE), and whether the command palette or the shortcut list is open.
  * It also listens for the frame's own shortcuts (global-keys.ts).
  */
 import {
@@ -15,6 +16,7 @@ import {
 } from "react";
 import {
   applyTheme,
+  THEME_DEFAULT_PREFERENCE,
   useThemePreference,
   type ResolvedTheme,
   type ThemePreference,
@@ -38,8 +40,8 @@ export const SHELL_OVERLAY_CLASS = "levi-shell-overlay";
 const OTHER_MODAL = `[aria-modal="true"]:not(.${SHELL_OVERLAY_CLASS})`;
 
 const OUTSIDE: Shell = {
-  theme: "system",
-  resolvedTheme: "light",
+  theme: THEME_DEFAULT_PREFERENCE,
+  resolvedTheme: "dark",
   setTheme: () => undefined,
   paletteOpen: false,
   setPaletteOpen: () => undefined,

@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { THEME_STORAGE_KEY } from "@/lib/design/theme";
+import {
+  THEME_DEFAULT_PREFERENCE,
+  THEME_STORAGE_KEY,
+} from "@/lib/design/theme";
 import {
   buildCommands,
   filterCommands,
@@ -15,7 +18,11 @@ import {
   shortcutGroups,
 } from "../global-keys";
 import { countConversionJobs, countPoolJobs, totalJobs } from "../jobs";
-import { THEME_BOOT_KEY, THEME_BOOT_SCRIPT } from "../theme-boot";
+import {
+  THEME_BOOT_DEFAULT,
+  THEME_BOOT_KEY,
+  THEME_BOOT_SCRIPT,
+} from "../theme-boot";
 
 const input = { closest: (selector: string) => (selector ? {} : null) };
 const plain = { closest: () => null };
@@ -191,47 +198,45 @@ describe("jobs", () => {
 });
 
 describe("theme boot script", () => {
-  test("uses the same storage key as the theme preference", () => {
+  test("uses the same storage key and default as the theme preference", () => {
     expect(THEME_BOOT_KEY).toBe(THEME_STORAGE_KEY);
+    expect(THEME_BOOT_DEFAULT).toBe(THEME_DEFAULT_PREFERENCE);
   });
 
-  test("sets a stored light/dark choice and ignores anything else", () => {
-    for (const [stored, expected] of [
-      ["dark", "dark"],
-      ["light", "light"],
-      ["system", null],
-      [null, null],
-      ["purple", null],
-    ] as const) {
-      const attributes: Record<string, string> = {};
-      const fakeDocument = {
+  const boot = (storage: { getItem: () => string | null }) => {
+    const attributes: Record<string, string> = {};
+    new Function("document", "localStorage", THEME_BOOT_SCRIPT)(
+      {
         documentElement: {
           setAttribute: (name: string, value: string) => {
             attributes[name] = value;
           },
         },
-      };
-      const fakeStorage = { getItem: () => stored };
-      new Function("document", "localStorage", THEME_BOOT_SCRIPT)(
-        fakeDocument,
-        fakeStorage,
-      );
-      expect(attributes["data-theme"] ?? null).toBe(expected);
-    }
+      },
+      storage,
+    );
+    return attributes["data-theme"] ?? null;
+  };
+
+  test("no stored value means dark during the transition (until stage 5)", () => {
+    expect(boot({ getItem: () => null })).toBe("dark");
+    expect(boot({ getItem: () => "purple" })).toBe("dark");
   });
 
-  test("blocked storage does not throw", () => {
-    const blocked = {
-      getItem: () => {
-        throw new Error("SecurityError");
-      },
-    };
-    expect(() =>
-      new Function("document", "localStorage", THEME_BOOT_SCRIPT)(
-        { documentElement: { setAttribute: () => undefined } },
-        blocked,
-      ),
-    ).not.toThrow();
+  test("an explicit choice wins; system leaves data-theme off", () => {
+    expect(boot({ getItem: () => "light" })).toBe("light");
+    expect(boot({ getItem: () => "dark" })).toBe("dark");
+    expect(boot({ getItem: () => "system" })).toBeNull();
+  });
+
+  test("blocked storage applies the default and does not throw", () => {
+    expect(
+      boot({
+        getItem: () => {
+          throw new Error("SecurityError");
+        },
+      }),
+    ).toBe("dark");
   });
 });
 

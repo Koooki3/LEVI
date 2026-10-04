@@ -148,6 +148,24 @@ function Frame({ children }: { children?: React.ReactNode }) {
 
 const ctrlK = { ctrlKey: true };
 
+describe("theme default", () => {
+  test("no stored value: the frame applies dark to <html> (until stage 5)", async () => {
+    window.localStorage.removeItem("levi-theme");
+    let theme = "";
+    function Probe() {
+      theme = useShell().theme;
+      return null;
+    }
+    await render(
+      <Frame>
+        <Probe />
+      </Frame>,
+    );
+    expect(theme).toBe("dark");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+  });
+});
+
 describe("command palette", () => {
   test("Ctrl+K opens it on the search field; Escape closes and returns focus", async () => {
     await render(<Frame />);

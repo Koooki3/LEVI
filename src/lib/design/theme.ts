@@ -5,11 +5,11 @@
  * The preference is "system" (follow `prefers-color-scheme`), "light" or
  * "dark", kept in localStorage under `levi-theme`. Storage may be missing or
  * throw (private windows, blocked site data); every read and write goes
- * through `browserStorage`, which never throws, and the default is "system".
+ * through `browserStorage`, which never throws. Without a stored value the
+ * preference is THEME_DEFAULT_PREFERENCE.
  *
- * Stage 1 only provides the state. Nothing here touches existing pages: the
- * caller decides where `data-theme` goes (`applyTheme`). Stage 2 will apply
- * it to <html> once the pages use the `--ds-*` tokens.
+ * Nothing here touches the page by itself: the caller decides where
+ * `data-theme` goes (`applyTheme`); the global frame applies it to <html>.
  */
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -22,12 +22,23 @@ export type ThemePreference = "system" | "light" | "dark";
 export type ResolvedTheme = "light" | "dark";
 
 export const THEME_STORAGE_KEY = "levi-theme";
+
+/**
+ * The preference when none is stored. Transitional: "dark" until the pages
+ * use the tokens (design stage 5), because a light frame over the still-dark
+ * pages looks broken; stage 5 sets it back to "system". An explicit choice,
+ * "system" included, is stored and always wins. The pre-paint script
+ * (components/shell/theme-boot.ts) repeats this value; a test keeps them equal.
+ */
+export const THEME_DEFAULT_PREFERENCE: ThemePreference = "dark";
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 
 export function normalizeThemePreference(
   value: string | null | undefined,
 ): ThemePreference {
-  return value === "light" || value === "dark" ? value : "system";
+  return value === "light" || value === "dark" || value === "system"
+    ? value
+    : THEME_DEFAULT_PREFERENCE;
 }
 
 export function readThemePreference(): ThemePreference {
@@ -36,9 +47,13 @@ export function readThemePreference(): ThemePreference {
   );
 }
 
-/** Store the preference; "system" removes the key. False when storage fails. */
+/**
+ * Store the preference; the default (THEME_DEFAULT_PREFERENCE) removes the
+ * key, so no stored value always means "the default". False when storage
+ * fails.
+ */
 export function writeThemePreference(preference: ThemePreference): boolean {
-  return preference === "system"
+  return preference === THEME_DEFAULT_PREFERENCE
     ? removeBrowserStorage("local", THEME_STORAGE_KEY)
     : writeBrowserStorage("local", THEME_STORAGE_KEY, preference);
 }
@@ -79,14 +94,17 @@ export function applyTheme(
 /**
  * The stored preference, a setter that persists it, and the theme it resolves
  * to now. Follows system changes and other tabs (the `storage` event).
- * Before mount it reports "system"/"light" so server and client render alike.
+ * Before mount it reports the default preference (and a light system) so
+ * server and client render alike.
  */
 export function useThemePreference(): {
   preference: ThemePreference;
   resolved: ResolvedTheme;
   setPreference: (preference: ThemePreference) => void;
 } {
-  const [preference, setPreferenceState] = useState<ThemePreference>("system");
+  const [preference, setPreferenceState] = useState<ThemePreference>(
+    THEME_DEFAULT_PREFERENCE,
+  );
   const [systemDark, setSystemDark] = useState(false);
 
   useEffect(() => {
