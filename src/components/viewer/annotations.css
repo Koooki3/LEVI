@@ -1,5 +1,6 @@
 /* ==========================================================================
-   Annotations tab — dark-mode skin scoped under .annotations-skin.
+   Annotations tab, scoped under .annotations-skin (design stage 3: tokens
+   only, light and dark; this replaces components/annotations-skin.css).
    Borrows the *functional* patterns from the Claude Design handoff
    (per-style pill colors, row layout, timeline shapes) but recolored to
    match the visualizer's existing dark theme. The complaint we're fixing
@@ -8,29 +9,15 @@
    ========================================================================== */
 
 .annotations-skin {
-  /* Brand accents (kept bright; visible on dark) */
-  --hf-yellow: #ffd21e;
-  --hf-orange: #ff9d00;
-  --hf-blue: #5b8cff;
-  --hf-cyan: #38bdf8;
-  --hf-red: #ef5350;
-  --hf-green: #34d399;
-  --hf-purple: #b78bff;
-
-  /* Dark surface scale */
-  --surface-0: rgba(255, 255, 255, 0.02);
-  --surface-1: rgba(255, 255, 255, 0.06);
-  --surface-2: rgba(255, 255, 255, 0.1);
-  --border-1: rgba(255, 255, 255, 0.12);
-  --border-2: rgba(255, 255, 255, 0.2);
-  --fg-1: #f1f5f9;
-  --fg-2: #cbd5e1;
-  --fg-3: #94a3b8;
-
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  /* Annotation styles take the data palette (viewer.css), in a fixed
+     order; the interface around them uses --ds-* tokens only. */
+  --style-subtask: var(--dv-1);
+  --style-plan: var(--dv-2);
+  --style-task-aug: var(--dv-3);
+  --style-speech: var(--dv-4);
+  --style-interjection: var(--dv-5);
+  --style-vqa: var(--dv-6);
+  --style-memory: var(--dv-7);
 }
 
 /* All form controls in the annotations area: brighter than the rest of the
@@ -41,84 +28,78 @@
 .annotations-skin input[type="search"],
 .annotations-skin textarea,
 .annotations-skin select {
-  background: var(--surface-1) !important;
-  color: var(--fg-1) !important;
-  border: 1px solid var(--border-1) !important;
-  border-radius: var(--radius-sm) !important;
+  background: var(--ds-field-bg) !important;
+  color: var(--ds-text-primary) !important;
+  border: 1px solid var(--ds-border-control) !important;
+  border-radius: var(--ds-radius-sm) !important;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--ds-text-callout-size);
   padding: 6px 9px;
-}
-/* `color-scheme: dark` on :root gets native option popovers most of the way
-   there, but Chromium still needs the colors spelled out explicitly — match
-   the graphite theme rather than the browser's own default. */
-.annotations-skin select option,
-.annotations-skin select optgroup {
-  color: #172018 !important;
-  background-color: #f4f7ed !important;
 }
 .annotations-skin input::placeholder,
 .annotations-skin textarea::placeholder {
-  color: var(--fg-3);
+  color: var(--ds-text-secondary);
 }
 .annotations-skin input:focus,
 .annotations-skin textarea:focus,
 .annotations-skin select:focus {
-  outline: 2px solid var(--hf-blue) !important;
-  outline-offset: -1px;
-  border-color: var(--hf-blue) !important;
+  outline: 2px solid var(--ds-focus-ring) !important;
+  outline-offset: 1px;
 }
 
 .annotations-skin kbd {
-  background: var(--surface-2);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-xs);
+  background: var(--ds-surface-selected);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-xs);
   padding: 1px 5px;
-  font-size: 10.5px;
-  color: var(--fg-1);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-primary);
+  font-family: var(--ds-font-mono);
 }
 
-/* ----- Style pills (per atom style) — bright on dark ----- */
+/* ----- Style pills (per atom style): words in text colour, identity in
+   the data colour (a dot and a tint), never colour alone. ----- */
 .annotations-skin .style-pill {
+  --pill: var(--ds-text-tertiary);
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 10.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 2px 8px;
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-medium);
+  padding: 1px 8px;
   border-radius: 999px;
-  border: 1px solid currentColor;
+  color: var(--ds-text-primary);
+  background: color-mix(in srgb, var(--pill) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--pill) 55%, transparent);
+}
+.annotations-skin .style-pill::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--pill);
+  flex: none;
 }
 .annotations-skin .style-pill.subtask {
-  color: var(--hf-yellow);
-  background: rgba(255, 210, 30, 0.12);
+  --pill: var(--style-subtask);
 }
 .annotations-skin .style-pill.task_aug {
-  color: var(--hf-cyan);
-  background: rgba(56, 189, 248, 0.12);
+  --pill: var(--style-task-aug);
 }
 .annotations-skin .style-pill.plan {
-  color: var(--hf-blue);
-  background: rgba(91, 140, 255, 0.12);
+  --pill: var(--style-plan);
 }
 .annotations-skin .style-pill.memory {
-  color: var(--hf-purple);
-  background: rgba(183, 139, 255, 0.12);
+  --pill: var(--style-memory);
 }
 .annotations-skin .style-pill.interjection {
-  color: var(--hf-red);
-  background: rgba(239, 83, 80, 0.12);
+  --pill: var(--style-interjection);
 }
 .annotations-skin .style-pill.vqa {
-  color: var(--hf-green);
-  background: rgba(52, 211, 153, 0.12);
+  --pill: var(--style-vqa);
 }
 .annotations-skin .style-pill.speech {
-  color: var(--hf-orange);
-  background: rgba(255, 157, 0, 0.12);
+  --pill: var(--style-speech);
 }
 
 .annotations-skin .style-dot {
@@ -128,25 +109,25 @@
   display: inline-block;
 }
 .annotations-skin .dot-subtask {
-  background: var(--hf-yellow);
+  background: var(--style-subtask);
 }
 .annotations-skin .dot-task-aug {
-  background: var(--hf-cyan);
+  background: var(--style-task-aug);
 }
 .annotations-skin .dot-plan {
-  background: var(--hf-blue);
+  background: var(--style-plan);
 }
 .annotations-skin .dot-memory {
-  background: var(--hf-purple);
+  background: var(--style-memory);
 }
 .annotations-skin .dot-interjection {
-  background: var(--hf-red);
+  background: var(--style-interjection);
 }
 .annotations-skin .dot-vqa {
-  background: var(--hf-green);
+  background: var(--style-vqa);
 }
 .annotations-skin .dot-speech {
-  background: var(--hf-orange);
+  background: var(--style-speech);
 }
 
 /* ----- Annotation rows ----- */
@@ -154,76 +135,73 @@
   display: flex;
   gap: 8px;
   padding: 6px 8px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ds-radius-sm);
   cursor: pointer;
   align-items: center;
   position: relative;
-  transition: background 80ms ease;
+  transition: background var(--ds-dur-fast) var(--ds-ease-standard);
 }
 .annotations-skin .row-anno:hover {
-  background: var(--surface-1);
+  background: var(--ds-surface-hover);
 }
 .annotations-skin .row-anno.active {
-  background: rgba(91, 140, 255, 0.12);
-  outline: 1px solid rgba(91, 140, 255, 0.4);
+  background: var(--ds-surface-selected);
+  box-shadow: inset 2px 0 0 var(--ds-selected-indicator);
 }
 .annotations-skin .row-anno.active.subtask {
-  background: rgba(255, 210, 30, 0.1);
-  outline-color: rgba(255, 210, 30, 0.4);
+  box-shadow: inset 3px 0 0 var(--style-subtask);
 }
 .annotations-skin .row-anno.active.vqa {
-  background: rgba(52, 211, 153, 0.1);
-  outline-color: rgba(52, 211, 153, 0.4);
+  box-shadow: inset 3px 0 0 var(--style-vqa);
 }
 .annotations-skin .row-anno.active.interjection {
-  background: rgba(239, 83, 80, 0.1);
-  outline-color: rgba(239, 83, 80, 0.4);
+  box-shadow: inset 3px 0 0 var(--style-interjection);
 }
 .annotations-skin .row-anno .ts {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10.5px;
-  color: var(--fg-3);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
   width: 56px;
   flex: none;
   text-align: right;
   white-space: nowrap;
 }
 .annotations-skin .row-anno .delete {
-  width: 22px;
-  height: 22px;
-  border: 1px solid var(--border-1);
-  background: var(--surface-1);
-  color: var(--fg-3);
-  border-radius: var(--radius-xs);
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--ds-separator);
+  background: transparent;
+  color: var(--ds-text-secondary);
+  border-radius: var(--ds-radius-xs);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: var(--ds-text-caption-size);
   flex: none;
 }
 .annotations-skin .row-anno .delete:hover {
-  color: var(--hf-red);
-  border-color: var(--hf-red);
+  color: var(--ds-danger);
+  border-color: var(--ds-danger);
 }
 .annotations-skin .jump {
-  width: 22px;
-  height: 22px;
-  border: 1px solid var(--border-1);
-  background: var(--surface-1);
-  color: var(--hf-blue);
-  border-radius: var(--radius-xs);
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--ds-separator);
+  background: transparent;
+  color: var(--ds-icon);
+  border-radius: var(--ds-radius-xs);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: var(--ds-text-caption-size);
   flex: none;
 }
 .annotations-skin .jump:hover {
-  background: var(--hf-blue);
-  color: #0b0e14;
-  border-color: var(--hf-blue);
+  background: var(--ds-accent);
+  color: var(--ds-on-accent);
+  border-color: var(--ds-accent);
 }
 
 /* ----- Section heads ----- */
@@ -237,25 +215,21 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--fg-1);
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-semibold);
+  color: var(--ds-text-primary);
 }
 .annotations-skin .section-head .hint {
-  font-size: 11.5px;
-  color: var(--fg-3);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
 }
 
 /* ----- Field labels ----- */
 .annotations-skin .field-label {
   display: block;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--fg-3);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-semibold);
+  color: var(--ds-text-secondary);
   margin-bottom: 4px;
 }
 
@@ -266,9 +240,9 @@
 }
 .annotations-skin .annotation-actionbar,
 .annotations-skin .annotation-composer {
-  background: var(--surface-0);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-lg);
+  background: var(--ds-surface-sunken);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-lg);
 }
 .annotations-skin .annotation-actionbar {
   display: flex;
@@ -283,15 +257,15 @@
   gap: 8px;
   margin: 0;
   font-size: 15px;
-  font-weight: 700;
-  color: var(--fg-1);
+  font-weight: var(--ds-weight-semibold);
+  color: var(--ds-text-primary);
 }
 .annotations-skin .annotation-actionbar p,
 .annotations-skin .annotation-composer p,
 .annotations-skin .list-head p {
   margin: 2px 0 0;
   font-size: 12px;
-  color: var(--fg-3);
+  color: var(--ds-text-secondary);
 }
 .annotations-skin .actionbar-actions {
   display: flex;
@@ -301,28 +275,24 @@
   justify-content: flex-end;
 }
 .annotations-skin .dirty-pill {
-  border: 1px solid rgba(251, 146, 60, 0.35);
+  border: 1px solid color-mix(in srgb, var(--ds-warning) 60%, transparent);
   border-radius: 999px;
-  background: rgba(251, 146, 60, 0.12);
-  color: #fdba74;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  background: color-mix(in srgb, var(--ds-warning) 12%, transparent);
+  color: var(--ds-warning);
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-semibold);
   padding: 2px 7px;
-  text-transform: uppercase;
 }
 .annotations-skin .backend-offline,
 .annotations-skin .save-status {
-  font-size: 11px;
-  color: var(--fg-3);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
 }
 .annotations-skin .section-kicker {
   display: inline-flex;
-  color: var(--fg-2);
-  font-size: 10.5px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-semibold);
 }
 .annotations-skin .annotation-composer {
   display: grid;
@@ -335,32 +305,30 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--fg-3);
+  color: var(--ds-text-secondary);
   font-size: 12px;
   white-space: nowrap;
 }
 
 /* ----- Timeline ----- */
 .annotations-skin .tl {
-  background: var(--surface-0);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-lg);
-  padding: 10px 12px;
+  background: var(--ds-surface-sunken);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-lg);
+  padding: 12px 16px;
 }
 .annotations-skin .tl-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 11px;
-  color: var(--fg-3);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
   margin-bottom: 8px;
 }
 .annotations-skin .tl-head .ts-display {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--ds-font-mono);
   font-size: 12px;
-  color: var(--fg-1);
+  color: var(--ds-text-primary);
   text-transform: none;
   letter-spacing: 0;
 }
@@ -374,11 +342,9 @@
 .annotations-skin .tl-row .label {
   width: 84px;
   flex: none;
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--fg-2);
-  font-weight: 600;
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+  font-weight: var(--ds-weight-semibold);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -387,16 +353,16 @@
   position: relative;
   flex: 1;
   height: 20px;
-  background: var(--surface-1);
-  border: 1px solid var(--border-1);
-  border-radius: 3px;
+  background: var(--ds-surface-1);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-xs);
 }
 .annotations-skin .tl-seg {
   position: absolute;
   top: 1px;
   bottom: 1px;
   border-radius: 2px;
-  font-size: 10px;
+  font-size: var(--ds-text-caption-size);
   line-height: 16px;
   padding: 0 6px;
   cursor: pointer;
@@ -407,37 +373,37 @@
   align-items: center;
   gap: 4px;
   user-select: none;
-  font-weight: 500;
+  font-weight: var(--ds-weight-medium);
 }
 .annotations-skin .tl-seg.task_aug {
-  background: rgba(56, 189, 248, 0.18);
-  border: 1px solid #38bdf8;
-  color: #bae6fd;
+  background: color-mix(in srgb, var(--style-task-aug) 25%, transparent);
+  border: 1px solid var(--style-task-aug);
+  color: var(--ds-text-primary);
 }
 .annotations-skin .tl-seg.subtask {
-  background: rgba(255, 210, 30, 0.25);
-  border: 1px solid var(--hf-yellow);
-  color: var(--hf-yellow);
+  background: color-mix(in srgb, var(--style-subtask) 25%, transparent);
+  border: 1px solid var(--style-subtask);
+  color: var(--ds-text-primary);
 }
 .annotations-skin .tl-seg.plan {
-  background: rgba(91, 140, 255, 0.25);
-  border: 1px solid var(--hf-blue);
-  color: #c7d6ff;
+  background: color-mix(in srgb, var(--style-plan) 25%, transparent);
+  border: 1px solid var(--style-plan);
+  color: var(--ds-text-primary);
 }
 .annotations-skin .tl-seg.memory {
-  background: rgba(183, 139, 255, 0.25);
-  border: 1px solid var(--hf-purple);
-  color: #e3d4ff;
+  background: color-mix(in srgb, var(--style-memory) 25%, transparent);
+  border: 1px solid var(--style-memory);
+  color: var(--ds-text-primary);
 }
 .annotations-skin .tl-seg.interjection {
-  background: rgba(239, 83, 80, 0.25);
-  border: 1px solid var(--hf-red);
-  color: #ffd6d4;
+  background: color-mix(in srgb, var(--style-interjection) 25%, transparent);
+  border: 1px solid var(--style-interjection);
+  color: var(--ds-text-primary);
 }
 .annotations-skin .tl-seg.vqa {
-  background: rgba(52, 211, 153, 0.25);
-  border: 1px solid var(--hf-green);
-  color: #c8f7e4;
+  background: color-mix(in srgb, var(--style-vqa) 25%, transparent);
+  border: 1px solid var(--style-vqa);
+  color: var(--ds-text-primary);
 }
 /* Range highlight drawn under a tick when the atom carries an explicit
    `to` — thinner than a normal span so the dot on top still reads clearly. */
@@ -457,32 +423,31 @@
   transform: translateX(-2px);
 }
 .annotations-skin .tl-tick.plan {
-  background: var(--hf-blue);
+  background: var(--style-plan);
 }
 .annotations-skin .tl-tick.task_aug {
-  background: var(--hf-cyan);
+  background: var(--style-task-aug);
 }
 .annotations-skin .tl-tick.memory {
-  background: var(--hf-purple);
+  background: var(--style-memory);
 }
 .annotations-skin .tl-tick.interjection {
-  background: var(--hf-red);
+  background: var(--style-interjection);
 }
 .annotations-skin .tl-tick.speech {
-  background: var(--hf-orange);
+  background: var(--style-speech);
 }
 .annotations-skin .tl-tick.vqa {
-  background: var(--hf-green);
+  background: var(--style-vqa);
 }
 .annotations-skin .tl-playhead {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 0;
-  border-left: 2px solid var(--hf-yellow);
+  border-left: 2px solid var(--ds-accent);
   pointer-events: none;
   z-index: 5;
-  box-shadow: 0 0 8px rgba(255, 210, 30, 0.6);
 }
 .annotations-skin .tl-playhead::before {
   content: "";
@@ -491,24 +456,24 @@
   left: -6px;
   width: 10px;
   height: 10px;
-  background: var(--hf-yellow);
+  background: var(--ds-accent);
   transform: rotate(45deg);
 }
 .annotations-skin .tl-ruler {
   position: relative;
   height: 16px;
   margin-left: 94px;
-  border-bottom: 1px solid var(--border-1);
+  border-bottom: 1px solid var(--ds-separator);
   margin-bottom: 6px;
 }
 .annotations-skin .tl-ruler .tick-mark {
   position: absolute;
   top: 0;
   bottom: 0;
-  border-left: 1px solid var(--border-1);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
-  color: var(--fg-3);
+  border-left: 1px solid var(--ds-separator);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
   padding-left: 3px;
 }
 
@@ -523,30 +488,28 @@
   gap: 8px;
   padding: 4px 0 4px 2px;
   margin-bottom: 4px;
-  border-left: 3px solid var(--border-2, #2a3344);
+  border-left: 3px solid var(--ds-separator-strong);
   padding-left: 8px;
 }
 .annotations-skin .tl-section-head.persistent,
 .annotations-skin .rail-column-head.persistent {
-  border-left-color: var(--hf-blue, #5b8cff);
+  border-left-color: var(--ds-text-primary);
 }
 .annotations-skin .tl-section-head.events,
 .annotations-skin .rail-column-head.events {
-  border-left-color: var(--hf-green, #34d399);
+  border-left-color: var(--ds-text-tertiary);
 }
 .annotations-skin .tl-section-title,
 .annotations-skin .rail-column-title {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--fg-1);
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-semibold);
+  color: var(--ds-text-primary);
 }
 .annotations-skin .tl-section-sub,
 .annotations-skin .rail-column-sub {
-  font-size: 10px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  color: var(--fg-3);
+  font-size: var(--ds-text-caption-size);
+  font-family: var(--ds-font-mono);
+  color: var(--ds-text-secondary);
 }
 .annotations-skin .rail-column {
   margin-bottom: 10px;
@@ -563,10 +526,10 @@
   transform: translate(-50%, -50%);
   box-sizing: border-box;
   z-index: 30;
-  background: rgba(15, 23, 42, 0.96);
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-md);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  background: var(--ds-surface-2);
+  border: 1px solid var(--ds-border-control);
+  border-radius: var(--ds-radius-md);
+  box-shadow: var(--ds-shadow-3);
   padding: 8px;
   min-width: 220px;
   max-width: min(360px, calc(100vw - 16px));
@@ -587,7 +550,7 @@
   cursor: grabbing;
 }
 .annotations-skin .quick-popup-grip {
-  color: var(--fg-3);
+  color: var(--ds-text-secondary);
   opacity: 0.7;
   font-size: 12px;
   letter-spacing: -0.2em;
@@ -597,10 +560,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--fg-3);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
 }
 .annotations-skin .quick-popup-actions {
   display: flex;
@@ -609,42 +570,42 @@
 }
 .annotations-skin .quick-popup .kind-pill {
   padding: 2px 6px;
-  border-radius: var(--radius-xs);
+  border-radius: var(--ds-radius-xs);
   border: 1px solid currentColor;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-semibold);
 }
 .annotations-skin .quick-popup .kind-pill.bbox {
-  color: var(--hf-cyan);
-  background: rgba(56, 189, 248, 0.16);
+  color: var(--ds-text-primary);
+  border-color: var(--style-task-aug);
+  background: color-mix(in srgb, var(--style-task-aug) 16%, transparent);
 }
 .annotations-skin .quick-popup .kind-pill.keypoint {
-  color: var(--hf-yellow);
-  background: rgba(255, 210, 30, 0.16);
+  color: var(--ds-text-primary);
+  border-color: var(--style-speech);
+  background: color-mix(in srgb, var(--style-speech) 16%, transparent);
 }
 .annotations-skin .quick-popup .popup-btn {
-  font-size: 11px;
+  font-size: var(--ds-text-caption-size);
   height: 24px;
   padding: 0 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-1);
+  border-radius: var(--ds-radius-sm);
+  border: 1px solid var(--ds-separator);
   background: transparent;
-  color: var(--fg-2);
+  color: var(--ds-text-secondary);
   cursor: pointer;
 }
 .annotations-skin .quick-popup .popup-btn:hover {
-  background: var(--surface-1);
-  color: var(--fg-1);
+  background: var(--ds-surface-hover);
+  color: var(--ds-text-primary);
 }
 .annotations-skin .quick-popup .popup-btn.primary {
-  border-color: rgba(56, 189, 248, 0.4);
-  background: rgba(56, 189, 248, 0.12);
-  color: #c5ecff;
+  border-color: var(--ds-accent);
+  background: var(--ds-accent);
+  color: var(--ds-on-accent);
 }
 .annotations-skin .quick-popup .popup-btn.primary:hover {
-  background: rgba(56, 189, 248, 0.2);
+  background: var(--ds-accent-hover);
 }
 .annotations-skin .quick-popup .popup-btn:disabled {
   opacity: 0.4;
@@ -665,12 +626,12 @@
   justify-content: flex-end;
 }
 .annotations-skin .ts-pill {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
   padding: 3px 8px;
   border-radius: 999px;
-  background: var(--surface-2);
-  color: var(--fg-2);
+  background: var(--ds-surface-selected);
+  color: var(--ds-text-secondary);
   white-space: nowrap;
 }
 .annotations-skin .quick-add .ts-pill {
@@ -678,9 +639,9 @@
 }
 /* ----- Grounded VQA intro card (under video) ----- */
 .annotations-skin .grounding-intro {
-  background: var(--surface-0);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-lg);
+  background: var(--ds-surface-sunken);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-lg);
   padding: 10px 14px;
   display: flex;
   flex-direction: column;
@@ -694,10 +655,10 @@
   gap: 4px;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--fg-3);
+  color: var(--ds-text-secondary);
 }
 .annotations-skin .grounding-intro li::marker {
-  color: var(--fg-3);
+  color: var(--ds-text-secondary);
 }
 
 /* ----- Workspace: annotation list + inspector ----- */
@@ -717,12 +678,11 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px;
-  border-bottom: 1px solid var(--border-1);
+  border-bottom: 1px solid var(--ds-separator);
   position: sticky;
   top: 0;
   z-index: 2;
-  background: rgba(15, 23, 42, 0.96);
-  backdrop-filter: blur(6px);
+  background: var(--ds-surface-sunken);
 }
 .annotations-skin .rail.annotation-list .rail-group {
   margin: 8px;
@@ -738,11 +698,11 @@
   line-height: 1.3;
 }
 .annotations-skin .rail.annotation-list .rail-row.selected {
-  background: rgba(91, 140, 255, 0.2);
-  box-shadow: inset 3px 0 0 var(--hf-blue);
+  background: var(--ds-surface-selected);
+  box-shadow: inset 2px 0 0 var(--ds-selected-indicator);
 }
 .annotations-skin .rail.annotation-list .rail-row.active-now:not(.selected) {
-  border-color: rgba(255, 210, 30, 0.45);
+  border-color: var(--ds-border-control);
   outline: none;
 }
 .annotations-skin .inspector {
@@ -775,15 +735,15 @@
 }
 .annotations-skin .inspector-title strong {
   display: block;
-  color: var(--fg-1);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--ds-text-primary);
+  font-family: var(--ds-font-mono);
   font-size: 12px;
   line-height: 1.4;
 }
 .annotations-skin .inspector-title span:not(.style-pill) {
   display: block;
-  color: var(--fg-3);
-  font-size: 11.5px;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
   line-height: 1.35;
 }
 
@@ -806,12 +766,12 @@
 
 /* Legacy quick-add styles kept for popup/control compatibility. */
 .annotations-skin .quick-add {
-  border-radius: var(--radius-md);
+  border-radius: var(--ds-radius-md);
 }
 .annotations-skin .quick-add.legacy {
   padding: 8px 10px;
-  background: var(--surface-0);
-  border: 1px solid var(--border-1);
+  background: var(--ds-surface-sunken);
+  border: 1px solid var(--ds-separator);
 }
 .annotations-skin .quick-add .ts-pill {
   flex: none;
@@ -821,18 +781,18 @@
   min-width: 200px;
 }
 .annotations-skin .quick-add .add-btn {
-  background: var(--hf-blue);
-  color: #0b0e14;
-  border: 1px solid var(--hf-blue);
-  border-radius: var(--radius-sm);
+  background: var(--ds-accent);
+  color: var(--ds-on-accent);
+  border: 1px solid var(--ds-accent);
+  border-radius: var(--ds-radius-sm);
   padding: 6px 14px;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--ds-weight-semibold);
   cursor: pointer;
   white-space: nowrap;
 }
 .annotations-skin .quick-add .add-btn:hover {
-  filter: brightness(1.1);
+  background: var(--ds-accent-hover);
 }
 .annotations-skin .quick-add .add-btn:disabled {
   opacity: 0.4;
@@ -852,9 +812,9 @@
   }
 }
 .annotations-skin .rail {
-  background: var(--surface-0);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-md);
+  background: var(--ds-surface-sunken);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
   padding: 8px;
   max-height: 60vh;
   overflow-y: auto;
@@ -862,7 +822,7 @@
 .annotations-skin .rail-empty {
   padding: 24px 8px;
   font-size: 12px;
-  color: var(--fg-3);
+  color: var(--ds-text-secondary);
   text-align: center;
 }
 .annotations-skin .rail-group {
@@ -873,38 +833,36 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 8px;
-  font-size: 10.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--fg-3);
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-semibold);
+  color: var(--ds-text-secondary);
 }
 .annotations-skin .rail-group-head .count {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
 }
 .annotations-skin .rail-row {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 5px 8px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ds-radius-sm);
   cursor: pointer;
   font-size: 12px;
-  color: var(--fg-1);
+  color: var(--ds-text-primary);
   border: 1px solid transparent;
 }
 .annotations-skin .rail-row:hover {
-  background: var(--surface-1);
+  background: var(--ds-surface-hover);
 }
 .annotations-skin .rail-row.selected {
-  background: rgba(91, 140, 255, 0.16);
-  border-color: var(--hf-blue);
+  background: var(--ds-surface-selected);
+  border-color: var(--ds-selected-indicator);
 }
 .annotations-skin .rail-row .ts {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10.5px;
-  color: var(--fg-3);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
   width: 56px;
   flex: none;
   text-align: right;
@@ -917,21 +875,21 @@
   text-overflow: ellipsis;
 }
 .annotations-skin .rail-row.active-now {
-  outline: 2px solid var(--hf-yellow);
+  outline: 1px solid var(--ds-border-control);
   outline-offset: -1px;
 }
 
 /* ----- Editor pane (right side of workspace) ----- */
 .annotations-skin .editor {
-  background: var(--surface-0);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-md);
+  background: var(--ds-surface-sunken);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
   padding: 14px 16px;
 }
 .annotations-skin .editor-empty {
   padding: 40px 16px;
   font-size: 13px;
-  color: var(--fg-3);
+  color: var(--ds-text-secondary);
   text-align: center;
 }
 .annotations-skin .editor-head {
@@ -940,7 +898,7 @@
   gap: 8px;
   margin-bottom: 12px;
   padding-bottom: 10px;
-  border-bottom: 1px solid var(--border-1);
+  border-bottom: 1px solid var(--ds-separator);
 }
 .annotations-skin .editor-head .right {
   margin-left: auto;
@@ -950,10 +908,10 @@
 .annotations-skin .editor-head .icon-btn {
   width: 28px;
   height: 28px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-1);
-  background: var(--surface-1);
-  color: var(--fg-2);
+  border-radius: var(--ds-radius-sm);
+  border: 1px solid var(--ds-separator);
+  background: transparent;
+  color: var(--ds-icon);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -961,12 +919,12 @@
   font-size: 12px;
 }
 .annotations-skin .editor-head .icon-btn:hover {
-  color: var(--fg-1);
-  border-color: var(--border-2);
+  color: var(--ds-text-primary);
+  border-color: var(--ds-border-control);
 }
 .annotations-skin .editor-head .icon-btn.danger:hover {
-  color: var(--hf-red);
-  border-color: var(--hf-red);
+  color: var(--ds-danger);
+  border-color: var(--ds-danger);
 }
 .annotations-skin .editor .field {
   margin-bottom: 10px;
@@ -990,18 +948,18 @@
   width: 100px;
 }
 .annotations-skin .editor .ts-row .frame-pill {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
   padding: 3px 8px;
   border: 0;
   border-radius: 999px;
-  background: var(--surface-2);
-  color: var(--fg-3);
+  background: var(--ds-surface-selected);
+  color: var(--ds-text-secondary);
   cursor: pointer;
 }
 .annotations-skin .editor .ts-row .frame-pill:hover {
-  color: var(--fg-1);
-  background: var(--surface-1);
+  color: var(--ds-text-primary);
+  background: var(--ds-surface-hover);
 }
 
 /* ----- Timeline drag handles + tooltip + draggable playhead ----- */
@@ -1020,22 +978,22 @@
   right: 0;
 }
 .annotations-skin .tl-seg .resize:hover {
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--ds-surface-selected);
 }
 .annotations-skin .tl-seg.dragging {
   opacity: 0.85;
-  outline: 2px solid var(--hf-yellow);
+  outline: 2px solid var(--ds-accent);
   outline-offset: -1px;
 }
 .annotations-skin .tl-row .track.creating {
-  outline: 1px dashed var(--hf-blue);
+  outline: 1px dashed var(--ds-accent);
 }
 .annotations-skin .tl-create-preview {
   position: absolute;
   top: 1px;
   bottom: 1px;
-  background: rgba(255, 210, 30, 0.3);
-  border: 1px dashed var(--hf-yellow);
+  background: var(--ds-surface-hover);
+  border: 1px dashed var(--ds-accent);
   border-radius: 2px;
   pointer-events: none;
   z-index: 4;
@@ -1048,7 +1006,7 @@
   top: 0;
   bottom: 0;
   width: 0;
-  border-left: 1px dashed rgba(255, 255, 255, 0.35);
+  border-left: 1px dashed var(--ds-border-control);
   pointer-events: none;
   z-index: 4;
 }
@@ -1056,13 +1014,13 @@
   position: absolute;
   top: -22px;
   transform: translateX(-50%);
-  background: #11180ddd;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: var(--ds-surface-2);
+  border: 1px solid var(--ds-border-control);
   border-radius: 4px;
   padding: 1px 6px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10.5px;
-  color: var(--fg-1);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-primary);
   white-space: nowrap;
   pointer-events: none;
   z-index: 7;
@@ -1072,8 +1030,8 @@
   top: -6px;
   width: 14px;
   height: 14px;
-  background: var(--hf-yellow);
-  border: 2px solid #0b0e14;
+  background: var(--ds-accent);
+  border: 2px solid var(--ds-surface-1);
   border-radius: 999px;
   transform: translate(-7px, 0);
   cursor: ew-resize;
@@ -1083,23 +1041,23 @@
 .annotations-skin .tl-tooltip {
   position: fixed;
   z-index: 1000;
-  background: rgba(15, 23, 42, 0.96);
-  color: var(--fg-1);
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-sm);
+  background: var(--ds-surface-2);
+  color: var(--ds-text-primary);
+  border: 1px solid var(--ds-border-control);
+  border-radius: var(--ds-radius-sm);
   padding: 6px 10px;
   font-size: 12px;
   max-width: 320px;
   pointer-events: none;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--ds-shadow-3);
   backdrop-filter: blur(6px);
   line-height: 1.35;
   white-space: pre-line;
 }
 .annotations-skin .tl-tooltip .meta {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
-  color: var(--fg-3);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
   margin-bottom: 2px;
 }
 
@@ -1109,26 +1067,22 @@
   margin-left: auto;
   padding: 0 5px;
   border-radius: 999px;
-  background: rgba(56, 189, 248, 0.28);
-  border: 1px solid rgba(56, 189, 248, 0.7);
-  color: #e0f2fe;
-  font-size: 9.5px;
-  font-weight: 700;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: var(--ds-surface-hover);
+  border: 1px solid var(--ds-border-control);
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-semibold);
+  font-family: var(--ds-font-mono);
   line-height: 14px;
 }
 
 /* ----- SAM3 object annotation sidecar ----- */
 .annotations-skin .object-annotation-panel {
-  border: 1px solid rgba(212, 247, 121, 0.28);
-  border-radius: 16px;
+  border: 1px solid var(--ds-border-control);
+  border-radius: var(--ds-radius-lg);
   padding: 18px;
-  background: linear-gradient(
-    135deg,
-    rgba(29, 37, 30, 0.94),
-    rgba(16, 21, 16, 0.98)
-  );
-  box-shadow: 0 16px 48px rgba(8, 15, 28, 0.3);
+  background: var(--ds-surface-1);
+  box-shadow: var(--ds-shadow-1), var(--ds-ring-raised);
 }
 .annotations-skin .object-annotation-head,
 .annotations-skin .object-annotation-controls,
@@ -1143,23 +1097,23 @@
 }
 .annotations-skin .object-annotation-head h2 {
   margin: 4px 0 0;
-  color: #f8fafc;
+  color: var(--ds-text-primary);
   font-size: 18px;
-  font-weight: 600;
+  font-weight: var(--ds-weight-semibold);
 }
 .annotations-skin .object-annotation-badge {
-  border: 1px solid rgba(212, 247, 121, 0.32);
+  border: 1px solid var(--ds-border-control);
   border-radius: 999px;
   padding: 5px 9px;
-  color: #d4f779;
-  font-size: 11px;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-caption-size);
   white-space: nowrap;
 }
 .annotations-skin .object-annotation-copy,
 .annotations-skin .object-annotation-empty,
 .annotations-skin .object-annotation-message {
   margin: 10px 0 14px;
-  color: #94a3b8;
+  color: var(--ds-text-secondary);
   font-size: 13px;
 }
 .annotations-skin .object-annotation-error-detail {
@@ -1167,7 +1121,7 @@
 }
 .annotations-skin .object-annotation-error-detail summary {
   cursor: pointer;
-  color: #64748b;
+  color: var(--ds-text-secondary);
   font-size: 12px;
 }
 .annotations-skin .object-annotation-error-detail pre {
@@ -1177,12 +1131,12 @@
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  border-radius: 8px;
-  color: #fca5a5;
-  font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--ds-surface-sunken);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-sm);
+  color: var(--ds-danger);
+  font-size: var(--ds-text-caption-size);
+  font-family: var(--ds-font-mono);
 }
 .annotations-skin .object-annotation-controls {
   flex-wrap: wrap;
@@ -1192,9 +1146,8 @@
 .annotations-skin .object-annotation-controls label {
   display: grid;
   gap: 5px;
-  color: #94a3b8;
-  font-size: 11px;
-  letter-spacing: 0.02em;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
 }
 .annotations-skin .object-annotation-controls .object-annotation-prompt {
   flex: 1 1 260px;
@@ -1202,10 +1155,10 @@
 .annotations-skin .object-annotation-controls select,
 .annotations-skin .object-annotation-controls input {
   min-height: 36px;
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  border-radius: 8px;
-  background: rgba(22, 29, 23, 0.92);
-  color: #e2e8f0;
+  border: 1px solid var(--ds-border-control);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-2);
+  color: var(--ds-text-primary);
   padding: 0 10px;
   font: inherit;
 }
@@ -1236,21 +1189,20 @@
 .annotations-skin .object-annotation-batch-row label {
   display: grid;
   gap: 5px;
-  color: #94a3b8;
-  font-size: 11px;
-  letter-spacing: 0.02em;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
 }
 .annotations-skin .object-annotation-range {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #64748b;
+  color: var(--ds-text-secondary);
 }
 .annotations-skin .object-annotation-range input {
   width: 72px;
 }
 .annotations-skin .object-annotation-scope-count {
-  color: #64748b;
+  color: var(--ds-text-secondary);
   font-size: 12px;
 }
 .annotations-skin .object-annotation-camera-checks {
@@ -1258,38 +1210,38 @@
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  color: #94a3b8;
+  color: var(--ds-text-secondary);
   font-size: 12px;
 }
 .annotations-skin .object-annotation-checkbox {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: #cbd5e1;
+  color: var(--ds-text-secondary);
 }
 .annotations-skin .object-annotation-run,
 .annotations-skin .object-annotation-actions button {
   min-height: 36px;
-  border: 1px solid rgba(212, 247, 121, 0.42);
-  border-radius: 8px;
-  background: rgba(212, 247, 121, 0.14);
-  color: #d4f779;
+  border: 1px solid var(--ds-border-control);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-1);
+  color: var(--ds-text-primary);
   cursor: pointer;
   padding: 0 12px;
   font-size: 12px;
 }
 .annotations-skin .object-annotation-run.sam3 {
-  border-color: rgba(212, 247, 121, 0.62);
-  background: #d4f779;
-  color: #17220e;
-  font-weight: 700;
+  border-color: var(--ds-border-control);
+  background: var(--ds-accent);
+  color: var(--ds-on-accent);
+  font-weight: var(--ds-weight-semibold);
 }
 .annotations-skin .object-annotation-run:hover,
 .annotations-skin .object-annotation-actions button:hover {
-  background: rgba(212, 247, 121, 0.26);
+  background: var(--ds-surface-hover);
 }
 .annotations-skin .object-annotation-run.sam3:hover {
-  background: #e5fbb6;
+  background: var(--ds-accent-hover);
 }
 .annotations-skin .object-annotation-run:disabled,
 .annotations-skin .object-annotation-actions button:disabled {
@@ -1299,22 +1251,22 @@
 .annotations-skin .object-annotation-runtime {
   flex-wrap: wrap;
   margin: 14px 0 2px;
-  color: #64748b;
-  font-size: 11px;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
 }
 .annotations-skin .object-annotation-runtime .ready {
-  color: #86efac;
+  color: var(--ds-success);
 }
 .annotations-skin .object-annotation-runtime .muted {
-  color: #fbbf24;
+  color: var(--ds-warning);
 }
 .annotations-skin .object-annotation-runtime code {
   margin-left: auto;
-  color: #64748b;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ds-text-secondary);
+  font-family: var(--ds-font-mono);
 }
 .annotations-skin .object-annotation-message {
-  color: #67e8f9;
+  color: var(--ds-text-primary);
 }
 .annotations-skin .object-annotation-list {
   display: grid;
@@ -1324,7 +1276,7 @@
 .annotations-skin .object-annotation-row {
   justify-content: space-between;
   min-width: 0;
-  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  border-top: 1px solid var(--ds-separator);
   padding: 9px 0 3px;
 }
 .annotations-skin .object-annotation-main {
@@ -1334,28 +1286,28 @@
   min-width: 0;
   border: 0;
   background: transparent;
-  color: #cbd5e1;
+  color: var(--ds-text-secondary);
   cursor: pointer;
   font-size: 12px;
   text-align: left;
 }
 .annotations-skin .object-annotation-main:hover .object-concept {
-  color: #67e8f9;
+  color: var(--ds-text-primary);
 }
 .annotations-skin .object-track-id {
-  color: #5eead4;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ds-text-primary);
+  font-family: var(--ds-font-mono);
 }
 .annotations-skin .object-concept {
   overflow: hidden;
-  color: #f8fafc;
-  font-weight: 600;
+  color: var(--ds-text-primary);
+  font-weight: var(--ds-weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .annotations-skin .object-score,
 .annotations-skin .object-frame {
-  color: #94a3b8;
+  color: var(--ds-text-secondary);
   font-variant-numeric: tabular-nums;
 }
 .annotations-skin .object-annotation-actions {
@@ -1366,7 +1318,7 @@
 .annotations-skin .object-annotation-actions button {
   min-height: 28px;
   padding: 0 8px;
-  font-size: 11px;
+  font-size: var(--ds-text-caption-size);
 }
 @media (max-width: 720px) {
   .annotations-skin .object-annotation-head,
@@ -1387,9 +1339,9 @@
   gap: 10px;
   margin: 16px 0;
   padding: 12px 14px;
-  border: 1px solid rgba(212, 247, 121, 0.24);
-  border-radius: 12px;
-  background: rgba(22, 29, 23, 0.74);
+  border: 1px solid var(--ds-border-control);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-2);
 }
 .annotations-skin .object-annotation-status-head,
 .annotations-skin .object-annotation-status-grid,
@@ -1400,25 +1352,25 @@
 }
 .annotations-skin .object-annotation-status-head {
   justify-content: space-between;
-  color: #f1efdf;
+  color: var(--ds-text-primary);
   font-size: 12px;
 }
 .annotations-skin .object-annotation-status-grid {
   flex-wrap: wrap;
-  color: #94a3b8;
-  font-size: 11px;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
 }
 .annotations-skin .object-annotation-status-grid code,
 .annotations-skin .object-annotation-path {
   max-width: min(100%, 520px);
   overflow: hidden;
-  color: #d4f779;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ds-text-primary);
+  font-family: var(--ds-font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .annotations-skin .object-annotation-status-grid > span:nth-of-type(odd) {
-  color: #64748b;
+  color: var(--ds-text-secondary);
   min-width: 116px;
 }
 .annotations-skin .object-annotation-status-grid .object-annotation-path {
@@ -1430,8 +1382,8 @@
 }
 .annotations-skin .object-annotation-progress-label {
   justify-content: space-between;
-  color: #d4f779;
-  font-size: 11px;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-caption-size);
   font-variant-numeric: tabular-nums;
 }
 .annotations-skin .object-annotation-progress progress {
@@ -1440,15 +1392,15 @@
   overflow: hidden;
   border: 0;
   border-radius: 999px;
-  background: rgba(51, 65, 85, 0.8);
-  accent-color: #d4f779;
+  background: var(--ds-surface-2);
+  accent-color: var(--ds-accent);
 }
 .annotations-skin .object-annotation-progress progress::-webkit-progress-bar {
-  background: rgba(51, 65, 85, 0.8);
+  background: var(--ds-surface-2);
   border-radius: 999px;
 }
 .annotations-skin .object-annotation-progress progress::-webkit-progress-value {
-  background: linear-gradient(90deg, #9ec345, #d4f779);
+  background: var(--ds-progress);
   border-radius: 999px;
 }
 @media (max-width: 720px) {
@@ -1457,15 +1409,14 @@
   }
 }
 
-/* SAM3 workflow layers: keep the model setup, plan and review phases visually
-   distinct while using the same graphite/parchment/lime language as LEVI. */
+/* SAM3 workflow layers: model setup, plan and review as separate steps. */
 .annotations-skin .object-annotation-status-head > div {
   display: grid;
   gap: 3px;
 }
 .annotations-skin .object-annotation-status-subtitle {
-  color: #afb7a8;
-  font-size: 10px;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
   font-weight: 400;
 }
 .annotations-skin .object-annotation-gates {
@@ -1477,18 +1428,18 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  border: 1px solid rgba(175, 183, 168, 0.2);
+  border: 1px solid var(--ds-separator);
   border-radius: 999px;
   padding: 4px 8px;
-  color: #afb7a8;
-  font-size: 10px;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
 }
 .annotations-skin .object-annotation-gates > span.ready {
-  border-color: rgba(212, 247, 121, 0.35);
-  color: #d4f779;
+  border-color: var(--ds-border-control);
+  color: var(--ds-text-primary);
 }
 .annotations-skin .object-annotation-gates > span.muted {
-  color: #e4b96b;
+  color: var(--ds-warning);
 }
 .annotations-skin .object-annotation-gates i {
   display: inline-grid;
@@ -1496,25 +1447,25 @@
   width: 15px;
   height: 15px;
   border-radius: 50%;
-  background: rgba(175, 183, 168, 0.16);
+  background: var(--ds-surface-selected);
   font-style: normal;
-  font-size: 9px;
+  font-size: var(--ds-text-caption-size);
 }
 .annotations-skin .object-annotation-gates > span.ready i {
-  background: rgba(212, 247, 121, 0.18);
+  background: var(--ds-surface-hover);
 }
 .annotations-skin .object-annotation-status-note {
   margin: 0;
-  color: #89927f;
-  font-size: 11px;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
   line-height: 1.55;
 }
 .annotations-skin .object-annotation-step {
   margin-top: 12px;
   padding: 12px 14px;
-  border: 1px solid rgba(175, 183, 168, 0.14);
-  border-radius: 12px;
-  background: rgba(22, 29, 23, 0.5);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-sunken);
 }
 .annotations-skin .object-annotation-step-head {
   display: flex;
@@ -1526,12 +1477,12 @@
   gap: 3px;
 }
 .annotations-skin .object-annotation-step-head strong {
-  color: #f1efdf;
+  color: var(--ds-text-primary);
   font-size: 12px;
 }
 .annotations-skin .object-annotation-step-head > div > span {
-  color: #89927f;
-  font-size: 11px;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
   line-height: 1.45;
 }
 .annotations-skin .object-annotation-step-number {
@@ -1540,14 +1491,11 @@
   place-items: center;
   width: 24px;
   height: 24px;
-  border: 1px solid rgba(212, 247, 121, 0.38);
+  border: 1px solid var(--ds-border-control);
   border-radius: 7px;
-  color: #d4f779;
-  font:
-    700 10px ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    monospace;
+  color: var(--ds-text-primary);
+  font: var(--ds-weight-semibold) var(--ds-text-caption-size)
+    var(--ds-font-mono);
 }
 .annotations-skin .object-annotation-step .object-annotation-controls,
 .annotations-skin .object-annotation-step .object-annotation-batch {
@@ -1563,8 +1511,8 @@
 }
 .annotations-skin .object-annotation-range label > span,
 .annotations-skin .object-annotation-task-select > span {
-  color: #89927f;
-  font-size: 10px;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
 }
 .annotations-skin .object-annotation-range-dash {
   padding-bottom: 9px;
@@ -1573,8 +1521,8 @@
   display: flex;
   gap: 8px;
   align-items: center;
-  color: #afb7a8;
-  font-size: 11px;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
 }
 .annotations-skin .object-annotation-runbar {
   display: flex;
@@ -1583,9 +1531,9 @@
   gap: 14px;
   margin-top: 14px;
   padding: 10px 12px;
-  border: 1px solid rgba(212, 247, 121, 0.2);
+  border: 1px solid var(--ds-border-control);
   border-radius: 10px;
-  background: rgba(212, 247, 121, 0.05);
+  background: var(--ds-surface-1);
 }
 .annotations-skin .object-annotation-plan-state {
   display: flex;
@@ -1593,15 +1541,15 @@
   gap: 8px;
   min-width: 0;
   flex-wrap: wrap;
-  color: #afb7a8;
-  font-size: 11px;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
 }
 .annotations-skin .object-annotation-plan-state small {
-  color: #89927f;
+  color: var(--ds-text-secondary);
 }
 .annotations-skin .object-annotation-plan-state code {
-  color: #d4f779;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ds-text-primary);
+  font-family: var(--ds-font-mono);
 }
 .annotations-skin .object-annotation-review-summary {
   display: flex;
@@ -1609,21 +1557,21 @@
   align-items: center;
   flex-wrap: wrap;
   margin-top: 16px;
-  color: #afb7a8;
-  font-size: 11px;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
 }
 .annotations-skin .object-annotation-review-summary strong {
-  color: #f1efdf;
+  color: var(--ds-text-primary);
   font-size: 12px;
 }
 .annotations-skin .object-annotation-review-summary .ready {
-  color: #86efac;
+  color: var(--ds-success);
 }
 .annotations-skin .object-annotation-review-summary .muted {
-  color: #e4b96b;
+  color: var(--ds-warning);
 }
 .annotations-skin .object-annotation-review-summary .rejected {
-  color: #fca5a5;
+  color: var(--ds-danger);
 }
 @media (max-width: 720px) {
   .annotations-skin .object-annotation-runbar {
@@ -1647,9 +1595,9 @@
   display: grid;
   gap: 10px;
   padding: 12px;
-  border: 1px solid rgba(228, 185, 107, 0.38);
+  border: 1px solid color-mix(in srgb, var(--ds-warning) 60%, transparent);
   border-radius: 10px;
-  background: rgba(228, 185, 107, 0.07);
+  background: color-mix(in srgb, var(--ds-warning) 7%, transparent);
 }
 .annotations-skin .object-annotation-checkpoint-head {
   display: flex;
@@ -1663,39 +1611,39 @@
   min-width: 0;
 }
 .annotations-skin .object-annotation-checkpoint-head strong {
-  color: #f1efdf;
+  color: var(--ds-text-primary);
   font-size: 12px;
 }
 .annotations-skin .object-annotation-checkpoint-head span {
-  color: #afb7a8;
-  font-size: 11px;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
   line-height: 1.45;
 }
 .annotations-skin .object-annotation-download {
   min-height: 34px;
   flex: none;
-  border: 1px solid rgba(212, 247, 121, 0.6);
-  border-radius: 8px;
-  background: #d4f779;
-  color: #17220e;
+  border: 1px solid var(--ds-border-control);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-accent);
+  color: var(--ds-on-accent);
   cursor: pointer;
   padding: 0 12px;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-semibold);
 }
 .annotations-skin .object-annotation-download:hover {
-  background: #e5fbb6;
+  background: var(--ds-accent-hover);
 }
 .annotations-skin .object-annotation-download:disabled {
-  border-color: rgba(175, 183, 168, 0.25);
-  background: rgba(175, 183, 168, 0.13);
-  color: #89927f;
+  border-color: var(--ds-border-control);
+  background: var(--ds-surface-hover);
+  color: var(--ds-text-secondary);
   cursor: not-allowed;
 }
 .annotations-skin .object-annotation-checkpoint-hint {
   margin: 0;
-  color: #e4b96b;
-  font-size: 10px;
+  color: var(--ds-warning);
+  font-size: var(--ds-text-caption-size);
   line-height: 1.45;
 }
 @media (max-width: 720px) {
@@ -1709,14 +1657,8 @@
 }
 
 /* ----- VALUE MODEL section (RECAP advantage labels) ----- */
-.annotations-skin {
-  --recap-pos: #3fb950;
-  --recap-neg: #f85149;
-  --recap-value: #e3b341;
-  --recap-accent: #d2a8ff;
-}
 .annotations-skin .tl-section-head.value-model {
-  border-left-color: var(--recap-accent);
+  border-left-color: var(--dv-7);
   align-items: center;
   flex-wrap: wrap;
   row-gap: 4px;
@@ -1726,26 +1668,24 @@
   display: inline-flex;
   flex-wrap: wrap;
   gap: 0 0.35em;
-  color: var(--fg-2);
+  color: var(--ds-text-secondary);
 }
 .annotations-skin .recap-meta code,
 .annotations-skin .tl-section-sub code {
   font-family: inherit;
-  color: var(--fg-1);
-  background: var(--surface-1);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-xs);
+  color: var(--ds-text-primary);
+  background: var(--ds-surface-hover);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-xs);
   padding: 0 4px;
 }
 .annotations-skin .recap-stale {
   margin-left: 8px;
   padding: 0 6px;
   border-radius: 999px;
-  border: 1px solid var(--hf-orange);
-  color: var(--hf-orange);
-  font-size: 9.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  border: 1px solid var(--ds-warning);
+  color: var(--ds-warning);
+  font-size: var(--ds-text-caption-size);
 }
 .annotations-skin .recap-head-right {
   margin-left: auto;
@@ -1758,8 +1698,8 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
-  color: var(--fg-3);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
 }
 .annotations-skin .recap-swatch {
   display: inline-block;
@@ -1771,20 +1711,20 @@
   margin-left: 6px;
 }
 .annotations-skin .recap-swatch.pos {
-  background: var(--recap-pos);
+  background: var(--dv-positive);
 }
 .annotations-skin .recap-swatch.neg {
-  background: var(--recap-neg);
+  background: var(--dv-negative);
 }
 .annotations-skin .dot-advantage {
   background: linear-gradient(
     90deg,
-    var(--recap-pos) 50%,
-    var(--recap-neg) 50%
+    var(--dv-positive) 50%,
+    var(--dv-negative) 50%
   );
 }
 .annotations-skin .dot-value {
-  background: var(--recap-value);
+  background: var(--dv-4);
 }
 .annotations-skin .recap-compute,
 .annotations-skin .recap-job {
@@ -1793,43 +1733,47 @@
   gap: 6px;
 }
 .annotations-skin .recap-compute select {
-  font-size: 11px;
+  font-size: var(--ds-text-caption-size);
   padding: 2px 6px;
   max-width: 220px;
 }
 .annotations-skin .recap-btn {
-  font-size: 11px;
+  font-size: var(--ds-text-caption-size);
   line-height: 16px;
   padding: 2px 8px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-1);
+  border-radius: var(--ds-radius-sm);
+  border: 1px solid var(--ds-separator);
   background: transparent;
-  color: var(--fg-2);
+  color: var(--ds-text-secondary);
   cursor: pointer;
   white-space: nowrap;
 }
 .annotations-skin .recap-btn:hover:not(:disabled) {
-  background: var(--surface-2);
-  color: var(--fg-1);
+  background: var(--ds-surface-selected);
+  color: var(--ds-text-primary);
 }
 .annotations-skin .recap-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 .annotations-skin .recap-btn.primary {
-  border-color: var(--recap-pos);
-  background: rgba(63, 185, 80, 0.15);
-  color: #aff5b4;
+  border-color: var(--ds-accent);
+  background: var(--ds-accent);
+  color: var(--ds-on-accent);
+}
+.annotations-skin .recap-btn.primary:hover:not(:disabled) {
+  background: var(--ds-accent-hover);
+  color: var(--ds-on-accent);
 }
 .annotations-skin .recap-btn.ghost {
   border-color: transparent;
-  color: var(--fg-3);
+  color: var(--ds-text-secondary);
   padding: 1px 6px;
 }
 .annotations-skin .recap-job-stage {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
-  color: var(--fg-2);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
   white-space: nowrap;
 }
 .annotations-skin .recap-progress {
@@ -1838,24 +1782,24 @@
   width: 120px;
   height: 6px;
   border-radius: 999px;
-  background: var(--surface-2);
+  background: var(--ds-progress-track);
   overflow: hidden;
 }
 .annotations-skin .recap-progress > span {
   position: absolute;
   inset: 0 auto 0 0;
-  background: var(--recap-accent);
+  background: var(--ds-progress);
   border-radius: 999px;
-  transition: width 300ms ease;
+  transition: width var(--ds-dur-fast) var(--ds-ease-standard);
 }
 .annotations-skin .recap-note {
-  font-size: 11px;
-  color: var(--fg-3);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
   padding: 0 0 4px 11px;
   margin-bottom: 4px;
 }
 .annotations-skin .recap-note.error {
-  color: #ffb4ae;
+  color: var(--ds-danger);
 }
 /* Advantage runs: a solid fill whose opacity (inline, 0.25..1) carries the
    strength; no text, so no padding. */
@@ -1864,13 +1808,13 @@
   border-radius: 1px;
 }
 .annotations-skin .tl-seg.adv.pos {
-  background: var(--recap-pos);
+  background: var(--dv-positive);
 }
 .annotations-skin .tl-seg.adv.neg {
-  background: var(--recap-neg);
+  background: var(--dv-negative);
 }
 .annotations-skin .tl-seg.adv:hover {
-  outline: 1px solid var(--fg-1);
+  outline: 1px solid var(--ds-text-primary);
   z-index: 1;
 }
 .annotations-skin .tl-row.recap-value-row {
@@ -1889,23 +1833,23 @@
   pointer-events: none;
 }
 .annotations-skin .recap-grid {
-  stroke: var(--border-1);
+  stroke: var(--ds-separator);
   stroke-width: 1;
   stroke-dasharray: 3 3;
 }
 .annotations-skin .recap-line {
   fill: none;
-  stroke: var(--recap-value);
+  stroke: var(--dv-4);
   stroke-width: 1.5;
   stroke-linejoin: round;
 }
 .annotations-skin .recap-axis {
   position: absolute;
   left: 3px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 8.5px;
-  line-height: 10px;
-  color: var(--fg-3);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  line-height: 14px;
+  color: var(--ds-text-secondary);
   pointer-events: none;
 }
 .annotations-skin .recap-axis.top {
@@ -1920,28 +1864,28 @@
   height: 8px;
   border-radius: 999px;
   transform: translate(-50%, -50%);
-  border: 1.5px solid #0f172a;
-  background: var(--recap-value);
+  border: 1.5px solid var(--ds-surface-1);
+  background: var(--dv-4);
   pointer-events: none;
   z-index: 6;
 }
 .annotations-skin .recap-dot.pos {
-  box-shadow: 0 0 0 2px var(--recap-pos);
+  box-shadow: 0 0 0 2px var(--dv-positive);
 }
 .annotations-skin .recap-dot.neg {
-  box-shadow: 0 0 0 2px var(--recap-neg);
+  box-shadow: 0 0 0 2px var(--dv-negative);
 }
 .annotations-skin .recap-readout {
   position: absolute;
   transform: translateX(8px);
   padding: 0 5px;
   border-radius: 3px;
-  background: #11180ddd;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 9.5px;
+  background: var(--ds-surface-2);
+  border: 1px solid var(--ds-separator);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
   line-height: 13px;
-  color: var(--fg-1);
+  color: var(--ds-text-primary);
   white-space: nowrap;
   pointer-events: none;
   z-index: 6;
@@ -1957,41 +1901,35 @@
 }
 
 /* ----- ANCHORED REVIEW section (per-event verdicts) ----- */
-.annotations-skin {
-  --anchored-valid: #3fb950;
-  --anchored-contradicted: #f85149;
-  --anchored-unknown: #e3b341;
-  --anchored-accent: #58a6ff;
-}
 .annotations-skin .tl-section-head.anchored {
-  border-left-color: var(--anchored-accent);
+  border-left-color: var(--dv-1);
   align-items: center;
   flex-wrap: wrap;
   row-gap: 4px;
 }
 .annotations-skin .anchored-outcome.success {
-  color: var(--anchored-valid);
-  font-weight: 600;
+  color: var(--ds-success);
+  font-weight: var(--ds-weight-semibold);
 }
 .annotations-skin .anchored-outcome.failure {
-  color: var(--anchored-contradicted);
-  font-weight: 600;
+  color: var(--ds-danger);
+  font-weight: var(--ds-weight-semibold);
 }
 .annotations-skin .dot-anchored {
-  background: var(--anchored-accent);
+  background: var(--dv-1);
 }
 .annotations-skin .tl-tick.anchored {
   width: 6px;
   transform: translateX(-3px);
 }
 .annotations-skin .tl-tick.anchored.supported {
-  background: var(--anchored-valid);
+  background: var(--ds-success);
 }
 .annotations-skin .tl-tick.anchored.contradicted {
-  background: var(--anchored-contradicted);
+  background: var(--ds-danger);
 }
 .annotations-skin .tl-tick.anchored.unknown {
-  background: var(--anchored-unknown);
+  background: var(--ds-warning);
 }
 
 /* Fast segmentation panel (fast-segmentation-panel.tsx). */
@@ -2004,37 +1942,37 @@
 }
 .annotations-skin .fast-seg-hint {
   margin: 8px 0 0;
-  color: #94a3b8;
+  color: var(--ds-text-secondary);
   font-size: 12px;
 }
 .annotations-skin .fast-seg-hint code,
 .annotations-skin .fast-seg-grid code,
 .annotations-skin .fast-seg-stats code {
-  color: #d4f779;
-  font-size: 11px;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-caption-size);
 }
 .annotations-skin .fast-seg-error {
   margin: 8px 0 0;
-  color: #fca5a5;
+  color: var(--ds-danger);
   font-size: 12px;
   word-break: break-word;
 }
 .annotations-skin .fast-seg-model {
   margin-top: 10px;
   padding: 10px 12px;
-  border: 1px solid rgba(175, 183, 168, 0.14);
+  border: 1px solid var(--ds-separator);
   border-radius: 10px;
-  background: rgba(15, 20, 15, 0.45);
+  background: var(--ds-surface-sunken);
 }
 .annotations-skin .fast-seg-grid {
   display: grid;
   grid-template-columns: minmax(120px, max-content) 1fr;
   gap: 4px 12px;
   font-size: 12px;
-  color: #e2e8f0;
+  color: var(--ds-text-primary);
 }
 .annotations-skin .fast-seg-grid > span:nth-child(odd) {
-  color: #94a3b8;
+  color: var(--ds-text-secondary);
 }
 .annotations-skin .fast-seg-recall {
   display: flex;
@@ -2042,24 +1980,24 @@
   align-items: center;
   gap: 6px;
   margin-top: 8px;
-  color: #94a3b8;
+  color: var(--ds-text-secondary);
   font-size: 12px;
 }
 .annotations-skin .fast-seg-chip {
-  border: 1px solid rgba(212, 247, 121, 0.24);
+  border: 1px solid var(--ds-border-control);
   border-radius: 999px;
   padding: 2px 8px;
-  color: #e2e8f0;
+  color: var(--ds-text-primary);
 }
 .annotations-skin .fast-seg-chip b {
-  color: #d4f779;
-  font-weight: 600;
+  color: var(--ds-text-primary);
+  font-weight: var(--ds-weight-semibold);
 }
 .annotations-skin .fast-seg-licence {
   margin: 6px 0 0;
   padding-left: 16px;
-  color: #94a3b8;
-  font-size: 11px;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
 }
 .annotations-skin .fast-seg-job {
   display: grid;
@@ -2082,20 +2020,20 @@
 .annotations-skin .fast-seg-stats th,
 .annotations-skin .fast-seg-stats td {
   padding: 4px 8px;
-  border-bottom: 1px solid rgba(175, 183, 168, 0.12);
+  border-bottom: 1px solid var(--ds-separator);
   text-align: left;
-  color: #e2e8f0;
+  color: var(--ds-text-primary);
 }
 .annotations-skin .fast-seg-stats th {
-  color: #94a3b8;
-  font-weight: 500;
+  color: var(--ds-text-secondary);
+  font-weight: var(--ds-weight-medium);
 }
 .annotations-skin .fast-seg-advanced summary {
   display: flex;
   align-items: center;
   gap: 10px;
   cursor: pointer;
-  color: #f8fafc;
+  color: var(--ds-text-primary);
   font-size: 13px;
 }
 .annotations-skin .object-annotation-controls .object-annotation-checkbox {
@@ -2111,10 +2049,35 @@
   width: 14px;
   height: 14px;
   padding: 0;
-  accent-color: #d4f779;
+  accent-color: var(--ds-accent);
 }
 .annotations-skin .fast-seg-panel .object-annotation-run {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+/* Subtask vocabulary editor (subtask-vocabulary.tsx). */
+.annotations-skin .vw-vocab {
+  margin-top: 8px;
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+}
+.annotations-skin .vw-vocab summary {
+  cursor: pointer;
+  color: var(--ds-text-primary);
+}
+.annotations-skin .vw-vocab p {
+  margin: 6px 0;
+}
+.annotations-skin .vw-vocab textarea {
+  width: 100%;
+  font-family: var(--ds-font-mono);
+}
+.annotations-skin .vw-vocab-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
 }
