@@ -97,3 +97,39 @@ describe("stage-4 stylesheets", () => {
     }
   });
 });
+
+describe("reduced motion inside the app (data-motion)", () => {
+  const dir = join(import.meta.dir, "..");
+  const strip = (file: string) =>
+    readFileSync(join(dir, file), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  test.each(["pages.css", "agent-content.css"])(
+    "%s: every animated or transitioned rule is also stopped under data-motion",
+    (file) => {
+      const css = strip(file);
+      const reduced = new Set<string>();
+      for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        if (!m[1].includes('[data-motion="reduce"]')) continue;
+        if (!/animation:\s*none/.test(m[2]) || !/transition:\s*none/.test(m[2]))
+          continue;
+        for (const sel of m[1].split(","))
+          reduced.add(sel.replace('[data-motion="reduce"]', "").trim());
+      }
+      const moving: string[] = [];
+      for (const m of css.matchAll(/([^{}@]+)\{([^{}]*)\}/g)) {
+        const body = m[2];
+        const moves =
+          /animation:\s*(?!\s|none)/.test(body) ||
+          /transition:\s*(?!\s|none)/.test(body);
+        if (!moves || m[1].includes("data-motion")) continue;
+        for (const sel of m[1].split(",")) moving.push(sel.trim());
+      }
+      const missing = moving.filter(
+        (sel) =>
+          ![...reduced].some(
+            (r) => sel === r || sel.startsWith(r) || r.startsWith(sel),
+          ),
+      );
+      expect(missing).toEqual([]);
+    },
+  );
+});

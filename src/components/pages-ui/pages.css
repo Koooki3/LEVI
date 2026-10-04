@@ -245,14 +245,6 @@
 .pg-empty-inline > .ds-icon {
   color: var(--ds-icon);
 }
-@media (prefers-reduced-motion: reduce) {
-  .pg-jobcard {
-    animation: none;
-  }
-}
-[data-motion="reduce"] .pg-jobcard {
-  animation: none;
-}
 
 /* ── Page components (formerly levi.css) ───────────────────────────── */
 .pg-box {
@@ -2234,4 +2226,24 @@
   .pg-live-summary__error {
     grid-column: auto;
   }
+}
+
+/* Reduced motion, from the system setting or the app's own switch
+   (data-motion="reduce" on an ancestor, docs/DESIGN.md "Motion"): no entry
+   animation, no breathing, no width or colour transitions. */
+@media (prefers-reduced-motion: reduce) {
+  .pg-jobcard,
+  .pg-bar span,
+  .pg-explore-card,
+  .pg-step {
+    animation: none;
+    transition: none;
+  }
+}
+[data-motion="reduce"] .pg-jobcard,
+[data-motion="reduce"] .pg-bar span,
+[data-motion="reduce"] .pg-explore-card,
+[data-motion="reduce"] .pg-step {
+  animation: none;
+  transition: none;
 }
