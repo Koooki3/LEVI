@@ -22,13 +22,23 @@ export type ToastOptions = {
   tone?: Tone;
   /** One optional action: undo, view, retry. */
   action?: { label: string; onClick: () => void };
-  /** ms before it hides; default 4000; errors (`danger`) stay until closed. */
+  /**
+   * ms before it hides. Default 4000; errors (`danger`) and toasts with an
+   * action (Undo, Retry, View) stay until closed, so nobody loses the action
+   * to a timer.
+   */
   duration?: number | null;
 };
 
 type ToastItem = ToastOptions & { id: number };
 
-const MAX_VISIBLE = 3;
+/** ms before a toast hides, or null when it stays until closed. */
+export function toastDuration(options: ToastOptions): number | null {
+  if (options.duration !== undefined) return options.duration;
+  return options.tone === "danger" || options.action ? null : TOAST_DEFAULT_MS;
+}
+
+export const TOAST_MAX_VISIBLE = 3;
 export const TOAST_DEFAULT_MS = 4000;
 
 type ToastApi = {
@@ -61,12 +71,7 @@ function ToastCard({
 }) {
   const { t } = useLocale();
   const tone = item.tone ?? "neutral";
-  const duration =
-    item.duration !== undefined
-      ? item.duration
-      : tone === "danger"
-        ? null
-        : TOAST_DEFAULT_MS;
+  const duration = toastDuration(item);
   const [paused, setPaused] = useState(false);
   const remaining = useRef(duration ?? 0);
   const startedAt = useRef(0);
@@ -124,9 +129,10 @@ function ToastCard({
 }
 
 /**
- * The toast region (bottom right, at most three at a time). Successes and
- * notes are announced politely and hide after 4 s (paused while hovered or
- * focused); errors are announced assertively and stay until closed.
+ * The toast region (bottom right). Successes and notes are announced
+ * politely, at most three at a time, and hide after 4 s (paused while hovered
+ * or focused; a toast with an action stays). Errors are announced
+ * assertively, are never hidden by newer toasts and stay until closed.
  */
 export function ToastProvider({
   children,
@@ -149,9 +155,11 @@ export function ToastProvider({
     return id;
   }, []);
   const api = useMemo(() => ({ show, dismiss }), [show, dismiss]);
-  const visible = items.slice(-MAX_VISIBLE);
-  const polite = visible.filter((item) => item.tone !== "danger");
-  const urgent = visible.filter((item) => item.tone === "danger");
+  // Errors are never hidden; the limit of three applies to the others.
+  const polite = items
+    .filter((item) => item.tone !== "danger")
+    .slice(-TOAST_MAX_VISIBLE);
+  const urgent = items.filter((item) => item.tone === "danger");
   return (
     <ToastContext.Provider value={api}>
       {children}

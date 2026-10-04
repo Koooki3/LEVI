@@ -1,10 +1,25 @@
-import { setupDom, click, flush, fire, focus, press, render } from "./dom";
+import {
+  setupDom,
+  click,
+  dropFocus,
+  flush,
+  fire,
+  focus,
+  press,
+  render,
+} from "./dom";
 import { describe, expect, mock, test } from "bun:test";
 import { act, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { ConfirmDialog, Dialog, Sheet, useConfirm } from "../Dialog";
 import { Menu } from "../Menu";
-import { TOAST_DEFAULT_MS, ToastProvider, useToast } from "../Toast";
+import {
+  TOAST_DEFAULT_MS,
+  TOAST_MAX_VISIBLE,
+  ToastProvider,
+  toastDuration,
+  useToast,
+} from "../Toast";
 
 setupDom();
 
@@ -344,5 +359,176 @@ describe("Toast", () => {
     const { host } = await render(<Trigger options={{ title: "x" }} />);
     await click(host.querySelector("button"));
     expect(host.querySelector(".ds-toast")).toBeNull();
+  });
+});
+
+describe("Modal focus trap (review fixes)", () => {
+  function Trap({
+    onClose,
+    closeOnScrim = true,
+  }: {
+    onClose: () => void;
+    closeOnScrim?: boolean;
+  }) {
+    return (
+      <>
+        <button type="button" id="outside">
+          Outside
+        </button>
+        <Dialog
+          open
+          onClose={onClose}
+          closeOnScrim={closeOnScrim}
+          title="Trap"
+          footer={
+            <button type="button" id="inside-last">
+              Save
+            </button>
+          }
+        />
+      </>
+    );
+  }
+
+  test("after a press on the scrim (closeOnScrim=false), Tab and Escape still work", async () => {
+    const onClose = mock(() => undefined);
+    const { host } = await render(
+      <Trap onClose={onClose} closeOnScrim={false} />,
+    );
+    const dialog = host.querySelector('[role="dialog"]')!;
+    const scrim = host.querySelector(".ds-scrim")!;
+    const down = new MouseEvent("mousedown", {
+      bubbles: true,
+      cancelable: true,
+    });
+    await fire(scrim, down);
+    expect(down.defaultPrevented).toBe(true);
+    await click(scrim);
+    expect(onClose).not.toHaveBeenCalled();
+    // Focus has left the panel (as after a click on a non-focusable area).
+    await dropFocus();
+    expect(dialog.contains(document.activeElement)).toBe(false);
+    await press(document.body, "Tab");
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    await dropFocus();
+    await press(document.body, "Tab", { shiftKey: true });
+    expect(document.activeElement?.id).toBe("inside-last");
+    await dropFocus();
+    await press(document.body, "Escape");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  test("focus that lands outside the panel is pulled back", async () => {
+    const { host } = await render(<Trap onClose={() => undefined} />);
+    const dialog = host.querySelector('[role="dialog"]')!;
+    await focus(host.querySelector("#outside"));
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  test("with nested dialogs only the innermost reacts to Tab and Escape", async () => {
+    const outerClose = mock(() => undefined);
+    function Nested() {
+      const [inner, setInner] = useState(true);
+      return (
+        <Dialog
+          open
+          onClose={outerClose}
+          title="Outer"
+          footer={
+            <button type="button" id="outer-btn">
+              Outer
+            </button>
+          }
+        >
+          <Dialog
+            open={inner}
+            onClose={() => setInner(false)}
+            title="Inner"
+            footer={
+              <button type="button" id="inner-btn">
+                Inner
+              </button>
+            }
+          />
+        </Dialog>
+      );
+    }
+    const { host } = await render(<Nested />);
+    const dialogs = () => host.querySelectorAll('[role="dialog"]');
+    expect(dialogs()).toHaveLength(2);
+    const inner = dialogs()[1];
+    expect(inner.contains(document.activeElement)).toBe(true);
+    await focus(host.querySelector("#inner-btn"));
+    await press(document.activeElement, "Tab");
+    expect(inner.contains(document.activeElement)).toBe(true);
+    await press(document.activeElement, "Escape");
+    expect(dialogs()).toHaveLength(1);
+    expect(outerClose).not.toHaveBeenCalled();
+    await press(document.body, "Escape");
+    expect(outerClose).toHaveBeenCalledTimes(1);
+  });
+
+  test("Escape in a menu inside a dialog closes the menu, not the dialog", async () => {
+    const onClose = mock(() => undefined);
+    const { host } = await render(
+      <Dialog open onClose={onClose} title="With menu">
+        <Menu
+          label="More"
+          items={[{ id: "a", label: "A", onSelect: () => undefined }]}
+        />
+      </Dialog>,
+    );
+    const trigger = host.querySelector('[aria-haspopup="menu"]')!;
+    await focus(trigger);
+    await press(trigger, "ArrowDown");
+    expect(host.querySelector('[role="menu"]')).not.toBeNull();
+    await press(document.activeElement, "Escape");
+    expect(host.querySelector('[role="menu"]')).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("Toast (review fixes)", () => {
+  test("errors stay visible however many notes follow; notes are capped", async () => {
+    let api: ReturnType<typeof useToast> | null = null;
+    function Grab() {
+      api = useToast();
+      return null;
+    }
+    const { host } = await render(
+      <ToastProvider>
+        <Grab />
+      </ToastProvider>,
+    );
+    await act(async () => {
+      api!.show({ tone: "danger", title: "Error 1" });
+      api!.show({ tone: "danger", title: "Error 2" });
+      for (let i = 0; i < 5; i += 1)
+        api!.show({ title: `note ${i}`, duration: null });
+    });
+    const urgent = host.querySelector('[aria-live="assertive"]')!;
+    const polite = host.querySelector('[aria-live="polite"]')!;
+    expect(urgent.querySelectorAll(".ds-toast")).toHaveLength(2);
+    expect(polite.querySelectorAll(".ds-toast")).toHaveLength(
+      TOAST_MAX_VISIBLE,
+    );
+  });
+
+  test("a toast with an action does not hide by default", () => {
+    expect(toastDuration({ title: "x" })).toBe(TOAST_DEFAULT_MS);
+    expect(
+      toastDuration({
+        title: "x",
+        action: { label: "Undo", onClick: () => undefined },
+      }),
+    ).toBeNull();
+    expect(toastDuration({ title: "x", tone: "danger" })).toBeNull();
+    expect(
+      toastDuration({
+        title: "x",
+        duration: 50,
+        action: { label: "Undo", onClick: () => undefined },
+      }),
+    ).toBe(50);
   });
 });

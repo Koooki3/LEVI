@@ -62,6 +62,8 @@ function ModalLayer({
       <div
         className="ds-scrim"
         aria-hidden="true"
+        // Keep focus where it is when the scrim is pressed.
+        onMouseDown={(event) => event.preventDefault()}
         onClick={closeOnScrim ? onClose : undefined}
       />
       <div

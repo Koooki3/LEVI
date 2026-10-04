@@ -71,6 +71,18 @@ export async function focus(target: Element | null): Promise<void> {
   });
 }
 
+/**
+ * Take focus off the active element (as a click on a non-focusable area
+ * does). Spelled indirectly: Tailwind scans src/ for class-like words, and
+ * the plain method name would add a utility to the global stylesheet.
+ */
+export async function dropFocus(): Promise<void> {
+  const method = ["bl", "ur"].join("") as "focus";
+  await act(async () => {
+    (document.activeElement as HTMLElement | null)?.[method]?.();
+  });
+}
+
 export async function flush(ms = 0): Promise<void> {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, ms));
