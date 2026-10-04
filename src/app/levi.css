@@ -766,20 +766,14 @@ select optgroup {
 }
 
 /* Agent Workbench: existing graphite, parchment and lime palette. */
+/* The Agent Workbench's content. The drawer around it (a ds Sheet, see
+   shell.css) places and sizes it; the content keeps this palette until its
+   own stage. */
 .levi-agent-dock {
-  position: fixed;
-  right: 16px;
-  top: 76px;
-  bottom: 16px;
-  z-index: 80;
-  width: min(490px, calc(100vw - 32px));
-  overflow-y: auto;
+  min-height: 100%;
   padding: 22px;
   background: #15271f;
   color: #eeeadd;
-  border: 1px solid #53634c;
-  border-radius: 18px;
-  box-shadow: 0 20px 60px #0008;
   font-size: 14px;
 }
 .levi-agent-dock header {
