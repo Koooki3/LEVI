@@ -133,12 +133,49 @@ def _built() -> bool:
     return _build_state() == "current"
 
 
+def _processes():
+    """``(pid, argv, cwd)`` of every process whose /proc entry can be read,
+    except this one and its parent."""
+    me = {os.getpid(), os.getppid()}
+    for entry in Path("/proc").glob("[0-9]*"):
+        if int(entry.name) in me:
+            continue
+        try:
+            raw = (entry / "cmdline").read_bytes()
+            cwd = Path(os.readlink(entry / "cwd")).resolve()
+        except OSError:
+            continue
+        argv = [a.decode(errors="replace") for a in raw.split(b"\0") if a]
+        if argv:
+            yield int(entry.name), argv, cwd
+
+
+def _of_checkout(argv: list, cwd: Path, project: Path) -> bool:
+    """Runs in this checkout, or from its ``.venv`` (``argv[0]`` inside it)."""
+    if cwd == project:
+        return True
+    first = Path(argv[0])
+    return first.is_absolute() and first.parent.parent.parent == project
+
+
+def _live_service(argv: list) -> bool:
+    """``python -m levi.live start [--daemon-child]`` or ``levi live start``."""
+    for i, arg in enumerate(argv[:-1]):
+        if arg == "levi.live" and argv[i + 1] == "start":
+            return True
+        if Path(arg).name == "levi" and argv[i + 1 : i + 3] == ["live", "start"]:
+            return True
+    return False
+
+
 def serving(ui_port: int = 7860) -> str:
-    """Why this checkout's frontend may be in use right now ("" = it is not):
-    the web UI port listens, or a process of this checkout runs ``levi
-    serve`` / ``next``. Only the kernel's socket table and /proc are read;
-    nothing is connected to. ``.next`` and ``node_modules`` must not be
-    rebuilt under a running ``next start``."""
+    """Why this checkout's frontend or code may be in use right now ("" = it
+    is not): the web UI port listens, a process of this checkout runs ``levi
+    serve`` / ``next``, or a live service of this checkout runs (``levi live
+    start``, its ``--daemon-child``: it starts its own ``next start``). Only
+    the kernel's socket table and /proc are read; nothing is connected to.
+    ``.next`` and ``node_modules`` must not be rebuilt under a running
+    ``next start``."""
     from .doctor import listening_ports
 
     try:
@@ -147,27 +184,19 @@ def serving(ui_port: int = 7860) -> str:
         ports = set()
     if ui_port in ports:
         return f"port {ui_port} is listening (a running LEVI?)"
-    me = os.getpid()
     project = PROJECT.resolve()
-    for entry in Path("/proc").glob("[0-9]*"):
-        if int(entry.name) in (me, os.getppid()):
+    for pid, argv, cwd in _processes():
+        if not _of_checkout(argv, cwd, project):
             continue
-        try:
-            cmd = (
-                (entry / "cmdline")
-                .read_bytes()
-                .replace(b"\0", b" ")
-                .decode(errors="replace")
-            )
-            cwd = Path(os.readlink(entry / "cwd")).resolve()
-        except OSError:
-            continue
+        if _live_service(argv):
+            return f"a live service of this checkout runs (pid {pid})"
+        cmd = " ".join(argv)
         if cwd == project and (
             ("levi" in cmd and " serve" in cmd)
             or "next start" in cmd
             or "next-server" in cmd
         ):
-            return f"a LEVI of this checkout runs (pid {entry.name})"
+            return f"a LEVI of this checkout runs (pid {pid})"
     return ""
 
 
@@ -183,10 +212,12 @@ def stop_first(busy: str) -> Step:
         "human",
         [
             "uv run --no-sync levi stop   # plain `uv run` would sync first",
+            "uv run --no-sync levi live stop   # if the live service runs too",
             "uv run --locked levi install --profile core",
-            "uv run levi   # start it again",
+            "uv run levi   # start it again (and the live service, if it ran)",
         ],
-        note=busy,
+        note=busy + "; if the live service of this checkout runs too, stop it as well "
+        "(uv run --no-sync levi live stop)",
         docs="INSTALL.md",
     )
 

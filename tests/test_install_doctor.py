@@ -267,6 +267,43 @@ def test_python_dependencies_wait_for_a_stop_while_this_checkout_serves(
     assert "stop-service" not in [s.id for s in steps]
 
 
+def test_serving_counts_a_live_service_of_this_checkout(monkeypatch, tmp_path):
+    """A ``levi live`` daemon of this checkout (cwd, or the checkout's
+    ``.venv`` python) runs its own ``next start``: the checkout is in use.
+    The same command from another checkout is not."""
+    project = tmp_path / "checkout"
+    project.mkdir()
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.setattr(install, "PROJECT", project)
+    monkeypatch.setattr(doctor, "listening_ports", lambda: set())
+    python = str(project / ".venv/bin/python")
+    daemon = [python, "-m", "levi.live", "start", "--daemon-child", "--no-ui"]
+    rows = []
+    monkeypatch.setattr(install, "_processes", lambda: iter(rows))
+    assert install.serving() == ""
+    rows[:] = [(41, daemon, other)]  # this checkout's .venv, another cwd
+    assert "live service" in install.serving() and "41" in install.serving()
+    rows[:] = [(42, ["/usr/bin/python3", "-m", "levi.live", "start"], project)]
+    assert "pid 42" in install.serving()
+    rows[:] = [(43, [str(project / ".venv/bin/levi"), "live", "start"], other)]
+    assert "pid 43" in install.serving()
+    # Another checkout's live service, or a live command that is not start.
+    rows[:] = [
+        (44, [str(other / ".venv/bin/python"), "-m", "levi.live", "start"], other),
+        (45, [python, "-m", "levi.live", "status"], project),
+    ]
+    assert install.serving() == ""
+
+
+def test_the_stop_step_names_the_live_service_too(isolated, monkeypatch):
+    monkeypatch.setattr(install, "serving", lambda ui_port=7860: "a live service")
+    monkeypatch.setattr(install, "_has", lambda module: False)  # uv sync pending
+    stop = _step(install.plan(["core"]), "stop-service")
+    assert any("levi live stop" in c for c in stop.command)
+    assert "levi live stop" in stop.note
+
+
 def test_serving_reads_the_socket_table(monkeypatch):
     monkeypatch.setattr(doctor, "listening_ports", lambda: {7860})
     assert "7860" in install.serving()

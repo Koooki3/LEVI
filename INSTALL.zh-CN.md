@@ -89,7 +89,7 @@ loginctl enable-linger "$USER"     # 注销后继续运行（可能需要管理�
 
 **从别的机器访问。** LEVI 没有登录，是能访问文件的单用户工作台。让它留在 `127.0.0.1`，用端口转发访问（`ssh -L 7860:127.0.0.1:7860 user@server`；7861 是内部 API，不是工作台）。要共享，就放在有身份认证的反向代理后面，转发到 `127.0.0.1:7860`，HTTPS 下设 `LEVI_SECURE_COOKIES=1`；不要在开放网络上用 `--host 0.0.0.0`。
 
-**更新：停止、安装、启动。** 这个检出的 LEVI 在运行时，安装的每一步都按这个顺序做，包括 Python 依赖（`uv sync`）：`git pull`；`uv run --no-sync levi stop`（不加 `--no-sync` 的 `uv run` 会先同步环境，等于在运行中的服务底下换包；有作业在跑时 `levi stop` 会拒绝：`--wait` 等它们结束；`--force` 会杀掉它们）；`uv run --locked levi install --profile core`（同步依赖；前端源码变了就重新构建；`levi doctor` 会报构建过期）；再启动服务。`levi install` 不改动本检出正在运行的 LEVI 所用的任何东西：端口 7860 在监听、或有本检出的 `levi serve` 进程时，Python 依赖、前端依赖（`node_modules`）和构建（`.next`）都列为人的步骤，排在“先停掉正在运行的 LEVI”（`stop-service`）之后。源码戳出现之前构建的 `.next` 状态为“未知”，只有加 `--yes` 才重建。如果还运行着实时服务（`levi live`），更新后要和产品 LEVI 一起重启：两者运行同一份代码，`live.toml` 的新键（例如 `vllm.model`、`gpu.lock_unavailable`）只在新启动的服务里生效。
+**更新：停止、安装、启动。** 这个检出的 LEVI 在运行时，安装的每一步都按这个顺序做，包括 Python 依赖（`uv sync`）：`git pull`；`uv run --no-sync levi stop`（不加 `--no-sync` 的 `uv run` 会先同步环境，等于在运行中的服务底下换包；有作业在跑时 `levi stop` 会拒绝：`--wait` 等它们结束；`--force` 会杀掉它们）；`uv run --locked levi install --profile core`（同步依赖；前端源码变了就重新构建；`levi doctor` 会报构建过期）；再启动服务。`levi install` 不改动本检出正在运行的 LEVI 所用的任何东西：端口 7860 在监听、有本检出的 `levi serve` 进程、或本检出的实时服务在运行时（`levi live start` 及其守护进程），Python 依赖、前端依赖（`node_modules`）和构建（`.next`）都列为人的步骤，排在“先停掉正在运行的 LEVI”（`stop-service`，其中也列出停实时服务的 `uv run --no-sync levi live stop`）之后。源码戳出现之前构建的 `.next` 状态为“未知”，只有加 `--yes` 才重建。如果还运行着实时服务（`levi live`），更新后要和产品 LEVI 一起重启：两者运行同一份代码，`live.toml` 的新键（例如 `vllm.model`、`gpu.lock_unavailable`）只在新启动的服务里生效。
 
 ## 5. 实时标注服务
 

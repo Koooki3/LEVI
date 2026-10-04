@@ -16,7 +16,7 @@ For Claude Code, Codex or any agent with a shell that installs LEVI for a person
 | 1 | `command -v git uv ffmpeg ffprobe` | each prints a path; a missing `uv` or `ffmpeg` is a person's step (root, or a download they approve) |
 | 2 | `git clone https://github.com/Koooki3/LEVI.git && cd LEVI` | `git status` is clean |
 | 3 | `export LEVI_WORKSPACE=<folder the person chose>` | path short (the core's socket path must stay within 103 bytes; doctor checks it) |
-| 4 | `uv run --locked levi install --profile core --plan --json` | exit 0 (nothing to do), 1 (automatic steps left) or 10 (a person's steps left); read `steps[]`. A `stop-service` step means this checkout's LEVI is running: neither `uv sync` nor the frontend dependencies nor the build run under it (those steps are `human`); ask the person to stop it (`uv run --no-sync levi stop`), never stop it yourself |
+| 4 | `uv run --locked levi install --profile core --plan --json` | exit 0 (nothing to do), 1 (automatic steps left) or 10 (a person's steps left); read `steps[]`. A `stop-service` step means this checkout's LEVI is running: neither `uv sync` nor the frontend dependencies nor the build run under it (those steps are `human`); ask the person to stop it (`uv run --no-sync levi stop`, and `uv run --no-sync levi live stop` when a live service of the checkout runs; both count as serving), never stop it yourself |
 | 5 | `uv run --locked levi install --profile core --json` | exit 0, or 10 with only person steps left; `steps[].result` |
 | 6 | `uv run levi doctor --json` | `status` `ok` or `warn`; every `fail` has a `fix` |
 | 7 | optional profiles: `uv run levi install --profile <name> --plan --json`, then without `--plan` (add `--yes` only after the person agreed to the download) | as 4-6 |
