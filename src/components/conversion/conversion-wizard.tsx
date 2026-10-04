@@ -1,4 +1,7 @@
 "use client";
+import { ArrowUpRight, Play, ScanSearch } from "lucide-react";
+import { Badge, Button, Icon } from "@/components/ds";
+import { JobCard, Note, RequestProblem } from "@/components/pages-ui/feedback";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { T, useLocale } from "@/components/levi-locale";
@@ -160,20 +163,21 @@ export function ConversionWizard({
   return (
     <div>
       {error && (
-        <p className="levi-error" role="alert">
-          {t(error)}
-        </p>
+        <RequestProblem
+          action="The conversion step did not complete"
+          message={error}
+        />
       )}
-      {notice && <p className="levi-status warn mt-3">{notice}</p>}
+      {notice && <Note tone="warning">{notice}</Note>}
       <form
-        className="levi-row mt-4"
+        className="pg-row mt-4"
         onSubmit={(e) => {
           e.preventDefault();
           inspect();
         }}
       >
         <input
-          className="levi-input grow"
+          className="ds-input ds-focus grow"
           aria-label={t("Input directory")}
           placeholder={t(
             "Raw capture (task/demo_NNNN folders) or a LeRobot dataset",
@@ -188,12 +192,14 @@ export function ConversionWizard({
             setOptions(INITIAL);
           }}
         />
-        <button
-          className="levi-primary"
-          disabled={busy || inspecting || !available}
+        <Button
+          type="submit"
+          icon={ScanSearch}
+          loading={inspecting}
+          disabled={busy || !available}
         >
           <T>{inspecting ? "Inspecting…" : "1 · Inspect input"}</T>
-        </button>
+        </Button>
       </form>
       <details className="mt-3">
         <summary className="cursor-pointer text-xs">
@@ -205,12 +211,13 @@ export function ConversionWizard({
             orientation, action mode and quality thresholds.
           </T>{" "}
           <Link href="/guide">
-            <T>Guide</T> ↗
+            <T>Guide</T>
+            <Icon icon={ArrowUpRight} />
           </Link>
         </p>
         <textarea
           aria-label={t("Conversion options JSON")}
-          className="levi-input w-full font-mono text-xs"
+          className="ds-input ds-focus w-full font-mono text-xs"
           rows={6}
           value={extra}
           onChange={(e) => setExtra(e.target.value)}
@@ -219,9 +226,11 @@ export function ConversionWizard({
 
       {inspectJob && inspecting && <JobProgress job={inspectJob} />}
       {inspectJob?.status === "failed" && (
-        <p className="levi-error" role="alert">
-          {t(inspectJob.error || "Inspection failed")}
-        </p>
+        <RequestProblem
+          action="Inspection failed"
+          message={inspectJob.error || "Inspection failed"}
+          fix={t("Check the input directory, then inspect it again.")}
+        />
       )}
       {report && (
         <>
@@ -258,13 +267,9 @@ export function ConversionWizard({
               setPlan(null);
             }}
           />
-          <button
-            className="levi-primary mt-4"
-            disabled={busy}
-            onClick={preview}
-          >
+          <Button className="mt-4" disabled={busy} onClick={preview}>
             <T>5 · Review plan</T>
-          </button>
+          </Button>
         </>
       )}
       {plan && (
@@ -290,8 +295,10 @@ export function ConversionWizard({
               2,
             )}
           </pre>
-          <button
-            className="levi-primary mt-3"
+          <Button
+            variant="primary"
+            icon={Play}
+            className="mt-3"
             disabled={busy}
             onClick={() =>
               void run(async () => {
@@ -301,37 +308,49 @@ export function ConversionWizard({
               })
             }
           >
-            <T>6 · Run conversion</T> ↗
-          </button>
+            <T>6 · Run conversion</T>
+          </Button>
         </div>
       )}
       {runJob && (
-        <div className="mt-6">
-          <p>
-            <span
-              className={`levi-status ${
+        <JobCard
+          label={t("Conversion")}
+          status={
+            <Badge
+              tone={
                 runJob.status === "failed"
-                  ? "fail"
+                  ? "danger"
                   : runJob.status === "succeeded"
-                    ? "pass"
-                    : ""
-              }`}
+                    ? "success"
+                    : "info"
+              }
             >
               {t(runJob.status)}
-            </span>
-          </p>
+            </Badge>
+          }
+          title={t(runJob.stage)}
+          meta={<code>{runJob.id}</code>}
+        >
           <JobProgress job={runJob} />
           {runJob.error && (
-            <p className="levi-error" role="alert">
-              {t(runJob.error)}
-            </p>
+            <RequestProblem
+              action="The conversion did not finish"
+              message={runJob.error}
+              fix={t(
+                "Open Task history & logs below for the step that failed.",
+              )}
+            />
           )}
           {runJob.dataset && (
-            <Link className="levi-primary" href={`/${runJob.dataset}`}>
-              <T>Review converted dataset</T> ↗
+            <Link
+              className="ds-btn ds-btn--primary ds-focus"
+              href={`/${runJob.dataset}`}
+            >
+              <T>Review converted dataset</T>
+              <Icon icon={ArrowUpRight} />
             </Link>
           )}
-        </div>
+        </JobCard>
       )}
     </div>
   );

@@ -1,5 +1,6 @@
 "use client";
 import { T, useLocale } from "@/components/levi-locale";
+import { Progress } from "@/components/ds";
 import type { Job } from "./types";
 
 function duration(seconds: number | null | undefined): string {
@@ -23,8 +24,8 @@ export function JobProgress({ job }: { job: Job }) {
       ? p.done / Math.max(1e-3, p.elapsed_seconds)
       : null;
   return (
-    <div className="levi-progress" aria-live="polite">
-      <ol className="levi-steps">
+    <div className="pg-progress" aria-live="polite">
+      <ol className="pg-steps">
         {p.stages.map((name, index) => (
           <li
             key={name}
@@ -42,13 +43,11 @@ export function JobProgress({ job }: { job: Job }) {
       </ol>
       {running && p.total > 0 && (
         <>
-          <div className="levi-bar">
-            <span style={{ width: `${(fraction * 100).toFixed(1)}%` }} />
-          </div>
-          <p className="text-xs tabular">
-            {p.done} / {p.total}
-            {p.current ? ` · ${p.current}` : ""}
-          </p>
+          <Progress
+            value={fraction * 100}
+            showValue
+            label={`${p.done} / ${p.total}${p.current ? ` · ${p.current}` : ""}`}
+          />
         </>
       )}
       <p className="text-xs tabular">
@@ -62,7 +61,7 @@ export function JobProgress({ job }: { job: Job }) {
         {rate !== null && running && ` · ${rate.toFixed(2)}/s`}
       </p>
       {p.warnings.length > 0 && (
-        <ul className="levi-warnings">
+        <ul className="pg-warnings" aria-label={t("Warnings")}>
           {p.warnings.map((w) => (
             <li key={w}>{t(w)}</li>
           ))}
