@@ -34,11 +34,14 @@ def checkout(tmp_path, monkeypatch):
     return project
 
 
-def install_all(project, names=("next", "lucide-react", "motion")):
+def install_all(project, names=("next", "lucide-react", "motion"), mark=True):
+    """Fill node_modules; ``mark`` writes the stamp as ``levi setup`` does
+    (a bare ``bun install`` writes none: ``levi build`` marks after it)."""
     for name in names:
         (project / "node_modules" / name).mkdir(parents=True, exist_ok=True)
         (project / "node_modules" / name / "package.json").write_text("{}")
-    bootstrap.mark_frontend_deps(project)
+    if mark:
+        bootstrap.mark_frontend_deps(project)
 
 
 @pytest.fixture
