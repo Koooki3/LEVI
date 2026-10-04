@@ -21,6 +21,7 @@ import {
   type ResolvedTheme,
   type ThemePreference,
 } from "@/lib/design/theme";
+import { openModalDialog } from "./confirm";
 import { globalShortcut } from "./global-keys";
 
 type Shell = {
@@ -78,8 +79,9 @@ export function ShellProvider({ children }: { children: ReactNode }) {
       if (event.defaultPrevented) return;
       const shortcut = globalShortcut(event);
       if (!shortcut) return;
-      // Another dialog (a confirmation, a page's own modal) keeps the keys.
-      if (document.querySelector(OTHER_MODAL)) return;
+      // Another dialog (a confirmation, a page's own modal, a native modal
+      // <dialog> such as the training pool's push dialog) keeps the keys.
+      if (document.querySelector(OTHER_MODAL) || openModalDialog()) return;
       event.preventDefault();
       if (shortcut === "palette") {
         setPaletteOpenState((open) => !open);

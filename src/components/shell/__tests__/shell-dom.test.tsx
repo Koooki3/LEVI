@@ -26,6 +26,24 @@ const { SHELL_EVENTS } = await import("../shell-events");
 setupDom();
 
 /**
+ * happy-dom has no `:modal`; make an open <dialog> opened by showModal()
+ * match it, as in a browser, for the duration of `run`.
+ */
+async function withModalSupport(run: () => Promise<void>) {
+  const original = Element.prototype.matches;
+  Element.prototype.matches = function (this: Element, selector: string) {
+    if (selector === ":modal")
+      return this instanceof HTMLDialogElement && this.open;
+    return original.call(this, selector);
+  };
+  try {
+    await run();
+  } finally {
+    Element.prototype.matches = original;
+  }
+}
+
+/**
  * The call style every former `window.confirm` site uses:
  *   if (!(await confirm({...}))) return;  action();
  */
@@ -344,6 +362,34 @@ describe("command palette", () => {
     await click(document.querySelector("#danger"));
     await press(document.activeElement, "k", ctrlK);
     expect(document.querySelector(".levi-palette")).toBeNull();
+  });
+});
+
+describe("a native modal dialog keeps the keys", () => {
+  // Without the guard the palette opens behind the native dialog and the two
+  // pull focus back and forth (under happy-dom that loops without end).
+  test("Ctrl+K and ? do nothing while a showModal() dialog is open", async () => {
+    await withModalSupport(async () => {
+      await render(
+        <Frame>
+          <dialog id="native">
+            <button type="button" id="in-native">
+              In
+            </button>
+          </dialog>
+        </Frame>,
+      );
+      const native = document.querySelector<HTMLDialogElement>("#native")!;
+      await act(async () => native.showModal());
+      const inside = document.querySelector("#in-native");
+      await press(inside, "k", { ctrlKey: true });
+      await press(inside, "?", { shiftKey: true });
+      expect(document.querySelector(".levi-palette")).toBeNull();
+      expect(document.querySelector(".levi-shortcuts")).toBeNull();
+      await act(async () => native.close());
+      await press(document.body, "k", { ctrlKey: true });
+      expect(document.querySelector(".levi-palette")).not.toBeNull();
+    });
   });
 });
 
