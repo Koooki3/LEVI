@@ -39,10 +39,6 @@ def install_all(project, names=("next", "lucide-react", "motion")):
         (project / "node_modules" / name).mkdir(parents=True, exist_ok=True)
         (project / "node_modules" / name / "package.json").write_text("{}")
     bootstrap.mark_frontend_deps(project)
-    # The lockfile and package.json are older than the install.
-    past = time.time() - 60
-    for name in ("bun.lock", "package.json"):
-        os.utime(project / name, (past, past))
 
 
 @pytest.fixture
@@ -56,7 +52,7 @@ def calls(monkeypatch, checkout):
         if cmd[1:3] == ["run", "build"]:
             (checkout / ".next").mkdir(exist_ok=True)
         if cmd[1] == "install" and codes.get("install", 0) == 0:
-            install_all(checkout)
+            install_all(checkout, mark=False)  # bun writes no stamp
         return codes.get(cmd[1] if cmd[1] == "install" else "build", 0)
 
     monkeypatch.setattr(levi_cli.subprocess, "call", call)
@@ -72,11 +68,42 @@ def test_the_dependency_check_names_what_is_off(checkout):
     assert (
         bootstrap.frontend_deps_problem() == "node_modules lacks lucide-react, motion"
     )
+
+
+def test_the_stamp_compares_contents_not_times(checkout):
     install_all(checkout)
+    # Same content, newer time (a checkout or pull rewrote it): nothing to do.
+    future = time.time() + 60
+    for name in ("bun.lock", "package.json"):
+        data = (checkout / name).read_bytes()
+        (checkout / name).write_bytes(data)
+        os.utime(checkout / name, (future, future))
+    assert bootstrap.frontend_deps_problem() == ""
+    # Changed content, older time: install.
     (checkout / "bun.lock").write_text('{"changed": true}')
-    future = time.time() + 5
-    os.utime(checkout / "bun.lock", (future, future))
-    assert bootstrap.frontend_deps_problem() == "bun.lock is newer than node_modules"
+    past = time.time() - 3600
+    os.utime(checkout / "bun.lock", (past, past))
+    assert (
+        bootstrap.frontend_deps_problem() == "bun.lock changed since the last install"
+    )
+
+
+def test_no_stamp_means_install_once_then_the_stamp_says(checkout, calls):
+    ran, _codes = calls
+    install_all(checkout)
+    (checkout / bootstrap.DEPS_STAMP).unlink()
+    # The folder is newer than the lockfile: still unknown, so install.
+    assert "no record" in bootstrap.frontend_deps_problem()
+    (checkout / bootstrap.DEPS_STAMP).write_text("not json")
+    assert "no record" in bootstrap.frontend_deps_problem()
+    (checkout / bootstrap.DEPS_STAMP).unlink()
+    assert levi_cli.build_frontend("/x/bun") == 0
+    assert ran == [["install", "--frozen-lockfile"], ["run", "build"]]
+    stamp = json.loads((checkout / bootstrap.DEPS_STAMP).read_text())
+    assert set(stamp) == {"bun.lock", "package.json"}
+    ran.clear()
+    assert levi_cli.build_frontend("/x/bun") == 0
+    assert ran == [["run", "build"]]
 
 
 def test_build_installs_missing_dependencies_first(checkout, calls, capsys):

@@ -64,37 +64,49 @@ def setup():
     print("LEVI installed. Run: uv run levi build && uv run levi serve")
 
 
-# Written into node_modules after a successful `bun install`: the lockfile and
-# package.json are compared against it (the folder's own time changes only
-# when an entry is added or removed).
+# Written into node_modules after a successful `bun install`: the sha256 of
+# bun.lock and package.json it installed. The files' contents are compared
+# against it (times change on every checkout or pull, contents do not).
 DEPS_STAMP = "node_modules/.levi-deps-installed"
 LOCK_FILES = ("bun.lock", "package.json")
+
+
+def _lock_digests(project) -> dict:
+    found = {}
+    for name in LOCK_FILES:
+        path = project / name
+        if path.is_file():
+            found[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return found
 
 
 def mark_frontend_deps(project=None) -> None:
     project = project or PROJECT
     stamp = project / DEPS_STAMP
     if stamp.parent.is_dir():
-        stamp.write_text("bun install --frozen-lockfile\n")
+        stamp.write_text(json.dumps(_lock_digests(project), sort_keys=True) + "\n")
 
 
 def frontend_deps_problem(project=None) -> str:
     """Why ``node_modules`` does not match ``bun.lock``/``package.json`` ("" =
-    it does): it is missing, one of them is newer than the last install, or
-    a dependency ``package.json`` names is not installed."""
+    it does): it is missing; there is no record of what was installed (no
+    stamp, or one that cannot be read: install once, then the stamp says);
+    the content of one of them differs from the last install; or a
+    dependency ``package.json`` names is not installed."""
     project = project or PROJECT
     modules = project / "node_modules"
     if not modules.is_dir():
         return "node_modules is missing"
-    stamp = project / DEPS_STAMP
     try:
-        installed = (stamp if stamp.is_file() else modules).stat().st_mtime
-    except OSError:
-        return "node_modules cannot be read"
+        recorded = json.loads((project / DEPS_STAMP).read_text())
+    except (OSError, ValueError):
+        recorded = None
+    if not isinstance(recorded, dict):
+        return "no record of the last install of node_modules"
+    current = _lock_digests(project)
     for name in LOCK_FILES:
-        path = project / name
-        if path.is_file() and path.stat().st_mtime > installed:
-            return f"{name} is newer than node_modules"
+        if recorded.get(name) != current.get(name):
+            return f"{name} changed since the last install"
     try:
         manifest = json.loads((project / "package.json").read_text())
     except (OSError, ValueError):
