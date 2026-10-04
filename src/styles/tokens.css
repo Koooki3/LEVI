@@ -1,0 +1,398 @@
+/* LEVI design tokens (design system "ds", stage 1).
+ *
+ * Source: levi-hub UI redesign proposal §4 with the user's decisions of
+ * 2026-10-04 (accent A "graphite", light + dark following the system,
+ * system fonts only). Every name starts with `--ds-` so these tokens never
+ * collide with the older `--bg` / `--accent` / `--surface-*` variables in
+ * globals.css, levi.css and annotations-skin.css; importing this file changes
+ * nothing on existing pages.
+ *
+ * Themes: light is the default; dark applies when the system asks for it
+ * (`prefers-color-scheme: dark`) unless an ancestor says
+ * `data-theme="light"`, and always under `data-theme="dark"`. `data-theme`
+ * works on any element, so a subtree can be themed on its own.
+ *
+ * Components use the semantic tokens only, never the raw gray steps.
+ * Contrast of the key pairs is checked by
+ * src/components/ds/__tests__/tokens-contrast.test.ts.
+ */
+
+:root {
+  /* ── Raw neutral scales (proposal §4.1). Do not use in components. ── */
+  --ds-gray-l-0: #ffffff;
+  --ds-gray-l-1: #fbfbfd;
+  --ds-gray-l-2: #f5f5f7;
+  --ds-gray-l-3: #ededf0;
+  --ds-gray-l-4: #e3e3e8;
+  --ds-gray-l-5: #d2d2d7;
+  --ds-gray-l-6: #b8b8be;
+  --ds-gray-l-7: #86868b;
+  --ds-gray-l-8: #6e6e73;
+  --ds-gray-l-9: #515154;
+  --ds-gray-l-10: #3a3a3c;
+  --ds-gray-l-11: #1d1d1f;
+
+  --ds-gray-d-0: #000000;
+  --ds-gray-d-1: #0b0b0c;
+  --ds-gray-d-2: #141416;
+  --ds-gray-d-3: #1c1c1e;
+  --ds-gray-d-4: #242426;
+  --ds-gray-d-5: #2c2c2e;
+  --ds-gray-d-6: #3a3a3c;
+  --ds-gray-d-7: #48484a;
+  --ds-gray-d-8: #6e6e73;
+  --ds-gray-d-9: #8e8e93;
+  --ds-gray-d-10: #aeaeb2;
+  --ds-gray-d-11: #d1d1d6;
+  --ds-gray-d-12: #f5f5f7;
+
+  /* ── Typography (§4.7). System fonts only; nothing is downloaded. ── */
+  --ds-font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable",
+    "Segoe UI", "Inter", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC",
+    "Source Han Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --ds-font-mono:
+    ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas,
+    "Noto Sans Mono CJK SC", monospace;
+
+  --ds-text-display-size: 32px;
+  --ds-text-display-line: 40px;
+  --ds-text-title-1-size: 24px;
+  --ds-text-title-1-line: 32px;
+  --ds-text-title-2-size: 19px;
+  --ds-text-title-2-line: 26px;
+  --ds-text-title-3-size: 16px;
+  --ds-text-title-3-line: 22px;
+  --ds-text-body-size: 14px;
+  --ds-text-body-line: 21px;
+  --ds-text-reading-size: 16px;
+  --ds-text-reading-line: 26px;
+  --ds-text-callout-size: 13px;
+  --ds-text-callout-line: 19px;
+  --ds-text-caption-size: 12px; /* the smallest size anywhere */
+  --ds-text-caption-line: 16px;
+
+  --ds-weight-regular: 400;
+  --ds-weight-medium: 500;
+  --ds-weight-semibold: 600;
+
+  --ds-tracking-title: -0.01em; /* titles under 24px */
+  --ds-tracking-display: -0.02em; /* titles of 24px and more */
+
+  /* ── Radius: five steps (§4.8). ── */
+  --ds-radius-xs: 4px;
+  --ds-radius-sm: 6px;
+  --ds-radius-md: 10px;
+  --ds-radius-lg: 14px;
+  --ds-radius-full: 999px;
+
+  /* ── Spacing: 4px base (§4.8). ── */
+  --ds-space-0-5: 2px;
+  --ds-space-1: 4px;
+  --ds-space-2: 8px;
+  --ds-space-3: 12px;
+  --ds-space-4: 16px;
+  --ds-space-5: 20px;
+  --ds-space-6: 24px;
+  --ds-space-8: 32px;
+  --ds-space-10: 40px;
+  --ds-space-12: 48px;
+  --ds-space-16: 64px;
+
+  /* ── Control heights and icon sizes (§4.8, §6). ── */
+  --ds-control-sm: 28px;
+  --ds-control-md: 32px;
+  --ds-control-lg: 40px;
+  --ds-hit-min: 24px; /* WCAG 2.5.8 */
+  --ds-icon-sm: 16px;
+  --ds-icon-md: 20px;
+  --ds-icon-lg: 24px;
+  --ds-icon-stroke-sm: 1.75;
+  --ds-icon-stroke-md: 1.5;
+
+  /* ── Motion (§4.9). ── */
+  --ds-dur-instant: 0ms;
+  --ds-dur-fast: 120ms;
+  --ds-dur-base: 200ms;
+  --ds-dur-base-exit: 140ms;
+  --ds-dur-slow: 320ms;
+  --ds-dur-slow-exit: 220ms;
+  --ds-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ds-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --ds-ease-spring: linear(
+    0,
+    0.38 9%,
+    0.79 20%,
+    1.02 32%,
+    1.06 40%,
+    1.02 52%,
+    1 64%,
+    1
+  );
+  /* Movement amounts; set to none under reduced motion. */
+  --ds-motion-shift: 4px;
+  --ds-motion-toast-shift: 8px;
+  --ds-motion-dialog-scale: 0.97;
+  --ds-motion-press-scale: 0.98;
+  --ds-motion-drawer-shift: 100%;
+
+  /* ── Layers (§4.8). ── */
+  --ds-z-base: 0;
+  --ds-z-sticky: 10;
+  --ds-z-dock: 20;
+  --ds-z-popover: 30;
+  --ds-z-overlay: 40;
+  --ds-z-dialog: 50;
+  --ds-z-toast: 60;
+
+  /* ── Material (§4.2 item 4). Only for layers floating over content. ── */
+  --ds-material-filter: saturate(180%) blur(20px);
+}
+
+/* ── Light theme (default) ─────────────────────────────────────────── */
+:root,
+[data-theme="light"] {
+  --ds-bg: var(--ds-gray-l-2);
+  --ds-bg-reading: var(--ds-gray-l-1);
+  --ds-surface-sunken: var(--ds-gray-l-3);
+  --ds-surface-1: var(--ds-gray-l-0);
+  --ds-surface-2: var(--ds-gray-l-0);
+  --ds-surface-hover: var(--ds-gray-l-4);
+  --ds-surface-selected: var(--ds-gray-l-4);
+  --ds-field-bg: var(--ds-gray-l-0);
+  --ds-skeleton: var(--ds-gray-l-4);
+  --ds-separator: var(--ds-gray-l-5);
+  --ds-separator-strong: var(--ds-gray-l-6);
+  --ds-border-control: var(--ds-gray-l-7);
+  --ds-border-control-on-raised: var(--ds-gray-l-7);
+
+  --ds-text-primary: var(--ds-gray-l-11);
+  --ds-text-secondary: var(--ds-gray-l-9);
+  --ds-text-tertiary: var(--ds-gray-l-8);
+  /* gray-8 fails 4.5:1 on sunken (4.34) and hover (3.97): use gray-9 there. */
+  --ds-text-tertiary-on-sunken: var(--ds-gray-l-9);
+  --ds-text-tertiary-on-hover: var(--ds-gray-l-9);
+  --ds-text-tertiary-on-selected: var(--ds-gray-l-9);
+  --ds-text-tertiary-on-raised: var(--ds-gray-l-8);
+  --ds-text-disabled: var(--ds-gray-l-7);
+  --ds-icon: var(--ds-gray-l-10);
+
+  /* Accent A "graphite" (§4.4). */
+  --ds-accent: var(--ds-gray-l-11);
+  --ds-accent-hover: var(--ds-gray-l-10);
+  --ds-on-accent: #ffffff;
+  --ds-focus-ring: var(--ds-gray-l-11);
+  --ds-selected-indicator: var(--ds-gray-l-11);
+  --ds-progress: var(--ds-gray-l-11);
+  --ds-progress-track: var(--ds-gray-l-4);
+
+  /* Status colours (§4.5): only on status badges, dots, toasts, notes. */
+  --ds-success: #28704a;
+  --ds-success-bg: #eaf3ed;
+  --ds-warning: #8a5a00;
+  --ds-warning-bg: #f7f0e1;
+  --ds-danger: #b3362b;
+  --ds-danger-bg: #f8e9e7;
+  --ds-info: #3d6a99;
+  --ds-info-bg: #e9eff6;
+  --ds-on-danger: #ffffff;
+
+  --ds-media-bg: #000000;
+  --ds-scrim: rgb(0 0 0 / 0.32);
+
+  --ds-shadow-1: 0 1px 2px rgb(0 0 0 / 0.06);
+  --ds-shadow-2: 0 4px 16px rgb(0 0 0 / 0.08), 0 1px 3px rgb(0 0 0 / 0.06);
+  --ds-shadow-3: 0 12px 40px rgb(0 0 0 / 0.14);
+  --ds-ring-raised: 0 0 0 0 transparent;
+  --ds-material-bar: rgb(251 251 253 / 0.72);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+}
+
+/* ── Dark theme ────────────────────────────────────────────────────────
+ * The two blocks below must stay identical (a test compares them): one
+ * follows the system, the other is the manual override. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ds-bg: var(--ds-gray-d-1);
+    --ds-bg-reading: var(--ds-gray-d-1);
+    --ds-surface-sunken: var(--ds-gray-d-2);
+    --ds-surface-1: var(--ds-gray-d-3);
+    --ds-surface-2: var(--ds-gray-d-5);
+    --ds-surface-hover: var(--ds-gray-d-4);
+    --ds-surface-selected: var(--ds-gray-d-6);
+    --ds-field-bg: var(--ds-gray-d-2);
+    --ds-skeleton: var(--ds-gray-d-5);
+    --ds-separator: var(--ds-gray-d-6);
+    --ds-separator-strong: var(--ds-gray-d-7);
+    --ds-border-control: var(--ds-gray-d-8);
+    --ds-border-control-on-raised: var(--ds-gray-d-9);
+
+    --ds-text-primary: var(--ds-gray-d-12);
+    --ds-text-secondary: var(--ds-gray-d-10);
+    --ds-text-tertiary: var(--ds-gray-d-9);
+    --ds-text-tertiary-on-sunken: var(--ds-gray-d-9);
+    --ds-text-tertiary-on-hover: var(--ds-gray-d-9);
+    --ds-text-tertiary-on-selected: var(--ds-gray-d-10);
+    --ds-text-tertiary-on-raised: var(--ds-gray-d-10);
+    --ds-text-disabled: var(--ds-gray-d-8);
+    --ds-icon: var(--ds-gray-d-11);
+
+    --ds-accent: var(--ds-gray-d-12);
+    --ds-accent-hover: var(--ds-gray-d-11);
+    --ds-on-accent: var(--ds-gray-d-1);
+    --ds-focus-ring: var(--ds-gray-d-12);
+    --ds-selected-indicator: var(--ds-gray-d-12);
+    --ds-progress: var(--ds-gray-d-12);
+    --ds-progress-track: var(--ds-gray-d-6);
+
+    --ds-success: #6fbf8b;
+    --ds-success-bg: #1d3326;
+    --ds-warning: #d4a64a;
+    --ds-warning-bg: #3a3020;
+    --ds-danger: #e8806f;
+    --ds-danger-bg: #3a2220;
+    --ds-info: #7fa8d6;
+    --ds-info-bg: #1c2a3a;
+    --ds-on-danger: var(--ds-gray-d-1);
+
+    --ds-media-bg: #000000;
+    --ds-scrim: rgb(0 0 0 / 0.56);
+
+    --ds-shadow-1: 0 0 0 0 transparent;
+    --ds-shadow-2: 0 8px 24px rgb(0 0 0 / 0.4);
+    --ds-shadow-3: 0 16px 48px rgb(0 0 0 / 0.5);
+    --ds-ring-raised: inset 0 0 0 1px rgb(255 255 255 / 0.06);
+    --ds-material-bar: rgb(22 22 23 / 0.72);
+  }
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --ds-bg: var(--ds-gray-d-1);
+  --ds-bg-reading: var(--ds-gray-d-1);
+  --ds-surface-sunken: var(--ds-gray-d-2);
+  --ds-surface-1: var(--ds-gray-d-3);
+  --ds-surface-2: var(--ds-gray-d-5);
+  --ds-surface-hover: var(--ds-gray-d-4);
+  --ds-surface-selected: var(--ds-gray-d-6);
+  --ds-field-bg: var(--ds-gray-d-2);
+  --ds-skeleton: var(--ds-gray-d-5);
+  --ds-separator: var(--ds-gray-d-6);
+  --ds-separator-strong: var(--ds-gray-d-7);
+  --ds-border-control: var(--ds-gray-d-8);
+  --ds-border-control-on-raised: var(--ds-gray-d-9);
+
+  --ds-text-primary: var(--ds-gray-d-12);
+  --ds-text-secondary: var(--ds-gray-d-10);
+  --ds-text-tertiary: var(--ds-gray-d-9);
+  --ds-text-tertiary-on-sunken: var(--ds-gray-d-9);
+  --ds-text-tertiary-on-hover: var(--ds-gray-d-9);
+  --ds-text-tertiary-on-selected: var(--ds-gray-d-10);
+  --ds-text-tertiary-on-raised: var(--ds-gray-d-10);
+  --ds-text-disabled: var(--ds-gray-d-8);
+  --ds-icon: var(--ds-gray-d-11);
+
+  --ds-accent: var(--ds-gray-d-12);
+  --ds-accent-hover: var(--ds-gray-d-11);
+  --ds-on-accent: var(--ds-gray-d-1);
+  --ds-focus-ring: var(--ds-gray-d-12);
+  --ds-selected-indicator: var(--ds-gray-d-12);
+  --ds-progress: var(--ds-gray-d-12);
+  --ds-progress-track: var(--ds-gray-d-6);
+
+  --ds-success: #6fbf8b;
+  --ds-success-bg: #1d3326;
+  --ds-warning: #d4a64a;
+  --ds-warning-bg: #3a3020;
+  --ds-danger: #e8806f;
+  --ds-danger-bg: #3a2220;
+  --ds-info: #7fa8d6;
+  --ds-info-bg: #1c2a3a;
+  --ds-on-danger: var(--ds-gray-d-1);
+
+  --ds-media-bg: #000000;
+  --ds-scrim: rgb(0 0 0 / 0.56);
+
+  --ds-shadow-1: 0 0 0 0 transparent;
+  --ds-shadow-2: 0 8px 24px rgb(0 0 0 / 0.4);
+  --ds-shadow-3: 0 16px 48px rgb(0 0 0 / 0.5);
+  --ds-ring-raised: inset 0 0 0 1px rgb(255 255 255 / 0.06);
+  --ds-material-bar: rgb(22 22 23 / 0.72);
+}
+
+/* ── Raised and sunken surfaces swap in the text and border colours that
+ * keep 4.5:1 / 3:1 there (proposal §4.3). Used by .ds-surface-* and every
+ * component drawn on surface-2 (menu, dialog, sheet, tooltip, toast). */
+.ds-on-sunken {
+  --ds-text-tertiary: var(--ds-text-tertiary-on-sunken);
+}
+.ds-on-raised {
+  --ds-text-tertiary: var(--ds-text-tertiary-on-raised);
+  --ds-border-control: var(--ds-border-control-on-raised);
+}
+
+/* ── Reduced motion (§4.9): no movement, no long fades. ── */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ds-dur-base: 0ms;
+    --ds-dur-base-exit: 0ms;
+    --ds-dur-slow: 0ms;
+    --ds-dur-slow-exit: 0ms;
+    --ds-ease-spring: linear;
+    --ds-motion-shift: 0px;
+    --ds-motion-toast-shift: 0px;
+    --ds-motion-dialog-scale: 1;
+    --ds-motion-press-scale: 1;
+    --ds-motion-drawer-shift: 0px;
+  }
+}
+/* Same switch by attribute, for previews and tests. */
+[data-motion="reduce"] {
+  --ds-dur-base: 0ms;
+  --ds-dur-base-exit: 0ms;
+  --ds-dur-slow: 0ms;
+  --ds-dur-slow-exit: 0ms;
+  --ds-ease-spring: linear;
+  --ds-motion-shift: 0px;
+  --ds-motion-toast-shift: 0px;
+  --ds-motion-dialog-scale: 1;
+  --ds-motion-press-scale: 1;
+  --ds-motion-drawer-shift: 0px;
+}
+
+/* ── Increased contrast (§10): borders and secondary text one step up. ── */
+@media (prefers-contrast: more) {
+  :root,
+  [data-theme="light"] {
+    --ds-separator: var(--ds-gray-l-6);
+    --ds-border-control: var(--ds-gray-l-8);
+    --ds-text-secondary: var(--ds-gray-l-10);
+    --ds-text-tertiary: var(--ds-gray-l-9);
+  }
+  [data-theme="dark"] {
+    --ds-separator: var(--ds-gray-d-7);
+    --ds-border-control: var(--ds-gray-d-9);
+    --ds-text-secondary: var(--ds-gray-d-11);
+    --ds-text-tertiary: var(--ds-gray-d-10);
+  }
+}
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ds-separator: var(--ds-gray-d-7);
+    --ds-border-control: var(--ds-gray-d-9);
+    --ds-text-secondary: var(--ds-gray-d-11);
+    --ds-text-tertiary: var(--ds-gray-d-10);
+  }
+}
+
+/* ── Reduced transparency or more contrast: materials become opaque. ── */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root,
+  [data-theme] {
+    --ds-material-bar: var(--ds-surface-1);
+    --ds-material-filter: none;
+  }
+}

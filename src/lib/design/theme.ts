@@ -1,0 +1,128 @@
+"use client";
+/**
+ * Light/dark theme preference for the design system.
+ *
+ * The preference is "system" (follow `prefers-color-scheme`), "light" or
+ * "dark", kept in localStorage under `levi-theme`. Storage may be missing or
+ * throw (private windows, blocked site data); every read and write goes
+ * through `browserStorage`, which never throws, and the default is "system".
+ *
+ * Stage 1 only provides the state. Nothing here touches existing pages: the
+ * caller decides where `data-theme` goes (`applyTheme`). Stage 2 will apply
+ * it to <html> once the pages use the `--ds-*` tokens.
+ */
+import { useCallback, useEffect, useState } from "react";
+import {
+  readBrowserStorage,
+  removeBrowserStorage,
+  writeBrowserStorage,
+} from "@/utils/browserStorage";
+
+export type ThemePreference = "system" | "light" | "dark";
+export type ResolvedTheme = "light" | "dark";
+
+export const THEME_STORAGE_KEY = "levi-theme";
+const DARK_QUERY = "(prefers-color-scheme: dark)";
+
+export function normalizeThemePreference(
+  value: string | null | undefined,
+): ThemePreference {
+  return value === "light" || value === "dark" ? value : "system";
+}
+
+export function readThemePreference(): ThemePreference {
+  return normalizeThemePreference(
+    readBrowserStorage("local", THEME_STORAGE_KEY),
+  );
+}
+
+/** Store the preference; "system" removes the key. False when storage fails. */
+export function writeThemePreference(preference: ThemePreference): boolean {
+  return preference === "system"
+    ? removeBrowserStorage("local", THEME_STORAGE_KEY)
+    : writeBrowserStorage("local", THEME_STORAGE_KEY, preference);
+}
+
+export function resolveTheme(
+  preference: ThemePreference,
+  systemDark: boolean,
+): ResolvedTheme {
+  if (preference === "system") return systemDark ? "dark" : "light";
+  return preference;
+}
+
+export function systemPrefersDark(): boolean {
+  try {
+    return (
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia(DARK_QUERY).matches
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Put the preference on an element: "system" removes `data-theme` so the
+ * tokens follow the media query; "light"/"dark" set it.
+ */
+export function applyTheme(
+  element: HTMLElement | null | undefined,
+  preference: ThemePreference,
+): void {
+  if (!element) return;
+  if (preference === "system") element.removeAttribute("data-theme");
+  else element.setAttribute("data-theme", preference);
+}
+
+/**
+ * The stored preference, a setter that persists it, and the theme it resolves
+ * to now. Follows system changes and other tabs (the `storage` event).
+ * Before mount it reports "system"/"light" so server and client render alike.
+ */
+export function useThemePreference(): {
+  preference: ThemePreference;
+  resolved: ResolvedTheme;
+  setPreference: (preference: ThemePreference) => void;
+} {
+  const [preference, setPreferenceState] = useState<ThemePreference>("system");
+  const [systemDark, setSystemDark] = useState(false);
+
+  useEffect(() => {
+    setPreferenceState(readThemePreference());
+    setSystemDark(systemPrefersDark());
+    let query: MediaQueryList | null = null;
+    try {
+      query =
+        typeof window.matchMedia === "function"
+          ? window.matchMedia(DARK_QUERY)
+          : null;
+    } catch {
+      query = null;
+    }
+    const onSystem = (event: MediaQueryListEvent) =>
+      setSystemDark(event.matches);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key === THEME_STORAGE_KEY)
+        setPreferenceState(readThemePreference());
+    };
+    query?.addEventListener?.("change", onSystem);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      query?.removeEventListener?.("change", onSystem);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
+  const setPreference = useCallback((next: ThemePreference) => {
+    writeThemePreference(next);
+    setPreferenceState(next);
+  }, []);
+
+  return {
+    preference,
+    resolved: resolveTheme(preference, systemDark),
+    setPreference,
+  };
+}
