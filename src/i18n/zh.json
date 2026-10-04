@@ -1208,7 +1208,7 @@
   "States that this episode's subtask annotation is complete; the recorder counts it.": "确认本集的子任务标注已全部完成；记录器会统计它。",
   "Save failed": "保存失败",
   "✓ Episode confirmed (undo)": "✓ 本集已确认完成（撤销）",
-  "Confirm episode complete": "确认本集完成",
+  "Confirm episode complete": "确认片段完成",
   "Stop recording": "停止记录",
   "Confirmed this session": "本次已确认",
   "Discard this recording without a record?": "放弃这次记录、不生成记录文件？",
