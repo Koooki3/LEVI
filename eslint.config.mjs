@@ -30,6 +30,22 @@ const NOT_LINK = `:not(JSXAttribute[name.name=${LINK_ATTR}] > Literal):not(Prope
 const HEX_MESSAGE =
   "Use a --ds-* token or a ds-* class instead of a hex colour (docs/DESIGN.md).";
 
+// Stage 4 pages (Live evaluation, Conversion & review, Training pool,
+// Explore) and the Agent Workbench content: the same hex rule as the frame.
+const PAGE_FILES = [
+  "src/app/live/**/*.tsx",
+  "src/app/workbench/**/*.tsx",
+  "src/app/pool/**/*.tsx",
+  "src/app/explore/**/*.tsx",
+  "src/components/live/**/*.tsx",
+  "src/components/conversion/**/*.tsx",
+  "src/components/pool/**/*.tsx",
+  "src/components/pages-ui/**/*.tsx",
+  "src/components/agent-*.tsx",
+  "src/components/ollama-*.tsx",
+  "src/components/chip-multi-select.tsx",
+];
+
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
@@ -41,7 +57,7 @@ const eslintConfig = [
   {
     // Design stage 2: the global frame uses `--ds-*` tokens, never a
     // hard-coded colour. Older pages follow in stage 6 (docs/DESIGN.md).
-    files: FRAME_FILES,
+    files: [...FRAME_FILES, ...PAGE_FILES],
     rules: {
       "no-restricted-syntax": [
         "error",
