@@ -162,9 +162,7 @@ export default function LivePage() {
         )}
       </Note>
       {status?.enabled !== false && (
-        <LiveSummaryBar
-          summary={liveSummary(sessions, rows, service?.last_error)}
-        />
+        <LiveSummaryBar summary={liveSummary(sessions, rows, service)} />
       )}
       <Freshness
         lastOk={poll.lastOk}
