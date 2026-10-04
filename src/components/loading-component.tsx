@@ -6,13 +6,16 @@ export default function Loading() {
   return (
     <T>
       {
+        // A loading overlay is a status, not a dialog: it takes no focus and
+        // traps nothing; screen readers hear "Loading" once (polite).
         <div
           className="absolute inset-0 flex flex-col items-center justify-center bg-[var(--bg)]/80 backdrop-blur-sm z-10 text-slate-200"
-          tabIndex={-1}
-          aria-modal="true"
-          role="dialog"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
         >
           <svg
+            aria-hidden="true"
             className="animate-spin mb-5 text-cyan-300"
             width="42"
             height="42"
