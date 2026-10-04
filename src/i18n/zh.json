@@ -2199,5 +2199,8 @@
   "Training pool scan": "训练池扫描",
   "Training pool export": "训练池导出",
   "Training pool job": "训练池作业",
-  "Conversion": "转换"
+  "Conversion": "转换",
+  "Contents": "目录",
+  "About LEVI": "关于 LEVI",
+  "Start from a public dataset": "从公开数据集开始"
 }

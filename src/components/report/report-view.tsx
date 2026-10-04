@@ -3,7 +3,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { SkeletonText, useToast } from "@/components/ds";
 import { leviApi } from "@/components/levi-api";
+import { LeviMark } from "@/components/shell/brand";
 import { useLocale } from "@/components/levi-locale";
 import {
   type Heading,
@@ -128,15 +130,14 @@ function Toc({ headings, active }: { headings: Heading[]; active: string }) {
   const items = headings.filter((h) => h.level >= 2 && h.level <= 3);
   if (!items.length) return null;
   return (
-    <nav className="lr-toc" aria-label={t("report.contents")}>
-      <div className="lr-toc-title">{t("report.contents")}</div>
+    <nav className="levi-toc" aria-label={t("report.contents")}>
+      <div className="levi-toc__title">{t("report.contents")}</div>
       <ol>
         {items.map((h) => (
           <li key={h.id} className={`lr-toc-l${h.level}`}>
             <a
               href={`#${h.id}`}
               aria-current={active === h.id ? "location" : undefined}
-              className={active === h.id ? "lr-toc-active" : undefined}
             >
               {h.text}
             </a>
@@ -312,11 +313,13 @@ export default function ReportView() {
     };
   }, [lang, load]);
 
+  // "Updated": a note in the frame's toast region (polite, hides itself).
+  const toasts = useToast();
   useEffect(() => {
     if (!toast) return;
-    const timer = window.setTimeout(() => setToast(false), 2400);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
+    toasts.show({ title: t("report.updated") });
+    setToast(false);
+  }, [toast, toasts, t]);
 
   const markdown = report?.markdown ?? null;
   const headings = useMemo(
@@ -332,7 +335,10 @@ export default function ReportView() {
   return (
     <main className="lr-page">
       <div className="lr-top">
-        <span className="levi-eyebrow">{t("report.eyebrow")}</span>
+        <span className="lr-brand">
+          <LeviMark size={18} />
+          <span className="levi-eyebrow">{t("report.eyebrow")}</span>
+        </span>
         {report && <StatusStrip report={report} live={live} now={now} />}
       </div>
       {error && !report && (
@@ -341,7 +347,12 @@ export default function ReportView() {
           <p>{error}</p>
         </section>
       )}
-      {!report && !error && <p className="lr-muted">{t("report.loading")}</p>}
+      {!report && !error && (
+        <div className="lr-loading" role="status" aria-busy="true">
+          <span className="ds-sr-only">{t("report.loading")}</span>
+          <SkeletonText lines={6} />
+        </div>
+      )}
       {report && report.errors.length > 0 && (
         <div className="lr-block-error" role="alert">
           <strong>{t("report.fileErrors")}</strong>
@@ -354,11 +365,11 @@ export default function ReportView() {
       )}
       {report && !markdown && <EmptyState report={report} />}
       {report && markdown && (
-        <div className="lr-layout">
-          <aside className="lr-aside">
+        <div className="levi-reading__layout">
+          <aside className="levi-reading__aside">
             <Toc headings={headings} active={active} />
           </aside>
-          <article className="lr-doc">
+          <article className="lr-doc levi-prose">
             {report.document_lang && report.document_lang !== lang && (
               <p className="lr-note">{t("report.fallbackEnglish")}</p>
             )}
@@ -368,13 +379,6 @@ export default function ReportView() {
           </article>
         </div>
       )}
-      <div
-        className={`lr-toast ${toast ? "lr-toast-show" : ""}`}
-        role="status"
-        aria-live="polite"
-      >
-        {toast ? t("report.updated") : ""}
-      </div>
     </main>
   );
 }

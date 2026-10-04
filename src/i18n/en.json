@@ -2199,5 +2199,8 @@
   "Training pool scan": "Training pool scan",
   "Training pool export": "Training pool export",
   "Training pool job": "Training pool job",
-  "Conversion": "Conversion"
+  "Conversion": "Conversion",
+  "Contents": "Contents",
+  "About LEVI": "About LEVI",
+  "Start from a public dataset": "Start from a public dataset"
 }
