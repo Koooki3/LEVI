@@ -1,8 +1,9 @@
 "use client";
 /**
- * Token values for code that cannot use CSS variables: SVG presentation
- * attributes (Recharts `stroke`, `fill`) and canvas drawing do not resolve
- * `var(--ds-…)`. `useCssTokens(names)` reads the current values from
+ * Token values for code that cannot use CSS variables: canvas and WebGL
+ * (three.js) drawing do not resolve `var(--ds-…)`. (Recharts' `stroke` and
+ * `fill` accept `var(--ds-…)` in current browsers; the report reads the
+ * values anyway, which also works where they do not.) `useCssTokens(names)` reads the current values from
  * <html> and reads them again when the theme changes (a `data-theme`
  * change or the system switching light and dark). Before mount it returns
  * the `fallback` (or empty strings).
@@ -48,7 +49,7 @@ export function useCssTokens<T extends string>(
   return values;
 }
 
-/** The six data colours, in order. */
+/** The eight data colours, in their fixed order. */
 export const DATA_TOKENS = [
   "--ds-data-1",
   "--ds-data-2",
@@ -56,4 +57,6 @@ export const DATA_TOKENS = [
   "--ds-data-4",
   "--ds-data-5",
   "--ds-data-6",
+  "--ds-data-7",
+  "--ds-data-8",
 ] as const;

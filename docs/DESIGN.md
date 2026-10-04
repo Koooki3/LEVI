@@ -17,7 +17,7 @@ LEVI's interface is being redesigned in stages: graphite accent, light and dark 
 | Mark (one definition) | `src/components/shell/brand.tsx`; tab icons drawn from it by `scripts/brand_icons.py` (`src/app/icon.svg`, `apple-icon.png`, `favicon.ico`) |
 | Page base and older names (stage 5) | `src/app/globals.css`, `src/app/levi.css` |
 | Home, guide, report (stage 5) | `src/components/home/`, `src/styles/home.css`; `src/app/guide/`, `src/styles/reading.css`; `src/components/report/`, `src/app/report/report.css` |
-| Token values in code (SVG, canvas) | `src/lib/design/css-tokens.ts` (`useCssTokens`) |
+| Token values in code (canvas, WebGL) | `src/lib/design/css-tokens.ts` (`useCssTokens`) |
 | Tests | `src/components/ds/__tests__/`, `src/lib/design/__tests__/`, `src/components/shell/__tests__/` |
 
 ## Rules for new code
@@ -44,7 +44,7 @@ All tokens are CSS custom properties on `:root`, named `--ds-*`, so they never c
 | Text | `--ds-text-primary`, `--ds-text-secondary`, `--ds-text-tertiary`, `--ds-text-tertiary-on-sunken`, `-on-hover`, `-on-selected`, `-on-raised`, `--ds-text-disabled`, `--ds-icon` |
 | Accent A | `--ds-accent`, `--ds-accent-hover`, `--ds-on-accent`, `--ds-focus-ring`, `--ds-selected-indicator`, `--ds-progress`, `--ds-progress-track` |
 | Status | `--ds-success`, `--ds-warning`, `--ds-danger`, `--ds-info`, each with `-bg`; `--ds-on-danger` |
-| Data | `--ds-data-1…6`: series and category colours for charts, at least 3:1 on the page and on cards in each theme (tested); never for interface state |
+| Data | `--ds-data-1…8` (blue, orange, aqua, yellow, magenta, green, violet, red; fixed order): series, time-segment and category colours, light and dark steps. Checked with the dataviz palette checks: neighbours stay apart for colour-vision deficiencies (ΔE ≥ 8.4) and normal vision (ΔE ≥ 19.3); every dark step is at least 3:1 on the dark page and card (tested). Light aqua, yellow and magenta are under 3:1 on white, so a coloured mark always has words beside it (legend, lane name). Never for text or interface state |
 | Media | `--ds-media-bg` (black), `--ds-on-media`, `--ds-on-media-secondary` (white text over video and images, both themes; Tailwind `text-on-media`), `--ds-media-scrim` |
 | Depth and material | `--ds-shadow-1…3`, `--ds-ring-raised` (dark), `--ds-material-bar`, `--ds-material-filter` |
 | Type | `--ds-font-sans`, `--ds-font-mono`; `--ds-text-{display,title-1,title-2,title-3,body,reading,callout,caption}-{size,line}`; `--ds-weight-{regular,medium,semibold}`; `--ds-tracking-{title,display}` |
@@ -145,7 +145,7 @@ One mark everywhere: a graphite tile with a geometric "L" and a square point, on
 
 **Home** (`/`): the work entrance. Continue (the last episode or dataset opened in this browser; the frame records visits in `localStorage` under `levi-recent`, nothing is sent), Needs you (agent tasks whose `waiting_for` is a person's approval, review or commit, from `/api/levi/agent/v1/activity/tasks`), Running (conversions and training pool jobs with their progress), the live evaluation card when a live service is shown, and recent datasets (visited first, then the other registered ones). Each card loads on its own with a skeleton and gives up after 10 s; it refreshes every 15 s while the tab is visible. The Hugging Face search and the older `/?path=` and `/?dataset=` links stay. The introduction moved to the guide.
 
-**Reading layout** (`reading.css`, the guide and the report): one column up to 760 px, contents on the left that stay in view and mark the current section (`aria-current="location"`), reading text 16/26 (`--ds-text-reading-*`), Markdown headings, lists, links (primary text, underlined), quotes, code and tables in `.levi-prose`. The report's charts use `--ds-data-*` through `useCssTokens` (SVG attributes cannot read CSS variables), running states are shown by colour and words with no looping animation, and "Updated" is a frame toast.
+**Reading layout** (`reading.css`, the guide and the report): one column up to 760 px, contents on the left that stay in view and mark the current section (`aria-current="location"`), reading text 16/26 (`--ds-text-reading-*`), Markdown headings, lists, links (primary text, underlined), quotes, code and tables in `.levi-prose`. The report's charts use `--ds-data-*` (read through `useCssTokens`; Recharts also accepts `var(--ds-…)` directly in current browsers, the hook is needed only for canvas and WebGL), running states are shown by colour and words with no looping animation, and "Updated" is a frame toast.
 
 ## Motion
 

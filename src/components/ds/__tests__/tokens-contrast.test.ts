@@ -322,20 +322,37 @@ describe("token structure", () => {
 });
 
 describe("data colours", () => {
-  test("each series colour reaches 3:1 on the page and on cards", () => {
-    for (const [name, theme] of [
-      ["light", LIGHT],
-      ["dark", DARK],
-      ["dark (system)", DARK_MEDIA],
-    ] as const)
-      for (let i = 1; i <= 6; i += 1) {
-        const color = resolve(theme, `--ds-data-${i}`);
+  // The eight validated hues (dataviz palette checks: adjacent CVD ΔE ≥ 8.4).
+  const DARK_THEMES = [
+    ["dark", DARK],
+    ["dark (system)", DARK_MEDIA],
+  ] as const;
+
+  test("every dark step reaches 3:1 on the dark page and card", () => {
+    for (const [name, theme] of DARK_THEMES)
+      for (let i = 1; i <= 8; i += 1)
         for (const surface of ["--ds-bg", "--ds-surface-1"]) {
-          const ratio = contrast(color, resolve(theme, surface));
+          const ratio = contrast(
+            resolve(theme, `--ds-data-${i}`),
+            resolve(theme, surface),
+          );
           if (ratio < 3)
             throw new Error(`${name} --ds-data-${i} on ${surface}: ${ratio}`);
-          expect(ratio).toBeGreaterThanOrEqual(3);
         }
-      }
+  });
+
+  test("light steps: 3:1 on cards except aqua, yellow, magenta (always labelled)", () => {
+    const card = resolve(LIGHT, "--ds-surface-1");
+    for (let i = 1; i <= 8; i += 1) {
+      const ratio = contrast(resolve(LIGHT, `--ds-data-${i}`), card);
+      expect(ratio).toBeGreaterThanOrEqual([3, 4, 5].includes(i) ? 2 : 3);
+    }
+  });
+
+  test("the two dark blocks agree", () => {
+    for (let i = 1; i <= 8; i += 1)
+      expect(resolve(DARK, `--ds-data-${i}`)).toBe(
+        resolve(DARK_MEDIA, `--ds-data-${i}`),
+      );
   });
 });

@@ -17,7 +17,7 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 | 标识（唯一定义） | `src/components/shell/brand.tsx`；浏览器标签图标由 `scripts/brand_icons.py` 据此生成（`src/app/icon.svg`、`apple-icon.png`、`favicon.ico`） |
 | 页面基础与旧名称（第 5 阶段） | `src/app/globals.css`、`src/app/levi.css` |
 | 首页、使用指南、报告页（第 5 阶段） | `src/components/home/`、`src/styles/home.css`；`src/app/guide/`、`src/styles/reading.css`；`src/components/report/`、`src/app/report/report.css` |
-| 代码里取令牌值（SVG、canvas） | `src/lib/design/css-tokens.ts`（`useCssTokens`） |
+| 代码里取令牌值（canvas、WebGL） | `src/lib/design/css-tokens.ts`（`useCssTokens`） |
 | 测试 | `src/components/ds/__tests__/`、`src/lib/design/__tests__/`、`src/components/shell/__tests__/` |
 
 ## 新代码的规则
@@ -44,7 +44,7 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 | 文字 | `--ds-text-primary`、`--ds-text-secondary`、`--ds-text-tertiary`、`--ds-text-tertiary-on-sunken`、`-on-hover`、`-on-selected`、`-on-raised`、`--ds-text-disabled`、`--ds-icon` |
 | 强调色 A | `--ds-accent`、`--ds-accent-hover`、`--ds-on-accent`、`--ds-focus-ring`、`--ds-selected-indicator`、`--ds-progress`、`--ds-progress-track` |
 | 状态 | `--ds-success`、`--ds-warning`、`--ds-danger`、`--ds-info`，各带 `-bg`；`--ds-on-danger` |
-| 数据 | `--ds-data-1…6`：图表的序列和类别颜色，两套外观下对页面底和卡片都至少 3:1（有测试）；不用于界面状态 |
+| 数据 | `--ds-data-1…8`（蓝、橙、青绿、黄、品红、绿、紫、红，顺序固定）：序列、时间片段和类别颜色，浅深两套。用 dataviz 配色检查校验过：相邻颜色在色觉障碍下（ΔE ≥ 8.4）和正常视觉下（ΔE ≥ 19.3）都能分开；深色各级对深色页面底和卡片都至少 3:1（有测试）。浅色的青绿、黄、品红对白底不到 3:1，所以有颜色的标记旁边总要有文字（图例、轨道名）。不用于文字和界面状态 |
 | 媒体 | `--ds-media-bg`（黑）、`--ds-on-media`、`--ds-on-media-secondary`（视频和图像上的白色文字，两套外观相同；Tailwind `text-on-media`）、`--ds-media-scrim` |
 | 层次与材质 | `--ds-shadow-1…3`、`--ds-ring-raised`（深色）、`--ds-material-bar`、`--ds-material-filter` |
 | 字体 | `--ds-font-sans`、`--ds-font-mono`；`--ds-text-{display,title-1,title-2,title-3,body,reading,callout,caption}-{size,line}`；`--ds-weight-{regular,medium,semibold}`；`--ds-tracking-{title,display}` |
@@ -145,7 +145,7 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 
 **首页**（`/`）是工作入口：继续（这个浏览器里最近打开的片段或数据集；框架把访问记录存在 `localStorage` 的 `levi-recent` 里，不发送到任何地方）、需要你处理（`waiting_for` 为人工批准、审核或提交的 agent 任务，来自 `/api/levi/agent/v1/activity/tasks`）、正在运行（转换和训练池作业及其进度）、显示实时评测时的状态卡，以及最近的数据集（先列打开过的，再列其他已登记的）。每张卡单独加载，先显示骨架，10 秒没有回应就放弃；标签页可见时每 15 秒刷新。Hugging Face 搜索和旧的 `/?path=`、`/?dataset=` 链接保留。原来的介绍移到了使用指南。
 
-**阅读型版式**（`reading.css`，使用指南和报告页）：单栏，最宽 760 px；左侧目录始终可见并标出当前小节（`aria-current="location"`）；正文 16/26（`--ds-text-reading-*`）；`.levi-prose` 统一 Markdown 的标题、列表、链接（主文字加下划线）、引用、代码和表格。报告页的图表通过 `useCssTokens` 使用 `--ds-data-*`（SVG 属性读不到 CSS 变量），运行中状态只用颜色和文字表示、没有循环动画，“已更新”用全局 Toast 提示。
+**阅读型版式**（`reading.css`，使用指南和报告页）：单栏，最宽 760 px；左侧目录始终可见并标出当前小节（`aria-current="location"`）；正文 16/26（`--ds-text-reading-*`）；`.levi-prose` 统一 Markdown 的标题、列表、链接（主文字加下划线）、引用、代码和表格。报告页的图表使用 `--ds-data-*`（经 `useCssTokens` 取值；当前浏览器里 Recharts 也能直接用 `var(--ds-…)`，这个 hook 只在 canvas、WebGL 里必需），运行中状态只用颜色和文字表示、没有循环动画，“已更新”用全局 Toast 提示。
 
 ## 动效
 
