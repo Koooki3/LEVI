@@ -2207,5 +2207,9 @@
   "Try again": "重试",
   "The LEVI service did not answer within 10 s, or answered with an error.": "LEVI 服务 10 秒内没有回应，或回应了错误。",
   "The job lists could not be read.": "读不到作业列表。",
-  "The list of local datasets could not be read.": "读不到本地数据集列表。"
+  "The list of local datasets could not be read.": "读不到本地数据集列表。",
+  "Running normally": "运行正常",
+  "Labelling": "正在标注",
+  "Needs attention": "需要处理",
+  "Status unknown": "状态未知"
 }

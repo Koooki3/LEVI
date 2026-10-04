@@ -5,18 +5,49 @@
 // page (`levi live start --ui`). Without one they render nothing (and cost a
 // status request a minute, see live-pulse-store).
 import Link from "next/link";
-import { Tooltip } from "@/components/ds";
+import { CircleDot } from "lucide-react";
+import { Icon, TONE_ICON, Tooltip, type Tone } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
-import { PULSE_NOTES, type Pulse } from "./live-logic";
+import { PULSE_NOTES, type Pulse, type PulseLight } from "./live-logic";
 import { useLivePulse } from "./use-live-pulse";
 
+/** Each light as a status tone: shape and colour, never colour alone. */
+export const PULSE_TONE: Record<PulseLight, Tone> = {
+  green: "success",
+  blue: "info",
+  amber: "warning",
+  red: "danger",
+  grey: "neutral",
+};
+
+/** A word for each light (read by screen readers next to the shape). */
+export const PULSE_WORD: Record<PulseLight, string> = {
+  green: "Running normally",
+  blue: "Labelling",
+  amber: "Needs attention",
+  red: "Fault",
+  grey: "Status unknown",
+};
+
+/** The live service's state as a ds status shape in its colour (check,
+ * dot that breathes while labelling, triangle, cross, circle) with the
+ * state in words for screen readers. */
 export function PulseDot({ pulse }: { pulse: Pulse }) {
+  const { t } = useLocale();
+  const tone = PULSE_TONE[pulse.light];
+  const labelling = pulse.light === "blue";
   return (
     <span
-      className={`levi-pulse-dot is-${pulse.light}`}
+      className={`levi-pulse-dot is-${pulse.light} ds-status--${tone}`}
       data-light={pulse.light}
-      aria-hidden="true"
-    />
+      data-tone={tone}
+    >
+      <Icon
+        icon={labelling ? CircleDot : TONE_ICON[tone]}
+        className={labelling ? "ds-breathe" : undefined}
+      />
+      <span className="ds-sr-only">{t(PULSE_WORD[pulse.light])}</span>
+    </span>
   );
 }
 

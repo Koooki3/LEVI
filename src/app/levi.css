@@ -2785,9 +2785,10 @@ button.levi-pool-danger {
 }
 
 /* The live evaluation entry: navigation link and home banner, shown only in
-   the live annotation workspace (src/components/live/live-nav.tsx). The dot
-   colours say the state (green fine, blue labelling, amber needs attention,
-   red robot fault); the label and the hover say it in words. */
+   the live annotation workspace (src/components/live/live-nav.tsx). The
+   state is a shape in a status colour (check fine, breathing dot labelling,
+   triangle needs attention, cross robot fault, circle unknown); the label,
+   hidden words and the hover say it in words. */
 :root {
   --pulse-green: var(--ds-success);
   --pulse-blue: var(--ds-info);
@@ -2795,41 +2796,26 @@ button.levi-pool-danger {
   --pulse-red: var(--ds-danger);
   --pulse-grey: var(--ds-surface-selected);
 }
+/* The state is a ds status shape (live-nav.tsx PulseDot) in its colour;
+   only "labelling" breathes, once every 2 s (.ds-breathe), still under
+   reduced motion. */
 .levi-pulse-dot {
-  display: inline-block;
+  display: inline-flex;
   flex: 0 0 auto;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--pulse-grey);
-  box-shadow: 0 0 0 3px
-    color-mix(in srgb, var(--ds-text-primary) 8%, transparent);
+  align-items: center;
+  color: var(--ds-text-tertiary);
 }
 .levi-pulse-dot.is-green {
-  background: var(--pulse-green);
+  color: var(--pulse-green);
 }
 .levi-pulse-dot.is-blue {
-  background: var(--pulse-blue);
-  animation: levi-pulse-beat 1.6s ease-in-out infinite;
+  color: var(--pulse-blue);
 }
 .levi-pulse-dot.is-amber {
-  background: var(--pulse-amber);
+  color: var(--pulse-amber);
 }
 .levi-pulse-dot.is-red {
-  background: var(--pulse-red);
-  animation: levi-pulse-beat 0.9s ease-in-out infinite;
-}
-@keyframes levi-pulse-beat {
-  50% {
-    box-shadow: 0 0 0 6px
-      color-mix(in srgb, var(--ds-text-primary) 0%, transparent);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .levi-pulse-dot.is-blue,
-  .levi-pulse-dot.is-red {
-    animation: none;
-  }
+  color: var(--pulse-red);
 }
 .levi-pulse-count {
   display: inline-block;
@@ -2867,9 +2853,9 @@ button.levi-pool-danger {
   border-color: color-mix(in srgb, var(--ds-danger) 63%, transparent);
   background: var(--ds-surface-1);
 }
-.levi-live-home .levi-pulse-dot {
-  width: 14px;
-  height: 14px;
+.levi-live-home .levi-pulse-dot svg {
+  width: 20px;
+  height: 20px;
 }
 .levi-live-home-text {
   display: flex;
