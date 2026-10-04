@@ -59,11 +59,20 @@ export function datasetLinks(detail: DatasetDetail | null | undefined): {
   };
 }
 
+/** This LEVI is the live workspace's own (`levi live start --ui`). */
+export function isLiveWorkspace(
+  enabled: boolean | null,
+  embedded: boolean | null,
+): boolean {
+  return enabled === true && embedded === false;
+}
+
 /** The training pool is the product LEVI's: the live workspace's own LEVI
- * (enabled, not embedded) does not offer one, so there is only one. */
+ * does not offer one, so there is only one. Not offered either while that
+ * is not known yet (no link that appears and then goes). */
 export function offersTrainingPool(
   enabled: boolean | null,
   embedded: boolean | null,
 ): boolean {
-  return !(enabled === true && embedded === false);
+  return enabled !== null && !isLiveWorkspace(enabled, embedded);
 }

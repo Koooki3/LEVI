@@ -4,7 +4,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import en from "@/i18n/en.json";
 import zh from "@/i18n/zh.json";
 import { DatasetCard } from "../dataset-card";
-import { datasetLinks, disabledText, offersTrainingPool } from "../embedding";
+import {
+  datasetLinks,
+  disabledText,
+  isLiveWorkspace,
+  offersTrainingPool,
+} from "../embedding";
 import type { DatasetDetail, DatasetRow } from "../types";
 
 const row: DatasetRow = {
@@ -112,7 +117,10 @@ describe("the live page in the product LEVI", () => {
   test("only the product LEVI offers the training pool", () => {
     expect(offersTrainingPool(true, true)).toBe(true); // product, live found
     expect(offersTrainingPool(false, null)).toBe(true); // product, no live
-    expect(offersTrainingPool(null, null)).toBe(true); // not known yet
+    expect(offersTrainingPool(null, null)).toBe(false); // not known yet: no flicker
+    expect(isLiveWorkspace(null, null)).toBe(false); // the pool page shows the pool
+    expect(isLiveWorkspace(true, false)).toBe(true);
+    expect((zh as Record<string, string>)["Live workspace"]).toBeTruthy();
     expect(offersTrainingPool(true, false)).toBe(false); // the live workspace
   });
 

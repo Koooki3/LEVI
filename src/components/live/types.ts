@@ -174,6 +174,8 @@ export interface LiveStatusResponse {
   embedded?: boolean;
   /** The live workspace's own page when the service runs one (`--ui`). */
   live_ui?: string | null;
+  /** The live workspace's folder name (never its whole path). */
+  workspace_name?: string;
   alive?: boolean;
   age_s?: number | null;
   service?: ServiceStatus | null;

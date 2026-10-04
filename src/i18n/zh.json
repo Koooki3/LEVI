@@ -2115,5 +2115,6 @@
   "That is the live workspace's own page (Conversion & review below), not this LEVI.": "这里指的是实时工作区自己的页面（下方的“转换与审核”），不是当前 LEVI。",
   "That is the live workspace's own page, not this LEVI: start the service with `levi live start --ui` to open it, or with --auto-approve to let it approve its own plans.": "这里指的是实时工作区自己的页面，不是当前 LEVI：用 `levi live start --ui` 启动服务即可打开；或者用 --auto-approve 让服务自己批准计划。",
   "The training pool is in the product LEVI": "训练池请用产品 LEVI",
-  "This is the live annotation service's own workspace. Its pool would read this workspace's own index, recipes and labels, not the ones you work with, so it is not offered here: open the training pool in the product LEVI (by default http://127.0.0.1:7860/pool).": "这里是实时标注服务自己的工作区。这里的训练池只会读本工作区自己的索引、配方和标签，不是你平时使用的那一份，所以这里不提供训练池：请在产品 LEVI 中打开训练池（默认 http://127.0.0.1:7860/pool）。"
+  "This is the live annotation service's own workspace. Its pool would read this workspace's own index, recipes and labels, not the ones you work with, so it is not offered here: open the training pool in the product LEVI (by default http://127.0.0.1:7860/pool).": "这里是实时标注服务自己的工作区。这里的训练池只会读本工作区自己的索引、配方和标签，不是你平时使用的那一份，所以这里不提供训练池：请在产品 LEVI 中打开训练池（默认 http://127.0.0.1:7860/pool）。",
+  "Live workspace": "实时工作区"
 }

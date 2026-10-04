@@ -140,6 +140,11 @@ export default function LivePage() {
     <main className="levi-workbench levi-live">
       <span className="levi-eyebrow">{t("LEVI / LIVE")}</span>
       <h1>{t("Live evaluation & annotation")}</h1>
+      {status?.enabled && status.workspace_name && (
+        <p className="levi-pool-muted">
+          {t("Live workspace")}: <code>{status.workspace_name}</code>
+        </p>
+      )}
       <p>
         {t(
           "Watch a robot evaluation while it runs: the evaluation sessions, the FR3 arm, and how far the background LEVI has got with labelling the finished episodes. Nothing here starts, stops or approves anything; the only change you can make is to remove an episode from a dataset (restorable, nothing is deleted). Automatic results are unreviewed and their accuracy has not been evaluated.",

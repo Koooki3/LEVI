@@ -24,7 +24,7 @@ import {
   STOPPED,
 } from "@/components/pool/pool-progress";
 import { defaultTiming } from "@/components/pool/types";
-import { offersTrainingPool } from "@/components/live/embedding";
+import { isLiveWorkspace } from "@/components/live/embedding";
 import { useLivePulse } from "@/components/live/use-live-pulse";
 import type {
   EpisodeRow,
@@ -96,7 +96,7 @@ function when(value: number | string | undefined): string {
 export default function TrainingPoolPage() {
   const { t } = useLocale();
   const { enabled, embedded } = useLivePulse();
-  if (!offersTrainingPool(enabled, embedded)) {
+  if (isLiveWorkspace(enabled, embedded)) {
     return (
       <main className="levi-workbench">
         <section className="levi-live-offline" role="status">
@@ -110,6 +110,8 @@ export default function TrainingPoolPage() {
       </main>
     );
   }
+  // Shown at once even before the live status is known: only the live
+  // workspace's own LEVI replaces it.
   return <TrainingPool />;
 }
 
