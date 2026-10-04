@@ -2207,5 +2207,11 @@
   "Warnings": "Warnings",
   "Warning": "Warning",
   "Info": "Info",
-  "Scrollable table": "Scrollable table"
+  "Scrollable table": "Scrollable table",
+  "Compose": "Compose",
+  "Export…": "Export…",
+  "Running jobs are also listed in the Jobs menu of the top bar.": "Running jobs are also listed in the Jobs menu of the top bar.",
+  "The token was not accepted": "The token was not accepted",
+  "Check the token on huggingface.co and paste it again.": "Check the token on huggingface.co and paste it again.",
+  "Export steps": "Export steps"
 }

@@ -25,7 +25,8 @@ import {
   STOPPED,
   StatusBadge,
 } from "@/components/pool/pool-progress";
-import { ArrowLeft, Layers, ScanSearch, X } from "lucide-react";
+import { ArrowLeft, Layers, PackagePlus, ScanSearch, X } from "lucide-react";
+import { PoolSteps, goToSection, poolStep } from "@/components/pool/pool-steps";
 import { Button, EmptyState, Icon, Skeleton, useToast } from "@/components/ds";
 import { JobCard, RequestProblem } from "@/components/pages-ui/feedback";
 import { defaultTiming } from "@/components/pool/types";
@@ -370,7 +371,19 @@ function TrainingPool() {
 
   return (
     <main className="ds-root pg-workbench pg-pool">
-      <h1>{t("Training pool")}</h1>
+      <div className="pg-head">
+        <h1>{t("Training pool")}</h1>
+        <div className="pg-head-actions">
+          <Button
+            variant={scanned ? "primary" : "secondary"}
+            icon={PackagePlus}
+            disabled={!scanned}
+            onClick={() => goToSection("pool-export", "pool-export-name")}
+          >
+            {t("Export…")}
+          </Button>
+        </div>
+      </div>
       <p>
         {t(
           "Every dataset under the pool folders, one row per episode. Pick tasks in order, preview what goes in, export a new training set and send it to a training machine. Sources stay read-only; held-out test episodes are never exported.",
@@ -415,7 +428,7 @@ function TrainingPool() {
           </div>
           <div className="pg-row">
             <Button
-              variant={scanned ? "secondary" : "primary"}
+              variant={scanned || !status?.enabled ? "secondary" : "primary"}
               icon={ScanSearch}
               loading={scanRunning}
               disabled={!status?.enabled}
@@ -456,10 +469,15 @@ function TrainingPool() {
           </JobCard>
         )}
         {status && status.jobs.length > 0 && (
-          <details className="pg-pool-jobs" open>
+          <details className="pg-pool-jobs">
             <summary>
               {t("Recent jobs")} ({status.jobs.length})
             </summary>
+            <p className="pg-pool-hint">
+              {t(
+                "Running jobs are also listed in the Jobs menu of the top bar.",
+              )}
+            </p>
             <RecentJobs
               jobs={status.jobs}
               onChanged={() => {
@@ -491,6 +509,11 @@ function TrainingPool() {
         </div>
       )}
 
+      {scanned && (
+        <PoolSteps
+          current={poolStep(composition.tasks.length, !!shownExport)}
+        />
+      )}
       {scanned && (
         <div className="pg-pool-layout">
           <FacetsPanel

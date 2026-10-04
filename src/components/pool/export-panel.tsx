@@ -173,6 +173,7 @@ export function ExportPanel({
         <label className="wide">
           <span>{t("Dataset name")}</span>
           <input
+            id="pool-export-name"
             className="ds-input ds-focus"
             value={name}
             required

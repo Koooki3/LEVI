@@ -2834,3 +2834,70 @@ button.pg-pool-danger {
   border-color: var(--ds-selected-indicator);
   font-weight: var(--ds-weight-semibold);
 }
+/* Training pool step bar: ① Select ② Compose ③ Export (proposal §8.4). */
+.pg-steps-bar {
+  margin: var(--ds-space-5) 0 var(--ds-space-4);
+}
+.pg-steps-bar ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pg-steps-bar li {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-1);
+}
+.pg-steps-bar li + li::before {
+  content: "";
+  width: var(--ds-space-8);
+  height: 1px;
+  background: var(--ds-separator-strong);
+}
+.pg-step {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  min-height: var(--ds-control-md);
+  padding: 0 var(--ds-space-3);
+  border: 0;
+  border-radius: var(--ds-radius-full);
+  background: transparent;
+  color: var(--ds-text-secondary);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color var(--ds-dur-fast) var(--ds-ease-standard);
+}
+.pg-step:hover {
+  background: var(--ds-surface-hover);
+}
+.pg-step[data-state="current"] {
+  color: var(--ds-text-primary);
+  font-weight: var(--ds-weight-semibold);
+}
+.pg-step__mark {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--ds-border-control);
+  border-radius: var(--ds-radius-full);
+  font-size: var(--ds-text-caption-size);
+  font-variant-numeric: tabular-nums;
+}
+.pg-step[data-state="current"] .pg-step__mark {
+  border-color: var(--ds-accent);
+  background: var(--ds-accent);
+  color: var(--ds-on-accent);
+}
+.pg-step[data-state="done"] .pg-step__mark {
+  border-color: var(--ds-separator-strong);
+  color: var(--ds-text-primary);
+}
+.pg-workbench .pg-head h1 {
+  margin: 0;
+}

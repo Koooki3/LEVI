@@ -2207,5 +2207,11 @@
   "Warnings": "警告",
   "Warning": "警告",
   "Info": "信息",
-  "Scrollable table": "可滚动的表格"
+  "Scrollable table": "可滚动的表格",
+  "Compose": "组合",
+  "Export…": "导出…",
+  "Running jobs are also listed in the Jobs menu of the top bar.": "运行中的作业也列在顶栏的“作业”菜单里。",
+  "The token was not accepted": "令牌未被接受",
+  "Check the token on huggingface.co and paste it again.": "在 huggingface.co 核对令牌后重新粘贴。",
+  "Export steps": "导出步骤"
 }
