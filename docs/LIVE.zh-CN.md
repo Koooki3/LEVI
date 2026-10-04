@@ -79,7 +79,7 @@ uv run levi live stop                            # 只停自己的进程
 
 ## 设置（`live.toml`）
 
-`levi live init` 写出带全部默认值的文件；未知键或类型不对是错误，不会悄悄取默认值。`--workspace`、`--root`、`--gpu-mode`、`--auto-approve`、`--prewarm`、`--process-backlog`、`--since`、`--vllm-port`、`--ui-port`、`--core-port`、`--home` 可覆盖文件。`--adopt-workspace`：把已有的、不是实时工作区的 LEVI 工作区改成实时工作区才需要它；没有它时，`levi live` 拒绝任何有 LEVI 状态却没有实时标记的工作区（尤其是产品的 `.state`：自动批准的标记绝不能落进去），本检出的 `.state`、（从 git worktree 运行时）主检出（产品 LEVI 运行的地方）的 `.state`，以及 `LEVI_WORKSPACE` 指向的工作区（除非它已经是实时工作区），不管有没有 `--adopt-workspace` 都拒绝。每个 home 和每个工作区各只运行一个服务。环境变量：`LEVI_LIVE_WORKSPACE`、`LEVI_LIVE_CONFIG`、`LEVI_LIVE_HOME`（`status.json` 所在目录，默认 `~/.levi-live`）。产品 LEVI 也读 `LEVI_LIVE_WORKSPACE` 和 `LEVI_LIVE_HOME`，用来找到它要显示的实时工作区（见[在产品 LEVI 里查看实时评测](#在产品-levi-里查看实时评测)）。`LEVI_LIVE_WORKER=1` 由服务在 worker 进程里设置（不要自己设）：它让 worker 不受“每次模型请求前查闸门”的约束，因为 worker 自己会让路。服务会把它从其他子进程的环境里去掉，所以 shell 里设了它也不会豁免任何东西。`LEVI_LIVE_VLLM_TIMINGS` 同样只由监督进程为它启动的 worker 设置：一个小 JSON，写着这个批次之前 vLLM 唤醒或冷启动花的秒数（`vllm_wake_s`、`vllm_cold_start_s`），worker 把它抄进 `stats.jsonl`；只传最近 10 分钟内的唤醒或冷启动，做完一个批次后就忘掉。服务也会把它从其他进程的环境里去掉。
+`levi live init` 写出带全部默认值的文件；未知键或类型不对是错误，不会悄悄取默认值。`--workspace`、`--root`、`--gpu-mode`、`--auto-approve`、`--prewarm`、`--process-backlog`、`--since`、`--vllm-port`、`--ui-port`、`--core-port`、`--home` 可覆盖文件。`--adopt-workspace`：把已有的、不是实时工作区的 LEVI 工作区改成实时工作区才需要它；没有它时，`levi live` 拒绝任何有 LEVI 状态却没有实时标记的工作区（尤其是产品的 `.state`：自动批准的标记绝不能落进去），本仓库所有检出（产品 LEVI 运行的主检出，以及每个 git worktree）的 `.state`、位于其中的目录、包含它们的目录，以及 `LEVI_WORKSPACE` 指向的工作区（除非它已经是实时工作区），不管有没有 `--adopt-workspace` 都拒绝。`LEVI_LIVE_PROTECT_CHECKOUT` 指定以哪个检出的各 worktree 的 `.state` 作为保护对象（默认是运行 `levi` 的那个检出；测试套件把它指向一个临时目录，因为测试的临时目录在检出自己的 `.state` 下）。每个 home 和每个工作区各只运行一个服务。环境变量：`LEVI_LIVE_WORKSPACE`、`LEVI_LIVE_CONFIG`、`LEVI_LIVE_HOME`（`status.json` 所在目录，默认 `~/.levi-live`）。产品 LEVI 也读 `LEVI_LIVE_WORKSPACE` 和 `LEVI_LIVE_HOME`，用来找到它要显示的实时工作区（见[在产品 LEVI 里查看实时评测](#在产品-levi-里查看实时评测)）。`LEVI_LIVE_WORKER=1` 由服务在 worker 进程里设置（不要自己设）：它让 worker 不受“每次模型请求前查闸门”的约束，因为 worker 自己会让路。服务会把它从其他子进程的环境里去掉，所以 shell 里设了它也不会豁免任何东西。`LEVI_LIVE_VLLM_TIMINGS` 同样只由监督进程为它启动的 worker 设置：一个小 JSON，写着这个批次之前 vLLM 唤醒或冷启动花的秒数（`vllm_wake_s`、`vllm_cold_start_s`），worker 把它抄进 `stats.jsonl`；只传最近 10 分钟内的唤醒或冷启动，做完一个批次后就忘掉。服务也会把它从其他进程的环境里去掉。
 
 各表、各键、默认值和含义与英文版表格一致（`service`、`watch`、`fr3`、`gpu`、`vllm`、`provider`、`pipeline`、`resources`），见 [LIVE.md](LIVE.md#settings-livetoml)。要点：
 
@@ -229,18 +229,18 @@ anchored_spec = "generic-release.v2.json"
 **产品 LEVI 怎样找到实时工作区**（`levi/live/locate.py`，每次请求都重新判断，不缓存）：
 
 1. 自己的工作区，如果它就是实时工作区（实时服务自己的核心，或加 `--ui` 时它的页面）；
-2. 否则用 `LEVI_LIVE_WORKSPACE`（如果产品 LEVI 的环境里设置了）；
-3. 否则用实时服务状态文件 `<LEVI_LIVE_HOME 或 ~/.levi-live>/status.json` 里的 `workspace` 字段（由 `levi live start` 写，服务停止后仍保留）。
+2. 否则用 `LEVI_LIVE_WORKSPACE`（如果产品 LEVI 的环境里设置了；**推荐的部署方式**：在产品检出的 `.env` 里写 `LEVI_LIVE_WORKSPACE=<实时工作区的绝对路径>`，这样不管状态文件写的是什么，页面都显示这个工作区）；
+3. 否则作为兜底，用实时服务状态文件 `<LEVI_LIVE_HOME 或 ~/.levi-live>/status.json` 里的 `workspace` 字段（由 `levi live start` 写，服务停止后仍保留）。
 
-候选目录必须带实时标记（`live/workspace.json`），并且不能是产品 LEVI 自己的工作区或某个检出的 `.state`。否则 `/api/levi/live/*` 回答 `{"enabled": false, "reason": "not_configured" | "not_live" | "product_workspace"}`，导航不显示入口，`/live` 说明缺什么。回答里没有路径、令牌或密钥。服务不必在运行：已停止的服务留下的状态文件仍然指向工作区，页面显示它未运行。
+候选目录必须是绝对路径（相对路径一律算 `not_live`），实时标记（`live/workspace.json`）所在的 `live/` 目录必须真的在它里面（不能是指向别处的链接），并且它既不能是、也不能位于或包含产品 LEVI 自己的工作区或本仓库任何检出（每个 git worktree 和主检出）的 `.state`。否则 `/api/levi/live/*` 回答 `{"enabled": false, "reason": "not_configured" | "not_live" | "product_workspace"}`，导航不显示入口，`/live` 说明缺什么。回答里没有路径、令牌或密钥。服务不必在运行：已停止的服务留下的状态文件仍然指向工作区，页面显示它未运行。页面只用目录名指称实时工作区（`workspace_name`）；它转发的状态里去掉了状态文件中的 `workspace` 和 `config` 路径。
 
 **产品 LEVI 读什么。** 所有只读路由（状态、会话、数据集、某个数据集的片段、审计、统计和下载、状态里的 GPU 与闸门）都由产品核心从实时工作区的文件回答：`<home>/status.json`、`live/effective.toml`、`live/datasets/*.json`、`live/audit.jsonl`、`live/stats.jsonl`、机器人侧的会话和 FR3 文件，以及实时工作区自己的目录（用于数据集的 `repo_id`；不用产品的目录，产品里可能有同名的另一个数据集）。这些都不写进产品工作区。
 
 **在产品页面上排除片段**，做法和实时工作区自己的页面一样，仍然只有人能做：请求必须带产品 LEVI 的界面令牌（与该页面其他写操作相同），智能体凭据一律 403。随后由产品核心自己在实时工作区的状态文件上修改，用的是实时 worker 也会取的同一把锁（`exclusion.py`），所以实时核心不必在运行，也不读取、不发送它的任何密钥。审计行写在实时工作区的 `live/audit.jsonl`，带 `"via": "product"`。`levi live exclude` 仍然经实时核心执行（见下）。
 
-**仍在实时工作区自己页面上的东西。** 产品 LEVI 里没有实时数据集，所以没有它们的查看器和审核。服务运行自己的页面时（`levi live start --ui`），卡片上的“在查看器中打开”和“转换与审核”会在新标签页打开那个页面；没有时，卡片说明它们在哪里。服务**不带** `--auto-approve` 运行时（`awaiting_approval`），批准计划或提交草稿也同样要在实时工作区的 Agent Workbench 里做，这种情况下请用 `--ui`（或 `--auto-approve`）启动服务。
+**仍在实时工作区自己页面上的东西。** 产品 LEVI 里没有实时数据集，所以没有它们的查看器和审核。服务运行自己的页面时（`levi live start --ui`），卡片上的“在查看器中打开”和“转换与审核”会在新标签页打开那个页面（链接是服务自己看到的 `http://<service.host>:<service.ui_port>`：`host = "0.0.0.0"`，或经隧道、从别的机器访问产品页面时，浏览器可能打不开）；没有时，卡片说明它们在哪里。服务**不带** `--auto-approve` 运行时（`awaiting_approval`），批准计划或提交草稿也同样要在实时工作区的 Agent Workbench 里做，这种情况下请用 `--ui`（或 `--auto-approve`）启动服务。
 
-**只有一个训练池：产品 LEVI 的。** 两个 LEVI 的训练池内容不同，是因为训练池按工作区存放：索引、扫描摘要、配方、导出作业和本体规则都在 `<工作区>/pool/` 下（`levi/pool/settings.py`），每个工作区各自扫描、扫描时间也不同。原因不在设置：实时核心从同一个检出启动，读同一个 `.env`（`levi/paths.py` 在每个进程里读 `<检出>/.env`），所以 `LEVI_POOL_ROOTS`、`LEVI_EXPORT_ROOTS`、`LEVI_POOL_HELDOUT` 相同。人工标签也不同：扫描读取池根下各工作区以及自己工作区的人工成败标签（`scanner.scan`），所以实时工作区的训练池看不到产品工作区的标签（除非产品工作区在池根下），产品的训练池看得到。因此实时工作区自己的页面（现在只在 `--ui` 时才有）不再提供训练池：导航里没有“训练池”，那里的 `/pool` 指向产品 LEVI。在任一页面上做的排除都会作用到产品的训练池：除了上次扫描找到的工作区，训练池还会读取产品实时页面所显示的实时工作区（`levi/pool/exclusions.py`），所以不在池根下的实时工作区也算数。
+**只有一个训练池：产品 LEVI 的。** 两个 LEVI 的训练池内容不同，是因为训练池按工作区存放：索引、扫描摘要、配方、导出作业和本体规则都在 `<工作区>/pool/` 下（`levi/pool/settings.py`），每个工作区各自扫描、扫描时间也不同。原因不在设置：实时核心从同一个检出启动，读同一个 `.env`（`levi/paths.py` 在每个进程里读 `<检出>/.env`），所以 `LEVI_POOL_ROOTS`、`LEVI_EXPORT_ROOTS`、`LEVI_POOL_HELDOUT` 相同。人工标签也不同：扫描读取池根下各工作区以及自己工作区的人工成败标签（`scanner.scan`），所以实时工作区的训练池看不到产品工作区的标签（除非产品工作区在池根下），产品的训练池看得到。因此实时工作区自己的页面（现在只在 `--ui` 时才有）不再提供训练池：导航里没有“训练池”，那里的 `/pool` 指向产品 LEVI。排除只要发生在产品训练池会读取的实时工作区里，就会作用到产品训练池。训练池读取：上次扫描找到的工作区、产品实时页面当前显示的实时工作区，以及该页面以前显示过的所有实时工作区（记在 `<产品工作区>/pool/live_workspaces.json`，只增不减；已不存在的目录跳过；`levi/pool/exclusions.py`）。所以不在池根下的实时工作区也算数，页面改为显示另一个实时工作区之后，之前的排除仍然有效。产品从没显示过、扫描也没找到的实时工作区不会被读。状态文件在训练池被查询时读取，文件没变就用缓存。
 
 ## 排除片段（可恢复）
 
@@ -264,7 +264,7 @@ anchored_spec = "generic-release.v2.json"
 
 **这是人的操作，并有审计。** 两个调用都要界面令牌（和页面其他写操作同样的检查）；智能体凭据（`Authorization: Bearer`）即使同时带着有效令牌也会被拒绝（403）；拒绝*任何* Bearer 是有意的，因为 LEVI 认识的 Bearer 凭据只有智能体的。Agent API 的任何能力、自动批准主体的任何调用（`auto.ALLOWED`）都做不了这件事。路由自己也做这个检查，不只靠服务的中间件，两道检查各自独立有效。实际上“人”指的是带界面令牌的请求，或经页面自己代理发来的请求；代理会给没有 `Origin` 头的本机请求自动加上令牌，所以本机任何进程不带 Bearer 直接 POST 到页面端口，也能以“人”的身份操作。页面其他写操作也是这样，不是本分支引入的。每次改动，每个片段在 `live/audit.jsonl` 写一行：`{"time", "principal": "local-human", "actor": "person", "tool": "episode.exclude" | "episode.restore", "dataset", "demo", "reason"?, "via"?, "decision": "completed"}`（在产品 LEVI 页面上操作时带 `"via": "product"`），不记录令牌。排除已排除的片段、恢复未排除的片段什么都不改，也不写审计。
 
-**训练池**：实时工作区在池根目录之下时，它的镜像会像任何原始采集一样被登记，而同一次录制还会从镜像所链接的 rollout 目录再登记一次（同一指纹、同一组；rollout 目录是规范副本）。所以训练池不只看镜像：它在**被查询时**读实时工作区的数据集状态（不需要重新扫描），把整组当作已排除，和一个副本上的标签或留出标记对所有副本生效一样。训练池除了认镜像的目录，也按状态文件自己的 `source` 路径认 rollout 原件，所以扫描先于镜像、或源在镜像之后被替换（指纹变了，不再和镜像同组）时，原件也照样被排除；这些路径只和索引里的键比较，从不打开。被排除的录制不会被列出或计数（`facets.removed_in_live` 给出录制数，一个录制算一个，不管有几个副本；训练池页面把这个数显示为“在实时页面被删除的片段数”，数字不会悄悄变少），任何配方都会跳过它（预览的排除原因里是 `excluded_in_live`，不管配方本来会选哪个副本），导出在规划、运行和续跑时都会拒绝它（“removed on the live page”），所以计划冻结之后才做的排除也能拦住导出。只读取上次扫描在池根下找到的实时工作区、训练池自己的工作区，以及本 LEVI 实时页面所显示的实时工作区（见[在产品 LEVI 里查看实时评测](#在产品-levi-里查看实时评测)）：上次扫描没见过的其他实时工作区不会被读，新起一个之后要重新扫描。
+**训练池**：实时工作区在池根目录之下时，它的镜像会像任何原始采集一样被登记，而同一次录制还会从镜像所链接的 rollout 目录再登记一次（同一指纹、同一组；rollout 目录是规范副本）。所以训练池不只看镜像：它在**被查询时**读实时工作区的数据集状态（不需要重新扫描），把整组当作已排除，和一个副本上的标签或留出标记对所有副本生效一样。训练池除了认镜像的目录，也按状态文件自己的 `source` 路径认 rollout 原件，所以扫描先于镜像、或源在镜像之后被替换（指纹变了，不再和镜像同组）时，原件也照样被排除；这些路径只和索引里的键比较，从不打开。被排除的录制不会被列出或计数（`facets.removed_in_live` 给出录制数，一个录制算一个，不管有几个副本；训练池页面把这个数显示为“在实时页面被删除的片段数”，数字不会悄悄变少），任何配方都会跳过它（预览的排除原因里是 `excluded_in_live`，不管配方本来会选哪个副本），导出在规划、运行和续跑时都会拒绝它（“removed on the live page”），所以计划冻结之后才做的排除也能拦住导出。只读取上次扫描在池根下找到的实时工作区、训练池自己的工作区，以及本 LEVI 实时页面正在显示或显示过的实时工作区（见[在产品 LEVI 里查看实时评测](#在产品-levi-里查看实时评测)）：上次扫描没见过的其他实时工作区不会被读，新起一个之后要重新扫描。
 
 ## 服务写的文件
 
@@ -365,7 +365,7 @@ anchored_spec = "generic-release.v2.json"
 
 | 路由 | 回答 |
 | --- | --- |
-| `GET /status` | `{"enabled", "embedded"（由不是实时工作区的 LEVI，即产品 LEVI 提供时为 true）, "live_ui"（服务运行着自己的页面且页面正常时为其地址，否则 null）, "alive", "age_s", "service": <status.json 或 null>, "faults": [{"dataset", "reasons": []}], "fr3_red", "blocked_runs": {"count", "waiting", "needs_person"}}`。`alive` = pid 存在、`updated_at` 不到 15 秒、状态不是 `stopped`。 |
+| `GET /status` | `{"enabled", "embedded"（由不是实时工作区的 LEVI，即产品 LEVI 提供时为 true）, "live_ui"（服务运行着自己的页面且页面正常时为其地址，否则 null）, "workspace_name"（实时工作区的目录名）, "alive", "age_s", "service": <status.json 或 null；在产品 LEVI 上去掉其中的 `workspace` 和 `config` 路径>, "faults": [{"dataset", "reasons": []}], "fr3_red", "blocked_runs": {"count", "waiting", "needs_person"}}`。`alive` = pid 存在、`updated_at` 不到 15 秒、状态不是 `stopped`。 |
 | `GET /sessions` | `{"enabled", "sessions": [ {会话字段, "dataset", "fault"} ], "fr3": {…}, "active"}`，直接读机器人侧文件（≤ 64 个）。 |
 | `GET /datasets` | `{"enabled", "datasets": {名字: 行}}`（`status.json` 里的行）。 |
 | `GET /datasets/{name}` | 数据集详情：`repo_id`（实时工作区目录里登记后的数据集 id，否则 null）、`embedded` 和 `live_ui`（同 `/status`）、任务文本、各状态计数（被排除的片段不计入）、`total_demos`（数据集里的片段数）、片段列表（最新在前，≤ 200；每项有 `excluded`（null）、状态、集序号、`run_id`、尝试次数、时间片段数、提交时间、自动判定 `verdict`：`outcome/events/valid_events/undecided/spec/review: "auto"/evaluated: false`，另有 `rule/place_outcome/closes_after_last_valid/min_valid`，默认规则下为空；以及 `spec_version`）、`excluded_count` 和 `excluded_demos`（被排除的片段，行的格式相同，带 `excluded: {at, by: "person", reason}`，最新在前，全部列出，不在 200 处截断）、`incomplete`（含按原因计数）、进行中的批次、上一批、`last_error`。未知名字返回 404。 |
