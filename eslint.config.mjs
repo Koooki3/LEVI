@@ -18,7 +18,15 @@ const FRAME_FILES = [
   "src/components/live/live-nav.tsx",
   "src/components/shell/**/*.{ts,tsx}",
 ];
-const HEX = "/#[0-9a-fA-F]{3,8}\\b/";
+// A colour: # and exactly 3, 4, 6 or 8 hex digits, at the start of the
+// string or after a space, "(", "," or ":", and not followed by another
+// word character. "#heading", "#12345" and "url#abc" are not colours.
+const HEX =
+  "/(^|[\\s(,:])#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})(?![\\w-])/";
+// Links and ids are never colours, even "#add" or "#face": the value of an
+// href/to/id/htmlFor attribute or property is not checked.
+const LINK_ATTR = "/^(href|to|id|htmlFor|hash)$/";
+const NOT_LINK = `:not(JSXAttribute[name.name=${LINK_ATTR}] > Literal):not(Property[key.name=${LINK_ATTR}] > Literal)`;
 const HEX_MESSAGE =
   "Use a --ds-* token or a ds-* class instead of a hex colour (docs/DESIGN.md).";
 
@@ -38,7 +46,7 @@ const eslintConfig = [
       "no-restricted-syntax": [
         "error",
         {
-          selector: `Literal[value=${HEX}]`,
+          selector: `Literal[value=${HEX}]${NOT_LINK}`,
           message: HEX_MESSAGE,
         },
         {
