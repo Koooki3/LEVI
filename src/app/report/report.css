@@ -1,7 +1,8 @@
 /* Technical report page (/report): reading layout (design proposal §8.6).
  * Tokens only (--ds-*); a test fails on any colour literal here. The
  * Markdown body uses the shared reading styles (.levi-prose, reading.css);
- * this file adds the report's own parts: the status strip, contents,
+ * this file adds the report's own parts (states by colour and words, no
+ * looping animation): the status strip, contents,
  * progress, metrics, charts and the timeline. */
 .lr-page {
   /* Workstream states (levi-hub report contract) onto status colours;
@@ -287,15 +288,6 @@
   border-radius: 50%;
   background: var(--lr-tone);
 }
-/* Running: one quiet breath every 2 s, only while running. */
-.lr-state-running .lr-state-dot {
-  animation: lr-breathe 2s var(--ds-ease-standard) infinite;
-}
-@keyframes lr-breathe {
-  50% {
-    opacity: 0.45;
-  }
-}
 .lr-progress-pct {
   min-width: 42px;
   margin-left: auto;
@@ -522,9 +514,6 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .lr-state-running .lr-state-dot {
-    animation: none;
-  }
   .lr-bar-fill {
     transition: none;
   }

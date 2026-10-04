@@ -145,7 +145,7 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 
 **首页**（`/`）是工作入口：继续（这个浏览器里最近打开的片段或数据集；框架把访问记录存在 `localStorage` 的 `levi-recent` 里，不发送到任何地方）、需要你处理（`waiting_for` 为人工批准、审核或提交的 agent 任务，来自 `/api/levi/agent/v1/activity/tasks`）、正在运行（转换和训练池作业及其进度）、显示实时评测时的状态卡，以及最近的数据集（先列打开过的，再列其他已登记的）。每张卡单独加载，先显示骨架，10 秒没有回应就放弃；标签页可见时每 15 秒刷新。Hugging Face 搜索和旧的 `/?path=`、`/?dataset=` 链接保留。原来的介绍移到了使用指南。
 
-**阅读型版式**（`reading.css`，使用指南和报告页）：单栏，最宽 760 px；左侧目录始终可见并标出当前小节（`aria-current="location"`）；正文 16/26（`--ds-text-reading-*`）；`.levi-prose` 统一 Markdown 的标题、列表、链接（主文字加下划线）、引用、代码和表格。报告页的图表通过 `useCssTokens` 使用 `--ds-data-*`（SVG 属性读不到 CSS 变量），运行中状态每 2 秒呼吸一次、减少动态效果时静止，“已更新”用全局 Toast 提示。
+**阅读型版式**（`reading.css`，使用指南和报告页）：单栏，最宽 760 px；左侧目录始终可见并标出当前小节（`aria-current="location"`）；正文 16/26（`--ds-text-reading-*`）；`.levi-prose` 统一 Markdown 的标题、列表、链接（主文字加下划线）、引用、代码和表格。报告页的图表通过 `useCssTokens` 使用 `--ds-data-*`（SVG 属性读不到 CSS 变量），运行中状态只用颜色和文字表示、没有循环动画，“已更新”用全局 Toast 提示。
 
 ## 动效
 
