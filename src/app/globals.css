@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* Tailwind scans the project for class names; the Markdown documentation is
+   not UI code, and its words must not add utilities to the stylesheet. */
+@source not "../../docs";
 
 /* ── Design tokens ────────────────────────────────────────────────
    Consolidated palette + surface scale. Use via Tailwind arbitrary
