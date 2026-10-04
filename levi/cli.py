@@ -148,6 +148,15 @@ def main():
         from .domain.schema_catalog import main as check_contracts
 
         return check_contracts(sys.argv[3:])
+    if len(sys.argv) > 1 and sys.argv[1] == "doctor":
+        # Read only: no configure() (it would create the workspace).
+        from .doctor import main as doctor
+
+        return doctor(sys.argv[2:])
+    if len(sys.argv) > 1 and sys.argv[1] == "install":
+        from .install import main as install
+
+        return install(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == "agent":
         from .agent.control import main as agent_control
 
@@ -253,7 +262,9 @@ def main():
         # These are dispatched before parsing, so argparse cannot list them and
         # someone reading --help would not know they exist.
         epilog=(
-            "Also available: stop (stop the shared service), clean (bounded "
+            "Also available: doctor (is this machine ready: read-only checks, "
+            "--json), install (set up LEVI and optional parts by profile, --plan "
+            "--json lists the steps), stop (stop the shared service), clean (bounded "
             "cache cleanup), migrate, convert, agent, sam3, recap (RECAP value "
             "model: checkpoints and advantage labels), export (training manifests: which "
             "frames enter a learner's loss, with what weight), sample (DROID test "
@@ -325,7 +336,13 @@ def main():
     if not Path(bun).exists():
         parser.error("Bun is required: see README installation instructions")
     if args.command == "build":
-        raise SystemExit(subprocess.call([bun, "run", "build"], cwd=PROJECT))
+        code = subprocess.call([bun, "run", "build"], cwd=PROJECT)
+        if code == 0:
+            # What `levi doctor` compares the sources against (stale builds).
+            from .doctor import write_build_stamp
+
+            write_build_stamp()
+        raise SystemExit(code)
     if args.command == "check":
         # Frontend (type-check/lint/format/tests) and the Python lint, in one
         # command — CI runs both too (see .github/workflows/test.yml); this
