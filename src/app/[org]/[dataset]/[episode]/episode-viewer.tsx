@@ -17,11 +17,13 @@ import { IconButton, Kbd, Tabs } from "@/components/ds";
 import { AnalysisTab } from "@/components/viewer/analysis-tab";
 import { EpisodeLoadError } from "@/components/viewer/load-error";
 import {
+  useViewerTabs,
+  type TabLoaders,
+} from "@/components/viewer/use-viewer-tabs";
+import {
   adjacentEpisode,
-  loadsFor,
   restoreViewerTab,
   showsEpisodeList,
-  type AnalysisView,
   type ViewerTab,
 } from "@/components/viewer/viewer-tabs";
 import "@/components/viewer/viewer.css";
@@ -337,10 +339,18 @@ function EpisodeViewerInner({
         )
       : restoreViewerTab(null, null),
   );
-  const [activeTab, setActiveTab] = useState<ViewerTab>(initialTabs.tab);
-  const [analysisView, setAnalysisView] = useState<AnalysisView>(
-    initialTabs.view,
-  );
+  // Loaders are defined further down; the hook reads them through the ref.
+  const tabLoadersRef = useRef<TabLoaders>({
+    stats: () => {},
+    frames: () => {},
+    insights: () => {},
+  });
+  const {
+    activeTab,
+    analysisView,
+    changeTab: handleTabChange,
+    changeView: handleAnalysisViewChange,
+  } = useViewerTabs(initialTabs, tabLoadersRef);
   // Sub-tab within "Annotations": language/event annotation is a fully
   // decoupled system from SAM3 object/track/mask annotation. sessionStorage
   // (not local-only state) because episode navigation goes through
@@ -759,27 +769,10 @@ function EpisodeViewerInner({
     loadInsights(request);
   };
 
-  const loadFor = (tab: ViewerTab, view: AnalysisView) => {
-    const needs = loadsFor(tab, view);
-    if (needs.stats) loadStats();
-    if (needs.frames) loadFrames();
-    if (needs.insights) loadInsights();
-  };
-
-  // Re-trigger data loading for the restored tab on mount
-  useEffect(() => {
-    loadFor(activeTab, analysisView);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleTabChange = (tab: ViewerTab) => {
-    setActiveTab(tab);
-    loadFor(tab, analysisView);
-  };
-
-  const handleAnalysisViewChange = (view: AnalysisView) => {
-    setAnalysisView(view);
-    loadFor("analysis", view);
+  tabLoadersRef.current = {
+    stats: loadStats,
+    frames: loadFrames,
+    insights: () => loadInsights(),
   };
 
   // `currentTime` is intentionally NOT read here. Subscribing to it would
