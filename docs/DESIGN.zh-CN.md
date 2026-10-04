@@ -131,7 +131,7 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 | `--accent`、`--accent-soft`、`--accent-ring` | `--ds-accent`、12% 强调色、`--ds-focus-ring` | `--ds-accent` 只用于主要按钮、选中和进度；选中的底色用 `--ds-surface-selected` |
 | `--border-subtle`、`--border-strong` | `--ds-separator`、`--ds-separator-strong` | 同左；输入框用 `--ds-border-control` |
 | Tailwind `white`（`text-white`、`border-white/10`、`bg-white/5`） | `--ds-text-primary`（两套外观下都是淡线或淡底） | `--ds-separator` / `--ds-surface-hover`；视频上的文字用 `text-on-media` |
-| Tailwind `slate-100…200` / `300…400` / `500…600` | 主 / 次要 / 三级文字 | 文字令牌 |
+| Tailwind `slate-100…200` / `300…500` / `600` | 主 / 次要 / 三级文字（`500` 用次要文字：旧页面把它放在凹陷区和弹出层上，三级文字在那里不到 4.5:1） | 文字令牌 |
 | Tailwind `slate-700` / `800` / `900` / `950` | `--ds-separator-strong` / `--ds-separator` / `--ds-surface-1` / `--ds-bg` | 同左 |
 | Tailwind `cyan-*`、`lime-*` | `--ds-accent`（`cyan-200`、`600` 为 `--ds-accent-hover`） | `Button variant="primary"`、`--ds-surface-selected` |
 | Tailwind `red-*`、`orange/amber/yellow-*`、`green/emerald-*`、`blue-*` | `--ds-danger`、`--ds-warning`、`--ds-success`、`--ds-info` | 带 tone 的 `Badge`、`StatusDot`；图表序列用 `--ds-data-*` |

@@ -131,7 +131,7 @@ One mark everywhere: a graphite tile with a geometric "L" and a square point, on
 | `--accent`, `--accent-soft`, `--accent-ring` | `--ds-accent`, 12 % accent, `--ds-focus-ring` | `--ds-accent` only for the primary button, selection and progress; `--ds-surface-selected` for a selected fill |
 | `--border-subtle`, `--border-strong` | `--ds-separator`, `--ds-separator-strong` | the same; `--ds-border-control` for inputs |
 | Tailwind `white` (`text-white`, `border-white/10`, `bg-white/5`) | `--ds-text-primary` (a faint line or fill in both themes) | `--ds-separator` / `--ds-surface-hover`; over video `text-on-media` |
-| Tailwind `slate-100…200` / `300…400` / `500…600` | primary / secondary / tertiary text | the text tokens |
+| Tailwind `slate-100…200` / `300…500` / `600` | primary / secondary / tertiary text (`500` is secondary: older pages put it on sunken and raised surfaces, where tertiary text falls under 4.5:1) | the text tokens |
 | Tailwind `slate-700` / `800` / `900` / `950` | `--ds-separator-strong` / `--ds-separator` / `--ds-surface-1` / `--ds-bg` | the same |
 | Tailwind `cyan-*`, `lime-*` | `--ds-accent` (`cyan-200`, `600`: `--ds-accent-hover`) | `Button variant="primary"`, `--ds-surface-selected` |
 | Tailwind `red-*`, `orange/amber/yellow-*`, `green/emerald-*`, `blue-*` | `--ds-danger`, `--ds-warning`, `--ds-success`, `--ds-info` | `Badge`, `StatusDot` with a tone; chart series use `--ds-data-*` |
