@@ -27,6 +27,8 @@ import {
   type RecordingSession,
 } from "@/utils/annotationsClient";
 import { T, useLocale } from "./levi-locale";
+import { CircleCheck, Circle, Square, Trash2 } from "lucide-react";
+import { Button, Tooltip } from "@/components/ds";
 
 function clock(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
@@ -88,42 +90,49 @@ export default function AnnotationRecorder() {
         .length
     : 0;
 
+  const confirmEpisode = () =>
+    void act(async () => {
+      if (!confirmed && dirty) {
+        const saved = await save();
+        if (!saved.ok) throw new Error(saved.error || t("Save failed"));
+      }
+      const value = await saveEpisodeStatus(episodeId, ident, !confirmed);
+      setStatus((prev) => {
+        const next = { ...prev };
+        if (value) next[String(episodeId)] = value;
+        else delete next[String(episodeId)];
+        return next;
+      });
+    });
+
   return (
-    <div className="levi-recorder" data-testid="annotation-recorder">
-      <button
-        type="button"
-        className={confirmed ? "levi-recorder-done" : ""}
-        disabled={busy}
-        title={t(
+    <div
+      className="flex flex-wrap items-center gap-2"
+      data-testid="annotation-recorder"
+    >
+      <Tooltip
+        content={t(
           "States that this episode's subtask annotation is complete; the recorder counts it.",
         )}
-        onClick={() =>
-          void act(async () => {
-            if (!confirmed && dirty) {
-              const saved = await save();
-              if (!saved.ok) throw new Error(saved.error || t("Save failed"));
-            }
-            const value = await saveEpisodeStatus(episodeId, ident, !confirmed);
-            setStatus((prev) => {
-              const next = { ...prev };
-              if (value) next[String(episodeId)] = value;
-              else delete next[String(episodeId)];
-              return next;
-            });
-          })
-        }
       >
-        <T>
-          {confirmed
-            ? "✓ Episode confirmed (undo)"
-            : "Confirm episode complete"}
-        </T>
-      </button>
+        <Button
+          size="sm"
+          icon={CircleCheck}
+          disabled={busy}
+          aria-pressed={Boolean(confirmed)}
+          onClick={confirmEpisode}
+        >
+          {t(
+            confirmed ? "Episode confirmed (undo)" : "Confirm episode complete",
+          )}
+        </Button>
+      </Tooltip>
       {session ? (
         <>
-          <button
-            type="button"
-            className="levi-recorder-stop"
+          <Button
+            size="sm"
+            variant="primary"
+            icon={Square}
             disabled={busy}
             onClick={() =>
               void act(async () => {
@@ -134,14 +143,16 @@ export default function AnnotationRecorder() {
               })
             }
           >
-            ■ <T>Stop recording</T> · {clock(now - session.started_at)}
-          </button>
-          <span className="levi-recorder-count">
-            <T>Confirmed this session</T>: {confirmedInSession}
+            {t("Stop recording")} ·{" "}
+            <span className="tabular">{clock(now - session.started_at)}</span>
+          </Button>
+          <span className="vw-muted text-xs tabular">
+            {t("Confirmed this session")}: {confirmedInSession}
           </span>
-          <button
-            type="button"
-            className="levi-recorder-link"
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={Trash2}
             disabled={busy}
             onClick={async () => {
               if (
@@ -158,30 +169,33 @@ export default function AnnotationRecorder() {
               });
             }}
           >
-            <T>Discard</T>
-          </button>
+            {t("Discard")}
+          </Button>
         </>
       ) : (
-        <button
-          type="button"
-          className="levi-recorder-start"
-          disabled={busy}
-          title={t(
+        <Tooltip
+          content={t(
             "Times your annotation work; Stop writes an evaluation record to .state/eval.",
           )}
-          onClick={() =>
-            void act(async () => {
-              setResult(null);
-              setSession(await startRecording(ident));
-              setNow(Date.now() / 1000);
-            })
-          }
         >
-          ● <T>Start recording</T>
-        </button>
+          <Button
+            size="sm"
+            icon={Circle}
+            disabled={busy}
+            onClick={() =>
+              void act(async () => {
+                setResult(null);
+                setSession(await startRecording(ident));
+                setNow(Date.now() / 1000);
+              })
+            }
+          >
+            {t("Start recording")}
+          </Button>
+        </Tooltip>
       )}
       {result && (
-        <span className="levi-recorder-result" role="status">
+        <span className="vw-muted text-xs" role="status">
           <T>Recorded</T> {clock(result.seconds)} · {result.episodes}{" "}
           <T>episodes</T> · {result.segments} <T>subtasks</T> · <T>coverage</T>{" "}
           {(100 * result.coverage_seconds).toFixed(1)}% ·{" "}
@@ -189,7 +203,7 @@ export default function AnnotationRecorder() {
         </span>
       )}
       {error && (
-        <span className="levi-error" role="alert">
+        <span className="text-xs text-(--ds-danger)" role="alert">
           {error}
         </span>
       )}

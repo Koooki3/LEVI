@@ -1,7 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useFlaggedEpisodes } from "@/context/flagged-episodes-context";
-import { T, useLocale } from "./levi-locale";
+import { useLocale } from "./levi-locale";
+import { Download, Pencil } from "lucide-react";
+import { Button, Dialog, Field, IconButton, Textarea } from "@/components/ds";
 import { leviApi, downloadJson, exportName } from "./levi-api";
 export default function LeviReview({ repoId }: { repoId: string }) {
   const { flagged } = useFlaggedEpisodes();
@@ -46,52 +48,51 @@ export default function LeviReview({ repoId }: { repoId: string }) {
     }
   }
   return (
-    <div className="flex items-center gap-2 px-3 text-xs whitespace-nowrap">
-      <button className="levi-secondary" disabled={busy} onClick={save}>
-        <T>Export review</T> ({flagged.size})
-      </button>
-      <button title={t("Review notes")} onClick={() => setEditing(true)}>
-        ✎
-      </button>
+    <div className="flex items-center gap-1 whitespace-nowrap">
+      <Button size="sm" icon={Download} loading={busy} onClick={save}>
+        {t("Export review")} ({flagged.size})
+      </Button>
+      <IconButton
+        icon={Pencil}
+        size="sm"
+        label={t("Review notes")}
+        tooltipPlacement="bottom"
+        onClick={() => setEditing(true)}
+      />
       {message && (
-        <span role="status">
-          <T>{message}</T>
+        <span role="status" className="vw-muted text-xs">
+          {t(message)}
         </span>
       )}
-      {editing && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70"
-          role="dialog"
-          aria-modal="true"
-          aria-label={t("Review notes")}
-        >
-          <div className="levi-box w-[min(520px,90vw)]">
-            <h2>
-              <T>Review notes</T>
-            </h2>
-            <textarea
-              autoFocus
-              className="levi-input w-full h-36 mt-4"
-              value={notes}
-              maxLength={20000}
-              aria-label={t("Review notes")}
-              placeholder={t("Optional review notes")}
-              onChange={(e) => setNotes(e.target.value)}
-            />
-            <div className="levi-row mt-4">
-              <button className="levi-primary" disabled={busy} onClick={save}>
-                <T>Export review</T>
-              </button>
-              <button
-                className="levi-secondary"
-                onClick={() => setEditing(false)}
-              >
-                <T>Cancel</T>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Dialog
+        open={editing}
+        onClose={() => setEditing(false)}
+        title={t("Review notes")}
+        footer={
+          <>
+            <Button onClick={() => setEditing(false)}>{t("Cancel")}</Button>
+            <Button
+              variant="primary"
+              icon={Download}
+              loading={busy}
+              onClick={save}
+            >
+              {t("Export review")}
+            </Button>
+          </>
+        }
+      >
+        <Field label={t("Review notes")}>
+          <Textarea
+            autoFocus
+            rows={6}
+            value={notes}
+            maxLength={20000}
+            placeholder={t("Optional review notes")}
+            onChange={(e) => setNotes(e.target.value)}
+          />
+        </Field>
+      </Dialog>
     </div>
   );
 }

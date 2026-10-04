@@ -1,6 +1,9 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
-import { T } from "@/components/levi-locale";
+import { useLocale } from "@/components/levi-locale";
+import { Pause, Play, Spline } from "lucide-react";
+import { Button, IconButton, Kbd } from "@/components/ds";
+import "@/components/viewer/viewer.css";
 
 import React from "react";
 
@@ -30,80 +33,65 @@ export default function UrdfPlaybackBar({
   const currentTime = totalFrames > 0 ? (frame / fps).toFixed(2) : "0.00";
   const totalTime = (totalFrames / fps).toFixed(2);
 
+  const { t } = useLocale();
   return (
-    <T>
-      {
-        <div
-          className={`flex items-center gap-3 ${disabled ? "opacity-50" : ""}`}
-          aria-busy={disabled}
-        >
-          {/* Play/Pause */}
-          <button
-            onClick={onPlayPause}
-            disabled={disabled}
-            className="w-8 h-8 flex items-center justify-center rounded-md bg-cyan-400/10 border border-cyan-400/30 text-cyan-300 hover:bg-cyan-400/15 disabled:bg-white/5 disabled:border-white/5 disabled:text-slate-500 disabled:cursor-not-allowed transition-colors shrink-0"
-          >
-            <T>
-              {playing ? (
-                <svg width="12" height="14" viewBox="0 0 12 14">
-                  <rect x="1" y="1" width="3" height="12" fill="white" />
-                  <rect x="8" y="1" width="3" height="12" fill="white" />
-                </svg>
-              ) : (
-                <svg width="12" height="14" viewBox="0 0 12 14">
-                  <polygon points="2,1 11,7 2,13" fill="white" />
-                </svg>
-              )}
-            </T>
-          </button>
+    <div
+      className="vw-playback"
+      style={{ position: "static", maxWidth: "none" }}
+      role="group"
+      aria-label={t("Playback")}
+      aria-busy={disabled}
+    >
+      <IconButton
+        icon={playing ? Pause : Play}
+        label={t(playing ? "Pause" : "Play")}
+        shortcut="Space"
+        variant="secondary"
+        onClick={onPlayPause}
+        disabled={disabled}
+      />
+      <Button
+        size="sm"
+        icon={Spline}
+        onClick={onTrailToggle}
+        disabled={disabled}
+        aria-pressed={trailEnabled}
+        variant={trailEnabled ? "primary" : "secondary"}
+      >
+        {t("Trail")}
+      </Button>
 
-          {/* Trail toggle */}
-          <button
-            onClick={onTrailToggle}
-            disabled={disabled}
-            className={`px-2 h-8 text-xs rounded transition-colors shrink-0 disabled:cursor-not-allowed ${
-              trailEnabled
-                ? "bg-cyan-400/15 text-cyan-300 border border-cyan-400/40"
-                : "bg-white/5 text-slate-400 border border-white/10"
-            }`}
-            title={trailEnabled ? "Hide trail" : "Show trail"}
-          >
-            <T>Trail</T>
-          </button>
+      {/* Scrubber */}
+      <span className="vw-scrubber">
+        <input
+          type="range"
+          min={0}
+          max={Math.max(totalFrames - 1, 0)}
+          value={frame}
+          onChange={onFrameChange}
+          disabled={disabled}
+          className="ds-focus"
+          aria-label={t("Seek frame")}
+        />
+      </span>
+      <span className="vw-time">
+        {currentTime} s / {totalTime} s
+      </span>
+      <span className="vw-time">
+        F {frame}/{Math.max(totalFrames - 1, 0)}
+      </span>
 
-          {/* Scrubber */}
-          <input
-            type="range"
-            min={0}
-            max={Math.max(totalFrames - 1, 0)}
-            value={frame}
-            onChange={onFrameChange}
-            disabled={disabled}
-            className="flex-1 h-1.5 accent-cyan-400 cursor-pointer disabled:cursor-not-allowed"
-          />
-          <span className="text-xs text-slate-400 tabular-nums w-28 text-right shrink-0">
-            <T>{currentTime}</T>s / <T>{totalTime}</T>s
-          </span>
-          <span className="text-xs text-slate-500 tabular-nums w-20 text-right shrink-0">
-            F <T>{frame}</T>/{Math.max(totalFrames - 1, 0)}
-          </span>
-
-          {/* Keyboard hints */}
-          <div className="text-xs text-slate-500 select-none hidden md:flex flex-col gap-y-0.5 ml-2 shrink-0">
-            <p>
-              <span className="px-1.5 py-0.5 rounded border border-white/10 bg-[var(--surface-1)] text-slate-400 text-xs">
-                <T>Space</T>
-              </span>
-              <T> </T>
-              <T>pause/unpause</T>
-            </p>
-            <p>
-              <span className="font-mono">↑/↓</span>
-              <T> prev/next episode</T>
-            </p>
-          </div>
-        </div>
-      }
-    </T>
+      <div className="vw-shortcut-hints" aria-hidden="true">
+        <span>
+          <Kbd>{t("Space")}</Kbd>
+          {t("pause/unpause")}
+        </span>
+        <span>
+          <Kbd>↑</Kbd>
+          <Kbd>↓</Kbd>
+          {t("prev/next episode")}
+        </span>
+      </div>
+    </div>
   );
 }

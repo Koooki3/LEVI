@@ -1,20 +1,27 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
-import { T } from "./levi-locale";
+import { useLocale } from "./levi-locale";
 import React from "react";
+import {
+  ChevronFirst,
+  ChevronLast,
+  Pause,
+  Play,
+  Rewind,
+  FastForward,
+  RotateCcw,
+} from "lucide-react";
+import { IconButton, Kbd } from "@/components/ds";
 import { useTime } from "../context/time-context";
 import { nextMark, useObjectMarks } from "./object-marks";
-import {
-  FaPlay,
-  FaPause,
-  FaBackward,
-  FaForward,
-  FaUndoAlt,
-  FaArrowDown,
-  FaArrowUp,
-  FaStepBackward,
-  FaStepForward,
-} from "react-icons/fa";
+import "@/components/viewer/viewer.css";
+
+/** Seconds as m:ss (tabular), the playback bar's time readout. */
+export function formatClock(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(whole / 60);
+  return `${minutes}:${String(whole % 60).padStart(2, "0")}`;
+}
 
 const PlaybackBar: React.FC = () => {
   const { duration, isPlaying, setIsPlaying, currentTime, seek } = useTime();
@@ -56,117 +63,103 @@ const PlaybackBar: React.FC = () => {
     }
   };
 
+  const { t } = useLocale();
   return (
-    <T>
-      <div className="sticky bottom-0 mt-auto w-full max-w-4xl mx-auto flex items-center gap-3 panel-raised bg-[var(--surface-0)]/90 backdrop-blur px-3 py-2">
-        <button
-          title="Jump backward 5 seconds"
-          onClick={() => seek(Math.max(0, currentTime - 5))}
-          className="hidden md:flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:text-slate-100 hover:bg-white/5 transition-colors"
-        >
-          <FaBackward size={14} />
-        </button>
-        <button
-          className="flex h-9 w-9 items-center justify-center rounded-md bg-cyan-400/10 border border-cyan-400/30 text-cyan-300 hover:bg-cyan-400/15 transition-colors"
-          title={
-            isPlaying ? "Pause. Toggle with Space" : "Play. Toggle with Space"
-          }
-          onClick={() => setIsPlaying(!isPlaying)}
-        >
-          {isPlaying ? <FaPause size={14} /> : <FaPlay size={14} />}
-        </button>
-        <button
-          title="Jump forward 5 seconds"
-          onClick={() => seek(Math.min(duration, currentTime + 5))}
-          className="hidden md:flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:text-slate-100 hover:bg-white/5 transition-colors"
-        >
-          <FaForward size={14} />
-        </button>
-        <button
-          title="Rewind from start"
+    <div className="vw-playback" role="group" aria-label={t("Playback")}>
+      <div className="vw-playback-buttons">
+        <IconButton
+          icon={RotateCcw}
+          label={t("Rewind from start")}
+          size="sm"
           onClick={() => seek(0)}
-          className="hidden md:flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:text-slate-100 hover:bg-white/5 transition-colors"
-        >
-          <FaUndoAlt size={14} />
-        </button>
+        />
+        <IconButton
+          icon={Rewind}
+          label={t("Jump backward 5 seconds")}
+          size="sm"
+          onClick={() => seek(Math.max(0, currentTime - 5))}
+        />
+        <IconButton
+          icon={isPlaying ? Pause : Play}
+          label={t(isPlaying ? "Pause" : "Play")}
+          shortcut="Space"
+          variant="secondary"
+          onClick={() => setIsPlaying(!isPlaying)}
+        />
+        <IconButton
+          icon={FastForward}
+          label={t("Jump forward 5 seconds")}
+          size="sm"
+          onClick={() => seek(Math.min(duration, currentTime + 5))}
+        />
         {objectMarks.length > 0 && (
-          <button
-            title="Previous annotated frame"
-            aria-label="Previous annotated frame"
+          <IconButton
+            icon={ChevronFirst}
+            label={t("Previous annotated frame")}
+            size="sm"
             onClick={() => {
               const target = nextMark(currentTime, -1);
               if (target != null) seek(target);
             }}
-            className="hidden md:flex h-8 w-8 items-center justify-center rounded-md text-lime-300/80 hover:text-lime-200 hover:bg-white/5 transition-colors"
-          >
-            <FaStepBackward size={12} />
-          </button>
-        )}
-        <span className="relative flex-1 mx-1 flex items-center">
-          <input
-            type="range"
-            min={0}
-            max={duration}
-            step={0.01}
-            value={sliderValue}
-            onChange={handleSliderChange}
-            onMouseDown={handleSliderMouseDown}
-            onMouseUp={handleSliderMouseUp}
-            onTouchStart={handleSliderMouseDown}
-            onTouchEnd={handleSliderMouseUp}
-            className="w-full h-1 accent-cyan-400 cursor-pointer focus:outline-none focus:ring-0"
-            aria-label="Seek video"
           />
-          {/* Ticks sit under the thumb and ignore the pointer so dragging the
-              slider still works exactly as before. */}
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 h-3"
-          >
-            {duration > 0 &&
-              objectMarks.map((mark) => (
-                <span
-                  key={mark}
-                  className="levi-object-mark"
-                  style={{ left: `${(mark / duration) * 100}%` }}
-                />
-              ))}
-          </span>
-        </span>
-        {objectMarks.length > 0 && (
-          <button
-            title="Next annotated frame"
-            aria-label="Next annotated frame"
-            onClick={() => {
-              const target = nextMark(currentTime, 1);
-              if (target != null) seek(target);
-            }}
-            className="hidden md:flex h-8 w-8 items-center justify-center rounded-md text-lime-300/80 hover:text-lime-200 hover:bg-white/5 transition-colors"
-          >
-            <FaStepForward size={12} />
-          </button>
         )}
-        <span className="w-16 text-right tabular text-[11px] text-slate-400 shrink-0">
-          {Math.floor(sliderValue)} / {Math.floor(duration)}
-        </span>
-
-        <div className="hidden lg:flex flex-col gap-y-0.5 ml-4 text-[10px] text-slate-500 select-none">
-          <p className="inline-flex items-center gap-1.5">
-            <kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-slate-300 text-[10px]">
-              Space
-            </kbd>
-            <span>pause/unpause</span>
-          </p>
-          <p className="inline-flex items-center gap-1.5">
-            <span className="inline-flex items-center gap-0.5 text-slate-300">
-              <FaArrowUp size={10} />
-              <FaArrowDown size={10} />
-            </span>
-            <span>prev/next episode</span>
-          </p>
-        </div>
       </div>
-    </T>
+      <span className="vw-scrubber">
+        <input
+          type="range"
+          min={0}
+          max={duration}
+          step={0.01}
+          value={sliderValue}
+          onChange={handleSliderChange}
+          onMouseDown={handleSliderMouseDown}
+          onMouseUp={handleSliderMouseUp}
+          onTouchStart={handleSliderMouseDown}
+          onTouchEnd={handleSliderMouseUp}
+          className="ds-focus"
+          aria-label={t("Seek video")}
+          aria-valuetext={`${formatClock(sliderValue)} / ${formatClock(duration)}`}
+        />
+        {/* Ticks sit over the track and ignore the pointer so dragging the
+            slider still works exactly as before. */}
+        <span aria-hidden className="pointer-events-none absolute inset-0">
+          {duration > 0 &&
+            objectMarks.map((mark) => (
+              <span
+                key={mark}
+                className="vw-scrubber-mark"
+                style={{ left: `${(mark / duration) * 100}%` }}
+              />
+            ))}
+        </span>
+      </span>
+      {objectMarks.length > 0 && (
+        <IconButton
+          icon={ChevronLast}
+          label={t("Next annotated frame")}
+          size="sm"
+          onClick={() => {
+            const target = nextMark(currentTime, 1);
+            if (target != null) seek(target);
+          }}
+        />
+      )}
+      <span className="vw-time">
+        {formatClock(sliderValue)} / {formatClock(duration)}
+      </span>
+
+      <div className="vw-shortcut-hints" aria-hidden="true">
+        <span>
+          <Kbd>{t("Space")}</Kbd>
+          {t("pause/unpause")}
+        </span>
+        <span>
+          <Kbd>↑</Kbd>
+          <Kbd>↓</Kbd>
+          {t("prev/next episode")}
+        </span>
+      </div>
+    </div>
   );
 };
 

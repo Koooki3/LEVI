@@ -1,6 +1,9 @@
 "use client";
 import Link from "next/link";
 import { T, useLocale } from "@/components/levi-locale";
+import { RotateCw } from "lucide-react";
+import { Button } from "@/components/ds";
+import "@/components/viewer/viewer.css";
 import { useDatasetSource } from "@/context/dataset-source-context";
 
 /** Floating notice when the open dataset changed on disk (levi/sync.py):
@@ -16,7 +19,7 @@ export function DatasetUpdateNotice() {
   if (!changed && !removed && !rebuilding) return null;
   const now = format?.episodes ?? null;
   return (
-    <div className="levi-update-toast" role="status" aria-live="polite">
+    <div className="vw-update" role="status" aria-live="polite">
       {removed ? (
         <>
           <strong>
@@ -28,7 +31,10 @@ export function DatasetUpdateNotice() {
               back if the dataset is added again.
             </T>
           </p>
-          <Link className="levi-secondary" href="/workbench">
+          <Link
+            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+            href="/workbench"
+          >
             <T>Open the Workbench</T>
           </Link>
         </>
@@ -48,13 +54,14 @@ export function DatasetUpdateNotice() {
               first.
             </T>
           </p>
-          <button
-            type="button"
-            className="levi-primary"
+          <Button
+            variant="primary"
+            size="sm"
+            icon={RotateCw}
             onClick={() => window.location.reload()}
           >
-            <T>Reload</T>
-          </button>
+            {t("Reload")}
+          </Button>
         </>
       ) : (
         <>
