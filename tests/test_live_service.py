@@ -828,6 +828,7 @@ def test_the_status_heartbeat_continues_while_the_loop_is_busy(tmp_path):
     finds status.json stale falls back to manual labelling."""
     c = cfg(tmp_path)
     c.service.heartbeat_s = 0.5
+    c.vllm.port = free_port()
     ctl = controller.Controller(
         c,
         probes=controller.Probes(
@@ -851,6 +852,7 @@ def test_the_status_heartbeat_continues_while_the_loop_is_busy(tmp_path):
         ctl.running = False
         ctl.wake.set()
         thread.join(30)
+        ctl.shutdown()
     assert len(stamps) >= 4, f"status.json moved {len(stamps)} times in a blocked tick"
 
 

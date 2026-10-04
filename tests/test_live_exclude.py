@@ -244,8 +244,7 @@ def test_excluding_while_a_batch_runs_is_refused_for_its_episodes_only(env):
     mirror_only(e, 0, 1, 2, 3)
     e.config.watch.batch_max_episodes = 2
     ctl = e.controller()
-    thread = threading.Thread(target=lambda: ctl.run(once=True, max_seconds=240))
-    thread.start()
+    thread = e.start(ctl, once=True, max_seconds=240)
     try:
         deadline = time.time() + 90
         while time.time() < deadline and not (e.state() or {}).get("current"):
@@ -259,6 +258,11 @@ def test_excluding_while_a_batch_runs_is_refused_for_its_episodes_only(env):
     finally:
         e.fake.delay = 0
         thread.join(240)
+        # A batch that did not finish in time must not leave its worker.
+        ctl.running = False
+        ctl.wake.set()
+        thread.join(60)
+        ctl.shutdown()
     state = e.state()
     states = {d: r["state"] for d, r in state["demos"].items()}
     assert (

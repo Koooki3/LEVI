@@ -42,11 +42,15 @@ class Env:
         self.config = c
         cli.prepare(c)
         self.messages = []
+        # Every supervisor and loop thread a test makes, stopped at teardown
+        # whatever happened: a test that failed half-way must not leave a
+        # worker process labelling (or a thread ticking) behind it.
+        self.controllers, self.threads = [], []
 
     def controller(self, **probe):
         ports = probe.get("ports", lambda: set())
         vram = probe.get("vram", lambda: None)
-        return controller.Controller(
+        ctl = controller.Controller(
             self.config,
             # Every probe pinned: no test depends on this machine's GPU.
             probes=controller.Probes(
@@ -54,11 +58,22 @@ class Env:
             ),
             log=lambda *a: self.messages.append(" ".join(map(str, a))),
         )
+        self.controllers.append(ctl)
+        return ctl
+
+    def start(self, ctl, **run):
+        """``ctl.run(**run)`` in a thread that teardown stops and joins."""
+        thread = threading.Thread(target=ctl.run, kwargs=run)
+        self.threads.append(thread)
+        thread.start()
+        return thread
 
     def run(self, **kwargs):
         ctl = self.controller()
-        ctl.run(once=True, max_seconds=kwargs.pop("max_seconds", 300))
-        ctl.shutdown()
+        try:
+            ctl.run(once=True, max_seconds=kwargs.pop("max_seconds", 300))
+        finally:
+            ctl.shutdown()
         return ctl
 
     @property
@@ -93,6 +108,14 @@ class Env:
         return mirror.load_state(self.config, name)
 
     def close(self):
+        for ctl in self.controllers:
+            ctl.running = False
+            ctl.wake.set()
+        for thread in self.threads:
+            thread.join(60)
+        for ctl in self.controllers:
+            ctl.shutdown()  # stops its worker (by process group) if any is left
+        self.controllers, self.threads = [], []
         self.server.shutdown()
 
 
@@ -257,8 +280,7 @@ def test_restarting_continues_where_it_stopped_and_repeats_nothing(env):
     for n in range(3):
         e.rollouts.write(n)
     ctl = e.controller()
-    thread = threading.Thread(target=lambda: ctl.run(once=True, max_seconds=120))
-    thread.start()
+    thread = e.start(ctl, once=True, max_seconds=120)
     deadline = time.time() + 60
     while time.time() < deadline:
         progress = jsonio.read(e.ws / "live/worker.json") or {}
@@ -364,8 +386,7 @@ def test_a_worker_killed_without_warning_does_not_hold_up_the_next_one(env):
     for n in range(3):
         e.rollouts.write(n)
     ctl = e.controller()
-    thread = threading.Thread(target=lambda: ctl.run(once=True, max_seconds=120))
-    thread.start()
+    thread = e.start(ctl, once=True, max_seconds=120)
     deadline = time.time() + 60
     while time.time() < deadline and not (ctl.worker and e.fake.calls):
         time.sleep(0.1)
@@ -376,6 +397,25 @@ def test_a_worker_killed_without_warning_does_not_hold_up_the_next_one(env):
     e.run()
     assert time.time() - started < 100  # not the 3 minutes a lease takes to expire
     assert {r["state"] for r in e.state()["demos"].values()} == {"done"}
+
+
+def test_teardown_stops_a_batch_a_test_left_running(env):
+    """A test that fails while a batch runs leaves no worker process behind:
+    the environment stops its supervisors and their workers."""
+    e = env(delay=5.0)
+    e.rollouts.write(0)
+    ctl = e.controller()
+    thread = e.start(ctl, once=True, max_seconds=240)
+    deadline = time.time() + 60
+    while time.time() < deadline and not (ctl.worker and e.fake.calls):
+        time.sleep(0.1)
+    worker = ctl.worker
+    assert worker is not None and worker.poll() is None
+    e.close()  # what the fixture does after a failed assertion
+    assert not thread.is_alive()
+    assert worker.poll() is not None
+    with pytest.raises(ProcessLookupError):
+        os.killpg(worker.pid, 0)  # the whole process group is gone
 
 
 def test_a_new_episode_cancels_the_request_in_flight_and_the_batch_resumes_after(env):
@@ -389,8 +429,7 @@ def test_a_new_episode_cancels_the_request_in_flight_and_the_batch_resumes_after
         e.rollouts.write(n)
     e.rollouts.session("homing")
     ctl = e.controller(ports=lambda: {8000})  # a policy server is up
-    thread = threading.Thread(target=ctl.run, kwargs={"max_seconds": 240})
-    thread.start()
+    thread = e.start(ctl, max_seconds=240)
     try:
         progress = lambda: jsonio.read(e.ws / "live/worker.json") or {}
         deadline = time.time() + 60
