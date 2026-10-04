@@ -208,8 +208,9 @@ def test_the_frontend_is_not_rebuilt_while_this_checkout_serves(isolated, monkey
     steps = install.plan(["core"])
     assert _step(steps, "build").kind == "human"
     assert _step(steps, "stop-service").kind == "human"
-    result = install.execute(steps, log=lambda *a, **k: None)
-    assert {r["id"]: r["result"] for r in result["steps"]}["build"] == "for a person"
+    # Only the build step: the others would really run here.
+    result = install.execute([_step(steps, "build")], log=lambda *a, **k: None)
+    assert result["steps"][0]["result"] == "for a person"
     monkeypatch.setattr(install, "serving", lambda ui_port=7860: "")
     steps = install.plan(["core"])
     assert _step(steps, "build").kind == "auto"
