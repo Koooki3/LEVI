@@ -66,7 +66,7 @@ export function OptionsForm({
               onChange={(e) => set({ fps: Number(e.target.value) })}
             />
             {measured && (
-              <span className="text-xs">
+              <span className="pg-small">
                 <T>Measured capture FPS</T>: {measured}
                 {options.timing === "retime" &&
                   ` · ${t("every captured frame is declared at this rate")}`}
@@ -186,11 +186,11 @@ export function OptionsForm({
         />
       </label>
       {options.exclude_demos.length > 0 && (
-        <p className="pg-wide text-xs">
+        <p className="pg-wide pg-small">
           <T>Excluded episodes</T>: {options.exclude_demos.length}{" "}
           <button
             type="button"
-            className="underline"
+            className="pg-underline"
             onClick={() => set({ exclude_demos: [] })}
           >
             <T>clear</T>

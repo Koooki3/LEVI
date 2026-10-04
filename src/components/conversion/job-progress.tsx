@@ -50,7 +50,7 @@ export function JobProgress({ job }: { job: Job }) {
           />
         </>
       )}
-      <p className="text-xs tabular">
+      <p className="pg-small tabular">
         <T>Elapsed</T> {duration(p.elapsed_seconds)}
         {running && (
           <>

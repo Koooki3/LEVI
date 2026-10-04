@@ -128,7 +128,7 @@ export function PoolJobProgress({ job }: { job: PoolJob }) {
           label={t(p.stages[p.stage_index] ?? p.stage ?? "In progress")}
         />
       )}
-      <p className="text-xs tabular">
+      <p className="pg-small tabular">
         {running && job.age_seconds !== undefined && (
           <>
             {t("Last update")} {ago(job.age_seconds, t)}

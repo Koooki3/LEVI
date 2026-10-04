@@ -482,7 +482,7 @@ export function EpisodeTable({
         >
           {t("Previous page")}
         </Button>
-        <span className="tabular text-xs">
+        <span className="tabular pg-small">
           {total ? `${offset + 1}–${last}` : "0"} / {total.toLocaleString()}
         </span>
         <Button

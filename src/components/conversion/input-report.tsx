@@ -36,7 +36,7 @@ export function InputReportView({ report }: { report: InputReport }) {
   const warned = report.requirements.filter((r) => r.status === "warn").length;
   const bad = report.episodes.filter((e) => e.errors.length);
   return (
-    <div className="mt-5">
+    <div className="pg-mt-5">
       <div className="pg-row">
         <Badge tone="info" icon={null}>
           {t(report.label)}
@@ -113,16 +113,16 @@ export function InputReportView({ report }: { report: InputReport }) {
                 <td>
                   {t(r.label)}
                   {r.verified === "during_scan" && (
-                    <span className="text-xs">
+                    <span className="pg-small">
                       {" "}
                       (<T>checked while converting</T>)
                     </span>
                   )}
                   {r.detail && (
-                    <p className="text-xs break-all">{t(r.detail)}</p>
+                    <p className="pg-small pg-break">{t(r.detail)}</p>
                   )}
                   {r.fix && (r.status !== "pass" || r.verified !== "now") && (
-                    <p className="text-xs pg-fix">{t(r.fix)}</p>
+                    <p className="pg-small pg-fix">{t(r.fix)}</p>
                   )}
                 </td>
               </tr>
@@ -131,8 +131,8 @@ export function InputReportView({ report }: { report: InputReport }) {
         </table>
       </div>
       {bad.length > 0 && (
-        <details className="mt-3">
-          <summary className="cursor-pointer text-xs">
+        <details className="pg-mt-3">
+          <summary className="pg-small">
             {bad.length} <T>episodes with errors</T>
           </summary>
           <pre>

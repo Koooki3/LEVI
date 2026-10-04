@@ -1,6 +1,6 @@
 import { render, setupDom } from "../../ds/__tests__/dom";
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "fs";
+import { readFileSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { EmptyLine, JobCard, Note, Problem, RequestProblem } from "../feedback";
 
@@ -132,4 +132,42 @@ describe("reduced motion inside the app (data-motion)", () => {
       expect(missing).toEqual([]);
     },
   );
+});
+
+describe("no Tailwind spacing or text utilities on the stage-4 pages", () => {
+  test("they lose against ds-root's reset; pg-* helpers are used", () => {
+    const root = join(import.meta.dir, "../../..");
+    const dirs = [
+      "app/live",
+      "app/workbench",
+      "app/pool",
+      "app/explore",
+      "components/live",
+      "components/conversion",
+      "components/pool",
+    ];
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const path = join(dir, name);
+        if (name === "__tests__") continue;
+        if (statSync(path).isDirectory()) walk(path);
+        else if (path.endsWith(".tsx")) files.push(path);
+      }
+    };
+    for (const dir of dirs) walk(join(root, dir));
+    const bad: string[] = [];
+    for (const file of files) {
+      const code = readFileSync(file, "utf8");
+      for (const m of code.matchAll(/className="([^"]*)"/g))
+        for (const token of m[1].split(" "))
+          if (
+            /^(m[trblxy]?|p[trblxy]?)-\d|^text-(xs|sm|base|lg)$|^w-(full|\d+)$/.test(
+              token,
+            )
+          )
+            bad.push(`${file}: ${token}`);
+    }
+    expect(bad).toEqual([]);
+  });
 });

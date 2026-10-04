@@ -2251,3 +2251,67 @@
   display: inline-flex;
   align-items: center;
 }
+/* Spacing and type helpers for these pages. ds-root resets heading and
+   paragraph margins outside any cascade layer, and the page rules size p
+   and h*, so Tailwind's layered utilities lose there; these win. */
+.pg-workbench .pg-small {
+  font-size: var(--ds-text-caption-size);
+  line-height: var(--ds-text-caption-line);
+}
+.pg-workbench .pg-mt-2 {
+  margin-top: var(--ds-space-2);
+}
+.pg-workbench .pg-mt-3 {
+  margin-top: var(--ds-space-3);
+}
+.pg-workbench .pg-mt-4 {
+  margin-top: var(--ds-space-4);
+}
+.pg-workbench .pg-mt-5 {
+  margin-top: var(--ds-space-5);
+}
+.pg-workbench .pg-mt-6 {
+  margin-top: var(--ds-space-6);
+}
+.pg-workbench .pg-my-2 {
+  margin-block: var(--ds-space-2);
+}
+.pg-workbench .pg-my-3 {
+  margin-block: var(--ds-space-3);
+}
+.pg-workbench .pg-mr-3 {
+  margin-right: var(--ds-space-3);
+}
+.pg-workbench .pg-ml-3 {
+  margin-left: var(--ds-space-3);
+}
+.pg-workbench .pg-full {
+  width: 100%;
+}
+.pg-workbench .pg-w-num {
+  width: 5rem;
+}
+.pg-workbench .pg-block {
+  display: block;
+}
+.pg-workbench .pg-mono {
+  font-family: var(--ds-font-mono);
+}
+.pg-workbench .pg-break {
+  word-break: break-all;
+}
+.pg-workbench .pg-underline {
+  text-decoration: underline;
+}
+.pg-workbench .pg-between {
+  justify-content: space-between;
+}
+.pg-workbench .pg-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--ds-space-2);
+}
+.pg-workbench .pg-row.pg-between {
+  flex-wrap: nowrap;
+}

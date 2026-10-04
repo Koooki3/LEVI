@@ -18,8 +18,8 @@ export function FormatsTable() {
   if (!formats) return null;
   const outputs = Object.fromEntries(formats.outputs.map((o) => [o.id, o]));
   return (
-    <details className="mt-4">
-      <summary className="cursor-pointer text-xs">
+    <details className="pg-mt-4">
+      <summary className="pg-small">
         <T>Supported formats</T>
       </summary>
       <div className="ds-table-wrap pg-gap-top">
@@ -42,7 +42,7 @@ export function FormatsTable() {
               <tr key={input.id}>
                 <td>
                   {t(input.label)}
-                  <p className="text-xs">{t(input.description)}</p>
+                  <p className="pg-small">{t(input.description)}</p>
                 </td>
                 <td>
                   {(formats.matrix[input.id] ?? [])
@@ -59,9 +59,9 @@ export function FormatsTable() {
                   <Badge tone="danger">
                     <T>unsupported</T>
                   </Badge>
-                  <p className="text-xs">{t(gap.reason)}</p>
+                  <p className="pg-small">{t(gap.reason)}</p>
                 </td>
-                <td className="text-xs">{t(gap.workaround)}</td>
+                <td className="pg-small">{t(gap.workaround)}</td>
               </tr>
             ))}
           </tbody>

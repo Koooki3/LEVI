@@ -171,7 +171,7 @@ export default function Workbench() {
             <T>Register & browse</T>
           </Button>
         </form>
-        <p className="mt-3 text-xs">
+        <p className="pg-mt-3 pg-small">
           <T>Workspace</T>: <code>{catalog?.workspace || "…"}</code>
         </p>
         <div className="pg-sync-bar">
@@ -227,7 +227,7 @@ export default function Workbench() {
         )}
         {sync && sync.changes.length > 0 && (
           <details className="pg-sync-changes">
-            <summary className="cursor-pointer">
+            <summary className="">
               <T>Recent workspace changes</T> ({sync.changes.length})
             </summary>
             <ul>
@@ -277,9 +277,9 @@ export default function Workbench() {
                         <span>{d.name}</span>
                       )}
                       {d.view_status === "failed" && d.view_error && (
-                        <p className="text-xs pg-fix">{t(d.view_error)}</p>
+                        <p className="pg-small pg-fix">{t(d.view_error)}</p>
                       )}
-                      <p className="text-xs break-all">
+                      <p className="pg-small pg-break">
                         <T>{d.path}</T>
                       </p>
                     </td>
@@ -290,7 +290,7 @@ export default function Workbench() {
                       {d.format?.episodes ?? d.info?.total_episodes ?? "—"}
                     </td>
                     <td>
-                      <div className="flex flex-col gap-2 items-stretch">
+                      <div className="pg-stack">
                         <Button size="sm" onClick={() => setSource(d.path)}>
                           <T>Use as input</T>
                         </Button>
@@ -345,7 +345,7 @@ export default function Workbench() {
         )}
       </section>
       <section className="pg-box">
-        <div className="pg-row justify-between">
+        <div className="pg-row pg-between">
           <h2>
             <T>Conversion pipeline</T>
           </h2>
@@ -373,7 +373,7 @@ export default function Workbench() {
       </section>
       <section className="pg-box">
         <details>
-          <summary className="cursor-pointer">
+          <summary className="">
             <T>Single stages (advanced)</T>
           </summary>
           <p>
@@ -399,10 +399,10 @@ export default function Workbench() {
               );
             }}
           >
-            <label className="block mt-5 text-xs">
+            <label className="pg-block pg-mt-5 pg-small">
               <T>Input directory</T>
               <input
-                className="ds-input ds-focus w-full mt-2"
+                className="ds-input ds-focus pg-full pg-mt-2"
                 value={source}
                 onChange={(e) => {
                   setSource(e.target.value);
@@ -414,10 +414,10 @@ export default function Workbench() {
                 )}
               />
             </label>
-            <label className="block mt-4 text-xs">
+            <label className="pg-block pg-mt-4 pg-small">
               <T>Output directory (optional)</T>
               <input
-                className="ds-input ds-focus w-full mt-2"
+                className="ds-input ds-focus pg-full pg-mt-2"
                 value={output}
                 onChange={(e) => {
                   setOutput(e.target.value);
@@ -428,7 +428,7 @@ export default function Workbench() {
                 )}
               />
             </label>
-            <div className="pg-row mt-4">
+            <div className="pg-row pg-mt-4">
               <select
                 aria-label={t("Conversion stage")}
                 className="ds-input ds-focus grow"
@@ -447,10 +447,10 @@ export default function Workbench() {
                   ))}
               </select>
               {["images", "pipeline", "fps"].includes(stage) && (
-                <label className="text-xs">
+                <label className="pg-small">
                   <T>Source FPS</T>{" "}
                   <input
-                    className="ds-input ds-focus w-20"
+                    className="ds-input ds-focus pg-w-num"
                     type="number"
                     min="1"
                     max="240"
@@ -462,10 +462,10 @@ export default function Workbench() {
                   />
                 </label>
               )}
-              <label className="text-xs">
+              <label className="pg-small">
                 <T>FPS </T>
                 <input
-                  className="ds-input ds-focus w-20"
+                  className="ds-input ds-focus pg-w-num"
                   type="number"
                   min="1"
                   max="240"
@@ -483,11 +483,11 @@ export default function Workbench() {
                 <T>Preview command</T>
               </Button>
             </div>
-            <details className="mt-5">
-              <summary className="cursor-pointer">
+            <details className="pg-mt-5">
+              <summary className="">
                 <T>Advanced conversion options</T>
               </summary>
-              <p className="my-3 text-xs">
+              <p className="pg-my-3 pg-small">
                 <T>
                   JSON options: camera mapping, task mapping, excluded demo
                   paths, orientation, action mode and quality thresholds.
@@ -499,7 +499,7 @@ export default function Workbench() {
               </p>
               <textarea
                 aria-label={t("Conversion options JSON")}
-                className="ds-input ds-focus w-full font-mono text-xs"
+                className="ds-input ds-focus pg-full pg-mono pg-small"
                 rows={8}
                 value={options}
                 onChange={(e) => {
@@ -510,12 +510,12 @@ export default function Workbench() {
             </details>
           </form>
           {plan && (
-            <div className="mt-6">
+            <div className="pg-mt-6">
               <h3>
                 <T>Review this plan</T>
               </h3>
               <pre>{plan.argv.map((arg) => JSON.stringify(arg)).join(" ")}</pre>
-              <p className="my-3">
+              <p className="pg-my-3">
                 <T>New output</T>: <T>{plan.output}</T>
               </p>
               <Button
@@ -548,11 +548,14 @@ export default function Workbench() {
           .map((j) => (
             <details key={j.id} className="pg-history-item">
               <summary>
-                <Badge tone={JOB_TONE[j.status] ?? "neutral"} className="mr-3">
+                <Badge
+                  tone={JOB_TONE[j.status] ?? "neutral"}
+                  className="pg-mr-3"
+                >
                   <T>{j.status}</T>
                 </Badge>
                 <T>{j.stage}</T>
-                <code className="ml-3 text-xs">
+                <code className="pg-ml-3 pg-small">
                   <T>{j.id}</T>
                 </code>
               </summary>
@@ -565,7 +568,7 @@ export default function Workbench() {
                 />
               )}
               <details>
-                <summary className="cursor-pointer text-xs">
+                <summary className="pg-small">
                   <T>Log</T>
                 </summary>
                 <pre>{j.log || t("Waiting for logs…")}</pre>
@@ -583,7 +586,7 @@ export default function Workbench() {
                   <pre>{JSON.stringify(j.result, null, 2)}</pre>
                 </details>
               )}
-              <div className="pg-row mt-4">
+              <div className="pg-row pg-mt-4">
                 <Button
                   disabled={j.status !== "succeeded" || !j.output_exists}
                   onClick={() => {

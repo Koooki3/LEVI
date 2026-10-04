@@ -33,7 +33,7 @@ export function TargetCards({
             key={target.target}
             className={`pg-card ${selected === target.target ? "selected" : ""}`}
           >
-            <div className="pg-row justify-between">
+            <div className="pg-row pg-between">
               <h3>{t(target.label)}</h3>
               <Badge tone={STATUS[target.status]}>{t(target.status)}</Badge>
             </div>
@@ -45,7 +45,7 @@ export function TargetCards({
               </ul>
             )}
             {Object.keys(target.defaults).length > 0 && (
-              <p className="text-xs">
+              <p className="pg-small">
                 <T>Defaults for this target</T>:{" "}
                 <code>
                   {Object.entries(target.defaults)
@@ -55,7 +55,7 @@ export function TargetCards({
               </p>
             )}
             {target.solutions.length > 0 && (
-              <div className="pg-row mt-3">
+              <div className="pg-row pg-mt-3">
                 {target.solutions.map((solution) => (
                   <Button
                     key={solution.id}
@@ -69,7 +69,7 @@ export function TargetCards({
               </div>
             )}
             <Button
-              className="mt-4 pg-choice"
+              className="pg-mt-4 pg-choice"
               icon={selected === target.target ? Check : undefined}
               disabled={!usable}
               aria-pressed={selected === target.target}

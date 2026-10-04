@@ -180,7 +180,7 @@ export function ConversionWizard({
       )}
       {notice && <Note tone="warning">{notice}</Note>}
       <form
-        className="pg-row mt-4"
+        className="pg-row pg-mt-4"
         onSubmit={(e) => {
           e.preventDefault();
           inspect();
@@ -212,11 +212,11 @@ export function ConversionWizard({
           <T>{inspecting ? "Inspecting…" : "1 · Inspect input"}</T>
         </Button>
       </form>
-      <details className="mt-3">
-        <summary className="cursor-pointer text-xs">
+      <details className="pg-mt-3">
+        <summary className="pg-small">
           <T>Advanced conversion options</T>
         </summary>
-        <p className="my-2 text-xs">
+        <p className="pg-my-2 pg-small">
           <T>
             JSON options: camera mapping, task mapping, excluded demo paths,
             orientation, action mode and quality thresholds.
@@ -228,7 +228,7 @@ export function ConversionWizard({
         </p>
         <textarea
           aria-label={t("Conversion options JSON")}
-          className="ds-input ds-focus w-full font-mono text-xs"
+          className="ds-input ds-focus pg-full pg-mono pg-small"
           rows={6}
           value={extra}
           onChange={(e) => setExtra(e.target.value)}
@@ -245,11 +245,11 @@ export function ConversionWizard({
       )}
       {report && (
         <>
-          <h3 className="mt-6">
+          <h3 className="pg-mt-6">
             <T>2 · Input requirements</T>
           </h3>
           <InputReportView report={report} />
-          <h3 className="mt-6">
+          <h3 className="pg-mt-6">
             <T>3 · Choose an export</T>
           </h3>
           <TargetCards
@@ -262,7 +262,7 @@ export function ConversionWizard({
       )}
       {report && target && (
         <>
-          <h3 className="mt-6">
+          <h3 className="pg-mt-6">
             <T>4 · Options</T>
           </h3>
           <OptionsForm
@@ -279,7 +279,7 @@ export function ConversionWizard({
             }}
           />
           <Button
-            className="mt-4"
+            className="pg-mt-4"
             variant={step === "review" ? "primary" : "secondary"}
             disabled={busy}
             onClick={preview}
@@ -289,7 +289,7 @@ export function ConversionWizard({
         </>
       )}
       {plan && (
-        <div className="mt-6">
+        <div className="pg-mt-6">
           <p>
             <T>New output</T>: <code>{plan.output}</code>
           </p>
@@ -314,7 +314,7 @@ export function ConversionWizard({
           <Button
             variant="primary"
             icon={Play}
-            className="mt-3"
+            className="pg-mt-3"
             disabled={busy}
             onClick={() =>
               void run(async () => {
