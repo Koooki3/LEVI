@@ -294,14 +294,19 @@
   padding: 0 var(--ds-space-1);
   color: var(--ds-text-tertiary-on-sunken);
 }
+/* The heading never breaks inside a word; when the filter chips do not
+   fit beside it they move to the next line. */
 .vw-sidebar-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--ds-space-2);
+  flex-wrap: wrap;
+  gap: var(--ds-space-1) var(--ds-space-2);
   padding: 0 var(--ds-space-1);
 }
 .vw-sidebar-head .vw-label {
+  flex-shrink: 0;
+  white-space: nowrap;
   color: var(--ds-text-tertiary-on-sunken);
 }
 .vw-filter-chips {
@@ -921,4 +926,13 @@ button.vw-outcome:hover {
   .vw-thumb-flag {
     opacity: 1;
   }
+}
+
+/* Keeps a control (segmented control, chip) on one line; its row wraps. */
+.vw-nowrap {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.vw-chip {
+  white-space: nowrap;
 }
