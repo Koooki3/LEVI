@@ -565,6 +565,7 @@ function TrainingPool() {
                         recipe.allow_unlinked_sources || false,
                       exclude: recipe.exclude,
                       task_text: recipe.task_text || {},
+                      task_corrections: recipe.task_corrections || [],
                     },
                   );
                   await refreshRecipes();

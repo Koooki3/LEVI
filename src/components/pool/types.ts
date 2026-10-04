@@ -378,6 +378,8 @@ export interface Recipe {
   allow_unlinked_sources?: boolean;
   exclude: string[];
   task_text?: Record<string, string>;
+  // Versions of reviewed task text corrections to apply (docs/TRAINING_POOL.md).
+  task_corrections?: string[];
   saved_at?: string;
 }
 
