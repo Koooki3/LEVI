@@ -53,23 +53,27 @@
   letter-spacing: 0.08em;
   text-decoration: none;
 }
-/* The mark: a graphite square with a cut corner (no Unicode glyph). */
-.levi-shell-mark {
-  position: relative;
-  width: 18px;
-  height: 18px;
-  border-radius: var(--ds-radius-xs);
-  background: var(--ds-accent);
+/* The mark (src/components/shell/brand.tsx): graphite tile, glyph in the
+   accent's text colour, so it inverts with the theme like a primary button.
+   Used by the bar, the home page, the guide and the report. */
+.levi-mark {
+  flex: none;
+  display: block;
 }
-.levi-shell-mark::after {
-  content: "";
-  position: absolute;
-  right: 3px;
-  top: 3px;
-  width: 6px;
-  height: 6px;
-  border-radius: 1px;
-  background: var(--ds-on-accent);
+.levi-mark__tile {
+  fill: var(--ds-accent);
+}
+.levi-mark__glyph {
+  fill: var(--ds-on-accent);
+}
+.levi-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  color: var(--ds-text-primary);
+  font-family: var(--ds-font-sans);
+  font-weight: var(--ds-weight-semibold);
+  letter-spacing: 0.08em;
 }
 
 .levi-shell-nav {
