@@ -176,6 +176,9 @@ export interface LiveStatusResponse {
   live_ui?: string | null;
   /** The live workspace's folder name (never its whole path). */
   workspace_name?: string;
+  /** The training pool remembers no more live workspaces: removals made in
+   * this one count only while the page shows it. */
+  pool_memory_full?: boolean;
   alive?: boolean;
   age_s?: number | null;
   service?: ServiceStatus | null;

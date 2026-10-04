@@ -67,12 +67,13 @@ export function isLiveWorkspace(
   return enabled === true && embedded === false;
 }
 
-/** The training pool is the product LEVI's: the live workspace's own LEVI
- * does not offer one, so there is only one. Not offered either while that
- * is not known yet (no link that appears and then goes). */
+/** The training pool is the product LEVI's: only the live workspace's own
+ * LEVI, once that is known, does not offer one. While the live status is
+ * not known (not answered yet, failing, or rendered on the server) the pool
+ * is offered: the product LEVI must never lose its pool to a failed request. */
 export function offersTrainingPool(
   enabled: boolean | null,
   embedded: boolean | null,
 ): boolean {
-  return enabled !== null && !isLiveWorkspace(enabled, embedded);
+  return !isLiveWorkspace(enabled, embedded);
 }

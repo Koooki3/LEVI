@@ -145,6 +145,13 @@ export default function LivePage() {
           {t("Live workspace")}: <code>{status.workspace_name}</code>
         </p>
       )}
+      {status?.enabled && status.pool_memory_full && (
+        <p className="levi-live-bad" role="status">
+          {t(
+            "The training pool already remembers 20 live workspaces and does not remember this one: episodes removed here are kept out of the pool only while this page shows it. Make room with `levi pool live-workspaces forget <path>`.",
+          )}
+        </p>
+      )}
       <p>
         {t(
           "Watch a robot evaluation while it runs: the evaluation sessions, the FR3 arm, and how far the background LEVI has got with labelling the finished episodes. Nothing here starts, stops or approves anything; the only change you can make is to remove an episode from a dataset (restorable, nothing is deleted). Automatic results are unreviewed and their accuracy has not been evaluated.",
