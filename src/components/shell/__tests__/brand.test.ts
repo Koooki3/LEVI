@@ -28,4 +28,16 @@ describe("LEVI mark", () => {
       expect(y + h).toBeLessThanOrEqual(LEVI_MARK.size - 6);
     }
   });
+
+  test("no page draws its own logo any more", () => {
+    const src = join(app, "..");
+    const hits = [...new Bun.Glob("**/*.{ts,tsx,css}").scanSync(src)].filter(
+      (file) => {
+        if (file.includes("__tests__")) return false;
+        const code = readFileSync(join(src, file), "utf8");
+        return /levi-orbit-core|levi-shell-mark\b/.test(code);
+      },
+    );
+    expect(hits).toEqual([]);
+  });
 });
