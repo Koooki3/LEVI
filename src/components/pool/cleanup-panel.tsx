@@ -123,7 +123,9 @@ export function CleanupPanel({
                 <th>{t("Size")}</th>
                 <th>{t("Age")}</th>
                 <th>{t("Removed in")}</th>
-                <th />
+                <th>
+                  <span className="sr-only">{t("Actions")}</span>
+                </th>
               </tr>
             </thead>
             <tbody>

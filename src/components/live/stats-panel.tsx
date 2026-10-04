@@ -49,7 +49,12 @@ export function SessionsTable({ rows }: { rows: StatsSession[] }) {
   return (
     <>
       <h3>{t("Evaluation sessions")}</h3>
-      <div className="pg-pool-table-wrap">
+      <div
+        className="pg-pool-table-wrap"
+        tabIndex={0}
+        role="region"
+        aria-label={t("Scrollable table")}
+      >
         <table className="ds-table ds-table--compact pg-pool-table pg-live-stats-table">
           <thead>
             <tr>
@@ -122,7 +127,12 @@ export function EpisodesTable({
           </button>
         ))}
       </div>
-      <div className="pg-pool-table-wrap">
+      <div
+        className="pg-pool-table-wrap"
+        tabIndex={0}
+        role="region"
+        aria-label={t("Scrollable table")}
+      >
         <table className="ds-table ds-table--compact pg-pool-table pg-live-stats-table">
           <thead>
             <tr>

@@ -95,7 +95,12 @@ export function TaskTable({
     (row) => Object.keys(row.policy_methods || {}).length > 0,
   );
   return (
-    <div className="pg-pool-table-wrap">
+    <div
+      className="pg-pool-table-wrap"
+      tabIndex={0}
+      role="region"
+      aria-label={t("Scrollable table")}
+    >
       <table className="ds-table ds-table--compact pg-pool-table">
         <caption className="sr-only">{t("Tasks")}</caption>
         <thead>
@@ -324,7 +329,12 @@ export function EpisodeTable({
   const showPolicy = rows.some((row) => row.policy_method || row.policy_model);
   return (
     <div>
-      <div className="pg-pool-table-wrap">
+      <div
+        className="pg-pool-table-wrap"
+        tabIndex={0}
+        role="region"
+        aria-label={t("Scrollable table")}
+      >
         <table className="ds-table ds-table--compact pg-pool-table">
           <caption className="sr-only">{t("Episodes")}</caption>
           <thead>

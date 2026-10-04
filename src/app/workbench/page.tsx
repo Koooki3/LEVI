@@ -262,7 +262,11 @@ export default function Workbench() {
                   <th>
                     <T>Episodes</T>
                   </th>
-                  <th />
+                  <th>
+                    <span className="sr-only">
+                      <T>Actions</T>
+                    </span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
