@@ -175,8 +175,10 @@ class EpisodeRule(Contract):
     # Without labels, what else the valid events must satisfy. ``any_valid``:
     # nothing (min_valid valid events are enough). ``last_valid_not_regrasped``:
     # the gripper does not close again after the last valid event, so the
-    # object is not picked up again. Both assume the task places once: a task
-    # that legitimately grasps again after a placement must not use it.
+    # object is not picked up again. The rule only looks after the last valid
+    # event, so a task that grasps again between placements is not failed by
+    # it; what it cannot stop is a half-done or twice-placed episode (use
+    # ``min_valid`` as a task-level lower bound).
     rule: Literal["any_valid", "last_valid_not_regrasped"] = "any_valid"
     # Also require that the episode's last time segment of the subtask
     # ``place`` (the one that starts last) is not a failure or unknown. The
