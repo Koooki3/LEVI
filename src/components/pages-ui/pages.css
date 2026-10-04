@@ -2333,3 +2333,8 @@
   right: 0;
   transform: none;
 }
+/* A date field's focus lands on its inner parts; ring the field itself. */
+.pg-workbench input[type="date"]:focus {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
