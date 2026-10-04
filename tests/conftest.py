@@ -15,10 +15,12 @@ pytest_plugins = ("pytester",)
 # On the maintainer's machine these loopback ports belong to services a person
 # is using: the local vLLM (8100), the product LEVI (7860/7861), the live
 # service (7880/7881) and the robot and policy servers (5000/8000). No test
-# may talk to them; one that must (it never should) says so with
-# ``@pytest.mark.allow_service_ports``. The guard is installed in this process
-# and, through ``tests/netguard`` first on PYTHONPATH (as ``sitecustomize``),
-# in every Python process a test starts.
+# may talk to them on any address of this machine. The guard is installed in
+# this process and, through ``tests/netguard`` first on PYTHONPATH (as
+# ``sitecustomize``), in every Python process a test starts. A test that must
+# reach them (none should) says so with ``@pytest.mark.allow_service_ports``:
+# that lifts the guard in this process, and LEVI_TEST_NETGUARD_OFF=1 is set
+# while it runs so the Python processes it starts are not guarded either.
 PROTECTED_PORTS = (8100, 7860, 7861, 7880, 7881, 5000, 8000)
 NETGUARD_DIR = Path(__file__).resolve().parent / "netguard"
 _spec = importlib.util.spec_from_file_location(
@@ -56,8 +58,10 @@ def pytest_configure(config):
     global _NETGUARD_LOG_DIR
     config.addinivalue_line(
         "markers",
-        "allow_service_ports: the test may connect to the protected loopback "
-        "ports (8100, 7860, 7861, 7880, 7881, 5000, 8000)",
+        "allow_service_ports: the test may connect to this machine's protected "
+        "service ports (8100, 7860, 7861, 7880, 7881, 5000, 8000); lifts the "
+        "guard in the pytest process, and sets LEVI_TEST_NETGUARD_OFF=1 while "
+        "the test runs so the Python processes it starts are unguarded too",
     )
     _NETGUARD_LOG_DIR = tempfile.mkdtemp(prefix="levi-netguard-")
     log = os.path.join(_NETGUARD_LOG_DIR, "blocked.jsonl")
@@ -98,13 +102,31 @@ def _no_protected_ports(request):
     or a child); the attempt itself was refused."""
     guard = netguard.GUARD
     allowed = request.node.get_closest_marker("allow_service_ports") is not None
+    off = os.environ.get(netguard.OFF_ENV)
     guard.enabled = not allowed
+    if allowed:
+        os.environ[netguard.OFF_ENV] = "1"
     start, offset = len(guard.blocked), _child_log_size()
-    yield guard
-    guard.enabled = True
+    try:
+        yield guard
+    finally:
+        guard.enabled = True
+        if allowed:
+            if off is None:
+                os.environ.pop(netguard.OFF_ENV, None)
+            else:
+                os.environ[netguard.OFF_ENV] = off
     attempts = guard.blocked[start:] + _child_attempts(offset)
     if attempts and not allowed:
-        pytest.fail(f"connected to a protected service port: {attempts}", pytrace=False)
+        lines = "\n".join(
+            f"  {a['host']}:{a['port']} from pid {a['pid']}"
+            + ("" if a["pid"] == os.getpid() else f" argv {a.get('argv')}")
+            for a in attempts
+        )
+        pytest.fail(
+            f"connected to a protected service port (refused):\n{lines}",
+            pytrace=False,
+        )
 
 
 @pytest.fixture
