@@ -50,21 +50,21 @@
   gap: 5px;
   margin: 12px 0;
 }
-.levi-agent-sheet .levi-agent-dock input,
-.levi-agent-sheet .levi-agent-dock select,
-.levi-agent-sheet .levi-agent-dock textarea {
+.levi-agent-sheet .levi-agent-dock input:where(:not(.ds-input)),
+.levi-agent-sheet .levi-agent-dock select:where(:not(.ds-input)),
+.levi-agent-sheet .levi-agent-dock textarea:where(:not(.ds-input)) {
   width: 100%;
   padding: 8px;
-  background: var(--ds-accent);
-  color: var(--ds-on-accent);
-  border: 1px solid var(--ds-border-control);
+  background: var(--ds-field-bg);
+  color: var(--ds-text-primary);
+  border: 1px solid var(--ds-border-control-on-raised);
   border-radius: var(--ds-radius-sm);
 }
-.levi-agent-sheet .levi-agent-dock select option {
-  background: var(--ds-accent);
-  color: var(--ds-on-accent);
+.levi-agent-sheet .levi-agent-dock select:where(:not(.ds-input)) option {
+  background: var(--ds-surface-2);
+  color: var(--ds-text-primary);
 }
-.levi-agent-sheet .levi-agent-dock button {
+.levi-agent-sheet .levi-agent-dock button:where(:not(.ds-btn, .ds-icon-btn)) {
   border: 1px solid var(--ds-border-control);
   border-radius: var(--ds-radius-sm);
   padding: 7px 11px;
@@ -72,18 +72,26 @@
   background: var(--ds-surface-hover);
   cursor: pointer;
 }
-.levi-agent-sheet .levi-agent-dock button:disabled {
+.levi-agent-sheet
+  .levi-agent-dock
+  button:where(:not(.ds-btn, .ds-icon-btn)):disabled {
   opacity: 0.5;
   cursor: default;
 }
-.levi-agent-sheet .levi-agent-dock button:focus-visible,
-.levi-agent-sheet .levi-agent-dock input:focus-visible,
-.levi-agent-sheet .levi-agent-dock textarea:focus-visible,
-.levi-agent-sheet .levi-agent-dock select:focus-visible {
+.levi-agent-sheet
+  .levi-agent-dock
+  button:where(:not(.ds-btn, .ds-icon-btn)):focus-visible,
+.levi-agent-sheet .levi-agent-dock input:where(:not(.ds-input)):focus-visible,
+.levi-agent-sheet
+  .levi-agent-dock
+  textarea:where(:not(.ds-input)):focus-visible,
+.levi-agent-sheet .levi-agent-dock select:where(:not(.ds-input)):focus-visible {
   outline: 2px solid var(--ds-focus-ring);
   outline-offset: 2px;
 }
-.levi-agent-sheet .levi-agent-dock button[aria-pressed="true"] {
+.levi-agent-sheet
+  .levi-agent-dock
+  button:where(:not(.ds-btn, .ds-icon-btn))[aria-pressed="true"] {
   background: var(--ds-accent);
   color: var(--ds-on-accent);
 }
@@ -787,65 +795,23 @@
   font-size: var(--ds-text-title-3-size);
   font-weight: var(--ds-weight-semibold);
 }
-.levi-agent-sheet .levi-agent-dock :is(input, select, textarea) {
-  min-height: var(--ds-control-md);
-  background: var(--ds-field-bg);
-  color: var(--ds-text-primary);
-  border-color: var(--ds-border-control-on-raised);
+.levi-agent-sheet .levi-agent-dock .ds-input {
+  width: 100%;
 }
-.levi-agent-sheet .levi-agent-dock :is(input, select, textarea)::placeholder {
-  color: var(--ds-text-tertiary-on-raised);
-}
-.levi-agent-sheet
-  .levi-agent-dock
-  :is(input[type="checkbox"], input[type="radio"]) {
-  min-height: 0;
-  width: auto;
-}
-.levi-agent-sheet .levi-agent-dock select option {
+.levi-agent-sheet .levi-agent-dock select.ds-input option {
   background: var(--ds-surface-2);
   color: var(--ds-text-primary);
 }
-.levi-agent-sheet .levi-agent-dock button {
-  min-height: var(--ds-control-md);
-  padding: 0 var(--ds-space-3);
-  border-color: var(--ds-border-control-on-raised);
-  background: var(--ds-surface-1);
-  color: var(--ds-text-primary);
-  font-weight: var(--ds-weight-medium);
-  transition:
-    background-color var(--ds-dur-fast) var(--ds-ease-standard),
-    transform var(--ds-dur-fast) var(--ds-ease-standard);
+.levi-agent-sheet .levi-agent-dock textarea.ds-input {
+  padding: var(--ds-space-2) var(--ds-space-3);
+  line-height: var(--ds-text-body-line);
 }
-.levi-agent-sheet .levi-agent-dock button:hover:not(:disabled) {
-  background: var(--ds-surface-hover-on-raised);
-}
-.levi-agent-sheet .levi-agent-dock button:active:not(:disabled) {
-  transform: scale(var(--ds-motion-press-scale));
-}
-.levi-agent-sheet .levi-agent-dock button:disabled {
-  opacity: 1;
-  background: var(--ds-surface-hover);
-  border-color: transparent;
-  color: var(--ds-text-disabled);
-  cursor: not-allowed;
-}
-.levi-agent-sheet .levi-agent-dock button[aria-pressed="true"] {
+/* A pressed button (the drawer's tabs, toggles) is the selected state:
+   grey fill, weight and the graphite edge, never a second primary. */
+.levi-agent-sheet .levi-agent-dock .ds-btn[aria-pressed="true"] {
   background: var(--ds-surface-selected);
-  color: var(--ds-text-primary);
   border-color: var(--ds-selected-indicator);
   font-weight: var(--ds-weight-semibold);
-}
-.levi-agent-sheet .levi-agent-dock .levi-primary {
-  background: var(--ds-accent);
-  border-color: transparent;
-  color: var(--ds-on-accent);
-}
-.levi-agent-sheet .levi-agent-dock .levi-primary:hover:not(:disabled) {
-  background: var(--ds-accent-hover);
-}
-.levi-agent-sheet .levi-agent-dock :is(.ds-btn, .ds-icon-btn) {
-  min-height: 0;
 }
 .levi-agent-sheet .levi-agent-dock :where(small, .levi-agent-muted) {
   color: var(--ds-text-secondary);
@@ -881,4 +847,51 @@
 }
 .levi-agent-sheet .levi-agent-dock progress {
   accent-color: var(--ds-progress);
+}
+/* levi.css still styles every button and field in the dock (".levi-agent-dock
+   button", "input"), which outranks the ds classes; restate the ds look here
+   until stage 6 removes those rules. */
+.levi-agent-sheet .levi-agent-dock .ds-btn {
+  height: var(--ds-control-sm);
+  padding: 0 var(--ds-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--ds-radius-sm);
+  font-size: var(--ds-text-callout-size);
+  font-weight: var(--ds-weight-medium);
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn--secondary {
+  background: var(--ds-surface-1);
+  border-color: var(--ds-border-control-on-raised);
+  color: var(--ds-text-primary);
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn--secondary:hover:not(:disabled) {
+  background: var(--ds-surface-hover-on-raised);
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn:disabled {
+  opacity: 1;
+  background: var(--ds-surface-hover);
+  border-color: transparent;
+  color: var(--ds-text-disabled);
+  cursor: not-allowed;
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn[aria-pressed="true"] {
+  background: var(--ds-surface-selected);
+  border-color: var(--ds-selected-indicator);
+  color: var(--ds-text-primary);
+  font-weight: var(--ds-weight-semibold);
+}
+.levi-agent-sheet .levi-agent-dock .ds-input {
+  min-height: var(--ds-control-md);
+  padding: 0 var(--ds-space-3);
+  border: 1px solid var(--ds-border-control-on-raised);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-field-bg);
+  color: var(--ds-text-primary);
+}
+.levi-agent-sheet .levi-agent-dock textarea.ds-input {
+  padding: var(--ds-space-2) var(--ds-space-3);
+}
+.levi-agent-sheet .levi-agent-dock :is(.ds-btn, .ds-input):focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
 }

@@ -41,6 +41,7 @@ export default function AgentDefinitions({
               <label key={k}>
                 {t(label)}
                 <input
+                  className="ds-input ds-focus"
                   value={d[k]}
                   onChange={(e) =>
                     save(
@@ -53,6 +54,7 @@ export default function AgentDefinitions({
               </label>
             ))}
             <button
+              className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
               type="button"
               onClick={() => save(items.filter((_, j) => i !== j))}
             >

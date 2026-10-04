@@ -85,7 +85,11 @@ export default function OllamaRuntime({
             {t(error)}
           </p>
         )}
-        <button disabled={busy} onClick={() => void action("status")}>
+        <button
+          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+          disabled={busy}
+          onClick={() => void action("status")}
+        >
           Check runtime installation
         </button>
         {status && (
@@ -116,6 +120,7 @@ export default function OllamaRuntime({
             <label>
               Dedicated port
               <input
+                className="ds-input ds-focus"
                 type="number"
                 min={1024}
                 max={65535}
@@ -134,6 +139,7 @@ export default function OllamaRuntime({
             </label>
             <div className="levi-agent-actions">
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 disabled={
                   busy || !status.installed || status.running || !consent
                 }
@@ -142,12 +148,14 @@ export default function OllamaRuntime({
                 Start owned service
               </button>
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 disabled={busy || !status.running || !consent}
                 onClick={() => void action("stop")}
               >
                 Stop owned service
               </button>
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 disabled={
                   busy || !status.running || !consent || connectionExists
                 }

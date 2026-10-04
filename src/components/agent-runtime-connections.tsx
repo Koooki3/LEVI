@@ -54,7 +54,12 @@ export default function AgentRuntimeConnections() {
           "Login is owned by the official local client. LEVI does not copy account credentials.",
         )}
       </p>
-      <button onClick={() => void refresh()}>{t("Refresh status")}</button>
+      <button
+        className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+        onClick={() => void refresh()}
+      >
+        {t("Refresh status")}
+      </button>
       {profiles.map((p) => (
         <article key={p.id}>
           <h4>{p.id}</h4>

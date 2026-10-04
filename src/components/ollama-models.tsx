@@ -138,6 +138,7 @@ export default function OllamaModels({
           </p>
         )}
         <button
+          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
           disabled={busy || !connection.enabled}
           onClick={() =>
             void action(async () => {

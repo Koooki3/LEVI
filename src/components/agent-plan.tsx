@@ -90,6 +90,7 @@ export default function AgentPlan({
         ))}
         {!plan.approval && (
           <button
+            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
             disabled={busy || !!plan.questions.length}
             onClick={onApprove}
           >
@@ -104,6 +105,7 @@ export default function AgentPlan({
               <label>
                 Pilot review notes
                 <textarea
+                  className="ds-input ds-textarea ds-focus"
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   placeholder={t(
@@ -113,12 +115,14 @@ export default function AgentPlan({
               </label>
               <div className="levi-agent-actions">
                 <button
+                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                   disabled={busy || !note.trim()}
                   onClick={() => onPilot(true, note)}
                 >
                   Accept pilot quality
                 </button>
                 <button
+                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                   disabled={busy || !note.trim()}
                   onClick={() => onPilot(false, note)}
                 >

@@ -48,6 +48,7 @@ export function TeacherChoice({
         <label>
           Supervision mode
           <select
+            className="ds-input ds-focus"
             value={mode}
             onChange={(e) =>
               change(
@@ -66,6 +67,7 @@ export function TeacherChoice({
             <label>
               Teacher connection
               <select
+                className="ds-input ds-focus"
                 value={teacher}
                 required
                 onChange={(e) =>
