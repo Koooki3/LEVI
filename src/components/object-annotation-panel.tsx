@@ -1,7 +1,11 @@
 "use client";
 
-import { Check, X } from "lucide-react";
-import { Icon, IconButton } from "@/components/ds";
+import { Check, Play, X } from "lucide-react";
+import { Button, Icon, IconButton } from "@/components/ds";
+import {
+  InspectorPortal,
+  useInspectorSlot,
+} from "@/components/viewer/inspector";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DatasetTaskIndex } from "@/app/[org]/[dataset]/[episode]/fetch-data";
 import HfAuthButton from "@/components/hf-auth-button";
@@ -157,6 +161,9 @@ export default function ObjectAnnotationPanel({
   const [presets, setPresets] = useState<Sam3PromptPreset[]>([]);
   const [presetNameDraft, setPresetNameDraft] = useState("");
   const [selectedPresetName, setSelectedPresetName] = useState("");
+  // The object shown in the viewer's inspector column (track key).
+  const [selectedTrack, setSelectedTrack] = useState<string | null>(null);
+  const inspectorDocked = useInspectorSlot() !== null;
 
   useEffect(() => {
     setCameraKey((current) =>
@@ -1114,14 +1121,29 @@ export default function ObjectAnnotationPanel({
                   const object = summary.object;
                   return (
                     <article
-                      className="object-annotation-row"
+                      className={`object-annotation-row${
+                        selectedTrack ===
+                        object.object_id + ":" + object.track_id
+                          ? " is-selected"
+                          : ""
+                      }`}
                       key={object.object_id + ":" + object.track_id}
                     >
                       <button
                         type="button"
                         className="object-annotation-main"
-                        onClick={() => seek(object.timestamp)}
-                        title={t("Jump to first frame")}
+                        aria-pressed={
+                          inspectorDocked
+                            ? selectedTrack ===
+                              object.object_id + ":" + object.track_id
+                            : undefined
+                        }
+                        onClick={() => {
+                          seek(object.timestamp);
+                          setSelectedTrack(
+                            object.object_id + ":" + object.track_id,
+                          );
+                        }}
                       >
                         <span className="object-track-id">
                           #{object.track_id}
@@ -1160,8 +1182,96 @@ export default function ObjectAnnotationPanel({
               </div>
             </>
           )}
+          {inspectorDocked && (
+            <InspectorPortal>
+              <ObjectInspector
+                summary={
+                  trackSummaries.find(
+                    (item) =>
+                      item.object.object_id + ":" + item.object.track_id ===
+                      selectedTrack,
+                  ) ?? null
+                }
+                busy={busy}
+                onSeek={seek}
+                onEdit={(object, action) => void edit(object, action)}
+              />
+            </InspectorPortal>
+          )}
         </section>
       }
     </T>
+  );
+}
+
+/** The selected object in the inspector column: its facts and the same
+ * accept / reject actions as its row. */
+function ObjectInspector({
+  summary,
+  busy,
+  onSeek,
+  onEdit,
+}: {
+  summary: TrackSummary | null;
+  busy: boolean;
+  onSeek: (time: number) => void;
+  onEdit: (object: ObjectAnnotation, action: "accept" | "reject") => void;
+}) {
+  const { t } = useLocale();
+  if (!summary) {
+    return (
+      <div className="editor-empty">
+        <p>{t("Select an object in the list to see its details.")}</p>
+      </div>
+    );
+  }
+  const object = summary.object;
+  return (
+    <div className="inspector-body vw-object-inspector">
+      <div className="inspector-title">
+        <div>
+          <strong>
+            #{object.track_id} {object.concept}
+          </strong>
+          <span className={statusColor[object.status]}>
+            {t(statusLabel(object.status))}
+          </span>
+        </div>
+      </div>
+      <dl className="vw-facts">
+        <dt>{t("Camera")}</dt>
+        <dd>{object.camera_key}</dd>
+        <dt>{t("Frames")}</dt>
+        <dd>
+          f{summary.startFrame}–{summary.endFrame} · {summary.frameCount}
+        </dd>
+        <dt>{t("Mean score")}</dt>
+        <dd>{(summary.meanScore * 100).toFixed(0)}%</dd>
+        <dt>{t("Lowest score")}</dt>
+        <dd>{(summary.minScore * 100).toFixed(0)}%</dd>
+      </dl>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" icon={Play} onClick={() => onSeek(object.timestamp)}>
+          {t("Jump to first frame")}
+        </Button>
+        <Button
+          size="sm"
+          variant="primary"
+          icon={Check}
+          disabled={busy}
+          onClick={() => onEdit(object, "accept")}
+        >
+          {t("Accept")}
+        </Button>
+        <Button
+          size="sm"
+          icon={X}
+          disabled={busy}
+          onClick={() => onEdit(object, "reject")}
+        >
+          {t("Reject")}
+        </Button>
+      </div>
+    </div>
   );
 }

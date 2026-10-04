@@ -967,3 +967,106 @@ button.vw-outcome:hover {
   max-width: 100%;
   overflow-x: auto;
 }
+
+/* ── Inspector column (proposal §8.3) ───────────────────────────────── */
+.vw-inspector {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  flex-shrink: 0;
+  min-height: 0;
+  border-left: 1px solid var(--ds-separator);
+  background: var(--ds-surface-sunken);
+  color: var(--ds-text-primary);
+}
+.vw-inspector[data-open="false"] {
+  width: 48px;
+}
+.vw-inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+  min-height: 48px;
+  padding: 0 var(--ds-space-2) 0 var(--ds-space-4);
+  border-bottom: 1px solid var(--ds-separator);
+}
+.vw-inspector[data-open="false"] .vw-inspector-head {
+  justify-content: center;
+  padding: 0;
+}
+.vw-inspector[data-open="false"] .vw-inspector-head h2 {
+  display: none;
+}
+.vw-inspector-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--ds-space-4);
+}
+.vw-inspector-body[hidden] {
+  display: none;
+}
+/* The panels' own form, flattened into the column. */
+.vw-inspector .editor.inspector {
+  position: static;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+.vw-inspector .editor-empty {
+  min-height: 0;
+  padding: var(--ds-space-8) 0;
+  text-align: left;
+}
+.vw-inspector .editor-empty .section-kicker {
+  display: none;
+}
+.vw-inspector .vw-object-inspector {
+  display: grid;
+  gap: var(--ds-space-4);
+}
+.vw-inspector .vw-object-inspector .inspector-title span {
+  display: block;
+  font-size: var(--ds-text-caption-size);
+}
+/* With the form in the column, the list takes the whole row. */
+.annotations-skin .workspace.inspector-workspace.is-docked {
+  grid-template-columns: minmax(0, 1fr);
+}
+.annotations-skin .object-annotation-row.is-selected {
+  box-shadow: inset 2px 0 0 var(--ds-selected-indicator);
+  background: var(--ds-surface-selected);
+}
+
+/* Below 1200 px the column becomes a drawer along the bottom edge. */
+@media (max-width: 1199px) {
+  .vw-inspector {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: var(--ds-z-dock);
+    width: auto;
+    max-height: 55vh;
+    border-left: 0;
+    border-top: 1px solid var(--ds-separator);
+    border-radius: var(--ds-radius-lg) var(--ds-radius-lg) 0 0;
+    background: var(--ds-surface-2);
+    box-shadow: var(--ds-shadow-3), var(--ds-ring-raised);
+  }
+  .vw-inspector[data-open="false"] {
+    width: auto;
+  }
+  .vw-inspector[data-open="false"] .vw-inspector-head {
+    justify-content: space-between;
+    padding: 0 var(--ds-space-2) 0 var(--ds-space-4);
+    border-bottom: 0;
+  }
+  .vw-inspector[data-open="false"] .vw-inspector-head h2 {
+    display: block;
+  }
+  .vw-body:has(.vw-inspector) .vw-main {
+    padding-bottom: 72px;
+  }
+}

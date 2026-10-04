@@ -2207,5 +2207,10 @@
   "Flagged only": "只看已标记",
   "Flag episode": "标记片段",
   "Episode viewer views": "片段查看器视图",
-  "Edit subtask / plan / memory / interjection / VQA atoms (lerobot v3.1 schema)": "编辑子任务、计划、记忆、插话和视觉问答标注（lerobot v3.1 结构）"
+  "Edit subtask / plan / memory / interjection / VQA atoms (lerobot v3.1 schema)": "编辑子任务、计划、记忆、插话和视觉问答标注（lerobot v3.1 结构）",
+  "Collapse inspector": "收起检查器",
+  "Expand inspector": "展开检查器",
+  "Select an object in the list to see its details.": "在列表中选择一个物体，查看它的详情。",
+  "Mean score": "平均分",
+  "Lowest score": "最低分"
 }

@@ -4,6 +4,10 @@ import { T, useLocale } from "@/components/levi-locale";
 import { useConfirmAction } from "@/components/shell/confirm";
 import { DatabaseZap, Play, Plus, Save, Trash2 } from "lucide-react";
 import { Button, IconButton } from "@/components/ds";
+import {
+  InspectorPortal,
+  useInspectorSlot,
+} from "@/components/viewer/inspector";
 
 import "@/components/viewer/annotations.css";
 
@@ -521,6 +525,8 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
   const { currentTime } = useTime();
   const { t } = useLocale();
   const confirm = useConfirmAction();
+  // In the episode viewer the inspector form lives in the right column.
+  const inspectorDocked = useInspectorSlot() !== null;
 
   // ============ Inline quick-add state ============
   const [qaKind, setQaKind] = useState<QuickAddKind>("subtask");
@@ -862,7 +868,9 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
             )}
           </section>
 
-          <div className="workspace inspector-workspace">
+          <div
+            className={`workspace inspector-workspace${inspectorDocked ? " is-docked" : ""}`}
+          >
             <div className="rail annotation-list">
               <div className="list-head">
                 <div>
@@ -922,31 +930,33 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
               })}
             </div>
 
-            <div className="editor inspector">
-              <T>
-                {selectedAtom == null ? (
-                  <div className="editor-empty">
-                    <span className="section-kicker">
-                      <T>Inspector</T>
-                    </span>
-                    <p>
-                      Select an annotation from the list or timeline, or draw a
-                      new bbox/keypoint on the video.
-                    </p>
-                  </div>
-                ) : (
-                  <AtomEditor
-                    atom={selectedAtom}
-                    cameraKeys={cameraKeys}
-                    vocabulary={vocabulary}
-                    onChange={(updates) =>
-                      updateAtom(selectedIdx as number, updates)
-                    }
-                    onDelete={() => deleteAtom(selectedAtom)}
-                  />
-                )}
-              </T>
-            </div>
+            <InspectorPortal>
+              <div className="editor inspector">
+                <T>
+                  {selectedAtom == null ? (
+                    <div className="editor-empty">
+                      <span className="section-kicker">
+                        <T>Inspector</T>
+                      </span>
+                      <p>
+                        Select an annotation from the list or timeline, or draw
+                        a new bbox/keypoint on the video.
+                      </p>
+                    </div>
+                  ) : (
+                    <AtomEditor
+                      atom={selectedAtom}
+                      cameraKeys={cameraKeys}
+                      vocabulary={vocabulary}
+                      onChange={(updates) =>
+                        updateAtom(selectedIdx as number, updates)
+                      }
+                      onDelete={() => deleteAtom(selectedAtom)}
+                    />
+                  )}
+                </T>
+              </div>
+            </InspectorPortal>
           </div>
         </div>
       }

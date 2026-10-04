@@ -16,6 +16,7 @@ import {
 import { IconButton, Kbd, Tabs, Tooltip } from "@/components/ds";
 import { AnalysisTab } from "@/components/viewer/analysis-tab";
 import { EpisodeLoadError } from "@/components/viewer/load-error";
+import { InspectorLayout } from "@/components/viewer/inspector";
 import {
   useViewerTabs,
   type TabLoaders,
@@ -1159,243 +1160,246 @@ function EpisodeViewerInner({
           />
         )}
 
-        {/* Main content */}
-        <main
-          className="vw-main vw-chart"
-          // Focusable so the content scrolls by keyboard (axe
-          // scrollable-region-focusable) when it holds no control.
-          tabIndex={0}
-          data-loading={isLoading ? "true" : undefined}
-          aria-busy={isLoading || undefined}
-        >
-          {isLoading && <Loading />}
-          {/* The heading row (with its h1) shows on Episodes and
+        {/* Main content, and the inspector column on the Annotations tab */}
+        <InspectorLayout enabled={activeTab === "annotations"}>
+          <main
+            className="vw-main vw-chart"
+            // Focusable so the content scrolls by keyboard (axe
+            // scrollable-region-focusable) when it holds no control.
+            tabIndex={0}
+            data-loading={isLoading ? "true" : undefined}
+            aria-busy={isLoading || undefined}
+          >
+            {isLoading && <Loading />}
+            {/* The heading row (with its h1) shows on Episodes and
               Annotations; the other tabs still need a page heading. */}
-          {activeTab !== "episodes" && activeTab !== "annotations" && (
-            <h1 className="ds-sr-only">
-              {t(`Episode ${episodeId}`)} ·{" "}
-              {t(
-                {
-                  urdf: "3D Replay",
-                  statistics: "Statistics",
-                  frames: "Frame gallery",
-                  analysis: "Analysis",
-                }[activeTab as string] ?? "",
-              )}
-            </h1>
-          )}
+            {activeTab !== "episodes" && activeTab !== "annotations" && (
+              <h1 className="ds-sr-only">
+                {t(`Episode ${episodeId}`)} ·{" "}
+                {t(
+                  {
+                    urdf: "3D Replay",
+                    statistics: "Statistics",
+                    frames: "Frame gallery",
+                    analysis: "Analysis",
+                  }[activeTab as string] ?? "",
+                )}
+              </h1>
+            )}
 
-          {activeTab === "episodes" && (
-            <>
-              {heading}
+            {activeTab === "episodes" && (
+              <>
+                {heading}
 
-              <RawCaptureNotice compact />
+                <RawCaptureNotice compact />
 
-              {/* Videos */}
-              {videosInfo.length > 0 && (
-                <SimpleVideosPlayer
-                  videosInfo={videosInfo}
-                  onVideosReady={() => setVideosReady(true)}
-                  annotationEpisodeId={episodeId}
-                  annotationRepoId={datasetInfo.repoId}
-                />
-              )}
+                {/* Videos */}
+                {videosInfo.length > 0 && (
+                  <SimpleVideosPlayer
+                    videosInfo={videosInfo}
+                    onVideosReady={() => setVideosReady(true)}
+                    annotationEpisodeId={episodeId}
+                    annotationRepoId={datasetInfo.repoId}
+                  />
+                )}
 
-              {/* Language instruction */}
-              {task && (
-                <section className="vw-card">
-                  <h2 className="vw-label">
-                    <T>Language Instruction</T>
-                  </h2>
-                  <div className="mt-1.5 space-y-0.5">
-                    {task
-                      .split("\n")
-                      .map((instruction: string, index: number) => (
-                        <p key={index} className="m-0">
-                          {t(instruction)}
-                        </p>
-                      ))}
-                  </div>
-                </section>
-              )}
+                {/* Language instruction */}
+                {task && (
+                  <section className="vw-card">
+                    <h2 className="vw-label">
+                      <T>Language Instruction</T>
+                    </h2>
+                    <div className="mt-1.5 space-y-0.5">
+                      {task
+                        .split("\n")
+                        .map((instruction: string, index: number) => (
+                          <p key={index} className="m-0">
+                            {t(instruction)}
+                          </p>
+                        ))}
+                    </div>
+                  </section>
+                )}
 
-              {/* Graph */}
-              <Suspense fallback={null}>
-                <DataRecharts
-                  data={chartDataGroups}
-                  onChartsReady={() => setChartsReady(true)}
-                />
-              </Suspense>
+                {/* Graph */}
+                <Suspense fallback={null}>
+                  <DataRecharts
+                    data={chartDataGroups}
+                    onChartsReady={() => setChartsReady(true)}
+                  />
+                </Suspense>
 
-              <PlaybackBar />
-            </>
-          )}
+                <PlaybackBar />
+              </>
+            )}
 
-          {activeTab === "annotations" && (
-            <div className="annotations-skin flex flex-col gap-4">
-              {heading}
-              {videosInfo.length > 0 && (
-                <SimpleVideosPlayer
-                  videosInfo={videosInfo}
-                  onVideosReady={() => setVideosReady(true)}
-                  annotationEpisodeId={episodeId}
-                  annotationRepoId={datasetInfo.repoId}
-                />
-              )}
-              <PlaybackBar />
+            {activeTab === "annotations" && (
+              <div className="annotations-skin flex flex-col gap-4">
+                {heading}
+                {videosInfo.length > 0 && (
+                  <SimpleVideosPlayer
+                    videosInfo={videosInfo}
+                    onVideosReady={() => setVideosReady(true)}
+                    annotationEpisodeId={episodeId}
+                    annotationRepoId={datasetInfo.repoId}
+                  />
+                )}
+                <PlaybackBar />
 
-              {/* Sub-tabs: language/event annotation vs. SAM3 object
+                {/* Sub-tabs: language/event annotation vs. SAM3 object
               annotation are fully independent systems — keep the video
               player + scrubber shared above (both need it, and keeping
               it mounted across sub-tab switches avoids a reload), but
               split everything else so users always know which system
               they're working in. */}
-              <Tabs
-                label={t("Annotation type")}
-                value={annotationsSubTab}
-                onChange={(id) =>
-                  setAnnotationsSubTab(id as "language" | "vision")
+                <Tabs
+                  label={t("Annotation type")}
+                  value={annotationsSubTab}
+                  onChange={(id) =>
+                    setAnnotationsSubTab(id as "language" | "vision")
+                  }
+                  items={[
+                    {
+                      id: "language",
+                      label: t("Language & Events"),
+                      icon: MessageSquareText,
+                    },
+                    {
+                      id: "vision",
+                      label: t("Objects & Tracking"),
+                      icon: ScanSearch,
+                    },
+                  ]}
+                />
+
+                {annotationsSubTab === "language" && (
+                  <>
+                    <div className="grounding-intro">
+                      <h2 className="vw-label">
+                        <T>Grounded VQA</T>
+                      </h2>
+                      <ul>
+                        <li>
+                          <T>
+                            Draw directly on the active video to create visual
+                            questions. Drag for a bounding box, click for a
+                            point. The camera is detected from the video you
+                            draw on.
+                          </T>
+                        </li>
+                        <li>
+                          <T>
+                            Drag on any video to add a bbox question. Click any
+                            video to add a keypoint question. Confirm the popup
+                            with{" "}
+                          </T>
+                          <Kbd>↵</Kbd>
+                          <T> or </T>
+                          <Kbd>Ctrl/Cmd+S</Kbd>
+                          <T>, or cancel with </T>
+                          <Kbd>{t("Esc")}</Kbd>.
+                        </li>
+                      </ul>
+                    </div>
+                    <AnnotationsTimeline duration={data.duration} />
+                    <AnnotationsPanel
+                      cameraKeys={videosInfo.map((v) => v.filename)}
+                    />
+                  </>
+                )}
+
+                {annotationsSubTab === "vision" && (
+                  <>
+                    <FastSegmentationPanel
+                      episodeId={episodeId}
+                      ident={{ repoId: datasetInfo.repoId }}
+                      cameraKeys={videosInfo.map((v) => v.filename)}
+                      allEpisodes={availableEpisodes}
+                    />
+                    <ObjectAnnotationPanel
+                      episodeId={episodeId}
+                      ident={{ repoId: datasetInfo.repoId }}
+                      cameraKeys={videosInfo.map((v) => v.filename)}
+                      allEpisodes={availableEpisodes}
+                      taskIndex={taskIndex}
+                    />
+                  </>
+                )}
+              </div>
+            )}
+
+            {activeTab === "statistics" && (
+              <StatsPanel
+                datasetInfo={datasetInfo}
+                taskCount={taskIndex?.tasks.length}
+                episodeLengthStats={episodeLengthStats}
+                loading={statsLoading}
+              />
+            )}
+
+            {activeTab === "frames" && (
+              <OverviewPanel
+                data={episodeFramesData}
+                loading={framesLoading}
+                flaggedOnly={framesFlaggedOnly}
+                onFlaggedOnlyChange={setFramesFlaggedOnly}
+              />
+            )}
+
+            {activeTab === "analysis" && (
+              <AnalysisTab
+                view={analysisView}
+                onViewChange={handleAnalysisViewChange}
+              >
+                {(view) =>
+                  view === "insights" ? (
+                    <Suspense fallback={<Loading />}>
+                      <ActionInsightsPanel
+                        flatChartData={data.flatChartData}
+                        fps={datasetInfo.fps}
+                        crossEpisodeData={crossEpData}
+                        crossEpisodeLoading={insightsLoading}
+                        totalEpisodes={datasetInfo.total_episodes}
+                        tasks={taskIndex?.tasks ?? []}
+                        crossEpisodeRequest={insightsRequest}
+                        onCrossEpisodeRequestChange={applyInsightsRequest}
+                        crossEpisodeProgress={insightsProgress}
+                      />
+                    </Suspense>
+                  ) : view === "filtering" ? (
+                    <Suspense fallback={<Loading />}>
+                      <FilteringPanel
+                        repoId={datasetInfo.repoId}
+                        crossEpisodeData={crossEpData}
+                        crossEpisodeLoading={insightsLoading}
+                        episodeLengthStats={episodeLengthStats}
+                        flatChartData={data.flatChartData}
+                        onViewFlaggedEpisodes={() => {
+                          setSidebarFlaggedOnly(true);
+                          handleTabChange("episodes");
+                        }}
+                      />
+                    </Suspense>
+                  ) : (
+                    <LeviDoctor repoId={`${org}/${dataset}`} />
+                  )
                 }
-                items={[
-                  {
-                    id: "language",
-                    label: t("Language & Events"),
-                    icon: MessageSquareText,
-                  },
-                  {
-                    id: "vision",
-                    label: t("Objects & Tracking"),
-                    icon: ScanSearch,
-                  },
-                ]}
-              />
+              </AnalysisTab>
+            )}
 
-              {annotationsSubTab === "language" && (
-                <>
-                  <div className="grounding-intro">
-                    <h2 className="vw-label">
-                      <T>Grounded VQA</T>
-                    </h2>
-                    <ul>
-                      <li>
-                        <T>
-                          Draw directly on the active video to create visual
-                          questions. Drag for a bounding box, click for a point.
-                          The camera is detected from the video you draw on.
-                        </T>
-                      </li>
-                      <li>
-                        <T>
-                          Drag on any video to add a bbox question. Click any
-                          video to add a keypoint question. Confirm the popup
-                          with{" "}
-                        </T>
-                        <Kbd>↵</Kbd>
-                        <T> or </T>
-                        <Kbd>Ctrl/Cmd+S</Kbd>
-                        <T>, or cancel with </T>
-                        <Kbd>{t("Esc")}</Kbd>.
-                      </li>
-                    </ul>
-                  </div>
-                  <AnnotationsTimeline duration={data.duration} />
-                  <AnnotationsPanel
-                    cameraKeys={videosInfo.map((v) => v.filename)}
-                  />
-                </>
-              )}
-
-              {annotationsSubTab === "vision" && (
-                <>
-                  <FastSegmentationPanel
-                    episodeId={episodeId}
-                    ident={{ repoId: datasetInfo.repoId }}
-                    cameraKeys={videosInfo.map((v) => v.filename)}
-                    allEpisodes={availableEpisodes}
-                  />
-                  <ObjectAnnotationPanel
-                    episodeId={episodeId}
-                    ident={{ repoId: datasetInfo.repoId }}
-                    cameraKeys={videosInfo.map((v) => v.filename)}
-                    allEpisodes={availableEpisodes}
-                    taskIndex={taskIndex}
-                  />
-                </>
-              )}
-            </div>
-          )}
-
-          {activeTab === "statistics" && (
-            <StatsPanel
-              datasetInfo={datasetInfo}
-              taskCount={taskIndex?.tasks.length}
-              episodeLengthStats={episodeLengthStats}
-              loading={statsLoading}
-            />
-          )}
-
-          {activeTab === "frames" && (
-            <OverviewPanel
-              data={episodeFramesData}
-              loading={framesLoading}
-              flaggedOnly={framesFlaggedOnly}
-              onFlaggedOnlyChange={setFramesFlaggedOnly}
-            />
-          )}
-
-          {activeTab === "analysis" && (
-            <AnalysisTab
-              view={analysisView}
-              onViewChange={handleAnalysisViewChange}
-            >
-              {(view) =>
-                view === "insights" ? (
-                  <Suspense fallback={<Loading />}>
-                    <ActionInsightsPanel
-                      flatChartData={data.flatChartData}
-                      fps={datasetInfo.fps}
-                      crossEpisodeData={crossEpData}
-                      crossEpisodeLoading={insightsLoading}
-                      totalEpisodes={datasetInfo.total_episodes}
-                      tasks={taskIndex?.tasks ?? []}
-                      crossEpisodeRequest={insightsRequest}
-                      onCrossEpisodeRequestChange={applyInsightsRequest}
-                      crossEpisodeProgress={insightsProgress}
-                    />
-                  </Suspense>
-                ) : view === "filtering" ? (
-                  <Suspense fallback={<Loading />}>
-                    <FilteringPanel
-                      repoId={datasetInfo.repoId}
-                      crossEpisodeData={crossEpData}
-                      crossEpisodeLoading={insightsLoading}
-                      episodeLengthStats={episodeLengthStats}
-                      flatChartData={data.flatChartData}
-                      onViewFlaggedEpisodes={() => {
-                        setSidebarFlaggedOnly(true);
-                        handleTabChange("episodes");
-                      }}
-                    />
-                  </Suspense>
-                ) : (
-                  <LeviDoctor repoId={`${org}/${dataset}`} />
-                )
-              }
-            </AnalysisTab>
-          )}
-
-          {activeTab === "urdf" && (
-            <Suspense fallback={<Loading />}>
-              <URDFViewer
-                data={data}
-                org={org}
-                dataset={dataset}
-                episodeChangerRef={urdfChangerRef}
-                playToggleRef={urdfPlayToggleRef}
-              />
-            </Suspense>
-          )}
-        </main>
+            {activeTab === "urdf" && (
+              <Suspense fallback={<Loading />}>
+                <URDFViewer
+                  data={data}
+                  org={org}
+                  dataset={dataset}
+                  episodeChangerRef={urdfChangerRef}
+                  playToggleRef={urdfPlayToggleRef}
+                />
+              </Suspense>
+            )}
+          </main>
+        </InspectorLayout>
       </div>
     </div>
   );
