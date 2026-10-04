@@ -498,7 +498,7 @@ progress {
   border: 1px solid color-mix(in srgb, var(--ds-accent) 40%, transparent);
   border-radius: 10px;
   padding: 14px 16px;
-  box-shadow: 0 10px 30px #00000080;
+  box-shadow: var(--ds-shadow-3), var(--ds-ring-raised);
   font-size: 13px;
   color: var(--ds-text-primary);
   display: flex;
@@ -2354,7 +2354,7 @@ button.levi-pool-danger {
   border-radius: 8px;
   background: var(--ds-danger-bg);
   color: var(--ds-text-primary);
-  box-shadow: 0 6px 24px #00000080;
+  box-shadow: var(--ds-shadow-2), var(--ds-ring-raised);
 }
 .levi-live-banner strong {
   display: block;
