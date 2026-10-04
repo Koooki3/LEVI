@@ -2845,3 +2845,12 @@ button.pg-pool-danger {
   outline: 2px solid var(--ds-focus-ring);
   outline-offset: 2px;
 }
+/* Screen-reader-only text inside a scrolled table is positioned absolutely;
+   keep it inside the scroll area so it never widens the page. */
+.pg-pool-table-wrap,
+.pg-workbench .ds-table-wrap {
+  position: relative;
+}
+.pg-head {
+  margin-bottom: var(--ds-space-6);
+}
