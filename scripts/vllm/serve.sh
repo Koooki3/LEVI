@@ -44,7 +44,17 @@ if [[ "${1:-}" == "--stop" ]]; then
   PORT="${2:?usage: serve.sh --stop PORT}"
   PIDFILE="$PID_DIR/vllm_${PORT}.pid"
   [[ -f "$PIDFILE" ]] || { echo "no pid file $PIDFILE" >&2; exit 1; }
-  PID="$(cat "$PIDFILE")"
+  PID="$(head -c 32 "$PIDFILE" | tr -d '[:space:]')"
+  if [[ ! "$PID" =~ ^[1-9][0-9]*$ ]]; then
+    echo "pid file $PIDFILE does not hold a process id; not signalling anything" >&2
+    exit 1
+  fi
+  # Only a vLLM server: a stale pid file may name a process that reused the pid.
+  if kill -0 "$PID" 2>/dev/null && ! tr '\0' ' ' < "/proc/$PID/cmdline" 2>/dev/null | grep -q vllm; then
+    echo "pid $PID is not a vLLM server (a stale pid file?); not signalling it" >&2
+    rm -f "$PIDFILE"
+    exit 1
+  fi
   if kill -0 "$PID" 2>/dev/null; then
     echo "stopping vllm pgid=$PID (port $PORT)"
     kill -TERM -- "-$PID" 2>/dev/null || kill -TERM "$PID"
@@ -84,8 +94,9 @@ WAIT_S="${VLLM_WAIT_S:-600}"
 unset VLLM_WAIT_S   # ours, not vLLM's (vLLM warns about unknown VLLM_* variables)
 
 PIDFILE="$PID_DIR/vllm_${PORT}.pid"
-if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-  echo "port $PORT is already served by pid $(cat "$PIDFILE"); stop it first: $0 --stop $PORT" >&2
+OLD="$( [[ -f "$PIDFILE" ]] && head -c 32 "$PIDFILE" | tr -d '[:space:]' || true)"
+if [[ "$OLD" =~ ^[1-9][0-9]*$ ]] && kill -0 "$OLD" 2>/dev/null; then
+  echo "port $PORT is already served by pid $OLD; stop it first: $0 --stop $PORT" >&2
   exit 1
 fi
 
@@ -102,8 +113,13 @@ for a in "${ARGS[@]}"; do
   prev="$a"
 done
 if [[ "${SERVE_SKIP_PREFLIGHT:-0}" != 1 ]] && command -v nvidia-smi >/dev/null; then
-  read -r FREE TOTAL < <(nvidia-smi --query-gpu=memory.free,memory.total --format=csv,noheader,nounits \
-    -i "${CUDA_VISIBLE_DEVICES:-0}" | head -1 | tr -d ',')
+  QUERY="$(nvidia-smi --query-gpu=memory.free,memory.total --format=csv,noheader,nounits \
+    -i "${CUDA_VISIBLE_DEVICES:-0}" 2>&1 | head -1 | tr -d ',' || true)"
+  read -r FREE TOTAL <<< "$QUERY" || true
+  if [[ ! "${FREE:-}" =~ ^[0-9]+$ || ! "${TOTAL:-}" =~ ^[0-9]+$ ]]; then
+    echo "[serve.sh] cannot read free GPU memory from nvidia-smi (${QUERY:-no output}); check the driver and CUDA_VISIBLE_DEVICES, or SERVE_SKIP_PREFLIGHT=1" >&2
+    exit 3
+  fi
   NEED=$(awk -v u="$UTIL" -v t="$TOTAL" 'BEGIN{printf "%d", u*t}')
   if (( FREE < NEED )); then
     echo "[serve.sh] refusing: --gpu-memory-utilization $UTIL needs about ${NEED} MiB, only ${FREE}/${TOTAL} MiB free." >&2

@@ -40,7 +40,7 @@ def venv(tmp_path, monkeypatch):
 port=""; prev=""
 for a in "$@"; do [[ "$prev" == "--port" ]] && port="$a"; prev="$a"; done
 "{sys.executable}" -c 'import json,os,sys; json.dump({{"argv": sys.argv[1:], "env": {{k: v for k, v in os.environ.items() if k.startswith(("LEVI_VLLM", "VLLM_SERVER", "GPU_UTIL", "PORT"))}}}}, open("{record}", "w"))' "$@"
-exec "{sys.executable}" -m levi.live.fakevlm --port "$port"
+exec -a vllm "{sys.executable}" -m levi.live.fakevlm --port "$port"
 """
     )
     fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
@@ -131,3 +131,45 @@ def test_a_launch_that_cannot_run_names_the_script(tmp_path):
     vllm = gpumgr.Vllm(c)
     assert not vllm.start(c.vllm_profile())
     assert "missing.sh" in vllm.error and "docs/VLLM.md" in vllm.error
+
+
+def _script(args, env):
+    return subprocess.run(
+        [str(SCRIPT), *args], env=env, capture_output=True, text=True, check=False
+    )
+
+
+def test_stop_signals_only_a_vllm_named_by_a_valid_pid_file(tmp_path):
+    pids = tmp_path / "pids"
+    pids.mkdir()
+    env = {**os.environ, "LEVI_VLLM_PID_DIR": str(pids)}
+    (pids / "vllm_65001.pid").write_text("-1\n")  # would signal every process
+    run = _script(["--stop", "65001"], env)
+    assert run.returncode == 1 and "does not hold a process id" in run.stderr
+    stranger = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    try:
+        (pids / "vllm_65002.pid").write_text(f"{stranger.pid}\n")
+        run = _script(["--stop", "65002"], env)
+        assert run.returncode == 1 and "not a vLLM server" in run.stderr
+        assert stranger.poll() is None  # left alone
+    finally:
+        stranger.kill()
+        stranger.wait()
+
+
+def test_an_unreadable_nvidia_smi_is_named(tmp_path, venv):
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    smi = fakebin / "nvidia-smi"
+    smi.write_text("#!/bin/sh\necho 'NVIDIA-SMI has failed' >&2\nexit 9\n")
+    smi.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{fakebin}:{os.environ['PATH']}",
+        "LEVI_VLLM_MODEL": "some/model",
+        "LEVI_VLLM_PID_DIR": str(tmp_path / "pids"),
+    }
+    env.pop("SERVE_SKIP_PREFLIGHT")
+    run = _script([], env)
+    assert run.returncode == 3 and "cannot read free GPU memory" in run.stderr
+    assert not (tmp_path / "pids" / "vllm_8100.pid").exists()

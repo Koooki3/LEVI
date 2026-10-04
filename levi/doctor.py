@@ -31,6 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -591,10 +592,18 @@ def gpu_checks() -> list:
     return out or [check("gpu", "gpu", "warn", "nvidia-smi output not understood")]
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A probe answers for the port it asked, never for where a redirect points
+    (which could be a robot port)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def _get(port: int, path: str, timeout=2.0):
     if port in NEVER_CONNECT:
         raise ValueError(f"port {port} is never connected to")
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
     with opener.open(f"http://127.0.0.1:{int(port)}{path}", timeout=timeout) as r:
         return r.status, r.read(65536)
 
@@ -642,6 +651,15 @@ def model_server_checks(ollama_ports, vllm_ports) -> list:
             )
         except ValueError as exc:
             out.append(check(f"vllm-{port}", "models", "warn", str(exc)))
+        except urllib.error.HTTPError as exc:
+            out.append(
+                check(
+                    f"vllm-{port}",
+                    "models",
+                    "warn",
+                    f"port {port} answered HTTP {exc.code} (not followed): not a model server?",
+                )
+            )
         except OSError:
             out.append(
                 check(
@@ -698,6 +716,8 @@ def live_checks() -> list:
                 c["level"],
                 c["message"],
                 c["fix"],
+                # Which folder the evaluation client writes is a person's to say.
+                human=c["key"] == "watch.roots" and c["level"] != "ok",
             )
         )
     return out

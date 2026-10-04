@@ -52,7 +52,7 @@ scripts/vllm/serve.sh --check                  # 打印解析后的设置；缺 
 | `VLLM_WAIT_S` | 600 | 等 `GET /health` 的秒数；0 表示立即返回（LEVI 设 0） |
 | `SERVE_SKIP_PREFLIGHT`、`SERVE_DRY_RUN` | 0 | 跳过空闲显存检查；只打印命令 |
 
-`HF_HOME`、`HF_HUB_OFFLINE`、`HF_TOKEN`、`CUDA_VISIBLE_DEVICES` 和 `VLLM_*` 原样传过去。启动前，若 `nvidia-smi` 显示的空闲显存不够预算，脚本拒绝启动（退出码 3）并列出占用 GPU 的进程。手动运行：
+`HF_HOME`、`HF_HUB_OFFLINE`、`HF_TOKEN`、`CUDA_VISIBLE_DEVICES` 和 `VLLM_*` 原样传过去。`--stop` 只在 pid 文件里是一个正整数、且该进程命令行含 `vllm` 时才发信号（过期 pid 文件的号可能已被别的进程复用：这时不碰它，只删 pid 文件）。启动前，若 `nvidia-smi` 显示的空闲显存不够预算，脚本拒绝启动（退出码 3）并列出占用 GPU 的进程；读不出 `nvidia-smi` 时也以退出码 3 拒绝并说明原因。手动运行：
 
 ```bash
 LEVI_VLLM_MODEL=RedHatAI/Qwen3.8-27B-INT4 LEVI_VLLM_SERVED_NAME=qwen3.8-27b \
@@ -99,5 +99,5 @@ scripts/vllm/serve.sh --stop 8100
 
 - `scripts/vllm/serve.sh --check` 打印将要运行的内容；没有 vLLM 或没设模型时失败。
 - `levi live doctor` 报告：脚本缺失或不可执行、pid 目录不可写、GPU 锁文件打不开、监视根目录不存在、路径指向别的用户的家目录。
-- `levi doctor`（安装自检，见[安装](../INSTALL.zh-CN.md)）只在回环地址上向配置端口的服务请求 `/health` 和 `/v1/models`。
+- `levi doctor`（安装自检，见[安装](../INSTALL.zh-CN.md)）只在回环地址上向 8100 端口（或 `--vllm-ports` 给出的端口；5000 和 8000 一律拒绝）请求 `/health` 和 `/v1/models`，不跟随重定向。它不读实时服务的 `[vllm] port`；改过端口时用 `--vllm-ports` 传入。
 - `tests/test_vllm_launcher.py` 用一个替身 `vllm` 可执行文件运行自带启动脚本，不用 GPU 检查整个约定（启动、pid 文件、参数、停止）。

@@ -15,27 +15,51 @@ from levi.live import cli, gpumgr
 from levi.live import config as live_config
 
 PROJECT = Path(__file__).resolve().parents[1]
-DEVELOPER_PATH = re.compile(r"(?<![\w<{$])/(home|Users)/[A-Za-z0-9._-]+/")
+# A real home or machine folder: /home/<name>, /Users/<name>, /root/, /mnt/,
+# ~/work/ (the maintainer's layout). Placeholders such as /home/<user>/ and
+# ${HOME} are fine: the character after the prefix must start a real name.
+DEVELOPER_PATH = re.compile(
+    r"(?<![\w<{$.])(?:/(?:home|Users)/[A-Za-z0-9._-]+|/root/|/mnt/|~/work/)"
+)
+
+
+SCANNED = (
+    ".py",
+    ".sh",
+    ".toml",
+    ".json",
+    ".md",
+    ".ts",
+    ".tsx",
+    ".yml",
+    ".yaml",
+    ".mjs",
+)
 
 
 def shipped_files():
-    for folder in ("levi", "backend", "scripts", "integrations", "src"):
+    """Everything a release carries except the tests: code, scripts,
+    integrations, frontend, docs, CI and configuration files."""
+    for folder in (
+        "levi",
+        "backend",
+        "scripts",
+        "integrations",
+        "src",
+        "docs",
+        ".github",
+    ):
         for path in (PROJECT / folder).rglob("*"):
             parts = set(path.relative_to(PROJECT).parts)
             if parts & {"node_modules", ".venv", "__pycache__", "tests", "__tests__"}:
                 continue
-            if path.is_file() and path.suffix in (
-                ".py",
-                ".sh",
-                ".toml",
-                ".json",
-                ".md",
-                ".ts",
-                ".tsx",
-            ):
+            if path.is_file() and path.suffix in SCANNED:
                 yield path
-    for name in (".env.example", "Dockerfile", "pyproject.toml", "package.json"):
-        yield PROJECT / name
+    for path in PROJECT.glob("*"):
+        if path.is_file() and (
+            path.suffix in SCANNED or path.name in (".env.example", "Dockerfile")
+        ):
+            yield path
 
 
 def test_no_shipped_file_hardcodes_a_developer_path():
@@ -51,9 +75,32 @@ def test_no_shipped_file_hardcodes_a_developer_path():
 
 
 def test_the_scan_would_catch_one():
-    assert DEVELOPER_PATH.search('x = "/home/alice/work/data"')
-    assert DEVELOPER_PATH.search("/Users/bob/Library/x")
-    assert not DEVELOPER_PATH.search("``/home/<someone>/...``")
+    for found in (
+        'x = "/home/alice/work/data"',
+        "the default is /home/alice",
+        "/Users/bob/Library/x",
+        "cd /root/levi",
+        "data in /mnt/nvme/rollouts",
+        "cd ~/work/wenkai/LEVI",
+    ):
+        assert DEVELOPER_PATH.search(found), found
+    for fine in (
+        "``/home/<someone>/...``",
+        "/home/<user>/data",
+        "${HOME}/x",
+        "~/.levi-live/workspace",
+        "/path/to/rollouts",
+        "src/app/home/page.tsx",
+    ):
+        assert not DEVELOPER_PATH.search(fine), fine
+    names = {p.relative_to(PROJECT).as_posix() for p in shipped_files()}
+    assert {
+        "README.md",
+        "INSTALL.md",
+        "docs/LIVE.md",
+        ".github/workflows/test.yml",
+    } <= names
+    assert "eslint.config.mjs" in names
 
 
 def test_live_defaults_are_relative_to_the_home_or_the_checkout_or_empty():

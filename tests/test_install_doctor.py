@@ -277,3 +277,49 @@ def test_an_unsupported_platform_is_a_plan_step_not_a_crash(isolated, monkeypatc
     assert platform_step.kind == "human" and "Unsupported" in platform_step.title
     assert _step(steps, "frontend-deps").kind == "human"
     assert _step(steps, "build").kind == "human"
+
+
+def test_a_redirect_is_never_followed(monkeypatch):
+    """A server answering 302 to a robot port: the probe reports it, it does
+    not follow (the target would be :8000)."""
+    import http.server
+    import threading
+
+    hits = []
+
+    class Redirect(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            hits.append(self.path)
+            self.send_response(302)
+            self.send_header("Location", "http://127.0.0.1:8000/health")
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Redirect)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    followed = []
+    real_get = doctor._get
+
+    def spy(port, path, timeout=2.0):
+        followed.append(port)
+        return real_get(port, path, timeout)
+
+    monkeypatch.setattr(doctor, "_get", spy)
+    try:
+        rows = doctor.model_server_checks((), (server.server_address[1],))
+    finally:
+        server.shutdown()
+    row = rows[-1]
+    assert row["level"] == "warn" and "302" in row["message"]
+    assert 8000 not in followed and hits == ["/health"]
+
+
+def test_no_rollout_root_in_the_live_check_is_a_persons(tmp_path, monkeypatch):
+    toml = tmp_path / "live.toml"
+    toml.write_text(f'[service]\nworkspace = "{tmp_path / "ws"}"\n')
+    monkeypatch.setenv("LEVI_LIVE_CONFIG", str(toml))
+    rows = [c for c in doctor.live_checks() if c["id"] == "live:watch.roots"]
+    assert rows and all(c["human"] for c in rows)
+    assert rows[0]["level"] == "fail"
