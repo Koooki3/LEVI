@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FaBolt, FaStop, FaTrash } from "react-icons/fa";
+import { Square, Trash2, Zap } from "lucide-react";
+import { Icon } from "@/components/ds";
 import { T, useLocale } from "@/components/levi-locale";
 import { useConfirmAction } from "@/components/shell/confirm";
 import {
@@ -826,7 +827,7 @@ export default function FastSegmentationPanel({
     <T>
       {
         <section
-          className="object-annotation-panel panel-raised fast-seg-panel"
+          className="object-annotation-panel vw-panel fast-seg-panel"
           data-testid="fast-seg-panel"
         >
           <div className="object-annotation-head">
@@ -839,7 +840,7 @@ export default function FastSegmentationPanel({
               </h2>
             </div>
             <span className="object-annotation-badge">
-              <FaBolt size={10} /> <T>student model</T>
+              <Icon icon={Zap} /> <T>student model</T>
             </span>
           </div>
 
@@ -904,7 +905,7 @@ export default function FastSegmentationPanel({
               title={t("Delete model")}
               aria-label={t("Delete model")}
             >
-              <FaTrash size={11} />
+              <Icon icon={Trash2} />
             </button>
           </div>
           {model && <ModelCard model={model} />}
@@ -939,7 +940,7 @@ export default function FastSegmentationPanel({
                   <T>Stopping…</T>
                 ) : liveOn ? (
                   <>
-                    <FaStop size={10} /> <T>Stop live overlay</T>
+                    <Icon icon={Square} /> <T>Stop live overlay</T>
                   </>
                 ) : (
                   <T>Start live overlay</T>

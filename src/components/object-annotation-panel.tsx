@@ -85,10 +85,10 @@ type TrackSummary = {
 };
 
 const statusColor: Record<ObjectAnnotation["status"], string> = {
-  suggested: "text-cyan-300",
-  accepted: "text-emerald-300",
-  rejected: "text-red-300",
-  needs_review: "text-amber-300",
+  suggested: "text-(--ds-text-primary)",
+  accepted: "text-(--ds-success)",
+  rejected: "text-(--ds-danger)",
+  needs_review: "text-(--ds-warning)",
 };
 
 function statusLabel(status: ObjectAnnotation["status"]): string {
@@ -531,7 +531,7 @@ export default function ObjectAnnotationPanel({
   return (
     <T>
       {
-        <section className="object-annotation-panel panel-raised">
+        <section className="object-annotation-panel vw-panel">
           <div className="object-annotation-head">
             <div>
               <p className="section-kicker">

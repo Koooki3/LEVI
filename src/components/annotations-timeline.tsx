@@ -81,17 +81,27 @@ const TRACK_GROUPS = [
       {
         key: "task_aug",
         label: "task aug",
-        color: "#38bdf8",
+        color: "var(--style-task-aug)",
         render: "task-aug",
       },
       {
         key: "subtask",
         label: "subtask",
-        color: "#ffd21e",
+        color: "var(--style-subtask)",
         render: "span-edit",
       },
-      { key: "plan", label: "plan", color: "#5b8cff", render: "span-ro" },
-      { key: "memory", label: "memory", color: "#b78bff", render: "tick" },
+      {
+        key: "plan",
+        label: "plan",
+        color: "var(--style-plan)",
+        render: "span-ro",
+      },
+      {
+        key: "memory",
+        label: "memory",
+        color: "var(--style-memory)",
+        render: "tick",
+      },
     ],
   },
   {
@@ -102,10 +112,10 @@ const TRACK_GROUPS = [
       {
         key: "interjection",
         label: "speech",
-        color: "#ef5350",
+        color: "var(--style-interjection)",
         render: "tick",
       },
-      { key: "vqa", label: "vqa", color: "#34d399", render: "tick" },
+      { key: "vqa", label: "vqa", color: "var(--style-vqa)", render: "tick" },
     ],
   },
 ] as const;
@@ -1053,32 +1063,17 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
               />
               <div className="quick-popup-actions">
                 <button
+                  type="button"
+                  className="popup-btn"
                   onClick={cancelPendingCreate}
-                  style={{
-                    fontSize: 11,
-                    padding: "4px 8px",
-                    borderRadius: 6,
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    background: "transparent",
-                    color: "var(--fg-2, #cbd5e1)",
-                    cursor: "pointer",
-                  }}
                 >
                   <T>cancel</T>
                 </button>
                 <button
+                  type="button"
+                  className="popup-btn primary"
                   onClick={commitPendingCreate}
                   disabled={!createLabel.trim()}
-                  style={{
-                    fontSize: 11,
-                    padding: "4px 8px",
-                    borderRadius: 6,
-                    border: "1px solid #5b8cff",
-                    background: "rgba(91,140,255,0.15)",
-                    color: "#c7d6ff",
-                    cursor: "pointer",
-                    opacity: createLabel.trim() ? 1 : 0.4,
-                  }}
                 >
                   <T>add ↵</T>
                 </button>

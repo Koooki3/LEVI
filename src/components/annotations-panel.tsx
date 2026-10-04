@@ -2,8 +2,10 @@
 "use client";
 import { T, useLocale } from "@/components/levi-locale";
 import { useConfirmAction } from "@/components/shell/confirm";
+import { DatabaseZap, Play, Save, Trash2 } from "lucide-react";
+import { Button, IconButton } from "@/components/ds";
 
-import "./annotations-skin.css";
+import "@/components/viewer/annotations.css";
 
 /**
  * Editor UI for v3.1 language atoms.
@@ -741,35 +743,40 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                   <T>backend offline — edits saved to sessionStorage only</T>
                 </span>
               )}
-              <button
-                disabled={saving || !dirty}
+              <Button
+                variant="primary"
+                size="sm"
+                icon={Save}
+                loading={saving}
+                disabled={!dirty}
                 onClick={handleSave}
-                title="Save episode (Ctrl/Cmd+S)"
-                className="text-xs h-7 px-3 rounded border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-40"
+                aria-keyshortcuts="Control+S Meta+S"
               >
-                <T>{saving ? "Saving…" : "Save episode"}</T>
-              </button>
-              <button
+                {t(saving ? "Saving…" : "Save episode")}
+              </Button>
+              <Button
+                size="sm"
+                icon={DatabaseZap}
                 disabled={!backendEnabled}
                 onClick={handleSaveDataset}
-                className="text-xs h-7 px-3 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40"
               >
-                <T>Save dataset</T>
-              </button>
-              <button
+                {t("Save dataset")}
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                icon={Trash2}
                 disabled={!backendEnabled || saving}
                 onClick={handleDeleteFile}
-                title="Delete this episode's saved annotation file (not just the current draft)"
-                className="text-xs h-7 px-3 rounded border border-red-500/40 bg-red-500/10 text-red-200 hover:bg-red-500/20 disabled:opacity-40"
               >
-                <T>Delete file</T>
-              </button>
+                {t("Delete file")}
+              </Button>
             </div>
           </div>
 
           {isRaw && showExportHint && <RawCaptureNotice feature="export" />}
           {exportStatus && (
-            <div className="save-status">
+            <div className="save-status" role="status">
               <T>{exportStatus}</T>
             </div>
           )}
@@ -1004,6 +1011,7 @@ const AtomEditor: React.FC<{
   onChange: (updates: Partial<LanguageAtom>) => void;
   onDelete: () => void;
 }> = ({ atom, cameraKeys, vocabulary, onChange, onDelete }) => {
+  const { t } = useLocale();
   const jump = useJump();
   const { snap } = useAnnotations();
   const isSpeech = isSpeechAtom(atom);
@@ -1115,20 +1123,18 @@ const AtomEditor: React.FC<{
               </div>
             </div>
             <div className="right">
-              <button
-                className="icon-btn"
-                title="Jump to this atom's frame"
+              <IconButton
+                icon={Play}
+                size="sm"
+                label={t("Jump to this atom's frame")}
                 onClick={() => jump(atom.timestamp)}
-              >
-                ▶
-              </button>
-              <button
-                className="icon-btn danger"
-                title="Delete this atom"
+              />
+              <IconButton
+                icon={Trash2}
+                size="sm"
+                label={t("Delete this atom")}
                 onClick={onDelete}
-              >
-                ×
-              </button>
+              />
             </div>
           </div>
 
@@ -1400,7 +1406,7 @@ const VqaEditorFields: React.FC<{
             onChange={(e) => onChange({ content: e.target.value })}
           />
           {parsed && kind === "bbox" && (
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-xs text-(--ds-text-secondary) mt-1">
               <T>
                 Tip: bbox values are 0..1 image-relative (xyxy). Edit on the
                 video itself by deleting this and re-drawing.
@@ -1408,7 +1414,7 @@ const VqaEditorFields: React.FC<{
             </p>
           )}
           {parsed && kind === "keypoint" && (
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-xs text-(--ds-text-secondary) mt-1">
               <T>Tip: point values are 0..1 image-relative (xy).</T>
             </p>
           )}
