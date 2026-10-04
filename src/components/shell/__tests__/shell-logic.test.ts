@@ -68,6 +68,29 @@ describe("global shortcuts", () => {
     expect(globalShortcut({ key: "?", ctrlKey: true }, false)).toBeNull();
   });
 
+  test("? also as the full-width ？ and through AltGr (Ctrl+Alt)", () => {
+    const at = plain as unknown as EventTarget;
+    expect(globalShortcut({ key: "？", target: at }, false)).toBe("shortcuts");
+    expect(
+      globalShortcut(
+        { key: "?", ctrlKey: true, altKey: true, target: at },
+        false,
+      ),
+    ).toBe("shortcuts");
+    expect(
+      globalShortcut(
+        { key: "？", target: input as unknown as EventTarget },
+        false,
+      ),
+    ).toBeNull();
+    expect(
+      globalShortcut({ key: "?", altKey: true, target: at }, false),
+    ).toBeNull();
+    expect(
+      globalShortcut({ key: "?", metaKey: true, target: at }, true),
+    ).toBeNull();
+  });
+
   test("never during IME composition", () => {
     expect(
       globalShortcut({ key: "k", ctrlKey: true, isComposing: true }, false),

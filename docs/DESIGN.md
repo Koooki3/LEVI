@@ -102,7 +102,7 @@ Import from `@/components/ds`. The root layout imports `@/styles/tokens.css`, `@
 | Shortcut list (`shortcuts-dialog.tsx`) | `?` (not while typing). Lists the frame's keys and the pages' existing ones (episode viewer, annotations, review queue) |
 | Agent Workbench drawer | `agent-workbench.tsx` renders its unchanged content in a non-modal right `Sheet` below the bar (`levi-agent-sheet`); the page stays usable beside it, its left edge still resizes it (the width is kept per browser). The bar's toggle, the palette and the old window events `levi-agent-toggle` / `levi-agent-connections` open it; it reports its state with `levi-agent-state` |
 
-**Keys.** The frame binds only ⌘K / Ctrl+K and `?`. Neither fires during IME composition, `?` not in a text field, and neither while another modal (a confirmation, a page's own dialog) is open. The pages keep theirs: Space, ↑/↓, J/K, Escape, Ctrl/⌘+S/Z/Y.
+**Keys.** The frame binds only ⌘K / Ctrl+K and `?` (also the full-width `？`, and with AltGr). Neither fires during IME composition, `?` not in a text field, and neither while another modal (a confirmation, a page's own dialog, a native `showModal()` dialog) is open. Keys typed inside a modal layer (except Tab and Escape, which the layer handles) do not reach listeners on `window`, so page shortcuts never act behind a dialog, as with a native `confirm()`; a confirmation still open when the page changes answers false. The pages keep theirs: Space, ↑/↓, J/K, Escape, Ctrl/⌘+S/Z/Y.
 
 **Loading overlay.** `loading-component.tsx` is `role="status"` with `aria-busy="true"`, not a dialog: it takes no focus and traps nothing.
 

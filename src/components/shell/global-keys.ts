@@ -3,7 +3,8 @@
  *
  * - ⌘K (macOS) / Ctrl+K (elsewhere) opens the command palette, also from a
  *   text field (it is the standard binding and types nothing);
- * - ? opens the shortcut list, never while typing.
+ * - ? (or the full-width ？, also typed with AltGr) opens the shortcut list,
+ *   never while typing.
  *
  * Neither fires during IME composition. Pages bind Space, arrows, J/K,
  * Escape and Ctrl/⌘+S/Z/Y (see SHORTCUT_GROUPS); none of those is used here.
@@ -59,11 +60,13 @@ export function globalShortcut(
     !event.shiftKey
   )
     return "palette";
+  // "?" or the full-width "？" (Chinese keyboard layouts). Ctrl and Alt
+  // together are AltGr, which some layouts need to type "?".
+  const altGr = Boolean(event.ctrlKey && event.altKey);
   if (
-    key === "?" &&
-    !event.ctrlKey &&
+    (key === "?" || key === "？") &&
     !event.metaKey &&
-    !event.altKey &&
+    (altGr || (!event.ctrlKey && !event.altKey)) &&
     !isEditableTarget(event.target)
   )
     return "shortcuts";
