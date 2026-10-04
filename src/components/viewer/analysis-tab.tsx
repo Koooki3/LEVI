@@ -52,6 +52,7 @@ export function AnalysisTab({
   const current = VIEWS.find((item) => item.value === view) ?? VIEWS[0];
   return (
     <section className="flex flex-col gap-4" aria-label={t("Analysis")}>
+      <h2 className="ds-sr-only">{t(current.label)}</h2>
       <div className="vw-analysis-head">
         <SegmentedControl
           label={t("Analysis view")}
