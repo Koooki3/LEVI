@@ -108,7 +108,11 @@ export function CleanupPanel({
       </p>
       {inventory && <DiskUsage disk={inventory.disk} />}
       {error && (
-        <RequestProblem action="The cleanup did not complete" message={error} />
+        <RequestProblem
+          action="The cleanup did not complete"
+          message={error}
+          onRetry={() => void load()}
+        />
       )}
       {empty && (
         <EmptyLine icon={CircleCheck}>{t("Nothing to clean up.")}</EmptyLine>

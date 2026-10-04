@@ -391,6 +391,7 @@ export function DatasetCard({
           <RequestProblem
             action="The episodes could not be loaded"
             message={entry.error}
+            onRetry={onChanged}
           />
         ) : (
           <EpisodeList dataset={name} detail={detail} onChanged={onChanged} />

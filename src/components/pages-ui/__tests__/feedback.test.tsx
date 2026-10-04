@@ -1,8 +1,15 @@
-import { render, setupDom } from "../../ds/__tests__/dom";
+import { click, render, setupDom } from "../../ds/__tests__/dom";
 import { describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync, statSync } from "fs";
 import { join } from "path";
-import { EmptyLine, JobCard, Note, Problem, RequestProblem } from "../feedback";
+import {
+  EmptyLine,
+  JobCard,
+  Note,
+  Problem,
+  RequestProblem,
+  cleanMessage,
+} from "../feedback";
 
 setupDom();
 
@@ -169,5 +176,31 @@ describe("no Tailwind spacing or text utilities on the stage-4 pages", () => {
             bad.push(`${file}: ${token}`);
     }
     expect(bad).toEqual([]);
+  });
+});
+
+describe("RequestProblem: the reason without the exception's name, a retry", () => {
+  test("drops a leading Error: and offers Try again when it can", async () => {
+    let retried = 0;
+    const { host } = await render(
+      <RequestProblem
+        action="The log could not be read"
+        message="Error: connection refused"
+        onRetry={() => (retried += 1)}
+      />,
+    );
+    expect(host.querySelector(".pg-problem__why")!.textContent).toBe(
+      "connection refused",
+    );
+    const button = host.querySelector(".pg-problem__fix button")!;
+    expect(button.textContent).toBe("Try again");
+    await click(button);
+    expect(retried).toBe(1);
+  });
+  test("cleanMessage keeps messages that do not start with an error name", () => {
+    expect(cleanMessage("TypeError: x is null")).toBe("x is null");
+    expect(cleanMessage("Export directory is outside")).toBe(
+      "Export directory is outside",
+    );
   });
 });

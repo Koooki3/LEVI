@@ -10,13 +10,14 @@ import type { ReactNode } from "react";
 import {
   CircleAlert,
   CircleCheck,
+  RotateCcw,
   Info,
   Inbox,
   TriangleAlert,
   UserCheck,
   type LucideIcon,
 } from "lucide-react";
-import { Badge, Icon } from "@/components/ds";
+import { Badge, Button, Icon } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 
 /**
@@ -72,20 +73,30 @@ export function Problem({
   );
 }
 
+/** "Error: busy" → "busy": the exception's class name says nothing to a
+ * person (String(error) adds it). */
+export function cleanMessage(message: string): string {
+  return message.replace(/^(?:[A-Z]\w*)?Error:\s*/, "").trim();
+}
+
 /**
  * The common case: a request failed. `message` is the server's sentence (or
- * the exception text); it is shown as the reason, translated when the
- * catalogue has it. `action` names what failed ("The export did not start").
+ * the exception text, without its "Error:" prefix); it is shown as the
+ * reason, translated when the catalogue has it. `action` names what failed
+ * ("The export did not start"). With `onRetry` a Try again button is the
+ * way forward.
  */
 export function RequestProblem({
   action,
   message,
   fix,
+  onRetry,
   className,
 }: {
   action: string;
   message: string;
   fix?: ReactNode;
+  onRetry?: () => void;
   className?: string;
 }) {
   const { t } = useLocale();
@@ -93,9 +104,21 @@ export function RequestProblem({
     <Problem
       className={className}
       title={t(action)}
-      why={t(message)}
+      why={t(cleanMessage(message))}
       fix={
-        fix ?? t("Check the reason above, change what it names and try again.")
+        <>
+          {fix ??
+            (onRetry
+              ? null
+              : t(
+                  "Check the reason above, change what it names and try again.",
+                ))}
+          {onRetry && (
+            <Button size="sm" icon={RotateCcw} onClick={onRetry}>
+              {t("Try again")}
+            </Button>
+          )}
+        </>
       }
     />
   );

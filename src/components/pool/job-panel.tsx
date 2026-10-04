@@ -118,7 +118,11 @@ export function LogDialog({
         <IconButton type="submit" icon={X} label={t("Close")} />
       </form>
       {error && (
-        <RequestProblem action="The log could not be read" message={error} />
+        <RequestProblem
+          action="The log could not be read"
+          message={error}
+          onRetry={() => void load()}
+        />
       )}
       <pre className="pg-pool-log" tabIndex={0}>
         {text || t("The log is empty.")}

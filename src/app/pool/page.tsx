@@ -393,6 +393,11 @@ function TrainingPool() {
         <RequestProblem
           action="The training pool request failed"
           message={error}
+          onRetry={() => {
+            setError("");
+            refreshStatus().catch((e) => setError(String(e)));
+            refreshRecipes().catch(() => {});
+          }}
         />
       )}
       <PoolWarnings warnings={status?.warnings || []} />
