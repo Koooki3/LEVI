@@ -1,6 +1,7 @@
 """Install a pinned project-local Bun, verified against release checksums."""
 
 import hashlib
+import json
 import os
 import platform
 import subprocess
@@ -59,4 +60,52 @@ def setup():
     subprocess.run(
         [str(executable), "install", "--frozen-lockfile"], cwd=PROJECT, check=True
     )
+    mark_frontend_deps()
     print("LEVI installed. Run: uv run levi build && uv run levi serve")
+
+
+# Written into node_modules after a successful `bun install`: the lockfile and
+# package.json are compared against it (the folder's own time changes only
+# when an entry is added or removed).
+DEPS_STAMP = "node_modules/.levi-deps-installed"
+LOCK_FILES = ("bun.lock", "package.json")
+
+
+def mark_frontend_deps(project=None) -> None:
+    project = project or PROJECT
+    stamp = project / DEPS_STAMP
+    if stamp.parent.is_dir():
+        stamp.write_text("bun install --frozen-lockfile\n")
+
+
+def frontend_deps_problem(project=None) -> str:
+    """Why ``node_modules`` does not match ``bun.lock``/``package.json`` ("" =
+    it does): it is missing, one of them is newer than the last install, or
+    a dependency ``package.json`` names is not installed."""
+    project = project or PROJECT
+    modules = project / "node_modules"
+    if not modules.is_dir():
+        return "node_modules is missing"
+    stamp = project / DEPS_STAMP
+    try:
+        installed = (stamp if stamp.is_file() else modules).stat().st_mtime
+    except OSError:
+        return "node_modules cannot be read"
+    for name in LOCK_FILES:
+        path = project / name
+        if path.is_file() and path.stat().st_mtime > installed:
+            return f"{name} is newer than node_modules"
+    try:
+        manifest = json.loads((project / "package.json").read_text())
+    except (OSError, ValueError):
+        return ""
+    missing = [
+        name
+        for group in ("dependencies", "devDependencies")
+        for name in (manifest.get(group) or {})
+        if not (modules / name / "package.json").is_file()
+    ]
+    if missing:
+        shown = ", ".join(sorted(missing)[:5]) + (", ..." if len(missing) > 5 else "")
+        return f"node_modules lacks {shown}"
+    return ""

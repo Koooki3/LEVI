@@ -143,6 +143,47 @@ def namespace_cli(argv) -> int:
     return 0
 
 
+def build_frontend(bun: str) -> int:
+    """``levi build``: install the frontend dependencies first when
+    ``node_modules`` does not match ``bun.lock``/``package.json``
+    (``bun install --frozen-lockfile``, with the Bun given), then the
+    production build and its source stamp. A failed build names the
+    dependencies as a likely cause."""
+    from .bootstrap import frontend_deps_problem, mark_frontend_deps
+
+    problem = frontend_deps_problem()
+    if problem:
+        print(
+            f"frontend dependencies: {problem}; running bun install --frozen-lockfile"
+        )
+        code = subprocess.call([bun, "install", "--frozen-lockfile"], cwd=PROJECT)
+        if code != 0:
+            print(
+                f"bun install --frozen-lockfile failed (exit {code}): the frontend "
+                "dependencies do not match bun.lock. Check the network and "
+                "bun.lock, then run: uv run levi setup",
+                file=sys.stderr,
+            )
+            return code
+        mark_frontend_deps()
+    code = subprocess.call([bun, "run", "build"], cwd=PROJECT)
+    if code != 0:
+        print(
+            f"the production build failed (exit {code}). If it reports a module "
+            "that cannot be resolved (for example `Module not found`), the "
+            "frontend dependencies are missing or out of date: run "
+            "`uv run levi setup` (bun install --frozen-lockfile), then "
+            "`uv run levi build` again.",
+            file=sys.stderr,
+        )
+        return code
+    # What `levi doctor` compares the sources against (stale builds).
+    from .doctor import write_build_stamp
+
+    write_build_stamp()
+    return 0
+
+
 def main():
     if len(sys.argv) > 2 and sys.argv[1:3] == ["dev", "check-contracts"]:
         from .domain.schema_catalog import main as check_contracts
@@ -336,13 +377,7 @@ def main():
     if not Path(bun).exists():
         parser.error("Bun is required: see README installation instructions")
     if args.command == "build":
-        code = subprocess.call([bun, "run", "build"], cwd=PROJECT)
-        if code == 0:
-            # What `levi doctor` compares the sources against (stale builds).
-            from .doctor import write_build_stamp
-
-            write_build_stamp()
-        raise SystemExit(code)
+        raise SystemExit(build_frontend(bun))
     if args.command == "check":
         # Frontend (type-check/lint/format/tests) and the Python lint, in one
         # command — CI runs both too (see .github/workflows/test.yml); this
