@@ -2315,3 +2315,11 @@
 .pg-workbench .pg-row.pg-between {
   flex-wrap: nowrap;
 }
+.pg-pool-outcome-source {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-regular);
+}
+.pg-pool-stats > .sr-only {
+  position: absolute;
+}

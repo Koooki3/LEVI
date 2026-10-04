@@ -12,7 +12,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { Button, Icon, IconButton, Skeleton } from "@/components/ds";
+import { Button, Icon, IconButton, Skeleton, Tooltip } from "@/components/ds";
 import { EmptyLine, RequestProblem } from "@/components/pages-ui/feedback";
 // Motion comes with it; the composition is only on the training pool page.
 import { ReorderList } from "@/components/ds/ReorderList";
@@ -181,7 +181,9 @@ export function CompositionPanel({
               <>
                 <div className="pg-pool-row">
                   <span className="pg-pool-rank tabular">{index + 1}</span>
-                  <span className="grow pg-pool-ellipsis">{task}</span>
+                  <Tooltip content={task}>
+                    <span className="grow pg-pool-ellipsis">{task}</span>
+                  </Tooltip>
                   <span className="pg-pool-count tabular">
                     {counts
                       ? counts.episodes.toLocaleString()
@@ -347,7 +349,10 @@ export function CompositionPanel({
           />
         ) : !preview ? (
           recipe.tasks.length ? (
-            <div className="pg-pool-stats" aria-hidden="true">
+            <div className="pg-pool-stats">
+              <span className="sr-only" role="status">
+                {t("Computing…")}
+              </span>
               <Skeleton height={56} radius="sm" />
               <Skeleton height={56} radius="sm" />
               <Skeleton height={56} radius="sm" />

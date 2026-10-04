@@ -296,7 +296,7 @@ function OutcomeCell({ row }: { row: EpisodeRow }) {
       className="pg-pool-outcome"
     >
       {t(row.outcome)}
-      <span className="sr-only"> · {source}</span>
+      <span className="pg-pool-outcome-source"> · {source}</span>
       {row.human_label && <Icon icon={UserCheck} label={t("human label")} />}
     </StatusDot>
   );

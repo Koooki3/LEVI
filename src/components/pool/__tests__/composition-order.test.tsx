@@ -112,3 +112,20 @@ describe("composition task order (stage 4: Motion reorder list)", () => {
     expect(host.querySelector(".ds-reorder")).toBeNull();
   });
 });
+
+describe("nothing the old composition said is lost", () => {
+  test("a long task name keeps its full text for the tooltip and the handle", async () => {
+    const { host } = await render(<Harness />);
+    const name = host.querySelector(".pg-pool-row .grow")!;
+    expect(name.textContent).toBe("plates");
+    expect(
+      host.querySelector(".ds-reorder__handle")!.getAttribute("aria-label"),
+    ).toBe("Move plates");
+  });
+
+  test("while the preview is computed, screen readers hear it", async () => {
+    const { host } = await render(<Harness />);
+    const status = host.querySelector('.pg-pool-preview [role="status"]');
+    expect(status?.textContent).toBe("Computing…");
+  });
+});
