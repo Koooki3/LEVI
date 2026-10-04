@@ -578,7 +578,8 @@ def correction_warnings(recipe: Recipe, chosen: list[dict], full) -> list[dict]:
                     "message": "Approved task corrections not applied: "
                     + ", ".join(f"{n} {k}" for k, n in sorted(rest.items()))
                     + " (stale: the episode's text is no longer the one corrected; "
-                    "unmatched: no such episode in the index)",
+                    "unmatched: no such episode in the index; ambiguous: the path is "
+                    "found under more than one pool root)",
                     "counts": dict(rest),
                     "corrections": [
                         p["correction"] for p in problems if p["problem"] != "conflict"

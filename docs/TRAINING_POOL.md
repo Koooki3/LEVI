@@ -253,7 +253,7 @@ A proposal file is JSONL (or a JSON list), one object per episode: `id` (default
 
 A review is appended in one write and synced to disk. A last line cut short (a write that did not finish) is skipped and reported as `reviews_truncated` by `show` and `list`, and the next review removes it; a damaged line before the last one is refused (restore the file), since reading past it could change a decision.
 
-Matching: `show`, `list` and the preview resolve each proposal against the index: `ok`; `stale` (the episode's text is no longer `task_from`: the source changed or the proposal is wrong; not applied); `unmatched` (no such episode). The preview warns about approved corrections that are stale or unmatched (`task_corrections_not_applied`), and refuses (blocking `task_correction_conflict`) when two approved corrections of one recording in the named versions disagree.
+Matching: `show`, `list` and the preview resolve each proposal against the index: `ok`; `stale` (the episode's text is no longer `task_from`: the source changed or the proposal is wrong; not applied); `ambiguous` (a relative path found under more than one pool root; not applied); `unmatched` (no such episode). The preview warns about approved corrections that are stale or unmatched (`task_corrections_not_applied`), and refuses (blocking `task_correction_conflict`) when two approved corrections of one recording in the named versions disagree.
 
 The export: each corrected episode carries `task_original` and `task_correction` (`version:id`) in `pool_export.json`, and the record has `task_corrections`: the versions and their sha256, each applied correction with its episodes, `task_from`, `task_to`, `source`, `confidence`, `reviewed_by` and `reviewed_at`. A raw-capture export writes the corrected `task_description` into its copy of `metadata.json` (the original text and the correction under `levi_task_correction`); the source's file is unchanged. At run time the export checks again that every planned correction is still approved as planned: a decision reversed after planning, or two approved corrections of one recording that disagree (approved after planning), stops it (plan again).
 
@@ -265,7 +265,7 @@ The export: each corrected episode carries `task_original` and `task_correction`
 - **审核记录的写入**：一次审核拼成一次写入并同步到磁盘。最后一行没写完时跳过，`show`、`list` 标出 `reviews_truncated`，下一次审核把这段残行去掉；中间的行损坏时报错（请恢复文件），不猜。
 - **谁能做**：任何人（包括 agent）都可以**提议**（`import`）；**批准和驳回只能由人做**。审核接口拒绝 agent 凭据，需要界面令牌；命令行的 `approve`、`reject` 以人的身份发给正在运行的服务。
 - **何时应用**：只有配方在 `task_corrections` 里点名了该版本，且订正已被批准；对这次录制的所有副本（同组）生效，在所有过滤之前应用；源文件永远不变。
-- **匹配**：`ok`；`stale`（片段的文本已不是 `task_from`，不应用）；`unmatched`（找不到该片段）。预览对已批准但无法应用的订正给出提示；同一录制在所选版本里有两条互相矛盾的已批准订正时拒绝导出。
+- **匹配**：`ok`；`stale`（片段的文本已不是 `task_from`，不应用）；`ambiguous`（相对路径在多个池根下都找到，不知道指哪个，不应用）；`unmatched`（找不到该片段）。预览对已批准但无法应用的订正给出提示；同一录制在所选版本里有两条互相矛盾的已批准订正时拒绝导出。
 - **导出记录**：被订正的片段在 `pool_export.json` 里带 `task_original` 和 `task_correction`（`版本:编号`）；记录顶层的 `task_corrections` 列出版本及其 sha256、每条已应用的订正（片段、原文本、新文本、来源、置信度、审核人、审核时间）。原始采集格式的导出在复制出的 `metadata.json` 里写入订正后的 `task_description`（原文本和订正编号放在 `levi_task_correction`），源文件不变。导出运行时再核对一次：计划之后被驳回的订正，或计划之后才被批准、与另一条矛盾的订正，都会让导出停止（重新计划）。
 
 ### Copies whose texts differ / 文本不同的副本

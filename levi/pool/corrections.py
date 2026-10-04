@@ -493,7 +493,8 @@ def _candidates(episode: str) -> list[str]:
 def resolve(rows: list[dict], df: pd.DataFrame) -> list[dict]:
     """Each proposal against the index: the matched episode ``key`` and
     ``group``, and ``match``: ``ok``, ``stale`` (the index's text is not
-    ``task_from``) or ``unmatched``."""
+    ``task_from``), ``ambiguous`` (a relative path found under more than one
+    pool root) or ``unmatched``."""
     by_key = {k: i for i, k in enumerate(df.key)}
     resolved: dict[str, int] = {}
 
@@ -518,13 +519,27 @@ def resolve(rows: list[dict], df: pd.DataFrame) -> list[dict]:
     keys, groups, tasks = list(df.key), list(df.group), list(df.task)
     out = []
     for row in rows:
-        hit = None
+        hits = []
         for candidate in _candidates(row["episode"]):
-            hit = by_key.get(candidate)
-            if hit is None:
-                hit = by_real_path(candidate)
-            if hit is not None:
-                break
+            found = by_key.get(candidate)
+            if found is None:
+                found = by_real_path(candidate)
+            if found is not None and found not in hits:
+                hits.append(found)
+        if len(hits) > 1:
+            # A relative path found under two pool roots: which one the
+            # proposal meant is not known, so it is not applied.
+            out.append(
+                {
+                    **row,
+                    "match": "ambiguous",
+                    "key": None,
+                    "group": None,
+                    "candidates": [keys[i] for i in hits],
+                }
+            )
+            continue
+        hit = hits[0] if hits else None
         if hit is None and row.get("fingerprint"):
             found = by_fp.get(row["fingerprint"]) or []
             if len({groups[i] for i in found}) == 1:

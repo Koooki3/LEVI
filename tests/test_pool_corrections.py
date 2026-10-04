@@ -695,3 +695,25 @@ def test_a_conflict_approved_after_planning_stops_the_export(pool, person):
     with pytest.raises(ValueError, match="disagree"):
         export.run(job)
     assert not (pool["out"] / "exports/clash").exists()
+
+
+def test_a_relative_path_under_two_pool_roots_is_ambiguous(monkeypatch, tmp_path):
+    import pandas as pd
+
+    one, two = tmp_path / "a", tmp_path / "b"
+    monkeypatch.setattr(corrections.settings, "pool_roots", lambda: [one, two])
+    df = pd.DataFrame(
+        {
+            "key": [str(one / "x/demo_0000"), str(two / "x/demo_0000")],
+            "group": [str(one / "x/demo_0000"), str(two / "x/demo_0000")],
+            "task": ["fold cloth", "fold cloth"],
+            "fingerprint": ["f1", "f2"],
+        }
+    )
+    row = _row("x/demo_0000", "fold_cloth", "unfold_cloth", "a", fingerprint="f1")
+    got = corrections.resolve([row], df)[0]
+    assert got["match"] == "ambiguous" and got["key"] is None
+    assert len(got["candidates"]) == 2
+    # One root only: the same proposal matches.
+    monkeypatch.setattr(corrections.settings, "pool_roots", lambda: [one])
+    assert corrections.resolve([row], df)[0]["match"] == "ok"
