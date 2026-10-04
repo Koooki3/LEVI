@@ -943,7 +943,7 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
         verify_embodiment(episodes)
         refuse_mixed_gripper(episodes, job["recipe"])
     # A correction approved when planned and rejected since stops the export.
-    corrections.verify(episodes)
+    corrections.verify(episodes, job["recipe"])
     _unchanged(episodes)
     check_space(job, staging if resume else None)
     check_fps(job, options)

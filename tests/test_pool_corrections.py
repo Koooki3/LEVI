@@ -664,3 +664,30 @@ def test_a_review_is_one_write_and_synced(pool, person, monkeypatch):
     assert len(writes) == 1 and writes[0].count(b"\n") == 2 and len(syncs) == 1
     # The manifest is written whole, through a temporary file.
     assert not list(corrections.folder().glob("*.tmp"))
+
+
+def test_a_conflict_approved_after_planning_stops_the_export(pool, person):
+    _import(pool)
+    _review(person, ids=["a"])
+    _import(
+        pool,
+        [_row("collect/data/fold_cloth/demo_0000", "fold_cloth", "wave", "w")],
+        "dir-v2",
+    )
+    rec = Recipe(
+        name="r",
+        categories=["human"],
+        tasks=["unfold cloth"],
+        task_corrections=[VERSION, "dir-v2"],
+    )
+    job = jobs.plan_export(
+        rec,
+        export.ExportOptions(
+            format="raw_capture", name="clash", output_dir=str(pool["out"] / "exports")
+        ),
+    )
+    # Approved only now: the plan did not see the disagreement.
+    _review(person, version="dir-v2", all=True)
+    with pytest.raises(ValueError, match="disagree"):
+        export.run(job)
+    assert not (pool["out"] / "exports/clash").exists()

@@ -689,9 +689,24 @@ def record(version_refs: list[str]) -> dict[str, dict]:
     return out
 
 
-def verify(episodes: list[dict]) -> None:
+def verify(episodes: list[dict], recipe: dict | None = None) -> None:
     """At run time: every correction a plan applied is still approved and
-    says the same (a decision reversed after planning stops the export)."""
+    says the same (a decision reversed after planning stops the export), and
+    the versions the recipe names hold no two approved corrections of one
+    recording that disagree (one approved after planning stops it too)."""
+    names = (recipe or {}).get("task_corrections") or []
+    if names:
+        df = _index()
+        if df is not None:
+            _, problems = applicable(names, df)
+            clash = [p for p in problems if p["problem"] == "conflict"]
+            if clash:
+                raise ValueError(
+                    f"{len(clash)} approved task correction(s) disagree with "
+                    "another one for the same recording (e.g. "
+                    f"{clash[0]['correction']} and {clash[0]['with']}); reject "
+                    "one of them and plan again"
+                )
     refs = {e["task_correction"] for e in episodes if e.get("task_correction")}
     if not refs:
         return
