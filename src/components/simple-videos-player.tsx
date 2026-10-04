@@ -5,6 +5,7 @@ import { T, useLocale } from "@/components/levi-locale";
 import { Eye, Maximize2, Minimize2, X } from "lucide-react";
 import { IconButton, Menu } from "@/components/ds";
 import "@/components/viewer/viewer.css";
+import { useEscape } from "@/components/viewer/use-escape";
 
 import React, { useEffect, useRef } from "react";
 import { useTime } from "../context/time-context";
@@ -71,6 +72,7 @@ export const SimpleVideosPlayer = ({
   }
   const [hiddenVideos, setHiddenVideos] = React.useState<string[]>([]);
   const [enlargedVideo, setEnlargedVideo] = React.useState<string | null>(null);
+  useEscape(enlargedVideo !== null, () => setEnlargedVideo(null));
   const [videosReady, setVideosReady] = React.useState(false);
   const [objectAnnotations, setObjectAnnotations] = React.useState<
     ObjectAnnotation[]
@@ -410,6 +412,7 @@ export const SimpleVideosPlayer = ({
                   <IconButton
                     icon={isEnlarged ? Minimize2 : Maximize2}
                     label={t(isEnlarged ? "Minimize" : "Enlarge")}
+                    shortcut={isEnlarged ? "Esc" : undefined}
                     size="sm"
                     tooltipPlacement="bottom"
                     onClick={() =>

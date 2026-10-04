@@ -538,10 +538,12 @@ button.vw-outcome:hover {
   gap: 2px;
   flex-shrink: 0;
 }
+/* Above the top bar (overlay + 5), so the camera bar and its Minimize
+   button stay reachable; Escape also leaves (useEscape). */
 .vw-video-enlarged {
   position: fixed;
   inset: 0;
-  z-index: var(--ds-z-overlay);
+  z-index: var(--ds-z-dialog);
   max-width: none;
   border-radius: 0;
   display: flex;
