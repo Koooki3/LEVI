@@ -13,9 +13,10 @@ import {
   Info,
   Inbox,
   TriangleAlert,
+  UserCheck,
   type LucideIcon,
 } from "lucide-react";
-import { Icon } from "@/components/ds";
+import { Badge, Icon } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 
 /**
@@ -182,5 +183,21 @@ export function EmptyLine({
       <Icon icon={icon} />
       <span>{children}</span>
     </p>
+  );
+}
+
+/**
+ * Marks an action only a person may take (approve a plan, accept a pilot,
+ * commit changes; proposal §7.2): a badge "Needs your confirmation" next to
+ * the button, so it is never mistaken for an agent's suggestion.
+ */
+export function HumanActionMark() {
+  const { t } = useLocale();
+  return (
+    <span className="pg-human-mark">
+      <Badge tone="info" icon={UserCheck}>
+        {t("Needs your confirmation")}
+      </Badge>
+    </span>
   );
 }

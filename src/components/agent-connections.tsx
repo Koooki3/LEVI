@@ -335,6 +335,7 @@ export default function AgentConnections({
             </p>
           ))}
           <button
+            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
             disabled={busy || !external?.configured}
             onClick={async () => {
               if (!external) return;

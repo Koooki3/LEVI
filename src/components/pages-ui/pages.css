@@ -2247,3 +2247,7 @@
   animation: none;
   transition: none;
 }
+.pg-human-mark {
+  display: inline-flex;
+  align-items: center;
+}

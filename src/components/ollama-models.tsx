@@ -218,6 +218,7 @@ export default function OllamaModels({
                   Model supports image input
                 </label>
                 <button
+                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                   disabled={busy || !structured}
                   onClick={() =>
                     void action(async () => {
@@ -261,6 +262,7 @@ export default function OllamaModels({
             </label>
             {(["load", "unload"] as const).map((operation) => (
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 key={operation}
                 disabled={busy || !connection.enabled || !memoryConsent}
                 onClick={() =>
@@ -306,6 +308,7 @@ export default function OllamaModels({
               I authorize this model download and have reviewed its license
             </label>
             <button
+              className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
               disabled={busy || active || !confirmed || !connection.enabled}
               onClick={() =>
                 void action(async () => {
@@ -347,6 +350,7 @@ export default function OllamaModels({
             {job.error_code && <p role="alert">{t(job.error_code)}</p>}
             {["queued", "running"].includes(job.status) && (
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 disabled={busy || job.cancel_requested}
                 onClick={() =>
                   void action(async () => {

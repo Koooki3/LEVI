@@ -239,6 +239,7 @@ export default function AgentReviewQueue({
             {current.p.end !== null && (
               <div className="levi-agent-actions">
                 <button
+                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                   disabled={disabled}
                   onClick={() => {
                     const midpoint = (current.p.start + current.p.end!) / 2;
@@ -257,6 +258,7 @@ export default function AgentReviewQueue({
                   Split segment at midpoint
                 </button>
                 <button
+                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                   disabled={disabled || current.i + 1 >= proposals.length}
                   onClick={() => {
                     const next = proposals[current.i + 1];

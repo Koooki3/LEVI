@@ -212,6 +212,7 @@ export default function AgentObjectTool({
           />
         </label>
         <button
+          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
           disabled={
             disabled ||
             !prompts.trim() ||
@@ -244,6 +245,7 @@ export default function AgentObjectTool({
             {job.reason && <p>{job.reason}</p>}
             {job.status === "planned" && (
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 disabled={disabled || !ready}
                 onClick={() =>
                   void act(async () => {
@@ -361,6 +363,7 @@ export default function AgentObjectTool({
             ))}
             <div className="levi-agent-actions">
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 onClick={() => {
                   if (!job) return;
                   void call<{ context: { repo_id: string } }>("runs.get", {

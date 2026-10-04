@@ -277,6 +277,7 @@ export default function AgentPilot({
         ))}
       </ol>
       <button
+        className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
         onClick={() => {
           void request<typeof manifest>(`/runs/${runId}/manifest`)
             .then(setManifest)
@@ -294,6 +295,7 @@ export default function AgentPilot({
                 <code>{a.path}</code> · {a.bytes} B
                 {a.evidence && (
                   <button
+                    className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                     disabled={edited}
                     onClick={() =>
                       window.dispatchEvent(

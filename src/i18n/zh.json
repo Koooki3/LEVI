@@ -2217,5 +2217,7 @@
   "Summary": "汇总",
   "Running sessions": "运行中的会话",
   "Labelled / finished episodes": "已标注 / 已完成片段",
-  "Most recent error": "最近一次错误"
+  "Most recent error": "最近一次错误",
+  "Needs your confirmation": "需要你确认",
+  "Agent Workbench sections": "Agent 工作台分区"
 }

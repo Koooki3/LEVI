@@ -63,6 +63,7 @@ export default function AgentDefinitions({
           </details>
         ))}
         <button
+          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
           type="button"
           onClick={() =>
             save([

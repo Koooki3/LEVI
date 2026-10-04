@@ -3,6 +3,7 @@
 import "@/components/pages-ui/agent-content.css";
 import { useState } from "react";
 import { T, useLocale } from "./levi-locale";
+import { HumanActionMark } from "@/components/pages-ui/feedback";
 export type HarnessPlan = {
   revision: number;
   digest: string;
@@ -89,13 +90,16 @@ export default function AgentPlan({
           </p>
         ))}
         {!plan.approval && (
-          <button
-            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-            disabled={busy || !!plan.questions.length}
-            onClick={onApprove}
-          >
-            Approve execution plan
-          </button>
+          <div className="levi-agent-actions">
+            <HumanActionMark />
+            <button
+              className="ds-btn ds-btn--primary ds-btn--sm ds-focus"
+              disabled={busy || !!plan.questions.length}
+              onClick={onApprove}
+            >
+              Approve execution plan
+            </button>
+          </div>
         )}
         {plan.approval &&
           !plan.pilot_review?.waived &&
@@ -114,8 +118,9 @@ export default function AgentPlan({
                 />
               </label>
               <div className="levi-agent-actions">
+                <HumanActionMark />
                 <button
-                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                  className="ds-btn ds-btn--primary ds-btn--sm ds-focus"
                   disabled={busy || !note.trim()}
                   onClick={() => onPilot(true, note)}
                 >

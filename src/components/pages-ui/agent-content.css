@@ -64,7 +64,9 @@
   background: var(--ds-surface-2);
   color: var(--ds-text-primary);
 }
-.levi-agent-sheet .levi-agent-dock button:where(:not(.ds-btn, .ds-icon-btn)) {
+.levi-agent-sheet
+  .levi-agent-dock
+  button:where(:not(.ds-btn, .ds-icon-btn, .ds-tab)) {
   border: 1px solid var(--ds-border-control);
   border-radius: var(--ds-radius-sm);
   padding: 7px 11px;
@@ -74,13 +76,13 @@
 }
 .levi-agent-sheet
   .levi-agent-dock
-  button:where(:not(.ds-btn, .ds-icon-btn)):disabled {
+  button:where(:not(.ds-btn, .ds-icon-btn, .ds-tab)):disabled {
   opacity: 0.5;
   cursor: default;
 }
 .levi-agent-sheet
   .levi-agent-dock
-  button:where(:not(.ds-btn, .ds-icon-btn)):focus-visible,
+  button:where(:not(.ds-btn, .ds-icon-btn, .ds-tab)):focus-visible,
 .levi-agent-sheet .levi-agent-dock input:where(:not(.ds-input)):focus-visible,
 .levi-agent-sheet
   .levi-agent-dock
@@ -91,7 +93,7 @@
 }
 .levi-agent-sheet
   .levi-agent-dock
-  button:where(:not(.ds-btn, .ds-icon-btn))[aria-pressed="true"] {
+  button:where(:not(.ds-btn, .ds-icon-btn, .ds-tab))[aria-pressed="true"] {
   background: var(--ds-accent);
   color: var(--ds-on-accent);
 }
@@ -942,4 +944,57 @@
 .levi-agent-sheet canvas.levi-agent-mask,
 canvas.levi-agent-mask {
   color: var(--ds-data-6, var(--ds-success));
+}
+/* An action only a person may take: the badge sits before its buttons. */
+.levi-agent-sheet .pg-human-mark {
+  display: inline-flex;
+  align-items: center;
+}
+.levi-agent-sheet .levi-agent-danger.ds-btn {
+  color: var(--ds-danger);
+}
+.levi-agent-sheet .levi-agent-tabs.ds-tabs {
+  margin: var(--ds-space-3) 0;
+}
+/* The drawer's section tabs are ds Tabs; restate them over levi.css's
+   ".levi-agent-dock button" (removed in stage 6). */
+.levi-agent-sheet .levi-agent-dock .ds-tab {
+  height: var(--ds-control-lg);
+  padding: 0 var(--ds-space-3);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ds-text-secondary);
+  font-weight: var(--ds-weight-medium);
+}
+.levi-agent-sheet .levi-agent-dock .ds-tab:hover:not(:disabled) {
+  color: var(--ds-text-primary);
+}
+.levi-agent-sheet .levi-agent-dock .ds-tab[aria-selected="true"] {
+  color: var(--ds-text-primary);
+  font-weight: var(--ds-weight-semibold);
+  border-bottom-color: var(--ds-selected-indicator);
+}
+.levi-agent-sheet .levi-agent-dock .ds-tab:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: -2px;
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn--primary {
+  background: var(--ds-accent);
+  border-color: transparent;
+  color: var(--ds-on-accent);
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn--primary:hover:not(:disabled) {
+  background: var(--ds-accent-hover);
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn--ghost:hover:not(:disabled) {
+  background: var(--ds-surface-hover-on-raised);
+}
+.levi-agent-sheet .levi-agent-tabs .ds-tabs__list {
+  flex-wrap: wrap;
 }

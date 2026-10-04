@@ -111,6 +111,7 @@ export default function AgentRuntimeConnections() {
             {new Date(g.expires * 1000).toLocaleString()}
           </p>
           <button
+            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
             disabled={!g.enabled}
             onClick={async () => {
               const r = await fetch(

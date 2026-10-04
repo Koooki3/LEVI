@@ -21,7 +21,8 @@ import {
 } from "@/utils/browserStorage";
 import { T, useLocale } from "./levi-locale";
 import { friendlyError } from "./live/friendly-error";
-import { Sheet } from "./ds";
+import { Sheet, Tabs } from "./ds";
+import { HumanActionMark } from "@/components/pages-ui/feedback";
 import { useConfirmAction } from "./shell/confirm";
 import { SHELL_EVENTS } from "./shell/shell-events";
 
@@ -415,36 +416,18 @@ export default function AgentWorkbench() {
           <p className="levi-agent-muted">
             Sampled evidence · every suggestion is reviewed by you
           </p>
-          <nav className="levi-agent-tabs">
-            <button
-              className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-              aria-pressed={tab === "task"}
-              onClick={() => setTab("task")}
-            >
-              Tasks & review
-            </button>
-            <button
-              className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-              aria-pressed={tab === "activity"}
-              onClick={() => setTab("activity")}
-            >
-              Live activity
-            </button>
-            <button
-              className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-              aria-pressed={tab === "connections"}
-              onClick={() => setTab("connections")}
-            >
-              Accounts & connections
-            </button>
-            <button
-              className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-              aria-pressed={tab === "model"}
-              onClick={() => setTab("model")}
-            >
-              Model settings
-            </button>
-          </nav>
+          <Tabs
+            className="levi-agent-tabs"
+            label={t("Agent Workbench sections")}
+            value={tab}
+            onChange={(id) => setTab(id as typeof tab)}
+            items={[
+              { id: "task", label: t("Tasks & review") },
+              { id: "activity", label: t("Live activity") },
+              { id: "connections", label: t("Accounts & connections") },
+              { id: "model", label: t("Model settings") },
+            ]}
+          />
           {error && (
             <p role="alert" className="levi-agent-error">
               {friendlyError(error, t)}
@@ -538,6 +521,7 @@ export default function AgentWorkbench() {
                 <label>
                   Connection type
                   <select
+                    className="ds-input ds-focus"
                     value={providerKind}
                     onChange={(e) => {
                       const kind = e.target.value as ProviderKind;
@@ -1235,6 +1219,7 @@ export default function AgentWorkbench() {
                           />
                         </label>
                         <button
+                          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                           disabled={busy}
                           onClick={() =>
                             void act(async () => {
@@ -1291,6 +1276,7 @@ export default function AgentWorkbench() {
                   <div className="levi-agent-actions">
                     {run.context.workflow?.kind === "objects" && (
                       <button
+                        className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                         disabled={busy || !run.plan?.approval}
                         onClick={() =>
                           void act(async () => {
@@ -1306,6 +1292,7 @@ export default function AgentWorkbench() {
                     ) &&
                       run.completed.length > 0 && (
                         <button
+                          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                           disabled={busy}
                           onClick={() =>
                             void act(async () => {
@@ -1327,6 +1314,7 @@ export default function AgentWorkbench() {
                       run.context.workflow?.kind !== "objects" && (
                         <>
                           <button
+                            className={`ds-btn ds-btn--sm ds-focus ${run.plan?.pilot_review?.accepted ? "ds-btn--secondary" : "ds-btn--primary"}`}
                             disabled={busy || !run.plan?.approval}
                             onClick={() =>
                               void act(async () => {
@@ -1340,6 +1328,7 @@ export default function AgentWorkbench() {
                             Run pilot
                           </button>
                           <button
+                            className={`ds-btn ds-btn--sm ds-focus ${run.plan?.pilot_review?.accepted ? "ds-btn--primary" : "ds-btn--secondary"}`}
                             disabled={busy || !run.plan?.pilot_review?.accepted}
                             onClick={() =>
                               void act(async () => {
@@ -1356,6 +1345,7 @@ export default function AgentWorkbench() {
                       )}
                     {["running", "queued"].includes(run.status) && (
                       <button
+                        className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                         disabled={busy}
                         onClick={() =>
                           void act(async () => {
@@ -1368,6 +1358,7 @@ export default function AgentWorkbench() {
                     )}
                     {!["succeeded", "cancelled"].includes(run.status) && (
                       <button
+                        className="ds-btn ds-btn--ghost ds-btn--sm ds-focus levi-agent-danger"
                         disabled={busy}
                         onClick={() =>
                           void act(async () => {
@@ -1491,6 +1482,7 @@ export default function AgentWorkbench() {
                       <div className="levi-agent-actions">
                         {change.status === "committed" && (
                           <button
+                            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                             disabled={busy}
                             onClick={() =>
                               void act(async () => {
@@ -1506,6 +1498,7 @@ export default function AgentWorkbench() {
                         )}
                         {change.status === "committed" && !change.undo_of && (
                           <button
+                            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                             disabled={busy}
                             onClick={() =>
                               void act(async () => {
@@ -1523,6 +1516,7 @@ export default function AgentWorkbench() {
                         )}
                         {draftEdited && (
                           <button
+                            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                             disabled={busy}
                             onClick={() =>
                               void act(async () => {
@@ -1543,7 +1537,11 @@ export default function AgentWorkbench() {
                           </button>
                         )}
                         {!draftEdited && change.status !== "committed" && (
+                          <HumanActionMark />
+                        )}
+                        {!draftEdited && change.status !== "committed" && (
                           <button
+                            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                             disabled={busy}
                             onClick={() =>
                               void act(async () => {
@@ -1564,6 +1562,7 @@ export default function AgentWorkbench() {
                         )}
                         {!draftEdited && change.status === "approved" && (
                           <button
+                            className="ds-btn ds-btn--primary ds-btn--sm ds-focus"
                             disabled={busy}
                             onClick={() =>
                               void act(async () => {
