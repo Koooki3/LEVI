@@ -3,6 +3,7 @@
 //   * 2 s while an evaluation runs, 10 s otherwise;
 //   * nothing while the tab is hidden, an immediate refresh when it returns;
 //   * after a failure the wait doubles (up to 30 s);
+//   * with no live service to show, once a minute;
 //   * a dataset's detail is fetched only for the few cards that matter or are
 //     open, and again only when its row in the status changed.
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -12,6 +13,7 @@ import {
   nextDelay,
   rowSignature,
 } from "./live-logic";
+import { PULSE_OFF_MS } from "./live-pulse-store";
 import type {
   DatasetDetail,
   DatasetRow,
@@ -60,7 +62,13 @@ export function useLivePoll(): LivePoll {
     const visible = () => document.visibilityState !== "hidden";
     const schedule = () => {
       if (stopped || !visible()) return;
-      timer = setTimeout(() => void tick(), nextDelay(evaluating, failures));
+      // No live service to show (the explanation page): look again once a
+      // minute, so one started later appears without a reload.
+      const wait =
+        lastStatus?.enabled === false
+          ? PULSE_OFF_MS
+          : nextDelay(evaluating, failures);
+      timer = setTimeout(() => void tick(), wait);
     };
     async function tick() {
       if (stopped || !visible()) return;
@@ -98,13 +106,10 @@ export function useLivePoll(): LivePoll {
           delay: nextDelay(evaluating, 0),
         }));
       }
-      // Not the live workspace (the explanation page): nothing to watch.
-      if (lastStatus?.enabled === false) return;
       schedule();
     }
     const onVisibility = () => {
       clearTimeout(timer);
-      if (lastStatus?.enabled === false) return;
       if (visible()) void tick();
       else controller?.abort();
     };

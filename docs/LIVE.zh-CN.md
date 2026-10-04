@@ -220,7 +220,7 @@ anchored_spec = "generic-release.v2.json"
 - **服务与资源**：状态、GPU 模式、vLLM 状态、用人话解释的标注闸门（例如策略推理时为什么暂不标注）、队列、工作进程、最近错误、监督进程的内存、线程和 CPU。服务未运行时页面会说明，并提供可复制的 `levi live start`。
 - **需要人处理**：服务放弃启动模型服务器（`attention`，写明原因并给出可复制的 `levi live resume`）、数据集在等你于 LEVI 页面批准计划或提交草稿（`awaiting`）、或服务启动的页面/核心没起来（`frontend`）时，出现琥珀色横幅。数据集卡片还会显示卡住的片段和被替换的源。复位等待在两次轮询之间由浏览器倒计时（`reset_wait_s`、`waiting_reset_since`），过期后提示“下一个片段应已开始”。GPU 闸门和决定的每个代码都有中英文的人话解释。当服务因不会自行消失的原因暂停了标注（`labelling_paused`：`vllm_failed`、`vllm_error`、`insufficient_vram`、`policy_large`、`unknown_client`、`vram`、`lock`、`external_busy`），横幅会说明原因、评测不受影响且片段不会丢，以及该怎么做（需要恢复时附可复制的 `levi live resume`）；主循环超过 5 分钟没动作（`loop_at`）也会提示。在 Agent 工作台里，策略推理期间被拒绝的 Run 或 Resume 会显示一句人话（几秒后再试；已经在跑的运行会自己继续），而不是核心的日志原文。
 
-评测运行时每 2 s、空闲时每 10 s 轮询 `/api/levi/live/status` 和 `/sessions`；标签页不可见时暂停；失败后退避（最长 30 s）；答复是 `{"enabled": false}` 时改为显示说明；只为少数重要或已展开的卡片加载数据集详情，且仅在该行变化后再次加载。页面唯一的写操作是排除和恢复片段（由人用页面自己的令牌发起），也不显示令牌。
+评测运行时每 2 s、空闲时每 10 s 轮询 `/api/levi/live/status` 和 `/sessions`；标签页不可见时暂停；失败后退避（最长 30 s）；答复是 `{"enabled": false}` 时改为显示说明（每分钟再问一次）；只为少数重要或已展开的卡片加载数据集详情，且仅在该行变化后再次加载。页面唯一的写操作是排除和恢复片段（由人用页面自己的令牌发起），也不显示令牌。
 
 ## 在产品 LEVI 里查看实时评测
 
