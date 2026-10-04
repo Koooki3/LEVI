@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FaBolt, FaStop, FaTrash } from "react-icons/fa";
 import { T, useLocale } from "@/components/levi-locale";
+import { useConfirmAction } from "@/components/shell/confirm";
 import {
   cancelSam3Job,
   cancelSegJob,
@@ -350,6 +351,7 @@ export default function FastSegmentationPanel({
   allEpisodes,
 }: Props) {
   const { t } = useLocale();
+  const confirm = useConfirmAction();
   const stableIdent = useMemo<DatasetIdent>(
     () => ({
       repoId: ident.repoId ?? null,
@@ -758,7 +760,11 @@ export default function FastSegmentationPanel({
   const removeModel = async () => {
     if (!model) return;
     if (
-      !window.confirm(t("Delete model {name}?").replace("{name}", model.name))
+      !(await confirm({
+        title: t("Delete model {name}?").replace("{name}", model.name),
+        confirmLabel: t("Delete"),
+        tone: "danger",
+      }))
     )
       return;
     try {

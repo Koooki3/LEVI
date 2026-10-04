@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { T, useLocale } from "@/components/levi-locale";
 import { leviApi } from "@/components/levi-api";
+import { useConfirmAction } from "@/components/shell/confirm";
 import { ConversionWizard } from "@/components/conversion/conversion-wizard";
 import { FormatsTable } from "@/components/conversion/formats-table";
 import { JobProgress } from "@/components/conversion/job-progress";
@@ -50,6 +51,7 @@ export default function Workbench() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const { t } = useLocale();
+  const confirm = useConfirmAction();
   const [sync, setSync] = useState<SyncStatus | null>(null);
   const refresh = useCallback(async () => {
     const [c, j, st] = await Promise.all([
@@ -265,13 +267,18 @@ export default function Workbench() {
                       title={t(
                         "Remove from the list. Files, annotations and review flags are kept.",
                       )}
-                      onClick={() => {
+                      onClick={async () => {
                         if (
-                          window.confirm(
-                            t(
+                          await confirm({
+                            title: t("Remove {name} from the list?").replace(
+                              "{name}",
+                              d.name,
+                            ),
+                            description: t(
                               "Remove this dataset from the list? Its files, annotations and review flags stay on disk. If it is still in the workspace, auto-sync will add it back.",
                             ),
-                          )
+                            confirmLabel: t("Unregister"),
+                          })
                         )
                           void action(() =>
                             fetch(

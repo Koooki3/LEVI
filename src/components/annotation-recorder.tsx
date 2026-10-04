@@ -13,6 +13,7 @@
  * The session lives on the server, so a reload or a second tab keeps it.
  */
 import { useCallback, useEffect, useState } from "react";
+import { useConfirmAction } from "@/components/shell/confirm";
 import { useAnnotations } from "@/context/annotations-context";
 import {
   cancelRecording,
@@ -37,6 +38,7 @@ function clock(seconds: number): string {
 
 export default function AnnotationRecorder() {
   const { t } = useLocale();
+  const confirm = useConfirmAction();
   const { episodeId, ident, dirty, save, backendEnabled } = useAnnotations();
   const [session, setSession] = useState<RecordingSession | null>(null);
   const [status, setStatus] = useState<Record<string, EpisodeStatus>>({});
@@ -141,9 +143,13 @@ export default function AnnotationRecorder() {
             type="button"
             className="levi-recorder-link"
             disabled={busy}
-            onClick={() => {
+            onClick={async () => {
               if (
-                !window.confirm(t("Discard this recording without a record?"))
+                !(await confirm({
+                  title: t("Discard this recording without a record?"),
+                  confirmLabel: t("Discard"),
+                  tone: "danger",
+                }))
               )
                 return;
               void act(async () => {

@@ -1,6 +1,7 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
 import { T, useLocale } from "@/components/levi-locale";
+import { useConfirmAction } from "@/components/shell/confirm";
 
 import "./annotations-skin.css";
 
@@ -517,6 +518,7 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
   } = useAnnotations();
   const { currentTime } = useTime();
   const { t } = useLocale();
+  const confirm = useConfirmAction();
 
   // ============ Inline quick-add state ============
   const [qaKind, setQaKind] = useState<QuickAddKind>("subtask");
@@ -687,11 +689,14 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
 
   const handleDeleteFile = async () => {
     if (
-      !window.confirm(
-        t(
+      !(await confirm({
+        title: t("Delete this episode's annotation file?"),
+        description: t(
           "Delete this episode's annotation file? This removes every saved atom for this episode and cannot be undone.",
         ),
-      )
+        confirmLabel: t("Delete"),
+        tone: "danger",
+      }))
     ) {
       return;
     }

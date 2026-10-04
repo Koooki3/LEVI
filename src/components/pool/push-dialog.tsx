@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
+import { useConfirmAction } from "@/components/shell/confirm";
 import {
   PoolJobProgress,
   RUNNING,
@@ -22,6 +23,7 @@ export function PushDialog({
   onClose: () => void;
 }) {
   const { t } = useLocale();
+  const confirm = useConfirmAction();
   const ref = useRef<HTMLDialogElement>(null);
   const [targets, setTargets] = useState<RemoteTarget[]>([]);
   const [target, setTarget] = useState("");
@@ -104,7 +106,13 @@ export function PushDialog({
               aria-label={`${t("Delete")}: ${x.name}`}
               onClick={() =>
                 void act(async () => {
-                  if (!window.confirm(`${t("Forget target")} ${x.name}?`))
+                  if (
+                    !(await confirm({
+                      title: `${t("Forget target")} ${x.name}?`,
+                      confirmLabel: t("Forget target"),
+                      tone: "danger",
+                    }))
+                  )
                     return;
                   await leviRequest(
                     "DELETE",

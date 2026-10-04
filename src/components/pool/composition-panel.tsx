@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useLocale } from "@/components/levi-locale";
+import { useConfirmAction } from "@/components/shell/confirm";
 import { GripperMix, MixSummary, PickedList, TaskPick } from "./task-pick";
 import {
   CATEGORY_LABELS,
@@ -89,6 +90,7 @@ export function CompositionPanel({
   refreshKey: string;
 }) {
   const { t } = useLocale();
+  const confirm = useConfirmAction();
   const [dragging, setDragging] = useState<number | null>(null);
   const [over, setOver] = useState<number | null>(null);
   const [announce, setAnnounce] = useState("");
@@ -473,9 +475,16 @@ export function CompositionPanel({
             type="button"
             className="levi-secondary danger"
             disabled={!chosenRecipe}
-            onClick={() => {
-              if (window.confirm(`${t("Delete recipe")} ${chosenRecipe}?`)) {
-                onDelete(chosenRecipe);
+            onClick={async () => {
+              const name = chosenRecipe;
+              if (
+                await confirm({
+                  title: `${t("Delete recipe")} ${name}?`,
+                  confirmLabel: t("Delete"),
+                  tone: "danger",
+                })
+              ) {
+                onDelete(name);
                 setChosenRecipe("");
               }
             }}
