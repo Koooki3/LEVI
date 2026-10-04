@@ -33,3 +33,15 @@ def test_failed_and_errored_tests_are_listed(tmp_path):
 
 def test_a_missing_file_says_pytest_did_not_finish(tmp_path):
     assert "did not finish" in load().summary(tmp_path / "absent.xml")
+
+
+def test_names_and_messages_cannot_break_the_table(tmp_path):
+    xml = tmp_path / "junit.xml"
+    xml.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<testsuite name="pytest" tests="1" failures="1" errors="0" skipped="0">
+<testcase classname="tests.test_a" name="test_bad[a|b`c&lt;d]"><failure message="&lt;details&gt; x">trace</failure></testcase>
+</testsuite>"""
+    )
+    text = load().summary(xml)
+    assert "| failure | `tests.test_a::test_bad[a\\|b'c<d]` | &lt;details&gt; x |" in text

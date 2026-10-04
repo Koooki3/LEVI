@@ -5,12 +5,23 @@ tests are visible on the run page without downloading logs. Standard library
 only: it runs with the runner's system Python, before or without the venv.
 """
 
+import html
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 MAX_CASES = 50
 MAX_MESSAGE = 300
+
+
+def cell(text: str, code: bool = False) -> str:
+    """One table cell: no column breaks, no code-span ends, no HTML tags.
+
+    Inside a code span HTML is shown as typed, so only plain cells are escaped.
+    """
+    if not code:
+        text = html.escape(text, quote=False)
+    return text.replace("|", "\\|").replace("`", "'")
 
 
 def summary(path: Path) -> str:
@@ -43,8 +54,7 @@ def summary(path: Path) -> str:
     if bad:
         lines += ["| | test | message |", "|---|---|---|"]
         for kind, name, first in bad[:MAX_CASES]:
-            cell = first.replace("|", "\\|").replace("`", "'")
-            lines.append(f"| {kind} | `{name}` | {cell} |")
+            lines.append(f"| {kind} | `{cell(name, code=True)}` | {cell(first)} |")
         if len(bad) > MAX_CASES:
             lines.append(f"\n{len(bad) - MAX_CASES} more not shown.")
     return "\n".join(lines) + "\n"
