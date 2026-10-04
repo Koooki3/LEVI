@@ -27,7 +27,7 @@ LEVI 是面向机器人学习数据的本地工作台：浏览 LeRobot 数据集
 
 ## 快速上手
 
-需要 [uv](https://docs.astral.sh/uv/getting-started/installation/) 和 FFmpeg（`sudo apt install ffmpeg` 或 `brew install ffmpeg`）。已在 Linux x86_64 上测试；macOS 可用；Windows 请用 WSL2。
+需要 [uv](https://docs.astral.sh/uv/getting-started/installation/) 和 FFmpeg（`sudo apt install ffmpeg` 或 `brew install ffmpeg`）。已在 Linux x86_64 上测试；macOS 可用；Windows 请用 WSL2。完整的安装指南、可选组件和作为服务运行见 [INSTALL.zh-CN.md](INSTALL.zh-CN.md)（[English](INSTALL.md)）；由 AI agent 安装时按 [INSTALL.agent.md](INSTALL.agent.md) 做。`uv run levi install --profile core` 一次完成下面的步骤，`uv run levi doctor` 检查本机。
 
 ```bash
 git clone https://github.com/Koooki3/LEVI.git
@@ -51,6 +51,8 @@ uv run levi                                   # 同时启动网页与 API
 DROID 原始目录（`demo_0000/trajectory.h5`、元数据及三路 MP4）是可选的**浏览与标注输入**，不支持转换成训练数据。使用前运行 `uv sync --locked --extra agent --extra droid`，把数据集目录直接放进 `$LEVI_WORKSPACE`，然后点击 **立即同步** 或重启 LEVI。只读派生视图位于 `outputs/LEVI/workbench/views/<数据集名>/`，HDF5 源文件不会被改动。源 MP4 时间与控制时间不一致，因此视图采用名义 14.3 FPS；原始时间戳和逐片段偏差记录在 `meta/levi_provenance.jsonl`，确定精确时间边界时应对照该记录复核。详见[转换指南](docs/CONVERSION.md#droid-raw-browsing-view)。DROID 测试数据集按需下载：`uv run levi sample fetch droid` 按固定种子确定的顺序，从公开发布版中抽取 500 个片段（约 11.6 GiB；再次运行再抽 500 个，与之前的抽取不重复）。除非设置 `LEVI_DROID_SAMPLE=on`，LEVI 不会自己开始下载，详见 [DROID 测试样本](docs/WORKSPACE.md#droid-test-sample)。
 
 ```bash
+uv run levi doctor              # 本机是否就绪（只读；--json）
+uv run levi install --help      # 按组件安装 LEVI 和可选部分（--plan --json 列出步骤）
 uv run levi stop                # 停止共享服务及其子进程；有作业在运行时拒绝（--wait [分钟]、--force；--all：连同 LEVI 启动的 Ollama）
 uv run levi clean               # 预览可再生缓存（需先停服务）；加 --apply 执行
 uv run levi migrate             # 预览旧工作区的升级；加 --apply 执行
@@ -86,6 +88,8 @@ LEVI 会对照数据目录校验解析出的任务规格，等你批准后才执
 
 | 指南 | 内容 |
 | --- | --- |
+| [安装](INSTALL.zh-CN.md) · [English](INSTALL.md) · [给 agent](INSTALL.agent.md) | 先决条件、`levi install` 组件、`levi doctor`、作为服务运行、更新 |
+| [vLLM](docs/VLLM.zh-CN.md) · [English](docs/VLLM.md) | 搭建 vLLM 环境、自带启动脚本 `scripts/vllm/serve.sh` 及其与实时服务的约定 |
 | [Agents](docs/AGENTS.md) | 通道、任务生命周期、自然语言任务、证据、物体掩码、harness（成本、记忆、自改进、教师监督）、能力参考 |
 | [本地模型](docs/OLLAMA.zh-CN.md) · [English](docs/OLLAMA.md) | Ollama 安装、本地 vLLM 服务、模型绑定、精简提示模式、并发请求、GPU 错峰使用、师生学习循环 |
 | [Pilot](docs/PILOT.zh-CN.md) · [English](docs/PILOT.md) | 托管的 Codex / Claude Code 会话 |

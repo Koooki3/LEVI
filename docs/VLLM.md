@@ -99,5 +99,5 @@ The script must exit 0 once the server is started, and before exiting write the 
 
 - `scripts/vllm/serve.sh --check` prints what it would run and fails when vLLM or the model is not set.
 - `levi live doctor` reports a missing or non-executable script, an unwritable pid folder, a GPU lock file that cannot be opened, missing rollout roots and paths that point into another user's home.
-- `levi doctor` (the installation check) asks a running server on the configured port for `/health` and `/v1/models` (loopback only).
+- `levi doctor` (the installation check, [Install](../INSTALL.md)) asks a running server on the configured port for `/health` and `/v1/models` (loopback only).
 - `tests/test_vllm_launcher.py` runs the shipped launcher against a stand-in `vllm` executable and checks the whole contract (launch, pid file, arguments, stop) without a GPU.

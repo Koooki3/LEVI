@@ -27,7 +27,7 @@ The header opens **Explore** (browse and analyze), **Conversion & review** (conv
 
 ## Quick start
 
-Requires [uv](https://docs.astral.sh/uv/getting-started/installation/) and FFmpeg (`sudo apt install ffmpeg` or `brew install ffmpeg`). Linux x86_64 is tested; macOS works; use WSL2 on Windows.
+Requires [uv](https://docs.astral.sh/uv/getting-started/installation/) and FFmpeg (`sudo apt install ffmpeg` or `brew install ffmpeg`). Linux x86_64 is tested; macOS works; use WSL2 on Windows. The full guide, optional parts and running LEVI as a service: [INSTALL.md](INSTALL.md) ([中文](INSTALL.zh-CN.md)); an AI agent installing LEVI follows [INSTALL.agent.md](INSTALL.agent.md). `uv run levi install --profile core` does the steps below in one go, and `uv run levi doctor` checks the machine.
 
 ```bash
 git clone https://github.com/Koooki3/LEVI.git
@@ -51,6 +51,8 @@ For a strict CPU-only LEVI session, set `export LEVI_CPU_ONLY=1` before starting
 DROID raw folders (`demo_0000/trajectory.h5`, metadata and three MP4 cameras) are an optional **browse-and-annotate input**, not a supported training conversion. To use it, run `uv sync --locked --extra agent --extra droid`, place the dataset folder directly under `$LEVI_WORKSPACE`, and use **Sync now** or restart LEVI. A read-only derived view appears at `outputs/LEVI/workbench/views/<dataset-name>/`; the HDF5 source is untouched. The view uses a nominal 14.3 FPS clock because source MP4 time and control time differ. Original timestamps and per-episode drift are saved in `meta/levi_provenance.jsonl`; check precise time boundaries against them. See [Conversion](docs/CONVERSION.md#droid-raw-browsing-view). A DROID test dataset is available on request: `uv run levi sample fetch droid` downloads 500 episodes of the public release, taken in one seeded order (about 11.6 GiB; each further fetch takes another 500, none of them drawn before). Nothing is downloaded by itself unless `LEVI_DROID_SAMPLE=on`; see [DROID test sample](docs/WORKSPACE.md#droid-test-sample).
 
 ```bash
+uv run levi doctor              # is this machine ready (read only; --json)
+uv run levi install --help      # set up LEVI and optional parts by profile (--plan --json lists the steps)
 uv run levi stop                # stop the shared service and its workers; refuses while jobs run (--wait [min], --force; --all: also LEVI's Ollama)
 uv run levi clean               # preview regenerable caches (service stopped); --apply to remove
 uv run levi migrate             # preview upgrading an older workspace; --apply to apply
@@ -86,6 +88,8 @@ LEVI checks the spec against the catalog and waits for your approval before anyt
 
 | Guide | Contents |
 | --- | --- |
+| [Install](INSTALL.md) · [中文](INSTALL.zh-CN.md) · [for agents](INSTALL.agent.md) | Prerequisites, `levi install` profiles, `levi doctor`, running as a service, updating |
+| [vLLM](docs/VLLM.md) · [中文](docs/VLLM.zh-CN.md) | Building a vLLM environment, the shipped launcher `scripts/vllm/serve.sh` and its contract with the live service |
 | [Agents](docs/AGENTS.md) | Channels, task lifecycle, natural-language tasks, evidence, object masks, the harness (cost, memory, self-improvement, teacher supervision), capability reference |
 | [Local models](docs/OLLAMA.md) · [中文](docs/OLLAMA.zh-CN.md) | Ollama setup, a local vLLM server, model binding, the lean prompt style, requests in flight, off-peak GPU use, the teacher/learner loop |
 | [Pilot](docs/PILOT.md) · [中文](docs/PILOT.zh-CN.md) | Managed Codex / Claude Code sessions |

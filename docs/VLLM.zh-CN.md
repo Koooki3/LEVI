@@ -99,5 +99,5 @@ scripts/vllm/serve.sh --stop 8100
 
 - `scripts/vllm/serve.sh --check` 打印将要运行的内容；没有 vLLM 或没设模型时失败。
 - `levi live doctor` 报告：脚本缺失或不可执行、pid 目录不可写、GPU 锁文件打不开、监视根目录不存在、路径指向别的用户的家目录。
-- `levi doctor`（安装自检）只在回环地址上向配置端口的服务请求 `/health` 和 `/v1/models`。
+- `levi doctor`（安装自检，见[安装](../INSTALL.zh-CN.md)）只在回环地址上向配置端口的服务请求 `/health` 和 `/v1/models`。
 - `tests/test_vllm_launcher.py` 用一个替身 `vllm` 可执行文件运行自带启动脚本，不用 GPU 检查整个约定（启动、pid 文件、参数、停止）。
