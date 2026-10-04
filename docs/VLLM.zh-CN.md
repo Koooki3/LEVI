@@ -52,7 +52,7 @@ scripts/vllm/serve.sh --check                  # 打印解析后的设置；缺 
 | `VLLM_WAIT_S` | 600 | 等 `GET /health` 的秒数；0 表示立即返回（LEVI 设 0） |
 | `SERVE_SKIP_PREFLIGHT`、`SERVE_DRY_RUN` | 0 | 跳过空闲显存检查；只打印命令 |
 
-`HF_HOME`、`HF_HUB_OFFLINE`、`HF_TOKEN`、`CUDA_VISIBLE_DEVICES` 和 `VLLM_*` 原样传过去。`--stop` 只在 pid 文件里是一个正整数、且该进程命令行含 `vllm` 时才发信号（过期 pid 文件的号可能已被别的进程复用：这时不碰它，只删 pid 文件）。启动前，若 `nvidia-smi` 显示的空闲显存不够预算，脚本拒绝启动（退出码 3）并列出占用 GPU 的进程；读不出 `nvidia-smi` 时也以退出码 3 拒绝并说明原因。手动运行：
+`HF_HOME`、`HF_HUB_OFFLINE`、`HF_TOKEN`、`CUDA_VISIBLE_DEVICES` 和 `VLLM_*` 原样传过去。`--stop` 只在 pid 文件里是一个正整数、且该进程命令行含 `vllm` 时才发信号（过期 pid 文件的号可能已被别的进程复用：这时不碰它，只删 pid 文件）。进程还在但读不出命令行时同样不发信号，pid 文件保留。启动前，若 `nvidia-smi` 显示的空闲显存不够预算，脚本拒绝启动（退出码 3）并列出占用 GPU 的进程；读不出 `nvidia-smi` 时也以退出码 3 拒绝并说明原因。手动运行：
 
 ```bash
 LEVI_VLLM_MODEL=RedHatAI/Qwen3.8-27B-INT4 LEVI_VLLM_SERVED_NAME=qwen3.8-27b \

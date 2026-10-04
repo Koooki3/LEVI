@@ -173,3 +173,60 @@ def test_an_unreadable_nvidia_smi_is_named(tmp_path, venv):
     run = _script([], env)
     assert run.returncode == 3 and "cannot read free GPU memory" in run.stderr
     assert not (tmp_path / "pids" / "vllm_8100.pid").exists()
+
+
+def test_stop_recognises_a_vllm_with_a_long_command_line(tmp_path):
+    """The command-line check reads ``/proc/PID/cmdline`` before matching:
+    with ``pipefail``, ``tr | grep -q`` failed when grep stopped reading
+    early and ``tr`` got SIGPIPE, and a real server was called a stranger."""
+    pids = tmp_path / "pids"
+    pids.mkdir()
+    env = {**os.environ, "LEVI_VLLM_PID_DIR": str(pids)}
+    # About 1 MB of short lines after the name: grep -q matches on the first
+    # line and stops reading while tr still writes.
+    filler = ["x\n" * 50_000] * 10
+    server = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)", "vllm", *filler],
+        start_new_session=True,
+    )
+    # Reap it as soon as it ends, or the script would wait 60 s on a zombie.
+    import threading
+
+    reaper = threading.Thread(target=server.wait, daemon=True)
+    reaper.start()
+    try:
+        (pids / "vllm_65003.pid").write_text(f"{server.pid}\n")
+        run = _script(["--stop", "65003"], env)
+        assert run.returncode == 0, run.stderr
+        assert "stopping vllm" in run.stdout and "SIGKILL" not in run.stdout
+        reaper.join(timeout=30)
+        assert server.returncode is not None
+        assert not (pids / "vllm_65003.pid").exists()
+    finally:
+        if server.poll() is None:
+            server.kill()
+            server.wait()
+
+
+def test_stop_is_quiet_when_the_command_line_cannot_be_read(tmp_path):
+    """A process whose command line reads empty (here a zombie): nothing is
+    signalled, the pid file stays, and no shell error about ``/proc``."""
+    pids = tmp_path / "pids"
+    pids.mkdir()
+    env = {**os.environ, "LEVI_VLLM_PID_DIR": str(pids)}
+    child = os.fork() if hasattr(os, "fork") else None
+    if child == 0:
+        os._exit(0)
+    try:
+        deadline = time.time() + 10
+        status = Path(f"/proc/{child}/status")
+        while time.time() < deadline and "zombie" not in status.read_text():
+            time.sleep(0.05)
+        assert Path(f"/proc/{child}/cmdline").read_bytes() == b""
+        (pids / "vllm_65004.pid").write_text(f"{child}\n")
+        run = _script(["--stop", "65004"], env)
+        assert run.returncode == 1 and "cannot read the command line" in run.stderr
+        assert "No such file" not in run.stderr and "/proc/" not in run.stderr
+        assert (pids / "vllm_65004.pid").exists()
+    finally:
+        os.waitpid(child, 0)

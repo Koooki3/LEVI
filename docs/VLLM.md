@@ -52,7 +52,7 @@ The live service's default `[vllm] script` and `stop_script` (a relative path in
 | `VLLM_WAIT_S` | 600 | seconds to wait for `GET /health`; 0 returns at once (LEVI sets 0) |
 | `SERVE_SKIP_PREFLIGHT`, `SERVE_DRY_RUN` | 0 | skip the free-VRAM check; print the command only |
 
-`HF_HOME`, `HF_HUB_OFFLINE`, `HF_TOKEN`, `CUDA_VISIBLE_DEVICES` and `VLLM_*` pass through. `--stop` signals only a pid file that holds one positive number, and only a process whose command line contains `vllm` (a stale pid file whose number was reused names somebody else's process: it is left alone and the file removed). Before launching, the script refuses (exit 3) when `nvidia-smi` shows less free memory than the budget needs (and prints who holds the GPU), or when `nvidia-smi` cannot be read (it says so). Run by hand:
+`HF_HOME`, `HF_HUB_OFFLINE`, `HF_TOKEN`, `CUDA_VISIBLE_DEVICES` and `VLLM_*` pass through. `--stop` signals only a pid file that holds one positive number, and only a process whose command line contains `vllm` (a stale pid file whose number was reused names somebody else's process: it is left alone and the file removed). A live process whose command line cannot be read is not signalled either, and its pid file stays. Before launching, the script refuses (exit 3) when `nvidia-smi` shows less free memory than the budget needs (and prints who holds the GPU), or when `nvidia-smi` cannot be read (it says so). Run by hand:
 
 ```bash
 LEVI_VLLM_MODEL=RedHatAI/Qwen3.8-27B-INT4 LEVI_VLLM_SERVED_NAME=qwen3.8-27b \

@@ -50,10 +50,20 @@ if [[ "${1:-}" == "--stop" ]]; then
     exit 1
   fi
   # Only a vLLM server: a stale pid file may name a process that reused the pid.
-  if kill -0 "$PID" 2>/dev/null && ! tr '\0' ' ' < "/proc/$PID/cmdline" 2>/dev/null | grep -q vllm; then
-    echo "pid $PID is not a vLLM server (a stale pid file?); not signalling it" >&2
-    rm -f "$PIDFILE"
-    exit 1
+  # The command line is read into a variable first (a `tr | grep -q` pipeline
+  # fails under pipefail when grep stops early and tr gets SIGPIPE); a read
+  # that fails (the process just ended) is silent and leaves CMD empty.
+  if kill -0 "$PID" 2>/dev/null; then
+    CMD="$( { tr '\0' ' ' < "/proc/$PID/cmdline"; } 2>/dev/null || true)"
+    if [[ -z "$CMD" ]] && kill -0 "$PID" 2>/dev/null; then
+      echo "cannot read the command line of pid $PID; not signalling it" >&2
+      exit 1
+    fi
+    if [[ -n "$CMD" && "$CMD" != *vllm* ]]; then
+      echo "pid $PID is not a vLLM server (a stale pid file?); not signalling it" >&2
+      rm -f "$PIDFILE"
+      exit 1
+    fi
   fi
   if kill -0 "$PID" 2>/dev/null; then
     echo "stopping vllm pgid=$PID (port $PORT)"
