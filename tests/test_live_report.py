@@ -4,6 +4,7 @@ of ``stats.jsonl`` (``levi live stats backfill``)."""
 import contextlib
 import io
 import json
+import threading
 import time
 
 from test_live_pipeline import NAME, env  # noqa: F401  (fixture)
@@ -182,11 +183,36 @@ def test_a_session_is_finished_when_it_ended_and_all_its_episodes_are_handled(
     assert report.finished_sessions(c, newer) == []
 
 
-def test_the_service_writes_the_report_itself_once_the_session_is_over(env):  # noqa: F811
+def test_the_service_writes_the_report_itself_once_the_session_is_over(
+    env,  # noqa: F811
+    monkeypatch,
+):
     e = env()
     e.rollouts.write(0, run_id="run-A")
     e.rollouts.session("finished", run_id="run-A")
+    # The run's first tick starts a report check of its own (while the batch
+    # is still busy, so it writes nothing). On a slow machine it can still be
+    # running when the run returns; a forced check then returns at once
+    # ("one check at a time") and the assertions below raced it (CI,
+    # 2026-10). Hold that first check until the run is over so the race is
+    # always present, then let it finish before forcing the next one.
+    real_auto = report.auto
+    release = threading.Event()
+    calls = []
+
+    def held_auto(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            release.wait(30)
+        return real_auto(*args, **kwargs)
+
+    monkeypatch.setattr(report, "auto", held_auto)
     ctl = e.run()
+    leftover = ctl._report_thread
+    assert leftover is not None and leftover.is_alive()
+    release.set()
+    leftover.join(30)
+    assert not leftover.is_alive()
     ctl._report_at = 0.0
     ctl._refresh(time.time(), True)  # the scan after the batch: nothing is ready
     ctl._reports(time.time())
