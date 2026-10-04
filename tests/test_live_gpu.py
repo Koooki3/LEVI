@@ -1910,3 +1910,39 @@ def test_the_gate_file_says_since_when_it_has_been_open(ctl):
     ctl.rollouts.session("homing")
     ctl.tick(t + 7)
     assert written()["open"] and written()["opened_at"] == t + 7
+
+
+# --- an unusable GPU lock file is said, and the setting decides ------------------------
+
+
+def _unusable_lock(ctl, tmp_path, wait):
+    blocker = tmp_path / "not-a-folder"
+    blocker.write_text("")
+    ctl.config.gpu.lock_file = str(blocker / "gpu.lock")
+    ctl.lock = gpumgr.GpuLock(
+        ctl.config.gpu.lock_file, "live", allow_unavailable=not wait
+    )
+
+
+def test_an_unusable_lock_file_lets_vllm_start_but_says_so(ctl, tmp_path):
+    _unusable_lock(ctl, tmp_path, wait=False)
+    ctl.rollouts.write(0)
+    t = time.time()
+    assert step(ctl, t) == "ok" and ctl.vllm.mine()  # the old behaviour...
+    lock = ctl.status()["gpu"]["lock"]
+    assert lock["state"] == "unavailable" and lock["on_unavailable"] == "continue"
+    said = [e for e in ctl.events if "GPU lock unavailable" in e["text"]]
+    assert len(said) == 1 and said[0]["level"] == "error"  # ...said once
+    out = cli.format_status(ctl.status(), True)
+    assert "gpu lock   UNAVAILABLE" in out
+
+
+def test_an_unusable_lock_file_keeps_vllm_down_when_the_setting_says_wait(
+    ctl, tmp_path
+):
+    _unusable_lock(ctl, tmp_path, wait=True)
+    ctl.rollouts.write(0)
+    t = time.time()
+    assert step(ctl, t) == "lock_unavailable" and not ctl.vllm.mine()
+    assert "gpu.lock_unavailable is wait" in ctl.decision.reason
+    assert ctl.status()["gpu"]["lock"]["on_unavailable"] == "wait"

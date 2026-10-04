@@ -82,3 +82,6 @@ integrations/sam3/checkpoints/
 integrations/pilot/node_modules/
 .mcp.json
 levi/agent/skills/levi-overview/SKILL.md
+
+# Optional vLLM environment for scripts/vllm/serve.sh (docs/VLLM.md)
+.venv-vllm/

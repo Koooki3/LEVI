@@ -674,6 +674,9 @@ def _start_inside(tmp_path, monkeypatch, *flags):
             str(tmp_path / "ws"),
             "--home",
             str(tmp_path / "h"),
+            # No rollout root is defaulted any more; `start` refuses none.
+            "--root",
+            str(tmp_path / "rollouts"),
             *flags,
         ]
     )

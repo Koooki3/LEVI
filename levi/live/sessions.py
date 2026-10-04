@@ -265,6 +265,11 @@ def latest_activity(sessions: dict) -> float | None:
 def read_fr3(path, stale_s=3.0, now=None) -> dict:
     """``{"state": ok|red|offline|missing, ...}`` from the health file."""
     now = time.time() if now is None else now
+    if not path:
+        return {
+            "state": "missing",
+            "detail": "no health file configured (fr3.health_file)",
+        }
     path = Path(path).expanduser()
     try:
         stat = path.stat()

@@ -11,13 +11,18 @@ What it does **not** do: it never writes to a rollout folder, never connects to 
 **The order matters: live service with `--prewarm` first, the policy server second, the evaluation last.** vLLM then loads while the card is empty (a cold start is 45-70 s of heavy GPU load whose effect on the policy's inference latency has not been measured, so the service never does one while a session is running, homing or waiting for the reset) and sleeps until there is work; the policy server (`.22` = 7.6 GB, inference latency the same as before, about 59 ms) then loads beside it:
 
 ```bash
+# 0. Once per machine: the vLLM environment and weights (docs/VLLM.md), then a
+#    live.toml that names this machine's rollout folder (nothing defaults to it).
+uv run levi live init --root /path/to/rollouts   # writes ~/.levi-live/workspace/live.toml
+uv run levi live doctor                          # scripts, pid folder, GPU lock, roots: what is missing
+
 # 1. The live service (once; it keeps running). --prewarm brings vLLM up now.
-cd ~/work/wenkai/LEVI && uv run levi live start --daemon --auto-approve --prewarm
+cd /path/to/LEVI && uv run levi live start --daemon --auto-approve --prewarm
 uv run levi live status        # wait until vLLM is ready (or asleep): about a minute
 # Watch it in the product LEVI: http://127.0.0.1:7860/live
 
 # 2. The policy server, with MEM_FRACTION=.22 (never .25 or .35 with vLLM resident)
-cd ~/work/wenkai/openpi && XLA_PYTHON_CLIENT_MEM_FRACTION=.22 uv run scripts/serve_policy.py --port 8000 policy:checkpoint --policy.config pi05_fr3_all_state --policy.dir checkpoints/pi05_fr3_all_step49999
+cd /path/to/openpi && XLA_PYTHON_CLIENT_MEM_FRACTION=.22 uv run scripts/serve_policy.py --port 8000 policy:checkpoint --policy.config pi05_fr3_all_state --policy.dir checkpoints/pi05_fr3_all_step49999
 
 # 3. The evaluation client; its "use background LEVI annotation?" answer is yes.
 ```
@@ -36,7 +41,7 @@ uv run levi live stop                            # stops only its own processes
 
 Without `--auto-approve` the service still mirrors, builds views and **plans**, then waits: a person approves the plan in the LEVI page (the dataset shows `awaiting_approval`). With it, the audited automatic approver (below) takes those gates.
 
-The default workspace is `/home/marvel/work/wenkai/levi-live-ws`; the default watched root is `/home/marvel/work/wenkai/online_rollout_data/models` (the evaluation client's `--rollout-root` default). Status lives in `~/.levi-live/`.
+No default names a folder of one machine. The workspace defaults to `~/.levi-live/workspace` (status, pid file and lock live in `~/.levi-live/`, `--home` or `LEVI_LIVE_HOME`); a command given no `--workspace`, `LEVI_LIVE_WORKSPACE` or `--config` acts on the workspace the last service started with that home recorded in its `status.json`, when it is still a live workspace. The rollout roots (the evaluation client's `--rollout-root`) have **no default**: `levi live start` and `once` refuse to run without one and say how to set it (`--root`, `[watch] roots`). Before it starts, the service checks the configuration against the machine (`levi live doctor` shows the same checks): the vLLM scripts exist and are executable, the pid folder can be written, the GPU lock file can be opened, the roots exist, and no path points into another user's home (a `live.toml` copied from another machine); a problem that would keep the service from working stops the start with its fix, the rest are warnings.
 
 ## How it works
 
@@ -83,22 +88,23 @@ A finished demo is hard-linked file by file into `<workspace>/captures/<name>/.p
 
 | Table | Key | Default | Meaning |
 | --- | --- | --- | --- |
-| `service` | `workspace` | `/home/marvel/work/wenkai/levi-live-ws` | the live LEVI workspace |
+| `service` | `workspace` | `~/.levi-live/workspace` | the live LEVI workspace (see above for how a command without `--workspace` finds the running one) |
 | | `ui_port`, `core_port`, `host` | 7880, 7881, 127.0.0.1 | never 7860/7861 (product), 5000/8000 (robot) |
 | | `poll_idle_s`, `poll_active_s`, `gate_poll_s`, `heartbeat_s` | 15, 3, 0.25, 4 | stat-only rollout scan interval idle/active; how often the gate is re-decided while a worker runs; status heartbeat |
-| `watch` | `roots` | `[".../online_rollout_data/models"]` | rollout roots |
+| `watch` | `roots` | none: must be set | rollout roots; `start` and `once` refuse to run without one |
 | | `include`, `exclude` | all | `fnmatch` over `group/task_folder` |
 | | `backlog`, `since` | `skip`, none | see above |
 | | `require_session` | false | only tasks with an evaluation session that enabled LEVI |
 | | `batch_max_episodes` | 40 | demos per batch |
 | | `settle_s` | 2 | a completion marker must be this old (seconds) before the demo is taken; it is part of the fixed delay between the end of an episode and the first model request (see "How much time there is between episodes") |
 | | `stuck_s` | 600 | a demo that has not finished and not changed for this long (a leftover raw capture, a client that died mid-write) is `stuck`: counted and listed, no longer waited for or re-read |
-| `fr3` | `health_file` | `~/work/franka_control/run/fr3_health.json` | health monitor file |
+| `fr3` | `health_file` | empty (no monitor) | the robot side's health monitor file (interface C4); unset, the FR3 state is `missing` and the doctor does not warn |
 | `gpu` | `mode` | `auto` | `auto` (= `timeshare`), `timeshare`, `coexist`, `manual` |
 | | `policy_ports` | `[8000]` | looked up in `/proc/net/tcp`, never connected to |
 | | `busy_states` | `["running"]` | session states in which the policy is inferring |
 | | `lead_s`, `lead_grace_s` | 3, 5 | the gate closes this long before the next episode (a session waiting for the reset starts running `levi.reset_wait_s` after it began waiting) and stays closed this long after the predicted start |
-| | `lock_file`, `lock_agent` | `levi-hub/.gpu.lock`, `live` | the workspace's GPU `flock` |
+| | `lock_file`, `lock_agent` | empty (no shared lock), `live` | an `flock` file shared with the machine's other GPU users (for example the product LEVI's `LEVI_GPU_LOCK_FILE`) |
+| | `lock_unavailable` | `continue` | a configured lock file that cannot be opened or created: `continue` starts vLLM without it (the status shows `gpu.lock.state = unavailable`, an event and `levi live doctor` say so); `wait` does not start vLLM (decision `lock_unavailable`) |
 | | `settle_s` | 20 | wait after a policy server appears or goes before starting vLLM |
 | | `standby_min_s` | 20 | a cold start waits until a session has been in `standby` this long (its first episode follows within seconds). A mitigation, not a guarantee: use `--prewarm` before the evaluation |
 | | `wake_margin_mib` | 850 | free VRAM kept beyond the budget (less what the sleeping vLLM still holds) when waking it; a start keeps `vllm.margin_mib`. **Measured on the real GPU** (policy server `.22`): a sleeping vLLM leaves 22768 MiB free, and waking it and serving the first requests used about 21758 MiB. The old 300 let a wake through at 21843 free, which would leave about 85 MiB, below `min_free_mib` (600), so vLLM would be put back to sleep at once; 800 would still leave about 585 at the line; with 850 a wake needs 22393 and leaves 635 MiB even right at the line, and the measured 22768 passes with about 375 MiB to spare (computed from those numbers, flapping itself was not observed) |
@@ -107,7 +113,8 @@ A finished demo is hard-linked file by file into `<workspace>/captures/<name>/.p
 | | `resume_stable_s`, `resume_max_bounces` | 3, 3 | a person's run the live gate stopped (`blocked`) continues by itself once the gate has stayed open this long (0.5-60 s; the supervisor's `opened_at` in `gate.json` is used, so a close and reopen between samples counts), once per opening; after this many stops in a row without progress (a finished episode or tokens settled) it is left for a person to resume; 0 switches the automatic resume off |
 | | `unknown_client_pause_s` | 600 | a policy server no session vouches for keeps the gate shut; after this long the status says `labelling_paused` (`unknown_client`) |
 | | `min_free_mib`, `policy_budget_mib` | 600, 8500 | vLLM sleeps when free VRAM falls below the first, or the policy server holds more than the second |
-| `vllm` | `script`, `stop_script`, `pid_dir`, `port` | `tools/vllm/serve-qwen38.sh`, `serve.sh`, `logs`, 8100 | the launch scripts |
+| `vllm` | `script`, `stop_script`, `pid_dir`, `port` | `scripts/vllm/serve.sh` (both; relative to the checkout), `~/.levi-live/vllm`, 8100 | the launch and stop scripts and where they write `vllm_<port>.pid`; the contract is in [vLLM](VLLM.md) |
+| | `model`, `served_model` | `RedHatAI/Qwen3.8-27B-INT4`, `qwen3.8-27b` | what the shipped launcher serves (`LEVI_VLLM_MODEL`) and the name the worker asks for (`LEVI_VLLM_SERVED_NAME`); a launcher of your own may serve a fixed model under `served_model` |
 | | `gpu_memory_utilization`, `max_model_len`, `max_images`, `max_num_seqs`, `max_num_batched_tokens` | 0.74, 49152, 128, 2, 4096 | the measured shared profile; the budget and context actually used are chosen at each start from the free VRAM (see GPU management) |
 | | `gpu_memory_utilization_max`, `gpu_memory_utilization_min`, `min_utilization_with_policy`, `min_utilization_alone`, `kv_bytes_per_token`, `min_model_len` | 0.747, 0.70, 0.725, 0.725, 39800, 32768 | the limits of that choice, calibrated with a **warm** compile cache (`live-validation.md` section 5): vLLM keeps 20.9 GiB of its 31.36 GiB for non-KV memory, so budget u leaves u × 31.36 − 20.9 GiB of KV cache (0.72: 1.73 GiB, 0.74: 2.36 GiB), and 49152 tokens need 1.82 GiB: at least about 0.7245. Alone and beside a policy server the floor is the same |
 | | `sleep_mode`, `idle_action`, `margin_mib` | true, `auto`, 1100 | `--enable-sleep-mode` (+ `VLLM_SERVER_DEV_MODE=1`); `auto` = sleep while an evaluation is live, else stop; VRAM kept free beyond the budget (vLLM refuses a budget above its own free memory, about 930 MiB less than nvidia-smi's) |
@@ -133,7 +140,7 @@ The service sets `LEVI_DROID_SAMPLE=off` (no sample download), `LEVI_GPU_SHARING
 
 ## GPU management
 
-One 32 GB GPU is shared with the robot's policy server. The measurement (`levi-hub/reports/live-gpu.md`) gives the rules:
+One 32 GB GPU is shared with the robot's policy server. The maintainers' measurement on that card (an RTX 5090 with an openpi π0.5 policy server) gives the rules below; the `[gpu]` and `[vllm]` numbers are that calibration and need measuring again on another card or model:
 
 - With the policy server at `XLA_PYTHON_CLIENT_MEM_FRACTION=.22` (7.6 GB, inference p50 about 59 ms, the same as `.35`) and vLLM at `--gpu-memory-utilization 0.72` **both stay resident** (peak about 31.3 of 32.6 GB, 1.3 GB spare). That measurement was a first start with a cold compile cache; later starts need 0.74 for the 49152-token context (see "Why not 0.72" below), which leaves about 0.6 GB spare beside the policy server. The old `.35` (11.8 GB) does not fit with vLLM.
 - They **cannot infer at the same time**: while vLLM works, each policy inference takes about 120 ms instead of 59 ms, over the 100 ms control cycle, and the recorded time steps jitter. vLLM idle (loaded, no request) costs the policy nothing.
@@ -167,7 +174,7 @@ The supervisor re-decides the gate every 0.25 s while a worker runs (the worker 
 
 **Stopping vLLM.** The lock is let go only after the server's whole process group is gone and `nvidia-smi` no longer lists any of its processes (up to 60 s); if they are still releasing the card the lock is kept, the decision is `gpu_not_free`, and each tick looks again.
 
-Always true: the workspace GPU lock (`flock` on `levi-hub/.gpu.lock`, `LEVI_AGENT=live`) follows the vLLM process: vLLM is started with the lock's descriptor open, so the lock survives a `kill -9` of the supervisor for as long as vLLM lives, and a restarted supervisor takes the running vLLM back only if the lock is still held by it (else it refuses and says so); the lock is let go only once vLLM is really gone, and `levi live doctor` reports an orphan vLLM and how to stop it. It stops only a server it started (verified by process identity), never another agent's; a vLLM it did not start is used only with `adopt_external` (or in `manual` mode) and never touched; `:5000` and the policy ports are never connected to; an idle tick does not touch `:8100`. Residual risks (measured, see the report): only 1.3-1.5 GB spare; the first episode may see one 280 ms outlier from the policy; a policy server restarted with a larger `MEM_FRACTION` while vLLM is awake fails to load, so start it before vLLM wakes or stop the service first (`levi live stop`).
+Always true: the GPU lock (`flock` on `gpu.lock_file` when one is configured, `LEVI_AGENT=live`) follows the vLLM process: vLLM is started with the lock's descriptor open, so the lock survives a `kill -9` of the supervisor for as long as vLLM lives, and a restarted supervisor takes the running vLLM back only if the lock is still held by it (else it refuses and says so); the lock is let go only once vLLM is really gone, and `levi live doctor` reports an orphan vLLM and how to stop it. It stops only a server it started (verified by process identity), never another agent's; a vLLM it did not start is used only with `adopt_external` (or in `manual` mode) and never touched; `:5000` and the policy ports are never connected to; an idle tick does not touch `:8100`. Residual risks (measured, see the report): only 1.3-1.5 GB spare; the first episode may see one 280 ms outlier from the policy; a policy server restarted with a larger `MEM_FRACTION` while vLLM is awake fails to load, so start it before vLLM wakes or stop the service first (`levi live stop`).
 
 ## The automatic approver
 
@@ -397,8 +404,8 @@ The quantitative record of the labelling: how long each stage takes after an epi
   "schema": "levi.live.status.v1", "pid": 1234, "started_at": 1790000000.0, "updated_at": 1790000400.2,
   "state": "idle|active|annotating|gpu_wait|starting|error|stopped",
   "accepts_sessions": true, "ui_url": "http://127.0.0.1:7880", "core_port": 7881,
-  "workspace": "/home/marvel/work/wenkai/levi-live-ws", "config": null, "auto_approve": false,
-  "watch_roots": ["/home/marvel/work/wenkai/online_rollout_data/models"],
+  "workspace": "/path/to/live-workspace", "config": null, "auto_approve": false,
+  "watch_roots": ["/path/to/rollouts"],
   "gpu": {"mode": "timeshare", "configured_mode": "auto", "vllm_state": "ready|asleep|starting|stopped|error",
           "vllm": {"state": "stopped", "port": 8100, "profile": null, "max_model_len": null, "started_at": null, "error": "", "owned": false},
           "policy_server_seen": true,
@@ -463,7 +470,7 @@ Link a dataset to the viewer with its `repo_id` (`local/<name>`) on the live wor
 - **A worker that finds nothing to do** although a batch looked due (the supervisor started it for demos it could not mirror) is not restarted every half second: the supervisor waits 2, 4, 8 ... s, at most `poll_idle_s`, before the next, logs `nothing to do (n in a row); next try in … s` once for each doubling instead of every start, and when the reason is the dataset's source folder (missing or empty) it marks the dataset `unavailable` in its state (the page's `available: false`, with `unavailable_reason`) and does not queue it again until the folder holds something. Demos already mirrored are not lost.
 - **A demo that never finishes** (a leftover raw capture after a failed mux, a client that died mid-write) becomes `stuck` after `watch.stuck_s`; it is counted, listed by `levi live doctor`, and looked at again only if it changes.
 - **A source replaced after it was mirrored** (a demo deleted and written again under the same number, `metadata.json` replaced after the marker): flagged `source_changed`; mirrored again if not yet annotated; an annotated one keeps the flag (what was annotated is the old content).
-- **`levi live doctor`** prints RSS/threads/nice of every service process, GPU use, vLLM state, disk and run-cache sizes, queue, FR3 state, and warnings (a supervisor over its budget, a main loop that has not ticked for 5 minutes, a process not at nice 19, vLLM up with nothing to do (idle for `idle_timeout_s` + 120 s; never for a prewarmed one, one still loading, or one that was just woken), vLLM failing to start, an orphan vLLM, low disk, copied instead of linked files, stuck demos, replaced sources, a stale status file, a service process holding more than half of its open-file limit: a descriptor leak) and notes (a cold start takes 45-70 s).
+- **`levi live doctor`** prints RSS/threads/nice of every service process, GPU use, vLLM state, disk and run-cache sizes, queue, FR3 state, and warnings (a supervisor over its budget, a main loop that has not ticked for 5 minutes, a process not at nice 19, vLLM up with nothing to do (idle for `idle_timeout_s` + 120 s; never for a prewarmed one, one still loading, or one that was just woken), vLLM failing to start, an orphan vLLM, an unavailable GPU lock, the configuration checks above (a missing or non-executable vLLM script, an unwritable pid folder, a lock file that cannot be made, a missing rollout root, a path into another user's home, a workspace path too long for the core's socket), low disk, copied instead of linked files, stuck demos, replaced sources, a stale status file, a service process holding more than half of its open-file limit: a descriptor leak) and notes (a cold start takes 45-70 s).
 
 ## Measured
 

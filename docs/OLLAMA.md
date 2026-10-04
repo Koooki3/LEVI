@@ -117,7 +117,7 @@ Every piece of feedback is kept as a file (`datasets/<name>/teaching/<run>/episo
 
 A profile of kind `openai-local` runs a model served by vLLM (or another local OpenAI-compatible server) through the same hardened path as Ollama: the narrowed answer schema (sent as `response_format` `json_schema`, which the server enforces while decoding), compact evidence rows, request-cost calibration and image limits, salvage of invalid answers, pause/cancel cutting the request in flight, the GPU guardian and natural-language tasks. Evaluation records name it `local-vlm`. Use it for models without an Ollama build, or to compare a model on both engines.
 
-LEVI does not install, start or stop the server. Run vLLM in an environment of its own, not LEVI's `.venv`. The commands below are for vLLM 0.30:
+LEVI does not install, start or stop the server. Run vLLM in an environment of its own, not LEVI's `.venv` ([vLLM](VLLM.md) shows how to build one, including on a machine without a system CUDA toolkit, and ships a launcher, `scripts/vllm/serve.sh`). The commands below are for vLLM 0.30:
 
 ```bash
 # Qwen3.8-27B, 4-bit weights (sized for a 32 GB GPU)

@@ -424,31 +424,49 @@ def _serves(pid, inodes, depth=6) -> bool:
 
 
 class GpuLock:
-    """The workspace's advisory GPU lock (``levi-hub/.gpu.lock``), held for as
-    long as this service's vLLM holds the GPU. Other users take it with
-    ``flock``; this is the same lock."""
+    """The machine's advisory GPU lock (``gpu.lock_file``), held for as long as
+    this service's vLLM holds the GPU. Other users take it with ``flock``;
+    this is the same lock.
 
-    def __init__(self, path, agent="live"):
+    ``state`` says what the last ``acquire`` found: ``disabled`` (no lock file
+    configured), ``held``, ``busy`` (another process holds it) or
+    ``unavailable`` (the file cannot be opened or created; ``detail`` says
+    why). An unavailable lock is never passed over silently: ``acquire``
+    returns ``allow_unavailable`` (``gpu.lock_unavailable = continue``: True,
+    the old behaviour, with the state shown in the status and the doctor;
+    ``wait``: False, vLLM is not started)."""
+
+    def __init__(self, path, agent="live", allow_unavailable=True):
         self.path = path
         self.agent = agent
+        self.allow_unavailable = allow_unavailable
         self._handle = None
+        self.state = "disabled" if not path else "free"
+        self.detail = ""
 
     def acquire(self) -> bool:
         if not self.path:
+            self.state, self.detail = "disabled", ""
             return True
         if self._handle:
             return True
+        target = Path(self.path).expanduser()
         try:
-            Path(self.path).expanduser().parent.mkdir(parents=True, exist_ok=True)
-            handle = open(Path(self.path).expanduser(), "a")  # noqa: SIM115
-        except OSError:
-            return True  # no usable lock file: the convention cannot apply
+            target.parent.mkdir(parents=True, exist_ok=True)
+            handle = open(target, "a")  # noqa: SIM115
+        except OSError as exc:
+            # No usable lock file: the convention cannot apply. Say so.
+            self.state = "unavailable"
+            self.detail = f"{target}: {exc.strerror or type(exc).__name__}"
+            return bool(self.allow_unavailable)
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             handle.close()
+            self.state, self.detail = "busy", ""
             return False
         self._handle = handle
+        self.state, self.detail = "held", ""
         return True
 
     def release(self):
@@ -457,10 +475,24 @@ class GpuLock:
             # lock for every process sharing the descriptor, vLLM included.
             self._handle.close()
             self._handle = None
+            self.state = "free"
 
     @property
     def held(self) -> bool:
         return self._handle is not None
+
+    @property
+    def unavailable(self) -> bool:
+        return self.state == "unavailable"
+
+    def public(self) -> dict:
+        """For the status file: the lock's path is not shown, only its state."""
+        return {
+            "state": self.state,
+            "detail": self.detail[:200],
+            "configured": bool(self.path),
+            "on_unavailable": "continue" if self.allow_unavailable else "wait",
+        }
 
     def fileno(self):
         """The descriptor of the held lock (None when not held): a vLLM
@@ -498,6 +530,20 @@ def healthy(port, opener=urllib.request.urlopen) -> bool:
             return r.status == 200
     except (OSError, ValueError):
         return False
+
+
+def script_env(config) -> dict:
+    """The environment the launch and stop scripts get (docs/VLLM.md): this
+    process's, plus where the pid file goes and which model to serve under
+    which name. A script of one's own may ignore the LEVI_VLLM_* variables;
+    it must still write ``<vllm.pid_dir>/vllm_<PORT>.pid``."""
+    v = config.vllm
+    env = dict(os.environ)
+    env["LEVI_VLLM_PID_DIR"] = str(config.vllm_pid_dir)
+    env["LEVI_VLLM_SERVED_NAME"] = v.served_model
+    if v.model:
+        env["LEVI_VLLM_MODEL"] = v.model
+    return env
 
 
 def launch_args(config, profile) -> list:
@@ -634,7 +680,7 @@ class Vllm:
         return self.config.vllm.port
 
     def _pidfile(self) -> Path:
-        return Path(self.config.vllm.pid_dir).expanduser() / f"vllm_{self.port}.pid"
+        return self.config.vllm_pid_dir / f"vllm_{self.port}.pid"
 
     def _pid(self):
         try:
@@ -701,9 +747,8 @@ class Vllm:
         """Launch vLLM with ``profile``; False (with ``error``) if it could not."""
         if self.state in ("starting", "ready") and self.mine():
             return True
-        c = self.config.vllm
         self._leaving, self._confirm_pending = set(), False
-        env = dict(os.environ)
+        env = script_env(self.config)
         env.update(
             PORT=str(self.port),
             GPU_UTIL=str(profile["gpu_memory_utilization"]),
@@ -720,7 +765,7 @@ class Vllm:
             with log.open("ab") as sink:
                 process = self.popen(
                     [
-                        str(Path(c.script).expanduser()),
+                        str(self.config.vllm_script),
                         *launch_args(self.config, profile),
                     ],
                     env=env,
@@ -732,9 +777,11 @@ class Vllm:
                 )
                 code = process.wait(timeout=120)
         except (OSError, subprocess.SubprocessError) as exc:
-            self.state, self.error = (
-                "error",
-                f"vLLM launch failed: {type(exc).__name__}",
+            self.state = "error"
+            self.error = (
+                f"vLLM launch failed: {type(exc).__name__} running "
+                f"{self.config.vllm_script} (vllm.script; docs/VLLM.md, "
+                "`levi live doctor`)"
             )
             return False
         pid = self._pid()
@@ -763,7 +810,7 @@ class Vllm:
         return True
 
     def log_path(self) -> Path:
-        return Path(self.config.vllm.pid_dir).expanduser() / f"vllm_{self.port}.log"
+        return self.config.vllm_pid_dir / f"vllm_{self.port}.log"
 
     def failure_reason(self) -> str:
         """Why the last start failed: the last error line of vLLM's own log
@@ -926,10 +973,11 @@ class Vllm:
         try:
             self.runner(
                 [
-                    str(Path(self.config.vllm.stop_script).expanduser()),
+                    str(self.config.vllm_stop_script),
                     "--stop",
                     str(self.port),
                 ],
+                env=script_env(self.config),
                 capture_output=True,
                 timeout=120,
                 check=False,

@@ -117,7 +117,7 @@ uv run levi agent task new "…" --provider qwen-local --supervision supervised 
 
 `openai-local` 类型的档案运行由 vLLM（或其他本地 OpenAI 兼容服务）提供的模型，走与 Ollama 相同的加固流程：收窄的答案 schema（以 `response_format` `json_schema` 发送，由服务在解码时强制执行）、紧凑证据行、请求成本标定与图像上限、保留无效答案中的有效部分、暂停/取消时切断进行中的请求、GPU 守护，以及自然语言任务。评测记录中它的名称是 `local-vlm`。适用于没有 Ollama 版本的模型，或在两种引擎上对比同一模型。
 
-LEVI 不安装、不启动、也不停止该服务。请在单独的环境中运行 vLLM，不要用 LEVI 的 `.venv`。以下命令适用于 vLLM 0.30：
+LEVI 不安装、不启动、也不停止该服务。请在单独的环境中运行 vLLM，不要用 LEVI 的 `.venv`（[vLLM](VLLM.zh-CN.md) 说明怎样搭建这个环境，包括没有系统 CUDA 工具包的机器，并附带启动脚本 `scripts/vllm/serve.sh`）。以下命令适用于 vLLM 0.30：
 
 ```bash
 # Qwen3.8-27B，4 bit 权重（按 32 GB 显卡配置）

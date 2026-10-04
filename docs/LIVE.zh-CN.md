@@ -11,13 +11,18 @@
 **顺序要紧：先带 `--prewarm` 启动实时服务，再起策略服务器，最后开评测。** 这样 vLLM 在显卡还空着时加载（冷启动是 45–70 秒的重 GPU 负载，对策略推理延迟的影响没测过，所以会话处于 running、homing 或等待复位时服务从不冷启动），没活时睡眠；策略服务器（`.22` = 7.6 GB，推理延迟和以前相同，约 59 ms）随后在它旁边加载：
 
 ```bash
+# 0. 每台机器做一次：vLLM 环境和权重（docs/VLLM.zh-CN.md），再写一个写明本机 rollout 目录的
+#    live.toml（没有任何默认值指向它）。
+uv run levi live init --root /path/to/rollouts   # 写出 ~/.levi-live/workspace/live.toml
+uv run levi live doctor                          # 脚本、pid 目录、GPU 锁、根目录：缺什么
+
 # 1. 实时服务（启动一次，一直运行）。--prewarm 让 vLLM 现在就起来。
-cd ~/work/wenkai/LEVI && uv run levi live start --daemon --auto-approve --prewarm
+cd /path/to/LEVI && uv run levi live start --daemon --auto-approve --prewarm
 uv run levi live status        # 等到 vLLM 显示 ready（或 asleep）：约一分钟
 # 在产品 LEVI 里查看：http://127.0.0.1:7860/live
 
 # 2. 策略服务器，MEM_FRACTION 用 .22（vLLM 常驻时不要用 .25 或 .35）
-cd ~/work/wenkai/openpi && XLA_PYTHON_CLIENT_MEM_FRACTION=.22 uv run scripts/serve_policy.py --port 8000 policy:checkpoint --policy.config pi05_fr3_all_state --policy.dir checkpoints/pi05_fr3_all_step49999
+cd /path/to/openpi && XLA_PYTHON_CLIENT_MEM_FRACTION=.22 uv run scripts/serve_policy.py --port 8000 policy:checkpoint --policy.config pi05_fr3_all_state --policy.dir checkpoints/pi05_fr3_all_step49999
 
 # 3. 评测客户端；“是否启用后台 LEVI 标注？”回答是。
 ```
@@ -36,7 +41,7 @@ uv run levi live stop                            # 只停自己的进程
 
 不加 `--auto-approve` 时，服务仍会镜像、建视图并**生成计划**，然后等待：由人在 LEVI 页面批准计划（数据集显示 `awaiting_approval`）。加上它，由下文的“自动批准主体”（有审计）代为通过这些关口。
 
-默认工作区 `/home/marvel/work/wenkai/levi-live-ws`；默认监视的根目录 `/home/marvel/work/wenkai/online_rollout_data/models`（评测客户端 `--rollout-root` 的默认值）。状态文件在 `~/.levi-live/`。
+默认值不指向任何一台机器上的目录。工作区默认 `~/.levi-live/workspace`（状态文件、pid 文件和锁在 `~/.levi-live/`，可用 `--home` 或 `LEVI_LIVE_HOME` 改）；命令没有给 `--workspace`、`LEVI_LIVE_WORKSPACE` 或 `--config` 时，作用于用同一个 home 启动的上一次服务在 `status.json` 里记下的工作区（前提是它仍是实时工作区）。监视的 rollout 根目录（评测客户端的 `--rollout-root`）**没有默认值**：没有它时 `levi live start` 和 `once` 拒绝运行，并说明怎样设置（`--root`、`[watch] roots`）。启动前服务按本机检查配置（`levi live doctor` 显示同样的检查）：vLLM 脚本存在且可执行、pid 目录可写、GPU 锁文件能打开、根目录存在、没有路径指向别的用户的家目录（从别的机器拷来的 `live.toml`）；会让服务无法工作的问题会中止启动并给出修法，其余是警告。
 
 ## 工作方式
 
@@ -89,13 +94,15 @@ uv run levi live stop                            # 只停自己的进程
 - `gpu.policy_ports` 默认 `[8000]`，只在内核的 socket 表里查，从不连接。`gpu.policy_loaded_min_mib` 6000、`gpu.policy_load_wait_s` 120：监听着的策略端口只有进程占用到这么多显存才算“策略服务器已加载”（用于预算规划）；占得更少说明还在加载，vLLM 等待（`settling`），端口出现 `policy_load_wait_s` 秒后按“只有 vLLM”规划；读不到显存同样按“只有 vLLM”的保守预算。`gpu.standby_min_s` 20：冷启动要等会话在 `standby` 待满这么久（它的第一集几秒内就会开始）；这是缓解，不是保证，评测前用 `--prewarm`。`gpu.wake_margin_mib` 850：唤醒时在预算（减去睡眠中的 vLLM 仍占的部分）之外保留的空闲显存；启动用 `vllm.margin_mib`。**在真 GPU 上测过**（策略服务器 `.22`）：睡眠的 vLLM 旁空闲 22768 MiB，唤醒并做完第一批请求用了约 21758 MiB。原来的 300 会在空闲 21843 MiB 时放行唤醒，唤醒后只剩约 85 MiB，低于 `min_free_mib`（600），vLLM 会立刻又被放睡；800 在放行线上仍只剩约 585；850 时唤醒需要 22393，正好在线上也剩 635 MiB，实测的 22768 放行，富余约 375 MiB（按这些数字算出来的，没有观察到真正的来回抖动）。`gpu.blocked_pause_s` 300：GPU 锁被别的 agent 持有、:8100 上有别人的 vLLM、睡眠的 vLLM 因显存不够唤不醒，持续这么久后写进 `labelling_paused`。`gpu.resume_stable_s` 3（0.5–60 秒）、`gpu.resume_max_bounces` 3：人的运行被实时闸门拦住（`blocked`）后，闸门连续开着这么久就自动继续（避开 `episode_imminent` 窗口；用监督进程写在 `gate.json` 里的 `opened_at`，所以两次采样之间的关上又打开也算），每次打开一次；连续被拦这么多次、中间没有进展（完成片段或结算了 token），就留给人点“继续”；0 表示关闭自动恢复。`gpu.unknown_client_pause_s` 600：没有会话为之作证的策略服务器让闸门一直关着，超过这么久状态里 `labelling_paused` 写 `unknown_client`。
 - `vllm.prewarm` 默认 false（`levi live start --prewarm`）：服务启动后、没有评测在跑时就把 vLLM 拉起来并保持常驻，空闲只睡眠，服务停止才停。这是**评测期间不冷启动**的办法。
 - vLLM 的显存预算和上下文长度在每次启动时按**当时的空闲显存**选择（见下），`gpu_memory_utilization_max/min`、`min_utilization_with_policy/alone`（都是 0.725）、`kv_bytes_per_token`、`min_model_len` 是这个选择的界限（按**热**编译缓存下的实测校准，见下）；`margin_mib` 1100；`max_start_failures` 3、`start_backoff_s` 60、`start_backoff_max_s` 600。
-- `vllm` 默认是实测的共存配置（`serve-qwen38.sh`，端口 8100，`gpu_memory_utilization` 0.74，`max_model_len` 49152，`max_images` 128，`max_num_seqs` 2，`max_num_batched_tokens` 4096，`--enable-sleep-mode`）；`idle_timeout_s` 120 秒无活后睡眠或停止（从 vLLM **就绪**那一刻起算，40–60 秒的载入不算闲置；之后从它最后一次有活起算）。
+- 路径类设置的默认值：`service.workspace` 为 `~/.levi-live/workspace`；`watch.roots` 无默认值，必须设置；`fr3.health_file` 为空（没有健康监控文件，FR3 状态为 `missing`，doctor 不报警）；`gpu.lock_file` 为空（不与其他 GPU 用户共用锁；需要时指向本机其他 GPU 用户也使用的 `flock` 文件，例如产品 LEVI 的 `LEVI_GPU_LOCK_FILE`）；`vllm.script` 和 `vllm.stop_script` 都是仓库自带的 `scripts/vllm/serve.sh`（相对路径相对 LEVI 检出目录），`vllm.pid_dir` 为 `~/.levi-live/vllm`，约定见 [vLLM](VLLM.zh-CN.md)；`vllm.model` 为 `RedHatAI/Qwen3.8-27B-INT4`（自带脚本服务的模型，`LEVI_VLLM_MODEL`），`vllm.served_model` 为 `qwen3.8-27b`。
+- `gpu.lock_unavailable` 默认 `continue`：配置了锁文件却打不开或建不了时，`continue` 不带锁启动 vLLM（状态里 `gpu.lock.state = unavailable`，事件和 `levi live doctor` 都会指出）；`wait` 不启动 vLLM（决定码 `lock_unavailable`）。
+- `vllm` 默认是实测的共存配置（端口 8100，`gpu_memory_utilization` 0.74，`max_model_len` 49152，`max_images` 128，`max_num_seqs` 2，`max_num_batched_tokens` 4096，`--enable-sleep-mode`）；`idle_timeout_s` 120 秒无活后睡眠或停止（从 vLLM **就绪**那一刻起算，40–60 秒的载入不算闲置；之后从它最后一次有活起算）。
 - 另有四项此前没写进文档：`watch.settle_s` 2：完成标记至少这么旧（秒）才收这个片段，它是“一集结束到第一个模型请求”固定延迟的一部分（见下文“两集之间有多少时间”）。`pipeline.human_recheck_s` 30：关闭 `auto_approve` 时，等待中的计划或草稿每隔这么久查一次是否已有人决定。`pipeline.budget_seconds` 86400：worker 规划的每个运行的墙钟预算（最多 86400），用完则运行变为 `blocked`。`resources.worker_idle_exit_s` 5：配置文件接受这个键，但目前没有任何代码读取它，worker 在批次做完时退出，而不是空闲等待后退出。
 - 服务为实时工作区设置 `LEVI_DROID_SAMPLE=off`、`LEVI_GPU_SHARING=allow`（用它自己的策略取代 LEVI 的错峰守卫，见下）、`LEVI_SYNC_DISCOVER=off`、`LEVI_SYNC_INTERVAL=30`。
 
 ## GPU 管理
 
-一块 32 GB 的 GPU 与机器人的策略服务器共用。实测（`levi-hub/reports/live-gpu.md`）给出规则：
+一块 32 GB 的 GPU 与机器人的策略服务器共用。维护者在这块卡上的实测（RTX 5090，openpi π0.5 策略服务器）给出下面的规则；`[gpu]` 和 `[vllm]` 的数值就是这次标定，换卡或换模型要重新测：
 
 - 策略服务器用 `XLA_PYTHON_CLIENT_MEM_FRACTION=.22`（7.6 GB，推理 p50 约 59 ms，与 `.35` 相同），vLLM 用 `--gpu-memory-utilization 0.72`，两者**可以同时常驻**（峰值约 31.3 / 32.6 GB，余量 1.3 GB）。这个实测是编译缓存还是冷的第一次启动；之后每次启动要 0.74 才装得下 49152 token 的上下文（见下“为什么不是 0.72”），和策略服务器并存时余量约 0.6 GB。原来的 `.35`（11.8 GB）和 vLLM 放不下。
 - 两者**不能同时推理**：vLLM 工作时策略每次推理约 120 ms，而不是 59 ms，超过 100 ms 控制周期，记录的时间步会抖动。vLLM 空闲（已加载、没有请求）对策略没有影响。
@@ -129,7 +136,7 @@ uv run levi live stop                            # 只停自己的进程
 
 **停止 vLLM。** 只有服务器的整个进程组都退出、`nvidia-smi` 也不再列出它的任何进程之后才放锁（最多等 60 秒）；如果它们还在释放显存，锁保留，决策是 `gpu_not_free`，每个 tick 再看一次。
 
-始终成立：工作区 GPU 锁（`levi-hub/.gpu.lock` 上的 `flock`，`LEVI_AGENT=live`）跟着 vLLM 进程走：vLLM 启动时带着锁的文件描述符，所以监督进程被 `kill -9` 后，只要 vLLM 还活着锁就在；重启的监督进程只有在锁仍被它持有时才接管运行中的 vLLM（否则拒绝并说明）；只有确认 vLLM 真的退出才放锁，`levi live doctor` 会报告孤儿 vLLM 以及如何停止。只停自己启动的服务（按进程身份核对），不碰别人的；不是它启动的 vLLM 只有在 `adopt_external`（或 `manual`）下才使用且从不动它；:5000 和策略端口从不连接；空闲 tick 不碰 :8100。残余风险（见实测报告）：余量只有 1.3–1.5 GB；第一集可能遇到一次 280 ms 的策略离群值；vLLM 清醒时用更大的 `MEM_FRACTION` 重启策略服务器会加载失败，请在 vLLM 唤醒前启动它，或先 `levi live stop`。
+始终成立：GPU 锁（配置了 `gpu.lock_file` 时，在它上面的 `flock`，`LEVI_AGENT=live`）跟着 vLLM 进程走：vLLM 启动时带着锁的文件描述符，所以监督进程被 `kill -9` 后，只要 vLLM 还活着锁就在；重启的监督进程只有在锁仍被它持有时才接管运行中的 vLLM（否则拒绝并说明）；只有确认 vLLM 真的退出才放锁，`levi live doctor` 会报告孤儿 vLLM 以及如何停止。只停自己启动的服务（按进程身份核对），不碰别人的；不是它启动的 vLLM 只有在 `adopt_external`（或 `manual`）下才使用且从不动它；:5000 和策略端口从不连接；空闲 tick 不碰 :8100。残余风险（见实测报告）：余量只有 1.3–1.5 GB；第一集可能遇到一次 280 ms 的策略离群值；vLLM 清醒时用更大的 `MEM_FRACTION` 重启策略服务器会加载失败，请在 vLLM 唤醒前启动它，或先 `levi live stop`。
 
 ## 自动批准主体
 
@@ -391,7 +398,7 @@ anchored_spec = "generic-release.v2.json"
 - **worker 找不到事可做**，而监督进程以为有一批要做（它为镜像不了的片段启动了 worker）：不再每半秒重启一次，监督进程等 2、4、8 …… 秒（最多 `poll_idle_s`）再起下一个，只在每次加倍时写一行 `nothing to do (n in a row); next try in … s`，而不是每次启动都写；原因是数据集的源目录（不存在或为空）时，在它的状态里标 `unavailable`（页面上 `available: false`，带 `unavailable_reason`），目录里有东西之前不再排它。已经镜像的片段不会丢。
 - **永远完不成的片段**（合成失败留下的 raw 采集、客户端写到一半死了）在 `watch.stuck_s` 之后变为 `stuck`：计数、由 `levi live doctor` 列出，只有它再变化才会重新检查。
 - **镜像之后源被替换**（片段删掉后以同一编号重写，或标记之后 `metadata.json` 被替换）：标 `source_changed`；还没标注的会重新镜像；已标注的保留标记（标注的是旧内容）。
-- **`levi live doctor`** 打印服务各进程的 RSS/线程/nice、GPU 占用、vLLM 状态、磁盘和运行缓存大小、队列、FR3 状态、警告（监督进程超预算、主循环 5 分钟没有 tick、进程不在 nice 19、vLLM 开着却没事做（闲置超过 `idle_timeout_s` + 120 秒；预热的、还在载入的、刚被唤醒的都不报）、vLLM 起不来、孤儿 vLLM、磁盘不足、复制而非链接、stuck 片段、被替换的源、状态文件过期、某个服务进程占用的打开文件数超过上限的一半：文件描述符泄漏）和提示（vLLM 冷启动 45–70 秒）。
+- **`levi live doctor`** 打印服务各进程的 RSS/线程/nice、GPU 占用、vLLM 状态、磁盘和运行缓存大小、队列、FR3 状态、警告（监督进程超预算、主循环 5 分钟没有 tick、进程不在 nice 19、vLLM 开着却没事做（闲置超过 `idle_timeout_s` + 120 秒；预热的、还在载入的、刚被唤醒的都不报）、vLLM 起不来、孤儿 vLLM、GPU 锁不可用、上面的配置检查（vLLM 脚本缺失或不可执行、pid 目录不可写、锁文件建不了、监视根目录不存在、路径指向别的用户的家目录、工作区路径太长放不下核心的 socket）、磁盘不足、复制而非链接、stuck 片段、被替换的源、状态文件过期、某个服务进程占用的打开文件数超过上限的一半：文件描述符泄漏）和提示（vLLM 冷启动 45–70 秒）。
 
 ## 实测
 

@@ -153,7 +153,13 @@ class Controller:
         self.scanner = mirror.Scanner(config)
         self.vllm = vllm or gpumgr.Vllm(config)
         self.vllm.keepalive = lambda: self._write_gate(time.time())
-        self.lock = gpumgr.GpuLock(config.gpu.lock_file, config.gpu.lock_agent)
+        self.lock = gpumgr.GpuLock(
+            config.gpu.lock_file,
+            config.gpu.lock_agent,
+            allow_unavailable=config.gpu.lock_unavailable != "wait",
+        )
+        # The last lock problem announced (an event once per change, not per tick).
+        self._lock_said = ""
         self.started_at = time.time()
         self.running = True
         self.wake = threading.Event()
@@ -527,10 +533,21 @@ class Controller:
         )
         if not self.decision.allowed:
             return False
-        if not self.lock.acquire():
-            self.decision = gpumgr.Decision(
-                False, "another agent holds the GPU lock", "lock", need
-            )
+        acquired = self.lock.acquire()
+        self._say_lock()
+        if not acquired:
+            if self.lock.unavailable:
+                self.decision = gpumgr.Decision(
+                    False,
+                    f"the GPU lock cannot be opened ({self.lock.detail}) and "
+                    "gpu.lock_unavailable is wait",
+                    "lock_unavailable",
+                    need,
+                )
+            else:
+                self.decision = gpumgr.Decision(
+                    False, "another agent holds the GPU lock", "lock", need
+                )
             return False
         self.event(
             f"starting vLLM (budget {profile['gpu_memory_utilization']}, "
@@ -544,6 +561,27 @@ class Controller:
             self._vllm_failed(now)
             self.vllm.state = "stopped"
         return False
+
+    def _say_lock(self):
+        """One event when the GPU lock turns unavailable (or recovers): an
+        unusable lock file is never passed over silently."""
+        said = self.lock.detail if self.lock.unavailable else ""
+        if said == self._lock_said:
+            return
+        self._lock_said = said
+        if said:
+            self.event(
+                f"GPU lock unavailable: {said}; "
+                + (
+                    "vLLM starts without it (gpu.lock_unavailable = continue): "
+                    "other GPU users are not coordinated with"
+                    if self.lock.allow_unavailable
+                    else "vLLM is not started (gpu.lock_unavailable = wait)"
+                ),
+                "error",
+            )
+        else:
+            self.event("GPU lock usable again")
 
     def _vllm_failed(self, now):
         """One failed start: wait 60 s doubling to 600 s; after
@@ -659,7 +697,9 @@ class Controller:
         the lock while it runs, take no part in it and say so."""
         if not self.vllm.mine():
             return
-        if self.lock.acquire() or self.vllm.holds_lock(self.config.gpu.lock_file):
+        acquired = self.lock.acquire()
+        self._say_lock()
+        if acquired or self.vllm.holds_lock(self.config.gpu.lock_file):
             self.event("took back the vLLM that was running")
             return
         pid = (jsonio.read(self.vllm.record_path) or {}).get("pid")
@@ -964,7 +1004,7 @@ class Controller:
             self._paused = {"code": code, "since": since or now}
         self._paused["reason"] = str(reason)[:300]
 
-    LONG_BLOCKS = ("vram", "lock", "external_busy", "gpu_not_free")
+    LONG_BLOCKS = ("vram", "lock", "lock_unavailable", "external_busy", "gpu_not_free")
 
     def _blocked_for(self, now) -> float:
         """How long the same long-lived block (see ``LONG_BLOCKS``) has held."""
@@ -978,6 +1018,11 @@ class Controller:
             return (
                 f"{why}: another agent has held the GPU lock for a long time "
                 "(its flock may wait up to 4 hours)"
+            )
+        if code == "lock_unavailable":
+            return (
+                f"{why}: fix gpu.lock_file or its permissions, or set "
+                "gpu.lock_unavailable = continue (`levi live doctor`)"
             )
         if code == "external_busy":
             return f"{why} (port {self.config.vllm.port}); stop it or set vllm.adopt_external"
@@ -1361,6 +1406,8 @@ class Controller:
                 "prewarm": bool(c.vllm.prewarm),
                 "lock_held": self.lock.held
                 or self.vllm.holds_lock(self.config.gpu.lock_file),
+                # disabled | free | held | busy | unavailable (docs/LIVE.md).
+                "lock": self.lock.public(),
             },
             "datasets": rows,
             "queue_depth": sum(1 for r in rows.values() if r["pending"]),
@@ -1441,7 +1488,8 @@ class Controller:
                     idle_rounds = 0
                 if self.state == "gpu_wait" and (
                     not self.gate.open
-                    or self.decision.code in ("manual", "lock", "vram", "external_busy")
+                    or self.decision.code
+                    in ("manual", "lock", "lock_unavailable", "vram", "external_busy")
                 ):
                     break
             if max_seconds and time.time() - started > max_seconds:

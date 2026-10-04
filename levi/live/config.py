@@ -9,14 +9,25 @@ Standard library only (the idle supervisor imports this).
 """
 
 import dataclasses
+import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-DEFAULT_WORKSPACE = "/home/marvel/work/wenkai/levi-live-ws"
+# Every default is either relative to the service's home (``~/.levi-live``) or
+# to this checkout, or empty ("not configured"); no default names a folder of
+# one machine. What a machine must say for itself (the rollout roots) has no
+# default: ``preflight`` names what is missing and how to set it.
 DEFAULT_HOME = "~/.levi-live"
-DEFAULT_ROOTS = ["/home/marvel/work/wenkai/online_rollout_data/models"]
+DEFAULT_WORKSPACE = "~/.levi-live/workspace"
+DEFAULT_ROOTS: list = []
+# The vLLM launcher shipped with LEVI (docs/VLLM.md); a relative script path
+# is resolved against the LEVI checkout.
+DEFAULT_VLLM_SCRIPT = "scripts/vllm/serve.sh"
+DEFAULT_VLLM_PID_DIR = "~/.levi-live/vllm"
 GPU_MODES = ("auto", "timeshare", "coexist", "manual")
+LOCK_UNAVAILABLE = ("continue", "wait")
+CHECKOUT = Path(__file__).resolve().parents[2]
 
 
 @dataclass
@@ -63,7 +74,9 @@ class Watch:
 
 @dataclass
 class Fr3:
-    health_file: str = "~/work/franka_control/run/fr3_health.json"
+    # The robot side's health monitor file (docs/LIVE.md, interface C4); empty:
+    # there is none, and the client's own signals are all there is.
+    health_file: str = ""
     # A health file older than this is "monitor offline", not a red light.
     stale_s: float = 3.0
 
@@ -80,9 +93,14 @@ class Gpu:
     # Ports of a robot-side policy server. Only ever looked up in the kernel's
     # socket table, never connected to.
     policy_ports: list = field(default_factory=lambda: [8000])
-    # flock file shared by the workspace's GPU users (levi-hub/.gpu.lock).
-    lock_file: str = "/home/marvel/work/wenkai/levi-hub/.gpu.lock"
+    # flock file shared with the machine's other GPU users (the same file they
+    # take with ``flock``); empty: no shared lock.
+    lock_file: str = ""
     lock_agent: str = "live"
+    # When ``lock_file`` is set but cannot be opened (a missing folder that
+    # cannot be made, no permission): "continue" starts vLLM without the lock
+    # and says so in the status and the doctor; "wait" does not start it.
+    lock_unavailable: str = "continue"
     # Session states in which the policy is inferring (timeshare sends the
     # model no request then). Homing, waiting for the reset, standby, fault,
     # stopped and finished leave the GPU to the model.
@@ -149,10 +167,16 @@ class Gpu:
 
 @dataclass
 class Vllm:
-    script: str = "/home/marvel/work/wenkai/tools/vllm/serve-qwen38.sh"
-    stop_script: str = "/home/marvel/work/wenkai/tools/vllm/serve.sh"
-    pid_dir: str = "/home/marvel/work/wenkai/tools/vllm/logs"
+    # The launch and stop scripts and where they write ``vllm_<port>.pid``: the
+    # contract is in docs/VLLM.md. A relative path is relative to the checkout.
+    script: str = DEFAULT_VLLM_SCRIPT
+    stop_script: str = DEFAULT_VLLM_SCRIPT
+    pid_dir: str = DEFAULT_VLLM_PID_DIR
     port: int = 8100
+    # The model the shipped script serves (LEVI_VLLM_MODEL) under the name the
+    # worker asks for (LEVI_VLLM_SERVED_NAME). Scripts of your own may ignore
+    # both and serve a fixed model, as long as its name is ``served_model``.
+    model: str = "RedHatAI/Qwen3.8-27B-INT4"
     served_model: str = "qwen3.8-27b"
     # The memory budget (a share of vLLM's own total) is chosen at each start
     # from the VRAM that is free then (``gpumgr.plan_budget``). CALIBRATION
@@ -318,6 +342,18 @@ class Config:
     def logs_dir(self) -> Path:
         return self.live_dir / "logs"
 
+    @property
+    def vllm_script(self) -> Path:
+        return resolve_path(self.vllm.script)
+
+    @property
+    def vllm_stop_script(self) -> Path:
+        return resolve_path(self.vllm.stop_script)
+
+    @property
+    def vllm_pid_dir(self) -> Path:
+        return resolve_path(self.vllm.pid_dir)
+
     def effective_gpu_mode(self) -> str:
         """``auto`` resolved: timeshare."""
         return "timeshare" if self.gpu.mode == "auto" else self.gpu.mode
@@ -347,6 +383,10 @@ class Config:
         problems = []
         if g.mode not in GPU_MODES:
             problems.append(f"gpu.mode must be one of {', '.join(GPU_MODES)}")
+        if g.lock_unavailable not in LOCK_UNAVAILABLE:
+            problems.append(
+                f"gpu.lock_unavailable must be one of {', '.join(LOCK_UNAVAILABLE)}"
+            )
         if w.backlog not in ("skip", "process"):
             problems.append("watch.backlog must be skip or process")
         if p.refine not in ("always", "auto"):
@@ -390,11 +430,191 @@ class Config:
             problems.append("pipeline.max_attempts must be >= 1")
         if r.report_keep < 1:
             problems.append("resources.report_keep must be >= 1")
-        if not (w.roots and all(isinstance(x, str) and x for x in w.roots)):
-            problems.append("watch.roots needs at least one directory")
+        # No roots is valid here (``status``, ``doctor``, ``init`` need none);
+        # a command that watches refuses it in ``preflight``.
+        if not all(isinstance(x, str) and x for x in w.roots):
+            problems.append("watch.roots must list directory paths")
         if problems:
             raise ValueError("Invalid live configuration: " + "; ".join(problems))
         return self
+
+
+def resolve_path(value) -> Path:
+    """A configured path: ``~`` expanded; a relative one is relative to the
+    LEVI checkout (where the shipped ``scripts/vllm/serve.sh`` lives)."""
+    path = Path(str(value)).expanduser()
+    return path if path.is_absolute() else CHECKOUT / path
+
+
+def foreign_home(path) -> str | None:
+    """The user whose home ``path`` points into when that is not this user's
+    (``/home/<someone>/...`` or ``/Users/<someone>/...``): a configuration
+    copied from another machine or account. None otherwise."""
+    try:
+        parts = Path(str(path)).expanduser().parts
+    except (RuntimeError, ValueError):
+        return None
+    if len(parts) < 3 or parts[0] != "/" or parts[1] not in ("home", "Users"):
+        return None
+    mine = Path.home().parts
+    if len(mine) >= 3 and mine[1] == parts[1] and mine[2] == parts[2]:
+        return None
+    return parts[2]
+
+
+def _writable_dir(path: Path) -> bool:
+    """``path`` is a writable folder, or the nearest folder above it that
+    exists is writable (so it can be made). Nothing is created."""
+    probe = path
+    while not probe.exists():
+        if probe.parent == probe:
+            return False
+        probe = probe.parent
+    return probe.is_dir() and os.access(probe, os.W_OK | os.X_OK)
+
+
+def _check(level, key, message, fix="") -> dict:
+    return {"level": level, "key": key, "message": message, "fix": fix}
+
+
+def checks(config: "Config", *, watching: bool = True) -> list:
+    """What this configuration needs from the machine, read only: each check
+    is ``{"level": ok|warn|fail, "key", "message", "fix"}``. ``fail`` means a
+    service started with it cannot work; ``preflight`` refuses those.
+    ``watching``: the rollout roots are needed (start, once)."""
+    c, out = config, []
+    where = f"{c.path or (str(c.workspace / 'live.toml'))}"
+    # Rollout roots: a machine's own folders, never defaulted.
+    if not c.watch.roots:
+        out.append(
+            _check(
+                "fail" if watching else "warn",
+                "watch.roots",
+                "no rollout root is configured",
+                f'set [watch] roots = ["/path/to/rollouts"] in {where}, or pass --root PATH',
+            )
+        )
+    for root in c.watch.roots:
+        if not Path(root).expanduser().is_dir():
+            out.append(
+                _check(
+                    "warn",
+                    "watch.roots",
+                    f"watch root {root} does not exist",
+                    "create it, or correct [watch] roots (the service waits for it)",
+                )
+            )
+    # The vLLM scripts and their pid folder (not used in manual mode).
+    if c.gpu.mode != "manual":
+        for key, path in (
+            ("vllm.script", c.vllm_script),
+            ("vllm.stop_script", c.vllm_stop_script),
+        ):
+            if not path.is_file():
+                out.append(
+                    _check(
+                        "fail",
+                        key,
+                        f"{key} {path} does not exist",
+                        f"point [vllm] {key.split('.')[1]} at a launcher that follows "
+                        "docs/VLLM.md (the shipped one is scripts/vllm/serve.sh), "
+                        'or use gpu.mode = "manual" with a vLLM you run yourself',
+                    )
+                )
+            elif not os.access(path, os.X_OK):
+                out.append(
+                    _check(
+                        "fail",
+                        key,
+                        f"{key} {path} is not executable",
+                        f"chmod +x {path}",
+                    )
+                )
+            else:
+                out.append(_check("ok", key, f"{key} {path}"))
+        if not _writable_dir(c.vllm_pid_dir):
+            out.append(
+                _check(
+                    "fail",
+                    "vllm.pid_dir",
+                    f"vllm.pid_dir {c.vllm_pid_dir} cannot be written",
+                    "choose a folder you can write ([vllm] pid_dir); the launcher "
+                    "writes vllm_<port>.pid there",
+                )
+            )
+    # The shared GPU lock.
+    if not c.gpu.lock_file:
+        out.append(
+            _check(
+                "ok",
+                "gpu.lock_file",
+                "no shared GPU lock configured (gpu.lock_file is empty): other "
+                "GPU users on this machine are not coordinated with",
+            )
+        )
+    else:
+        lock = Path(c.gpu.lock_file).expanduser()
+        usable = (
+            os.access(lock, os.R_OK | os.W_OK)
+            if lock.exists()
+            else _writable_dir(lock.parent)
+        )
+        if usable:
+            out.append(_check("ok", "gpu.lock_file", f"GPU lock {lock}"))
+        else:
+            out.append(
+                _check(
+                    "fail" if c.gpu.lock_unavailable == "wait" else "warn",
+                    "gpu.lock_file",
+                    f"GPU lock {lock} cannot be opened or created: "
+                    + (
+                        "vLLM will not start (gpu.lock_unavailable = wait)"
+                        if c.gpu.lock_unavailable == "wait"
+                        else "vLLM starts without it (gpu.lock_unavailable = continue)"
+                    ),
+                    'fix the path or its permissions, or set gpu.lock_file = ""',
+                )
+            )
+    # Paths that point into another user's home: a configuration copied from
+    # another machine or account.
+    named = [
+        ("service.workspace", c.service.workspace),
+        ("service.home", c.service.home),
+        ("fr3.health_file", c.fr3.health_file),
+        ("gpu.lock_file", c.gpu.lock_file),
+        ("vllm.script", c.vllm.script),
+        ("vllm.stop_script", c.vllm.stop_script),
+        ("vllm.pid_dir", c.vllm.pid_dir),
+        *(("watch.roots", r) for r in c.watch.roots),
+    ]
+    for key, value in named:
+        who = foreign_home(value) if value else None
+        if who:
+            out.append(
+                _check(
+                    "warn",
+                    key,
+                    f"{key} {value} points into the home of another user ({who})",
+                    f"a configuration from another machine or account? correct {key} in {where}",
+                )
+            )
+    return out
+
+
+def preflight(config: "Config", *, watching: bool = True) -> list:
+    """Refuse (ValueError) a configuration a service cannot run with, naming
+    each problem and its fix; returns the warnings otherwise."""
+    found = checks(config, watching=watching)
+    failed = [c for c in found if c["level"] == "fail"]
+    if failed:
+        raise ValueError(
+            "the live configuration cannot run: "
+            + "; ".join(
+                c["message"] + (f" (fix: {c['fix']})" if c["fix"] else "")
+                for c in failed
+            )
+        )
+    return [c for c in found if c["level"] == "warn"]
 
 
 def _fill(cls, data: dict, where: str):

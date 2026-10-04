@@ -52,7 +52,9 @@ def add_config_options(parser):
     parser.add_argument("--config", help="live.toml (default: <workspace>/live.toml)")
     parser.add_argument(
         "--workspace",
-        help=f"service workspace (default {live_config.DEFAULT_WORKSPACE})",
+        help="service workspace (default: LEVI_LIVE_WORKSPACE, else the workspace "
+        "of the last service started with this home, else "
+        f"{live_config.DEFAULT_WORKSPACE})",
     )
     parser.add_argument(
         "--root",
@@ -94,9 +96,25 @@ def add_config_options(parser):
     )
 
 
+def remembered_workspace(home) -> str | None:
+    """The workspace the last service started with ``home`` recorded in its
+    status file, when it is still a live workspace: commands given neither
+    ``--workspace`` nor a configuration act on the service that runs (or
+    last ran), not on a built-in default."""
+    status = jsonio.read(Path(home).expanduser() / "status.json")
+    named = status.get("workspace") if isinstance(status, dict) else None
+    if not isinstance(named, str) or not Path(named).is_absolute():
+        return None
+    return named if locate.is_live(named) else None
+
+
 def resolve_config(args):
     workspace = args.workspace or os.environ.get(ENV_WORKSPACE)
     path = args.config or os.environ.get(ENV_CONFIG)
+    if not workspace and not path:
+        workspace = remembered_workspace(
+            args.home or os.environ.get(ENV_HOME) or live_config.DEFAULT_HOME
+        )
     config = live_config.load(path, workspace)
     if args.roots:
         config.watch.roots = list(args.roots)
@@ -387,8 +405,18 @@ def write_effective(config):
     target.write_text(live_config.render(config))
 
 
+def preflight(config) -> None:
+    """Refuse a configuration the service cannot run with (no rollout root,
+    a missing or non-executable vLLM script, an unwritable pid folder...),
+    naming each fix; print the warnings (``live_config.checks``)."""
+    for warning in live_config.preflight(config):
+        print(f"warning: {warning['message']}", file=sys.stderr)
+
+
 def cmd_start(args) -> int:
     config = resolve_config(args)
+    if not args.daemon_child:
+        preflight(config)
     if args.daemon:
         return daemonize(args, config)
     prepare(config, args.adopt_workspace, core=not args.no_core)
@@ -639,6 +667,18 @@ def format_status(value, alive) -> str:
     lines.append(
         f"resources  rss {res.get('rss_mb')} MiB, {res.get('threads')} threads, cpu {res.get('cpu_percent')}%"
     )
+    lock = gpu.get("lock") or {}
+    if lock.get("state") == "unavailable":
+        lines.append(
+            f"gpu lock   UNAVAILABLE ({lock.get('detail')}); "
+            + (
+                "vLLM is not started"
+                if lock.get("on_unavailable") == "wait"
+                else "vLLM runs without it"
+            )
+        )
+    elif lock.get("state"):
+        lines.append(f"gpu lock   {lock.get('state')}")
     fr3 = value.get("fr3") or {}
     lines.append(f"fr3        {fr3.get('state')} {fr3.get('detail') or ''}")
     for session in value.get("sessions") or []:
@@ -756,7 +796,7 @@ def diagnose(config) -> dict:
         warnings.append(
             f"an orphan vLLM (pid {record['pid']}, port {record.get('port')}) is still "
             "running with no live service: it holds the GPU. `levi live start` takes it "
-            f"back, or stop it with `{config.vllm.stop_script} --stop {record.get('port')}`"
+            f"back, or stop it with `{config.vllm_stop_script} --stop {record.get('port')}`"
         )
     gpu = {"vram": gpumgr.vram(), "processes": gpumgr.gpu_holders()}
     report["gpu"] = gpu
@@ -854,14 +894,41 @@ def diagnose(config) -> dict:
                 f"{name}: the source of {row['source_changed']} mirrored demo(s) was "
                 "replaced after it was mirrored (annotations belong to the old content)"
             )
-    for root in config.watch.roots:
-        if not Path(root).expanduser().is_dir():
-            warnings.append(f"watch root {root} does not exist")
+    # The configuration against this machine: scripts, pid folder, lock,
+    # rollout roots, paths into another user's home (``live_config.checks``).
+    found = live_config.checks(config)
+    if len(os.fsencode(socket_path(config))) > SOCKET_LIMIT:
+        found.append(
+            {
+                "level": "fail",
+                "key": "service.workspace",
+                "message": "the workspace path is too long for the core's Unix socket "
+                f"({len(os.fsencode(socket_path(config)))} > {SOCKET_LIMIT} bytes)",
+                "fix": "choose a shorter --workspace",
+            }
+        )
+    report["config_checks"] = found
+    for check in found:
+        if check["level"] != "ok":
+            warnings.append(
+                check["message"] + (f" (fix: {check['fix']})" if check["fix"] else "")
+            )
+    lock = gpu_status.get("lock") or {}
+    report["gpu_lock"] = lock
+    if lock.get("state") == "unavailable":
+        warnings.append(
+            f"GPU lock unavailable: {lock.get('detail') or 'the lock file cannot be opened'}; "
+            + (
+                "vLLM is not started (gpu.lock_unavailable = wait)"
+                if lock.get("on_unavailable") == "wait"
+                else "vLLM runs without it, other GPU users are not coordinated with"
+            )
+        )
     fr3 = ((value or {}).get("fr3") or {}).get("state")
     report["fr3"] = fr3
     if fr3 == "red":
         warnings.append("FR3 health monitor reports a red light")
-    elif fr3 in ("offline", "missing"):
+    elif fr3 in ("offline", "missing") and config.fr3.health_file:
         warnings.append(
             f"FR3 health monitor is {fr3} (the client falls back to its own signals)"
         )
@@ -917,6 +984,13 @@ def cmd_doctor(args) -> int:
             f"queue      depth {report['queue']['depth']}; {report['queue']['datasets']}"
         )
         print(f"fr3        {report['fr3']}")
+        lock = report.get("gpu_lock") or {}
+        print(
+            f"gpu lock   {lock.get('state') or ('not configured' if not config.gpu.lock_file else 'unknown (service not running)')}"
+        )
+        for check in report.get("config_checks") or []:
+            if check["level"] == "ok":
+                print(f"config ok  {check['message']}")
         for w in report["warnings"]:
             print(f"WARNING    {w}")
         if not report["warnings"]:
@@ -934,7 +1008,7 @@ def cmd_once(args) -> int:
         if (
             not args.workspace
             or Path(args.workspace).expanduser().resolve()
-            == Path(live_config.DEFAULT_WORKSPACE).resolve()
+            == Path(live_config.DEFAULT_WORKSPACE).expanduser().resolve()
         ):
             raise ValueError(
                 "--fake-vlm labels with a stand-in model and (with --auto-approve) "
@@ -947,6 +1021,12 @@ def cmd_once(args) -> int:
         config.gpu.mode = "manual"
         config.vllm.port = port
         print(f"fake vLLM on 127.0.0.1:{port}")
+    try:
+        preflight(config)
+    except ValueError:
+        if fake:
+            server.shutdown()
+        raise
     prepare(config, args.adopt_workspace)
     instance = controller.Instance(config.home, config.workspace)
     if not instance.acquire():
