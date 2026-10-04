@@ -22,6 +22,8 @@ const { CommandPalette } = await import("../command-palette");
 const { ShortcutsDialog } = await import("../shortcuts-dialog");
 const { navPages } = await import("../commands");
 const { SHELL_EVENTS } = await import("../shell-events");
+const { JobsMenu } = await import("../jobs-menu");
+const { JOBS_POLL_MS } = await import("../jobs");
 
 setupDom();
 
@@ -390,6 +392,52 @@ describe("a native modal dialog keeps the keys", () => {
       await press(document.body, "k", { ctrlKey: true });
       expect(document.querySelector(".levi-palette")).not.toBeNull();
     });
+  });
+});
+
+describe("jobs entry", () => {
+  test("asks on load and on opening the menu, never twice at once, 60 s apart", async () => {
+    expect(JOBS_POLL_MS).toBe(60_000);
+    const asked: string[] = [];
+    const pending: Array<() => void> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = ((url: string) => {
+      asked.push(String(url));
+      return new Promise<Response>((resolve) =>
+        pending.push(() =>
+          resolve(
+            new Response(
+              String(url).includes("pool")
+                ? JSON.stringify({ jobs: [{ status: "running" }] })
+                : JSON.stringify([{ status: "running" }, { status: "done" }]),
+            ),
+          ),
+        ),
+      );
+    }) as unknown as typeof fetch;
+    try {
+      await render(<JobsMenu pool />);
+      expect(asked).toEqual(["/api/levi/pool/jobs", "/api/levi/jobs"]);
+      const trigger = document.querySelector<HTMLButtonElement>(
+        'button[aria-haspopup="menu"]',
+      )!;
+      // Still waiting: opening the menu does not ask again.
+      await click(trigger);
+      expect(asked).toHaveLength(2);
+      await click(trigger); // close
+      await act(async () => {
+        pending.splice(0).forEach((answer) => answer());
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      expect(
+        trigger.querySelector(".ds-menu-trigger__badge")!.textContent,
+      ).toBe("2");
+      // Answered: opening the menu asks once more.
+      await click(trigger);
+      expect(asked).toHaveLength(4);
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 });
 

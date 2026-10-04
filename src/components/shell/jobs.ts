@@ -37,5 +37,9 @@ export function totalJobs(counts: JobCounts | null): number {
   return counts ? counts.pool + counts.conversion : 0;
 }
 
-/** Poll interval: often enough to notice a job, rare enough to cost nothing. */
-export const JOBS_POLL_MS = 30_000;
+/**
+ * While the tab is visible the counts refresh this often; they are also
+ * asked on first load and whenever the Jobs menu opens. A request still
+ * waiting for its answer is never sent again.
+ */
+export const JOBS_POLL_MS = 60_000;

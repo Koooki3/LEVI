@@ -2,10 +2,10 @@
 /**
  * The header's Jobs entry: how many training pool exports/scans/pushes and
  * conversions are running, and where to follow them. It asks the two job
- * lists every 30 s while the tab is visible (and at once when it becomes
- * visible again); nothing is asked while the tab is hidden.
+ * lists on first load, when the menu opens, and every 60 s while the tab is
+ * visible (never while hidden, never twice at once).
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Layers, ListChecks, Repeat } from "lucide-react";
 import { Menu } from "@/components/ds";
@@ -19,46 +19,58 @@ import {
   type JobCounts,
 } from "./jobs";
 
-export function useRunningJobs(pool: boolean): JobCounts | null {
+export function useRunningJobs(pool: boolean): {
+  counts: JobCounts | null;
+  refresh: () => void;
+} {
   const [counts, setCounts] = useState<JobCounts | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const ask = async () => {
-      const [poolBody, conversionBody] = await Promise.all([
-        pool ? leviApi<unknown>("pool/jobs").catch(() => null) : null,
-        leviApi<unknown>("jobs").catch(() => null),
-      ]);
-      if (cancelled) return;
-      setCounts({
-        pool: countPoolJobs(poolBody),
-        conversion: countConversionJobs(conversionBody),
+  const inFlight = useRef(false);
+  const alive = useRef(true);
+  const refresh = useCallback(() => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    void Promise.all([
+      pool ? leviApi<unknown>("pool/jobs").catch(() => null) : null,
+      leviApi<unknown>("jobs").catch(() => null),
+    ])
+      .then(([poolBody, conversionBody]) => {
+        if (alive.current)
+          setCounts({
+            pool: countPoolJobs(poolBody),
+            conversion: countConversionJobs(conversionBody),
+          });
+      })
+      .finally(() => {
+        inFlight.current = false;
       });
-    };
-    const schedule = () => {
-      if (timer) clearTimeout(timer);
-      timer = null;
-      if (document.visibilityState === "hidden") return;
-      void ask().finally(() => {
-        if (!cancelled && document.visibilityState !== "hidden")
-          timer = setTimeout(schedule, JOBS_POLL_MS);
-      });
-    };
-    schedule();
-    document.addEventListener("visibilitychange", schedule);
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-      document.removeEventListener("visibilitychange", schedule);
-    };
   }, [pool]);
-  return counts;
+
+  useEffect(() => {
+    alive.current = true;
+    refresh();
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const follow = () => {
+      if (timer) clearInterval(timer);
+      timer =
+        document.visibilityState === "hidden"
+          ? null
+          : setInterval(refresh, JOBS_POLL_MS);
+    };
+    follow();
+    document.addEventListener("visibilitychange", follow);
+    return () => {
+      alive.current = false;
+      if (timer) clearInterval(timer);
+      document.removeEventListener("visibilitychange", follow);
+    };
+  }, [refresh]);
+  return { counts, refresh };
 }
 
 export function JobsMenu({ pool }: { pool: boolean }) {
   const { t } = useLocale();
   const router = useRouter();
-  const counts = useRunningJobs(pool);
+  const { counts, refresh } = useRunningJobs(pool);
   const total = totalJobs(counts);
   const running = (n: number) =>
     n === 0 ? t("none running") : t("{n} running").replace("{n}", String(n));
@@ -75,6 +87,7 @@ export function JobsMenu({ pool }: { pool: boolean }) {
       align="end"
       tooltip={label}
       badge={total > 0 ? String(Math.min(total, 99)) : undefined}
+      onOpenChange={(open) => open && refresh()}
       items={[
         ...(pool
           ? [

@@ -46,6 +46,7 @@ export function Menu({
   badge,
   tooltip,
   tooltipPlacement = "bottom",
+  onOpenChange,
 }: {
   label: ReactNode;
   items: MenuItem[];
@@ -66,6 +67,8 @@ export function Menu({
   /** Visible tooltip for the trigger (an icon-only trigger needs one). */
   tooltip?: string;
   tooltipPlacement?: "top" | "bottom";
+  /** Told when the menu opens or closes (e.g. to refresh its items). */
+  onOpenChange?: (open: boolean) => void;
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
@@ -74,6 +77,14 @@ export function Menu({
   const trigger = useRef<HTMLButtonElement>(null);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const disabled = (i: number) => Boolean(items[i]?.disabled);
+  const onOpenChangeRef = useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
+  const opened = useRef(false);
+  useEffect(() => {
+    if (opened.current === open) return;
+    opened.current = open;
+    onOpenChangeRef.current?.(open);
+  }, [open]);
 
   const openAt = (where: "first" | "last") => {
     const index = rovingIndex(
