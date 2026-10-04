@@ -241,9 +241,9 @@ describe("theme boot script", () => {
     return attributes["data-theme"] ?? null;
   };
 
-  test("no stored value means dark during the transition (until stage 5)", () => {
-    expect(boot({ getItem: () => null })).toBe("dark");
-    expect(boot({ getItem: () => "purple" })).toBe("dark");
+  test("no stored value follows the system: data-theme stays off", () => {
+    expect(boot({ getItem: () => null })).toBeNull();
+    expect(boot({ getItem: () => "purple" })).toBeNull();
   });
 
   test("an explicit choice wins; system leaves data-theme off", () => {
@@ -259,7 +259,7 @@ describe("theme boot script", () => {
           throw new Error("SecurityError");
         },
       }),
-    ).toBe("dark");
+    ).toBeNull();
   });
 });
 

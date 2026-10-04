@@ -39,10 +39,10 @@ describe("theme preference", () => {
     expect(resolveTheme("light", true)).toBe("light");
   });
 
-  test("transitional default: no stored value means dark (until stage 5)", () => {
-    expect(THEME_DEFAULT_PREFERENCE).toBe("dark");
+  test("no stored value follows the system", () => {
+    expect(THEME_DEFAULT_PREFERENCE).toBe("system");
     window.localStorage.removeItem(THEME_STORAGE_KEY);
-    expect(readThemePreference()).toBe("dark");
+    expect(readThemePreference()).toBe("system");
   });
 
   test("persists every explicit choice in localStorage, the default included", () => {

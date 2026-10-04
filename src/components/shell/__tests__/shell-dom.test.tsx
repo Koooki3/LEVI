@@ -281,8 +281,9 @@ function Frame({ children }: { children?: React.ReactNode }) {
 const ctrlK = { ctrlKey: true };
 
 describe("theme default", () => {
-  test("no stored value: the frame applies dark to <html> (until stage 5)", async () => {
+  test("no stored value: the frame follows the system (no data-theme)", async () => {
     window.localStorage.removeItem("levi-theme");
+    document.documentElement.setAttribute("data-theme", "dark");
     let theme = "";
     function Probe() {
       theme = useShell().theme;
@@ -293,8 +294,8 @@ describe("theme default", () => {
         <Probe />
       </Frame>,
     );
-    expect(theme).toBe("dark");
-    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(theme).toBe("system");
+    expect(document.documentElement.getAttribute("data-theme")).toBeNull();
   });
 });
 

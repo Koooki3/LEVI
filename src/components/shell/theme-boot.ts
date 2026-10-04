@@ -8,11 +8,11 @@
  * The root layout is a server component and cannot read constants from the
  * client module `@/lib/design/theme`, so the key and the default are repeated
  * here; a test checks that they equal THEME_STORAGE_KEY and
- * THEME_DEFAULT_PREFERENCE. Transitional default: "dark" until design stage 5,
- * then back to "system".
+ * THEME_DEFAULT_PREFERENCE ("system": nothing is set, the tokens follow the
+ * media query).
  */
 export const THEME_BOOT_KEY = "levi-theme";
-export const THEME_BOOT_DEFAULT: "system" | "light" | "dark" = "dark";
+export const THEME_BOOT_DEFAULT: "system" | "light" | "dark" = "system";
 
 export const THEME_BOOT_SCRIPT = `(function(){var d=${JSON.stringify(
   THEME_BOOT_DEFAULT,

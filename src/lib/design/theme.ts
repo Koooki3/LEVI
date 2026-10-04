@@ -23,13 +23,12 @@ export type ResolvedTheme = "light" | "dark";
 export const THEME_STORAGE_KEY = "levi-theme";
 
 /**
- * The preference when none is stored. Transitional: "dark" until the pages
- * use the tokens (design stage 5), because a light frame over the still-dark
- * pages looks broken; stage 5 sets it back to "system". An explicit choice,
+ * The preference when none is stored: follow the system (design stage 5;
+ * while the pages were still dark it was "dark"). An explicit choice,
  * "system" included, is stored and always wins. The pre-paint script
  * (components/shell/theme-boot.ts) repeats this value; a test keeps them equal.
  */
-export const THEME_DEFAULT_PREFERENCE: ThemePreference = "dark";
+export const THEME_DEFAULT_PREFERENCE: ThemePreference = "system";
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 
 export function normalizeThemePreference(
