@@ -10,9 +10,10 @@ import { describe, expect, mock, test } from "bun:test";
 import { act } from "react";
 
 const pushed: string[] = [];
+const route = { path: "/pool" };
 mock.module("next/navigation", () => ({
   useRouter: () => ({ push: (href: string) => pushed.push(href) }),
-  usePathname: () => "/pool",
+  usePathname: () => route.path,
 }));
 
 const { ConfirmProvider, useConfirmAction } = await import("../confirm");
@@ -129,6 +130,74 @@ describe("confirmation instead of window.confirm", () => {
     await flush();
     expect(log).toEqual([]);
     expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  });
+});
+
+describe("an open confirmation keeps the page's keys", () => {
+  test("arrows, Space, Ctrl+Z/S and Escape do not reach window listeners", async () => {
+    const seen: string[] = [];
+    const onKey = (event: KeyboardEvent) =>
+      seen.push(`${event.ctrlKey ? "Ctrl+" : ""}${event.key}`);
+    window.addEventListener("keydown", onKey);
+    try {
+      await render(
+        <ConfirmProvider>
+          <Guarded log={[]} />
+        </ConfirmProvider>,
+      );
+      await focus(document.querySelector("#danger"));
+      await click(document.querySelector("#danger"));
+      const inside = document.activeElement;
+      expect(inside?.textContent).toBe("Cancel");
+      await press(inside, "ArrowDown");
+      await press(inside, " ");
+      await press(inside, "z", { ctrlKey: true });
+      await press(inside, "s", { ctrlKey: true });
+      expect(seen).toEqual([]);
+      await press(inside, "Escape");
+      expect(seen).toEqual([]);
+      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      // Closed: the page has its keys again.
+      await press(document.querySelector("#danger"), "ArrowDown");
+      expect(seen).toEqual(["ArrowDown"]);
+    } finally {
+      window.removeEventListener("keydown", onKey);
+    }
+  });
+
+  test("a page change answers an open question no", async () => {
+    let answer: Promise<boolean> | null = null;
+    function Ask() {
+      const confirm = useConfirmAction();
+      return (
+        <button
+          type="button"
+          id="ask"
+          onClick={() => {
+            answer = confirm({ title: "Delete?", confirmLabel: "Delete" });
+          }}
+        >
+          Ask
+        </button>
+      );
+    }
+    route.path = "/pool";
+    const { rerender } = await render(
+      <ConfirmProvider>
+        <Ask />
+      </ConfirmProvider>,
+    );
+    await click(document.querySelector("#ask"));
+    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+    route.path = "/explore";
+    await rerender(
+      <ConfirmProvider>
+        <Ask />
+      </ConfirmProvider>,
+    );
+    expect(await answer!).toBe(false);
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    route.path = "/pool";
   });
 });
 

@@ -12,7 +12,7 @@ import { X } from "lucide-react";
 import { useLocale } from "@/components/levi-locale";
 import { Button } from "./Button";
 import { IconButton } from "./IconButton";
-import { cx, useModalFocus } from "./internal";
+import { cx, keepKeysInside, useModalFocus } from "./internal";
 
 type Layer = {
   open: boolean;
@@ -98,6 +98,7 @@ function ModalLayer({
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
+        onKeyDown={modal ? keepKeysInside : undefined}
         className={cx(`ds-${kind}`, "ds-on-raised", className)}
         style={width ? { width: `${width}px` } : undefined}
       >
@@ -243,6 +244,8 @@ export function ConfirmDialog({
 export function useConfirm(container?: Element | null): {
   confirm: (options: ConfirmOptions) => Promise<boolean>;
   dialog: ReactNode;
+  /** Close an open question as cancelled (its caller gets false). */
+  cancel: () => void;
 } {
   const [state, setState] = useState<
     (ConfirmOptions & { resolve: (value: boolean) => void }) | null
@@ -263,6 +266,14 @@ export function useConfirm(container?: Element | null): {
     state?.resolve(value);
     setState(null);
   };
+  const cancel = useCallback(
+    () =>
+      setState((previous) => {
+        previous?.resolve(false);
+        return null;
+      }),
+    [],
+  );
   const dialog = state ? (
     <ConfirmDialog
       {...state}
@@ -272,5 +283,5 @@ export function useConfirm(container?: Element | null): {
       onCancel={() => settle(false)}
     />
   ) : null;
-  return { confirm, dialog };
+  return { confirm, dialog, cancel };
 }

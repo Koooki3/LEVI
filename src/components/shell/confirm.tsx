@@ -8,7 +8,8 @@
  *     return;
  *
  * Cancel, Escape and the scrim all answer false, as `window.confirm` did
- * for Cancel. Outside a ConfirmProvider every question answers false, so an
+ * for Cancel, and so does a page change while it is open. While it is open,
+ * keys typed in it do not reach the page's shortcuts. Outside a ConfirmProvider every question answers false, so an
  * action that needs a yes is never taken without one.
  *
  * The dialog lives at the root, outside any page's styles (an older panel's
@@ -20,9 +21,12 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
+import { usePathname } from "next/navigation";
 import { useConfirm, type ConfirmOptions } from "@/components/ds";
 
 export type ConfirmAction = (options: ConfirmOptions) => Promise<boolean>;
@@ -47,7 +51,15 @@ export function openModalDialog(): HTMLDialogElement | null {
 
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [container, setContainer] = useState<Element | null>(null);
-  const { confirm: ask, dialog } = useConfirm(container);
+  const { confirm: ask, dialog, cancel } = useConfirm(container);
+  // Leaving the page leaves its question unanswered: answer it "no".
+  const pathname = usePathname();
+  const shownAt = useRef(pathname);
+  useEffect(() => {
+    if (shownAt.current === pathname) return;
+    shownAt.current = pathname;
+    cancel();
+  }, [pathname, cancel]);
   const confirm = useCallback<ConfirmAction>(
     (options) => {
       setContainer(openModalDialog());

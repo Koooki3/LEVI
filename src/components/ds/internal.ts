@@ -109,6 +109,9 @@ export function useModalFocus(
       if (event.key !== "Escape" || !isTop() || event.defaultPrevented) return;
       if (!trap && !container.contains(document.activeElement)) return;
       event.preventDefault();
+      // Handled: listeners on window (page shortcuts) do not see it, as
+      // with a native confirm().
+      event.stopPropagation();
       onEscapeRef.current?.();
     };
     const onFocusIn = (event: FocusEvent) => {
@@ -171,4 +174,17 @@ export function rovingIndex(
     if (!isDisabled(index)) return index;
   }
   return null;
+}
+
+/**
+ * For a modal layer's panel (`onKeyDown`): keys typed inside a modal stay
+ * inside, as with a native dialog, so page shortcuts bound on window (Space,
+ * arrows, J/K, Ctrl/⌘+S/Z/Y) do not act behind it. Tab and Escape go on: the
+ * layer's own document listeners handle them.
+ */
+export function keepKeysInside(event: {
+  key: string;
+  stopPropagation: () => void;
+}): void {
+  if (event.key !== "Tab" && event.key !== "Escape") event.stopPropagation();
 }
