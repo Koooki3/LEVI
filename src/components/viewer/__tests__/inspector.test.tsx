@@ -156,3 +156,22 @@ describe("go to the inspector", () => {
     expect(seen).toBeNull();
   });
 });
+
+describe("inspector toggle icon", () => {
+  test("points sideways for the column and up/down for the drawer", async () => {
+    const wide = mockMatchMedia(["min-width: 1200px"]);
+    const a = await render(<Page enabled />);
+    wide();
+    const wideIcon = a.host
+      .querySelector("aside [aria-expanded] svg")!
+      .getAttribute("class");
+    const narrow = mockMatchMedia(["max-width: 1199px"]);
+    const b = await render(<Page enabled />);
+    narrow();
+    const narrowIcon = b.host
+      .querySelector("aside [aria-expanded] svg")!
+      .getAttribute("class");
+    expect(wideIcon).toContain("panel-right");
+    expect(narrowIcon).toContain("panel-bottom");
+  });
+});

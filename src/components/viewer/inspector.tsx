@@ -9,7 +9,12 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import {
+  PanelBottomClose,
+  PanelBottomOpen,
+  PanelRightClose,
+  PanelRightOpen,
+} from "lucide-react";
 import { IconButton } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import "./viewer.css";
@@ -36,6 +41,26 @@ export function useInspectorSlot(): HTMLElement | null {
  */
 export function useInspectorReveal(): (() => void) | null {
   return useContext(InspectorReveal);
+}
+
+const NARROW = "(max-width: 1199px)";
+
+function useNarrow(): boolean {
+  const [narrow, setNarrow] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia(NARROW).matches,
+  );
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia(NARROW);
+    const update = () => setNarrow(query.matches);
+    update();
+    query.addEventListener?.("change", update);
+    return () => query.removeEventListener?.("change", update);
+  }, []);
+  return narrow;
 }
 
 /**
@@ -81,6 +106,7 @@ export function InspectorLayout({
       typeof window.matchMedia !== "function" ||
       window.matchMedia("(min-width: 1200px)").matches,
   );
+  const narrow = useNarrow();
   const asideRef = useRef<HTMLElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   useEffect(() => {
@@ -100,6 +126,9 @@ export function InspectorLayout({
     // After the body is shown again.
     requestAnimationFrame(() => headingRef.current?.focus());
   }, []);
+  const [openIcon, closeIcon] = narrow
+    ? [PanelBottomOpen, PanelBottomClose]
+    : [PanelRightOpen, PanelRightClose];
   return (
     <InspectorSlot.Provider value={enabled ? slot : null}>
       <InspectorReveal.Provider value={enabled ? reveal : null}>
@@ -117,7 +146,7 @@ export function InspectorLayout({
               {t("Inspector")}
             </h2>
             <IconButton
-              icon={open ? PanelRightClose : PanelRightOpen}
+              icon={open ? closeIcon : openIcon}
               size="sm"
               label={t(open ? "Collapse inspector" : "Expand inspector")}
               aria-expanded={open}
