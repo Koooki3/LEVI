@@ -71,16 +71,17 @@ def _resolve(path) -> Path | None:
         return None
 
 
-ENV_CHECKOUT = "LEVI_LIVE_PROTECT_CHECKOUT"
+# The checkout this code runs from.
+THIS_CHECKOUT = Path(__file__).resolve().parents[2]
 
 
 def checkout_root() -> Path:
-    """The LEVI checkout whose worktrees' ``.state`` are protected: the one
-    this code runs from, unless ``LEVI_LIVE_PROTECT_CHECKOUT`` names another
-    (the test suite points it at a scratch folder: its temporary folders lie
-    under this checkout's own ``.state``)."""
-    named = (os.environ.get(ENV_CHECKOUT) or "").strip()
-    return Path(named).expanduser() if named else Path(__file__).resolve().parents[2]
+    """The LEVI checkout whose worktrees' ``.state`` are protected: always the
+    one this code runs from. No setting changes it (a value read from a
+    ``.env`` must never unprotect the product's ``.state``); the test suite
+    replaces this function, since its temporary folders lie under the
+    checkout's own ``.state``."""
+    return THIS_CHECKOUT
 
 
 def _git_common_dir(top: Path) -> Path | None:

@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from live_helpers import Rollouts
 
-from levi.live import api, cli, controller, mirror, resources, sessions
+from levi.live import api, cli, controller, locate, mirror, resources, sessions
 from levi.live import config as live_config
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -392,14 +392,27 @@ def free_port():
         return sock.getsockname()[1]
 
 
-def service(tmp_path, *args):
+@pytest.fixture
+def outside():
+    """A workspace for a `levi live` child process. The child protects every
+    `.state` of the checkout it runs from, and pytest's temporary folders lie
+    under this checkout's `.state` (in-process tests point the guard at a
+    scratch checkout instead, see conftest.py): so outside the checkout."""
+    import shutil
+
+    base = short_dir()
+    yield base / "ws"
+    shutil.rmtree(base, ignore_errors=True)
+
+
+def service(tmp_path, *args, ws=None):
     return [
         sys.executable,
         "-m",
         "levi.live",
         *args,
         "--workspace",
-        str(tmp_path / "ws"),
+        str(ws or tmp_path / "ws"),
         "--home",
         str(tmp_path / "home"),
         "--root",
@@ -412,10 +425,10 @@ def service(tmp_path, *args):
     ]
 
 
-def cli_run(tmp_path, *args, timeout=120):
+def cli_run(tmp_path, *args, timeout=120, ws=None):
     env = {**os.environ, "PYTHONPATH": str(PROJECT)}
     return subprocess.run(
-        service(tmp_path, *args),
+        service(tmp_path, *args, ws=ws),
         capture_output=True,
         text=True,
         env=env,
@@ -425,9 +438,11 @@ def cli_run(tmp_path, *args, timeout=120):
     )
 
 
-def test_the_service_idles_cheaply_heartbeats_and_stops_on_request(tmp_path, rollouts):
+def test_the_service_idles_cheaply_heartbeats_and_stops_on_request(
+    tmp_path, rollouts, outside
+):
     home = tmp_path / "home"
-    started = cli_run(tmp_path, "start", "--daemon", "--no-core", "--no-ui")
+    started = cli_run(tmp_path, "start", "--daemon", "--no-core", "--no-ui", ws=outside)
     assert started.returncode == 0, started.stdout + started.stderr
     try:
         status_file = home / "status.json"
@@ -447,26 +462,28 @@ def test_the_service_idles_cheaply_heartbeats_and_stops_on_request(tmp_path, rol
         assert resources.thread_count(pid) <= 4
         assert len(stamps) >= 2  # the heartbeat moves (<= 5 s apart)
         assert os.getpriority(os.PRIO_PROCESS, pid) == 19
-        again = cli_run(tmp_path, "start", "--no-core", "--no-ui")
+        again = cli_run(tmp_path, "start", "--no-core", "--no-ui", ws=outside)
         assert again.returncode == 1 and "already running" in again.stdout
-        shown = cli_run(tmp_path, "status")
+        shown = cli_run(tmp_path, "status", ws=outside)
         assert shown.returncode == 0 and "state      idle" in shown.stdout
-        doctor = json.loads(cli_run(tmp_path, "doctor", "--json").stdout)
+        doctor = json.loads(cli_run(tmp_path, "doctor", "--json", ws=outside).stdout)
         assert doctor["alive"] and doctor["processes"][0]["nice"] == 19
         assert not [w for w in doctor["warnings"] if "supervisor holds" in w]
         assert doctor["processes"][0]["fds"] > 0 and doctor["processes"][0]["fd_limit"]
         assert not [w for w in doctor["warnings"] if "open files" in w]
     finally:
-        stopped = cli_run(tmp_path, "stop", timeout=200)
+        stopped = cli_run(tmp_path, "stop", timeout=200, ws=outside)
     assert stopped.returncode == 0 and "stopped" in stopped.stdout
     assert json.loads((home / "status.json").read_text())["state"] == "stopped"
-    assert cli_run(tmp_path, "stop").stdout.startswith(
+    assert cli_run(tmp_path, "stop", ws=outside).stdout.startswith(
         "The live service is not running"
     )
-    assert cli_run(tmp_path, "status").returncode == 3
+    assert cli_run(tmp_path, "status", ws=outside).returncode == 3
 
 
-def test_once_with_the_fake_model_labels_everything_and_exits(tmp_path, rollouts):
+def test_once_with_the_fake_model_labels_everything_and_exits(
+    tmp_path, rollouts, outside
+):
     rollouts.write(0)
     rollouts.write(1)
     rollouts.begin(2)
@@ -477,10 +494,11 @@ def test_once_with_the_fake_model_labels_everything_and_exits(tmp_path, rollouts
         "--auto-approve",
         "--process-backlog",
         timeout=300,
+        ws=outside,
     )
     assert done.returncode == 0, done.stdout + done.stderr
     assert "pi05_fake__stack_the_plates: 0 / 0 / 2 / 0 / 1" in done.stdout
-    audit = (tmp_path / "ws/live/audit.jsonl").read_text()
+    audit = (outside / "live/audit.jsonl").read_text()
     assert "changes.commit" in audit and "refused" not in audit
 
 
@@ -726,7 +744,7 @@ def test_the_service_refuses_a_workspace_that_is_not_a_live_one(tmp_path, monkey
     # The checkout's own .state is refused whatever the flag says.
     checkout = tmp_path / "checkout"
     (checkout / ".state").mkdir(parents=True)
-    monkeypatch.setenv("LEVI_LIVE_PROTECT_CHECKOUT", str(checkout))
+    monkeypatch.setattr(locate, "checkout_root", lambda: checkout)
     for inside in (checkout / ".state", checkout / ".state/tmp/ws", checkout):
         own = cfg(tmp_path)
         own.service.workspace = str(inside)
@@ -745,7 +763,7 @@ def test_the_main_checkout_and_the_environment_workspace_are_refused_even_adopte
     tree = tmp_path / "LEVI-live-fix"
     tree.mkdir()
     (tree / ".git").write_text(f"gitdir: {main}/.git/worktrees/live-fix\n")
-    monkeypatch.setenv("LEVI_LIVE_PROTECT_CHECKOUT", str(tree))
+    monkeypatch.setattr(locate, "checkout_root", lambda: tree)
     c = cfg(tmp_path)
     c.service.workspace = str(main / ".state")
     (main / ".state/outputs/LEVI").mkdir(parents=True)
@@ -767,11 +785,14 @@ def test_the_main_checkout_and_the_environment_workspace_are_refused_even_adopte
     cli.prepare(c)
 
 
-def test_init_and_start_respect_the_guard(tmp_path):
-    (tmp_path / "ws/outputs/LEVI").mkdir(parents=True)
-    done = cli_run(tmp_path, "init")
+def test_init_and_start_respect_the_guard(tmp_path, outside):
+    (outside / "outputs/LEVI").mkdir(parents=True)
+    done = cli_run(tmp_path, "init", ws=outside)
     assert done.returncode == 2 and "not a live one" in done.stderr
-    assert cli_run(tmp_path, "start", "--no-core").returncode == 2
+    assert cli_run(tmp_path, "start", "--no-core", ws=outside).returncode == 2
+    # And a child process protects this checkout's `.state` by itself.
+    inside = cli_run(tmp_path, "init")
+    assert inside.returncode == 2 and "product LEVI" in inside.stderr
 
 
 def test_two_homes_cannot_run_on_one_workspace(tmp_path):

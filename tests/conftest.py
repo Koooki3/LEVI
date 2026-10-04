@@ -117,9 +117,13 @@ def _no_real_live_service(monkeypatch, tmp_path):
     monkeypatch.delenv("LEVI_LIVE_WORKSPACE", raising=False)
     # The `.state` of every checkout is refused as (or around) a live
     # workspace, and the test's temporary folders lie under this checkout's
-    # `.state`: the protected checkout is a scratch one here. A test of the
-    # guard points it at a checkout of its own.
-    monkeypatch.setenv("LEVI_LIVE_PROTECT_CHECKOUT", str(tmp_path / "no-checkout"))
+    # `.state`: in this process the protected checkout is a scratch one. A
+    # test of the guard points it at a checkout of its own; a `levi live`
+    # child process protects the real one and gets a workspace outside it
+    # (`outside` in test_live_service.py).
+    from levi.live import locate
+
+    monkeypatch.setattr(locate, "checkout_root", lambda: tmp_path / "no-checkout")
 
 
 @pytest.fixture(autouse=True)
