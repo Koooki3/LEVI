@@ -2101,7 +2101,7 @@
   position: relative;
 }
 .pg-head {
-  margin-bottom: var(--ds-space-6);
+  margin-bottom: var(--ds-space-3);
 }
 /* A choice among cards (choose this export): the chosen one is outlined and
    pressed, never a second primary button. */

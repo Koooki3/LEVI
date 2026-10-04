@@ -69,15 +69,18 @@ export function ConversionWizard({
     inspectJob !== null &&
     (inspectJob.status === "queued" || inspectJob.status === "running");
   // The one primary button of the wizard is the current step's (docs/DESIGN.md).
-  const step: "inspect" | "choose" | "review" | "run" | "done" = plan
-    ? "run"
-    : runJob?.dataset
-      ? "done"
-      : report && target
-        ? "review"
-        : report
-          ? "choose"
-          : "inspect";
+  const step: "inspect" | "choose" | "review" | "run" | "running" | "done" =
+    plan
+      ? "run"
+      : runJob?.dataset
+        ? "done"
+        : runJob && ["queued", "running"].includes(runJob.status)
+          ? "running"
+          : report && target
+            ? "review"
+            : report
+              ? "choose"
+              : "inspect";
 
   function extraOptions(): Record<string, unknown> {
     const parsed = JSON.parse(extra || "{}") as unknown;
