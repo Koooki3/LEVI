@@ -214,7 +214,8 @@ export default function OverviewPanel({
                   aria-label="Camera"
                   value={selectedCamera}
                   onChange={handleCameraChange}
-                  className="ds-input w-auto"
+                  className="ds-input"
+                  style={{ width: "auto", maxWidth: "100%" }}
                 >
                   {data.cameras.map((cam) => (
                     <option key={cam} value={cam}>
