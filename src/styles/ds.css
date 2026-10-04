@@ -1280,3 +1280,58 @@
     background: CanvasText;
   }
 }
+
+/* ── Stage 2 additions: non-modal sheet, menu trigger variants ────── */
+/* A non-modal sheet lets the page beside it take pointer input. */
+.ds-layer--nonmodal {
+  pointer-events: none;
+  z-index: var(--ds-z-overlay);
+}
+.ds-layer--nonmodal > .ds-sheet {
+  pointer-events: auto;
+}
+.ds-menu-trigger--icon {
+  width: var(--ds-control-md);
+  padding: 0;
+  justify-content: center;
+}
+.ds-menu-trigger--icon:has(.ds-menu-trigger__badge) {
+  width: auto;
+  padding: 0 var(--ds-space-2);
+}
+.ds-menu-trigger__badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--ds-space-1);
+  border-radius: var(--ds-radius-full);
+  background: var(--ds-accent);
+  color: var(--ds-on-accent);
+  font-size: var(--ds-text-caption-size);
+  line-height: 18px;
+  font-weight: var(--ds-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.ds-menu__check {
+  display: inline-flex;
+  color: var(--ds-text-primary);
+}
+.ds-menu,
+.ds-toast-region,
+.ds-tooltip {
+  font-family: var(--ds-font-sans);
+}
+/* Menus size to their longest item instead of wrapping labels. */
+.ds-menu {
+  width: max-content;
+  max-width: min(360px, calc(100vw - 2 * var(--ds-space-4)));
+}
+.ds-menu__label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ds-menu__shortcut {
+  margin-left: var(--ds-space-4);
+  font-size: var(--ds-text-caption-size);
+}

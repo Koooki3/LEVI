@@ -189,6 +189,31 @@ describe("ConfirmDialog and useConfirm", () => {
   });
 });
 
+describe("useConfirm, superseded", () => {
+  test("a second question cancels the first, so no caller waits forever", async () => {
+    let api: ReturnType<typeof useConfirm> | null = null;
+    function Harness() {
+      api = useConfirm();
+      return <>{api.dialog}</>;
+    }
+    await render(<Harness />);
+    let first: Promise<boolean> | null = null;
+    let second: Promise<boolean> | null = null;
+    await act(async () => {
+      first = api!.confirm({ title: "One?", confirmLabel: "One" });
+    });
+    await act(async () => {
+      second = api!.confirm({ title: "Two?", confirmLabel: "Two" });
+    });
+    expect(await first!).toBe(false);
+    expect(document.querySelector('[role="alertdialog"] h2')!.textContent).toBe(
+      "Two?",
+    );
+    await press(document.activeElement, "Escape");
+    expect(await second!).toBe(false);
+  });
+});
+
 describe("Sheet", () => {
   test("is a modal dialog drawn from its side, closed by Escape", async () => {
     const onClose = mock(() => undefined);
@@ -202,6 +227,55 @@ describe("Sheet", () => {
     expect(sheet.contains(document.activeElement)).toBe(true);
     await press(document.activeElement, "Escape");
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  test("modal={false}: no scrim, page usable, Escape only from inside, focus returns", async () => {
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" id="opener" onClick={() => setOpen(true)}>
+            Open
+          </button>
+          <button type="button" id="page">
+            Page
+          </button>
+          <Sheet
+            open={open}
+            modal={false}
+            width={520}
+            onClose={() => setOpen(false)}
+            title="Agent workbench"
+          >
+            <button type="button" id="inside">
+              Inside
+            </button>
+          </Sheet>
+        </>
+      );
+    }
+    const { host } = await render(<Harness />);
+    const opener = host.querySelector<HTMLButtonElement>("#opener")!;
+    await focus(opener);
+    await click(opener);
+    const sheet = host.querySelector<HTMLElement>('[role="dialog"]')!;
+    expect(sheet.getAttribute("aria-modal")).toBeNull();
+    expect(host.querySelector(".ds-scrim")).toBeNull();
+    expect(host.querySelector(".ds-layer--nonmodal")).not.toBeNull();
+    expect(sheet.style.width).toBe("520px");
+    expect(sheet.contains(document.activeElement)).toBe(true);
+    // Focus may go to the page and stays there (no trap).
+    const page = host.querySelector<HTMLButtonElement>("#page")!;
+    await focus(page);
+    expect(document.activeElement).toBe(page);
+    // Escape typed on the page does not close the drawer.
+    await press(page, "Escape");
+    expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+    // From inside it does, and focus goes back to the opener.
+    await focus(host.querySelector("#inside"));
+    await press(document.activeElement, "Escape");
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(opener);
   });
 });
 
@@ -258,6 +332,64 @@ describe("Menu", () => {
     await press(document.activeElement, "Escape");
     expect(host.querySelector('[role="menu"]')).toBeNull();
     expect(document.activeElement).toBe(trigger);
+  });
+
+  test("checked items are menuitemradio with aria-checked", async () => {
+    const chosen: string[] = [];
+    const { host } = await render(
+      <Menu
+        label="Theme: System"
+        iconOnly
+        icon={Trash2}
+        variant="ghost"
+        tooltip="Theme: System"
+        items={[
+          {
+            id: "system",
+            label: "System",
+            checked: true,
+            onSelect: () => chosen.push("system"),
+          },
+          {
+            id: "dark",
+            label: "Dark",
+            checked: false,
+            onSelect: () => chosen.push("dark"),
+          },
+        ]}
+      />,
+    );
+    const trigger = host.querySelector<HTMLButtonElement>(
+      'button[aria-haspopup="menu"]',
+    )!;
+    expect(trigger.className).toContain("ds-btn--ghost");
+    expect(trigger.className).toContain("ds-menu-trigger--icon");
+    // The label stays the accessible name, visually hidden.
+    expect(trigger.querySelector(".ds-sr-only")!.textContent).toBe(
+      "Theme: System",
+    );
+    // An icon-only trigger has a visible tooltip with the same words.
+    expect(host.querySelector('[role="tooltip"]')!.textContent).toBe(
+      "Theme: System",
+    );
+    await focus(trigger);
+    await press(trigger, "ArrowDown");
+    const radios = host.querySelectorAll('[role="menuitemradio"]');
+    expect(radios).toHaveLength(2);
+    expect(radios[0].getAttribute("aria-checked")).toBe("true");
+    expect(radios[1].getAttribute("aria-checked")).toBe("false");
+    await press(document.activeElement, "ArrowDown");
+    await press(document.activeElement, "Enter");
+    expect(chosen).toEqual(["dark"]);
+  });
+
+  test("a badge follows the label", async () => {
+    const { host } = await render(
+      <Menu label="Jobs" icon={Trash2} iconOnly badge="2" items={[]} />,
+    );
+    expect(host.querySelector(".ds-menu-trigger__badge")!.textContent).toBe(
+      "2",
+    );
   });
 
   test("a click outside closes it", async () => {

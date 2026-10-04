@@ -33,6 +33,11 @@ const modalStack: HTMLElement[] = [];
  * stray focus()) is pulled back, Escape calls `onEscape`. With nested
  * modals only the innermost one reacts. On close, focus goes back to the
  * element that had it.
+ *
+ * `trap: false` is for a non-modal layer (a side panel next to the page):
+ * focus still moves in on open and back on close, but Tab may leave, focus
+ * elsewhere is not pulled back, and Escape closes it only while focus is
+ * inside.
  */
 export function useModalFocus(
   containerRef: RefObject<HTMLElement | null>,
@@ -40,11 +45,13 @@ export function useModalFocus(
   options: {
     initialFocus?: RefObject<HTMLElement | null>;
     onEscape?: () => void;
+    trap?: boolean;
   } = {},
 ): void {
   const onEscapeRef = useRef(options.onEscape);
   onEscapeRef.current = options.onEscape;
   const initialFocus = options.initialFocus;
+  const trap = options.trap ?? true;
 
   useEffect(() => {
     if (!open) return;
@@ -73,7 +80,7 @@ export function useModalFocus(
 
     // Capture phase: runs before anything inside can move focus out.
     const onTab = (event: KeyboardEvent) => {
-      if (event.key !== "Tab" || !isTop()) return;
+      if (event.key !== "Tab" || !trap || !isTop()) return;
       const items = focusableIn(container);
       const active = document.activeElement;
       if (!active || !container.contains(active)) {
@@ -100,11 +107,12 @@ export function useModalFocus(
     // (stopPropagation / preventDefault) closes first, not the modal.
     const onEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || !isTop() || event.defaultPrevented) return;
+      if (!trap && !container.contains(document.activeElement)) return;
       event.preventDefault();
       onEscapeRef.current?.();
     };
     const onFocusIn = (event: FocusEvent) => {
-      if (!isTop()) return;
+      if (!trap || !isTop()) return;
       const target = event.target as Node | null;
       if (target && target !== document && !container.contains(target))
         focusEdge("first");
@@ -125,7 +133,7 @@ export function useModalFocus(
       )
         previous.focus();
     };
-  }, [open, containerRef, initialFocus]);
+  }, [open, containerRef, initialFocus, trap]);
 }
 
 /** Roving focus over a list: returns the index the key moves to, or null. */

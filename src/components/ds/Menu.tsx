@@ -8,8 +8,9 @@ import {
   type ReactNode,
 } from "react";
 import type { LucideIcon } from "lucide-react";
-import { ChevronDown } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { Icon } from "./Icon";
+import { Tooltip } from "./Tooltip";
 import { cx, rovingIndex } from "./internal";
 
 export type MenuItem = {
@@ -19,6 +20,11 @@ export type MenuItem = {
   shortcut?: ReactNode;
   tone?: "default" | "danger";
   disabled?: boolean;
+  /**
+   * One of a set of choices (theme, language): the item becomes a
+   * `menuitemradio` with `aria-checked`, and a check mark shows the chosen one.
+   */
+  checked?: boolean;
   onSelect: () => void;
 };
 
@@ -35,6 +41,11 @@ export function Menu({
   align = "start",
   triggerClassName,
   ariaLabel,
+  variant = "secondary",
+  iconOnly = false,
+  badge,
+  tooltip,
+  tooltipPlacement = "bottom",
 }: {
   label: ReactNode;
   items: MenuItem[];
@@ -43,6 +54,18 @@ export function Menu({
   triggerClassName?: string;
   /** Accessible name when `label` is not text. */
   ariaLabel?: string;
+  /** Trigger look: outlined (default) or frameless until hovered. */
+  variant?: "secondary" | "ghost";
+  /**
+   * Show only the icon (no chevron); `label` stays as the accessible name
+   * (visually hidden). Needs `icon`.
+   */
+  iconOnly?: boolean;
+  /** A short count or mark after the label (e.g. running jobs). */
+  badge?: ReactNode;
+  /** Visible tooltip for the trigger (an icon-only trigger needs one). */
+  tooltip?: string;
+  tooltipPlacement?: "top" | "bottom";
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
@@ -127,27 +150,46 @@ export function Menu({
     }
   };
 
+  const button = (
+    <button
+      ref={trigger}
+      type="button"
+      id={`${id}-button`}
+      aria-haspopup="menu"
+      aria-expanded={open}
+      aria-controls={open ? `${id}-menu` : undefined}
+      aria-label={ariaLabel}
+      className={cx(
+        "ds-btn ds-btn--md ds-focus",
+        `ds-btn--${variant}`,
+        iconOnly && "ds-menu-trigger--icon",
+        triggerClassName,
+      )}
+      onClick={() => (open ? close(false) : openAt("first"))}
+      onKeyDown={onTriggerKey}
+    >
+      {icon && <Icon icon={icon} />}
+      <span className={iconOnly ? "ds-sr-only" : "ds-btn__label"}>{label}</span>
+      {badge !== undefined && badge !== null && badge !== false && (
+        <span className="ds-menu-trigger__badge">{badge}</span>
+      )}
+      {!iconOnly && <Icon icon={ChevronDown} />}
+    </button>
+  );
+
   return (
     <div className="ds-menu-anchor" ref={root}>
-      <button
-        ref={trigger}
-        type="button"
-        id={`${id}-button`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={open ? `${id}-menu` : undefined}
-        aria-label={ariaLabel}
-        className={cx(
-          "ds-btn ds-btn--secondary ds-btn--md ds-focus",
-          triggerClassName,
-        )}
-        onClick={() => (open ? close(false) : openAt("first"))}
-        onKeyDown={onTriggerKey}
-      >
-        {icon && <Icon icon={icon} />}
-        <span className="ds-btn__label">{label}</span>
-        <Icon icon={ChevronDown} />
-      </button>
+      {tooltip ? (
+        <Tooltip
+          content={tooltip}
+          describe={false}
+          placement={tooltipPlacement}
+        >
+          {button}
+        </Tooltip>
+      ) : (
+        button
+      )}
       {open && (
         <div
           role="menu"
@@ -163,7 +205,8 @@ export function Menu({
                 itemRefs.current[index] = element;
               }}
               type="button"
-              role="menuitem"
+              role={item.checked === undefined ? "menuitem" : "menuitemradio"}
+              aria-checked={item.checked}
               tabIndex={index === active ? 0 : -1}
               aria-disabled={item.disabled || undefined}
               className={cx(
@@ -181,6 +224,11 @@ export function Menu({
               <span className="ds-menu__label">{item.label}</span>
               {item.shortcut && (
                 <span className="ds-menu__shortcut">{item.shortcut}</span>
+              )}
+              {item.checked && (
+                <span className="ds-menu__check">
+                  <Icon icon={Check} />
+                </span>
               )}
             </button>
           ))}

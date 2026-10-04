@@ -33,6 +33,16 @@ type Layer = {
   className?: string;
 };
 
+type ModalProps = {
+  /**
+   * false: a non-modal layer (no scrim, the page stays usable, focus is not
+   * trapped; Escape closes it while focus is inside). Default true.
+   */
+  modal?: boolean;
+  /** Inline width in px (a resizable side sheet). */
+  width?: number | null;
+};
+
 function ModalLayer({
   open,
   onClose,
@@ -47,35 +57,53 @@ function ModalLayer({
   className,
   kind,
   role = "dialog",
-}: Layer & {
-  kind: string;
-  role?: "dialog" | "alertdialog";
-}) {
+  modal = true,
+  width,
+}: Layer &
+  ModalProps & {
+    kind: string;
+    role?: "dialog" | "alertdialog";
+  }) {
   const { t } = useLocale();
   const titleId = useId();
   const descriptionId = useId();
   const panel = useRef<HTMLDivElement>(null);
-  useModalFocus(panel, open, { initialFocus, onEscape: onClose });
+  useModalFocus(panel, open, {
+    initialFocus,
+    onEscape: onClose,
+    trap: modal,
+  });
   if (!open) return null;
   const layer = (
-    <div className={cx("ds-layer", `ds-layer--${kind}`)}>
-      <div
-        className="ds-scrim"
-        aria-hidden="true"
-        // Keep focus where it is when the scrim is pressed.
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={closeOnScrim ? onClose : undefined}
-      />
+    <div
+      className={cx(
+        "ds-layer",
+        `ds-layer--${kind}`,
+        !modal && "ds-layer--nonmodal",
+      )}
+    >
+      {modal && (
+        <div
+          className="ds-scrim"
+          aria-hidden="true"
+          // Keep focus where it is when the scrim is pressed.
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={closeOnScrim ? onClose : undefined}
+        />
+      )}
       <div
         ref={panel}
         role={role}
-        aria-modal="true"
+        aria-modal={modal ? "true" : undefined}
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
         className={cx(`ds-${kind}`, "ds-on-raised", className)}
+        style={width ? { width: `${width}px` } : undefined}
       >
-        <header className="ds-dialog__header">
+        {/* div, not header/footer: inside a dialog those would be page
+            landmarks (banner, contentinfo) to assistive technology. */}
+        <div className="ds-dialog__header">
           <h2 id={titleId} className="ds-dialog__title">
             {title}
           </h2>
@@ -87,14 +115,14 @@ function ModalLayer({
               size="sm"
             />
           )}
-        </header>
+        </div>
         {description && (
           <p id={descriptionId} className="ds-dialog__description">
             {description}
           </p>
         )}
         {children && <div className="ds-dialog__body">{children}</div>}
-        {footer && <footer className="ds-dialog__footer">{footer}</footer>}
+        {footer && <div className="ds-dialog__footer">{footer}</div>}
       </div>
     </div>
   );
@@ -121,11 +149,12 @@ export function Dialog({
 /**
  * A side or bottom sheet (drawer) with the same focus rules as Dialog.
  * It slides in from its side; under reduced motion it only appears.
+ * `modal={false}` keeps the page beside it usable (no scrim, no focus trap).
  */
 export function Sheet({
   side = "right",
   ...props
-}: Layer & { side?: "right" | "left" | "bottom" }) {
+}: Layer & ModalProps & { side?: "right" | "left" | "bottom" }) {
   return (
     <ModalLayer
       {...props}
@@ -149,7 +178,8 @@ export type ConfirmOptions = {
 /**
  * A confirmation for an irreversible action. The danger button is never the
  * default focus: focus starts on Cancel for `tone="danger"`. Escape and the
- * scrim cancel. Replaces `window.confirm` (stage 2 swaps the existing calls).
+ * scrim cancel. Replaces `window.confirm`; app code asks through
+ * `useConfirmAction()` (components/shell/confirm.tsx), one dialog at the root.
  */
 export function ConfirmDialog({
   open,
@@ -219,7 +249,14 @@ export function useConfirm(container?: Element | null): {
   >(null);
   const confirm = useCallback(
     (options: ConfirmOptions) =>
-      new Promise<boolean>((resolve) => setState({ ...options, resolve })),
+      new Promise<boolean>((resolve) =>
+        // A new question replaces one still open: that one counts as
+        // cancelled, so its caller is never left waiting.
+        setState((previous) => {
+          if (previous && previous.resolve !== resolve) previous.resolve(false);
+          return { ...options, resolve };
+        }),
+      ),
     [],
   );
   const settle = (value: boolean) => {
