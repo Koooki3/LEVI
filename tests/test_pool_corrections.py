@@ -762,3 +762,16 @@ def test_a_corrected_episode_that_is_held_out_stays_out(
     with pytest.raises(PermissionError, match="held-out"):
         export.run(job)
     assert not (tmp_path / "exports/held").exists()
+
+
+def test_a_whole_last_review_line_without_newline_is_kept(pool, person):
+    _import(pool)
+    assert _review(person, ids=["a"]).status_code == 200
+    reviews = corrections._paths(VERSION)["reviews"]
+    reviews.write_text(reviews.read_text().rstrip("\n"))  # lost its newline only
+    assert corrections.show(VERSION)["counts"] == {"approved": 1, "proposed": 1}
+    assert _review(person, ids=["b"]).status_code == 200
+    lines = reviews.read_text().splitlines()
+    assert [json.loads(x)["id"] for x in lines] == ["a", "b"]
+    shown = corrections.show(VERSION)
+    assert shown["counts"] == {"approved": 2} and not shown["reviews_truncated"]

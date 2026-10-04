@@ -453,14 +453,22 @@ def review(version: str, decision: Review, *, principal: str) -> dict:
             + "\n"
             for item in wanted
         )
-        if _reviews(version)[1]:
-            # An earlier append was cut short (never a whole decision): drop
-            # the fragment, so the new lines are not glued onto it.
-            data = path.read_bytes()
-            with path.open("r+b") as handle:
-                handle.truncate(data.rfind(b"\n") + 1)
-        # One write and an fsync: a decision is either all on disk or, cut
-        # short, an unfinished last line that the reader skips.
+        data = path.read_bytes() if path.is_file() else b""
+        if data and not data.endswith(b"\n"):
+            cut = data.rfind(b"\n") + 1
+            try:
+                json.loads(data[cut:])
+            except ValueError:
+                # An append cut short (never a whole decision): drop the
+                # fragment, so the new lines are not glued onto it.
+                with path.open("r+b") as handle:
+                    handle.truncate(cut)
+            else:
+                # A whole last line that lost only its newline: end it.
+                lines = "\n" + lines
+        # One write and an fsync. A crash can still leave part of it: the
+        # whole lines written before the cut count (a partial review of the
+        # ids asked for), and an unfinished last line is skipped.
         fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
         try:
             data = lines.encode("utf-8")
