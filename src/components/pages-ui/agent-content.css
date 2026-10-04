@@ -850,32 +850,6 @@
 .levi-agent-sheet .levi-agent-dock progress {
   accent-color: var(--ds-progress);
 }
-/* levi.css still styles every button and field in the dock (".levi-agent-dock
-   button", "input"), which outranks the ds classes; restate the ds look here
-   until stage 6 removes those rules. */
-.levi-agent-sheet .levi-agent-dock .ds-btn {
-  height: var(--ds-control-sm);
-  padding: 0 var(--ds-space-2);
-  border: 1px solid transparent;
-  border-radius: var(--ds-radius-sm);
-  font-size: var(--ds-text-callout-size);
-  font-weight: var(--ds-weight-medium);
-}
-.levi-agent-sheet .levi-agent-dock .ds-btn--secondary {
-  background: var(--ds-surface-1);
-  border-color: var(--ds-border-control-on-raised);
-  color: var(--ds-text-primary);
-}
-.levi-agent-sheet .levi-agent-dock .ds-btn--secondary:hover:not(:disabled) {
-  background: var(--ds-surface-hover-on-raised);
-}
-.levi-agent-sheet .levi-agent-dock .ds-btn:disabled {
-  opacity: 1;
-  background: var(--ds-surface-hover);
-  border-color: transparent;
-  color: var(--ds-text-disabled);
-  cursor: not-allowed;
-}
 .levi-agent-sheet .levi-agent-dock .ds-btn[aria-pressed="true"] {
   background: var(--ds-surface-selected);
   border-color: var(--ds-selected-indicator);
@@ -892,10 +866,6 @@
 }
 .levi-agent-sheet .levi-agent-dock textarea.ds-input {
   padding: var(--ds-space-2) var(--ds-space-3);
-}
-.levi-agent-sheet .levi-agent-dock :is(.ds-btn, .ds-input):focus-visible {
-  outline: 2px solid var(--ds-focus-ring);
-  outline-offset: 2px;
 }
 
 /* Reduced motion, from the system setting or the app's own switch
@@ -950,23 +920,208 @@ canvas.levi-agent-mask {
   display: inline-flex;
   align-items: center;
 }
-.levi-agent-sheet .levi-agent-danger.ds-btn {
+.levi-agent-sheet .levi-agent-dock .levi-agent-danger.ds-btn {
   color: var(--ds-danger);
 }
 .levi-agent-sheet .levi-agent-tabs.ds-tabs {
   margin: var(--ds-space-3) 0;
 }
-/* The drawer's section tabs are ds Tabs; restate them over levi.css's
-   ".levi-agent-dock button" (removed in stage 6). */
-.levi-agent-sheet .levi-agent-dock .ds-tab {
-  height: var(--ds-control-lg);
-  padding: 0 var(--ds-space-3);
+.levi-agent-sheet .levi-agent-tabs .ds-tabs__list {
+  flex-wrap: wrap;
+}
+
+/* ── ds controls inside the drawer (generated from ds.css) ────────────
+   levi.css styles every button in the dock (".levi-agent-dock button",
+   0-1-1, and its :disabled, :focus-visible and [aria-pressed] forms), which
+   outranks the ds classes (0-1-0). These are ds.css's own rules for the
+   controls that are buttons (Button in every variant and size, IconButton,
+   menu triggers and items, tabs, tag remove, reorder handle, toast action,
+   the focus ring) under the drawer's prefix, so they win again. A test keeps
+   this list equal to ds.css. Remove with levi.css's dock rules (stage 6). */
+.levi-agent-sheet
+  .levi-agent-dock
+  :is(
+    .ds-btn,
+    .ds-icon-btn,
+    .ds-menu__item,
+    .ds-tab,
+    .ds-tag__remove,
+    .ds-reorder__handle,
+    .ds-toast__action
+  ) {
+  padding: 0;
   border: 0;
-  border-bottom: 2px solid transparent;
   border-radius: 0;
   background: transparent;
-  color: var(--ds-text-secondary);
+  color: inherit;
+  opacity: 1;
+}
+.levi-agent-sheet .levi-agent-dock .ds-focus:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ds-space-2);
+  height: var(--ds-control-md);
+  padding: 0 var(--ds-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--ds-radius-sm);
+  font: inherit;
+  font-size: var(--ds-text-body-size);
   font-weight: var(--ds-weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color var(--ds-dur-fast) var(--ds-ease-standard),
+    border-color var(--ds-dur-fast) var(--ds-ease-standard),
+    color var(--ds-dur-fast) var(--ds-ease-standard),
+    transform var(--ds-dur-fast) var(--ds-ease-standard);
+}
+.levi-agent-sheet
+  .levi-agent-dock
+  .ds-btn:active:not(:disabled):not([aria-busy="true"]) {
+  transform: scale(var(--ds-motion-press-scale));
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn--sm {
+  height: var(--ds-control-sm);
+  padding: 0 var(--ds-space-2);
+  font-size: var(--ds-text-callout-size);
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn--lg {
+  height: var(--ds-control-lg);
+  padding: 0 var(--ds-space-4);
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn--primary {
+  background: var(--ds-accent);
+  color: var(--ds-on-accent);
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn--primary:hover:not(:disabled) {
+  background: var(--ds-accent-hover);
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn--secondary {
+  background: var(--ds-surface-1);
+  border-color: var(--ds-border-control);
+  color: var(--ds-text-primary);
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn--secondary:hover:not(:disabled),
+.levi-agent-sheet .levi-agent-dock .ds-btn--secondary[aria-expanded="true"] {
+  background: var(--ds-surface-hover);
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn--ghost {
+  background: transparent;
+  color: var(--ds-text-primary);
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn--ghost:hover:not(:disabled) {
+  background: var(--ds-surface-hover);
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn--danger {
+  background: var(--ds-danger);
+  color: var(--ds-on-danger);
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ds-danger) 88%, var(--ds-text-primary));
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+  background: var(--ds-surface-hover);
+  border-color: transparent;
+  color: var(--ds-text-disabled);
+}
+.levi-agent-sheet .levi-agent-dock .ds-btn[aria-busy="true"] {
+  cursor: progress;
+}
+.levi-agent-sheet .levi-agent-dock .ds-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ds-control-md);
+  height: var(--ds-control-md);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--ds-radius-sm);
+  background: transparent;
+  color: var(--ds-icon);
+  cursor: pointer;
+  transition: background-color var(--ds-dur-fast) var(--ds-ease-standard);
+}
+.levi-agent-sheet .levi-agent-dock .ds-icon-btn--sm {
+  width: var(--ds-control-sm);
+  height: var(--ds-control-sm);
+}
+.levi-agent-sheet .levi-agent-dock .ds-icon-btn--lg {
+  width: var(--ds-control-lg);
+  height: var(--ds-control-lg);
+}
+.levi-agent-sheet .levi-agent-dock .ds-icon-btn--secondary {
+  border-color: var(--ds-border-control);
+  background: var(--ds-surface-1);
+}
+.levi-agent-sheet .levi-agent-dock .ds-icon-btn:hover:not(:disabled),
+.levi-agent-sheet .levi-agent-dock .ds-icon-btn[aria-pressed="true"] {
+  background: var(--ds-surface-hover);
+  color: var(--ds-text-primary);
+}
+.levi-agent-sheet .levi-agent-dock .ds-icon-btn[aria-pressed="true"] {
+  background: var(--ds-surface-selected);
+}
+.levi-agent-sheet .levi-agent-dock .ds-icon-btn:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+  color: var(--ds-text-disabled);
+}
+.levi-agent-sheet .levi-agent-dock .ds-tag__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ds-hit-min);
+  height: var(--ds-hit-min);
+  margin: -1px calc(-1 * var(--ds-space-2)) -1px calc(-1 * var(--ds-space-1));
+  padding: 0;
+  border: 0;
+  border-radius: var(--ds-radius-xs);
+  background: transparent;
+  color: var(--ds-text-secondary);
+  cursor: pointer;
+}
+.levi-agent-sheet .levi-agent-dock .ds-tag__remove-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--ds-radius-xs);
+}
+.levi-agent-sheet .levi-agent-dock .ds-tag__remove .ds-icon {
+  width: 12px;
+  height: 12px;
+}
+.levi-agent-sheet .levi-agent-dock .ds-tag__remove:hover {
+  color: var(--ds-text-primary);
+}
+.levi-agent-sheet .levi-agent-dock .ds-tag__remove:hover .ds-tag__remove-mark {
+  background: var(--ds-surface-hover);
+}
+.levi-agent-sheet .levi-agent-dock .ds-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  height: var(--ds-control-lg);
+  padding: 0 var(--ds-space-3);
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ds-text-secondary);
+  font: inherit;
+  font-weight: var(--ds-weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
 }
 .levi-agent-sheet .levi-agent-dock .ds-tab:hover:not(:disabled) {
   color: var(--ds-text-primary);
@@ -976,25 +1131,97 @@ canvas.levi-agent-mask {
   font-weight: var(--ds-weight-semibold);
   border-bottom-color: var(--ds-selected-indicator);
 }
-.levi-agent-sheet .levi-agent-dock .ds-tab:focus-visible {
-  outline: 2px solid var(--ds-focus-ring);
-  outline-offset: -2px;
+.levi-agent-sheet .levi-agent-dock .ds-tab:disabled {
+  color: var(--ds-text-disabled);
+  cursor: not-allowed;
 }
-.levi-agent-sheet .levi-agent-dock .ds-btn--primary {
-  background: var(--ds-accent);
-  border-color: transparent;
-  color: var(--ds-on-accent);
-}
-.levi-agent-sheet .levi-agent-dock .ds-btn--primary:hover:not(:disabled) {
-  background: var(--ds-accent-hover);
-}
-.levi-agent-sheet .levi-agent-dock .ds-btn--ghost {
+.levi-agent-sheet .levi-agent-dock .ds-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  width: 100%;
+  height: var(--ds-control-md);
+  padding: 0 var(--ds-space-2);
+  border: 0;
+  border-radius: var(--ds-radius-sm);
   background: transparent;
-  border-color: transparent;
+  color: var(--ds-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
-.levi-agent-sheet .levi-agent-dock .ds-btn--ghost:hover:not(:disabled) {
-  background: var(--ds-surface-hover-on-raised);
+.levi-agent-sheet .levi-agent-dock .ds-menu__item:hover,
+.levi-agent-sheet .levi-agent-dock .ds-menu__item:focus {
+  background: var(--ds-surface-hover);
 }
-.levi-agent-sheet .levi-agent-tabs .ds-tabs__list {
-  flex-wrap: wrap;
+.levi-agent-sheet .levi-agent-dock .ds-menu__item[aria-disabled="true"] {
+  color: var(--ds-text-disabled);
+  cursor: not-allowed;
+}
+.levi-agent-sheet .levi-agent-dock .ds-menu__item--danger {
+  color: var(--ds-danger);
+}
+.levi-agent-sheet .levi-agent-dock .ds-toast__action {
+  align-self: center;
+  padding: var(--ds-space-1) var(--ds-space-2);
+  border: 0;
+  border-radius: var(--ds-radius-sm);
+  background: transparent;
+  color: var(--ds-text-primary);
+  font: inherit;
+  font-weight: var(--ds-weight-semibold);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.levi-agent-sheet .levi-agent-dock .ds-toast__action:hover {
+  background: var(--ds-surface-hover);
+}
+.levi-agent-sheet .levi-agent-dock .ds-reorder__handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ds-hit-min);
+  height: var(--ds-control-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--ds-radius-xs);
+  background: transparent;
+  color: var(--ds-text-secondary);
+  cursor: grab;
+  touch-action: none;
+}
+.levi-agent-sheet .levi-agent-dock .ds-reorder__handle:active {
+  cursor: grabbing;
+}
+.levi-agent-sheet .levi-agent-dock .ds-menu-trigger--icon {
+  width: var(--ds-control-md);
+  padding: 0;
+  justify-content: center;
+}
+.levi-agent-sheet
+  .levi-agent-dock
+  .ds-menu-trigger--icon:has(.ds-menu-trigger__badge) {
+  width: auto;
+  padding: 0 var(--ds-space-2);
+}
+@media (forced-colors: active) {
+  .levi-agent-sheet .levi-agent-dock .ds-focus:focus-visible {
+    outline-color: Highlight;
+  }
+  .levi-agent-sheet .levi-agent-dock .ds-tab[aria-selected="true"] {
+    border-color: Highlight;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .levi-agent-sheet .levi-agent-dock .ds-btn,
+  .levi-agent-sheet .levi-agent-dock .ds-icon-btn {
+    animation: none;
+    transition: none;
+  }
+}
+[data-motion="reduce"] .levi-agent-sheet .levi-agent-dock .ds-btn,
+[data-motion="reduce"] .levi-agent-sheet .levi-agent-dock .ds-icon-btn {
+  animation: none;
+  transition: none;
 }

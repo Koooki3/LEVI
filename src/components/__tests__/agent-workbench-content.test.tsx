@@ -58,3 +58,29 @@ describe("Agent Workbench content (stage 4)", () => {
     }
   });
 });
+
+describe("ds controls inside the drawer win over levi.css's dock rules", () => {
+  test("every ds.css rule of a button-like control is restated under the dock", () => {
+    const strip = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, "");
+    const ds = strip(
+      readFileSync(join(import.meta.dir, "../../styles/ds.css"), "utf8"),
+    );
+    const agent = strip(read("pages-ui/agent-content.css")).replace(
+      /\s+/g,
+      " ",
+    );
+    const control =
+      /^\.ds-(btn|icon-btn|menu__item|menu-trigger|tab|tag__remove|reorder__handle|toast__action)\b|^\.ds-focus:focus-visible/;
+    const missing: string[] = [];
+    for (const m of ds.matchAll(/([^{}@]+)\{[^{}]*\}/g))
+      for (const sel of m[1].split(",").map((s) => s.trim()))
+        if (control.test(sel) && !agent.includes(`.levi-agent-dock ${sel}`))
+          missing.push(sel);
+    expect(missing).toEqual([]);
+    for (const variant of ["primary", "secondary", "ghost", "danger"])
+      expect(agent).toContain(`.levi-agent-dock .ds-btn--${variant} {`);
+    expect(agent).toContain(".levi-agent-dock .ds-btn--ghost:hover");
+    expect(agent).toContain(".levi-agent-dock .ds-btn:disabled");
+    expect(agent).toContain(".levi-agent-dock .ds-focus:focus-visible");
+  });
+});
