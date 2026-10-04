@@ -18,7 +18,13 @@ created. Without ``--plan`` the automatic steps run (a download over
 list, and ``levi doctor`` runs at the end.
 
 Exit code: 0 everything done; 2 a step failed; 10 steps are left for a
-person (or for ``--yes``).
+person (or for ``--yes``). With ``--plan``: 0 nothing to do, 1 only
+automatic steps are left, 10 a person's steps are left.
+
+The frontend (``node_modules``, ``.next``) is never rebuilt while this
+checkout's LEVI runs (``serving``): those steps are handed to a person
+("stop, install, start"). A build without a source stamp is "unknown" and
+is rebuilt only with ``--yes``.
 """
 
 from __future__ import annotations
@@ -45,7 +51,7 @@ PROFILES = (
     "live",
     "pilot",
 )
-EXIT_DONE, EXIT_FAILED, EXIT_HUMAN = 0, 2, 10
+EXIT_DONE, EXIT_PENDING, EXIT_FAILED, EXIT_HUMAN = 0, 1, 2, 10
 CONFIRM_BYTES = 1 << 30  # a step that downloads more than this needs --yes
 SCHEMA = "levi.install.plan.v1"
 
@@ -68,11 +74,23 @@ class Step:
     done: bool = False
     note: str = ""
     docs: str = ""
+    # Why this automatic step waits for --yes besides its size ("" = it does not).
+    confirm: str = ""
+    # "human": a step LEVI would do, but not now (the frontend is in use, the
+    # platform is unsupported): it is listed for a person instead.
+    kind_override: str = ""
+
+    def __post_init__(self):
+        if self.kind_override:
+            self.kind = self.kind_override
 
     def public(self) -> dict:
         row = asdict(self)
+        row.pop("kind_override")
         row["download"] = _size(self.download_bytes)
-        row["needs_yes"] = self.kind == "auto" and self.download_bytes > CONFIRM_BYTES
+        row["needs_yes"] = self.kind == "auto" and (
+            self.download_bytes > CONFIRM_BYTES or bool(self.confirm)
+        )
         return row
 
 
@@ -97,15 +115,59 @@ def _extras(profiles) -> list:
     return extras
 
 
-def _built() -> bool:
+def _build_state() -> str:
+    """``current`` (stamp matches the sources), ``stale``, ``unknown`` (a
+    build without a stamp) or ``missing``."""
     from .doctor import BUILD_STAMP, source_hash
 
+    if not (PROJECT / ".next/BUILD_ID").is_file():
+        return "missing"
     stamp = PROJECT / BUILD_STAMP
-    return (
-        (PROJECT / ".next/BUILD_ID").is_file()
-        and stamp.is_file()
-        and stamp.read_text().strip() == source_hash()
-    )
+    if not stamp.is_file():
+        return "unknown"
+    return "current" if stamp.read_text().strip() == source_hash() else "stale"
+
+
+def _built() -> bool:
+    return _build_state() == "current"
+
+
+def serving(ui_port: int = 7860) -> str:
+    """Why this checkout's frontend may be in use right now ("" = it is not):
+    the web UI port listens, or a process of this checkout runs ``levi
+    serve`` / ``next``. Only the kernel's socket table and /proc are read;
+    nothing is connected to. ``.next`` and ``node_modules`` must not be
+    rebuilt under a running ``next start``."""
+    from .doctor import listening_ports
+
+    try:
+        ports = listening_ports()
+    except Exception:  # noqa: BLE001 - no socket table: look at processes only
+        ports = set()
+    if ui_port in ports:
+        return f"port {ui_port} is listening (a running LEVI?)"
+    me = os.getpid()
+    project = PROJECT.resolve()
+    for entry in Path("/proc").glob("[0-9]*"):
+        if int(entry.name) in (me, os.getppid()):
+            continue
+        try:
+            cmd = (
+                (entry / "cmdline")
+                .read_bytes()
+                .replace(b"\0", b" ")
+                .decode(errors="replace")
+            )
+            cwd = Path(os.readlink(entry / "cwd")).resolve()
+        except OSError:
+            continue
+        if cwd == project and (
+            ("levi" in cmd and " serve" in cmd)
+            or "next start" in cmd
+            or "next-server" in cmd
+        ):
+            return f"a LEVI of this checkout runs (pid {entry.name})"
+    return ""
 
 
 def plan(profiles) -> list:
@@ -185,6 +247,42 @@ def plan(profiles) -> list:
     )
     from .bootstrap import bun_path
 
+    try:
+        bun = bun_path()
+    except RuntimeError as exc:
+        bun = None
+        steps.append(
+            Step(
+                "platform",
+                "core",
+                f"this platform cannot run LEVI's web UI as shipped: {exc}",
+                "human",
+                note="Linux or macOS on x86_64/aarch64 (Windows: WSL2)",
+                docs="INSTALL.md",
+            )
+        )
+    busy = serving()
+    deps_done = (
+        bun is not None
+        and bun.exists()
+        and (PROJECT / "node_modules/next/package.json").is_file()
+    )
+    build = _build_state()
+    stop_first = Step(
+        "stop-service",
+        "core",
+        "stop the running LEVI first: the frontend is rebuilt only while nothing uses it",
+        "human",
+        [
+            "uv run levi stop",
+            "uv run levi install --profile core",
+            "uv run levi   # start it again",
+        ],
+        note=busy,
+        docs="INSTALL.md",
+    )
+    if busy and (not deps_done or build != "current") and bun is not None:
+        steps.append(stop_first)
     steps.append(
         Step(
             "frontend-deps",
@@ -195,8 +293,8 @@ def plan(profiles) -> list:
             cwd=str(PROJECT),
             network=True,
             download_bytes=450 << 20,
-            done=bun_path().exists()
-            and (PROJECT / "node_modules/next/package.json").is_file(),
+            done=deps_done,
+            kind_override=("human" if bun is None or (busy and not deps_done) else ""),
         )
     )
     steps.append(
@@ -207,8 +305,17 @@ def plan(profiles) -> list:
             "auto",
             [sys.executable, "-m", "levi.cli", "build"],
             cwd=str(PROJECT),
-            done=_built(),
+            done=build == "current",
             note="rebuilt when the frontend sources changed (levi doctor: build)",
+            confirm=(
+                "the existing build has no source stamp, so whether it is stale "
+                "is unknown: --yes rebuilds it"
+                if build == "unknown"
+                else ""
+            ),
+            kind_override=(
+                "human" if bun is None or (busy and build != "current") else ""
+            ),
         )
     )
     if "agent" in profiles:
@@ -386,7 +493,7 @@ def plan(profiles) -> list:
                 "pilot",
                 "the Managed Pilot adapters",
                 "auto",
-                [str(bun_path()), "install", "--frozen-lockfile"],
+                [str(bun or "bun"), "install", "--frozen-lockfile"],
                 cwd=str(PROJECT / "integrations/pilot"),
                 network=True,
                 download_bytes=150 << 20,
@@ -412,7 +519,7 @@ def plan(profiles) -> list:
     return steps
 
 
-def _run_step(step: Step) -> tuple[bool, str]:
+def _run_step(step: Step, stdout=None) -> tuple[bool, str]:
     if step.id == "env-file":
         target = PROJECT / ".env"
         if not target.exists():
@@ -428,7 +535,9 @@ def _run_step(step: Step) -> tuple[bool, str]:
         # `levi setup` / `levi build` in a child: the same interpreter.
         env.setdefault("NEXT_TELEMETRY_DISABLED", "1")
     try:
-        code = subprocess.call(step.command, cwd=step.cwd or None, env=env)
+        code = subprocess.call(
+            step.command, cwd=step.cwd or None, env=env, stdout=stdout
+        )
     except OSError as exc:
         return False, str(exc)
     if code == 0 and step.id == "build":
@@ -438,7 +547,9 @@ def _run_step(step: Step) -> tuple[bool, str]:
     return code == 0, "" if code == 0 else f"exit {code}"
 
 
-def execute(steps, *, yes=False, log=print) -> dict:
+def execute(steps, *, yes=False, log=print, stdout=None) -> dict:
+    """Run the automatic steps. ``stdout``: where the steps' own output goes
+    (with --json, standard error, so standard output stays one document)."""
     results = []
     failed = False
     for step in steps:
@@ -453,7 +564,7 @@ def execute(steps, *, yes=False, log=print) -> dict:
             row["result"] = f"waiting for --yes (downloads {row['download']})"
         else:
             log(f"[levi install] {step.title} ...", flush=True)
-            ok, why = _run_step(step)
+            ok, why = _run_step(step, stdout=stdout)
             row["result"] = "done" if ok else f"failed: {why}"
             failed = failed or not ok
         results.append(row)
@@ -469,6 +580,13 @@ def summary_code(results: dict) -> int:
         if r["result"] == "for a person" or r["result"].startswith("waiting for --yes")
     ]
     return EXIT_HUMAN if pending else EXIT_DONE
+
+
+def command_lines(command) -> list:
+    """An argv (no element with a space) is one shell line; otherwise each
+    element is a line of its own (a person's commands)."""
+    items = [str(c) for c in command]
+    return [" ".join(items)] if not any(" " in c for c in items) else items
 
 
 def render_plan(steps) -> str:
@@ -494,11 +612,7 @@ def render_plan(steps) -> str:
             )
         )
         if s.command and not s.done:
-            shown = (
-                [" ".join(map(str, s.command))]
-                if s.kind == "auto"
-                else [str(c) for c in s.command]
-            )
+            shown = command_lines(s.command)
             lines += [f"         $ {c}" for c in shown]
         if s.note and not s.done:
             lines.append(f"         note: {s.note}")
@@ -510,7 +624,8 @@ def main(argv=None) -> int:
         prog="levi install",
         description="Install LEVI and optional parts, idempotently. Steps a person "
         "must take are listed, never worked around. Exit 0 done, 2 a step failed, "
-        "10 steps are left for a person (or for --yes).",
+        "10 steps are left for a person (or for --yes); with --plan: 0 nothing to "
+        "do, 1 automatic steps left, 10 a person's steps left.",
     )
     parser.add_argument(
         "--profile",
@@ -549,13 +664,15 @@ def main(argv=None) -> int:
             )
         else:
             print(render_plan(steps))
-        return EXIT_HUMAN if humans else EXIT_DONE
+        autos = [s for s in steps if s.kind == "auto" and not s.done]
+        return EXIT_HUMAN if humans else (EXIT_PENDING if autos else EXIT_DONE)
 
     def log(*parts, **kw):
         # With --json, stdout carries only the JSON document.
         print(*parts, file=sys.stderr if args.json else sys.stdout, **kw)
 
-    results = execute(steps, yes=args.yes, log=log)
+    # With --json the steps' own output (uv, bun, next) goes to standard error.
+    results = execute(steps, yes=args.yes, log=log, stdout=2 if args.json else None)
     code = summary_code(results)
     doctor = None
     if not args.no_doctor:
@@ -582,8 +699,8 @@ def main(argv=None) -> int:
             print("\nFor a person (LEVI does not do these):")
             for r in people:
                 print(f"- {r['title']}")
-                for c in r["command"]:
-                    print(f"    {c if isinstance(c, str) else ' '.join(c)}")
+                for c in command_lines(r["command"]):
+                    print(f"    {c}")
                 if r["docs"]:
                     print(f"    see {r['docs']}")
         if doctor:

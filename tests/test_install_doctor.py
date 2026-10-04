@@ -191,3 +191,89 @@ def test_levi_doctor_and_install_are_commands(tmp_path):
     )
     assert json.loads(plan.stdout)["schema"] == "levi.install.plan.v1"
     assert not (tmp_path / "ws").exists()
+
+
+# --- review fixes: the running frontend, --json output, plan exit codes ------------
+
+
+def _step(steps, id_):
+    return next(s for s in steps if s.id == id_)
+
+
+def test_the_frontend_is_not_rebuilt_while_this_checkout_serves(isolated, monkeypatch):
+    monkeypatch.setattr(install, "_build_state", lambda: "stale")
+    monkeypatch.setattr(
+        install, "serving", lambda ui_port=7860: "port 7860 is listening"
+    )
+    steps = install.plan(["core"])
+    assert _step(steps, "build").kind == "human"
+    assert _step(steps, "stop-service").kind == "human"
+    result = install.execute(steps, log=lambda *a, **k: None)
+    assert {r["id"]: r["result"] for r in result["steps"]}["build"] == "for a person"
+    monkeypatch.setattr(install, "serving", lambda ui_port=7860: "")
+    steps = install.plan(["core"])
+    assert _step(steps, "build").kind == "auto"
+    assert not [s for s in steps if s.id == "stop-service"]
+
+
+def test_serving_reads_the_socket_table(monkeypatch):
+    monkeypatch.setattr(doctor, "listening_ports", lambda: {7860})
+    assert "7860" in install.serving()
+
+
+def test_a_build_without_a_stamp_is_rebuilt_only_with_yes(isolated, monkeypatch):
+    monkeypatch.setattr(install, "_build_state", lambda: "unknown")
+    monkeypatch.setattr(install, "serving", lambda ui_port=7860: "")
+    build = _step(install.plan(["core"]), "build")
+    assert build.kind == "auto" and build.public()["needs_yes"]
+    assert "no source stamp" in build.confirm
+    ran = []
+    monkeypatch.setattr(
+        install, "_run_step", lambda s, stdout=None: ran.append(s.id) or (True, "")
+    )
+    result = install.execute([build], log=lambda *a, **k: None)
+    assert not ran and result["steps"][0]["result"].startswith("waiting for --yes")
+    install.execute([build], yes=True, log=lambda *a, **k: None)
+    assert ran == ["build"]
+
+
+def test_json_output_is_one_document_even_when_steps_print(monkeypatch, capfd):
+    noisy = install.Step(
+        "noisy", "core", "noisy", "auto", ["printf", "%s-%s\\n", "raw", "child-output"]
+    )
+    monkeypatch.setattr(install, "plan", lambda profiles: [noisy])
+    code = install.main(["--json", "--no-doctor"])
+    out, err = capfd.readouterr()
+    document = json.loads(out)
+    assert document["schema"] == "levi.install.result.v1" and code == 0
+    assert "raw-child-output" in err and "raw-child-output" not in out
+
+
+@pytest.mark.parametrize(
+    "steps,code",
+    [
+        ([], 0),
+        ([install.Step("a", "core", "a", "auto", ["true"])], 1),
+        ([install.Step("a", "core", "a", "auto", ["true"], done=True)], 0),
+        ([install.Step("h", "core", "h", "human")], 10),
+    ],
+)
+def test_plan_exit_codes(monkeypatch, capsys, steps, code):
+    monkeypatch.setattr(install, "plan", lambda profiles: steps)
+    assert install.main(["--plan", "--json"]) == code
+    json.loads(capsys.readouterr().out)
+
+
+def test_an_unsupported_platform_is_a_plan_step_not_a_crash(isolated, monkeypatch):
+    from levi import bootstrap
+
+    def unsupported():
+        raise RuntimeError("Unsupported CPU architecture")
+
+    monkeypatch.setattr(bootstrap, "bun_path", unsupported)
+    monkeypatch.setattr(install, "serving", lambda ui_port=7860: "")
+    steps = install.plan(["core", "pilot"])
+    platform_step = _step(steps, "platform")
+    assert platform_step.kind == "human" and "Unsupported" in platform_step.title
+    assert _step(steps, "frontend-deps").kind == "human"
+    assert _step(steps, "build").kind == "human"

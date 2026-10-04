@@ -7,7 +7,7 @@ Two commands do the work and say what is left:
 - `uv run levi install --profile <profile> [--plan] [--json] [--yes]` sets up a profile. It is idempotent (a step already done is skipped), does what it can by itself, and lists what a person must do. `--plan` only lists the steps (network use, download size, root, token, consent) and changes nothing.
 - `uv run levi doctor [--json]` checks the machine, read only: Python and uv, ffmpeg, Bun and the frontend dependencies, whether the production build matches the sources, ports 7860/7861, the workspace (writable, path short enough for the core's socket, free disk), the training-pool settings (set or not; values are never shown), the optional workers and their weights, a Hugging Face token (present or not), the GPU and driver, local model servers (loopback `GET` only), and the live service's configuration.
 
-Exit codes of both: **0** done / all well, **1** warnings (doctor), **2** a failure that a command fixes (the report names it), **10** what is left needs a person (root, a token, a licence, a choice) or `--yes` for a large download.
+Exit codes of both: **0** done / all well, **1** warnings (doctor), **2** a failure that a command fixes (the report names it), **10** what is left needs a person (root, a token, a licence, a choice) or `--yes` for a large download. `levi install --plan` exits 0 when nothing is left to do, 1 when only automatic steps are left, 10 when a person's steps are left.
 
 ## 1. Before you start
 
@@ -89,7 +89,7 @@ loginctl enable-linger "$USER"     # keep it running after logout (may need an a
 
 **Access from another machine.** LEVI has no login: it is a single-user workbench with file access. Keep it on `127.0.0.1` and forward the port (`ssh -L 7860:127.0.0.1:7860 user@server`; 7861 is the internal API, not the workbench). To share it, put it behind an authenticating reverse proxy that forwards to `127.0.0.1:7860`, set `LEVI_SECURE_COOKIES=1` under HTTPS, and never bind `--host 0.0.0.0` on an open network.
 
-**Updating.** `git pull`, then `uv run levi install --profile core` (it syncs the dependencies and rebuilds when the frontend sources changed; `levi doctor` reports a stale build), then restart the service. `levi stop` refuses while jobs run (`--wait`); `--force` kills them.
+**Updating: stop, install, start.** `git pull`; `uv run levi stop` (it refuses while jobs run: `--wait` lets them finish; `--force` kills them); `uv run levi install --profile core` (it syncs the dependencies and rebuilds when the frontend sources changed; `levi doctor` reports a stale build); start the service again. The frontend (`node_modules`, `.next`) is never rebuilt while this checkout's LEVI runs: `levi install` hands those steps back as "stop the running LEVI first" when port 7860 listens or a `levi serve` of the checkout runs. A build made before the source stamp existed is "unknown" and is rebuilt only with `--yes`. If you also run the live service (`levi live`), restart it together with the product LEVI after an update: both read the same code, and new `live.toml` keys (for example `vllm.model`, `gpu.lock_unavailable`) take effect only in a new service.
 
 ## 5. The live annotation service
 
