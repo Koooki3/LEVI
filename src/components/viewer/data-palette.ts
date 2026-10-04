@@ -33,9 +33,10 @@ export const DATA_NEGATIVE = "var(--dv-negative)";
 export const DATA_NEUTRAL = "var(--dv-neutral)";
 
 /**
- * The same eight slots as plain colours for drawing on video and canvas.
- * Media is black in both themes, so these are the dark steps; a test keeps
- * them equal to the dark block of viewer.css. Canvas cannot read CSS
+ * The same eight slots as plain colours for drawing on video and canvas:
+ * the dark steps of the design tokens --ds-data-1 … --ds-data-8 (same
+ * values; media is black in both themes). A test keeps them equal to the
+ * dark block of viewer.css. Canvas and the 3D scene cannot read CSS
  * variables, which is why they are spelled out here.
  */
 export const DATA_ON_MEDIA = [

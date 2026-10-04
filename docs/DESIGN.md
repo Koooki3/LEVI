@@ -116,7 +116,7 @@ The episode viewer (`src/app/[org]/[dataset]/[episode]/`) uses the tokens in bot
 | --- | --- |
 | Frame, tab bar, episode list, media, playback, notes, metric tiles | `viewer.css` (classes `vw-*`) |
 | Annotation panels, timeline, value-model and anchored-review lanes, segmentation | `annotations.css` (scoped under `.annotations-skin`; replaces `annotations-skin.css`) |
-| Data palette | `viewer.css` (`--dv-1` … `--dv-8`, `--dv-positive`, `--dv-negative`, `--dv-neutral`) and `data-palette.ts` |
+| Data palette | `viewer.css` (`--dv-1` … `--dv-8` = the tokens `--ds-data-1` … `--ds-data-8`, `--dv-positive`, `--dv-negative`, `--dv-neutral`) and `data-palette.ts` |
 | Tabs and the Analysis tab | `viewer-tabs.ts`, `analysis-tab.tsx` |
 | Error page | `load-error.tsx` |
 | Tests | `src/components/viewer/__tests__/` |

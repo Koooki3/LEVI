@@ -116,7 +116,7 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 | --- | --- |
 | 框架、标签栏、片段列表、媒体、播放、提示、指标卡 | `viewer.css`（类名 `vw-*`） |
 | 标注面板、时间轴、价值模型和锚定复核泳道、分割 | `annotations.css`（作用域 `.annotations-skin`，取代 `annotations-skin.css`） |
-| 数据配色 | `viewer.css`（`--dv-1` … `--dv-8`、`--dv-positive`、`--dv-negative`、`--dv-neutral`）和 `data-palette.ts` |
+| 数据配色 | `viewer.css`（`--dv-1` … `--dv-8` 即令牌 `--ds-data-1` … `--ds-data-8`、`--dv-positive`、`--dv-negative`、`--dv-neutral`）和 `data-palette.ts` |
 | 标签页与“分析”标签 | `viewer-tabs.ts`、`analysis-tab.tsx` |
 | 错误页 | `load-error.tsx` |
 | 测试 | `src/components/viewer/__tests__/` |

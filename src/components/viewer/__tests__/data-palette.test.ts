@@ -14,7 +14,7 @@ const annotationsCss = readFileSync(join(dir, "annotations.css"), "utf8");
 
 /** `--dv-N: #hex` pairs of one CSS block. */
 function slots(block: string): string[] {
-  return [...block.matchAll(/--dv-(\d): (#[0-9a-f]{6})/g)]
+  return [...block.matchAll(/--dv-(\d): var\(--ds-data-\1, (#[0-9a-f]{6})\)/g)]
     .sort((a, b) => Number(a[1]) - Number(b[1]))
     .map((m) => m[2]);
 }
