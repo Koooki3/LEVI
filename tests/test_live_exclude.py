@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import scaled
 from test_live_pipeline import NAME, Env
 
 from levi.live import api, auto, cli, exclusion, jsonio, mirror, worker
@@ -246,7 +247,7 @@ def test_excluding_while_a_batch_runs_is_refused_for_its_episodes_only(env):
     ctl = e.controller()
     thread = e.start(ctl, once=True, max_seconds=240)
     try:
-        deadline = time.time() + 90
+        deadline = time.time() + scaled(90)
         while time.time() < deadline and not (e.state() or {}).get("current"):
             time.sleep(0.05)
         batch = e.state()["current"]["demos"]
@@ -257,11 +258,11 @@ def test_excluding_while_a_batch_runs_is_refused_for_its_episodes_only(env):
         exclusion.exclude(e.config, NAME, ["demo_0003"], "while a batch ran")
     finally:
         e.fake.delay = 0
-        thread.join(240)
+        thread.join(scaled(240))
         # A batch that did not finish in time must not leave its worker.
         ctl.running = False
         ctl.wake.set()
-        thread.join(60)
+        thread.join(scaled(60))
         ctl.shutdown()
     state = e.state()
     states = {d: r["state"] for d, r in state["demos"].items()}
@@ -754,13 +755,13 @@ def served(client, env, monkeypatch):
     )
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
-    deadline = time.time() + 30
+    deadline = time.time() + scaled(30)
     while not server.started and time.time() < deadline:
         time.sleep(0.05)
     assert server.started
     yield e, root
     server.should_exit = True
-    thread.join(30)
+    thread.join(scaled(30))
     shutil.rmtree(root, ignore_errors=True)
 
 

@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import with_netguard
+from conftest import scaled, with_netguard
 from live_helpers import Rollouts
 
 from levi.live import api, cli, controller, locate, mirror, resources, sessions
@@ -442,7 +442,7 @@ def cli_run(tmp_path, *args, timeout=120, ws=None):
         text=True,
         env=env,
         cwd=PROJECT,
-        timeout=timeout,
+        timeout=scaled(timeout),
         check=False,
     )
 
@@ -664,7 +664,7 @@ def live_cmd(workspace, home, *args):
         text=True,
         cwd=PROJECT,
         env={**os.environ, "PYTHONPATH": with_netguard(str(PROJECT))},
-        timeout=240,
+        timeout=scaled(240),
         check=False,
     )
 

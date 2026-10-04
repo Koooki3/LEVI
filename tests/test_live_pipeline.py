@@ -64,7 +64,10 @@ class Env:
         return ctl
 
     def start(self, ctl, **run):
-        """``ctl.run(**run)`` in a thread that teardown stops and joins."""
+        """``ctl.run(**run)`` in a thread that teardown stops and joins
+        (``max_seconds`` scaled by LEVI_TEST_TIME_SCALE)."""
+        if "max_seconds" in run:
+            run["max_seconds"] = scaled(run["max_seconds"])
         thread = threading.Thread(target=ctl.run, kwargs=run)
         self.threads.append(thread)
         thread.start()
@@ -295,7 +298,7 @@ def test_restarting_continues_where_it_stopped_and_repeats_nothing(env):
         e.rollouts.write(n)
     ctl = e.controller()
     thread = e.start(ctl, once=True, max_seconds=120)
-    deadline = time.time() + 60
+    deadline = time.time() + scaled(60)
     while time.time() < deadline:
         progress = jsonio.read(e.ws / "live/worker.json") or {}
         if progress.get("phase") in ("temporal", "anchored") and e.fake.calls:
@@ -304,7 +307,7 @@ def test_restarting_continues_where_it_stopped_and_repeats_nothing(env):
     ctl.preempt("session", "test: the supervisor is killed mid-batch")
     ctl.running = False
     ctl.wake.set()
-    thread.join(30)
+    thread.join(scaled(30))
     assert e.state()["current"] is not None  # the batch is remembered
     calls_before = len(e.fake.calls)
     e.fake.delay = 0
@@ -401,11 +404,11 @@ def test_a_worker_killed_without_warning_does_not_hold_up_the_next_one(env):
         e.rollouts.write(n)
     ctl = e.controller()
     thread = e.start(ctl, once=True, max_seconds=120)
-    deadline = time.time() + 60
+    deadline = time.time() + scaled(60)
     while time.time() < deadline and not (ctl.worker and e.fake.calls):
         time.sleep(0.1)
     os.killpg(ctl.worker.pid, signal.SIGKILL)  # no pause, leases left behind
-    thread.join(60)
+    thread.join(scaled(60))
     e.fake.delay = 0
     started = time.time()
     e.run()
@@ -420,7 +423,7 @@ def test_teardown_stops_a_batch_a_test_left_running(env):
     e.rollouts.write(0)
     ctl = e.controller()
     thread = e.start(ctl, once=True, max_seconds=240)
-    deadline = time.time() + 60
+    deadline = time.time() + scaled(60)
     while time.time() < deadline and not (ctl.worker and e.fake.calls):
         time.sleep(0.1)
     worker = ctl.worker
@@ -463,7 +466,7 @@ def test_a_new_episode_cancels_the_request_in_flight_and_the_batch_resumes_after
     thread = e.start(ctl, max_seconds=240)
     try:
         progress = lambda: jsonio.read(e.ws / "live/worker.json") or {}
-        deadline = time.time() + 60
+        deadline = time.time() + scaled(60)
         while time.time() < deadline and not (
             e.fake.started and progress().get("phase") in ("temporal", "anchored")
         ):
@@ -471,7 +474,7 @@ def test_a_new_episode_cancels_the_request_in_flight_and_the_batch_resumes_after
         assert e.fake.started, "the model never got a request while the policy was idle"
         flipped = time.time()
         e.rollouts.session("running")  # a new episode begins: the policy infers
-        deadline = time.time() + 30
+        deadline = time.time() + scaled(30)
         while time.time() < deadline and progress().get("phase") != "gated":
             time.sleep(0.1)
         assert progress().get("phase") == "gated", (
@@ -499,7 +502,7 @@ def test_a_new_episode_cancels_the_request_in_flight_and_the_batch_resumes_after
         assert e.fake.started == sent  # nothing goes out while the policy infers
         assert not [c for c in e.records("changes") if c["status"] == "committed"]
         e.rollouts.session("finished")  # the evaluation ends
-        deadline = time.time() + 120
+        deadline = time.time() + scaled(120)
         while time.time() < deadline:
             state = e.state() or {}
             if state.get("demos") and all(
@@ -516,7 +519,7 @@ def test_a_new_episode_cancels_the_request_in_flight_and_the_batch_resumes_after
     finally:
         ctl.running = False
         ctl.wake.set()
-        thread.join(60)
+        thread.join(scaled(60))
         ctl.shutdown()
 
 
@@ -570,7 +573,7 @@ def test_waiting_for_a_person_does_not_loop_and_a_person_s_commit_is_not_a_failu
     e.rollouts.write(0)
     started = lambda ctl: sum(m.startswith("batch started") for m in e.messages)
     ctl = e.controller()
-    ctl.run(once=True, max_seconds=120)
+    ctl.run(once=True, max_seconds=scaled(120))
     assert ctl.awaiting[NAME]["kind"] == "plan"
     assert started(ctl) == 1
     (run,) = e.records("runs")
@@ -581,7 +584,7 @@ def test_waiting_for_a_person_does_not_loop_and_a_person_s_commit_is_not_a_failu
     as_a_person(e, "plan", run["id"])
     # Time passes: the plan is approved, so exactly one more worker runs it ...
     ctl.awaiting[NAME]["at"] -= 1000
-    deadline = time.time() + 120
+    deadline = time.time() + scaled(120)
     while time.time() < deadline and started(ctl) < 2:
         ctl.tick()
         time.sleep(0.3)
@@ -609,7 +612,7 @@ def test_waiting_for_a_person_does_not_loop_and_a_person_s_commit_is_not_a_failu
     # waits for its own plan to be approved.
     def settle(kind):
         ctl.awaiting.get(NAME, {}).update(at=0.0)
-        deadline = time.time() + 150
+        deadline = time.time() + scaled(150)
         while time.time() < deadline:
             ctl.tick()
             if ctl.worker is None and ctl.awaiting.get(NAME, {}).get("kind") == kind:
@@ -626,7 +629,7 @@ def test_waiting_for_a_person_does_not_loop_and_a_person_s_commit_is_not_a_failu
     ]
     as_a_person(e, "plan", anchored[0]["id"])
     ctl.awaiting[NAME]["at"] = 0.0
-    deadline = time.time() + 150
+    deadline = time.time() + scaled(150)
     while time.time() < deadline:
         ctl.tick()
         if ctl.worker is None and e.state()["demos"]["demo_0000"]["state"] == "done":
@@ -645,7 +648,7 @@ def test_a_worker_finding_a_person_s_wait_needs_no_model(env):
     e.config.pipeline.auto_approve = False
     e.rollouts.write(0)
     ctl = e.controller()
-    ctl.run(once=True, max_seconds=120)
+    ctl.run(once=True, max_seconds=scaled(120))
     assert ctl.awaiting[NAME]["kind"] == "plan"
     ctl.shutdown()
     # The supervisor restarts with the model server gone.
@@ -655,7 +658,7 @@ def test_a_worker_finding_a_person_s_wait_needs_no_model(env):
     ctl.awaiting.clear()  # ... and suppose it had not: the worker must cope
     e.messages.clear()
     ctl._spawn(NAME)  # (the supervisor itself would not: no model is up)
-    deadline = time.time() + 120
+    deadline = time.time() + scaled(120)
     while time.time() < deadline and ctl.worker is not None:
         ctl.tick()
         time.sleep(0.3)
