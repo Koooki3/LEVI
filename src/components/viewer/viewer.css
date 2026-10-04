@@ -1066,7 +1066,20 @@ button.vw-outcome:hover {
   .vw-inspector[data-open="false"] .vw-inspector-head h2 {
     display: block;
   }
+  /* The drawer is fixed over the bottom edge: the content and the episode
+     list keep as much room below as the drawer is tall (inspector.tsx
+     publishes --vw-inspector-h), so their last lines scroll above it, and
+     the playback bar floats above the drawer, not under it. */
   .vw-body:has(.vw-inspector) .vw-main {
-    padding-bottom: 72px;
+    padding-bottom: calc(var(--vw-inspector-h, 48px) + var(--ds-space-4));
+    scroll-padding-bottom: calc(
+      var(--vw-inspector-h, 48px) + var(--ds-space-4)
+    );
+  }
+  .vw-body:has(.vw-inspector) .vw-sidebar {
+    padding-bottom: calc(var(--vw-inspector-h, 48px) + var(--ds-space-4));
+  }
+  .vw-body:has(.vw-inspector) .vw-playback {
+    bottom: calc(var(--vw-inspector-h, 48px) + var(--ds-space-3));
   }
 }

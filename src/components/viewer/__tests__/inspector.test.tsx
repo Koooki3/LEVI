@@ -85,3 +85,29 @@ describe("inspector column", () => {
     );
   });
 });
+
+describe("inspector drawer height", () => {
+  test("the layout around it learns how tall the drawer is", async () => {
+    const { syncInspectorHeight } = await import("../inspector");
+    const host = document.createElement("div");
+    const aside = document.createElement("aside");
+    host.appendChild(aside);
+    aside.getBoundingClientRect = () =>
+      ({ height: 412.4 }) as unknown as DOMRect;
+    syncInspectorHeight(aside);
+    expect(host.style.getPropertyValue("--vw-inspector-h")).toBe("413px");
+  });
+
+  test("narrow layout reserves the drawer's height below content and list", async () => {
+    const { readFileSync } = await import("fs");
+    const { join } = await import("path");
+    const css = readFileSync(join(import.meta.dir, "../viewer.css"), "utf8");
+    const narrow = css.slice(css.indexOf("@media (max-width: 1199px)"));
+    expect(narrow).toContain(
+      "padding-bottom: calc(var(--vw-inspector-h, 48px)",
+    );
+    expect(narrow).toMatch(
+      /\.vw-sidebar \{\s*padding-bottom: calc\(var\(--vw-inspector-h/,
+    );
+  });
+});

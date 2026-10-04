@@ -1,5 +1,12 @@
 "use client";
-import { createContext, useContext, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { IconButton } from "@/components/ds";
@@ -18,6 +25,20 @@ const InspectorSlot = createContext<HTMLElement | null>(null);
 /** The column's body element, or null when there is no inspector column. */
 export function useInspectorSlot(): HTMLElement | null {
   return useContext(InspectorSlot);
+}
+
+/**
+ * Publishes the drawer's height as `--vw-inspector-h` on the layout around
+ * it, so on narrow windows the content and the episode list keep that much
+ * room at the bottom and nothing ends up under the drawer.
+ */
+export function syncInspectorHeight(aside: HTMLElement | null): void {
+  const host = aside?.parentElement;
+  if (!aside || !host) return;
+  host.style.setProperty(
+    "--vw-inspector-h",
+    `${Math.ceil(aside.getBoundingClientRect().height)}px`,
+  );
 }
 
 /** Renders `children` in the inspector column if there is one, else here. */
@@ -49,11 +70,25 @@ export function InspectorLayout({
       typeof window.matchMedia !== "function" ||
       window.matchMedia("(min-width: 1200px)").matches,
   );
+  const asideRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const aside = asideRef.current;
+    if (!enabled || !aside) return;
+    syncInspectorHeight(aside);
+    if (typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(() => syncInspectorHeight(aside));
+    observer.observe(aside);
+    return () => {
+      observer.disconnect();
+      aside.parentElement?.style.removeProperty("--vw-inspector-h");
+    };
+  }, [enabled, open]);
   return (
     <InspectorSlot.Provider value={enabled ? slot : null}>
       {children}
       {enabled && (
         <aside
+          ref={asideRef}
           className="vw-inspector annotations-skin"
           data-open={open ? "true" : "false"}
           aria-label={t("Inspector")}
