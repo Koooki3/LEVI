@@ -276,7 +276,17 @@ def test_a_status_file_alone_names_only_a_workspace_a_start_used(tmp_path, monke
     assert cli.remembered_workspace(home) == str(ws.resolve())
 
 
-def test_once_never_changes_the_workspace_start_resolves_to(tmp_path, monkeypatch):
+@pytest.fixture
+def contained(monkeypatch):
+    """``levi live once`` changes its own process (environment, priority):
+    none of that may reach the rest of the test session."""
+    monkeypatch.setattr(os, "environ", dict(os.environ))
+    monkeypatch.setattr(cli.resources, "apply", lambda config, **kw: {})
+
+
+def test_once_never_changes_the_workspace_start_resolves_to(
+    tmp_path, monkeypatch, contained
+):
     home = tmp_path / "home"
     real = _live_ws(tmp_path / "real")
     _started(home, real)
@@ -304,7 +314,7 @@ def test_once_never_changes_the_workspace_start_resolves_to(tmp_path, monkeypatc
     assert cli.resolve_config(args).workspace == real.resolve()
 
 
-def test_fake_vlm_without_a_home_uses_a_scratch_home(tmp_path, monkeypatch):
+def test_fake_vlm_without_a_home_uses_a_scratch_home(tmp_path, monkeypatch, contained):
     import tempfile
 
     default_home = tmp_path / "default-home"
