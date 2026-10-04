@@ -8,6 +8,7 @@ import os
 import sqlite3
 import threading
 import time
+import warnings
 from pathlib import Path
 
 import pytest
@@ -109,15 +110,27 @@ class Env:
         return mirror.load_state(self.config, name)
 
     def close(self):
-        for ctl in self.controllers:
-            ctl.running = False
-            ctl.wake.set()
-        for thread in self.threads:
-            thread.join(60)
-        for ctl in self.controllers:
-            ctl.shutdown()  # stops its worker (by process group) if any is left
+        controllers, threads = self.controllers, self.threads
         self.controllers, self.threads = [], []
-        self.server.shutdown()
+        try:
+            for ctl in controllers:
+                ctl.running = False
+                ctl.wake.set()
+            for thread in threads:
+                thread.join(scaled(60))
+                if thread.is_alive():
+                    warnings.warn(
+                        f"a live supervisor thread outlived teardown: {thread}"
+                    )
+            for ctl in controllers:
+                # Stops its worker (by process group) if one is left; one that
+                # fails must not keep the others, or the fake server, running.
+                try:
+                    ctl.shutdown()
+                except Exception as error:  # noqa: BLE001 (teardown goes on)
+                    warnings.warn(f"a live supervisor did not shut down: {error!r}")
+        finally:
+            self.server.shutdown()
 
 
 @pytest.fixture
@@ -417,6 +430,23 @@ def test_teardown_stops_a_batch_a_test_left_running(env):
     assert worker.poll() is not None
     with pytest.raises(ProcessLookupError):
         os.killpg(worker.pid, 0)  # the whole process group is gone
+
+
+def test_teardown_goes_on_when_a_supervisor_fails_to_shut_down(env):
+    e = env()
+    first, second = e.controller(), e.controller()
+    stopped = []
+
+    def broken():
+        raise RuntimeError("shutdown failed")
+
+    first.shutdown = broken
+    second.shutdown = lambda: stopped.append("second")
+    shutdown = e.server.shutdown
+    e.server.shutdown = lambda: (stopped.append("server"), shutdown())
+    with pytest.warns(UserWarning, match="did not shut down"):
+        e.close()
+    assert stopped == ["second", "server"]
 
 
 def test_a_new_episode_cancels_the_request_in_flight_and_the_batch_resumes_after(env):
