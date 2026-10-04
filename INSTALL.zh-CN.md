@@ -98,7 +98,7 @@ loginctl enable-linger "$USER"     # 注销后继续运行（可能需要管理�
 1. 搭 vLLM 环境并下载权重（[vLLM](docs/VLLM.zh-CN.md) 第 1 节）；默认启动脚本是仓库自带的 `scripts/vllm/serve.sh`。
 2. `uv run levi live init --root /path/to/rollouts` 写出 `~/.levi-live/workspace/live.toml`（没有任何默认值指向某台机器的目录；有健康监控文件和 GPU 锁文件时设 `[fr3] health_file`、`[gpu] lock_file`）。
 3. `uv run levi live doctor` 检查脚本、pid 目录、GPU 锁文件、根目录，以及从别的机器拷来的路径。
-4. `uv run levi live once --fake-vlm --workspace /tmp/levi-live-smoke --root /path/to/rollouts` 用替身模型把流水线跑一遍（不用 GPU），然后 `uv run levi live start --daemon`。
+4. `uv run levi live once --fake-vlm --workspace /tmp/levi-live-smoke/ws --home /tmp/levi-live-smoke/home --root /path/to/rollouts` 用替身模型把流水线跑一遍（不用 GPU），然后 `uv run levi live start --daemon`。
 
 ## 6. 东西都在哪里
 

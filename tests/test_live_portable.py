@@ -177,24 +177,35 @@ def test_paths_into_another_users_home_are_named(tmp_path, monkeypatch):
     assert keys == ["gpu.lock_file", "watch.roots"]
 
 
+def _live_ws(path):
+    from levi.live import auto
+
+    (path / "live").mkdir(parents=True, exist_ok=True)
+    auto.write_marker(path / "live", {"config": str(path / "live.toml")})
+    return path
+
+
+def _started(home, ws):
+    c = live_config.Config()
+    c.service.home, c.service.workspace = str(home), str(ws)
+    home.mkdir(parents=True, exist_ok=True)
+    cli.record_start(c)
+
+
 def test_live_commands_follow_the_service_that_ran_with_this_home(
     tmp_path, monkeypatch
 ):
     """``levi live status`` and the rest, given no --workspace, act on the
-    workspace the last service recorded in <home>/status.json, as they did when
-    the default was that machine's own folder."""
+    workspace the last ``levi live start`` with this home ran on."""
     home = tmp_path / "home"
-    ws = tmp_path / "ws"
-    (ws / "live").mkdir(parents=True)
-    from levi.live import auto
-
-    auto.write_marker(ws / "live", {"config": str(ws / "live.toml")})
-    home.mkdir()
-    (home / "status.json").write_text(json.dumps({"workspace": str(ws)}))
+    ws = _live_ws(tmp_path / "ws")
+    _started(home, ws)
     monkeypatch.setenv("LEVI_LIVE_HOME", str(home))
     args = cli.build_parser().parse_args(["status"])
     assert cli.resolve_config(args).workspace == ws.resolve()
     # Not a live workspace (any more): the default.
+    from levi.live import auto
+
     (ws / "live" / auto.MARKER).unlink()
     assert (
         cli.resolve_config(args).workspace
@@ -203,6 +214,96 @@ def test_live_commands_follow_the_service_that_ran_with_this_home(
     # An explicit workspace always wins.
     args = cli.build_parser().parse_args(["status", "--workspace", str(tmp_path / "x")])
     assert cli.resolve_config(args).workspace == (tmp_path / "x").resolve()
+
+
+def test_a_status_file_alone_names_only_a_workspace_a_start_used(tmp_path, monkeypatch):
+    """Before started.json existed: the status file's workspace counts only
+    when a ``start`` ran there (its service log), never a ``once`` target."""
+    home = tmp_path / "home"
+    home.mkdir()
+    ws = _live_ws(tmp_path / "ws")
+    (home / "status.json").write_text(json.dumps({"workspace": str(ws)}))
+    assert cli.remembered_workspace(home) is None
+    (ws / "live/logs").mkdir(parents=True)
+    (ws / "live/logs/live.log").write_text("")
+    assert cli.remembered_workspace(home) == str(ws.resolve())
+
+
+def test_once_never_changes_the_workspace_start_resolves_to(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    real = _live_ws(tmp_path / "real")
+    _started(home, real)
+    monkeypatch.setenv("LEVI_LIVE_HOME", str(home))
+    (tmp_path / "rollouts").mkdir()
+    code = cli.main(
+        [
+            "once",
+            "--workspace",
+            str(tmp_path / "trial"),
+            "--root",
+            str(tmp_path / "rollouts"),
+            "--gpu-mode",
+            "manual",
+            "--max-seconds",
+            "5",
+        ]
+    )
+    assert code == 0
+    # The once run wrote its status into the same home...
+    status = json.loads((home / "status.json").read_text())
+    assert Path(status["workspace"]).resolve() == (tmp_path / "trial").resolve()
+    # ...but a later `start` (or status) without --workspace still means the real one.
+    args = cli.build_parser().parse_args(["start"])
+    assert cli.resolve_config(args).workspace == real.resolve()
+
+
+def test_fake_vlm_without_a_home_uses_a_scratch_home(tmp_path, monkeypatch):
+    import tempfile
+
+    default_home = tmp_path / "default-home"
+    monkeypatch.setattr(live_config, "DEFAULT_HOME", str(default_home))
+    monkeypatch.delenv("LEVI_LIVE_HOME")
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "tmp"))
+    (tmp_path / "tmp").mkdir()
+    (tmp_path / "rollouts").mkdir()
+    code = cli.main(
+        [
+            "once",
+            "--fake-vlm",
+            "--workspace",
+            str(tmp_path / "trial"),
+            "--root",
+            str(tmp_path / "rollouts"),
+            "--max-seconds",
+            "5",
+        ]
+    )
+    assert code == 0
+    assert not default_home.exists()  # the real home is untouched
+    scratch = list((tmp_path / "tmp").glob("levi-live-fake-home-*"))
+    assert len(scratch) == 1 and (scratch[0] / "status.json").is_file()
+    assert not (scratch[0] / cli.STARTED).exists()
+
+
+@pytest.mark.parametrize("which", ["remembered", "env", "started_here", "default"])
+def test_fake_vlm_refuses_any_real_service_workspace(tmp_path, monkeypatch, which):
+    home = tmp_path / "home"
+    monkeypatch.setenv("LEVI_LIVE_HOME", str(home))
+    target = _live_ws(tmp_path / "ws")
+    if which == "remembered":
+        _started(home, target)
+    elif which == "env":
+        monkeypatch.setenv("LEVI_LIVE_WORKSPACE", str(target))
+    elif which == "started_here":
+        (target / "live/logs").mkdir(parents=True)
+        (target / "live/logs/live.log").write_text("")
+    else:
+        monkeypatch.setattr(live_config, "DEFAULT_WORKSPACE", str(target))
+    args = cli.build_parser().parse_args(
+        ["once", "--fake-vlm", "--auto-approve", "--workspace", str(target)]
+    )
+    with pytest.raises(ValueError, match="scratch"):
+        cli.check_fake_target(args, None)
 
 
 def test_start_refuses_a_configuration_that_cannot_run(tmp_path, monkeypatch, capsys):

@@ -98,7 +98,7 @@ loginctl enable-linger "$USER"     # keep it running after logout (may need an a
 1. Build the vLLM environment and download the weights ([vLLM](docs/VLLM.md) section 1); the default launcher is the shipped `scripts/vllm/serve.sh`.
 2. `uv run levi live init --root /path/to/rollouts` writes `~/.levi-live/workspace/live.toml` (no default names a machine's folder; set `[fr3] health_file` and `[gpu] lock_file` if you have them).
 3. `uv run levi live doctor` checks the scripts, the pid folder, the GPU lock file, the roots and paths copied from another machine.
-4. `uv run levi live once --fake-vlm --workspace /tmp/levi-live-smoke --root /path/to/rollouts` runs the pipeline once against a stand-in model (no GPU), then `uv run levi live start --daemon`.
+4. `uv run levi live once --fake-vlm --workspace /tmp/levi-live-smoke/ws --home /tmp/levi-live-smoke/home --root /path/to/rollouts` runs the pipeline once against a stand-in model (no GPU), then `uv run levi live start --daemon`.
 
 ## 6. What is where
 

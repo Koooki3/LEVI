@@ -96,16 +96,70 @@ def add_config_options(parser):
     )
 
 
-def remembered_workspace(home) -> str | None:
-    """The workspace the last service started with ``home`` recorded in its
-    status file, when it is still a live workspace: commands given neither
-    ``--workspace`` nor a configuration act on the service that runs (or
-    last ran), not on a built-in default."""
-    status = jsonio.read(Path(home).expanduser() / "status.json")
-    named = status.get("workspace") if isinstance(status, dict) else None
-    if not isinstance(named, str) or not Path(named).is_absolute():
+STARTED = "started.json"  # in the home: the workspace `levi live start` ran on
+
+
+def record_start(config) -> None:
+    """Remember the workspace a service was started on, in the home and in
+    the workspace (``start`` only: ``once`` and ``--fake-vlm`` never write
+    either)."""
+    row = {"workspace": str(config.workspace), "at": time.time(), "pid": os.getpid()}
+    jsonio.write(config.home / STARTED, row)
+    jsonio.write(config.live_dir / STARTED, row)
+
+
+def started_here(workspace) -> bool:
+    """Has a ``levi live start`` run on this workspace? Its record, or the
+    service log only ``start`` writes (services started before the record
+    existed)."""
+    live = Path(workspace) / "live"
+    return (live / STARTED).is_file() or (live / "logs" / "live.log").is_file()
+
+
+def _usable_live_workspace(named) -> str | None:
+    if not isinstance(named, str) or not named or not Path(named).is_absolute():
         return None
-    return named if locate.is_live(named) else None
+    candidate = Path(named).expanduser().resolve()
+    if (
+        not locate.is_live(candidate)
+        or not locate.confined(candidate / "live", candidate)
+        or locate.refused(candidate)
+    ):
+        return None
+    return str(candidate)
+
+
+def remembered_workspace(home) -> str | None:
+    """The workspace the last ``levi live start`` with ``home`` ran on, when it
+    is still a live workspace (and not a product workspace, ``locate``):
+    commands given neither ``--workspace`` nor a configuration act on that
+    service, not on a built-in default. ``once`` runs are never remembered.
+
+    A home whose service was started before ``started.json`` existed falls
+    back to the status file, but only for a workspace that a ``start`` has
+    used (``started_here``)."""
+    home = Path(home).expanduser()
+    record = jsonio.read(home / STARTED)
+    if isinstance(record, dict):
+        return _usable_live_workspace(record.get("workspace"))
+    status = jsonio.read(home / "status.json")
+    named = status.get("workspace") if isinstance(status, dict) else None
+    found = _usable_live_workspace(named)
+    if found and started_here(found):
+        return found
+    return None
+
+
+def started_workspaces(home) -> list:
+    """Workspaces a real service uses or used: never a ``--fake-vlm`` target."""
+    found = []
+    named = remembered_workspace(home)
+    if named:
+        found.append(Path(named))
+    env = os.environ.get(ENV_WORKSPACE)
+    if env:
+        found.append(Path(env).expanduser().resolve())
+    return found
 
 
 def resolve_config(args):
@@ -431,6 +485,7 @@ def cmd_start(args) -> int:
     os.environ.pop(ENV_CONFIG, None)
     resources.apply(config)
     write_effective(config)  # before the core starts: it reads this session's
+    record_start(config)  # what later commands without --workspace act on
     logger = resources.rotating_logger(
         "levi.live",
         config.logs_dir / "live.log",
@@ -1001,20 +1056,38 @@ def cmd_doctor(args) -> int:
 # --- once ------------------------------------------------------------------------------------------------------
 
 
+def check_fake_target(args, config) -> None:
+    """``--fake-vlm`` (with ``--auto-approve``, its stand-in output is committed
+    as automatic annotations) only ever runs on a scratch workspace: never the
+    default one, the one LEVI_LIVE_WORKSPACE names, the one the last ``start``
+    used, nor any workspace a ``start`` has run on (``started_here``)."""
+    refusal = (
+        "--fake-vlm labels with a stand-in model and (with --auto-approve) "
+        "commits its output as automatic annotations: give it a scratch "
+        "--workspace, never a live service's workspace"
+    )
+    if not args.workspace:
+        raise ValueError(refusal)
+    target = Path(args.workspace).expanduser().resolve()
+    home = args.home or os.environ.get(ENV_HOME) or live_config.DEFAULT_HOME
+    guarded = [Path(live_config.DEFAULT_WORKSPACE).expanduser().resolve()]
+    guarded += started_workspaces(home)
+    if target in guarded or started_here(target):
+        raise ValueError(refusal + f" ({target} is one)")
+
+
 def cmd_once(args) -> int:
     config = resolve_config(args)
     fake = None
     if args.fake_vlm:
-        if (
-            not args.workspace
-            or Path(args.workspace).expanduser().resolve()
-            == Path(live_config.DEFAULT_WORKSPACE).expanduser().resolve()
-        ):
-            raise ValueError(
-                "--fake-vlm labels with a stand-in model and (with --auto-approve) "
-                "commits its output as automatic annotations: give it a scratch "
-                "--workspace, never the live workspace"
-            )
+        check_fake_target(args, config)
+        if not args.home and not os.environ.get(ENV_HOME):
+            # A trial run never touches the real service's home (status file,
+            # lock, what `start` remembers): a scratch home of its own.
+            import tempfile
+
+            config.service.home = tempfile.mkdtemp(prefix="levi-live-fake-home-")
+            print(f"scratch home {config.service.home}")
         from . import fakevlm
 
         server, fake, port = fakevlm.serve(0)
