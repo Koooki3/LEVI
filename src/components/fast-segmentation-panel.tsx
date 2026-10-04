@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Square, Trash2, Zap } from "lucide-react";
-import { Icon } from "@/components/ds";
+import { Icon, IconButton } from "@/components/ds";
 import { T, useLocale } from "@/components/levi-locale";
 import { useConfirmAction } from "@/components/shell/confirm";
 import {
@@ -897,16 +897,13 @@ export default function FastSegmentationPanel({
                 ))}
               </select>
             </label>
-            <button
-              type="button"
-              className="object-annotation-run"
+            <IconButton
+              icon={Trash2}
+              variant="secondary"
+              label={t("Delete model")}
               onClick={() => void removeModel()}
               disabled={!model || liveOn || labelActive}
-              title={t("Delete model")}
-              aria-label={t("Delete model")}
-            >
-              <Icon icon={Trash2} />
-            </button>
+            />
           </div>
           {model && <ModelCard model={model} />}
 

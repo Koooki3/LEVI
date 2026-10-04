@@ -550,11 +550,9 @@
   cursor: grabbing;
 }
 .annotations-skin .quick-popup-grip {
+  display: inline-flex;
   color: var(--ds-text-secondary);
-  opacity: 0.7;
-  font-size: 12px;
-  letter-spacing: -0.2em;
-  margin-left: 4px;
+  margin-left: auto;
 }
 .annotations-skin .quick-popup-head {
   display: flex;

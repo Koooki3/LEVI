@@ -1,6 +1,8 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
 
+import { GripVertical } from "lucide-react";
+import { Icon } from "@/components/ds";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { isSaveShortcut } from "../utils/keyboardShortcuts";
 import { useLocale } from "./levi-locale";
@@ -166,7 +168,7 @@ export const DraggablePopup: React.FC<DraggablePopupProps> = ({
       >
         {header}
         <span className="quick-popup-grip" aria-hidden="true">
-          ⋮⋮
+          <Icon icon={GripVertical} />
         </span>
       </div>
       {children}

@@ -920,8 +920,8 @@ function VarianceHeatmap({
     Math.min(isFs ? 56 : 36, Math.floor(baseH / numDims)),
   );
   const labelW = 100;
-  const svgW = labelW + numBins * cellW + 60;
-  const svgH = numDims * cellH + 40;
+  const svgW = labelW + numBins * cellW + 72;
+  const svgH = numDims * cellH + 48;
 
   // Sequential, one hue: the data blue, stronger with more variance.
   function varOpacity(v: number): number {
@@ -1017,7 +1017,7 @@ function VarianceHeatmap({
                   textAnchor="end"
                   dominantBaseline="central"
                   className="fill-(--ds-text-secondary)"
-                  fontSize={Math.min(11, cellH - 4)}
+                  fontSize={12}
                 >
                   {shortName(name)}
                 </text>
@@ -1030,10 +1030,10 @@ function VarianceHeatmap({
                   <text
                     key={frac}
                     x={labelW + binIdx * cellW + cellW / 2}
-                    y={numDims * cellH + 14}
+                    y={numDims * cellH + 16}
                     textAnchor="middle"
                     className="fill-(--ds-text-secondary)"
-                    fontSize={9}
+                    fontSize={12}
                   >
                     {(frac * 100).toFixed(0)}%
                   </text>
@@ -1041,10 +1041,10 @@ function VarianceHeatmap({
               })}
               <text
                 x={labelW + (numBins * cellW) / 2}
-                y={numDims * cellH + 30}
+                y={numDims * cellH + 38}
                 textAnchor="middle"
-                className="fill-(--ds-text-tertiary)"
-                fontSize={10}
+                className="fill-(--ds-text-secondary)"
+                fontSize={12}
               >
                 <T>Episode progress</T>
               </text>
@@ -1069,8 +1069,8 @@ function VarianceHeatmap({
               <text
                 x={labelW + numBins * cellW + 34}
                 y={10}
-                className="fill-(--ds-text-tertiary)"
-                fontSize={8}
+                className="fill-(--ds-text-secondary)"
+                fontSize={12}
                 dominantBaseline="central"
               >
                 <T>high</T>
@@ -1078,8 +1078,8 @@ function VarianceHeatmap({
               <text
                 x={labelW + numBins * cellW + 34}
                 y={numDims * cellH - 4}
-                className="fill-(--ds-text-tertiary)"
-                fontSize={8}
+                className="fill-(--ds-text-secondary)"
+                fontSize={12}
                 dominantBaseline="central"
               >
                 <T>low</T>
@@ -1207,7 +1207,7 @@ function SpeedVarianceSection({
             <div className="flex-1 overflow-x-auto">
               <svg
                 width={bins.length * barW}
-                height={barH + 24}
+                height={barH + 26}
                 className="block"
               >
                 {bins.map((count: number, i: number) => {
@@ -1244,10 +1244,10 @@ function SpeedVarianceSection({
                     <text
                       key={frac}
                       x={idx * barW + barW / 2}
-                      y={barH + 14}
+                      y={barH + 16}
                       textAnchor="middle"
                       className="fill-(--ds-text-secondary)"
-                      fontSize={9}
+                      fontSize={12}
                     >
                       {(lo + idx * binW).toFixed(2)}
                     </text>

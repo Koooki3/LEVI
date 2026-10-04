@@ -719,7 +719,10 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                                   onMouseMove={moveTip}
                                   onMouseLeave={hideTip}
                                 >
-                                  <span style={{ opacity: 0.7, fontSize: 10 }}>
+                                  <span
+                                    className="vw-muted"
+                                    style={{ fontSize: 12 }}
+                                  >
                                     <T>{k}</T>
                                   </span>
                                   <span

@@ -44,7 +44,7 @@ function EpisodeLengthHistogram({
   );
   const chartHeight = 150;
   const labelHeight = 30;
-  const topPad = 16;
+  const topPad = 18;
   const svgWidth = data.length * (barWidth + gap);
   const labelStep = Math.max(1, Math.ceil(data.length / 10));
 
@@ -75,13 +75,13 @@ function EpisodeLengthHistogram({
                     className="fill-(--dv-1) hover:opacity-80 transition-opacity"
                     rx={Math.min(2, barWidth / 4)}
                   />
-                  {bin.count > 0 && barWidth >= 8 && (
+                  {bin.count > 0 && barWidth >= 14 && (
                     <text
                       x={x + barWidth / 2}
                       y={y - 3}
                       textAnchor="middle"
                       className="fill-(--ds-text-secondary)"
-                      fontSize={Math.min(10, barWidth - 1)}
+                      fontSize={12}
                     >
                       <T>{bin.count}</T>
                     </text>
@@ -98,10 +98,10 @@ function EpisodeLengthHistogram({
                 <text
                   key={idx}
                   x={idx * (barWidth + gap) + barWidth / 2}
-                  y={topPad + chartHeight + 14}
+                  y={topPad + chartHeight + 16}
                   textAnchor="middle"
                   className="fill-(--ds-text-secondary)"
-                  fontSize={9}
+                  fontSize={12}
                 >
                   <T>{label}</T>s
                 </text>
