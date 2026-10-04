@@ -235,7 +235,7 @@ Some episodes record another task than their text says: in a paired collection (
 | --- | --- |
 | What | per episode: the corrected text (`task_to`), the text it carries now (`task_from`, a guard), where the proposal comes from (`source`, `evidence`, `evidence_files`, `confidence`, `proposed_by`, `proposed_at`), an optional `review_batch`, and the review: `status` (`proposed`, `approved`, `rejected`), `reviewed_by`, `reviewed_at`, `review_note` |
 | Where | `<workspace>/pool/task_corrections/<version>.jsonl` (the proposals, written once), `<version>.json` (when, from what file, the sha256) and `<version>.reviews.jsonl` (decisions, appended; the latest one counts) |
-| Who | anyone may **propose** (`import`); only a **person** approves or rejects. The review route (`POST /api/levi/pool/corrections/{version}/review`) refuses an agent's credential and needs the UI token; the CLI's `approve` and `reject` send the decision to the running service as the person |
+| Who | anyone may **propose** (`import`); only a **person** approves or rejects. The review route (`POST /api/levi/pool/corrections/{version}/review`) refuses an agent's credential and needs the UI token; the CLI's `approve` and `reject` send the decision to the running service as the person, reading the person's key from the file the core owns (`<workspace>/outputs/LEVI/workbench/agent/core/human.key`, owner-only; never printed). **Boundary:** an agent process running as the same operating-system user could read that file too; LEVI cannot tell it apart from the person, so keeping agents away from it rests on the agent rules (AGENTS.md: human-only actions stay with a person), exactly as for removing an episode on the live page ([LIVE.md](LIVE.md)) |
 | Applied | only when a recipe names the version (`task_corrections`), only approved ones, to every copy of the recording (the group), before every filter; the source files never change |
 
 ```bash
@@ -263,7 +263,7 @@ The export: each corrected episode carries `task_original` and `task_correction`
 - **存放**：`<工作区>/pool/task_corrections/<版本>.jsonl`（提议，只写一次）、`<版本>.json`（导入时间、来源文件、sha256）、`<版本>.reviews.jsonl`（审核决定，只追加，以最新一条为准）。同一版本只写一次：该版本的任何文件（提议、清单或审核记录）已存在时拒绝导入，要改就导入新版本。
 - **批准绑定内容**：`show`、`list` 打印该版本提议文件的 `sha256`（导入时记在清单里）；`approve`、`reject` 必须带上它（`--sha256`），对不上就拒绝。每条审核记录连同这个 sha256 和该条的 `task_to` 一起保存，只有两者都和当前内容一致时才算数。预览、计划、运行和记录审核之前都会重新计算提议文件的 sha256，和清单不一致时整个版本被拒绝，改动要作为新版本导入。
 - **审核记录的写入**：一次审核拼成一次写入并同步到磁盘。最后一行没写完时跳过，`show`、`list` 标出 `reviews_truncated`，下一次审核把这段残行去掉；中间的行损坏时报错（请恢复文件），不猜。
-- **谁能做**：任何人（包括 agent）都可以**提议**（`import`）；**批准和驳回只能由人做**。审核接口拒绝 agent 凭据，需要界面令牌；命令行的 `approve`、`reject` 以人的身份发给正在运行的服务。
+- **谁能做**：任何人（包括 agent）都可以**提议**（`import`）；**批准和驳回只能由人做**。审核接口拒绝 agent 凭据，需要界面令牌；命令行的 `approve`、`reject` 从核心持有的文件读取人的密钥（`<工作区>/outputs/LEVI/workbench/agent/core/human.key`，仅属主可读，不打印），以人的身份发给正在运行的服务。**边界**：以同一操作系统用户运行的 agent 进程理论上也能读这个文件，LEVI 分不出它和人；不让 agent 代做靠的是 agent 规则（AGENTS.md：只有人能做的动作留给人），与实时页面排除片段（[LIVE.zh-CN.md](LIVE.zh-CN.md)）相同。
 - **何时应用**：只有配方在 `task_corrections` 里点名了该版本，且订正已被批准；对这次录制的所有副本（同组）生效，在所有过滤之前应用；源文件永远不变。
 - **匹配**：`ok`；`stale`（片段的文本已不是 `task_from`，不应用）；`ambiguous`（相对路径在多个池根下都找到，不知道指哪个，不应用）；`unmatched`（找不到该片段）。预览对已批准但无法应用的订正给出提示；同一录制在所选版本里有两条互相矛盾的已批准订正时拒绝导出。
 - **导出记录**：被订正的片段在 `pool_export.json` 里带 `task_original` 和 `task_correction`（`版本:编号`）；记录顶层的 `task_corrections` 列出版本及其 sha256、每条已应用的订正（片段、原文本、新文本、来源、置信度、审核人、审核时间）。原始采集格式的导出在复制出的 `metadata.json` 里写入订正后的 `task_description`（原文本和订正编号放在 `levi_task_correction`），源文件不变。导出运行时再核对一次：计划之后被驳回的订正，或计划之后才被批准、与另一条矛盾的订正，都会让导出停止（重新计划）。
