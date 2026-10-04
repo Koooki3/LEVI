@@ -33,7 +33,9 @@ call into the run store is made (that store is a SQLite file of its own).
 Only people do this: the API refuses an agent's credential (``api.py``), and
 the automatic approver's call list (``auto.ALLOWED``) has no such call. Every
 change is a line in ``live/audit.jsonl`` (``episode.exclude`` or
-``episode.restore``). Standard library only.
+``episode.restore``), with ``via: "product"`` when the person used the product
+LEVI's page (``locate.py``): the change is made here, on the live workspace's
+files, by the product LEVI's process, never in its own workspace. Standard library only.
 """
 
 import logging
@@ -123,11 +125,13 @@ def open_review_count(state: dict) -> int:
     return state.get("review_runs_open", 0)
 
 
-def exclude(config, name, demos, reason="", *, now=None, by=ACTOR) -> dict:
+def exclude(config, name, demos, reason="", *, now=None, by=ACTOR, via=None) -> dict:
     """Exclude ``demos`` of dataset ``name`` (all or nothing). Raises
     ``Unknown`` (a demo the dataset does not have), ``Busy`` (in the batch in
     progress) or ``NotPart`` (never taken into the dataset). Excluding an
-    episode that is already excluded changes nothing."""
+    episode that is already excluded changes nothing. ``via`` names the page
+    the person used when it is not the live workspace's own (``"product"``:
+    the product LEVI's page); it goes into the audit line."""
     now = time.time() if now is None else now
     demos = list(dict.fromkeys(demos))
     reason = clean_reason(reason)
@@ -160,11 +164,12 @@ def exclude(config, name, demos, reason="", *, now=None, by=ACTOR) -> dict:
             demo,
             reason=reason,
             at=now,
+            via=via,
         )
     return {**outcome, **summary(value)}
 
 
-def restore(config, name, demos, *, now=None) -> dict:
+def restore(config, name, demos, *, now=None, via=None) -> dict:
     """Put ``demos`` back (all or nothing). Raises ``Unknown``; restoring an
     episode that is not excluded changes nothing."""
     now = time.time() if now is None else now
@@ -185,7 +190,7 @@ def restore(config, name, demos, *, now=None) -> dict:
 
     value = jsonio.update(mirror.state_path(config, name), change, default=dict)
     for demo in outcome["changed"]:
-        audit(config, TOOL_RESTORE, name, demo, at=now)
+        audit(config, TOOL_RESTORE, name, demo, at=now, via=via)
     return {**outcome, **summary(value)}
 
 
@@ -199,7 +204,7 @@ def summary(state: dict) -> dict:
     }
 
 
-def audit(config, tool, dataset, demo, *, reason=None, at=None):
+def audit(config, tool, dataset, demo, *, reason=None, at=None, via=None):
     """One line per episode in ``live/audit.jsonl``. A log that cannot be
     written is reported but does not undo a change that was made."""
     record = {
@@ -213,6 +218,8 @@ def audit(config, tool, dataset, demo, *, reason=None, at=None):
     }
     if reason is not None:
         record["reason"] = reason
+    if via:
+        record["via"] = via
     try:
         jsonio.append_line(
             config.live_dir / auto.AUDIT, record, max_bytes=auto.AUDIT_MAX_BYTES

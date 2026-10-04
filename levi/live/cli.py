@@ -1,6 +1,6 @@
 """``levi live``: start, stop and inspect the background annotation service.
 
-    levi live start [--daemon] [--auto-approve] [--config F] [--workspace W]
+    levi live start [--daemon] [--auto-approve] [--ui] [--config F] [--workspace W]
     levi live stop
     levi live status [--json]
     levi live doctor [--json]
@@ -432,7 +432,7 @@ def cmd_start(args) -> int:
     try:
         if not args.no_core:
             frontend = Frontend(config, log)
-            frontend.start(ui=not args.no_ui)
+            frontend.start(ui=wants_ui(args))
         signal.signal(
             signal.SIGTERM, lambda *_: setattr(ctl, "running", False) or ctl.wake.set()
         )
@@ -455,6 +455,13 @@ def cmd_start(args) -> int:
             frontend.stop()
         instance.release()
     return 0
+
+
+def wants_ui(args) -> bool:
+    """Start the live workspace's own page? Only with ``--ui``: the product
+    LEVI shows the live page (``locate.py``), and the live workspace's own
+    page would offer a second, different training pool. ``--no-ui`` wins."""
+    return bool(getattr(args, "ui", False) and not getattr(args, "no_ui", False))
 
 
 def daemonize(args, config) -> int:
@@ -509,8 +516,8 @@ def daemonize(args, config) -> int:
                 else f"core API :{config.service.core_port}"
                 + (
                     " (no production build: run `levi build` for the page)"
-                    if wants_frontend and not args.no_ui
-                    else ""
+                    if wants_frontend and wants_ui(args)
+                    else "; the live page is in the product LEVI (/live)"
                 )
             )
             print(
@@ -547,7 +554,7 @@ def _forward(args) -> list:
         ("--prewarm", getattr(args, "prewarm", False)),
         ("--process-backlog", args.process_backlog),
         ("--adopt-workspace", args.adopt_workspace),
-        ("--no-ui", args.no_ui),
+        ("--ui", wants_ui(args)),
         ("--no-core", args.no_core),
     ):
         if on:
@@ -586,6 +593,14 @@ def read_status(config):
     return value, alive, holder
 
 
+def _page(value) -> str:
+    """Where the live page is: the service's own (``--ui``), or the product
+    LEVI's /live."""
+    if ((value or {}).get("frontend") or {}).get("ui"):
+        return str(value.get("ui_url"))
+    return "in the product LEVI (/live)"
+
+
 def format_status(value, alive) -> str:
     if not value:
         return "No status file: the live service has not run here."
@@ -593,7 +608,7 @@ def format_status(value, alive) -> str:
     age = now - float(value.get("updated_at") or 0)
     lines = [
         f"state      {value.get('state')}{'' if alive else f'  (NOT RUNNING: last seen {age:.0f} s ago)'}",
-        f"workspace  {value.get('workspace')}   UI {value.get('ui_url')}   core :{value.get('core_port')}",
+        f"workspace  {value.get('workspace')}   UI {_page(value)}   core :{value.get('core_port')}",
         f"auto       {'automatic approver ON' if value.get('auto_approve') else 'approvals wait for a person'}",
     ]
     gpu = value.get("gpu") or {}
@@ -1172,7 +1187,15 @@ def build_parser():
     )
     start.add_argument("--daemon-child", action="store_true", help=argparse.SUPPRESS)
     start.add_argument(
-        "--no-ui", action="store_true", help="start the core API without the web page"
+        "--ui",
+        action="store_true",
+        help="also start the live workspace's own web page (off by default: the "
+        "product LEVI shows the live page at /live)",
+    )
+    start.add_argument(
+        "--no-ui",
+        action="store_true",
+        help="the core API without the web page (the default; kept for old scripts)",
     )
     start.add_argument(
         "--no-core", action="store_true", help="start neither the page nor the core API"

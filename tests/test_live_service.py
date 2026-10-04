@@ -221,7 +221,10 @@ def test_the_api_answers_disabled_outside_a_live_workspace(
 ):
     monkeypatch.setattr(api, "_workspace", lambda: tmp_path)
     for path in ("status", "sessions", "datasets", "audit"):
-        assert client.get(f"/api/levi/live/{path}").json() == {"enabled": False}
+        assert client.get(f"/api/levi/live/{path}").json() == {
+            "enabled": False,
+            "reason": "not_live",
+        }
 
 
 def test_the_api_merges_sessions_health_progress_and_faults(

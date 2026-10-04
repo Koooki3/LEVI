@@ -31,8 +31,9 @@ def live_stats(client, tmp_path, monkeypatch):
 
 def test_the_api_is_disabled_outside_a_live_workspace(client, tmp_path, monkeypatch):
     monkeypatch.setattr(api, "_workspace", lambda: tmp_path)
-    assert client.get("/api/levi/live/stats").json() == {"enabled": False}
-    assert client.get("/api/levi/live/stats/export").json() == {"enabled": False}
+    off = {"enabled": False, "reason": "not_live"}
+    assert client.get("/api/levi/live/stats").json() == off
+    assert client.get("/api/levi/live/stats/export").json() == off
 
 
 def test_stats_answer_aggregates_sessions_and_a_page_of_episodes(live_stats):

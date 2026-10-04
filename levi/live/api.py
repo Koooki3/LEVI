@@ -1,15 +1,24 @@
 """HTTP views for the live page (``/api/levi/live/*``).
 
 The GET routes only read files the supervisor and the robot side write, and
-none returns a token or a path outside the live workspace's own state. In any
-workspace that is not a live workspace (no ``live/workspace.json``) they
-answer ``{"enabled": false}``.
+none returns a token or a path outside the live workspace's own state.
+
+Which live workspace: the one this LEVI runs on when it is a live workspace
+(the live service's own core), else the one ``locate.py`` finds
+(``LEVI_LIVE_WORKSPACE``, or the live service's status file). That is how the
+product LEVI shows the live page without sharing a workspace with the service:
+it reads the live workspace's files, and nothing of the live service (the
+approver, its runs, the mirror) enters the product workspace. With no live
+workspace found the routes answer ``{"enabled": false, "reason": ...}``.
 
 The only routes that change anything take an episode out of a dataset and put
 it back (``exclusion.py``; a soft delete that keeps every file). They are a
-person's action: the UI token is required (the same check as every other
-write of the page), a LEVI Agent credential is refused, and there is no
-capability an agent or the automatic approver could call instead.
+person's action: the UI token of the LEVI serving the page is required (the
+same check as every other write of the page), a LEVI Agent credential is
+refused, and there is no capability an agent or the automatic approver could
+call instead. On the product LEVI the change is made by its own process on
+the live workspace's state file (under the lock the live worker takes) and
+audited with ``via: "product"``.
 
 The JSON shapes are documented in ``docs/LIVE.md``.
 """
@@ -25,7 +34,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from . import config as live_config
-from . import exclusion, jsonio, mirror, resumer, sessions, statsfmt, statsview
+from . import exclusion, jsonio, locate, mirror, resumer, sessions, statsfmt, statsview
 
 router = APIRouter(prefix="/api/levi/live", tags=["Live annotation"])
 
@@ -48,17 +57,34 @@ MAX_DEMOS = 200
 MAX_AUDIT = 100
 
 
-def _workspace() -> Path:
+def _own() -> Path:
+    """This LEVI's own workspace."""
     from levi.paths import ROOT
 
     return ROOT
 
 
+def _workspace() -> Path | None:
+    """The live workspace this page shows: this LEVI's own when it is the live
+    one, else the one ``locate.find`` names (``LEVI_LIVE_WORKSPACE``, or the
+    live service's status file), else None."""
+    return locate.find(_own()).workspace
+
+
+def _embedded(root: Path) -> bool:
+    """Shown by a LEVI that is not the live workspace itself (the product
+    LEVI's page)."""
+    try:
+        return Path(root).resolve() != _own().resolve()
+    except OSError:
+        return True
+
+
 def _config():
     """The live configuration in force (the file the supervisor wrote), or
-    None outside a live workspace."""
+    None when no live workspace is found."""
     root = _workspace()
-    if not (root / "live" / "workspace.json").is_file():
+    if root is None or not locate.is_live(root):
         return None
     live = root / "live"
     written = next(
@@ -69,7 +95,7 @@ def _config():
     except ValueError:
         config = live_config.Config()
     config.service.workspace = str(root)
-    home = os.environ.get("LEVI_LIVE_HOME")
+    home = os.environ.get(locate.ENV_HOME)
     if home:
         config.service.home = home
     return config
@@ -88,7 +114,25 @@ def _alive(status: dict | None, now: float) -> bool:
 
 
 def _disabled():
-    return {"enabled": False}
+    """No live workspace to show, and why (a reason code, never a path):
+    ``not_configured``, ``not_live`` or ``product_workspace`` (``locate.py``)."""
+    root = _workspace()
+    if root is not None and not locate.is_live(root):
+        return {"enabled": False, "reason": "not_live"}
+    return {"enabled": False, "reason": locate.find(_own()).problem or "not_live"}
+
+
+def _where(config, value: dict | None, alive: bool) -> dict:
+    """Which page shows this: ``embedded`` when it is not the live
+    workspace's own LEVI (the product LEVI), and the live workspace's own
+    page when the service runs one (``levi live start --ui``)."""
+    front = (value or {}).get("frontend") or {}
+    page = (
+        f"http://{config.service.host}:{config.service.ui_port}"
+        if alive and front.get("ui") and front.get("state") == "ok"
+        else None
+    )
+    return {"embedded": _embedded(config.workspace), "live_ui": page}
 
 
 @router.get("/status")
@@ -107,6 +151,7 @@ def status():
             faults.append({"dataset": name, "reasons": row.get("fault_reasons") or []})
     return {
         "enabled": True,
+        **_where(config, value, alive),
         "alive": alive,
         "age_s": None
         if not value
@@ -225,18 +270,18 @@ def dataset_view(name: str):
     # Not cut at MAX_DEMOS: a person removes few, and cutting the list would
     # hide episodes that could not then be restored from the page.
     removed_rows = [_demo_row(d, demos[d]) for d in removed]
-    repo_id = None
-    try:
-        from levi import catalog
-
-        entry = catalog.datasets().get(name)
-        repo_id = entry["id"] if entry else None
-    except Exception:  # noqa: BLE001 - the catalog is optional here
-        repo_id = None
+    # The live workspace's own catalog (not this LEVI's: the product LEVI may
+    # hold a dataset of the same name that is another one).
+    catalog = jsonio.read(config.workspace / "outputs/LEVI/workbench/datasets.json", {})
+    entry = catalog.get(name) if isinstance(catalog, dict) else None
+    repo_id = entry.get("id") if isinstance(entry, dict) else None
+    value = jsonio.read(config.status_file)
+    where = _where(config, value, _alive(value, time.time()))
     return {
         "enabled": True,
         "name": name,
         "repo_id": repo_id,
+        **where,
         "group": state.get("group"),
         "task_folder": state.get("task_folder"),
         "task_text": state.get("task_text"),
@@ -318,7 +363,7 @@ def _person(request: Request) -> None:
 def _live_config(name: str):
     config = _config()
     if config is None:
-        raise HTTPException(404, "This is not a live workspace")
+        raise HTTPException(404, "No live workspace is set up for this LEVI")
     if not DATASET.fullmatch(name) or not mirror.load_state(config, name):
         raise HTTPException(404, "Unknown live dataset")
     return config
@@ -345,11 +390,19 @@ def _refusal(exc: exclusion.Refused) -> HTTPException:
     )
 
 
+def _via(config):
+    """``"product"`` when the person acts on the product LEVI's page: the
+    change is made right here on the live workspace's state files, under the
+    same lock the live worker takes (``exclusion.py``), so the live core
+    need not run and no key of it is read."""
+    return "product" if _embedded(config.workspace) else None
+
+
 def _exclude(name, demos, reason):
     config = _live_config(name)
     _demo_names(demos)
     try:
-        done = exclusion.exclude(config, name, demos, reason)
+        done = exclusion.exclude(config, name, demos, reason, via=_via(config))
     except exclusion.Refused as exc:
         raise _refusal(exc) from exc
     return {"enabled": True, "dataset": name, **done}
@@ -359,7 +412,7 @@ def _restore(name, demos):
     config = _live_config(name)
     _demo_names(demos)
     try:
-        done = exclusion.restore(config, name, demos)
+        done = exclusion.restore(config, name, demos, via=_via(config))
     except exclusion.Refused as exc:
         raise _refusal(exc) from exc
     return {"enabled": True, "dataset": name, **done}

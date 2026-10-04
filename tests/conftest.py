@@ -109,6 +109,15 @@ def _no_droid_sample(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_live_service(monkeypatch, tmp_path):
+    """The live page of any LEVI looks for the live service's status file
+    (``levi/live/locate.py``): never this machine's ``~/.levi-live`` or a
+    ``LEVI_LIVE_WORKSPACE`` from the shell. A test that wants one sets it."""
+    monkeypatch.setenv("LEVI_LIVE_HOME", str(tmp_path / "no-live-home"))
+    monkeypatch.delenv("LEVI_LIVE_WORKSPACE", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _gpu_is_not_this_machines(monkeypatch):
     """The off-peak GPU guard reads the real nvidia-smi; a test must not pass
     or fail depending on who is training on this machine right now."""
