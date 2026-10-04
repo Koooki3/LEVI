@@ -234,26 +234,26 @@ def parse(rows: list[dict], name: str = "proposals") -> list[Proposal]:
     return out
 
 
-def import_file(path, version: str, *, replace: bool = False) -> dict:
+def import_file(path, version: str) -> dict:
     """Write the proposals of ``path`` (JSONL, or a JSON list) as ``version``.
-    A version is written once; ``replace`` rewrites one that has no review
-    yet (a reviewed table is never changed under the person's decisions:
-    import a new version instead)."""
+    A version is written once: any file of it already there (proposals,
+    manifest or reviews, even a reviews file left from a deleted version)
+    refuses the import. A change is a new version, so a person's decisions
+    always refer to the proposals they saw."""
     path = Path(path)
     items = parse(_read_rows(path.read_text(encoding="utf-8"), path.name), path.name)
     files = _paths(version)
     with _locked(version):
-        if files["proposals"].exists():
-            if not replace:
-                raise ValueError(
-                    f"Correction version {version!r} exists; a version is written "
-                    "once (import under a new version name)"
-                )
-            if _reviews(version):
-                raise ValueError(
-                    f"Correction version {version!r} has reviews; it cannot be "
-                    "replaced (import under a new version name)"
-                )
+        present = [
+            files[k].name
+            for k in ("proposals", "manifest", "reviews")
+            if files[k].exists()
+        ]
+        if present:
+            raise ValueError(
+                f"Correction version {version!r} exists ({', '.join(present)}); "
+                "a version is written once (import under a new version name)"
+            )
         stamp = _now()
         lines = []
         for item in items:

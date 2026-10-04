@@ -181,12 +181,35 @@ def test_unreviewed_and_rejected_corrections_are_not_applied(pool, person):
     entry = {e["id"]: e for e in corrections.show(VERSION)["entries"]}
     assert entry["a"]["status"] == "rejected" and entry["a"]["review_note"]
     assert entry["b"]["status"] == "approved" and entry["b"]["reviewed_by"] == "Ann"
-    # Reviewed: the version can no longer be replaced.
-    with pytest.raises(ValueError, match="has reviews"):
+    # Reviewed: the version can never be written again.
+    with pytest.raises(ValueError, match="written once"):
         corrections.import_file(
-            _proposals(pool["out"], [_row("x/y", "a", "b", "z")], "r.jsonl"),
-            VERSION,
-            replace=True,
+            _proposals(pool["out"], [_row("x/y", "a", "b", "z")], "r.jsonl"), VERSION
+        )
+
+
+def test_a_version_is_written_once_even_over_leftover_files(pool):
+    """Reviews (or a manifest) left from a deleted version must not attach to
+    new proposals of the same name: any file of the version refuses."""
+    rows = [
+        _row("collect/data/fold_cloth/demo_0000", "fold_cloth", "unfold_cloth", "a")
+    ]
+    for leftover in ("reviews", "manifest"):
+        name = f"left-{leftover}"
+        path = corrections._paths(name)[leftover]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"id": "a", "decision": "approved"}\n')
+        with pytest.raises(ValueError, match="written once"):
+            corrections.import_file(
+                _proposals(pool["out"], rows, f"{name}.jsonl"), name
+            )
+        assert not corrections._paths(name)["proposals"].exists()
+    import inspect
+
+    assert "replace" not in inspect.signature(corrections.import_file).parameters
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(
+            ["corrections", "import", "x.jsonl", "--version", "v", "--replace"]
         )
 
 

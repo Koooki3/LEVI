@@ -312,11 +312,6 @@ def build_parser() -> argparse.ArgumentParser:
     cimp = csub.add_parser("import", help="import proposals (JSONL or a JSON list)")
     cimp.add_argument("file")
     cimp.add_argument("--version", required=True, help="e.g. cast-direction-v1")
-    cimp.add_argument(
-        "--replace",
-        action="store_true",
-        help="rewrite a version that has no review yet",
-    )
     csub.add_parser("list", help="versions and counts per status")
     cshow = csub.add_parser("show", help="one version's proposals and status")
     cshow.add_argument("version")
@@ -606,7 +601,7 @@ def _corrections(args) -> int:
 
     action = args.corrections_action
     if action == "import":
-        _print(corrections.import_file(args.file, args.version, replace=args.replace))
+        _print(corrections.import_file(args.file, args.version))
     elif action == "list":
         _print(corrections.listing())
     elif action == "show":
