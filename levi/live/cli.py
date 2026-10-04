@@ -143,6 +143,23 @@ def remembered_workspace(home) -> str | None:
     return found
 
 
+def keep_legacy_start(home) -> str | None:
+    """Before a ``levi live once`` rewrites the status file of a home with no
+    ``started.json`` (a service started before that record existed), record
+    the workspace that status file still names for its service, so the once
+    run's status never changes what ``remembered_workspace`` and the product
+    LEVI's page (``locate.find``) resolve to. Writes only ``<home>/started.json``
+    and only when the status file names a workspace a ``start`` used."""
+    home = Path(home).expanduser()
+    if (home / STARTED).exists():
+        return None
+    named = remembered_workspace(home)
+    if named:
+        row = {"workspace": named, "at": time.time(), "from": "status.json"}
+        jsonio.write(home / STARTED, row)
+    return named
+
+
 def started_workspaces(home) -> list:
     """Workspaces a real service uses or used: never a ``--fake-vlm`` target."""
     found = []
@@ -1100,6 +1117,10 @@ def cmd_once(args) -> int:
             "The live service is running; stop it first (levi live stop) or let it work."
         )
         return 1
+    if not fake:
+        # This run rewrites <home>/status.json: keep naming an older service.
+        with contextlib.suppress(OSError):
+            keep_legacy_start(config.home)
     os.environ.update(service_env(config))
     resources.apply(config)
     ctl = controller.Controller(config)

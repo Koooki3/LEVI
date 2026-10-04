@@ -41,7 +41,7 @@ uv run levi live stop                            # 只停自己的进程
 
 不加 `--auto-approve` 时，服务仍会镜像、建视图并**生成计划**，然后等待：由人在 LEVI 页面批准计划（数据集显示 `awaiting_approval`）。加上它，由下文的“自动批准主体”（有审计）代为通过这些关口。
 
-默认值不指向任何一台机器上的目录。工作区默认 `~/.levi-live/workspace`（状态文件、pid 文件和锁在 `~/.levi-live/`，可用 `--home` 或 `LEVI_LIVE_HOME` 改）；命令没有给 `--workspace`、`LEVI_LIVE_WORKSPACE` 或 `--config` 时，作用于用同一个 home 最近一次 `levi live start` 运行的工作区（记在 `<home>/started.json`；这条记录出现之前启动的服务，通过 `status.json` 找，且要求该工作区有只有 `start` 才写的服务日志），前提是它仍是实时工作区、不是产品工作区。`levi live once` 不会改变它。监视的 rollout 根目录（评测客户端的 `--rollout-root`）**没有默认值**：没有它时 `levi live start` 和 `once` 拒绝运行，并说明怎样设置（`--root`、`[watch] roots`）。启动前服务按本机检查配置（`levi live doctor` 显示同样的检查）：vLLM 脚本存在且可执行、pid 目录可写、GPU 锁文件能打开、根目录存在、没有路径指向别的用户的家目录（从别的机器拷来的 `live.toml`）；会让服务无法工作的问题会中止启动并给出修法，其余是警告。
+默认值不指向任何一台机器上的目录。工作区默认 `~/.levi-live/workspace`（状态文件、pid 文件和锁在 `~/.levi-live/`，可用 `--home` 或 `LEVI_LIVE_HOME` 改）；命令没有给 `--workspace`、`LEVI_LIVE_WORKSPACE` 或 `--config` 时，作用于用同一个 home 最近一次 `levi live start` 运行的工作区（记在 `<home>/started.json`；这条记录出现之前启动的服务，通过 `status.json` 找，且要求该工作区有只有 `start` 才写的服务日志），前提是它仍是实时工作区、不是产品工作区。`levi live once` 不会改变它：home 里没有 `started.json` 时，真实的 `once` 在改写状态文件之前，先把状态文件指向的旧服务工作区写进 `started.json`。监视的 rollout 根目录（评测客户端的 `--rollout-root`）**没有默认值**：没有它时 `levi live start` 和 `once` 拒绝运行，并说明怎样设置（`--root`、`[watch] roots`）。启动前服务按本机检查配置（`levi live doctor` 显示同样的检查）：vLLM 脚本存在且可执行、pid 目录可写、GPU 锁文件能打开、根目录存在、没有路径指向别的用户的家目录（从别的机器拷来的 `live.toml`）；会让服务无法工作的问题会中止启动并给出修法，其余是警告。
 
 ## 工作方式
 

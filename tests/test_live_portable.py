@@ -386,6 +386,33 @@ def test_a_status_file_alone_names_only_a_started_workspace_on_the_page(
     assert locate.find(product).problem == "product_workspace"
 
 
+def test_a_once_run_keeps_a_service_started_before_started_json(
+    tmp_path, monkeypatch, contained
+):
+    """No ``started.json`` in the default home, its status file naming a
+    service started before that record existed: a real ``once`` rewrites the
+    status file, and both ``levi live`` and the product page still resolve
+    to the older service's workspace."""
+    from levi.live import locate
+
+    home = tmp_path / "user/.levi-live"
+    home.mkdir(parents=True)
+    legacy = _live_ws(tmp_path / "legacy")
+    (legacy / "live/logs").mkdir(parents=True)
+    (legacy / "live/logs/live.log").write_text("")
+    (home / "status.json").write_text(json.dumps({"workspace": str(legacy)}))
+    _once_in_default_home(tmp_path, monkeypatch, tmp_path / "trial")
+    assert cli.remembered_workspace(home) == str(legacy.resolve())
+    product = tmp_path / "product"
+    product.mkdir()
+    assert locate.find(product).workspace == legacy.resolve()
+    # Nothing to keep: a once run records nothing.
+    (tmp_path / "x").mkdir()
+    fresh = _once_in_default_home(tmp_path / "x", monkeypatch, tmp_path / "trial2")
+    assert not (fresh / cli.STARTED).exists()
+    assert cli.remembered_workspace(fresh) is None
+
+
 def test_fake_vlm_without_a_home_uses_a_scratch_home(tmp_path, monkeypatch, contained):
     import tempfile
 
