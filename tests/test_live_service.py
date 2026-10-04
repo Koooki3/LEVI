@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import with_netguard
 from live_helpers import Rollouts
 
 from levi.live import api, cli, controller, locate, mirror, resources, sessions
@@ -228,7 +229,7 @@ def test_the_api_answers_disabled_outside_a_live_workspace(
 
 
 def test_the_api_merges_sessions_health_progress_and_faults(
-    live_api, rollouts, tmp_path
+    live_api, rollouts, tmp_path, request
 ):
     client, c = live_api
     rollouts.write(0)
@@ -242,11 +243,19 @@ def test_the_api_merges_sessions_health_progress_and_faults(
         )
     )
     c.fr3.health_file = str(health)
+    # No vLLM on the port, no worker: this test reads the status, and on a
+    # machine with a vLLM on :8100 the default port would label for real.
+    c.vllm.port = free_port()
     (c.live_dir / "effective.toml").write_text(live_config.render(c))
-    ctl = controller.Controller(c, log=lambda *a: None)
+    spawned = []
+    ctl = controller.Controller(
+        c, popen=lambda *a, **k: spawned.append(a) or 1 / 0, log=lambda *a: None
+    )
+    request.addfinalizer(ctl.shutdown)  # after the status was read
     ctl.state = "idle"
     ctl.tick()
     ctl.write_status()
+    assert spawned == []
     status = client.get("/api/levi/live/status").json()
     assert status["enabled"] and status["alive"] and status["fr3_red"]
     assert status["service"]["schema"].startswith("levi.live.status")
@@ -322,7 +331,7 @@ def test_the_status_counts_the_runs_the_gate_stopped(live_api):
 
 
 def run_python(code, **env):
-    full = {**os.environ, "PYTHONPATH": str(PROJECT), **env}
+    full = {**os.environ, "PYTHONPATH": with_netguard(str(PROJECT)), **env}
     return subprocess.run(
         [sys.executable, "-c", code],
         capture_output=True,
@@ -426,7 +435,7 @@ def service(tmp_path, *args, ws=None):
 
 
 def cli_run(tmp_path, *args, timeout=120, ws=None):
-    env = {**os.environ, "PYTHONPATH": str(PROJECT)}
+    env = {**os.environ, "PYTHONPATH": with_netguard(str(PROJECT))}
     return subprocess.run(
         service(tmp_path, *args, ws=ws),
         capture_output=True,
@@ -654,7 +663,7 @@ def live_cmd(workspace, home, *args):
         capture_output=True,
         text=True,
         cwd=PROJECT,
-        env={**os.environ, "PYTHONPATH": str(PROJECT)},
+        env={**os.environ, "PYTHONPATH": with_netguard(str(PROJECT))},
         timeout=240,
         check=False,
     )
@@ -883,7 +892,7 @@ def test_fake_vlm_refuses_the_live_workspace(tmp_path):
         cwd=PROJECT,
         env={
             **{k: v for k, v in os.environ.items() if k != "LEVI_LIVE_WORKSPACE"},
-            "PYTHONPATH": str(PROJECT),
+            "PYTHONPATH": with_netguard(str(PROJECT)),
         },
         check=False,
     )
@@ -891,19 +900,26 @@ def test_fake_vlm_refuses_the_live_workspace(tmp_path):
     assert not (tmp_path / "home/status.json").exists()
 
 
-def test_the_page_gets_the_reset_countdown_and_open_review_count(live_api, rollouts):
+def test_the_page_gets_the_reset_countdown_and_open_review_count(
+    live_api, rollouts, request
+):
     client, c = live_api
     rollouts.write(0)
     rollouts.session("waiting_reset")
+    c.vllm.port = free_port()  # never the machine's vLLM on :8100
+    spawned = []
     ctl = controller.Controller(
         c,
         probes=controller.Probes(
             vram=lambda: None, ports=set, holders=list, policy_vram=lambda p: None
         ),
+        popen=lambda *a, **k: spawned.append(a) or 1 / 0,
         log=lambda *a: None,
     )
+    request.addfinalizer(ctl.shutdown)
     ctl.tick()
     ctl.write_status()
+    assert spawned == []
     status = json.loads(c.status_file.read_text())
     row = status["sessions"][0]
     assert row["reset_wait_s"] == 10.0 and row["waiting_reset_since"] is not None

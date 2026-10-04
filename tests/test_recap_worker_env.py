@@ -11,6 +11,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from conftest import with_netguard
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKER = ROOT / "integrations" / "recap_value"
@@ -65,7 +66,7 @@ def test_tokenizer_folder_with_only_a_sentencepiece_model(tmp_path):
         text=True,
         timeout=300,
         check=False,
-        env={**os.environ, "PYTHONPATH": str(WORKER)},
+        env={**os.environ, "PYTHONPATH": with_netguard(str(WORKER))},
     )
     assert done.returncode == 0, done.stderr[-2000:]
     result = json.loads(done.stdout.strip().splitlines()[-1])

@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import with_netguard
 from live_helpers import Rollouts
 
 from levi.live import cli, controller, fakevlm, gpumgr
@@ -233,7 +234,7 @@ def serve(tmp_path, monkeypatch):
     """A serve.sh look-alike that starts the fake model server detached and
     writes the pid file, exactly as tools/vllm/serve.sh does. It records the
     environment vLLM would have been launched with."""
-    monkeypatch.setenv("PYTHONPATH", str(PROJECT))
+    monkeypatch.setenv("PYTHONPATH", with_netguard(str(PROJECT)))
     pid_dir = tmp_path / "vllm-logs"
     pid_dir.mkdir()
     script = tmp_path / "serve-fake.sh"

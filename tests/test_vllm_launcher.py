@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import with_netguard
 
 from levi.live import config as live_config
 from levi.live import gpumgr
@@ -44,7 +45,7 @@ exec -a vllm "{sys.executable}" -m levi.live.fakevlm --port "$port"
 """
     )
     fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
-    monkeypatch.setenv("PYTHONPATH", str(PROJECT))
+    monkeypatch.setenv("PYTHONPATH", with_netguard(str(PROJECT)))
     monkeypatch.setenv("LEVI_VLLM_VENV", str(root))
     monkeypatch.setenv("SERVE_SKIP_PREFLIGHT", "1")  # no nvidia-smi in the test
     return root, record

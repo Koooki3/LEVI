@@ -1,8 +1,96 @@
+import importlib.util
 import json
+import os
+import shutil
+import tempfile
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
+
+pytest_plugins = ("pytester",)
+
+# --- network guard -------------------------------------------------------------------
+# On the maintainer's machine these loopback ports belong to services a person
+# is using: the local vLLM (8100), the product LEVI (7860/7861), the live
+# service (7880/7881) and the robot and policy servers (5000/8000). No test
+# may talk to them; one that must (it never should) says so with
+# ``@pytest.mark.allow_service_ports``. The guard is installed in this process
+# and, through ``tests/netguard`` first on PYTHONPATH (as ``sitecustomize``),
+# in every Python process a test starts.
+PROTECTED_PORTS = (8100, 7860, 7861, 7880, 7881, 5000, 8000)
+NETGUARD_DIR = Path(__file__).resolve().parent / "netguard"
+_spec = importlib.util.spec_from_file_location(
+    "levi_test_netguard", NETGUARD_DIR / "sitecustomize.py"
+)
+netguard = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(netguard)
+_NETGUARD_LOG_DIR = None
+# A test may replace builtins.open (to prove code opens no file); the guard's
+# own bookkeeping must not trip over that.
+_open = open
+
+
+def with_netguard(pythonpath: str = "") -> str:
+    """A PYTHONPATH that keeps the guard for a child process."""
+    parts = [str(NETGUARD_DIR)] + [p for p in pythonpath.split(os.pathsep) if p]
+    return os.pathsep.join(dict.fromkeys(parts))
+
+
+def pytest_configure(config):
+    global _NETGUARD_LOG_DIR
+    config.addinivalue_line(
+        "markers",
+        "allow_service_ports: the test may connect to the protected loopback "
+        "ports (8100, 7860, 7861, 7880, 7881, 5000, 8000)",
+    )
+    _NETGUARD_LOG_DIR = tempfile.mkdtemp(prefix="levi-netguard-")
+    log = os.path.join(_NETGUARD_LOG_DIR, "blocked.jsonl")
+    os.environ[netguard.PORTS_ENV] = ",".join(map(str, PROTECTED_PORTS))
+    os.environ[netguard.LOG_ENV] = log
+    os.environ["PYTHONPATH"] = with_netguard(os.environ.get("PYTHONPATH", ""))
+    netguard.install(PROTECTED_PORTS, None)
+
+
+def pytest_unconfigure(config):
+    if _NETGUARD_LOG_DIR:
+        shutil.rmtree(_NETGUARD_LOG_DIR, ignore_errors=True)
+
+
+def _child_attempts(offset):
+    log = os.environ.get(netguard.LOG_ENV, "")
+    if _child_log_size() <= offset:
+        return []
+    try:
+        with _open(log, encoding="utf-8") as source:
+            source.seek(offset)
+            lines = source.read().splitlines()
+    except OSError:
+        return []
+    return [json.loads(line) for line in lines if line.strip()]
+
+
+def _child_log_size():
+    try:
+        return os.path.getsize(os.environ.get(netguard.LOG_ENV, ""))
+    except OSError:
+        return 0
+
+
+@pytest.fixture(autouse=True)
+def _no_protected_ports(request):
+    """Fail a test that tried to connect to a protected port (in this process
+    or a child); the attempt itself was refused."""
+    guard = netguard.GUARD
+    allowed = request.node.get_closest_marker("allow_service_ports") is not None
+    guard.enabled = not allowed
+    start, offset = len(guard.blocked), _child_log_size()
+    yield guard
+    guard.enabled = True
+    attempts = guard.blocked[start:] + _child_attempts(offset)
+    if attempts and not allowed:
+        pytest.fail(f"connected to a protected service port: {attempts}", pytrace=False)
 
 
 @pytest.fixture
