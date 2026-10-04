@@ -99,7 +99,7 @@ def workspaces(scanned) -> list[Path]:
         from levi.live import locate
 
         found = locate.find(settings.workspace()).workspace
-    except Exception:  # noqa: BLE001 - never let the live side break the pool
+    except (OSError, ValueError, RuntimeError):  # the live side never breaks the pool
         found = None
     if found is not None:
         seen.add(Path(found))

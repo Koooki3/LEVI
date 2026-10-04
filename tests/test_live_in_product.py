@@ -134,7 +134,7 @@ def test_the_product_workspace_is_never_shown_as_the_live_one(
     checkout = tmp_path / "checkout/.state"
     (checkout / "live").mkdir(parents=True)
     (checkout / "live/workspace.json").write_text("{}")
-    monkeypatch.setattr(cli, "protected_workspaces", lambda: [checkout.resolve()])
+    monkeypatch.setattr(locate, "protected_workspaces", lambda: [checkout.resolve()])
     write_status(home, checkout)
     found = locate.find(ws)
     assert found.workspace is None and found.problem == "product_workspace"

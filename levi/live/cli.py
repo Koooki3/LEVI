@@ -30,6 +30,7 @@ from . import (
     controller,
     gpumgr,
     jsonio,
+    locate,
     mirror,
     resources,
     statsfmt,
@@ -147,21 +148,8 @@ def check_socket_path(config):
 def protected_workspaces() -> list:
     """The `.state` of this checkout and, when this is a git worktree, of the
     main checkout it belongs to (the product LEVI runs there): never a live
-    workspace, whatever ``--adopt-workspace`` says."""
-    top = controller.project_root()
-    found = [(top / ".state").resolve()]
-    marker = top / ".git"
-    try:
-        if marker.is_file():
-            line = marker.read_text().strip()
-            if line.startswith("gitdir:"):
-                git_dir = Path(line.split(":", 1)[1].strip())
-                # <main>/.git/worktrees/<name> -> <main>
-                if git_dir.parent.name == "worktrees":
-                    found.append((git_dir.parent.parent.parent / ".state").resolve())
-    except OSError:
-        pass
-    return found
+    workspace, whatever ``--adopt-workspace`` says (``locate.py``)."""
+    return locate.protected_workspaces(controller.project_root())
 
 
 def check_workspace(config, adopt=False):

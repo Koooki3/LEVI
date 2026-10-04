@@ -16,7 +16,7 @@ by reading the live workspace's files (``levi/live/api.py``).
    ``<LEVI_LIVE_HOME or ~/.levi-live>/status.json``.
 
 A candidate is used only when it carries the live marker and is not ``own``
-nor a checkout's ``.state`` (``cli.protected_workspaces``). Otherwise the
+nor a checkout's ``.state`` (``protected_workspaces``). Otherwise the
 answer is no workspace and a reason: ``not_configured`` (nothing names one),
 ``not_live`` (what is named is not a live workspace, or does not exist) or
 ``product_workspace`` (what is named is a product LEVI's workspace). The
@@ -69,9 +69,27 @@ def _resolve(path) -> Path | None:
         return None
 
 
-def _protected(own: Path) -> set:
-    from .cli import protected_workspaces
+def protected_workspaces(top: Path | None = None) -> list:
+    """The `.state` of the checkout ``top`` (this one by default) and, when it
+    is a git worktree, of the main checkout it belongs to (the product LEVI
+    runs there): never a live workspace."""
+    top = Path(top) if top is not None else Path(__file__).resolve().parents[2]
+    found = [(top / ".state").resolve()]
+    marker = top / ".git"
+    try:
+        if marker.is_file():
+            line = marker.read_text().strip()
+            if line.startswith("gitdir:"):
+                git_dir = Path(line.split(":", 1)[1].strip())
+                # <main>/.git/worktrees/<name> -> <main>
+                if git_dir.parent.name == "worktrees":
+                    found.append((git_dir.parent.parent.parent / ".state").resolve())
+    except OSError:
+        pass
+    return found
 
+
+def _protected(own: Path) -> set:
     found = {p for p in (_resolve(x) for x in protected_workspaces()) if p}
     mine = _resolve(own)
     if mine:
