@@ -292,24 +292,26 @@ class Controller:
                 continue
             if not mirror.is_available(self.config, name, state):
                 continue
-            if name in self.awaiting and not self._human_acted(name, state):
+            if name in self.awaiting and not self._human_acted(name, state, now):
                 continue
             names.append((state.get("last_processed_at") or 0.0, name))
         return [n for _, n in sorted(names)]
 
-    def _human_acted(self, name, state) -> bool:
+    def _human_acted(self, name, state, now=None) -> bool:
         """Has the person done what the worker waited for? A plan: approved (or
         moved on). A draft: committed or rejected -- approval alone is not
-        enough, the worker cannot commit without the approver."""
+        enough, the worker cannot commit without the approver. ``now`` is the
+        tick's clock, the one ``awaiting[name]["at"]`` was set on."""
+        now = time.time() if now is None else now
         info = self.awaiting[name]
-        if time.time() - info["at"] < self.config.pipeline.human_recheck_s:
+        if now - info["at"] < self.config.pipeline.human_recheck_s:
             return False
         ws = self.config.workspace
         try:
             acted = self._acted(ws, info)
         except StoreUnreadable:
             # A locked or missing store is not an answer: keep waiting.
-            info["at"] = time.time()
+            info["at"] = now
             return False
         if acted:
             self.awaiting.pop(name, None)
@@ -320,7 +322,7 @@ class Controller:
                     default=dict,
                 )
             return True
-        info["at"] = time.time()
+        info["at"] = now
         return False
 
     @staticmethod
@@ -771,7 +773,7 @@ class Controller:
             "max_images": profile["max_images"],
         }
 
-    def _spawn(self, name):
+    def _spawn(self, name, now=None):
         c = self.config
         effective = c.live_dir / "effective.toml"
         effective.parent.mkdir(parents=True, exist_ok=True)
@@ -814,11 +816,13 @@ class Controller:
                 stdin=subprocess.DEVNULL,
                 start_new_session=True,
             )
-        self.worker_dataset, self.worker_started = name, time.time()
+        # On the tick's clock: _poll_worker measures a stall against it.
+        self.worker_dataset = name
+        self.worker_started = time.time() if now is None else now
         if name not in self.nothing:  # a repeat is summarised when it ends
             self.event(f"batch started for {name}")
 
-    def _stop_worker(self, grace=30.0):
+    def _stop_worker(self, grace=30.0, now=None):
         proc = self.worker
         if proc is None:
             return
@@ -833,7 +837,7 @@ class Controller:
                     os.killpg(proc.pid, signal.SIGKILL)
                 proc.wait()
         # Stopped on purpose (a pause for the GPU), not a failure: no back-off.
-        self._reaped(proc.returncode, requested=True)
+        self._reaped(proc.returncode, requested=True, now=now)
 
     def _poll_worker(self, now):
         proc = self.worker
@@ -848,7 +852,7 @@ class Controller:
                     f"worker for {self.worker_dataset} stalled {stale:.0f} s: stopping it",
                     "error",
                 )
-                self._stop_worker(grace=10.0)
+                self._stop_worker(grace=10.0, now=now)
             return
         self._reaped(code, now=now)
 
@@ -1123,7 +1127,7 @@ class Controller:
         if progress.get("pid") == self.worker.pid and progress.get("phase") == "gated":
             return
         self.event("the worker did not stand down while the policy infers: stopping it")
-        self._stop_worker()
+        self._stop_worker(now=now)
 
     def tick(self, now=None) -> float:
         """One pass; returns seconds to wait before the next."""
@@ -1152,7 +1156,7 @@ class Controller:
         self._write_gate(now)
         self._police_worker(now)
         if self.worker is None and want and ready and not orphan and self.gate.open:
-            self._spawn(queue[0])
+            self._spawn(queue[0], now)
         self._release_if_idle(now, bool(queue) or orphan)
         waiting = any(t.waiting for t in self.tasks)
         if self.worker is not None or orphan:

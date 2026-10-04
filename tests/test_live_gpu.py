@@ -370,7 +370,7 @@ def ctl(live):
     machine = Machine()
     spawned = []
     ctl = controller.Controller(c, probes=machine.probes(), log=lambda *a: None)
-    ctl._spawn = lambda name: spawned.append(name)
+    ctl._spawn = lambda name, now=None: spawned.append(name)
     ctl.machine, ctl.spawned, ctl.rollouts = machine, spawned, rollouts
     yield ctl
     ctl.shutdown()
@@ -979,7 +979,7 @@ def started_controller(live, machine=None):
     c, rollouts = live
     machine = machine or Machine()
     ctl = controller.Controller(c, probes=machine.probes(), log=lambda *a: None)
-    ctl._spawn = lambda name: None
+    ctl._spawn = lambda name, now=None: None
     ctl.machine, ctl.rollouts = machine, rollouts
     return ctl
 
@@ -1223,7 +1223,7 @@ def test_a_restarted_supervisor_reads_the_wait_for_a_person_and_starts_no_vllm(
         ctl.config, probes=ctl.machine.probes(), log=lambda *a: None
     )
     spawned = []
-    again._spawn = spawned.append
+    again._spawn = lambda name, now=None: spawned.append(name)
     ctl.machine.ports = {8000}
     ctl.machine.policy_mib = 7685
     try:
