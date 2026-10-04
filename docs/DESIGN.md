@@ -2,7 +2,7 @@
 
 [中文](DESIGN.zh-CN.md)
 
-LEVI's interface is being redesigned in stages: graphite accent, light and dark themes that follow the system, system fonts only, Lucide icons, Motion for drag and list reordering only. Stage 1 added the design tokens, the theme preference and a set of base components. Stage 2 (see [Global frame](#global-frame-stage-2)) moved the frame onto them: the top bar, toasts, the confirmation dialog, the command palette, the shortcut list and the Agent Workbench drawer. **The pages below the bar do not use them yet**: their content keeps `levi.css`, `annotations-skin.css` and `report.css` and stays dark in both themes. Pages move over in later stages.
+LEVI's interface is being redesigned in stages: graphite accent, light and dark themes that follow the system, system fonts only, Lucide icons, Motion for drag and list reordering only. Stage 1 added the design tokens, the theme preference and a set of base components. Stage 2 (see [Global frame](#global-frame-stage-2)) moved the frame onto them: the top bar, toasts, the confirmation dialog, the command palette, the shortcut list and the Agent Workbench drawer. Stage 5's global layer (see [Brand](#brand) and [Global page base](#global-page-base-stage-5)) gave the site one mark, put the page base and every older page style on the tokens, and rebuilt the home page, the guide and the report. The episode viewer and the other pages move their own markup to `ds-*` components in their stages; until then they follow the themes through the older names mapped onto the tokens.
 
 | What | Where |
 | --- | --- |
@@ -14,6 +14,10 @@ LEVI's interface is being redesigned in stages: graphite accent, light and dark 
 | Specimen switch | `src/lib/design/gate.ts`, `src/middleware.ts` |
 | Specimen page (development only) | `/design` (`src/app/design/`) |
 | Global frame (stage 2) | `src/components/shell/`, `src/components/levi-header.tsx`, `src/styles/shell.css` |
+| Mark (one definition) | `src/components/shell/brand.tsx`; tab icons drawn from it by `scripts/brand_icons.py` (`src/app/icon.svg`, `apple-icon.png`, `favicon.ico`) |
+| Page base and older names (stage 5) | `src/app/globals.css`, `src/app/levi.css` |
+| Home, guide, report (stage 5) | `src/components/home/`, `src/styles/home.css`; `src/app/guide/`, `src/styles/reading.css`; `src/components/report/`, `src/app/report/report.css` |
+| Token values in code (SVG, canvas) | `src/lib/design/css-tokens.ts` (`useCssTokens`) |
 | Tests | `src/components/ds/__tests__/`, `src/lib/design/__tests__/`, `src/components/shell/__tests__/` |
 
 ## Rules for new code
@@ -40,6 +44,8 @@ All tokens are CSS custom properties on `:root`, named `--ds-*`, so they never c
 | Text | `--ds-text-primary`, `--ds-text-secondary`, `--ds-text-tertiary`, `--ds-text-tertiary-on-sunken`, `-on-hover`, `-on-selected`, `-on-raised`, `--ds-text-disabled`, `--ds-icon` |
 | Accent A | `--ds-accent`, `--ds-accent-hover`, `--ds-on-accent`, `--ds-focus-ring`, `--ds-selected-indicator`, `--ds-progress`, `--ds-progress-track` |
 | Status | `--ds-success`, `--ds-warning`, `--ds-danger`, `--ds-info`, each with `-bg`; `--ds-on-danger` |
+| Data | `--ds-data-1…6`: series and category colours for charts, at least 3:1 on the page and on cards in each theme (tested); never for interface state |
+| Media | `--ds-media-bg` (black), `--ds-on-media`, `--ds-on-media-secondary` (white text over video and images, both themes; Tailwind `text-on-media`), `--ds-media-scrim` |
 | Depth and material | `--ds-shadow-1…3`, `--ds-ring-raised` (dark), `--ds-material-bar`, `--ds-material-filter` |
 | Type | `--ds-font-sans`, `--ds-font-mono`; `--ds-text-{display,title-1,title-2,title-3,body,reading,callout,caption}-{size,line}`; `--ds-weight-{regular,medium,semibold}`; `--ds-tracking-{title,display}` |
 | Shape and space | `--ds-radius-{xs,sm,md,lg,full}` (4, 6, 10, 14, 999 px); `--ds-space-{0-5,1,2,3,4,5,6,8,10,12,16}` (4 px base); `--ds-control-{sm,md,lg}` (28, 32, 40 px); `--ds-hit-min`; `--ds-icon-{sm,md,lg}` |
@@ -108,6 +114,39 @@ Import from `@/components/ds`. The root layout imports `@/styles/tokens.css`, `@
 
 **Tailwind** does not scan `docs/` (`@source not "../../docs"` in `globals.css`): the Markdown is not UI code and its words must not add utilities.
 
+## Brand
+
+One mark everywhere: a graphite tile with a geometric "L" and a square point, on a 32-unit grid. `LEVI_MARK` in `src/components/shell/brand.tsx` is its only definition; `<LeviMark size>` draws it in the page (tile `--ds-accent`, glyph `--ds-on-accent`, so it is black on light and white on dark, like the primary button) and `<LeviWordmark>` adds the name. The top bar, the home page, the guide and the report use it. The browser tab icon `src/app/icon.svg` (black tile, white tile under a dark browser theme), `apple-icon.png` (180 px, full bleed) and `favicon.ico` (16, 32, 48 px) are drawn from the same numbers: after changing the mark run `uv run --with pillow python scripts/brand_icons.py`; `brand.test.ts` fails when `icon.svg` no longer matches. No page draws a logo of its own, and the lime colour is gone.
+
+## Global page base (stage 5)
+
+`globals.css` sets the page from the tokens: background `--ds-bg`, primary text, the system font at body size, `color-scheme: light dark` (so scrollbars, select lists and date pickers follow the theme), quiet scrollbars, selection, `scroll-padding-top` for the bar, and one graphite focus ring for every element (`levi.css`, `outline: 2px` offset 2 px; `Highlight` in forced colours). In Chinese, older uppercase and wide-tracked labels are set normally.
+
+**Older names.** Pages that have not moved yet keep their classes; their colours now come from the tokens, so every page follows light and dark and none shows the old green, parchment, lime or cyan. Map them when you migrate:
+
+| Older name | Now | Use instead |
+| --- | --- | --- |
+| `--bg`, `--surface-0/1/2` | `--ds-bg`, `--ds-surface-sunken`, `--ds-surface-1`, `--ds-surface-2` | the same `--ds-*` |
+| `--text-primary/muted/faint` | `--ds-text-primary/secondary/tertiary` | the same |
+| `--accent`, `--accent-soft`, `--accent-ring` | `--ds-accent`, 12 % accent, `--ds-focus-ring` | `--ds-accent` only for the primary button, selection and progress; `--ds-surface-selected` for a selected fill |
+| `--border-subtle`, `--border-strong` | `--ds-separator`, `--ds-separator-strong` | the same; `--ds-border-control` for inputs |
+| Tailwind `white` (`text-white`, `border-white/10`, `bg-white/5`) | `--ds-text-primary` (a faint line or fill in both themes) | `--ds-separator` / `--ds-surface-hover`; over video `text-on-media` |
+| Tailwind `slate-100…200` / `300…400` / `500…600` | primary / secondary / tertiary text | the text tokens |
+| Tailwind `slate-700` / `800` / `900` / `950` | `--ds-separator-strong` / `--ds-separator` / `--ds-surface-1` / `--ds-bg` | the same |
+| Tailwind `cyan-*`, `lime-*` | `--ds-accent` (`cyan-200`, `600`: `--ds-accent-hover`) | `Button variant="primary"`, `--ds-surface-selected` |
+| Tailwind `red-*`, `orange/amber/yellow-*`, `green/emerald-*`, `blue-*` | `--ds-danger`, `--ds-warning`, `--ds-success`, `--ds-info` | `Badge`, `StatusDot` with a tone; chart series use `--ds-data-*` |
+| `.levi-workbench`, `.levi-box` | page frame, card | `Card`, the page's own layout |
+| `.levi-primary`, `.levi-secondary` | drawn like the ds buttons | `Button variant="primary"` / `"secondary"` |
+| `.levi-input` | drawn like a ds field | `Input`, `Select`, `Textarea` in a `Field` |
+| `.levi-table`, `.levi-status`, `.levi-error`, `.levi-code`, `.levi-metrics`, `.levi-eyebrow` | ds table, neutral or status badge, error note, code block, metric cards, section label | `Table`, `Badge`, an error in three parts (what, why, what to do), `<pre>` in `ds-*` styles |
+| `.panel`, `.panel-raised` | card, raised card | `Card`, `Card variant="raised"` |
+
+`levi.css` still holds the page styles of the episode viewer, Live, the training pool, conversion and the Agent Workbench; each literal colour in it was mapped by its role (surface, text, line, accent, status). A class is removed from `levi.css` once no page uses it. A test (`global-styles.test.ts`) fails on a colour literal in `globals.css`, `home.css`, `reading.css` and `report.css`, on one in `levi.css` other than black, and on the old palette anywhere in them.
+
+**Home** (`/`): the work entrance. Continue (the last episode or dataset opened in this browser; the frame records visits in `localStorage` under `levi-recent`, nothing is sent), Needs you (agent tasks whose `waiting_for` is a person's approval, review or commit, from `/api/levi/agent/v1/activity/tasks`), Running (conversions and training pool jobs with their progress), the live evaluation card when a live service is shown, and recent datasets (visited first, then the other registered ones). Each card loads on its own with a skeleton and gives up after 10 s; it refreshes every 15 s while the tab is visible. The Hugging Face search and the older `/?path=` and `/?dataset=` links stay. The introduction moved to the guide.
+
+**Reading layout** (`reading.css`, the guide and the report): one column up to 760 px, contents on the left that stay in view and mark the current section (`aria-current="location"`), reading text 16/26 (`--ds-text-reading-*`), Markdown headings, lists, links (primary text, underlined), quotes, code and tables in `.levi-prose`. The report's charts use `--ds-data-*` through `useCssTokens` (SVG attributes cannot read CSS variables), its running states breathe once every 2 s and stop under reduced motion, and "Updated" is a frame toast.
+
 ## Motion
 
 | Interaction | Motion | Reduced motion |
@@ -139,5 +178,7 @@ No infinite decorative animation, parallax, scroll hijacking, animation longer t
 `/design` shows every token and component in light and dark side by side (`?only=light` or `?only=dark` shows one; `?motion=reduce` starts with reduced motion). It is served by `next dev`; in a production server (`next start`, `levi serve`) `src/middleware.ts` answers a plain 404 before routing (so neither the page's metadata nor its styles are sent) unless `LEVI_DESIGN_PAGE=1` is set in its environment (`src/lib/design/gate.ts`). It is not linked from the navigation.
 
 ## Testing
+
+`global-styles.test.ts` checks the page base and the older styles (above), `brand.test.ts` the mark, `recent.test.ts` and `home-data.test.ts` the home page's data; ESLint's hex rule also covers the home page, guide, report and `src/lib/design/`.
 
 `bun test` runs the component tests in a DOM (happy-dom, a dev dependency). `tokens-contrast.test.ts` also fails on a colour literal (hex, `rgb()`, `hsl()`) or a Tailwind arbitrary value in the components' or the specimen's TSX. A component test imports `./dom` first and calls `setupDom()`; `render`, `press`, `click`, `focus`, `dropFocus`, `fire`, `flush` and `mockMatchMedia` are there. The DOM globals are removed after each such file, so other tests run without a DOM.

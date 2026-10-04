@@ -2,7 +2,7 @@
 
 [English](DESIGN.md)
 
-LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默认跟随系统，只用系统字体，图标用 Lucide，Motion 只用于拖拽和列表重排。第 1 阶段加入了设计令牌、主题偏好和一组基础组件。第 2 阶段（见[全局框架](#全局框架第-2-阶段)）把全局框架迁到上面：顶栏、Toast、确认对话框、命令面板、快捷键总表和 Agent 工作台抽屉。**顶栏下方的页面还没有用它们**：页面内容仍用 `levi.css`、`annotations-skin.css`、`report.css`，两套外观下都保持深色。页面在后续阶段逐个迁移。
+LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默认跟随系统，只用系统字体，图标用 Lucide，Motion 只用于拖拽和列表重排。第 1 阶段加入了设计令牌、主题偏好和一组基础组件。第 2 阶段（见[全局框架](#全局框架第-2-阶段)）把全局框架迁到上面：顶栏、Toast、确认对话框、命令面板、快捷键总表和 Agent 工作台抽屉。第 5 阶段的全局部分（见[品牌标识](#品牌标识)和[全局页面基础](#全局页面基础第-5-阶段)）统一了标识，把页面基础和所有旧页面样式接到令牌上，并重做了首页、使用指南和报告页。片段查看器和其他页面在各自阶段把标记换成 `ds-*` 组件；在那之前，它们通过映射到令牌的旧名称跟随两套外观。
 
 | 内容 | 位置 |
 | --- | --- |
@@ -14,6 +14,10 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 | 样张页开关 | `src/lib/design/gate.ts`、`src/middleware.ts` |
 | 样张页（仅开发用） | `/design`（`src/app/design/`） |
 | 全局框架（第 2 阶段） | `src/components/shell/`、`src/components/levi-header.tsx`、`src/styles/shell.css` |
+| 标识（唯一定义） | `src/components/shell/brand.tsx`；浏览器标签图标由 `scripts/brand_icons.py` 据此生成（`src/app/icon.svg`、`apple-icon.png`、`favicon.ico`） |
+| 页面基础与旧名称（第 5 阶段） | `src/app/globals.css`、`src/app/levi.css` |
+| 首页、使用指南、报告页（第 5 阶段） | `src/components/home/`、`src/styles/home.css`；`src/app/guide/`、`src/styles/reading.css`；`src/components/report/`、`src/app/report/report.css` |
+| 代码里取令牌值（SVG、canvas） | `src/lib/design/css-tokens.ts`（`useCssTokens`） |
 | 测试 | `src/components/ds/__tests__/`、`src/lib/design/__tests__/`、`src/components/shell/__tests__/` |
 
 ## 新代码的规则
@@ -40,6 +44,8 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 | 文字 | `--ds-text-primary`、`--ds-text-secondary`、`--ds-text-tertiary`、`--ds-text-tertiary-on-sunken`、`-on-hover`、`-on-selected`、`-on-raised`、`--ds-text-disabled`、`--ds-icon` |
 | 强调色 A | `--ds-accent`、`--ds-accent-hover`、`--ds-on-accent`、`--ds-focus-ring`、`--ds-selected-indicator`、`--ds-progress`、`--ds-progress-track` |
 | 状态 | `--ds-success`、`--ds-warning`、`--ds-danger`、`--ds-info`，各带 `-bg`；`--ds-on-danger` |
+| 数据 | `--ds-data-1…6`：图表的序列和类别颜色，两套外观下对页面底和卡片都至少 3:1（有测试）；不用于界面状态 |
+| 媒体 | `--ds-media-bg`（黑）、`--ds-on-media`、`--ds-on-media-secondary`（视频和图像上的白色文字，两套外观相同；Tailwind `text-on-media`）、`--ds-media-scrim` |
 | 层次与材质 | `--ds-shadow-1…3`、`--ds-ring-raised`（深色）、`--ds-material-bar`、`--ds-material-filter` |
 | 字体 | `--ds-font-sans`、`--ds-font-mono`；`--ds-text-{display,title-1,title-2,title-3,body,reading,callout,caption}-{size,line}`；`--ds-weight-{regular,medium,semibold}`；`--ds-tracking-{title,display}` |
 | 形状与间距 | `--ds-radius-{xs,sm,md,lg,full}`（4、6、10、14、999 px）；`--ds-space-{0-5,1,2,3,4,5,6,8,10,12,16}`（4 px 基数）；`--ds-control-{sm,md,lg}`（28、32、40 px）；`--ds-hit-min`；`--ds-icon-{sm,md,lg}` |
@@ -108,6 +114,39 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 
 **Tailwind** 不扫描 `docs/`（`globals.css` 里的 `@source not "../../docs"`）：Markdown 不是界面代码，其中的词不应生成样式。
 
+## 品牌标识
+
+全站只有一个标识：32 单位网格上的石墨色方块，里面是几何的“L”和一个方点。`src/components/shell/brand.tsx` 里的 `LEVI_MARK` 是它唯一的定义；`<LeviMark size>` 在页面里画它（方块用 `--ds-accent`，字形用 `--ds-on-accent`，所以和主要按钮一样，浅色下黑、深色下白），`<LeviWordmark>` 再加上名称。顶栏、首页、使用指南和报告页都用它。浏览器标签图标 `src/app/icon.svg`（黑色方块，浏览器为深色主题时换成白色）、`apple-icon.png`（180 px，满版）和 `favicon.ico`（16、32、48 px）按同一组数字生成：改了标识后运行 `uv run --with pillow python scripts/brand_icons.py`；`icon.svg` 与定义不一致时 `brand.test.ts` 失败。页面不再自己画标识，酸橙绿已经去掉。
+
+## 全局页面基础（第 5 阶段）
+
+`globals.css` 用令牌设置页面：背景 `--ds-bg`、主文字、正文字号的系统字体、`color-scheme: light dark`（滚动条、下拉列表、日期选择器随主题变化）、低调的滚动条、选中文字底色、给顶栏留出的 `scroll-padding-top`，以及所有元素统一的石墨色焦点环（`levi.css`，`outline: 2px`，外偏 2 px；强制颜色模式下用 `Highlight`）。中文下旧的全大写、加宽字距标签按正常排版显示。
+
+**旧名称。** 还没迁移的页面保留原来的类名；它们的颜色现在来自令牌，所以每个页面都跟随浅色和深色，不再出现旧的深绿、羊皮纸色、酸橙绿或青色。迁移时按下表替换：
+
+| 旧名称 | 现在指向 | 迁移时改用 |
+| --- | --- | --- |
+| `--bg`、`--surface-0/1/2` | `--ds-bg`、`--ds-surface-sunken`、`--ds-surface-1`、`--ds-surface-2` | 对应的 `--ds-*` |
+| `--text-primary/muted/faint` | `--ds-text-primary/secondary/tertiary` | 同左 |
+| `--accent`、`--accent-soft`、`--accent-ring` | `--ds-accent`、12% 强调色、`--ds-focus-ring` | `--ds-accent` 只用于主要按钮、选中和进度；选中的底色用 `--ds-surface-selected` |
+| `--border-subtle`、`--border-strong` | `--ds-separator`、`--ds-separator-strong` | 同左；输入框用 `--ds-border-control` |
+| Tailwind `white`（`text-white`、`border-white/10`、`bg-white/5`） | `--ds-text-primary`（两套外观下都是淡线或淡底） | `--ds-separator` / `--ds-surface-hover`；视频上的文字用 `text-on-media` |
+| Tailwind `slate-100…200` / `300…400` / `500…600` | 主 / 次要 / 三级文字 | 文字令牌 |
+| Tailwind `slate-700` / `800` / `900` / `950` | `--ds-separator-strong` / `--ds-separator` / `--ds-surface-1` / `--ds-bg` | 同左 |
+| Tailwind `cyan-*`、`lime-*` | `--ds-accent`（`cyan-200`、`600` 为 `--ds-accent-hover`） | `Button variant="primary"`、`--ds-surface-selected` |
+| Tailwind `red-*`、`orange/amber/yellow-*`、`green/emerald-*`、`blue-*` | `--ds-danger`、`--ds-warning`、`--ds-success`、`--ds-info` | 带 tone 的 `Badge`、`StatusDot`；图表序列用 `--ds-data-*` |
+| `.levi-workbench`、`.levi-box` | 页面框架、卡片 | `Card`，页面自己的布局 |
+| `.levi-primary`、`.levi-secondary` | 画成 ds 按钮的样子 | `Button variant="primary"` / `"secondary"` |
+| `.levi-input` | 画成 ds 输入框的样子 | `Field` 里的 `Input`、`Select`、`Textarea` |
+| `.levi-table`、`.levi-status`、`.levi-error`、`.levi-code`、`.levi-metrics`、`.levi-eyebrow` | ds 表格、中性或状态徽章、错误提示、代码块、指标卡、分区标签 | `Table`、`Badge`、三段式错误（发生了什么、为什么、怎么办）、`ds-*` 样式的 `<pre>` |
+| `.panel`、`.panel-raised` | 卡片、抬升卡片 | `Card`、`Card variant="raised"` |
+
+`levi.css` 里仍是片段查看器、实时评测、训练池、转换与审核、Agent 工作台的页面样式；其中每个写死的颜色都按用途（表面、文字、线、强调、状态）映射到了令牌。某个类没有页面再用时，就从 `levi.css` 删除。`global-styles.test.ts` 在 `globals.css`、`home.css`、`reading.css`、`report.css` 出现颜色字面量、`levi.css` 出现黑色以外的颜色字面量，或这些文件里出现旧配色时失败。
+
+**首页**（`/`）是工作入口：继续（这个浏览器里最近打开的片段或数据集；框架把访问记录存在 `localStorage` 的 `levi-recent` 里，不发送到任何地方）、需要你处理（`waiting_for` 为人工批准、审核或提交的 agent 任务，来自 `/api/levi/agent/v1/activity/tasks`）、正在运行（转换和训练池作业及其进度）、显示实时评测时的状态卡，以及最近的数据集（先列打开过的，再列其他已登记的）。每张卡单独加载，先显示骨架，10 秒没有回应就放弃；标签页可见时每 15 秒刷新。Hugging Face 搜索和旧的 `/?path=`、`/?dataset=` 链接保留。原来的介绍移到了使用指南。
+
+**阅读型版式**（`reading.css`，使用指南和报告页）：单栏，最宽 760 px；左侧目录始终可见并标出当前小节（`aria-current="location"`）；正文 16/26（`--ds-text-reading-*`）；`.levi-prose` 统一 Markdown 的标题、列表、链接（主文字加下划线）、引用、代码和表格。报告页的图表通过 `useCssTokens` 使用 `--ds-data-*`（SVG 属性读不到 CSS 变量），运行中状态每 2 秒呼吸一次、减少动态效果时静止，“已更新”用全局 Toast 提示。
+
 ## 动效
 
 | 交互 | 动效 | 减少动态效果时 |
@@ -139,5 +178,7 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 `/design` 并排展示浅色和深色下的全部令牌和组件（`?only=light` 或 `?only=dark` 只显示一套，`?motion=reduce` 以减少动态效果开始）。`next dev` 下可访问；生产服务（`next start`、`levi serve`）里，除非环境里设了 `LEVI_DESIGN_PAGE=1`（`src/lib/design/gate.ts`），`src/middleware.ts` 会在路由之前直接返回纯文本 404，不发送页面的元数据和样式。导航里没有它的入口。
 
 ## 测试
+
+`global-styles.test.ts` 检查页面基础和旧样式（见上），`brand.test.ts` 检查标识，`recent.test.ts` 和 `home-data.test.ts` 检查首页的数据；ESLint 的十六进制颜色规则也覆盖首页、使用指南、报告页和 `src/lib/design/`。
 
 `bun test` 在 DOM（happy-dom，开发依赖）里运行组件测试。组件测试先引入 `./dom` 并调用 `setupDom()`，其中有 `render`、`press`、`click`、`focus`、`dropFocus`、`fire`、`flush`、`mockMatchMedia`。每个这样的测试文件结束后会移除 DOM 全局对象，其他测试仍在没有 DOM 的环境里运行。`tokens-contrast.test.ts` 还会在组件或样张页的 TSX 里发现颜色字面量（十六进制、`rgb()`、`hsl()`）或 Tailwind 任意值时报错。
