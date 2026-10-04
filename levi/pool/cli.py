@@ -293,6 +293,16 @@ def build_parser() -> argparse.ArgumentParser:
     msub.add_parser("list", help="registered targets")
     forget = msub.add_parser("delete", help="forget a target")
     forget.add_argument("name")
+    live = sub.add_parser(
+        "live-workspaces",
+        help="live workspaces whose removed episodes this pool keeps out",
+    )
+    lsub = live.add_subparsers(dest="live_action", required=True)
+    lsub.add_parser("list", help="the remembered ones (and the one shown now)")
+    lforget = lsub.add_parser(
+        "forget", help="stop reading one (deletes nothing; listed again if shown again)"
+    )
+    lforget.add_argument("path")
     push = sub.add_parser(
         "push", help="send a finished export to a remote target (rsync over SSH)"
     )
@@ -446,6 +456,16 @@ def main(argv=None) -> int:
                 _print(remote.listing())
             else:
                 _print({"deleted": remote.delete(args.name)})
+        elif args.action == "live-workspaces":
+            from . import exclusions
+
+            if args.live_action == "forget":
+                if not exclusions.forget(args.path):
+                    print(f"not remembered: {args.path}", file=sys.stderr)
+                    return 1
+                print(f"forgotten (nothing deleted): {args.path}")
+            else:
+                _print(exclusions.listing())
         elif args.action == "push":
             target = remote.get(args.target)
 

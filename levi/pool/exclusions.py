@@ -36,6 +36,7 @@ workspace, and whether or not the live workspace lies under a pool root.
 """
 
 import json
+import logging
 from pathlib import Path
 
 from . import settings
@@ -46,6 +47,11 @@ MARKER = LIVE / "workspace.json"
 
 
 REMEMBERED = "live_workspaces.json"
+# At most this many remembered live workspaces; past it a new one is not
+# added (it is still read while the page shows it), and the page and the log
+# say so: `levi pool live-workspaces forget` makes room.
+MAX_REMEMBERED = 20
+LOG = logging.getLogger("levi.pool.exclusions")
 # Parsed state files by path, kept while the file's stamp (inode, size,
 # modification time) is unchanged: the pool asks on every listing.
 _CACHE: dict[str, tuple] = {}
@@ -76,28 +82,86 @@ def remembered(pool: Path | None = None) -> list[Path]:
     return [Path(w) for w in rows or [] if isinstance(w, str) and w]
 
 
-def remember(workspace, pool: Path | None = None) -> None:
-    """Add a live workspace the live page showed (never removes one). A
-    failure to write is not the page's problem: the pool then still reads
-    the workspace the page shows now."""
+def is_full(workspace, pool: Path | None = None) -> bool:
+    """The list is at ``MAX_REMEMBERED`` and does not hold ``workspace``."""
+    known = {str(w) for w in remembered(pool)}
+    return str(Path(workspace)) not in known and len(known) >= MAX_REMEMBERED
+
+
+def _store(pool: Path, change) -> None:
     from levi.live import jsonio
 
+    def apply(value):
+        value = value if isinstance(value, dict) else {}
+        rows = [w for w in value.get("workspaces") or [] if isinstance(w, str)]
+        return {"schema": "levi.pool.live_workspaces.v1", "workspaces": change(rows)}
+
+    jsonio.update(pool / REMEMBERED, apply, default=dict)
+
+
+def remember(workspace, pool: Path | None = None) -> bool:
+    """Add a live workspace the live page showed (never removes one; only
+    ``forget`` does). Past ``MAX_REMEMBERED`` it is not added and a warning
+    is logged. A failure to write is not the page's problem: the pool then
+    still reads the workspace the page shows now. True when it is listed."""
     text = str(Path(workspace))
     pool = Path(pool or settings.pool_dir())
     if text in {str(w) for w in remembered(pool)}:
-        return
+        return True
+    if is_full(text, pool):
+        LOG.warning(
+            "the training pool already remembers %d live workspaces: %s is read "
+            "while the live page shows it, but not remembered "
+            "(levi pool live-workspaces forget <path> makes room)",
+            MAX_REMEMBERED,
+            text,
+        )
+        return False
 
-    def add(value):
-        value = value if isinstance(value, dict) else {}
-        rows = [w for w in value.get("workspaces") or [] if isinstance(w, str)]
-        if text not in rows:
-            rows.append(text)
-        return {"schema": "levi.pool.live_workspaces.v1", "workspaces": rows}
+    def add(rows):
+        return rows if text in rows else [*rows, text]
 
     try:
-        jsonio.update(pool / REMEMBERED, add, default=dict)
+        _store(pool, add)
     except OSError:
-        pass
+        return False
+    return True
+
+
+def forget(workspace, pool: Path | None = None) -> bool:
+    """Stop reading a remembered live workspace (nothing of it is deleted; it
+    is listed again if the live page shows it again). True when it was
+    listed."""
+    text = str(Path(workspace).expanduser())
+    pool = Path(pool or settings.pool_dir())
+    known = [str(w) for w in remembered(pool)]
+    resolved = str(Path(text).resolve()) if Path(text).is_absolute() else text
+    hit = next((w for w in known if w in (text, resolved)), None)
+    if hit is None:
+        return False
+    _store(pool, lambda rows: [w for w in rows if w != hit])
+    return True
+
+
+def listing() -> dict:
+    """What ``levi pool live-workspaces list`` prints."""
+    rows = remembered()
+    shown = _shown_now()
+    return {
+        "remembered": [{"path": str(w), "exists": w.is_dir()} for w in rows],
+        "limit": MAX_REMEMBERED,
+        "shown_now": str(shown) if shown else None,
+    }
+
+
+def _shown_now() -> Path | None:
+    try:
+        from levi.live import locate
+
+        found = locate.find(settings.workspace()).workspace
+    except (OSError, ValueError, RuntimeError):  # the live side never breaks the pool
+        return None
+    return Path(found) if found is not None else None
 
 
 def workspace_exclusions(workspace: Path) -> dict[str, dict]:
@@ -150,12 +214,7 @@ def workspaces(scanned) -> list[Path]:
     seen = {Path(w) for w in scanned or []}
     seen.add(settings.workspace())
     seen.update(w for w in remembered() if w.is_dir())
-    try:
-        from levi.live import locate
-
-        found = locate.find(settings.workspace()).workspace
-    except (OSError, ValueError, RuntimeError):  # the live side never breaks the pool
-        found = None
+    found = _shown_now()
     if found is not None and Path(found) != settings.workspace():
         seen.add(Path(found))
         remember(found)

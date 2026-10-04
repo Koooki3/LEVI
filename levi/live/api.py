@@ -11,6 +11,13 @@ it reads the live workspace's files, and nothing of the live service (the
 approver, its runs, the mirror) enters the product workspace. With no live
 workspace found the routes answer ``{"enabled": false, "reason": ...}``.
 
+One thing a GET does write, and only in the product LEVI's own workspace:
+the first time a request finds a live workspace, its path is added to
+``<product workspace>/pool/live_workspaces.json`` (the training pool keeps
+reading the removals made there; ``levi/pool/exclusions.py``, at most
+``MAX_REMEMBERED``; ``levi pool live-workspaces list|forget``). Nothing is
+ever written into the live workspace by a GET.
+
 The only routes that change anything take an episode out of a dataset and put
 it back (``exclusion.py``; a soft delete that keeps every file). They are a
 person's action: the UI token of the LEVI serving the page is required (the
@@ -34,8 +41,18 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
+from . import (
+    auto,
+    exclusion,
+    jsonio,
+    locate,
+    mirror,
+    resumer,
+    sessions,
+    statsfmt,
+    statsview,
+)
 from . import config as live_config
-from . import exclusion, jsonio, locate, mirror, resumer, sessions, statsfmt, statsview
 
 router = APIRouter(prefix="/api/levi/live", tags=["Live annotation"])
 
@@ -152,7 +169,18 @@ def _where(config, value: dict | None, alive: bool) -> dict:
         "live_ui": page,
         # Its folder's name, never the whole path.
         "workspace_name": config.workspace.name,
+        # The product's training pool remembers no more live workspaces
+        # (``pool/exclusions.MAX_REMEMBERED``): removals made in this one keep
+        # counting only while the page shows it.
+        "pool_memory_full": _embedded(config.workspace)
+        and _pool_memory_full(config.workspace),
     }
+
+
+def _pool_memory_full(workspace) -> bool:
+    from levi.pool import exclusions as pool_exclusions
+
+    return pool_exclusions.is_full(workspace, _own() / "pool")
 
 
 # Fields of the status file that name folders of this machine: not given out
@@ -399,7 +427,13 @@ def _live_config(name: str):
         raise HTTPException(404, "Unknown live dataset")
     # Before writing: the state file and the audit log must really lie inside
     # the live workspace (a ``live/`` linked to elsewhere is refused).
-    for path in (config.live_dir, mirror.state_path(config, name)):
+    state = mirror.state_path(config, name)
+    for path in (
+        config.live_dir,
+        state,
+        state.with_name(state.name + ".lock"),  # jsonio.locked's lock file
+        config.live_dir / auto.AUDIT,
+    ):
         if not locate.confined(path, config.workspace):
             raise HTTPException(
                 409, "The live workspace's state lies outside it; nothing was changed"
