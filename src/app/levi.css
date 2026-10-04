@@ -38,52 +38,6 @@ html {
 body {
   font-family: Arial, "Noto Sans SC", "Microsoft YaHei", sans-serif;
 }
-.levi-header {
-  height: 72px;
-  border-bottom: 1px solid #ffffff14;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 4%;
-  background: #101510;
-  position: relative;
-  z-index: 45;
-}
-.levi-wordmark {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 25px;
-  letter-spacing: 3px;
-  font-weight: 800;
-}
-.levi-mark {
-  background: #d4f779;
-  color: #162011;
-  padding: 3px 5px;
-  font-size: 21px;
-  border-radius: 4px;
-  letter-spacing: -3px;
-}
-.levi-wordmark-caption {
-  border-left: 1px solid #ffffff30;
-  margin-left: 8px;
-  padding-left: 16px;
-  font: 9px/1.6 monospace;
-  letter-spacing: 2px;
-  max-width: 130px;
-  color: #aab3a0;
-}
-.levi-header nav {
-  display: flex;
-  align-items: center;
-  gap: 28px;
-  font-size: 13px;
-  color: #bec5b5;
-}
-.levi-header a:hover {
-  color: #d4f779;
-}
 .levi-language {
   border: 1px solid #ffffff2a;
   border-radius: 5px;
@@ -356,11 +310,13 @@ body {
   letter-spacing: 1px;
   color: #859077;
 }
+/* Full-height pages fill the viewport below the top bar (shell.css sets
+   --levi-header-height). */
 .h-screen {
-  height: calc(100dvh - 72px);
+  height: calc(100dvh - var(--levi-header-height, 56px));
 }
 .max-h-screen {
-  max-height: calc(100dvh - 72px);
+  max-height: calc(100dvh - var(--levi-header-height, 56px));
 }
 .panel,
 .panel-raised {
@@ -535,28 +491,6 @@ select optgroup {
   outline: 2px solid #d4f779;
 }
 @media (max-width: 800px) {
-  .levi-wordmark-caption {
-    display: none;
-  }
-  .levi-header {
-    padding: 10px 5%;
-    height: auto;
-    min-height: 64px;
-    flex-wrap: wrap;
-    row-gap: 8px;
-  }
-  .levi-header nav {
-    gap: 8px 13px;
-    font-size: 11px;
-    /* Wrap the entries onto more lines so every one is visible on a phone
-       and the page does not widen. */
-    flex: 1 1 100%;
-    min-width: 0;
-    flex-wrap: wrap;
-  }
-  .levi-header nav > * {
-    flex: 0 0 auto;
-  }
   .levi-hero {
     grid-template-columns: 1fr;
     padding: 40px 0;
@@ -578,9 +512,6 @@ select optgroup {
   }
   .levi-demo-caption p {
     font-size: 9px;
-  }
-  .h-screen {
-    height: calc(100dvh - 64px);
   }
   .levi-metrics {
     grid-template-columns: repeat(3, 1fr);
@@ -3142,29 +3073,6 @@ button.levi-pool-danger {
   background: var(--pulse-red);
   color: #2a0a07;
 }
-.levi-header .levi-live-nav {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 12px;
-  border: 1px solid #d4f77960;
-  border-radius: 6px;
-  background: #d4f77914;
-  color: #f1efdf;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.levi-header .levi-live-nav:hover {
-  background: #d4f77928;
-  color: #d4f779;
-}
-.levi-header .levi-live-nav.is-amber {
-  border-color: #f1c67790;
-}
-.levi-header .levi-live-nav.is-red {
-  border-color: #ff6b5ea0;
-  background: #ff6b5e22;
-}
 .levi-live-home {
   display: flex;
   align-items: center;
@@ -3211,9 +3119,6 @@ button.levi-pool-danger {
   white-space: nowrap;
 }
 @media (max-width: 800px) {
-  .levi-header .levi-live-nav {
-    padding: 5px 9px;
-  }
   .levi-live-home {
     flex-wrap: wrap;
     margin: 16px 0 0;
