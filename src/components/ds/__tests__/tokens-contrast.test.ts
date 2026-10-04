@@ -320,3 +320,22 @@ describe("token structure", () => {
     expect([...used].filter((name) => !defined.has(name))).toEqual([]);
   });
 });
+
+describe("data colours", () => {
+  test("each series colour reaches 3:1 on the page and on cards", () => {
+    for (const [name, theme] of [
+      ["light", LIGHT],
+      ["dark", DARK],
+      ["dark (system)", DARK_MEDIA],
+    ] as const)
+      for (let i = 1; i <= 6; i += 1) {
+        const color = resolve(theme, `--ds-data-${i}`);
+        for (const surface of ["--ds-bg", "--ds-surface-1"]) {
+          const ratio = contrast(color, resolve(theme, surface));
+          if (ratio < 3)
+            throw new Error(`${name} --ds-data-${i} on ${surface}: ${ratio}`);
+          expect(ratio).toBeGreaterThanOrEqual(3);
+        }
+      }
+  });
+});
