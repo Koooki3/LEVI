@@ -8,7 +8,14 @@
  * reduced (indeterminate progress shows words instead of a moving bar, the
  * reorder list snaps) use `usePrefersReducedMotion`.
  */
-import { useEffect, useState } from "react";
+import {
+  createContext,
+  createElement,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 
 const REDUCE_QUERY = "(prefers-reduced-motion: reduce)";
 
@@ -25,8 +32,38 @@ export function prefersReducedMotion(element?: Element | null): boolean {
   }
 }
 
-/** True when the person asked the system for less motion. */
+const ReducedMotionOverride = createContext<boolean | null>(null);
+
+/**
+ * Force reduced motion for a subtree (previews, tests). Pair it with
+ * `data-motion="reduce"` on an element so the CSS tokens follow too.
+ * `reduce={false}` leaves the system setting in charge.
+ */
+export function ReducedMotionScope({
+  reduce,
+  children,
+}: {
+  reduce: boolean;
+  children: ReactNode;
+}) {
+  return createElement(
+    ReducedMotionOverride.Provider,
+    { value: reduce ? true : null },
+    children,
+  );
+}
+
+/** True inside a `ReducedMotionScope reduce`, else null. */
+export function useReducedMotionOverride(): boolean | null {
+  return useContext(ReducedMotionOverride);
+}
+
+/**
+ * True when the person asked the system for less motion, or inside a
+ * `ReducedMotionScope reduce`.
+ */
 export function usePrefersReducedMotion(): boolean {
+  const override = useContext(ReducedMotionOverride);
   const [reduced, setReduced] = useState(false);
   useEffect(() => {
     setReduced(prefersReducedMotion());
@@ -43,7 +80,7 @@ export function usePrefersReducedMotion(): boolean {
     query?.addEventListener?.("change", onChange);
     return () => query?.removeEventListener?.("change", onChange);
   }, []);
-  return reduced;
+  return override ?? reduced;
 }
 
 /** Motion durations in ms, mirroring tokens.css (§4.9 of the proposal). */

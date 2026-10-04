@@ -4,6 +4,7 @@ import "@/styles/tokens.css";
 import "@/styles/ds.css";
 import "./design.css";
 import Specimen from "./specimen";
+import { designPageEnabled } from "@/lib/design/gate";
 
 export const dynamic = "force-dynamic";
 
@@ -14,17 +15,11 @@ export const metadata: Metadata = {
 
 /**
  * The design-system specimen (stage 0 of the UI redesign): tokens and
- * components in light and dark side by side. Development only: `next dev`
- * serves it; a production server serves it only with `LEVI_DESIGN_PAGE=1`.
- * It is not linked from the navigation.
+ * components in light and dark side by side. Development only: in production
+ * src/middleware.ts answers 404 before this page (and its metadata and
+ * styles) is reached, unless `LEVI_DESIGN_PAGE=1`. Not linked from the
+ * navigation.
  */
-function designPageEnabled(): boolean {
-  return (
-    process.env.NODE_ENV !== "production" ||
-    process.env.LEVI_DESIGN_PAGE === "1"
-  );
-}
-
 export default async function DesignPage({
   searchParams,
 }: {

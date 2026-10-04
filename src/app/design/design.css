@@ -30,8 +30,7 @@
   display: grid;
   align-content: start;
   gap: var(--ds-space-8);
-  /* Room at the bottom for the contained toast region. */
-  padding: 0 var(--ds-space-6) calc(var(--ds-space-16) * 2);
+  padding: 0 var(--ds-space-6) var(--ds-space-6);
   border: 1px solid var(--ds-separator);
   border-radius: var(--ds-radius-lg);
   overflow: clip;
@@ -157,4 +156,7 @@
 }
 .dsp-pop {
   animation: ds-pop-in var(--ds-dur-base) var(--ds-ease-standard);
+}
+.dsp-toast-room {
+  height: 112px;
 }

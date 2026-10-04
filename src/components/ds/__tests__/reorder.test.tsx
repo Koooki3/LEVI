@@ -7,6 +7,7 @@ import {
   dsLayoutTransition,
   moveItem,
 } from "../ReorderList";
+import { ReducedMotionScope } from "@/lib/design/motion";
 
 setupDom();
 
@@ -73,8 +74,33 @@ describe("ReorderList", () => {
     );
     await press(handle(), "ArrowUp");
     expect(order(host)).toEqual(["screws", "plates", "cups"]);
+    await press(handle(), "ArrowDown");
+    expect(order(host)).toEqual(["plates", "screws", "cups"]);
+    expect(document.activeElement).toBe(handle());
     await press(handle(), "End");
     expect(order(host)).toEqual(["plates", "cups", "screws"]);
+    expect(document.activeElement).toBe(handle());
+    expect(host.querySelector('[role="status"]')!.textContent).toBe(
+      "Moved screws to position 3 of 3",
+    );
+  });
+
+  test("a ReducedMotionScope forces the reduced path without the system setting", async () => {
+    const restore = mockMatchMedia([]);
+    try {
+      const { host } = await render(
+        <ReducedMotionScope reduce>
+          <Harness />
+        </ReducedMotionScope>,
+      );
+      const first = host.querySelector(".ds-reorder__handle")!;
+      await focus(first);
+      await press(first, "ArrowDown");
+      expect(order(host)).toEqual(["screws", "plates", "cups"]);
+      expect(host.innerHTML).not.toContain("scale(1.02)");
+    } finally {
+      restore();
+    }
   });
 
   test("renders and reorders the same under reduced motion", async () => {

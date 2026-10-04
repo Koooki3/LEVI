@@ -14,7 +14,8 @@ import {
   Tag,
 } from "../Display";
 import { Progress, Spinner } from "../Progress";
-import { SegmentedControl, Tabs } from "../Tabs";
+import { SegmentedControl, Tabs, selectedIndex } from "../Tabs";
+import { ReducedMotionScope } from "@/lib/design/motion";
 import { Table, TableRow } from "../Table";
 import { ThemePicker } from "../ThemePicker";
 
@@ -293,5 +294,72 @@ describe("Table", () => {
     expect(rows[1].getAttribute("data-selected")).toBe("true");
     expect(rows[1].getAttribute("aria-current")).toBe("true");
     expect(host.querySelector(".ds-table-wrap")).not.toBeNull();
+  });
+});
+
+describe("review fixes", () => {
+  test("only the selected tab names a panel; an unknown value falls back", async () => {
+    const { host } = await render(
+      <Tabs
+        label="Viewer"
+        value="missing"
+        onChange={() => undefined}
+        items={[
+          { id: "off", label: "Off", disabled: true, content: "x" },
+          { id: "a", label: "A", content: "A body" },
+          { id: "b", label: "B", content: "B body" },
+        ]}
+      />,
+    );
+    const tabs = Array.from(host.querySelectorAll('[role="tab"]'));
+    expect(tabs.map((t) => t.getAttribute("aria-selected"))).toEqual([
+      "false",
+      "true",
+      "false",
+    ]);
+    expect(tabs.map((t) => t.hasAttribute("aria-controls"))).toEqual([
+      false,
+      true,
+      false,
+    ]);
+    expect(tabs[1].getAttribute("tabindex")).toBe("0");
+    expect(host.querySelector('[role="tabpanel"]')!.textContent).toBe("A body");
+    expect(selectedIndex([{ id: "a" }, { id: "b" }], "b")).toBe(1);
+    expect(selectedIndex([{ id: "a", disabled: true }, { id: "b" }], "a")).toBe(
+      1,
+    );
+  });
+
+  test("tag remove target is 24 px; a non-text tag must name its button", async () => {
+    const onRemove = mock(() => undefined);
+    const { host } = await render(
+      <Tag onRemove={onRemove} removeLabel="Remove camera wrist">
+        <strong>wrist</strong>
+      </Tag>,
+    );
+    const button = host.querySelector("button")!;
+    expect(button.getAttribute("aria-label")).toBe("Remove camera wrist");
+    expect(button.querySelector(".ds-tag__remove-mark")).not.toBeNull();
+    // @ts-expect-error removeLabel is required when the tag is not plain text
+    void (
+      <Tag onRemove={onRemove}>
+        <strong>x</strong>
+      </Tag>
+    );
+  });
+
+  test("Progress follows a ReducedMotionScope", async () => {
+    const restore = mockMatchMedia([]);
+    try {
+      const { host } = await render(
+        <ReducedMotionScope reduce>
+          <Progress label="Scanning" value={null} />
+        </ReducedMotionScope>,
+      );
+      expect(host.textContent).toContain("In progress");
+      expect(host.querySelector(".ds-progress__track--still")).not.toBeNull();
+    } finally {
+      restore();
+    }
   });
 });

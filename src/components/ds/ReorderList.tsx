@@ -20,6 +20,7 @@ import {
 } from "motion/react";
 import { GripVertical } from "lucide-react";
 import { useLocale } from "@/components/levi-locale";
+import { useReducedMotionOverride } from "@/lib/design/motion";
 import { Icon } from "./Icon";
 import { cx } from "./internal";
 
@@ -126,7 +127,9 @@ export function ReorderList<T>({
   className?: string;
 }) {
   const { t, language } = useLocale();
-  const reduced = Boolean(useReducedMotion());
+  const forced = useReducedMotionOverride();
+  const system = useReducedMotion();
+  const reduced = forced ?? Boolean(system);
   const [announcement, setAnnouncement] = useState("");
   const helpId = useId();
   const move = (from: number, to: number) => {
@@ -140,7 +143,7 @@ export function ReorderList<T>({
     );
   };
   return (
-    <MotionConfig reducedMotion="user">
+    <MotionConfig reducedMotion={forced ? "always" : "user"}>
       <div className={cx("ds-reorder", className)}>
         <p id={helpId} className="ds-sr-only">
           {t("Drag the handle, or focus it and press the up and down arrows.")}
