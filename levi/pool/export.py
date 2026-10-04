@@ -50,7 +50,7 @@ from ..conversion.outputs.lerobot_v21 import LeRobotV21
 from ..conversion.outputs.recap_value import RECAP_COLUMNS, RecapOptions, RecapValue
 from ..conversion.progress import Progress
 from ..conversion.report import InputReport, Requirement
-from . import embodiment, heldout, index, joblog, scanner, settings
+from . import corrections, embodiment, heldout, index, joblog, scanner, settings
 from . import journal as journal_mod
 from . import timing as timing_mod
 from .recipe import NAME, Recipe, find_warnings, select_detailed
@@ -212,6 +212,8 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "episode_index",
         "task",
         "task_raw",
+        "task_original",
+        "task_correction",
         "frames",
         "fps",
         "measured_fps",
@@ -263,6 +265,7 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
             scanner.rules_mod.load(settings.pool_dir())
         ),
         "embodiment_rules": index.summary().get("embodiment_rules"),
+        "task_corrections": selection.corrections,
         "warnings": [w for w in warnings if not w["blocking"]]
         + timing_mod.warnings(chosen, options.fps, options.timing),
     }
@@ -294,6 +297,15 @@ def _policy_fields(ep: dict) -> dict:
             "policy_phase",
             "policy_label",
         )
+    }
+
+
+def _correction_fields(ep: dict) -> dict:
+    """The text the episode carried before an approved task correction, and
+    which correction (``version:id``); both null when none applied."""
+    return {
+        "task_original": ep.get("task_original"),
+        "task_correction": ep.get("task_correction"),
     }
 
 
@@ -930,6 +942,8 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
         # on any episode) has nothing to check.
         verify_embodiment(episodes)
         refuse_mixed_gripper(episodes, job["recipe"])
+    # A correction approved when planned and rejected since stops the export.
+    corrections.verify(episodes)
     _unchanged(episodes)
     check_space(job, staging if resume else None)
     check_fps(job, options)
@@ -973,6 +987,9 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
                 job["recipe"],
                 (job.get("embodiment_rules") or {}).get("version"),
                 job.get("embodiment_declared"),
+            ),
+            "task_corrections": corrections.export_record(
+                _exported(job["episodes"], result["episodes"]), job["recipe"]
             ),
             "counts": {
                 "episodes": len(result["episodes"]),
@@ -1022,6 +1039,12 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
     }
 
 
+def _exported(planned: list[dict], rows: list[dict]) -> list[dict]:
+    """The planned episodes that are in the finished export."""
+    done = {r["source_path"] for r in rows}
+    return [e for e in planned if e["key"] in done]
+
+
 def _timing_record(options: ExportOptions, rows: list[dict]) -> dict:
     """The timing mode used and how far each source's time axis moved: per
     episode ``source_fps`` (measured) and ``time_scale`` (exported duration /
@@ -1065,6 +1088,29 @@ def _copy_hashed(src: Path, dst: Path) -> str:
     return digest.hexdigest()
 
 
+def _corrected_metadata(path: Path, src: Path, out: Path, ep: dict) -> bool:
+    """Write the exported copy of a corrected episode's ``metadata.json``
+    with the corrected ``task_description`` (the original text and the
+    correction kept beside it). The source is never touched. False: not that
+    file, no correction, or not readable JSON (then it is copied as it is)."""
+    if not ep.get("task_correction") or path != src / "metadata.json":
+        return False
+    try:
+        meta = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(meta, dict):
+        return False
+    meta["levi_task_correction"] = {
+        "correction": ep["task_correction"],
+        "task_description_original": meta.get("task_description"),
+    }
+    meta["task_description"] = ep.get("task_raw") or ep["task"]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+    return True
+
+
 def _raw_capture(ctx: RunContext) -> dict:
     job, options, staging, progress = ctx.job, ctx.options, ctx.staging, ctx.progress
     texts = _texts(job)
@@ -1101,7 +1147,8 @@ def _raw_capture(ctx: RunContext) -> dict:
                     if path.is_dir() or path.is_symlink():
                         continue
                     out = _inside(staging, dst / path.relative_to(src))
-                    linked += _link_or_copy(path, out, options.hardlink)
+                    if not _corrected_metadata(path, src, out, ep):
+                        linked += _link_or_copy(path, out, options.hardlink)
                     name = out.relative_to(staging).as_posix()
                     files[name] = journal_mod.file_record(staging, name)
                 ctx.journal.record(unit, path=rel, linked=linked, files=files)
@@ -1132,6 +1179,7 @@ def _raw_capture(ctx: RunContext) -> dict:
                 **_policy_fields(ep),
                 **_embodiment_fields(ep),
                 **_selection_fields(ep),
+                **_correction_fields(ep),
                 "frames": ep["frames"],
             }
         )
@@ -1581,6 +1629,7 @@ def _lerobot(ctx: RunContext) -> dict:
                 **_policy_fields(ep),
                 **_embodiment_fields(ep),
                 **_selection_fields(ep),
+                **_correction_fields(ep),
                 "frames": n,
                 "source_fps": timing_mod.rounded(source_fps),
                 "time_scale": timing_mod.rounded(

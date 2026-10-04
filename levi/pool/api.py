@@ -2,13 +2,25 @@
 UI-token and same-origin middleware (writes: recipes, scans, exports)."""
 
 import json
+import os
+import secrets
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import cleanup, deletion, index, jobs, journal, recipe, remote, settings
+from . import (
+    cleanup,
+    corrections,
+    deletion,
+    index,
+    jobs,
+    journal,
+    recipe,
+    remote,
+    settings,
+)
 from .export import ExportOptions
 from .recipe import Recipe
 
@@ -580,3 +592,58 @@ def push(payload: Push):
     except KeyError:
         raise HTTPException(404, "Remote target not found") from None
     return jobs._brief(jobs.launch(planned["id"]))
+
+
+# ------------------------------------------------------------------ task corrections
+
+
+def _person(request: Request) -> None:
+    """Approving or rejecting a task correction is a person's action. The
+    service's middleware already turns an agent's Bearer credential away from
+    every route but the Agent API and demands the UI token; this refuses
+    again here so the rule does not depend on how the router is mounted."""
+    if request.headers.get("authorization", "").lower().startswith("bearer "):
+        raise HTTPException(
+            403, "Reviewing a task correction is a person's action; agents only propose"
+        )
+    secret = os.getenv("LEVI_UI_TOKEN")
+    if secret and not secrets.compare_digest(
+        request.headers.get("x-levi-ui-token", ""), secret
+    ):
+        raise HTTPException(401, "Use the LEVI Web UI or `levi pool corrections`")
+
+
+@router.get("/corrections")
+def correction_versions():
+    """The task correction versions of this pool, with counts per status."""
+    return {"versions": corrections.listing()}
+
+
+@router.get("/corrections/copies")
+def copy_candidates():
+    """Copies whose task texts differ, for a person to decide."""
+    return {"candidates": corrections.copy_candidates()}
+
+
+@router.get("/corrections/{version}")
+def correction_entries(
+    version: str, status: str | None = None, batch: str | None = None
+):
+    """One version's proposals, their status and how they match the index."""
+    try:
+        return corrections.show(version, status, batch)
+    except KeyError:
+        raise HTTPException(404, "Task correction version not found") from None
+
+
+@router.post("/corrections/{version}/review")
+def correction_review(version: str, payload: corrections.Review, request: Request):
+    """Approve or reject proposals (``ids``, a ``batch`` or ``all``, less
+    ``exclude``): a person only."""
+    _person(request)
+    try:
+        return corrections.review(version, payload, principal="local-human")
+    except KeyError:
+        raise HTTPException(404, "Task correction version not found") from None
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None

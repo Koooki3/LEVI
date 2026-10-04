@@ -11,12 +11,14 @@ The training pool indexes every dataset under a set of read-only folders, one ro
 - **One export holds one gripper.** When the selected episodes carry more than one known gripper, or one known gripper next to episodes whose gripper is not recorded, the whole export is refused, unless the recipe allows it (`allow_mixed_gripper`) or names `unknown` on purpose. See [Robot and gripper](#robot-gripper-action-mode-and-end-effector-frame--机器人夹爪动作模式与末端坐标系).
 - **An episode a person removed on the live page stays out.** A live workspace (`levi live`, [LIVE.md](LIVE.md#removing-an-episode-restorable)) lets a person remove an episode (restorable; no file is deleted). When that workspace lies under a pool root, its mirror is indexed beside the rollout folder it was linked from, and the removal applies to the whole group of copies: the pool reads the live workspace's dataset states when it is asked (no new scan), also names the rollout folder the mirror was linked from (the state file's `source`), so the original is kept out even when the scan ran before the demo was mirrored or the source was replaced afterwards; it does not list or count the recording (`facets.removed_in_live` counts recordings, and the page shows it as "Episodes removed on the live page"), leaves it out of every recipe (`excluded_in_live` among the exclusions) and refuses it when an export is planned, run or resumed ("removed on the live page"). Only live workspaces the last scan found under the roots (and the pool's own workspace) are read.
 - **One recorded episode counts once.** Copies are grouped (see [Grouping](#grouping-copies-variants-conversions--副本与版本归并)); an export takes the canonical member unless the recipe names only other sources.
+- **A corrected task text is a reviewed, separate record.** A [task text correction](#task-text-corrections--任务文本订正) never changes a source; an export applies one only when its recipe names the version and a person approved it, and `pool_export.json` lists every correction it applied.
 - **Traceable.** Every export writes `pool_export.json`: the recipe, the task order, each episode's source path, group, fingerprint, outcome and its source, policy fields (`policy_model`, `policy_checkpoint`, `policy_method`, `policy_phase`, `policy_label`), robot, gripper, action mode and end-effector frame (`robot`, `gripper`, `action_mode`, `ee_frame`) and why it was picked (`selection_stratum`, `quality_score`, `selection_reason`), per task what was asked for and what was picked (`selection`), every exclusion with its reason, the LEVI commit and the format parameters.
 
 - **源数据只读**：只读取 `LEVI_POOL_ROOTS`；训练池自己的文件在 `<workspace>/pool/`；导出写到新目录，先写 `.<名称>.partial`，完成后改名。导出目录不能在任何已登记的源数据集内部（也不能包含源数据集），必须在 `LEVI_EXPORT_ROOTS` 之内，且事先不存在。
 - **留出（冻结测试）片段永不导出**：`LEVI_POOL_HELDOUT` 中的清单按路径和视频 sha256 匹配，留出片段的副本、过滤版本和转换结果同样视为留出。选择无法包含它们；导出时再按路径、sha256 和索引各查一遍，只要有一条混入就拒绝整个导出。
 - **人在实时页面排除的片段不会进池**：实时工作区（`levi live`，见 [LIVE.zh-CN.md](LIVE.zh-CN.md#排除片段可恢复)）允许人排除一个片段（可恢复，不删除任何文件）。该工作区在池根目录之下时，它的镜像会和所链接的 rollout 目录一起登记，排除对整组副本生效：训练池在被查询时读实时工作区的数据集状态（不需要重新扫描），也按状态文件里的 `source` 认出镜像所链接的 rollout 目录（扫描先于镜像、或源在镜像后被替换时原件同样被排除），不列出也不计入这个录制（`facets.removed_in_live` 按录制计数，页面显示为“在实时页面被删除的片段数”），任何配方都会跳过它（排除原因里是 `excluded_in_live`），导出在规划、运行和续跑时都会拒绝它（“removed on the live page”）。只读取上次扫描在池根下找到的实时工作区（以及训练池自己的工作区）。
 - **同一次录制只算一次**：副本归为一组，导出默认只用规范来源。
+- **任务文本订正是经人审核的独立记录**：[任务文本订正](#task-text-corrections--任务文本订正)不改任何源数据；只有配方点名了该版本、且人已经批准的订正才会在导出时应用，`pool_export.json` 列出应用了哪些。
 - **一次导出只取一种夹爪**：所选片段含有一种以上已知夹爪（或已知夹爪加上未记录夹爪的片段）时，整次导出被拒绝，除非配方明确允许（`allow_mixed_gripper`）或有意选了“未知”。见[机器人与夹爪](#robot-gripper-action-mode-and-end-effector-frame--机器人夹爪动作模式与末端坐标系)。
 - **可追溯**：每次导出写 `pool_export.json`（选择条件、任务顺序、每个片段的来源路径与指纹、排除清单及原因、LEVI commit、格式参数）。
 
@@ -154,9 +156,9 @@ Rows are grouped when they share any of:
 - a **conversion link**: a LeRobot episode's `rollout_source_demo`, `meta/processed_demos.json` or LEVI's `source_demo`;
 - the **content hash** of a LeRobot episode (md5 of its state and action arrays) — LeRobot copies.
 
-The canonical member is the original: not archived, not in a LEVI workspace, a raw capture before a LeRobot conversion, unfiltered before filtered, the shallowest path. Human labels and held-out marks apply to the whole group. A LeRobot dataset with no provenance whose episodes differ from every other dataset (for example an older conversion of a different filtering) cannot be linked to its raw captures and appears as a separate human source; pick sources explicitly when that matters.
+The canonical member is the original: not archived, not in a LEVI workspace, a raw capture before a LeRobot conversion, unfiltered before filtered, a standard folder name before a non-standard one (`demo_0001` is kept over `demo_0001 copy`), the shallowest path. When the members of a group carry different task texts, the export keeps the canonical member's text and warns (`copy_task_conflict`); `levi pool corrections copies` lists those groups for a person, see [Copies whose texts differ](#copies-whose-texts-differ--文本不同的副本). Human labels and held-out marks apply to the whole group. A LeRobot dataset with no provenance whose episodes differ from every other dataset (for example an older conversion of a different filtering) cannot be linked to its raw captures and appears as a separate human source; pick sources explicitly when that matters.
 
-分组依据：原始片段指纹（字节副本）、录制身份（任务目录 + 开始/结束时间，过滤版本归入原件）、转换链接（`rollout_source_demo`、`processed_demos.json`、`source_demo`）、LeRobot 内容哈希。规范成员是原始采集或 rollout 目录。没有来源记录的 LeRobot 数据集无法关联到原始采集，会作为单独来源出现。
+分组依据：原始片段指纹（字节副本）、录制身份（任务目录 + 开始/结束时间，过滤版本归入原件）、转换链接（`rollout_source_demo`、`processed_demos.json`、`source_demo`）、LeRobot 内容哈希。规范成员是原始采集或 rollout 目录；标准目录名优先于非标准目录名（保留 `demo_0001`，`demo_0001 copy` 视为副本）。同组成员的任务文本不同时，导出用规范成员的文本并给出提示（`copy_task_conflict`），`levi pool corrections copies` 把这些组列出来交人决定，见[文本不同的副本](#copies-whose-texts-differ--文本不同的副本)。没有来源记录的 LeRobot 数据集无法关联到原始采集，会作为单独来源出现。
 
 ## Recipes / 选择
 
@@ -174,6 +176,7 @@ A recipe is a named, saved selection (`pool/recipes/<name>.json`):
 | `include_nonstandard`, `exclude` | non-standard folders in; episode keys out |
 | `allow_unlinked_sources` | see below |
 | `task_text` | normalised task → the text written into the export |
+| `task_corrections` | versions of the pool's [task text corrections](#task-text-corrections--任务文本订正) to apply, in order; only approved ones are applied, before every filter, so a corrected episode counts under its corrected task |
 
 The selection runs in this order: held-out out (always), `exclude`, non-standard and unsupported formats out, one episode per group, the outcome filter, the export format's own need (a raw copy takes raw captures; a RECAP value export needs an outcome), then, per task in the task order, the choice of how many and which episodes. A task taken from raw captures **and** from a LeRobot dataset that no scan link ties to them (no provenance, different content hash) may be one recording twice. The preview warns (`possible_unlinked_conversion`) and planning an export refuses, unless the recipe names its `sources` or sets `allow_unlinked_sources`. Preview `warnings` also carry the held-out problems above; a `blocking` one stops an export.
 
@@ -223,6 +226,50 @@ The choice is deterministic for a recipe, its `seed` and the index, and one func
 部分任务有数百个片段，任务条目因此可以指定取多少、取哪些：`count`（片段数，缺省用 `per_task_cap`，再缺省取全部）、`success_ratio`（成功占比 0..1，缺省保持该任务原有比例）、`strategy`（`quality` 智能选取、`random` 按种子随机、`first` 按索引顺序）。命令行写法 `文本:count=50,success=0.6,strategy=quality`（`count` 为数字或 `all`，`success` 为 0..1、`60%` 或 `natural`）；不带选项的文本仍是旧写法（按种子随机）。旧配方（任务文本列表加全局 `per_task_cap`）载入后含义不变。
 
 选取规则：在所有过滤之后，按任务顺序逐个任务进行。（1）按结果分成功/失败，口径与导出一致（人工标签优先，其次机器人标志）；没有结果的片段、以及人工标签互相矛盾的片段（智能选取时）只在凑不够数量时才用，并单独报告；完全没有结果的任务（人工示范）原样取。（2）配额：不指定成功占比时智能选取保持自然比例，指定后取 `round(片段数 × 占比)` 个成功，其余为失败；某一类不够时由另一类补足并报告缺口；可用片段少于要求时全部取走并报告缺少的数量。（3）质量分 = 0.40 × 标注可信度 + 0.30 × 完整度 + 0.30 × 适配度：人工标签 1.0、示范 0.8、机器人标志 0.6、无结果 0.3、标签矛盾 0；片段长度在任务中位数的 0.5–2 倍内为满分，短于 0.15 倍（中途中止）或长于 4 倍（一直没结束）降为 0；成功片段偏好“较高效”的（帧数排在该任务成功片段的 15%–55% 分位），失败片段需要足够长以包含一次尝试（帧数至少约为成功片段中位数的一半）；RECAP 优势标签只在分数相差不到 0.02 时用来打破平局。（4）多样性：按 策略方法 | 检查点 | 来源 | 日期（按天）分层，轮流从已选最少的层里取最好的，避免全部来自同一次运行；低于 0.4 分的片段最后才用。（5）整体：新添加任务的默认片段数为已添加任务片段数的中位数（没有时为 100，不超过可用数）；前面任务已选的片段不会重复选取；组合明显偏向某一类别或方法（≥ 80%）时预览会显示，不会自动重新加权。预览、导出计划和 `POST /selection` 使用同一个函数，结果一致；`pool_export.json` 逐片段记录所属任务、分层、质量分、入选原因、结果及其来源，并按任务记录要求数、可用数、实际数和缺口。
+
+## Task text corrections / 任务文本订正
+
+Some episodes record another task than their text says: in a paired collection (put into / take out of, fold / flatten) an operator who falls out of step with the collector's task pointer records the opposite direction under the text of the other half. A correction table fixes this without touching the data. Code: `levi/pool/corrections.py`; nothing in it names a task.
+
+| | |
+| --- | --- |
+| What | per episode: the corrected text (`task_to`), the text it carries now (`task_from`, a guard), where the proposal comes from (`source`, `evidence`, `evidence_files`, `confidence`, `proposed_by`, `proposed_at`), an optional `review_batch`, and the review: `status` (`proposed`, `approved`, `rejected`), `reviewed_by`, `reviewed_at`, `review_note` |
+| Where | `<workspace>/pool/task_corrections/<version>.jsonl` (the proposals, written once), `<version>.json` (when, from what file, the sha256) and `<version>.reviews.jsonl` (decisions, appended; the latest one counts) |
+| Who | anyone may **propose** (`import`); only a **person** approves or rejects. The review route (`POST /api/levi/pool/corrections/{version}/review`) refuses an agent's credential and needs the UI token; the CLI's `approve` and `reject` send the decision to the running service as the person |
+| Applied | only when a recipe names the version (`task_corrections`), only approved ones, to every copy of the recording (the group), before every filter; the source files never change |
+
+```bash
+uv run levi pool corrections import proposals.jsonl --version cast-direction-v1   # proposals only
+uv run levi pool corrections list | show cast-direction-v1 [--status proposed] [--batch 1]
+uv run levi pool corrections approve cast-direction-v1 --batch 1 --except 0007 --reviewer "Ann"   # a person
+uv run levi pool corrections reject cast-direction-v1 --id 0007 --reviewer "Ann" --note "unclear"   # a person
+uv run levi pool corrections copies                                                  # copies whose texts differ
+uv run levi pool recipe save towels --task "flatten the towel" --file recipe.json     # recipe.json: {"task_corrections": ["cast-direction-v1"]}
+```
+
+A proposal file is JSONL (or a JSON list), one object per episode: `id` (default: its line number), `episode` (a path relative to a pool root, or absolute), optionally `fingerprint` (the pool's, used when the path matches nothing), `task_from`, `task_to`, `source`, `proposed_by` and the optional fields above. An import that carries a decision (`status` other than `proposed`, `reviewed_by`, `reviewed_at`) is refused, as is one that changes nothing. A version is written once; `--replace` rewrites one with no review yet; a reviewed version is never rewritten (import a new version).
+
+Matching: `show`, `list` and the preview resolve each proposal against the index: `ok`; `stale` (the episode's text is no longer `task_from`: the source changed or the proposal is wrong; not applied); `unmatched` (no such episode). The preview warns about approved corrections that are stale or unmatched (`task_corrections_not_applied`), and refuses (blocking `task_correction_conflict`) when two approved corrections of one recording in the named versions disagree.
+
+The export: each corrected episode carries `task_original` and `task_correction` (`version:id`) in `pool_export.json`, and the record has `task_corrections`: the versions and their sha256, each applied correction with its episodes, `task_from`, `task_to`, `source`, `confidence`, `reviewed_by` and `reviewed_at`. A raw-capture export writes the corrected `task_description` into its copy of `metadata.json` (the original text and the correction under `levi_task_correction`); the source's file is unchanged. At run time the export checks again that every planned correction is still approved as planned: a decision reversed after planning stops it (plan again).
+
+有些片段录下的任务和文本不符：成对采集（放入/取出、折叠/摊平）时操作者与采集程序的任务指针错位，录下的是反方向，文本却是另一半的。订正表不改数据就能修正。代码在 `levi/pool/corrections.py`，不含任何任务专用逻辑。
+
+- **内容**：每个片段一条：订正后的文本（`task_to`）、当前文本（`task_from`，用来核对）、提议来源（`source`、`evidence`、`evidence_files`、`confidence`、`proposed_by`、`proposed_at`）、可选的 `review_batch`（审核批次），以及审核状态 `status`（`proposed` 待审、`approved` 批准、`rejected` 驳回）、`reviewed_by`、`reviewed_at`、`review_note`。
+- **存放**：`<工作区>/pool/task_corrections/<版本>.jsonl`（提议，只写一次）、`<版本>.json`（导入时间、来源文件、sha256）、`<版本>.reviews.jsonl`（审核决定，只追加，以最新一条为准）。
+- **谁能做**：任何人（包括 agent）都可以**提议**（`import`）；**批准和驳回只能由人做**。审核接口拒绝 agent 凭据，需要界面令牌；命令行的 `approve`、`reject` 以人的身份发给正在运行的服务。
+- **何时应用**：只有配方在 `task_corrections` 里点名了该版本，且订正已被批准；对这次录制的所有副本（同组）生效，在所有过滤之前应用；源文件永远不变。
+- **匹配**：`ok`；`stale`（片段的文本已不是 `task_from`，不应用）；`unmatched`（找不到该片段）。预览对已批准但无法应用的订正给出提示；同一录制在所选版本里有两条互相矛盾的已批准订正时拒绝导出。
+- **导出记录**：被订正的片段在 `pool_export.json` 里带 `task_original` 和 `task_correction`（`版本:编号`）；记录顶层的 `task_corrections` 列出版本及其 sha256、每条已应用的订正（片段、原文本、新文本、来源、置信度、审核人、审核时间）。原始采集格式的导出在复制出的 `metadata.json` 里写入订正后的 `task_description`（原文本和订正编号放在 `levi_task_correction`），源文件不变。导出运行时再核对一次：计划之后被驳回的订正会让导出停止（重新计划）。
+
+### Copies whose texts differ / 文本不同的副本
+
+`levi pool corrections copies` (or `GET /api/levi/pool/corrections/copies`) lists what a person must decide; nothing here is resolved silently:
+
+- `group_text_differs`: copies of one recording whose task texts differ. The export keeps the canonical member (an original over a folder named like a copy) and its text, and the preview warns (`copy_task_conflict`) until an approved correction of that recording settles the text.
+- `copy_without_original`: a raw capture in a non-standard folder (`demo_0022 copy`) with no original in the pool, whose text is not its task folder's name. Which one is right is unknown; such folders stay out of exports unless a recipe sets `include_nonstandard`, and a correction can settle the text.
+
+`levi pool corrections copies` 列出需要人决定的副本，不做静默选择：`group_text_differs`（同一录制的几个副本文本不同：导出保留规范成员即非 `copy` 目录及其文本，并在预览里提示，直到有经批准的订正）；`copy_without_original`（非标准目录名如 `demo_0022 copy`，池里没有原件，且文本与所在任务目录名不同：不知道哪个对；这类目录默认不导出，除非配方设置 `include_nonstandard`，也可以用订正定下文本）。
 
 ## Exports / 导出
 
@@ -413,6 +460,9 @@ All routes are behind the service's UI token and same-origin check.
 | POST | `/api/levi/pool/jobs/delete`, `/api/levi/pool/jobs/clear-failed` | Bulk clear or delete `{ids, files, force}`; clear failed, interrupted and cancelled jobs and their partials |
 | GET / POST | `/api/levi/pool/cleanup`, `/api/levi/pool/deleted` | Partials, old jobs and free space; delete named ones or `{sweep: true}`; the deletion log |
 | GET | `/api/levi/pool/jobs/{id}/summary` | `pool_export.json` of a finished export job |
+| GET | `/api/levi/pool/corrections`, `/api/levi/pool/corrections/{version}?status=&batch=` | Task correction versions with counts; one version's proposals with status and index match |
+| GET | `/api/levi/pool/corrections/copies` | Copies whose task texts differ, for a person to decide |
+| POST | `/api/levi/pool/corrections/{version}/review` | A person's decision `{ "decision": "approved" \| "rejected", "reviewer": "…", "ids" \| "batch" \| "all", "exclude"?, "note"? }`; 403 for an agent credential, 401 without the UI token |
 | GET | `/api/levi/pool/remotes` | Registered remote targets |
 | PUT / DELETE | `/api/levi/pool/remotes/{name}` | Register (`{"spec": "[user@]host:/path", "port"?}`) or forget a target; unknown fields such as `password` are refused |
 | POST | `/api/levi/pool/push` | `{ "target": "…", "export_job": "…" or "source": "<export dir>", "dry_run": false }`: rsync over SSH as a cancellable job |
@@ -422,4 +472,5 @@ All routes are behind the service's UI token and same-origin check.
 - **只读查询**：`status`（设置、上次扫描摘要、近期作业）、`sources`、`tasks`、`episodes`（分页）和 `facets`（页面的分面计数，以及开关隐藏了多少）。`tasks`、`episodes` 和 `facets` 都接受策略模型、检查点和运行方式过滤。
 - **扫描与作业**：`POST scan?rehash=` 启动扫描作业；`jobs` 和 `jobs/{id}` 给出进度和结果；`POST jobs/{id}/cancel` 停止运行中的扫描、导出或推送；`jobs/{id}/summary` 返回已完成导出的 `pool_export.json`。
 - **选择**：`recipes` 是选择的增删改查（请求体的 `name` 必须与 URL 一致）；`POST preview` 返回数量和排除原因，每个任务有 `available`、`successes`、`failures`、`selected`、`shortfall` 等字段，以及整体 `mix`；`POST selection` 返回某个任务选中的片段和该任务的报告，选择里没有该任务时返回 404；`POST suggest` 返回加入某个任务时的可用数量和均衡的默认数量。
+- **任务文本订正**：`GET corrections` 列出版本和各状态数量，`GET corrections/{version}` 列出提议、状态和与索引的匹配，`GET corrections/copies` 列出文本不同的副本；`POST corrections/{version}/review` 记录人的批准或驳回（agent 凭据返回 403，缺界面令牌返回 401）。
 - **导出与传输**：`POST export` 接受 `recipe_name` 或 `recipe`、`options` 和 `dry_run`；路径在 `LEVI_EXPORT_ROOTS` 之外或在源数据集内部时返回 403。`remotes` 和 `remotes/{name}` 登记或删除远程目标（不接受 `password` 等未知字段）；`POST push` 以可取消的作业通过 SSH 运行 rsync。

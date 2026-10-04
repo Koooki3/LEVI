@@ -35,6 +35,8 @@ Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge fo
 | GET | `/api/levi/pool/facets` | Training pool facet counts and what the visibility toggles hide |
 | POST | `/api/levi/pool/jobs/{id}/cancel` | Stop a running pool scan, export or push |
 | GET | `/api/levi/pool/jobs/{id}/summary` | `pool_export.json` of a finished export job |
+| GET | `/api/levi/pool/corrections`, `/api/levi/pool/corrections/{version}`, `/api/levi/pool/corrections/copies` | Training-pool task text corrections: versions, one version's proposals and status, copies whose texts differ ([Training pool](TRAINING_POOL.md#task-text-corrections--任务文本订正)) |
+| POST | `/api/levi/pool/corrections/{version}/review` | A person approves or rejects proposals (agent credentials refused) |
 | GET | `/api/levi/pool/remotes` | Remote targets for pool pushes |
 | PUT / DELETE | `/api/levi/pool/remotes/{name}` | Register `{ "spec": "[user@]host:/path", "port"?: n }` or forget a target (SSH keys only; a `password` field is refused) |
 | POST | `/api/levi/pool/push` | `{ "target": "…", "export_job": "…" \| "source": "<export dir>", "dry_run": false }`: rsync over SSH of a finished pool export, as a cancellable job |

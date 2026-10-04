@@ -303,6 +303,48 @@ def build_parser() -> argparse.ArgumentParser:
         "forget", help="stop reading one (deletes nothing; listed again if shown again)"
     )
     lforget.add_argument("path")
+    corr = sub.add_parser(
+        "corrections",
+        help="task text corrections: import proposals, list, show; "
+        "approve or reject (a person's action, through the running service)",
+    )
+    csub = corr.add_subparsers(dest="corrections_action", required=True)
+    cimp = csub.add_parser("import", help="import proposals (JSONL or a JSON list)")
+    cimp.add_argument("file")
+    cimp.add_argument("--version", required=True, help="e.g. cast-direction-v1")
+    cimp.add_argument(
+        "--replace",
+        action="store_true",
+        help="rewrite a version that has no review yet",
+    )
+    csub.add_parser("list", help="versions and counts per status")
+    cshow = csub.add_parser("show", help="one version's proposals and status")
+    cshow.add_argument("version")
+    cshow.add_argument("--status", choices=["proposed", "approved", "rejected"])
+    cshow.add_argument("--batch", help="only this review batch")
+    csub.add_parser(
+        "copies", help="copies whose task texts differ (for a person to decide)"
+    )
+    for verb in ("approve", "reject"):
+        cv = csub.add_parser(
+            verb,
+            help=f"{verb} proposals: a person's action, sent to the running "
+            "LEVI service with the person's key",
+        )
+        cv.add_argument("version")
+        pick = cv.add_mutually_exclusive_group(required=True)
+        pick.add_argument("--id", action="append", dest="ids", help="repeatable")
+        pick.add_argument("--batch", help="every proposal of this review batch")
+        pick.add_argument("--all", action="store_true", help="every proposal")
+        cv.add_argument(
+            "--except",
+            action="append",
+            dest="exclude",
+            default=[],
+            help="leave this id out (repeatable)",
+        )
+        cv.add_argument("--reviewer", required=True, help="who decides")
+        cv.add_argument("--note", default="")
     push = sub.add_parser(
         "push", help="send a finished export to a remote target (rsync over SSH)"
     )
@@ -466,6 +508,8 @@ def main(argv=None) -> int:
                 print(f"forgotten (nothing deleted): {args.path}")
             else:
                 _print(exclusions.listing())
+        elif args.action == "corrections":
+            return _corrections(args)
         elif args.action == "push":
             target = remote.get(args.target)
 
@@ -551,6 +595,53 @@ def _export(args, jobs, recipe) -> int:
     if final.get("resumable"):
         print(f"  resume with: levi pool export --resume {job['id']}")
     return code or 1
+
+
+def _corrections(args) -> int:
+    """``levi pool corrections``. Import, list, show and copies read and
+    write the pool's own files; approve and reject are a person's decision
+    and go to the running service as the person (its review route refuses
+    an agent's credential)."""
+    from . import corrections
+
+    action = args.corrections_action
+    if action == "import":
+        _print(corrections.import_file(args.file, args.version, replace=args.replace))
+    elif action == "list":
+        _print(corrections.listing())
+    elif action == "show":
+        _print(corrections.show(args.version, args.status, args.batch))
+    elif action == "copies":
+        _print(corrections.copy_candidates())
+    else:
+        from urllib.parse import quote
+
+        from ..agent import core
+
+        corrections.check_version(args.version)
+        decision = corrections.Review(
+            decision="approved" if action == "approve" else "rejected",
+            reviewer=args.reviewer,
+            ids=args.ids or [],
+            batch=args.batch,
+            all=args.all,
+            exclude=args.exclude,
+            note=args.note,
+        )
+        if not core.status():
+            raise ValueError(
+                "The LEVI service is not running: a review is a person's action "
+                "and is recorded by the running service (start it with "
+                "`levi serve`, or review on the page)"
+            )
+        _print(
+            core.request(
+                f"/api/levi/pool/corrections/{quote(args.version, safe='')}/review",
+                decision.model_dump(),
+                human=True,
+            )
+        )
+    return 0
 
 
 def _confirm(question: str, yes: bool) -> bool:

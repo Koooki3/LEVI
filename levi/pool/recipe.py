@@ -3,6 +3,10 @@
 A recipe picks episodes by category, source, format, task (an ordered list:
 the export follows it), date and policy (model, checkpoint, how it was run), then applies, in order:
 
+0. the task text corrections of the versions in ``task_corrections`` that a
+   person approved (``corrections.py``): a corrected episode, and every copy
+   of it, counts under the corrected task from here on;
+
 1. held-out episodes out — always, whatever the recipe says;
 2. episodes the recipe names in ``exclude`` out;
 3. nonstandard folders out (unless ``include_nonstandard``) and episodes of
@@ -34,7 +38,7 @@ from typing import Literal
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from . import embodiment, index, recap_signal, settings
+from . import corrections, embodiment, index, recap_signal, settings
 from . import select as picker
 from . import timing as timing_mod
 from .rules import CATEGORIES, normalize_task
@@ -108,6 +112,15 @@ class Recipe(BaseModel):
     # Normalized task -> the text written into the export (default: the
     # normalized task itself).
     task_text: dict[str, str] = Field(default_factory=dict)
+    # Versions of the pool's task text corrections to apply, in order (the
+    # first that corrects a recording wins); only corrections a person
+    # approved are applied (corrections.py).
+    task_corrections: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("task_corrections")
+    @classmethod
+    def _corrections(cls, value):
+        return list(dict.fromkeys(corrections.check_version(v) for v in value))
 
     @field_validator("robots", "grippers")
     @classmethod
@@ -284,6 +297,8 @@ class Selection:
     chosen: list[dict]
     excluded: list[dict]
     tasks: dict[str, dict] = field(default_factory=dict)
+    # The task text corrections applied (``corrections.apply``), if any.
+    corrections: dict = field(default_factory=dict)
 
 
 def select(
@@ -309,6 +324,9 @@ def select_detailed(
     needs an outcome per episode (``human_as_success``: a human demonstration
     without one counts as a success)."""
     df = index.frame() if df is None else df
+    # Approved task text corrections first: a corrected episode counts under
+    # the task its recording shows, for every filter and pick below.
+    df, fixed = corrections.apply(df, recipe.task_corrections)
     df = index._filter(
         df,
         categories=recipe.categories or None,
@@ -448,7 +466,7 @@ def select_detailed(
             taken.add(row.get("group") or row["key"])
         chosen += picked
     chosen.sort(key=lambda r: (position[r["task"]], *order_key(r)))
-    return Selection(chosen, excluded, reports)
+    return Selection(chosen, excluded, reports, fixed)
 
 
 def find_warnings(recipe: Recipe, chosen: list[dict], df=None) -> list[dict]:
@@ -511,6 +529,7 @@ def find_warnings(recipe: Recipe, chosen: list[dict], df=None) -> list[dict]:
             }
         )
     out += gripper_warnings(recipe, chosen)
+    out += correction_warnings(recipe, chosen, full)
     fallback = sum(
         1
         for r in chosen
@@ -527,6 +546,48 @@ def find_warnings(recipe: Recipe, chosen: list[dict], df=None) -> list[dict]:
                 "episodes": fallback,
             }
         )
+    return out
+
+
+def correction_warnings(recipe: Recipe, chosen: list[dict], full) -> list[dict]:
+    """Task text corrections the recipe names but cannot apply (``stale``,
+    ``unmatched``: non-blocking; two approved corrections of one recording
+    that disagree: blocking), and picked episodes whose copies carry another
+    text (``copy_task_conflict``, non-blocking)."""
+    out = []
+    if recipe.task_corrections:
+        _, problems = corrections.applicable(recipe.task_corrections, full)
+        clash = [p for p in problems if p["problem"] == "conflict"]
+        if clash:
+            out.append(
+                {
+                    "code": "task_correction_conflict",
+                    "blocking": True,
+                    "message": f"{len(clash)} approved task correction(s) disagree "
+                    "with another one for the same recording; reject one of them "
+                    "or apply fewer versions",
+                    "corrections": clash[:20],
+                }
+            )
+        rest = Counter(p["problem"] for p in problems if p["problem"] != "conflict")
+        if rest:
+            out.append(
+                {
+                    "code": "task_corrections_not_applied",
+                    "blocking": False,
+                    "message": "Approved task corrections not applied: "
+                    + ", ".join(f"{n} {k}" for k, n in sorted(rest.items()))
+                    + " (stale: the episode's text is no longer the one corrected; "
+                    "unmatched: no such episode in the index)",
+                    "counts": dict(rest),
+                    "corrections": [
+                        p["correction"] for p in problems if p["problem"] != "conflict"
+                    ][:50],
+                }
+            )
+    warning = corrections.conflict_warning(chosen, full)
+    if warning:
+        out.append(warning)
     return out
 
 
@@ -729,6 +790,7 @@ def preview(
             if fps and timing_mod.has_timing(target)
             else []
         ),
+        "task_corrections": result.corrections,
         "excluded": dict(reasons),
         "excluded_label_conflicts": reasons.get("label_conflict", 0),
         "excluded_heldout": reasons.get("heldout", 0),
