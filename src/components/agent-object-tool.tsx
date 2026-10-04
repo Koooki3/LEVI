@@ -31,11 +31,22 @@ async function call<V>(name: string, args: unknown): Promise<V> {
     );
   return result;
 }
+/** "rgb(0, 131, 0)" → [0, 131, 0]; null for anything else. */
+export function parseRgb(value: string): [number, number, number] | null {
+  const m = value.match(/^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
 function Mask({ row }: { row: ObjectAnnotation }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const ctx = canvas.current?.getContext("2d");
-    if (!ctx) return;
+    if (!ctx || !canvas.current) return;
+    // The mask colour is a data colour (--ds-data-6, set as the canvas's
+    // CSS colour in agent-content.css): canvas cannot read CSS variables,
+    // so the resolved value is taken from the element.
+    const colour = getComputedStyle(canvas.current).color;
+    const [r, g, b] = parseRgb(colour) ?? [0, 131, 0];
     const [h, w] = row.mask_rle.size;
     const pixels = ctx.createImageData(w, h);
     let offset = 0,
@@ -44,15 +55,13 @@ function Mask({ row }: { row: ObjectAnnotation }) {
       if (foreground)
         for (let i = offset; i < offset + length; i++) {
           const p = ((i % h) * w + Math.floor(i / h)) * 4;
-          pixels.data.set([190, 232, 85, 105], p);
+          pixels.data.set([r, g, b, 105], p);
         }
       offset += length;
       foreground = !foreground;
     }
     ctx.putImageData(pixels, 0, 0);
-    // A mask colour drawn on the image (data palette, not interface colour).
-    // eslint-disable-next-line no-restricted-syntax
-    ctx.strokeStyle = "#bee855";
+    ctx.strokeStyle = `rgb(${r} ${g} ${b})`;
     ctx.lineWidth = 2;
     const [x1, y1, x2, y2] = row.bbox_xyxy;
     ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
@@ -60,6 +69,7 @@ function Mask({ row }: { row: ObjectAnnotation }) {
   return (
     <canvas
       ref={canvas}
+      className="levi-agent-mask"
       width={row.image_size[1]}
       height={row.image_size[0]}
       aria-label="Object mask overlay"

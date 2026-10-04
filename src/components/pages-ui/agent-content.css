@@ -935,3 +935,11 @@
 [data-motion="reduce"] .levi-agent-sheet .levi-activity-list {
   scroll-behavior: auto;
 }
+/* The object tool's mask overlay: a data colour, read by the canvas from
+   this element (media is black in both themes, so the dark step is used).
+   --ds-data-6 comes with the data palette; until it is there, the success
+   colour stands in. */
+.levi-agent-sheet canvas.levi-agent-mask,
+canvas.levi-agent-mask {
+  color: var(--ds-data-6, var(--ds-success));
+}
