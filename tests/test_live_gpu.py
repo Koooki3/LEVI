@@ -2,6 +2,7 @@
 may work, when it must sleep, and its own server lifecycle -- with fake probes
 and a fake serve script, never a real GPU or a real model."""
 
+import contextlib
 import json
 import os
 import signal
@@ -249,7 +250,23 @@ echo $! > "{pid_dir}/vllm_$PORT.pid"
 """
     )
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
-    return script, pid_dir
+    yield script, pid_dir
+    stop_fake_servers(pid_dir)
+
+
+def stop_fake_servers(pid_dir):
+    """The fake server is detached (setsid): a test that failed before it
+    stopped it would leave it running. Stop every one the fake script started
+    (still named in its pid file and still a fake model server)."""
+    for record in pid_dir.glob("vllm_*.pid"):
+        try:
+            pid = int(record.read_text().strip())
+            argv = Path(f"/proc/{pid}/cmdline").read_bytes()
+        except (OSError, ValueError):
+            continue
+        if b"levi.live.fakevlm" in argv:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(pid, signal.SIGTERM)
 
 
 def free_port():
@@ -295,26 +312,44 @@ def test_vllm_starts_sleeps_wakes_and_stops_only_what_it_started(live, serve):
     vllm = gpumgr.Vllm(c)
     profile = c.vllm_profile()
     assert vllm.start(profile) and vllm.state == "starting" and vllm.mine()
-    launched = (serve[1] / "launch.txt").read_text()
-    assert (
-        "dev=1" in launched
-        and "util=0.74" in launched
-        and "--enable-sleep-mode" in launched
-    )
-    assert wait_for(lambda: vllm.poll() == "ready")
-    pid = vllm._pid()
-    assert vllm.sleep() and vllm.state == "asleep" and gpumgr.is_sleeping(c.vllm.port)
-    assert vllm.poll() == "asleep" and vllm.mine()
-    # A restarted supervisor finds it asleep and takes it back.
-    again = gpumgr.Vllm(c)
-    assert again.state == "asleep" and again.mine()
-    assert (
-        again.wake() and again.state == "ready" and not gpumgr.is_sleeping(c.vllm.port)
-    )
-    assert vllm.stop() and vllm.state == "stopped"
+    try:
+        launched = (serve[1] / "launch.txt").read_text()
+        assert (
+            "dev=1" in launched
+            and "util=0.74" in launched
+            and "--enable-sleep-mode" in launched
+        )
+        assert wait_for(lambda: vllm.poll() == "ready")
+        pid = vllm._pid()
+        assert (
+            vllm.sleep() and vllm.state == "asleep" and gpumgr.is_sleeping(c.vllm.port)
+        )
+        assert vllm.poll() == "asleep" and vllm.mine()
+        # A restarted supervisor finds it asleep and takes it back.
+        again = gpumgr.Vllm(c)
+        assert again.state == "asleep" and again.mine()
+        assert (
+            again.wake()
+            and again.state == "ready"
+            and not gpumgr.is_sleeping(c.vllm.port)
+        )
+    finally:
+        stopped = vllm.stop()
+    assert stopped and vllm.state == "stopped"
     assert wait_for(lambda: gpumgr.identity(pid) is None)
     assert not gpumgr.healthy(c.vllm.port)
     assert not c.live_dir.joinpath("vllm.json").exists()
+
+
+def test_a_fake_server_a_test_left_running_is_stopped_at_teardown(live):
+    c, _ = live
+    vllm = gpumgr.Vllm(c)
+    assert vllm.start(c.vllm_profile())
+    assert wait_for(lambda: vllm.poll() == "ready")
+    pid = vllm._pid()
+    stop_fake_servers(Path(c.vllm.pid_dir))  # what the fixture's teardown does
+    assert wait_for(lambda: gpumgr.identity(pid) is None)
+    assert not gpumgr.healthy(c.vllm.port)
 
 
 def test_without_sleep_mode_there_is_no_sleeping(live):
@@ -322,9 +357,11 @@ def test_without_sleep_mode_there_is_no_sleeping(live):
     c.vllm.sleep_mode = False
     vllm = gpumgr.Vllm(c)
     assert vllm.start(c.vllm_profile())
-    assert wait_for(lambda: vllm.poll() == "ready")
-    assert not vllm.sleep() and vllm.state == "ready"
-    vllm.stop()
+    try:
+        assert wait_for(lambda: vllm.poll() == "ready")
+        assert not vllm.sleep() and vllm.state == "ready"
+    finally:
+        vllm.stop()
 
 
 def test_a_server_it_did_not_start_is_never_stopped_or_put_to_sleep(live):
