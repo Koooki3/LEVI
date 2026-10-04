@@ -68,6 +68,16 @@ export function ConversionWizard({
   const inspecting =
     inspectJob !== null &&
     (inspectJob.status === "queued" || inspectJob.status === "running");
+  // The one primary button of the wizard is the current step's (docs/DESIGN.md).
+  const step: "inspect" | "choose" | "review" | "run" | "done" = plan
+    ? "run"
+    : runJob?.dataset
+      ? "done"
+      : report && target
+        ? "review"
+        : report
+          ? "choose"
+          : "inspect";
 
   function extraOptions(): Record<string, unknown> {
     const parsed = JSON.parse(extra || "{}") as unknown;
@@ -194,6 +204,7 @@ export function ConversionWizard({
         />
         <Button
           type="submit"
+          variant={step === "inspect" ? "primary" : "secondary"}
           icon={ScanSearch}
           loading={inspecting}
           disabled={busy || !available}
@@ -267,7 +278,12 @@ export function ConversionWizard({
               setPlan(null);
             }}
           />
-          <Button className="mt-4" disabled={busy} onClick={preview}>
+          <Button
+            className="mt-4"
+            variant={step === "review" ? "primary" : "secondary"}
+            disabled={busy}
+            onClick={preview}
+          >
             <T>5 · Review plan</T>
           </Button>
         </>
@@ -343,7 +359,7 @@ export function ConversionWizard({
           )}
           {runJob.dataset && (
             <Link
-              className="ds-btn ds-btn--primary ds-focus"
+              className={`ds-btn ${step === "done" ? "ds-btn--primary" : "ds-btn--secondary"} ds-focus`}
               href={`/${runJob.dataset}`}
             >
               <T>Review converted dataset</T>

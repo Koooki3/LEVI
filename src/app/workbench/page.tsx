@@ -167,12 +167,7 @@ export default function Workbench() {
             required
             onChange={(e) => setPath(e.target.value)}
           />
-          <Button
-            type="submit"
-            variant="primary"
-            icon={FolderInput}
-            disabled={busy}
-          >
+          <Button type="submit" icon={FolderInput} disabled={busy}>
             <T>Register & browse</T>
           </Button>
         </form>
@@ -524,7 +519,6 @@ export default function Workbench() {
                 <T>New output</T>: <T>{plan.output}</T>
               </p>
               <Button
-                variant="primary"
                 icon={Play}
                 disabled={busy}
                 onClick={() =>

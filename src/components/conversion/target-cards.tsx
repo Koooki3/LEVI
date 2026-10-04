@@ -69,8 +69,7 @@ export function TargetCards({
               </div>
             )}
             <Button
-              className="mt-4"
-              variant={selected === target.target ? "primary" : "secondary"}
+              className="mt-4 pg-choice"
               icon={selected === target.target ? Check : undefined}
               disabled={!usable}
               aria-pressed={selected === target.target}
