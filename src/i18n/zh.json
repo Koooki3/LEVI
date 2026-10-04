@@ -2117,5 +2117,14 @@
   "The training pool is in the product LEVI": "训练池请用产品 LEVI",
   "This is the live annotation service's own workspace. Its pool would read this workspace's own index, recipes and labels, not the ones you work with, so it is not offered here: open the training pool in the product LEVI (by default http://127.0.0.1:7860/pool).": "这里是实时标注服务自己的工作区。这里的训练池只会读本工作区自己的索引、配方和标签，不是你平时使用的那一份，所以这里不提供训练池：请在产品 LEVI 中打开训练池（默认 http://127.0.0.1:7860/pool）。",
   "Live workspace": "实时工作区",
-  "The training pool already remembers 20 live workspaces and does not remember this one: episodes removed here are kept out of the pool only while this page shows it. Make room with `levi pool live-workspaces forget <path>`.": "训练池已记住 20 个实时工作区，没有再记住这一个：在这里排除的片段，只在本页面显示这个工作区期间才会被训练池排除。用 `levi pool live-workspaces forget <路径>` 腾出位置。"
+  "The training pool already remembers 20 live workspaces and does not remember this one: episodes removed here are kept out of the pool only while this page shows it. Make room with `levi pool live-workspaces forget <path>`.": "训练池已记住 20 个实时工作区，没有再记住这一个：在这里排除的片段，只在本页面显示这个工作区期间才会被训练池排除。用 `levi pool live-workspaces forget <路径>` 腾出位置。",
+  "In progress": "进行中",
+  "Dismiss notification": "关闭通知",
+  "Notifications": "通知",
+  "Move": "移动",
+  "Drag the handle, or focus it and press the up and down arrows.": "拖动手柄，或让手柄获得焦点后按上下方向键。",
+  "Theme": "外观",
+  "System": "跟随系统",
+  "Light": "浅色",
+  "Dark": "深色"
 }

@@ -2117,5 +2117,14 @@
   "The training pool is in the product LEVI": "The training pool is in the product LEVI",
   "This is the live annotation service's own workspace. Its pool would read this workspace's own index, recipes and labels, not the ones you work with, so it is not offered here: open the training pool in the product LEVI (by default http://127.0.0.1:7860/pool).": "This is the live annotation service's own workspace. Its pool would read this workspace's own index, recipes and labels, not the ones you work with, so it is not offered here: open the training pool in the product LEVI (by default http://127.0.0.1:7860/pool).",
   "Live workspace": "Live workspace",
-  "The training pool already remembers 20 live workspaces and does not remember this one: episodes removed here are kept out of the pool only while this page shows it. Make room with `levi pool live-workspaces forget <path>`.": "The training pool already remembers 20 live workspaces and does not remember this one: episodes removed here are kept out of the pool only while this page shows it. Make room with `levi pool live-workspaces forget <path>`."
+  "The training pool already remembers 20 live workspaces and does not remember this one: episodes removed here are kept out of the pool only while this page shows it. Make room with `levi pool live-workspaces forget <path>`.": "The training pool already remembers 20 live workspaces and does not remember this one: episodes removed here are kept out of the pool only while this page shows it. Make room with `levi pool live-workspaces forget <path>`.",
+  "In progress": "In progress",
+  "Dismiss notification": "Dismiss notification",
+  "Notifications": "Notifications",
+  "Move": "Move",
+  "Drag the handle, or focus it and press the up and down arrows.": "Drag the handle, or focus it and press the up and down arrows.",
+  "Theme": "Theme",
+  "System": "System",
+  "Light": "Light",
+  "Dark": "Dark"
 }
