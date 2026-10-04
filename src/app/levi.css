@@ -534,10 +534,9 @@ progress {
   line-height: 1.7;
 }
 
-/* Agent Workbench: existing graphite, parchment and lime palette. */
 /* The Agent Workbench's content. The drawer around it (a ds Sheet, see
-   shell.css) places and sizes it; the content keeps this palette until its
-   own stage. */
+   shell.css) places and sizes it; its colours point at the design tokens
+   until its own stage moves it to ds components. */
 .levi-agent-dock {
   min-height: 100%;
   padding: 22px;
@@ -762,7 +761,7 @@ progress {
   background: var(--ds-accent);
 }
 
-/* Pilot shares the graphite, parchment and lime Workbench palette. */
+/* Pilot shares the Agent Workbench styles (colours from the tokens). */
 .levi-pilot {
   margin-block: 1rem;
   padding: 1rem;
