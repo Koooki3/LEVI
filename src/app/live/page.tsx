@@ -27,6 +27,7 @@ import {
   Fr3Panel,
   SessionsPanel,
 } from "@/components/live/session-panels";
+import { disabledText } from "@/components/live/embedding";
 import { StatsPanel } from "@/components/live/stats-panel";
 import { useDatasetDetails, useLivePoll } from "@/components/live/use-live";
 import {
@@ -156,12 +157,8 @@ export default function LivePage() {
 
       {status?.enabled === false ? (
         <section className="levi-live-offline" role="status">
-          <strong>{t("This LEVI is not the live annotation workspace")}</strong>
-          <p>
-            {t(
-              "The live page shows the workspace that `levi live start` created. Open that service's own page (by default http://127.0.0.1:7880).",
-            )}
-          </p>
+          <strong>{t(disabledText(status.reason).title)}</strong>
+          <p>{t(disabledText(status.reason).body)}</p>
         </section>
       ) : (
         <>

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { blockedRunsSummary, livePulse, PULSE_NOTES } from "../live-logic";
 import {
+  PULSE_OFF_MS,
   PULSE_POLL_MS,
   PulseStore,
   pulseDelay,
@@ -214,21 +215,34 @@ function harness(answers: (LiveStatusResponse | Error)[], visible = true) {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("the status store", () => {
-  test("a workspace that is not live is asked once and never polled", async () => {
-    const h = harness([{ enabled: false }]);
+  test("a LEVI without a live service asks again only once a minute, and not while hidden", async () => {
+    const h = harness([{ enabled: false, reason: "not_configured" }]);
     const off = h.store.subscribe(() => {});
     await settle();
     expect(h.calls()).toBe(1);
     expect(h.store.getSnapshot().enabled).toBe(false);
-    expect(h.timers.length).toBe(0); // no timer, so no later request
-    h.setVisible(false);
-    h.setVisible(true); // back to the tab: still nothing to ask
-    await settle();
+    expect(h.store.getSnapshot().embedded).toBeNull();
+    expect(h.timers.map((t) => t.ms)).toEqual([PULSE_OFF_MS]);
+    h.setVisible(false); // hidden: no timer, nothing asked
     expect(h.timers.length).toBe(0);
     off();
-    h.store.subscribe(() => {})(); // a new subscriber does not ask again
+    h.store.subscribe(() => {})(); // a new subscriber while hidden asks nothing
     await settle();
     expect(h.calls()).toBe(1);
+  });
+  test("the product LEVI that found the live service is told it shows it", async () => {
+    const h = harness([
+      { enabled: false, reason: "not_configured" },
+      live({}, { embedded: true }),
+    ]);
+    h.store.subscribe(() => {});
+    await settle();
+    expect(h.store.getSnapshot().enabled).toBe(false);
+    h.timers[0].fn(); // a minute later the service has started
+    await settle();
+    expect(h.store.getSnapshot().enabled).toBe(true);
+    expect(h.store.getSnapshot().embedded).toBe(true);
+    expect(h.timers.map((t) => t.ms)).toEqual([PULSE_POLL_MS]);
   });
   test("a live workspace is refreshed every 8 s, and not while hidden", async () => {
     const h = harness([live(), live({ state: "annotating" })]);

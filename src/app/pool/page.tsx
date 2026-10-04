@@ -24,6 +24,8 @@ import {
   STOPPED,
 } from "@/components/pool/pool-progress";
 import { defaultTiming } from "@/components/pool/types";
+import { offersTrainingPool } from "@/components/live/embedding";
+import { useLivePulse } from "@/components/live/use-live-pulse";
 import type {
   EpisodeRow,
   ExportFormat,
@@ -88,7 +90,30 @@ function when(value: number | string | undefined): string {
   return isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
 
-export default function TrainingPool() {
+/** The live workspace's own LEVI (`levi live start --ui`) offers no training
+ * pool: its pool would read its own workspace's index, recipes and labels,
+ * not the product LEVI's, and two different pools confuse (docs/LIVE.md). */
+export default function TrainingPoolPage() {
+  const { t } = useLocale();
+  const { enabled, embedded } = useLivePulse();
+  if (!offersTrainingPool(enabled, embedded)) {
+    return (
+      <main className="levi-workbench">
+        <section className="levi-live-offline" role="status">
+          <strong>{t("The training pool is in the product LEVI")}</strong>
+          <p>
+            {t(
+              "This is the live annotation service's own workspace. Its pool would read this workspace's own index, recipes and labels, not the ones you work with, so it is not offered here: open the training pool in the product LEVI (by default http://127.0.0.1:7860/pool).",
+            )}
+          </p>
+        </section>
+      </main>
+    );
+  }
+  return <TrainingPool />;
+}
+
+function TrainingPool() {
   const { t } = useLocale();
   const [status, setStatus] = useState<PoolStatus | null>(null);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);

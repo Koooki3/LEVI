@@ -5,6 +5,7 @@ import { pulseStore, type PulseState } from "./live-pulse-store";
 
 const SERVER: PulseState = {
   enabled: null,
+  embedded: null,
   status: null,
   failures: 0,
   at: null,
@@ -16,13 +17,19 @@ const subscribe = (listener: () => void) => pulseStore().subscribe(listener);
 const snapshot = () => pulseStore().getSnapshot();
 const server = () => SERVER;
 
-/** `enabled`: true in the live annotation workspace, false in any other,
- * null while that is not known yet (nothing is shown for it either way). */
-export function useLivePulse(): { enabled: boolean | null; pulse: Pulse } {
+/** `enabled`: true when this LEVI shows a live annotation service (the live
+ * workspace's own core, or the product LEVI that found it), false when not,
+ * null while that is not known yet (nothing is shown for it either way).
+ * `embedded`: true in the product LEVI, false in the live workspace itself. */
+export function useLivePulse(): {
+  enabled: boolean | null;
+  embedded: boolean | null;
+  pulse: Pulse;
+} {
   const state = useSyncExternalStore(subscribe, snapshot, server);
   const pulse = useMemo(
     () => livePulse(state.status, state.failures, (state.at ?? 0) / 1000),
     [state],
   );
-  return { enabled: state.enabled, pulse };
+  return { enabled: state.enabled, embedded: state.embedded, pulse };
 }

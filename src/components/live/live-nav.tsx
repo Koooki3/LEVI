@@ -1,7 +1,9 @@
 "use client";
 // The live evaluation entry of the navigation and of the home page. Both
-// exist only in the live annotation workspace; anywhere else they render
-// nothing (and cost one status request per page load, see live-pulse-store).
+// appear where a live annotation service is shown: the product LEVI once it
+// finds the live workspace (levi/live/locate.py), or the live workspace's own
+// page (`levi live start --ui`). Without one they render nothing (and cost a
+// status request a minute, see live-pulse-store).
 import Link from "next/link";
 import { useLocale } from "@/components/levi-locale";
 import { PULSE_NOTES, type Pulse } from "./live-logic";
@@ -44,7 +46,7 @@ export function LiveNavLink() {
   );
 }
 
-/** A large link at the top of the home page of the live workspace. */
+/** A large link at the top of the home page while a live service is shown. */
 export function LiveBanner() {
   const { t } = useLocale();
   const { enabled, pulse } = useLivePulse();

@@ -1744,8 +1744,6 @@
   "retrying": "retrying",
   "Updated": "Updated",
   "Request failed": "Request failed",
-  "This LEVI is not the live annotation workspace": "This LEVI is not the live annotation workspace",
-  "The live page shows the workspace that `levi live start` created. Open that service's own page (by default http://127.0.0.1:7880).": "The live page shows the workspace that `levi live start` created. Open that service's own page (by default http://127.0.0.1:7880).",
   "How long labelling takes after an episode ends, what the model costs, and how often the GPU gate got in the way. Measured by the service for every episode it labels.": "How long labelling takes after an episode ends, what the model costs, and how often the GPU gate got in the way. Measured by the service for every episode it labels.",
   "Could not read the statistics": "Could not read the statistics",
   "All datasets": "All datasets",
@@ -2106,5 +2104,16 @@
   "no placement time segment": "no placement time segment",
   "the last placement is undecided": "the last placement is undecided",
   "placement not checked: no time segments": "placement not checked: no time segments",
-  "no gripper close frames recorded: a new grasp cannot be checked": "no gripper close frames recorded: a new grasp cannot be checked"
+  "no gripper close frames recorded: a new grasp cannot be checked": "no gripper close frames recorded: a new grasp cannot be checked",
+  "The live annotation service is set up wrongly": "The live annotation service is set up wrongly",
+  "What names the live workspace (LEVI_LIVE_WORKSPACE or the service's status file) names a product LEVI's own workspace. The live service needs a workspace of its own: start it with `levi live start --workspace <folder>`.": "What names the live workspace (LEVI_LIVE_WORKSPACE or the service's status file) names a product LEVI's own workspace. The live service needs a workspace of its own: start it with `levi live start --workspace <folder>`.",
+  "The live annotation workspace was not found": "The live annotation workspace was not found",
+  "The folder named as the live workspace (LEVI_LIVE_WORKSPACE or the service's status file) does not exist or is not a live workspace. Start the service with `levi live start`; this page finds it by itself.": "The folder named as the live workspace (LEVI_LIVE_WORKSPACE or the service's status file) does not exist or is not a live workspace. Start the service with `levi live start`; this page finds it by itself.",
+  "The live annotation service is not set up": "The live annotation service is not set up",
+  "Nothing here has run `levi live start` yet. Once the service has started, this page shows its evaluations and labelling; it keeps its own workspace, and nothing of it is written into this LEVI's workspace.": "Nothing here has run `levi live start` yet. Once the service has started, this page shows its evaluations and labelling; it keeps its own workspace, and nothing of it is written into this LEVI's workspace.",
+  "The episodes' viewer and their review are on the live workspace's own page: start the service with `levi live start --ui` to open them.": "The episodes' viewer and their review are on the live workspace's own page: start the service with `levi live start --ui` to open them.",
+  "That is the live workspace's own page (Conversion & review below), not this LEVI.": "That is the live workspace's own page (Conversion & review below), not this LEVI.",
+  "That is the live workspace's own page, not this LEVI: start the service with `levi live start --ui` to open it, or with --auto-approve to let it approve its own plans.": "That is the live workspace's own page, not this LEVI: start the service with `levi live start --ui` to open it, or with --auto-approve to let it approve its own plans.",
+  "The training pool is in the product LEVI": "The training pool is in the product LEVI",
+  "This is the live annotation service's own workspace. Its pool would read this workspace's own index, recipes and labels, not the ones you work with, so it is not offered here: open the training pool in the product LEVI (by default http://127.0.0.1:7860/pool).": "This is the live annotation service's own workspace. Its pool would read this workspace's own index, recipes and labels, not the ones you work with, so it is not offered here: open the training pool in the product LEVI (by default http://127.0.0.1:7860/pool)."
 }

@@ -10,6 +10,7 @@ import {
   verdictTally,
   type ReviewFilter,
 } from "./live-logic";
+import { datasetLinks, type LiveLink } from "./embedding";
 import { EpisodeList } from "./episode-list";
 import { Chip, type Tone } from "./session-panels";
 import type { DatasetDetail, DatasetRow } from "./types";
@@ -140,6 +141,34 @@ function ReviewRuns({
   );
 }
 
+/** A link here, or to the live workspace's own page in a new tab. */
+function LinkTo({
+  link,
+  className,
+  children,
+}: {
+  link: LiveLink;
+  className: string;
+  children: React.ReactNode;
+}) {
+  if (link.external)
+    return (
+      <a
+        className={className}
+        href={link.href}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        {children}
+      </a>
+    );
+  return (
+    <Link className={className} href={link.href}>
+      {children}
+    </Link>
+  );
+}
+
 export function DatasetCard({
   name,
   row,
@@ -168,6 +197,7 @@ export function DatasetCard({
 }) {
   const { t } = useLocale();
   const detail = entry?.data ?? undefined;
+  const links = datasetLinks(detail);
   const [stateLabel, stateTone] = STATE_LABELS[row.state ?? ""] ?? [
     row.state ?? "",
     "",
@@ -287,6 +317,12 @@ export function DatasetCard({
             : t(
                 "The service made a plan and waits for you to approve it in the LEVI page (Agent Workbench); it does nothing on this dataset until you do.",
               )}
+          {detail?.embedded &&
+            ` ${t(
+              detail.live_ui
+                ? "That is the live workspace's own page (Conversion & review below), not this LEVI."
+                : "That is the live workspace's own page, not this LEVI: start the service with `levi live start --ui` to open it, or with --auto-approve to let it approve its own plans.",
+            )}`}
         </p>
       )}
       {error && (
@@ -308,20 +344,26 @@ export function DatasetCard({
           : t("never")}
       </p>
       <div className="levi-row levi-live-actions">
-        {detail?.repo_id ? (
-          <Link className="levi-secondary" href={`/${detail.repo_id}`}>
+        {links.viewer ? (
+          <LinkTo className="levi-secondary" link={links.viewer}>
             {t("Open in the viewer")}
-          </Link>
+          </LinkTo>
         ) : (
           <span className="levi-pool-muted">
-            {detail
-              ? t("Not registered in LEVI yet: no viewer link.")
-              : t("Loading…")}
+            {!detail
+              ? t("Loading…")
+              : detail.embedded
+                ? t(
+                    "The episodes' viewer and their review are on the live workspace's own page: start the service with `levi live start --ui` to open them.",
+                  )
+                : t("Not registered in LEVI yet: no viewer link.")}
           </span>
         )}
-        <Link className="levi-pool-link" href="/workbench">
-          {t("Conversion & review")}
-        </Link>
+        {links.review && (
+          <LinkTo className="levi-pool-link" link={links.review}>
+            {t("Conversion & review")}
+          </LinkTo>
+        )}
         <button
           type="button"
           className="levi-pool-link"

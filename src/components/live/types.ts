@@ -160,8 +160,20 @@ export interface ServiceStatus {
   };
 }
 
+/** Why there is nothing to show (no path is ever given): nothing names a
+ * live workspace, what is named is not one, or it is a product workspace. */
+export type LiveDisabledReason =
+  | "not_configured"
+  | "not_live"
+  | "product_workspace";
+
 export interface LiveStatusResponse {
   enabled: boolean;
+  reason?: LiveDisabledReason;
+  /** Shown by the product LEVI, not by the live workspace's own LEVI. */
+  embedded?: boolean;
+  /** The live workspace's own page when the service runs one (`--ui`). */
+  live_ui?: string | null;
   alive?: boolean;
   age_s?: number | null;
   service?: ServiceStatus | null;
@@ -231,7 +243,10 @@ export interface DemoRow {
 export interface DatasetDetail {
   enabled: boolean;
   name: string;
+  /** The dataset's id in the live workspace's catalog (its viewer is there). */
   repo_id?: string | null;
+  embedded?: boolean;
+  live_ui?: string | null;
   group?: string | null;
   task_folder?: string | null;
   task_text?: string | null;

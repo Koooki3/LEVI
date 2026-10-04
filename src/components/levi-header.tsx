@@ -1,8 +1,13 @@
 "use client";
 import Link from "next/link";
 import { LanguageSwitch, T } from "./levi-locale";
+import { offersTrainingPool } from "./live/embedding";
 import { LiveNavLink } from "./live/live-nav";
+import { useLivePulse } from "./live/use-live-pulse";
 export default function LeviHeader() {
+  // The live workspace's own LEVI (`levi live start --ui`) offers no training
+  // pool: the pool is the product LEVI's (docs/LIVE.md).
+  const { enabled, embedded } = useLivePulse();
   return (
     <T>
       {
@@ -19,9 +24,11 @@ export default function LeviHeader() {
             <Link href="/workbench">
               <T>Conversion & review</T>
             </Link>
-            <Link href="/pool">
-              <T>Training pool</T>
-            </Link>
+            {offersTrainingPool(enabled, embedded) && (
+              <Link href="/pool">
+                <T>Training pool</T>
+              </Link>
+            )}
             <Link href="/guide">
               <T>Guide</T>
             </Link>

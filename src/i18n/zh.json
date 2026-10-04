@@ -1744,8 +1744,6 @@
   "retrying": "正在重试",
   "Updated": "更新于",
   "Request failed": "请求失败",
-  "This LEVI is not the live annotation workspace": "当前 LEVI 不是实时标注工作区",
-  "The live page shows the workspace that `levi live start` created. Open that service's own page (by default http://127.0.0.1:7880).": "实时页面显示的是 `levi live start` 创建的工作区。请打开该服务自己的页面（默认 http://127.0.0.1:7880）。",
   "How long labelling takes after an episode ends, what the model costs, and how often the GPU gate got in the way. Measured by the service for every episode it labels.": "片段结束后多久标完、模型花了多少、GPU 门控挡了多少次。由服务对它标注的每个片段实测。",
   "Could not read the statistics": "读不到统计数据",
   "All datasets": "全部数据集",
@@ -2106,5 +2104,16 @@
   "no placement time segment": "没有放置时间片段",
   "the last placement is undecided": "最后一个放置时间片段未定",
   "placement not checked: no time segments": "没有时间片段，未核对放置",
-  "no gripper close frames recorded: a new grasp cannot be checked": "没有夹爪闭合帧的记录，无法核对是否重新抓起"
+  "no gripper close frames recorded: a new grasp cannot be checked": "没有夹爪闭合帧的记录，无法核对是否重新抓起",
+  "The live annotation service is set up wrongly": "实时标注服务的设置有误",
+  "What names the live workspace (LEVI_LIVE_WORKSPACE or the service's status file) names a product LEVI's own workspace. The live service needs a workspace of its own: start it with `levi live start --workspace <folder>`.": "指定实时工作区的地方（LEVI_LIVE_WORKSPACE 或服务的状态文件）指向了产品 LEVI 自己的工作区。实时服务需要独立的工作区：用 `levi live start --workspace <目录>` 启动。",
+  "The live annotation workspace was not found": "找不到实时标注工作区",
+  "The folder named as the live workspace (LEVI_LIVE_WORKSPACE or the service's status file) does not exist or is not a live workspace. Start the service with `levi live start`; this page finds it by itself.": "被指定为实时工作区的目录（来自 LEVI_LIVE_WORKSPACE 或服务的状态文件）不存在，或不是实时工作区。用 `levi live start` 启动服务后，本页会自动找到它。",
+  "The live annotation service is not set up": "实时标注服务未配置或尚未运行",
+  "Nothing here has run `levi live start` yet. Once the service has started, this page shows its evaluations and labelling; it keeps its own workspace, and nothing of it is written into this LEVI's workspace.": "这台机器上还没有运行过 `levi live start`。服务启动后，本页会显示它的评测和标注；服务使用自己的工作区，不会往当前 LEVI 的工作区写任何东西。",
+  "The episodes' viewer and their review are on the live workspace's own page: start the service with `levi live start --ui` to open them.": "这些片段的查看器和审核在实时工作区自己的页面上：用 `levi live start --ui` 启动服务后可以打开。",
+  "That is the live workspace's own page (Conversion & review below), not this LEVI.": "这里指的是实时工作区自己的页面（下方的“转换与审核”），不是当前 LEVI。",
+  "That is the live workspace's own page, not this LEVI: start the service with `levi live start --ui` to open it, or with --auto-approve to let it approve its own plans.": "这里指的是实时工作区自己的页面，不是当前 LEVI：用 `levi live start --ui` 启动服务即可打开；或者用 --auto-approve 让服务自己批准计划。",
+  "The training pool is in the product LEVI": "训练池请用产品 LEVI",
+  "This is the live annotation service's own workspace. Its pool would read this workspace's own index, recipes and labels, not the ones you work with, so it is not offered here: open the training pool in the product LEVI (by default http://127.0.0.1:7860/pool).": "这里是实时标注服务自己的工作区。这里的训练池只会读本工作区自己的索引、配方和标签，不是你平时使用的那一份，所以这里不提供训练池：请在产品 LEVI 中打开训练池（默认 http://127.0.0.1:7860/pool）。"
 }

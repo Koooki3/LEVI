@@ -1,20 +1,27 @@
 // What the navigation needs to know about the live service, and nothing more.
 //
-//   * The first request asks `/api/levi/live/status` whether this LEVI is the
-//     live annotation workspace at all (`enabled`). In any other workspace
-//     (the one a person works in every day) that is the only request this
-//     module ever makes: no timer, no polling.
-//   * In a live workspace it refreshes the same lightweight status every
-//     8 s, not while the tab is hidden, with a growing wait after failures.
+//   * The first request asks `/api/levi/live/status` whether this LEVI shows a
+//     live annotation service at all (`enabled`): the live workspace's own
+//     core, or the product LEVI once it finds the live workspace
+//     (levi/live/locate.py). Without one it asks again once a minute (a
+//     service started later appears without a reload), never while the tab
+//     is hidden.
+//   * With one it refreshes the same lightweight status every 8 s, not while
+//     the tab is hidden, with a growing wait after failures.
 //   * One store per page load, shared by the header and the home banner.
 import type { LiveStatusResponse } from "./types";
 
 export const PULSE_POLL_MS = 8000;
 export const PULSE_MAX_MS = 30000;
+/** How often a LEVI without a live service asks whether one appeared. */
+export const PULSE_OFF_MS = 60000;
 
 export interface PulseState {
   /** null until the first answer (or while the core does not answer). */
   enabled: boolean | null;
+  /** true when this LEVI is not the live workspace itself but shows it (the
+   * product LEVI); null until known. */
+  embedded: boolean | null;
   status: LiveStatusResponse | null;
   /** Failed requests in a row. */
   failures: number;
@@ -39,6 +46,7 @@ export function pulseDelay(failures: number): number {
 export class PulseStore {
   private state: PulseState = {
     enabled: null,
+    embedded: null,
     status: null,
     failures: 0,
     at: null,
@@ -63,8 +71,7 @@ export class PulseStore {
 
   /** The tab was hidden or shown (the page wires `visibilitychange` to it). */
   visibilityChanged() {
-    // Not the live workspace: nothing to ask, not even on coming back to the tab.
-    if (!this.running || this.state.enabled === false) return;
+    if (!this.running) return;
     this.clear();
     if (this.deps.visible()) void this.tick();
     else this.controller?.abort();
@@ -82,8 +89,11 @@ export class PulseStore {
 
   private start() {
     this.running = true;
-    // A live workspace is known for good once answered; any other too.
-    if (this.state.enabled === false) return;
+    // Already answered "no live service" less than a minute ago: wait.
+    if (this.state.enabled === false) {
+      this.schedule();
+      return;
+    }
     if (this.deps.visible()) void this.tick();
   }
 
@@ -95,12 +105,12 @@ export class PulseStore {
 
   private schedule() {
     this.clear();
-    // Not live: nothing more to ask, ever (until the page is reloaded).
-    if (!this.running || this.state.enabled === false) return;
-    if (!this.deps.visible()) return;
+    if (!this.running || !this.deps.visible()) return;
     this.timer = this.deps.setTimer(
       () => void this.tick(),
-      pulseDelay(this.state.failures),
+      this.state.enabled === false
+        ? PULSE_OFF_MS
+        : pulseDelay(this.state.failures),
     );
   }
 
@@ -113,6 +123,7 @@ export class PulseStore {
       if (!this.running || signal.aborted) return;
       this.set({
         enabled: status.enabled === true,
+        embedded: status.enabled === true ? status.embedded === true : null,
         status: status.enabled === true ? status : null,
         failures: 0,
         at: this.deps.now(),
