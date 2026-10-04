@@ -39,6 +39,7 @@ listed for a person to decide, never resolved silently.
 import fcntl
 import hashlib
 import json
+import os
 import re
 import time
 from collections import Counter, defaultdict
@@ -275,7 +276,9 @@ def import_file(path, version: str) -> dict:
             "proposals": len(items),
             "sha256": _sha256(files["proposals"]),
         }
-        files["manifest"].write_text(json.dumps(manifest, ensure_ascii=False, indent=1))
+        temp = files["manifest"].with_name(files["manifest"].name + ".tmp")
+        temp.write_text(json.dumps(manifest, ensure_ascii=False, indent=1))
+        temp.replace(files["manifest"])
     return manifest
 
 
@@ -308,15 +311,41 @@ def manifest(version: str) -> dict:
         return {}
 
 
-def _reviews(version: str) -> list[dict]:
+def _reviews(version: str) -> tuple[list[dict], bool]:
+    """The decisions, and whether the last line was cut short (a write that
+    did not finish: skipped, and reported as ``reviews_truncated``). A
+    damaged line before the last one raises: that is not an unfinished
+    append, and guessing past it could change a decision."""
     path = _paths(version)["reviews"]
     if not path.is_file():
-        return []
-    return [
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+        return [], False
+    text = path.read_text(encoding="utf-8")
+    lines = text.split("\n")
+    # A complete file ends with a newline, so the last piece is empty.
+    tail = lines.pop()
+    rows = []
+    for n, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            raise ValueError(
+                f"{path.name}: line {n} is damaged; the decisions after it "
+                "cannot be trusted (restore the file)"
+            ) from None
+    truncated = bool(tail.strip())
+    if truncated:
+        try:  # a last line without its newline may still be whole
+            rows.append(json.loads(tail))
+            truncated = False
+        except ValueError:
+            pass
+    return rows, truncated
+
+
+def reviews_truncated(version: str) -> bool:
+    return _reviews(version)[1]
 
 
 def checked_sha256(version: str) -> str:
@@ -355,7 +384,7 @@ def entries(version: str) -> list[dict]:
     sha = manifest(version).get("sha256")
     by_id = {r["id"]: r for r in rows}
     latest: dict[str, dict] = {}
-    for row in _reviews(version):
+    for row in _reviews(version)[0]:
         proposal = by_id.get(row.get("id"))
         if proposal is not None and _binds(row, proposal, sha):
             latest[row["id"]] = row
@@ -407,24 +436,40 @@ def review(version: str, decision: Review, *, principal: str) -> dict:
         wanted = [i for i in wanted if i not in skip]
         stamp = _now()
         path = _paths(version)["reviews"]
-        with path.open("a", encoding="utf-8") as handle:
-            for item in wanted:
-                handle.write(
-                    json.dumps(
-                        {
-                            "id": item,
-                            "decision": decision.decision,
-                            "reviewer": decision.reviewer,
-                            "principal": principal,
-                            "sha256": sha,
-                            "task_to": task_to[item],
-                            "at": stamp,
-                            "note": decision.note,
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
+        lines = "".join(
+            json.dumps(
+                {
+                    "id": item,
+                    "decision": decision.decision,
+                    "reviewer": decision.reviewer,
+                    "principal": principal,
+                    "sha256": sha,
+                    "task_to": task_to[item],
+                    "at": stamp,
+                    "note": decision.note,
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+            for item in wanted
+        )
+        if _reviews(version)[1]:
+            # An earlier append was cut short (never a whole decision): drop
+            # the fragment, so the new lines are not glued onto it.
+            data = path.read_bytes()
+            with path.open("r+b") as handle:
+                handle.truncate(data.rfind(b"\n") + 1)
+        # One write and an fsync: a decision is either all on disk or, cut
+        # short, an unfinished last line that the reader skips.
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            data = lines.encode("utf-8")
+            written = os.write(fd, data)
+            if written != len(data):
+                raise OSError(f"short write to {path.name}")
+            os.fsync(fd)
+        finally:
+            os.close(fd)
     return {
         "version": version,
         "decision": decision.decision,
@@ -522,6 +567,7 @@ def show(version: str, status: str | None = None, batch: str | None = None) -> d
     return {
         "version": version,
         "sha256": manifest(version).get("sha256"),
+        "reviews_truncated": reviews_truncated(version),
         "manifest": manifest(version),
         "counts": dict(Counter(r["status"] for r in rows)),
         "match": dict(Counter(r.get("match", "not_scanned") for r in rows)),
@@ -538,6 +584,7 @@ def listing() -> list[dict]:
             "version": version,
             "imported_at": manifest(version).get("imported_at"),
             "sha256": manifest(version).get("sha256"),
+            "reviews_truncated": reviews_truncated(version),
             "proposals": len(rows),
             "status": dict(Counter(r["status"] for r in rows)),
             "batches": sorted({r.get("review_batch") or "" for r in rows} - {""}),

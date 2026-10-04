@@ -623,3 +623,44 @@ def test_an_export_stops_when_the_proposals_change_after_planning(pool, person):
     with pytest.raises(ValueError, match="changed after its import"):
         export.run(job)
     assert not (pool["out"] / "exports/edited").exists()
+
+
+# ------------------------------------------------------------------ durability
+
+
+def test_an_unfinished_last_review_line_is_skipped_and_reported(pool, person):
+    _import(pool)
+    assert _review(person, ids=["a"]).status_code == 200
+    reviews = corrections._paths(VERSION)["reviews"]
+    whole = reviews.read_text()
+    # A write cut short: half a line, no newline.
+    reviews.write_text(whole + '{"id": "b", "decision": "appr')
+    shown = corrections.show(VERSION)
+    assert shown["reviews_truncated"] is True
+    assert shown["counts"] == {"approved": 1, "proposed": 1}
+    assert corrections.listing()[0]["reviews_truncated"] is True
+    # The next decision drops the fragment instead of gluing onto it.
+    assert _review(person, ids=["b"]).status_code == 200
+    shown = corrections.show(VERSION)
+    assert shown["counts"] == {"approved": 2} and not shown["reviews_truncated"]
+    # A damaged line in the middle is not an unfinished append: it raises.
+    lines = reviews.read_text().splitlines()
+    reviews.write_text("\n".join([lines[0][:10], *lines[1:]]) + "\n")
+    with pytest.raises(ValueError, match="damaged"):
+        corrections.show(VERSION)
+
+
+def test_a_review_is_one_write_and_synced(pool, person, monkeypatch):
+    _import(pool)
+    writes, syncs = [], []
+    real_write, real_fsync = corrections.os.write, corrections.os.fsync
+    monkeypatch.setattr(
+        corrections.os, "write", lambda fd, b: writes.append(b) or real_write(fd, b)
+    )
+    monkeypatch.setattr(
+        corrections.os, "fsync", lambda fd: syncs.append(fd) or real_fsync(fd)
+    )
+    assert _review(person, all=True).status_code == 200
+    assert len(writes) == 1 and writes[0].count(b"\n") == 2 and len(syncs) == 1
+    # The manifest is written whole, through a temporary file.
+    assert not list(corrections.folder().glob("*.tmp"))
