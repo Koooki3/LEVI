@@ -1,5 +1,10 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import {
+  MEDIA_LABEL_PLATE,
+  MEDIA_LABEL_TEXT,
+  mediaColor,
+} from "@/components/viewer/data-palette";
 import { useAgentMaskPreview } from "./agent-mask-preview";
 import { T, useLocale } from "@/components/levi-locale";
 
@@ -177,10 +182,12 @@ function drawBbox(
   if (label) {
     ctx.font = "12px ui-sans-serif, system-ui";
     const m = ctx.measureText(label);
-    ctx.fillStyle = "#0b0e14";
-    ctx.fillRect(px1, py1 - 16, m.width + 8, 16);
+    ctx.fillStyle = MEDIA_LABEL_PLATE;
+    ctx.fillRect(px1, py1 - 16, m.width + 11, 16);
     ctx.fillStyle = color;
-    ctx.fillText(label, px1 + 4, py1 - 4);
+    ctx.fillRect(px1, py1 - 16, 3, 16);
+    ctx.fillStyle = MEDIA_LABEL_TEXT;
+    ctx.fillText(label, px1 + 7, py1 - 4);
   }
 }
 
@@ -205,10 +212,12 @@ function drawPoint(
   if (label) {
     ctx.font = "12px ui-sans-serif, system-ui";
     const m = ctx.measureText(label);
-    ctx.fillStyle = "#0b0e14";
-    ctx.fillRect(px + 8, py - 18, m.width + 8, 16);
+    ctx.fillStyle = MEDIA_LABEL_PLATE;
+    ctx.fillRect(px + 8, py - 18, m.width + 11, 16);
     ctx.fillStyle = color;
-    ctx.fillText(label, px + 12, py - 6);
+    ctx.fillRect(px + 8, py - 18, 3, 16);
+    ctx.fillStyle = MEDIA_LABEL_TEXT;
+    ctx.fillText(label, px + 15, py - 6);
   }
 }
 
@@ -229,17 +238,8 @@ function vqaMatchesCamera(answer: VqaAnswer, cameraKey: string): boolean {
   return false; // other VQA kinds aren't drawn
 }
 
-const OBJECT_COLORS = [
-  "#22d3ee",
-  "#a78bfa",
-  "#34d399",
-  "#fbbf24",
-  "#fb7185",
-  "#60a5fa",
-];
-
 function objectColor(trackId: number): string {
-  return OBJECT_COLORS[Math.abs(trackId) % OBJECT_COLORS.length];
+  return mediaColor(Math.abs(trackId));
 }
 
 function drawObjectMask(
@@ -338,10 +338,12 @@ function drawObjectBbox(
   ctx.font = "12px ui-sans-serif, system-ui";
   const metrics = ctx.measureText(label);
   const labelTop = Math.max(0, py1 - 18);
-  ctx.fillStyle = "#0b0e14e6";
-  ctx.fillRect(px1, labelTop, metrics.width + 8, 18);
+  ctx.fillStyle = MEDIA_LABEL_PLATE;
+  ctx.fillRect(px1, labelTop, metrics.width + 11, 18);
   ctx.fillStyle = color;
-  ctx.fillText(label, px1 + 4, labelTop + 13);
+  ctx.fillRect(px1, labelTop, 3, 18);
+  ctx.fillStyle = MEDIA_LABEL_TEXT;
+  ctx.fillText(label, px1 + 7, labelTop + 13);
   ctx.restore();
 }
 
@@ -570,12 +572,12 @@ export const VideoOverlayCanvas: React.FC<Props> = ({
             d.bbox,
             d.bbox_format || "xyxy",
             d.label || "",
-            "#22d3ee",
+            mediaColor(2),
           );
         }
       } else if (kind === "keypoint") {
         const k = ans as { point: [number, number]; label?: string };
-        drawPoint(ctx, rect, k.point, k.label || "", "#facc15");
+        drawPoint(ctx, rect, k.point, k.label || "", mediaColor(3));
       }
     }
 
@@ -591,7 +593,7 @@ export const VideoOverlayCanvas: React.FC<Props> = ({
           pendingDraw.bbox,
           "xyxy",
           pendingDraw.label || "",
-          "#f97316",
+          mediaColor(1),
         );
       } else {
         drawPoint(
@@ -599,7 +601,7 @@ export const VideoOverlayCanvas: React.FC<Props> = ({
           rect,
           pendingDraw.point,
           pendingDraw.label || "",
-          "#f97316",
+          mediaColor(1),
         );
       }
     }
@@ -865,7 +867,10 @@ export const VideoOverlayCanvas: React.FC<Props> = ({
                 top: 4,
                 left: 4,
                 zIndex: 5,
-                background: "#15221a",
+                background: "var(--ds-surface-2)",
+                color: "var(--ds-text-primary)",
+                borderRadius: "var(--ds-radius-xs)",
+                fontSize: "var(--ds-text-caption-size)",
                 padding: 4,
               }}
             >

@@ -1,6 +1,14 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import {
+  MEDIA_BACKGROUND,
+  MEDIA_GRID,
+  MEDIA_GRID_SECTION,
+  mediaColor,
+} from "@/components/viewer/data-palette";
 import { T } from "@/components/levi-locale";
+import { ChevronRight, LoaderCircle } from "lucide-react";
+import { Icon } from "@/components/ds";
 
 import React, {
   useState,
@@ -189,7 +197,10 @@ const SINGLE_ARM_TIP_NAMES = [
 const DUAL_ARM_TIP_NAMES = ["openarm_left_hand_tcp", "openarm_right_hand_tcp"];
 const G1_TIP_NAMES = ["left_hand_palm_link", "right_hand_palm_link"];
 const TRAIL_DURATION = 1.0;
-const TRAIL_COLORS = [new THREE.Color("#ff6600"), new THREE.Color("#00aaff")];
+const TRAIL_COLORS = [
+  new THREE.Color(mediaColor(1)),
+  new THREE.Color(mediaColor(0)),
+];
 const MAX_TRAIL_POINTS = 300;
 
 // ─── Robot scene (imperative, inside Canvas) ───
@@ -634,7 +645,7 @@ function RobotScene({
       <T>
         {
           <Html center>
-            <span className="text-red-400">
+            <span className="text-(--ds-danger)">
               <T>Failed to load URDF</T>
             </span>
           </Html>
@@ -928,7 +939,7 @@ export default function URDFViewer({
     return (
       <T>
         {
-          <div className="text-slate-400 p-8 text-center">
+          <div className="text-(--ds-text-secondary) p-8 text-center">
             <T>No trajectory data available.</T>
           </div>
         }
@@ -941,10 +952,15 @@ export default function URDFViewer({
       {
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* 3D Viewport */}
-          <div className="flex-1 min-h-0 bg-[var(--surface-0)] rounded-lg overflow-hidden border border-white/10 relative">
+          <div className="flex-1 min-h-0 bg-(--ds-media-bg) rounded-lg overflow-hidden border border-(--ds-separator) relative">
             {(episodeLoading || urdfLoading) && (
-              <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--bg)]/80">
-                <span className="text-white text-lg animate-pulse">
+              <div
+                className="absolute inset-0 z-10 flex items-center justify-center bg-(--ds-media-bg)"
+                data-theme="dark"
+                role="status"
+              >
+                <span className="inline-flex items-center gap-2 text-(--ds-text-primary)">
+                  <Icon icon={LoaderCircle} className="ds-spin" />
                   <T>
                     {urdfLoading
                       ? "Loading 3D model…"
@@ -970,7 +986,7 @@ export default function URDFViewer({
                 toneMappingExposure: 0.9,
               }}
             >
-              <color attach="background" args={["#1a2433"]} />
+              <color attach="background" args={[MEDIA_BACKGROUND]} />
               {/* IBL: PMREM studio env gives mesh highlights somewhere to bounce */}
               <Environment preset="studio" background={false} />
               {/* 3-point studio rig — key is the only shadow caster */}
@@ -1021,10 +1037,10 @@ export default function URDFViewer({
                 args={[10, 10]}
                 cellSize={isG1 ? 0.5 : 0.2}
                 cellThickness={0.5}
-                cellColor="#334155"
+                cellColor={MEDIA_GRID}
                 sectionSize={isG1 ? 2 : 1}
                 sectionThickness={1}
-                sectionColor="#475569"
+                sectionColor={MEDIA_GRID_SECTION}
                 fadeDistance={isG1 ? 20 : 10}
                 position={[0, 0, 0]}
               />
@@ -1043,7 +1059,7 @@ export default function URDFViewer({
           </div>
 
           {/* Controls */}
-          <div className="bg-[var(--surface-1)]/90 border-t border-white/10 p-3 space-y-3 shrink-0">
+          <div className="bg-(--ds-surface-1) border-t border-(--ds-separator) p-3 space-y-3 shrink-0">
             <UrdfPlaybackBar
               frame={frame}
               totalFrames={totalFrames}
@@ -1059,15 +1075,15 @@ export default function URDFViewer({
             {/* Collapsible joint mapping */}
             <button
               onClick={() => setShowMapping((v) => !v)}
-              className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+              className="flex items-center gap-1.5 text-xs text-(--ds-text-secondary) hover:text-(--ds-text-primary) transition-colors"
             >
               <span
-                className={`transition-transform ${showMapping ? "rotate-90" : ""}`}
+                className={`inline-flex transition-transform ${showMapping ? "rotate-90" : ""}`}
               >
-                ▶
+                <Icon icon={ChevronRight} />
               </span>
               <T>Joint Mapping</T>
-              <span className="text-slate-600">
+              <span className="text-(--ds-text-tertiary)">
                 (<T>{Object.keys(mapping).filter((k) => mapping[k]).length}</T>/
                 <T>{displayJointNames.length}</T>
                 <T> mapped)</T>
@@ -1077,7 +1093,7 @@ export default function URDFViewer({
             {showMapping && (
               <div className="flex gap-4 items-start">
                 <div className="space-y-1 shrink-0">
-                  <label className="text-xs text-slate-400">
+                  <label className="text-xs text-(--ds-text-secondary)">
                     <T>Data source</T>
                   </label>
                   <div className="flex gap-1 flex-wrap">
@@ -1087,8 +1103,8 @@ export default function URDFViewer({
                         onClick={() => setSelectedGroup(name)}
                         className={`px-2 py-1 text-xs rounded transition-colors ${
                           selectedGroup === name
-                            ? "bg-cyan-500 text-white"
-                            : "bg-white/5 text-slate-300 hover:bg-white/5"
+                            ? "bg-(--ds-accent) text-(--ds-on-accent)"
+                            : "bg-(--ds-surface-sunken) text-(--ds-text-secondary) hover:bg-(--ds-surface-sunken)"
                         }`}
                       >
                         <T>{name}</T>
@@ -1099,8 +1115,8 @@ export default function URDFViewer({
 
                 <div className="flex-1 overflow-x-auto max-h-48 overflow-y-auto">
                   <table className="w-full text-xs">
-                    <thead className="sticky top-0 bg-[var(--surface-1)]">
-                      <tr className="text-slate-500">
+                    <thead className="sticky top-0 bg-(--ds-surface-1)">
+                      <tr className="text-(--ds-text-tertiary)">
                         <th className="text-left font-normal px-1">
                           <T>URDF Joint</T>
                         </th>
@@ -1117,12 +1133,12 @@ export default function URDFViewer({
                       {displayJointNames.map((jointName) => (
                         <tr
                           key={jointName}
-                          className="border-t border-white/10/50"
+                          className="border-t border-(--ds-separator)"
                         >
-                          <td className="px-1 py-0.5 text-slate-300 font-mono">
+                          <td className="px-1 py-0.5 text-(--ds-text-secondary) font-mono">
                             <T>{jointName}</T>
                           </td>
-                          <td className="px-1 text-slate-600">→</td>
+                          <td className="px-1 text-(--ds-text-tertiary)">→</td>
                           <td className="px-1 py-0.5">
                             <select
                               value={mapping[jointName] ?? ""}
@@ -1132,7 +1148,7 @@ export default function URDFViewer({
                                   [jointName]: e.target.value,
                                 }))
                               }
-                              className="bg-[var(--surface-0)] text-slate-200 text-xs rounded px-1 py-0.5 border border-white/10 w-full max-w-[200px]"
+                              className="bg-(--ds-surface-sunken) text-(--ds-text-primary) text-xs rounded px-1 py-0.5 border border-(--ds-separator) w-full max-w-[200px]"
                             >
                               <option value="">
                                 <T>-- unmapped --</T>
@@ -1148,7 +1164,7 @@ export default function URDFViewer({
                               })}
                             </select>
                           </td>
-                          <td className="px-1 py-0.5 text-right tabular-nums text-slate-400 font-mono">
+                          <td className="px-1 py-0.5 text-right tabular-nums text-(--ds-text-secondary) font-mono">
                             <T>
                               {jointValues[jointName] !== undefined
                                 ? jointValues[jointName].toFixed(3)

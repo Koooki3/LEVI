@@ -1,5 +1,6 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import { seriesColor } from "@/components/viewer/data-palette";
 import { T } from "@/components/levi-locale";
 
 import React, {
@@ -29,21 +30,6 @@ type DataGraphProps = {
 };
 
 const SERIES_NAME_DELIMITER = " | ";
-
-const CHART_COLORS = [
-  "#f97316",
-  "#3b82f6",
-  "#22c55e",
-  "#ef4444",
-  "#a855f7",
-  "#eab308",
-  "#06b6d4",
-  "#ec4899",
-  "#14b8a6",
-  "#f59e0b",
-  "#6366f1",
-  "#84cc16",
-];
 
 function mergeGroups(data: ChartRow[][]): ChartRow[] {
   if (data.length <= 1) return data[0] ?? [];
@@ -93,8 +79,8 @@ export const DataRecharts = React.memo(
                   onClick={() => setExpanded((v) => !v)}
                   className={`text-xs px-2.5 py-1 rounded transition-colors flex items-center gap-1.5 ${
                     expanded
-                      ? "bg-cyan-400/15 text-cyan-300 border border-cyan-400/40"
-                      : "bg-[var(--surface-1)]/60 text-slate-400 hover:text-slate-200 border border-white/10/50"
+                      ? "bg-(--ds-surface-selected) text-(--ds-text-primary) border border-(--ds-accent)"
+                      : "bg-(--ds-surface-1) text-(--ds-text-secondary) hover:text-(--ds-text-primary) border border-(--ds-separator)"
                   }`}
                 >
                   <svg
@@ -253,7 +239,7 @@ const SingleDataGraph = React.memo(
       const allGroups = [...Object.keys(grouped), ...singleList];
       const colorMap: Record<string, string> = {};
       allGroups.forEach((group, idx) => {
-        colorMap[group] = CHART_COLORS[idx % CHART_COLORS.length];
+        colorMap[group] = seriesColor(idx);
       });
       return { groups: grouped, singles: singleList, groupColorMap: colorMap };
     }, [dataKeys]);
@@ -333,7 +319,7 @@ const SingleDataGraph = React.memo(
                         className="size-3"
                         style={{ accentColor: color }}
                       />
-                      <span className="text-xs font-semibold text-slate-200">
+                      <span className="text-xs font-semibold text-(--ds-text-primary)">
                         <T>{group}</T>
                       </span>
                     </label>
@@ -354,12 +340,12 @@ const SingleDataGraph = React.memo(
                               style={{ accentColor: color }}
                             />
                             <span
-                              className={`text-xs ${visibleKeys.includes(key) ? "text-slate-300" : "text-slate-500"}`}
+                              className={`text-xs ${visibleKeys.includes(key) ? "text-(--ds-text-secondary)" : "text-(--ds-text-tertiary)"}`}
                             >
                               <T>{label}</T>
                             </span>
                             <span
-                              className={`text-xs font-mono tabular-nums ml-1 ${visibleKeys.includes(key) ? "text-cyan-200/80" : "text-slate-600"}`}
+                              className={`text-xs font-mono tabular-nums ml-1 ${visibleKeys.includes(key) ? "text-(--ds-text-primary)" : "text-(--ds-text-tertiary)"}`}
                             >
                               <T>
                                 {typeof currentData[key] === "number"
@@ -389,12 +375,12 @@ const SingleDataGraph = React.memo(
                       style={{ accentColor: color }}
                     />
                     <span
-                      className={`text-xs ${visibleKeys.includes(key) ? "text-slate-200" : "text-slate-500"}`}
+                      className={`text-xs ${visibleKeys.includes(key) ? "text-(--ds-text-primary)" : "text-(--ds-text-tertiary)"}`}
                     >
                       <T>{key}</T>
                     </span>
                     <span
-                      className={`text-xs font-mono tabular-nums ml-1 ${visibleKeys.includes(key) ? "text-cyan-200/80" : "text-slate-600"}`}
+                      className={`text-xs font-mono tabular-nums ml-1 ${visibleKeys.includes(key) ? "text-(--ds-text-primary)" : "text-(--ds-text-tertiary)"}`}
                     >
                       <T>
                         {typeof currentData[key] === "number"
@@ -427,10 +413,10 @@ const SingleDataGraph = React.memo(
     return (
       <T>
         {
-          <div className="w-full bg-[var(--surface-1)]/40 rounded-lg border border-white/10/50 p-3">
+          <div className="vw-chart vw-panel w-full p-3">
             {chartTitle && (
               <p
-                className="text-xs font-medium text-slate-300 mb-1 px-1 truncate"
+                className="text-xs font-medium text-(--ds-text-secondary) mb-1 px-1 truncate"
                 title={chartTitle}
               >
                 <T>{chartTitle}</T>
@@ -456,8 +442,7 @@ const SingleDataGraph = React.memo(
                 >
                   <CartesianGrid
                     strokeDasharray="3 3"
-                    stroke="#334155"
-                    strokeOpacity={0.6}
+                    stroke="var(--ds-separator)"
                   />
                   <XAxis
                     dataKey="timestamp"
@@ -466,15 +451,15 @@ const SingleDataGraph = React.memo(
                       chartData.at(-1)?.timestamp ?? 0,
                     ]}
                     tickFormatter={(v: number) => `${v.toFixed(1)}s`}
-                    stroke="#64748b"
-                    tick={{ fontSize: 12, fill: "#94a3b8" }}
+                    stroke="var(--ds-separator-strong)"
+                    tick={{ fontSize: 12, fill: "var(--ds-text-secondary)" }}
                     minTickGap={30}
                     allowDataOverflow={true}
                   />
                   <YAxis
                     domain={["auto", "auto"]}
-                    stroke="#64748b"
-                    tick={{ fontSize: 12, fill: "#94a3b8" }}
+                    stroke="var(--ds-separator-strong)"
+                    tick={{ fontSize: 12, fill: "var(--ds-text-secondary)" }}
                     width={55}
                     allowDataOverflow={true}
                     tickFormatter={(v: number) => {
@@ -498,9 +483,8 @@ const SingleDataGraph = React.memo(
 
                   <ReferenceLine
                     x={currentTime}
-                    stroke="#f97316"
+                    stroke="var(--ds-text-primary)"
                     strokeWidth={1.5}
-                    strokeOpacity={0.7}
                   />
 
                   {dataKeys.map((key) => {

@@ -1,6 +1,37 @@
 "use client";
 import { useState } from "react";
 import { T, useLocale } from "./levi-locale";
+import {
+  ArrowUpRight,
+  Braces,
+  Download,
+  Flag,
+  ListChecks,
+  Stethoscope,
+} from "lucide-react";
+import {
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  EmptyState,
+  Field,
+  Icon,
+  Input,
+  type Tone,
+} from "@/components/ds";
+import "@/components/viewer/viewer.css";
+
+const STATUS_TONE: Record<string, Tone> = {
+  pass: "success",
+  warn: "warning",
+  fail: "danger",
+};
+const STATUS_WORD: Record<string, string> = {
+  pass: "Pass",
+  warn: "Warn",
+  fail: "Fail",
+};
 import { leviApi, downloadJson, exportName } from "./levi-api";
 import { useFlaggedEpisodes } from "@/context/flagged-episodes-context";
 import { RawCaptureNotice } from "@/components/raw-capture-notice";
@@ -65,45 +96,40 @@ export default function LeviDoctor({ repoId }: { repoId: string }) {
       setBusy(false);
     }
   }
+  const statusBadge = (status: string) => (
+    <Badge tone={STATUS_TONE[status] ?? "neutral"}>
+      {t(STATUS_WORD[status] ?? status)}
+    </Badge>
+  );
   return (
-    <section className="levi-diagnostic">
-      <span className="levi-eyebrow">
-        <T>LEVI / DATASET DOCTOR</T>
-      </span>
-      <h2>
-        <T>Dataset quality diagnostics</T>
-      </h2>
-      <p className="mt-3 text-sm text-slate-400">
-        <T>
-          Version-aware local checks for timestamps, actions, videos and
-          metadata. Reports identify review candidates; thresholds are
-          configurable heuristics.
-        </T>
-      </p>
-      <div className="mt-4">
-        <RawCaptureNotice feature="doctor" />
-      </div>
-      <div className="levi-box">
-        <div className="levi-row">
-          <code className="grow text-xs">{repoId}</code>
-          <label className="text-xs">
-            <T>Max episodes (0 = all)</T>{" "}
-            <input
-              aria-label={t("Max episodes (0 = all)")}
-              className="levi-input w-24"
-              type="number"
-              min="0"
-              max="10000"
-              value={max}
-              onChange={(e) => setMax(Number(e.target.value))}
-            />
-          </label>
-        </div>
-        <div className="levi-checks">
-          {CHECKS.map((c) => (
-            <label key={c}>
-              <input
-                type="checkbox"
+    <section className="flex flex-col gap-4">
+      <RawCaptureNotice feature="doctor" />
+      <Card
+        title={t("Dataset quality diagnostics")}
+        description={t(
+          "Version-aware local checks for timestamps, actions, videos and metadata. Reports identify review candidates; thresholds are configurable heuristics.",
+        )}
+      >
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-end gap-4">
+            <code className="vw-code grow">{repoId}</code>
+            <Field label={t("Max episodes (0 = all)")}>
+              <Input
+                className="w-28"
+                type="number"
+                min="0"
+                max="10000"
+                value={max}
+                onChange={(e) => setMax(Number(e.target.value))}
+              />
+            </Field>
+          </div>
+          <fieldset className="vw-checks">
+            <legend className="vw-label">{t("Checks")}</legend>
+            {CHECKS.map((c) => (
+              <Checkbox
+                key={c}
+                label={t("check." + c)}
                 checked={checks.includes(c)}
                 onChange={(e) =>
                   setChecks((prev) =>
@@ -113,75 +139,84 @@ export default function LeviDoctor({ repoId }: { repoId: string }) {
                   )
                 }
               />
-              {t("check." + c)}
-            </label>
-          ))}
-        </div>
-        <label className="text-xs flex gap-2 mb-4">
-          <input
-            type="checkbox"
+            ))}
+          </fieldset>
+          <Checkbox
+            label={t("Decode video samples (downloads remote videos)")}
+            description={t(
+              "Remote analysis downloads parquet shards. The episode limit applies to analysis, not download size.",
+            )}
             checked={decode}
             onChange={(e) => setDecode(e.target.checked)}
           />
-          <T>Decode video samples (downloads remote videos)</T>
-        </label>
-        <p className="text-xs text-slate-400 mb-4">
-          <T>
-            Remote analysis downloads parquet shards. The episode limit applies
-            to analysis, not download size.
-          </T>
-        </p>
-        <button
-          className="levi-primary"
-          onClick={run}
-          disabled={busy || !checks.length}
-        >
-          <T>{busy ? "Running diagnostics…" : "Run diagnostics"}</T>
-        </button>
-        {!repoId.startsWith("local/") && (
-          <a
-            className="ml-5 text-xs underline text-slate-400"
-            target="_blank"
-            rel="noreferrer"
-            href={`https://jashshah999-lerobot-doctor.hf.space/?dataset=${repoId}`}
-          >
-            <T>Open upstream lerobot-doctor</T> ↗
-          </a>
-        )}
-      </div>
+          <div className="flex flex-wrap items-center gap-4">
+            <Button
+              variant="primary"
+              icon={Stethoscope}
+              loading={busy}
+              onClick={run}
+              disabled={!checks.length}
+            >
+              {t(busy ? "Running diagnostics…" : "Run diagnostics")}
+            </Button>
+            {!repoId.startsWith("local/") && (
+              <a
+                className="vw-link inline-flex items-center gap-1 text-sm"
+                target="_blank"
+                rel="noreferrer"
+                href={`https://jashshah999-lerobot-doctor.hf.space/?dataset=${repoId}`}
+              >
+                {t("Open upstream lerobot-doctor")}
+                <Icon icon={ArrowUpRight} />
+              </a>
+            )}
+          </div>
+        </div>
+      </Card>
       {error && (
-        <p role="alert" className="levi-error">
-          {error}
-        </p>
+        <div className="vw-note vw-note--danger" role="alert">
+          <strong>{t("Diagnostics could not run")}</strong>
+          <p>{error}</p>
+        </div>
+      )}
+      {!report && !error && !busy && (
+        <EmptyState
+          icon={ListChecks}
+          title={t("No diagnostics yet")}
+          description={t(
+            "Choose the checks above and run them; findings can be flagged for review.",
+          )}
+        />
       )}
       {report && (
         <>
-          <div className="levi-row">
-            <span className={`levi-status ${report.status}`}>
-              {report.status.toUpperCase()}
-            </span>
-            <span className="text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            {statusBadge(report.status)}
+            <span className="vw-muted text-sm">
               <T>Scope</T>: <T>{report.scope}</T>
             </span>
-            <button className="levi-secondary" onClick={() => setRaw(!raw)}>
+            <span className="grow" />
+            <Button size="sm" icon={Braces} onClick={() => setRaw(!raw)}>
               {raw ? t("Report") : "JSON"}
-            </button>
-            <button
-              className="levi-secondary"
+            </Button>
+            <Button
+              size="sm"
+              icon={Download}
               onClick={() =>
                 downloadJson(report, exportName(repoId, "quality"))
               }
             >
-              <T>Export report</T>
-            </button>
-            <button
-              className="levi-secondary"
+              {t("Export report")}
+            </Button>
+            <Button
+              size="sm"
+              icon={Flag}
               onClick={() => addMany(report.flagged_episodes)}
             >
-              <T>Flag findings for review</T> ({report.flagged_episodes.length})
-            </button>
+              {t("Flag findings for review")} ({report.flagged_episodes.length})
+            </Button>
           </div>
-          <div className="levi-metrics">
+          <dl className="vw-metrics">
             {[
               ["Episodes", report.episodes],
               ["Frames", report.frames],
@@ -190,38 +225,37 @@ export default function LeviDoctor({ repoId }: { repoId: string }) {
               ["Fail", report.counts.fail],
             ].map(([k, v]) => (
               <div key={k}>
-                <span className="text-xs text-slate-400">
-                  <T>{k}</T>
-                </span>
-                <strong>{v}</strong>
+                <dt>{t(String(k))}</dt>
+                <dd>{v}</dd>
               </div>
             ))}
-          </div>
+          </dl>
           {raw ? (
-            <pre className="levi-code">{JSON.stringify(report, null, 2)}</pre>
+            <pre className="vw-pre">{JSON.stringify(report, null, 2)}</pre>
           ) : (
             CHECKS.filter((c) => report.results.some((r) => r.check === c)).map(
               (c) => (
-                <div className="levi-box" key={c}>
-                  <h3 className="mb-4">{t("check." + c)}</h3>
-                  {report.results
-                    .filter((r) => r.check === c)
-                    .map((r, i) => (
-                      <div className="levi-row text-xs mb-3" key={i}>
-                        <span className={`levi-status ${r.status}`}>
-                          {r.status.toUpperCase()}
-                        </span>
-                        {r.episode !== null && <strong>EP {r.episode}</strong>}
-                        <T>{r.message}</T>
-                      </div>
-                    ))}
-                </div>
+                <Card key={c} title={t("check." + c)} padding="compact">
+                  <ul className="vw-findings">
+                    {report.results
+                      .filter((r) => r.check === c)
+                      .map((r, i) => (
+                        <li key={i}>
+                          {statusBadge(r.status)}
+                          {r.episode !== null && (
+                            <strong className="tabular">
+                              {t(`Episode ${r.episode}`)}
+                            </strong>
+                          )}
+                          <span>{t(r.message)}</span>
+                        </li>
+                      ))}
+                  </ul>
+                </Card>
               ),
             )
           )}
-          <p className="text-xs text-slate-400">
-            <T>{report.method}</T>
-          </p>
+          <p className="vw-faint text-xs m-0">{t(report.method)}</p>
         </>
       )}
     </section>

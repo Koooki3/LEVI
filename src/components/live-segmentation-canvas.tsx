@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  MEDIA_LABEL_PLATE,
+  MEDIA_LABEL_TEXT,
+  mediaColor,
+} from "@/components/viewer/data-palette";
 import React, { useEffect, useRef } from "react";
 import type { LiveResult } from "@/types/segmentation.types";
 import {
@@ -12,21 +17,8 @@ import {
   subscribeLive,
 } from "@/utils/liveSegmentation";
 
-const TRACK_COLORS = [
-  "#22d3ee",
-  "#a78bfa",
-  "#34d399",
-  "#fbbf24",
-  "#fb7185",
-  "#60a5fa",
-  "#f472b6",
-  "#a3e635",
-  "#fb923c",
-  "#2dd4bf",
-];
-
 export function trackColor(trackId: number): string {
-  return TRACK_COLORS[Math.abs(trackId) % TRACK_COLORS.length];
+  return mediaColor(Math.abs(trackId));
 }
 
 function rgb(hex: string): [number, number, number] {
@@ -148,10 +140,12 @@ function draw(
     const label = `${object.concept} #${object.track_id}`;
     const labelW = ctx.measureText(label).width + 8;
     const top = Math.max(0, py - 16);
-    ctx.fillStyle = "#0b0e14d9";
-    ctx.fillRect(px, top, labelW, 16);
+    ctx.fillStyle = MEDIA_LABEL_PLATE;
+    ctx.fillRect(px, top, labelW + 3, 16);
     ctx.fillStyle = color;
-    ctx.fillText(label, px + 4, top + 12);
+    ctx.fillRect(px, top, 3, 16);
+    ctx.fillStyle = MEDIA_LABEL_TEXT;
+    ctx.fillText(label, px + 7, top + 12);
   }
 }
 

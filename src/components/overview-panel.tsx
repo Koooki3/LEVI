@@ -1,6 +1,9 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
-import { T } from "@/components/levi-locale";
+import { Icon } from "@/components/ds";
+import { LoaderCircle } from "lucide-react";
+import { T, useLocale } from "@/components/levi-locale";
+import { SegmentedControl } from "@/components/ds";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import type {
@@ -66,7 +69,7 @@ function FrameThumbnail({
     <T>
       {
         <div ref={containerRef} className="flex flex-col items-center">
-          <div className="w-full aspect-video bg-[var(--surface-1)] rounded overflow-hidden relative group">
+          <div className="w-full aspect-video bg-(--ds-surface-1) rounded overflow-hidden relative group">
             <T>
               {inView ? (
                 <video
@@ -77,15 +80,18 @@ function FrameThumbnail({
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <div className="w-full h-full animate-pulse bg-white/5" />
+                <div
+                  className="w-full h-full bg-(--ds-skeleton)"
+                  aria-hidden="true"
+                />
               )}
             </T>
             <button
               onClick={() => toggle(info.episodeIndex)}
               className={`absolute top-1 right-1 p-1 rounded transition-opacity ${
                 isFlagged
-                  ? "opacity-100 text-cyan-300"
-                  : "opacity-0 group-hover:opacity-100 text-slate-400 hover:text-cyan-300"
+                  ? "opacity-100 text-(--ds-text-primary)"
+                  : "opacity-0 group-hover:opacity-100 text-(--ds-text-secondary) hover:text-(--ds-text-primary)"
               }`}
               title={isFlagged ? "Unflag episode" : "Flag episode"}
             >
@@ -106,7 +112,7 @@ function FrameThumbnail({
             </button>
           </div>
           <p
-            className={`text-xs mt-1 tabular-nums ${isFlagged ? "text-cyan-300" : "text-slate-400"}`}
+            className={`text-xs mt-1 tabular-nums ${isFlagged ? "text-(--ds-text-primary)" : "text-(--ds-text-secondary)"}`}
           >
             <T>ep </T>
             <T>{info.episodeIndex}</T>
@@ -131,6 +137,7 @@ export default function OverviewPanel({
   flaggedOnly = false,
   onFlaggedOnlyChange,
 }: OverviewPanelProps) {
+  const { t } = useLocale();
   const { flagged, count: flagCount } = useFlaggedEpisodes();
   const [selectedCamera, setSelectedCamera] = useState<string>("");
   const [showLast, setShowLast] = useState(false);
@@ -155,26 +162,8 @@ export default function OverviewPanel({
     return (
       <T>
         {
-          <div className="flex items-center gap-2 text-slate-400 text-sm py-12 justify-center">
-            <svg
-              className="animate-spin h-4 w-4"
-              viewBox="0 0 24 24"
-              fill="none"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-              />
-            </svg>
+          <div className="flex items-center gap-2 text-(--ds-text-secondary) text-sm py-12 justify-center">
+            <Icon icon={LoaderCircle} className="ds-spin" />
             <T>Loading episode frames…</T>
           </div>
         }
@@ -192,7 +181,7 @@ export default function OverviewPanel({
       <T>
         {
           <div className="text-center py-8 space-y-2">
-            <p className="text-slate-500 italic">
+            <p className="text-(--ds-text-tertiary) italic">
               <T>
                 {flaggedOnly
                   ? "No flagged episodes to show."
@@ -202,7 +191,7 @@ export default function OverviewPanel({
             {flaggedOnly && onFlaggedOnlyChange && (
               <button
                 onClick={() => onFlaggedOnlyChange(false)}
-                className="text-xs text-cyan-300 hover:text-cyan-200 underline"
+                className="text-xs text-(--ds-text-primary) hover:text-(--ds-text-primary) underline"
               >
                 <T>Show all episodes</T>
               </button>
@@ -220,7 +209,7 @@ export default function OverviewPanel({
     <T>
       {
         <div className="max-w-7xl mx-auto py-6 space-y-5">
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-(--ds-text-tertiary)">
             <T>
               Use first/last frame views to spot episodes with bad end states or
               other anomalies. Hover over a thumbnail and click the flag icon to
@@ -236,7 +225,7 @@ export default function OverviewPanel({
                 <select
                   value={selectedCamera}
                   onChange={handleCameraChange}
-                  className="bg-[var(--surface-1)] text-slate-200 text-sm rounded px-3 py-1.5 border border-white/10 focus:outline-none focus:border-cyan-400"
+                  className="bg-(--ds-surface-1) text-(--ds-text-primary) text-sm rounded px-3 py-1.5 border border-(--ds-separator) focus:outline-none focus:border-(--ds-accent)"
                 >
                   {data.cameras.map((cam) => (
                     <option key={cam} value={cam}>
@@ -255,8 +244,8 @@ export default function OverviewPanel({
                   }}
                   className={`text-xs px-2.5 py-1 rounded transition-colors flex items-center gap-1.5 ${
                     flaggedOnly
-                      ? "bg-cyan-400/15 text-cyan-300 border border-cyan-400/40"
-                      : "text-slate-400 hover:text-slate-200 border border-white/10"
+                      ? "bg-(--ds-surface-selected) text-(--ds-text-primary) border border-(--ds-accent)"
+                      : "text-(--ds-text-secondary) hover:text-(--ds-text-primary) border border-(--ds-separator)"
                   }`}
                 >
                   <svg
@@ -278,37 +267,26 @@ export default function OverviewPanel({
                 </button>
               )}
 
-              {/* First / Last toggle */}
-              <div className="flex items-center gap-3">
-                <span
-                  className={`text-sm ${!showLast ? "text-slate-100 font-medium" : "text-slate-500"}`}
-                >
-                  <T>First Frame</T>
-                </span>
-                <button
-                  onClick={() => setShowLast((v) => !v)}
-                  className={`relative inline-flex items-center w-9 h-5 rounded-full transition-colors shrink-0 ${showLast ? "bg-cyan-500" : "bg-white/10"}`}
-                  aria-label="Toggle first/last frame"
-                >
-                  <span
-                    className={`inline-block w-3.5 h-3.5 bg-white rounded-full transition-transform ${showLast ? "translate-x-[18px]" : "translate-x-[3px]"}`}
-                  />
-                </button>
-                <span
-                  className={`text-sm ${showLast ? "text-slate-100 font-medium" : "text-slate-500"}`}
-                >
-                  <T>Last Frame</T>
-                </span>
-              </div>
+              {/* First / Last frame */}
+              <SegmentedControl
+                label={t("Frame shown")}
+                size="sm"
+                value={showLast ? "last" : "first"}
+                onChange={(value) => setShowLast(value === "last")}
+                options={[
+                  { value: "first", label: t("First Frame") },
+                  { value: "last", label: t("Last Frame") },
+                ]}
+              />
             </div>
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className="flex items-center gap-2 text-sm text-slate-300">
+              <div className="flex items-center gap-2 text-sm text-(--ds-text-secondary)">
                 <button
                   disabled={page === 0}
                   onClick={() => setPage((p) => p - 1)}
-                  className="px-2 py-1 rounded bg-[var(--surface-1)] hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="px-2 py-1 rounded bg-(--ds-surface-1) hover:bg-(--ds-surface-sunken) disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   <T>← Prev</T>
                 </button>
@@ -318,7 +296,7 @@ export default function OverviewPanel({
                 <button
                   disabled={page === totalPages - 1}
                   onClick={() => setPage((p) => p + 1)}
-                  className="px-2 py-1 rounded bg-[var(--surface-1)] hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="px-2 py-1 rounded bg-(--ds-surface-1) hover:bg-(--ds-surface-sunken) disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   <T>Next →</T>
                 </button>

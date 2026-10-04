@@ -1,6 +1,8 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
-import { T } from "@/components/levi-locale";
+import { Flag, LoaderCircle } from "lucide-react";
+import { Icon, IconButton } from "@/components/ds";
+import { T, useLocale } from "@/components/levi-locale";
 
 import React, { useState, useMemo, useCallback } from "react";
 import { useFlaggedEpisodes } from "@/context/flagged-episodes-context";
@@ -19,32 +21,17 @@ import {
 
 function FlagBtn({ id }: { id: number }) {
   const { has, toggle } = useFlaggedEpisodes();
+  const { t } = useLocale();
   const flagged = has(id);
   return (
-    <T>
-      {
-        <button
-          onClick={() => toggle(id)}
-          title={flagged ? "Unflag episode" : "Flag for review"}
-          className={`p-0.5 rounded transition-colors ${flagged ? "text-cyan-300" : "text-slate-600 hover:text-slate-400"}`}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill={flagged ? "currentColor" : "none"}
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
-            <line x1="4" y1="22" x2="4" y2="15" />
-          </svg>
-        </button>
-      }
-    </T>
+    <IconButton
+      icon={Flag}
+      size="sm"
+      className="vw-flag-btn"
+      pressed={flagged}
+      label={t(flagged ? "Unflag episode" : "Flag for review")}
+      onClick={() => toggle(id)}
+    />
   );
 }
 
@@ -55,7 +42,7 @@ function FlagAllBtn({ ids, label }: { ids: number[]; label?: string }) {
       {
         <button
           onClick={() => addMany(ids)}
-          className="text-xs text-slate-500 hover:text-cyan-300 transition-colors flex items-center gap-1"
+          className="text-xs text-(--ds-text-tertiary) hover:text-(--ds-text-primary) transition-colors flex items-center gap-1"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -87,14 +74,14 @@ function LowMovementSection({ episodes }: { episodes: LowMovementEpisode[] }) {
   return (
     <T>
       {
-        <div className="bg-[var(--surface-1)]/60 rounded-lg p-5 border border-white/10 space-y-3">
+        <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator) space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-200">
+            <h3 className="text-sm font-semibold text-(--ds-text-primary)">
               <T>Lowest-Movement Episodes</T>
             </h3>
             <FlagAllBtn ids={episodes.map((e) => e.episodeIndex)} />
           </div>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-(--ds-text-secondary)">
             <T>
               Episodes with the lowest average action change per frame. Very low
               values may indicate the robot was standing still or the episode
@@ -110,30 +97,30 @@ function LowMovementSection({ episodes }: { episodes: LowMovementEpisode[] }) {
             {episodes.map((ep) => (
               <div
                 key={ep.episodeIndex}
-                className="bg-[var(--surface-0)]/50 rounded-md px-3 py-2 flex items-center gap-3"
+                className="bg-(--ds-surface-sunken) rounded-md px-3 py-2 flex items-center gap-3"
               >
                 <FlagBtn id={ep.episodeIndex} />
-                <span className="text-xs text-slate-300 font-medium shrink-0">
+                <span className="text-xs text-(--ds-text-secondary) font-medium shrink-0">
                   <T>ep </T>
                   <T>{ep.episodeIndex}</T>
                 </span>
                 <div className="flex-1 min-w-0">
-                  <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                  <div className="h-1.5 bg-(--ds-surface-sunken) rounded-full overflow-hidden">
                     <div
                       className="h-full rounded-full"
                       style={{
                         width: `${Math.max(2, (ep.totalMovement / maxMovement) * 100)}%`,
                         background:
                           ep.totalMovement / maxMovement < 0.15
-                            ? "#ef4444"
+                            ? "var(--ds-danger)"
                             : ep.totalMovement / maxMovement < 0.4
-                              ? "#eab308"
-                              : "#22c55e",
+                              ? "var(--ds-warning)"
+                              : "var(--ds-success)",
                       }}
                     />
                   </div>
                 </div>
-                <span className="text-xs text-slate-500 tabular-nums shrink-0">
+                <span className="text-xs text-(--ds-text-tertiary) tabular-nums shrink-0">
                   {ep.totalMovement.toFixed(2)}
                 </span>
               </div>
@@ -178,20 +165,20 @@ function EpisodeLengthFilter({ episodes }: { episodes: EpisodeLengthInfo[] }) {
   return (
     <T>
       {
-        <div className="bg-[var(--surface-1)]/60 rounded-lg p-5 border border-white/10 space-y-4">
-          <h3 className="text-sm font-semibold text-slate-200">
+        <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator) space-y-4">
+          <h3 className="text-sm font-semibold text-(--ds-text-primary)">
             <T>Episode Length Filter</T>
           </h3>
 
           <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs text-slate-400">
+            <div className="flex items-center justify-between text-xs text-(--ds-text-secondary)">
               <span className="tabular-nums">{rangeMin.toFixed(1)}s</span>
               <span className="tabular-nums">{rangeMax.toFixed(1)}s</span>
             </div>
             <div className="relative h-5">
-              <div className="absolute top-1/2 -translate-y-1/2 left-0 right-0 h-1 rounded bg-white/5" />
+              <div className="absolute top-1/2 -translate-y-1/2 left-0 right-0 h-1 rounded bg-(--ds-surface-sunken)" />
               <div
-                className="absolute top-1/2 -translate-y-1/2 h-1 rounded bg-cyan-500"
+                className="absolute top-1/2 -translate-y-1/2 h-1 rounded bg-(--ds-accent)"
                 style={{
                   left: `${((rangeMin - globalMin) / (globalMax - globalMin || 1)) * 100}%`,
                   right: `${100 - ((rangeMax - globalMin) / (globalMax - globalMin || 1)) * 100}%`,
@@ -206,7 +193,7 @@ function EpisodeLengthFilter({ episodes }: { episodes: EpisodeLengthInfo[] }) {
                 onChange={(e) =>
                   setRangeMin(Math.min(Number(e.target.value), rangeMax))
                 }
-                className="absolute inset-0 w-full appearance-none bg-transparent pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-cyan-400 [&::-webkit-slider-thumb]:cursor-pointer [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-cyan-400 [&::-moz-range-thumb]:cursor-pointer"
+                className="absolute inset-0 w-full appearance-none bg-transparent pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-(--ds-surface-1) [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-(--ds-accent) [&::-webkit-slider-thumb]:cursor-pointer [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-(--ds-surface-1) [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-(--ds-accent) [&::-moz-range-thumb]:cursor-pointer"
               />
               <input
                 type="range"
@@ -217,14 +204,14 @@ function EpisodeLengthFilter({ episodes }: { episodes: EpisodeLengthInfo[] }) {
                 onChange={(e) =>
                   setRangeMax(Math.max(Number(e.target.value), rangeMin))
                 }
-                className="absolute inset-0 w-full appearance-none bg-transparent pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-cyan-400 [&::-webkit-slider-thumb]:cursor-pointer [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-cyan-400 [&::-moz-range-thumb]:cursor-pointer"
+                className="absolute inset-0 w-full appearance-none bg-transparent pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-(--ds-surface-1) [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-(--ds-accent) [&::-webkit-slider-thumb]:cursor-pointer [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-(--ds-surface-1) [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-(--ds-accent) [&::-moz-range-thumb]:cursor-pointer"
               />
             </div>
           </div>
 
           {rangeChanged && (
             <div className="flex items-center justify-between">
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-(--ds-text-secondary)">
                 <T>{outsideIds.length}</T>
                 <T> episode</T>
                 <T>{outsideIds.length !== 1 ? "s" : ""}</T>
@@ -234,7 +221,7 @@ function EpisodeLengthFilter({ episodes }: { episodes: EpisodeLengthInfo[] }) {
               {outsideIds.length > 0 && (
                 <button
                   onClick={() => addMany(outsideIds)}
-                  className="text-xs bg-cyan-400/15 text-cyan-300 border border-cyan-400/40 rounded px-2 py-1 hover:bg-cyan-400/20 transition-colors"
+                  className="text-xs bg-(--ds-surface-selected) text-(--ds-text-primary) border border-(--ds-accent) rounded px-2 py-1 hover:bg-(--ds-surface-selected) transition-colors"
                 >
                   <T>Flag </T>
                   <T>{outsideIds.length}</T>
@@ -284,18 +271,18 @@ function FlaggedIdsCopyBar({
   return (
     <T>
       {
-        <div className="bg-[var(--surface-1)]/60 rounded-lg p-4 border border-cyan-400/30 space-y-3">
+        <div className="bg-(--ds-surface-1) rounded-lg p-4 border border-(--ds-border-control) space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-cyan-300">
+            <h3 className="text-sm font-semibold text-(--ds-text-primary)">
               <T>Flagged Episodes</T>
-              <span className="text-xs text-slate-500 ml-2 font-normal">
+              <span className="text-xs text-(--ds-text-tertiary) ml-2 font-normal">
                 (<T>{count}</T>)
               </span>
             </h3>
             <div className="flex items-center gap-2">
               <button
                 onClick={handleCopy}
-                className="text-xs text-slate-400 hover:text-slate-200 transition-colors flex items-center gap-1"
+                className="text-xs text-(--ds-text-secondary) hover:text-(--ds-text-primary) transition-colors flex items-center gap-1"
                 title="Copy IDs"
               >
                 <T>
@@ -308,7 +295,7 @@ function FlaggedIdsCopyBar({
                       fill="none"
                       stroke="currentColor"
                       strokeWidth="2"
-                      className="text-green-400"
+                      className="text-(--ds-success)"
                     >
                       <polyline points="20 6 9 17 4 12" />
                     </svg>
@@ -331,19 +318,19 @@ function FlaggedIdsCopyBar({
               </button>
               <button
                 onClick={clear}
-                className="text-xs text-slate-500 hover:text-red-400 transition-colors"
+                className="text-xs text-(--ds-text-tertiary) hover:text-(--ds-danger) transition-colors"
               >
                 <T>Clear</T>
               </button>
             </div>
           </div>
-          <p className="text-xs text-slate-300 tabular-nums leading-relaxed max-h-20 overflow-y-auto">
+          <p className="text-xs text-(--ds-text-secondary) tabular-nums leading-relaxed max-h-20 overflow-y-auto">
             <T>{idStr}</T>
           </p>
           {onViewEpisodes && (
             <button
               onClick={onViewEpisodes}
-              className="w-full text-xs py-1.5 rounded bg-white/5/80 hover:bg-white/5 text-slate-300 hover:text-white transition-colors flex items-center justify-center gap-1.5"
+              className="w-full text-xs py-1.5 rounded bg-(--ds-surface-2) hover:bg-(--ds-surface-sunken) text-(--ds-text-secondary) hover:text-(--ds-text-primary) transition-colors flex items-center justify-center gap-1.5"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -362,23 +349,23 @@ function FlaggedIdsCopyBar({
               <T>View flagged episodes</T>
             </button>
           )}
-          <div className="bg-[var(--surface-0)]/60 rounded-md px-3 py-2 border border-white/10/60 space-y-2.5">
-            <p className="text-xs text-slate-400">
+          <div className="bg-(--ds-surface-sunken) rounded-md px-3 py-2 border border-(--ds-separator) space-y-2.5">
+            <p className="text-xs text-(--ds-text-secondary)">
               <a
                 href="https://github.com/huggingface/lerobot"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-cyan-300 underline"
+                className="text-(--ds-text-primary) underline"
               >
                 <T>LeRobot CLI</T>
               </a>
               <T> </T>
               <T>— delete flagged episodes:</T>
             </p>
-            <pre className="text-xs text-slate-300 bg-[var(--bg)]/50 rounded px-2 py-1.5 overflow-x-auto select-all">
+            <pre className="text-xs text-(--ds-text-secondary) bg-(--ds-bg) rounded px-2 py-1.5 overflow-x-auto select-all">
               <T>{`# Delete episodes (modifies original dataset)\nlerobot-edit-dataset \\\n    --repo_id ${repoId} \\\n    --operation.type delete_episodes \\\n    --operation.episode_indices "[${ids.join(", ")}]"`}</T>
             </pre>
-            <pre className="text-xs text-slate-300 bg-[var(--bg)]/50 rounded px-2 py-1.5 overflow-x-auto select-all">
+            <pre className="text-xs text-(--ds-text-secondary) bg-(--ds-bg) rounded px-2 py-1.5 overflow-x-auto select-all">
               <T>{`# Delete episodes and save to a new dataset (preserves original)\nlerobot-edit-dataset \\\n    --repo_id ${repoId} \\\n    --new_repo_id ${repoId}_filtered \\\n    --operation.type delete_episodes \\\n    --operation.episode_indices "[${ids.join(", ")}]"`}</T>
             </pre>
           </div>
@@ -401,10 +388,10 @@ function FilteringPanel({
       {
         <div className="max-w-5xl mx-auto py-6 space-y-8">
           <div>
-            <h2 className="text-xl font-bold text-slate-100">
+            <h2 className="text-xl font-semibold text-(--ds-text-primary)">
               <T>Filtering</T>
             </h2>
-            <p className="text-sm text-slate-400 mt-1">
+            <p className="text-sm text-(--ds-text-secondary) mt-1">
               <T>
                 Identify and flag problematic episodes for removal. Flagged
                 episodes appear in the sidebar and can be exported as a CLI
@@ -425,27 +412,9 @@ function FilteringPanel({
           )}
 
           {crossEpisodeLoading && (
-            <div className="bg-[var(--surface-1)]/60 rounded-lg p-5 border border-white/10">
-              <div className="flex items-center gap-2 text-slate-400 text-sm py-4 justify-center">
-                <svg
-                  className="animate-spin h-4 w-4"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                  />
-                </svg>
+            <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator)">
+              <div className="flex items-center gap-2 text-(--ds-text-secondary) text-sm py-4 justify-center">
+                <Icon icon={LoaderCircle} className="ds-spin" />
                 <T>Loading cross-episode data…</T>
               </div>
             </div>
