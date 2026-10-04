@@ -207,7 +207,7 @@ export default function OverviewPanel({
 
           {/* Controls row */}
           <div className="flex items-center justify-between flex-wrap gap-4">
-            <div className="flex items-center gap-5">
+            <div className="flex flex-wrap items-center gap-3">
               {/* Camera selector */}
               {data.cameras.length > 1 && (
                 <select
@@ -244,6 +244,7 @@ export default function OverviewPanel({
               <SegmentedControl
                 label={t("Frame shown")}
                 size="sm"
+                className="vw-nowrap"
                 value={showLast ? "last" : "first"}
                 onChange={(value) => setShowLast(value === "last")}
                 options={[
