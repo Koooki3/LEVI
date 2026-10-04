@@ -56,4 +56,15 @@ describe("global styles", () => {
     }
     expect(hits).toEqual([]);
   });
+
+  test("the report has no looping animation", () => {
+    expect(code("app/report/report.css")).not.toMatch(/\binfinite\b/);
+  });
+
+  test("Tailwind slate-500 is secondary text, not tertiary", () => {
+    // Older pages put it on sunken and raised surfaces, where tertiary text
+    // falls under 4.5:1 (proposal §4.3).
+    const line = /--color-slate-500:\s*([^;]+);/.exec(code("app/globals.css"));
+    expect(line?.[1].trim()).toBe("var(--ds-text-secondary)");
+  });
 });
