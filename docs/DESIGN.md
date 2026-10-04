@@ -2,7 +2,7 @@
 
 [中文](DESIGN.zh-CN.md)
 
-LEVI's interface is being redesigned in stages: graphite accent, light and dark themes that follow the system, system fonts only, Lucide icons, Motion for drag and list reordering only. Stage 1 (this document) adds the design tokens, the theme preference and a set of base components. **No existing page uses them yet**: `globals.css`, `levi.css`, `annotations-skin.css` and `report.css` are unchanged, and the existing pages render exactly as before. Pages move over in later stages.
+LEVI's interface is being redesigned in stages: graphite accent, light and dark themes that follow the system, system fonts only, Lucide icons, Motion for drag and list reordering only. Stage 1 added the design tokens, the theme preference and a set of base components. Stage 2 (see [Global frame](#global-frame-stage-2)) moved the frame onto them: the top bar, toasts, the confirmation dialog, the command palette, the shortcut list and the Agent Workbench drawer. **The pages below the bar do not use them yet**: their content keeps `levi.css`, `annotations-skin.css` and `report.css` and stays dark in both themes. Pages move over in later stages.
 
 | What | Where |
 | --- | --- |
@@ -13,18 +13,19 @@ LEVI's interface is being redesigned in stages: graphite accent, light and dark 
 | Reduced-motion helpers, durations, breakpoints | `src/lib/design/motion.ts` |
 | Specimen switch | `src/lib/design/gate.ts`, `src/middleware.ts` |
 | Specimen page (development only) | `/design` (`src/app/design/`) |
-| Tests | `src/components/ds/__tests__/`, `src/lib/design/__tests__/` |
+| Global frame (stage 2) | `src/components/shell/`, `src/components/levi-header.tsx`, `src/styles/shell.css` |
+| Tests | `src/components/ds/__tests__/`, `src/lib/design/__tests__/`, `src/components/shell/__tests__/` |
 
 ## Rules for new code
 
-- **No hard-coded colours.** Use a semantic token (`var(--ds-text-secondary)`, `var(--ds-surface-1)`) or a `ds-*` class. No hex, `rgb()` or `hsl()` in new CSS or TSX; a test fails if `ds.css` or the specimen's CSS has one. Data colours (time segments, masks, chart series) are a separate palette that stage 4 defines.
+- **No hard-coded colours.** Use a semantic token (`var(--ds-text-secondary)`, `var(--ds-surface-1)`) or a `ds-*` class. No hex, `rgb()` or `hsl()` in new CSS or TSX; a test fails if `ds.css`, `shell.css` or the specimen's CSS has one, and ESLint (`no-restricted-syntax`, list `FRAME_FILES` in `eslint.config.mjs`) rejects a hex string in the frame's TSX. Older pages are cleaned up in stage 6. Data colours (time segments, masks, chart series) are a separate palette that stage 4 defines.
 - **Semantic tokens only in components.** The raw steps `--ds-gray-l-*` / `--ds-gray-d-*` exist only to define the semantic tokens.
 - **One primary button per screen.** Accent A ("graphite") is the darkest grey: it is used only for the primary button, the focus ring, selection and progress. Links in running text are primary text with an underline.
 - **Status never by colour alone.** Status colours (success, warning, danger, info) appear only on badges, status dots, toasts and notes, always with an icon shape and words (`Badge`, `StatusDot`).
 - **Smallest text 12 px** (`--ds-text-caption-size`); weights 400, 500, 600.
 - **Icons**: Lucide only, through `Icon` (16 px with stroke 1.75; 20 or 24 px with 1.5). Decorative icons are `aria-hidden`; an icon that carries meaning gets a `label`.
 - **No `title=` tooltips.** Use `Tooltip` (hover and keyboard focus); an icon-only button is an `IconButton`, which requires `label` (its `aria-label` and tooltip).
-- **No `window.confirm`.** Use `ConfirmDialog` or `useConfirm()` for an irreversible action only; for an expected, undoable deletion, delete and offer Undo in a toast.
+- **No `window.confirm`.** Ask through `useConfirmAction()` (`src/components/shell/confirm.tsx`; a test fails on any `window.confirm` in `src/`), and only for an irreversible action; for an expected, undoable deletion, delete and offer Undo in a toast.
 - **Text** goes through the locale catalogs (`useLocale().t`, both `en.json` and `zh.json`). Component defaults (Close, Cancel, Loading, In progress, Dismiss notification, Notifications, Move, Theme, System, Light, Dark) are already there.
 
 ## Tokens
@@ -55,13 +56,13 @@ Breakpoints (640, 900, 1200, 1440 px) are constants in `src/lib/design/motion.ts
 
 Light is the default. Dark applies under `prefers-color-scheme: dark` unless an ancestor has `data-theme="light"`, and always under `data-theme="dark"`. `data-theme` works on any element, so a subtree can be themed alone (the specimen shows both themes side by side this way). `prefers-contrast: more` raises separators, control borders and secondary text one step.
 
-`useThemePreference()` returns `{ preference, resolved, setPreference }`: `"system" | "light" | "dark"`, stored in `localStorage` under `levi-theme` (`"system"` removes the key). Reads and writes go through `browserStorage`, which never throws; without storage the preference is "system". The hook follows system changes and other tabs. It does **not** touch `<html>`: call `applyTheme(element, preference)` where the theme should apply. Stage 2 applies it to `<html>` once the pages use the tokens; until then the existing pages stay dark. `ThemePicker` is the System / Light / Dark control.
+`useThemePreference()` returns `{ preference, resolved, setPreference }`: `"system" | "light" | "dark"`, stored in `localStorage` under `levi-theme` (`"system"` removes the key). Reads and writes go through `browserStorage`, which never throws; without storage the preference is "system". The hook follows system changes and other tabs. The hook itself does not touch `<html>`; `applyTheme(element, preference)` does. Since stage 2 the frame (`ShellProvider`) holds the one preference and applies it to `<html>`, and a small script in the root layout's `<head>` sets a stored light/dark choice before the first paint (`theme-boot.ts`, so the bar never flashes the other theme). `color-scheme` on `<html>` stays dark while the pages are dark, so their native controls keep dark chrome. `ThemePicker` is the System / Light / Dark control; the top bar uses a menu with the same three choices.
 
 Add `ds-root` to a container to give it the design-system font, text colour and background, and `color-scheme` that follows the theme.
 
 ## Components
 
-Import from `@/components/ds`; the styles need `@/styles/tokens.css` and `@/styles/ds.css` imported once (the specimen page does; stage 2 moves them into the root layout).
+Import from `@/components/ds`. The root layout imports `@/styles/tokens.css`, `@/styles/ds.css` and `@/styles/shell.css` once for every page.
 
 | Component | Notes |
 | --- | --- |
@@ -73,18 +74,39 @@ Import from `@/components/ds`; the styles need `@/styles/tokens.css` and `@/styl
 | `Checkbox`, `Radio`, `RadioGroup`, `Switch` | Native inputs; `Checkbox indeterminate`; `RadioGroup` is a fieldset with a legend; `Switch` is a checkbox with `role="switch"` |
 | `Badge`, `StatusDot`, `Tag` | Status as icon shape + colour + words (`tone` neutral, success, warning, danger, info); `StatusDot live` breathes once every 2 s (still under reduced motion); `Tag onRemove` gets a "Remove …" button with a 24 × 24 px target (16 px drawn); `removeLabel` is required (type-checked) when the tag is not plain text |
 | `Card`, `Divider`, `Kbd` | `Card` `variant` default / sunken / raised, `padding` compact / regular, optional `title`, `description`, `actions` |
-| `Dialog`, `Sheet` | Modal (`aria-modal`), labelled by the title; focus moves in, Tab wraps, focus that lands outside (a press on the scrim, a stray `focus()`) is pulled back, Escape and the scrim close (`closeOnScrim={false}` keeps it open), focus returns to the opener; with nested modals only the innermost handles Tab and Escape, and a menu inside handles its own Escape first; `container` renders into another element (portal); `Sheet side` right / left / bottom |
-| `ConfirmDialog`, `useConfirm` | `role="alertdialog"`; the title names action and object, `confirmLabel` is a verb; `tone="danger"` puts focus on Cancel; `const { confirm, dialog } = useConfirm()` then `await confirm({...})` replaces `window.confirm` |
+| `Dialog`, `Sheet` | `Sheet modal={false}` is a drawer beside the page: no scrim, no focus trap, Escape closes it only while focus is inside, focus still moves in and back; `width` sets its width in px. Otherwise modal (`aria-modal`), labelled by the title; focus moves in, Tab wraps, focus that lands outside (a press on the scrim, a stray `focus()`) is pulled back, Escape and the scrim close (`closeOnScrim={false}` keeps it open), focus returns to the opener; with nested modals only the innermost handles Tab and Escape, and a menu inside handles its own Escape first; `container` renders into another element (portal); `Sheet side` right / left / bottom |
+| `ConfirmDialog`, `useConfirm` | `role="alertdialog"`; the title names action and object, `confirmLabel` is a verb; `tone="danger"` puts focus on Cancel; `const { confirm, dialog } = useConfirm()` then `await confirm({...})`; a second question while one is open cancels the first (it answers false). App code uses the frame's `useConfirmAction()` instead |
 | `ToastProvider`, `useToast` | Bottom right; `show({ title, description, tone, action, duration })`; notes in a polite region, at most three, hidden after 4 s (paused while hovered or focused); a toast with an action stays until closed unless `duration` is given; errors (`danger`) in an assertive region, never hidden by newer toasts, stay until closed; outside a provider `show` does nothing |
 | `Skeleton`, `SkeletonText` | Static blocks (no shimmer), hidden from assistive technology; mark the loading region `aria-busy="true"` |
 | `Progress`, `Spinner` | `Progress value={n}` is determinate; `value={null}` indeterminate (a moving bar, or still with "In progress" under reduced motion); `Spinner` is `role="status"`; neither is a dialog. Limitation: a `Spinner` is its own live region, and a live region inserted together with its text is not announced by every screen reader; for a result that must be heard, keep one status region mounted and change its text, or use a toast |
 | `EmptyState` | Icon, one sentence, the next step as a button (`action`, `secondaryAction`) |
 | `Tabs` | ARIA tabs: one tab stop, ←/→, Home/End, disabled tabs skipped; switching is instant; only the selected tab has `aria-controls`; a `value` that matches no enabled tab selects the first enabled one |
 | `SegmentedControl` | Radio group drawn as joined buttons; arrows move and select |
-| `Menu` | Menu button: Enter/Space/↓ open on the first item, ↑ on the last; ↑/↓/Home/End; Enter/Space choose; Escape closes and returns focus; Tab and a click outside close |
+| `Menu` | Menu button: Enter/Space/↓ open on the first item, ↑ on the last; ↑/↓/Home/End; Enter/Space choose; Escape closes and returns focus; Tab and a click outside close. `variant` secondary / ghost; `iconOnly` (the label stays as the visually hidden name; give `tooltip`); `badge` (a count); an item with `checked` is a `menuitemradio` with a check mark |
 | `Table`, `TableRow` | Sunken header, row separators, hover; `TableRow selected` (grey fill, weight 500, 2 px bar, `aria-current`); `ds-num` for right-aligned tabular numbers; the wrapper scrolls sideways |
 | `ThemePicker` | System / Light / Dark |
 | `ReorderList` | Import from `@/components/ds/ReorderList` (lazily with `next/dynamic` where possible): drag by the handle, or focus the handle and press ↑/↓/Home/End; each move is announced; `moveItem`, `DS_SPRING`, `dsLayoutTransition` are exported |
+
+## Global frame (stage 2)
+
+`src/app/layout.tsx` mounts `AppFrame` (`src/components/shell/app-frame.tsx`) around every page:
+
+| Part | What it does |
+| --- | --- |
+| `ShellProvider` (`shell-context.tsx`) | The theme preference (one instance, applied to `<html>`); whether the palette or the shortcut list is open; the frame's keys (`global-keys.ts`) |
+| `ToastProvider` | The toast region, bottom right, one polite and one assertive live region. Any component below calls `useToast().show({...})` from `@/components/ds` |
+| `ConfirmProvider` (`confirm.tsx`) | One confirmation dialog at the root. `const confirm = useConfirmAction(); if (!(await confirm({ title, confirmLabel, tone }))) return;`. Cancel, Escape and the scrim answer false, as Cancel did in `window.confirm`; outside the provider the answer is always false. While a native modal `<dialog>` is open (the training pool's push dialog) the question is rendered inside it, because the rest of the page is inert |
+| Top bar (`levi-header.tsx`) | 56 px, opaque `--ds-bg` with a separator (it does not stay on top while the page scrolls yet, so a translucent material would only show the older pages' dark background; it becomes `ds-material` once it is sticky). Wordmark; the pages (Live evaluation when shown, Explore, Conversion & review, Training pool when offered, Guide, Report), the current one with `aria-current="page"`, weight 600 and a 2 px bar; on the right Search (opens the palette), Jobs, the Agent Workbench toggle, Settings (Accounts & connections, Command palette, Keyboard shortcuts), Theme and Language. Below 900 px the pages move to their own scrolling row (`--levi-header-height` becomes 100 px; `.h-screen` pages subtract it) |
+| Jobs (`jobs-menu.tsx`, `jobs.ts`) | The number of running training pool jobs and conversions, read from the existing `/api/levi/pool/jobs` and `/api/levi/jobs` every 30 s while the tab is visible (nothing while hidden); the menu leads to the training pool and to Conversion & review |
+| Command palette (`command-palette.tsx`, `commands.ts`) | ⌘K on macOS, Ctrl+K elsewhere, or Search. A combobox over a list box: go to a page, open the Agent Workbench, Accounts & connections or the shortcut list, choose the theme or the language. Words match the label in either language and Chinese and English keywords |
+| Shortcut list (`shortcuts-dialog.tsx`) | `?` (not while typing). Lists the frame's keys and the pages' existing ones (episode viewer, annotations, review queue) |
+| Agent Workbench drawer | `agent-workbench.tsx` renders its unchanged content in a non-modal right `Sheet` below the bar (`levi-agent-sheet`); the page stays usable beside it, its left edge still resizes it (the width is kept per browser). The bar's toggle, the palette and the old window events `levi-agent-toggle` / `levi-agent-connections` open it; it reports its state with `levi-agent-state` |
+
+**Keys.** The frame binds only ⌘K / Ctrl+K and `?`. Neither fires during IME composition, `?` not in a text field, and neither while another modal (a confirmation, a page's own dialog) is open. The pages keep theirs: Space, ↑/↓, J/K, Escape, Ctrl/⌘+S/Z/Y.
+
+**Loading overlay.** `loading-component.tsx` is `role="status"` with `aria-busy="true"`, not a dialog: it takes no focus and traps nothing.
+
+**Tailwind** does not scan `docs/` (`@source not "../../docs"` in `globals.css`): the Markdown is not UI code and its words must not add utilities.
 
 ## Motion
 

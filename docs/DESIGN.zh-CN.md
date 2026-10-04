@@ -2,7 +2,7 @@
 
 [English](DESIGN.md)
 
-LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默认跟随系统，只用系统字体，图标用 Lucide，Motion 只用于拖拽和列表重排。第 1 阶段（本文）加入设计令牌、主题偏好和一组基础组件。**现有页面还没有用它们**：`globals.css`、`levi.css`、`annotations-skin.css`、`report.css` 没有改动，现有页面的显示与之前完全相同。页面在后续阶段逐个迁移。
+LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默认跟随系统，只用系统字体，图标用 Lucide，Motion 只用于拖拽和列表重排。第 1 阶段加入了设计令牌、主题偏好和一组基础组件。第 2 阶段（见[全局框架](#全局框架第-2-阶段)）把全局框架迁到上面：顶栏、Toast、确认对话框、命令面板、快捷键总表和 Agent 工作台抽屉。**顶栏下方的页面还没有用它们**：页面内容仍用 `levi.css`、`annotations-skin.css`、`report.css`，两套外观下都保持深色。页面在后续阶段逐个迁移。
 
 | 内容 | 位置 |
 | --- | --- |
@@ -13,18 +13,19 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 | 减少动态效果的工具、时长、断点 | `src/lib/design/motion.ts` |
 | 样张页开关 | `src/lib/design/gate.ts`、`src/middleware.ts` |
 | 样张页（仅开发用） | `/design`（`src/app/design/`） |
-| 测试 | `src/components/ds/__tests__/`、`src/lib/design/__tests__/` |
+| 全局框架（第 2 阶段） | `src/components/shell/`、`src/components/levi-header.tsx`、`src/styles/shell.css` |
+| 测试 | `src/components/ds/__tests__/`、`src/lib/design/__tests__/`、`src/components/shell/__tests__/` |
 
 ## 新代码的规则
 
-- **禁止硬编码颜色。** 用语义令牌（`var(--ds-text-secondary)`、`var(--ds-surface-1)`）或 `ds-*` 类。新的 CSS 和 TSX 里不写十六进制、`rgb()`、`hsl()`，也不写 Tailwind 任意值；`ds.css`、样张页 CSS、组件和样张页的 TSX 里出现就会让测试失败。数据配色（时间片段、掩码、图表序列）是单独一套，第 4 阶段定义。
+- **禁止硬编码颜色。** 用语义令牌（`var(--ds-text-secondary)`、`var(--ds-surface-1)`）或 `ds-*` 类。新的 CSS 和 TSX 里不写十六进制、`rgb()`、`hsl()`，也不写 Tailwind 任意值；`ds.css`、`shell.css`、样张页 CSS、组件和样张页的 TSX 里出现就会让测试失败；全局框架的 TSX 里出现十六进制字符串时 ESLint 报错（`no-restricted-syntax`，文件清单是 `eslint.config.mjs` 的 `FRAME_FILES`）。旧页面在第 6 阶段清理。数据配色（时间片段、掩码、图表序列）是单独一套，第 4 阶段定义。
 - **组件里只用语义令牌。** 原始灰阶 `--ds-gray-l-*`、`--ds-gray-d-*` 只用来定义语义令牌。
 - **每屏一个主要按钮。** 强调色 A“石墨”是最深的灰，只用于主要按钮、焦点环、选中态和进度。正文中的链接用主文字色加下划线。
 - **状态不只靠颜色。** 状态色（成功、警告、错误、信息）只出现在徽章、状态点、Toast 和行内提示上，并且总带图标形状和文字（`Badge`、`StatusDot`）。
 - **最小字号 12 px**（`--ds-text-caption-size`）；字重只用 400、500、600。
 - **图标**只用 Lucide，经 `Icon` 引入（16 px 配描边 1.75；20、24 px 配 1.5）。装饰性图标 `aria-hidden`；承载含义的图标给 `label`。
 - **不用 `title=` 做提示。** 用 `Tooltip`（悬停和键盘焦点都会出现）；只有图标的按钮用 `IconButton`，它必须有 `label`（即 `aria-label` 和提示文字）。
-- **不用 `window.confirm`。** 只有不可逆的操作才用 `ConfirmDialog` 或 `useConfirm()`；预期内、可撤销的删除直接删除，并在 Toast 里给“撤销”。
+- **不用 `window.confirm`。** 通过 `useConfirmAction()`（`src/components/shell/confirm.tsx`）询问，`src/` 里出现 `window.confirm` 会让测试失败；只有不可逆的操作才询问；预期内、可撤销的删除直接删除，并在 Toast 里给“撤销”。
 - **文案**走语言目录（`useLocale().t`，`en.json` 和 `zh.json` 同时加）。组件的默认文字（Close、Cancel、Loading、In progress、Dismiss notification、Notifications、Move、Theme、System、Light、Dark）已经在目录里。
 
 ## 令牌
@@ -55,13 +56,13 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 
 默认浅色。系统为深色（`prefers-color-scheme: dark`）且祖先元素没有 `data-theme="light"` 时用深色；`data-theme="dark"` 下总是深色。`data-theme` 可以放在任何元素上，单独给一个子树换主题（样张页就是这样并排显示两套）。`prefers-contrast: more` 时，分隔线、控件边界和次要文字各提高一级。
 
-`useThemePreference()` 返回 `{ preference, resolved, setPreference }`：取值 `"system" | "light" | "dark"`，存在 `localStorage` 的 `levi-theme` 键下（`"system"` 会删除该键）。读写都经过不会抛异常的 `browserStorage`；存储不可用时为“跟随系统”。它跟随系统外观的变化和其他标签页的修改，但**不会改 `<html>`**：调用方用 `applyTheme(element, preference)` 决定主题作用在哪里。第 2 阶段页面改用令牌之后才把它作用到 `<html>`，在此之前现有页面保持深色。`ThemePicker` 是“跟随系统 / 浅色 / 深色”的切换控件。
+`useThemePreference()` 返回 `{ preference, resolved, setPreference }`：取值 `"system" | "light" | "dark"`，存在 `localStorage` 的 `levi-theme` 键下（`"system"` 会删除该键）。读写都经过不会抛异常的 `browserStorage`；存储不可用时为“跟随系统”。它跟随系统外观的变化和其他标签页的修改。这个 hook 本身不改 `<html>`，`applyTheme(element, preference)` 才改。从第 2 阶段起，全局框架（`ShellProvider`）持有唯一的偏好并把它作用到 `<html>`；根布局 `<head>` 里的一小段脚本（`theme-boot.ts`）在首次绘制前写入已存的浅色/深色选择，顶栏不会先闪一下另一套外观。页面还是深色时，`<html>` 的 `color-scheme` 保持深色，页面里的原生控件仍是深色外观。`ThemePicker` 是“跟随系统 / 浅色 / 深色”的切换控件；顶栏用一个有同样三个选项的菜单。
 
 给容器加 `ds-root` 类，它就使用设计系统的字体、文字色和背景，`color-scheme` 也随主题变化。
 
 ## 组件
 
-从 `@/components/ds` 引入；样式需要引入一次 `@/styles/tokens.css` 和 `@/styles/ds.css`（样张页已引入；第 2 阶段移到根布局）。
+从 `@/components/ds` 引入。根布局为所有页面引入一次 `@/styles/tokens.css`、`@/styles/ds.css` 和 `@/styles/shell.css`。
 
 | 组件 | 说明 |
 | --- | --- |
@@ -73,18 +74,39 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 | `Checkbox`、`Radio`、`RadioGroup`、`Switch` | 原生输入控件；`Checkbox indeterminate` 表示部分选中；`RadioGroup` 是带 legend 的 fieldset；`Switch` 是 `role="switch"` 的复选框 |
 | `Badge`、`StatusDot`、`Tag` | 状态用图标形状 + 颜色 + 文字表示（`tone`：neutral、success、warning、danger、info）；`StatusDot live` 每 2 秒呼吸一次（减少动态效果时静止）；`Tag onRemove` 带“Remove …”按钮，可点区域 24 × 24 px（视觉 16 px）；标签内容不是纯文本时必须给 `removeLabel`（类型检查强制） |
 | `Card`、`Divider`、`Kbd` | `Card` 的 `variant` 为 default / sunken / raised，`padding` 为 compact / regular，可选 `title`、`description`、`actions` |
-| `Dialog`、`Sheet` | 模态（`aria-modal`），以标题命名；焦点移入，Tab 在内部循环，焦点落到外面（点了遮罩、别处调用了 `focus()`）会被拉回，Esc 和点遮罩关闭（`closeOnScrim={false}` 时点遮罩不关），关闭后焦点回到打开它的元素；嵌套时只有最上层处理 Tab 和 Esc，内部菜单先处理自己的 Esc；`container` 可渲染到别的元素（portal）；`Sheet side` 为 right / left / bottom |
-| `ConfirmDialog`、`useConfirm` | `role="alertdialog"`；标题写清动作和对象，`confirmLabel` 用动词；`tone="danger"` 时默认焦点在“取消”；`const { confirm, dialog } = useConfirm()` 后 `await confirm({...})`，可取代 `window.confirm` |
+| `Dialog`、`Sheet` | `Sheet modal={false}` 是页面旁边的抽屉：没有遮罩、不困住焦点，只有焦点在抽屉内时 Esc 才关闭它，焦点仍会移入并在关闭后返回；`width` 设宽度（px）。其余情况为模态（`aria-modal`），以标题命名；焦点移入，Tab 在内部循环，焦点落到外面（点了遮罩、别处调用了 `focus()`）会被拉回，Esc 和点遮罩关闭（`closeOnScrim={false}` 时点遮罩不关），关闭后焦点回到打开它的元素；嵌套时只有最上层处理 Tab 和 Esc，内部菜单先处理自己的 Esc；`container` 可渲染到别的元素（portal）；`Sheet side` 为 right / left / bottom |
+| `ConfirmDialog`、`useConfirm` | `role="alertdialog"`；标题写清动作和对象，`confirmLabel` 用动词；`tone="danger"` 时默认焦点在“取消”；`const { confirm, dialog } = useConfirm()` 后 `await confirm({...})`；一个问题还开着时又问第二个，第一个按“取消”作答（返回 false）。应用代码改用全局框架的 `useConfirmAction()` |
 | `ToastProvider`、`useToast` | 右下角；`show({ title, description, tone, action, duration })`；普通通知走 polite 区域，最多 3 条，4 秒后消失（悬停或聚焦时暂停）；带操作按钮的 Toast 默认不自动消失（除非给 `duration`）；错误（`danger`）走 assertive 区域，不会被新通知挤掉，直到手动关闭；在 provider 之外 `show` 什么也不做 |
 | `Skeleton`、`SkeletonText` | 静态灰块（不扫光），对辅助技术隐藏；正在加载的区域标 `aria-busy="true"` |
 | `Progress`、`Spinner` | `Progress value={n}` 为确定进度；`value={null}` 为不确定进度（一段来回移动的条，减少动态效果时静止并显示“进行中”）；`Spinner` 是 `role="status"`；两者都不是对话框。局限：每个 `Spinner` 自己是一个 live 区域，而与文字一起插入的 live 区域并非所有读屏软件都会播报；必须让人听到的结果，请保持一个常驻的状态区域只改其文字，或用 Toast |
 | `EmptyState` | 图标、一句说明、下一步操作按钮（`action`、`secondaryAction`） |
 | `Tabs` | ARIA 标签页：一个 Tab 停靠点，←/→、Home/End，跳过禁用项；切换立即生效；只有选中的标签写 `aria-controls`；`value` 找不到可用项时选中第一个未禁用的标签 |
 | `SegmentedControl` | 画成拼接按钮的单选组；方向键移动并选中 |
-| `Menu` | 菜单按钮：Enter/Space/↓ 打开并聚焦第一项，↑ 聚焦最后一项；↑/↓/Home/End 移动；Enter/Space 选择；Esc 关闭并把焦点还给按钮；Tab 或点击外部关闭 |
+| `Menu` | 菜单按钮：Enter/Space/↓ 打开并聚焦第一项，↑ 聚焦最后一项；↑/↓/Home/End 移动；Enter/Space 选择；Esc 关闭并把焦点还给按钮；Tab 或点击外部关闭。`variant` 为 secondary / ghost；`iconOnly` 只显示图标（label 仍是视觉隐藏的名称，需同时给 `tooltip`）；`badge` 显示计数；带 `checked` 的项是 `menuitemradio`，选中项有对勾 |
 | `Table`、`TableRow` | 凹陷表头、行分隔线、悬停；`TableRow selected`（灰底、字重 500、左侧 2 px 竖条、`aria-current`）；`ds-num` 右对齐等宽数字；外层容器横向滚动 |
 | `ThemePicker` | 跟随系统 / 浅色 / 深色 |
 | `ReorderList` | 从 `@/components/ds/ReorderList` 引入（尽量用 `next/dynamic` 懒加载）：拖手柄，或让手柄获得焦点后按 ↑/↓/Home/End；每次移动都会播报，焦点留在被移动项的手柄上；另导出 `moveItem`、`DS_SPRING`、`dsLayoutTransition` |
+
+## 全局框架（第 2 阶段）
+
+`src/app/layout.tsx` 在每个页面外层挂上 `AppFrame`（`src/components/shell/app-frame.tsx`）：
+
+| 部分 | 作用 |
+| --- | --- |
+| `ShellProvider`（`shell-context.tsx`） | 主题偏好（只有一个实例，作用到 `<html>`）；命令面板和快捷键总表是否打开；全局快捷键（`global-keys.ts`） |
+| `ToastProvider` | 右下角的 Toast 区域，一个 polite、一个 assertive 的 live 区域。下面任何组件都可以用 `@/components/ds` 的 `useToast().show({...})` |
+| `ConfirmProvider`（`confirm.tsx`） | 根部唯一的确认对话框。`const confirm = useConfirmAction(); if (!(await confirm({ title, confirmLabel, tone }))) return;`。“取消”、Esc、点遮罩都返回 false，与 `window.confirm` 的“取消”一致；在 provider 之外总是返回 false。原生模态 `<dialog>` 打开时（训练池的推送对话框）页面其余部分是 inert 的，所以问题渲染在那个对话框里面 |
+| 顶栏（`levi-header.tsx`） | 高 56 px，不透明的 `--ds-bg` 加分隔线（顶栏还不随页面滚动固定，半透明材质只会透出旧页面的深色背景；改成粘性后再用 `ds-material`）。字标；页面导航（显示实时评测时有“实时评测”、探索数据、转换与审核、提供训练池时有“训练池”、使用指南、报告），当前页标 `aria-current="page"`、字重 600、下方 2 px 指示条；右侧是搜索（打开命令面板）、作业、Agent 工作台开关、设置（账号与连接、命令面板、快捷键）、外观和语言。窄于 900 px 时页面导航移到单独一行、可横向滚动（`--levi-header-height` 变为 100 px，`.h-screen` 页面减去它） |
+| 作业（`jobs-menu.tsx`、`jobs.ts`） | 正在运行的训练池作业和转换作业数量，读现有的 `/api/levi/pool/jobs` 和 `/api/levi/jobs`，标签页可见时每 30 秒一次（隐藏时不请求）；菜单通向训练池和转换与审核 |
+| 命令面板（`command-palette.tsx`、`commands.ts`） | macOS 上 ⌘K，其他系统 Ctrl+K，或点“搜索”。组合框加列表框：跳到页面，打开 Agent 工作台、账号与连接或快捷键总表，选择外观或语言。按两种语言的标签以及中英文关键词匹配 |
+| 快捷键总表（`shortcuts-dialog.tsx`） | 按 `?` 打开（在输入框中不触发）。列出全局快捷键和页面已有的快捷键（片段查看器、标注、审核队列） |
+| Agent 工作台抽屉 | `agent-workbench.tsx` 把原有内容（未改动）放进顶栏下方、右侧的非模态 `Sheet`（`levi-agent-sheet`）；旁边的页面仍可操作，左边缘仍可拖动调整宽度（宽度按浏览器保存）。顶栏的开关、命令面板和原有的窗口事件 `levi-agent-toggle` / `levi-agent-connections` 都能打开它；它用 `levi-agent-state` 报告开关状态 |
+
+**快捷键。** 全局框架只绑定 ⌘K / Ctrl+K 和 `?`。输入法组字时都不触发，`?` 在输入框中不触发，另一个模态对话框（确认框、页面自己的对话框）打开时也都不触发。页面保留自己的快捷键：Space、↑/↓、J/K、Esc、Ctrl/⌘+S/Z/Y。
+
+**加载遮罩。** `loading-component.tsx` 是 `role="status"` 加 `aria-busy="true"`，不是对话框：不拿焦点，也不困住焦点。
+
+**Tailwind** 不扫描 `docs/`（`globals.css` 里的 `@source not "../../docs"`）：Markdown 不是界面代码，其中的词不应生成样式。
 
 ## 动效
 
