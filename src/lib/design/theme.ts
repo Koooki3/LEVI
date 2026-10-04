@@ -95,20 +95,25 @@ export function applyTheme(
  * The stored preference, a setter that persists it, and the theme it resolves
  * to now. Follows system changes and other tabs (the `storage` event).
  * Before mount it reports the default preference (and a light system) so
- * server and client render alike.
+ * server and client render alike; `ready` turns true once the stored value
+ * has been read, so a caller applying the theme never applies that
+ * placeholder over what is stored.
  */
 export function useThemePreference(): {
   preference: ThemePreference;
   resolved: ResolvedTheme;
   setPreference: (preference: ThemePreference) => void;
+  ready: boolean;
 } {
   const [preference, setPreferenceState] = useState<ThemePreference>(
     THEME_DEFAULT_PREFERENCE,
   );
   const [systemDark, setSystemDark] = useState(false);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     setPreferenceState(readThemePreference());
+    setReady(true);
     setSystemDark(systemPrefersDark());
     let query: MediaQueryList | null = null;
     try {
@@ -142,5 +147,6 @@ export function useThemePreference(): {
     preference,
     resolved: resolveTheme(preference, systemDark),
     setPreference,
+    ready,
   };
 }

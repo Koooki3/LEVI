@@ -235,6 +235,28 @@ describe("theme default", () => {
   });
 });
 
+describe("theme on first render", () => {
+  test("a stored light choice is never overwritten with the default", async () => {
+    window.localStorage.setItem("levi-theme", "light");
+    const root = document.documentElement;
+    const written: string[] = [];
+    const original = root.setAttribute.bind(root);
+    root.setAttribute = (name: string, value: string) => {
+      if (name === "data-theme") written.push(value);
+      original(name, value);
+    };
+    try {
+      await render(<Frame />);
+      expect(written).not.toContain("dark");
+      expect(root.getAttribute("data-theme")).toBe("light");
+    } finally {
+      root.setAttribute = original;
+      window.localStorage.removeItem("levi-theme");
+      root.removeAttribute("data-theme");
+    }
+  });
+});
+
 describe("command palette", () => {
   test("Ctrl+K opens it on the search field; Escape closes and returns focus", async () => {
     await render(<Frame />);

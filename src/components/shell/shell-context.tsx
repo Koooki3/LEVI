@@ -54,13 +54,15 @@ export function useShell(): Shell {
 }
 
 export function ShellProvider({ children }: { children: ReactNode }) {
-  const { preference, resolved, setPreference } = useThemePreference();
+  const { preference, resolved, setPreference, ready } = useThemePreference();
   const [paletteOpen, setPaletteOpenState] = useState(false);
   const [shortcutsOpen, setShortcutsOpenState] = useState(false);
 
+  // Only once the stored value is read: before that `preference` is the
+  // default, and applying it would overwrite what the boot script set.
   useEffect(() => {
-    applyTheme(document.documentElement, preference);
-  }, [preference]);
+    if (ready) applyTheme(document.documentElement, preference);
+  }, [preference, ready]);
 
   const setPaletteOpen = useCallback((open: boolean) => {
     setPaletteOpenState(open);
