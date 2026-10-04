@@ -578,8 +578,20 @@ def _index() -> pd.DataFrame | None:
     return pd.read_parquet(path, columns=["key", "group", "task", "fingerprint"])
 
 
-def show(version: str, status: str | None = None, batch: str | None = None) -> dict:
+def _viewed(version: str) -> tuple[list[dict], bool]:
+    """``entries`` for a person to read, and whether the proposals file no
+    longer matches its manifest. Then no decision holds (nothing of the
+    version is applied): every status reads ``invalid``, never ``approved``."""
     rows = entries(version)
+    try:
+        checked_sha256(version)
+    except ValueError:
+        return [{**r, "status": "invalid", "decision": r["status"]} for r in rows], True
+    return rows, False
+
+
+def show(version: str, status: str | None = None, batch: str | None = None) -> dict:
+    rows, changed = _viewed(version)
     df = _index()
     if df is not None:
         rows = resolve(rows, df)
@@ -590,6 +602,7 @@ def show(version: str, status: str | None = None, batch: str | None = None) -> d
     return {
         "version": version,
         "sha256": manifest(version).get("sha256"),
+        "changed_after_import": changed,
         "reviews_truncated": reviews_truncated(version),
         "manifest": manifest(version),
         "counts": dict(Counter(r["status"] for r in rows)),
@@ -602,11 +615,12 @@ def listing() -> list[dict]:
     out = []
     df = _index()
     for version in versions():
-        rows = entries(version)
+        rows, changed = _viewed(version)
         item = {
             "version": version,
             "imported_at": manifest(version).get("imported_at"),
             "sha256": manifest(version).get("sha256"),
+            "changed_after_import": changed,
             "reviews_truncated": reviews_truncated(version),
             "proposals": len(rows),
             "status": dict(Counter(r["status"] for r in rows)),

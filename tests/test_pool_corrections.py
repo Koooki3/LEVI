@@ -775,3 +775,20 @@ def test_a_whole_last_review_line_without_newline_is_kept(pool, person):
     assert [json.loads(x)["id"] for x in lines] == ["a", "b"]
     shown = corrections.show(VERSION)
     assert shown["counts"] == {"approved": 2} and not shown["reviews_truncated"]
+
+
+def test_show_and_list_mark_a_version_changed_after_import(pool, person):
+    _import(pool)
+    _review(person, ids=["a"])
+    shown = corrections.show(VERSION)
+    assert shown["changed_after_import"] is False
+    assert shown["counts"] == {"approved": 1, "proposed": 1}
+    _rewrite_proposal(VERSION, "b", note="edited")
+    shown = corrections.show(VERSION)
+    assert shown["changed_after_import"] is True
+    assert shown["counts"] == {"invalid": 2}
+    assert "approved" not in {e["status"] for e in shown["entries"]}
+    assert corrections.show(VERSION, status="approved")["entries"] == []
+    listed = corrections.listing()[0]
+    assert listed["changed_after_import"] is True
+    assert listed["status"] == {"invalid": 2}
