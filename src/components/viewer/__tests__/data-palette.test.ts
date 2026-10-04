@@ -73,3 +73,14 @@ describe("viewer data palette", () => {
     expect(annotationsCss).not.toContain("text-transform: uppercase");
   });
 });
+
+describe("series past eight", () => {
+  test("the colour repeats but the line pattern does not", async () => {
+    const { seriesDash } = await import("../data-palette");
+    expect(seriesDash(0)).toBeUndefined();
+    expect(seriesDash(7)).toBeUndefined();
+    expect(seriesDash(8)).toBe("6 3");
+    expect(seriesColor(8)).toBe(seriesColor(0));
+    expect(seriesDash(16)).not.toBe(seriesDash(8));
+  });
+});

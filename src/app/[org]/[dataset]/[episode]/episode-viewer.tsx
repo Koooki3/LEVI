@@ -13,7 +13,7 @@ import {
   ScanSearch,
   Tags,
 } from "lucide-react";
-import { IconButton, Kbd, Tabs } from "@/components/ds";
+import { IconButton, Kbd, Tabs, Tooltip } from "@/components/ds";
 import { AnalysisTab } from "@/components/viewer/analysis-tab";
 import { EpisodeLoadError } from "@/components/viewer/load-error";
 import {
@@ -1016,7 +1016,20 @@ function EpisodeViewerInner({
 
   const tabItems = [
     { id: "episodes", label: t("Episodes"), icon: Film },
-    { id: "annotations", label: t("Annotations"), icon: Tags },
+    {
+      id: "annotations",
+      label: (
+        <Tooltip
+          content={t(
+            "Edit subtask / plan / memory / interjection / VQA atoms (lerobot v3.1 schema)",
+          )}
+          placement="bottom"
+        >
+          <span>{t("Annotations")}</span>
+        </Tooltip>
+      ),
+      icon: Tags,
+    },
     ...(hasURDFSupport(datasetInfo.robot_type)
       ? [{ id: "urdf", label: t("3D Replay"), icon: Box }]
       : []),
@@ -1161,7 +1174,14 @@ function EpisodeViewerInner({
           {activeTab !== "episodes" && activeTab !== "annotations" && (
             <h1 className="ds-sr-only">
               {t(`Episode ${episodeId}`)} ·{" "}
-              {tabItems.find((item) => item.id === activeTab)?.label}
+              {t(
+                {
+                  urdf: "3D Replay",
+                  statistics: "Statistics",
+                  frames: "Frame gallery",
+                  analysis: "Analysis",
+                }[activeTab as string] ?? "",
+              )}
             </h1>
           )}
 

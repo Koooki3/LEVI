@@ -763,7 +763,8 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                 {t("Save dataset")}
               </Button>
               <Button
-                variant="danger"
+                variant="secondary"
+                className="vw-btn-danger-outline"
                 size="sm"
                 icon={Trash2}
                 disabled={!backendEnabled || saving}

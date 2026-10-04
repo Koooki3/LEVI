@@ -2,7 +2,8 @@
 "use client";
 import { Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ds";
-import { seriesColor } from "@/components/viewer/data-palette";
+import { seriesColor, seriesDash } from "@/components/viewer/data-palette";
+import { SeriesSwatch } from "@/components/viewer/series-swatch";
 import { T } from "@/components/levi-locale";
 
 import React, {
@@ -193,7 +194,7 @@ const SingleDataGraph = React.memo(
       setVisibleKeys(dataKeys);
     }
 
-    const { groups, singles, groupColorMap } = useMemo(() => {
+    const { groups, singles, groupColorMap, groupIndex } = useMemo(() => {
       const grouped: Record<string, string[]> = {};
       const singleList: string[] = [];
       dataKeys.forEach((key) => {
@@ -209,10 +210,17 @@ const SingleDataGraph = React.memo(
 
       const allGroups = [...Object.keys(grouped), ...singleList];
       const colorMap: Record<string, string> = {};
+      const indexMap: Record<string, number> = {};
       allGroups.forEach((group, idx) => {
         colorMap[group] = seriesColor(idx);
+        indexMap[group] = idx;
       });
-      return { groups: grouped, singles: singleList, groupColorMap: colorMap };
+      return {
+        groups: grouped,
+        singles: singleList,
+        groupColorMap: colorMap,
+        groupIndex: indexMap,
+      };
     }, [dataKeys]);
 
     // Find the closest data point to the current time for highlighting
@@ -290,6 +298,7 @@ const SingleDataGraph = React.memo(
                         className="size-3"
                         style={{ accentColor: color }}
                       />
+                      <SeriesSwatch index={groupIndex[group] ?? 0} />
                       <span className="text-xs font-semibold text-(--ds-text-primary)">
                         <T>{group}</T>
                       </span>
@@ -345,6 +354,7 @@ const SingleDataGraph = React.memo(
                       className="size-3"
                       style={{ accentColor: color }}
                     />
+                    <SeriesSwatch index={groupIndex[key] ?? 0} />
                     <span
                       className={`text-xs ${visibleKeys.includes(key) ? "text-(--ds-text-primary)" : "text-(--ds-text-secondary)"}`}
                     >
@@ -463,7 +473,11 @@ const SingleDataGraph = React.memo(
                       ? key.split(SERIES_NAME_DELIMITER)[0]
                       : key;
                     const color = groupColorMap[group];
-                    let strokeDasharray: string | undefined = undefined;
+                    // Past eight groups the colours repeat: the pattern tells
+                    // them apart (the legend shows it too).
+                    let strokeDasharray: string | undefined = seriesDash(
+                      groupIndex[group] ?? 0,
+                    );
                     if (groups[group] && groups[group].length > 1) {
                       const idxInGroup = groups[group].indexOf(key);
                       if (idxInGroup > 0) strokeDasharray = "5 5";

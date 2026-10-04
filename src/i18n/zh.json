@@ -2206,5 +2206,6 @@
   "Add at frame": "在当前帧添加",
   "Flagged only": "只看已标记",
   "Flag episode": "标记片段",
-  "Episode viewer views": "片段查看器视图"
+  "Episode viewer views": "片段查看器视图",
+  "Edit subtask / plan / memory / interjection / VQA atoms (lerobot v3.1 schema)": "编辑子任务、计划、记忆、插话和视觉问答标注（lerobot v3.1 结构）"
 }

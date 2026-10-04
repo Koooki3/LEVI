@@ -1,5 +1,9 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import {
+  formatClock,
+  formatClockPrecise,
+} from "@/components/viewer/time-format";
 import { T, useLocale } from "@/components/levi-locale";
 
 /**
@@ -608,7 +612,7 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
               <T>Annotations timeline</T>
             </span>
             <span className="ts-display">
-              {currentTime.toFixed(2)}s / {duration.toFixed(2)}s
+              {formatClockPrecise(currentTime)} / {formatClockPrecise(duration)}
             </span>
           </div>
 
@@ -632,7 +636,7 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                     className="tick-mark"
                     style={{ left: `${left}%` }}
                   >
-                    <T>{t}</T>s
+                    {formatClock(t)}
                   </div>
                 );
               },
@@ -712,7 +716,7 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                                   onMouseEnter={(e) =>
                                     showTip(
                                       e,
-                                      `subtask · ${s.start.toFixed(2)}s → ${s.end.toFixed(2)}s`,
+                                      `subtask · ${formatClockPrecise(s.start)} → ${formatClockPrecise(s.end)}`,
                                       s.label,
                                     )
                                   }
@@ -873,7 +877,7 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                                   onMouseEnter={(e) =>
                                     showTip(
                                       e,
-                                      `${tk.label} · ${s.start.toFixed(2)}s → ${s.end.toFixed(2)}s`,
+                                      `${tk.label} · ${formatClockPrecise(s.start)} → ${formatClockPrecise(s.end)}`,
                                       s.label,
                                     )
                                   }
@@ -1044,8 +1048,8 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                     <T>{pendingCreate.trackKey}</T>
                   </span>
                   <span style={{ marginLeft: "auto", fontFamily: "monospace" }}>
-                    {pendingCreate.start.toFixed(2)}s →{" "}
-                    {pendingCreate.end.toFixed(2)}s
+                    {formatClockPrecise(pendingCreate.start)} →{" "}
+                    {formatClockPrecise(pendingCreate.end)}
                   </span>
                 </>
               }

@@ -947,3 +947,23 @@ button.vw-outcome:hover {
   position: relative;
   min-height: 12rem;
 }
+
+/* An irreversible action at rest: outlined in the danger colour; the
+   confirmation it opens carries the solid danger button. */
+.ds-btn.vw-btn-danger-outline {
+  border-color: var(--ds-danger);
+  color: var(--ds-danger);
+}
+.ds-btn.vw-btn-danger-outline:hover:not(:disabled) {
+  background: var(--ds-danger-bg);
+}
+
+/* Narrow windows: the actions move under the tabs instead of being cut. */
+.vw-tabbar {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+.vw-tabbar > nav {
+  max-width: 100%;
+  overflow-x: auto;
+}

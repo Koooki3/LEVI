@@ -67,3 +67,13 @@ export const MEDIA_GRID_SECTION = "#48484a";
 /** Labels drawn on video: near-white words on a dark plate. */
 export const MEDIA_LABEL_PLATE = "#000000d9";
 export const MEDIA_LABEL_TEXT = "#f5f5f7";
+
+/**
+ * Line pattern for the series at `index`: solid for the first eight, then
+ * dashed, then dotted, so a ninth series never looks like the first (the
+ * colours repeat after eight; the legend shows the same pattern).
+ */
+export function seriesDash(index: number): string | undefined {
+  const round = Math.floor(Math.max(0, index) / DATA_SERIES.length);
+  return round === 0 ? undefined : round === 1 ? "6 3" : "1.5 3";
+}

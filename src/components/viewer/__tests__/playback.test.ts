@@ -9,3 +9,14 @@ describe("playback clock", () => {
     expect(formatClock(-3)).toBe("0:00");
   });
 });
+
+describe("timeline clock", () => {
+  test("shows hundredths as m:ss.cc", async () => {
+    const { formatClockPrecise } =
+      await import("@/components/viewer/time-format");
+    expect(formatClockPrecise(0)).toBe("0:00.00");
+    expect(formatClockPrecise(7.7)).toBe("0:07.70");
+    expect(formatClockPrecise(72.345)).toBe("1:12.35");
+    expect(formatClockPrecise(59.999)).toBe("1:00.00");
+  });
+});

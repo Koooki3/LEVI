@@ -16,12 +16,8 @@ import { useTime } from "../context/time-context";
 import { nextMark, useObjectMarks } from "./object-marks";
 import "@/components/viewer/viewer.css";
 
-/** Seconds as m:ss (tabular), the playback bar's time readout. */
-export function formatClock(seconds: number): string {
-  const whole = Math.max(0, Math.floor(seconds));
-  const minutes = Math.floor(whole / 60);
-  return `${minutes}:${String(whole % 60).padStart(2, "0")}`;
-}
+export { formatClock } from "@/components/viewer/time-format";
+import { formatClock } from "@/components/viewer/time-format";
 
 const PlaybackBar: React.FC = () => {
   const { duration, isPlaying, setIsPlaying, currentTime, seek } = useTime();

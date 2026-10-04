@@ -3,7 +3,8 @@
 import { Flag, Info, LoaderCircle, Maximize2, Minimize2 } from "lucide-react";
 import { Button, Icon, IconButton, SegmentedControl } from "@/components/ds";
 import { T, useLocale } from "@/components/levi-locale";
-import { DATA_SERIES } from "@/components/viewer/data-palette";
+import { DATA_SERIES, seriesDash } from "@/components/viewer/data-palette";
+import { SeriesSwatch } from "@/components/viewer/series-swatch";
 
 import React, { useMemo, useState, useEffect } from "react";
 import {
@@ -380,6 +381,7 @@ function AutocorrelationSection({
                     key={name}
                     dataKey={name}
                     stroke={COLORS[i % COLORS.length]}
+                    strokeDasharray={seriesDash(i)}
                     dot={false}
                     strokeWidth={1.5}
                     legendType="none"
@@ -394,10 +396,7 @@ function AutocorrelationSection({
           <div className="flex flex-wrap gap-x-4 gap-y-1 px-1">
             {shortKeys.map((name, i) => (
               <div key={name} className="flex items-center gap-1.5">
-                <span
-                  className="w-3 h-[3px] rounded-full shrink-0"
-                  style={{ background: COLORS[i % COLORS.length] }}
-                />
+                <SeriesSwatch index={i} />
                 <span className="text-xs text-(--ds-text-secondary)">
                   <T>{name}</T>
                 </span>
