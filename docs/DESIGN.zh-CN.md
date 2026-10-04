@@ -108,7 +108,7 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 | 作业（`jobs-menu.tsx`、`jobs.ts`） | 正在运行的训练池作业和转换作业数量，读现有的 `/api/levi/pool/jobs` 和 `/api/levi/jobs`，首次加载、打开菜单、切回标签页时各查一次，标签页可见时每 60 秒一次（隐藏时不请求，上一个请求未返回时不再发）；菜单通向训练池和转换与审核 |
 | 命令面板（`command-palette.tsx`、`commands.ts`） | macOS 上 ⌘K，其他系统 Ctrl+K，或点“搜索”。组合框加列表框：跳到页面，打开 Agent 工作台、账号与连接或快捷键总表，选择外观或语言。按两种语言的标签以及中英文关键词匹配 |
 | 快捷键总表（`shortcuts-dialog.tsx`） | 按 `?` 打开（在输入框中不触发）。列出全局快捷键和页面已有的快捷键（片段查看器、标注、审核队列） |
-| Agent 工作台抽屉 | `agent-workbench.tsx` 把原有内容（未改动）放进顶栏下方、右侧的非模态 `Sheet`（`levi-agent-sheet`）；旁边的页面仍可操作，左边缘仍可拖动调整宽度（宽度按浏览器保存）。顶栏的开关、命令面板和原有的窗口事件 `levi-agent-toggle` / `levi-agent-connections` 都能打开它；它用 `levi-agent-state` 报告开关状态 |
+| Agent 工作台抽屉 | `agent-workbench.tsx` 把原有内容（未改动）放进顶栏下方、右侧的非模态 `Sheet`（`levi-agent-sheet`）；旁边的页面仍可操作，左边缘仍可拖动调整宽度（也可聚焦后按 ←/→，Shift 步长更大，Home/End 到最窄/最宽；它是带 `aria-valuemin`、`aria-valuenow`、`aria-valuemax`（单位 px，`panel-width.ts`）的分隔条；宽度按浏览器保存）。顶栏的开关、命令面板和原有的窗口事件 `levi-agent-toggle` / `levi-agent-connections` 都能打开它；它用 `levi-agent-state` 报告开关状态 |
 
 **快捷键。** 全局框架只绑定 ⌘K / Ctrl+K 和 `?`（也接受全角 `？` 和用 AltGr 打出的 `?`）。输入法组字时都不触发，`?` 在输入框中不触发，另一个模态对话框（确认框、页面自己的对话框、原生 `showModal()` 对话框）打开时也都不触发。在模态层里按的键（Tab 和 Esc 除外，由层自己处理）不会传到 `window` 上的监听，页面快捷键不会在对话框背后生效，和原生 `confirm()` 一样；确认框开着时切换页面，按“取消”作答。页面保留自己的快捷键：Space、↑/↓、J/K、Esc、Ctrl/⌘+S/Z/Y。
 
