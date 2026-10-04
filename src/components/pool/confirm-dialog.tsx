@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { useLocale } from "@/components/levi-locale";
+import { Button } from "@/components/ds";
 
 /** A modal confirmation. Focus starts on Cancel (a destructive button is
  * never the default), Esc cancels, and the browser keeps focus inside. */
@@ -40,7 +41,7 @@ export function ConfirmDialog({
   return (
     <dialog
       ref={ref}
-      className="levi-pool-dialog"
+      className="pg-pool-dialog ds-on-raised"
       aria-labelledby={titleId}
       onCancel={(e) => {
         e.preventDefault();
@@ -50,27 +51,22 @@ export function ConfirmDialog({
         if (open) onCancel();
       }}
     >
-      <div className="levi-pool-dialog-head">
+      <div className="pg-pool-dialog-head">
         <h2 id={titleId}>{title}</h2>
       </div>
-      <div className="levi-pool-confirm-body">{children}</div>
-      <div className="levi-row levi-pool-confirm-actions">
-        <button
-          ref={cancelRef}
-          type="button"
-          className="levi-secondary"
-          onClick={onCancel}
-        >
+      <div className="pg-pool-confirm-body">{children}</div>
+      <div className="pg-row pg-pool-confirm-actions">
+        <Button ref={cancelRef} onClick={onCancel}>
           {t("Cancel")}
-        </button>
-        <button
-          type="button"
-          className={danger ? "levi-pool-danger" : "levi-primary"}
-          disabled={busy || disabled}
+        </Button>
+        <Button
+          variant={danger ? "danger" : "primary"}
+          loading={busy}
+          disabled={disabled}
           onClick={onConfirm}
         >
           {busy ? t("Working…") : confirmLabel}
-        </button>
+        </Button>
       </div>
     </dialog>
   );

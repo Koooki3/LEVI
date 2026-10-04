@@ -1,4 +1,7 @@
 "use client";
+import { FileText, Play, Send, Trash2 } from "lucide-react";
+import { Button, Tooltip } from "@/components/ds";
+import { Problem, RequestProblem } from "@/components/pages-ui/feedback";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
@@ -32,7 +35,7 @@ export function jobTarget(j: PoolJob): string {
 function OutputCard({ item }: { item: DeleteOutput }) {
   const { t } = useLocale();
   return (
-    <dl className="levi-pool-facts">
+    <dl className="pg-pool-facts">
       <dt>{item.role === "partial" ? t("Unfinished output") : t("Export")}</dt>
       <dd>
         <code>{item.path}</code>
@@ -219,9 +222,9 @@ export function RecentJobs({
   const allSelected = jobs.length > 0 && selected.size === jobs.length;
 
   return (
-    <div className="levi-pool-joblist">
-      <div className="levi-row levi-pool-bulk">
-        <label className="levi-pool-check">
+    <div className="pg-pool-joblist">
+      <div className="pg-row pg-pool-bulk">
+        <label className="pg-pool-check">
           <input
             type="checkbox"
             checked={allSelected}
@@ -234,25 +237,24 @@ export function RecentJobs({
           />
           <span>{t("Select all")}</span>
         </label>
-        <button
-          type="button"
-          className="levi-secondary"
+        <Button
+          size="sm"
           disabled={!selected.size}
           onClick={() => void ask([...selected], false)}
         >
           {t("Clear selected")}
-        </button>
-        <button
-          type="button"
-          className="levi-pool-danger"
+        </Button>
+        <Button
+          size="sm"
+          variant="danger"
+          icon={Trash2}
           disabled={!selected.size}
           onClick={() => void ask([...selected], true)}
         >
           {t("Delete selected (with files)")}
-        </button>
-        <button
-          type="button"
-          className="levi-secondary"
+        </Button>
+        <Button
+          size="sm"
           disabled={!failed.length}
           onClick={() =>
             void ask(
@@ -263,114 +265,131 @@ export function RecentJobs({
           }
         >
           {t("Clear all failed and interrupted jobs")} ({failed.length})
-        </button>
+        </Button>
       </div>
-      <table className="levi-table">
-        <tbody>
-          {jobs.map((j) => (
-            <tr key={j.id}>
-              <td>
-                <input
-                  type="checkbox"
-                  checked={selected.has(j.id)}
-                  aria-label={`${t("Select")} ${j.id}`}
-                  onChange={() =>
-                    setSelected((s) => {
-                      const next = new Set(s);
-                      if (!next.delete(j.id)) next.add(j.id);
-                      return next;
-                    })
-                  }
-                />
-              </td>
-              <td>
-                <code>{j.id}</code>
-              </td>
-              <td>{t(j.kind)}</td>
-              <td>
-                <StatusBadge status={j.status} />
-                {live(j) && j.age_seconds !== undefined && (
-                  <small className="levi-pool-muted">
-                    {" "}
-                    {ago(j.age_seconds, t)}
-                  </small>
-                )}
-              </td>
-              <td className="levi-pool-ellipsis">
-                <code title={jobTarget(j)}>{jobTarget(j)}</code>
-              </td>
-              <td>{when(j.finished_at || j.started_at || j.planned_at)}</td>
-              <td className="levi-pool-actions">
-                {live(j) && (
-                  <button
-                    type="button"
-                    className="levi-pool-link"
-                    onClick={() => void act(j, "cancel")}
-                  >
-                    {t("Cancel")}
-                  </button>
-                )}
-                {j.resumable && (
-                  <button
-                    type="button"
-                    className="levi-pool-link"
-                    onClick={() => void act(j, "resume")}
-                  >
-                    {t("Resume")}
-                  </button>
-                )}
-                {j.kind === "export" &&
-                  (j.status === "done" || j.status === "done_with_errors") && (
-                    <button
-                      type="button"
-                      className="levi-pool-link"
-                      onClick={() => onPush(j)}
-                    >
-                      {t("Send to remote")}
-                    </button>
+      <div className="ds-table-wrap">
+        <table className="ds-table ds-table--compact">
+          <caption className="sr-only">{t("Recent jobs")}</caption>
+          <tbody>
+            {jobs.map((j) => (
+              <tr key={j.id}>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(j.id)}
+                    aria-label={`${t("Select")} ${j.id}`}
+                    onChange={() =>
+                      setSelected((s) => {
+                        const next = new Set(s);
+                        if (!next.delete(j.id)) next.add(j.id);
+                        return next;
+                      })
+                    }
+                  />
+                </td>
+                <td>
+                  <code>{j.id}</code>
+                </td>
+                <td>{t(j.kind)}</td>
+                <td>
+                  <StatusBadge status={j.status} />
+                  {live(j) && j.age_seconds !== undefined && (
+                    <small className="pg-pool-muted">
+                      {" "}
+                      {ago(j.age_seconds, t)}
+                    </small>
                   )}
-                <button
-                  type="button"
-                  className="levi-pool-link"
-                  onClick={() => onLog(j)}
-                >
-                  {t("View log")}
-                </button>
-                <button
-                  type="button"
-                  className="levi-pool-link"
-                  disabled={live(j)}
-                  title={
-                    live(j)
-                      ? t("Cancel the running job first")
-                      : t("Remove the record only; the exported data stays")
-                  }
-                  onClick={() => void clearOne(j)}
-                >
-                  {t("Clear record")}
-                </button>
-                {j.kind === "export" && (
-                  <button
-                    type="button"
-                    className="levi-pool-link levi-pool-danger-link"
-                    disabled={live(j)}
-                    title={
+                </td>
+                <td className="pg-pool-ellipsis">
+                  <code>{jobTarget(j)}</code>
+                </td>
+                <td className="tabular">
+                  {when(j.finished_at || j.started_at || j.planned_at)}
+                </td>
+                <td className="pg-pool-actions">
+                  {live(j) && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void act(j, "cancel")}
+                    >
+                      {t("Cancel")}
+                    </Button>
+                  )}
+                  {j.resumable && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={Play}
+                      onClick={() => void act(j, "resume")}
+                    >
+                      {t("Resume")}
+                    </Button>
+                  )}
+                  {j.kind === "export" &&
+                    (j.status === "done" ||
+                      j.status === "done_with_errors") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={Send}
+                        onClick={() => onPush(j)}
+                      >
+                        {t("Send to remote")}
+                      </Button>
+                    )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon={FileText}
+                    onClick={() => onLog(j)}
+                  >
+                    {t("View log")}
+                  </Button>
+                  <Tooltip
+                    content={
                       live(j)
                         ? t("Cancel the running job first")
-                        : t(
-                            "Remove the record and the export this job produced",
-                          )
+                        : t("Remove the record only; the exported data stays")
                     }
-                    onClick={() => void ask([j.id], true)}
                   >
-                    {t("Delete record and files")}
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={live(j)}
+                      onClick={() => void clearOne(j)}
+                    >
+                      {t("Clear record")}
+                    </Button>
+                  </Tooltip>
+                  {j.kind === "export" && (
+                    <Tooltip
+                      content={
+                        live(j)
+                          ? t("Cancel the running job first")
+                          : t(
+                              "Remove the record and the export this job produced",
+                            )
+                      }
+                    >
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="pg-danger-text"
+                        icon={Trash2}
+                        disabled={live(j)}
+                        onClick={() => void ask([j.id], true)}
+                      >
+                        {t("Delete record and files")}
+                      </Button>
+                    </Tooltip>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <ConfirmDialog
         open={!!pending}
         title={title}
@@ -401,41 +420,42 @@ export function RecentJobs({
               </p>
             )}
             {pending?.files && (
-              <p className="levi-pool-hint">
+              <p className="pg-pool-hint">
                 {t(
                   "Files are deleted only for the job that produced them; a directory made by another job with the same name stays.",
                 )}
               </p>
             )}
             {plans.length === 0 && !error && (
-              <p className="levi-pool-muted">{t("Checking…")}</p>
+              <p className="pg-pool-muted">{t("Checking…")}</p>
             )}
             {plans.map((p) => (
-              <section key={p.id} className="levi-pool-confirm-job">
+              <section key={p.id} className="pg-pool-confirm-job">
                 <h3>
                   <code>{p.id}</code> · <StatusBadge status={p.status} />
                 </h3>
                 {p.refused && (
-                  <p className="levi-error" role="alert">
-                    {t(p.refused)}
-                  </p>
+                  <Problem
+                    title={t("This job cannot be deleted")}
+                    why={t(p.refused)}
+                  />
                 )}
                 {pending?.files &&
                   p.outputs.map((o) => (
                     <div key={o.path}>
                       <OutputCard item={o} />
                       {o.kept_because && !o.will_delete && (
-                        <p className="levi-pool-hint">{t(o.kept_because)}</p>
+                        <p className="pg-pool-hint">{t(o.kept_because)}</p>
                       )}
                       {o.needs_force.map((n) => (
-                        <p key={n} className="levi-pool-bad" role="alert">
+                        <p key={n} className="pg-pool-bad" role="alert">
                           {t(n)}
                         </p>
                       ))}
                     </div>
                   ))}
                 {pending?.files && p.outputs.length === 0 && !p.refused && (
-                  <p className="levi-pool-muted">
+                  <p className="pg-pool-muted">
                     {t("This job has no files on disk.")}
                   </p>
                 )}
@@ -449,7 +469,7 @@ export function RecentJobs({
               </p>
             ) : null}
             {needsForce && (
-              <p className="levi-pool-bad" role="alert">
+              <p className="pg-pool-bad" role="alert">
                 {t(
                   "The folder was changed after the export. Deleting it needs this second confirmation.",
                 )}
@@ -458,9 +478,7 @@ export function RecentJobs({
           </>
         )}
         {error && (
-          <p className="levi-error" role="alert">
-            {t(error)}
-          </p>
+          <RequestProblem action="Nothing was deleted" message={error} />
         )}
       </ConfirmDialog>
     </div>

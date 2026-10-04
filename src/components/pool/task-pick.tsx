@@ -1,4 +1,7 @@
 "use client";
+import { ArrowUpRight, Check, Pencil } from "lucide-react";
+import { Button, Icon, SkeletonText } from "@/components/ds";
+import { RequestProblem } from "@/components/pages-ui/feedback";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useLocale } from "@/components/levi-locale";
@@ -38,8 +41,8 @@ export function TaskPick({
   const [editing, setEditing] = useState(false);
   const short = report && (report.shortfall > 0 || report.notes.length > 0);
   return (
-    <div className="levi-pool-pick">
-      <div className="levi-pool-pick-line">
+    <div className="pg-pool-pick">
+      <div className="pg-pool-pick-line">
         {report ? (
           <span className="tabular">
             {t("Picked")} <strong>{report.selected.toLocaleString()}</strong>{" "}
@@ -51,24 +54,26 @@ export function TaskPick({
               : ""}
           </span>
         ) : (
-          <span className="levi-pool-muted">…</span>
+          <span className="pg-pool-muted">…</span>
         )}
-        <span className="levi-pool-badge" title={t("How to pick")}>
+        <span className="pg-pool-badge">
+          <span className="sr-only">{t("How to pick")}: </span>
           {t(STRATEGY_LABELS[entry.strategy])}
         </span>
-        <button
-          type="button"
-          className="levi-pool-link"
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={editing ? Check : Pencil}
           aria-expanded={editing}
           onClick={() => setEditing(!editing)}
         >
           {editing ? t("Done") : t("Edit")}
-        </button>
+        </Button>
       </div>
       {short && report && (
-        <ul className="levi-pool-notes">
+        <ul className="pg-pool-notes">
           {report.shortfall > 0 && (
-            <li className="levi-pool-warn">
+            <li className="pg-pool-warn">
               {t("Requested")} {report.requested?.toLocaleString()}, {t("only")}{" "}
               {report.selected.toLocaleString()} {t("available")}
             </li>
@@ -76,7 +81,7 @@ export function TaskPick({
           {report.notes
             .filter((n) => n !== "fewer_available")
             .map((n) => (
-              <li key={n} className="levi-pool-warn">
+              <li key={n} className="pg-pool-warn">
                 {t(SELECTION_NOTES[n] || n)}
                 {n === "success_short" && report.shortfall_successes > 0
                   ? ` (−${report.shortfall_successes})`
@@ -140,34 +145,43 @@ export function PickedList({
   }, [open, task, refreshKey]);
   return (
     <details
-      className="levi-pool-picked"
+      className="pg-pool-picked"
       onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
     >
       <summary>{t("Show picked episodes")}</summary>
-      {open && error && <p className="levi-error">{error}</p>}
+      {open && error && (
+        <RequestProblem
+          action="The picked episodes could not be listed"
+          message={error}
+        />
+      )}
       {open && !data && !error && (
-        <p className="levi-pool-muted">{t("Computing…")}</p>
+        <div className="pg-pool-picked-loading" aria-busy="true">
+          <span className="sr-only">{t("Computing…")}</span>
+          <SkeletonText lines={3} />
+        </div>
       )}
       {open && data && (
         <ol
-          className="levi-pool-picked-list"
+          className="pg-pool-picked-list"
           aria-label={`${t("Picked episodes")}: ${task}`}
         >
           {data.episodes.map((row) => (
             <li key={row.key} title={row.sel_stratum}>
-              <span className="levi-pool-picked-name">
+              <span className="pg-pool-picked-name">
                 {row.viewer ? (
-                  <Link className="text-cyan-300" href={row.viewer}>
-                    {shortName(row.episode)} ↗
+                  <Link href={row.viewer}>
+                    {shortName(row.episode)}
+                    <Icon icon={ArrowUpRight} />
                   </Link>
                 ) : (
-                  <code className="levi-pool-path" title={row.episode}>
+                  <code className="pg-pool-path" title={row.episode}>
                     {shortName(row.episode)}
                   </code>
                 )}
               </span>
               <span
-                className={`levi-pool-outcome ${row.outcome || "none"}`}
+                className={`pg-pool-outcome ${row.outcome || "none"}`}
                 title={
                   row.outcome_source
                     ? t(
@@ -186,7 +200,7 @@ export function PickedList({
               <span className="tabular" title={t("Quality")}>
                 {row.quality_score.toFixed(2)}
               </span>
-              <span className="levi-pool-why">
+              <span className="pg-pool-why">
                 {row.selection_reason
                   .map((r) => t(PICK_REASONS[r] || r))
                   .join(" · ")}
@@ -223,24 +237,24 @@ export function GripperMix({
   if (!entries.length) return null;
   const known = entries.some(([g]) => g !== "unknown");
   return (
-    <div className="levi-pool-mix">
+    <div className="pg-pool-mix">
       <h4>{t("Grippers")}</h4>
-      <div className="levi-pool-constraints">
+      <div className="pg-pool-constraints">
         {entries.map(([g, n]) => (
-          <span key={g} className="levi-pool-chip">
+          <span key={g} className="pg-pool-chip">
             {gripperLabel(g, t)} {n.toLocaleString()}
           </span>
         ))}
       </div>
       {!!declared && (
-        <p className="levi-pool-hint">
+        <p className="pg-pool-hint">
           {t(
             "{count} episode(s): the gripper comes from a declaration in pool/rules.json, not from the metadata.",
           ).replace("{count}", declared.toLocaleString())}
         </p>
       )}
       {!known && (
-        <p className="levi-pool-hint">
+        <p className="pg-pool-hint">
           {t(
             "No gripper is recorded for these sources; their episodes export as unknown.",
           )}
@@ -257,12 +271,12 @@ export function MixSummary({ mix }: { mix: Mix }) {
   if (!mix.episodes) return null;
   const decided = mix.successes + mix.failures;
   return (
-    <div className="levi-pool-mix">
+    <div className="pg-pool-mix">
       <h4>{t("Mix")}</h4>
       {decided > 0 && (
         <>
           <div
-            className="levi-pool-mixbar"
+            className="pg-pool-mixbar"
             role="img"
             aria-label={`${t("successes")} ${mix.successes}, ${t("failures")} ${mix.failures}`}
           >
@@ -275,7 +289,7 @@ export function MixSummary({ mix }: { mix: Mix }) {
               style={{ width: `${(mix.failures / mix.episodes) * 100}%` }}
             />
           </div>
-          <p className="levi-pool-hint tabular">
+          <p className="pg-pool-hint tabular">
             {t("successes")} {mix.successes.toLocaleString()} (
             {share(mix.successes, decided)}) · {t("failures")}{" "}
             {mix.failures.toLocaleString()} ({share(mix.failures, decided)})
@@ -286,22 +300,22 @@ export function MixSummary({ mix }: { mix: Mix }) {
         </>
       )}
       {decided === 0 && (
-        <p className="levi-pool-hint">{t("No outcomes recorded here.")}</p>
+        <p className="pg-pool-hint">{t("No outcomes recorded here.")}</p>
       )}
-      <div className="levi-pool-constraints">
+      <div className="pg-pool-constraints">
         {Object.entries(mix.categories).map(([c, n]) => (
-          <span key={c} className="levi-pool-chip">
+          <span key={c} className="pg-pool-chip">
             {t(CATEGORY_NAMES[c] || c)} {share(n, mix.episodes)}
           </span>
         ))}
         {Object.entries(mix.policy_methods).map(([m, n]) => (
-          <span key={m} className="levi-pool-chip">
+          <span key={m} className="pg-pool-chip">
             {t(METHOD_LABELS[m] || m)} {share(n, mix.episodes)}
           </span>
         ))}
       </div>
       {mix.lean && (
-        <p className="levi-pool-warn" role="status">
+        <p className="pg-pool-warn" role="status">
           {t("The composition leans to one group")}:{" "}
           {t(
             mix.lean.dimension === "category"

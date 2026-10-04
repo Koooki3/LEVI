@@ -2,6 +2,18 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
+import {
+  CircleAlert,
+  ClipboardCopy,
+  FileText,
+  Play,
+  RefreshCw,
+  RotateCcw,
+  TriangleAlert,
+  X,
+} from "lucide-react";
+import { Button, Icon, IconButton, Tooltip } from "@/components/ds";
+import { RequestProblem } from "@/components/pages-ui/feedback";
 import { ago, pollDelay } from "./pool-progress";
 import type { PoolJob } from "./types";
 
@@ -95,37 +107,28 @@ export function LogDialog({
   return (
     <dialog
       ref={ref}
-      className="levi-pool-dialog levi-pool-logdialog"
+      className="pg-pool-dialog pg-pool-logdialog ds-on-raised"
       aria-labelledby={titleId}
       onClose={onClose}
     >
-      <form method="dialog" className="levi-pool-dialog-head">
+      <form method="dialog" className="pg-pool-dialog-head">
         <h2 id={titleId}>
           {t("Job log")} <code>{id}</code>
         </h2>
-        <button aria-label={t("Close")} className="levi-secondary">
-          ×
-        </button>
+        <IconButton type="submit" icon={X} label={t("Close")} />
       </form>
       {error && (
-        <p className="levi-error" role="alert">
-          {t(error)}
-        </p>
+        <RequestProblem action="The log could not be read" message={error} />
       )}
-      <pre className="levi-pool-log" tabIndex={0}>
+      <pre className="pg-pool-log" tabIndex={0}>
         {text || t("The log is empty.")}
       </pre>
-      <div className="levi-row">
-        <button
-          type="button"
-          className="levi-secondary"
-          onClick={() => void load()}
-        >
+      <div className="pg-row">
+        <Button icon={RefreshCw} onClick={() => void load()}>
           {t("Refresh")}
-        </button>
-        <button
-          type="button"
-          className="levi-secondary"
+        </Button>
+        <Button
+          icon={ClipboardCopy}
           onClick={() => {
             void navigator.clipboard
               ?.writeText(text)
@@ -133,7 +136,7 @@ export function LogDialog({
           }}
         >
           {copied ? t("Copied") : t("Copy")}
-        </button>
+        </Button>
       </div>
     </dialog>
   );
@@ -187,14 +190,15 @@ export function JobBanner({
     }
   }
   return (
-    <div className={`levi-pool-banner ${tone}`} role="alert">
-      <p className="levi-pool-banner-title">
+    <div className={`pg-pool-banner ${tone}`} role="alert">
+      <p className="pg-pool-banner-title">
+        <Icon icon={tone === "warn" ? TriangleAlert : CircleAlert} />
         <strong>{t(title)}</strong>
         {job.reason && status === "interrupted" && (
           <span> · {t(job.reason)}</span>
         )}
         {job.age_seconds !== undefined && job.age_seconds !== null && (
-          <span className="levi-pool-muted">
+          <span className="pg-pool-muted">
             {" "}
             · {t("Last update")} {ago(job.age_seconds, t)}
           </span>
@@ -202,63 +206,66 @@ export function JobBanner({
       </p>
       {detail && <p>{t(detail)}</p>}
       {info?.hint && status !== "done_with_errors" && (
-        <p className="levi-pool-hint">{t(info.hint)}</p>
+        <p className="pg-pool-hint">{t(info.hint)}</p>
       )}
       {job.partial && job.resumable && (
-        <p className="levi-pool-hint">
+        <p className="pg-pool-hint">
           {t("Unfinished output kept in")} <code>{job.partial}</code>
         </p>
       )}
-      {error && <p className="levi-error">{t(error)}</p>}
-      <div className="levi-row">
+      {error && (
+        <RequestProblem action="The action did not complete" message={error} />
+      )}
+      <div className="pg-row">
         {job.resumable && (
-          <button
-            type="button"
-            className="levi-primary"
+          <Button
+            variant="primary"
+            icon={Play}
             disabled={busy}
             onClick={() => void call(job, "resume")}
           >
             {t("Resume")}
-          </button>
+          </Button>
         )}
         {job.rerunnable && status !== "done_with_errors" && (
-          <button
-            type="button"
-            className={error ? "levi-primary" : "levi-secondary"}
-            disabled={busy}
-            title={t(
+          <Tooltip
+            content={t(
               "Plan again from the saved recipe; unfinished output goes",
             )}
-            onClick={() => void call(job, "rerun")}
           >
-            {t("Re-run")}
-          </button>
+            <Button
+              variant={error && !job.resumable ? "primary" : "secondary"}
+              icon={RotateCcw}
+              disabled={busy}
+              onClick={() => void call(job, "rerun")}
+            >
+              {t("Re-run")}
+            </Button>
+          </Tooltip>
         )}
         {status !== "done_with_errors" && (
-          <button
-            type="button"
-            className="levi-secondary"
-            disabled={busy}
-            title={t("Stop for good and remove the unfinished output")}
-            onClick={() => void call(job, "cancel")}
+          <Tooltip
+            content={t("Stop for good and remove the unfinished output")}
           >
-            {t("Cancel")}
-          </button>
+            <Button
+              icon={X}
+              disabled={busy}
+              onClick={() => void call(job, "cancel")}
+            >
+              {t("Cancel")}
+            </Button>
+          </Tooltip>
         )}
-        <button
-          type="button"
-          className="levi-secondary"
-          onClick={() => onLog(job)}
-        >
+        <Button variant="ghost" icon={FileText} onClick={() => onLog(job)}>
           {t("View log")}
-        </button>
-        <button
-          type="button"
-          className="levi-secondary"
+        </Button>
+        <Button
+          variant="ghost"
+          icon={ClipboardCopy}
           onClick={() => void copyReport()}
         >
           {copied ? t("Copied") : t("Copy error report")}
-        </button>
+        </Button>
       </div>
     </div>
   );

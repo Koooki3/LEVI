@@ -1,4 +1,11 @@
 "use client";
+import { Plus, Send, Server, Trash2, X } from "lucide-react";
+import { Button, IconButton } from "@/components/ds";
+import {
+  EmptyLine,
+  JobCard,
+  RequestProblem,
+} from "@/components/pages-ui/feedback";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
@@ -69,28 +76,26 @@ export function PushDialog({
   return (
     <dialog
       ref={ref}
-      className="levi-pool-dialog"
+      className="pg-pool-dialog ds-on-raised"
       aria-labelledby="pool-push-title"
       onClose={onClose}
     >
-      <form method="dialog" className="levi-pool-dialog-head">
+      <form method="dialog" className="pg-pool-dialog-head">
         <h2 id="pool-push-title">{t("Send to remote")}</h2>
-        <button aria-label={t("Close")} className="levi-secondary">
-          ×
-        </button>
+        <IconButton type="submit" icon={X} label={t("Close")} />
       </form>
-      <p className="levi-pool-hint">
+      <p className="pg-pool-hint">
         {t("Export")}: <code>{source}</code>
       </p>
-      <p className="levi-pool-hint">
+      <p className="pg-pool-hint">
         {t(
           "rsync over SSH with your SSH key (no passwords). The host key must already be in known_hosts; an interrupted push resumes when you send it again.",
         )}
       </p>
-      <fieldset className="levi-pool-targets">
+      <fieldset className="pg-pool-targets">
         <legend>{t("Remote target")}</legend>
         {targets.map((x) => (
-          <label key={x.name} className="levi-pool-check">
+          <label key={x.name} className="pg-pool-check">
             <input
               type="radio"
               name="pool-target"
@@ -100,9 +105,11 @@ export function PushDialog({
             <span className="grow">
               <strong>{x.name}</strong> <code>{x.display}</code>
             </span>
-            <button
-              type="button"
-              className="levi-pool-link"
+            <Button
+              size="sm"
+              variant="ghost"
+              className="pg-danger-text"
+              icon={Trash2}
               aria-label={`${t("Delete")}: ${x.name}`}
               onClick={() =>
                 void act(async () => {
@@ -124,15 +131,15 @@ export function PushDialog({
               }
             >
               {t("Delete")}
-            </button>
+            </Button>
           </label>
         ))}
         {!targets.length && (
-          <p className="levi-pool-muted">{t("No remote targets yet.")}</p>
+          <EmptyLine icon={Server}>{t("No remote targets yet.")}</EmptyLine>
         )}
         {adding ? (
           <form
-            className="levi-pool-fields"
+            className="pg-pool-fields"
             onSubmit={(e) => {
               e.preventDefault();
               void act(async () => {
@@ -156,7 +163,7 @@ export function PushDialog({
             <label>
               <span>{t("Name")}</span>
               <input
-                className="levi-input"
+                className="ds-input ds-focus"
                 required
                 pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}"
                 placeholder="gpu-server"
@@ -169,7 +176,7 @@ export function PushDialog({
                 {t("[user@]host:/path (host may be an ~/.ssh/config alias)")}
               </span>
               <input
-                className="levi-input"
+                className="ds-input ds-focus"
                 required
                 placeholder="wk@gpu-server:/data/datasets"
                 value={newSpec}
@@ -181,7 +188,7 @@ export function PushDialog({
             <label>
               <span>{t("Port (optional)")}</span>
               <input
-                className="levi-input"
+                className="ds-input ds-focus"
                 type="number"
                 min={1}
                 max={65535}
@@ -189,38 +196,36 @@ export function PushDialog({
                 onChange={(e) => setNewPort(e.target.value)}
               />
             </label>
-            <div className="levi-row wide">
-              <button className="levi-primary">{t("Save target")}</button>
+            <div className="pg-row wide">
+              <Button type="submit">{t("Save target")}</Button>
               {targets.length > 0 && (
-                <button
-                  type="button"
-                  className="levi-secondary"
-                  onClick={() => setAdding(false)}
-                >
+                <Button variant="ghost" onClick={() => setAdding(false)}>
                   {t("Cancel")}
-                </button>
+                </Button>
               )}
             </div>
           </form>
         ) : (
-          <button
-            type="button"
-            className="levi-pool-link"
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={Plus}
+            className="pg-align-start"
             onClick={() => setAdding(true)}
           >
-            + {t("Add a target")}
-          </button>
+            {t("Add a target")}
+          </Button>
         )}
       </fieldset>
       {chosen && (
-        <p className="levi-pool-hint">
+        <p className="pg-pool-hint">
           {t("Destination")}:{" "}
           <code>
             {chosen.display?.split(" ")[0]}/{source.split("/").pop()}/
           </code>
         </p>
       )}
-      <label className="levi-pool-check">
+      <label className="pg-pool-check">
         <input
           type="checkbox"
           checked={dryRun}
@@ -228,10 +233,10 @@ export function PushDialog({
         />
         <span>{t("Dry run (list only, send nothing)")}</span>
       </label>
-      <div className="levi-row">
-        <button
-          type="button"
-          className="levi-primary"
+      <div className="pg-row">
+        <Button
+          variant="primary"
+          icon={Send}
           disabled={!target || !exportJob || running}
           onClick={() =>
             void act(async () => {
@@ -246,11 +251,10 @@ export function PushDialog({
           }
         >
           {t("Send")}
-        </button>
+        </Button>
         {running && job && (
-          <button
-            type="button"
-            className="levi-secondary danger"
+          <Button
+            icon={X}
             onClick={() =>
               void act(async () => {
                 await leviRequest(
@@ -261,32 +265,30 @@ export function PushDialog({
             }
           >
             {t("Cancel transfer")}
-          </button>
+          </Button>
         )}
       </div>
       {error && (
-        <p className="levi-error" role="alert">
-          {t(error)}
-        </p>
+        <RequestProblem action="The transfer did not start" message={error} />
       )}
       {job && (
-        <div className="levi-pool-job">
-          <p className="levi-row">
-            <StatusBadge status={job.status} />
-            <code>{job.destination}</code>
-          </p>
+        <JobCard
+          label={t("Send to remote")}
+          status={<StatusBadge status={job.status} />}
+          title={<code>{job.destination}</code>}
+        >
           <PoolJobProgress job={job} />
           <JobBanner job={job} onJob={setJob} onLog={setLogFor} />
           {(job.status === "done" || job.status === "done_with_errors") && (
-            <p className="levi-pool-hint">
+            <p className="pg-pool-hint">
               {job.dry_run ? t("Dry run finished") : t("Sent")}:{" "}
               {bytes(job.result?.bytes)} · {duration(job.result?.seconds)}
             </p>
           )}
           {job.error && job.status === "cancelled" && (
-            <pre className="levi-code">{t(job.error)}</pre>
+            <pre className="pg-code">{t(job.error)}</pre>
           )}
-        </div>
+        </JobCard>
       )}
       <LogDialog job={logFor} onClose={() => setLogFor(null)} />
     </dialog>

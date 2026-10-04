@@ -1,4 +1,16 @@
 "use client";
+import {
+  ArrowUpRight,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Lock,
+  Plus,
+  UserCheck,
+} from "lucide-react";
+import { Badge, Button, Icon, StatusDot, Tooltip } from "@/components/ds";
+import { RequestProblem } from "@/components/pages-ui/feedback";
 import { Fragment, useState } from "react";
 import Link from "next/link";
 import { useLocale } from "@/components/levi-locale";
@@ -83,8 +95,8 @@ export function TaskTable({
     (row) => Object.keys(row.policy_methods || {}).length > 0,
   );
   return (
-    <div className="levi-pool-table-wrap">
-      <table className="levi-table levi-pool-table">
+    <div className="pg-pool-table-wrap">
+      <table className="ds-table ds-table--compact pg-pool-table">
         <caption className="sr-only">{t("Tasks")}</caption>
         <thead>
           <tr>
@@ -120,11 +132,11 @@ export function TaskTable({
             const chooser = open?.task === row.task ? open : null;
             return (
               <Fragment key={row.task}>
-                <tr className={focus === row.task ? "levi-pool-focus" : ""}>
+                <tr className={focus === row.task ? "pg-pool-focus" : ""}>
                   <td>
                     <button
                       type="button"
-                      className="levi-pool-task"
+                      className="pg-pool-task"
                       title={row.spellings.join("\n")}
                       aria-pressed={focus === row.task}
                       onClick={() =>
@@ -134,7 +146,7 @@ export function TaskTable({
                       {row.task}
                     </button>
                     {row.spellings.length > 1 && (
-                      <span className="levi-pool-muted">
+                      <span className="pg-pool-muted">
                         {" "}
                         · {row.spellings.length} {t("spellings")}
                       </span>
@@ -160,38 +172,36 @@ export function TaskTable({
                       : `${Math.round(row.success_rate * 100)}%`}
                   </td>
                   {showMethods && (
-                    <td className="levi-pool-methods">
+                    <td className="pg-pool-methods">
                       {POLICY_METHODS.filter(
                         (m) => row.policy_methods?.[m],
                       ).map((m) => (
-                        <span
-                          key={m}
-                          className="levi-pool-badge"
-                          title={t(METHOD_LABELS[m])}
-                        >
+                        <span key={m} className="pg-pool-badge">
                           {t(METHOD_LABELS[m])} {row.policy_methods?.[m]}
                         </span>
                       ))}
                     </td>
                   )}
                   <td>
-                    <button
-                      type="button"
-                      className="levi-pool-add"
-                      disabled={added || busy === row.task}
+                    <Button
+                      size="sm"
+                      variant={added ? "ghost" : "secondary"}
+                      icon={added ? Check : Plus}
+                      loading={busy === row.task}
+                      disabled={added}
                       aria-expanded={chooser ? true : undefined}
                       aria-label={`${t("Add to composition")}: ${row.task}`}
                       onClick={() => void add(row)}
                     >
-                      {added ? t("Added") : `+ ${t("Add")}`}
-                    </button>
+                      {added ? t("Added") : t("Add")}
+                    </Button>
                   </td>
                 </tr>
                 {chooser && (
-                  <tr className="levi-pool-chooser-row">
+                  <tr className="pg-pool-chooser-row">
                     <td colSpan={columns.length + 5 + (showMethods ? 1 : 0)}>
                       <div
-                        className="levi-pool-chooser"
+                        className="pg-pool-chooser"
                         role="group"
                         aria-label={`${t("Choose episodes")}: ${row.task}`}
                         onKeyDown={(e) => {
@@ -213,16 +223,16 @@ export function TaskTable({
                           }
                         />
                         {chooser.info.earlier_counts.length > 0 && (
-                          <p className="levi-pool-hint">
+                          <p className="pg-pool-hint">
                             {t(
                               "Suggested count: the median of the tasks already added.",
                             )}
                           </p>
                         )}
-                        <div className="levi-row">
-                          <button
-                            type="button"
-                            className="levi-primary"
+                        <div className="pg-row">
+                          <Button
+                            variant="primary"
+                            icon={Plus}
                             autoFocus
                             onClick={() => {
                               onAdd(chooser.draft);
@@ -230,14 +240,10 @@ export function TaskTable({
                             }}
                           >
                             {t("Add to composition")}
-                          </button>
-                          <button
-                            type="button"
-                            className="levi-secondary"
-                            onClick={() => setOpen(null)}
-                          >
+                          </Button>
+                          <Button variant="ghost" onClick={() => setOpen(null)}>
                             {t("Cancel")}
-                          </button>
+                          </Button>
                         </div>
                       </div>
                     </td>
@@ -250,7 +256,7 @@ export function TaskTable({
             <tr>
               <td
                 colSpan={columns.length + 5 + (showMethods ? 1 : 0)}
-                className="levi-pool-muted"
+                className="pg-pool-muted"
               >
                 {t("No tasks match these filters.")}
               </td>
@@ -259,9 +265,10 @@ export function TaskTable({
         </tbody>
       </table>
       {problem && (
-        <p className="levi-error" role="alert">
-          {problem}
-        </p>
+        <RequestProblem
+          action="The task could not be added"
+          message={problem}
+        />
       )}
     </div>
   );
@@ -269,17 +276,24 @@ export function TaskTable({
 
 function OutcomeCell({ row }: { row: EpisodeRow }) {
   const { t } = useLocale();
-  if (!row.outcome) return <span className="levi-pool-muted">—</span>;
+  if (!row.outcome) return <span className="pg-pool-muted">—</span>;
   const source =
     row.outcome_source === "human" ? t("human label") : t("robot flag");
   return (
-    <span
-      className={`levi-pool-outcome ${row.outcome}`}
-      title={`${t(row.outcome)} · ${source}`}
+    <StatusDot
+      tone={
+        row.outcome === "success"
+          ? "success"
+          : row.outcome === "failure"
+            ? "danger"
+            : "neutral"
+      }
+      className="pg-pool-outcome"
     >
       {t(row.outcome)}
-      {row.human_label ? " ✓" : ""}
-    </span>
+      <span className="sr-only"> · {source}</span>
+      {row.human_label && <Icon icon={UserCheck} label={t("human label")} />}
+    </StatusDot>
   );
 }
 
@@ -310,8 +324,8 @@ export function EpisodeTable({
   const showPolicy = rows.some((row) => row.policy_method || row.policy_model);
   return (
     <div>
-      <div className="levi-pool-table-wrap">
-        <table className="levi-table levi-pool-table">
+      <div className="pg-pool-table-wrap">
+        <table className="ds-table ds-table--compact pg-pool-table">
           <caption className="sr-only">{t("Episodes")}</caption>
           <thead>
             <tr>
@@ -335,12 +349,15 @@ export function EpisodeTable({
                 <tr key={row.key}>
                   <td>
                     {row.heldout ? (
-                      <span
-                        className="levi-pool-badge heldout"
-                        title={t("Held-out episodes are never exported")}
+                      <Tooltip
+                        content={t("Held-out episodes are never exported")}
                       >
-                        {t("held-out")}
-                      </span>
+                        <span tabIndex={0} className="pg-badge-trigger">
+                          <Badge tone="warning" icon={Lock}>
+                            {t("held-out")}
+                          </Badge>
+                        </span>
+                      </Tooltip>
                     ) : inComposition ? (
                       <input
                         type="checkbox"
@@ -349,37 +366,39 @@ export function EpisodeTable({
                         onChange={() => onToggleExclude(row.key)}
                       />
                     ) : (
-                      <span className="levi-pool-muted">·</span>
+                      <span className="pg-pool-muted">·</span>
                     )}
                   </td>
-                  <td className="levi-pool-source" title={row.source_path}>
+                  <td className="pg-pool-source" title={row.source_path}>
                     {row.source}
                   </td>
                   <td>
                     {t(CATEGORY_SHORT[row.category] || row.category)}
                     {!row.canonical && (
-                      <span className="levi-pool-badge">{t("copy")}</span>
+                      <Badge icon={Copy} className="pg-badge-gap">
+                        {t("copy")}
+                      </Badge>
                     )}
                     {row.nonstandard && (
-                      <span className="levi-pool-badge warn">
+                      <Badge tone="warning" className="pg-badge-gap">
                         {t("non-standard")}
-                      </span>
+                      </Badge>
                     )}
                     {!row.exportable && !row.nonstandard && (
-                      <span className="levi-pool-badge warn">
+                      <Badge tone="warning" className="pg-badge-gap">
                         {t("not exportable")}
-                      </span>
+                      </Badge>
                     )}
                   </td>
                   <td
-                    className="levi-pool-ellipsis"
+                    className="pg-pool-ellipsis"
                     title={row.task_raw || row.task}
                   >
                     {row.task}
                   </td>
                   {showPolicy && (
                     <td
-                      className="levi-pool-policy"
+                      className="pg-pool-policy"
                       title={
                         [
                           row.policy_model,
@@ -391,7 +410,7 @@ export function EpisodeTable({
                       }
                     >
                       {policyLabel(row, t) || (
-                        <span className="levi-pool-muted">—</span>
+                        <span className="pg-pool-muted">—</span>
                       )}
                     </td>
                   )}
@@ -399,13 +418,13 @@ export function EpisodeTable({
                     className={
                       row.gripper && row.gripper !== "unknown"
                         ? undefined
-                        : "levi-pool-muted"
+                        : "pg-pool-muted"
                     }
                     title={gripperTitle(row, t)}
                   >
                     {gripperLabel(row.gripper, t)}
                     {gripperDeclared(row) && (
-                      <span className="levi-pool-badge">{t("declared")}</span>
+                      <span className="pg-pool-badge">{t("declared")}</span>
                     )}
                   </td>
                   <td className="num tabular">
@@ -414,14 +433,15 @@ export function EpisodeTable({
                   <td>
                     <OutcomeCell row={row} />
                   </td>
-                  <td className="levi-pool-ellipsis">
+                  <td className="pg-pool-ellipsis">
                     {row.viewer ? (
-                      <Link className="text-cyan-300" href={row.viewer}>
-                        {row.episode} ↗
+                      <Link href={row.viewer}>
+                        {row.episode}
+                        <Icon icon={ArrowUpRight} />
                       </Link>
                     ) : (
                       <code
-                        className="levi-pool-path"
+                        className="pg-pool-path"
                         title={`${row.source_path}/${row.episode}`}
                       >
                         {row.format === "lerobot"
@@ -435,7 +455,7 @@ export function EpisodeTable({
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={showPolicy ? 9 : 8} className="levi-pool-muted">
+                <td colSpan={showPolicy ? 9 : 8} className="pg-pool-muted">
                   {t("No episodes match these filters.")}
                 </td>
               </tr>
@@ -443,26 +463,26 @@ export function EpisodeTable({
           </tbody>
         </table>
       </div>
-      <nav className="levi-pool-pager" aria-label={t("Pages")}>
-        <button
-          type="button"
-          className="levi-secondary"
+      <nav className="pg-pool-pager" aria-label={t("Pages")}>
+        <Button
+          size="sm"
+          icon={ChevronLeft}
           disabled={offset === 0}
           onClick={() => onPage(Math.max(0, offset - pageSize))}
         >
-          ← {t("Previous page")}
-        </button>
+          {t("Previous page")}
+        </Button>
         <span className="tabular text-xs">
           {total ? `${offset + 1}–${last}` : "0"} / {total.toLocaleString()}
         </span>
-        <button
-          type="button"
-          className="levi-secondary"
+        <Button
+          size="sm"
+          iconEnd={ChevronRight}
           disabled={offset + pageSize >= total}
           onClick={() => onPage(offset + pageSize)}
         >
-          {t("Next page")} →
-        </button>
+          {t("Next page")}
+        </Button>
       </nav>
     </div>
   );

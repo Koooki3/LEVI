@@ -132,20 +132,20 @@ export function SelectionFields({
     onChange({ count: bounded >= available ? null : bounded });
   };
   return (
-    <div className="levi-pool-picker">
-      <div className="levi-pool-picker-count">
+    <div className="pg-pool-picker">
+      <div className="pg-pool-picker-count">
         <label htmlFor={`${id}-n`}>
           <span>
             {t("Episodes to take")}{" "}
-            <span className="levi-pool-muted">
+            <span className="pg-pool-muted">
               ({t("of")} {available.toLocaleString()})
             </span>
           </span>
         </label>
-        <div className="levi-pool-picker-row">
+        <div className="pg-pool-picker-row">
           <input
             id={`${id}-n`}
-            className="levi-input tabular"
+            className="ds-input ds-focus tabular"
             type="number"
             min={1}
             max={available}
@@ -168,7 +168,7 @@ export function SelectionFields({
           />
           <button
             type="button"
-            className="levi-pool-link"
+            className="pg-pool-link"
             disabled={value.count === null}
             onClick={() => onChange({ count: null })}
           >
@@ -176,12 +176,12 @@ export function SelectionFields({
           </button>
         </div>
       </div>
-      <div className="levi-pool-picker-two">
+      <div className="pg-pool-picker-two">
         <label htmlFor={`${id}-share`}>
           <span>{t("Share of successes")}</span>
           <select
             id={`${id}-share`}
-            className="levi-input"
+            className="ds-input ds-focus"
             value={share}
             onChange={(e) => {
               const next = e.target.value as Share;
@@ -211,7 +211,7 @@ export function SelectionFields({
             <span>{t("Successes, %")}</span>
             <input
               id={`${id}-pct`}
-              className="levi-input tabular"
+              className="ds-input ds-focus tabular"
               type="number"
               min={0}
               max={100}
@@ -231,7 +231,7 @@ export function SelectionFields({
           <span>{t("How to pick")}</span>
           <select
             id={`${id}-how`}
-            className="levi-input"
+            className="ds-input ds-focus"
             value={value.strategy}
             onChange={(e) => onChange({ strategy: e.target.value as Strategy })}
           >
@@ -243,7 +243,7 @@ export function SelectionFields({
           </select>
         </label>
       </div>
-      <p className="levi-pool-hint" aria-live="polite">
+      <p className="pg-pool-hint" aria-live="polite">
         {t("About")} {guess.successes.toLocaleString()} {t("successes")} ·{" "}
         {guess.failures.toLocaleString()} {t("failures")}
         {guess.unknown > 0
@@ -254,7 +254,7 @@ export function SelectionFields({
         {failures.toLocaleString()} {t("failures")}
       </p>
       {(guess.shortSuccesses > 0 || guess.shortFailures > 0) && (
-        <p className="levi-pool-warn" role="status">
+        <p className="pg-pool-warn" role="status">
           {guess.shortSuccesses > 0
             ? t(
                 "Not enough successes for the requested share; failures fill in",
@@ -264,7 +264,7 @@ export function SelectionFields({
               )}
         </p>
       )}
-      <p className="levi-pool-hint">
+      <p className="pg-pool-hint">
         {value.strategy === "quality"
           ? t(
               "Smart pick prefers human-labelled, complete, efficient episodes and spreads them over runs, checkpoints and dates.",

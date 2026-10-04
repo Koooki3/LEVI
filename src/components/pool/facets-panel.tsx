@@ -1,4 +1,6 @@
 "use client";
+import { FilterX } from "lucide-react";
+import { Button, Tooltip } from "@/components/ds";
 import { useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import {
@@ -74,19 +76,21 @@ function PolicyFacet({
   return (
     <fieldset>
       <legend>{t(legend)}</legend>
-      <div className="levi-pool-scroll">
+      <div className="pg-pool-scroll">
         {entries.map(([value, n]) => (
-          <label key={value} className="levi-pool-check" title={value}>
-            <input
-              type="checkbox"
-              checked={selected.includes(value)}
-              onChange={() => onToggle(value)}
-            />
-            <span className="grow levi-pool-ellipsis">
-              {label ? label(value) : value}
-            </span>
-            <span className="levi-pool-count">{n.toLocaleString()}</span>
-          </label>
+          <Tooltip key={value} content={value}>
+            <label className="pg-pool-check">
+              <input
+                type="checkbox"
+                checked={selected.includes(value)}
+                onChange={() => onToggle(value)}
+              />
+              <span className="grow pg-pool-ellipsis">
+                {label ? label(value) : value}
+              </span>
+              <span className="pg-pool-count">{n.toLocaleString()}</span>
+            </label>
+          </Tooltip>
         ))}
       </div>
     </fieldset>
@@ -101,15 +105,17 @@ export function RemovedInLive({ count }: { count?: number }) {
   const { t } = useLocale();
   if (!count) return null;
   return (
-    <p
-      className="levi-pool-check"
-      title={t(
-        "Removed by a person on the live page: not listed, counted or exported. They can be restored there.",
-      )}
-    >
-      <span className="grow">{t("Episodes removed on the live page")}</span>
-      <span className="levi-pool-count">{count.toLocaleString()}</span>
-    </p>
+    <div className="pg-pool-removed">
+      <p className="pg-pool-check">
+        <span className="grow">{t("Episodes removed on the live page")}</span>
+        <span className="pg-pool-count">{count.toLocaleString()}</span>
+      </p>
+      <p className="pg-pool-why">
+        {t(
+          "Removed by a person on the live page: not listed, counted or exported. They can be restored there.",
+        )}
+      </p>
+    </div>
   );
 }
 
@@ -146,11 +152,11 @@ export function FacetsPanel({
     (c) => c !== "archive" || filters.showArchive,
   );
   return (
-    <aside className="levi-pool-facets" aria-label={t("Filters")}>
+    <aside className="pg-pool-facets" aria-label={t("Filters")}>
       <fieldset>
         <legend>{t("Category")}</legend>
         {categories.map((c) => (
-          <label key={c} className="levi-pool-check">
+          <label key={c} className="pg-pool-check">
             <input
               type="checkbox"
               checked={filters.categories.includes(c)}
@@ -159,7 +165,7 @@ export function FacetsPanel({
               }
             />
             <span className="grow">{t(CATEGORY_LABELS[c])}</span>
-            <span className="levi-pool-count">
+            <span className="pg-pool-count">
               {(facets?.categories[c] || 0).toLocaleString()}
             </span>
           </label>
@@ -168,7 +174,7 @@ export function FacetsPanel({
       <fieldset>
         <legend>{t("Task")}</legend>
         <input
-          className="levi-input levi-pool-full"
+          className="ds-input ds-focus pg-pool-full"
           type="search"
           placeholder={t("Search tasks")}
           aria-label={t("Search tasks")}
@@ -186,7 +192,7 @@ export function FacetsPanel({
             ["human_verified_success", "Human-labelled success"],
           ] as [OutcomeFilter, string][]
         ).map(([value, label]) => (
-          <label key={value} className="levi-pool-check">
+          <label key={value} className="pg-pool-check">
             <input
               type="radio"
               name="pool-outcome"
@@ -195,7 +201,7 @@ export function FacetsPanel({
             />
             <span className="grow">{t(label)}</span>
             {value !== "all" && (
-              <span className="levi-pool-count">
+              <span className="pg-pool-count">
                 {(facets?.outcomes[value] || 0).toLocaleString()}
               </span>
             )}
@@ -205,42 +211,45 @@ export function FacetsPanel({
       <fieldset>
         <legend>{t("Source")}</legend>
         <input
-          className="levi-input levi-pool-full"
+          className="ds-input ds-focus pg-pool-full"
           type="search"
           placeholder={t("Filter sources")}
           aria-label={t("Filter sources")}
           value={sourceSearch}
           onChange={(e) => setSourceSearch(e.target.value)}
         />
-        <div className="levi-pool-scroll">
+        <div className="pg-pool-scroll">
           {shownSources.map((s) => (
-            <label key={s.source} className="levi-pool-check" title={s.path}>
-              <input
-                type="checkbox"
-                checked={filters.sources.includes(s.source)}
-                onChange={() =>
-                  set({ sources: toggle(filters.sources, s.source) })
-                }
-              />
-              <span className="grow levi-pool-ellipsis">
-                {shortSource(s.source)}
-              </span>
-              <span className="levi-pool-count">
-                {s.episodes.toLocaleString()}
-              </span>
-            </label>
+            <Tooltip key={s.source} content={s.path}>
+              <label className="pg-pool-check">
+                <input
+                  type="checkbox"
+                  checked={filters.sources.includes(s.source)}
+                  onChange={() =>
+                    set({ sources: toggle(filters.sources, s.source) })
+                  }
+                />
+                <span className="grow pg-pool-ellipsis">
+                  {shortSource(s.source)}
+                </span>
+                <span className="pg-pool-count">
+                  {s.episodes.toLocaleString()}
+                </span>
+              </label>
+            </Tooltip>
           ))}
         </div>
         {sources.length > 12 && (
-          <button
-            type="button"
-            className="levi-pool-link"
+          <Button
+            size="sm"
+            variant="ghost"
+            className="pg-align-start"
             onClick={() => setAllSources(!allSources)}
           >
             {allSources
               ? t("Show fewer")
               : `${t("Show all")} (${sources.length})`}
-          </button>
+          </Button>
         )}
       </fieldset>
       {models.length > 0 && (
@@ -285,11 +294,11 @@ export function FacetsPanel({
       )}
       <fieldset>
         <legend>{t("Date")}</legend>
-        <div className="levi-pool-dates">
+        <div className="pg-pool-dates">
           <label>
             <span>{t("From")}</span>
             <input
-              className="levi-input"
+              className="ds-input ds-focus"
               type="date"
               value={filters.dateFrom}
               min={facets?.date_min || undefined}
@@ -300,7 +309,7 @@ export function FacetsPanel({
           <label>
             <span>{t("To")}</span>
             <input
-              className="levi-input"
+              className="ds-input ds-focus"
               type="date"
               value={filters.dateTo}
               min={facets?.date_min || undefined}
@@ -312,7 +321,7 @@ export function FacetsPanel({
       </fieldset>
       <fieldset>
         <legend>{t("Show hidden")}</legend>
-        <label className="levi-pool-check">
+        <label className="pg-pool-check">
           <input
             type="checkbox"
             checked={filters.showHeldout}
@@ -320,12 +329,12 @@ export function FacetsPanel({
           />
           <span className="grow">{t("Held-out test set")}</span>
           {!filters.showHeldout && (
-            <span className="levi-pool-count">
+            <span className="pg-pool-count">
               {(facets?.hidden_heldout || 0).toLocaleString()}
             </span>
           )}
         </label>
-        <label className="levi-pool-check">
+        <label className="pg-pool-check">
           <input
             type="checkbox"
             checked={filters.showCopies}
@@ -333,12 +342,12 @@ export function FacetsPanel({
           />
           <span className="grow">{t("Copies")}</span>
           {!filters.showCopies && (
-            <span className="levi-pool-count">
+            <span className="pg-pool-count">
               {(facets?.hidden_copies || 0).toLocaleString()}
             </span>
           )}
         </label>
-        <label className="levi-pool-check">
+        <label className="pg-pool-check">
           <input
             type="checkbox"
             checked={filters.showArchive}
@@ -346,20 +355,16 @@ export function FacetsPanel({
           />
           <span className="grow">{t("Archive")}</span>
           {!filters.showArchive && (
-            <span className="levi-pool-count">
+            <span className="pg-pool-count">
               {(facets?.archive || 0).toLocaleString()}
             </span>
           )}
         </label>
         <RemovedInLive count={facets?.removed_in_live} />
       </fieldset>
-      <button
-        type="button"
-        className="levi-secondary"
-        onClick={() => onChange(EMPTY_FILTERS)}
-      >
+      <Button icon={FilterX} onClick={() => onChange(EMPTY_FILTERS)}>
         {t("Clear filters")}
-      </button>
+      </Button>
     </aside>
   );
 }
