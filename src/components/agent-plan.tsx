@@ -1,4 +1,6 @@
 "use client";
+// The Agent Workbench content styles; this module is loaded with the drawer.
+import "@/components/pages-ui/agent-content.css";
 import { useState } from "react";
 import { T, useLocale } from "./levi-locale";
 export type HarnessPlan = {
