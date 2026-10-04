@@ -4,6 +4,7 @@ import {
   useId,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -41,6 +42,11 @@ type ModalProps = {
   modal?: boolean;
   /** Inline width in px (a resizable side sheet). */
   width?: number | null;
+  /**
+   * Keys that may leave a modal layer anyway (they reach listeners on
+   * window), e.g. the shortcut that toggles this very layer.
+   */
+  passKeys?: (event: KeyboardEvent<HTMLDivElement>) => boolean;
 };
 
 function ModalLayer({
@@ -59,6 +65,7 @@ function ModalLayer({
   role = "dialog",
   modal = true,
   width,
+  passKeys,
 }: Layer &
   ModalProps & {
     kind: string;
@@ -98,7 +105,9 @@ function ModalLayer({
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
-        onKeyDown={modal ? keepKeysInside : undefined}
+        onKeyDown={
+          modal ? (event) => keepKeysInside(event, passKeys) : undefined
+        }
         className={cx(`ds-${kind}`, "ds-on-raised", className)}
         style={width ? { width: `${width}px` } : undefined}
       >
@@ -137,7 +146,7 @@ function ModalLayer({
 export function Dialog({
   size = "md",
   ...props
-}: Layer & { size?: "sm" | "md" | "lg" }) {
+}: Layer & Pick<ModalProps, "passKeys"> & { size?: "sm" | "md" | "lg" }) {
   return (
     <ModalLayer
       {...props}

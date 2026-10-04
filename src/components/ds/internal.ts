@@ -182,9 +182,10 @@ export function rovingIndex(
  * arrows, J/K, Ctrl/⌘+S/Z/Y) do not act behind it. Tab and Escape go on: the
  * layer's own document listeners handle them.
  */
-export function keepKeysInside(event: {
-  key: string;
-  stopPropagation: () => void;
-}): void {
-  if (event.key !== "Tab" && event.key !== "Escape") event.stopPropagation();
+export function keepKeysInside<
+  E extends { key: string; stopPropagation: () => void },
+>(event: E, passes?: (event: E) => boolean): void {
+  if (event.key === "Tab" || event.key === "Escape") return;
+  if (passes?.(event)) return;
+  event.stopPropagation();
 }

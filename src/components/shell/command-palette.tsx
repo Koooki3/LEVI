@@ -15,6 +15,7 @@ import {
   type Command,
   type NavPage,
 } from "./commands";
+import { globalShortcut } from "./global-keys";
 import { SHELL_OVERLAY_CLASS, useShell } from "./shell-context";
 import { openAgentConnections, toggleAgentWorkbench } from "./shell-events";
 
@@ -90,6 +91,8 @@ export function CommandPalette({ pages }: { pages: NavPage[] }) {
       title={t("Command palette")}
       initialFocus={input}
       size="md"
+      // ⌘K / Ctrl+K still reaches the frame, so it toggles the palette here.
+      passKeys={(event) => globalShortcut(event.nativeEvent) === "palette"}
       className={`${SHELL_OVERLAY_CLASS} levi-palette`}
     >
       <div className="levi-palette__search">

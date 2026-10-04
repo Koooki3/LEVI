@@ -112,7 +112,7 @@ describe("confirmation instead of window.confirm", () => {
     await click(buttonNamed("Cancel")!);
     await flush();
     expect(log).toEqual([]);
-    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(Boolean(document.querySelector('[role="alertdialog"]'))).toBe(false);
     expect(document.activeElement?.id).toBe("danger");
   });
 
@@ -140,7 +140,7 @@ describe("confirmation instead of window.confirm", () => {
     await click(buttonNamed("Delete")!);
     await flush();
     expect(log).toEqual(["deleted"]);
-    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(Boolean(document.querySelector('[role="alertdialog"]'))).toBe(false);
   });
 
   test("outside a provider the answer is no", async () => {
@@ -149,7 +149,7 @@ describe("confirmation instead of window.confirm", () => {
     await click(document.querySelector("#danger"));
     await flush();
     expect(log).toEqual([]);
-    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(Boolean(document.querySelector('[role="alertdialog"]'))).toBe(false);
   });
 });
 
@@ -176,7 +176,9 @@ describe("an open confirmation keeps the page's keys", () => {
       expect(seen).toEqual([]);
       await press(inside, "Escape");
       expect(seen).toEqual([]);
-      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(Boolean(document.querySelector('[role="alertdialog"]'))).toBe(
+        false,
+      );
       // Closed: the page has its keys again.
       await press(document.querySelector("#danger"), "ArrowDown");
       expect(seen).toEqual(["ArrowDown"]);
@@ -208,7 +210,7 @@ describe("an open confirmation keeps the page's keys", () => {
       </ConfirmProvider>,
     );
     await click(document.querySelector("#ask"));
-    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+    expect(Boolean(document.querySelector('[role="alertdialog"]'))).toBe(true);
     route.path = "/explore";
     await rerender(
       <ConfirmProvider>
@@ -216,7 +218,7 @@ describe("an open confirmation keeps the page's keys", () => {
       </ConfirmProvider>,
     );
     expect(await answer!).toBe(false);
-    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(Boolean(document.querySelector('[role="alertdialog"]'))).toBe(false);
     route.path = "/pool";
   });
 });
@@ -237,7 +239,7 @@ describe("confirmation inside a native modal dialog", () => {
       await focus(document.querySelector("#danger"));
       await click(document.querySelector("#danger"));
       const question = document.querySelector('[role="alertdialog"]')!;
-      expect(question).not.toBeNull();
+      expect(Boolean(question)).toBe(true);
       // Inside the native dialog: the rest of the page is inert.
       expect(native.contains(question)).toBe(true);
       await click(buttonNamed("Delete")!);
@@ -332,8 +334,33 @@ describe("command palette", () => {
       8,
     );
     await press(document.activeElement, "Escape");
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(Boolean(document.querySelector('[role="dialog"]'))).toBe(false);
     expect(document.activeElement).toBe(before);
+  });
+
+  // Booleans, not elements: printing a happy-dom element in a failure
+  // message can exhaust memory and crash Bun instead of failing.
+  test("Ctrl+K again closes it; from the shortcut list it switches to it", async () => {
+    await render(<Frame />);
+    const before = document.querySelector<HTMLButtonElement>("#before")!;
+    await focus(before);
+    await press(before, "k", ctrlK);
+    expect(Boolean(document.querySelector(".levi-palette"))).toBe(true);
+    await press(document.activeElement, "k", ctrlK);
+    expect(Boolean(document.querySelector(".levi-palette"))).toBe(false);
+    expect(document.activeElement === before).toBe(true);
+    await press(before, "?", { shiftKey: true });
+    expect(Boolean(document.querySelector(".levi-shortcuts"))).toBe(true);
+    await press(document.activeElement, "k", ctrlK);
+    expect(Boolean(document.querySelector(".levi-shortcuts"))).toBe(false);
+    expect(Boolean(document.querySelector(".levi-palette"))).toBe(true);
+    // Other keys still stay inside.
+    const seen: string[] = [];
+    const onKey = (event: KeyboardEvent) => seen.push(event.key);
+    window.addEventListener("keydown", onKey);
+    await press(document.activeElement, "ArrowDown");
+    window.removeEventListener("keydown", onKey);
+    expect(seen).toEqual([]);
   });
 
   test("type to filter, arrows move, Enter goes to the page", async () => {
@@ -348,7 +375,7 @@ describe("command palette", () => {
     expect(search.getAttribute("aria-activedescendant")).toBe(options[0].id);
     await press(search, "Enter");
     expect(pushed).toEqual(["/guide"]);
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(Boolean(document.querySelector('[role="dialog"]'))).toBe(false);
   });
 
   test("runs frame actions: the Agent Workbench and the theme", async () => {
@@ -404,7 +431,7 @@ describe("command palette", () => {
     );
     await click(document.querySelector("#danger"));
     await press(document.activeElement, "k", ctrlK);
-    expect(document.querySelector(".levi-palette")).toBeNull();
+    expect(Boolean(document.querySelector(".levi-palette"))).toBe(false);
   });
 });
 
@@ -495,7 +522,7 @@ describe("shortcut list", () => {
     const field = document.querySelector<HTMLInputElement>("#field")!;
     await focus(field);
     await press(field, "?", { shiftKey: true });
-    expect(document.querySelector(".levi-shortcuts")).toBeNull();
+    expect(Boolean(document.querySelector(".levi-shortcuts"))).toBe(false);
     const before = document.querySelector<HTMLButtonElement>("#before")!;
     await focus(before);
     await press(before, "?", { shiftKey: true });
@@ -504,7 +531,7 @@ describe("shortcut list", () => {
     expect(dialog.textContent).toContain("Open the command palette");
     expect(dialog.querySelectorAll("kbd").length).toBeGreaterThan(5);
     await press(document.activeElement, "Escape");
-    expect(document.querySelector(".levi-shortcuts")).toBeNull();
+    expect(Boolean(document.querySelector(".levi-shortcuts"))).toBe(false);
     expect(document.activeElement).toBe(before);
   });
 });

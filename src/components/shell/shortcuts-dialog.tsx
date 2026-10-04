@@ -3,7 +3,7 @@
 import { Fragment, useMemo } from "react";
 import { Dialog, Kbd } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
-import { isApplePlatform, shortcutGroups } from "./global-keys";
+import { globalShortcut, isApplePlatform, shortcutGroups } from "./global-keys";
 import { SHELL_OVERLAY_CLASS, useShell } from "./shell-context";
 
 export function ShortcutsDialog() {
@@ -22,6 +22,8 @@ export function ShortcutsDialog() {
         "Shortcuts do not fire while you type in a field or compose text with an input method.",
       )}
       size="md"
+      // ⌘K / Ctrl+K still reaches the frame, so it toggles the palette here.
+      passKeys={(event) => globalShortcut(event.nativeEvent) === "palette"}
       className={`${SHELL_OVERLAY_CLASS} levi-shortcuts`}
     >
       {groups.map((group) => (
