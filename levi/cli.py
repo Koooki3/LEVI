@@ -229,7 +229,7 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "namespace":
         configure()
         raise SystemExit(namespace_cli(sys.argv[2:]))
-    if len(sys.argv) > 1 and sys.argv[1] == "sample":
+    if len(sys.argv) > 1 and sys.argv[1] in ("sample", "samples"):
         configure()
         from .samples import cli as sample_cli
 
@@ -257,7 +257,7 @@ def main():
             "cache cleanup), migrate, convert, agent, sam3, recap (RECAP value "
             "model: checkpoints and advantage labels), export (training manifests: which "
             "frames enter a learner's loss, with what weight), sample (DROID test "
-            "samples), namespace (isolated experiments over one dataset), pool (training pool: "
+            "samples: `levi sample fetch droid` downloads one), namespace (isolated experiments over one dataset), pool (training pool: "
             "scan read-only pool roots, recipes, merged exports), live (background annotation service for robot rollouts), docs (check or regenerate the documentation). Each takes its own "
             "--help."
         ),

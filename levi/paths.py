@@ -77,8 +77,9 @@ def configure() -> None:
         os.environ[key] = str(value)
     STATE.mkdir(parents=True, exist_ok=True)
     if new_workspace:
-        # A new workspace gets a DROID test sample when the service first
-        # runs, unless LEVI_DROID_SAMPLE is off (levi/samples).
+        # A new workspace is offered a DROID test sample; it is downloaded
+        # only on request (`levi sample fetch droid`, or LEVI_DROID_SAMPLE=on
+        # lets the service take it; levi/samples).
         from .samples import note_new_workspace
 
         note_new_workspace()

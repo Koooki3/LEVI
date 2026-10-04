@@ -283,6 +283,49 @@ def test_a_new_workspace_is_offered_a_sample_once_and_only_when_allowed(monkeypa
     assert calls == ["new workspace"] + ["resume after restart"] * 2
 
 
+def test_by_default_a_new_workspace_downloads_nothing_by_itself(monkeypatch, caplog):
+    """Unset LEVI_DROID_SAMPLE: the offer stays an offer (logged with the
+    command that takes it), and only LEVI_DROID_SAMPLE=on takes it."""
+    from levi import samples
+
+    calls = fake_start(monkeypatch)
+    samples.note_new_workspace()
+    monkeypatch.delenv("LEVI_DROID_SAMPLE")
+    with caplog.at_level(logging.INFO, logger="levi"):
+        samples.on_service_start()
+        samples.on_service_start()
+    assert not calls
+    assert "levi sample fetch droid" in caplog.text
+    ledger = json.loads(droid.ledger_path().read_text())
+    assert ledger["auto"] == "pending" and not ledger.get("draws")
+    monkeypatch.setenv("LEVI_DROID_SAMPLE", "on")
+    samples.on_service_start()
+    assert calls == ["new workspace"]
+
+
+def test_by_default_an_existing_workspace_resumes_its_unfinished_draw(monkeypatch):
+    """A workspace whose sample was started (by hand, or automatically under
+    the old default) and interrupted behaves as it did: the draw resumes."""
+    from levi import samples
+
+    calls = fake_start(monkeypatch)
+    draw = samples.plan(3)
+    droid.set_draw(draw["draw"], status="interrupted")
+    monkeypatch.delenv("LEVI_DROID_SAMPLE")
+    samples.on_service_start()
+    assert calls == ["resume after restart"]
+
+
+def test_fetch_is_draw_and_samples_is_sample(monkeypatch):
+    from levi import samples
+
+    monkeypatch.setattr(samples, "running", lambda: True)  # stops right after parsing
+    assert samples.cli(["fetch", "droid"]) == 1
+    assert samples.cli(["fetch"]) == 1
+    with pytest.raises(SystemExit):
+        samples.cli(["fetch", "imagenet"])
+
+
 def test_a_draw_by_hand_answers_the_offer(monkeypatch):
     from levi import samples
 
@@ -746,11 +789,14 @@ def test_the_setting_is_off_unless_it_clearly_says_on(monkeypatch, caplog):
     for value in ("off", "0", "false", "no", " OFF "):
         monkeypatch.setenv("LEVI_DROID_SAMPLE", value)
         assert samples.setting() == "off", value
-    for value in ("auto", "on", "1", "true", "yes", ""):
+    for value in ("auto", "on", "1", "true", "yes", " On "):
         monkeypatch.setenv("LEVI_DROID_SAMPLE", value)
         assert samples.setting() == "auto", value
+    # Unset or empty: only what was asked for (no 11.6 GiB surprise).
+    monkeypatch.setenv("LEVI_DROID_SAMPLE", "")
+    assert samples.setting() == "manual"
     monkeypatch.delenv("LEVI_DROID_SAMPLE")
-    assert samples.setting() == "auto"
+    assert samples.setting() == "manual"
     monkeypatch.setenv("LEVI_DROID_SAMPLE", "disabled")
     with caplog.at_level(logging.WARNING, logger="levi"):
         assert samples.setting() == "off"

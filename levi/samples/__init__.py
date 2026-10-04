@@ -1,11 +1,13 @@
 """Test samples a workspace downloads for itself.
 
-A new workspace (``paths.configure`` creating it) is marked so that the
-first time the service runs it draws a DROID raw sample of 500 episodes
-(:mod:`levi.samples.droid`; the first draw was 11.6 GiB). ``levi sample draw``
-(or ``POST /api/levi/samples/droid_raw``) draws another at any time: a new
-``droid_raw_<size>_drawNN`` capture from the workspace's next unused
-positions of the order, sharing no episode with its earlier draws.
+A new workspace (``paths.configure`` creating it) is offered a DROID raw
+sample of 500 episodes (:mod:`levi.samples.droid`; the first draw was 11.6
+GiB). It is downloaded only when asked for: ``levi sample fetch droid`` (the
+same as ``levi sample draw``), ``POST /api/levi/samples/droid_raw``, or
+``LEVI_DROID_SAMPLE=on``, which lets the service take the offer the first
+time it runs. Each draw is a new ``droid_raw_<size>_drawNN`` capture from the
+workspace's next unused positions of the order, sharing no episode with its
+earlier draws.
 
 An unfinished draw resumes where it stopped the next time it is started.
 The service, when it starts, resumes by itself a draw left interrupted (its
@@ -13,10 +15,17 @@ process stopped, or Ctrl-C) or failed on the network -- at most
 :data:`AUTO_ATTEMPTS` automatic attempts per draw; a draw cancelled or failed
 for another reason waits for ``levi sample draw``.
 
-``LEVI_DROID_SAMPLE`` = ``off``/``0``/``false``/``no``: LEVI never starts or
-resumes a download by itself (tests and CI set it); drawing by hand still
-works. ``auto``/``on``/``1``/``true``/``yes`` or unset: it does. Any other
-value is ``off``, with a warning.
+``LEVI_DROID_SAMPLE``:
+
+- unset or empty (``manual``, the default): no download starts by itself; a
+  draw that was started (by hand, or automatically under an earlier setting)
+  and stopped is resumed as before, so a workspace that already has its
+  sample, or one on the way, behaves as it did;
+- ``auto``/``on``/``1``/``true``/``yes``: a new workspace's first draw also
+  starts by itself when the service first runs (the old default);
+- ``off``/``0``/``false``/``no``: LEVI never starts or resumes a download by
+  itself (tests and CI set it); drawing by hand still works. Any other value
+  is ``off``, with a warning.
 """
 
 from __future__ import annotations
@@ -42,11 +51,14 @@ _warned: set[str] = set()
 
 
 def setting() -> str:
-    """``auto`` or ``off``. A setting meant to stop downloads never starts
-    one by a typo: an unrecognised value is ``off``, with a warning."""
+    """``manual`` (unset: only what was asked for), ``auto`` or ``off``. A
+    setting meant to stop downloads never starts one by a typo: an
+    unrecognised value is ``off``, with a warning."""
     raw = os.environ.get("LEVI_DROID_SAMPLE")
     value = (raw or "").strip().lower()
-    if not value or value in ENABLED:
+    if not value:
+        return "manual"
+    if value in ENABLED:
         return "auto"
     if value not in DISABLED and value not in _warned:
         _warned.add(value)
@@ -335,16 +347,24 @@ def _stop_untracked(grace: float) -> str | None:
 
 
 def on_service_start() -> None:
-    """A new workspace's first draw, or a draw to resume (:func:`resumable`).
-    Never fails the service."""
+    """A new workspace's first draw (only with ``LEVI_DROID_SAMPLE=on``), or
+    a draw to resume (:func:`resumable`). Never fails the service."""
     try:
         ledger = droid.read_json(droid.ledger_path(), {})
-        if not ledger or setting() == "off" or running():
+        mode = setting()
+        if not ledger or mode == "off" or running():
             return
         ledger = droid.update_ledger(droid.reconcile)
         current = open_draw(ledger)
         if ledger.get("auto") == "pending" and not ledger.get("draws"):
-            start(reason="new workspace", automatic=True)
+            if mode == "auto":
+                start(reason="new workspace", automatic=True)
+            else:
+                log.info(
+                    "This workspace has no DROID test sample; `levi sample fetch "
+                    "droid` downloads one (500 episodes, about 11.6 GiB), or set "
+                    "LEVI_DROID_SAMPLE=on to let the service take it"
+                )
         elif current and resumable(current):
             start(current["size"], reason="resume after restart", automatic=True)
         elif current:
@@ -379,7 +399,18 @@ def cli(argv=None) -> int:
         ),
     )
     parser.add_argument(
-        "action", nargs="?", default="status", choices=["status", "draw", "cancel"]
+        "action",
+        nargs="?",
+        default="status",
+        choices=["status", "draw", "fetch", "cancel"],
+        help="fetch is draw: download a sample now (in the foreground)",
+    )
+    parser.add_argument(
+        "source",
+        nargs="?",
+        choices=["droid"],
+        default="droid",
+        help="the sample (only droid: the DROID raw release)",
     )
     parser.add_argument(
         "--size", type=int, default=droid.SIZE, help="episodes per draw (default 500)"

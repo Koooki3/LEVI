@@ -48,7 +48,7 @@ uv run levi                                   # 同时启动网页与 API
 
 如需严格只用 CPU，请在启动服务前设置 `export LEVI_CPU_ONLY=1`。这会关闭后台 GPU 监测，并禁止依赖加速器的本地推理、SAM3、快速分割和 RECAP 价值模型（测试用的 fake 提供者仍可运行）。
 
-DROID 原始目录（`demo_0000/trajectory.h5`、元数据及三路 MP4）是可选的**浏览与标注输入**，不支持转换成训练数据。使用前运行 `uv sync --locked --extra agent --extra droid`，把数据集目录直接放进 `$LEVI_WORKSPACE`，然后点击 **立即同步** 或重启 LEVI。只读派生视图位于 `outputs/LEVI/workbench/views/<数据集名>/`，HDF5 源文件不会被改动。源 MP4 时间与控制时间不一致，因此视图采用名义 14.3 FPS；原始时间戳和逐片段偏差记录在 `meta/levi_provenance.jsonl`，确定精确时间边界时应对照该记录复核。详见[转换指南](docs/CONVERSION.md#droid-raw-browsing-view)。新建的工作区还会自动下载一份 DROID 测试数据集：按固定种子确定的顺序，从公开发布版中抽取 500 个片段，在后台下载约 11.6 GiB（设置 `LEVI_DROID_SAMPLE=off` 可跳过；`uv run levi sample draw` 可再抽 500 个，与之前的抽取不重复），详见 [DROID 测试样本](docs/WORKSPACE.md#droid-test-sample)。
+DROID 原始目录（`demo_0000/trajectory.h5`、元数据及三路 MP4）是可选的**浏览与标注输入**，不支持转换成训练数据。使用前运行 `uv sync --locked --extra agent --extra droid`，把数据集目录直接放进 `$LEVI_WORKSPACE`，然后点击 **立即同步** 或重启 LEVI。只读派生视图位于 `outputs/LEVI/workbench/views/<数据集名>/`，HDF5 源文件不会被改动。源 MP4 时间与控制时间不一致，因此视图采用名义 14.3 FPS；原始时间戳和逐片段偏差记录在 `meta/levi_provenance.jsonl`，确定精确时间边界时应对照该记录复核。详见[转换指南](docs/CONVERSION.md#droid-raw-browsing-view)。DROID 测试数据集按需下载：`uv run levi sample fetch droid` 按固定种子确定的顺序，从公开发布版中抽取 500 个片段（约 11.6 GiB；再次运行再抽 500 个，与之前的抽取不重复）。除非设置 `LEVI_DROID_SAMPLE=on`，LEVI 不会自己开始下载，详见 [DROID 测试样本](docs/WORKSPACE.md#droid-test-sample)。
 
 ```bash
 uv run levi stop                # 停止共享服务及其子进程；有作业在运行时拒绝（--wait [分钟]、--force；--all：连同 LEVI 启动的 Ollama）
