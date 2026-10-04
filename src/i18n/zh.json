@@ -2212,5 +2212,6 @@
   "Expand inspector": "展开检查器",
   "Select an object in the list to see its details.": "在列表中选择一个物体，查看它的详情。",
   "Mean score": "平均分",
-  "Lowest score": "最低分"
+  "Lowest score": "最低分",
+  "Go to inspector": "转到检查器"
 }

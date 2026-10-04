@@ -111,3 +111,48 @@ describe("inspector drawer height", () => {
     );
   });
 });
+
+describe("go to the inspector", () => {
+  test("reveal opens a collapsed inspector and focuses its heading", async () => {
+    const { flush } = await import("@/components/ds/__tests__/dom");
+    const { useInspectorReveal } = await import("../inspector");
+    function Jump() {
+      const reveal = useInspectorReveal();
+      return (
+        <button type="button" onClick={() => reveal?.()}>
+          go
+        </button>
+      );
+    }
+    const restore = mockMatchMedia([]);
+    const { host } = await render(
+      <InspectorLayout enabled>
+        <main>
+          <Jump />
+        </main>
+      </InspectorLayout>,
+    );
+    restore();
+    const aside = host.querySelector("aside")!;
+    expect(aside.getAttribute("data-open")).toBe("false");
+    await click(host.querySelector("main button"));
+    await flush(30);
+    expect(aside.getAttribute("data-open")).toBe("true");
+    expect(document.activeElement?.textContent).toBe("Inspector");
+  });
+
+  test("without a column there is nothing to reveal", async () => {
+    const { useInspectorReveal } = await import("../inspector");
+    let seen: unknown = "unset";
+    function Probe() {
+      seen = useInspectorReveal();
+      return null;
+    }
+    await render(
+      <InspectorLayout enabled={false}>
+        <Probe />
+      </InspectorLayout>,
+    );
+    expect(seen).toBeNull();
+  });
+});

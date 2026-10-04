@@ -2,10 +2,18 @@
 "use client";
 import { T, useLocale } from "@/components/levi-locale";
 import { useConfirmAction } from "@/components/shell/confirm";
-import { DatabaseZap, Play, Plus, Save, Trash2 } from "lucide-react";
+import {
+  DatabaseZap,
+  PanelRight,
+  Play,
+  Plus,
+  Save,
+  Trash2,
+} from "lucide-react";
 import { Button, IconButton } from "@/components/ds";
 import {
   InspectorPortal,
+  useInspectorReveal,
   useInspectorSlot,
 } from "@/components/viewer/inspector";
 
@@ -527,6 +535,7 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
   const confirm = useConfirmAction();
   // In the episode viewer the inspector form lives in the right column.
   const inspectorDocked = useInspectorSlot() !== null;
+  const revealInspector = useInspectorReveal();
 
   // ============ Inline quick-add state ============
   const [qaKind, setQaKind] = useState<QuickAddKind>("subtask");
@@ -882,7 +891,19 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                     <T> atoms in this episode</T>
                   </p>
                 </div>
-                <span className="ts-pill">{fmtTime(currentTime)}</span>
+                <span className="flex items-center gap-2">
+                  {revealInspector && selectedAtom && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={PanelRight}
+                      onClick={revealInspector}
+                    >
+                      {t("Go to inspector")}
+                    </Button>
+                  )}
+                  <span className="ts-pill">{fmtTime(currentTime)}</span>
+                </span>
               </div>
               {atoms.length === 0 && (
                 <div className="rail-empty">
@@ -976,6 +997,7 @@ const RailGroup: React.FC<{
 }> = ({ title, dotClass, entries, currentTime }) => {
   const { selectedIdx, selectAtom } = useAnnotations();
   const jump = useJump();
+  const revealInspector = useInspectorReveal();
   if (entries.length === 0) return null;
   return (
     <T>
@@ -999,9 +1021,23 @@ const RailGroup: React.FC<{
               <div
                 key={idx}
                 className={`rail-row ${sel ? "selected" : ""} ${active ? "active-now" : ""}`}
+                role="button"
+                tabIndex={0}
+                aria-pressed={sel}
                 onClick={() => {
                   selectAtom(idx);
                   jump(atom.timestamp);
+                }}
+                onKeyDown={(event) => {
+                  // Enter or Space selects, as a click does; Enter also
+                  // takes the keyboard to the inspector form.
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
+                  // Keep Space from also toggling playback (window key).
+                  event.stopPropagation();
+                  selectAtom(idx);
+                  jump(atom.timestamp);
+                  if (event.key === "Enter") revealInspector?.();
                 }}
               >
                 <span className="ts">{fmtTime(atom.timestamp)}</span>

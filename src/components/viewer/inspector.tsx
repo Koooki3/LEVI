@@ -1,6 +1,7 @@
 "use client";
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useRef,
@@ -21,10 +22,20 @@ import "./viewer.css";
  * Without a column (other pages, tests) the form renders where it is.
  */
 const InspectorSlot = createContext<HTMLElement | null>(null);
+const InspectorReveal = createContext<(() => void) | null>(null);
 
 /** The column's body element, or null when there is no inspector column. */
 export function useInspectorSlot(): HTMLElement | null {
   return useContext(InspectorSlot);
+}
+
+/**
+ * Opens the inspector (if collapsed) and moves keyboard focus to its
+ * heading, so a keyboard user reaches the form without tabbing through the
+ * page. Null when there is no inspector column.
+ */
+export function useInspectorReveal(): (() => void) | null {
+  return useContext(InspectorReveal);
 }
 
 /**
@@ -71,6 +82,7 @@ export function InspectorLayout({
       window.matchMedia("(min-width: 1200px)").matches,
   );
   const asideRef = useRef<HTMLElement | null>(null);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
   useEffect(() => {
     const aside = asideRef.current;
     if (!enabled || !aside) return;
@@ -83,9 +95,16 @@ export function InspectorLayout({
       aside.parentElement?.style.removeProperty("--vw-inspector-h");
     };
   }, [enabled, open]);
+  const reveal = useCallback(() => {
+    setOpen(true);
+    // After the body is shown again.
+    requestAnimationFrame(() => headingRef.current?.focus());
+  }, []);
   return (
     <InspectorSlot.Provider value={enabled ? slot : null}>
-      {children}
+      <InspectorReveal.Provider value={enabled ? reveal : null}>
+        {children}
+      </InspectorReveal.Provider>
       {enabled && (
         <aside
           ref={asideRef}
@@ -94,7 +113,9 @@ export function InspectorLayout({
           aria-label={t("Inspector")}
         >
           <div className="vw-inspector-head">
-            <h2 className="vw-label">{t("Inspector")}</h2>
+            <h2 className="vw-label" ref={headingRef} tabIndex={-1}>
+              {t("Inspector")}
+            </h2>
             <IconButton
               icon={open ? PanelRightClose : PanelRightOpen}
               size="sm"
