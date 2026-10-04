@@ -228,6 +228,14 @@
 }
 
 /* ── Guide: the introduction ── */
+.levi-prose h2.levi-guide-sub {
+  margin: var(--ds-space-8) 0 var(--ds-space-2);
+  padding-top: 0;
+  border-top: 0;
+  font-size: var(--ds-text-title-2-size);
+  line-height: var(--ds-text-title-2-line);
+  letter-spacing: var(--ds-tracking-title);
+}
 .levi-guide-steps {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -249,7 +249,7 @@ function LiveCard() {
         </Badge>
       )}
       <span className="levi-home-live__go">
-        {t("Open the live page")}
+        <span>{t("Open the live page")}</span>
         <Icon icon={ArrowRight} />
       </span>
     </Link>
@@ -529,6 +529,7 @@ export function HomeDashboard() {
         />
       )}
 
+      <h2 className="ds-sr-only">{t("Your work")}</h2>
       <div className="levi-home-grid">
         <PendingCard pending={pending ?? null} loaded={pending !== undefined} />
         <RunningCard jobs={jobs ?? []} loaded={jobs !== undefined} />

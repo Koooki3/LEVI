@@ -57,8 +57,10 @@
   background: var(--ds-field-bg);
   transition: border-color var(--ds-dur-fast) var(--ds-ease-standard);
 }
-.levi-home-search:focus-within {
+/* Focus is drawn on the frame: 2 px, the focus-ring colour. */
+.levi-home-search:has(.levi-home-search__input:focus-visible) {
   border-color: var(--ds-focus-ring);
+  box-shadow: 0 0 0 1px var(--ds-focus-ring);
 }
 .levi-home-search__icon {
   flex: none;
@@ -275,6 +277,12 @@
 .levi-home-empty {
   padding: var(--ds-space-4) 0;
 }
+/* In a card the empty state is a quiet line, not a headline. */
+.levi-home-empty .ds-empty__title {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-body-size);
+  font-weight: var(--ds-weight-regular);
+}
 .levi-home-skeleton {
   display: flex;
   flex-direction: column;
@@ -295,6 +303,7 @@
   text-decoration: underline;
   text-decoration-color: var(--ds-separator-strong);
   text-underline-offset: 3px;
+  white-space: nowrap;
 }
 .levi-home-link:hover,
 .levi-home-cta:hover {

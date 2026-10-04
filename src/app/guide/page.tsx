@@ -168,7 +168,9 @@ export default function Guide() {
                 </li>
               ))}
             </ul>
-            <h3>{t("Start from a public dataset")}</h3>
+            <h2 className="levi-guide-sub">
+              {t("Start from a public dataset")}
+            </h2>
             <ul className="levi-guide-demos">
               {DEMOS.map((demo) => (
                 <li key={demo.id}>
