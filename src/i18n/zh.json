@@ -2198,5 +2198,9 @@
   "Seek frame": "定位帧",
   "Technical details": "技术细节",
   "This episode could not be loaded": "这个片段没能加载",
-  "Try again": "重试"
+  "Try again": "重试",
+  "Annotation kind": "标注类型（快速添加）",
+  "Preset": "预设",
+  "Minimum episode length (s)": "片段最短时长（秒）",
+  "Maximum episode length (s)": "片段最长时长（秒）"
 }

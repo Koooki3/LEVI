@@ -65,7 +65,9 @@ export function AnalysisTab({
         />
         <p>{t(current.description)}</p>
       </div>
-      <div data-analysis-view={current.value}>{children(current.value)}</div>
+      <div className="vw-chart" data-analysis-view={current.value}>
+        {children(current.value)}
+      </div>
     </section>
   );
 }

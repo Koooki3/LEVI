@@ -42,7 +42,7 @@ function FlagAllBtn({ ids, label }: { ids: number[]; label?: string }) {
       {
         <button
           onClick={() => addMany(ids)}
-          className="text-xs text-(--ds-text-tertiary) hover:text-(--ds-text-primary) transition-colors flex items-center gap-1"
+          className="text-xs text-(--ds-text-secondary) hover:text-(--ds-text-primary) transition-colors flex items-center gap-1"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -120,7 +120,7 @@ function LowMovementSection({ episodes }: { episodes: LowMovementEpisode[] }) {
                     />
                   </div>
                 </div>
-                <span className="text-xs text-(--ds-text-tertiary) tabular-nums shrink-0">
+                <span className="text-xs text-(--ds-text-secondary) tabular-nums shrink-0">
                   {ep.totalMovement.toFixed(2)}
                 </span>
               </div>
@@ -190,6 +190,7 @@ function EpisodeLengthFilter({ episodes }: { episodes: EpisodeLengthInfo[] }) {
                 max={globalMax}
                 step={step}
                 value={rangeMin}
+                aria-label="Minimum episode length (s)"
                 onChange={(e) =>
                   setRangeMin(Math.min(Number(e.target.value), rangeMax))
                 }
@@ -201,6 +202,7 @@ function EpisodeLengthFilter({ episodes }: { episodes: EpisodeLengthInfo[] }) {
                 max={globalMax}
                 step={step}
                 value={rangeMax}
+                aria-label="Maximum episode length (s)"
                 onChange={(e) =>
                   setRangeMax(Math.max(Number(e.target.value), rangeMin))
                 }
@@ -275,7 +277,7 @@ function FlaggedIdsCopyBar({
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-(--ds-text-primary)">
               <T>Flagged Episodes</T>
-              <span className="text-xs text-(--ds-text-tertiary) ml-2 font-normal">
+              <span className="text-xs text-(--ds-text-secondary) ml-2 font-normal">
                 (<T>{count}</T>)
               </span>
             </h3>
@@ -318,7 +320,7 @@ function FlaggedIdsCopyBar({
               </button>
               <button
                 onClick={clear}
-                className="text-xs text-(--ds-text-tertiary) hover:text-(--ds-danger) transition-colors"
+                className="text-xs text-(--ds-text-secondary) hover:text-(--ds-danger) transition-colors"
               >
                 <T>Clear</T>
               </button>

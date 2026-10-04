@@ -898,3 +898,10 @@ button.vw-outcome:hover {
 .vw-flag-btn[aria-pressed="true"] svg {
   fill: currentColor;
 }
+.vw-note > a.ds-btn {
+  justify-self: start;
+}
+.vw-main:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: -2px;
+}

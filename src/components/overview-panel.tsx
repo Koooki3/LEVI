@@ -181,7 +181,7 @@ export default function OverviewPanel({
       <T>
         {
           <div className="text-center py-8 space-y-2">
-            <p className="text-(--ds-text-tertiary) italic">
+            <p className="text-(--ds-text-secondary) italic">
               <T>
                 {flaggedOnly
                   ? "No flagged episodes to show."
@@ -209,7 +209,7 @@ export default function OverviewPanel({
     <T>
       {
         <div className="max-w-7xl mx-auto py-6 space-y-5">
-          <p className="text-sm text-(--ds-text-tertiary)">
+          <p className="text-sm text-(--ds-text-secondary)">
             <T>
               Use first/last frame views to spot episodes with bad end states or
               other anomalies. Hover over a thumbnail and click the flag icon to
@@ -223,9 +223,10 @@ export default function OverviewPanel({
               {/* Camera selector */}
               {data.cameras.length > 1 && (
                 <select
+                  aria-label="Camera"
                   value={selectedCamera}
                   onChange={handleCameraChange}
-                  className="bg-(--ds-surface-1) text-(--ds-text-primary) text-sm rounded px-3 py-1.5 border border-(--ds-separator) focus:outline-none focus:border-(--ds-accent)"
+                  className="ds-input w-auto"
                 >
                   {data.cameras.map((cam) => (
                     <option key={cam} value={cam}>

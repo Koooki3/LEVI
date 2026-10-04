@@ -2198,5 +2198,9 @@
   "Seek frame": "Seek frame",
   "Technical details": "Technical details",
   "This episode could not be loaded": "This episode could not be loaded",
-  "Try again": "Try again"
+  "Try again": "Try again",
+  "Annotation kind": "Annotation kind",
+  "Preset": "Preset",
+  "Minimum episode length (s)": "Minimum episode length (s)",
+  "Maximum episode length (s)": "Maximum episode length (s)"
 }

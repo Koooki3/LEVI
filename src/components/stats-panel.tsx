@@ -245,7 +245,7 @@ function StatsPanel({
                 <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator)">
                   <h3 className="text-sm font-semibold text-(--ds-text-primary) mb-4">
                     <T>Episode Length Distribution</T>
-                    <span className="text-xs text-(--ds-text-tertiary) ml-2 font-normal">
+                    <span className="text-xs text-(--ds-text-secondary) ml-2 font-normal">
                       <T>{els.episodeLengthHistogram.length}</T>
                       <T>
                         {els.episodeLengthHistogram.length !== 1

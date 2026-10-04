@@ -122,7 +122,7 @@ function FlagAllBtn({ ids, label }: { ids: number[]; label?: string }) {
       {
         <button
           onClick={() => addMany(ids)}
-          className="text-xs text-(--ds-text-tertiary) hover:text-(--ds-text-primary) transition-colors flex items-center gap-1"
+          className="text-xs text-(--ds-text-secondary) hover:text-(--ds-text-primary) transition-colors flex items-center gap-1"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -270,7 +270,7 @@ function AutocorrelationSection({
     return (
       <T>
         {
-          <p className="text-(--ds-text-tertiary) italic">
+          <p className="text-(--ds-text-secondary) italic">
             <T>No action columns found.</T>
           </p>
         }
@@ -285,7 +285,7 @@ function AutocorrelationSection({
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold text-(--ds-text-primary)">
                 <T>Action Autocorrelation</T>
-                <span className="text-xs text-(--ds-text-tertiary) ml-2 font-normal">
+                <span className="text-xs text-(--ds-text-secondary) ml-2 font-normal">
                   <T>{numEpisodesLabel}</T>
                 </span>
               </h3>
@@ -306,7 +306,7 @@ function AutocorrelationSection({
                     executing them open-loop offers diminishing returns.
                   </T>
                   <br />
-                  <span className="text-(--ds-text-tertiary)">
+                  <span className="text-(--ds-text-secondary)">
                     <T>
                       Grounded in the theoretical result that chunk length
                       should scale logarithmically with system stability
@@ -607,7 +607,7 @@ function ActionVelocitySection({
     return (
       <T>
         {
-          <p className="text-(--ds-text-tertiary) italic">
+          <p className="text-(--ds-text-secondary) italic">
             <T>No action data for velocity analysis.</T>
           </p>
         }
@@ -622,7 +622,7 @@ function ActionVelocitySection({
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold text-(--ds-text-primary)">
                 <T>Action Velocity (Δa) — Smoothness Proxy</T>
-                <span className="text-xs text-(--ds-text-tertiary) ml-2 font-normal">
+                <span className="text-xs text-(--ds-text-secondary) ml-2 font-normal">
                   <T>
                     {isAgg
                       ? `(${numEpisodes} episodes sampled)`
@@ -656,7 +656,7 @@ function ActionVelocitySection({
                     potentially beneficial noise injection.
                   </T>
                   <br />
-                  <span className="text-(--ds-text-tertiary)">
+                  <span className="text-(--ds-text-secondary)">
                     <T>Relates to the Lipschitz constant L</T>
                     <sub>π</sub>
                     <T> and smoothness C</T>
@@ -702,21 +702,21 @@ function ActionVelocitySection({
               return (
                 <div
                   key={s.name}
-                  className={`rounded-md px-2.5 py-2 space-y-1 ${dimmed ? "bg-(--ds-surface-sunken) opacity-50" : "bg-(--ds-surface-sunken)"}`}
+                  className={`rounded-md px-2.5 py-2 space-y-1 ${dimmed ? "border border-dashed border-(--ds-border-control)" : "bg-(--ds-surface-sunken)"}`}
                 >
                   <p
-                    className={`text-xs font-medium truncate ${dimmed ? "text-(--ds-text-tertiary)" : "text-(--ds-text-primary)"}`}
+                    className={`text-xs font-medium truncate ${dimmed ? "text-(--ds-text-secondary)" : "text-(--ds-text-primary)"}`}
                     title={s.name}
                   >
                     <T>{s.name}</T>
                     {tag && (
-                      <span className="text-(--ds-text-tertiary) ml-1 font-normal">
+                      <span className="text-(--ds-text-secondary) ml-1 font-normal">
                         (<T>{tag}</T>)
                       </span>
                     )}
                   </p>
                   <div
-                    className={`flex gap-2 text-xs tabular-nums ${dimmed ? "text-(--ds-text-tertiary)" : "text-(--ds-text-secondary)"}`}
+                    className={`flex gap-2 text-xs tabular-nums ${dimmed ? "text-(--ds-text-secondary)" : "text-(--ds-text-secondary)"}`}
                   >
                     <span>σ={s.std.toFixed(4)}</span>
                     <span>
@@ -790,7 +790,7 @@ function ActionVelocitySection({
                   </li>
                 ))}
               </ul>
-              <p className="text-xs text-(--ds-text-tertiary) pt-1">
+              <p className="text-xs text-(--ds-text-secondary) pt-1">
                 <T>{insight.tip}</T>
               </p>
             </div>
@@ -817,7 +817,7 @@ function JerkyEpisodesList({ episodes }: { episodes: JerkyEpisode[] }) {
             <p className="text-sm font-medium text-(--ds-text-primary)">
               <T>Most Jerky Episodes</T>
               <T> </T>
-              <span className="text-xs text-(--ds-text-tertiary) font-normal">
+              <span className="text-xs text-(--ds-text-secondary) font-normal">
                 <T>sorted by mean |Δa|</T>
               </span>
             </p>
@@ -838,7 +838,7 @@ function JerkyEpisodesList({ episodes }: { episodes: JerkyEpisode[] }) {
           <div className="max-h-48 overflow-y-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="text-(--ds-text-tertiary) border-b border-(--ds-separator)">
+                <tr className="text-(--ds-text-secondary) border-b border-(--ds-separator)">
                   <th className="w-5 py-1" />
                   <th className="text-left py-1 pr-3">
                     <T>Episode</T>
@@ -912,7 +912,7 @@ function VarianceHeatmap({
             <h3 className="text-sm font-semibold text-(--ds-text-primary) mb-2">
               <T>Cross-Episode Action Variance</T>
             </h3>
-            <p className="text-(--ds-text-tertiary) italic text-sm">
+            <p className="text-(--ds-text-secondary) italic text-sm">
               <T>Not enough episodes or no action data to compute variance.</T>
             </p>
           </div>
@@ -954,7 +954,7 @@ function VarianceHeatmap({
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold text-(--ds-text-primary)">
                 <T>Cross-Episode Action Variance</T>
-                <span className="text-xs text-(--ds-text-tertiary) ml-2 font-normal">
+                <span className="text-xs text-(--ds-text-secondary) ml-2 font-normal">
                   (<T>{numEpisodes}</T>
                   <T> episodes sampled)</T>
                 </span>
@@ -980,7 +980,7 @@ function VarianceHeatmap({
                   <T> </T>
                   <T>indicate consistent behavior across demonstrations.</T>
                   <br />
-                  <span className="text-(--ds-text-tertiary)">
+                  <span className="text-(--ds-text-secondary)">
                     <T>Relates to the &quot;coverage&quot; discussion in</T>
                     <T> </T>
                     <a
@@ -1185,7 +1185,7 @@ function SpeedVarianceSection({
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold text-(--ds-text-primary)">
                 <T>Demonstrator Speed Variance</T>
-                <span className="text-xs text-(--ds-text-tertiary) ml-2 font-normal">
+                <span className="text-xs text-(--ds-text-secondary) ml-2 font-normal">
                   (<T>{numEpisodes}</T>
                   <T> episodes)</T>
                 </span>
@@ -1208,7 +1208,7 @@ function SpeedVarianceSection({
                     trajectory speed before training.
                   </T>
                   <br />
-                  <span className="text-(--ds-text-tertiary)">
+                  <span className="text-(--ds-text-secondary)">
                     <T>
                       Based on &quot;Is Diversity All You Need&quot; (AGI-Bot,
                       2025) which shows velocity normalization dramatically
@@ -1274,7 +1274,7 @@ function SpeedVarianceSection({
             </div>
             <div className="flex flex-col gap-2 text-xs shrink-0 min-w-[120px]">
               <div>
-                <span className="text-(--ds-text-tertiary)">
+                <span className="text-(--ds-text-secondary)">
                   <T>Mean</T>
                 </span>
                 <T> </T>
@@ -1283,7 +1283,7 @@ function SpeedVarianceSection({
                 </span>
               </div>
               <div>
-                <span className="text-(--ds-text-tertiary)">
+                <span className="text-(--ds-text-secondary)">
                   <T>Median</T>
                 </span>
                 <T> </T>
@@ -1292,7 +1292,7 @@ function SpeedVarianceSection({
                 </span>
               </div>
               <div>
-                <span className="text-(--ds-text-tertiary)">
+                <span className="text-(--ds-text-secondary)">
                   <T>Std</T>
                 </span>
                 <T> </T>
@@ -1301,7 +1301,7 @@ function SpeedVarianceSection({
                 </span>
               </div>
               <div>
-                <span className="text-(--ds-text-tertiary)">
+                <span className="text-(--ds-text-secondary)">
                   <T>CV</T>
                 </span>
                 <span
@@ -1495,7 +1495,7 @@ function StateActionAlignmentSection({
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold text-(--ds-text-primary)">
                 <T>State–Action Temporal Alignment</T>
-                <span className="text-xs text-(--ds-text-tertiary) ml-2 font-normal">
+                <span className="text-xs text-(--ds-text-secondary) ml-2 font-normal">
                   (<T>{scopeLabel}</T>, <T>{numPairs}</T>
                   <T> matched pair</T>
                   <T>{numPairs !== 1 ? "s" : ""}</T>)
@@ -1531,7 +1531,7 @@ function StateActionAlignmentSection({
                     changes.
                   </T>
                   <br />
-                  <span className="text-(--ds-text-tertiary)">
+                  <span className="text-(--ds-text-secondary)">
                     <T>Central to ACT (</T>
                     <a
                       href="https://arxiv.org/abs/2304.13705"
@@ -1810,7 +1810,7 @@ function ScopeControls({
       {
         <div className="bg-(--ds-surface-1) rounded-lg p-4 border border-(--ds-separator) space-y-3">
           <div className="flex items-center flex-wrap gap-x-4 gap-y-2">
-            <span className="text-xs text-(--ds-text-tertiary)">
+            <span className="text-xs text-(--ds-text-secondary)">
               <T>Analysis scope</T>
             </span>
             <div className="flex items-center gap-1 rounded-md border border-(--ds-separator) p-0.5">
@@ -1853,7 +1853,7 @@ function ScopeControls({
                     className="w-20 bg-(--ds-surface-sunken) border border-(--ds-separator) rounded px-2 py-1 text-(--ds-text-primary) tabular-nums"
                   />
                 </label>
-                <span className="text-(--ds-text-tertiary)">
+                <span className="text-(--ds-text-secondary)">
                   <T>{`0–${lastEpisode}`}</T>
                 </span>
               </div>
@@ -1902,7 +1902,7 @@ function ScopeControls({
               disabled={loading || !dirty}
               className={`ml-auto px-3 py-1 text-xs rounded-md border transition-colors ${
                 loading || !dirty
-                  ? "border-(--ds-separator) text-(--ds-text-tertiary) cursor-not-allowed"
+                  ? "border-(--ds-separator) text-(--ds-text-secondary) cursor-not-allowed"
                   : "border-(--ds-accent) text-(--ds-text-primary) hover:bg-(--ds-surface-selected)"
               }`}
             >

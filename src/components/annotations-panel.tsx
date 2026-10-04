@@ -805,6 +805,7 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                 </T>
               </span>
               <select
+                aria-label="Annotation kind"
                 value={qaKind}
                 onChange={(e) => {
                   setQaKind(e.target.value as QuickAddKind);
@@ -1339,6 +1340,7 @@ const CameraField: React.FC<{
             <T>Camera</T>
           </label>
           <select
+            aria-label="Camera"
             value={value}
             onChange={(e) =>
               onChange({

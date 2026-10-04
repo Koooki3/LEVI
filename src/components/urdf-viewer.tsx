@@ -1083,7 +1083,7 @@ export default function URDFViewer({
                 <Icon icon={ChevronRight} />
               </span>
               <T>Joint Mapping</T>
-              <span className="text-(--ds-text-tertiary)">
+              <span className="text-(--ds-text-secondary)">
                 (<T>{Object.keys(mapping).filter((k) => mapping[k]).length}</T>/
                 <T>{displayJointNames.length}</T>
                 <T> mapped)</T>
@@ -1116,7 +1116,7 @@ export default function URDFViewer({
                 <div className="flex-1 overflow-x-auto max-h-48 overflow-y-auto">
                   <table className="w-full text-xs">
                     <thead className="sticky top-0 bg-(--ds-surface-1)">
-                      <tr className="text-(--ds-text-tertiary)">
+                      <tr className="text-(--ds-text-secondary)">
                         <th className="text-left font-normal px-1">
                           <T>URDF Joint</T>
                         </th>
@@ -1138,7 +1138,7 @@ export default function URDFViewer({
                           <td className="px-1 py-0.5 text-(--ds-text-secondary) font-mono">
                             <T>{jointName}</T>
                           </td>
-                          <td className="px-1 text-(--ds-text-tertiary)">→</td>
+                          <td className="px-1 text-(--ds-text-secondary)">→</td>
                           <td className="px-1 py-0.5">
                             <select
                               value={mapping[jointName] ?? ""}

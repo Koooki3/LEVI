@@ -775,6 +775,7 @@ export default function ObjectAnnotationPanel({
               </label>
               <div className="object-annotation-presets">
                 <select
+                  aria-label="Preset"
                   value={selectedPresetName}
                   onChange={(event) => {
                     setSelectedPresetName(event.target.value);

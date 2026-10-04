@@ -1153,7 +1153,10 @@ function EpisodeViewerInner({
 
         {/* Main content */}
         <main
-          className="vw-main"
+          className="vw-main vw-chart"
+          // Focusable so the content scrolls by keyboard (axe
+          // scrollable-region-focusable) when it holds no control.
+          tabIndex={0}
           data-loading={isLoading ? "true" : undefined}
           aria-busy={isLoading || undefined}
         >

@@ -340,12 +340,12 @@ const SingleDataGraph = React.memo(
                               style={{ accentColor: color }}
                             />
                             <span
-                              className={`text-xs ${visibleKeys.includes(key) ? "text-(--ds-text-secondary)" : "text-(--ds-text-tertiary)"}`}
+                              className={`text-xs ${visibleKeys.includes(key) ? "text-(--ds-text-secondary)" : "text-(--ds-text-secondary)"}`}
                             >
                               <T>{label}</T>
                             </span>
                             <span
-                              className={`text-xs font-mono tabular-nums ml-1 ${visibleKeys.includes(key) ? "text-(--ds-text-primary)" : "text-(--ds-text-tertiary)"}`}
+                              className={`text-xs font-mono tabular-nums ml-1 ${visibleKeys.includes(key) ? "text-(--ds-text-primary)" : "text-(--ds-text-secondary)"}`}
                             >
                               <T>
                                 {typeof currentData[key] === "number"
@@ -375,12 +375,12 @@ const SingleDataGraph = React.memo(
                       style={{ accentColor: color }}
                     />
                     <span
-                      className={`text-xs ${visibleKeys.includes(key) ? "text-(--ds-text-primary)" : "text-(--ds-text-tertiary)"}`}
+                      className={`text-xs ${visibleKeys.includes(key) ? "text-(--ds-text-primary)" : "text-(--ds-text-secondary)"}`}
                     >
                       <T>{key}</T>
                     </span>
                     <span
-                      className={`text-xs font-mono tabular-nums ml-1 ${visibleKeys.includes(key) ? "text-(--ds-text-primary)" : "text-(--ds-text-tertiary)"}`}
+                      className={`text-xs font-mono tabular-nums ml-1 ${visibleKeys.includes(key) ? "text-(--ds-text-primary)" : "text-(--ds-text-secondary)"}`}
                     >
                       <T>
                         {typeof currentData[key] === "number"
