@@ -1,7 +1,7 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
 import { Flag, Info, LoaderCircle, Maximize2, Minimize2 } from "lucide-react";
-import { Icon, IconButton, SegmentedControl } from "@/components/ds";
+import { Button, Icon, IconButton, SegmentedControl } from "@/components/ds";
 import { T, useLocale } from "@/components/levi-locale";
 import { DATA_SERIES } from "@/components/viewer/data-palette";
 
@@ -118,30 +118,9 @@ function FlagBtn({ id }: { id: number }) {
 function FlagAllBtn({ ids, label }: { ids: number[]; label?: string }) {
   const { addMany } = useFlaggedEpisodes();
   return (
-    <T>
-      {
-        <button
-          onClick={() => addMany(ids)}
-          className="text-xs text-(--ds-text-secondary) hover:text-(--ds-text-primary) transition-colors flex items-center gap-1"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="10"
-            height="10"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
-            <line x1="4" y1="22" x2="4" y2="15" />
-          </svg>
-          {label ?? "Flag all"}
-        </button>
-      }
-    </T>
+    <Button size="sm" variant="ghost" icon={Flag} onClick={() => addMany(ids)}>
+      <T>{label ?? "Flag all"}</T>
+    </Button>
   );
 }
 const COLORS = DATA_SERIES;

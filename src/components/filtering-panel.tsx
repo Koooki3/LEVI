@@ -1,7 +1,7 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
-import { Flag, LoaderCircle } from "lucide-react";
-import { Icon, IconButton } from "@/components/ds";
+import { Check, Copy, Flag, LoaderCircle, X } from "lucide-react";
+import { Button, Icon, IconButton } from "@/components/ds";
 import { T, useLocale } from "@/components/levi-locale";
 
 import React, { useState, useMemo, useCallback } from "react";
@@ -38,30 +38,9 @@ function FlagBtn({ id }: { id: number }) {
 function FlagAllBtn({ ids, label }: { ids: number[]; label?: string }) {
   const { addMany } = useFlaggedEpisodes();
   return (
-    <T>
-      {
-        <button
-          onClick={() => addMany(ids)}
-          className="text-xs text-(--ds-text-secondary) hover:text-(--ds-text-primary) transition-colors flex items-center gap-1"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="10"
-            height="10"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
-            <line x1="4" y1="22" x2="4" y2="15" />
-          </svg>
-          {label ?? "Flag all"}
-        </button>
-      }
-    </T>
+    <Button size="sm" variant="ghost" icon={Flag} onClick={() => addMany(ids)}>
+      <T>{label ?? "Flag all"}</T>
+    </Button>
   );
 }
 
@@ -256,6 +235,7 @@ function FlaggedIdsCopyBar({
   repoId: string;
   onViewEpisodes?: () => void;
 }) {
+  const { t } = useLocale();
   const { flagged, count, clear } = useFlaggedEpisodes();
   const [copied, setCopied] = useState(false);
 
@@ -282,74 +262,31 @@ function FlaggedIdsCopyBar({
               </span>
             </h3>
             <div className="flex items-center gap-2">
-              <button
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={copied ? Check : Copy}
                 onClick={handleCopy}
-                className="text-xs text-(--ds-text-secondary) hover:text-(--ds-text-primary) transition-colors flex items-center gap-1"
-                title="Copy IDs"
               >
-                <T>
-                  {copied ? (
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="12"
-                      height="12"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      className="text-(--ds-success)"
-                    >
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  ) : (
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="12"
-                      height="12"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                    >
-                      <rect x="9" y="9" width="13" height="13" rx="2" />
-                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                    </svg>
-                  )}
-                </T>
-                <T>Copy</T>
-              </button>
-              <button
-                onClick={clear}
-                className="text-xs text-(--ds-text-secondary) hover:text-(--ds-danger) transition-colors"
-              >
-                <T>Clear</T>
-              </button>
+                {t(copied ? "Copied" : "Copy")}
+              </Button>
+              <Button size="sm" variant="ghost" icon={X} onClick={clear}>
+                {t("Clear")}
+              </Button>
             </div>
           </div>
           <p className="text-xs text-(--ds-text-secondary) tabular-nums leading-relaxed max-h-20 overflow-y-auto">
             <T>{idStr}</T>
           </p>
           {onViewEpisodes && (
-            <button
+            <Button
+              size="sm"
+              icon={Flag}
+              className="w-full"
               onClick={onViewEpisodes}
-              className="w-full text-xs py-1.5 rounded bg-(--ds-surface-2) hover:bg-(--ds-surface-sunken) text-(--ds-text-secondary) hover:text-(--ds-text-primary) transition-colors flex items-center justify-center gap-1.5"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
-                <line x1="4" y1="22" x2="4" y2="15" />
-              </svg>
               <T>View flagged episodes</T>
-            </button>
+            </Button>
           )}
           <div className="bg-(--ds-surface-sunken) rounded-md px-3 py-2 border border-(--ds-separator) space-y-2.5">
             <p className="text-xs text-(--ds-text-secondary)">

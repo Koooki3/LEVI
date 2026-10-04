@@ -1,9 +1,8 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
-import { Icon } from "@/components/ds";
-import { LoaderCircle } from "lucide-react";
 import { T, useLocale } from "@/components/levi-locale";
-import { SegmentedControl } from "@/components/ds";
+import { Button, Icon, IconButton, SegmentedControl } from "@/components/ds";
+import { ChevronLeft, ChevronRight, Flag, LoaderCircle } from "lucide-react";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import type {
@@ -21,6 +20,7 @@ function FrameThumbnail({
   info: EpisodeFrameInfo;
   showLast: boolean;
 }) {
+  const { t } = useLocale();
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [inView, setInView] = useState(false);
@@ -86,37 +86,25 @@ function FrameThumbnail({
                 />
               )}
             </T>
-            <button
-              onClick={() => toggle(info.episodeIndex)}
-              className={`absolute top-1 right-1 p-1 rounded transition-opacity ${
-                isFlagged
-                  ? "opacity-100 text-(--ds-text-primary)"
-                  : "opacity-0 group-hover:opacity-100 text-(--ds-text-secondary) hover:text-(--ds-text-primary)"
-              }`}
-              title={isFlagged ? "Unflag episode" : "Flag episode"}
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill={isFlagged ? "currentColor" : "none"}
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
-                <line x1="4" y1="22" x2="4" y2="15" />
-              </svg>
-            </button>
+            <span className="absolute top-1 right-1">
+              <IconButton
+                icon={Flag}
+                size="sm"
+                variant="secondary"
+                className="vw-flag-btn vw-thumb-flag"
+                pressed={isFlagged}
+                label={t(isFlagged ? "Unflag episode" : "Flag episode")}
+                onClick={() => toggle(info.episodeIndex)}
+              />
+            </span>
           </div>
           <p
             className={`text-xs mt-1 tabular-nums ${isFlagged ? "text-(--ds-text-primary)" : "text-(--ds-text-secondary)"}`}
           >
-            <T>ep </T>
-            <T>{info.episodeIndex}</T>
-            <T>{isFlagged ? " ⚑" : ""}</T>
+            {t(`Episode ${info.episodeIndex}`)}
+            {isFlagged && (
+              <Icon icon={Flag} label={t("Flagged")} className="ml-1 inline" />
+            )}
           </p>
         </div>
       }
@@ -239,32 +227,16 @@ export default function OverviewPanel({
               {/* Flagged only toggle */}
               {flagCount > 0 && onFlaggedOnlyChange && (
                 <button
+                  type="button"
+                  className="vw-chip ds-focus"
+                  aria-pressed={flaggedOnly}
                   onClick={() => {
                     onFlaggedOnlyChange(!flaggedOnly);
                     setPage(0);
                   }}
-                  className={`text-xs px-2.5 py-1 rounded transition-colors flex items-center gap-1.5 ${
-                    flaggedOnly
-                      ? "bg-(--ds-surface-selected) text-(--ds-text-primary) border border-(--ds-accent)"
-                      : "text-(--ds-text-secondary) hover:text-(--ds-text-primary) border border-(--ds-separator)"
-                  }`}
                 >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill={flaggedOnly ? "currentColor" : "none"}
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
-                    <line x1="4" y1="22" x2="4" y2="15" />
-                  </svg>
-                  <T>Flagged only (</T>
-                  <T>{flagCount}</T>)
+                  <Icon icon={Flag} />
+                  {t("Flagged only")} · {flagCount}
                 </button>
               )}
 
@@ -284,23 +256,27 @@ export default function OverviewPanel({
             {/* Pagination */}
             {totalPages > 1 && (
               <div className="flex items-center gap-2 text-sm text-(--ds-text-secondary)">
-                <button
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={ChevronLeft}
                   disabled={page === 0}
                   onClick={() => setPage((p) => p - 1)}
-                  className="px-2 py-1 rounded bg-(--ds-surface-1) hover:bg-(--ds-surface-sunken) disabled:opacity-30 disabled:cursor-not-allowed"
                 >
-                  <T>← Prev</T>
-                </button>
+                  {t("Previous")}
+                </Button>
                 <span className="tabular-nums">
                   {page + 1} / <T>{totalPages}</T>
                 </span>
-                <button
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  iconEnd={ChevronRight}
                   disabled={page === totalPages - 1}
                   onClick={() => setPage((p) => p + 1)}
-                  className="px-2 py-1 rounded bg-(--ds-surface-1) hover:bg-(--ds-surface-sunken) disabled:opacity-30 disabled:cursor-not-allowed"
                 >
-                  <T>Next →</T>
-                </button>
+                  {t("Next")}
+                </Button>
               </div>
             )}
           </div>

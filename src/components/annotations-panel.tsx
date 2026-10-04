@@ -2,7 +2,7 @@
 "use client";
 import { T, useLocale } from "@/components/levi-locale";
 import { useConfirmAction } from "@/components/shell/confirm";
-import { DatabaseZap, Play, Save, Trash2 } from "lucide-react";
+import { DatabaseZap, Play, Plus, Save, Trash2 } from "lucide-react";
 import { Button, IconButton } from "@/components/ds";
 
 import "@/components/viewer/annotations.css";
@@ -843,9 +843,14 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                   }
                 />
               ))}
-              <button className="add-btn" onClick={handleQuickAdd}>
-                <T>+ Add at frame</T>
-              </button>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={Plus}
+                onClick={handleQuickAdd}
+              >
+                {t("Add at frame")}
+              </Button>
             </div>
             {backendEnabled && (
               <VocabularyEditor

@@ -907,3 +907,18 @@ button.vw-outcome:hover {
   outline: 2px solid var(--ds-focus-ring);
   outline-offset: -2px;
 }
+/* The flag on a frame-gallery thumbnail: shown on hover or focus, kept
+   when set. */
+.vw-thumb-flag {
+  opacity: 0;
+}
+.group:hover .vw-thumb-flag,
+.vw-thumb-flag:focus-visible,
+.vw-thumb-flag[aria-pressed="true"] {
+  opacity: 1;
+}
+@media (hover: none) {
+  .vw-thumb-flag {
+    opacity: 1;
+  }
+}

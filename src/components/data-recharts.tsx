@@ -1,5 +1,7 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import { Maximize2, Minimize2 } from "lucide-react";
+import { Button } from "@/components/ds";
 import { seriesColor } from "@/components/viewer/data-palette";
 import { T } from "@/components/levi-locale";
 
@@ -75,45 +77,14 @@ export const DataRecharts = React.memo(
           <div>
             {data.length > 1 && (
               <div className="flex justify-end mb-2">
-                <button
+                <Button
+                  size="sm"
+                  icon={expanded ? Minimize2 : Maximize2}
+                  aria-pressed={expanded}
                   onClick={() => setExpanded((v) => !v)}
-                  className={`text-xs px-2.5 py-1 rounded transition-colors flex items-center gap-1.5 ${
-                    expanded
-                      ? "bg-(--ds-surface-selected) text-(--ds-text-primary) border border-(--ds-accent)"
-                      : "bg-(--ds-surface-1) text-(--ds-text-secondary) hover:text-(--ds-text-primary) border border-(--ds-separator)"
-                  }`}
                 >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <T>
-                      {expanded ? (
-                        <>
-                          <polyline points="4 14 10 14 10 20" />
-                          <polyline points="20 10 14 10 14 4" />
-                          <line x1="14" y1="10" x2="21" y2="3" />
-                          <line x1="3" y1="21" x2="10" y2="14" />
-                        </>
-                      ) : (
-                        <>
-                          <polyline points="15 3 21 3 21 9" />
-                          <polyline points="9 21 3 21 3 15" />
-                          <line x1="21" y1="3" x2="14" y2="10" />
-                          <line x1="3" y1="21" x2="10" y2="14" />
-                        </>
-                      )}
-                    </T>
-                  </svg>
                   <T>{expanded ? "Split charts" : "Combine all"}</T>
-                </button>
+                </Button>
               </div>
             )}
 

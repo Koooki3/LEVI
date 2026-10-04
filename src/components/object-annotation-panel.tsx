@@ -1,5 +1,7 @@
 "use client";
 
+import { Check, X } from "lucide-react";
+import { Icon, IconButton } from "@/components/ds";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DatasetTaskIndex } from "@/app/[org]/[dataset]/[episode]/fetch-data";
 import HfAuthButton from "@/components/hf-auth-button";
@@ -571,15 +573,21 @@ export default function ObjectAnnotationPanel({
               aria-label="SAM3 setup gates"
             >
               <span className={accountReady ? "ready" : "muted"}>
-                <i aria-hidden="true">{accountReady ? "✓" : "1"}</i>
+                <i aria-hidden="true">
+                  {accountReady ? <Icon icon={Check} /> : "1"}
+                </i>
                 <T>Hub access</T>
               </span>
               <span className={workerReady ? "ready" : "muted"}>
-                <i aria-hidden="true">{workerReady ? "✓" : "2"}</i>
+                <i aria-hidden="true">
+                  {workerReady ? <Icon icon={Check} /> : "2"}
+                </i>
                 <T>CUDA worker</T>
               </span>
               <span className={checkpointReady ? "ready" : "muted"}>
-                <i aria-hidden="true">{checkpointReady ? "✓" : "3"}</i>
+                <i aria-hidden="true">
+                  {checkpointReady ? <Icon icon={Check} /> : "3"}
+                </i>
                 <T>Checkpoint</T>
               </span>
             </div>
@@ -791,14 +799,13 @@ export default function ObjectAnnotationPanel({
                   ))}
                 </select>
                 {selectedPresetName && (
-                  <button
-                    type="button"
+                  <IconButton
+                    icon={X}
+                    size="sm"
+                    label={t("Delete this preset")}
                     onClick={() => void deletePreset(selectedPresetName)}
                     disabled={busy}
-                    title={t("Delete this preset")}
-                  >
-                    ×
-                  </button>
+                  />
                 )}
                 <input
                   value={presetNameDraft}

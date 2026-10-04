@@ -2202,5 +2202,8 @@
   "Annotation kind": "标注类型（快速添加）",
   "Preset": "预设",
   "Minimum episode length (s)": "片段最短时长（秒）",
-  "Maximum episode length (s)": "片段最长时长（秒）"
+  "Maximum episode length (s)": "片段最长时长（秒）",
+  "Add at frame": "在当前帧添加",
+  "Flagged only": "只看已标记",
+  "Flag episode": "标记片段"
 }
