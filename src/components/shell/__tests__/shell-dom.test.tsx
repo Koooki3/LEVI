@@ -221,6 +221,47 @@ describe("an open confirmation keeps the page's keys", () => {
   });
 });
 
+describe("confirmation inside a native modal dialog", () => {
+  test("is rendered inside the open showModal() dialog and still answers", async () => {
+    await withModalSupport(async () => {
+      const log: string[] = [];
+      await render(
+        <ConfirmProvider>
+          <dialog id="push">
+            <Guarded log={log} />
+          </dialog>
+        </ConfirmProvider>,
+      );
+      const native = document.querySelector<HTMLDialogElement>("#push")!;
+      await act(async () => native.showModal());
+      await focus(document.querySelector("#danger"));
+      await click(document.querySelector("#danger"));
+      const question = document.querySelector('[role="alertdialog"]')!;
+      expect(question).not.toBeNull();
+      // Inside the native dialog: the rest of the page is inert.
+      expect(native.contains(question)).toBe(true);
+      await click(buttonNamed("Delete")!);
+      await flush();
+      expect(log).toEqual(["deleted"]);
+      expect(document.activeElement?.id).toBe("danger");
+    });
+  });
+
+  test("without an open modal dialog it is rendered at the root", async () => {
+    await withModalSupport(async () => {
+      await render(
+        <ConfirmProvider>
+          <dialog id="closed">x</dialog>
+          <Guarded log={[]} />
+        </ConfirmProvider>,
+      );
+      await click(document.querySelector("#danger"));
+      const question = document.querySelector('[role="alertdialog"]')!;
+      expect(document.querySelector("#closed")!.contains(question)).toBe(false);
+    });
+  });
+});
+
 function Frame({ children }: { children?: React.ReactNode }) {
   return (
     <ShellProvider>
