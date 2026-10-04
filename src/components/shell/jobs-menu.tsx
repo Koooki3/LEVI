@@ -2,8 +2,9 @@
 /**
  * The header's Jobs entry: how many training pool exports/scans/pushes and
  * conversions are running, and where to follow them. It asks the two job
- * lists on first load, when the menu opens, and every 60 s while the tab is
- * visible (never while hidden, never twice at once).
+ * lists on first load, when the menu opens, when the tab becomes visible
+ * again and every 60 s while it is visible (never while hidden, never twice
+ * at once).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -56,12 +57,17 @@ export function useRunningJobs(pool: boolean): {
           ? null
           : setInterval(refresh, JOBS_POLL_MS);
     };
+    // Back on the tab: the counts may be old, ask at once (not twice).
+    const onVisibility = () => {
+      follow();
+      if (document.visibilityState !== "hidden") refresh();
+    };
     follow();
-    document.addEventListener("visibilitychange", follow);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       alive.current = false;
       if (timer) clearInterval(timer);
-      document.removeEventListener("visibilitychange", follow);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [refresh]);
   return { counts, refresh };

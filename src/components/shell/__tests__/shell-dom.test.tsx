@@ -510,6 +510,20 @@ describe("jobs entry", () => {
       // Answered: opening the menu asks once more.
       await click(trigger);
       expect(asked).toHaveLength(4);
+      await click(trigger); // close
+      // Coming back to the tab asks at once, but not while still waiting.
+      const visible = () =>
+        act(async () => {
+          document.dispatchEvent(new Event("visibilitychange"));
+        });
+      await visible();
+      expect(asked).toHaveLength(4);
+      await act(async () => {
+        pending.splice(0).forEach((answer) => answer());
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await visible();
+      expect(asked).toHaveLength(6);
     } finally {
       globalThis.fetch = original;
     }

@@ -97,7 +97,7 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 | `ToastProvider` | 右下角的 Toast 区域，一个 polite、一个 assertive 的 live 区域。下面任何组件都可以用 `@/components/ds` 的 `useToast().show({...})` |
 | `ConfirmProvider`（`confirm.tsx`） | 根部唯一的确认对话框。`const confirm = useConfirmAction(); if (!(await confirm({ title, confirmLabel, tone }))) return;`。“取消”、Esc、点遮罩都返回 false，与 `window.confirm` 的“取消”一致；在 provider 之外总是返回 false。原生模态 `<dialog>` 打开时（训练池的推送对话框）页面其余部分是 inert 的，所以问题渲染在那个对话框里面 |
 | 顶栏（`levi-header.tsx`） | 高 56 px，不透明的 `--ds-bg` 加分隔线（顶栏还不随页面滚动固定，半透明材质只会透出旧页面的深色背景；改成粘性后再用 `ds-material`）。字标；页面导航（显示实时评测时有“实时评测”、探索数据、转换与审核、提供训练池时有“训练池”、使用指南、报告），当前页标 `aria-current="page"`、字重 600、下方 2 px 指示条；右侧是搜索（打开命令面板）、作业、Agent 工作台开关、设置（账号与连接、命令面板、快捷键）、外观和语言。窄于 900 px 时页面导航移到单独一行、可横向滚动（`--levi-header-height` 变为 100 px，`.h-screen` 页面减去它） |
-| 作业（`jobs-menu.tsx`、`jobs.ts`） | 正在运行的训练池作业和转换作业数量，读现有的 `/api/levi/pool/jobs` 和 `/api/levi/jobs`，首次加载、打开菜单时各查一次，标签页可见时每 60 秒一次（隐藏时不请求，上一个请求未返回时不再发）；菜单通向训练池和转换与审核 |
+| 作业（`jobs-menu.tsx`、`jobs.ts`） | 正在运行的训练池作业和转换作业数量，读现有的 `/api/levi/pool/jobs` 和 `/api/levi/jobs`，首次加载、打开菜单、切回标签页时各查一次，标签页可见时每 60 秒一次（隐藏时不请求，上一个请求未返回时不再发）；菜单通向训练池和转换与审核 |
 | 命令面板（`command-palette.tsx`、`commands.ts`） | macOS 上 ⌘K，其他系统 Ctrl+K，或点“搜索”。组合框加列表框：跳到页面，打开 Agent 工作台、账号与连接或快捷键总表，选择外观或语言。按两种语言的标签以及中英文关键词匹配 |
 | 快捷键总表（`shortcuts-dialog.tsx`） | 按 `?` 打开（在输入框中不触发）。列出全局快捷键和页面已有的快捷键（片段查看器、标注、审核队列） |
 | Agent 工作台抽屉 | `agent-workbench.tsx` 把原有内容（未改动）放进顶栏下方、右侧的非模态 `Sheet`（`levi-agent-sheet`）；旁边的页面仍可操作，左边缘仍可拖动调整宽度（宽度按浏览器保存）。顶栏的开关、命令面板和原有的窗口事件 `levi-agent-toggle` / `levi-agent-connections` 都能打开它；它用 `levi-agent-state` 报告开关状态 |
