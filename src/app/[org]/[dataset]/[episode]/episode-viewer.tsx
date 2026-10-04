@@ -1098,12 +1098,14 @@ function EpisodeViewerInner({
       <UrlTimeSync />
       {/* Top tab bar */}
       <div className="vw-tabbar">
-        <Tabs
-          label={t("Episode viewer")}
-          items={tabItems}
-          value={activeTab}
-          onChange={(id) => handleTabChange(id as ViewerTab)}
-        />
+        <nav aria-label={t("Episode viewer views")} className="min-w-0">
+          <Tabs
+            label={t("Episode viewer")}
+            items={tabItems}
+            value={activeTab}
+            onChange={(id) => handleTabChange(id as ViewerTab)}
+          />
+        </nav>
         <div className="vw-tabbar-actions">
           <LeviReview repoId={`${org}/${dataset}`} />
           <HfAuthButton variant="tab" />
@@ -1161,6 +1163,14 @@ function EpisodeViewerInner({
           aria-busy={isLoading || undefined}
         >
           {isLoading && <Loading />}
+          {/* The heading row (with its h1) shows on Episodes and
+              Annotations; the other tabs still need a page heading. */}
+          {activeTab !== "episodes" && activeTab !== "annotations" && (
+            <h1 className="ds-sr-only">
+              {t(`Episode ${episodeId}`)} ·{" "}
+              {tabItems.find((item) => item.id === activeTab)?.label}
+            </h1>
+          )}
 
           {activeTab === "episodes" && (
             <>

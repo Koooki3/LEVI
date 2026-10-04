@@ -818,7 +818,11 @@ function JerkyEpisodesList({ episodes }: { episodes: JerkyEpisode[] }) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-(--ds-text-secondary) border-b border-(--ds-separator)">
-                  <th className="w-5 py-1" />
+                  <th className="w-5 py-1">
+                    <span className="ds-sr-only">
+                      <T>Flag</T>
+                    </span>
+                  </th>
                   <th className="text-left py-1 pr-3">
                     <T>Episode</T>
                   </th>
