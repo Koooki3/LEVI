@@ -14,6 +14,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from conftest import scaled
 
 CAMERAS = ("observation.images.front", "observation.images.wrist")
 
@@ -62,7 +63,7 @@ def _repo(client, dataset) -> str:
 
 
 def _wait_job(client, repo, job_id, timeout=60):
-    deadline = time.time() + timeout
+    deadline = time.time() + scaled(timeout)
     while time.time() < deadline:
         job = client.get(
             f"/annotations/api/segmentation/jobs/{job_id}", params={"repo_id": repo}

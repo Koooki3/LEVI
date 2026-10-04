@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import scaled
 
 from levi.agent import grants
 from levi.agent.capabilities import invoke
@@ -341,7 +342,7 @@ def _idle_runtime(monkeypatch, closed):
 
 
 def _wait_disconnected(wb, id, seconds):
-    for _ in range(int(seconds / 0.05)):
+    for _ in range(int(scaled(seconds) / 0.05)):
         value = wb.store.get("pilot_sessions", id)
         if value["connection"] == "disconnected":
             return value

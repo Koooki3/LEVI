@@ -11,6 +11,7 @@ import os
 import threading
 import time
 
+from conftest import scaled
 from test_agent_workbench import bench  # noqa: F401  (fixture)
 
 from levi.agent.planning import approve
@@ -31,7 +32,7 @@ def journal_fds(path) -> int:
 
 
 def wait_for(condition, seconds=30):
-    deadline = time.monotonic() + seconds
+    deadline = time.monotonic() + scaled(seconds)
     while time.monotonic() < deadline:
         if condition():
             return True

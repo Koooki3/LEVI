@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import with_netguard
+from conftest import scaled, with_netguard
 from live_helpers import Rollouts
 
 from levi.live import cli, controller, fakevlm, gpumgr
@@ -299,7 +299,7 @@ def live(tmp_path, serve, demo_template):
 
 
 def wait_for(predicate, seconds=20):
-    deadline = time.time() + seconds
+    deadline = time.time() + scaled(seconds)
     while time.time() < deadline:
         if predicate():
             return True

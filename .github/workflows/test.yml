@@ -26,6 +26,9 @@ jobs:
       # A fresh CI workspace must not download the DROID test sample.
       LEVI_DROID_SAMPLE: "off"
       CUDA_VISIBLE_DEVICES: ""
+      # Shared runners are slower than a workstation: the tests' wait helpers
+      # get twice their wall-clock budget (tests/conftest.py, scaled()).
+      LEVI_TEST_TIME_SCALE: "2"
     steps:
       # Node 24 releases (the Node 20 runtime is deprecated on the runners).
       - uses: actions/checkout@v7

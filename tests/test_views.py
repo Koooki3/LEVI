@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from conftest import scaled
 from test_formats import capture_fixture, make_demo
 
 from levi import catalog
@@ -17,7 +18,7 @@ from levi.conversion.media import frame_interval
 
 
 def wait(client, job_id, limit=600):
-    for _ in range(limit):
+    for _ in range(int(scaled(limit))):
         item = next(j for j in client.get("/api/levi/jobs").json() if j["id"] == job_id)
         if item["status"] not in ("planned", "queued", "running"):
             return item

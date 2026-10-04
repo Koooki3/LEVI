@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import scaled
 from test_pool import declare_grippers, make_demo
 
 from levi import children
@@ -305,7 +306,7 @@ def test_raw_capture_copy_resumes_too(rp, monkeypatch):
 
 
 def _wait(predicate, timeout=90.0, step=0.05):
-    end = time.monotonic() + timeout
+    end = time.monotonic() + scaled(timeout)
     while time.monotonic() < end:
         value = predicate()
         if value:

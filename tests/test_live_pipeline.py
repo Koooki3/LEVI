@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import scaled
 from live_helpers import Rollouts
 
 from levi.live import cli, controller, fakevlm, jsonio, mirror
@@ -71,7 +72,7 @@ class Env:
     def run(self, **kwargs):
         ctl = self.controller()
         try:
-            ctl.run(once=True, max_seconds=kwargs.pop("max_seconds", 300))
+            ctl.run(once=True, max_seconds=scaled(kwargs.pop("max_seconds", 300)))
         finally:
             ctl.shutdown()
         return ctl

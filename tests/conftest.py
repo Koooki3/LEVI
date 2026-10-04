@@ -38,6 +38,20 @@ def with_netguard(pythonpath: str = "") -> str:
     return os.pathsep.join(dict.fromkeys(parts))
 
 
+# Wall-clock budgets of the tests' wait helpers (how long to wait for a job,
+# a worker or a server) are multiplied by LEVI_TEST_TIME_SCALE (default 1),
+# so a slower machine such as a CI runner can give them more time.
+def time_scale() -> float:
+    value = float(os.environ.get("LEVI_TEST_TIME_SCALE") or 1)
+    if value <= 0:
+        raise ValueError("LEVI_TEST_TIME_SCALE must be positive")
+    return value
+
+
+def scaled(seconds: float) -> float:
+    return seconds * time_scale()
+
+
 def pytest_configure(config):
     global _NETGUARD_LOG_DIR
     config.addinivalue_line(
@@ -182,7 +196,7 @@ def client(monkeypatch, tmp_path):
     # A job thread still running after the test would write through the
     # module paths once the monkeypatches above are undone -- into the real
     # workspace. Wait for them while the test's paths are still in place.
-    assert not jobs.wait_idle(120), "a job thread outlived its test"
+    assert not jobs.wait_idle(scaled(120)), "a job thread outlived its test"
 
 
 @pytest.fixture(autouse=True)
