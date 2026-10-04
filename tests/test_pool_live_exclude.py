@@ -317,3 +317,39 @@ def test_a_removal_on_the_product_page_reaches_the_pool_outside_the_pool_roots(
     mirror.jsonio.write(home / "status.json", {"workspace": str(outside)})
     assert original not in episodes()
     assert recipe.preview(Recipe(name="r", categories=["rollout"]))["episodes"] == 2
+
+
+def test_a_removal_stays_out_after_the_live_page_finds_another_workspace(
+    pool, tmp_path
+):
+    """The pool remembers each live workspace the page showed: a removal made
+    in the first stays out of the listings, the recipes and the exports after
+    the status file names a second one."""
+    first = tmp_path / "first-live"
+    config = live_config.Config()
+    config.service.workspace = str(first)
+    (first / "live").mkdir(parents=True)
+    (first / "live/workspace.json").write_text("{}")
+    state = mirror.empty_state(
+        config,
+        (str(pool["root"] / "rollouts/models"), "pi05_test", "stack_the_plates"),
+        0,
+    )
+    state["demos"] = {"demo_0002": {"state": "done", "episode_index": 2}}
+    mirror.jsonio.write(mirror.state_path(config, DATASET), state)
+    exclusion.exclude(config, DATASET, ["demo_0002"], via="product")
+    home = Path(os.environ["LEVI_LIVE_HOME"])
+    mirror.jsonio.write(home / "status.json", {"workspace": str(first)})
+    original = str(pool["task"] / "demo_0002")
+    assert original not in episodes()
+    second = tmp_path / "second-live"
+    (second / "live").mkdir(parents=True)
+    (second / "live/workspace.json").write_text("{}")
+    mirror.jsonio.write(home / "status.json", {"workspace": str(second)})
+    assert original not in episodes()
+    assert recipe.preview(Recipe(name="r", categories=["rollout"]))["episodes"] == 2
+    with pytest.raises(PermissionError):
+        export.refuse_removed([{"key": original}])
+    # Nothing names a live workspace any more: still remembered.
+    (home / "status.json").unlink()
+    assert original not in episodes()

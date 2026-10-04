@@ -711,7 +711,7 @@ def test_the_watchdog_gives_up_after_three_restarts_and_says_so_once(tmp_path):
 # --- the workspace guard and the per-workspace lock --------------------------------------
 
 
-def test_the_service_refuses_a_workspace_that_is_not_a_live_one(tmp_path):
+def test_the_service_refuses_a_workspace_that_is_not_a_live_one(tmp_path, monkeypatch):
     c = cfg(tmp_path)
     c.service.workspace = str(tmp_path / "ws")
     # The product LEVI's workspace: LEVI state, no live marker.
@@ -724,10 +724,14 @@ def test_the_service_refuses_a_workspace_that_is_not_a_live_one(tmp_path):
     assert (tmp_path / "ws/live/workspace.json").exists()
     cli.prepare(c)  # now fine without the flag
     # The checkout's own .state is refused whatever the flag says.
-    own = cfg(tmp_path)
-    own.service.workspace = str(PROJECT / ".state")
-    with pytest.raises(ValueError, match="product LEVI"):
-        cli.prepare(own, adopt=True)
+    checkout = tmp_path / "checkout"
+    (checkout / ".state").mkdir(parents=True)
+    monkeypatch.setenv("LEVI_LIVE_PROTECT_CHECKOUT", str(checkout))
+    for inside in (checkout / ".state", checkout / ".state/tmp/ws", checkout):
+        own = cfg(tmp_path)
+        own.service.workspace = str(inside)
+        with pytest.raises(ValueError, match="product LEVI"):
+            cli.prepare(own, adopt=True)
 
 
 def test_the_main_checkout_and_the_environment_workspace_are_refused_even_adopted(
@@ -741,7 +745,7 @@ def test_the_main_checkout_and_the_environment_workspace_are_refused_even_adopte
     tree = tmp_path / "LEVI-live-fix"
     tree.mkdir()
     (tree / ".git").write_text(f"gitdir: {main}/.git/worktrees/live-fix\n")
-    monkeypatch.setattr(controller, "project_root", lambda: tree)
+    monkeypatch.setenv("LEVI_LIVE_PROTECT_CHECKOUT", str(tree))
     c = cfg(tmp_path)
     c.service.workspace = str(main / ".state")
     (main / ".state/outputs/LEVI").mkdir(parents=True)

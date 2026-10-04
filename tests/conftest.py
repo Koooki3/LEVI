@@ -115,6 +115,11 @@ def _no_real_live_service(monkeypatch, tmp_path):
     ``LEVI_LIVE_WORKSPACE`` from the shell. A test that wants one sets it."""
     monkeypatch.setenv("LEVI_LIVE_HOME", str(tmp_path / "no-live-home"))
     monkeypatch.delenv("LEVI_LIVE_WORKSPACE", raising=False)
+    # The `.state` of every checkout is refused as (or around) a live
+    # workspace, and the test's temporary folders lie under this checkout's
+    # `.state`: the protected checkout is a scratch one here. A test of the
+    # guard points it at a checkout of its own.
+    monkeypatch.setenv("LEVI_LIVE_PROTECT_CHECKOUT", str(tmp_path / "no-checkout"))
 
 
 @pytest.fixture(autouse=True)

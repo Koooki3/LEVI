@@ -6,6 +6,7 @@ live service lands in the product workspace, and that ``levi live start``
 starts no page of its own by default. Temporary directories, a fake home
 and a fake model server only: no running LEVI, no live service, no GPU."""
 
+import json
 import os
 import time
 from pathlib import Path
@@ -64,8 +65,17 @@ def write_status(home: Path, workspace, **extra):
     )
 
 
+# The one thing the product LEVI keeps about the live workspace in its own
+# workspace: its training pool's list of the live workspaces it was shown.
+REMEMBERED = {"pool", "pool/live_workspaces.json", "pool/live_workspaces.json.lock"}
+
+
 def snapshot(folder: Path) -> list:
-    return sorted(str(p.relative_to(folder)) for p in folder.rglob("*"))
+    return sorted(
+        name
+        for name in (str(p.relative_to(folder)) for p in folder.rglob("*"))
+        if name not in REMEMBERED
+    )
 
 
 # --- finding the live workspace --------------------------------------------------------
@@ -314,3 +324,162 @@ def test_the_status_line_points_to_the_product_page_without_a_page():
         False,
     )
     assert "http://127.0.0.1:7880" in line
+
+
+# --- review: overlap, every worktree, links, relative paths, paths not shown -----------
+
+
+def fake_checkouts(tmp_path):
+    """A main checkout with one worktree, as git lays them out."""
+    main = tmp_path / "LEVI"
+    other = tmp_path / "LEVI-other"
+    (main / ".git/worktrees/other").mkdir(parents=True)
+    (main / ".git/worktrees/other/gitdir").write_text(f"{other}/.git\n")
+    (main / ".git/worktrees/other/commondir").write_text("../..\n")
+    other.mkdir()
+    (other / ".git").write_text(f"gitdir: {main}/.git/worktrees/other\n")
+    for top in (main, other):
+        (top / ".state").mkdir()
+    return main, other
+
+
+def live_folder(path: Path) -> Path:
+    (path / "live").mkdir(parents=True)
+    (path / "live/workspace.json").write_text("{}")
+    return path
+
+
+def test_every_checkout_s_state_is_protected_from_any_of_them(tmp_path, monkeypatch):
+    main, other = fake_checkouts(tmp_path)
+    for start in (main, other):
+        monkeypatch.setenv("LEVI_LIVE_PROTECT_CHECKOUT", str(start))
+        assert set(locate.protected_workspaces()) == {
+            (main / ".state").resolve(),
+            (other / ".state").resolve(),
+        }
+
+
+@pytest.mark.parametrize(
+    "where",
+    ["main/.state/live-ws", "other/.state/tmp/ws", "main/.state", "holder"],
+)
+def test_a_live_workspace_inside_or_around_a_checkout_s_state_is_refused(
+    product, tmp_path, monkeypatch, where
+):
+    ws, home = product
+    main, other = fake_checkouts(tmp_path / "repo")
+    monkeypatch.setenv("LEVI_LIVE_PROTECT_CHECKOUT", str(main))
+    named = {
+        "main/.state/live-ws": main / ".state/live-ws",
+        "other/.state/tmp/ws": other / ".state/tmp/ws",
+        "main/.state": main / ".state",
+        "holder": tmp_path / "repo",  # holds both checkouts' .state
+    }[where]
+    live_folder(named) if not (named / "live").exists() else None
+    write_status(home, named)
+    assert locate.find(ws).problem == "product_workspace"
+    # And the service refuses it as its workspace, adopted or not.
+    from levi.live import config as live_config
+
+    c = live_config.Config()
+    c.service.workspace = str(named)
+    c.service.home = str(home)
+    with pytest.raises(ValueError, match="product LEVI"):
+        cli.check_workspace(c, adopt=True)
+
+
+def test_a_live_workspace_around_the_product_s_own_workspace_is_refused(
+    product, tmp_path
+):
+    ws, home = product
+    write_status(home, live_folder(tmp_path))  # tmp_path holds the product's
+    assert locate.find(ws).problem == "product_workspace"
+
+
+def test_a_live_folder_linked_to_elsewhere_is_not_a_live_workspace(
+    client, env, product, tmp_path, monkeypatch
+):
+    e = env()
+    ws, home = product
+    mirror_only(e, 0)
+    outside = tmp_path / "elsewhere"
+    (e.ws / "live").rename(outside)
+    (e.ws / "live").symlink_to(outside, target_is_directory=True)
+    write_status(home, e.ws)
+    assert locate.find(ws).problem == "not_live"
+    # The live workspace's own core: the read works, a write is refused.
+    monkeypatch.setattr(api, "_own", lambda: e.ws)
+    monkeypatch.setenv("LEVI_UI_TOKEN", "test-ui-token")
+    url = f"/api/levi/live/datasets/{NAME}/exclude"
+    answer = client.post(url, json={"demos": ["demo_0000"]}, headers=UI)
+    assert answer.status_code == 409
+    assert not exclusion.is_excluded(
+        jsonio.read(outside / f"datasets/{NAME}.json")["demos"]["demo_0000"]
+    )
+
+
+@pytest.mark.parametrize("named", ["levi-live-ws", "./ws", "ws/../ws"])
+def test_a_relative_path_never_names_the_live_workspace(
+    product, tmp_path, monkeypatch, named
+):
+    ws, home = product
+    monkeypatch.chdir(tmp_path)
+    live_folder(tmp_path / named.split("/")[-1].lstrip("."))
+    monkeypatch.setenv("LEVI_LIVE_WORKSPACE", named)
+    assert locate.find(ws).problem == "not_live"
+    monkeypatch.delenv("LEVI_LIVE_WORKSPACE")
+    write_status(home, named)
+    assert locate.find(ws).problem == "not_live"
+
+
+def test_the_configured_workspace_is_stored_absolute(tmp_path, monkeypatch):
+    from levi.live import config as live_config
+
+    monkeypatch.chdir(tmp_path)
+    config = live_config.load(None, "rel/ws")
+    assert config.service.workspace == str((tmp_path / "rel/ws").resolve())
+
+
+def test_the_product_page_gives_no_path_of_the_live_workspace(client, env, product):
+    e = env()
+    _ws, home = product
+    write_status(home, e.ws, config=str(e.ws / "live.toml"))
+    body = client.get("/api/levi/live/status").json()
+    assert "workspace" not in body["service"] and "config" not in body["service"]
+    assert body["workspace_name"] == e.ws.name
+    assert str(e.ws) not in json.dumps(body)
+
+
+def test_the_live_workspace_s_own_page_keeps_the_whole_status(client, env, monkeypatch):
+    e = env()
+    monkeypatch.setattr(api, "_own", lambda: e.ws)
+    write_status(locate.home(), e.ws, config="x.toml")
+    body = client.get("/api/levi/live/status").json()
+    assert body["service"]["workspace"] == str(e.ws)
+    assert body["service"]["config"] == "x.toml"
+
+
+def test_the_product_remembers_each_live_workspace_it_showed(
+    client, env, product, tmp_path
+):
+    e = env()
+    ws, home = product
+    write_status(home, e.ws)
+    client.get("/api/levi/live/status")
+    other = live_folder(tmp_path / "second-live")
+    write_status(home, other)
+    client.get("/api/levi/live/status")
+    client.get("/api/levi/live/status")
+    from levi.pool import exclusions as pool_exclusions
+
+    assert pool_exclusions.remembered(ws / "pool") == [e.ws.resolve(), other.resolve()]
+
+
+def test_the_first_log_line_says_what_the_service_serves():
+    c = __import__("levi.live.config", fromlist=["Config"]).Config()
+    parse = cli.build_parser().parse_args
+    assert cli._served(c, parse(["start"])) == (
+        "core :7881 (the live page is in the product LEVI)"
+    )
+    assert cli._served(c, parse(["start", "--ui"])) == "UI :7880 core :7881"
+    assert cli._served(c, parse(["start", "--no-core"])) == "no page or core"

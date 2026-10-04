@@ -458,7 +458,7 @@ def load(path=None, workspace=None) -> Config:
             raise ValueError(f"Cannot read {source}: {exc}") from exc
     config = from_dict(data, source)
     if workspace is not None:
-        config.service.workspace = str(Path(workspace).expanduser())
+        config.service.workspace = str(Path(workspace).expanduser().resolve())
     return config
 
 

@@ -23,6 +23,7 @@ audited with ``via: "product"``.
 The JSON shapes are documented in ``docs/LIVE.md``.
 """
 
+import contextvars
 import os
 import re
 import secrets
@@ -64,11 +65,25 @@ def _own() -> Path:
     return ROOT
 
 
+# Why there is nothing to show, for this request (``_disabled``).
+_REASON: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "live_disabled_reason", default="not_configured"
+)
+
+
 def _workspace() -> Path | None:
     """The live workspace this page shows: this LEVI's own when it is the live
     one, else the one ``locate.find`` names (``LEVI_LIVE_WORKSPACE``, or the
-    live service's status file), else None."""
-    return locate.find(_own()).workspace
+    live service's status file), else None. One that another LEVI shows is
+    remembered by that LEVI's training pool (``pool/exclusions.py``), so a
+    removal made there keeps counting after the page finds another one."""
+    found = locate.find(_own())
+    _REASON.set(found.problem or "not_live")
+    if found.embedded:
+        from levi.pool import exclusions as pool_exclusions
+
+        pool_exclusions.remember(found.workspace, _own() / "pool")
+    return found.workspace
 
 
 def _embedded(root: Path) -> bool:
@@ -84,7 +99,10 @@ def _config():
     """The live configuration in force (the file the supervisor wrote), or
     None when no live workspace is found."""
     root = _workspace()
-    if root is None or not locate.is_live(root):
+    if root is None:
+        return None
+    if not locate.is_live(root):
+        _REASON.set("not_live")
         return None
     live = root / "live"
     written = next(
@@ -116,10 +134,7 @@ def _alive(status: dict | None, now: float) -> bool:
 def _disabled():
     """No live workspace to show, and why (a reason code, never a path):
     ``not_configured``, ``not_live`` or ``product_workspace`` (``locate.py``)."""
-    root = _workspace()
-    if root is not None and not locate.is_live(root):
-        return {"enabled": False, "reason": "not_live"}
-    return {"enabled": False, "reason": locate.find(_own()).problem or "not_live"}
+    return {"enabled": False, "reason": _REASON.get()}
 
 
 def _where(config, value: dict | None, alive: bool) -> dict:
@@ -132,7 +147,23 @@ def _where(config, value: dict | None, alive: bool) -> dict:
         if alive and front.get("ui") and front.get("state") == "ok"
         else None
     )
-    return {"embedded": _embedded(config.workspace), "live_ui": page}
+    return {
+        "embedded": _embedded(config.workspace),
+        "live_ui": page,
+        # Its folder's name, never the whole path.
+        "workspace_name": config.workspace.name,
+    }
+
+
+# Fields of the status file that name folders of this machine: not given out
+# by another LEVI's page (the product LEVI).
+PATH_FIELDS = ("workspace", "config")
+
+
+def _shown(config, value):
+    if value and _embedded(config.workspace):
+        return {k: v for k, v in value.items() if k not in PATH_FIELDS}
+    return value
 
 
 @router.get("/status")
@@ -156,7 +187,7 @@ def status():
         "age_s": None
         if not value
         else round(max(0.0, now - float(value.get("updated_at") or 0)), 1),
-        "service": value,
+        "service": _shown(config, value),
         "faults": faults,
         "fr3_red": bool(((value or {}).get("fr3") or {}).get("state") == "red"),
         # Runs the gate stopped that a person started: ``waiting`` go on by
@@ -366,6 +397,13 @@ def _live_config(name: str):
         raise HTTPException(404, "No live workspace is set up for this LEVI")
     if not DATASET.fullmatch(name) or not mirror.load_state(config, name):
         raise HTTPException(404, "Unknown live dataset")
+    # Before writing: the state file and the audit log must really lie inside
+    # the live workspace (a ``live/`` linked to elsewhere is refused).
+    for path in (config.live_dir, mirror.state_path(config, name)):
+        if not locate.confined(path, config.workspace):
+            raise HTTPException(
+                409, "The live workspace's state lies outside it; nothing was changed"
+            )
     return config
 
 

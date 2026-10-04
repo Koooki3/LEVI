@@ -27,7 +27,12 @@ workspace and the live workspace this LEVI's live page shows
 (``levi/live/locate.py``) are consulted; any other live workspace the scan
 has not seen is not.
 
-Nothing here writes.
+Nothing here writes into a live workspace. The pool keeps one small file of
+its own, ``<pool>/live_workspaces.json``: every live workspace the product
+LEVI's live page has shown (``remember``; entries are only ever added). They
+are consulted too (those that no longer exist are skipped), so an episode
+removed on that page stays out of the pool after the page finds another live
+workspace, and whether or not the live workspace lies under a pool root.
 """
 
 import json
@@ -40,11 +45,59 @@ STATES = LIVE / "datasets"
 MARKER = LIVE / "workspace.json"
 
 
+REMEMBERED = "live_workspaces.json"
+# Parsed state files by path, kept while the file's stamp (inode, size,
+# modification time) is unchanged: the pool asks on every listing.
+_CACHE: dict[str, tuple] = {}
+
+
 def _read(path: Path):
     try:
-        return json.loads(path.read_text())
+        st = path.stat()
+        stamp = (st.st_ino, st.st_size, st.st_mtime_ns)
+    except OSError:
+        _CACHE.pop(str(path), None)
+        return None
+    cached = _CACHE.get(str(path))
+    if cached and cached[0] == stamp:
+        return cached[1]
+    try:
+        value = json.loads(path.read_text())
     except (OSError, ValueError):
         return None
+    _CACHE[str(path)] = (stamp, value)
+    return value
+
+
+def remembered(pool: Path | None = None) -> list[Path]:
+    """The live workspaces this pool was ever shown (``remember``)."""
+    value = _read(Path(pool or settings.pool_dir()) / REMEMBERED)
+    rows = value.get("workspaces") if isinstance(value, dict) else None
+    return [Path(w) for w in rows or [] if isinstance(w, str) and w]
+
+
+def remember(workspace, pool: Path | None = None) -> None:
+    """Add a live workspace the live page showed (never removes one). A
+    failure to write is not the page's problem: the pool then still reads
+    the workspace the page shows now."""
+    from levi.live import jsonio
+
+    text = str(Path(workspace))
+    pool = Path(pool or settings.pool_dir())
+    if text in {str(w) for w in remembered(pool)}:
+        return
+
+    def add(value):
+        value = value if isinstance(value, dict) else {}
+        rows = [w for w in value.get("workspaces") or [] if isinstance(w, str)]
+        if text not in rows:
+            rows.append(text)
+        return {"schema": "levi.pool.live_workspaces.v1", "workspaces": rows}
+
+    try:
+        jsonio.update(pool / REMEMBERED, add, default=dict)
+    except OSError:
+        pass
 
 
 def workspace_exclusions(workspace: Path) -> dict[str, dict]:
@@ -88,21 +141,24 @@ def workspace_exclusions(workspace: Path) -> dict[str, dict]:
 
 
 def workspaces(scanned) -> list[Path]:
-    """The workspaces to consult: those the last scan listed, the pool's, and
-    the live workspace the live page of this LEVI shows (``levi/live/
-    locate.py``): a person removes episodes on the product LEVI's page too,
-    and that must reach this pool even when the live workspace lies outside
-    the pool roots (its states name the rollout folders they came from)."""
+    """The workspaces to consult: those the last scan listed, the pool's, the
+    live workspace the live page of this LEVI shows (``levi/live/locate.py``)
+    and every one it showed before (``remembered``): a person removes
+    episodes on the product LEVI's page too, and that must reach this pool
+    even when the live workspace lies outside the pool roots (its states name
+    the rollout folders they came from) or the page has since found another."""
     seen = {Path(w) for w in scanned or []}
     seen.add(settings.workspace())
+    seen.update(w for w in remembered() if w.is_dir())
     try:
         from levi.live import locate
 
         found = locate.find(settings.workspace()).workspace
     except (OSError, ValueError, RuntimeError):  # the live side never breaks the pool
         found = None
-    if found is not None:
+    if found is not None and Path(found) != settings.workspace():
         seen.add(Path(found))
+        remember(found)
     return sorted(seen)
 
 

@@ -146,10 +146,10 @@ def check_socket_path(config):
 
 
 def protected_workspaces() -> list:
-    """The `.state` of this checkout and, when this is a git worktree, of the
-    main checkout it belongs to (the product LEVI runs there): never a live
-    workspace, whatever ``--adopt-workspace`` says (``locate.py``)."""
-    return locate.protected_workspaces(controller.project_root())
+    """The `.state` of every checkout of this repository (the main one, where
+    the product LEVI runs, and every worktree): never a live workspace, nor
+    inside or around one, whatever ``--adopt-workspace`` says (``locate.py``)."""
+    return locate.protected_workspaces()
 
 
 def check_workspace(config, adopt=False):
@@ -159,15 +159,16 @@ def check_workspace(config, adopt=False):
     must never land in the workspace of the product LEVI or any other LEVI
     that people use. A workspace that already holds LEVI's own state
     (``outputs/LEVI``, a catalog) without the live marker needs
-    ``--adopt-workspace``; the product checkout's ``.state`` is refused
-    always."""
+    ``--adopt-workspace``; a checkout's ``.state``, a folder inside one and a
+    folder holding one are refused always."""
     root = config.workspace.expanduser().resolve()
     live = (root / "live" / auto.MARKER).is_file()
     for protected in protected_workspaces():
-        if root == protected:
+        if locate.overlaps(root, protected):
             raise ValueError(
-                f"{root} is the product LEVI's workspace (a checkout's own "
-                "`.state`): the live service needs a workspace of its own"
+                f"{root} is, lies inside or holds the product LEVI's workspace "
+                f"({protected}, a checkout's own `.state`): the live service "
+                "needs a workspace of its own"
             )
     env = os.environ.get("LEVI_WORKSPACE")
     if env and not live and root == Path(env).expanduser().resolve():
@@ -430,7 +431,7 @@ def cmd_start(args) -> int:
         log(
             f"live service up: workspace {config.workspace}, gpu {config.effective_gpu_mode()}, "
             f"auto-approve {'ON' if config.pipeline.auto_approve else 'off'}, "
-            f"UI :{config.service.ui_port} core :{config.service.core_port}"
+            + _served(config, args)
         )
         if frontend:
             ctl.hooks.append(frontend.check)
@@ -443,6 +444,16 @@ def cmd_start(args) -> int:
             frontend.stop()
         instance.release()
     return 0
+
+
+def _served(config, args) -> str:
+    """What the service serves, for its first log line."""
+    if args.no_core:
+        return "no page or core"
+    core = f"core :{config.service.core_port}"
+    if wants_ui(args):
+        return f"UI :{config.service.ui_port} {core}"
+    return f"{core} (the live page is in the product LEVI)"
 
 
 def wants_ui(args) -> bool:
