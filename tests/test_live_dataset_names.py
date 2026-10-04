@@ -15,7 +15,7 @@ from pathlib import Path
 from live_helpers import Rollouts
 from test_live_pipeline import env  # noqa: F401  (fixture)
 
-from levi.live import cli, controller, mirror
+from levi.live import cli, controller, gpumgr, mirror
 from levi.live import config as live_config
 
 GROUP, TASK = "pi05_fr3_all_state", "pick_the_eggplant_in_the_blue_plate"
@@ -207,7 +207,17 @@ class Exits:
         return self.code
 
 
+def no_model_server_anywhere(monkeypatch):
+    """As on CI or a machine whose vLLM is down: nothing answers on any port.
+    These tests once passed only because a real vLLM answered on :8100 (and
+    failed when it was down or too slow to answer its health check under
+    load)."""
+    monkeypatch.setattr(gpumgr, "healthy", lambda *a, **k: False)
+
+
 def supervisor(c, code=14):
+    """A supervisor in manual GPU mode whose model server is "up" (a stand-in,
+    no socket is opened) and whose workers exit at once with ``code``."""
     made = []
 
     def popen(*args, **kwargs):
@@ -226,12 +236,14 @@ def supervisor(c, code=14):
         popen=popen,
         log=lambda *a: messages.append(" ".join(map(str, a))),
     )
+    ctl.vllm.external = lambda: True
     return ctl, made, messages
 
 
 def test_a_worker_that_finds_nothing_is_not_restarted_every_half_second(
-    tmp_path, demo_template
+    tmp_path, demo_template, monkeypatch
 ):
+    no_model_server_anywhere(monkeypatch)
     r = rollouts(tmp_path, demo_template, "root")
     r.write(0)
     c = config_for(tmp_path, [r.root])
@@ -253,8 +265,9 @@ def test_a_worker_that_finds_nothing_is_not_restarted_every_half_second(
 
 
 def test_a_dataset_whose_source_is_gone_is_marked_and_left_until_it_returns(
-    tmp_path, demo_template
+    tmp_path, demo_template, monkeypatch
 ):
+    no_model_server_anywhere(monkeypatch)
     r = rollouts(tmp_path, demo_template, "root")
     r.write(0)
     c = config_for(tmp_path, [r.root])
