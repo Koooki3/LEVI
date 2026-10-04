@@ -31,8 +31,11 @@ type TaskRow = {
   instruction?: unknown;
   waiting_for?: unknown;
   episodes?: unknown;
-  finished?: unknown;
+  status?: unknown;
 };
+
+/** Run states that will never need a person again. */
+const CLOSED = new Set(["failed", "cancelled"]);
 
 export function pendingTasks(body: unknown): PendingTask[] {
   const tasks =
@@ -47,7 +50,9 @@ export function pendingTasks(body: unknown): PendingTask[] {
         typeof task.run_id === "string" &&
         typeof task.waiting_for === "string" &&
         task.waiting_for in STEP_LABEL &&
-        task.finished !== true,
+        // `finished` is also true for a run whose proposals wait for review
+        // (levi/agent/tracking.py), so only a closed status rules it out.
+        !(typeof task.status === "string" && CLOSED.has(task.status)),
     )
     .map((task: TaskRow) => ({
       runId: task.run_id as string,

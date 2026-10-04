@@ -19,13 +19,16 @@ describe("home data", () => {
           episodes: [1, 2],
         },
         { run_id: "b", waiting_for: "agent_propose", dataset: "d" },
-        { run_id: "c", waiting_for: "human_approval", finished: true },
+        // Finished runs can still wait for a person's review.
+        { run_id: "c", waiting_for: "human_review", finished: true },
+        { run_id: "f", waiting_for: "human_approval", status: "failed" },
+        { run_id: "g", waiting_for: "human_commit", status: "cancelled" },
         { run_id: "d", waiting_for: "nothing; the annotations are published" },
         { run_id: "e", waiting_for: "human_commit", workflow: "temporal" },
       ],
     };
     const pending = pendingTasks(body);
-    expect(pending.map((task) => task.runId)).toEqual(["a", "e"]);
+    expect(pending.map((task) => task.runId)).toEqual(["a", "c", "e"]);
     expect(pending[0].episodes).toBe(2);
     expect(pendingTasks(null)).toEqual([]);
     expect(pendingTasks({ tasks: "x" })).toEqual([]);
