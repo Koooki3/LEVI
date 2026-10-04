@@ -921,3 +921,45 @@ def test_every_fixed_sentence_a_job_error_can_carry_is_in_both_catalogs():
         "done_with_errors",
     ]:
         assert word in en and word in zh, word
+
+
+def _fresh_journal(tmp_path):
+    partial = tmp_path / ".x.partial"
+    partial.mkdir()
+    job = {"id": "j", "target": str(tmp_path / "x"), "options": {"format": "f"}}
+    return partial, journal.Journal.create(partial, job)
+
+
+def test_a_stop_while_a_unit_is_written_keeps_the_partial_folder(tmp_path, monkeypatch):
+    """A stop signal that lands while a finished unit's line is being written
+    (the line on disk, the sync not done) found no unit, and the export
+    removed the partial folder with the finished unit in it."""
+    partial, log = _fresh_journal(tmp_path)
+
+    def stopped(fd):
+        raise SystemExit(143)  # what the worker's SIGTERM handler raises
+
+    monkeypatch.setattr(journal.os, "fsync", stopped)
+    with pytest.raises(SystemExit):
+        log.record("part-000")
+    assert log.has_units()
+    monkeypatch.undo()
+    again = journal.Journal(partial, log.header)
+    again._load_units()  # the line was written before the stop
+    assert "part-000" in again.units
+
+
+def test_a_unit_whose_line_cannot_be_written_is_not_counted(tmp_path, monkeypatch):
+    """A write that fails (the disk) records nothing: no unit, no mark."""
+    _partial, log = _fresh_journal(tmp_path)
+
+    def full(fd):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(journal.os, "fsync", full)
+    with pytest.raises(OSError):
+        log.record("part-000")
+    assert not log.has_units() and log.writing is None and log.new_units == 0
+    monkeypatch.undo()
+    log.record("part-001")
+    assert log.has_units() and list(log.units) == ["part-001"]

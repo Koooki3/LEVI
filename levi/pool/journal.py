@@ -73,6 +73,9 @@ class Journal:
         self.resumed = resumed
         self.units: dict[str, dict] = {}
         self.new_units = 0
+        # The unit whose line is being written right now (``record``): a stop
+        # signal that lands meanwhile must still find finished work.
+        self.writing: str | None = None
 
     # ------------------------------------------------------------- open
 
@@ -165,12 +168,24 @@ class Journal:
     def record(self, unit: str, **fields) -> dict:
         row = {"unit": unit, "at": time.time(), **fields}
         line = json.dumps(row, ensure_ascii=False) + "\n"
-        with (self.partial / UNITS).open("a", encoding="utf-8") as handle:
-            handle.write(line)
-            handle.flush()
-            os.fsync(handle.fileno())
+        # Marked while its line is written and synced: a stop signal there
+        # (SystemExit from the worker's handler) leaves the mark, so
+        # ``has_units`` keeps the partial folder with the finished unit in it
+        # (``export._dispose``); a line the stop tore is skipped when the
+        # journal is read again and that unit is redone. A write that fails
+        # (an OSError: the disk) clears the mark: nothing was recorded.
+        self.writing = unit
+        try:
+            with (self.partial / UNITS).open("a", encoding="utf-8") as handle:
+                handle.write(line)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except Exception:
+            self.writing = None
+            raise
         self.units[unit] = row
         self.new_units += 1
+        self.writing = None
         return row
 
     def note_stopped(self, state: str, reason: str) -> None:
@@ -218,7 +233,8 @@ class Journal:
         return True
 
     def has_units(self) -> bool:
-        return bool(self.units)
+        """Finished units recorded, or one being recorded (``writing``)."""
+        return bool(self.units) or self.writing is not None
 
     # ---------------------------------------------------------- discard
 
