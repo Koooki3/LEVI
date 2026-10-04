@@ -11,6 +11,7 @@ LEVI's interface is being redesigned in stages: graphite accent, light and dark 
 | Components | `src/components/ds/` (`index.ts` exports all but `ReorderList`) |
 | Theme preference | `src/lib/design/theme.ts` |
 | Reduced-motion helpers, durations, breakpoints | `src/lib/design/motion.ts` |
+| Specimen switch | `src/lib/design/gate.ts`, `src/middleware.ts` |
 | Specimen page (development only) | `/design` (`src/app/design/`) |
 | Tests | `src/components/ds/__tests__/`, `src/lib/design/__tests__/` |
 
@@ -33,7 +34,7 @@ All tokens are CSS custom properties on `:root`, named `--ds-*`, so they never c
 | Group | Tokens |
 | --- | --- |
 | Neutral scales | light `--ds-gray-l-0…11`, dark `--ds-gray-d-0…12` (cool neutral greys, proposal §4.1) |
-| Surfaces | `--ds-bg`, `--ds-bg-reading`, `--ds-surface-sunken`, `--ds-surface-1` (card), `--ds-surface-2` (raised: menus, dialogs), `--ds-surface-hover`, `--ds-surface-selected`, `--ds-field-bg`, `--ds-skeleton`, `--ds-media-bg` (black in both themes), `--ds-scrim` |
+| Surfaces | `--ds-bg`, `--ds-bg-reading`, `--ds-surface-sunken`, `--ds-surface-1` (card), `--ds-surface-2` (raised: menus, dialogs), `--ds-surface-hover`, `--ds-surface-hover-on-raised`, `--ds-surface-selected`, `--ds-field-bg`, `--ds-skeleton`, `--ds-media-bg` (black in both themes), `--ds-scrim` |
 | Lines | `--ds-separator`, `--ds-separator-strong`, `--ds-border-control`, `--ds-border-control-on-raised` |
 | Text | `--ds-text-primary`, `--ds-text-secondary`, `--ds-text-tertiary`, `--ds-text-tertiary-on-sunken`, `-on-hover`, `-on-selected`, `-on-raised`, `--ds-text-disabled`, `--ds-icon` |
 | Accent A | `--ds-accent`, `--ds-accent-hover`, `--ds-on-accent`, `--ds-focus-ring`, `--ds-selected-indicator`, `--ds-progress`, `--ds-progress-track` |
@@ -46,7 +47,7 @@ All tokens are CSS custom properties on `:root`, named `--ds-*`, so they never c
 
 Breakpoints (640, 900, 1200, 1440 px) are constants in `src/lib/design/motion.ts` (`BREAKPOINT`), since media queries cannot read variables.
 
-**Contrast.** Text pairs reach 4.5:1 and control boundaries, focus ring, selection bar and progress reach 3:1 in both themes; `tokens-contrast.test.ts` computes them from `tokens.css` with the WCAG formula. Three pairs the proposal rules out are replaced by dedicated tokens: tertiary text on sunken and hover surfaces (light) and on raised surfaces (dark), and control borders on raised surfaces (dark). Inside a `Card variant="sunken"`, a menu, dialog, sheet, tooltip or toast these swaps happen by themselves (`ds-on-sunken`, `ds-on-raised`); in a hovered or selected table row too. Elsewhere, add the class `ds-on-sunken` or `ds-on-raised` to a container drawn on those surfaces.
+**Contrast.** Text pairs reach 4.5:1 and control boundaries, focus ring, selection bar and progress reach 3:1 in both themes; `tokens-contrast.test.ts` computes them from `tokens.css` with the WCAG formula. Pairs the proposal rules out are replaced by dedicated tokens: tertiary text on sunken, hover and selected surfaces and on raised surfaces, control borders on raised surfaces (dark), and the hover fill on raised surfaces (dark: gray-6, lighter than the raised gray-5). Two status colours differ from the proposal so that they also pass on hover fills: light info `#3a6693` (was `#3d6a99`, 4.41:1 on hover) and dark danger `#ee8f80` (was `#e8806f`, 4.19:1 on the raised hover). Status colours are checked against card, raised, field, hover and raised-hover surfaces, and the hovered danger button against its text. Inside a `Card variant="sunken"`, a menu, dialog, sheet, tooltip or toast these swaps happen by themselves (`ds-on-sunken`, `ds-on-raised`); in a hovered or selected table row too. Elsewhere, add the class `ds-on-sunken` or `ds-on-raised` to a container drawn on those surfaces.
 
 **Layers.** Neighbouring surfaces differ by one or two grey steps; cards always have a 1 px separator border (cards are only 1.09:1 against the light background). Shadows are for light mode; dark mode uses lighter surfaces and an inner hairline. The glass material (`ds-material`) is only for layers floating over content (top bar, floating toolbars); under `prefers-reduced-transparency` or `prefers-contrast: more` it becomes opaque.
 
@@ -70,15 +71,15 @@ Import from `@/components/ds`; the styles need `@/styles/tokens.css` and `@/styl
 | `Tooltip` | Opens on hover after 0.5 s and at once on keyboard focus (not on click); Escape, pointer leave and focus loss close it; sets `aria-describedby` on the trigger |
 | `Field`, `Input`, `Textarea`, `Select` | `Field` wires label, hint and error (`aria-describedby`, `aria-invalid`, `required`) to the control inside; `Select` is a native select |
 | `Checkbox`, `Radio`, `RadioGroup`, `Switch` | Native inputs; `Checkbox indeterminate`; `RadioGroup` is a fieldset with a legend; `Switch` is a checkbox with `role="switch"` |
-| `Badge`, `StatusDot`, `Tag` | Status as icon shape + colour + words (`tone` neutral, success, warning, danger, info); `StatusDot live` breathes once every 2 s (still under reduced motion); `Tag onRemove` gets a "Remove …" button |
+| `Badge`, `StatusDot`, `Tag` | Status as icon shape + colour + words (`tone` neutral, success, warning, danger, info); `StatusDot live` breathes once every 2 s (still under reduced motion); `Tag onRemove` gets a "Remove …" button with a 24 × 24 px target (16 px drawn); `removeLabel` is required (type-checked) when the tag is not plain text |
 | `Card`, `Divider`, `Kbd` | `Card` `variant` default / sunken / raised, `padding` compact / regular, optional `title`, `description`, `actions` |
-| `Dialog`, `Sheet` | Modal (`aria-modal`), labelled by the title; focus moves in, Tab wraps, Escape and the scrim close, focus returns to the opener; `container` renders into another element (portal); `Sheet side` right / left / bottom |
+| `Dialog`, `Sheet` | Modal (`aria-modal`), labelled by the title; focus moves in, Tab wraps, focus that lands outside (a press on the scrim, a stray `focus()`) is pulled back, Escape and the scrim close (`closeOnScrim={false}` keeps it open), focus returns to the opener; with nested modals only the innermost handles Tab and Escape, and a menu inside handles its own Escape first; `container` renders into another element (portal); `Sheet side` right / left / bottom |
 | `ConfirmDialog`, `useConfirm` | `role="alertdialog"`; the title names action and object, `confirmLabel` is a verb; `tone="danger"` puts focus on Cancel; `const { confirm, dialog } = useConfirm()` then `await confirm({...})` replaces `window.confirm` |
-| `ToastProvider`, `useToast` | Bottom right, three at a time; `show({ title, description, tone, action, duration })`; polite region, errors (`danger`) in an assertive region and they stay; others hide after 4 s, paused while hovered or focused; outside a provider `show` does nothing |
+| `ToastProvider`, `useToast` | Bottom right; `show({ title, description, tone, action, duration })`; notes in a polite region, at most three, hidden after 4 s (paused while hovered or focused); a toast with an action stays until closed unless `duration` is given; errors (`danger`) in an assertive region, never hidden by newer toasts, stay until closed; outside a provider `show` does nothing |
 | `Skeleton`, `SkeletonText` | Static blocks (no shimmer), hidden from assistive technology; mark the loading region `aria-busy="true"` |
-| `Progress`, `Spinner` | `Progress value={n}` is determinate; `value={null}` indeterminate (a moving bar, or still with "In progress" under reduced motion); `Spinner` is `role="status"`; neither is a dialog |
+| `Progress`, `Spinner` | `Progress value={n}` is determinate; `value={null}` indeterminate (a moving bar, or still with "In progress" under reduced motion); `Spinner` is `role="status"`; neither is a dialog. Limitation: a `Spinner` is its own live region, and a live region inserted together with its text is not announced by every screen reader; for a result that must be heard, keep one status region mounted and change its text, or use a toast |
 | `EmptyState` | Icon, one sentence, the next step as a button (`action`, `secondaryAction`) |
-| `Tabs` | ARIA tabs: one tab stop, ←/→, Home/End, disabled tabs skipped; switching is instant |
+| `Tabs` | ARIA tabs: one tab stop, ←/→, Home/End, disabled tabs skipped; switching is instant; only the selected tab has `aria-controls`; a `value` that matches no enabled tab selects the first enabled one |
 | `SegmentedControl` | Radio group drawn as joined buttons; arrows move and select |
 | `Menu` | Menu button: Enter/Space/↓ open on the first item, ↑ on the last; ↑/↓/Home/End; Enter/Space choose; Escape closes and returns focus; Tab and a click outside close |
 | `Table`, `TableRow` | Sunken header, row separators, hover; `TableRow selected` (grey fill, weight 500, 2 px bar, `aria-current`); `ds-num` for right-aligned tabular numbers; the wrapper scrolls sideways |
@@ -99,7 +100,7 @@ Import from `@/components/ds`; the styles need `@/styles/tokens.css` and `@/styl
 | Running status | opacity breath every 2 s | still |
 | Drag and reorder (Motion) | lift `scale(1.02)` + deeper shadow, spring into place | items snap |
 
-Under `prefers-reduced-motion: reduce` the tokens `--ds-dur-base`, `--ds-dur-slow` (and their exit values) become 0, `--ds-ease-spring` becomes `linear` and all movement tokens become none; spinners, the indeterminate bar and the breathing dot stop. `data-motion="reduce"` on an ancestor does the same (for previews and tests). Components that render differently use `usePrefersReducedMotion()`; `ReorderList` uses Motion's `useReducedMotion` and `MotionConfig reducedMotion="user"`. Exits are instant in stage 1 (no exit animation).
+Under `prefers-reduced-motion: reduce` the tokens `--ds-dur-base`, `--ds-dur-slow` (and their exit values) become 0, `--ds-ease-spring` becomes `linear` and all movement tokens become none; spinners, the indeterminate bar and the breathing dot stop. `data-motion="reduce"` on an ancestor does the same (for previews and tests). Components that render differently use `usePrefersReducedMotion()`; `ReorderList` uses Motion's `useReducedMotion` and `MotionConfig reducedMotion="user"`. `ReducedMotionScope reduce` forces the reduced path for a subtree (the specimen's preview switch; put `data-motion="reduce"` on an element too so the CSS follows). Exits are instant in stage 1 (no exit animation).
 
 No infinite decorative animation, parallax, scroll hijacking, animation longer than 400 ms or animation that blocks input.
 
@@ -108,13 +109,13 @@ No infinite decorative animation, parallax, scroll hijacking, animation longer t
 ## Accessibility
 
 - Focus ring: 2 px `--ds-focus-ring`, offset 2 px (class `ds-focus` on every interactive component); in Windows high contrast it uses `Highlight`.
-- Every overlay traps focus, closes on Escape and returns focus; menus and tabs follow the ARIA patterns; toasts use one polite and one assertive live region.
+- Every overlay traps focus (listeners on `document`, so it holds wherever focus went), closes on Escape and returns focus; menus and tabs follow the ARIA patterns; toasts use one polite and one assertive live region.
 - Hit targets are at least 24 × 24 px.
 
 ## Specimen page
 
-`/design` shows every token and component in light and dark side by side (`?only=light` or `?only=dark` shows one; `?motion=reduce` starts with reduced motion). It is served by `next dev`; a production server (`next start`, `levi serve`) answers 404 unless `LEVI_DESIGN_PAGE=1` is set in its environment. It is not linked from the navigation.
+`/design` shows every token and component in light and dark side by side (`?only=light` or `?only=dark` shows one; `?motion=reduce` starts with reduced motion). It is served by `next dev`; in a production server (`next start`, `levi serve`) `src/middleware.ts` answers a plain 404 before routing (so neither the page's metadata nor its styles are sent) unless `LEVI_DESIGN_PAGE=1` is set in its environment (`src/lib/design/gate.ts`). It is not linked from the navigation.
 
 ## Testing
 
-`bun test` runs the component tests in a DOM (happy-dom, a dev dependency). A component test imports `./dom` first and calls `setupDom()`; `render`, `press`, `click`, `focus`, `fire`, `flush` and `mockMatchMedia` are there. The DOM globals are removed after each such file, so other tests run without a DOM.
+`bun test` runs the component tests in a DOM (happy-dom, a dev dependency). `tokens-contrast.test.ts` also fails on a colour literal (hex, `rgb()`, `hsl()`) or a Tailwind arbitrary value in the components' or the specimen's TSX. A component test imports `./dom` first and calls `setupDom()`; `render`, `press`, `click`, `focus`, `dropFocus`, `fire`, `flush` and `mockMatchMedia` are there. The DOM globals are removed after each such file, so other tests run without a DOM.
