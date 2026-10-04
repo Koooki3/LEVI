@@ -451,6 +451,20 @@ def test_fake_vlm_without_a_home_uses_a_scratch_home(tmp_path, monkeypatch, cont
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "tmp"))
     (tmp_path / "tmp").mkdir()
     (tmp_path / "rollouts").mkdir()
+    # Another folder of the same prefix, not made by this run: left alone.
+    other = tmp_path / "tmp/levi-live-fake-home-not-mine"
+    other.mkdir()
+    seen = []
+    real_run = cli.controller.Controller.run
+
+    def run(self, *a, **kw):
+        home = Path(self.config.home)
+        try:
+            return real_run(self, *a, **kw)
+        finally:
+            seen.append((home, (home / "status.json").is_file()))
+
+    monkeypatch.setattr(cli.controller.Controller, "run", run)
     code = cli.main(
         [
             "once",
@@ -465,9 +479,13 @@ def test_fake_vlm_without_a_home_uses_a_scratch_home(tmp_path, monkeypatch, cont
     )
     assert code == 0
     assert not default_home.exists()  # the real home is untouched
-    scratch = list((tmp_path / "tmp").glob("levi-live-fake-home-*"))
-    assert len(scratch) == 1 and (scratch[0] / "status.json").is_file()
-    assert not (scratch[0] / cli.STARTED).exists()
+    # The run used a scratch home of its own (its status file, no started.json)...
+    [(scratch, had_status)] = seen
+    assert scratch.parent == tmp_path / "tmp" and had_status
+    assert scratch.name.startswith("levi-live-fake-home-") and scratch != other
+    # ...and removed it when the command ended.
+    assert not scratch.exists()
+    assert list((tmp_path / "tmp").iterdir()) == [other]
 
 
 @pytest.mark.parametrize("which", ["remembered", "env", "started_here", "default"])

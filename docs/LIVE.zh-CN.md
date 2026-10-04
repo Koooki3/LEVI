@@ -37,7 +37,7 @@ uv run levi live doctor                          # CPU、内存、GPU、磁盘�
 uv run levi live stop                            # 只停自己的进程
 ```
 
-`levi live once [--fake-vlm]` 标完当前已完成的片段就退出（加 `--fake-vlm` 时使用假的模型服务，不需要 GPU）。`levi live init` 把所有默认值写成 `<工作区>/live.toml`。`levi live report` 把某个数据集或会话的统计打印成报告，`levi live stats backfill` 为统计功能出现之前标注的片段补记录（见“统计与报告”）。`levi live start` 在启动核心之前，把它校验过的配置（文件、`--config`、命令行覆盖）写到 `<工作区>/live/effective.toml`，所以核心读到的是本次会话的设置，而不是上一次的。`levi live resume` 清除服务放弃了的 vLLM 启动失败。`once --fake-vlm` 必须指定临时的 `--workspace`：默认工作区、`LEVI_LIVE_WORKSPACE`、上一次 `start` 用的工作区以及任何 `start` 运行过的工作区都会被拒绝；没有 `--home` 或 `LEVI_LIVE_HOME` 时它用一个临时 home，不碰真实服务的状态文件和锁。
+`levi live once [--fake-vlm]` 标完当前已完成的片段就退出（加 `--fake-vlm` 时使用假的模型服务，不需要 GPU）。`levi live init` 把所有默认值写成 `<工作区>/live.toml`。`levi live report` 把某个数据集或会话的统计打印成报告，`levi live stats backfill` 为统计功能出现之前标注的片段补记录（见“统计与报告”）。`levi live start` 在启动核心之前，把它校验过的配置（文件、`--config`、命令行覆盖）写到 `<工作区>/live/effective.toml`，所以核心读到的是本次会话的设置，而不是上一次的。`levi live resume` 清除服务放弃了的 vLLM 启动失败。`once --fake-vlm` 必须指定临时的 `--workspace`：默认工作区、`LEVI_LIVE_WORKSPACE`、上一次 `start` 用的工作区以及任何 `start` 运行过的工作区都会被拒绝；没有 `--home` 或 `LEVI_LIVE_HOME` 时它用一个临时 home（临时目录下的 `levi-live-fake-home-*`，命令结束时删除），不碰真实服务的状态文件和锁。
 
 不加 `--auto-approve` 时，服务仍会镜像、建视图并**生成计划**，然后等待：由人在 LEVI 页面批准计划（数据集显示 `awaiting_approval`）。加上它，由下文的“自动批准主体”（有审计）代为通过这些关口。
 

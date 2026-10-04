@@ -1086,18 +1086,36 @@ def check_fake_target(args, config) -> None:
         raise ValueError(refusal + f" ({target} is one)")
 
 
+FAKE_HOME_PREFIX = "levi-live-fake-home-"
+
+
 def cmd_once(args) -> int:
+    scratch: list = []  # the scratch home this run made, if any
+    try:
+        return _once(args, scratch)
+    finally:
+        # Only the folder this run created (``mkdtemp``), never a given home.
+        import shutil
+
+        for path in scratch:
+            if Path(path).name.startswith(FAKE_HOME_PREFIX):
+                shutil.rmtree(path, ignore_errors=True)
+
+
+def _once(args, scratch: list) -> int:
     config = resolve_config(args)
     fake = None
     if args.fake_vlm:
         check_fake_target(args, config)
         if not args.home and not os.environ.get(ENV_HOME):
             # A trial run never touches the real service's home (status file,
-            # lock, what `start` remembers): a scratch home of its own.
+            # lock, what `start` remembers): a scratch home of its own, removed
+            # when the command ends.
             import tempfile
 
-            config.service.home = tempfile.mkdtemp(prefix="levi-live-fake-home-")
-            print(f"scratch home {config.service.home}")
+            config.service.home = tempfile.mkdtemp(prefix=FAKE_HOME_PREFIX)
+            scratch.append(config.service.home)
+            print(f"scratch home {config.service.home} (removed at the end)")
         from . import fakevlm
 
         server, fake, port = fakevlm.serve(0)
