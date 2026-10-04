@@ -610,7 +610,9 @@ def _person(request: Request) -> None:
     if secret and not secrets.compare_digest(
         request.headers.get("x-levi-ui-token", ""), secret
     ):
-        raise HTTPException(401, "Use the LEVI Web UI or `levi pool corrections`")
+        raise HTTPException(
+            401, "A person's key is needed: `levi pool corrections approve|reject`"
+        )
 
 
 @router.get("/corrections")

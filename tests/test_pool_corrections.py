@@ -246,7 +246,10 @@ def test_review_is_a_persons_action(pool, client, monkeypatch):
         raw.post(url, json=body, headers={"Authorization": "Bearer t"}).status_code
         == 403
     )
-    assert raw.post(url, json=body).status_code == 401
+    unauthorised = raw.post(url, json=body)
+    assert unauthorised.status_code == 401
+    # No page offers a review: the hint names the command only.
+    assert "Web UI" not in unauthorised.json()["detail"]
     assert corrections.show(VERSION)["counts"] == {"proposed": 2}
     # A person, by batch with one left out.
     done = raw.post(
@@ -470,7 +473,8 @@ def test_cli_import_list_show_and_review_through_the_service(
         )
         == 1
     )
-    assert "not running" in capsys.readouterr().out
+    refused = capsys.readouterr().out
+    assert "not running" in refused and "review on the page" not in refused
     assert corrections.show(VERSION)["counts"] == {"proposed": 1}
     # With the service, the CLI sends the person's decision to the review route.
     sent = []

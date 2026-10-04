@@ -634,7 +634,7 @@ def _corrections(args) -> int:
             raise ValueError(
                 "The LEVI service is not running: a review is a person's action "
                 "and is recorded by the running service (start it with "
-                "`levi serve`, or review on the page)"
+                "`levi serve`); the page has no review controls"
             )
         _print(
             core.request(
