@@ -352,7 +352,7 @@ def live_folder(path: Path) -> Path:
 def test_every_checkout_s_state_is_protected_from_any_of_them(tmp_path, monkeypatch):
     main, other = fake_checkouts(tmp_path)
     for start in (main, other):
-        monkeypatch.setenv("LEVI_LIVE_PROTECT_CHECKOUT", str(start))
+        monkeypatch.setattr(locate, "checkout_root", lambda start=start: start)
         assert set(locate.protected_workspaces()) == {
             (main / ".state").resolve(),
             (other / ".state").resolve(),
@@ -368,7 +368,7 @@ def test_a_live_workspace_inside_or_around_a_checkout_s_state_is_refused(
 ):
     ws, home = product
     main, other = fake_checkouts(tmp_path / "repo")
-    monkeypatch.setenv("LEVI_LIVE_PROTECT_CHECKOUT", str(main))
+    monkeypatch.setattr(locate, "checkout_root", lambda: main)
     named = {
         "main/.state/live-ws": main / ".state/live-ws",
         "other/.state/tmp/ws": other / ".state/tmp/ws",
@@ -483,3 +483,90 @@ def test_the_first_log_line_says_what_the_service_serves():
     )
     assert cli._served(c, parse(["start", "--ui"])) == "UI :7880 core :7881"
     assert cli._served(c, parse(["start", "--no-core"])) == "no page or core"
+
+
+def test_no_setting_unprotects_the_checkout_s_state(tmp_path, monkeypatch):
+    """A variable that once named the protected checkout (it could come from
+    a `.env`) is ignored: the checkout this code runs from stays protected."""
+    from levi.live import config as live_config
+
+    monkeypatch.setattr(locate, "checkout_root", lambda: locate.THIS_CHECKOUT)
+    monkeypatch.setenv("LEVI_LIVE_PROTECT_CHECKOUT", str(tmp_path / "elsewhere"))
+    assert (locate.THIS_CHECKOUT / ".state").resolve() in locate.protected_workspaces()
+    for named in (".state", ".state/live-ws"):
+        c = live_config.Config()
+        c.service.workspace = str(locate.THIS_CHECKOUT / named)
+        with pytest.raises(ValueError, match="product LEVI"):
+            cli.check_workspace(c, adopt=True)
+
+
+# --- review 2: the remembered list, its cap and the CLI; every written path ---------------
+
+
+def test_the_remembered_list_has_a_cap_and_says_so(
+    client, env, product, tmp_path, monkeypatch, caplog
+):
+    from levi.pool import exclusions as pool_exclusions
+
+    ws, home = product
+    monkeypatch.setattr(pool_exclusions, "MAX_REMEMBERED", 2)
+    first, second = (live_folder(tmp_path / f"live-{n}") for n in (1, 2))
+    for named in (first, second):
+        write_status(home, named)
+        assert client.get("/api/levi/live/status").json()["pool_memory_full"] is False
+    e = env()
+    write_status(home, e.ws)
+    with caplog.at_level("WARNING", logger="levi.pool.exclusions"):
+        body = client.get("/api/levi/live/status").json()
+    assert body["enabled"] and body["pool_memory_full"] is True
+    assert "levi pool live-workspaces forget" in caplog.text
+    assert len(pool_exclusions.remembered(ws / "pool")) == 2
+    # Forgetting deletes nothing and makes room.
+    assert pool_exclusions.forget(first, ws / "pool")
+    assert (first / "live/workspace.json").is_file()
+    assert client.get("/api/levi/live/status").json()["pool_memory_full"] is False
+    assert pool_exclusions.remembered(ws / "pool") == [second.resolve(), e.ws.resolve()]
+    assert not pool_exclusions.forget(tmp_path / "never", ws / "pool")
+
+
+def test_levi_pool_live_workspaces_lists_and_forgets(tmp_path, monkeypatch, capsys):
+    from levi import paths
+    from levi.pool import cli as pool_cli
+    from levi.pool import exclusions as pool_exclusions
+
+    monkeypatch.setattr(paths, "configure", lambda: None)
+    monkeypatch.setenv("LEVI_WORKSPACE", str(tmp_path / "product"))
+    live = live_folder(tmp_path / "live-a")
+    pool_exclusions.remember(live)
+    assert pool_cli.main(["live-workspaces", "list"]) == 0
+    listed = json.loads(capsys.readouterr().out)
+    assert listed["remembered"] == [{"path": str(live), "exists": True}]
+    assert listed["limit"] == pool_exclusions.MAX_REMEMBERED
+    assert pool_cli.main(["live-workspaces", "forget", str(live)]) == 0
+    assert "nothing deleted" in capsys.readouterr().out
+    assert live.is_dir() and pool_exclusions.remembered() == []
+    assert pool_cli.main(["live-workspaces", "forget", str(live)]) == 1
+
+
+@pytest.mark.parametrize("linked", ["audit", "lock"])
+def test_a_removal_refuses_an_audit_log_or_lock_linked_out_of_the_workspace(
+    client, env, monkeypatch, tmp_path, linked
+):
+    e = env()
+    mirror_only(e, 0)
+    monkeypatch.setattr(api, "_own", lambda: e.ws)
+    monkeypatch.setenv("LEVI_UI_TOKEN", "test-ui-token")
+    target = tmp_path / "outside-file"
+    target.write_text("")
+    link = (
+        e.ws / "live/audit.jsonl"
+        if linked == "audit"
+        else e.ws / f"live/datasets/{NAME}.json.lock"
+    )
+    link.unlink(missing_ok=True)
+    link.symlink_to(target)
+    url = f"/api/levi/live/datasets/{NAME}/exclude"
+    answer = client.post(url, json={"demos": ["demo_0000"]}, headers=UI)
+    assert answer.status_code == 409
+    assert not exclusion.is_excluded(e.state()["demos"]["demo_0000"])
+    assert target.read_text() == ""
