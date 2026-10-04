@@ -2323,3 +2323,13 @@
 .pg-pool-stats > .sr-only {
   position: absolute;
 }
+.pg-pool-warnings li {
+  overflow-wrap: anywhere;
+}
+/* The close button sits at the dialog's right edge; its tooltip opens below
+   and right-aligned so it stays inside the dialog. */
+.pg-pool-dialog-head .ds-tooltip {
+  left: auto;
+  right: 0;
+  transform: none;
+}

@@ -82,7 +82,12 @@ export function PushDialog({
     >
       <form method="dialog" className="pg-pool-dialog-head">
         <h2 id="pool-push-title">{t("Send to remote")}</h2>
-        <IconButton type="submit" icon={X} label={t("Close")} />
+        <IconButton
+          type="submit"
+          icon={X}
+          label={t("Close")}
+          tooltipPlacement="bottom"
+        />
       </form>
       <p className="pg-pool-hint">
         {t("Export")}: <code>{source}</code>

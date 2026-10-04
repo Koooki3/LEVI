@@ -115,7 +115,12 @@ export function LogDialog({
         <h2 id={titleId}>
           {t("Job log")} <code>{id}</code>
         </h2>
-        <IconButton type="submit" icon={X} label={t("Close")} />
+        <IconButton
+          type="submit"
+          icon={X}
+          label={t("Close")}
+          tooltipPlacement="bottom"
+        />
       </form>
       {error && (
         <RequestProblem
