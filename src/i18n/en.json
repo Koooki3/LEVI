@@ -2203,5 +2203,9 @@
   "Contents": "Contents",
   "About LEVI": "About LEVI",
   "Start from a public dataset": "Start from a public dataset",
-  "Your work": "Your work"
+  "Your work": "Your work",
+  "Try again": "Try again",
+  "The LEVI service did not answer within 10 s, or answered with an error.": "The LEVI service did not answer within 10 s, or answered with an error.",
+  "The job lists could not be read.": "The job lists could not be read.",
+  "The list of local datasets could not be read.": "The list of local datasets could not be read."
 }

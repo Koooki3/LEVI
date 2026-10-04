@@ -24,6 +24,7 @@ import {
   Inbox,
   Activity,
   Compass,
+  RotateCw,
   Search,
 } from "lucide-react";
 import {
@@ -64,9 +65,10 @@ const POLL_MS = 15_000;
 const DATASET_ID = /^[\w.-]+\/[\w.-]+$/;
 
 type State = {
-  /** Each card shows its skeleton until its own answer arrives. */
-  datasets: DatasetSummary[] | undefined;
-  jobs: RunningJob[] | undefined;
+  /** Each card shows its skeleton until its own answer arrives
+   * (undefined); null means the answer could not be read. */
+  datasets: DatasetSummary[] | null | undefined;
+  jobs: RunningJob[] | null | undefined;
   /** null: the agent API did not answer (no access or not running). */
   pending: PendingTask[] | null | undefined;
 };
@@ -80,28 +82,39 @@ function within<T>(ms: number, work: Promise<T>): Promise<T | null> {
   ]);
 }
 
-function useHomeData(pool: boolean): State {
+function useHomeData(pool: boolean): State & { retry: () => void } {
   const [state, setState] = useState<State>({
     datasets: undefined,
     jobs: undefined,
     pending: undefined,
   });
   const busy = useRef(false);
-  const load = useCallback(async () => {
+  const patch = useCallback(
+    (part: Partial<State>) =>
+      setState((previous) => ({ ...previous, ...part })),
+    [],
+  );
+  // The dataset list changes rarely: read on first load, when the tab comes
+  // back and on Retry, not on every poll.
+  const loadDatasets = useCallback(async () => {
+    const catalog = await within(10_000, leviApi<unknown>("catalog"));
+    patch({ datasets: catalog === null ? null : catalogDatasets(catalog) });
+  }, [patch]);
+  const loadWork = useCallback(async () => {
     if (busy.current) return;
     busy.current = true;
-    const patch = (part: Partial<State>) =>
-      setState((previous) => ({ ...previous, ...part }));
     try {
       await Promise.all([
-        within(10_000, leviApi<unknown>("catalog")).then((catalog) =>
-          patch({ datasets: catalogDatasets(catalog) }),
-        ),
         Promise.all([
           within(10_000, leviApi<unknown>("jobs")),
-          pool ? within(10_000, leviApi<unknown>("pool/jobs")) : null,
+          pool ? within(10_000, leviApi<unknown>("pool/jobs")) : undefined,
         ]).then(([conversions, poolJobs]) =>
-          patch({ jobs: runningJobs(poolJobs, conversions) }),
+          patch({
+            jobs:
+              conversions === null || poolJobs === null
+                ? null
+                : runningJobs(poolJobs, conversions),
+          }),
         ),
         within(
           10_000,
@@ -115,22 +128,52 @@ function useHomeData(pool: boolean): State {
     } finally {
       busy.current = false;
     }
-  }, [pool]);
+  }, [pool, patch]);
   useEffect(() => {
-    void load();
+    void loadDatasets();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loadDatasets();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [loadDatasets]);
+  useEffect(() => {
+    void loadWork();
     const timer = setInterval(() => {
-      if (document.visibilityState === "visible") void load();
+      if (document.visibilityState === "visible") void loadWork();
     }, POLL_MS);
     const onVisible = () => {
-      if (document.visibilityState === "visible") void load();
+      if (document.visibilityState === "visible") void loadWork();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [load]);
-  return state;
+  }, [loadWork]);
+  const retry = useCallback(() => {
+    void loadDatasets();
+    void loadWork();
+  }, [loadDatasets, loadWork]);
+  return { ...state, retry };
+}
+
+/** A card's answer could not be read: what happened, why, what to do. */
+function ReadError({ what, onRetry }: { what: string; onRetry: () => void }) {
+  const { t } = useLocale();
+  return (
+    <div className="levi-home-error">
+      <strong>{what}</strong>
+      <span>
+        {t(
+          "The LEVI service did not answer within 10 s, or answered with an error.",
+        )}
+      </span>
+      <Button variant="secondary" size="sm" icon={RotateCw} onClick={onRetry}>
+        {t("Try again")}
+      </Button>
+    </div>
+  );
 }
 
 function useNow(): number | null {
@@ -368,13 +411,16 @@ function PendingCard({
 }
 
 function RunningCard({
-  jobs,
+  jobs: answer,
   loaded,
+  onRetry,
 }: {
-  jobs: RunningJob[];
+  jobs: RunningJob[] | null;
   loaded: boolean;
+  onRetry: () => void;
 }) {
   const { t } = useLocale();
+  const jobs = answer ?? [];
   return (
     <Card
       className="levi-home-card"
@@ -391,6 +437,11 @@ function RunningCard({
     >
       {!loaded ? (
         <ListSkeleton />
+      ) : answer === null ? (
+        <ReadError
+          what={t("The job lists could not be read.")}
+          onRetry={onRetry}
+        />
       ) : jobs.length === 0 ? (
         <EmptyState
           className="levi-home-empty"
@@ -428,12 +479,17 @@ function RunningCard({
 
 function DatasetsCard({
   datasets,
+  failed,
   loaded,
   now,
+  onRetry,
 }: {
   datasets: ReturnType<typeof recentDatasets>;
+  /** The catalog could not be read (the list holds only visits then). */
+  failed: boolean;
   loaded: boolean;
   now: number | null;
+  onRetry: () => void;
 }) {
   const { t } = useLocale();
   return (
@@ -448,20 +504,28 @@ function DatasetsCard({
         </Link>
       }
     >
+      {failed && (
+        <ReadError
+          what={t("The list of local datasets could not be read.")}
+          onRetry={onRetry}
+        />
+      )}
       {!loaded ? (
         <ListSkeleton />
       ) : datasets.length === 0 ? (
-        <EmptyState
-          className="levi-home-empty"
-          icon={Database}
-          title={t("No local dataset yet.")}
-          action={
-            <Link href="/workbench" className="levi-home-cta ds-focus">
-              <Icon icon={FolderOpen} />
-              {t("Register a local dataset")}
-            </Link>
-          }
-        />
+        failed ? null : (
+          <EmptyState
+            className="levi-home-empty"
+            icon={Database}
+            title={t("No local dataset yet.")}
+            action={
+              <Link href="/workbench" className="levi-home-cta ds-focus">
+                <Icon icon={FolderOpen} />
+                {t("Register a local dataset")}
+              </Link>
+            }
+          />
+        )
       ) : (
         <ul className="levi-home-list">
           {datasets.map((item) => (
@@ -496,7 +560,7 @@ export function HomeDashboard() {
   const { t } = useLocale();
   const { enabled, embedded } = useLivePulse();
   const pool = offersTrainingPool(enabled, embedded);
-  const { datasets, jobs, pending } = useHomeData(pool);
+  const { datasets, jobs, pending, retry } = useHomeData(pool);
   const now = useNow();
   const [recent, setRecent] = useState<RecentVisit[]>([]);
   useEffect(() => setRecent(readRecent()), []);
@@ -532,10 +596,16 @@ export function HomeDashboard() {
       <h2 className="ds-sr-only">{t("Your work")}</h2>
       <div className="levi-home-grid">
         <PendingCard pending={pending ?? null} loaded={pending !== undefined} />
-        <RunningCard jobs={jobs ?? []} loaded={jobs !== undefined} />
+        <RunningCard
+          jobs={jobs ?? null}
+          loaded={jobs !== undefined}
+          onRetry={retry}
+        />
         <DatasetsCard
           datasets={recentDatasets(recent, datasets ?? [])}
+          failed={datasets === null}
           loaded={datasets !== undefined}
+          onRetry={retry}
           now={now}
         />
       </div>
