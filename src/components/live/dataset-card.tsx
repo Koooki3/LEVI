@@ -13,6 +13,9 @@ import {
 import { datasetLinks, type LiveLink } from "./embedding";
 import { EpisodeList } from "./episode-list";
 import { Chip, type Tone } from "./session-panels";
+import { ArrowUpRight, ChevronDown, ChevronUp } from "lucide-react";
+import { Button, Icon, Progress, Skeleton } from "@/components/ds";
+import { Problem, RequestProblem } from "@/components/pages-ui/feedback";
 import type { DatasetDetail, DatasetRow } from "./types";
 import type { DetailEntry } from "./use-live";
 
@@ -40,35 +43,36 @@ function AutoOutcome({ detail }: { detail: DatasetDetail | undefined }) {
   const tally = verdictTally(detail?.demos);
   const judged = tally.success + tally.failure + tally.undecided;
   return (
-    <div className="levi-live-auto">
-      <div className="levi-live-auto-head">
-        <span className="levi-live-auto-tag">{t("auto")}</span>
+    <div className="pg-live-auto">
+      <div className="pg-live-auto-head">
+        <span className="pg-live-auto-tag">{t("auto")}</span>
         <strong>{t("Automatic outcome")}</strong>
-        <span className="levi-pool-muted">
+        <span className="pg-pool-muted">
           {t("not reviewed, accuracy not evaluated")}
         </span>
       </div>
       {!detail ? (
-        <span className="levi-pool-muted">{t("Loading…")}</span>
-      ) : judged === 0 ? (
-        <span className="levi-pool-muted">
-          {t("No automatic verdict yet.")}
+        <span className="pg-live-loading" aria-busy="true">
+          <span className="sr-only">{t("Loading…")}</span>
+          <Skeleton width="60%" height={20} />
         </span>
+      ) : judged === 0 ? (
+        <span className="pg-pool-muted">{t("No automatic verdict yet.")}</span>
       ) : (
-        <div className="levi-live-chips">
-          <span className="levi-live-autochip">
+        <div className="pg-live-chips">
+          <span className="pg-live-autochip">
             {t("success")} {tally.success}
           </span>
-          <span className="levi-live-autochip">
+          <span className="pg-live-autochip">
             {t("failure")} {tally.failure}
           </span>
           {tally.undecided > 0 && (
-            <span className="levi-live-autochip">
+            <span className="pg-live-autochip">
               {t("undecided")} {tally.undecided}
             </span>
           )}
           {tally.none > 0 && (
-            <span className="levi-live-autochip dim">
+            <span className="pg-live-autochip dim">
               {t("no verdict")} {tally.none}
             </span>
           )}
@@ -96,15 +100,15 @@ function ReviewRuns({
   if (runs.length === 0 && openCount === 0) return null;
   const { shown, hidden } = filterReviewRuns(runs, filter, nowSeconds);
   return (
-    <div className="levi-live-reviews">
-      <div className="levi-live-reviews-head">
+    <div className="pg-live-reviews">
+      <div className="pg-live-reviews-head">
         <strong>
           {t("Review runs left for a person")} ({openCount || runs.length})
         </strong>
-        <label className="levi-pool-muted">
+        <label className="pg-pool-muted">
           {t("Show")}{" "}
           <select
-            className="levi-input"
+            className="ds-input ds-focus"
             value={filter}
             onChange={(e) => onFilter(e.target.value as ReviewFilter)}
           >
@@ -114,7 +118,7 @@ function ReviewRuns({
           </select>
         </label>
       </div>
-      <p className="levi-pool-muted">
+      <p className="pg-pool-muted">
         {t(
           "One per batch. The service never commits them: a person accepts or rejects the outcome proposals in LEVI. This filter only hides rows on this page.",
         )}
@@ -128,12 +132,12 @@ function ReviewRuns({
               {t("failure")} {r.failure}
               {r.undecided > 0 && ` · ${t("undecided")} ${r.undecided}`}
             </span>
-            <span className="levi-pool-muted">{r.at ? clock(r.at) : "—"}</span>
+            <span className="pg-pool-muted">{r.at ? clock(r.at) : "—"}</span>
           </li>
         ))}
       </ul>
       {hidden > 0 && (
-        <p className="levi-pool-muted">
+        <p className="pg-pool-muted">
           {hidden} {t("older run(s) hidden")}
         </p>
       )}
@@ -220,14 +224,14 @@ export function DatasetCard({
     : name.replace("__", " / ");
   return (
     <article
-      className={`levi-live-card${fault === "current" ? " fault" : ""}`}
+      className={`pg-live-card${fault === "current" ? " fault" : ""}`}
       aria-label={title}
     >
       <header>
         <h3>
           <code>{title}</code>
         </h3>
-        <div className="levi-live-chips">
+        <div className="pg-live-chips">
           <Chip tone={stateTone}>{t(stateLabel)}</Chip>
           {row.state === "awaiting_approval" && (
             <Chip tone="warn">
@@ -270,33 +274,29 @@ export function DatasetCard({
         </div>
       </header>
       {detail?.task_text && (
-        <p className="levi-live-prompt">“{detail.task_text}”</p>
+        <p className="pg-live-prompt">“{detail.task_text}”</p>
       )}
 
-      <div className="levi-live-stats">
+      <div className="pg-live-stats">
         <Stat label={t("mirrored")} value={row.episodes} />
         <Stat label={t("waiting")} value={row.pending} />
         <Stat label={t("labelling")} value={row.annotating} />
         <Stat label={t("done")} value={row.done} />
         <Stat label={t("failed")} value={row.failed} />
       </div>
-      <div
-        className="levi-bar levi-live-bar"
-        role="progressbar"
-        aria-label={t("Episodes labelled")}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(fraction * 100)}
-      >
-        <span style={{ width: `${(fraction * 100).toFixed(1)}%` }} />
-      </div>
+      <Progress
+        className="pg-live-bar"
+        value={fraction * 100}
+        showValue
+        label={t("Episodes labelled")}
+      />
       {shownExtras.length > 0 && (
-        <p className="levi-pool-muted">
+        <p className="pg-pool-muted">
           {shownExtras.map(([label, n]) => `${n} ${t(label)}`).join(" · ")}
         </p>
       )}
 
-      <p className="levi-live-line">
+      <p className="pg-live-line">
         <strong>{t("Time segments")}:</strong>{" "}
         {detail
           ? seg.committed > 0
@@ -309,7 +309,7 @@ export function DatasetCard({
       </p>
       <AutoOutcome detail={detail} />
       {row.state === "awaiting_approval" && (
-        <p className="levi-live-await">
+        <p className="pg-live-await">
           {row.awaiting === "changes"
             ? t(
                 "The service finished the temporary work and waits for you to commit the draft in the LEVI page (Agent Workbench); nothing is written until you do.",
@@ -326,9 +326,14 @@ export function DatasetCard({
         </p>
       )}
       {error && (
-        <p className="levi-error">
-          <strong>{t("Last error")}:</strong> {error}
-        </p>
+        <Problem
+          live={false}
+          title={t("Last error")}
+          why={error}
+          fix={t(
+            "The service retries by itself; nothing to do unless it repeats.",
+          )}
+        />
       )}
       <ReviewRuns
         detail={detail}
@@ -337,19 +342,23 @@ export function DatasetCard({
         onFilter={onFilter}
         nowSeconds={nowSeconds}
       />
-      <p className="levi-pool-muted">
+      <p className="pg-pool-muted">
         {t("Last processed")}:{" "}
         {row.last_processed_at
           ? ago(nowSeconds - row.last_processed_at, t)
           : t("never")}
       </p>
-      <div className="levi-row levi-live-actions">
+      <div className="pg-row pg-live-actions">
         {links.viewer ? (
-          <LinkTo className="levi-secondary" link={links.viewer}>
+          <LinkTo
+            className="ds-btn ds-btn--secondary ds-focus"
+            link={links.viewer}
+          >
             {t("Open in the viewer")}
+            <Icon icon={ArrowUpRight} />
           </LinkTo>
         ) : (
-          <span className="levi-pool-muted">
+          <span className="pg-pool-muted">
             {!detail
               ? t("Loading…")
               : detail.embedded
@@ -360,22 +369,29 @@ export function DatasetCard({
           </span>
         )}
         {links.review && (
-          <LinkTo className="levi-pool-link" link={links.review}>
+          <LinkTo
+            className="ds-btn ds-btn--ghost ds-btn--sm ds-focus"
+            link={links.review}
+          >
             {t("Conversion & review")}
           </LinkTo>
         )}
-        <button
-          type="button"
-          className="levi-pool-link"
+        <Button
+          size="sm"
+          variant="ghost"
+          iconEnd={open ? ChevronUp : ChevronDown}
           aria-expanded={open}
           onClick={onToggle}
         >
           {open ? t("Hide episodes") : t("Show episodes")}
-        </button>
+        </Button>
       </div>
       {open &&
         (entry?.error && !detail ? (
-          <p className="levi-error">{entry.error}</p>
+          <RequestProblem
+            action="The episodes could not be loaded"
+            message={entry.error}
+          />
         ) : (
           <EpisodeList dataset={name} detail={detail} onChanged={onChanged} />
         ))}

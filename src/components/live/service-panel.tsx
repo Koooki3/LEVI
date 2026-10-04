@@ -12,6 +12,9 @@ import {
   vllmLabel,
 } from "./live-logic";
 import { Chip, Field, type Tone } from "./session-panels";
+import { Check, ClipboardCopy, Hand, PlugZap, Server } from "lucide-react";
+import { Button, Icon } from "@/components/ds";
+import { EmptyLine, Problem } from "@/components/pages-ui/feedback";
 import type { LiveStatusResponse } from "./types";
 import { PAUSE_NOTES, type NeedsPerson } from "./live-logic";
 
@@ -34,11 +37,11 @@ export function CopyCommand({ command }: { command: string }) {
       .catch(() => {});
   };
   return (
-    <div className="levi-row">
-      <code className="levi-live-command">{command}</code>
-      <button type="button" className="levi-secondary" onClick={copy}>
+    <div className="pg-row">
+      <code className="pg-live-command">{command}</code>
+      <Button size="sm" icon={copied ? Check : ClipboardCopy} onClick={copy}>
         {copied ? t("Copied") : t("Copy")}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -57,7 +60,7 @@ export function BlockedRunsNote({
   const say = (text: string, n: number) => t(text).replace("{n}", String(n));
   return (
     <section
-      className={needsPerson ? "levi-live-attention" : "levi-live-blocked"}
+      className={needsPerson ? "pg-live-attention" : "pg-live-blocked"}
       role="status"
       aria-live="polite"
     >
@@ -70,7 +73,7 @@ export function BlockedRunsNote({
         </p>
       )}
       {waiting > 0 && (
-        <p className="levi-pool-hint">
+        <p className="pg-pool-hint">
           {say(
             "{n} run(s) stopped for the robot's policy will continue by themselves once the evaluation lets the model work again.",
             waiting,
@@ -95,12 +98,15 @@ export function AttentionBanner({ need }: { need: NeedsPerson }) {
     return null;
   const note = need.paused ? PAUSE_NOTES[need.paused.code ?? ""] : undefined;
   return (
-    <section className="levi-live-attention" role="alert" aria-live="polite">
-      <strong>{t("The live service needs a person")}</strong>
+    <section className="pg-live-attention" role="alert" aria-live="polite">
+      <strong>
+        <Icon icon={Hand} />
+        {t("The live service needs a person")}
+      </strong>
       {need.paused && (
         <>
           <p>
-            <strong className="levi-live-inline">
+            <strong className="pg-live-inline">
               {t("The service paused labelling")}
             </strong>
             {note ? `: ${t(note.title)}. ` : ". "}
@@ -114,8 +120,8 @@ export function AttentionBanner({ need }: { need: NeedsPerson }) {
             </p>
           )}
           {need.paused.reason && (
-            <p className="levi-live-reasons-line">
-              <span className="levi-pool-muted">{t("Reason")}:</span>{" "}
+            <p className="pg-live-reasons-line">
+              <span className="pg-pool-muted">{t("Reason")}:</span>{" "}
               <code>{need.paused.reason}</code>
             </p>
           )}
@@ -139,8 +145,8 @@ export function AttentionBanner({ need }: { need: NeedsPerson }) {
             )}
           </p>
           {need.attention.reason && (
-            <p className="levi-live-reasons-line">
-              <span className="levi-pool-muted">{t("Reason")}:</span>{" "}
+            <p className="pg-live-reasons-line">
+              <span className="pg-pool-muted">{t("Reason")}:</span>{" "}
               <code>{need.attention.reason}</code>
             </p>
           )}
@@ -184,8 +190,9 @@ export function ServiceOffline({
   const { t } = useLocale();
   const last = status?.service ? status.age_s : null;
   return (
-    <section className="levi-live-offline" role="status">
+    <section className="pg-live-offline" role="status">
       <strong>
+        <Icon icon={PlugZap} />
         {coreError
           ? t("The LEVI core is not answering")
           : t("The background service is not running")}
@@ -200,12 +207,12 @@ export function ServiceOffline({
             )}
       </p>
       {last != null && (
-        <p className="levi-pool-muted">
+        <p className="pg-pool-muted">
           {t("Last heard from it")}: {ago(last, t)}
         </p>
       )}
       <CopyCommand command={START_COMMAND} />
-      <p className="levi-pool-muted">
+      <p className="pg-pool-muted">
         {t(
           "Add --daemon to keep it running in the background, and --auto-approve to let it approve its own plans.",
         )}
@@ -246,9 +253,9 @@ export function ServicePanel({
   const service = status?.service;
   if (!service) {
     return (
-      <section className="levi-live-section" aria-labelledby="live-service">
+      <section className="pg-live-section" aria-labelledby="live-service">
         <h2 id="live-service">{t("Service and resources")}</h2>
-        <p className="levi-pool-hint">{t("No status file yet.")}</p>
+        <EmptyLine icon={Server}>{t("No status file yet.")}</EmptyLine>
       </section>
     );
   }
@@ -261,11 +268,11 @@ export function ServicePanel({
     vllm === "ready" ? "pass" : vllm === "error" ? "fail" : vllm ? "" : "";
   return (
     <section
-      className={`levi-live-section${alive ? "" : " stale"}`}
+      className={`pg-live-section${alive ? "" : " stale"}`}
       aria-labelledby="live-service"
     >
       <h2 id="live-service">{t("Service and resources")}</h2>
-      <div className="levi-live-chips">
+      <div className="pg-live-chips">
         {alive ? (
           <Chip tone={SERVICE_TONES[state] ?? ""}>
             {t(SERVICE_LABELS[state] ?? state)}
@@ -290,28 +297,30 @@ export function ServicePanel({
         )}
       </div>
       {!alive && (
-        <p className="levi-pool-muted">
+        <p className="pg-pool-muted">
           {t("Everything below is the last known state.")}
         </p>
       )}
       {alive && serviceStateNote(state) && (
-        <p className="levi-pool-hint">{t(serviceStateNote(state))}</p>
+        <p className="pg-pool-hint">{t(serviceStateNote(state))}</p>
       )}
       {service.last_error && (
-        <p className="levi-error">
-          <strong>{t("Last error")}:</strong> {service.last_error}
-        </p>
+        <Problem
+          live={false}
+          title={t("Last error")}
+          why={service.last_error}
+        />
       )}
 
-      <h3 className="levi-live-sub">{t("GPU")}</h3>
-      <dl className="levi-live-dl">
+      <h3 className="pg-live-sub">{t("GPU")}</h3>
+      <dl className="pg-live-dl">
         <Field label={t("Mode")}>
           <code>{gpu.mode ?? "—"}</code>
         </Field>
         <Field label={t("Model server (vLLM)")}>
           <Chip tone={vllmTone}>{t(vllmLabel(vllm))}</Chip>
           {gpu.vllm?.owned === false && vllm && vllm !== "stopped" && (
-            <span className="levi-pool-muted">
+            <span className="pg-pool-muted">
               {" "}
               {t("started by someone else")}
             </span>
@@ -336,17 +345,17 @@ export function ServicePanel({
         </Field>
       </dl>
       {alive && gate && (
-        <div className={`levi-live-gate ${gate.tone}`}>
+        <div className={`pg-live-gate ${gate.tone}`}>
           <strong>{t(gate.title)}</strong>
           <p>{t(gate.detail)}</p>
         </div>
       )}
       {alive && gpuModeNote(gpu.mode) && (
-        <p className="levi-pool-muted">{t(gpuModeNote(gpu.mode))}</p>
+        <p className="pg-pool-muted">{t(gpuModeNote(gpu.mode))}</p>
       )}
 
-      <h3 className="levi-live-sub">{t("Work")}</h3>
-      <dl className="levi-live-dl">
+      <h3 className="pg-live-sub">{t("Work")}</h3>
+      <dl className="pg-live-dl">
         <Field label={t("Queue")}>
           {service.queue_depth ?? 0} {t("dataset(s) waiting")}
         </Field>
@@ -355,10 +364,7 @@ export function ServicePanel({
             <>
               <code>{service.worker.dataset ?? "—"}</code>
               {service.worker.phase && (
-                <span className="levi-pool-muted">
-                  {" "}
-                  · {service.worker.phase}
-                </span>
+                <span className="pg-pool-muted"> · {service.worker.phase}</span>
               )}
             </>
           ) : (
@@ -368,7 +374,7 @@ export function ServicePanel({
         <Field label={t("Watching")}>
           {service.watch_roots?.length
             ? service.watch_roots.map((r) => (
-                <code key={r} className="levi-live-path">
+                <code key={r} className="pg-live-path">
                   {r}
                 </code>
               ))
@@ -376,8 +382,8 @@ export function ServicePanel({
         </Field>
       </dl>
 
-      <h3 className="levi-live-sub">{t("Resources (supervisor)")}</h3>
-      <dl className="levi-live-dl">
+      <h3 className="pg-live-sub">{t("Resources (supervisor)")}</h3>
+      <dl className="pg-live-dl">
         <Field label={t("Memory")}>
           {res.rss_mb != null ? `${res.rss_mb.toFixed(0)} MiB` : "—"}
         </Field>
@@ -393,15 +399,14 @@ export function ServicePanel({
       </dl>
 
       {service.events && service.events.length > 0 && (
-        <details className="levi-live-events">
+        <details className="pg-live-events">
           <summary>
             {t("Recent events")} ({service.events.length})
           </summary>
           <ul>
             {service.events.slice(0, 12).map((e, i) => (
               <li key={`${e.time}-${i}`} className={e.level}>
-                <span className="levi-pool-muted">{clock(e.time)}</span>{" "}
-                {e.text}
+                <span className="pg-pool-muted">{clock(e.time)}</span> {e.text}
               </li>
             ))}
           </ul>

@@ -2,6 +2,8 @@
 // The "Statistics" section of the live page: key figures, the evaluation
 // sessions, one row per episode, and downloads. Read-only; the data is
 // `GET /api/levi/live/stats` (docs/LIVE.md, "Statistics and reports").
+import { Badge, SkeletonText } from "@/components/ds";
+import { Problem } from "@/components/pages-ui/feedback";
 import { useEffect, useRef, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { clock } from "./live-logic";
@@ -29,9 +31,9 @@ const FORMAT_LABEL = { md: "Markdown", json: "JSON", csv: "CSV" } as const;
 export function KeyFigures({ summary }: { summary: StatsResponse["summary"] }) {
   const { t } = useLocale();
   return (
-    <div className="levi-live-kpis" role="list">
+    <div className="pg-live-kpis" role="list">
       {kpis(summary).map((k) => (
-        <div key={k.id} className="levi-live-kpi" role="listitem">
+        <div key={k.id} className="pg-live-kpi" role="listitem">
           <span>{t(k.label)}</span>
           <strong>{k.value}</strong>
           <small>{fill(t(k.hint), k.hintArgs)}</small>
@@ -47,8 +49,8 @@ export function SessionsTable({ rows }: { rows: StatsSession[] }) {
   return (
     <>
       <h3>{t("Evaluation sessions")}</h3>
-      <div className="levi-pool-table-wrap">
-        <table className="levi-table levi-pool-table levi-live-stats-table">
+      <div className="pg-pool-table-wrap">
+        <table className="ds-table ds-table--compact pg-pool-table pg-live-stats-table">
           <thead>
             <tr>
               <th>{t("Session")}</th>
@@ -103,16 +105,16 @@ export function EpisodesTable({
     <>
       <h3>
         {t("Per episode")}{" "}
-        <span className="levi-pool-muted">
+        <span className="pg-pool-muted">
           ({rows.length} / {count(data.total)})
         </span>
       </h3>
-      <div className="levi-live-chips" role="group" aria-label={t("Columns")}>
+      <div className="pg-live-chips" role="group" aria-label={t("Columns")}>
         {(["latency", "cost"] as const).map((v) => (
           <button
             key={v}
             type="button"
-            className={`levi-live-toggle${view === v ? " on" : ""}`}
+            className={`pg-live-toggle${view === v ? " on" : ""}`}
             aria-pressed={view === v}
             onClick={() => onView(v)}
           >
@@ -120,8 +122,8 @@ export function EpisodesTable({
           </button>
         ))}
       </div>
-      <div className="levi-pool-table-wrap">
-        <table className="levi-table levi-pool-table levi-live-stats-table">
+      <div className="pg-pool-table-wrap">
+        <table className="ds-table ds-table--compact pg-pool-table pg-live-stats-table">
           <thead>
             <tr>
               {cols.map((c) => (
@@ -138,9 +140,9 @@ export function EpisodesTable({
                   <td key={c.key} className={c.numeric ? "num" : undefined}>
                     {c.numeric ? c.cell(r) : t(c.cell(r))}
                     {c.key === "demo" && r.excluded && (
-                      <span className="levi-status levi-live-chip warn">
+                      <Badge tone="warning" className="pg-badge-gap">
                         {t("removed")}
-                      </span>
+                      </Badge>
                     )}
                   </td>
                 ))}
@@ -150,7 +152,11 @@ export function EpisodesTable({
         </table>
       </div>
       {rows.length < (data.total ?? 0) && (
-        <button type="button" className="levi-live-more" onClick={onMore}>
+        <button
+          type="button"
+          className="ds-btn ds-btn--ghost ds-btn--sm ds-focus pg-live-more"
+          onClick={onMore}
+        >
           {t("Show more")}
         </button>
       )}
@@ -161,7 +167,7 @@ export function EpisodesTable({
 export function ExportLinks({ scope }: { scope: StatsScope }) {
   const { t, language } = useLocale();
   return (
-    <p className="levi-live-export">
+    <p className="pg-live-export">
       {t("Download")}:{" "}
       {EXPORT_FORMATS.map((f, i) => (
         <span key={f}>
@@ -197,7 +203,7 @@ export function StatsView({
   const removed = data.excluded_demos ?? 0;
   return (
     <>
-      <div className="levi-live-scope">
+      <div className="pg-live-scope">
         <label>
           {t("Dataset")}
           <select
@@ -232,7 +238,7 @@ export function StatsView({
             ))}
           </select>
         </label>
-        <label className="levi-live-check">
+        <label className="pg-live-check">
           <input
             type="checkbox"
             checked={!!scope.includeExcluded}
@@ -261,7 +267,7 @@ export function StatsView({
           onMore={onMore}
         />
       )}
-      <p className="levi-pool-hint">
+      <p className="pg-pool-hint">
         {t(
           "Figures count the newest record of each episode; a dash means the figure was not measured. Definitions: docs/LIVE.md, Statistics and reports.",
         )}
@@ -274,7 +280,7 @@ export function StatsView({
 export function StatsEmpty({ filtered }: { filtered: boolean }) {
   const { t } = useLocale();
   return (
-    <p className="levi-pool-hint" role="status">
+    <p className="pg-pool-hint" role="status">
       {filtered
         ? t("No labelled episode matches this scope.")
         : t(
@@ -320,21 +326,28 @@ export function StatsPanel({
     !!scope.dataset || !!scope.session || (data?.excluded_demos ?? 0) > 0;
   return (
     <section
-      className="levi-live-section levi-live-slot o5"
+      className="pg-live-section pg-live-slot o5"
       aria-labelledby="live-statistics"
     >
       <h2 id="live-statistics">{t("Statistics")}</h2>
-      <p className="levi-pool-hint">
+      <p className="pg-pool-hint">
         {t(
           "How long labelling takes after an episode ends, what the model costs, and how often the GPU gate got in the way. Measured by the service for every episode it labels.",
         )}
       </p>
       {error && !data && (
-        <p className="levi-live-bad" role="alert">
-          {t("Could not read the statistics")} ({error})
-        </p>
+        <Problem
+          title={t("Could not read the statistics")}
+          why={error}
+          fix={t("The page asks again with the next refresh.")}
+        />
       )}
-      {!data && !error && <p className="levi-pool-hint">{t("Loading…")}</p>}
+      {!data && !error && (
+        <div aria-busy="true">
+          <span className="sr-only">{t("Loading…")}</span>
+          <SkeletonText lines={3} />
+        </div>
+      )}
       {data && data.enabled === false && null}
       {data && data.enabled !== false && (
         <>
@@ -356,7 +369,7 @@ export function StatsPanel({
           )}
           {empty && filtered && <StatsEmpty filtered />}
           {error && (
-            <p className="levi-live-bad">
+            <p className="pg-live-bad">
               {t("last request failed")} ({error})
             </p>
           )}
