@@ -372,6 +372,49 @@ def test_an_idle_session_releases_its_runtime(prepared, monkeypatch):
         pilot.shutdown()
 
 
+def test_a_disconnected_session_never_shows_an_enabled_grant(prepared, monkeypatch):
+    """The session's end disables its grant before it reads "disconnected":
+    someone who waits for "disconnected" (a client, the page, the idle test
+    above) never finds the grant still enabled. The order used to be the
+    reverse, a race that failed the idle test on a slow CI runner."""
+    from levi.agent import pilot
+    from levi.agent.pilot_contracts import PilotStart
+
+    wb, run = prepared
+    invoke(
+        wb,
+        Principal("human", human=True),
+        "plans.approve",
+        {"run_id": run["id"], "revision": 1},
+    )
+    _idle_runtime(monkeypatch, [])
+    monkeypatch.setenv("LEVI_PILOT_IDLE_SECONDS", "0.2")
+    real = wb.store.mutate
+    seen = []
+
+    def spy(kind, id, fn):
+        value = real(kind, id, fn)
+        if kind == "pilot_sessions" and value.get("connection") == "disconnected":
+            seen.append(wb.store.get("grants", value["grant_id"])["enabled"])
+        return value
+
+    monkeypatch.setattr(wb.store, "mutate", spy)
+    value = pilot.start(wb, PilotStart(run_id=run["id"], runtime="codex"))
+    try:
+        _wait_disconnected(wb, value["id"], 10)
+        assert seen == [False]
+        # A core restart closes a session left "connected" the same way.
+        wb.store.mutate(
+            "pilot_sessions", value["id"], lambda s: s.update(connection="connected")
+        )
+        wb.store.mutate("grants", value["grant_id"], lambda g: g.update(enabled=True))
+        seen.clear()
+        pilot.recover(wb)
+        assert seen == [False]
+    finally:
+        pilot.shutdown()
+
+
 def test_a_finished_run_releases_its_runtime(prepared, monkeypatch):
     from levi.agent import pilot
     from levi.agent.pilot_contracts import PilotStart

@@ -485,10 +485,12 @@ class Session:
             )
             if self.acp:
                 self.acp.close()
-            self.update(connection="disconnected")
+            # The grant goes first: a session that reads "disconnected" has
+            # no usable grant left (a reader in between saw it still enabled).
             self.wb.store.mutate(
                 "grants", self.value["grant_id"], lambda g: g.update(enabled=False)
             )
+            self.update(connection="disconnected")
             with _LOCK:
                 _ACTIVE.pop(self.value["id"], None)
 
@@ -645,10 +647,10 @@ def recover(wb):
     for session in wb.store.list("pilot_sessions"):
         if session["connection"] != "disconnected":
             wb.store.mutate(
+                "grants", session["grant_id"], lambda g: g.update(enabled=False)
+            )
+            wb.store.mutate(
                 "pilot_sessions",
                 session["id"],
                 lambda s: s.update(connection="disconnected", state="interrupted"),
-            )
-            wb.store.mutate(
-                "grants", session["grant_id"], lambda g: g.update(enabled=False)
             )
