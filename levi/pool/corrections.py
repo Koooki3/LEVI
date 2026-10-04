@@ -402,12 +402,21 @@ def resolve(rows: list[dict], df: pd.DataFrame) -> list[dict]:
     ``group``, and ``match``: ``ok``, ``stale`` (the index's text is not
     ``task_from``) or ``unmatched``."""
     by_key = {k: i for i, k in enumerate(df.key)}
-    resolved = {}
-    for i, key in enumerate(df.key):
+    resolved: dict[str, int] = {}
+
+    def by_real_path(candidate: str):
+        # Built on the first miss only: resolving every key costs a stat each.
+        if not resolved:
+            for i, key in enumerate(df.key):
+                try:
+                    resolved.setdefault(str(Path(key).resolve()), i)
+                except OSError:
+                    pass
         try:
-            resolved.setdefault(str(Path(key).resolve()), i)
+            return resolved.get(str(Path(candidate).resolve()))
         except OSError:
-            pass
+            return None
+
     by_fp = defaultdict(list)
     if "fingerprint" in df.columns:
         for i, fp in enumerate(df.fingerprint):
@@ -420,10 +429,7 @@ def resolve(rows: list[dict], df: pd.DataFrame) -> list[dict]:
         for candidate in _candidates(row["episode"]):
             hit = by_key.get(candidate)
             if hit is None:
-                try:
-                    hit = resolved.get(str(Path(candidate).resolve()))
-                except OSError:
-                    hit = None
+                hit = by_real_path(candidate)
             if hit is not None:
                 break
         if hit is None and row.get("fingerprint"):

@@ -447,3 +447,22 @@ def test_recipes_keep_their_correction_versions(pool):
     assert recipe.load("keep").task_corrections == [VERSION]
     with pytest.raises(ValueError):
         Recipe(name="bad", task_corrections=["Not A Version"])
+
+
+def test_a_proposal_is_found_by_fingerprint_when_its_path_is_elsewhere(pool):
+    key = str(pool["root"] / "collect/data/fold_cloth/demo_0001")
+    row = next(r for r in index.episodes(limit=1000)["episodes"] if r["key"] == key)
+    _import(
+        pool,
+        [
+            _row(
+                "other_root/fold_cloth/demo_0001",
+                "fold_cloth",
+                "unfold_cloth",
+                "f",
+                fingerprint=row["fingerprint"],
+            )
+        ],
+    )
+    entry = corrections.show(VERSION)["entries"][0]
+    assert entry["match"] == "ok" and entry["key"] == key
