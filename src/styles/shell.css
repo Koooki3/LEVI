@@ -9,12 +9,8 @@
   --levi-header-height: 56px;
 }
 
-/* Until the pages use the tokens they stay dark: a light/dark choice must
-   not turn their native controls (scrollbars, select lists) light. The
-   frame's own layers set their scheme themselves. */
-:root[data-theme] {
-  color-scheme: dark;
-}
+/* Native controls follow the theme: tokens.css sets color-scheme on
+   [data-theme], globals.css "light dark" otherwise. */
 
 /* ── Top bar ───────────────────────────────────────────────────────── */
 .levi-shell-header {
@@ -390,4 +386,10 @@
 }
 .levi-agent-sheet .ds-dialog__body {
   flex: 1;
+}
+
+/* The name is Latin in both languages and keeps its tracking. */
+:lang(zh) .levi-shell-brand,
+:lang(zh) .levi-wordmark {
+  letter-spacing: 0.08em;
 }

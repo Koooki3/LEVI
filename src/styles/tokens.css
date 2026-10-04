@@ -201,6 +201,10 @@
   --ds-on-danger: #ffffff;
 
   --ds-media-bg: #000000;
+  /* Text and icons drawn over video or images: white in both themes. */
+  --ds-on-media: #ffffff;
+  --ds-on-media-secondary: rgb(255 255 255 / 0.78);
+  --ds-media-scrim: rgb(0 0 0 / 0.56);
   --ds-scrim: rgb(0 0 0 / 0.32);
 
   --ds-shadow-1: 0 1px 2px rgb(0 0 0 / 0.06);
@@ -263,6 +267,9 @@
     --ds-on-danger: var(--ds-gray-d-1);
 
     --ds-media-bg: #000000;
+    --ds-on-media: #ffffff;
+    --ds-on-media-secondary: rgb(255 255 255 / 0.78);
+    --ds-media-scrim: rgb(0 0 0 / 0.56);
     --ds-scrim: rgb(0 0 0 / 0.56);
 
     --ds-shadow-1: 0 0 0 0 transparent;
@@ -319,6 +326,9 @@
   --ds-on-danger: var(--ds-gray-d-1);
 
   --ds-media-bg: #000000;
+  --ds-on-media: #ffffff;
+  --ds-on-media-secondary: rgb(255 255 255 / 0.78);
+  --ds-media-scrim: rgb(0 0 0 / 0.56);
   --ds-scrim: rgb(0 0 0 / 0.56);
 
   --ds-shadow-1: 0 0 0 0 transparent;
