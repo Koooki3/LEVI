@@ -717,3 +717,48 @@ def test_a_relative_path_under_two_pool_roots_is_ambiguous(monkeypatch, tmp_path
     # One root only: the same proposal matches.
     monkeypatch.setattr(corrections.settings, "pool_roots", lambda: [one])
     assert corrections.resolve([row], df)[0]["match"] == "ok"
+
+
+def test_a_corrected_episode_that_is_held_out_stays_out(
+    corr_root, tmp_path, monkeypatch, client
+):
+    """A correction moves an episode to another task; it never brings a
+    held-out (frozen test) episode back in."""
+    frozen = tmp_path / "frozen.json"
+    held = "collect/data/fold_cloth/demo_0000"
+    frozen.write_text(json.dumps({"version": "f", "episodes": [{"path": held}]}))
+    monkeypatch.setenv("LEVI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.setenv("LEVI_POOL_ROOTS", str(corr_root))
+    monkeypatch.setenv("LEVI_POOL_HELDOUT", str(frozen))
+    monkeypatch.setenv("LEVI_EXPORT_ROOTS", str(tmp_path))
+    monkeypatch.setenv("LEVI_UI_TOKEN", TOKEN)
+    monkeypatch.setattr(export, "_levi_commit", lambda: "test")
+    scanner.scan()
+    _import({"out": tmp_path})
+    assert _review(client, ids=["a"]).status_code == 200
+    rec = Recipe(
+        name="r",
+        categories=["human"],
+        tasks=["unfold cloth"],
+        task_corrections=[VERSION],
+    )
+    key = str(corr_root / held)
+    selection = recipe.select_detailed(rec)
+    assert key not in {r["key"] for r in selection.chosen}
+    out = next(e for e in selection.excluded if e["key"] == key)
+    assert out["reason"] == "heldout"
+    job = jobs.plan_export(
+        rec,
+        export.ExportOptions(
+            format="raw_capture", name="held", output_dir=str(tmp_path / "exports")
+        ),
+    )
+    assert key not in {e["key"] for e in job["episodes"]}
+    # Slipped into the plan by hand (corrected text and all): refused.
+    other = job["episodes"][0]
+    job["episodes"].append(
+        {**other, "key": key, "task_correction": f"{VERSION}:a", "group": key}
+    )
+    with pytest.raises(PermissionError, match="held-out"):
+        export.run(job)
+    assert not (tmp_path / "exports/held").exists()
