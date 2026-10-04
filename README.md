@@ -103,6 +103,7 @@ LEVI checks the spec against the catalog and waits for your approval before anyt
 | [Built-in knowledge](docs/KNOWLEDGE.md) | Dataset-agnostic rules every model in LEVI follows, and how local memory is promoted into them |
 | [Workspace](docs/WORKSPACE.md) | What lives where under `LEVI_WORKSPACE`, naming, sync, processes LEVI starts, namespaces, the DROID test sample, cleanup |
 | [API](docs/API.md) | REST routes and agent capabilities |
+| [Design system](docs/DESIGN.md) · [中文](docs/DESIGN.zh-CN.md) | Design tokens, light and dark themes, base components, motion and accessibility rules for the redesigned interface |
 | [Validation](docs/VALIDATION.md) | What has been tested, on what, and what has not |
 | [Architecture status](docs/architecture/IMPLEMENTATION_STATUS.md) | Implementation progress against the architecture plan |
 | [Upstream](docs/UPSTREAM.md) · [Releasing](docs/RELEASING.md) · [Changelog](CHANGELOG.md) | Attribution and feature parity, release procedure, changes |

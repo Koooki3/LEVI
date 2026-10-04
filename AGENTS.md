@@ -177,6 +177,7 @@ Reserved/bookkeeping columns from lerobot — see `EXCLUDED_COLUMNS` in `src/uti
 
 `src/app/globals.css` retains upstream base styles. LEVI overrides live in
 `src/app/levi.css`: graphite green surfaces, parchment text and lime accents.
+The redesign's design system (stage 1: `--ds-*` tokens in `src/styles/tokens.css`, `ds-*` styles in `src/styles/ds.css`, components in `src/components/ds/`, specimen at `/design` in development) is not used by existing pages yet; new UI code uses it and never hard-codes colours. See docs/DESIGN.md.
 `src/components/levi-locale.tsx` and `src/i18n/` supply the Chinese/English UI.
 Preserve the LEVI theme, keyboard access and responsive layouts when editing inherited components.
 

@@ -103,6 +103,7 @@ LEVI 会对照数据目录校验解析出的任务规格，等你批准后才执
 | [内置知识](docs/KNOWLEDGE.md) | LEVI 中所有模型都遵循的、与数据集无关的规则，以及本地记忆如何提升为内置知识 |
 | [工作区](docs/WORKSPACE.md) | `LEVI_WORKSPACE` 下各类文件的位置、命名、同步、LEVI 启动的进程、命名空间、DROID 测试样本与清理 |
 | [API](docs/API.md) | REST 路由与 agent 能力 |
+| [设计系统](docs/DESIGN.zh-CN.md) · [English](docs/DESIGN.md) | 界面重构用的设计令牌、浅色与深色主题、基础组件、动效与可访问性规则 |
 | [验证记录](docs/VALIDATION.md) | 测了什么、用什么测、哪些还没测 |
 | [架构进展](docs/architecture/IMPLEMENTATION_STATUS.md) | 相对架构规划的实现进度 |
 | [上游](docs/UPSTREAM.md) · [发布](docs/RELEASING.md) · [更新日志](CHANGELOG.md) | 来源与功能对照、发布流程、变更记录 |
