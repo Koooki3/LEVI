@@ -44,6 +44,8 @@ const PAGE_FILES = [
   "src/components/agent-*.tsx",
   "src/components/ollama-*.tsx",
   "src/components/chip-multi-select.tsx",
+  "src/components/hf-auth-button.tsx",
+  "src/components/dataset-format.tsx",
 ];
 
 const eslintConfig = [

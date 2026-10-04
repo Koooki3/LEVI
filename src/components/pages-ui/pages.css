@@ -2814,33 +2814,6 @@ button.pg-pool-danger {
   vertical-align: baseline;
   margin-left: 0;
 }
-/* Shared components drawn on these pages (dataset-format.tsx is also used by
-   the episode viewer, hf-auth-button.tsx by the home page): their old
-   classes, restated with tokens only inside the stage-4 pages. */
-.pg-workbench .levi-format .levi-status {
-  display: inline-flex;
-  padding: 1px var(--ds-space-2);
-  border: 1px solid var(--ds-separator-strong);
-  border-radius: var(--ds-radius-xs);
-  background: var(--ds-surface-sunken);
-  color: var(--ds-text-primary);
-  font-family: var(--ds-font-mono);
-  font-size: var(--ds-text-caption-size);
-}
-.pg-workbench .levi-format .levi-status.warn {
-  border-color: var(--ds-warning);
-  background: var(--ds-warning-bg);
-}
-.pg-workbench .levi-format .levi-status.fail {
-  border-color: var(--ds-danger);
-  background: var(--ds-danger-bg);
-}
-.pg-workbench .levi-format p {
-  color: var(--ds-text-secondary);
-}
-.pg-head-actions :is(button, a, span) {
-  color: var(--ds-text-primary);
-}
 .pg-pool-table-wrap:focus-visible {
   outline: 2px solid var(--ds-focus-ring);
   outline-offset: 2px;

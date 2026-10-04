@@ -1,6 +1,9 @@
 "use client";
 import { useLocale } from "@/components/levi-locale";
+import { Database } from "lucide-react";
+import { Badge, type Tone } from "@/components/ds";
 import type { DatasetFormat } from "@/types/dataset-format.types";
+import "@/components/pages-ui/shared.css";
 
 const INPUT_LABELS: Record<string, string> = {
   robot_capture: "Robot capture (CSV + video)",
@@ -116,6 +119,16 @@ export function useFormatDescription(format: DatasetFormat | undefined) {
   };
 }
 
+const FORMAT_TONE: Record<string, Tone> = {
+  pass: "neutral",
+  warn: "warning",
+  fail: "danger",
+  "": "neutral",
+};
+
+/** The format as a ds badge (raw captures: warning, a failed view: danger,
+ * converted and registered datasets: neutral) with its detail lines. The same
+ * look on every page, the episode viewer's raw-capture notice included. */
 export function DatasetFormatBadge({
   format,
   compact = false,
@@ -126,10 +139,16 @@ export function DatasetFormatBadge({
   const { badge, tone, lines } = useFormatDescription(format);
   return (
     <div className="levi-format">
-      <span className={`levi-status ${tone}`}>{badge}</span>
+      <Badge
+        tone={FORMAT_TONE[tone] ?? "neutral"}
+        icon={tone === "pass" ? Database : undefined}
+        className="levi-format-badge"
+      >
+        {badge}
+      </Badge>
       {!compact &&
         lines.map((line) => (
-          <p key={line} className="text-xs">
+          <p key={line} className="levi-format-line">
             {line}
           </p>
         ))}

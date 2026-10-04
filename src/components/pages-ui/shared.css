@@ -1,0 +1,65 @@
+/* Styles of shared components restyled in stage 4 and drawn on many pages
+ * (the episode viewer, home, explore, workbench, Agent Workbench):
+ * dataset-format.tsx and hf-auth-button.tsx. Imported by those components,
+ * so they look the same wherever they appear. Tokens only. */
+.levi-format {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ds-space-1);
+  min-width: 0;
+}
+.levi-format .levi-format-line {
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+  line-height: var(--ds-text-caption-line);
+  overflow-wrap: anywhere;
+}
+.levi-hf-auth {
+  display: inline-flex;
+  align-items: center;
+}
+.levi-hf-auth-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ds-radius-sm);
+  background: transparent;
+  cursor: pointer;
+  transition: opacity var(--ds-dur-fast) var(--ds-ease-standard);
+}
+.levi-hf-auth-badge:hover {
+  opacity: 0.9;
+}
+.levi-hf-auth-badge img {
+  height: 32px;
+  width: auto;
+}
+.levi-hf-auth-user {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  max-width: 14rem;
+}
+.levi-hf-auth-user > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.levi-hf-auth-user img {
+  border-radius: var(--ds-radius-full);
+  box-shadow: 0 0 0 1px var(--ds-separator);
+}
+.levi-hf-token-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+.levi-hf-token-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ds-space-2);
+}
