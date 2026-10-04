@@ -276,6 +276,35 @@ def test_a_status_file_alone_names_only_a_workspace_a_start_used(tmp_path, monke
     assert cli.remembered_workspace(home) == str(ws.resolve())
 
 
+def test_a_remembered_product_workspace_is_refused(tmp_path, monkeypatch):
+    """``started.json`` or a legacy status file that names a checkout's
+    ``.state`` (``locate.refused``) names no workspace for ``levi live``, and
+    the product page says ``product_workspace``."""
+    from levi.live import locate
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("LEVI_LIVE_HOME", str(home))
+    ws = _live_ws(tmp_path / "checkout/.state")
+    (ws / "live/logs").mkdir(parents=True)
+    (ws / "live/logs/live.log").write_text("")
+    _started(home, ws)
+    product = tmp_path / "product"
+    product.mkdir()
+    assert cli.remembered_workspace(home) == str(ws.resolve())
+    monkeypatch.setattr(locate, "protected_workspaces", lambda: [ws.resolve()])
+    assert cli.remembered_workspace(home) is None
+    assert locate.find(product).problem == "product_workspace"
+    # The same through the status file of a service from before started.json.
+    (home / cli.STARTED).unlink()
+    (home / "status.json").write_text(json.dumps({"workspace": str(ws)}))
+    assert cli.remembered_workspace(home) is None
+    assert locate.find(product).problem == "product_workspace"
+    # A workspace inside the protected one is refused too.
+    inner = _live_ws(ws / "inner")
+    _started(home, inner)
+    assert cli.remembered_workspace(home) is None
+
+
 @pytest.fixture
 def contained(monkeypatch):
     """``levi live once`` changes its own process (environment, priority):

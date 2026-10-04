@@ -217,6 +217,30 @@ def test_the_frontend_is_not_rebuilt_while_this_checkout_serves(isolated, monkey
     assert not [s for s in steps if s.id == "stop-service"]
 
 
+def test_build_state_classifies_a_temporary_next(tmp_path, monkeypatch):
+    """``install._build_state`` on a temporary checkout: no ``.next`` is
+    missing, a build without a stamp unknown, a stamp of these sources
+    current, and a source change after the stamp stale."""
+    project = tmp_path / "checkout"
+    (project / "src").mkdir(parents=True)
+    (project / "src/page.tsx").write_text("one")
+    (project / "package.json").write_text("{}")
+    monkeypatch.setattr(install, "PROJECT", project)
+    monkeypatch.setattr(doctor, "PROJECT", project)
+    assert install._build_state() == "missing" and not install._built()
+    (project / ".next").mkdir()
+    (project / ".next/BUILD_ID").write_text("0.3.0")
+    assert install._build_state() == "unknown" and not install._built()
+    doctor.write_build_stamp(project)
+    assert install._build_state() == "current" and install._built()
+    (project / "src/page.tsx").write_text("two")
+    assert install._build_state() == "stale" and not install._built()
+    doctor.write_build_stamp(project)
+    assert install._build_state() == "current"
+    (project / ".next/BUILD_ID").unlink()
+    assert install._build_state() == "missing"
+
+
 def test_serving_reads_the_socket_table(monkeypatch):
     monkeypatch.setattr(doctor, "listening_ports", lambda: {7860})
     assert "7860" in install.serving()
