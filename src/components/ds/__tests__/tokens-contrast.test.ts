@@ -75,6 +75,21 @@ function contrast(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+/** CSS color-mix(in srgb, a p, b): per-channel mix of the encoded values. */
+function mix(a: string, b: string, p: number): string {
+  const channel = (hex: string, i: number) => parseInt(hex.slice(i, i + 2), 16);
+  return (
+    "#" +
+    [1, 3, 5]
+      .map((i) =>
+        Math.round(channel(a, i) * p + channel(b, i) * (1 - p))
+          .toString(16)
+          .padStart(2, "0"),
+      )
+      .join("")
+  );
+}
+
 const TEXT = 4.5;
 const NON_TEXT = 3;
 
@@ -116,12 +131,17 @@ const PAIRS: Array<[string, string, number]> = [
   ["--ds-selected-indicator", "--ds-surface-selected", NON_TEXT],
   ["--ds-progress", "--ds-progress-track", NON_TEXT],
   ["--ds-on-danger", "--ds-danger", TEXT],
+  ["--ds-text-primary", "--ds-surface-hover-on-raised", TEXT],
+  ["--ds-text-secondary", "--ds-surface-hover-on-raised", TEXT],
+  ["--ds-text-tertiary-on-raised", "--ds-surface-hover-on-raised", TEXT],
   ...["success", "warning", "danger", "info"].flatMap(
     (tone): Array<[string, string, number]> => [
       [`--ds-${tone}`, "--ds-surface-1", TEXT],
       [`--ds-${tone}`, `--ds-${tone}-bg`, TEXT],
       [`--ds-${tone}`, "--ds-surface-2", TEXT],
       [`--ds-${tone}`, "--ds-field-bg", TEXT],
+      [`--ds-${tone}`, "--ds-surface-hover", TEXT],
+      [`--ds-${tone}`, "--ds-surface-hover-on-raised", TEXT],
     ],
   ),
 ];
@@ -141,6 +161,36 @@ describe("token contrast (WCAG 2.x)", () => {
       expect(failures).toEqual([]);
     });
   }
+
+  test("raised hover is lighter than the raised surface in dark", () => {
+    expect(
+      luminance(resolve(DARK, "--ds-surface-hover-on-raised")),
+    ).toBeGreaterThan(luminance(resolve(DARK, "--ds-surface-2")));
+    // The .ds-on-raised context really swaps it in.
+    expect(TOKENS).toMatch(
+      /\.ds-on-raised \{[^}]*--ds-surface-hover: var\(--ds-surface-hover-on-raised\);/,
+    );
+  });
+
+  test("the hovered danger button keeps its text readable", () => {
+    // .ds-btn--danger:hover mixes the danger colour with primary text.
+    const rule =
+      /\.ds-btn--danger:hover[^{]*\{\s*background: color-mix\(in srgb, var\((--ds-[a-z-]+)\) (\d+)%, var\((--ds-[a-z-]+)\)\);/.exec(
+        DS,
+      );
+    expect(rule).not.toBeNull();
+    const [, a, weight, b] = rule!;
+    for (const theme of [LIGHT, DARK]) {
+      const hover = mix(
+        resolve(theme, a),
+        resolve(theme, b),
+        Number(weight) / 100,
+      );
+      expect(
+        contrast(resolve(theme, "--ds-on-danger"), hover),
+      ).toBeGreaterThanOrEqual(TEXT);
+    }
+  });
 
   test("reproduces the proposal's numbers, including the pairs it rules out", () => {
     const L = (step: number) => RAW[`--ds-gray-l-${step}`];
@@ -231,6 +281,31 @@ describe("token structure", () => {
       );
       expect(literals).toBeNull();
     }
+  });
+
+  test("component and specimen TSX hard-code no colours", () => {
+    const root = join(import.meta.dir, "../../..");
+    const files = [
+      ...new Bun.Glob("components/ds/**/*.tsx").scanSync(root),
+      ...new Bun.Glob("app/design/*.tsx").scanSync(root),
+    ].filter((file) => !file.includes("__tests__"));
+    expect(files.length).toBeGreaterThan(15);
+    const found = files.flatMap((file) => {
+      const code = readFileSync(join(root, file), "utf8");
+      const hits =
+        code.match(
+          /#[0-9a-f]{3,8}\b|\b(?:rgb|rgba|hsl|hsla)\(|\b[a-z][a-z0-9:-]*-\[[^\]\s]+\]/gi,
+        ) ?? [];
+      return hits.map((hit) => `${file}: ${hit}`);
+    });
+    expect(found).toEqual([]);
+  });
+
+  test("the tag remove button is a 24 px target", () => {
+    expect(DS).toMatch(
+      /\.ds-tag__remove \{[^}]*width: var\(--ds-hit-min\);[^}]*height: var\(--ds-hit-min\);/,
+    );
+    expect(RAW["--ds-hit-min"]).toBe("24px");
   });
 
   test("every token the styles use is defined", () => {

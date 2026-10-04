@@ -596,13 +596,15 @@
   color: var(--ds-text-primary);
   font-weight: var(--ds-weight-regular);
 }
+/* 24 × 24 target (WCAG 2.5.8), 16 px visible mark; negative margins keep
+   the tag 22 px tall. */
 .ds-tag__remove {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
-  margin-right: calc(-1 * var(--ds-space-1));
+  width: var(--ds-hit-min);
+  height: var(--ds-hit-min);
+  margin: -1px calc(-1 * var(--ds-space-2)) -1px calc(-1 * var(--ds-space-1));
   padding: 0;
   border: 0;
   border-radius: var(--ds-radius-xs);
@@ -610,13 +612,23 @@
   color: var(--ds-text-secondary);
   cursor: pointer;
 }
+.ds-tag__remove-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--ds-radius-xs);
+}
 .ds-tag__remove .ds-icon {
   width: 12px;
   height: 12px;
 }
 .ds-tag__remove:hover {
-  background: var(--ds-surface-hover);
   color: var(--ds-text-primary);
+}
+.ds-tag__remove:hover .ds-tag__remove-mark {
+  background: var(--ds-surface-hover);
 }
 .ds-status {
   display: inline-flex;

@@ -46,22 +46,28 @@ export function Badge({
   );
 }
 
+export type TagProps = { className?: string } & (
+  | { onRemove?: undefined; removeLabel?: undefined; children: ReactNode }
+  | {
+      onRemove: () => void;
+      /** Accessible name of the remove button; default "Remove <text>". */
+      removeLabel?: string;
+      children: string;
+    }
+  | {
+      onRemove: () => void;
+      /** Required when the tag is not plain text. */
+      removeLabel: string;
+      children: ReactNode;
+    }
+);
+
 /**
  * A neutral label (category, filter value). With `onRemove` it gets a remove
- * button named "Remove <label>".
+ * button named "Remove <label>" (pass `removeLabel` when the label is not
+ * plain text); the button's target is 24 × 24 px, drawn at 16 px.
  */
-export function Tag({
-  children,
-  onRemove,
-  removeLabel,
-  className,
-}: {
-  children: ReactNode;
-  onRemove?: () => void;
-  /** Accessible name of the remove button; default "Remove <text>". */
-  removeLabel?: string;
-  className?: string;
-}) {
+export function Tag({ children, onRemove, removeLabel, className }: TagProps) {
   const { t } = useLocale();
   const text = typeof children === "string" ? children : "";
   return (
@@ -74,7 +80,9 @@ export function Tag({
           aria-label={removeLabel ?? `${t("Remove")} ${text}`.trim()}
           onClick={onRemove}
         >
-          <Icon icon={X} />
+          <span className="ds-tag__remove-mark">
+            <Icon icon={X} />
+          </span>
         </button>
       )}
     </span>

@@ -4,6 +4,20 @@ import type { LucideIcon } from "lucide-react";
 import { Icon } from "./Icon";
 import { cx, rovingIndex } from "./internal";
 
+/**
+ * The index of the tab with `value`; if there is none (or it is disabled),
+ * the first enabled tab, so the list always has one tab stop.
+ */
+export function selectedIndex(
+  items: Array<{ id: string; disabled?: boolean }>,
+  value: string,
+): number {
+  const found = items.findIndex((item) => item.id === value);
+  if (found >= 0 && !items[found].disabled) return found;
+  const enabled = items.findIndex((item) => !item.disabled);
+  return enabled >= 0 ? enabled : 0;
+}
+
 export type TabItem = {
   id: string;
   label: ReactNode;
@@ -33,10 +47,7 @@ export function Tabs({
 }) {
   const base = useId();
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
-  const current = Math.max(
-    0,
-    items.findIndex((item) => item.id === value),
-  );
+  const current = selectedIndex(items, value);
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const index = rovingIndex(
       event.key,
@@ -71,7 +82,11 @@ export function Tabs({
               role="tab"
               id={`${base}-tab-${item.id}`}
               aria-selected={isSelected}
-              aria-controls={`${base}-panel-${item.id}`}
+              aria-controls={
+                isSelected && item.content !== undefined
+                  ? `${base}-panel-${item.id}`
+                  : undefined
+              }
               tabIndex={isSelected ? 0 : -1}
               disabled={item.disabled}
               className="ds-tab ds-focus"
@@ -127,9 +142,9 @@ export function SegmentedControl({
   className?: string;
 }) {
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
-  const current = Math.max(
-    0,
-    options.findIndex((option) => option.value === value),
+  const current = selectedIndex(
+    options.map((option) => ({ id: option.value, disabled: option.disabled })),
+    value,
   );
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const key =

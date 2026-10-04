@@ -158,6 +158,7 @@
   --ds-surface-1: var(--ds-gray-l-0);
   --ds-surface-2: var(--ds-gray-l-0);
   --ds-surface-hover: var(--ds-gray-l-4);
+  --ds-surface-hover-on-raised: var(--ds-gray-l-4);
   --ds-surface-selected: var(--ds-gray-l-4);
   --ds-field-bg: var(--ds-gray-l-0);
   --ds-skeleton: var(--ds-gray-l-4);
@@ -173,7 +174,8 @@
   --ds-text-tertiary-on-sunken: var(--ds-gray-l-9);
   --ds-text-tertiary-on-hover: var(--ds-gray-l-9);
   --ds-text-tertiary-on-selected: var(--ds-gray-l-9);
-  --ds-text-tertiary-on-raised: var(--ds-gray-l-8);
+  /* Raised layers have hover rows (gray-4), where gray-8 is 3.97:1. */
+  --ds-text-tertiary-on-raised: var(--ds-gray-l-9);
   --ds-text-disabled: var(--ds-gray-l-7);
   --ds-icon: var(--ds-gray-l-10);
 
@@ -193,7 +195,8 @@
   --ds-warning-bg: #f7f0e1;
   --ds-danger: #b3362b;
   --ds-danger-bg: #f8e9e7;
-  --ds-info: #3d6a99;
+  /* Proposal had #3d6a99: 4.41:1 on surface-hover; one step darker. */
+  --ds-info: #3a6693;
   --ds-info-bg: #e9eff6;
   --ds-on-danger: #ffffff;
 
@@ -222,6 +225,7 @@
     --ds-surface-1: var(--ds-gray-d-3);
     --ds-surface-2: var(--ds-gray-d-5);
     --ds-surface-hover: var(--ds-gray-d-4);
+    --ds-surface-hover-on-raised: var(--ds-gray-d-6);
     --ds-surface-selected: var(--ds-gray-d-6);
     --ds-field-bg: var(--ds-gray-d-2);
     --ds-skeleton: var(--ds-gray-d-5);
@@ -252,7 +256,7 @@
     --ds-success-bg: #1d3326;
     --ds-warning: #d4a64a;
     --ds-warning-bg: #3a3020;
-    --ds-danger: #e8806f;
+    --ds-danger: #ee8f80; /* proposal #e8806f: 4.19:1 on raised hover */
     --ds-danger-bg: #3a2220;
     --ds-info: #7fa8d6;
     --ds-info-bg: #1c2a3a;
@@ -277,6 +281,7 @@
   --ds-surface-1: var(--ds-gray-d-3);
   --ds-surface-2: var(--ds-gray-d-5);
   --ds-surface-hover: var(--ds-gray-d-4);
+  --ds-surface-hover-on-raised: var(--ds-gray-d-6);
   --ds-surface-selected: var(--ds-gray-d-6);
   --ds-field-bg: var(--ds-gray-d-2);
   --ds-skeleton: var(--ds-gray-d-5);
@@ -307,7 +312,7 @@
   --ds-success-bg: #1d3326;
   --ds-warning: #d4a64a;
   --ds-warning-bg: #3a3020;
-  --ds-danger: #e8806f;
+  --ds-danger: #ee8f80; /* proposal #e8806f: 4.19:1 on raised hover */
   --ds-danger-bg: #3a2220;
   --ds-info: #7fa8d6;
   --ds-info-bg: #1c2a3a;
@@ -330,6 +335,8 @@
   --ds-text-tertiary: var(--ds-text-tertiary-on-sunken);
 }
 .ds-on-raised {
+  /* Dark: hover must be lighter than the raised surface (gray-5). */
+  --ds-surface-hover: var(--ds-surface-hover-on-raised);
   --ds-text-tertiary: var(--ds-text-tertiary-on-raised);
   --ds-border-control: var(--ds-border-control-on-raised);
 }
