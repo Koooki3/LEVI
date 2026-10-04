@@ -78,3 +78,14 @@ describe("Analysis tab", () => {
     expect(host.textContent).toContain("lerobot-doctor");
   });
 });
+
+describe("Analysis tab loading", () => {
+  test("the view sits in its own positioned box, below the switch", async () => {
+    const { host } = await render(<Harness />);
+    const body = host.querySelector("[data-analysis-view]")!;
+    expect(body.className).toContain("vw-analysis-body");
+    expect(body.contains(host.querySelector('[role="radiogroup"]'))).toBe(
+      false,
+    );
+  });
+});

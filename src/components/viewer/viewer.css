@@ -940,3 +940,10 @@ button.vw-outcome:hover {
 .vw-chip {
   white-space: nowrap;
 }
+
+/* A view's loading overlay covers the view only, never the switch above
+   it, so another view can still be chosen while one loads. */
+.vw-analysis-body {
+  position: relative;
+  min-height: 12rem;
+}
