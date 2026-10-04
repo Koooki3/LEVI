@@ -339,6 +339,12 @@ def build_parser() -> argparse.ArgumentParser:
             help="leave this id out (repeatable)",
         )
         cv.add_argument("--reviewer", required=True, help="who decides")
+        cv.add_argument(
+            "--sha256",
+            required=True,
+            help="the version's sha256 as `show` / `list` print it: the "
+            "decision binds to the proposals you looked at",
+        )
         cv.add_argument("--note", default="")
     push = sub.add_parser(
         "push", help="send a finished export to a remote target (rsync over SSH)"
@@ -617,6 +623,7 @@ def _corrections(args) -> int:
         decision = corrections.Review(
             decision="approved" if action == "approve" else "rejected",
             reviewer=args.reviewer,
+            sha256=args.sha256,
             ids=args.ids or [],
             batch=args.batch,
             all=args.all,

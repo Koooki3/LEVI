@@ -115,6 +115,9 @@ class Review(BaseModel):
     model_config = ConfigDict(extra="forbid")
     decision: Literal["approved", "rejected"]
     reviewer: str = Field(min_length=1, max_length=120)
+    # The sha256 of the version's proposals file the person looked at
+    # (``show`` / ``list`` print it): a decision binds to that content.
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     ids: list[str] = Field(default_factory=list, max_length=MAX_ENTRIES)
     batch: str | None = Field(None, max_length=40)
     all: bool = False
@@ -316,13 +319,48 @@ def _reviews(version: str) -> list[dict]:
     ]
 
 
+def checked_sha256(version: str) -> str:
+    """The sha256 of the version's proposals file, which must equal the one
+    the import recorded; anything else (an edited file, a missing manifest)
+    raises: decisions were made on what the manifest names."""
+    path = _paths(version)["proposals"]
+    if not path.is_file():
+        raise KeyError(f"task correction version {version}")
+    want = manifest(version).get("sha256")
+    have = _sha256(path)
+    if not want or have != want:
+        raise ValueError(
+            f"Task correction version {version!r} was changed after its import "
+            f"(proposals sha256 {have[:12]}…, manifest {str(want)[:12]}…); "
+            "nothing of it is applied: import the change as a new version"
+        )
+    return have
+
+
+def _binds(decision: dict, proposal: dict, sha: str | None) -> bool:
+    """A decision counts only for the content it was made on: the version's
+    proposals file (sha256) and this proposal's ``task_to``."""
+    return (
+        sha is not None
+        and decision.get("sha256") == sha
+        and decision.get("task_to") == proposal.get("task_to")
+    )
+
+
 def entries(version: str) -> list[dict]:
-    """Proposals with their current status (the latest decision)."""
+    """Proposals with their current status: the latest decision made on this
+    content (the manifest's sha256 and the proposal's ``task_to``); a decision
+    on other content is ignored."""
+    rows = proposals(version)
+    sha = manifest(version).get("sha256")
+    by_id = {r["id"]: r for r in rows}
     latest: dict[str, dict] = {}
     for row in _reviews(version):
-        latest[row["id"]] = row
+        proposal = by_id.get(row.get("id"))
+        if proposal is not None and _binds(row, proposal, sha):
+            latest[row["id"]] = row
     out = []
-    for row in proposals(version):
+    for row in rows:
         decision = latest.get(row["id"])
         out.append(
             {
@@ -341,7 +379,15 @@ def review(version: str, decision: Review, *, principal: str) -> dict:
     checked that a person, not an agent, asks)."""
     with _locked(version):
         rows = proposals(version)
-        known = {r["id"] for r in rows}
+        sha = checked_sha256(version)
+        if decision.sha256 != sha:
+            raise ValueError(
+                f"The proposals of {version!r} have sha256 {sha}, not the "
+                f"{decision.sha256} named in the decision: look at "
+                f"`levi pool corrections show {version}` and decide on what it shows"
+            )
+        task_to = {r["id"]: r["task_to"] for r in rows}
+        known = set(task_to)
         if decision.all:
             wanted = [r["id"] for r in rows]
         elif decision.batch is not None:
@@ -370,6 +416,8 @@ def review(version: str, decision: Review, *, principal: str) -> dict:
                             "decision": decision.decision,
                             "reviewer": decision.reviewer,
                             "principal": principal,
+                            "sha256": sha,
+                            "task_to": task_to[item],
                             "at": stamp,
                             "note": decision.note,
                         },
@@ -473,6 +521,7 @@ def show(version: str, status: str | None = None, batch: str | None = None) -> d
         rows = [r for r in rows if r.get("review_batch") == batch]
     return {
         "version": version,
+        "sha256": manifest(version).get("sha256"),
         "manifest": manifest(version),
         "counts": dict(Counter(r["status"] for r in rows)),
         "match": dict(Counter(r.get("match", "not_scanned") for r in rows)),
@@ -488,6 +537,7 @@ def listing() -> list[dict]:
         item = {
             "version": version,
             "imported_at": manifest(version).get("imported_at"),
+            "sha256": manifest(version).get("sha256"),
             "proposals": len(rows),
             "status": dict(Counter(r["status"] for r in rows)),
             "batches": sorted({r.get("review_batch") or "" for r in rows} - {""}),
@@ -511,6 +561,7 @@ def applicable(names: list[str], df: pd.DataFrame) -> tuple[dict, list[dict]]:
     problems: list[dict] = []
     for version in names:
         try:
+            checked_sha256(version)
             rows = entries(version)
         except KeyError:
             raise ValueError(
@@ -581,8 +632,9 @@ def record(version_refs: list[str]) -> dict[str, dict]:
         wanted[version].add(item)
     for version, ids in wanted.items():
         try:
+            checked_sha256(version)
             rows = entries(version)
-        except KeyError:
+        except (KeyError, ValueError):
             continue
         for row in rows:
             if row["id"] in ids:
@@ -596,6 +648,13 @@ def verify(episodes: list[dict]) -> None:
     refs = {e["task_correction"] for e in episodes if e.get("task_correction")}
     if not refs:
         return
+    for version in sorted({r.partition(":")[0] for r in refs}):
+        try:
+            checked_sha256(version)
+        except KeyError:
+            raise ValueError(
+                f"Task correction version {version!r} is gone (plan again)"
+            ) from None
     now = record(sorted(refs))
     wrong = []
     for e in episodes:

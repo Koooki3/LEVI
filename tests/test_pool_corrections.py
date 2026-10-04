@@ -97,10 +97,19 @@ def _tasks(rec: Recipe) -> dict:
     return {t["task"]: t["episodes"] for t in recipe.preview(rec)["tasks"]}
 
 
+def _sha(version=VERSION) -> str:
+    return corrections.manifest(version)["sha256"]
+
+
 def _review(client, decision="approved", version=VERSION, **body):
     return client.post(
         f"/api/levi/pool/corrections/{version}/review",
-        json={"decision": decision, "reviewer": "Ann", **body},
+        json={
+            "decision": decision,
+            "reviewer": "Ann",
+            "sha256": _sha(version),
+            **body,
+        },
         headers=PERSON,
     )
 
@@ -218,7 +227,7 @@ def test_review_is_a_persons_action(pool, client, monkeypatch):
     monkeypatch.setenv("LEVI_UI_TOKEN", TOKEN)
     monkeypatch.setenv("LEVI_AGENT_TOKEN", "test-scoped-token")
     url = f"/api/levi/pool/corrections/{VERSION}/review"
-    body = {"decision": "approved", "reviewer": "x", "all": True}
+    body = {"decision": "approved", "reviewer": "x", "all": True, "sha256": _sha()}
     agent = {"Authorization": "Bearer test-scoped-token"}
     assert client.post(url, json=body).status_code == 401
     assert client.post(url, json=body, headers=agent).status_code == 403
@@ -433,16 +442,33 @@ def test_cli_import_list_show_and_review_through_the_service(
     ]
     path = _proposals(pool["out"], rows)
     assert cli.main(["corrections", "import", str(path), "--version", VERSION]) == 0
-    assert cli.main(["corrections", "list"]) == 0
     capsys.readouterr()
+    assert cli.main(["corrections", "list"]) == 0
+    assert json.loads(capsys.readouterr().out)[0]["sha256"] == _sha()
     assert cli.main(["corrections", "show", VERSION, "--status", "proposed"]) == 0
-    assert json.loads(capsys.readouterr().out)["counts"] == {"proposed": 1}
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["counts"] == {"proposed": 1} and shown["sha256"] == _sha()
+    # The approval names the content: without --sha256 the CLI refuses.
+    with pytest.raises(SystemExit):
+        cli.main(["corrections", "approve", VERSION, "--all", "--reviewer", "Ann"])
     from levi.agent import core
 
     # No running service: the review is refused, nothing is recorded.
     monkeypatch.setattr(core, "status", lambda: None)
     assert (
-        cli.main(["corrections", "approve", VERSION, "--all", "--reviewer", "Ann"]) == 1
+        cli.main(
+            [
+                "corrections",
+                "approve",
+                VERSION,
+                "--all",
+                "--reviewer",
+                "Ann",
+                "--sha256",
+                _sha(),
+            ]
+        )
+        == 1
     )
     assert "not running" in capsys.readouterr().out
     assert corrections.show(VERSION)["counts"] == {"proposed": 1}
@@ -456,7 +482,19 @@ def test_cli_import_list_show_and_review_through_the_service(
     monkeypatch.setattr(core, "status", lambda: {"instance": "x"})
     monkeypatch.setattr(core, "request", request)
     assert (
-        cli.main(["corrections", "approve", VERSION, "--id", "a", "--reviewer", "Ann"])
+        cli.main(
+            [
+                "corrections",
+                "approve",
+                VERSION,
+                "--id",
+                "a",
+                "--reviewer",
+                "Ann",
+                "--sha256",
+                _sha(),
+            ]
+        )
         == 0
     )
     assert sent == [(f"/api/levi/pool/corrections/{VERSION}/review", True)]
@@ -489,3 +527,99 @@ def test_a_proposal_is_found_by_fingerprint_when_its_path_is_elsewhere(pool):
     )
     entry = corrections.show(VERSION)["entries"][0]
     assert entry["match"] == "ok" and entry["key"] == key
+
+
+# ------------------------------------------------------------------ binding
+
+
+def _rewrite_proposal(version, id_, **change):
+    path = corrections._paths(version)["proposals"]
+    rows = [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
+    for row in rows:
+        if row["id"] == id_:
+            row.update(change)
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+
+def test_a_decision_names_the_content_it_was_made_on(pool, person):
+    _import(pool)
+    wrong = _review(person, ids=["a"], sha256="0" * 64)
+    assert wrong.status_code == 400 and "sha256" in wrong.json()["detail"]
+    assert corrections.show(VERSION)["counts"] == {"proposed": 2}
+    assert _review(person, ids=["a"]).status_code == 200
+    line = json.loads(
+        corrections._paths(VERSION)["reviews"].read_text().splitlines()[-1]
+    )
+    assert line["sha256"] == _sha() and line["task_to"] == "unfold_cloth"
+
+
+def test_proposals_changed_after_import_are_not_applied(pool, person):
+    _import(pool)
+    _review(person, ids=["a"])
+    rec = Recipe(
+        name="r",
+        categories=["human"],
+        tasks=["fold cloth", "unfold cloth"],
+        task_corrections=[VERSION],
+    )
+    assert _tasks(rec) == {"fold cloth": 2, "unfold cloth": 3}
+    # Someone edits the approved proposal's text in the file.
+    _rewrite_proposal(VERSION, "a", task_to="wave")
+    with pytest.raises(ValueError, match="changed after its import"):
+        recipe.preview(rec)
+    with pytest.raises(ValueError, match="changed after its import"):
+        corrections.review(
+            VERSION,
+            corrections.Review(
+                decision="approved", reviewer="Ann", sha256=_sha(), ids=["b"]
+            ),
+            principal="local-human",
+        )
+    # Even with the manifest made to match, the old decision does not carry
+    # over to the new content: it was made on another sha256.
+    manifest_path = corrections._paths(VERSION)["manifest"]
+    value = json.loads(manifest_path.read_text())
+    value["sha256"] = corrections._sha256(corrections._paths(VERSION)["proposals"])
+    manifest_path.write_text(json.dumps(value))
+    assert corrections.show(VERSION)["counts"] == {"proposed": 2}
+    assert _tasks(rec) == {"fold cloth": 3, "unfold cloth": 2}
+
+
+def test_a_decision_on_another_task_to_is_ignored(pool, person):
+    _import(pool)
+    reviews = corrections._paths(VERSION)["reviews"]
+    reviews.write_text(
+        json.dumps(
+            {
+                "id": "a",
+                "decision": "approved",
+                "reviewer": "Ann",
+                "sha256": _sha(),
+                "task_to": "something else",
+                "at": "now",
+            }
+        )
+        + "\n"
+    )
+    assert corrections.show(VERSION)["counts"] == {"proposed": 2}
+
+
+def test_an_export_stops_when_the_proposals_change_after_planning(pool, person):
+    _import(pool)
+    _review(person, ids=["a"])
+    rec = Recipe(
+        name="r",
+        categories=["human"],
+        tasks=["unfold cloth"],
+        task_corrections=[VERSION],
+    )
+    job = jobs.plan_export(
+        rec,
+        export.ExportOptions(
+            format="raw_capture", name="edited", output_dir=str(pool["out"] / "exports")
+        ),
+    )
+    _rewrite_proposal(VERSION, "a", task_to="wave")
+    with pytest.raises(ValueError, match="changed after its import"):
+        export.run(job)
+    assert not (pool["out"] / "exports/edited").exists()

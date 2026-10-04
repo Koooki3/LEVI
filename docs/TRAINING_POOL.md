@@ -240,14 +240,16 @@ Some episodes record another task than their text says: in a paired collection (
 
 ```bash
 uv run levi pool corrections import proposals.jsonl --version cast-direction-v1   # proposals only
-uv run levi pool corrections list | show cast-direction-v1 [--status proposed] [--batch 1]
-uv run levi pool corrections approve cast-direction-v1 --batch 1 --except 0007 --reviewer "Ann"   # a person
-uv run levi pool corrections reject cast-direction-v1 --id 0007 --reviewer "Ann" --note "unclear"   # a person
+uv run levi pool corrections list | show cast-direction-v1 [--status proposed] [--batch 1]   # both print the sha256
+uv run levi pool corrections approve cast-direction-v1 --sha256 <sha256> --batch 1 --except 0007 --reviewer "Ann"   # a person
+uv run levi pool corrections reject cast-direction-v1 --sha256 <sha256> --id 0007 --reviewer "Ann" --note "unclear"   # a person
 uv run levi pool corrections copies                                                  # copies whose texts differ
 uv run levi pool recipe save towels --task "flatten the towel" --file recipe.json     # recipe.json: {"task_corrections": ["cast-direction-v1"]}
 ```
 
 A proposal file is JSONL (or a JSON list), one object per episode: `id` (default: its line number), `episode` (a path relative to a pool root, or absolute), optionally `fingerprint` (the pool's, used when the path matches nothing), `task_from`, `task_to`, `source`, `proposed_by` and the optional fields above. An import that carries a decision (`status` other than `proposed`, `reviewed_by`, `reviewed_at`) is refused, as is one that changes nothing. A version is written once: when any file of it exists (proposals, manifest or reviews) the import is refused; a change is a new version, so a decision always refers to the proposals the person saw.
+
+**A decision binds to content.** `show` and `list` print the version's `sha256` (of its proposals file, recorded by the import); `approve` and `reject` must name it (`--sha256`, `sha256` in the request), and a different value is refused. Each decision is stored with that sha256 and the proposal's `task_to`, and counts only while both still match: a decision made on other content is ignored. Before anything is applied (preview, plan, run) and before a decision is recorded, the proposals file is hashed again; when it no longer matches the manifest the version is refused as a whole (`changed after its import`): import the change as a new version.
 
 Matching: `show`, `list` and the preview resolve each proposal against the index: `ok`; `stale` (the episode's text is no longer `task_from`: the source changed or the proposal is wrong; not applied); `unmatched` (no such episode). The preview warns about approved corrections that are stale or unmatched (`task_corrections_not_applied`), and refuses (blocking `task_correction_conflict`) when two approved corrections of one recording in the named versions disagree.
 
@@ -257,6 +259,7 @@ The export: each corrected episode carries `task_original` and `task_correction`
 
 - **内容**：每个片段一条：订正后的文本（`task_to`）、当前文本（`task_from`，用来核对）、提议来源（`source`、`evidence`、`evidence_files`、`confidence`、`proposed_by`、`proposed_at`）、可选的 `review_batch`（审核批次），以及审核状态 `status`（`proposed` 待审、`approved` 批准、`rejected` 驳回）、`reviewed_by`、`reviewed_at`、`review_note`。
 - **存放**：`<工作区>/pool/task_corrections/<版本>.jsonl`（提议，只写一次）、`<版本>.json`（导入时间、来源文件、sha256）、`<版本>.reviews.jsonl`（审核决定，只追加，以最新一条为准）。同一版本只写一次：该版本的任何文件（提议、清单或审核记录）已存在时拒绝导入，要改就导入新版本。
+- **批准绑定内容**：`show`、`list` 打印该版本提议文件的 `sha256`（导入时记在清单里）；`approve`、`reject` 必须带上它（`--sha256`），对不上就拒绝。每条审核记录连同这个 sha256 和该条的 `task_to` 一起保存，只有两者都和当前内容一致时才算数。预览、计划、运行和记录审核之前都会重新计算提议文件的 sha256，和清单不一致时整个版本被拒绝，改动要作为新版本导入。
 - **谁能做**：任何人（包括 agent）都可以**提议**（`import`）；**批准和驳回只能由人做**。审核接口拒绝 agent 凭据，需要界面令牌；命令行的 `approve`、`reject` 以人的身份发给正在运行的服务。
 - **何时应用**：只有配方在 `task_corrections` 里点名了该版本，且订正已被批准；对这次录制的所有副本（同组）生效，在所有过滤之前应用；源文件永远不变。
 - **匹配**：`ok`；`stale`（片段的文本已不是 `task_from`，不应用）；`unmatched`（找不到该片段）。预览对已批准但无法应用的订正给出提示；同一录制在所选版本里有两条互相矛盾的已批准订正时拒绝导出。
@@ -462,7 +465,7 @@ All routes are behind the service's UI token and same-origin check.
 | GET | `/api/levi/pool/jobs/{id}/summary` | `pool_export.json` of a finished export job |
 | GET | `/api/levi/pool/corrections`, `/api/levi/pool/corrections/{version}?status=&batch=` | Task correction versions with counts; one version's proposals with status and index match |
 | GET | `/api/levi/pool/corrections/copies` | Copies whose task texts differ, for a person to decide |
-| POST | `/api/levi/pool/corrections/{version}/review` | A person's decision `{ "decision": "approved" \| "rejected", "reviewer": "…", "ids" \| "batch" \| "all", "exclude"?, "note"? }`; 403 for an agent credential, 401 without the UI token |
+| POST | `/api/levi/pool/corrections/{version}/review` | A person's decision `{ "decision": "approved" \| "rejected", "reviewer": "…", "sha256": "<the version's>", "ids" \| "batch" \| "all", "exclude"?, "note"? }`; 403 for an agent credential, 401 without the UI token |
 | GET | `/api/levi/pool/remotes` | Registered remote targets |
 | PUT / DELETE | `/api/levi/pool/remotes/{name}` | Register (`{"spec": "[user@]host:/path", "port"?}`) or forget a target; unknown fields such as `password` are refused |
 | POST | `/api/levi/pool/push` | `{ "target": "…", "export_job": "…" or "source": "<export dir>", "dry_run": false }`: rsync over SSH as a cancellable job |
