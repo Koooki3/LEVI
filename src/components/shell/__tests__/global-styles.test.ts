@@ -37,4 +37,23 @@ describe("global styles", () => {
     for (const file of [...TOKEN_ONLY, "app/levi.css"])
       expect(code(file)).not.toMatch(/d4f779|f1efdf|38bdf8|101510/i);
   });
+
+  test("no coloured fill with white text in one class list", () => {
+    // `white` is the primary text colour now: on an accent or status fill it
+    // would be the same colour as the fill. Use --ds-on-accent,
+    // --ds-on-danger or text-on-media instead.
+    const fill =
+      /\bbg-(cyan|lime|red|blue|green|emerald|amber|orange|yellow)-\d+\b/;
+    const hits: string[] = [];
+    for (const file of new Bun.Glob("**/*.tsx").scanSync(src)) {
+      if (file.includes("__tests__")) continue;
+      const text = readFileSync(join(src, file), "utf8");
+      // Each string literal or template segment is one class list.
+      for (const match of text.matchAll(/"[^"\n]*"|'[^'\n]*'|`[^`]*`/g))
+        for (const part of match[0].split("${"))
+          if (fill.test(part) && /(^|[\s"'`:])text-white\b/.test(part))
+            hits.push(`${file}: ${part.trim().slice(0, 80)}`);
+    }
+    expect(hits).toEqual([]);
+  });
 });
