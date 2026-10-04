@@ -267,9 +267,9 @@ The export: each corrected episode carries `task_original` and `task_correction`
 `levi pool corrections copies` (or `GET /api/levi/pool/corrections/copies`) lists what a person must decide; nothing here is resolved silently:
 
 - `group_text_differs`: copies of one recording whose task texts differ. The export keeps the canonical member (an original over a folder named like a copy) and its text, and the preview warns (`copy_task_conflict`) until an approved correction of that recording settles the text.
-- `copy_without_original`: a raw capture in a non-standard folder (`demo_0022 copy`) with no original in the pool, whose text is not its task folder's name. Which one is right is unknown; such folders stay out of exports unless a recipe sets `include_nonstandard`, and a correction can settle the text.
+- `nonstandard_text_differs`: a raw capture in a non-standard folder (`demo_0022 copy`, `demo_0038_failure`) with no original in the pool, whose text is not its task folder's name. Which one is right is unknown; such folders stay out of exports unless a recipe sets `include_nonstandard`, and a correction can settle the text.
 
-`levi pool corrections copies` 列出需要人决定的副本，不做静默选择：`group_text_differs`（同一录制的几个副本文本不同：导出保留规范成员即非 `copy` 目录及其文本，并在预览里提示，直到有经批准的订正）；`copy_without_original`（非标准目录名如 `demo_0022 copy`，池里没有原件，且文本与所在任务目录名不同：不知道哪个对；这类目录默认不导出，除非配方设置 `include_nonstandard`，也可以用订正定下文本）。
+`levi pool corrections copies` 列出需要人决定的副本，不做静默选择：`group_text_differs`（同一录制的几个副本文本不同：导出保留规范成员即非 `copy` 目录及其文本，并在预览里提示，直到有经批准的订正）；`nonstandard_text_differs`（非标准目录名如 `demo_0022 copy`、`demo_0038_failure`，池里没有原件，且文本与所在任务目录名不同：不知道哪个对；这类目录默认不导出，除非配方设置 `include_nonstandard`，也可以用订正定下文本）。
 
 ## Exports / 导出
 

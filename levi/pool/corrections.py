@@ -648,8 +648,8 @@ def copy_candidates(df: pd.DataFrame | None = None) -> list[dict]:
       texts differ. The export keeps the canonical member (a folder with a
       standard name before one named like a copy) and its text, and warns;
       a correction decides the text instead.
-    - ``copy_without_original``: a raw capture in a non-standard folder
-      (``demo_0022 copy``) with no standard copy in the pool, whose text is
+    - ``nonstandard_text_differs``: a raw capture in a non-standard folder
+      (``demo_0022 copy``, ``demo_0038_failure``) with no standard copy in the pool, whose text is
       not its task folder's name: which of the two is right is not known.
       Non-standard folders stay out of exports unless a recipe includes them.
     """
@@ -694,7 +694,7 @@ def copy_candidates(df: pd.DataFrame | None = None) -> list[dict]:
                 if folder_task != m["task"]:
                     out.append(
                         {
-                            "kind": "copy_without_original",
+                            "kind": "nonstandard_text_differs",
                             "group": group,
                             "key": m["key"],
                             "task_raw": m.get("task_raw"),

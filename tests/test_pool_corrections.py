@@ -366,7 +366,7 @@ def test_the_original_is_kept_over_a_copy_and_differing_texts_are_listed(pool):
     assert group["kept"].endswith("fold_cloth/demo_0002")
     assert group["kept_task"] == "fold cloth"
     assert {m["task_raw"] for m in group["members"]} == {"fold_cloth", "unfold_cloth"}
-    lone = found["copy_without_original"]
+    lone = found["nonstandard_text_differs"]
     assert lone["key"].endswith("unfold_cloth/demo_0009 copy")
     assert lone["task_raw"] == "fold_cloth" and lone["folder_task"] == "unfold cloth"
     # A recipe that picks the original is told, not silently given one text.
