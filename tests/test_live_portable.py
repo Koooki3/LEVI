@@ -314,6 +314,78 @@ def test_once_never_changes_the_workspace_start_resolves_to(
     assert cli.resolve_config(args).workspace == real.resolve()
 
 
+def _once_in_default_home(tmp_path, monkeypatch, target):
+    """A real (not ``--fake-vlm``) ``levi live once`` given no ``--home`` and
+    no ``LEVI_LIVE_HOME``: it writes the default home's status file. The
+    user's home is a temporary folder, so no real ``~/.levi-live`` is read."""
+    user = tmp_path / "user"
+    user.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(user))
+    monkeypatch.delenv("LEVI_LIVE_HOME", raising=False)
+    (tmp_path / "rollouts").mkdir(exist_ok=True)
+    code = cli.main(
+        [
+            "once",
+            "--workspace",
+            str(target),
+            "--root",
+            str(tmp_path / "rollouts"),
+            "--gpu-mode",
+            "manual",
+            "--max-seconds",
+            "5",
+        ]
+    )
+    assert code == 0
+    home = user / ".levi-live"
+    status = json.loads((home / "status.json").read_text())
+    assert Path(status["workspace"]).resolve() == target.resolve()
+    return home
+
+
+def test_the_product_page_follows_started_json_after_a_once_run(
+    tmp_path, monkeypatch, contained
+):
+    """``locate.find`` (the product LEVI's ``/live``) resolves the live
+    workspace the way ``levi live`` does: ``started.json`` first, so a
+    ``once`` run that rewrote the default home's status file does not move
+    the page to the once target."""
+    from levi.live import locate
+
+    real = _live_ws(tmp_path / "real")
+    _started(tmp_path / "user/.levi-live", real)
+    home = _once_in_default_home(tmp_path, monkeypatch, tmp_path / "trial")
+    assert locate.home() == home
+    product = tmp_path / "product"
+    product.mkdir()
+    found = locate.find(product)
+    assert found.workspace == real.resolve() and found.how == "status"
+    assert cli.remembered_workspace(home) == str(real.resolve())
+
+
+def test_a_status_file_alone_names_only_a_started_workspace_on_the_page(
+    tmp_path, monkeypatch
+):
+    """The product page's status-file fallback (no ``started.json``) has the
+    same rule as ``levi live``: only a workspace a ``start`` used."""
+    from levi.live import locate
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("LEVI_LIVE_HOME", str(home))
+    ws = _live_ws(tmp_path / "ws")
+    (home / "status.json").write_text(json.dumps({"workspace": str(ws)}))
+    product = tmp_path / "product"
+    product.mkdir()
+    assert locate.find(product).problem == "not_configured"
+    (ws / "live/logs").mkdir(parents=True)
+    (ws / "live/logs/live.log").write_text("")
+    assert locate.find(product).workspace == ws.resolve()
+    # The refusal of a product workspace comes first, as before.
+    monkeypatch.setattr(locate, "protected_workspaces", lambda: [ws.resolve()])
+    assert locate.find(product).problem == "product_workspace"
+
+
 def test_fake_vlm_without_a_home_uses_a_scratch_home(tmp_path, monkeypatch, contained):
     import tempfile
 

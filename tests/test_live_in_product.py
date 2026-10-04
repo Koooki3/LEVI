@@ -51,7 +51,12 @@ def product(tmp_path, monkeypatch):
     return ws, home
 
 
-def write_status(home: Path, workspace, **extra):
+def write_status(home: Path, workspace, *, started=True, **extra):
+    """The live home after ``levi live start`` on ``workspace``: its status
+    file and, unless ``started=False`` (a service from before the record, or
+    only a ``levi live once``), its ``started.json``."""
+    if started:
+        jsonio.write(Path(home) / locate.STARTED, {"workspace": str(workspace)})
     jsonio.write(
         Path(home) / "status.json",
         {

@@ -96,7 +96,7 @@ def add_config_options(parser):
     )
 
 
-STARTED = "started.json"  # in the home: the workspace `levi live start` ran on
+STARTED = locate.STARTED  # in the home: the workspace `levi live start` ran on
 
 
 def record_start(config) -> None:
@@ -109,11 +109,8 @@ def record_start(config) -> None:
 
 
 def started_here(workspace) -> bool:
-    """Has a ``levi live start`` run on this workspace? Its record, or the
-    service log only ``start`` writes (services started before the record
-    existed)."""
-    live = Path(workspace) / "live"
-    return (live / STARTED).is_file() or (live / "logs" / "live.log").is_file()
+    """Has a ``levi live start`` run on this workspace? (``locate.started_here``)"""
+    return locate.started_here(workspace)
 
 
 def _usable_live_workspace(named) -> str | None:
@@ -137,17 +134,13 @@ def remembered_workspace(home) -> str | None:
 
     A home whose service was started before ``started.json`` existed falls
     back to the status file, but only for a workspace that a ``start`` has
-    used (``started_here``)."""
-    home = Path(home).expanduser()
-    record = jsonio.read(home / STARTED)
-    if isinstance(record, dict):
-        return _usable_live_workspace(record.get("workspace"))
-    status = jsonio.read(home / "status.json")
-    named = status.get("workspace") if isinstance(status, dict) else None
+    used (``started_here``). The product LEVI's ``/live`` page reads the same
+    records the same way (``locate.find``)."""
+    named, legacy = locate.remembered(home)
     found = _usable_live_workspace(named)
-    if found and started_here(found):
-        return found
-    return None
+    if found and legacy and not started_here(found):
+        return None
+    return found
 
 
 def started_workspaces(home) -> list:

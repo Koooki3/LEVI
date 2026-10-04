@@ -236,10 +236,10 @@ anchored_spec = "generic-release.v2.json"
 **产品 LEVI 怎样找到实时工作区**（`levi/live/locate.py`，每次请求都重新判断，不缓存）：
 
 1. 自己的工作区，如果它就是实时工作区（实时服务自己的核心，或加 `--ui` 时它的页面）；
-2. 否则用 `LEVI_LIVE_WORKSPACE`（如果产品 LEVI 的环境里设置了；**推荐的部署方式**：在产品检出的 `.env` 里写 `LEVI_LIVE_WORKSPACE=<实时工作区的绝对路径>`，这样不管状态文件写的是什么，页面都显示这个工作区）；
-3. 否则作为兜底，用实时服务状态文件 `<LEVI_LIVE_HOME 或 ~/.levi-live>/status.json` 里的 `workspace` 字段（由 `levi live start` 写，服务停止后仍保留）。
+2. 否则用 `LEVI_LIVE_WORKSPACE`（如果产品 LEVI 的环境里设置了；**推荐的部署方式**：在产品检出的 `.env` 里写 `LEVI_LIVE_WORKSPACE=<实时工作区的绝对路径>`，这样不管实时 home 里记的是什么，页面都显示这个工作区）；
+3. 否则作为兜底，用同一个实时 home 最近一次 `levi live start` 运行的工作区，记在 `<LEVI_LIVE_HOME 或 ~/.levi-live>/started.json`（与 `levi live` 命令在没给工作区时跟随的是同一条记录；服务停止后仍保留）。没有这条记录的 home（记录出现之前启动的服务）退回用状态文件 `status.json` 里的 `workspace` 字段，但要求该工作区有只有 `start` 才写的服务日志：`levi live once` 也写状态文件，它的目标不会被当成实时工作区显示。
 
-候选目录必须是绝对路径（相对路径一律算 `not_live`），实时标记（`live/workspace.json`）所在的 `live/` 目录必须真的在它里面（不能是指向别处的链接），并且它既不能是、也不能位于或包含产品 LEVI 自己的工作区或本仓库任何检出（每个 git worktree 和主检出）的 `.state`。否则 `/api/levi/live/*` 回答 `{"enabled": false, "reason": "not_configured" | "not_live" | "product_workspace"}`，导航不显示入口，`/live` 说明缺什么。回答里没有路径、令牌或密钥。服务不必在运行：已停止的服务留下的状态文件仍然指向工作区，页面显示它未运行。页面只用目录名指称实时工作区（`workspace_name`）；它转发的状态里去掉了状态文件中的 `workspace` 和 `config` 路径。
+候选目录必须是绝对路径（相对路径一律算 `not_live`），实时标记（`live/workspace.json`）所在的 `live/` 目录必须真的在它里面（不能是指向别处的链接），并且它既不能是、也不能位于或包含产品 LEVI 自己的工作区或本仓库任何检出（每个 git worktree 和主检出）的 `.state`。否则 `/api/levi/live/*` 回答 `{"enabled": false, "reason": "not_configured" | "not_live" | "product_workspace"}`，导航不显示入口，`/live` 说明缺什么。回答里没有路径、令牌或密钥。服务不必在运行：已停止的服务留下的 `started.json` 仍然指向工作区，页面显示它未运行。页面只用目录名指称实时工作区（`workspace_name`）；它转发的状态里去掉了状态文件中的 `workspace` 和 `config` 路径。
 
 **产品 LEVI 读什么。** 所有只读路由（状态、会话、数据集、某个数据集的片段、审计、统计和下载、状态里的 GPU 与闸门）都由产品核心从实时工作区的文件回答：`<home>/status.json`、`live/effective.toml`、`live/datasets/*.json`、`live/audit.jsonl`、`live/stats.jsonl`、机器人侧的会话和 FR3 文件，以及实时工作区自己的目录（用于数据集的 `repo_id`；不用产品的目录，产品里可能有同名的另一个数据集）。这些都不写进产品工作区。
 

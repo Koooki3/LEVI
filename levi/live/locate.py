@@ -12,8 +12,13 @@ by reading the live workspace's files (``levi/live/api.py``).
    live service's own core;
 2. else ``LEVI_LIVE_WORKSPACE`` when set (the same variable ``levi live``
    reads for its workspace);
-3. else the ``workspace`` the live service last wrote into its status file,
-   ``<LEVI_LIVE_HOME or ~/.levi-live>/status.json``.
+3. else the workspace the last ``levi live start`` with the live home ran on,
+   ``<LEVI_LIVE_HOME or ~/.levi-live>/started.json`` (``remembered``, the same
+   answer ``levi live`` commands use when given no workspace). A home without
+   that record (a service started before it existed) falls back to the
+   ``workspace`` in its status file, ``status.json``, but only for a workspace
+   a ``start`` has used (``started_here``): ``levi live once`` also writes the
+   status file, and its target is never the live service's workspace.
 
 A candidate is used only when it is an absolute path, carries the live
 marker in a ``live/`` folder that really lies inside it (not a link to
@@ -36,13 +41,14 @@ from . import config as live_config
 
 ENV_WORKSPACE = "LEVI_LIVE_WORKSPACE"
 ENV_HOME = "LEVI_LIVE_HOME"
+STARTED = "started.json"  # in the home and in live/: the workspace `start` ran on
 
 
 @dataclass(frozen=True)
 class Found:
     workspace: Path | None
     # own: this LEVI is the live workspace; env / status: another one, named
-    # by LEVI_LIVE_WORKSPACE or by the live service's status file.
+    # by LEVI_LIVE_WORKSPACE or by the live home's records (``remembered``).
     how: str
     problem: str | None = None
 
@@ -62,6 +68,29 @@ def is_live(workspace) -> bool:
         return (Path(workspace) / "live" / auto.MARKER).is_file()
     except OSError:
         return False
+
+
+def started_here(workspace) -> bool:
+    """Has a ``levi live start`` run on this workspace? Its record, or the
+    service log only ``start`` writes (services started before the record
+    existed)."""
+    live = Path(workspace) / "live"
+    return (live / STARTED).is_file() or (live / "logs" / "live.log").is_file()
+
+
+def remembered(home_dir) -> tuple:
+    """What the live home names as the service's workspace: ``(named,
+    legacy)``. ``named`` is the ``workspace`` of ``<home>/started.json`` when
+    that record exists, else the one in ``<home>/status.json`` (or None);
+    ``legacy`` is true for the status-file fallback, which counts only for a
+    workspace a ``start`` used (``started_here``, checked by the caller once
+    the path is known to be safe)."""
+    home_dir = Path(home_dir).expanduser()
+    record = jsonio.read(home_dir / STARTED)
+    if isinstance(record, dict):
+        return record.get("workspace"), False
+    status = jsonio.read(home_dir / "status.json")
+    return (status.get("workspace") if isinstance(status, dict) else None), True
 
 
 def _resolve(path) -> Path | None:
@@ -166,11 +195,11 @@ def find(own) -> Found:
     if is_live(own):
         return Found(own, "own")
     explicit = (os.environ.get(ENV_WORKSPACE) or "").strip()
+    legacy = False
     if explicit:
         how, named = "env", explicit
     else:
-        status = jsonio.read(home() / "status.json")
-        named = status.get("workspace") if isinstance(status, dict) else None
+        named, legacy = remembered(home())
         how = "status"
         if not isinstance(named, str) or not named.strip():
             return Found(None, how, "not_configured")
@@ -187,4 +216,7 @@ def find(own) -> Found:
         or not confined(candidate / "live", candidate)
     ):
         return Found(None, how, "not_live")
+    if legacy and not started_here(candidate):
+        # Only a `levi live once` ran there: not the live service's workspace.
+        return Found(None, how, "not_configured")
     return Found(candidate, how)

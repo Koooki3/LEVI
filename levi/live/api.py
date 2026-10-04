@@ -5,7 +5,7 @@ none returns a token or a path outside the live workspace's own state.
 
 Which live workspace: the one this LEVI runs on when it is a live workspace
 (the live service's own core), else the one ``locate.py`` finds
-(``LEVI_LIVE_WORKSPACE``, or the live service's status file). That is how the
+(``LEVI_LIVE_WORKSPACE``, or the live home's ``started.json``). That is how the
 product LEVI shows the live page without sharing a workspace with the service:
 it reads the live workspace's files, and nothing of the live service (the
 approver, its runs, the mirror) enters the product workspace. With no live
@@ -91,7 +91,7 @@ _REASON: contextvars.ContextVar[str] = contextvars.ContextVar(
 def _workspace() -> Path | None:
     """The live workspace this page shows: this LEVI's own when it is the live
     one, else the one ``locate.find`` names (``LEVI_LIVE_WORKSPACE``, or the
-    live service's status file), else None. One that another LEVI shows is
+    live home's ``started.json``), else None. One that another LEVI shows is
     remembered by that LEVI's training pool (``pool/exclusions.py``), so a
     removal made there keeps counting after the page finds another one."""
     found = locate.find(_own())
