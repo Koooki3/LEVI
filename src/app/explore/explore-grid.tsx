@@ -6,6 +6,14 @@ import React, { useEffect, useRef } from "react";
 import Link from "next/link";
 import { postParentMessageWithParams } from "@/utils/postParentMessage";
 import HfAuthButton from "@/components/hf-auth-button";
+import {
+  ArrowUpRight,
+  ChevronLeft,
+  ChevronRight,
+  Database,
+} from "lucide-react";
+import { EmptyState, Icon } from "@/components/ds";
+import { Problem } from "@/components/pages-ui/feedback";
 
 type ExploreGridProps = {
   datasets: Array<{ id: string; videoUrl: string | null }>;
@@ -33,35 +41,46 @@ export default function ExploreGrid({
   return (
     <T>
       {
-        <main className="px-8 py-10 max-w-7xl mx-auto">
-          <div className="flex items-center justify-between mb-6 gap-4">
-            <h1 className="text-xl font-medium tracking-tight text-slate-100">
+        <main className="ds-root pg-workbench">
+          <div className="pg-head">
+            <h1>
               <T>Explore LeRobot datasets</T>
             </h1>
-            <div className="flex items-center gap-5">
+            <div className="pg-head-actions">
               <Link
-                className="text-xs text-cyan-300"
+                className="ds-btn ds-btn--ghost ds-focus"
                 href="/explore?catalog=all"
               >
-                <T>Live Hub catalog</T> ↗
+                <T>Live Hub catalog</T>
+                <Icon icon={ArrowUpRight} />
               </Link>
               <HfAuthButton />
             </div>
           </div>
           {error && (
-            <div
-              className="mb-4 p-4 rounded-md border border-red-400/30 text-red-300"
-              role="alert"
-            >
-              <T>{error}</T>
-            </div>
+            <Problem
+              title={<T>{error}</T>}
+              why={<T>The Hugging Face dataset list did not answer.</T>}
+              fix={
+                <button
+                  type="button"
+                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                  onClick={() => window.location.reload()}
+                >
+                  <T>Try again</T>
+                </button>
+              }
+            />
           )}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          {!error && datasets.length === 0 && (
+            <EmptyState icon={Database} title={<T>No datasets to show.</T>} />
+          )}
+          <div className="pg-explore-grid">
             {datasets.map((ds, idx) => (
               <Link
                 key={ds.id}
                 href={`/${ds.id}`}
-                className="relative rounded-md overflow-hidden h-48 flex items-end group panel hover:border-cyan-400/40 transition-colors"
+                className="pg-explore-card ds-focus"
                 onMouseEnter={() => {
                   const vid = videoRefs.current[idx];
                   if (vid) void vid.play().catch(() => {});
@@ -74,57 +93,61 @@ export default function ExploreGrid({
                   }
                 }}
               >
-                <video
-                  ref={(el) => {
-                    videoRefs.current[idx] = el;
-                  }}
-                  src={ds.videoUrl || undefined}
-                  className="absolute top-0 left-0 w-full h-full object-cover object-center z-0"
-                  loop
-                  muted
-                  playsInline
-                  preload="metadata"
-                  onTimeUpdate={(e) => {
-                    const vid = e.currentTarget;
-                    if (vid.currentTime >= 15) {
-                      vid.pause();
-                      vid.currentTime = 0;
-                    }
-                  }}
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent z-10 pointer-events-none" />
-                <div className="relative z-20 w-full px-3 py-2 text-xs text-slate-200 truncate">
+                <div className="pg-explore-media">
+                  <video
+                    ref={(el) => {
+                      videoRefs.current[idx] = el;
+                    }}
+                    src={ds.videoUrl || undefined}
+                    loop
+                    muted
+                    playsInline
+                    preload="metadata"
+                    onTimeUpdate={(e) => {
+                      const vid = e.currentTarget;
+                      if (vid.currentTime >= 15) {
+                        vid.pause();
+                        vid.currentTime = 0;
+                      }
+                    }}
+                  />
+                </div>
+                <div className="pg-explore-name">
                   <T>{ds.id}</T>
                 </div>
               </Link>
             ))}
           </div>
-          <div className="flex justify-center mt-8 gap-3">
+          <nav className="pg-explore-pager">
             {currentPage > 1 && (
               <button
-                className="px-4 py-2 rounded-md panel text-sm text-slate-300 hover:text-slate-100 hover:bg-white/5 transition-colors"
+                type="button"
+                className="ds-btn ds-btn--secondary ds-focus"
                 onClick={() => {
                   const params = new URLSearchParams(window.location.search);
                   params.set("p", (currentPage - 1).toString());
                   window.location.search = params.toString();
                 }}
               >
-                <T>‹ Previous</T>
+                <Icon icon={ChevronLeft} />
+                <T>Previous page</T>
               </button>
             )}
             {currentPage < totalPages && (
               <button
-                className="px-4 py-2 rounded-md bg-cyan-400/10 border border-cyan-400/30 text-cyan-300 text-sm hover:bg-cyan-400/15 transition-colors"
+                type="button"
+                className="ds-btn ds-btn--secondary ds-focus"
                 onClick={() => {
                   const params = new URLSearchParams(window.location.search);
                   params.set("p", (currentPage + 1).toString());
                   window.location.search = params.toString();
                 }}
               >
-                <T>Next ›</T>
+                <T>Next page</T>
+                <Icon icon={ChevronRight} />
               </button>
             )}
-          </div>
+          </nav>
         </main>
       }
     </T>
