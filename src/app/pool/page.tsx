@@ -149,7 +149,14 @@ function TrainingPool() {
   const [logFor, setLogFor] = useState<PoolJob | null>(null);
   // Bumped when jobs or files change, so the cleanup section reloads.
   const [cleanupKey, setCleanupKey] = useState(0);
-  const [error, setError] = useState("");
+  const [error, setErrorText] = useState("");
+  // A failed action (Scan now, Save) is announced when it appears; a failed
+  // read of the page's data is a standing error, shown with the page.
+  const [errorFromAction, setErrorFromAction] = useState(false);
+  const setError = useCallback((text: string, fromAction = false) => {
+    setErrorText(text);
+    setErrorFromAction(fromAction);
+  }, []);
   // Results of actions far from where they show (saved recipe, cleared
   // jobs, freed space) are toasts.
   const toast = useToast();
@@ -224,7 +231,7 @@ function TrainingPool() {
   useEffect(() => {
     refreshStatus().catch((e) => setError(String(e)));
     refreshRecipes().catch(() => {});
-  }, [refreshStatus, refreshRecipes]);
+  }, [refreshStatus, refreshRecipes, setError]);
   const anyRunning = !!status?.jobs.some((j) => RUNNING.has(j.status));
   useEffect(() => {
     const timer = setInterval(
@@ -269,6 +276,7 @@ function TrainingPool() {
     filters.showHeldout,
     filters.showCopies,
     filters.showArchive,
+    setError,
   ]);
   useEffect(() => setOffset(0), [filterKey, focus]);
   useEffect(() => {
@@ -362,7 +370,7 @@ function TrainingPool() {
     try {
       await fn();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? e.message : String(e), true);
     }
   }
   const scanJob = status?.jobs.find((j) => j.kind === "scan");
@@ -377,9 +385,11 @@ function TrainingPool() {
           {!scanned && (
             <span id="pool-export-why" className="pg-pool-muted pg-head-why">
               {t(
-                status
-                  ? "Scan the pool first to enable the export."
-                  : "Export is available once the pool has been read.",
+                !status
+                  ? "Export is available once the pool has been read."
+                  : status.enabled
+                    ? "Scan the pool first to enable the export."
+                    : "The training pool is not enabled, so there is nothing to export.",
               )}
             </span>
           )}
@@ -403,7 +413,7 @@ function TrainingPool() {
         <RequestProblem
           action="The training pool request failed"
           message={error}
-          live={false}
+          live={errorFromAction}
           onRetry={() => {
             setError("");
             refreshStatus().catch((e) => setError(String(e)));
