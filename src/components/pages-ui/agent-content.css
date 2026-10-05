@@ -159,6 +159,12 @@
   gap: var(--ds-space-1);
   overflow-wrap: anywhere;
 }
+.ag-list--rows li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--ds-space-1) var(--ds-space-2);
+}
 .ag-list--plain {
   padding-left: 0;
   list-style: none;

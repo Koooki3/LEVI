@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { Connection } from "./agent-connections";
 import { Download as DownloadIcon, X } from "lucide-react";
 import { T, useLocale } from "./levi-locale";
@@ -113,6 +113,12 @@ export default function OllamaModels({
     ["running", "queued"].includes(item.status),
   );
   const consentFirst = t("Tick the authorization above first.");
+  const memoryWhy = useId();
+  const memoryReason = !connection.enabled
+    ? t("Reconnect this model first.")
+    : !memoryConsent
+      ? consentFirst
+      : null;
   return (
     <T>
       <section
@@ -277,19 +283,14 @@ export default function OllamaModels({
               checked={memoryConsent}
               onChange={(e) => setMemoryConsent(e.target.checked)}
             />
+            {memoryReason && <Hint id={memoryWhy}>{memoryReason}</Hint>}
             <Actions>
               {(["load", "unload"] as const).map((operation) => (
-                <GatedButton
+                <Button
                   size="sm"
                   key={operation}
-                  disabled={busy}
-                  reason={
-                    !connection.enabled
-                      ? t("Reconnect this model first.")
-                      : !memoryConsent
-                        ? consentFirst
-                        : null
-                  }
+                  disabled={busy || !!memoryReason}
+                  aria-describedby={memoryReason ? memoryWhy : undefined}
                   onClick={() =>
                     void action(async () => {
                       await request(path + "/memory", {
@@ -306,7 +307,7 @@ export default function OllamaModels({
                       ? "Load bound model"
                       : "Unload bound model",
                   )}
-                </GatedButton>
+                </Button>
               ))}
             </Actions>
             {memoryDone && (

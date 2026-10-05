@@ -329,7 +329,7 @@ export default function AgentPilot({
         {manifest && (
           <div className="ag-stack">
             <p>{t(manifest.status)}</p>
-            <ul className="ag-list">
+            <ul className="ag-list ag-list--rows">
               {manifest.artifacts.map((a) => (
                 <li key={a.path}>
                   <code>{a.path}</code> · {a.bytes} B

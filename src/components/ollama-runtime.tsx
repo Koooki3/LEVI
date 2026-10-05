@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Server } from "lucide-react";
 import { T, useLocale } from "./levi-locale";
 import { Badge, Button, Card, Checkbox, Field, Input } from "@/components/ds";
@@ -71,7 +71,7 @@ export default function OllamaRuntime({
       setBusy(false);
     }
   }
-  const needsConsent = t("Tick the authorization above first.");
+  const consentWhy = useId();
   return (
     <T>
       <Card padding="compact" className="ag-conn">
@@ -155,18 +155,22 @@ export default function OllamaRuntime({
               checked={consent}
               onChange={(e) => setConsent(e.target.checked)}
             />
+            {!consent && (
+              <Hint id={consentWhy}>
+                {t("Tick the authorization above first.")}
+              </Hint>
+            )}
             <Actions>
               <GatedButton
                 size="sm"
-                disabled={busy}
+                disabled={busy || !consent}
+                aria-describedby={!consent ? consentWhy : undefined}
                 reason={
                   !status.installed
                     ? t("The Ollama executable was not found on this machine.")
                     : status.running
                       ? t("The service is already running.")
-                      : !consent
-                        ? needsConsent
-                        : null
+                      : null
                 }
                 onClick={() => void action("start")}
               >
@@ -174,13 +178,10 @@ export default function OllamaRuntime({
               </GatedButton>
               <GatedButton
                 size="sm"
-                disabled={busy}
+                disabled={busy || !consent}
+                aria-describedby={!consent ? consentWhy : undefined}
                 reason={
-                  !status.running
-                    ? t("The service is not running.")
-                    : !consent
-                      ? needsConsent
-                      : null
+                  !status.running ? t("The service is not running.") : null
                 }
                 onClick={() => void action("stop")}
               >
@@ -188,15 +189,14 @@ export default function OllamaRuntime({
               </GatedButton>
               <GatedButton
                 size="sm"
-                disabled={busy}
+                disabled={busy || !consent}
+                aria-describedby={!consent ? consentWhy : undefined}
                 reason={
                   !status.running
                     ? t("The service is not running.")
                     : connectionExists
                       ? t("The Qwen connection is already configured.")
-                      : !consent
-                        ? needsConsent
-                        : null
+                      : null
                 }
                 onClick={() => void action("use")}
               >

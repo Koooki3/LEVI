@@ -879,6 +879,7 @@ export default function AgentWorkbench() {
                     <div className="ag-field">
                       <span className="ag-label">{t("Tasks")}</span>
                       <ChipMultiSelect
+                        label={t("Tasks")}
                         options={facets.tasks.map((task) => ({
                           value: task,
                           label:
@@ -899,6 +900,7 @@ export default function AgentWorkbench() {
                   <div className="ag-field">
                     <span className="ag-label">{t("Episodes")}</span>
                     <ChipMultiSelect
+                      label={t("Episodes")}
                       options={facets.episodes.map((index) => ({
                         value: String(index),
                         label: String(index),
@@ -921,6 +923,7 @@ export default function AgentWorkbench() {
                   <div className="ag-field">
                     <span className="ag-label">{t("Cameras")}</span>
                     <ChipMultiSelect
+                      label={t("Cameras")}
                       options={facets.cameras.map((key) => ({
                         value: key,
                         label: key.replace(/^observation\.images\./, ""),

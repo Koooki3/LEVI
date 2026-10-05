@@ -96,9 +96,14 @@ export function GatedButton({
 }: ButtonProps & { reason?: ReactNode | null }) {
   const id = useId();
   if (!reason) return <Button disabled={disabled} {...rest} />;
+  const { "aria-describedby": more, ...props } = rest;
   return (
     <span className="ag-gated">
-      <Button disabled aria-describedby={id} {...rest} />
+      <Button
+        disabled
+        {...props}
+        aria-describedby={[id, more].filter(Boolean).join(" ")}
+      />
       <span id={id} className="ag-why">
         {reason}
       </span>

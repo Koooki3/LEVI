@@ -197,6 +197,7 @@ describe("ChipMultiSelect", () => {
     const onChange = mock((_next: string[]) => undefined);
     const { host } = await render(
       <ChipMultiSelect
+        label="Episodes"
         options={[
           { value: "0", label: "0" },
           { value: "1", label: "1" },
@@ -205,6 +206,9 @@ describe("ChipMultiSelect", () => {
         onChange={onChange}
       />,
     );
+    expect(
+      host.querySelector('[role="listbox"]')!.getAttribute("aria-label"),
+    ).toBe("Episodes");
     const chips = Array.from(host.querySelectorAll('[role="option"]'));
     expect(chips.length).toBe(2);
     expect(chips.every((c) => c.className.includes("ds-btn"))).toBe(true);

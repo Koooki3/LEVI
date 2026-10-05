@@ -19,7 +19,10 @@ export default function ChipMultiSelect({
   onChange,
   emptyHint,
   columns,
+  label,
 }: {
+  /** The name of the list for assistive technology ("Episodes"). */
+  label: string;
   options: ChipOption[];
   selected: string[];
   onChange: (next: string[]) => void;
@@ -72,6 +75,7 @@ export default function ChipMultiSelect({
       <div
         className={`ag-chips ${columns ? "is-columns" : ""}`}
         role="listbox"
+        aria-label={label}
         aria-multiselectable
         onPointerUp={() => {
           anchor.current = null;
