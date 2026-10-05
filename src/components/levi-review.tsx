@@ -3,15 +3,22 @@ import { useEffect, useState } from "react";
 import { useFlaggedEpisodes } from "@/context/flagged-episodes-context";
 import { useLocale } from "./levi-locale";
 import { Download, Pencil } from "lucide-react";
-import { Button, Dialog, Field, IconButton, Textarea } from "@/components/ds";
+import {
+  Button,
+  Dialog,
+  Field,
+  IconButton,
+  Textarea,
+  useToast,
+} from "@/components/ds";
 import { leviApi, downloadJson, exportName } from "./levi-api";
 export default function LeviReview({ repoId }: { repoId: string }) {
   const { flagged } = useFlaggedEpisodes();
   const [busy, setBusy] = useState(false),
-    [message, setMessage] = useState(""),
     [notes, setNotes] = useState(""),
     [editing, setEditing] = useState(false);
   const { t } = useLocale();
+  const toast = useToast();
   useEffect(() => {
     let current = true;
     leviApi<{ notes: string }>(`review?repo_id=${encodeURIComponent(repoId)}`)
@@ -39,10 +46,14 @@ export default function LeviReview({ repoId }: { repoId: string }) {
         },
         exportName(repoId, "review"),
       );
-      setMessage("Review saved");
+      toast.show({ title: t("Review saved"), tone: "success" });
       setEditing(false);
     } catch (e) {
-      setMessage(String(e));
+      toast.show({
+        title: t("The review was not saved"),
+        description: t(String(e).replace(/^(?:[A-Z]\w*)?Error:\s*/, "")),
+        tone: "danger",
+      });
     } finally {
       setBusy(false);
     }
@@ -59,11 +70,6 @@ export default function LeviReview({ repoId }: { repoId: string }) {
         tooltipPlacement="bottom"
         onClick={() => setEditing(true)}
       />
-      {message && (
-        <span role="status" className="vw-muted text-xs">
-          {t(message)}
-        </span>
-      )}
       <Dialog
         open={editing}
         onClose={() => setEditing(false)}

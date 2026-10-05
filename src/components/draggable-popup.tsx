@@ -164,11 +164,11 @@ export const DraggablePopup: React.FC<DraggablePopupProps> = ({
       <div
         className="quick-popup-head quick-popup-drag-handle"
         onPointerDown={beginDrag}
-        title={t("Drag to move")}
       >
         {header}
-        <span className="quick-popup-grip" aria-hidden="true">
+        <span className="quick-popup-grip">
           <Icon icon={GripVertical} />
+          <span className="ds-sr-only">{t("Drag to move")}</span>
         </span>
       </div>
       {children}
