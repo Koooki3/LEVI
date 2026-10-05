@@ -9,26 +9,123 @@ const src = join(import.meta.dir, "../..");
 const enKeys = Object.keys(en);
 const zhKeys = Object.keys(zh);
 
-/** Every `t("literal")` / `t('literal')` call outside the tests. */
-function literalKeys(): Array<{ key: string; where: string }> {
-  const found: Array<{ key: string; where: string }> = [];
+type Found = { key: string; where: string };
+type Template = { prefix: string; where: string };
+
+/** The strings an expression can evaluate to when they are written out:
+ * string literals, both arms of `a ? "x" : "y"`, `a ?? "x"`, `a || "x"`, a
+ * parenthesis, and a template without substitutions; a template with
+ * substitutions is returned as its static prefix. */
+function stringsOf(
+  node: ts.Expression,
+  out: { literals: string[]; templates: string[] },
+): void {
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
+    out.literals.push(node.text);
+  else if (ts.isTemplateExpression(node)) out.templates.push(node.head.text);
+  else if (ts.isParenthesizedExpression(node)) stringsOf(node.expression, out);
+  else if (ts.isConditionalExpression(node)) {
+    stringsOf(node.whenTrue, out);
+    stringsOf(node.whenFalse, out);
+  } else if (
+    ts.isBinaryExpression(node) &&
+    [ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken].includes(
+      node.operatorToken.kind,
+    )
+  ) {
+    stringsOf(node.left, out);
+    stringsOf(node.right, out);
+  }
+}
+
+const fold = (text: string) => text.replace(/\s+/g, " ").trim();
+
+/** What the code asks the catalogue for: every `t(…)` argument (literals,
+ * both arms of a conditional, template prefixes) and every expression inside a
+ * `<T>` ({cond ? "a" : "b"}). Files under __tests__ are skipped. */
+function catalogueUses(): { literals: Found[]; templates: Template[] } {
+  const literals: Found[] = [];
+  const templates: Template[] = [];
   for (const file of new Bun.Glob("**/*.{ts,tsx}").scanSync(src)) {
     if (file.includes("__tests__")) continue;
-    const text = readFileSync(join(src, file), "utf8");
-    for (const match of text.matchAll(
-      /(?<![\w.])t\(\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')\s*[,)]/g,
-    )) {
-      const raw = match[1] ?? match[2];
-      const key = raw
-        .replace(/\\(["'])/g, "$1")
-        .replace(/\s+/g, " ")
-        .trim();
-      const line = text.slice(0, match.index).split("\n").length;
-      found.push({ key, where: `${file}:${line}` });
-    }
+    const sf = ts.createSourceFile(
+      file,
+      readFileSync(join(src, file), "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+      file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    const take = (
+      expression: ts.Expression,
+      node: ts.Node,
+      withTemplates: boolean,
+    ) => {
+      const found = { literals: [] as string[], templates: [] as string[] };
+      stringsOf(expression, found);
+      const { line } = sf.getLineAndCharacterOfPosition(node.getStart());
+      const where = `${file}:${line + 1}`;
+      for (const text of found.literals)
+        literals.push({ key: fold(text), where });
+      // A template inside <T> is composite text the locale's patterns handle
+      // ("Speed 2: 3 ep"); only a t(`…`) key is checked.
+      if (withTemplates)
+        for (const prefix of found.templates) templates.push({ prefix, where });
+    };
+    const visit = (node: ts.Node, inT: boolean) => {
+      let within = inT;
+      if (
+        ts.isJsxElement(node) &&
+        node.openingElement.tagName.getText() === "T"
+      )
+        within = true;
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "t" &&
+        node.arguments.length >= 1
+      )
+        take(node.arguments[0], node, true);
+      // A child of an element inside <T> ({cond ? "a" : "b"}), not an
+      // attribute's value (className, tone): only children are translated.
+      if (
+        within &&
+        ts.isJsxExpression(node) &&
+        node.expression &&
+        (ts.isJsxElement(node.parent) || ts.isJsxFragment(node.parent))
+      )
+        take(node.expression, node, false);
+      ts.forEachChild(node, (child) => visit(child, within));
+    };
+    visit(sf, false);
   }
-  return found;
+  return { literals, templates };
 }
+
+/** The keys a template can produce, where the code builds them from a fixed
+ * set. Every dotted template prefix must be listed here, with all its members
+ * in the catalogue (a member missing shows its raw key to the reader). */
+const TEMPLATE_KEYS: Record<string, string[]> = {
+  "report.state.": ["running", "done", "blocked", "waiting", "planned"],
+  "report.milestone.": ["done", "current", "next"],
+  // The kinds of a workspace change (`SyncChange["kind"]`, workbench/page.tsx).
+  "syncNow.": [
+    "added",
+    "removed",
+    "updated",
+    "rebuilding",
+    "failed",
+    "skipped",
+  ],
+};
+/** Templates the locale's own patterns turn into the other language
+ * (`Episode 3` → `片段 3`, levi-locale.tsx). */
+const PATTERN_TEMPLATES = [
+  "Episode ",
+  "Positive advantage: ",
+  "All tasks (",
+  "State changes lag behind actions by ~",
+  "Actions lag behind state changes by ~",
+];
 
 describe("the language catalogues", () => {
   test("English and Chinese have exactly the same keys", () => {
@@ -41,19 +138,62 @@ describe("the language catalogues", () => {
       expect((zh as Record<string, string>)[key]).toBeTruthy();
   });
 
-  test("every t() call with a literal finds its key in both catalogues", () => {
-    const missing = literalKeys().filter(
-      ({ key }) => !(key in en) || !(key in zh),
+  test("every t() argument and <T> expression with written-out strings finds its key", () => {
+    const missing = catalogueUses().literals.filter(
+      ({ key }) => key && !(key in en && key in zh),
     );
-    expect(missing.map(({ key, where }) => `${where} ${key}`)).toEqual([]);
+    // A <T> expression can hold code that is not text (a number, a name): only
+    // strings with a letter and a space or capital are meant for people.
+    const meant = missing.filter(
+      ({ key }) => /[A-Za-z]{3}/.test(key) && !SAME_IN_BOTH.includes(key),
+    );
+    expect(meant.map(({ key, where }) => `${where} ${key}`)).toEqual([]);
   });
 
-  test("text inside <T> that names a control is in the catalogue", () => {
-    // Labels the review queue and the activity list render inside <T>.
-    for (const key of ["Start time", "End time", "Agent activity", "Std Dev"]) {
-      expect(key in en).toBe(true);
-      expect(key in zh).toBe(true);
+  test("keys built from a template exist for every member (and for each prefix)", () => {
+    const { templates } = catalogueUses();
+    const unknown = templates.filter(
+      ({ prefix }) =>
+        /^[A-Za-z]+(\.[A-Za-z]+)*\.$/.test(prefix) &&
+        !(prefix in TEMPLATE_KEYS),
+    );
+    expect(unknown.map(({ prefix, where }) => `${where} ${prefix}`)).toEqual(
+      [],
+    );
+    const notPatterns = templates.filter(
+      ({ prefix }) =>
+        !/^[A-Za-z]+(\.[A-Za-z]+)*\.$/.test(prefix) &&
+        !PATTERN_TEMPLATES.includes(prefix),
+    );
+    // Sentences with numbers in them go through the locale's patterns; a new
+    // one needs a pattern (levi-locale.tsx) and an entry in PATTERN_TEMPLATES.
+    expect(
+      notPatterns.map(({ prefix, where }) => `${where} ${prefix}`),
+    ).toEqual([]);
+    const missing: string[] = [];
+    for (const [prefix, members] of Object.entries(TEMPLATE_KEYS))
+      for (const member of members)
+        if (!(`${prefix}${member}` in en && `${prefix}${member}` in zh))
+          missing.push(`${prefix}${member}`);
+    expect(missing).toEqual([]);
+    for (const prefix of Object.keys(TEMPLATE_KEYS))
+      expect(templates.some((entry) => entry.prefix === prefix)).toBe(true);
+  });
+
+  test('example placeholders held in data (placeholder: "…") are in the catalogue', () => {
+    // The quick-add forms keep their placeholders in a table and pass each
+    // through t(): a missing key would leave an English example in Chinese.
+    const missing: string[] = [];
+    for (const file of new Bun.Glob("**/*.{ts,tsx}").scanSync(src)) {
+      if (file.includes("__tests__")) continue;
+      const text = readFileSync(join(src, file), "utf8");
+      for (const match of text.matchAll(/^\s+placeholder:\s*"([^"]+)"/gm)) {
+        const key = fold(match[1]);
+        if (!(key in en && key in zh) && !SAME_IN_BOTH.includes(key))
+          missing.push(`${file} ${key}`);
+      }
     }
+    expect(missing).toEqual([]);
   });
 
   test("every string a <T> translates has a key (JSX text, entities decoded)", () => {
@@ -169,6 +309,10 @@ function decodeEntities(text: string): string {
 
 /** Product names, paths and example values that read the same in both languages. */
 const SAME_IN_BOTH = [
+  "Ollama",
+  "1038lab/sam3",
+  "sam3.pt",
+  "workspace/checkpoints/sam3/sam3.pt",
   "Codex Pilot",
   "Claude Code Pilot",
   "Hugging Face",

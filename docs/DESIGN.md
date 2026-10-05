@@ -262,7 +262,7 @@ No infinite decorative animation, parallax, scroll hijacking, animation longer t
 | Colour | Tokens only, in CSS and TSX, checked on all of `src/` (one module, `viewer/data-palette.ts`, and the tests are exceptions); `levi.css` and the older variables and Tailwind remaps are deleted |
 | Icons | Lucide through `Icon`; remaining text arrows and check marks are in prose, keyboard hints and the 3D viewer's HUD |
 | Not-found and error pages | In the frame's look, bilingual (`error-pages.tsx`); the framework's defaults are gone |
-| Language | Every `t("…")` literal has a key in both catalogues (tested); the catalogues have the same keys |
+| Language | The catalogues have the same keys, and the code's written-out strings all have one (tested from the syntax tree): `t("…")` literals, both arms of `t(cond ? "a" : "b")`, JSX text and `{cond ? "a" : "b"}` children of `<T>` (entities decoded), quick-add placeholders; every dotted `t(`prefix.${x}`)` template has a listed member set with all its keys; sentences with numbers go through the locale patterns. Names and example values that read the same in both languages are listed in the test |
 
 Follow-ups: the native `<select>` elements listed above move to the ds `Select`; `messages.ts`, `analysis-ui.tsx` and `agent-ui.tsx` can be promoted into `ds`; the training pool's untranslated API errors get entries in `KNOWN`. Known gap kept on purpose: the native `title` on cut-off table cells (see the `title=` rule). Two runs of the same model and task folder are separate session cards (`sessionKeys` keys them by run id).
 

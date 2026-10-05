@@ -851,7 +851,7 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                 <input
                   key={f.name}
                   type={f.type === "number" ? "number" : "text"}
-                  placeholder={f.placeholder}
+                  placeholder={t(f.placeholder)}
                   className={f.grow ? "grow" : undefined}
                   style={f.width ? { width: f.width } : undefined}
                   value={qaValues[f.name] ?? ""}
@@ -1279,7 +1279,7 @@ export const AtomEditor: React.FC<{
                 <input
                   type="text"
                   inputMode="decimal"
-                  placeholder="point in time"
+                  placeholder={t("point in time")}
                   value={toDraft}
                   onChange={(e) => setToDraft(e.target.value)}
                   onBlur={() => commitTo()}
@@ -1325,7 +1325,7 @@ export const AtomEditor: React.FC<{
                       : atom.style === "plan"
                         ? "Plan"
                         : atom.style === "memory"
-                          ? "Memory"
+                          ? "Robot memory"
                           : "Interjection"}
                 </T>
               </label>
