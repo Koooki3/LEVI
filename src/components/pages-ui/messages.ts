@@ -158,7 +158,7 @@ const KNOWN: Known[] = [
     render: (match, t, language) =>
       fill(t("The SAM3 teacher is not ready: {1}"), [
         match[0],
-        describeMessage(match[1], t, language).text,
+        serverSentence(match[1], t, language),
       ]),
   },
   {

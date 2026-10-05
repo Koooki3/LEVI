@@ -29,7 +29,7 @@ import {
   Tooltip,
 } from "@/components/ds";
 import { EmptyLine, RequestProblem } from "@/components/pages-ui/feedback";
-import { useServerText } from "@/components/pages-ui/messages";
+import { useColon, useServerText } from "@/components/pages-ui/messages";
 import type { CatalogEntry } from "@/types/dataset-format.types";
 type Local = CatalogEntry;
 type SyncChange = {
@@ -86,6 +86,7 @@ export default function Workbench() {
   const [busy, setBusy] = useState(false);
   const { t } = useLocale();
   const serverText = useServerText();
+  const colon = useColon();
   const confirm = useConfirmAction();
   const [sync, setSync] = useState<SyncStatus | null>(null);
   const refresh = useCallback(async () => {
@@ -216,7 +217,9 @@ export default function Workbench() {
           </Button>
         </form>
         <p className="pg-mt-3 pg-small">
-          <T>Workspace</T>: <code>{catalog?.workspace || "…"}</code>
+          <T>Workspace</T>
+          {colon}
+          <code>{catalog?.workspace || "…"}</code>
         </p>
         <div className="pg-sync-bar">
           <Badge
@@ -293,7 +296,7 @@ export default function Workbench() {
                     {new Date(c.time * 1000).toLocaleTimeString()}
                   </span>{" "}
                   <strong>{t(`sync.${c.kind}`)}</strong> {c.name}
-                  {c.detail ? ` — ${t(c.detail)}` : ""}
+                  {c.detail ? ` — ${serverText(c.detail)}` : ""}
                 </li>
               ))}
             </ul>

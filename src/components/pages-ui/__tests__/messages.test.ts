@@ -86,6 +86,16 @@ describe("known service sentences", () => {
     expect(described.details).toBeUndefined();
     expect(described.text).not.toMatch(/\b(outside|inside|worker|workspace)\b/);
   });
+  test("an unknown reason inside the SAM3 teacher sentence keeps its own words", () => {
+    const described = describeMessage(
+      "The SAM3 teacher is not ready: CUDA out of memory at /x/y",
+      tzh,
+      "zh",
+    );
+    expect(described.text).toMatch(/SAM3 教师模型未就绪/);
+    expect(described.text).toContain("CUDA out of memory at /x/y");
+    expect(described.text).not.toMatch(/技术细节/);
+  });
   test("a known sentence says what to do about it", () => {
     const outside = describeMessage(
       "Export directory /x/e is outside LEVI_EXPORT_ROOTS (/x)",

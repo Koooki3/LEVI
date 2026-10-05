@@ -1426,7 +1426,6 @@ const CameraField: React.FC<{
           </label>
           <select
             id={`${uid}-camera`}
-            aria-label="Camera"
             value={value}
             onChange={(e) =>
               onChange({
