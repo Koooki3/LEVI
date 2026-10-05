@@ -365,7 +365,12 @@ export default function OllamaModels({
           </Disclosure>
         )}
         {downloads.map((job) => (
-          <div key={job.id} className="ag-download" aria-label={job.id}>
+          <div
+            key={job.id}
+            className="ag-download"
+            role="group"
+            aria-label={job.id}
+          >
             <p>
               {job.model} · {t(job.status)}{" "}
               {job.cancel_requested ? t("Cancellation requested") : ""}

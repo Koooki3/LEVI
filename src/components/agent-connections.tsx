@@ -125,8 +125,8 @@ export default function AgentConnections({
   async function remove(name: string) {
     // The configuration goes, the task history stays: ask before it goes.
     const yes = await confirm({
-      title: `${t("Remove this configuration?")} ${name}`,
-      description: t("Existing task history will be preserved."),
+      title: t("Remove this configuration?"),
+      description: `${name} · ${t("Existing task history will be preserved.")}`,
       confirmLabel: t("Remove configuration"),
       tone: "danger",
     });
