@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Square, Trash2, Zap } from "lucide-react";
 import { Button, Icon, IconButton } from "@/components/ds";
 import { T, useLocale } from "@/components/levi-locale";
+import { useServerText } from "@/components/pages-ui/messages";
 import { useConfirmAction } from "@/components/shell/confirm";
 import {
   cancelSam3Job,
@@ -189,6 +190,7 @@ function JobProgress({
   onCancel: () => void;
 }) {
   const { t } = useLocale();
+  const serverText = useServerText();
   const active = ACTIVE.has(job.status);
   const total = job.total ?? 0;
   const done = job.done ?? 0;
@@ -238,7 +240,9 @@ function JobProgress({
               {job.seconds != null && <span>{num(job.seconds, 0)} s</span>}
             </p>
           )}
-          {job.error && <p className="fast-seg-error">{job.error}</p>}
+          {job.error && (
+            <p className="fast-seg-error">{serverText(job.error)}</p>
+          )}
           {job.errorDetail && (
             <details className="object-annotation-error-detail">
               <summary>
@@ -343,7 +347,10 @@ export default function FastSegmentationPanel({
   cameraKeys,
   allEpisodes,
 }: Props) {
-  const { t } = useLocale();
+  const { t, language } = useLocale();
+  const serverText = useServerText();
+  // The full-width colon in Chinese, the spaced one in English.
+  const colon = language === "zh" ? "：" : ": ";
   const confirm = useConfirmAction();
   const stableIdent = useMemo<DatasetIdent>(
     () => ({
@@ -859,32 +866,34 @@ export default function FastSegmentationPanel({
           <div className="object-annotation-runtime fast-seg-status">
             <span className={workerReady ? "ready" : "muted"}>
               <T>Student worker</T>
-              {": "}
+              {colon}
               {workerReady ? <T>ready</T> : <T>not ready</T>}
             </span>
             <span className={teacherReady ? "ready" : "muted"}>
               <T>Teacher model</T>
-              {": "}
+              {colon}
               {teacherReady ? <T>ready</T> : <T>not ready</T>}
             </span>
             <span className={status?.gpu_lock ? "ready" : "muted"}>
               <T>GPU lock</T>
-              {": "}
+              {colon}
               {status?.gpu_lock ? <T>configured</T> : <T>not configured</T>}
             </span>
           </div>
           {status && !workerReady && status.worker.reason && (
             <p className="fast-seg-hint">
-              {status.worker.reason}
+              {serverText(status.worker.reason)}
               {" · "}
               <T>Install it with</T>{" "}
               <code>integrations/segmentation/setup.sh</code>
             </p>
           )}
           {status && !teacherReady && status.teacher.reason && (
-            <p className="fast-seg-hint">{status.teacher.reason}</p>
+            <p className="fast-seg-hint">{serverText(status.teacher.reason)}</p>
           )}
-          {statusError && <p className="fast-seg-error">{statusError}</p>}
+          {statusError && (
+            <p className="fast-seg-error">{serverText(statusError)}</p>
+          )}
 
           {/* b. Model */}
           <div className="object-annotation-controls">
@@ -971,7 +980,9 @@ export default function FastSegmentationPanel({
                 <T>Save results when stopping</T>
               </label>
             </div>
-            {liveError && <p className="fast-seg-error">{liveError}</p>}
+            {liveError && (
+              <p className="fast-seg-error">{serverText(liveError)}</p>
+            )}
             {liveNote && (
               <p className="object-annotation-runtime">
                 <span className="ready">{liveNote}</span>
@@ -1125,7 +1136,9 @@ export default function FastSegmentationPanel({
                 </small>
               )}
             </div>
-            {labelError && <p className="fast-seg-error">{labelError}</p>}
+            {labelError && (
+              <p className="fast-seg-error">{serverText(labelError)}</p>
+            )}
             {labelJob && (
               <JobProgress job={labelJob} onCancel={() => void cancelLabel()} />
             )}
@@ -1259,7 +1272,9 @@ export default function FastSegmentationPanel({
                 </small>
               )}
             </div>
-            {distilError && <p className="fast-seg-error">{distilError}</p>}
+            {distilError && (
+              <p className="fast-seg-error">{serverText(distilError)}</p>
+            )}
             {distilJob && (
               <JobProgress
                 job={distilJob}

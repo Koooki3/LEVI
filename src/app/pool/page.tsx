@@ -1,5 +1,6 @@
 "use client";
 import "@/components/pages-ui/pages.css";
+import { useColon } from "@/components/pages-ui/messages";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useLocale } from "@/components/levi-locale";
@@ -124,6 +125,7 @@ export default function TrainingPoolPage() {
 
 function TrainingPool() {
   const { t } = useLocale();
+  const colon = useColon();
   const [status, setStatus] = useState<PoolStatus | null>(null);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [facets, setFacets] = useState<Facets | null>(null);
@@ -443,12 +445,13 @@ function TrainingPool() {
               </ul>
             )}
             <p className="pg-pool-hint">
-              {t("Last scan")}:{" "}
+              {t("Last scan")}
+              {colon}
               {summary ? when(summary.scanned_at) : status ? t("never") : "—"}
               {summary &&
                 ` · ${summary.episodes.toLocaleString()} ${t("episodes")} · ${summary.sources.toLocaleString()} ${t("sources")} · ${summary.tasks.toLocaleString()} ${t("Tasks").toLowerCase()}`}
               {status?.heldout_lists.length
-                ? ` · ${t("Held-out lists")}: ${status.heldout_lists.length}`
+                ? ` · ${t("Held-out lists")}${colon}${status.heldout_lists.length}`
                 : ""}
             </p>
           </div>
@@ -714,7 +717,7 @@ function TrainingPool() {
           onNotice={setNotice}
         />
       )}
-      <p className="pg-pool-hint">
+      <p className="pg-pool-hint pg-pool-footer">
         <Link href="/workbench" className="pg-back-link">
           <Icon icon={ArrowLeft} />
           {t("Conversion & review")}

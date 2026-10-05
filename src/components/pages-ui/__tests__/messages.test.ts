@@ -54,6 +54,24 @@ describe("known service sentences", () => {
     ["The worker exited with code 3 without a result", /退出码 3/],
     ["HTTP 500", /HTTP 500/],
     [
+      "worker environment not found at /x/.venv/bin/python; run integrations/segmentation/setup.sh",
+      /在 \/x\/\.venv\/bin\/python 没有找到学生模型运行环境/,
+    ],
+    ["worker source is missing from this checkout", /缺少学生模型工作进程/],
+    [
+      "SAM3 worker environment not found at /y/.venv/bin/python",
+      /在 \/y\/\.venv\/bin\/python 没有找到 SAM3 运行环境/,
+    ],
+    ["SAM3 checkpoint is not downloaded", /SAM3 模型检查点还没有下载/],
+    [
+      "The SAM3 teacher is not ready: SAM3 checkpoint is not downloaded",
+      /SAM3 教师模型未就绪：SAM3 模型检查点还没有下载/,
+    ],
+    [
+      "Not a LeRobot dataset (meta/info.json) or a recognized raw capture",
+      /不是 LeRobot 数据集.*不是可识别的原始采集/,
+    ],
+    [
       "2 approved task correction(s) disagree with another one for the same recording; reject one of them or apply fewer versions",
       /2 条已批准/,
     ],

@@ -66,7 +66,7 @@ function Freshness({
   failures: number;
   error: string;
 }) {
-  const { t } = useLocale();
+  const { t, language } = useLocale();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => {
@@ -87,7 +87,9 @@ function Freshness({
       {failures > 0 && (
         <span className="pg-live-bad">
           {" · "}
-          {t("last request failed")} ({error}), {t("retrying")}
+          {t("last request failed")}
+          {language === "zh" ? `（${error}），` : ` (${error}), `}
+          {t("retrying")}
         </span>
       )}
       {" · "}

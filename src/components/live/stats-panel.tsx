@@ -310,7 +310,7 @@ export function StatsPanel({
   evaluating: boolean;
   enabled: boolean;
 }) {
-  const { t } = useLocale();
+  const { t, language } = useLocale();
   const [scope, setScope] = useState<StatsScope>({
     dataset: "",
     session: "",
@@ -380,7 +380,8 @@ export function StatsPanel({
           {empty && filtered && <StatsEmpty filtered />}
           {error && (
             <p className="pg-live-bad">
-              {t("last request failed")} ({error})
+              {t("last request failed")}
+              {language === "zh" ? `（${error}）` : ` (${error})`}
             </p>
           )}
         </>

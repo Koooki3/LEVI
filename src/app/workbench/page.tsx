@@ -292,7 +292,7 @@ export default function Workbench() {
                   <span className="tabular">
                     {new Date(c.time * 1000).toLocaleTimeString()}
                   </span>{" "}
-                  <strong>{t(`syncNow.${c.kind}`)}</strong> {c.name}
+                  <strong>{t(`sync.${c.kind}`)}</strong> {c.name}
                   {c.detail ? ` — ${t(c.detail)}` : ""}
                 </li>
               ))}

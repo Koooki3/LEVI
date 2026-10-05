@@ -1,4 +1,5 @@
 "use client";
+import { useColon } from "@/components/pages-ui/messages";
 import { useServerText } from "@/components/pages-ui/messages";
 import { useState } from "react";
 import { useLocale } from "@/components/levi-locale";
@@ -97,6 +98,7 @@ export function ExportPanel({
 }) {
   const { t } = useLocale();
   const serverText = useServerText();
+  const colon = useColon();
   const [name, setName] = useState("");
   const [outputDir, setOutputDir] = useState("");
   const [cameras, setCameras] = useState(DEFAULT_CAMERAS);
@@ -219,7 +221,7 @@ export function ExportPanel({
           {dirProblem && (
             <small className="pg-pool-bad" role="alert">
               {dirProblem === "outside"
-                ? `${t("This folder is outside LEVI_EXPORT_ROOTS.")} ${t("Allowed")}: ${exportRoots.join(", ")}`
+                ? `${t("This folder is outside LEVI_EXPORT_ROOTS.")} ${t("Allowed")}${colon}${exportRoots.join(", ")}`
                 : t(dirProblem)}
             </small>
           )}
@@ -349,8 +351,9 @@ export function ExportPanel({
       {plan && (
         <Note tone="success" role="status" className="pg-pool-plan">
           <p>
-            <strong>{t("Dry run")}</strong>: {plan.planned_episodes}{" "}
-            {t("episodes")}
+            <strong>{t("Dry run")}</strong>
+            {colon}
+            {plan.planned_episodes} {t("episodes")}
             <Icon icon={ArrowRight} />
             <code>{plan.target}</code>
           </p>

@@ -255,3 +255,63 @@ describe("Conversion & review keeps what it knows honest", () => {
     expect(box.textContent).not.toContain("not valid JSON");
   });
 });
+
+describe("Recent workspace changes", () => {
+  const KINDS: [string, string, string][] = [
+    ["added", "Added", "新增"],
+    ["removed", "Removed", "移除"],
+    ["updated", "Updated", "更新"],
+    ["rebuilding", "Rebuilding view", "重建视图"],
+    ["failed", "Failed", "失败"],
+    ["skipped", "Skipped", "跳过"],
+  ];
+  const withChanges = () =>
+    serve((path) =>
+      path.includes("/convert/formats")
+        ? json(FORMATS)
+        : path.includes("/catalog")
+          ? json(CATALOG)
+          : path.includes("/sync")
+            ? json({
+                ...SYNC,
+                changes: KINDS.map(([kind], i) => ({
+                  time: 1_700_000_000 + i,
+                  kind,
+                  name: `ds-${kind}`,
+                  detail: "",
+                })),
+              })
+            : json([]),
+    );
+
+  test("each kind is a word, never the catalogue key", async () => {
+    withChanges();
+    const { host } = await render(<Workbench />);
+    await flush(80);
+    const items = [...host.querySelectorAll(".pg-sync-changes li")];
+    expect(items).toHaveLength(KINDS.length);
+    for (const [kind, english] of KINDS) {
+      const item = items.find((li) => li.textContent?.includes(`ds-${kind}`))!;
+      expect(item.querySelector("strong")!.textContent).toBe(english);
+    }
+    expect(host.textContent).not.toContain("sync.");
+    expect(host.textContent).not.toContain("syncNow.");
+  });
+
+  test("Chinese too", async () => {
+    localStorage.setItem("levi-language", "zh");
+    withChanges();
+    const { host } = await render(
+      <LocaleProvider>
+        <Workbench />
+      </LocaleProvider>,
+    );
+    await flush(120);
+    const items = [...host.querySelectorAll(".pg-sync-changes li")];
+    for (const [kind, , chinese] of KINDS) {
+      const item = items.find((li) => li.textContent?.includes(`ds-${kind}`))!;
+      expect(item.querySelector("strong")!.textContent).toBe(chinese);
+    }
+    expect(host.textContent).not.toContain("sync.");
+  });
+});
