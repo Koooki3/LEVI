@@ -427,7 +427,18 @@ const Sidebar: React.FC<SidebarProps> = ({
             </p>
           )}
 
-          <ul className="vw-episodes" ref={listRef} onKeyDown={onListKeyDown}>
+          <p id="vw-episodes-hint" className="ds-sr-only">
+            {t(
+              "The list is one tab stop. Left and right arrows move between an episode's controls; up and down arrows change episode.",
+            )}
+          </p>
+          <ul
+            className="vw-episodes"
+            ref={listRef}
+            onKeyDown={onListKeyDown}
+            aria-describedby="vw-episodes-hint"
+            aria-keyshortcuts="ArrowLeft ArrowRight"
+          >
             {displayEpisodes.map(row)}
           </ul>
 

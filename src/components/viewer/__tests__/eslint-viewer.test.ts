@@ -16,6 +16,7 @@ describe("ESLint: no hex colours in the episode viewer", () => {
     const code = 'export const a = "#ffffff";\n';
     expect(await hexHits(code, "src/components/viewer/probe.tsx")).toBe(1);
     expect(await hexHits(code, "src/components/side-nav.tsx")).toBe(1);
+    expect(await hexHits(code, "src/components/urdf-viewer.tsx")).toBe(1);
     expect(
       await hexHits(code, "src/app/[org]/[dataset]/[episode]/probe.tsx"),
     ).toBe(1);

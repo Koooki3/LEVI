@@ -1021,7 +1021,8 @@ function EpisodeViewerInner({
     {
       id: "annotations",
       // No tooltip inside the tab: the tab list scrolls sideways, so it would
-      // be clipped and show a scroll bar over the selected-tab line.
+      // be clipped and show a scroll bar over the selected-tab line. What the
+      // tab is for is written under the sub-tabs instead.
       label: t("Annotations"),
       icon: Tags,
     },
@@ -1271,6 +1272,11 @@ function EpisodeViewerInner({
 
                 {annotationsSubTab === "language" && (
                   <>
+                    <p className="vw-a-hint">
+                      {t(
+                        "Edit subtask / plan / memory / interjection / VQA atoms (lerobot v3.1 schema)",
+                      )}
+                    </p>
                     <div className="grounding-intro">
                       <h2 className="vw-label">
                         <T>Grounded VQA</T>

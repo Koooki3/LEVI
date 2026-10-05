@@ -2398,5 +2398,6 @@
   "Type a label to add it.": "请先输入标签再添加。",
   "Skip links": "跳转链接",
   "Skip to content": "跳到正文",
-  "Skip to inspector": "跳到检查器"
+  "Skip to inspector": "跳到检查器",
+  "The list is one tab stop. Left and right arrows move between an episode's controls; up and down arrows change episode.": "列表只占一个 Tab 停靠点。左右方向键在片段的各个控件之间移动，上下方向键切换片段。"
 }
