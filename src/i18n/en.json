@@ -2383,5 +2383,9 @@
   "LEVI hit an error while showing this page. Your data is untouched. Try again; if it keeps happening, go back to the home page and open the page again.": "LEVI hit an error while showing this page. Your data is untouched. Try again; if it keeps happening, go back to the home page and open the page again.",
   "Motion: follow the system": "Motion: follow the system",
   "Motion: reduced": "Motion: reduced",
-  "Motion: normal": "Motion: normal"
+  "Motion: normal": "Motion: normal",
+  "Copy command": "Copy command",
+  "Command copied": "Command copied",
+  "Could not copy the command": "Could not copy the command",
+  "Select it and copy it by hand.": "Select it and copy it by hand."
 }

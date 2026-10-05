@@ -31,6 +31,11 @@ import {
   Fr3Panel,
   SessionsPanel,
 } from "@/components/live/session-panels";
+import {
+  CommandText,
+  CopyCommandButton,
+  commandsIn,
+} from "@/components/live/command-text";
 import { disabledText } from "@/components/live/embedding";
 import { StatsPanel } from "@/components/live/stats-panel";
 import { LiveSummaryBar, liveSummary } from "@/components/live/live-summary";
@@ -179,7 +184,16 @@ export default function LivePage() {
           <EmptyState
             icon={Radio}
             title={t(disabledText(status.reason).title)}
-            description={t(disabledText(status.reason).body)}
+            description={
+              <CommandText text={t(disabledText(status.reason).body)} />
+            }
+            action={
+              commandsIn(disabledText(status.reason).body)[0] ? (
+                <CopyCommandButton
+                  command={commandsIn(disabledText(status.reason).body)[0]}
+                />
+              ) : undefined
+            }
           />
         </div>
       ) : (

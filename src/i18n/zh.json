@@ -2383,5 +2383,9 @@
   "LEVI hit an error while showing this page. Your data is untouched. Try again; if it keeps happening, go back to the home page and open the page again.": "LEVI 显示这个页面时出错了，你的数据没有受到影响。请重试；如果反复出现，回到首页再重新打开这个页面。",
   "Motion: follow the system": "动效：跟随系统",
   "Motion: reduced": "动效：减少",
-  "Motion: normal": "动效：正常"
+  "Motion: normal": "动效：正常",
+  "Copy command": "复制命令",
+  "Command copied": "命令已复制",
+  "Could not copy the command": "无法复制命令",
+  "Select it and copy it by hand.": "请选中后手动复制。"
 }

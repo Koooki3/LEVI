@@ -2,7 +2,7 @@
 // The "Statistics" section of the live page: key figures, the evaluation
 // sessions, one row per episode, and downloads. Read-only; the data is
 // `GET /api/levi/live/stats` (docs/LIVE.md, "Statistics and reports").
-import { Badge, SkeletonText } from "@/components/ds";
+import { Badge, Select, SkeletonText } from "@/components/ds";
 import { Problem } from "@/components/pages-ui/feedback";
 import { useEffect, useRef, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
@@ -216,7 +216,7 @@ export function StatsView({
       <div className="pg-live-scope">
         <label>
           {t("Dataset")}
-          <select
+          <Select
             value={scope.dataset}
             onChange={(e) =>
               onScope({
@@ -232,11 +232,11 @@ export function StatsView({
                 {d}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label>
           {t("Session")}
-          <select
+          <Select
             value={scope.session}
             onChange={(e) => onScope({ ...scope, session: e.target.value })}
           >
@@ -246,7 +246,7 @@ export function StatsView({
                 {s}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="pg-live-check">
           <input

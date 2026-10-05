@@ -1,10 +1,11 @@
 "use client";
-// The live evaluation entry of the navigation. It appears where a live
-// annotation service is shown: the product LEVI once it finds the live
-// workspace (levi/live/locate.py), or the live workspace's own page
-// (`levi live start --ui`). Without one it renders nothing (and costs a
-// status request a minute, see live-pulse-store). The home page has its own
-// live card (src/components/home).
+// The live evaluation entry of the navigation. Always offered: where a live
+// annotation service is shown (the product LEVI once it finds the live
+// workspace, levi/live/locate.py, or the live workspace's own page,
+// `levi live start --ui`) it carries the service's state and the count of
+// things that need a person; without one it is a plain link to the page that
+// says how to start one (the status request it costs, once a minute, is in
+// live-pulse-store). The home page has its own live card (src/components/home).
 import Link from "next/link";
 import { CircleDot } from "lucide-react";
 import { Icon, TONE_ICON, Tooltip, type Tone } from "@/components/ds";
@@ -64,8 +65,19 @@ export function LiveNavLink({ current = false }: { current?: boolean }) {
   const { t } = useLocale();
   const { enabled, pulse } = useLivePulse();
   const note = usePulseNote(pulse);
-  if (!enabled) return null;
   const label = t("Live evaluation");
+  // No live service (or not known yet): a plain entry like the others, so
+  // the page that explains how to start one can be found.
+  if (!enabled)
+    return (
+      <Link
+        href="/live"
+        className="levi-shell-link ds-focus"
+        aria-current={current ? "page" : undefined}
+      >
+        {label}
+      </Link>
+    );
   const count = pulse.count > 0 ? String(Math.min(pulse.count, 99)) : "";
   return (
     <Tooltip content={`${label}: ${note}`} describe={false} placement="bottom">

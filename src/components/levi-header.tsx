@@ -72,8 +72,10 @@ export default function LeviHeader() {
   const { enabled, embedded } = useLivePulse();
   const pool = offersTrainingPool(enabled, embedded);
   const pages = useMemo(
-    () => navPages({ live: Boolean(enabled), pool }),
-    [enabled, pool],
+    // The Live evaluation entry is always offered: with no live service it
+    // opens a page that says how to start one (LiveNavLink draws it plain).
+    () => navPages({ live: true, pool }),
+    [pool],
   );
   const agentOpen = useAgentOpen();
   // Rendered after mount so the server and the first client render agree.
