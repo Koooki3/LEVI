@@ -122,9 +122,10 @@ export function InspectorLayout({
       aside.parentElement?.style.removeProperty("--vw-inspector-h");
     };
   }, [enabled, open]);
-  // On a narrow window the inspector is a bottom drawer: Escape closes it
-  // first (capture phase, so the deselect handler that follows sees the key
-  // as used), and only then clears the selection.
+  // On a narrow window the inspector is a bottom drawer. Escape closes it
+  // after the layers that handle the key in React (a ds Menu, a popup: they
+  // stop it there) and before the window-level handler that clears the
+  // selected annotation: React root, then document (here), then window.
   useEffect(() => {
     if (!enabled || !narrow || !open) return;
     const onKey = (event: KeyboardEvent) => {
@@ -135,8 +136,8 @@ export function InspectorLayout({
       event.preventDefault();
       setOpen(false);
     };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
   }, [enabled, narrow, open]);
   const reveal = useCallback(() => {
     setOpen(true);

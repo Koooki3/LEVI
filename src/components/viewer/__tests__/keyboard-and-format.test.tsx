@@ -17,6 +17,7 @@ import {
 } from "@/context/annotations-context";
 import { FlaggedEpisodesProvider } from "@/context/flagged-episodes-context";
 import type { LanguageAtom } from "@/types/language.types";
+import { Menu } from "@/components/ds";
 import { InspectorLayout } from "../inspector";
 import { SkipLinks } from "../skip-links";
 import { isTextEntry } from "../text-entry";
@@ -232,6 +233,59 @@ describe("text fields keep their own keys", () => {
     expect(aside.getAttribute("data-open")).toBe("false");
     await click(aside.querySelector("button[aria-expanded]")!);
     expect(aside.getAttribute("data-open")).toBe("true");
+    await act(async () => q(host, "add").focus());
+    await press(q(host, "add"), "Escape");
+    expect(aside.getAttribute("data-open")).toBe("false");
+    expect(q(host, "sel").textContent).toBe("0");
+    await press(q(host, "add"), "Escape");
+    expect(q(host, "sel").textContent).toBe("null");
+  });
+});
+
+describe("Escape order on a narrow window", () => {
+  function Probe() {
+    const { addAtom, selectAtom, selectedIdx } = useAnnotations();
+    return (
+      <div>
+        <output data-testid="sel">{String(selectedIdx)}</output>
+        <button data-testid="add" onClick={() => addAtom(atom(1))} />
+        <button data-testid="select" onClick={() => selectAtom(0)} />
+        <Menu
+          label="Actions"
+          items={[{ id: "a", label: "Item", onSelect: () => undefined }]}
+        />
+      </div>
+    );
+  }
+  const q = (host: HTMLElement, id: string) =>
+    host.querySelector<HTMLElement>(`[data-testid=${id}]`)!;
+
+  test("an open menu takes the first Escape; the drawer and selection stay", async () => {
+    const restore = mockMatchMedia(["max-width: 1199px"]);
+    const { host } = await render(
+      <AnnotationsProvider>
+        <InspectorLayout enabled>
+          <Probe />
+        </InspectorLayout>
+      </AnnotationsProvider>,
+    );
+    restore();
+    await click(q(host, "add"));
+    await click(q(host, "select"));
+    const aside = host.querySelector("aside")!;
+    await click(aside.querySelector("button[aria-expanded]")!);
+    expect(aside.getAttribute("data-open")).toBe("true");
+    const trigger = host.querySelector<HTMLElement>(
+      "button[aria-haspopup='menu']",
+    )!;
+    await click(trigger);
+    expect(host.querySelector("[role=menu]")).not.toBeNull();
+    const item = document.activeElement as HTMLElement;
+    await press(item, "Escape");
+    expect(host.querySelector("[role=menu]")).toBeNull();
+    expect(aside.getAttribute("data-open")).toBe("true");
+    expect(q(host, "sel").textContent).toBe("0");
+    // Nothing else open: the drawer closes first, then the selection clears.
     await act(async () => q(host, "add").focus());
     await press(q(host, "add"), "Escape");
     expect(aside.getAttribute("data-open")).toBe("false");
