@@ -62,12 +62,16 @@ describe("not-found and error pages", () => {
     const main = host.querySelector("main")!;
     expect(main.hasAttribute("role")).toBe(false);
     const title = host.querySelector(".levi-error-page__title")!;
-    expect(title.getAttribute("role")).toBe("alert");
+    // Focus moving to the headline already reads it: it is no alert itself,
+    // the message is.
+    expect(title.hasAttribute("role")).toBe(false);
     expect(
       host.querySelector(".ds-empty__description [role=alert]"),
     ).toBeTruthy();
     expect(document.activeElement).toBe(title);
     const nf = await render(<NotFoundPage />);
+    // A missing address is not an incident: focus moves, nothing is announced.
+    expect(nf.host.querySelector("[role=alert]")).toBeNull();
     expect(nf.host.querySelector("main")!.hasAttribute("role")).toBe(false);
     expect(document.activeElement).toBe(
       nf.host.querySelector(".levi-error-page__title"),

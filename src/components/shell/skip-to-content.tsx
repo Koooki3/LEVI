@@ -13,11 +13,15 @@ export function SkipToContent() {
       className="levi-skip"
       href="#levi-main"
       onClick={(event) => {
-        const main = document.querySelector<HTMLElement>("main");
+        // The page's main area: a `main` (or role=main), else the viewer's.
+        const main =
+          document.querySelector<HTMLElement>("main, [role=main]") ??
+          document.getElementById("vw-main");
         if (!main) return;
         event.preventDefault();
         if (!main.hasAttribute("tabindex")) main.tabIndex = -1;
         main.focus();
+        // main's scroll-margin-top keeps it below the sticky bar.
         main.scrollIntoView?.({ block: "start" });
       }}
     >

@@ -2408,8 +2408,8 @@
   "Concepts (default: the model's concepts)": "Concepts (default: the model's concepts)",
   "Design system": "Design system",
   "Leave this page without saving?": "Leave this page without saving?",
-  "Your annotation edits on this page are not saved. Going to another page drops them.": "Your annotation edits on this page are not saved. Going to another page drops them.",
   "Leave without saving": "Leave without saving",
   "Stay here": "Stay here",
-  "Skip to main content": "Skip to main content"
+  "Skip to main content": "Skip to main content",
+  "Your annotation edits are not saved to the workspace yet; they stay only in this browser tab.": "Your annotation edits are not saved to the workspace yet; they stay only in this browser tab."
 }

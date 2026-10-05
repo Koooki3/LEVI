@@ -695,6 +695,11 @@ describe("keyboard jumps and unsaved work", () => {
       await flush();
       const dialog = document.querySelector('[role="alertdialog"]')!;
       expect(dialog.textContent).toContain("Leave this page without saving?");
+      // True to what happens: the draft is kept per tab, not in the workspace.
+      expect(dialog.textContent).toContain(
+        "not saved to the workspace yet; they stay only in this browser tab",
+      );
+      expect(dialog.textContent).not.toContain("drops them");
       expect(pushed).toEqual([]);
       const button = (label: string) =>
         [...dialog.querySelectorAll("button")].find((b) =>

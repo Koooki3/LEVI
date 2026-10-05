@@ -43,7 +43,7 @@ function KeyboardJumps() {
         !(await confirm({
           title: t("Leave this page without saving?"),
           description: t(
-            "Your annotation edits on this page are not saved. Going to another page drops them.",
+            "Your annotation edits are not saved to the workspace yet; they stay only in this browser tab.",
           ),
           confirmLabel: t("Leave without saving"),
           cancelLabel: t("Stay here"),

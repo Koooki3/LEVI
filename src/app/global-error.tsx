@@ -27,7 +27,6 @@ export default function GlobalError({
                 <span
                   ref={headline}
                   tabIndex={-1}
-                  role="alert"
                   className="levi-error-page__title"
                 >
                   <span lang="en">Something went wrong</span> ·{" "}

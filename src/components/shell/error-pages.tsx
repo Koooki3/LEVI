@@ -13,9 +13,9 @@ import { Button, Card, EmptyState } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { useTitleOverride } from "./route-title";
 
-/** The page keeps its `main` landmark; only the words that tell what
- * happened are announced (`alert`), and focus moves to them so a keyboard or
- * screen-reader user lands on the news, not on the top bar. */
+/** The page keeps its `main` landmark. Focus moves to the headline, which
+ * reads it; only an error's message is also an `alert` (a missing address is
+ * not an incident, so the 404 only moves focus). */
 function Frame({ children }: { children: ReactNode }) {
   return (
     <main className="levi-error-page">
@@ -24,24 +24,13 @@ function Frame({ children }: { children: ReactNode }) {
   );
 }
 
-/** The headline: focusable (focus lands here when the page appears), and
- * announced when `alert`. */
-function Headline({
-  children,
-  alert,
-}: {
-  children: ReactNode;
-  alert: boolean;
-}) {
+/** The headline: focusable, and focused when the page appears (moving focus
+ * already makes a screen reader read it, so it is no `alert` itself). */
+function Headline({ children }: { children: ReactNode }) {
   const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => ref.current?.focus(), []);
   return (
-    <span
-      ref={ref}
-      tabIndex={-1}
-      className="levi-error-page__title"
-      role={alert ? "alert" : undefined}
-    >
+    <span ref={ref} tabIndex={-1} className="levi-error-page__title">
       {children}
     </span>
   );
@@ -68,9 +57,7 @@ export function NotFoundPage() {
     <Frame>
       <EmptyState
         icon={Compass}
-        title={
-          <Headline alert={false}>{t("This page does not exist")}</Headline>
-        }
+        title={<Headline>{t("This page does not exist")}</Headline>}
         description={t(
           "The address may be mistyped, or the dataset or episode it names may have been removed or renamed. Start from the home page or Explore.",
         )}
@@ -100,9 +87,7 @@ export function RouteErrorPage({
     <Frame>
       <EmptyState
         icon={TriangleAlert}
-        title={
-          <Headline alert>{t("Something went wrong on this page")}</Headline>
-        }
+        title={<Headline>{t("Something went wrong on this page")}</Headline>}
         description={
           <span role="alert">
             {t(
