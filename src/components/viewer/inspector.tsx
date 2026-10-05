@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { IconButton } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
+import { isTextEntry } from "./text-entry";
 import "./viewer.css";
 
 /**
@@ -121,6 +122,23 @@ export function InspectorLayout({
       aside.parentElement?.style.removeProperty("--vw-inspector-h");
     };
   }, [enabled, open]);
+  // On a narrow window the inspector is a bottom drawer. Escape closes it
+  // after the layers that handle the key in React (a ds Menu, a popup: they
+  // stop it there) and before the window-level handler that clears the
+  // selected annotation: React root, then document (here), then window.
+  useEffect(() => {
+    if (!enabled || !narrow || !open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.isComposing || event.defaultPrevented)
+        return;
+      if (isTextEntry(event.target)) return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      event.preventDefault();
+      setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [enabled, narrow, open]);
   const reveal = useCallback(() => {
     setOpen(true);
     // After the body is shown again.
@@ -142,7 +160,12 @@ export function InspectorLayout({
           aria-label={t("Inspector")}
         >
           <div className="vw-inspector-head">
-            <h2 className="vw-label" ref={headingRef} tabIndex={-1}>
+            <h2
+              className="vw-label"
+              id="vw-inspector-heading"
+              ref={headingRef}
+              tabIndex={-1}
+            >
               {t("Inspector")}
             </h2>
             <IconButton

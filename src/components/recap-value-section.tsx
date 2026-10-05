@@ -15,7 +15,8 @@
  * one-line header and only grows once there is something to draw.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { Badge, Button, Select, Tooltip } from "@/components/ds";
 import { T, useLocale } from "@/components/levi-locale";
 import { useAnnotations } from "@/context/annotations-context";
 import {
@@ -46,6 +47,22 @@ import {
 } from "@/types/recap.types";
 
 const POLL_MS = 1500;
+
+/** A short fact whose longer explanation is a tooltip (also on keyboard focus). */
+function Hint({
+  text,
+  children,
+}: {
+  text?: string;
+  children: React.ReactNode;
+}) {
+  if (!text) return <span>{children}</span>;
+  return (
+    <Tooltip content={text}>
+      <span tabIndex={0}>{children}</span>
+    </Tooltip>
+  );
+}
 /** viewBox of the value plot; stretched to the track with
  * preserveAspectRatio="none" (strokes stay 1.5px via non-scaling-stroke). */
 const PLOT_W = 1000;
@@ -98,6 +115,7 @@ export const RecapValueSection: React.FC<Props> = ({
   const [job, setJob] = useState<RecapJob | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [checkpoint, setCheckpoint] = useState<string>("");
+  const blockedId = useId();
   const [showControls, setShowControls] = useState(false);
   const [starting, setStarting] = useState(false);
   // Bumped to refetch status + episode (after a run finishes).
@@ -320,9 +338,9 @@ export const RecapValueSection: React.FC<Props> = ({
           }}
         />
       </span>
-      <button type="button" className="recap-btn" onClick={cancelRun}>
-        <T>Cancel</T>
-      </button>
+      <Button size="sm" onClick={cancelRun}>
+        {t("Cancel")}
+      </Button>
     </span>
   );
 
@@ -337,9 +355,20 @@ export const RecapValueSection: React.FC<Props> = ({
       ? (status?.checkpoints ?? []).filter((c) => !c.ready)
       : [];
 
+  // Why Compute is off, in words next to the head (the button points at it
+  // with aria-describedby); a tooltip alone never carries the reason.
+  const computeBlocked =
+    view.control === "compute"
+      ? (workerReason ??
+        (readyCheckpoints.length === 0
+          ? t("No ready checkpoint")
+          : !checkpoint
+            ? t("Choose a value-model checkpoint to compute advantages.")
+            : null))
+      : null;
   const computeControl = status && !jobActive && (
     <span className="recap-compute">
-      <select
+      <Select
         aria-label={t("Value-model checkpoint")}
         value={checkpoint}
         onChange={(e) => setCheckpoint(e.target.value)}
@@ -349,38 +378,34 @@ export const RecapValueSection: React.FC<Props> = ({
           <option value="">{t("No ready checkpoint")}</option>
         )}
         {status.checkpoints.map((c) => (
-          <option
-            key={c.name}
-            value={c.name}
-            disabled={!c.ready}
-            title={c.reason ?? c.notes ?? undefined}
-          >
+          <option key={c.name} value={c.name} disabled={!c.ready}>
             {`${c.name}${c.provider === "fake" ? " (fake)" : ""}${
               c.ready ? "" : ` — ${t("not ready")}`
             }`}
           </option>
         ))}
-      </select>
-      <button
-        type="button"
-        className="recap-btn primary"
+      </Select>
+      <Button
+        size="sm"
+        variant="primary"
+        loading={starting}
         onClick={startRun}
         disabled={!checkpoint || starting || !!workerReason}
-        title={workerReason ?? undefined}
+        aria-describedby={computeBlocked ? blockedId : undefined}
       >
         {t(current ? "Recompute" : "Compute advantages")}
-      </button>
+      </Button>
       {current && (
-        <button
-          type="button"
-          className="recap-btn"
+        <Button
+          size="sm"
+          variant="ghost"
           onClick={() => {
             setShowControls(false);
             setRunError(null);
           }}
         >
-          <T>Close</T>
-        </button>
+          {t("Close")}
+        </Button>
       )}
     </span>
   );
@@ -420,11 +445,11 @@ export const RecapValueSection: React.FC<Props> = ({
       </span>
       {view.showMeta && episode ? (
         <span className="tl-section-sub recap-meta">
-          <span title={t("Value-model checkpoint")}>
+          <Hint text={t("Value-model checkpoint")}>
             {current?.checkpoint ?? episode.revision_id}
-          </span>
-          <span
-            title={
+          </Hint>
+          <Hint
+            text={
               current
                 ? `${t(thresholdSourceKey(current.threshold_source))}${
                     current.threshold_source === "dataset_quantile" &&
@@ -443,43 +468,41 @@ export const RecapValueSection: React.FC<Props> = ({
                 (<T>manual</T>)
               </>
             )}
-          </span>
-          <span
-            title={t("Share of this episode's frames with positive advantage")}
+          </Hint>
+          <Hint
+            text={t("Share of this episode's frames with positive advantage")}
           >
             {"· "}
             {percent(episodeFraction)} <T>positive frames</T>
-          </span>
+          </Hint>
           {episode.static_filter && episode.episode_frames != null && (
-            <span
-              title={t(
+            <Hint
+              text={t(
                 "The model was trained on static-filtered data: near-static frames are left unlabelled, and returns and advantages run over the kept frames",
               )}
             >
               {"· "}
               <T>static filter</T> {episode.frame_index.length}/
               {episode.episode_frames}
-            </span>
+            </Hint>
           )}
           {(current?.dev_only_base_models?.length ?? 0) > 0 && (
-            <span
-              className="recap-stale"
-              title={t(
+            <Hint
+              text={t(
                 "Computed with base-model files that are not verified official releases — for development only",
               )}
             >
-              <T>dev base model</T>
-            </span>
+              <Badge tone="warning">{t("dev base model")}</Badge>
+            </Hint>
           )}
           {current?.stale && (
-            <span
-              className="recap-stale"
-              title={t(
+            <Hint
+              text={t(
                 "The dataset changed after these labels were computed — recompute to refresh them",
               )}
             >
-              <T>stale</T>
-            </span>
+              <Badge tone="warning">{t("stale")}</Badge>
+            </Hint>
           )}
         </span>
       ) : (
@@ -491,14 +514,15 @@ export const RecapValueSection: React.FC<Props> = ({
         {view.showMeta && legend}
         {view.control === "progress" && progress}
         {view.control === "recompute" && (
-          <button
-            type="button"
-            className="recap-btn ghost"
-            onClick={() => setShowControls(true)}
-            title={t("Compute the advantage labels again")}
-          >
-            <T>Recompute</T>
-          </button>
+          <Tooltip content={t("Compute the advantage labels again")}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setShowControls(true)}
+            >
+              {t("Recompute")}
+            </Button>
+          </Tooltip>
         )}
         {view.control === "compute" && computeControl}
       </span>
@@ -509,8 +533,10 @@ export const RecapValueSection: React.FC<Props> = ({
     <T>
       <div className="tl-section recap-section">
         {head}
-        {workerReason && view.control === "compute" && (
-          <div className="recap-note">{workerReason}</div>
+        {computeBlocked && (
+          <div className="recap-note" id={blockedId}>
+            {computeBlocked}
+          </div>
         )}
         {notReady.map((c) => (
           <div className="recap-note" key={c.name}>

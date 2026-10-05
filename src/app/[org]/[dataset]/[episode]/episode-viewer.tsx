@@ -13,7 +13,7 @@ import {
   ScanSearch,
   Tags,
 } from "lucide-react";
-import { IconButton, Kbd, Tabs, Tooltip } from "@/components/ds";
+import { IconButton, Kbd, Tabs } from "@/components/ds";
 import { AnalysisTab } from "@/components/viewer/analysis-tab";
 import { EpisodeLoadError } from "@/components/viewer/load-error";
 import { InspectorLayout } from "@/components/viewer/inspector";
@@ -64,6 +64,7 @@ import Loading from "@/components/loading-component";
 import LeviDoctor from "@/components/levi-doctor";
 import LeviReview from "@/components/levi-review";
 import HfAuthButton from "@/components/hf-auth-button";
+import { SkipLinks } from "@/components/viewer/skip-links";
 import { hasURDFSupport } from "@/lib/so101-robot";
 import {
   getAdjacentEpisodesVideoInfo,
@@ -1019,16 +1020,10 @@ function EpisodeViewerInner({
     { id: "episodes", label: t("Episodes"), icon: Film },
     {
       id: "annotations",
-      label: (
-        <Tooltip
-          content={t(
-            "Edit subtask / plan / memory / interjection / VQA atoms (lerobot v3.1 schema)",
-          )}
-          placement="bottom"
-        >
-          <span>{t("Annotations")}</span>
-        </Tooltip>
-      ),
+      // No tooltip inside the tab: the tab list scrolls sideways, so it would
+      // be clipped and show a scroll bar over the selected-tab line. What the
+      // tab is for is written under the sub-tabs instead.
+      label: t("Annotations"),
       icon: Tags,
     },
     ...(hasURDFSupport(datasetInfo.robot_type)
@@ -1102,6 +1097,7 @@ function EpisodeViewerInner({
 
   return (
     <div className="vw-root ds-root">
+      <SkipLinks inspector={activeTab === "annotations"} />
       <UrlTimeSync />
       {/* Top tab bar */}
       <div className="vw-tabbar">
@@ -1115,7 +1111,8 @@ function EpisodeViewerInner({
         </nav>
         <div className="vw-tabbar-actions">
           <LeviReview repoId={`${org}/${dataset}`} />
-          <HfAuthButton variant="tab" />
+          {/* Only a remote dataset needs a Hugging Face session. */}
+          {org !== "local" && <HfAuthButton variant="tab" />}
         </div>
       </div>
 
@@ -1163,6 +1160,7 @@ function EpisodeViewerInner({
         {/* Main content, and the inspector column on the Annotations tab */}
         <InspectorLayout enabled={activeTab === "annotations"}>
           <main
+            id="vw-main"
             className="vw-main vw-chart"
             // Focusable so the content scrolls by keyboard (axe
             // scrollable-region-focusable) when it holds no control.
@@ -1274,6 +1272,11 @@ function EpisodeViewerInner({
 
                 {annotationsSubTab === "language" && (
                   <>
+                    <p className="vw-a-hint">
+                      {t(
+                        "Edit subtask / plan / memory / interjection / VQA atoms (lerobot v3.1 schema)",
+                      )}
+                    </p>
                     <div className="grounding-intro">
                       <h2 className="vw-label">
                         <T>Grounded VQA</T>

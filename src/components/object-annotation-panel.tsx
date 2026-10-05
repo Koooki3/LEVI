@@ -1,7 +1,14 @@
 "use client";
 
 import { Check, Play, X } from "lucide-react";
-import { Button, Icon, IconButton } from "@/components/ds";
+import {
+  Badge,
+  Button,
+  Icon,
+  IconButton,
+  Tooltip,
+  type Tone,
+} from "@/components/ds";
 import {
   InspectorPortal,
   useInspectorSlot,
@@ -90,11 +97,12 @@ type TrackSummary = {
   minScore: number;
 };
 
-const statusColor: Record<ObjectAnnotation["status"], string> = {
-  suggested: "text-(--ds-text-primary)",
-  accepted: "text-(--ds-success)",
-  rejected: "text-(--ds-danger)",
-  needs_review: "text-(--ds-warning)",
+/** A status is a Badge (shape and words), never only a text colour. */
+const statusTone: Record<ObjectAnnotation["status"], Tone> = {
+  suggested: "info",
+  accepted: "success",
+  rejected: "danger",
+  needs_review: "warning",
 };
 
 function statusLabel(status: ObjectAnnotation["status"]): string {
@@ -518,6 +526,16 @@ export default function ObjectAnnotationPanel({
     !downloadActive &&
     !downloadBusy &&
     !checkpointReady;
+  // Why Run is off, in words beside the button (aria-describedby points here).
+  const runBlocked = !runtimeReady
+    ? t("Complete Hub access, worker and checkpoint setup above.")
+    : !selectedCameras.length
+      ? t("Choose at least one camera.")
+      : !scopeEpisodes.length
+        ? t("Enter at least one episode")
+        : !promptValues.length
+          ? t("Enter at least one object prompt.")
+          : null;
   const reviewCounts = useMemo(
     () =>
       trackSummaries.reduce(
@@ -645,7 +663,7 @@ export default function ObjectAnnotationPanel({
                     <strong>
                       <T>SAM3 checkpoint required</T>
                     </strong>
-                    <span>
+                    <span id="oa-download-reason">
                       {hubReady ? (
                         <T>
                           Your Hugging Face session is ready. Download the
@@ -660,20 +678,22 @@ export default function ObjectAnnotationPanel({
                       )}
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    className="object-annotation-download"
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={downloadActive}
                     onClick={() => void downloadCheckpoint()}
                     disabled={!downloadCanStart}
+                    aria-describedby={
+                      downloadCanStart ? undefined : "oa-download-reason"
+                    }
                   >
-                    {downloadActive ? (
-                      <T>Downloading…</T>
-                    ) : download?.phase === "error" ? (
-                      <T>Retry download</T>
-                    ) : (
-                      <T>Download checkpoint</T>
-                    )}
-                  </button>
+                    {downloadActive
+                      ? t("Downloading…")
+                      : download?.phase === "error"
+                        ? t("Retry download")
+                        : t("Download checkpoint")}
+                  </Button>
                 </div>
                 <div className="object-annotation-progress">
                   <div className="object-annotation-progress-label">
@@ -820,15 +840,29 @@ export default function ObjectAnnotationPanel({
                   placeholder={t("Preset name")}
                   disabled={busy}
                 />
-                <button
-                  type="button"
+                <Button
+                  size="sm"
                   onClick={() => void saveCurrentAsPreset()}
                   disabled={
                     busy || !presetNameDraft.trim() || !promptText.trim()
                   }
+                  aria-describedby={
+                    !busy && (!presetNameDraft.trim() || !promptText.trim())
+                      ? "oa-preset-reason"
+                      : undefined
+                  }
                 >
-                  <T>Save preset</T>
-                </button>
+                  {t("Save preset")}
+                </Button>
+                {!busy && (!presetNameDraft.trim() || !promptText.trim()) && (
+                  <small id="oa-preset-reason">
+                    {t(
+                      !presetNameDraft.trim()
+                        ? "Name the preset to save it."
+                        : "Enter at least one object prompt to save a preset.",
+                    )}
+                  </small>
+                )}
               </div>
             </div>
           </div>
@@ -990,38 +1024,31 @@ export default function ObjectAnnotationPanel({
                 )}
               </span>
               {planId && <code>{planId.slice(0, 12)}</code>}
-              {!runtimeReady && (
-                <small>
-                  <T>Complete Hub access, worker and checkpoint setup above.</T>
-                </small>
+              {runBlocked && !busy && (
+                <small id="oa-run-reason">{runBlocked}</small>
               )}
             </div>
             {busy && jobId ? (
-              <button
-                type="button"
-                className="object-annotation-run"
-                onClick={() => void cancelRun()}
-              >
-                <T>Cancel</T>
-              </button>
+              <Button onClick={() => void cancelRun()}>{t("Cancel")}</Button>
             ) : (
-              <button
-                type="button"
-                className="object-annotation-run sam3"
-                onClick={() => void runSam3Annotation()}
-                disabled={
-                  busy ||
-                  !selectedCameras.length ||
-                  !scopeEpisodes.length ||
-                  !promptValues.length ||
-                  !runtimeReady
-                }
-                title={t(
+              <Tooltip
+                content={t(
                   "Uses the configured CUDA worker and 1038lab/sam3 checkpoint",
                 )}
               >
-                <T>Run SAM3 annotation</T>
-              </button>
+                <Button
+                  variant="primary"
+                  loading={busy}
+                  icon={Play}
+                  onClick={() => void runSam3Annotation()}
+                  disabled={busy || !!runBlocked}
+                  aria-describedby={
+                    runBlocked && !busy ? "oa-run-reason" : undefined
+                  }
+                >
+                  {t("Run SAM3 annotation")}
+                </Button>
+              </Tooltip>
             )}
           </div>
 
@@ -1149,9 +1176,9 @@ export default function ObjectAnnotationPanel({
                           #{object.track_id}
                         </span>
                         <span className="object-concept">{object.concept}</span>
-                        <span className={statusColor[object.status]}>
-                          <T>{statusLabel(object.status)}</T>
-                        </span>
+                        <Badge tone={statusTone[object.status]}>
+                          {t(statusLabel(object.status))}
+                        </Badge>
                         <span className="object-score">
                           {(summary.meanScore * 100).toFixed(0)}% <T>mean</T>
                         </span>
@@ -1161,20 +1188,23 @@ export default function ObjectAnnotationPanel({
                         </span>
                       </button>
                       <div className="object-annotation-actions">
-                        <button
-                          type="button"
+                        <Button
+                          size="sm"
+                          icon={Check}
                           onClick={() => void edit(object, "accept")}
                           disabled={busy}
                         >
-                          <T>Accept</T>
-                        </button>
-                        <button
-                          type="button"
+                          {t("Accept")}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon={X}
                           onClick={() => void edit(object, "reject")}
                           disabled={busy}
                         >
-                          <T>Reject</T>
-                        </button>
+                          {t("Reject")}
+                        </Button>
                       </div>
                     </article>
                   );
@@ -1233,9 +1263,9 @@ function ObjectInspector({
           <strong>
             #{object.track_id} {object.concept}
           </strong>
-          <span className={statusColor[object.status]}>
+          <Badge tone={statusTone[object.status]}>
             {t(statusLabel(object.status))}
-          </span>
+          </Badge>
         </div>
       </div>
       <dl className="vw-facts">

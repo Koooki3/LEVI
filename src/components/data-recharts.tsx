@@ -1,7 +1,7 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
 import { Maximize2, Minimize2 } from "lucide-react";
-import { Button } from "@/components/ds";
+import { Button, Checkbox, Tooltip as Tip } from "@/components/ds";
 import { seriesColor, seriesDash } from "@/components/viewer/data-palette";
 import { SeriesSwatch } from "@/components/viewer/series-swatch";
 import { T } from "@/components/levi-locale";
@@ -77,7 +77,7 @@ export const DataRecharts = React.memo(
         {
           <div>
             {data.length > 1 && (
-              <div className="flex justify-end mb-2">
+              <div className="vw-chart-toolbar">
                 <Button
                   size="sm"
                   icon={expanded ? Minimize2 : Maximize2}
@@ -98,7 +98,7 @@ export const DataRecharts = React.memo(
                   tall
                 />
               ) : (
-                <div className="grid md:grid-cols-2 grid-cols-1 gap-4">
+                <div className="vw-chart-grid">
                   {data.map((group, idx) => (
                     <SingleDataGraph
                       key={idx}
@@ -278,103 +278,69 @@ const SingleDataGraph = React.memo(
         );
       };
 
+      const value = (key: string) =>
+        typeof currentData[key] === "number"
+          ? currentData[key].toFixed(2)
+          : "–";
+
       return (
-        <T>
-          {
-            <div className="flex flex-wrap gap-x-5 gap-y-2 px-1 pt-2">
-              {Object.entries(groups).map(([group, children]) => {
-                const color = groupColorMap[group];
-                return (
-                  <div key={group}>
-                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={isGroupChecked(group)}
-                        ref={(el) => {
-                          if (el)
-                            el.indeterminate = isGroupIndeterminate(group);
-                        }}
-                        onChange={() => handleGroupCheckboxChange(group)}
-                        className="size-3"
-                        style={{ accentColor: color }}
+        <div className="vw-series-legend">
+          {Object.entries(groups).map(([group, children]) => (
+            <div key={group} className="vw-series-group">
+              <Checkbox
+                checked={isGroupChecked(group)}
+                indeterminate={isGroupIndeterminate(group)}
+                onChange={() => handleGroupCheckboxChange(group)}
+                label={
+                  <span className="vw-series-name vw-series-name--group">
+                    <SeriesSwatch index={groupIndex[group] ?? 0} />
+                    {group}
+                  </span>
+                }
+              />
+              <div className="vw-series-children">
+                {children.map((key) => {
+                  const label = key.split(SERIES_NAME_DELIMITER).pop() ?? key;
+                  return (
+                    <div key={key} className="vw-series-row">
+                      <Checkbox
+                        checked={visibleKeys.includes(key)}
+                        onChange={() => handleCheckboxChange(key)}
+                        label={<span className="vw-series-name">{label}</span>}
                       />
-                      <SeriesSwatch index={groupIndex[group] ?? 0} />
-                      <span className="text-xs font-semibold text-(--ds-text-primary)">
-                        <T>{group}</T>
+                      <span
+                        className="vw-series-value"
+                        data-off={!visibleKeys.includes(key) || undefined}
+                      >
+                        {value(key)}
                       </span>
-                    </label>
-                    <div className="pl-5 flex flex-col gap-0.5 mt-0.5">
-                      {children.map((key) => {
-                        const label =
-                          key.split(SERIES_NAME_DELIMITER).pop() ?? key;
-                        return (
-                          <label
-                            key={key}
-                            className="flex items-center gap-1.5 cursor-pointer select-none"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={visibleKeys.includes(key)}
-                              onChange={() => handleCheckboxChange(key)}
-                              className="size-2.5"
-                              style={{ accentColor: color }}
-                            />
-                            <span
-                              className={`text-xs ${visibleKeys.includes(key) ? "text-(--ds-text-secondary)" : "text-(--ds-text-secondary)"}`}
-                            >
-                              <T>{label}</T>
-                            </span>
-                            <span
-                              className={`text-xs font-mono tabular-nums ml-1 ${visibleKeys.includes(key) ? "text-(--ds-text-primary)" : "text-(--ds-text-secondary)"}`}
-                            >
-                              <T>
-                                {typeof currentData[key] === "number"
-                                  ? currentData[key].toFixed(2)
-                                  : "–"}
-                              </T>
-                            </span>
-                          </label>
-                        );
-                      })}
                     </div>
-                  </div>
-                );
-              })}
-              {singles.map((key) => {
-                const color = groupColorMap[key];
-                return (
-                  <label
-                    key={key}
-                    className="flex items-center gap-1.5 cursor-pointer select-none"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={visibleKeys.includes(key)}
-                      onChange={() => handleCheckboxChange(key)}
-                      className="size-3"
-                      style={{ accentColor: color }}
-                    />
-                    <SeriesSwatch index={groupIndex[key] ?? 0} />
-                    <span
-                      className={`text-xs ${visibleKeys.includes(key) ? "text-(--ds-text-primary)" : "text-(--ds-text-secondary)"}`}
-                    >
-                      <T>{key}</T>
-                    </span>
-                    <span
-                      className={`text-xs font-mono tabular-nums ml-1 ${visibleKeys.includes(key) ? "text-(--ds-text-primary)" : "text-(--ds-text-secondary)"}`}
-                    >
-                      <T>
-                        {typeof currentData[key] === "number"
-                          ? currentData[key].toFixed(2)
-                          : "–"}
-                      </T>
-                    </span>
-                  </label>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          }
-        </T>
+          ))}
+          {singles.map((key) => (
+            <div key={key} className="vw-series-row">
+              <Checkbox
+                checked={visibleKeys.includes(key)}
+                onChange={() => handleCheckboxChange(key)}
+                label={
+                  <span className="vw-series-name">
+                    <SeriesSwatch index={groupIndex[key] ?? 0} />
+                    {key}
+                  </span>
+                }
+              />
+              <span
+                className="vw-series-value"
+                data-off={!visibleKeys.includes(key) || undefined}
+              >
+                {value(key)}
+              </span>
+            </div>
+          ))}
+        </div>
       );
     };
 
@@ -394,17 +360,18 @@ const SingleDataGraph = React.memo(
     return (
       <T>
         {
-          <div className="vw-chart vw-panel w-full p-3">
+          <div className="vw-chart vw-panel vw-chart-panel">
             {chartTitle && (
-              <p
-                className="text-xs font-medium text-(--ds-text-secondary) mb-1 px-1 truncate"
-                title={chartTitle}
-              >
-                <T>{chartTitle}</T>
-              </p>
+              <Tip content={chartTitle}>
+                <p className="vw-chart-title" tabIndex={0}>
+                  {chartTitle}
+                </p>
+              </Tip>
             )}
             <div
-              className={`w-full ${tall ? "h-[500px]" : "h-72"}`}
+              className={
+                tall ? "vw-chart-plot vw-chart-plot--tall" : "vw-chart-plot"
+              }
               onMouseLeave={handleMouseLeave}
             >
               <ResponsiveContainer width="100%" height="100%">

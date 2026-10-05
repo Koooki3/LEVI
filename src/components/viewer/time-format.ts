@@ -12,3 +12,10 @@ export function formatClockPrecise(seconds: number): string {
   const rest = (hundredths % 6000) / 100;
   return `${minutes}:${rest.toFixed(2).padStart(5, "0")}`;
 }
+
+/** A number of seconds or a rate for display: at most two decimals, no
+ * trailing zeros (9.349721999915758 -> "9.35", 3 -> "3"). */
+export function roundTo2(value: number): string {
+  if (!Number.isFinite(value)) return "";
+  return String(Math.round(value * 100) / 100);
+}

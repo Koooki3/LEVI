@@ -27,8 +27,8 @@ const FRAME_FILES = [
 ];
 // The episode viewer (design stage 3). Its data colours live in
 // src/components/viewer/data-palette.ts (the one viewer file with hex: canvas
-// and the 3D scene cannot read CSS variables) and in viewer.css; the URDF
-// viewer keeps the robot models' material colours.
+// and the 3D scene cannot read CSS variables; the robot models' paint and
+// lights are there too) and in viewer.css.
 const VIEWER_FILES = [
   "src/app/[[]org]/[[]dataset]/[[]episode]/*.tsx",
   "src/components/viewer/*.tsx",
@@ -55,6 +55,7 @@ const VIEWER_FILES = [
   "src/components/stats-panel.tsx",
   "src/components/subtask-vocabulary.tsx",
   "src/components/urdf-playback-bar.tsx",
+  "src/components/urdf-viewer.tsx",
   "src/components/video-overlay-canvas.tsx",
 ];
 // A colour: # and exactly 3, 4, 6 or 8 hex digits, at the start of the

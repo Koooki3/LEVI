@@ -1,8 +1,16 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
 import { T, useLocale } from "@/components/levi-locale";
-import { Button, Icon, IconButton, SegmentedControl } from "@/components/ds";
-import { ChevronLeft, ChevronRight, Flag, LoaderCircle } from "lucide-react";
+import {
+  Button,
+  EmptyState,
+  Icon,
+  IconButton,
+  SegmentedControl,
+  Select,
+  Spinner,
+} from "@/components/ds";
+import { ChevronLeft, ChevronRight, Flag, ImageOff } from "lucide-react";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import type {
@@ -68,8 +76,8 @@ function FrameThumbnail({
   return (
     <T>
       {
-        <div ref={containerRef} className="flex flex-col items-center">
-          <div className="w-full aspect-video bg-(--ds-surface-1) rounded overflow-hidden relative group">
+        <div ref={containerRef} className="vw-thumb">
+          <div className="vw-thumb-frame group">
             <T>
               {inView ? (
                 <video
@@ -77,16 +85,16 @@ function FrameThumbnail({
                   src={info.videoUrl}
                   preload="metadata"
                   muted
-                  className="w-full h-full object-cover"
+                  className="vw-thumb-media"
                 />
               ) : (
                 <div
-                  className="w-full h-full bg-(--ds-skeleton)"
+                  className="vw-thumb-media vw-thumb-skeleton"
                   aria-hidden="true"
                 />
               )}
             </T>
-            <span className="absolute top-1 right-1">
+            <span className="vw-thumb-flag-slot">
               <IconButton
                 icon={Flag}
                 size="sm"
@@ -98,9 +106,7 @@ function FrameThumbnail({
               />
             </span>
           </div>
-          <p
-            className={`text-xs mt-1 tabular-nums ${isFlagged ? "text-(--ds-text-primary)" : "text-(--ds-text-secondary)"}`}
-          >
+          <p className="vw-thumb-caption" data-flagged={isFlagged || undefined}>
             {t(`Episode ${info.episodeIndex}`)}
             {isFlagged && (
               <Icon icon={Flag} label={t("Flagged")} className="ml-1 inline" />
@@ -148,14 +154,9 @@ export default function OverviewPanel({
 
   if (loading || !data) {
     return (
-      <T>
-        {
-          <div className="flex items-center gap-2 text-(--ds-text-secondary) text-sm py-12 justify-center">
-            <Icon icon={LoaderCircle} className="ds-spin" />
-            <T>Loading episode frames…</T>
-          </div>
-        }
-      </T>
+      <div className="vw-a-view" role="status">
+        <Spinner label={t("Loading episode frames…")} showLabel />
+      </div>
     );
   }
 
@@ -166,27 +167,21 @@ export default function OverviewPanel({
 
   if (frames.length === 0) {
     return (
-      <T>
-        {
-          <div className="text-center py-8 space-y-2">
-            <p className="text-(--ds-text-secondary) italic">
-              <T>
-                {flaggedOnly
-                  ? "No flagged episodes to show."
-                  : "No episode frames available."}
-              </T>
-            </p>
-            {flaggedOnly && onFlaggedOnlyChange && (
-              <button
-                onClick={() => onFlaggedOnlyChange(false)}
-                className="text-xs text-(--ds-text-primary) hover:text-(--ds-text-primary) underline"
-              >
-                <T>Show all episodes</T>
-              </button>
-            )}
-          </div>
+      <EmptyState
+        icon={ImageOff}
+        title={t(
+          flaggedOnly
+            ? "No flagged episodes to show."
+            : "No episode frames available.",
+        )}
+        action={
+          flaggedOnly && onFlaggedOnlyChange ? (
+            <Button size="sm" onClick={() => onFlaggedOnlyChange(false)}>
+              {t("Show all episodes")}
+            </Button>
+          ) : undefined
         }
-      </T>
+      />
     );
   }
 
@@ -196,8 +191,8 @@ export default function OverviewPanel({
   return (
     <T>
       {
-        <div className="max-w-7xl mx-auto py-6 space-y-5">
-          <p className="text-sm text-(--ds-text-secondary)">
+        <div className="vw-a-view vw-a-view--wide">
+          <p className="vw-a-hint">
             <T>
               Use first/last frame views to spot episodes with bad end states or
               other anomalies. Hover over a thumbnail and click the flag icon to
@@ -206,23 +201,22 @@ export default function OverviewPanel({
           </p>
 
           {/* Controls row */}
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div className="flex flex-wrap items-center gap-3">
+          <div className="vw-a-row">
+            <div className="vw-a-row">
               {/* Camera selector */}
               {data.cameras.length > 1 && (
-                <select
-                  aria-label="Camera"
+                <Select
+                  aria-label={t("Camera")}
                   value={selectedCamera}
                   onChange={handleCameraChange}
-                  className="ds-input"
-                  style={{ width: "auto", maxWidth: "100%" }}
+                  className="vw-camera-select"
                 >
                   {data.cameras.map((cam) => (
                     <option key={cam} value={cam}>
-                      <T>{cam}</T>
+                      {cam}
                     </option>
                   ))}
-                </select>
+                </Select>
               )}
 
               {/* Flagged only toggle */}
@@ -244,7 +238,6 @@ export default function OverviewPanel({
               {/* First / Last frame */}
               <SegmentedControl
                 label={t("Frame shown")}
-                size="sm"
                 className="vw-nowrap"
                 value={showLast ? "last" : "first"}
                 onChange={(value) => setShowLast(value === "last")}
@@ -257,7 +250,7 @@ export default function OverviewPanel({
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className="flex items-center gap-2 text-sm text-(--ds-text-secondary)">
+              <div className="vw-pager">
                 <Button
                   size="sm"
                   variant="ghost"
@@ -267,8 +260,8 @@ export default function OverviewPanel({
                 >
                   {t("Previous")}
                 </Button>
-                <span className="tabular-nums">
-                  {page + 1} / <T>{totalPages}</T>
+                <span>
+                  {page + 1} / {totalPages}
                 </span>
                 <Button
                   size="sm"
@@ -284,12 +277,7 @@ export default function OverviewPanel({
           </div>
 
           {/* Adaptive grid — only current page's thumbnails are mounted */}
-          <div
-            className="grid gap-3"
-            style={{
-              gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-            }}
-          >
+          <div className="vw-thumb-grid">
             {pageFrames.map((info) => (
               <FrameThumbnail
                 key={`${selectedCamera}-${info.episodeIndex}`}

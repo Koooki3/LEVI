@@ -22,12 +22,12 @@
 
 /* All form controls in the annotations area: brighter than the rest of the
    visualizer so users can see what they're typing. */
-.annotations-skin input[type="text"],
-.annotations-skin input[type="number"],
-.annotations-skin input[type="password"],
-.annotations-skin input[type="search"],
-.annotations-skin textarea,
-.annotations-skin select {
+.annotations-skin input[type="text"]:not(.ds-input),
+.annotations-skin input[type="number"]:not(.ds-input),
+.annotations-skin input[type="password"]:not(.ds-input),
+.annotations-skin input[type="search"]:not(.ds-input),
+.annotations-skin textarea:not(.ds-input),
+.annotations-skin select:not(.ds-input) {
   background: var(--ds-field-bg) !important;
   color: var(--ds-text-primary) !important;
   border: 1px solid var(--ds-border-control) !important;
@@ -40,9 +40,9 @@
 .annotations-skin textarea::placeholder {
   color: var(--ds-text-secondary);
 }
-.annotations-skin input:focus,
-.annotations-skin textarea:focus,
-.annotations-skin select:focus {
+.annotations-skin input:not(.ds-input):focus,
+.annotations-skin textarea:not(.ds-input):focus,
+.annotations-skin select:not(.ds-input):focus {
   outline: 2px solid var(--ds-focus-ring) !important;
   outline-offset: 1px;
 }
@@ -583,33 +583,6 @@
   border-color: var(--style-speech);
   background: color-mix(in srgb, var(--style-speech) 16%, transparent);
 }
-.annotations-skin .quick-popup .popup-btn {
-  font-size: var(--ds-text-caption-size);
-  height: 24px;
-  padding: 0 10px;
-  border-radius: var(--ds-radius-sm);
-  border: 1px solid var(--ds-separator);
-  background: transparent;
-  color: var(--ds-text-secondary);
-  cursor: pointer;
-}
-.annotations-skin .quick-popup .popup-btn:hover {
-  background: var(--ds-surface-hover);
-  color: var(--ds-text-primary);
-}
-.annotations-skin .quick-popup .popup-btn.primary {
-  border-color: var(--ds-accent);
-  background: var(--ds-accent);
-  color: var(--ds-on-accent);
-}
-.annotations-skin .quick-popup .popup-btn.primary:hover {
-  background: var(--ds-accent-hover);
-}
-.annotations-skin .quick-popup .popup-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
 /* ----- Inline quick-add bar (above the timeline) ----- */
 .annotations-skin .quick-add {
   display: flex;
@@ -945,21 +918,6 @@
 .annotations-skin .editor .ts-row input {
   width: 100px;
 }
-.annotations-skin .editor .ts-row .frame-pill {
-  font-family: var(--ds-font-mono);
-  font-size: var(--ds-text-caption-size);
-  padding: 3px 8px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--ds-surface-selected);
-  color: var(--ds-text-secondary);
-  cursor: pointer;
-}
-.annotations-skin .editor .ts-row .frame-pill:hover {
-  color: var(--ds-text-primary);
-  background: var(--ds-surface-hover);
-}
-
 /* ----- Timeline drag handles + tooltip + draggable playhead ----- */
 .annotations-skin .tl-seg .resize {
   position: absolute;
@@ -1023,18 +981,20 @@
   pointer-events: none;
   z-index: 7;
 }
-.annotations-skin .tl-playhead-handle {
+.annotations-skin .tl-playhead-handle-wrap {
   position: absolute;
   top: -6px;
+  transform: translate(-7px, 0);
+  pointer-events: auto;
+  z-index: 6;
+}
+.annotations-skin .tl-playhead-handle {
   width: 14px;
   height: 14px;
   background: var(--ds-accent);
   border: 2px solid var(--ds-surface-1);
   border-radius: 999px;
-  transform: translate(-7px, 0);
   cursor: ew-resize;
-  pointer-events: auto;
-  z-index: 6;
 }
 .annotations-skin .tl-tooltip {
   position: fixed;
@@ -1076,7 +1036,7 @@
 
 /* ----- SAM3 object annotation sidecar ----- */
 .annotations-skin .object-annotation-panel {
-  border: 1px solid var(--ds-border-control);
+  border: 1px solid var(--ds-separator);
   border-radius: var(--ds-radius-lg);
   padding: 18px;
   background: var(--ds-surface-1);
@@ -1100,11 +1060,14 @@
   font-weight: var(--ds-weight-semibold);
 }
 .annotations-skin .object-annotation-badge {
-  border: 1px solid var(--ds-border-control);
+  border: 1px solid var(--ds-separator);
   border-radius: 999px;
   padding: 5px 9px;
   color: var(--ds-text-primary);
   font-size: var(--ds-text-caption-size);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   white-space: nowrap;
 }
 .annotations-skin .object-annotation-copy,
@@ -1217,35 +1180,6 @@
   gap: 5px;
   color: var(--ds-text-secondary);
 }
-.annotations-skin .object-annotation-run,
-.annotations-skin .object-annotation-actions button {
-  min-height: 36px;
-  border: 1px solid var(--ds-border-control);
-  border-radius: var(--ds-radius-sm);
-  background: var(--ds-surface-1);
-  color: var(--ds-text-primary);
-  cursor: pointer;
-  padding: 0 12px;
-  font-size: 12px;
-}
-.annotations-skin .object-annotation-run.sam3 {
-  border-color: var(--ds-border-control);
-  background: var(--ds-accent);
-  color: var(--ds-on-accent);
-  font-weight: var(--ds-weight-semibold);
-}
-.annotations-skin .object-annotation-run:hover,
-.annotations-skin .object-annotation-actions button:hover {
-  background: var(--ds-surface-hover);
-}
-.annotations-skin .object-annotation-run.sam3:hover {
-  background: var(--ds-accent-hover);
-}
-.annotations-skin .object-annotation-run:disabled,
-.annotations-skin .object-annotation-actions button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
 .annotations-skin .object-annotation-runtime {
   flex-wrap: wrap;
   margin: 14px 0 2px;
@@ -1313,11 +1247,6 @@
   flex: none;
   gap: 6px;
 }
-.annotations-skin .object-annotation-actions button {
-  min-height: 28px;
-  padding: 0 8px;
-  font-size: var(--ds-text-caption-size);
-}
 @media (max-width: 720px) {
   .annotations-skin .object-annotation-head,
   .annotations-skin .object-annotation-row {
@@ -1337,7 +1266,7 @@
   gap: 10px;
   margin: 16px 0;
   padding: 12px 14px;
-  border: 1px solid var(--ds-border-control);
+  border: 1px solid var(--ds-separator);
   border-radius: var(--ds-radius-md);
   background: var(--ds-surface-2);
 }
@@ -1489,7 +1418,7 @@
   place-items: center;
   width: 24px;
   height: 24px;
-  border: 1px solid var(--ds-border-control);
+  border: 1px solid var(--ds-separator);
   border-radius: 7px;
   color: var(--ds-text-primary);
   font: var(--ds-weight-semibold) var(--ds-text-caption-size)
@@ -1529,7 +1458,7 @@
   gap: 14px;
   margin-top: 14px;
   padding: 10px 12px;
-  border: 1px solid var(--ds-border-control);
+  border: 1px solid var(--ds-separator);
   border-radius: 10px;
   background: var(--ds-surface-1);
 }
@@ -1677,14 +1606,6 @@
   border-radius: var(--ds-radius-xs);
   padding: 0 4px;
 }
-.annotations-skin .recap-stale {
-  margin-left: 8px;
-  padding: 0 6px;
-  border-radius: 999px;
-  border: 1px solid var(--ds-warning);
-  color: var(--ds-warning);
-  font-size: var(--ds-text-caption-size);
-}
 .annotations-skin .recap-head-right {
   margin-left: auto;
   display: inline-flex;
@@ -1730,43 +1651,9 @@
   align-items: center;
   gap: 6px;
 }
-.annotations-skin .recap-compute select {
-  font-size: var(--ds-text-caption-size);
-  padding: 2px 6px;
+.annotations-skin .recap-compute .ds-select {
+  width: auto;
   max-width: 220px;
-}
-.annotations-skin .recap-btn {
-  font-size: var(--ds-text-caption-size);
-  line-height: 16px;
-  padding: 2px 8px;
-  border-radius: var(--ds-radius-sm);
-  border: 1px solid var(--ds-separator);
-  background: transparent;
-  color: var(--ds-text-secondary);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.annotations-skin .recap-btn:hover:not(:disabled) {
-  background: var(--ds-surface-selected);
-  color: var(--ds-text-primary);
-}
-.annotations-skin .recap-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.annotations-skin .recap-btn.primary {
-  border-color: var(--ds-accent);
-  background: var(--ds-accent);
-  color: var(--ds-on-accent);
-}
-.annotations-skin .recap-btn.primary:hover:not(:disabled) {
-  background: var(--ds-accent-hover);
-  color: var(--ds-on-accent);
-}
-.annotations-skin .recap-btn.ghost {
-  border-color: transparent;
-  color: var(--ds-text-secondary);
-  padding: 1px 6px;
 }
 .annotations-skin .recap-job-stage {
   font-family: var(--ds-font-mono);
@@ -1904,14 +1791,6 @@
   align-items: center;
   flex-wrap: wrap;
   row-gap: 4px;
-}
-.annotations-skin .anchored-outcome.success {
-  color: var(--ds-success);
-  font-weight: var(--ds-weight-semibold);
-}
-.annotations-skin .anchored-outcome.failure {
-  color: var(--ds-danger);
-  font-weight: var(--ds-weight-semibold);
 }
 .annotations-skin .dot-anchored {
   background: var(--dv-1);
@@ -2078,4 +1957,28 @@
   align-items: center;
   gap: 8px;
   margin-top: 6px;
+}
+.annotations-skin .quick-popup-actions {
+  align-items: center;
+}
+.annotations-skin .quick-popup-actions small {
+  margin-right: auto;
+}
+
+/* The playhead line runs through the whole tracks region; a section's title
+   and description sit above it on the card colour, so no text is struck
+   through (the line shows again in the rows, where the tracks are). */
+.annotations-skin .tl-section-head > .tl-section-title,
+.annotations-skin .tl-section-head > .tl-section-sub {
+  position: relative;
+  z-index: 6;
+  background: var(--ds-surface-1);
+}
+
+/* No tooltip while the playhead is being dragged (the pointer stays over the
+   handle, so hover would otherwise open it after half a second). */
+.annotations-skin
+  .tl-playhead-handle-wrap[data-dragging="true"]
+  [role="tooltip"] {
+  display: none;
 }

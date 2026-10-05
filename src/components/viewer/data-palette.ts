@@ -64,6 +64,29 @@ export const MEDIA_BACKGROUND = "#000000";
 export const MEDIA_GRID = "#3a3a3c";
 export const MEDIA_GRID_SECTION = "#48484a";
 
+/**
+ * The 3D replay's robot materials and studio lights. Three.js reads plain
+ * colours, not CSS variables, and these are the models' own paint (an
+ * archetype per part), not interface colours: they do not follow the theme.
+ */
+export const URDF_MATERIAL = {
+  /** Used when a mesh carries no colour of its own. */
+  fallback: "#c0c4cc",
+  /** Neutral off-white plastic. */
+  neutral: "#9ba1ab",
+  g1Light: "#9ca3af",
+  g1Dark: "#1f2937",
+  /** Servo housings (SO-arm). */
+  servo: "#171a20",
+  openArmBase: "#3a3a4a",
+  openArmLight: "#f5f5f5",
+} as const;
+export const URDF_LIGHT = {
+  key: "#fff2e3",
+  fill: "#bfd9ff",
+  rim: "#ffffff",
+} as const;
+
 /** Labels drawn on video: near-white words on a dark plate. */
 export const MEDIA_LABEL_PLATE = "#000000d9";
 export const MEDIA_LABEL_TEXT = "#f5f5f7";

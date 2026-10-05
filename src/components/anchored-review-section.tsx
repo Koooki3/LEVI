@@ -16,6 +16,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { Badge, Tooltip } from "@/components/ds";
 import { T, useLocale } from "@/components/levi-locale";
 import { useAnnotations } from "@/context/annotations-context";
 import {
@@ -72,8 +73,10 @@ export const AnchoredReviewSection: React.FC<Props> = ({
   }, [enabled, repoId, episodeId]);
 
   const markers = useMemo(
-    () => anchoredMarkers(record, duration),
-    [record, duration],
+    () => anchoredMarkers(record, duration, t),
+    // `t` changes with the language only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [record, duration, language],
   );
 
   if (!record) return null;
@@ -85,20 +88,27 @@ export const AnchoredReviewSection: React.FC<Props> = ({
             <T>Anchored review</T>
           </span>
           <span className="tl-section-sub">
-            <span
-              title={`${t("Anchored review rules")} · ${t("Rule set id")}: ${record.spec.id}`}
+            <Tooltip
+              content={`${t("Anchored review rules")} · ${t("Rule set id")}: ${record.spec.id}`}
             >
-              {anchoredSpecTitle(record.spec, language)}
-            </span>
+              <span tabIndex={0}>
+                {anchoredSpecTitle(record.spec, language)}
+              </span>
+            </Tooltip>
             {" · "}
-            <span
-              className={`anchored-outcome ${record.outcome}`}
-              title={t(
+            <Tooltip
+              content={t(
                 "Outcome from the valid events; a person commits it in the review queue",
               )}
             >
-              {t(record.outcome)}
-            </span>
+              <span tabIndex={0}>
+                <Badge
+                  tone={record.outcome === "success" ? "success" : "danger"}
+                >
+                  {t(record.outcome)}
+                </Badge>
+              </span>
+            </Tooltip>
             {" · "}
             {anchoredSummary(record)}
           </span>

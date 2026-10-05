@@ -14,7 +14,8 @@ import { Button, Icon, IconButton, Select, Tooltip } from "@/components/ds";
 import "@/components/viewer/viewer.css";
 
 import Link from "next/link";
-import React, { useMemo, useState } from "react";
+import { roundTo2 } from "@/components/viewer/time-format";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useFlaggedEpisodes } from "@/context/flagged-episodes-context";
 
 import type {
@@ -121,6 +122,8 @@ function OutcomeBadge({
         className="vw-outcome ds-focus"
         data-outcome={state}
         data-human={human ? "true" : undefined}
+        data-roving=""
+        tabIndex={-1}
         aria-label={hint}
         onClick={(event) => {
           event.stopPropagation();
@@ -252,6 +255,38 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const { t } = useLocale();
 
+  // The list is ONE tab stop: the current episode's link (or the first row).
+  // ←/→ move between the controls of a row (link, outcome, flag); ↑/↓ already
+  // step through episodes, and focus follows the current row.
+  const entryEpisode = displayEpisodes.includes(episodeId)
+    ? episodeId
+    : displayEpisodes[0];
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const lastEpisode = useRef(episodeId);
+  useEffect(() => {
+    if (lastEpisode.current === episodeId) return;
+    lastEpisode.current = episodeId;
+    const list = listRef.current;
+    if (!list || !list.contains(document.activeElement)) return;
+    list
+      .querySelector<HTMLElement>(
+        '.vw-episode[aria-current="true"] .vw-episode-link',
+      )
+      ?.focus();
+  }, [episodeId]);
+  const onListKeyDown = (event: React.KeyboardEvent<HTMLUListElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    const current = (event.target as HTMLElement).closest("[data-roving]");
+    const rowEl = current?.closest(".vw-episode");
+    if (!current || !rowEl) return;
+    const stops = [...rowEl.querySelectorAll<HTMLElement>("[data-roving]")];
+    const at = stops.indexOf(current as HTMLElement);
+    const next = stops[at + (event.key === "ArrowRight" ? 1 : -1)];
+    if (!next) return;
+    event.preventDefault();
+    next.focus();
+  };
+
   const row = (episode: number) => {
     const active = episode === episodeId;
     const isFlagged = flagged.has(episode);
@@ -264,6 +299,8 @@ const Sidebar: React.FC<SidebarProps> = ({
               type="button"
               onClick={() => onEpisodeSelect(episode)}
               className="vw-episode-link ds-focus"
+              data-roving=""
+              tabIndex={episode === entryEpisode ? 0 : -1}
               aria-current={active ? "page" : undefined}
             >
               {name}
@@ -272,6 +309,8 @@ const Sidebar: React.FC<SidebarProps> = ({
             <Link
               href={`./episode_${episode}`}
               className="vw-episode-link ds-focus"
+              data-roving=""
+              tabIndex={episode === entryEpisode ? 0 : -1}
               aria-current={active ? "page" : undefined}
             >
               {name}
@@ -297,6 +336,8 @@ const Sidebar: React.FC<SidebarProps> = ({
               type="button"
               onClick={() => toggle(episode)}
               className="vw-flag ds-focus"
+              data-roving=""
+              tabIndex={-1}
               aria-pressed={isFlagged}
               aria-label={`${t(isFlagged ? "Unflag" : "Flag")} · ${name}`}
             >
@@ -321,7 +362,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <dt>{t("Episodes")}</dt>
           <dd>{datasetInfo.total_episodes.toLocaleString()}</dd>
           <dt>{t("FPS")}</dt>
-          <dd>{datasetInfo.fps}</dd>
+          <dd>{roundTo2(datasetInfo.fps)}</dd>
         </dl>
 
         {tasks.length > 1 && onTaskFilterChange && (
@@ -386,7 +427,20 @@ const Sidebar: React.FC<SidebarProps> = ({
             </p>
           )}
 
-          <ul className="vw-episodes">{displayEpisodes.map(row)}</ul>
+          <p id="vw-episodes-hint" className="ds-sr-only">
+            {t(
+              "The list is one tab stop. Left and right arrows move between an episode's controls; up and down arrows change episode.",
+            )}
+          </p>
+          <ul
+            className="vw-episodes"
+            ref={listRef}
+            onKeyDown={onListKeyDown}
+            aria-describedby="vw-episodes-hint"
+            aria-keyshortcuts="ArrowLeft ArrowRight"
+          >
+            {displayEpisodes.map(row)}
+          </ul>
 
           {!showFlaggedOnly && totalPages > 1 && (
             <div className="vw-pager">

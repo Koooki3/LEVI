@@ -4,6 +4,8 @@ import {
   formatClock,
   formatClockPrecise,
 } from "@/components/viewer/time-format";
+import { Tooltip as Tip } from "@/components/ds";
+import { PopupActions } from "@/components/viewer/popup-actions";
 import { T, useLocale } from "@/components/levi-locale";
 
 /**
@@ -180,6 +182,10 @@ interface PendingCreate {
   start: number;
   end: number;
 }
+
+/** Seconds the playhead moves per arrow key; with Shift, per press. */
+export const PLAYHEAD_STEP = 0.1;
+export const PLAYHEAD_BIG_STEP = 1;
 
 export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
   const { atoms, addAtom, updateAtom, snap, selectAtom } = useAnnotations();
@@ -462,6 +468,23 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     setIsPlaying(false);
     setDrag({ kind: "playhead" });
+  };
+
+  // The handle is a slider: arrow keys nudge the playhead (Shift: a second).
+  const onPlayheadKey = (e: React.KeyboardEvent) => {
+    const step = e.shiftKey ? PLAYHEAD_BIG_STEP : PLAYHEAD_STEP;
+    let next: number | null = null;
+    if (e.key === "ArrowLeft" || e.key === "ArrowDown")
+      next = currentTime - step;
+    else if (e.key === "ArrowRight" || e.key === "ArrowUp")
+      next = currentTime + step;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = duration;
+    if (next === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setIsPlaying(false);
+    seek(Math.max(0, Math.min(duration, next)), "external");
   };
 
   const onTrackBandClick = (e: React.MouseEvent) => {
@@ -992,11 +1015,29 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                 {/* Playhead — spans the full tracks region via top/bottom. */}
                 <div className="tl-playhead" style={{ left: playheadLeft }} />
                 <div
-                  className="tl-playhead-handle"
-                  style={{ left: playheadLeft, top: -6 }}
-                  onPointerDown={onPlayheadDown}
-                  title="Drag to scrub"
-                />
+                  className="tl-playhead-handle-wrap"
+                  data-dragging={drag?.kind === "playhead" ? "true" : undefined}
+                  style={{ left: playheadLeft }}
+                >
+                  <Tip
+                    content={t("Drag to scrub, or use the arrow keys")}
+                    describe={false}
+                  >
+                    <div
+                      className="tl-playhead-handle ds-focus"
+                      role="slider"
+                      tabIndex={0}
+                      aria-label={t("Playhead")}
+                      aria-orientation="horizontal"
+                      aria-valuemin={0}
+                      aria-valuemax={duration}
+                      aria-valuenow={Number(currentTime.toFixed(2))}
+                      aria-valuetext={`${currentTime.toFixed(2)} s`}
+                      onPointerDown={onPlayheadDown}
+                      onKeyDown={onPlayheadKey}
+                    />
+                  </Tip>
+                </div>
 
                 {/* Continuous hover-time readout — shown for any mouse
                 position over any track, including while dragging (the drag
@@ -1068,23 +1109,11 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                   if (e.key === "Enter") commitPendingCreate();
                 }}
               />
-              <div className="quick-popup-actions">
-                <button
-                  type="button"
-                  className="popup-btn"
-                  onClick={cancelPendingCreate}
-                >
-                  <T>cancel</T>
-                </button>
-                <button
-                  type="button"
-                  className="popup-btn primary"
-                  onClick={commitPendingCreate}
-                  disabled={!createLabel.trim()}
-                >
-                  <T>add ↵</T>
-                </button>
-              </div>
+              <PopupActions
+                canAdd={createLabel.trim().length > 0}
+                onCancel={cancelPendingCreate}
+                onAdd={commitPendingCreate}
+              />
             </DraggablePopup>
           )}
         </div>

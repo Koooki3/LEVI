@@ -83,7 +83,19 @@ describe("anchoredMarkers", () => {
 describe("wording", () => {
   test("answers, then each condition's reading", () => {
     expect(eventText(event(1, "contradicted", "green"))).toBe(
-      "held_before: yes · plate_colour: green · stays: yes\n✓ held_before  ✗ plate_colour",
+      "held_before: yes · plate_colour: green · stays: yes\nheld_before — supported · plate_colour — contradicted",
+    );
+  });
+
+  test("readings are words, never ✓ or ✗, and follow the interface language", () => {
+    const e = event(1, "contradicted", "green");
+    const zh = (word: string) =>
+      ({ supported: "支持", contradicted: "矛盾", unknown: "未知" })[word] ??
+      word;
+    expect(eventText(e)).not.toMatch(/[✓✗?]/);
+    expect(eventText(e, zh)).toContain("plate_colour — 矛盾");
+    expect(anchoredMarkers(record([e]), 10, zh)[0].text).toContain(
+      "held_before — 支持",
     );
   });
 

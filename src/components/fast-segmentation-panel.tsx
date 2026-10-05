@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Square, Trash2, Zap } from "lucide-react";
-import { Icon, IconButton } from "@/components/ds";
+import { Button, Icon, IconButton } from "@/components/ds";
 import { T, useLocale } from "@/components/levi-locale";
 import { useConfirmAction } from "@/components/shell/confirm";
 import {
@@ -214,15 +214,7 @@ function JobProgress({
               aria-label={t("Job progress")}
             />
           </div>
-          {active && (
-            <button
-              type="button"
-              className="object-annotation-run"
-              onClick={onCancel}
-            >
-              <T>Cancel</T>
-            </button>
-          )}
+          {active && <Button onClick={onCancel}>{t("Cancel")}</Button>}
           {job.status === "succeeded" && (
             <p className="object-annotation-runtime">
               <span className="ready">
@@ -818,6 +810,25 @@ export default function FastSegmentationPanel({
   const liveOn = !!session && ["starting", "running"].includes(session.state);
   const workerReady = !!status?.worker.ready;
   const teacherReady = !!status?.teacher.ready;
+  // Why a button is off, in words beside it (aria-describedby points there).
+  const workerBlocked = !workerReady
+    ? `${t("Student worker")}: ${t("not ready")}`
+    : null;
+  const teacherBlocked = !teacherReady
+    ? `${t("Teacher model")}: ${t("not ready")}`
+    : null;
+  const liveBlocked = !model ? t("Choose a student model") : workerBlocked;
+  const labelBlocked =
+    engine === "student"
+      ? !model
+        ? t("Choose a student model")
+        : workerBlocked
+      : teacherBlocked;
+  const distilBlocked = !distilName.trim()
+    ? t("Name the new student model.")
+    : !trainText.trim()
+      ? t("Enter at least one object prompt.")
+      : (workerBlocked ?? teacherBlocked);
   const distilledModel = distilJob?.model
     ? status?.models.find((m) => m.name === distilJob.model)
     : null;
@@ -924,25 +935,32 @@ export default function FastSegmentationPanel({
               </div>
             </div>
             <div className="object-annotation-controls">
-              <button
-                type="button"
-                className={"object-annotation-run" + (liveOn ? "" : " sam3")}
+              <Button
+                variant={liveOn ? "secondary" : "primary"}
+                icon={liveOn ? Square : undefined}
+                loading={!!liveBusy}
                 onClick={() => (liveOn ? stopLive() : void startLive())}
-                disabled={!!liveBusy || (!liveOn && (!model || !workerReady))}
+                disabled={!!liveBusy || (!liveOn && !!liveBlocked)}
                 aria-pressed={liveOn}
+                aria-describedby={
+                  !liveOn && liveBlocked && !liveBusy
+                    ? "fast-seg-live-reason"
+                    : undefined
+                }
               >
-                {liveBusy === "starting" ? (
-                  <T>Loading model…</T>
-                ) : liveBusy === "stopping" ? (
-                  <T>Stopping…</T>
-                ) : liveOn ? (
-                  <>
-                    <Icon icon={Square} /> <T>Stop live overlay</T>
-                  </>
-                ) : (
-                  <T>Start live overlay</T>
-                )}
-              </button>
+                {liveBusy === "starting"
+                  ? t("Loading model…")
+                  : liveBusy === "stopping"
+                    ? t("Stopping…")
+                    : liveOn
+                      ? t("Stop live overlay")
+                      : t("Start live overlay")}
+              </Button>
+              {!liveOn && liveBlocked && !liveBusy && (
+                <small id="fast-seg-live-reason" className="fast-seg-hint">
+                  {liveBlocked}
+                </small>
+              )}
               <label className="object-annotation-checkbox">
                 <input
                   type="checkbox"
@@ -1088,20 +1106,24 @@ export default function FastSegmentationPanel({
                   />
                 </label>
               )}
-              <button
-                type="button"
-                className="object-annotation-run sam3"
+              <Button
+                variant="secondary"
+                loading={labelActive || labelBusy}
                 onClick={() => void startLabel()}
-                disabled={
-                  labelActive ||
-                  labelBusy ||
-                  (engine === "student"
-                    ? !model || !workerReady
-                    : !teacherReady)
+                disabled={labelActive || labelBusy || !!labelBlocked}
+                aria-describedby={
+                  labelBlocked && !labelActive && !labelBusy
+                    ? "fast-seg-label-reason"
+                    : undefined
                 }
               >
-                <T>Start labelling</T>
-              </button>
+                {t("Start labelling")}
+              </Button>
+              {labelBlocked && !labelActive && !labelBusy && (
+                <small id="fast-seg-label-reason" className="fast-seg-hint">
+                  {labelBlocked}
+                </small>
+              )}
             </div>
             {labelError && <p className="fast-seg-error">{labelError}</p>}
             {labelJob && (
@@ -1218,21 +1240,24 @@ export default function FastSegmentationPanel({
                   ))}
                 </select>
               </label>
-              <button
-                type="button"
-                className="object-annotation-run sam3"
+              <Button
+                variant="secondary"
+                loading={distilActive || distilBusy}
                 onClick={() => void startDistil()}
-                disabled={
-                  distilActive ||
-                  distilBusy ||
-                  !distilName.trim() ||
-                  !trainText.trim() ||
-                  !workerReady ||
-                  !teacherReady
+                disabled={distilActive || distilBusy || !!distilBlocked}
+                aria-describedby={
+                  distilBlocked && !distilActive && !distilBusy
+                    ? "fast-seg-distil-reason"
+                    : undefined
                 }
               >
-                <T>Start distillation</T>
-              </button>
+                {t("Start distillation")}
+              </Button>
+              {distilBlocked && !distilActive && !distilBusy && (
+                <small id="fast-seg-distil-reason" className="fast-seg-hint">
+                  {distilBlocked}
+                </small>
+              )}
             </div>
             {distilError && <p className="fast-seg-error">{distilError}</p>}
             {distilJob && (

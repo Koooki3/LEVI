@@ -1,12 +1,38 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
-import { Flag, Info, LoaderCircle, Maximize2, Minimize2 } from "lucide-react";
-import { Button, Icon, IconButton, SegmentedControl } from "@/components/ds";
+import { CircleCheck, Flag, Maximize2, Minimize2 } from "lucide-react";
+import {
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  Icon,
+  IconButton,
+  Input,
+  SegmentedControl,
+  Select,
+  Spinner,
+  Table,
+  TableRow,
+  Tooltip as Tip,
+  type Tone,
+} from "@/components/ds";
 import { T, useLocale } from "@/components/levi-locale";
+import {
+  AnalysisCard,
+  AnalysisNote,
+  Callout,
+  fill,
+  LegendItem,
+  Meter,
+  StateBadge,
+  StatList,
+  toneForRatio,
+} from "@/components/viewer/analysis-ui";
 import { DATA_SERIES, seriesDash } from "@/components/viewer/data-palette";
 import { SeriesSwatch } from "@/components/viewer/series-swatch";
 
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useEffect, useId, useMemo, useState } from "react";
 import {
   LineChart,
   Line,
@@ -32,27 +58,6 @@ import type {
 const FullscreenCtx = React.createContext(false);
 const useIsFullscreen = () => React.useContext(FullscreenCtx);
 
-function InfoToggle({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const { t } = useLocale();
-  return (
-    <>
-      <IconButton
-        icon={Info}
-        size="sm"
-        label={t("Toggle description")}
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      />
-      {open && (
-        <div className="mt-1">
-          <T>{children}</T>
-        </div>
-      )}
-    </>
-  );
-}
-
 function FullscreenWrapper({ children }: { children: React.ReactNode }) {
   const [fs, setFs] = useState(false);
   const { t } = useLocale();
@@ -68,7 +73,7 @@ function FullscreenWrapper({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="relative">
-      <div className="absolute top-3 right-3 z-10">
+      <div className="vw-a-fs-toggle">
         <IconButton
           icon={fs ? Minimize2 : Maximize2}
           size="sm"
@@ -77,8 +82,8 @@ function FullscreenWrapper({ children }: { children: React.ReactNode }) {
         />
       </div>
       {fs ? (
-        <div className="ds-root fixed inset-0 z-50 overflow-auto p-6">
-          <div className="fixed top-4 right-4 z-50">
+        <div className="ds-root vw-a-fullscreen">
+          <div className="vw-a-fullscreen__close">
             <IconButton
               icon={Minimize2}
               variant="secondary"
@@ -87,7 +92,7 @@ function FullscreenWrapper({ children }: { children: React.ReactNode }) {
               onClick={() => setFs(false)}
             />
           </div>
-          <div className="max-w-7xl mx-auto">
+          <div className="vw-a-view vw-a-view--wide">
             <FullscreenCtx.Provider value={true}>
               {children}
             </FullscreenCtx.Provider>
@@ -181,6 +186,7 @@ function AutocorrelationSection({
   numEpisodes?: number;
 }) {
   const isFs = useIsFullscreen();
+  const { t } = useLocale();
   const actionKeys = useMemo(
     () => (data.length > 0 ? getActionKeys(data[0]) : []),
     [data],
@@ -230,8 +236,8 @@ function AutocorrelationSection({
     fallback ?? { chartData: [], suggestedChunk: null, shortKeys: [] };
   const isAgg = !!agg;
   const numEpisodesLabel = isAgg
-    ? ` (${numEpisodes} episodes sampled)`
-    : " (current episode)";
+    ? fill(t("({n} episodes sampled)"), { n: numEpisodes ?? 0 })
+    : t("(current episode)");
 
   const yDomain = useMemo(() => {
     if (chartData.length === 0 || shortKeys.length === 0)
@@ -248,164 +254,135 @@ function AutocorrelationSection({
 
   if (shortKeys.length === 0)
     return (
-      <T>
-        {
-          <p className="text-(--ds-text-secondary) italic">
-            <T>No action columns found.</T>
-          </p>
-        }
-      </T>
+      <EmptyState
+        title={t("No action columns found.")}
+        description={t(
+          "The analysis needs columns whose names start with “action”.",
+        )}
+      />
     );
 
   return (
-    <T>
-      {
-        <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator) space-y-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-(--ds-text-primary)">
-                <T>Action Autocorrelation</T>
-                <span className="text-xs text-(--ds-text-secondary) ml-2 font-normal">
-                  <T>{numEpisodesLabel}</T>
-                </span>
-              </h3>
-              <InfoToggle>
-                <p className="text-xs text-(--ds-text-secondary)">
-                  <T>
-                    Shows how correlated each action dimension is with itself
-                    over increasing time lags. Where autocorrelation drops below
-                    0.5 suggests a
-                  </T>
-                  <T> </T>
-                  <span className="text-(--ds-text-primary) font-medium">
-                    <T>natural action chunk boundary</T>
-                  </span>
-                  <T> </T>
-                  <T>
-                    — actions beyond this lag are essentially independent, so
-                    executing them open-loop offers diminishing returns.
-                  </T>
-                  <br />
-                  <span className="text-(--ds-text-secondary)">
-                    <T>
-                      Grounded in the theoretical result that chunk length
-                      should scale logarithmically with system stability
-                      constants (
-                    </T>
-                    <a
-                      href="https://arxiv.org/abs/2507.09061"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline hover:text-(--ds-text-secondary)"
-                    >
-                      <T>Zhang et al., 2025</T>
-                    </a>
-                    <T>, Theorem 1).</T>
-                  </span>
-                </p>
-              </InfoToggle>
-            </div>
-          </div>
-
-          {suggestedChunk && (
-            <div className="flex items-center gap-3 bg-(--ds-surface-selected) border border-(--ds-border-control) rounded-md px-4 py-2.5">
-              <span className="text-(--ds-text-primary) font-semibold text-lg tabular-nums">
-                <T>{suggestedChunk}</T>
-              </span>
-              <div>
-                <p className="text-sm text-(--ds-text-primary) font-medium">
-                  <T>Suggested chunk length: </T>
-                  <T>{suggestedChunk}</T>
-                  <T> steps (</T>
-                  {(suggestedChunk / fps).toFixed(2)}s)
-                </p>
-                <p className="text-xs text-(--ds-text-secondary)">
-                  <T>
-                    Median lag where autocorrelation drops below 0.5 across
-                    action dimensions
-                  </T>
-                </p>
-              </div>
-            </div>
-          )}
-
-          <div className={isFs ? "h-[500px]" : "h-64"}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart
-                key={isAgg ? "agg" : "ep"}
-                data={chartData}
-                margin={{ top: 8, right: 16, left: 0, bottom: 16 }}
-              >
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="var(--ds-separator)"
-                />
-                <XAxis
-                  dataKey="lag"
-                  stroke="var(--ds-separator-strong)"
-                  label={{
-                    value: "Lag (steps)",
-                    position: "insideBottom",
-                    offset: -8,
-                    fill: "var(--ds-text-secondary)",
-                    fontSize: 13,
-                  }}
-                />
-                <YAxis
-                  stroke="var(--ds-separator-strong)"
-                  domain={yDomain}
-                  tickFormatter={(v) => Number(v.toFixed(2)).toString()}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: "var(--ds-surface-2)",
-                    border: "1px solid var(--ds-separator)",
-                    borderRadius: 6,
-                  }}
-                  labelFormatter={(v) =>
-                    `Lag ${v} (${(Number(v) / fps).toFixed(2)}s)`
-                  }
-                  formatter={(v: number) => v.toFixed(3)}
-                />
-                <Line
-                  dataKey={() => 0.5}
-                  stroke="var(--ds-text-tertiary)"
-                  strokeDasharray="6 4"
-                  dot={false}
-                  name="0.5 threshold"
-                  legendType="none"
-                  isAnimationActive={false}
-                />
-                {shortKeys.map((name, i) => (
-                  <Line
-                    key={name}
-                    dataKey={name}
-                    stroke={COLORS[i % COLORS.length]}
-                    strokeDasharray={seriesDash(i)}
-                    dot={false}
-                    strokeWidth={1.5}
-                    legendType="none"
-                    isAnimationActive={false}
-                  />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Custom legend */}
-          <div className="flex flex-wrap gap-x-4 gap-y-1 px-1">
-            {shortKeys.map((name, i) => (
-              <div key={name} className="flex items-center gap-1.5">
-                <SeriesSwatch index={i} />
-                <span className="text-xs text-(--ds-text-secondary)">
-                  <T>{name}</T>
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+    <AnalysisCard
+      title="Action Autocorrelation"
+      meta={numEpisodesLabel}
+      info={
+        <p>
+          <T>
+            Shows how correlated each action dimension is with itself over
+            increasing time lags. Where autocorrelation drops below 0.5 suggests
+            a
+          </T>
+          <T> </T>
+          <span className="vw-a-em">
+            <T>natural action chunk boundary</T>
+          </span>
+          <T> </T>
+          <T>
+            — actions beyond this lag are essentially independent, so executing
+            them open-loop offers diminishing returns.
+          </T>
+          <br />
+          <T>
+            Grounded in the theoretical result that chunk length should scale
+            logarithmically with system stability constants (
+          </T>
+          <a
+            href="https://arxiv.org/abs/2507.09061"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <T>Zhang et al., 2025</T>
+          </a>
+          <T>, Theorem 1).</T>
+        </p>
       }
-    </T>
+    >
+      {suggestedChunk && (
+        <Callout
+          value={suggestedChunk}
+          title={fill(t("Suggested chunk length: {n} steps ({s}s)"), {
+            n: suggestedChunk,
+            s: (suggestedChunk / fps).toFixed(2),
+          })}
+        >
+          {t(
+            "Median lag where autocorrelation drops below 0.5 across action dimensions",
+          )}
+        </Callout>
+      )}
+
+      <div className={isFs ? "h-[500px]" : "h-64"}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart
+            key={isAgg ? "agg" : "ep"}
+            data={chartData}
+            margin={{ top: 8, right: 16, left: 0, bottom: 16 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--ds-separator)" />
+            <XAxis
+              dataKey="lag"
+              stroke="var(--ds-separator-strong)"
+              label={{
+                value: t("Lag (steps)"),
+                position: "insideBottom",
+                offset: -8,
+                fill: "var(--ds-text-secondary)",
+                fontSize: 13,
+              }}
+            />
+            <YAxis
+              stroke="var(--ds-separator-strong)"
+              domain={yDomain}
+              tickFormatter={(v) => Number(v.toFixed(2)).toString()}
+            />
+            <Tooltip
+              contentStyle={{
+                background: "var(--ds-surface-2)",
+                border: "1px solid var(--ds-separator)",
+                borderRadius: 6,
+              }}
+              labelFormatter={(v) =>
+                fill(t("Lag {lag} ({s}s)"), {
+                  lag: String(v),
+                  s: (Number(v) / fps).toFixed(2),
+                })
+              }
+              formatter={(v: number) => v.toFixed(3)}
+            />
+            <Line
+              dataKey={() => 0.5}
+              stroke="var(--ds-text-tertiary)"
+              strokeDasharray="6 4"
+              dot={false}
+              name="0.5 threshold"
+              legendType="none"
+              isAnimationActive={false}
+            />
+            {shortKeys.map((name, i) => (
+              <Line
+                key={name}
+                dataKey={name}
+                stroke={COLORS[i % COLORS.length]}
+                strokeDasharray={seriesDash(i)}
+                dot={false}
+                strokeWidth={1.5}
+                legendType="none"
+                isAnimationActive={false}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="vw-a-legend">
+        {shortKeys.map((name, i) => (
+          <LegendItem key={name} swatch={<SeriesSwatch index={i} />}>
+            {name}
+          </LegendItem>
+        ))}
+      </div>
+    </AnalysisCard>
   );
 }
 
@@ -522,16 +499,16 @@ function ActionVelocitySection({
     const jerkyNonGripper = jerky.filter((s) => !isGripper(s.name));
     const jerkyGripper = jerky.filter((s) => isGripper(s.name));
 
-    let verdict: { label: string; color: string };
+    let verdict: { label: string; tone: Tone };
     if (active.length === 0) {
-      verdict = { label: "N/A", color: "text-(--ds-text-secondary)" };
+      verdict = { label: "N/A", tone: "neutral" };
     } else {
       const smoothRatio = smooth.length / active.length;
       if (smoothRatio >= 0.6 && jerkyNonGripper.length === 0)
-        verdict = { label: "Smooth", color: "text-(--ds-success)" };
+        verdict = { label: "Smooth", tone: "success" };
       else if (jerkyNonGripper.length <= 2 && smoothRatio >= 0.3)
-        verdict = { label: "Moderate", color: "text-(--ds-warning)" };
-      else verdict = { label: "Jerky", color: "text-(--ds-danger)" };
+        verdict = { label: "Moderate", tone: "warning" };
+      else verdict = { label: "Jerky", tone: "danger" };
     }
 
     const lines: string[] = [];
@@ -583,277 +560,214 @@ function ActionVelocitySection({
 
   if (stats.length === 0)
     return (
-      <T>
-        {
-          <p className="text-(--ds-text-secondary) italic">
-            <T>No action data for velocity analysis.</T>
-          </p>
-        }
-      </T>
+      <EmptyState
+        title={t("No action data for velocity analysis.")}
+        description={t(
+          "The analysis needs at least two frames with action columns.",
+        )}
+      />
     );
 
   return (
-    <T>
-      {
-        <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator) space-y-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-(--ds-text-primary)">
-                <T>Action Velocity (Δa) — Smoothness Proxy</T>
-                <span className="text-xs text-(--ds-text-secondary) ml-2 font-normal">
-                  <T>
-                    {isAgg
-                      ? `(${numEpisodes} episodes sampled)`
-                      : "(current episode)"}
-                  </T>
-                </span>
-              </h3>
-              <InfoToggle>
-                <p className="text-xs text-(--ds-text-secondary)">
-                  <T>
-                    Shows the distribution of frame-to-frame action changes (Δa
-                    = a
-                  </T>
-                  <sub>t+1</sub> − a<sub>t</sub>
-                  <T>) for each dimension. A</T>
-                  <T> </T>
-                  <span className="text-(--ds-success)">
-                    <T>tight distribution around zero</T>
-                  </span>
-                  <T> </T>
-                  <T>
-                    means smooth, predictable control — the system is likely
-                    stable and benefits from longer action chunks.
-                  </T>
-                  <span className="text-(--ds-danger)">
-                    <T> Fat tails or high std</T>
-                  </span>
-                  <T> </T>
-                  <T>
-                    indicate jerky demonstrations, suggesting shorter chunks and
-                    potentially beneficial noise injection.
-                  </T>
-                  <br />
-                  <span className="text-(--ds-text-secondary)">
-                    <T>Relates to the Lipschitz constant L</T>
-                    <sub>π</sub>
-                    <T> and smoothness C</T>
-                    <sub>π</sub>
-                    <T> in</T>
-                    <T> </T>
-                    <a
-                      href="https://arxiv.org/abs/2507.09061"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline hover:text-(--ds-text-secondary)"
-                    >
-                      <T>Zhang et al. (2025)</T>
-                    </a>
-                    <T>
-                      , which govern compounding error bounds (Assumptions 3.1,
-                      4.1).
-                    </T>
-                  </span>
-                </p>
-              </InfoToggle>
-            </div>
-          </div>
-
-          {/* Per-dimension mini histograms + stats */}
-          <div
-            className="grid gap-2"
-            style={{
-              gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-            }}
-          >
-            {stats.map((s, si) => {
-              const barH = 28;
-              const dimmed = !!s.inactive || !!s.discrete;
-              const tag =
-                s.inactive && s.discrete
-                  ? "inactive & discrete"
-                  : s.discrete
-                    ? "discrete"
-                    : s.inactive
-                      ? "inactive"
-                      : null;
-              return (
-                <div
-                  key={s.name}
-                  className={`rounded-md px-2.5 py-2 space-y-1 ${dimmed ? "border border-dashed border-(--ds-border-control)" : "bg-(--ds-surface-sunken)"}`}
-                >
-                  <p
-                    className={`text-xs font-medium truncate ${dimmed ? "text-(--ds-text-secondary)" : "text-(--ds-text-primary)"}`}
-                    title={s.name}
-                  >
-                    <T>{s.name}</T>
-                    {tag && (
-                      <span className="text-(--ds-text-secondary) ml-1 font-normal">
-                        (<T>{tag}</T>)
-                      </span>
-                    )}
-                  </p>
-                  <div
-                    className={`flex gap-2 text-xs tabular-nums ${dimmed ? "text-(--ds-text-secondary)" : "text-(--ds-text-secondary)"}`}
-                  >
-                    <span>σ={s.std.toFixed(4)}</span>
-                    <span>
-                      |Δ|
-                      <sub>
-                        <T>max</T>
-                      </sub>
-                      ={s.maxAbs.toFixed(4)}
-                    </span>
-                  </div>
-                  <svg
-                    width="100%"
-                    viewBox={`0 0 ${s.bins.length} ${barH}`}
-                    preserveAspectRatio="none"
-                    className="h-7 rounded"
-                    aria-label={t("Δa distribution for") + " " + s.name}
-                  >
-                    {[...s.bins].map((count, bi) => {
-                      const h =
-                        maxBinCount > 0 ? (count / maxBinCount) * barH : 0;
-                      return (
-                        <rect
-                          key={bi}
-                          x={bi}
-                          y={barH - h}
-                          width={0.85}
-                          height={h}
-                          fill={
-                            dimmed
-                              ? "var(--dv-neutral)"
-                              : COLORS[si % COLORS.length]
-                          }
-                          opacity={dimmed ? 0.4 : 0.7}
-                        />
-                      );
-                    })}
-                  </svg>
-                  <div className="h-1 w-full bg-(--ds-surface-sunken) rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${Math.min(100, (s.std / maxStd) * 100)}%`,
-                        background: dimmed
-                          ? "var(--dv-neutral)"
-                          : s.std / maxStd < 0.4
-                            ? "var(--ds-success)"
-                            : s.std / maxStd < 0.7
-                              ? "var(--ds-warning)"
-                              : "var(--ds-danger)",
-                      }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {insight && (
-            <div className="bg-(--ds-surface-sunken) rounded-md px-4 py-3 border border-(--ds-separator) space-y-1.5">
-              <p className="text-sm font-medium text-(--ds-text-primary)">
-                <T>Overall:</T>
-                <T> </T>
-                <span className={insight.verdict.color}>
-                  <T>{insight.verdict.label}</T>
-                </span>
-              </p>
-              <ul className="text-xs text-(--ds-text-secondary) space-y-0.5 list-disc list-inside">
-                {insight.lines.map((l, i) => (
-                  <li key={i}>
-                    <T>{l}</T>
-                  </li>
-                ))}
-              </ul>
-              <p className="text-xs text-(--ds-text-secondary) pt-1">
-                <T>{insight.tip}</T>
-              </p>
-            </div>
-          )}
-
-          {jerkyEpisodes && jerkyEpisodes.length > 0 && (
-            <JerkyEpisodesList episodes={jerkyEpisodes} />
-          )}
-        </div>
+    <AnalysisCard
+      title="Action Velocity (Δa) — Smoothness Proxy"
+      meta={
+        isAgg
+          ? fill(t("({n} episodes sampled)"), { n: numEpisodes ?? 0 })
+          : t("(current episode)")
       }
-    </T>
+      info={
+        <p>
+          <T>Shows the distribution of frame-to-frame action changes (Δa = a</T>
+          <sub>t+1</sub> − a<sub>t</sub>
+          <T>) for each dimension. A</T>
+          <T> </T>
+          <span className="vw-a-em" data-tone="success">
+            <T>tight distribution around zero</T>
+          </span>
+          <T> </T>
+          <T>
+            means smooth, predictable control — the system is likely stable and
+            benefits from longer action chunks.
+          </T>
+          <span className="vw-a-em" data-tone="danger">
+            <T> Fat tails or high std</T>
+          </span>
+          <T> </T>
+          <T>
+            indicate jerky demonstrations, suggesting shorter chunks and
+            potentially beneficial noise injection.
+          </T>
+          <br />
+          <T>Relates to the Lipschitz constant L</T>
+          <sub>π</sub>
+          <T> and smoothness C</T>
+          <sub>π</sub>
+          <T> in</T>
+          <T> </T>
+          <a
+            href="https://arxiv.org/abs/2507.09061"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <T>Zhang et al. (2025)</T>
+          </a>
+          <T>, which govern compounding error bounds (Assumptions 3.1, 4.1).</T>
+        </p>
+      }
+    >
+      {/* Per-dimension mini histograms + stats */}
+      <div className="vw-a-grid">
+        {stats.map((s, si) => {
+          const barH = 28;
+          const dimmed = !!s.inactive || !!s.discrete;
+          const tag =
+            s.inactive && s.discrete
+              ? "inactive & discrete"
+              : s.discrete
+                ? "discrete"
+                : s.inactive
+                  ? "inactive"
+                  : null;
+          const ratio = s.std / maxStd;
+          return (
+            <div key={s.name} className="vw-a-tile" data-dimmed={dimmed}>
+              <p className="vw-a-tile__name">
+                <Tip content={s.name}>
+                  <span tabIndex={0}>{s.name}</span>
+                </Tip>
+                {tag && <StateBadge tone="neutral">{t(tag)}</StateBadge>}
+              </p>
+              <div className="vw-a-tile__nums">
+                <span>σ={s.std.toFixed(4)}</span>
+                <span>
+                  |Δ|
+                  <sub>{t("max")}</sub>={s.maxAbs.toFixed(4)}
+                </span>
+              </div>
+              <svg
+                viewBox={`0 0 ${s.bins.length} ${barH}`}
+                preserveAspectRatio="none"
+                role="img"
+                aria-label={t("Δa distribution for") + " " + s.name}
+              >
+                {[...s.bins].map((count, bi) => {
+                  const h = maxBinCount > 0 ? (count / maxBinCount) * barH : 0;
+                  return (
+                    <rect
+                      key={bi}
+                      x={bi}
+                      y={barH - h}
+                      width={0.85}
+                      height={h}
+                      fill={
+                        dimmed
+                          ? "var(--dv-neutral)"
+                          : COLORS[si % COLORS.length]
+                      }
+                      opacity={dimmed ? 0.4 : 0.7}
+                    />
+                  );
+                })}
+              </svg>
+              <Meter
+                ratio={Math.min(1, ratio)}
+                tone={dimmed ? "neutral" : toneForRatio(ratio, [0.4, 0.7])}
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      {insight && (
+        <AnalysisNote>
+          <p className="vw-a-note-title">
+            <T>Overall:</T>
+            <StateBadge tone={insight.verdict.tone}>
+              {t(insight.verdict.label)}
+            </StateBadge>
+          </p>
+          <ul>
+            {insight.lines.map((l, i) => (
+              <li key={i}>
+                <T>{l}</T>
+              </li>
+            ))}
+          </ul>
+          <p className="vw-a-note-text">
+            <T>{insight.tip}</T>
+          </p>
+        </AnalysisNote>
+      )}
+
+      {jerkyEpisodes && jerkyEpisodes.length > 0 && (
+        <JerkyEpisodesList episodes={jerkyEpisodes} />
+      )}
+    </AnalysisCard>
   );
 }
 
 function JerkyEpisodesList({ episodes }: { episodes: JerkyEpisode[] }) {
   const [showAll, setShowAll] = useState(false);
+  const { t } = useLocale();
   const display = showAll ? episodes : episodes.slice(0, 15);
 
   return (
-    <T>
-      {
-        <div className="bg-(--ds-surface-sunken) rounded-md px-4 py-3 border border-(--ds-separator) space-y-2">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-(--ds-text-primary)">
-              <T>Most Jerky Episodes</T>
-              <T> </T>
-              <span className="text-xs text-(--ds-text-secondary) font-normal">
-                <T>sorted by mean |Δa|</T>
-              </span>
-            </p>
-            <div className="flex items-center gap-3">
-              <FlagAllBtn ids={display.map((e) => e.episodeIndex)} />
-              {episodes.length > 15 && (
-                <button
-                  onClick={() => setShowAll((v) => !v)}
-                  className="text-xs text-(--ds-text-secondary) hover:text-(--ds-text-primary) transition-colors"
-                >
-                  <T>
-                    {showAll ? "Show top 15" : `Show all ${episodes.length}`}
-                  </T>
-                </button>
-              )}
-            </div>
-          </div>
-          <div className="max-h-48 overflow-y-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-(--ds-text-secondary) border-b border-(--ds-separator)">
-                  <th className="w-5 py-1">
-                    <span className="ds-sr-only">
-                      <T>Flag</T>
-                    </span>
-                  </th>
-                  <th className="text-left py-1 pr-3">
-                    <T>Episode</T>
-                  </th>
-                  <th className="text-right py-1">
-                    <T>Mean |Δa|</T>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {display.map((e) => (
-                  <tr
-                    key={e.episodeIndex}
-                    className="border-b border-(--ds-separator) text-(--ds-text-secondary)"
-                  >
-                    <td className="py-1">
-                      <FlagBtn id={e.episodeIndex} />
-                    </td>
-                    <td className="py-1 pr-3">
-                      <T>ep </T>
-                      <T>{e.episodeIndex}</T>
-                    </td>
-                    <td className="py-1 text-right tabular-nums">
-                      {e.meanAbsDelta.toFixed(4)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+    <AnalysisNote>
+      <div className="vw-a-row">
+        <p className="vw-a-note-title">
+          <T>Most Jerky Episodes</T>
+          <small>
+            <T>sorted by mean |Δa|</T>
+          </small>
+        </p>
+        <div className="vw-a-row">
+          <FlagAllBtn ids={display.map((e) => e.episodeIndex)} />
+          {episodes.length > 15 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-expanded={showAll}
+              onClick={() => setShowAll((v) => !v)}
+            >
+              {showAll
+                ? t("Show top 15")
+                : fill(t("Show all {n}"), { n: episodes.length })}
+            </Button>
+          )}
         </div>
-      }
-    </T>
+      </div>
+      <div className="vw-a-scroll">
+        <Table density="compact" caption={t("Most Jerky Episodes")}>
+          <thead>
+            <tr>
+              <th>
+                <span className="ds-sr-only">
+                  <T>Flag</T>
+                </span>
+              </th>
+              <th>
+                <T>Episode</T>
+              </th>
+              <th className="ds-num">
+                <T>Mean |Δa|</T>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {display.map((e) => (
+              <TableRow key={e.episodeIndex}>
+                <td>
+                  <FlagBtn id={e.episodeIndex} />
+                </td>
+                <td>{t(`Episode ${e.episodeIndex}`)}</td>
+                <td className="ds-num">{e.meanAbsDelta.toFixed(4)}</td>
+              </TableRow>
+            ))}
+          </tbody>
+        </Table>
+      </div>
+    </AnalysisNote>
   );
 }
 
@@ -867,39 +781,30 @@ function VarianceHeatmap({
   loading: boolean;
 }) {
   const isFs = useIsFullscreen();
+  const { t } = useLocale();
 
   if (loading) {
     return (
-      <T>
-        {
-          <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator)">
-            <h3 className="text-sm font-semibold text-(--ds-text-primary) mb-2">
-              <T>Cross-Episode Action Variance</T>
-            </h3>
-            <div className="flex items-center gap-2 text-(--ds-text-secondary) text-sm py-8 justify-center">
-              <Icon icon={LoaderCircle} className="ds-spin" />
-              <T>Loading cross-episode data…</T>
-            </div>
-          </div>
-        }
-      </T>
+      <AnalysisCard title="Cross-Episode Action Variance">
+        <div className="vw-a-row" role="status">
+          <Spinner label={t("Loading cross-episode data…")} showLabel />
+        </div>
+      </AnalysisCard>
     );
   }
 
   if (!data) {
     return (
-      <T>
-        {
-          <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator)">
-            <h3 className="text-sm font-semibold text-(--ds-text-primary) mb-2">
-              <T>Cross-Episode Action Variance</T>
-            </h3>
-            <p className="text-(--ds-text-secondary) italic text-sm">
-              <T>Not enough episodes or no action data to compute variance.</T>
-            </p>
-          </div>
-        }
-      </T>
+      <AnalysisCard title="Cross-Episode Action Variance">
+        <EmptyState
+          title={t(
+            "Not enough episodes or no action data to compute variance.",
+          )}
+          description={t(
+            "Choose a wider analysis scope, or a dataset with action columns.",
+          )}
+        />
+      </AnalysisCard>
     );
   }
   const { actionNames, timeBins, variance, numEpisodes } = data;
@@ -929,165 +834,144 @@ function VarianceHeatmap({
   }
 
   return (
-    <T>
-      {
-        <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator) space-y-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-(--ds-text-primary)">
-                <T>Cross-Episode Action Variance</T>
-                <span className="text-xs text-(--ds-text-secondary) ml-2 font-normal">
-                  (<T>{numEpisodes}</T>
-                  <T> episodes sampled)</T>
-                </span>
-              </h3>
-              <InfoToggle>
-                <p className="text-xs text-(--ds-text-secondary)">
-                  <T>
-                    Shows how much each action dimension varies across episodes
-                    at each point in time (normalized 0–100%).
-                  </T>
-                  <span className="text-(--ds-text-primary)">
-                    <T> High-variance regions</T>
-                  </span>
-                  <T> </T>
-                  <T>
-                    indicate multi-modal or inconsistent demonstrations —
-                    generative policies (diffusion, flow-matching) and action
-                    chunking help here by modeling multiple modes.
-                  </T>
-                  <span className="text-(--ds-info)">
-                    <T> Low-variance regions</T>
-                  </span>
-                  <T> </T>
-                  <T>indicate consistent behavior across demonstrations.</T>
-                  <br />
-                  <span className="text-(--ds-text-secondary)">
-                    <T>Relates to the &quot;coverage&quot; discussion in</T>
-                    <T> </T>
-                    <a
-                      href="https://arxiv.org/abs/2507.09061"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline hover:text-(--ds-text-secondary)"
-                    >
-                      <T>Zhang et al. (2025)</T>
-                    </a>
-                    <T> </T>
-                    <T>
-                      — regions with low variance may lack the exploratory
-                      coverage needed to prevent compounding errors (Section 4).
-                    </T>
-                  </span>
-                </p>
-              </InfoToggle>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <svg width={svgW} height={svgH} className="block">
-              {/* Heatmap cells */}
-              {variance.map((row, bi) =>
-                row.map((v, di) => (
-                  <rect
-                    key={`${bi}-${di}`}
-                    x={labelW + bi * cellW}
-                    y={di * cellH}
-                    width={cellW}
-                    height={cellH}
-                    fill="var(--dv-1)"
-                    fillOpacity={varOpacity(v)}
-                    stroke="var(--ds-surface-1)"
-                    strokeWidth={0.5}
-                  >
-                    <title>
-                      <T>{`${shortName(actionNames[di])} @ ${(timeBins[bi] * 100).toFixed(0)}%: var=${v.toFixed(5)}`}</T>
-                    </title>
-                  </rect>
-                )),
-              )}
-
-              {/* Y-axis: action names */}
-              {actionNames.map((name, di) => (
-                <text
-                  key={di}
-                  x={labelW - 4}
-                  y={di * cellH + cellH / 2}
-                  textAnchor="end"
-                  dominantBaseline="central"
-                  className="fill-(--ds-text-secondary)"
-                  fontSize={12}
-                >
-                  {shortName(name)}
-                </text>
-              ))}
-
-              {/* X-axis labels */}
-              {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
-                const binIdx = Math.round(frac * (numBins - 1));
-                return (
-                  <text
-                    key={frac}
-                    x={labelW + binIdx * cellW + cellW / 2}
-                    y={numDims * cellH + 16}
-                    textAnchor="middle"
-                    className="fill-(--ds-text-secondary)"
-                    fontSize={12}
-                  >
-                    {(frac * 100).toFixed(0)}%
-                  </text>
-                );
-              })}
-              <text
-                x={labelW + (numBins * cellW) / 2}
-                y={numDims * cellH + 38}
-                textAnchor="middle"
-                className="fill-(--ds-text-secondary)"
-                fontSize={12}
-              >
-                <T>Episode progress</T>
-              </text>
-
-              {/* Color bar */}
-              {Array.from({ length: 10 }, (_, i) => {
-                const t = i / 9;
-                const barX = labelW + numBins * cellW + 16;
-                const barH = (numDims * cellH) / 10;
-                return (
-                  <rect
-                    key={i}
-                    x={barX}
-                    y={(9 - i) * barH}
-                    width={12}
-                    height={barH}
-                    fill="var(--dv-1)"
-                    fillOpacity={varOpacity(t * maxVar)}
-                  />
-                );
-              })}
-              <text
-                x={labelW + numBins * cellW + 34}
-                y={10}
-                className="fill-(--ds-text-secondary)"
-                fontSize={12}
-                dominantBaseline="central"
-              >
-                <T>high</T>
-              </text>
-              <text
-                x={labelW + numBins * cellW + 34}
-                y={numDims * cellH - 4}
-                className="fill-(--ds-text-secondary)"
-                fontSize={12}
-                dominantBaseline="central"
-              >
-                <T>low</T>
-              </text>
-            </svg>
-          </div>
-        </div>
+    <AnalysisCard
+      title="Cross-Episode Action Variance"
+      meta={fill(t("({n} episodes sampled)"), { n: numEpisodes })}
+      info={
+        <p>
+          <T>
+            Shows how much each action dimension varies across episodes at each
+            point in time (normalized 0–100%).
+          </T>
+          <span className="vw-a-em">
+            <T> High-variance regions</T>
+          </span>
+          <T> </T>
+          <T>
+            indicate multi-modal or inconsistent demonstrations — generative
+            policies (diffusion, flow-matching) and action chunking help here by
+            modeling multiple modes.
+          </T>
+          <span className="vw-a-em" data-tone="info">
+            <T> Low-variance regions</T>
+          </span>
+          <T> </T>
+          <T>indicate consistent behavior across demonstrations.</T>
+          <br />
+          <T>Relates to the &quot;coverage&quot; discussion in</T>
+          <T> </T>
+          <a
+            href="https://arxiv.org/abs/2507.09061"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <T>Zhang et al. (2025)</T>
+          </a>
+          <T> </T>
+          <T>
+            — regions with low variance may lack the exploratory coverage needed
+            to prevent compounding errors (Section 4).
+          </T>
+        </p>
       }
-    </T>
+    >
+      <div className="vw-a-histogram-wrap">
+        <svg width={svgW} height={svgH} className="vw-a-histogram">
+          {/* Heatmap cells */}
+          {variance.map((row, bi) =>
+            row.map((v, di) => (
+              <rect
+                key={`${bi}-${di}`}
+                x={labelW + bi * cellW}
+                y={di * cellH}
+                width={cellW}
+                height={cellH}
+                fill="var(--dv-1)"
+                fillOpacity={varOpacity(v)}
+                stroke="var(--ds-surface-1)"
+                strokeWidth={0.5}
+              >
+                <title>
+                  <T>{`${shortName(actionNames[di])} @ ${(timeBins[bi] * 100).toFixed(0)}%: var=${v.toFixed(5)}`}</T>
+                </title>
+              </rect>
+            )),
+          )}
+
+          {/* Y-axis: action names */}
+          {actionNames.map((name, di) => (
+            <text
+              key={di}
+              x={labelW - 4}
+              y={di * cellH + cellH / 2}
+              textAnchor="end"
+              dominantBaseline="central"
+              className="vw-a-svgtext"
+            >
+              {shortName(name)}
+            </text>
+          ))}
+
+          {/* X-axis labels */}
+          {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
+            const binIdx = Math.round(frac * (numBins - 1));
+            return (
+              <text
+                key={frac}
+                x={labelW + binIdx * cellW + cellW / 2}
+                y={numDims * cellH + 16}
+                textAnchor="middle"
+                className="vw-a-svgtext"
+              >
+                {(frac * 100).toFixed(0)}%
+              </text>
+            );
+          })}
+          <text
+            x={labelW + (numBins * cellW) / 2}
+            y={numDims * cellH + 38}
+            textAnchor="middle"
+            className="vw-a-svgtext"
+          >
+            <T>Episode progress</T>
+          </text>
+
+          {/* Color bar */}
+          {Array.from({ length: 10 }, (_, i) => {
+            const t = i / 9;
+            const barX = labelW + numBins * cellW + 16;
+            const barH = (numDims * cellH) / 10;
+            return (
+              <rect
+                key={i}
+                x={barX}
+                y={(9 - i) * barH}
+                width={12}
+                height={barH}
+                fill="var(--dv-1)"
+                fillOpacity={varOpacity(t * maxVar)}
+              />
+            );
+          })}
+          <text
+            x={labelW + numBins * cellW + 34}
+            y={10}
+            className="vw-a-svgtext"
+            dominantBaseline="central"
+          >
+            <T>high</T>
+          </text>
+          <text
+            x={labelW + numBins * cellW + 34}
+            y={numDims * cellH - 4}
+            className="vw-a-svgtext"
+            dominantBaseline="central"
+          >
+            <T>low</T>
+          </text>
+        </svg>
+      </div>
+    </AnalysisCard>
   );
 }
 
@@ -1101,6 +985,7 @@ function SpeedVarianceSection({
   numEpisodes: number;
 }) {
   const isFs = useIsFullscreen();
+  const { t } = useLocale();
   const { speeds, mean, std, cv, median, bins, lo, binW, maxBin, verdict } =
     useMemo(() => {
       const sp = distribution.map((d) => d.speed).sort((a, b) => a - b);
@@ -1120,23 +1005,23 @@ function SpeedVarianceSection({
         b[i]++;
       }
 
-      let v: { label: string; color: string; tip: string };
+      let v: { label: string; tone: Tone; tip: string };
       if (c < 0.2)
         v = {
           label: "Consistent",
-          color: "text-(--ds-success)",
+          tone: "success",
           tip: "Demonstrators execute at similar speeds — no velocity normalization needed.",
         };
       else if (c < 0.4)
         v = {
           label: "Moderate variance",
-          color: "text-(--ds-warning)",
+          tone: "warning",
           tip: "Some speed variation across demonstrators. Consider velocity normalization for best results.",
         };
       else
         v = {
           label: "High variance",
-          color: "text-(--ds-danger)",
+          tone: "danger",
           tip: "Large speed differences between demonstrations. Velocity normalization before training is strongly recommended.",
         };
 
@@ -1160,155 +1045,106 @@ function SpeedVarianceSection({
   const barW = Math.max(8, Math.floor((isFs ? 900 : 500) / bins.length));
 
   return (
-    <T>
-      {
-        <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator) space-y-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-(--ds-text-primary)">
-                <T>Demonstrator Speed Variance</T>
-                <span className="text-xs text-(--ds-text-secondary) ml-2 font-normal">
-                  (<T>{numEpisodes}</T>
-                  <T> episodes)</T>
-                </span>
-              </h3>
-              <InfoToggle>
-                <p className="text-xs text-(--ds-text-secondary)">
-                  <T>Distribution of average execution speed (mean ‖Δa</T>
-                  <sub>t</sub>
-                  <T>
-                    ‖ per frame) across all episodes. Different human
-                    demonstrators often execute at{" "}
-                  </T>
-                  <span className="text-(--ds-text-primary)">
-                    <T>different speeds</T>
-                  </span>
-                  <T>
-                    , creating artificial multimodality in the action
-                    distribution that confuses the policy. A coefficient of
-                    variation (CV) above 0.3 strongly suggests normalizing
-                    trajectory speed before training.
-                  </T>
-                  <br />
-                  <span className="text-(--ds-text-secondary)">
-                    <T>
-                      Based on &quot;Is Diversity All You Need&quot; (AGI-Bot,
-                      2025) which shows velocity normalization dramatically
-                      improves fine-tuning success rate.
-                    </T>
-                  </span>
-                </p>
-              </InfoToggle>
-            </div>
-          </div>
-
-          <div className="flex gap-4">
-            <div className="flex-1 overflow-x-auto">
-              <svg
-                width={bins.length * barW}
-                height={barH + 26}
-                className="block"
-              >
-                {bins.map((count: number, i: number) => {
-                  const h = maxBin > 0 ? (count / maxBin) * barH : 0;
-                  const speed = lo + (i + 0.5) * binW;
-                  const ratio = median > 0 ? speed / median : 1;
-                  const dev = Math.abs(ratio - 1);
-                  const color =
-                    dev < 0.2
-                      ? "var(--ds-success)"
-                      : dev < 0.5
-                        ? "var(--ds-warning)"
-                        : "var(--ds-danger)";
-                  return (
-                    <rect
-                      key={i}
-                      x={i * barW}
-                      y={barH - h}
-                      width={barW - 1}
-                      height={Math.max(1, h)}
-                      fill={color}
-                      opacity={0.7}
-                      rx={1}
-                    >
-                      <title>
-                        <T>{`Speed ${(lo + i * binW).toFixed(3)}–${(lo + (i + 1) * binW).toFixed(3)}: ${count} ep (${ratio.toFixed(2)}× median)`}</T>
-                      </title>
-                    </rect>
-                  );
-                })}
-                {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
-                  const idx = Math.round(frac * (bins.length - 1));
-                  return (
-                    <text
-                      key={frac}
-                      x={idx * barW + barW / 2}
-                      y={barH + 16}
-                      textAnchor="middle"
-                      className="fill-(--ds-text-secondary)"
-                      fontSize={12}
-                    >
-                      {(lo + idx * binW).toFixed(2)}
-                    </text>
-                  );
-                })}
-              </svg>
-            </div>
-            <div className="flex flex-col gap-2 text-xs shrink-0 min-w-[120px]">
-              <div>
-                <span className="text-(--ds-text-secondary)">
-                  <T>Mean</T>
-                </span>
-                <T> </T>
-                <span className="text-(--ds-text-primary) tabular-nums ml-1">
-                  {mean.toFixed(4)}
-                </span>
-              </div>
-              <div>
-                <span className="text-(--ds-text-secondary)">
-                  <T>Median</T>
-                </span>
-                <T> </T>
-                <span className="text-(--ds-text-primary) tabular-nums ml-1">
-                  {median.toFixed(4)}
-                </span>
-              </div>
-              <div>
-                <span className="text-(--ds-text-secondary)">
-                  <T>Std</T>
-                </span>
-                <T> </T>
-                <span className="text-(--ds-text-primary) tabular-nums ml-1">
-                  {std.toFixed(4)}
-                </span>
-              </div>
-              <div>
-                <span className="text-(--ds-text-secondary)">
-                  <T>CV</T>
-                </span>
-                <span
-                  className={`tabular-nums ml-1 font-semibold ${verdict.color}`}
-                >
-                  {cv.toFixed(3)}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-(--ds-surface-sunken) rounded-md px-4 py-3 border border-(--ds-separator) space-y-1.5">
-            <p className="text-sm font-medium text-(--ds-text-primary)">
-              <T>Verdict: </T>
-              <span className={verdict.color}>
-                <T>{verdict.label}</T>
-              </span>
-            </p>
-            <p className="text-xs text-(--ds-text-secondary)">
-              <T>{verdict.tip}</T>
-            </p>
-          </div>
-        </div>
+    <AnalysisCard
+      title="Demonstrator Speed Variance"
+      meta={fill(t("({n} episodes)"), { n: numEpisodes })}
+      info={
+        <p>
+          <T>Distribution of average execution speed (mean ‖Δa</T>
+          <sub>t</sub>
+          <T>
+            ‖ per frame) across all episodes. Different human demonstrators
+            often execute at{" "}
+          </T>
+          <span className="vw-a-em">
+            <T>different speeds</T>
+          </span>
+          <T>
+            , creating artificial multimodality in the action distribution that
+            confuses the policy. A coefficient of variation (CV) above 0.3
+            strongly suggests normalizing trajectory speed before training.
+          </T>
+          <br />
+          <T>
+            Based on &quot;Is Diversity All You Need&quot; (AGI-Bot, 2025) which
+            shows velocity normalization dramatically improves fine-tuning
+            success rate.
+          </T>
+        </p>
       }
-    </T>
+    >
+      <div className="vw-a-row">
+        <div className="vw-a-histogram-wrap">
+          <svg
+            width={bins.length * barW}
+            height={barH + 26}
+            className="vw-a-histogram"
+          >
+            {bins.map((count: number, i: number) => {
+              const h = maxBin > 0 ? (count / maxBin) * barH : 0;
+              const speed = lo + (i + 0.5) * binW;
+              const ratio = median > 0 ? speed / median : 1;
+              const dev = Math.abs(ratio - 1);
+              const color =
+                dev < 0.2
+                  ? "var(--ds-success)"
+                  : dev < 0.5
+                    ? "var(--ds-warning)"
+                    : "var(--ds-danger)";
+              return (
+                <rect
+                  key={i}
+                  className="vw-a-bar"
+                  x={i * barW}
+                  y={barH - h}
+                  width={barW - 1}
+                  height={Math.max(1, h)}
+                  fill={color}
+                  opacity={0.7}
+                  rx={1}
+                >
+                  <title>
+                    <T>{`Speed ${(lo + i * binW).toFixed(3)}–${(lo + (i + 1) * binW).toFixed(3)}: ${count} ep (${ratio.toFixed(2)}× median)`}</T>
+                  </title>
+                </rect>
+              );
+            })}
+            {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
+              const idx = Math.round(frac * (bins.length - 1));
+              return (
+                <text
+                  key={frac}
+                  x={idx * barW + barW / 2}
+                  y={barH + 16}
+                  textAnchor="middle"
+                  className="vw-a-svgtext"
+                >
+                  {(lo + idx * binW).toFixed(2)}
+                </text>
+              );
+            })}
+          </svg>
+        </div>
+        <StatList
+          items={[
+            { label: "Mean", value: mean.toFixed(4) },
+            { label: "Median", value: median.toFixed(4) },
+            { label: "Std", value: std.toFixed(4) },
+            { label: "CV", value: cv.toFixed(3), tone: verdict.tone },
+          ]}
+        />
+      </div>
+
+      <AnalysisNote>
+        <p className="vw-a-note-title">
+          <T>Verdict: </T>
+          <StateBadge tone={verdict.tone}>{t(verdict.label)}</StateBadge>
+        </p>
+        <p className="vw-a-note-text">
+          <T>{verdict.tip}</T>
+        </p>
+      </AnalysisNote>
+    </AnalysisCard>
   );
 }
 
@@ -1326,6 +1162,7 @@ function StateActionAlignmentSection({
   numEpisodes?: number;
 }) {
   const isFs = useIsFullscreen();
+  const { t } = useLocale();
   const result = useMemo(() => {
     if (agg) return { ...agg, fromAgg: true };
     if (data.length < 10) return null;
@@ -1466,231 +1303,234 @@ function StateActionAlignmentSection({
     fromAgg,
   } = result;
   const scopeLabel = fromAgg
-    ? `${numEpisodes} episodes sampled`
-    : "current episode";
+    ? fill(t("{n} episodes sampled"), { n: numEpisodes ?? 0 })
+    : t("current episode");
 
   return (
-    <T>
-      {
-        <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator) space-y-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-(--ds-text-primary)">
-                <T>State–Action Temporal Alignment</T>
-                <span className="text-xs text-(--ds-text-secondary) ml-2 font-normal">
-                  (<T>{scopeLabel}</T>, <T>{numPairs}</T>
-                  <T> matched pair</T>
-                  <T>{numPairs !== 1 ? "s" : ""}</T>)
-                </span>
-              </h3>
-              <InfoToggle>
-                <p className="text-xs text-(--ds-text-secondary)">
-                  <T>Per-dimension cross-correlation between Δaction</T>
-                  <sub>d</sub>
-                  <T>(t) and Δstate</T>
-                  <sub>d</sub>
-                  <T>(t+lag), aggregated as</T>
-                  <span className="text-(--ds-text-primary)">
-                    <T> max</T>
-                  </span>
-                  ,<T> </T>
-                  <span className="text-(--ds-text-primary)">
-                    <T>mean</T>
-                  </span>
-                  <T>, and</T>
-                  <span className="text-(--ds-info)">
-                    <T> min</T>
-                  </span>
-                  <T> across all matched action–state pairs. The</T>
-                  <T> </T>
-                  <span className="text-(--ds-text-primary)">
-                    <T>peak lag</T>
-                  </span>
-                  <T>
-                    {" "}
-                    reveals the effective control delay — the time between when
-                    an action is commanded and when the corresponding state
-                    changes.
-                  </T>
-                  <br />
-                  <span className="text-(--ds-text-secondary)">
-                    <T>Central to ACT (</T>
-                    <a
-                      href="https://arxiv.org/abs/2304.13705"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline hover:text-(--ds-text-secondary)"
-                    >
-                      <T>Zhao et al., 2023</T>
-                    </a>
-                    <T> </T>
-                    <T>
-                      — action chunking compensates for delay), Real-Time
-                      Chunking (RTC,
-                    </T>
-                    <T> </T>
-                    <a
-                      href="https://arxiv.org/abs/2506.07339"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline hover:text-(--ds-text-secondary)"
-                    >
-                      <T>Black et al., 2025</T>
-                    </a>
-                    <T>), and Training-Time RTC (</T>
-                    <a
-                      href="https://arxiv.org/abs/2512.05964"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline hover:text-(--ds-text-secondary)"
-                    >
-                      <T>Black et al., 2025</T>
-                    </a>
-                    <T>
-                      ) — all address the timing mismatch between commanded
-                      actions and observed state changes.
-                    </T>
-                  </span>
-                </p>
-              </InfoToggle>
-            </div>
-          </div>
-
-          {meanPeakLag !== 0 && (
-            <div className="flex items-center gap-3 bg-(--ds-surface-selected) border border-(--ds-border-control) rounded-md px-4 py-2.5">
-              <span className="text-(--ds-text-primary) font-semibold text-lg tabular-nums">
-                <T>{meanPeakLag}</T>
-              </span>
-              <div>
-                <p className="text-sm text-(--ds-text-primary) font-medium">
-                  <T>Mean control delay: </T>
-                  <T>{meanPeakLag}</T>
-                  <T>{Math.abs(meanPeakLag) !== 1 ? " steps" : " step"}</T> (
-                  {(meanPeakLag / fps).toFixed(3)}s)
-                </p>
-                <p className="text-xs text-(--ds-text-secondary)">
-                  <T>
-                    {meanPeakLag > 0
-                      ? `State changes lag behind actions by ~${meanPeakLag} frames on average. Consider aligning action[t] with state[t+${meanPeakLag}].`
-                      : `Actions lag behind state changes by ~${-meanPeakLag} frames on average (predictive actions).`}
-                  </T>
-                  {lagRangeMin !== lagRangeMax &&
-                    ` Individual dimension peaks range from ${lagRangeMin} to ${lagRangeMax} steps.`}
-                </p>
-              </div>
-            </div>
-          )}
-
-          <div className={isFs ? "h-[500px]" : "h-56"}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart
-                data={ccData}
-                margin={{ top: 8, right: 16, left: 0, bottom: 16 }}
-              >
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="var(--ds-separator)"
-                />
-                <XAxis
-                  dataKey="lag"
-                  stroke="var(--ds-separator-strong)"
-                  label={{
-                    value: "Lag (steps)",
-                    position: "insideBottom",
-                    offset: -8,
-                    fill: "var(--ds-text-secondary)",
-                    fontSize: 13,
-                  }}
-                />
-                <YAxis
-                  stroke="var(--ds-separator-strong)"
-                  domain={[-0.5, 1]}
-                  tickFormatter={(v) => Number(v.toFixed(2)).toString()}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: "var(--ds-surface-2)",
-                    border: "1px solid var(--ds-separator)",
-                    borderRadius: 6,
-                  }}
-                  labelFormatter={(v) =>
-                    `Lag ${v} (${(Number(v) / fps).toFixed(3)}s)`
-                  }
-                  formatter={(v: number) => v.toFixed(3)}
-                />
-                <Line
-                  dataKey="max"
-                  stroke="var(--dv-2)"
-                  dot={false}
-                  strokeWidth={2}
-                  isAnimationActive={false}
-                  name="max"
-                />
-                <Line
-                  dataKey="mean"
-                  stroke="var(--ds-text-secondary)"
-                  dot={false}
-                  strokeWidth={2}
-                  isAnimationActive={false}
-                  name="mean"
-                />
-                <Line
-                  dataKey="min"
-                  stroke="var(--dv-1)"
-                  dot={false}
-                  strokeWidth={2}
-                  isAnimationActive={false}
-                  name="min"
-                />
-                <Line
-                  dataKey={() => 0}
-                  stroke="var(--ds-text-tertiary)"
-                  strokeDasharray="6 4"
-                  dot={false}
-                  name="zero"
-                  legendType="none"
-                  isAnimationActive={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="flex flex-wrap gap-x-4 gap-y-1 px-1">
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-[3px] rounded-full shrink-0 bg-(--dv-2)" />
-              <span className="text-xs text-(--ds-text-secondary)">
-                <T>max (peak: lag </T>
-                <T>{maxPeakLag}</T>, r={maxPeakCorr.toFixed(3)})
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-[3px] rounded-full shrink-0 bg-(--ds-text-secondary)" />
-              <span className="text-xs text-(--ds-text-secondary)">
-                <T>mean (peak: lag </T>
-                <T>{meanPeakLag}</T>, r={meanPeakCorr.toFixed(3)})
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-[3px] rounded-full shrink-0 bg-(--dv-1)" />
-              <span className="text-xs text-(--ds-text-secondary)">
-                <T>min (peak: lag </T>
-                <T>{minPeakLag}</T>, r={minPeakCorr.toFixed(3)})
-              </span>
-            </div>
-          </div>
-
-          {meanPeakLag === 0 && (
-            <p className="text-xs text-(--ds-success)">
-              <T>Mean peak correlation at lag 0 (r=</T>
-              {meanPeakCorr.toFixed(3)}
-              <T>
-                ) — actions and state changes are well-aligned in this episode.
-              </T>
-            </p>
-          )}
-        </div>
+    <AnalysisCard
+      title="State–Action Temporal Alignment"
+      meta={fill(
+        t(
+          numPairs !== 1
+            ? "({scope}, {n} matched pairs)"
+            : "({scope}, {n} matched pair)",
+        ),
+        { scope: scopeLabel, n: numPairs },
+      )}
+      info={
+        <p>
+          <T>Per-dimension cross-correlation between Δaction</T>
+          <sub>d</sub>
+          <T>(t) and Δstate</T>
+          <sub>d</sub>
+          <T>(t+lag), aggregated as</T>
+          <span className="vw-a-em">
+            <T> max</T>
+          </span>
+          ,<T> </T>
+          <span className="vw-a-em">
+            <T>mean</T>
+          </span>
+          <T>, and</T>
+          <span className="vw-a-em" data-tone="info">
+            <T> min</T>
+          </span>
+          <T> across all matched action–state pairs. The</T>
+          <T> </T>
+          <span className="vw-a-em">
+            <T>peak lag</T>
+          </span>
+          <T>
+            {" "}
+            reveals the effective control delay — the time between when an
+            action is commanded and when the corresponding state changes.
+          </T>
+          <br />
+          <T>Central to ACT (</T>
+          <a
+            href="https://arxiv.org/abs/2304.13705"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <T>Zhao et al., 2023</T>
+          </a>
+          <T> </T>
+          <T>
+            — action chunking compensates for delay), Real-Time Chunking (RTC,
+          </T>
+          <T> </T>
+          <a
+            href="https://arxiv.org/abs/2506.07339"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <T>Black et al., 2025</T>
+          </a>
+          <T>), and Training-Time RTC (</T>
+          <a
+            href="https://arxiv.org/abs/2512.05964"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <T>Black et al., 2025</T>
+          </a>
+          <T>
+            ) — all address the timing mismatch between commanded actions and
+            observed state changes.
+          </T>
+        </p>
       }
-    </T>
+    >
+      {meanPeakLag !== 0 && (
+        <Callout
+          value={meanPeakLag}
+          title={fill(
+            t(
+              Math.abs(meanPeakLag) !== 1
+                ? "Mean control delay: {n} steps ({s}s)"
+                : "Mean control delay: {n} step ({s}s)",
+            ),
+            { n: meanPeakLag, s: (meanPeakLag / fps).toFixed(3) },
+          )}
+        >
+          {t(
+            meanPeakLag > 0
+              ? `State changes lag behind actions by ~${meanPeakLag} frames on average. Consider aligning action[t] with state[t+${meanPeakLag}].`
+              : `Actions lag behind state changes by ~${-meanPeakLag} frames on average (predictive actions).`,
+          )}
+          {lagRangeMin !== lagRangeMax &&
+            " " +
+              fill(
+                t("Individual dimension peaks range from {a} to {b} steps."),
+                {
+                  a: lagRangeMin,
+                  b: lagRangeMax,
+                },
+              )}
+        </Callout>
+      )}
+
+      <div className={isFs ? "h-[500px]" : "h-56"}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart
+            data={ccData}
+            margin={{ top: 8, right: 16, left: 0, bottom: 16 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--ds-separator)" />
+            <XAxis
+              dataKey="lag"
+              stroke="var(--ds-separator-strong)"
+              label={{
+                value: t("Lag (steps)"),
+                position: "insideBottom",
+                offset: -8,
+                fill: "var(--ds-text-secondary)",
+                fontSize: 13,
+              }}
+            />
+            <YAxis
+              stroke="var(--ds-separator-strong)"
+              domain={[-0.5, 1]}
+              tickFormatter={(v) => Number(v.toFixed(2)).toString()}
+            />
+            <Tooltip
+              contentStyle={{
+                background: "var(--ds-surface-2)",
+                border: "1px solid var(--ds-separator)",
+                borderRadius: 6,
+              }}
+              labelFormatter={(v) =>
+                fill(t("Lag {lag} ({s}s)"), {
+                  lag: String(v),
+                  s: (Number(v) / fps).toFixed(3),
+                })
+              }
+              formatter={(v: number) => v.toFixed(3)}
+            />
+            <Line
+              dataKey="max"
+              stroke="var(--dv-2)"
+              dot={false}
+              strokeWidth={2}
+              isAnimationActive={false}
+              name="max"
+            />
+            <Line
+              dataKey="mean"
+              stroke="var(--ds-text-secondary)"
+              dot={false}
+              strokeWidth={2}
+              isAnimationActive={false}
+              name="mean"
+            />
+            <Line
+              dataKey="min"
+              stroke="var(--dv-1)"
+              dot={false}
+              strokeWidth={2}
+              isAnimationActive={false}
+              name="min"
+            />
+            <Line
+              dataKey={() => 0}
+              stroke="var(--ds-text-tertiary)"
+              strokeDasharray="6 4"
+              dot={false}
+              name="zero"
+              legendType="none"
+              isAnimationActive={false}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="vw-a-legend">
+        <LegendItem
+          swatch={
+            <span
+              className="vw-a-legend__line"
+              style={{ background: "var(--dv-2)" }}
+            />
+          }
+        >
+          {fill(t("max (peak: lag {lag}, r={r})"), {
+            lag: maxPeakLag,
+            r: maxPeakCorr.toFixed(3),
+          })}
+        </LegendItem>
+        <LegendItem swatch={<span className="vw-a-legend__line" />}>
+          {fill(t("mean (peak: lag {lag}, r={r})"), {
+            lag: meanPeakLag,
+            r: meanPeakCorr.toFixed(3),
+          })}
+        </LegendItem>
+        <LegendItem
+          swatch={
+            <span
+              className="vw-a-legend__line"
+              style={{ background: "var(--dv-1)" }}
+            />
+          }
+        >
+          {fill(t("min (peak: lag {lag}, r={r})"), {
+            lag: minPeakLag,
+            r: minPeakCorr.toFixed(3),
+          })}
+        </LegendItem>
+      </div>
+
+      {meanPeakLag === 0 && (
+        <p className="vw-a-ok">
+          <Icon icon={CircleCheck} />
+          {fill(
+            t(
+              "Mean peak correlation at lag 0 (r={r}) — actions and state changes are well-aligned in this episode.",
+            ),
+            { r: meanPeakCorr.toFixed(3) },
+          )}
+        </p>
+      )}
+    </AnalysisCard>
   );
 }
 
@@ -1786,141 +1626,125 @@ function ScopeControls({
     { value: "range", label: "Episode range" },
     ...(multiTask ? [{ value: "task" as const, label: "By task" }] : []),
   ];
+  const { t } = useLocale();
+  const analyzeLabel = loading ? "Analyzing…" : dirty ? "Analyze" : "Analyzed";
+  const analyzeNoteId = useId();
 
   return (
-    <T>
-      {
-        <div className="bg-(--ds-surface-1) rounded-lg p-4 border border-(--ds-separator) space-y-3">
-          <div className="flex items-center flex-wrap gap-x-4 gap-y-2">
-            <span className="text-xs text-(--ds-text-secondary)">
-              <T>Analysis scope</T>
-            </span>
-            <div className="flex items-center gap-1 rounded-md border border-(--ds-separator) p-0.5">
-              {kinds.map((option) => (
-                <button
-                  key={option.value}
-                  onClick={() => setKind(option.value)}
-                  className={`px-2.5 py-1 text-xs rounded transition-colors ${
-                    kind === option.value
-                      ? "bg-(--ds-surface-selected) text-(--ds-text-primary)"
-                      : "text-(--ds-text-secondary) hover:text-(--ds-text-primary)"
-                  }`}
-                >
-                  <T>{option.label}</T>
-                </button>
-              ))}
-            </div>
-
-            {kind === "range" && (
-              <div className="flex items-center gap-2 text-xs text-(--ds-text-secondary)">
-                <label className="flex items-center gap-1">
-                  <T>From</T>
-                  <input
-                    type="number"
-                    min={0}
-                    max={lastEpisode}
-                    value={from}
-                    onChange={(e) => setFrom(e.target.value)}
-                    className="w-20 bg-(--ds-surface-sunken) border border-(--ds-separator) rounded px-2 py-1 text-(--ds-text-primary) tabular-nums"
-                  />
-                </label>
-                <label className="flex items-center gap-1">
-                  <T>To</T>
-                  <input
-                    type="number"
-                    min={0}
-                    max={lastEpisode}
-                    value={to}
-                    onChange={(e) => setTo(e.target.value)}
-                    className="w-20 bg-(--ds-surface-sunken) border border-(--ds-separator) rounded px-2 py-1 text-(--ds-text-primary) tabular-nums"
-                  />
-                </label>
-                <span className="text-(--ds-text-secondary)">
-                  <T>{`0–${lastEpisode}`}</T>
-                </span>
-              </div>
-            )}
-
-            {kind === "task" && (
-              <select
-                value={task}
-                onChange={(e) => setTask(e.target.value)}
-                className="max-w-xs bg-(--ds-surface-sunken) border border-(--ds-separator) rounded px-2 py-1 text-xs text-(--ds-text-primary)"
-                aria-label="Select a task"
-              >
-                {tasks.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            )}
-
-            <label className="flex items-center gap-1 text-xs text-(--ds-text-secondary)">
-              <T>Sample</T>
-              <select
-                value={shownSample === null ? "all" : String(shownSample)}
-                onChange={(e) =>
-                  setMaxEpisodes(
-                    e.target.value === "all" ? null : Number(e.target.value),
-                  )
-                }
-                className="bg-(--ds-surface-sunken) border border-(--ds-separator) rounded px-2 py-1 text-(--ds-text-primary) tabular-nums"
-                aria-label="Episode sample size"
-              >
-                {sampleOptions.map((n) => (
-                  <option
-                    key={n ?? "all"}
-                    value={n === null ? "all" : String(n)}
-                  >
-                    {n === null ? "All" : String(n)}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <button
-              onClick={() => onRequestChange(draft)}
-              disabled={loading || !dirty}
-              className={`ml-auto px-3 py-1 text-xs rounded-md border transition-colors ${
-                loading || !dirty
-                  ? "border-(--ds-separator) text-(--ds-text-secondary) cursor-not-allowed"
-                  : "border-(--ds-accent) text-(--ds-text-primary) hover:bg-(--ds-surface-selected)"
-              }`}
-            >
-              <T>{loading ? "Analyzing…" : dirty ? "Analyze" : "Analyzed"}</T>
-            </button>
-          </div>
-
-          <p className="text-xs text-(--ds-text-secondary)">
-            {loading && progress ? (
-              <T>{`Loading ${progress.loaded} / ${progress.total} episodes…`}</T>
-            ) : data ? (
-              <>
-                <span className="text-(--ds-text-secondary)">
-                  <T>{describeScope(data.scope)}</T>
-                </span>
-                <T> · </T>
-                <T>
-                  {`Analysed ${data.numEpisodes} of ${data.scopeEpisodes} episodes in scope`}
-                </T>
-                <T> · </T>
-                <T>
-                  {data.sampled
-                    ? "Evenly sampled from the scope."
-                    : "Full coverage — every episode in scope was analysed."}
-                </T>
-              </>
-            ) : (
-              <T>
-                Nothing to show for this scope — it needs at least two episodes
-                with action data.
-              </T>
-            )}
-          </p>
+    <Card variant="sunken" padding="compact" className="vw-a-scope">
+      <div className="vw-a-scope__controls">
+        <div className="ds-field">
+          <span className="ds-field__label" aria-hidden="true">
+            {t("Analysis scope")}
+          </span>
+          <SegmentedControl
+            label={t("Analysis scope")}
+            size="md"
+            value={kind}
+            onChange={(value) => setKind(value as typeof kind)}
+            options={kinds.map((option) => ({
+              value: option.value,
+              label: t(option.label),
+            }))}
+          />
         </div>
-      }
-    </T>
+
+        {kind === "range" && (
+          <>
+            <Field label={t("From")}>
+              <Input
+                type="number"
+                min={0}
+                max={lastEpisode}
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+              />
+            </Field>
+            <Field label={`${t("To")} (0–${lastEpisode})`}>
+              <Input
+                type="number"
+                min={0}
+                max={lastEpisode}
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+              />
+            </Field>
+          </>
+        )}
+
+        {kind === "task" && (
+          <Field label={t("Select a task")}>
+            <Select value={task} onChange={(e) => setTask(e.target.value)}>
+              {tasks.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+
+        <Field label={t("Sample")}>
+          <Select
+            value={shownSample === null ? "all" : String(shownSample)}
+            onChange={(e) =>
+              setMaxEpisodes(
+                e.target.value === "all" ? null : Number(e.target.value),
+              )
+            }
+            aria-label={t("Episode sample size")}
+          >
+            {sampleOptions.map((n) => (
+              <option key={n ?? "all"} value={n === null ? "all" : String(n)}>
+                {n === null ? t("All") : String(n)}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        <Button
+          className="vw-a-scope__go"
+          variant="primary"
+          loading={loading}
+          onClick={() => onRequestChange(draft)}
+          disabled={loading || !dirty}
+          aria-describedby={!loading && !dirty ? analyzeNoteId : undefined}
+        >
+          {t(analyzeLabel)}
+        </Button>
+      </div>
+
+      <p className="vw-a-hint" id={analyzeNoteId}>
+        {loading && progress ? (
+          fill(t("Loading {a} / {b} episodes…"), {
+            a: progress.loaded,
+            b: progress.total,
+          })
+        ) : data ? (
+          <>
+            {t(describeScope(data.scope))}
+            {" · "}
+            {fill(t("Analysed {a} of {b} episodes in scope"), {
+              a: data.numEpisodes,
+              b: data.scopeEpisodes,
+            })}
+            {" · "}
+            {t(
+              data.sampled
+                ? "Evenly sampled from the scope."
+                : "Full coverage — every episode in scope was analysed.",
+            )}
+            {!dirty && (
+              <> {t("Change the scope or the sample to analyse again.")}</>
+            )}
+          </>
+        ) : (
+          t(
+            "Nothing to show for this scope — it needs at least two episodes with action data.",
+          )
+        )}
+      </p>
+    </Card>
   );
 }
 
@@ -1955,84 +1779,80 @@ function ActionInsightsPanel({
   const showAgg = mode === "dataset" && !!crossEpisodeData;
 
   return (
-    <T>
-      {
-        <div className="max-w-5xl mx-auto py-6 space-y-8">
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div>
-              <h2 className="text-xl font-semibold text-(--ds-text-primary)">
-                <T>Action Insights</T>
-              </h2>
-              <p className="text-sm text-(--ds-text-secondary) mt-1">
-                <T>
-                  Data-driven analysis to guide action chunking, data quality
-                  assessment, and training configuration.
-                </T>
-              </p>
-            </div>
-            <SegmentedControl
-              label={t("Analysis scope")}
-              value={mode}
-              onChange={(value) => setMode(value as typeof mode)}
-              options={[
-                { value: "episode", label: t("Current Episode") },
-                {
-                  value: "dataset",
-                  label: `${t("All Episodes")}${
-                    crossEpisodeData ? ` (${crossEpisodeData.numEpisodes})` : ""
-                  }`,
-                },
-              ]}
-            />
-          </div>
-
-          {mode === "dataset" && (
-            <ScopeControls
-              totalEpisodes={totalEpisodes}
-              tasks={tasks}
-              request={crossEpisodeRequest}
-              onRequestChange={onCrossEpisodeRequestChange}
-              loading={crossEpisodeLoading}
-              progress={crossEpisodeProgress}
-              data={crossEpisodeData}
-            />
-          )}
-
-          <FullscreenWrapper>
-            <AutocorrelationSection
-              data={flatChartData}
-              fps={fps}
-              agg={showAgg ? crossEpisodeData?.aggAutocorrelation : null}
-              numEpisodes={crossEpisodeData?.numEpisodes}
-            />
-          </FullscreenWrapper>
-          <FullscreenWrapper>
-            <StateActionAlignmentSection
-              data={flatChartData}
-              fps={fps}
-              agg={showAgg ? crossEpisodeData?.aggAlignment : null}
-              numEpisodes={crossEpisodeData?.numEpisodes}
-            />
-          </FullscreenWrapper>
-
-          {crossEpisodeData?.speedDistribution &&
-            crossEpisodeData.speedDistribution.length > 2 && (
-              <FullscreenWrapper>
-                <SpeedVarianceSection
-                  distribution={crossEpisodeData.speedDistribution}
-                  numEpisodes={crossEpisodeData.numEpisodes}
-                />
-              </FullscreenWrapper>
-            )}
-          <FullscreenWrapper>
-            <VarianceHeatmap
-              data={crossEpisodeData}
-              loading={crossEpisodeLoading}
-            />
-          </FullscreenWrapper>
+    <div className="vw-a-view">
+      <div className="vw-a-view__head">
+        <div>
+          <h2 className="vw-a-section-title">
+            <T>Action Insights</T>
+          </h2>
+          <p>
+            <T>
+              Data-driven analysis to guide action chunking, data quality
+              assessment, and training configuration.
+            </T>
+          </p>
         </div>
-      }
-    </T>
+        <SegmentedControl
+          label={t("Analysis scope")}
+          value={mode}
+          onChange={(value) => setMode(value as typeof mode)}
+          options={[
+            { value: "episode", label: t("Current Episode") },
+            {
+              value: "dataset",
+              label: `${t("All Episodes")}${
+                crossEpisodeData ? ` (${crossEpisodeData.numEpisodes})` : ""
+              }`,
+            },
+          ]}
+        />
+      </div>
+
+      {mode === "dataset" && (
+        <ScopeControls
+          totalEpisodes={totalEpisodes}
+          tasks={tasks}
+          request={crossEpisodeRequest}
+          onRequestChange={onCrossEpisodeRequestChange}
+          loading={crossEpisodeLoading}
+          progress={crossEpisodeProgress}
+          data={crossEpisodeData}
+        />
+      )}
+
+      <FullscreenWrapper>
+        <AutocorrelationSection
+          data={flatChartData}
+          fps={fps}
+          agg={showAgg ? crossEpisodeData?.aggAutocorrelation : null}
+          numEpisodes={crossEpisodeData?.numEpisodes}
+        />
+      </FullscreenWrapper>
+      <FullscreenWrapper>
+        <StateActionAlignmentSection
+          data={flatChartData}
+          fps={fps}
+          agg={showAgg ? crossEpisodeData?.aggAlignment : null}
+          numEpisodes={crossEpisodeData?.numEpisodes}
+        />
+      </FullscreenWrapper>
+
+      {crossEpisodeData?.speedDistribution &&
+        crossEpisodeData.speedDistribution.length > 2 && (
+          <FullscreenWrapper>
+            <SpeedVarianceSection
+              distribution={crossEpisodeData.speedDistribution}
+              numEpisodes={crossEpisodeData.numEpisodes}
+            />
+          </FullscreenWrapper>
+        )}
+      <FullscreenWrapper>
+        <VarianceHeatmap
+          data={crossEpisodeData}
+          loading={crossEpisodeLoading}
+        />
+      </FullscreenWrapper>
+    </div>
   );
 }
 
