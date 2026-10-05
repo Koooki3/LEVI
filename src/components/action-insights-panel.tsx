@@ -1639,7 +1639,7 @@ function ScopeControls({
           </span>
           <SegmentedControl
             label={t("Analysis scope")}
-            size="sm"
+            size="md"
             value={kind}
             onChange={(value) => setKind(value as typeof kind)}
             options={kinds.map((option) => ({
@@ -1705,7 +1705,6 @@ function ScopeControls({
         <Button
           className="vw-a-scope__go"
           variant="primary"
-          size="sm"
           loading={loading}
           onClick={() => onRequestChange(draft)}
           disabled={loading || !dirty}
@@ -1736,10 +1735,7 @@ function ScopeControls({
                 : "Full coverage — every episode in scope was analysed.",
             )}
             {!dirty && (
-              <>
-                {" · "}
-                {t("Change the scope or the sample to analyse again.")}
-              </>
+              <> {t("Change the scope or the sample to analyse again.")}</>
             )}
           </>
         ) : (

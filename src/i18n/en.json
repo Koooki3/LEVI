@@ -2395,5 +2395,8 @@
   "Playhead": "Playhead",
   "Drag to scrub, or use the arrow keys": "Drag to scrub, or use the arrow keys",
   "contradicted": "contradicted",
-  "Type a label to add it.": "Type a label to add it."
+  "Type a label to add it.": "Type a label to add it.",
+  "Skip links": "Skip links",
+  "Skip to content": "Skip to content",
+  "Skip to inspector": "Skip to inspector"
 }

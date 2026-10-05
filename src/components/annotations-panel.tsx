@@ -1,6 +1,7 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
 import { T, useLocale } from "@/components/levi-locale";
+import { roundTo2 } from "@/components/viewer/time-format";
 import { useConfirmAction } from "@/components/shell/confirm";
 import {
   DatabaseZap,
@@ -65,7 +66,7 @@ interface Props {
   cameraKeys: string[];
 }
 
-function fmtTime(s: number): string {
+function formatSeconds(s: number): string {
   return s.toFixed(3) + "s";
 }
 
@@ -817,7 +818,9 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
               <span className="ts-pill">
                 t ={" "}
                 <T>
-                  {qaDef.atEpisodeStart ? fmtTime(0) : fmtTime(currentTime)}
+                  {qaDef.atEpisodeStart
+                    ? formatSeconds(0)
+                    : formatSeconds(currentTime)}
                 </T>
               </span>
               <select
@@ -902,7 +905,7 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                       {t("Go to inspector")}
                     </Button>
                   )}
-                  <span className="ts-pill">{fmtTime(currentTime)}</span>
+                  <span className="ts-pill">{formatSeconds(currentTime)}</span>
                 </span>
               </div>
               {atoms.length === 0 && (
@@ -1040,7 +1043,7 @@ const RailGroup: React.FC<{
                   if (event.key === "Enter") revealInspector?.();
                 }}
               >
-                <span className="ts">{fmtTime(atom.timestamp)}</span>
+                <span className="ts">{formatSeconds(atom.timestamp)}</span>
                 <span className="body">
                   <T>{label}</T>
                 </span>
@@ -1071,28 +1074,31 @@ const AtomEditor: React.FC<{
   const cameraLabel = atom.camera ?? "all cameras";
   const roleLabel = isSpeech ? "speech" : atom.role;
   const [timestampDraft, setTimestampDraft] = useState(() =>
-    String(atom.timestamp),
+    roundTo2(atom.timestamp),
   );
   const [toDraft, setToDraft] = useState(() =>
-    atom.to != null ? String(atom.to) : "",
+    atom.to != null ? roundTo2(atom.to) : "",
   );
 
   React.useEffect(() => {
-    setTimestampDraft(String(atom.timestamp));
+    setTimestampDraft(roundTo2(atom.timestamp));
   }, [atom.timestamp]);
   React.useEffect(() => {
-    setToDraft(atom.to != null ? String(atom.to) : "");
+    setToDraft(atom.to != null ? roundTo2(atom.to) : "");
   }, [atom.to]);
 
   const commitTimestamp = React.useCallback(
     (raw = timestampDraft) => {
+      // Unchanged text (the display is rounded to 0.01 s): keep the exact
+      // stored time instead of rewriting it with the rounded one.
+      if (raw === roundTo2(atom.timestamp)) return;
       const next = Number(raw);
       if (!Number.isFinite(next) || next < 0) {
-        setTimestampDraft(String(atom.timestamp));
+        setTimestampDraft(roundTo2(atom.timestamp));
         return;
       }
       onChange({ timestamp: next });
-      setTimestampDraft(String(next));
+      setTimestampDraft(roundTo2(next));
     },
     [atom.timestamp, onChange, timestampDraft],
   );
@@ -1101,7 +1107,7 @@ const AtomEditor: React.FC<{
     const parsed = Number(timestampDraft);
     const next = snap(Number.isFinite(parsed) ? parsed : atom.timestamp);
     onChange({ timestamp: next });
-    setTimestampDraft(String(next));
+    setTimestampDraft(roundTo2(next));
   };
 
   // Optional range end — LEVI-only editorial metadata (never exported into
@@ -1115,13 +1121,14 @@ const AtomEditor: React.FC<{
         setToDraft("");
         return;
       }
+      if (atom.to != null && trimmed === roundTo2(atom.to)) return;
       const next = Number(trimmed);
       if (!Number.isFinite(next) || next < atom.timestamp) {
-        setToDraft(atom.to != null ? String(atom.to) : "");
+        setToDraft(atom.to != null ? roundTo2(atom.to) : "");
         return;
       }
       onChange({ to: next });
-      setToDraft(String(next));
+      setToDraft(roundTo2(next));
     },
     [atom.timestamp, atom.to, onChange, toDraft],
   );
@@ -1131,16 +1138,16 @@ const AtomEditor: React.FC<{
     const base = Number.isFinite(parsed) ? parsed : (atom.to ?? atom.timestamp);
     const next = Math.max(atom.timestamp, snap(base));
     onChange({ to: next });
-    setToDraft(String(next));
+    setToDraft(roundTo2(next));
   };
 
   // Content edits (the textarea below) commit on every keystroke — there's
   // nothing pending there. Timestamp/`to` are the only fields with a
   // draft-then-commit pattern, so they're the only ones a Ctrl+S/Escape
   // shortcut needs to resolve.
-  const committedToStr = atom.to != null ? String(atom.to) : "";
+  const committedToStr = atom.to != null ? roundTo2(atom.to) : "";
   const hasDraft =
-    timestampDraft !== String(atom.timestamp) || toDraft !== committedToStr;
+    timestampDraft !== roundTo2(atom.timestamp) || toDraft !== committedToStr;
   useAnnotationDraftShortcuts({
     hasDraft,
     onCommit: () => {
@@ -1148,7 +1155,7 @@ const AtomEditor: React.FC<{
       commitTo();
     },
     onCancel: () => {
-      setTimestampDraft(String(atom.timestamp));
+      setTimestampDraft(roundTo2(atom.timestamp));
       setToDraft(committedToStr);
     },
   });
@@ -1165,9 +1172,9 @@ const AtomEditor: React.FC<{
               <StylePill style={atom.style} />
               <div>
                 <strong>
-                  {fmtTime(atom.timestamp)}
+                  {formatSeconds(atom.timestamp)}
                   {atom.to != null && atom.to > atom.timestamp
-                    ? ` → ${fmtTime(atom.to)}`
+                    ? ` → ${formatSeconds(atom.to)}`
                     : ""}
                 </strong>
                 <span>
@@ -1225,7 +1232,7 @@ const AtomEditor: React.FC<{
                 onKeyDown={(e) => {
                   if (e.key === "Enter") commitTimestamp();
                   if (e.key === "Escape")
-                    setTimestampDraft(String(atom.timestamp));
+                    setTimestampDraft(roundTo2(atom.timestamp));
                 }}
               />
               <Button
@@ -1265,7 +1272,7 @@ const AtomEditor: React.FC<{
                   onKeyDown={(e) => {
                     if (e.key === "Enter") commitTo();
                     if (e.key === "Escape")
-                      setToDraft(atom.to != null ? String(atom.to) : "");
+                      setToDraft(atom.to != null ? roundTo2(atom.to) : "");
                   }}
                 />
                 <Button

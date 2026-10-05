@@ -2395,5 +2395,8 @@
   "Playhead": "播放头",
   "Drag to scrub, or use the arrow keys": "拖动以定位，或用方向键微调",
   "contradicted": "矛盾",
-  "Type a label to add it.": "请先输入标签再添加。"
+  "Type a label to add it.": "请先输入标签再添加。",
+  "Skip links": "跳转链接",
+  "Skip to content": "跳到正文",
+  "Skip to inspector": "跳到检查器"
 }

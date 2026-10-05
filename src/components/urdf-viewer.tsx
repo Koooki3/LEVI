@@ -1110,7 +1110,6 @@ export default function URDFViewer({
                   </span>
                   <SegmentedControl
                     label={t("Data source")}
-                    size="sm"
                     value={selectedGroup}
                     onChange={setSelectedGroup}
                     options={groupNames.map((name) => ({

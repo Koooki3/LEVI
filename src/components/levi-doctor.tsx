@@ -102,7 +102,7 @@ export default function LeviDoctor({ repoId }: { repoId: string }) {
     </Badge>
   );
   return (
-    <section className="flex flex-col gap-4">
+    <section className="vw-a-view">
       <RawCaptureNotice feature="doctor" />
       <Card
         title={t("Dataset quality diagnostics")}

@@ -679,7 +679,7 @@ export default function ObjectAnnotationPanel({
                     </span>
                   </div>
                   <Button
-                    variant="primary"
+                    variant="secondary"
                     size="sm"
                     loading={downloadActive}
                     onClick={() => void downloadCheckpoint()}

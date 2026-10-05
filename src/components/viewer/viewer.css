@@ -1170,6 +1170,7 @@ button.vw-outcome:hover {
 }
 .vw-a-note ul {
   padding-inline-start: var(--ds-space-4);
+  list-style: disc;
 }
 .vw-a-callout {
   display: flex;
@@ -1478,6 +1479,7 @@ button.vw-outcome:hover {
 .vw-a-view {
   display: grid;
   gap: var(--ds-space-6);
+  width: 100%;
   max-width: 64rem;
   margin-inline: auto;
   padding-block: var(--ds-space-6);
@@ -1719,4 +1721,48 @@ button.vw-outcome:hover {
 }
 .vw-series-value[data-off] {
   color: var(--ds-text-secondary);
+}
+/* The full-screen toggle sits in the card's top right corner: the card's own
+   header controls (the info button) move left of it. */
+.vw-a-fs-toggle + .vw-a-card .ds-card__header {
+  padding-inline-end: calc(var(--ds-control-sm) + var(--ds-space-2));
+}
+.vw-a-section-title + .vw-a-hint {
+  margin-top: var(--ds-space-1);
+}
+
+/* Skip links: out of sight until they take keyboard focus. */
+.vw-skip {
+  position: absolute;
+  top: var(--ds-space-2);
+  left: var(--ds-space-2);
+  z-index: var(--ds-z-dialog);
+  display: flex;
+  gap: var(--ds-space-2);
+}
+.vw-skip a {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.vw-skip a:focus {
+  position: static;
+  width: auto;
+  height: auto;
+  padding: var(--ds-space-2) var(--ds-space-3);
+  overflow: visible;
+  clip-path: none;
+  border: 1px solid var(--ds-border-control);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-2);
+  color: var(--ds-text-primary);
+  box-shadow: var(--ds-shadow-2);
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
+.vw-root {
+  position: relative;
 }

@@ -1105,7 +1105,7 @@ export default function FastSegmentationPanel({
                 </label>
               )}
               <Button
-                variant="primary"
+                variant="secondary"
                 loading={labelActive || labelBusy}
                 onClick={() => void startLabel()}
                 disabled={labelActive || labelBusy || !!labelBlocked}
@@ -1237,7 +1237,7 @@ export default function FastSegmentationPanel({
                 </select>
               </label>
               <Button
-                variant="primary"
+                variant="secondary"
                 loading={distilActive || distilBusy}
                 onClick={() => void startDistil()}
                 disabled={distilActive || distilBusy || !!distilBlocked}

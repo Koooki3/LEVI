@@ -1036,7 +1036,7 @@
 
 /* ----- SAM3 object annotation sidecar ----- */
 .annotations-skin .object-annotation-panel {
-  border: 1px solid var(--ds-border-control);
+  border: 1px solid var(--ds-separator);
   border-radius: var(--ds-radius-lg);
   padding: 18px;
   background: var(--ds-surface-1);
@@ -1060,11 +1060,14 @@
   font-weight: var(--ds-weight-semibold);
 }
 .annotations-skin .object-annotation-badge {
-  border: 1px solid var(--ds-border-control);
+  border: 1px solid var(--ds-separator);
   border-radius: 999px;
   padding: 5px 9px;
   color: var(--ds-text-primary);
   font-size: var(--ds-text-caption-size);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   white-space: nowrap;
 }
 .annotations-skin .object-annotation-copy,
@@ -1177,35 +1180,6 @@
   gap: 5px;
   color: var(--ds-text-secondary);
 }
-.annotations-skin .object-annotation-run,
-.annotations-skin .object-annotation-actions button {
-  min-height: 36px;
-  border: 1px solid var(--ds-border-control);
-  border-radius: var(--ds-radius-sm);
-  background: var(--ds-surface-1);
-  color: var(--ds-text-primary);
-  cursor: pointer;
-  padding: 0 12px;
-  font-size: 12px;
-}
-.annotations-skin .object-annotation-run.sam3 {
-  border-color: var(--ds-border-control);
-  background: var(--ds-accent);
-  color: var(--ds-on-accent);
-  font-weight: var(--ds-weight-semibold);
-}
-.annotations-skin .object-annotation-run:hover,
-.annotations-skin .object-annotation-actions button:hover {
-  background: var(--ds-surface-hover);
-}
-.annotations-skin .object-annotation-run.sam3:hover {
-  background: var(--ds-accent-hover);
-}
-.annotations-skin .object-annotation-run:disabled,
-.annotations-skin .object-annotation-actions button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
 .annotations-skin .object-annotation-runtime {
   flex-wrap: wrap;
   margin: 14px 0 2px;
@@ -1273,11 +1247,6 @@
   flex: none;
   gap: 6px;
 }
-.annotations-skin .object-annotation-actions button {
-  min-height: 28px;
-  padding: 0 8px;
-  font-size: var(--ds-text-caption-size);
-}
 @media (max-width: 720px) {
   .annotations-skin .object-annotation-head,
   .annotations-skin .object-annotation-row {
@@ -1297,7 +1266,7 @@
   gap: 10px;
   margin: 16px 0;
   padding: 12px 14px;
-  border: 1px solid var(--ds-border-control);
+  border: 1px solid var(--ds-separator);
   border-radius: var(--ds-radius-md);
   background: var(--ds-surface-2);
 }
@@ -1449,7 +1418,7 @@
   place-items: center;
   width: 24px;
   height: 24px;
-  border: 1px solid var(--ds-border-control);
+  border: 1px solid var(--ds-separator);
   border-radius: 7px;
   color: var(--ds-text-primary);
   font: var(--ds-weight-semibold) var(--ds-text-caption-size)
@@ -1489,7 +1458,7 @@
   gap: 14px;
   margin-top: 14px;
   padding: 10px 12px;
-  border: 1px solid var(--ds-border-control);
+  border: 1px solid var(--ds-separator);
   border-radius: 10px;
   background: var(--ds-surface-1);
 }
@@ -1994,4 +1963,14 @@
 }
 .annotations-skin .quick-popup-actions small {
   margin-right: auto;
+}
+
+/* The playhead line runs through the whole tracks region; a section's title
+   and description sit above it on the card colour, so no text is struck
+   through (the line shows again in the rows, where the tracks are). */
+.annotations-skin .tl-section-head > .tl-section-title,
+.annotations-skin .tl-section-head > .tl-section-sub {
+  position: relative;
+  z-index: 6;
+  background: var(--ds-surface-1);
 }

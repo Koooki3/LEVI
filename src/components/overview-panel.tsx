@@ -238,7 +238,6 @@ export default function OverviewPanel({
               {/* First / Last frame */}
               <SegmentedControl
                 label={t("Frame shown")}
-                size="sm"
                 className="vw-nowrap"
                 value={showLast ? "last" : "first"}
                 onChange={(value) => setShowLast(value === "last")}

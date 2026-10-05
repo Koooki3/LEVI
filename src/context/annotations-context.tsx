@@ -1,6 +1,7 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
 import { T } from "@/components/levi-locale";
+import { isTextEntry } from "@/components/viewer/text-entry";
 
 /**
  * Per-episode annotation state for the v3.1 language schema.
@@ -441,17 +442,15 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   // Ctrl+Z / Cmd+Z undo, Ctrl+Shift+Z / Cmd+Shift+Z / Ctrl+Y redo — global
-  // to the whole annotation surface (not scoped to one field's focus) and
-  // always intercepted: controlled React inputs don't have a working
-  // native undo history of their own to preserve (React overwrites the
-  // DOM value on every keystroke), so there's nothing worth falling back
-  // to — this app-level stack is a strict upgrade, and it's what keeps
-  // sessionStorage/dirty tracking consistent with whatever the shortcut
-  // just changed (those already react to `atoms`, so undo/redo need no
-  // extra wiring there).
+  // to the annotation surface, but NOT while focus is in a text field: there
+  // the browser's own undo of the typed text must work, and the shortcut
+  // list says shortcuts do not fire in text fields. The app-level stack
+  // keeps sessionStorage/dirty tracking consistent with whatever the
+  // shortcut changed (those already react to `atoms`).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
+      if (isTextEntry(e.target) || isTextEntry(document.activeElement)) return;
       const key = e.key.toLowerCase();
       if (key === "z" && e.shiftKey) {
         e.preventDefault();
@@ -467,6 +466,20 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [undo, redo]);
+
+  // Escape clears the selected annotation: after an open layer (a dialog,
+  // the narrow inspector drawer, a field's own Escape) has used the key.
+  useEffect(() => {
+    if (selectedIdx === null) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.isComposing || e.defaultPrevented) return;
+      if (isTextEntry(e.target) || isTextEntry(document.activeElement)) return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      setSelectedIdxState(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedIdx]);
 
   const setPendingDraw = useCallback((draw: PendingDraw) => {
     setPendingDrawState(draw);

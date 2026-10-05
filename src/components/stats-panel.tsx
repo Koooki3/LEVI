@@ -3,6 +3,7 @@
 import { Spinner, Tooltip } from "@/components/ds";
 import { T, useLocale } from "@/components/levi-locale";
 import { AnalysisCard, fill } from "@/components/viewer/analysis-ui";
+import { roundTo2 } from "@/components/viewer/time-format";
 
 import type {
   DatasetDisplayInfo,
@@ -169,7 +170,7 @@ function StatsPanel({
             label: "Total Episodes",
             value: datasetInfo.total_episodes.toLocaleString(),
           },
-          { label: "FPS", value: datasetInfo.fps },
+          { label: "FPS", value: roundTo2(datasetInfo.fps) },
           {
             label: "Total Recording Time",
             value: formatTotalTime(datasetInfo.total_frames, datasetInfo.fps),

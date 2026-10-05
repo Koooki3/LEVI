@@ -32,6 +32,9 @@ function keysOf(file: string): string[] {
     /\bt\(\s*[^()"`]*\?\s*"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"/g,
   ))
     keys.add(m[1]).add(m[2]);
+  // Titles of AnalysisCard are translated by the card itself.
+  for (const m of text.matchAll(/<AnalysisCard\s+title="([^"]+)"/g))
+    keys.add(m[1]);
   return [...keys].map((k) => k.replace(/\s+/g, " ").trim());
 }
 
