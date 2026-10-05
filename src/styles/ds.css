@@ -303,11 +303,13 @@
   background: var(--ds-surface-1);
 }
 .ds-icon-btn:hover:not(:disabled),
-.ds-icon-btn[aria-pressed="true"] {
+.ds-icon-btn[aria-pressed="true"],
+.ds-icon-btn[aria-expanded="true"] {
   background: var(--ds-surface-hover);
   color: var(--ds-text-primary);
 }
-.ds-icon-btn[aria-pressed="true"] {
+.ds-icon-btn[aria-pressed="true"],
+.ds-icon-btn[aria-expanded="true"] {
   background: var(--ds-surface-selected);
 }
 .ds-icon-btn:disabled {

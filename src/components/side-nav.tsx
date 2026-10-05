@@ -15,7 +15,8 @@ import "@/components/viewer/viewer.css";
 
 import Link from "next/link";
 import { roundTo2 } from "@/components/viewer/time-format";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { isTextEntry } from "@/components/viewer/text-entry";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useFlaggedEpisodes } from "@/context/flagged-episodes-context";
 
 import type {
@@ -214,6 +215,26 @@ const Sidebar: React.FC<SidebarProps> = ({
   recapFractions,
 }) => {
   const [mobileVisible, setMobileVisible] = useState(false);
+  const sidebarId = useId();
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  // On a narrow window the list is a drawer: Escape folds it, on the same
+  // level as the inspector drawer (after a layer or menu, never from a text
+  // field, before clearing the selected annotation: document bubble phase).
+  useEffect(() => {
+    if (!mobileVisible) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.isComposing || event.defaultPrevented)
+        return;
+      if (!window.matchMedia?.("(max-width: 899px)").matches) return;
+      if (isTextEntry(event.target)) return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      event.preventDefault();
+      setMobileVisible(false);
+      toggleRef.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [mobileVisible]);
   const { flagged, count, toggle } = useFlaggedEpisodes();
 
   const failureEpisodes = useMemo(() => {
@@ -352,6 +373,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   return (
     <div className="vw-sidebar-wrap">
       <nav
+        id={sidebarId}
         className="vw-sidebar"
         data-mobile-hidden={mobileVisible ? undefined : "true"}
         aria-label={t("Episode list")}
@@ -472,10 +494,12 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       <div className="vw-sidebar-toggle">
         <IconButton
+          ref={toggleRef}
           icon={PanelLeft}
           label={t("Toggle sidebar")}
           size="sm"
-          pressed={mobileVisible}
+          aria-expanded={mobileVisible}
+          aria-controls={sidebarId}
           onClick={() => setMobileVisible((prev) => !prev)}
         />
       </div>
