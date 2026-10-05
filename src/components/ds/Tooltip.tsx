@@ -32,10 +32,11 @@ const NAVIGATION_KEYS = new Set([
 // focus that comes right after a navigation key counts as keyboard focus;
 // a pointer press or any other key (Enter that opened the layer) does not.
 let lastNavigationKeyAt = -Infinity;
-let tracking = false;
+let trackedDocument: Document | null = null;
 function trackInputModality() {
-  if (tracking || typeof document === "undefined") return;
-  tracking = true;
+  if (typeof document === "undefined" || trackedDocument === document) return;
+  // One listener pair per document (tests swap the document between files).
+  trackedDocument = document;
   document.addEventListener(
     "keydown",
     (event) => {

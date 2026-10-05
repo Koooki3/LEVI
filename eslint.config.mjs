@@ -16,11 +16,10 @@ const compat = new FlatCompat({
  * serve (canvas, WebGL and SVG attributes that cannot read CSS variables).
  */
 const HEX_EXCEPTIONS = [
-  // Robot models: material and light colours of the 3D scene (WebGL takes
-  // numbers, and a robot's paint is not a theme colour).
-  "src/components/urdf-viewer.tsx",
   // The viewer's categorical data colours as numbers for canvas and the 3D
-  // scene (the one viewer module with hex; viewer.css holds the CSS side).
+  // scene, and the robot models' material and light colours (WebGL takes
+  // numbers, and a robot's paint is not a theme colour): the one viewer
+  // module with hex; viewer.css holds the CSS side.
   "src/components/viewer/data-palette.ts",
   // Tests build colour strings to assert on them.
   "src/**/__tests__/**",

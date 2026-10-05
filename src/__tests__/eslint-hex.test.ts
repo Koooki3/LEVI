@@ -76,9 +76,8 @@ describe("ESLint: no hard-coded colours in src", () => {
     ).toBe(0);
   }, 30000);
 
-  test("the listed exceptions (robot materials, data palette, tests) may hold colours", async () => {
+  test("the listed exceptions (the data and robot-colour palette module, tests) may hold colours", async () => {
     for (const file of [
-      "src/components/urdf-viewer.tsx",
       "src/components/viewer/data-palette.ts",
       "src/components/shell/__tests__/probe.test.ts",
     ])
