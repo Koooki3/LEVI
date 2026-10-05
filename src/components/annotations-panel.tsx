@@ -66,6 +66,9 @@ interface Props {
   cameraKeys: string[];
 }
 
+// Read-only readouts (list rows, timeline) keep three decimals: they show the
+// exact stored time. The editable fields use `roundTo2` (two decimals) so the
+// number fits the narrow inspector; see AtomEditor for why that is safe.
 function formatSeconds(s: number): string {
   return s.toFixed(3) + "s";
 }
@@ -1060,7 +1063,7 @@ const RailGroup: React.FC<{
 // AtomEditor — form for the currently selected atom.
 // ---------------------------------------------------------------------------
 
-const AtomEditor: React.FC<{
+export const AtomEditor: React.FC<{
   atom: LanguageAtom;
   cameraKeys: string[];
   vocabulary: Vocabulary;
@@ -1089,8 +1092,11 @@ const AtomEditor: React.FC<{
 
   const commitTimestamp = React.useCallback(
     (raw = timestampDraft) => {
-      // Unchanged text (the display is rounded to 0.01 s): keep the exact
-      // stored time instead of rewriting it with the rounded one.
+      // The field shows the time rounded to 0.01 s. Text equal to that
+      // display is "unchanged": keep the exact stored time instead of
+      // rewriting it with the rounded one. (Deliberately typing the same
+      // number as the display, e.g. 1.23 over a stored 1.23456, therefore
+      // writes nothing; type another value, or use "snap to frame".)
       if (raw === roundTo2(atom.timestamp)) return;
       const next = Number(raw);
       if (!Number.isFinite(next) || next < 0) {
@@ -1104,7 +1110,12 @@ const AtomEditor: React.FC<{
   );
 
   const commitSnappedTimestamp = () => {
-    const parsed = Number(timestampDraft);
+    // Snap from the stored time when the draft is untouched: the rounded
+    // display could land next to the wrong frame at high frame rates.
+    const parsed =
+      timestampDraft === roundTo2(atom.timestamp)
+        ? atom.timestamp
+        : Number(timestampDraft);
     const next = snap(Number.isFinite(parsed) ? parsed : atom.timestamp);
     onChange({ timestamp: next });
     setTimestampDraft(roundTo2(next));
@@ -1134,7 +1145,10 @@ const AtomEditor: React.FC<{
   );
 
   const commitSnappedTo = () => {
-    const parsed = Number(toDraft);
+    const parsed =
+      atom.to != null && toDraft === roundTo2(atom.to)
+        ? atom.to
+        : Number(toDraft);
     const base = Number.isFinite(parsed) ? parsed : (atom.to ?? atom.timestamp);
     const next = Math.max(atom.timestamp, snap(base));
     onChange({ to: next });
