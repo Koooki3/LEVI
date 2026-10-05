@@ -9,10 +9,9 @@
  */
 
 /* ── Data palette (categorical, fixed order) ─────────────────────────
- * One source: --dv-N is the design token --ds-data-N (tokens.css, same
- * values); the value after the comma only applies where that token is not
- * defined yet. Each theme scope redeclares it so a dark subtree (video
- * tiles) resolves the dark step.
+ * One source: --dv-N is the design token --ds-data-N (tokens.css); there is
+ * no fallback colour here. Each theme scope redeclares it so a dark subtree
+ * (video tiles) resolves the dark step.
  * Eight hues validated with the dataviz palette checks (adjacent CVD
  * ΔE ≥ 8.4, normal-vision ΔE ≥ 19.3; dark steps ≥ 3:1 on the dark card).
  * Three light steps (aqua, yellow, magenta) are below 3:1 on white, so a
@@ -21,43 +20,43 @@
  * The two blocks for dark must stay identical (system and manual). */
 :root,
 [data-theme="light"] {
-  --dv-1: var(--ds-data-1, #2a78d6); /* blue */
-  --dv-2: var(--ds-data-2, #eb6834); /* orange */
-  --dv-3: var(--ds-data-3, #1baf7a); /* aqua */
-  --dv-4: var(--ds-data-4, #eda100); /* yellow */
-  --dv-5: var(--ds-data-5, #e87ba4); /* magenta */
-  --dv-6: var(--ds-data-6, #008300); /* green */
-  --dv-7: var(--ds-data-7, #4a3aa7); /* violet */
-  --dv-8: var(--ds-data-8, #e34948); /* red */
+  --dv-1: var(--ds-data-1); /* blue */
+  --dv-2: var(--ds-data-2); /* orange */
+  --dv-3: var(--ds-data-3); /* aqua */
+  --dv-4: var(--ds-data-4); /* yellow */
+  --dv-5: var(--ds-data-5); /* magenta */
+  --dv-6: var(--ds-data-6); /* green */
+  --dv-7: var(--ds-data-7); /* violet */
+  --dv-8: var(--ds-data-8); /* red */
   /* Diverging midpoint and the neutral "no data" fill. */
-  --dv-neutral: #b8b8be;
+  --dv-neutral: var(--ds-separator-strong);
   /* Positive / negative (RECAP advantage, value): blue ↔ red poles. */
   --dv-positive: var(--dv-1);
   --dv-negative: var(--dv-8);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --dv-1: var(--ds-data-1, #3987e5);
-    --dv-2: var(--ds-data-2, #d95926);
-    --dv-3: var(--ds-data-3, #199e70);
-    --dv-4: var(--ds-data-4, #c98500);
-    --dv-5: var(--ds-data-5, #d55181);
-    --dv-6: var(--ds-data-6, #008300);
-    --dv-7: var(--ds-data-7, #9085e9);
-    --dv-8: var(--ds-data-8, #e66767);
-    --dv-neutral: #48484a;
+    --dv-1: var(--ds-data-1);
+    --dv-2: var(--ds-data-2);
+    --dv-3: var(--ds-data-3);
+    --dv-4: var(--ds-data-4);
+    --dv-5: var(--ds-data-5);
+    --dv-6: var(--ds-data-6);
+    --dv-7: var(--ds-data-7);
+    --dv-8: var(--ds-data-8);
+    --dv-neutral: var(--ds-separator-strong);
   }
 }
 [data-theme="dark"] {
-  --dv-1: var(--ds-data-1, #3987e5);
-  --dv-2: var(--ds-data-2, #d95926);
-  --dv-3: var(--ds-data-3, #199e70);
-  --dv-4: var(--ds-data-4, #c98500);
-  --dv-5: var(--ds-data-5, #d55181);
-  --dv-6: var(--ds-data-6, #008300);
-  --dv-7: var(--ds-data-7, #9085e9);
-  --dv-8: var(--ds-data-8, #e66767);
-  --dv-neutral: #48484a;
+  --dv-1: var(--ds-data-1);
+  --dv-2: var(--ds-data-2);
+  --dv-3: var(--ds-data-3);
+  --dv-4: var(--ds-data-4);
+  --dv-5: var(--ds-data-5);
+  --dv-6: var(--ds-data-6);
+  --dv-7: var(--ds-data-7);
+  --dv-8: var(--ds-data-8);
+  --dv-neutral: var(--ds-separator-strong);
 }
 
 /* ── Frame ──────────────────────────────────────────────────────────── */
@@ -746,6 +745,10 @@ button.vw-outcome:hover {
   .vw-loading {
     animation: none;
   }
+}
+[data-motion="reduce"] .vw-loading,
+[data-motion="reduce"] .vw-update {
+  animation: none;
 }
 
 /* A bordered panel inside the viewer (replaces the dark-only .panel). */
