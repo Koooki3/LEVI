@@ -41,7 +41,9 @@ export function ConversionWizard({
 }: {
   jobs: Job[];
   refresh: () => Promise<void>;
-  available: boolean;
+  /** Whether the converter can run; null: not known (the catalogue has not
+   * been read), which is neither a yes nor a missing ffmpeg. */
+  available: boolean | null;
   source: string;
   onSourceChange: (value: string) => void;
 }) {
@@ -210,11 +212,21 @@ export function ConversionWizard({
           variant={step === "inspect" ? "primary" : "secondary"}
           icon={ScanSearch}
           loading={inspecting}
-          disabled={busy || !available}
+          disabled={busy || available !== true}
+          aria-describedby={available === true ? undefined : "wb-inspect-why"}
         >
           <T>{inspecting ? "Inspecting…" : "1 · Inspect input"}</T>
         </Button>
       </form>
+      {available !== true && (
+        <p id="wb-inspect-why" className="pg-small pg-mt-2">
+          {t(
+            available === false
+              ? "Inspection needs ffmpeg, which was not found. Install ffmpeg and reload this page."
+              : "Inspection is off until the page can read LEVI's state. Press Try again above.",
+          )}
+        </p>
+      )}
       <details className="pg-mt-3">
         <summary className="pg-small">
           <T>Advanced conversion options</T>
