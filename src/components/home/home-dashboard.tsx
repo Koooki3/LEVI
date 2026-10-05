@@ -383,7 +383,7 @@ function PendingCard({
         <ListSkeleton />
       ) : pending === null ? (
         <ReadError
-          what={t("Agent tasks could not be read just now.")}
+          what={t("Agent tasks could not be read")}
           onRetry={onRetry}
         />
       ) : count === 0 ? (
@@ -451,7 +451,7 @@ function RunningCard({
         <ListSkeleton />
       ) : answer === null ? (
         <ReadError
-          what={t("The job lists could not be read.")}
+          what={t("The job lists could not be read")}
           onRetry={onRetry}
         />
       ) : jobs.length === 0 ? (
@@ -467,7 +467,17 @@ function RunningCard({
               <Link
                 href={job.href}
                 className="levi-home-job pg-home-job ds-focus"
-                aria-label={`${t(job.title)} ${job.subject} · ${t(JOB_PAGE[job.kind])}`}
+                aria-label={[
+                  t(job.title),
+                  job.subject,
+                  t(job.stage),
+                  job.fraction === null
+                    ? ""
+                    : `${Math.round(job.fraction * 100)}%`,
+                  t("Go to {page}").replace("{page}", t(JOB_PAGE[job.kind])),
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               >
                 <span className="pg-home-job__row">
                   <span className="levi-home-list__main">
@@ -526,7 +536,7 @@ function DatasetsCard({
     >
       {failed && (
         <ReadError
-          what={t("The list of local datasets could not be read.")}
+          what={t("The list of local datasets could not be read")}
           onRetry={onRetry}
         />
       )}

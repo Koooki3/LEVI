@@ -2444,5 +2444,11 @@
   "The plan did not start": "计划没有开始",
   "The conversion options are not valid JSON.": "转换参数不是有效的 JSON。",
   "The task text comes from the folder name for: {1}; {2} task(s)": "任务文本取自文件夹名的有：{1}；共 {2} 个任务",
-  "(+{1} more)": "（另有 {1} 个）"
+  "(+{1} more)": "（另有 {1} 个）",
+  "Sync is off until the page can read LEVI's state.": "页面读到 LEVI 的状态之前，不能同步。",
+  "Agent tasks could not be read": "读不到 agent 任务",
+  "The job lists could not be read": "读不到作业列表",
+  "The list of local datasets could not be read": "读不到本地数据集列表",
+  "Go to {page}": "前往{page}",
+  "The training pool is not enabled, so there is nothing to export.": "训练池未启用，没有可导出的内容。"
 }

@@ -21,8 +21,6 @@ export interface Described {
   text: string;
   fix?: string;
   details?: string;
-  /** The LEVI service did not answer at all (stopped, starting). */
-  down?: boolean;
 }
 
 type Translate = (text: string) => string;
@@ -50,7 +48,6 @@ interface Known {
   /** Fills the groups itself when they need translating too. */
   render?: (match: RegExpExecArray, t: Translate) => string;
   fix?: string;
-  down?: boolean;
 }
 
 const KNOWN: Known[] = [
@@ -59,7 +56,6 @@ const KNOWN: Known[] = [
     re: /^LEVI backend unavailable\./,
     why: "LEVI's service did not answer. It may be stopped or still starting.",
     fix: "Start both services with `uv run levi serve`, then try again.",
-    down: true,
   },
   {
     re: /^Path must remain inside the configured workspace/,
@@ -116,12 +112,7 @@ const KNOWN: Known[] = [
         t(
           "Approved task corrections not applied: {1}. Stale: the episode's text is no longer the one corrected. Unmatched: no such episode in the index. Ambiguous: the path is found under more than one pool root.",
         ),
-        [
-          match[0],
-          match[1].replace(/\b(stale|unmatched|ambiguous)\b/g, (word) =>
-            t(word),
-          ),
-        ] as unknown as RegExpExecArray,
+        [match[0], counted(match[1], t)],
       ),
   },
   {
@@ -149,6 +140,21 @@ const KNOWN: Known[] = [
 const UNTRANSLATED =
   "The service gave a reason that has no translation. Its own words are under Technical details.";
 
+/** "1 stale, 2 unmatched" with the kinds translated: "1 条已过期，2 条未匹配"
+ * (English keeps its own words and its comma). */
+function counted(list: string, t: Translate): string {
+  let translated = false;
+  const parts = list.split(", ").map((part) => {
+    const found = /^(\d+) (\w+)$/.exec(part);
+    if (!found) return part;
+    const word = t(found[2]);
+    if (word === found[2]) return part;
+    translated = true;
+    return `${found[1]} 条${word}`;
+  });
+  return parts.join(translated ? "，" : ", ");
+}
+
 function fill(template: string, match: ArrayLike<string>): string {
   return template.replace(
     /\{(\d)\}/g,
@@ -168,7 +174,6 @@ export function describeMessage(
     return {
       text: known.render ? known.render(match, t) : fill(t(known.why), match),
       fix: known.fix ? t(known.fix) : undefined,
-      down: known.down,
     };
   }
   const translated = t(cleaned);

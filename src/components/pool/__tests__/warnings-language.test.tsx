@@ -68,7 +68,7 @@ describe("pool warnings read in one language", () => {
       tzh,
       "zh",
     );
-    expect(text).toContain("2 已过期");
+    expect(text).toContain("2 条已过期");
     expect(text).not.toContain("Approved");
   });
 });

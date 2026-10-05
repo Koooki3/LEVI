@@ -34,8 +34,8 @@ describe("home page data", () => {
     const { host } = await render(<HomeDashboard />);
     await flush(50);
     const text = host.textContent ?? "";
-    expect(text).toContain("The job lists could not be read.");
-    expect(text).toContain("The list of local datasets could not be read.");
+    expect(text).toContain("The job lists could not be read");
+    expect(text).toContain("The list of local datasets could not be read");
     expect(
       [...host.querySelectorAll("button")].filter(
         (button) => button.textContent?.trim() === "Try again",
@@ -91,7 +91,9 @@ describe("home page data", () => {
     expect(
       rows[0].querySelector("[role=progressbar]")!.getAttribute("aria-label"),
     ).toContain("raw_alt_lerobot");
-    expect(rows[0].getAttribute("aria-label")).toContain("Conversion & review");
+    expect(rows[0].getAttribute("aria-label")).toContain(
+      "Go to Conversion & review",
+    );
   });
 
   test("empty answers show the empty states and no error", async () => {

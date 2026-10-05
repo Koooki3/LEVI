@@ -59,7 +59,7 @@ describe("known service sentences", () => {
     ],
     [
       "Approved task corrections not applied: 1 stale, 2 unmatched (stale: the episode's text is no longer the one corrected; unmatched: no such episode in the index; ambiguous: the path is found under more than one pool root)",
-      /1 已过期, 2 未匹配/,
+      /1 条已过期，2 条未匹配/,
     ],
   ];
   test.each(cases)("%s reads in Chinese, once", (raw, expected) => {
@@ -81,10 +81,9 @@ describe("known service sentences", () => {
       tzh,
       "zh",
     );
-    expect(down.down).toBe(true);
     expect(down.fix).toContain("uv run levi serve");
   });
-  test("English keeps the service's sentence in its own words", () => {
+  test("English gets the plain wording, with the names and paths kept", () => {
     const described = describeMessage(
       "Export directory /x/e is outside LEVI_EXPORT_ROOTS (/x)",
       ten,
