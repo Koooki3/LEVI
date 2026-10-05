@@ -1,549 +1,56 @@
-/* Agent Workbench content (interface redesign, stage 4).
+/* Agent Workbench content (interface redesign, stage 4 and its audit fix).
  *
  * The drawer itself (Sheet, header, resize) belongs to the frame
- * (shell.css). Its content keeps its levi-agent-*, levi-activity-* and
- * levi-connection-* class names (agent-workbench.tsx is shared with the
- * frame); these rules restate them with --ds-* tokens under
- * .levi-agent-sheet, so they win over levi.css and follow the theme.
- * No colour literals here.
+ * (shell.css). Its content is built from ds components (Button, Field,
+ * Input, Select, Checkbox, Badge, Card, Tabs, Progress, ...) and the small
+ * pieces in agent-ui.tsx; this file only lays them out (`ag-*`) and keeps the
+ * drag grip. Tokens only, no colour literals, nothing from levi.css.
+ * Motion goes through the --ds-dur-* tokens, which tokens.css sets to 0
+ * under prefers-reduced-motion and under [data-motion="reduce"].
  */
-.levi-agent-sheet .levi-error {
-  color: var(--ds-danger);
-  padding: 12px;
-  border: 1px solid var(--ds-danger);
-  border-radius: var(--ds-radius-sm);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.levi-agent-sheet .levi-agent-dock {
-  min-height: 100%;
-  padding: 22px;
-  background: var(--ds-surface-1);
-  color: var(--ds-text-primary);
-  font-size: var(--ds-text-body-size);
-}
-.levi-agent-sheet .levi-agent-dock header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.levi-agent-sheet .levi-agent-dock h2 {
-  font-size: var(--ds-text-title-1-size);
-  margin: 4px 0;
-}
-.levi-agent-sheet .levi-agent-dock h3 {
-  font-size: var(--ds-text-title-3-size);
-  margin: 15px 0 8px;
-  overflow-wrap: anywhere;
-}
-.levi-agent-sheet .levi-agent-dock small,
-.levi-agent-sheet .levi-agent-muted {
-  color: var(--ds-text-secondary);
-}
-.levi-agent-sheet .levi-agent-dock p {
-  margin: 12px 0;
-  overflow-wrap: anywhere;
-}
-.levi-agent-sheet .levi-agent-dock label {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  margin: 12px 0;
-}
-.levi-agent-sheet .levi-agent-dock input:where(:not(.ds-input)),
-.levi-agent-sheet .levi-agent-dock select:where(:not(.ds-input)),
-.levi-agent-sheet .levi-agent-dock textarea:where(:not(.ds-input)) {
-  width: 100%;
-  padding: 8px;
-  background: var(--ds-field-bg);
-  color: var(--ds-text-primary);
-  border: 1px solid var(--ds-border-control-on-raised);
-  border-radius: var(--ds-radius-sm);
-}
-.levi-agent-sheet .levi-agent-dock select:where(:not(.ds-input)) option {
-  background: var(--ds-surface-2);
-  color: var(--ds-text-primary);
-}
-.levi-agent-sheet
-  .levi-agent-dock
-  button:where(:not(.ds-btn, .ds-icon-btn, .ds-tab)) {
-  border: 1px solid var(--ds-border-control);
-  border-radius: var(--ds-radius-sm);
-  padding: 7px 11px;
-  color: var(--ds-text-primary);
-  background: var(--ds-surface-hover);
-  cursor: pointer;
-}
-.levi-agent-sheet
-  .levi-agent-dock
-  button:where(:not(.ds-btn, .ds-icon-btn, .ds-tab)):disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.levi-agent-sheet
-  .levi-agent-dock
-  button:where(:not(.ds-btn, .ds-icon-btn, .ds-tab)):focus-visible,
-.levi-agent-sheet .levi-agent-dock input:where(:not(.ds-input)):focus-visible,
-.levi-agent-sheet
-  .levi-agent-dock
-  textarea:where(:not(.ds-input)):focus-visible,
-.levi-agent-sheet .levi-agent-dock select:where(:not(.ds-input)):focus-visible {
-  outline: 2px solid var(--ds-focus-ring);
-  outline-offset: 2px;
-}
-.levi-agent-sheet
-  .levi-agent-dock
-  button:where(:not(.ds-btn, .ds-icon-btn, .ds-tab))[aria-pressed="true"] {
-  background: var(--ds-accent);
-  color: var(--ds-on-accent);
-}
-.levi-agent-sheet .levi-agent-tabs,
-.levi-agent-sheet .levi-agent-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 12px 0;
-}
-.levi-agent-sheet .levi-agent-dock .levi-agent-check {
-  flex-direction: row;
-  align-items: flex-start;
-}
-.levi-agent-sheet .levi-agent-check input {
-  width: auto;
-  margin-top: 3px;
-}
-.levi-agent-sheet .levi-agent-budget {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 8px;
-}
-.levi-agent-sheet .levi-agent-error {
-  color: var(--ds-danger);
-  padding: 10px;
-  background: var(--ds-surface-hover);
-  border-radius: var(--ds-radius-md);
-}
-.levi-agent-sheet .levi-agent-review article {
-  border-top: 1px solid var(--ds-separator);
-  padding: 12px 0;
-}
-.levi-agent-sheet .levi-agent-review textarea {
-  margin: 8px 0;
-  min-height: 70px;
-}
-.levi-agent-sheet .levi-agent-dock progress {
-  width: 100%;
-  accent-color: var(--ds-accent);
-}
-.levi-agent-sheet .levi-agent-evidence {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-.levi-agent-sheet .levi-agent-evidence img {
-  width: 100%;
-  border-radius: var(--ds-radius-sm);
-}
-.levi-agent-sheet .levi-agent-dock summary {
-  cursor: pointer;
-  padding: 10px 0;
-}
-.levi-agent-sheet .levi-connection-card {
-  border: 1px solid var(--ds-separator);
-  border-radius: var(--ds-radius-lg);
-  padding: 15px;
-  margin: 12px 0;
-  background: var(--ds-surface-1);
-}
-.levi-agent-sheet .levi-connection-card.selected {
-  border-color: var(--ds-selected-indicator);
-  box-shadow: inset 3px 0 var(--ds-selected-indicator);
-}
-.levi-agent-sheet .levi-connection-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.levi-agent-sheet .levi-connection-title p {
-  margin: 2px 0;
-  font-size: var(--ds-text-caption-size);
-  color: var(--ds-text-secondary);
-}
-.levi-agent-sheet .levi-connection-avatar {
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  width: 38px;
-  height: 38px;
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-accent);
-  color: var(--ds-on-accent);
-  font-weight: var(--ds-weight-semibold);
-  font-size: var(--ds-text-caption-size);
-}
-.levi-agent-sheet .levi-connection-status {
-  margin-left: auto;
-  border-radius: var(--ds-radius-lg);
-  padding: 3px 8px;
-  font-size: var(--ds-text-caption-size);
-  background: var(--ds-surface-hover);
-  color: var(--ds-warning);
-}
-.levi-agent-sheet .levi-connection-status.ready {
-  background: var(--ds-surface-hover);
-  color: var(--ds-text-primary);
-}
-.levi-agent-sheet .levi-agent-endpoint {
-  font-family: var(--ds-font-mono);
-  font-size: var(--ds-text-caption-size);
-  overflow-wrap: anywhere;
-}
-.levi-agent-sheet .levi-agent-mask-frame {
+
+/* ── The dock: one column, one rhythm ───────────────────────────────── */
+.levi-agent-sheet .ag-dock {
   position: relative;
-  background: var(--ds-surface-sunken);
-}
-.levi-agent-sheet .levi-agent-mask-frame img,
-.levi-agent-sheet .levi-agent-review-evidence img {
-  width: 100%;
-  height: auto;
-  display: block;
-  border-radius: var(--ds-radius-md);
-}
-.levi-agent-sheet .levi-agent-mask-frame canvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-.levi-agent-sheet .levi-agent-object article {
-  border-bottom: 1px solid var(--ds-separator);
-  padding: 10px 0;
-}
-.levi-agent-sheet .levi-agent-review-evidence {
-  position: sticky;
-  top: 0;
-  background: var(--ds-surface-1);
-  padding: 8px;
-  z-index: 2;
-}
-.levi-agent-sheet .levi-agent-review-evidence img {
-  max-height: 200px;
-  object-fit: contain;
-}
-.levi-agent-sheet .levi-agent-dock progress::-webkit-progress-bar {
-  background: var(--ds-surface-hover);
-  border-radius: var(--ds-radius-sm);
-}
-.levi-agent-sheet .levi-agent-dock progress::-webkit-progress-value {
-  background: var(--ds-accent);
-  border-radius: var(--ds-radius-sm);
-}
-.levi-agent-sheet .levi-agent-dock progress::-moz-progress-bar {
-  background: var(--ds-accent);
-}
-.levi-agent-sheet .levi-pilot {
-  margin-block: 1rem;
-  padding: 1rem;
-  border: 1px solid var(--ds-separator);
-  border-radius: var(--ds-radius-md);
-}
-.levi-agent-sheet .levi-pilot header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-.levi-agent-sheet .levi-pilot-events {
-  max-height: 24rem;
-  overflow: auto;
-  padding: 0 0 0 1.5rem;
-}
-.levi-agent-sheet .levi-pilot-events li {
-  margin: 0.7rem 0;
-  overflow-wrap: anywhere;
-}
-.levi-agent-sheet .levi-pilot-events small {
-  display: block;
-  opacity: 0.75;
-}
-.levi-agent-sheet .levi-pilot pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-height: 15rem;
-  overflow: auto;
-}
-.levi-agent-sheet .levi-pilot-session {
-  padding-block: 0.75rem;
-}
-.levi-agent-sheet .levi-pilot button {
-  margin: 0.3rem;
-}
-.levi-agent-sheet .levi-activity {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  min-height: 0;
-}
-.levi-agent-sheet .levi-activity-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.levi-agent-sheet .levi-activity-pulse {
-  width: 9px;
-  height: 9px;
-  border-radius: var(--ds-radius-full);
-  background: var(--ds-text-tertiary);
-  box-shadow: 0 0 0 0 transparent;
-}
-.levi-agent-sheet .levi-activity-pulse.live {
-  background: var(--ds-accent);
-  animation: ds-breathe 2s ease-in-out infinite;
-}
-.levi-agent-sheet .levi-activity-paths {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px;
-  border: 1px solid var(--ds-separator);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-surface-1);
-}
-.levi-agent-sheet .levi-activity-paths h4 {
-  margin: 0 0 2px;
-  font-size: var(--ds-text-callout-size);
-  color: var(--ds-text-secondary);
-  font-weight: var(--ds-weight-semibold);
-}
-.levi-agent-sheet .levi-activity-path {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 9px;
-  border: 1px solid transparent;
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-surface-1);
+  gap: var(--ds-space-4);
+  min-height: 100%;
+  padding: var(--ds-space-5) var(--ds-space-6) var(--ds-space-8);
   color: var(--ds-text-primary);
-  text-align: left;
-  cursor: pointer;
-  transition:
-    border-color var(--ds-dur-base) var(--ds-ease-standard),
-    background var(--ds-dur-base) var(--ds-ease-standard);
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-body-size);
+  line-height: var(--ds-text-body-line);
 }
-.levi-agent-sheet .levi-activity-path:hover,
-.levi-agent-sheet .levi-activity-path:focus-visible {
-  border-color: var(--ds-selected-indicator);
-  background: var(--ds-surface-hover);
-}
-.levi-agent-sheet .levi-activity-path code {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--ds-text-caption-size);
-  color: var(--ds-text-secondary);
-}
-.levi-agent-sheet .levi-activity-path-label {
-  font-size: var(--ds-text-caption-size);
-  color: var(--ds-text-primary);
-}
-.levi-agent-sheet .levi-activity-copy {
-  font-size: var(--ds-text-caption-size);
-  color: var(--ds-text-tertiary);
-}
-.levi-agent-sheet .levi-activity-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  max-height: 46vh;
-  overflow-y: auto;
-  scroll-behavior: smooth;
-}
-.levi-agent-sheet .levi-activity-empty {
-  padding: 18px 4px;
-}
-.levi-agent-sheet .levi-activity-row {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 10px;
-  padding: 9px 10px;
-  border: 1px solid var(--ds-separator);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-surface-1);
-  animation: pg-enter var(--ds-dur-base) var(--ds-ease-standard) both;
-}
-.levi-agent-sheet .levi-activity-row.failed {
-  border-color: var(--ds-danger);
-}
-.levi-agent-sheet .levi-activity-dot {
-  width: 8px;
-  height: 8px;
-  margin-top: 6px;
-  border-radius: var(--ds-radius-full);
-  background: var(--ds-text-tertiary);
-}
-.levi-agent-sheet .levi-activity-dot.started {
-  background: var(--ds-accent);
-  animation: ds-breathe 2s ease-in-out infinite;
-}
-.levi-agent-sheet .levi-activity-dot.completed {
-  background: var(--ds-success);
-}
-.levi-agent-sheet .levi-activity-dot.failed {
-  background: var(--ds-danger);
-}
-.levi-agent-sheet .levi-activity-body {
+.levi-agent-sheet .ag-dock > * {
   min-width: 0;
 }
-.levi-agent-sheet .levi-activity-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+.levi-agent-sheet .ag-dock p {
   margin: 0;
+  overflow-wrap: anywhere;
 }
-.levi-agent-sheet .levi-activity-who {
-  padding: 1px 7px;
-  border-radius: var(--ds-radius-full);
-  font-size: var(--ds-text-caption-size);
-  background: var(--ds-surface-hover);
-  color: var(--ds-text-secondary);
+.levi-agent-sheet .ag-dock h3 {
+  margin: 0;
+  font-size: var(--ds-text-title-3-size);
+  line-height: var(--ds-text-title-3-line);
+  font-weight: var(--ds-weight-semibold);
+  overflow-wrap: anywhere;
 }
-.levi-agent-sheet .levi-activity-who.agent {
-  background: var(--ds-surface-selected);
-  color: var(--ds-text-primary);
-}
-.levi-agent-sheet .levi-activity-action {
-  color: var(--ds-text-primary);
-}
-.levi-agent-sheet .levi-activity-chip {
-  padding: 1px 7px;
-  border-radius: var(--ds-radius-full);
-  font-size: var(--ds-text-caption-size);
-  background: var(--ds-surface-1);
-  color: var(--ds-text-secondary);
-}
-.levi-agent-sheet .levi-activity-chip.dataset {
-  color: var(--ds-text-tertiary);
-}
-.levi-agent-sheet .levi-activity-error {
-  margin: 4px 0 0;
-  font-size: var(--ds-text-caption-size);
-  color: var(--ds-danger);
-}
-.levi-agent-sheet .levi-activity-meta {
-  display: flex;
-  gap: 10px;
-  margin: 3px 0 0;
-  font-size: var(--ds-text-caption-size);
-  color: var(--ds-text-tertiary);
-}
-.levi-agent-sheet .levi-activity-tasks {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.levi-agent-sheet .levi-activity-tasks h4 {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.levi-agent-sheet .ag-dock h4 {
   margin: 0;
   font-size: var(--ds-text-callout-size);
+  line-height: var(--ds-text-callout-line);
   font-weight: var(--ds-weight-semibold);
   color: var(--ds-text-secondary);
 }
-.levi-agent-sheet .levi-activity-clear {
-  padding: 2px 8px;
-  border: 1px solid var(--ds-separator);
-  border-radius: var(--ds-radius-full);
-  background: transparent;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-text-caption-size);
-  cursor: pointer;
+.levi-agent-sheet .ag-tabs.ds-tabs {
+  margin: 0;
 }
-.levi-agent-sheet .levi-activity-task {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-  padding: 9px 10px;
-  border: 1px solid var(--ds-separator);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-surface-1);
-  color: var(--ds-text-primary);
-  text-align: left;
-  cursor: pointer;
-  transition:
-    border-color var(--ds-dur-base) var(--ds-ease-standard),
-    background var(--ds-dur-base) var(--ds-ease-standard);
+.levi-agent-sheet .ag-tabs .ds-tabs__list {
+  flex-wrap: wrap;
 }
-.levi-agent-sheet .levi-activity-task:hover,
-.levi-agent-sheet .levi-activity-task:focus-visible {
-  border-color: var(--ds-selected-indicator);
-}
-.levi-agent-sheet .levi-activity-task.selected {
-  border-color: var(--ds-selected-indicator);
-  background: var(--ds-surface-1);
-}
-.levi-agent-sheet .levi-activity-task.done .levi-activity-progress > span {
-  background: var(--ds-success);
-}
-.levi-agent-sheet .levi-activity-task-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.levi-agent-sheet .levi-activity-progress {
-  display: block;
-  height: 4px;
-  border-radius: var(--ds-radius-full);
-  background: var(--ds-surface-hover);
-  overflow: hidden;
-}
-.levi-agent-sheet .levi-activity-progress > span {
-  display: block;
-  height: 100%;
-  border-radius: var(--ds-radius-full);
-  background: var(--ds-progress);
-  transition: width var(--ds-dur-slow) var(--ds-ease-standard);
-}
-.levi-agent-sheet .levi-activity-done {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid var(--ds-selected-indicator);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-surface-selected);
-  animation: pg-enter var(--ds-dur-base) var(--ds-ease-standard) both;
-}
-.levi-agent-sheet .levi-activity-done p {
-  margin: 2px 0 8px;
-}
-.levi-agent-sheet .levi-activity-jump {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 12px;
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-accent);
-  color: var(--ds-on-accent);
-  font-size: var(--ds-text-callout-size);
-  text-decoration: none;
-  white-space: nowrap;
-}
-.levi-agent-sheet .levi-activity-dot.stale {
-  background: var(--ds-text-tertiary);
-}
-.levi-agent-sheet .levi-activity-row.stale {
-  opacity: 0.75;
-}
+
+/* ── The drag grip on the drawer's left edge ───────────────────────── */
 .levi-agent-sheet .levi-agent-grip {
   position: absolute;
   left: 0;
@@ -565,663 +72,647 @@
   transform: translateY(-50%);
   border-radius: var(--ds-radius-full);
   background: var(--ds-surface-hover);
-  transition: background var(--ds-dur-base) var(--ds-ease-standard);
+  transition: background-color var(--ds-dur-base) var(--ds-ease-standard);
 }
 .levi-agent-sheet .levi-agent-grip:hover::after,
 .levi-agent-sheet .levi-agent-grip:focus-visible::after {
   background: var(--ds-accent);
 }
 .levi-agent-sheet .levi-agent-grip:focus-visible {
-  outline: 2px solid var(--ds-selected-indicator);
+  outline: 2px solid var(--ds-focus-ring);
   outline-offset: -2px;
 }
-.levi-agent-sheet .levi-agent-field {
+
+/* ── Layout helpers ────────────────────────────────────────────────── */
+.ag-section,
+.ag-stack,
+.ag-form,
+.ag-conn,
+.ag-proposal,
+.ag-pilot {
+  min-width: 0;
+}
+.ag-section {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin: 12px 0;
+  gap: var(--ds-space-3);
 }
-.levi-agent-sheet .levi-agent-label {
-  font-size: var(--ds-text-body-size);
-  color: var(--ds-text-secondary);
-}
-.levi-agent-sheet .levi-agent-tip {
-  margin: 4px 0 0;
-  font-size: var(--ds-text-caption-size);
-  line-height: 1.5;
-  color: var(--ds-text-tertiary);
-}
-.levi-agent-sheet .levi-chips-field {
+.ag-stack {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--ds-space-2);
 }
-.levi-agent-sheet .levi-chips-actions {
+.ag-form {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: var(--ds-space-3);
 }
-.levi-agent-sheet .levi-chips-actions button {
-  padding: 2px 10px;
-  border: 1px solid var(--ds-separator);
-  border-radius: var(--ds-radius-full);
-  background: transparent;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-text-caption-size);
-  cursor: pointer;
+.ag-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
 }
-.levi-agent-sheet .levi-chips-actions button:hover {
-  border-color: var(--ds-selected-indicator);
+.ag-label {
+  font-size: var(--ds-text-callout-size);
+  line-height: var(--ds-text-callout-line);
+  font-weight: var(--ds-weight-medium);
   color: var(--ds-text-primary);
 }
-.levi-agent-sheet .levi-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  max-height: 168px;
-  overflow-y: auto;
-  padding: 8px;
-  border: 1px solid var(--ds-separator);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-surface-1);
-  touch-action: none;
-  user-select: none;
+.ag-grid2,
+.ag-grid3 {
+  display: grid;
+  gap: var(--ds-space-3);
 }
-.levi-agent-sheet .levi-chips.columns {
-  flex-direction: column;
-  flex-wrap: nowrap;
+.ag-grid2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-.levi-agent-sheet .levi-chip {
-  padding: 3px 10px;
-  border: 1px solid var(--ds-separator);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-surface-1);
+.ag-grid3 {
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+}
+.ag-muted {
   color: var(--ds-text-secondary);
   font-size: var(--ds-text-callout-size);
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-  transition:
-    background var(--ds-dur-fast) var(--ds-ease-standard),
-    border-color var(--ds-dur-fast) var(--ds-ease-standard),
-    color var(--ds-dur-fast) var(--ds-ease-standard);
+  line-height: var(--ds-text-callout-line);
 }
-.levi-agent-sheet .levi-chips.columns .levi-chip {
-  text-align: left;
-}
-.levi-agent-sheet .levi-chip:hover {
-  border-color: var(--ds-selected-indicator);
-}
-.levi-agent-sheet .levi-chip.on {
-  background: var(--ds-accent);
-  border-color: var(--ds-selected-indicator);
-  color: var(--ds-on-accent);
-}
-.levi-agent-sheet .levi-agent-advanced {
-  margin: 10px 0;
-  padding: 10px;
-  border: 1px solid var(--ds-separator);
-  border-radius: var(--ds-radius-md);
-}
-.levi-agent-sheet .levi-agent-advanced summary {
-  cursor: pointer;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-text-body-size);
-}
-.levi-agent-sheet .levi-agent-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 12px 0;
-}
-.levi-agent-sheet .levi-agent-label {
-  font-size: var(--ds-text-body-size);
-  color: var(--ds-text-secondary);
-}
-.levi-agent-sheet .levi-agent-tip {
-  margin: 4px 0 0;
-  font-size: var(--ds-text-caption-size);
-  line-height: 1.5;
-  color: var(--ds-text-tertiary);
-}
-.levi-agent-sheet .levi-chips-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.levi-agent-sheet .levi-chips-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.levi-agent-sheet .levi-chips-actions button {
-  padding: 2px 10px;
-  border: 1px solid var(--ds-separator);
-  border-radius: var(--ds-radius-full);
-  background: transparent;
+.ag-hint {
   color: var(--ds-text-secondary);
   font-size: var(--ds-text-caption-size);
-  cursor: pointer;
+  line-height: var(--ds-text-caption-line);
 }
-.levi-agent-sheet .levi-chips-actions button:hover {
-  border-color: var(--ds-selected-indicator);
-  color: var(--ds-text-primary);
-}
-.levi-agent-sheet .levi-chips {
+.ag-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
-  max-height: 168px;
-  overflow-y: auto;
-  padding: 8px;
+  align-items: flex-start;
+  gap: var(--ds-space-2);
+}
+.ag-actions a.ds-btn {
+  text-decoration: none;
+}
+.ag-danger.ds-btn {
+  color: var(--ds-danger);
+}
+.ag-list {
+  margin: 0;
+  padding-left: var(--ds-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  overflow-wrap: anywhere;
+}
+.ag-list--plain {
+  padding-left: 0;
+  list-style: none;
+}
+.ag-code,
+.ag-endpoint,
+.levi-agent-sheet .ag-dock code {
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  overflow-wrap: anywhere;
+}
+.ag-endpoint {
+  color: var(--ds-text-secondary);
+}
+.ag-pre {
+  margin: 0;
+  max-height: 15rem;
+  overflow: auto;
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border-radius: var(--ds-radius-xs);
+  background: var(--ds-surface-sunken);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  line-height: var(--ds-text-caption-line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* A key/value list: terms in secondary text, values beside them. */
+.ag-facts {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: var(--ds-space-1) var(--ds-space-4);
+  margin: 0 0 var(--ds-space-2);
+  font-size: var(--ds-text-callout-size);
+}
+.ag-facts dt {
+  color: var(--ds-text-secondary);
+}
+.ag-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+/* Counters side by side (the review queue's head, a task's usage). */
+.ag-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
+  gap: var(--ds-space-2);
+  margin: 0;
+}
+.ag-stats > div {
+  display: flex;
+  flex-direction: column-reverse;
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-1);
+}
+.ag-stats dt {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.ag-stats dd {
+  margin: 0;
+  font-size: var(--ds-text-title-3-size);
+  font-weight: var(--ds-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── A disabled button and the reason it is disabled ───────────────── */
+.ag-gated {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ds-space-1);
+  max-width: 100%;
+}
+.ag-why {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+  line-height: var(--ds-text-caption-line);
+}
+
+/* ── Disclosure ────────────────────────────────────────────────────── */
+.ag-disclosure {
   border: 1px solid var(--ds-separator);
   border-radius: var(--ds-radius-md);
   background: var(--ds-surface-1);
-  user-select: none;
-  touch-action: none;
 }
-.levi-agent-sheet .levi-chips.columns {
+.ag-disclosure__summary {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  min-height: var(--ds-control-lg);
+  padding: 0 var(--ds-space-3);
+  border-radius: var(--ds-radius-md);
+  cursor: pointer;
+  list-style: none;
+  font-weight: var(--ds-weight-medium);
+  color: var(--ds-text-primary);
+}
+.ag-disclosure__summary::-webkit-details-marker {
+  display: none;
+}
+.ag-disclosure__summary:hover {
+  background: var(--ds-surface-hover);
+}
+.ag-disclosure__summary > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ag-disclosure__chevron {
+  flex: none;
+  color: var(--ds-icon);
+  transition: transform var(--ds-dur-base) var(--ds-ease-standard);
+}
+.ag-disclosure[open] > .ag-disclosure__summary .ag-disclosure__chevron {
+  transform: rotate(90deg);
+}
+.ag-disclosure__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-2) var(--ds-space-3) var(--ds-space-3);
+}
+.ag-disclosure .ag-disclosure {
+  background: var(--ds-surface-sunken);
+}
+
+/* ── Connection cards ──────────────────────────────────────────────── */
+.ag-conn.ds-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+.ag-conn.is-selected {
+  border-color: var(--ds-selected-indicator);
+  box-shadow: inset 3px 0 var(--ds-selected-indicator);
+}
+.ag-conn-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+}
+.ag-conn-head__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-right: auto;
+}
+.ag-conn-head__title,
+.ag-conn-head__sub {
+  overflow-wrap: anywhere;
+}
+.ag-conn-head__sub {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.ag-tile {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--ds-control-lg);
+  height: var(--ds-control-lg);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-sunken);
+  color: var(--ds-icon);
+}
+.ag-conn .ds-btn[aria-pressed="true"] {
+  background: var(--ds-surface-selected);
+  border-color: var(--ds-selected-indicator);
+  font-weight: var(--ds-weight-semibold);
+}
+.ag-subcard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  padding-top: var(--ds-space-3);
+  border-top: 1px solid var(--ds-separator);
+}
+.ag-download {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+
+/* ── Chips (episodes, cameras, tasks) ──────────────────────────────── */
+.ag-chips-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+.ag-chips-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+.ag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-1);
+  max-height: 11rem;
+  overflow-y: auto;
+  padding: var(--ds-space-2);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-sunken);
+  touch-action: none;
+  user-select: none;
+}
+.ag-chips.is-columns {
   flex-direction: column;
   flex-wrap: nowrap;
 }
-.levi-agent-sheet .levi-chip {
-  padding: 3px 10px;
-  border: 1px solid var(--ds-separator);
-  border-radius: var(--ds-radius-full);
-  background: var(--ds-surface-1);
+.ds-btn.ag-chip {
+  min-width: var(--ds-control-md);
+  font-variant-numeric: tabular-nums;
+}
+.ag-chips.is-columns .ds-btn.ag-chip {
+  justify-content: flex-start;
+  width: 100%;
+  overflow: hidden;
+}
+.ag-chips.is-columns .ds-btn.ag-chip .ds-btn__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Live activity ─────────────────────────────────────────────────── */
+.ag-activity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  min-height: 0;
+}
+.ag-activity__head {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+}
+.ag-activity__tasks,
+.ag-activity__paths {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+.ag-subhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+  min-height: var(--ds-control-sm);
+}
+.ag-paths {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+}
+.ds-btn.ag-path {
+  justify-content: flex-start;
+  width: 100%;
+  min-width: 0;
+  font-weight: var(--ds-weight-regular);
+}
+.ag-path .ds-btn__label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--ds-space-2);
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+}
+.ag-path__label {
+  font-weight: var(--ds-weight-medium);
+}
+.ag-path__code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ds-text-secondary);
+}
+.ag-path__action {
   color: var(--ds-text-secondary);
   font-size: var(--ds-text-caption-size);
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-  transition:
-    background var(--ds-dur-fast) var(--ds-ease-standard),
-    border-color var(--ds-dur-fast) var(--ds-ease-standard),
-    color var(--ds-dur-fast) var(--ds-ease-standard);
 }
-.levi-agent-sheet .levi-chips.columns .levi-chip {
-  text-align: left;
-  border-radius: var(--ds-radius-md);
-}
-.levi-agent-sheet .levi-chip:hover {
-  border-color: var(--ds-selected-indicator);
-  color: var(--ds-text-primary);
-}
-.levi-agent-sheet .levi-chip.on {
-  background: var(--ds-accent);
-  border-color: var(--ds-selected-indicator);
-  color: var(--ds-on-accent);
-}
-.levi-agent-sheet .levi-agent-advanced {
-  margin: 8px 0;
-  padding: 10px;
-  border: 1px solid var(--ds-separator);
-  border-radius: var(--ds-radius-md);
-}
-.levi-agent-sheet .levi-agent-advanced summary {
-  cursor: pointer;
-  font-size: var(--ds-text-body-size);
-  color: var(--ds-text-secondary);
-}
-@media (prefers-reduced-motion: reduce) {
-  .levi-agent-sheet .levi-activity-row,
-  .levi-agent-sheet .levi-activity-pulse.live,
-  .levi-agent-sheet .levi-activity-dot.started {
-    animation: none;
-  }
-  .levi-agent-sheet .levi-activity-list {
-    scroll-behavior: auto;
-  }
-  .levi-agent-sheet .levi-activity-done,
-  .levi-agent-sheet .levi-activity-progress > span {
-    animation: none;
-    transition: none;
-  }
-  .levi-agent-sheet .levi-chip {
-    transition: none;
-  }
-  .levi-agent-sheet .levi-chip {
-    transition: none;
-  }
-}
-
-/* ── Stage-4 adjustments ────────────────────────────────────────────── */
-.levi-agent-sheet .levi-agent-dock {
-  background: transparent;
-  font-family: var(--ds-font-sans);
-}
-.levi-agent-sheet .levi-agent-dock h2 {
-  font-size: var(--ds-text-title-2-size);
-  line-height: var(--ds-text-title-2-line);
-  font-weight: var(--ds-weight-semibold);
-}
-.levi-agent-sheet .levi-agent-dock h3 {
-  font-size: var(--ds-text-title-3-size);
-  font-weight: var(--ds-weight-semibold);
-}
-.levi-agent-sheet .levi-agent-dock .ds-input {
+.ds-btn.ag-task {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: var(--ds-space-2);
   width: 100%;
-}
-.levi-agent-sheet .levi-agent-dock select.ds-input option {
-  background: var(--ds-surface-2);
-  color: var(--ds-text-primary);
-}
-.levi-agent-sheet .levi-agent-dock textarea.ds-input {
+  height: auto;
   padding: var(--ds-space-2) var(--ds-space-3);
-  line-height: var(--ds-text-body-line);
+  white-space: normal;
+  text-align: left;
+  font-weight: var(--ds-weight-regular);
 }
-/* A pressed button (the drawer's tabs, toggles) is the selected state:
-   grey fill, weight and the graphite edge, never a second primary. */
-.levi-agent-sheet .levi-agent-dock .ds-btn[aria-pressed="true"] {
+.ag-task .ds-btn__label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  min-width: 0;
+}
+.ag-task[aria-pressed="true"] {
   background: var(--ds-surface-selected);
   border-color: var(--ds-selected-indicator);
-  font-weight: var(--ds-weight-semibold);
 }
-.levi-agent-sheet .levi-agent-dock :where(small, .levi-agent-muted) {
+.ag-task__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+}
+.ag-task__name {
+  font-weight: var(--ds-weight-medium);
+  overflow-wrap: anywhere;
+}
+.ag-task__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-1) var(--ds-space-3);
   color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
 }
-.levi-agent-sheet .levi-agent-tip {
-  color: var(--ds-text-tertiary-on-raised);
+.ag-has-tip {
+  border-radius: var(--ds-radius-xs);
+  cursor: help;
 }
-.levi-agent-sheet .levi-connection-avatar {
-  background: var(--ds-surface-sunken);
-  color: var(--ds-text-primary);
-  border: 1px solid var(--ds-separator);
+.ag-has-tip:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
 }
-.levi-agent-sheet .levi-connection-status {
-  background: var(--ds-warning-bg);
-  color: var(--ds-warning);
+.ag-bar {
+  display: block;
+  height: 4px;
+  border-radius: var(--ds-radius-full);
+  background: var(--ds-progress-track);
+  overflow: hidden;
 }
-.levi-agent-sheet .levi-connection-status.ready {
-  background: var(--ds-success-bg);
-  color: var(--ds-success);
-}
-.levi-agent-sheet .levi-agent-error {
-  background: var(--ds-danger-bg);
-  border-left: 3px solid var(--ds-danger);
-  color: var(--ds-text-primary);
-}
-.levi-agent-sheet .levi-activity-pulse.live,
-.levi-agent-sheet .levi-activity-dot.started {
-  background: var(--ds-info);
-}
-.levi-agent-sheet .levi-agent-dock progress::-webkit-progress-value,
-.levi-agent-sheet .levi-agent-dock progress::-moz-progress-bar {
+.ag-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: var(--ds-radius-full);
   background: var(--ds-progress);
+  transition: width var(--ds-dur-slow) var(--ds-ease-standard);
 }
-.levi-agent-sheet .levi-agent-dock progress {
-  accent-color: var(--ds-progress);
+.ag-task.is-done .ag-bar > span {
+  background: var(--ds-success);
 }
-.levi-agent-sheet .levi-agent-dock .ds-btn[aria-pressed="true"] {
-  background: var(--ds-surface-selected);
+.ag-done.ds-card {
   border-color: var(--ds-selected-indicator);
-  color: var(--ds-text-primary);
-  font-weight: var(--ds-weight-semibold);
+  background: var(--ds-surface-selected);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
 }
-.levi-agent-sheet .levi-agent-dock .ds-input {
-  min-height: var(--ds-control-md);
-  padding: 0 var(--ds-space-3);
-  border: 1px solid var(--ds-border-control-on-raised);
-  border-radius: var(--ds-radius-sm);
-  background: var(--ds-field-bg);
-  color: var(--ds-text-primary);
+.ag-done .ds-card__header {
+  flex-direction: column;
+  margin-bottom: 0;
 }
-.levi-agent-sheet .levi-agent-dock textarea.ds-input {
+.ag-activity__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.ag-event {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
   padding: var(--ds-space-2) var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+}
+.ag-event.is-failed {
+  border-color: var(--ds-danger);
+}
+.ag-event.is-stale {
+  background: var(--ds-surface-sunken);
+}
+.ag-event__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+.ag-event__action {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ag-event__error {
+  color: var(--ds-danger);
+  font-size: var(--ds-text-caption-size);
+}
+.ag-event__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-1) var(--ds-space-3);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
 }
 
-/* Reduced motion, from the system setting or the app's own switch
-   (data-motion="reduce" on an ancestor, docs/DESIGN.md "Motion"): no entry
-   animation, no breathing, no width or colour transitions. */
-@media (prefers-reduced-motion: reduce) {
-  .levi-agent-sheet .levi-activity-row,
-  .levi-agent-sheet .levi-activity-pulse.live,
-  .levi-agent-sheet .levi-activity-dot.started,
-  .levi-agent-sheet .levi-activity-done,
-  .levi-agent-sheet .levi-activity-progress > span,
-  .levi-agent-sheet .levi-activity-path,
-  .levi-agent-sheet .levi-activity-task,
-  .levi-agent-sheet .levi-agent-grip::after,
-  .levi-agent-sheet .levi-chip,
-  .levi-agent-sheet .levi-agent-dock button {
-    animation: none;
-    transition: none;
-  }
+/* ── Pilot ─────────────────────────────────────────────────────────── */
+.ag-pilot-events {
+  max-height: 24rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0 0 0 var(--ds-space-5);
 }
-[data-motion="reduce"] .levi-agent-sheet .levi-activity-row,
-[data-motion="reduce"] .levi-agent-sheet .levi-activity-pulse.live,
-[data-motion="reduce"] .levi-agent-sheet .levi-activity-dot.started,
-[data-motion="reduce"] .levi-agent-sheet .levi-activity-done,
-[data-motion="reduce"] .levi-agent-sheet .levi-activity-progress > span,
-[data-motion="reduce"] .levi-agent-sheet .levi-activity-path,
-[data-motion="reduce"] .levi-agent-sheet .levi-activity-task,
-[data-motion="reduce"] .levi-agent-sheet .levi-agent-grip::after,
-[data-motion="reduce"] .levi-agent-sheet .levi-chip,
-[data-motion="reduce"] .levi-agent-sheet .levi-agent-dock button {
-  animation: none;
-  transition: none;
+.ag-pilot-events li {
+  margin: var(--ds-space-2) 0;
+  overflow-wrap: anywhere;
 }
-@media (prefers-reduced-motion: reduce) {
-  .levi-agent-sheet .levi-activity-list {
-    scroll-behavior: auto;
-  }
+.ag-pilot-events small {
+  display: block;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
 }
-[data-motion="reduce"] .levi-agent-sheet .levi-activity-list {
-  scroll-behavior: auto;
+
+/* ── Object tool ───────────────────────────────────────────────────── */
+.ag-mask-frame {
+  position: relative;
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-media-bg);
+  overflow: hidden;
+}
+.ag-mask-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.ag-mask-frame canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 /* The object tool's mask overlay: a data colour, read by the canvas from
    this element (media is black in both themes, so the dark step is used).
    --ds-data-6 comes with the data palette; until it is there, the success
    colour stands in. */
-.levi-agent-sheet canvas.levi-agent-mask,
-canvas.levi-agent-mask {
+canvas.ag-mask {
   color: var(--ds-data-6, var(--ds-success));
 }
+.ds-input.ag-range {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--ds-accent);
+}
+
+/* ── Review ────────────────────────────────────────────────────────── */
+.ag-proposal.ds-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+.ag-proposal__nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+}
+.ag-proposal__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+.ag-review-evidence {
+  position: sticky;
+  top: 0;
+  z-index: var(--ds-z-sticky);
+  padding: var(--ds-space-2);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-2);
+}
+.ag-review-evidence img {
+  display: block;
+  width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-media-bg);
+}
+.ag-evidence {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ds-space-2);
+}
+.ds-btn.ag-evidence__item {
+  flex-direction: column;
+  align-items: stretch;
+  height: auto;
+  padding: var(--ds-space-1);
+  white-space: normal;
+  text-align: left;
+}
+.ag-evidence__item .ds-btn__label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-regular);
+}
+.ag-evidence__item img {
+  display: block;
+  width: 100%;
+  border-radius: var(--ds-radius-xs);
+  background: var(--ds-media-bg);
+}
+
 /* An action only a person may take: the badge sits before its buttons. */
 .levi-agent-sheet .pg-human-mark {
   display: inline-flex;
   align-items: center;
-}
-.levi-agent-sheet .levi-agent-dock .levi-agent-danger.ds-btn {
-  color: var(--ds-danger);
-}
-.levi-agent-sheet .levi-agent-tabs.ds-tabs {
-  margin: var(--ds-space-3) 0;
-}
-.levi-agent-sheet .levi-agent-tabs .ds-tabs__list {
-  flex-wrap: wrap;
+  min-height: var(--ds-control-sm);
 }
 
-/* ── ds controls inside the drawer (generated from ds.css) ────────────
-   levi.css styles every button in the dock (".levi-agent-dock button",
-   0-1-1, and its :disabled, :focus-visible and [aria-pressed] forms), which
-   outranks the ds classes (0-1-0). These are ds.css's own rules for the
-   controls that are buttons (Button in every variant and size, IconButton,
-   menu triggers and items, tabs, tag remove, reorder handle, toast action,
-   the focus ring) under the drawer's prefix, so they win again. A test keeps
-   this list equal to ds.css. Remove with levi.css's dock rules (stage 6). */
-.levi-agent-sheet
-  .levi-agent-dock
-  :is(
-    .ds-btn,
-    .ds-icon-btn,
-    .ds-menu__item,
-    .ds-tab,
-    .ds-tag__remove,
-    .ds-reorder__handle,
-    .ds-toast__action
-  ) {
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: inherit;
-  opacity: 1;
-}
-.levi-agent-sheet .levi-agent-dock .ds-focus:focus-visible {
-  outline: 2px solid var(--ds-focus-ring);
-  outline-offset: 2px;
-}
-.levi-agent-sheet .levi-agent-dock .ds-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--ds-space-2);
-  height: var(--ds-control-md);
-  padding: 0 var(--ds-space-3);
-  border: 1px solid transparent;
-  border-radius: var(--ds-radius-sm);
-  font: inherit;
-  font-size: var(--ds-text-body-size);
-  font-weight: var(--ds-weight-medium);
-  line-height: 1;
-  white-space: nowrap;
-  cursor: pointer;
-  user-select: none;
-  transition:
-    background-color var(--ds-dur-fast) var(--ds-ease-standard),
-    border-color var(--ds-dur-fast) var(--ds-ease-standard),
-    color var(--ds-dur-fast) var(--ds-ease-standard),
-    transform var(--ds-dur-fast) var(--ds-ease-standard);
-}
-.levi-agent-sheet
-  .levi-agent-dock
-  .ds-btn:active:not(:disabled):not([aria-busy="true"]) {
-  transform: scale(var(--ds-motion-press-scale));
-}
-.levi-agent-sheet .levi-agent-dock .ds-btn--sm {
-  height: var(--ds-control-sm);
-  padding: 0 var(--ds-space-2);
-  font-size: var(--ds-text-callout-size);
-}
-.levi-agent-sheet .levi-agent-dock .ds-btn--lg {
-  height: var(--ds-control-lg);
-  padding: 0 var(--ds-space-4);
-}
-.levi-agent-sheet .levi-agent-dock .ds-btn--primary {
-  background: var(--ds-accent);
-  color: var(--ds-on-accent);
-}
-.levi-agent-sheet .levi-agent-dock .ds-btn--primary:hover:not(:disabled) {
-  background: var(--ds-accent-hover);
-}
-.levi-agent-sheet .levi-agent-dock .ds-btn--secondary {
-  background: var(--ds-surface-1);
-  border-color: var(--ds-border-control);
-  color: var(--ds-text-primary);
-}
-.levi-agent-sheet .levi-agent-dock .ds-btn--secondary:hover:not(:disabled),
-.levi-agent-sheet .levi-agent-dock .ds-btn--secondary[aria-expanded="true"] {
-  background: var(--ds-surface-hover);
-}
-.levi-agent-sheet .levi-agent-dock .ds-btn--ghost {
-  background: transparent;
-  color: var(--ds-text-primary);
-}
-.levi-agent-sheet .levi-agent-dock .ds-btn--ghost:hover:not(:disabled) {
-  background: var(--ds-surface-hover);
-}
-.levi-agent-sheet .levi-agent-dock .ds-btn--danger {
-  background: var(--ds-danger);
-  color: var(--ds-on-danger);
-}
-.levi-agent-sheet .levi-agent-dock .ds-btn--danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--ds-danger) 88%, var(--ds-text-primary));
-}
-.levi-agent-sheet .levi-agent-dock .ds-btn:disabled {
-  opacity: 1;
-  cursor: not-allowed;
-  background: var(--ds-surface-hover);
-  border-color: transparent;
-  color: var(--ds-text-disabled);
-}
-.levi-agent-sheet .levi-agent-dock .ds-btn[aria-busy="true"] {
-  cursor: progress;
-}
-.levi-agent-sheet .levi-agent-dock .ds-icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--ds-control-md);
-  height: var(--ds-control-md);
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--ds-radius-sm);
-  background: transparent;
-  color: var(--ds-icon);
-  cursor: pointer;
-  transition: background-color var(--ds-dur-fast) var(--ds-ease-standard);
-}
-.levi-agent-sheet .levi-agent-dock .ds-icon-btn--sm {
-  width: var(--ds-control-sm);
-  height: var(--ds-control-sm);
-}
-.levi-agent-sheet .levi-agent-dock .ds-icon-btn--lg {
-  width: var(--ds-control-lg);
-  height: var(--ds-control-lg);
-}
-.levi-agent-sheet .levi-agent-dock .ds-icon-btn--secondary {
-  border-color: var(--ds-border-control);
-  background: var(--ds-surface-1);
-}
-.levi-agent-sheet .levi-agent-dock .ds-icon-btn:hover:not(:disabled),
-.levi-agent-sheet .levi-agent-dock .ds-icon-btn[aria-pressed="true"] {
-  background: var(--ds-surface-hover);
-  color: var(--ds-text-primary);
-}
-.levi-agent-sheet .levi-agent-dock .ds-icon-btn[aria-pressed="true"] {
-  background: var(--ds-surface-selected);
-}
-.levi-agent-sheet .levi-agent-dock .ds-icon-btn:disabled {
-  opacity: 1;
-  cursor: not-allowed;
-  color: var(--ds-text-disabled);
-}
-.levi-agent-sheet .levi-agent-dock .ds-tag__remove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--ds-hit-min);
-  height: var(--ds-hit-min);
-  margin: -1px calc(-1 * var(--ds-space-2)) -1px calc(-1 * var(--ds-space-1));
-  padding: 0;
-  border: 0;
-  border-radius: var(--ds-radius-xs);
-  background: transparent;
-  color: var(--ds-text-secondary);
-  cursor: pointer;
-}
-.levi-agent-sheet .levi-agent-dock .ds-tag__remove-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: var(--ds-radius-xs);
-}
-.levi-agent-sheet .levi-agent-dock .ds-tag__remove .ds-icon {
-  width: 12px;
-  height: 12px;
-}
-.levi-agent-sheet .levi-agent-dock .ds-tag__remove:hover {
-  color: var(--ds-text-primary);
-}
-.levi-agent-sheet .levi-agent-dock .ds-tag__remove:hover .ds-tag__remove-mark {
-  background: var(--ds-surface-hover);
-}
-.levi-agent-sheet .levi-agent-dock .ds-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ds-space-2);
-  height: var(--ds-control-lg);
-  padding: 0 var(--ds-space-3);
-  margin-bottom: -1px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--ds-text-secondary);
-  font: inherit;
-  font-weight: var(--ds-weight-medium);
-  white-space: nowrap;
-  cursor: pointer;
-}
-.levi-agent-sheet .levi-agent-dock .ds-tab:hover:not(:disabled) {
-  color: var(--ds-text-primary);
-}
-.levi-agent-sheet .levi-agent-dock .ds-tab[aria-selected="true"] {
-  color: var(--ds-text-primary);
-  font-weight: var(--ds-weight-semibold);
-  border-bottom-color: var(--ds-selected-indicator);
-}
-.levi-agent-sheet .levi-agent-dock .ds-tab:disabled {
-  color: var(--ds-text-disabled);
-  cursor: not-allowed;
-}
-.levi-agent-sheet .levi-agent-dock .ds-menu__item {
-  display: flex;
-  align-items: center;
-  gap: var(--ds-space-2);
-  width: 100%;
-  height: var(--ds-control-md);
-  padding: 0 var(--ds-space-2);
-  border: 0;
-  border-radius: var(--ds-radius-sm);
-  background: transparent;
-  color: var(--ds-text-primary);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.levi-agent-sheet .levi-agent-dock .ds-menu__item:hover,
-.levi-agent-sheet .levi-agent-dock .ds-menu__item:focus {
-  background: var(--ds-surface-hover);
-}
-.levi-agent-sheet .levi-agent-dock .ds-menu__item[aria-disabled="true"] {
-  color: var(--ds-text-disabled);
-  cursor: not-allowed;
-}
-.levi-agent-sheet .levi-agent-dock .ds-menu__item--danger {
-  color: var(--ds-danger);
-}
-.levi-agent-sheet .levi-agent-dock .ds-toast__action {
-  align-self: center;
-  padding: var(--ds-space-1) var(--ds-space-2);
-  border: 0;
-  border-radius: var(--ds-radius-sm);
-  background: transparent;
-  color: var(--ds-text-primary);
-  font: inherit;
-  font-weight: var(--ds-weight-semibold);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-.levi-agent-sheet .levi-agent-dock .ds-toast__action:hover {
-  background: var(--ds-surface-hover);
-}
-.levi-agent-sheet .levi-agent-dock .ds-reorder__handle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--ds-hit-min);
-  height: var(--ds-control-sm);
-  padding: 0;
-  border: 0;
-  border-radius: var(--ds-radius-xs);
-  background: transparent;
-  color: var(--ds-text-secondary);
-  cursor: grab;
-  touch-action: none;
-}
-.levi-agent-sheet .levi-agent-dock .ds-reorder__handle:active {
-  cursor: grabbing;
-}
-.levi-agent-sheet .levi-agent-dock .ds-menu-trigger--icon {
-  width: var(--ds-control-md);
-  padding: 0;
-  justify-content: center;
-}
-.levi-agent-sheet
-  .levi-agent-dock
-  .ds-menu-trigger--icon:has(.ds-menu-trigger__badge) {
-  width: auto;
-  padding: 0 var(--ds-space-2);
-}
-@media (forced-colors: active) {
-  .levi-agent-sheet .levi-agent-dock .ds-focus:focus-visible {
-    outline-color: Highlight;
+/* Narrow drawer: the paired fields stack. */
+@media (max-width: 520px) {
+  .ag-grid2,
+  .ag-grid3 {
+    grid-template-columns: minmax(0, 1fr);
   }
-  .levi-agent-sheet .levi-agent-dock .ds-tab[aria-selected="true"] {
-    border-color: Highlight;
+  .ag-evidence {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Reduced motion, from the system setting or the app's own switch
+   (data-motion="reduce" on an ancestor, docs/DESIGN.md "Motion"). The
+   duration tokens are already 0 there; this also drops the rules outright. */
 @media (prefers-reduced-motion: reduce) {
-  .levi-agent-sheet .levi-agent-dock .ds-btn,
-  .levi-agent-sheet .levi-agent-dock .ds-icon-btn {
+  .levi-agent-sheet .levi-agent-grip::after,
+  .ag-disclosure__chevron,
+  .ag-bar > span {
     animation: none;
     transition: none;
   }
 }
-[data-motion="reduce"] .levi-agent-sheet .levi-agent-dock .ds-btn,
-[data-motion="reduce"] .levi-agent-sheet .levi-agent-dock .ds-icon-btn {
+[data-motion="reduce"] .levi-agent-sheet .levi-agent-grip::after,
+[data-motion="reduce"] .ag-disclosure__chevron,
+[data-motion="reduce"] .ag-bar > span {
   animation: none;
   transition: none;
 }
