@@ -1,4 +1,5 @@
 "use client";
+import { useServerText } from "@/components/pages-ui/messages";
 import { useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
@@ -95,6 +96,7 @@ export function ExportPanel({
   onPush: (job: PoolJob) => void;
 }) {
   const { t } = useLocale();
+  const serverText = useServerText();
   const [name, setName] = useState("");
   const [outputDir, setOutputDir] = useState("");
   const [cameras, setCameras] = useState(DEFAULT_CAMERAS);
@@ -116,6 +118,23 @@ export function ExportPanel({
     !dirProblem &&
     !busy &&
     !(job && RUNNING.has(job.status));
+  // Why the buttons are off, in words next to them (the blocked-export note
+  // above says it when the composition is what blocks).
+  const whyNot = canRun
+    ? ""
+    : busy
+      ? ""
+      : recipe.tasks.length === 0
+        ? "Add at least one task to the composition."
+        : stopped
+          ? ""
+          : !name
+            ? "Enter a dataset name to export."
+            : nameProblem
+              ? "Fix the dataset name above."
+              : dirProblem
+                ? "Fix the output folder above."
+                : "An export is already running.";
   async function start(dryRun: boolean) {
     setError("");
     setBusy(true);
@@ -303,6 +322,7 @@ export function ExportPanel({
         <Button
           icon={FlaskConical}
           disabled={!canRun}
+          aria-describedby={whyNot ? "pool-export-whynot" : undefined}
           onClick={() => void start(true)}
         >
           {t("Dry run")}
@@ -312,11 +332,17 @@ export function ExportPanel({
           icon={PackagePlus}
           loading={busy}
           disabled={!canRun && !busy}
+          aria-describedby={whyNot ? "pool-export-whynot" : undefined}
           onClick={() => void start(false)}
         >
           {t("Start export")}
         </Button>
       </div>
+      {whyNot && (
+        <p id="pool-export-whynot" className="pg-pool-hint">
+          {t(whyNot)}
+        </p>
+      )}
       {error && (
         <RequestProblem action="The export did not start" message={error} />
       )}
@@ -346,7 +372,7 @@ export function ExportPanel({
           <PoolJobProgress job={job} />
           <JobBanner job={job} onJob={onJob} onLog={setLogFor} />
           {job.error && job.status === "cancelled" && (
-            <p className="pg-pool-muted">{t(job.error)}</p>
+            <p className="pg-pool-muted">{serverText(job.error)}</p>
           )}
           {done && (
             <>

@@ -374,10 +374,20 @@ function TrainingPool() {
       <div className="pg-head">
         <h1>{t("Training pool")}</h1>
         <div className="pg-head-actions">
+          {!scanned && (
+            <span id="pool-export-why" className="pg-pool-muted pg-head-why">
+              {t(
+                status
+                  ? "Scan the pool first to enable the export."
+                  : "Export is available once the pool has been read.",
+              )}
+            </span>
+          )}
           <Button
             variant={scanned ? "primary" : "secondary"}
             icon={PackagePlus}
             disabled={!scanned}
+            aria-describedby={scanned ? undefined : "pool-export-why"}
             onClick={() => goToSection("pool-export", "pool-export-name")}
           >
             {t("Export…")}
@@ -393,6 +403,7 @@ function TrainingPool() {
         <RequestProblem
           action="The training pool request failed"
           message={error}
+          live={false}
           onRetry={() => {
             setError("");
             refreshStatus().catch((e) => setError(String(e)));
@@ -407,7 +418,7 @@ function TrainingPool() {
           <div>
             <h2 id="pool-scan">{t("Pool folders")}</h2>
             {status && !status.enabled ? (
-              <p>
+              <p id="pool-scan-why">
                 {t(
                   "The training pool is idle: set LEVI_POOL_ROOTS to the folders it may read, then restart LEVI.",
                 )}
@@ -423,7 +434,7 @@ function TrainingPool() {
             )}
             <p className="pg-pool-hint">
               {t("Last scan")}:{" "}
-              {summary ? when(summary.scanned_at) : t("never")}
+              {summary ? when(summary.scanned_at) : status ? t("never") : "—"}
               {summary &&
                 ` · ${summary.episodes.toLocaleString()} ${t("episodes")} · ${summary.sources.toLocaleString()} ${t("sources")} · ${summary.tasks.toLocaleString()} ${t("Tasks").toLowerCase()}`}
               {status?.heldout_lists.length
@@ -437,6 +448,9 @@ function TrainingPool() {
               icon={ScanSearch}
               loading={scanRunning}
               disabled={!status?.enabled}
+              aria-describedby={
+                status && !status.enabled ? "pool-scan-why" : undefined
+              }
               onClick={() =>
                 void act(async () => {
                   await leviRequest("POST", "pool/scan");

@@ -5,6 +5,7 @@
  * datasets. Read-only, from existing API answers (home-data.ts) and this
  * browser's own visit list (shell/recent.ts). Styles: src/styles/home.css.
  */
+import "@/components/pages-ui/pages.css";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -37,6 +38,7 @@ import {
   Skeleton,
 } from "@/components/ds";
 import { leviApi } from "@/components/levi-api";
+import { Problem } from "@/components/pages-ui/feedback";
 import { useLocale } from "@/components/levi-locale";
 import { offersTrainingPool } from "@/components/live/embedding";
 import { PulseDot, usePulseNote } from "@/components/live/live-nav";
@@ -62,6 +64,11 @@ import {
 } from "./home-data";
 
 const POLL_MS = 15_000;
+/** Where a running job's row leads (its page's name, for the link's label). */
+const JOB_PAGE: Record<RunningJob["kind"], string> = {
+  conversion: "Conversion & review",
+  pool: "Training pool",
+};
 const DATASET_ID = /^[\w.-]+\/[\w.-]+$/;
 
 type State = {
@@ -158,21 +165,23 @@ function useHomeData(pool: boolean): State & { retry: () => void } {
   return { ...state, retry };
 }
 
-/** A card's answer could not be read: what happened, why, what to do. */
+/** A card's answer could not be read: what happened, why, what to do. The
+ * same three-part box the other pages use for a failed request. */
 function ReadError({ what, onRetry }: { what: string; onRetry: () => void }) {
   const { t } = useLocale();
   return (
-    <div className="levi-home-error">
-      <strong>{what}</strong>
-      <span>
-        {t(
-          "The LEVI service did not answer within 10 s, or answered with an error.",
-        )}
-      </span>
-      <Button variant="secondary" size="sm" icon={RotateCw} onClick={onRetry}>
-        {t("Try again")}
-      </Button>
-    </div>
+    <Problem
+      live={false}
+      title={what}
+      why={t(
+        "The LEVI service did not answer within 10 s, or answered with an error.",
+      )}
+      fix={
+        <Button variant="secondary" size="sm" icon={RotateCw} onClick={onRetry}>
+          {t("Try again")}
+        </Button>
+      }
+    />
   );
 }
 
@@ -350,9 +359,11 @@ function ListSkeleton() {
 function PendingCard({
   pending,
   loaded,
+  onRetry,
 }: {
   pending: PendingTask[] | null;
   loaded: boolean;
+  onRetry: () => void;
 }) {
   const { t } = useLocale();
   const count = pending?.length ?? 0;
@@ -371,9 +382,10 @@ function PendingCard({
       {!loaded ? (
         <ListSkeleton />
       ) : pending === null ? (
-        <p className="levi-home-note">
-          {t("Agent tasks could not be read just now.")}
-        </p>
+        <ReadError
+          what={t("Agent tasks could not be read just now.")}
+          onRetry={onRetry}
+        />
       ) : count === 0 ? (
         <EmptyState
           className="levi-home-empty"
@@ -452,21 +464,29 @@ function RunningCard({
         <ul className="levi-home-list">
           {jobs.slice(0, 5).map((job) => (
             <li key={`${job.kind}-${job.id}`}>
-              <Link href={job.href} className="levi-home-job ds-focus">
-                <span className="levi-home-list__main">
-                  <strong>{t(job.title)}</strong>
-                  <span className="levi-home-meta">
-                    {job.subject && (
-                      <span className="levi-home-mono">{job.subject}</span>
-                    )}
-                    {job.subject && " · "}
-                    {t(job.stage)}
+              <Link
+                href={job.href}
+                className="levi-home-job pg-home-job ds-focus"
+                aria-label={`${t(job.title)} ${job.subject} · ${t(JOB_PAGE[job.kind])}`}
+              >
+                <span className="pg-home-job__row">
+                  <span className="levi-home-list__main">
+                    <strong>{t(job.title)}</strong>
+                    <span className="levi-home-meta">
+                      {job.subject && (
+                        <span className="levi-home-mono">{job.subject}</span>
+                      )}
+                      {job.subject && " · "}
+                      {t(job.stage)}
+                    </span>
                   </span>
+                  <Icon icon={ArrowRight} className="pg-home-job__go" />
                 </span>
                 <Progress
-                  className="levi-home-job__bar"
+                  className="levi-home-job__bar pg-home-job__bar"
                   label={`${t(job.title)} ${job.subject}`}
                   value={job.fraction === null ? null : job.fraction * 100}
+                  showValue
                 />
               </Link>
             </li>
@@ -595,7 +615,11 @@ export function HomeDashboard() {
 
       <h2 className="ds-sr-only">{t("Your work")}</h2>
       <div className="levi-home-grid">
-        <PendingCard pending={pending ?? null} loaded={pending !== undefined} />
+        <PendingCard
+          pending={pending ?? null}
+          loaded={pending !== undefined}
+          onRetry={retry}
+        />
         <RunningCard
           jobs={jobs ?? null}
           loaded={jobs !== undefined}

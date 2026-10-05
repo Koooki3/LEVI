@@ -1,4 +1,5 @@
 "use client";
+import { useServerText } from "@/components/pages-ui/messages";
 import { FileText, Play, Send, Trash2 } from "lucide-react";
 import { Button, Tooltip } from "@/components/ds";
 import { Problem, RequestProblem } from "@/components/pages-ui/feedback";
@@ -95,6 +96,7 @@ export function RecentJobs({
   onNotice: (text: string) => void;
 }) {
   const { t } = useLocale();
+  const serverText = useServerText();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Pending>(null);
   const [plans, setPlans] = useState<DeletePlan[]>([]);
@@ -437,7 +439,7 @@ export function RecentJobs({
                 {p.refused && (
                   <Problem
                     title={t("This job cannot be deleted")}
-                    why={t(p.refused)}
+                    why={serverText(p.refused)}
                   />
                 )}
                 {pending?.files &&
@@ -445,11 +447,13 @@ export function RecentJobs({
                     <div key={o.path}>
                       <OutputCard item={o} />
                       {o.kept_because && !o.will_delete && (
-                        <p className="pg-pool-hint">{t(o.kept_because)}</p>
+                        <p className="pg-pool-hint">
+                          {serverText(o.kept_because)}
+                        </p>
                       )}
                       {o.needs_force.map((n) => (
                         <p key={n} className="pg-pool-bad" role="alert">
-                          {t(n)}
+                          {serverText(n)}
                         </p>
                       ))}
                     </div>

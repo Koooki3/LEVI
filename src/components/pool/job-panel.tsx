@@ -3,17 +3,16 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
 import {
-  CircleAlert,
   ClipboardCopy,
   FileText,
   Play,
   RefreshCw,
   RotateCcw,
-  TriangleAlert,
   X,
 } from "lucide-react";
-import { Button, Icon, IconButton, Tooltip } from "@/components/ds";
-import { RequestProblem } from "@/components/pages-ui/feedback";
+import { Button, IconButton, Tooltip } from "@/components/ds";
+import { Problem, RequestProblem } from "@/components/pages-ui/feedback";
+import { useServerText } from "@/components/pages-ui/messages";
 import { ago, pollDelay } from "./pool-progress";
 import type { PoolJob } from "./types";
 
@@ -171,6 +170,7 @@ export function JobBanner({
 }) {
   const { t } = useLocale();
   const { busy, error, setError, call } = useJobActions(onJob);
+  const serverText = useServerText();
   const [copied, setCopied] = useState(false);
   const status = job.status;
   const title = TITLES[status];
@@ -186,6 +186,12 @@ export function JobBanner({
             "The worker is alive but nothing has moved. Wait for it, or cancel the job.",
           )
         : info?.message || job.error || "";
+  // The reason beside the title, unless the note below already says it (the
+  // worker-gone and signal notes use the same sentence for both).
+  const reasonShown =
+    !!job.reason &&
+    status === "interrupted" &&
+    (!detail || serverText(job.reason) !== serverText(detail));
   async function copyReport() {
     try {
       const report = await leviRequest<unknown>(
@@ -199,83 +205,91 @@ export function JobBanner({
     }
   }
   return (
-    <div className={`pg-pool-banner ${tone}`} role="alert">
-      <p className="pg-pool-banner-title">
-        <Icon icon={tone === "warn" ? TriangleAlert : CircleAlert} />
-        <strong>{t(title)}</strong>
-        {job.reason && status === "interrupted" && (
-          <span> · {t(job.reason)}</span>
-        )}
-        {job.age_seconds !== undefined && job.age_seconds !== null && (
-          <span className="pg-pool-muted">
-            {" "}
-            · {t("Last update")} {ago(job.age_seconds, t)}
-          </span>
-        )}
-      </p>
-      {detail && <p>{t(detail)}</p>}
-      {info?.hint && status !== "done_with_errors" && (
-        <p className="pg-pool-hint">{t(info.hint)}</p>
-      )}
-      {job.partial && job.resumable && (
-        <p className="pg-pool-hint">
-          {t("Unfinished output kept in")} <code>{job.partial}</code>
-        </p>
-      )}
-      {error && (
-        <RequestProblem action="The action did not complete" message={error} />
-      )}
-      <div className="pg-row">
-        {job.resumable && (
-          <Button
-            variant="primary"
-            icon={Play}
-            disabled={busy}
-            onClick={() => void call(job, "resume")}
-          >
-            {t("Resume")}
-          </Button>
-        )}
-        {job.rerunnable && status !== "done_with_errors" && (
-          <Tooltip
-            content={t(
-              "Plan again from the saved recipe; unfinished output goes",
+    <Problem
+      tone={tone === "warn" ? "warning" : "danger"}
+      className="pg-pool-banner"
+      title={
+        <>
+          {t(title)}
+          {reasonShown && <span> · {serverText(job.reason!)}</span>}
+          {job.age_seconds !== undefined && job.age_seconds !== null && (
+            <span className="pg-pool-muted">
+              {" "}
+              · {t("Last update")} {ago(job.age_seconds, t)}
+            </span>
+          )}
+        </>
+      }
+      why={detail ? serverText(detail) : undefined}
+      fix={
+        <div className="pg-pool-banner-body">
+          {info?.hint && status !== "done_with_errors" && (
+            <p className="pg-pool-hint">{serverText(info.hint)}</p>
+          )}
+          {job.partial && job.resumable && (
+            <p className="pg-pool-hint">
+              {t("Unfinished output kept in")} <code>{job.partial}</code>
+            </p>
+          )}
+          {error && (
+            <RequestProblem
+              action="The action did not complete"
+              message={error}
+            />
+          )}
+          <div className="pg-row">
+            {job.resumable && (
+              <Button
+                variant="primary"
+                icon={Play}
+                disabled={busy}
+                onClick={() => void call(job, "resume")}
+              >
+                {t("Resume")}
+              </Button>
             )}
-          >
-            <Button
-              variant={error && !job.resumable ? "primary" : "secondary"}
-              icon={RotateCcw}
-              disabled={busy}
-              onClick={() => void call(job, "rerun")}
-            >
-              {t("Re-run")}
+            {job.rerunnable && status !== "done_with_errors" && (
+              <Tooltip
+                content={t(
+                  "Plan again from the saved recipe; unfinished output goes",
+                )}
+              >
+                <Button
+                  variant={error && !job.resumable ? "primary" : "secondary"}
+                  icon={RotateCcw}
+                  disabled={busy}
+                  onClick={() => void call(job, "rerun")}
+                >
+                  {t("Re-run")}
+                </Button>
+              </Tooltip>
+            )}
+            {status !== "done_with_errors" && (
+              <Tooltip
+                content={t("Stop for good and remove the unfinished output")}
+              >
+                <Button
+                  icon={X}
+                  disabled={busy}
+                  onClick={() => void call(job, "cancel")}
+                >
+                  {t("Cancel")}
+                </Button>
+              </Tooltip>
+            )}
+            <Button variant="ghost" icon={FileText} onClick={() => onLog(job)}>
+              {t("View log")}
             </Button>
-          </Tooltip>
-        )}
-        {status !== "done_with_errors" && (
-          <Tooltip
-            content={t("Stop for good and remove the unfinished output")}
-          >
             <Button
-              icon={X}
-              disabled={busy}
-              onClick={() => void call(job, "cancel")}
+              variant="ghost"
+              icon={ClipboardCopy}
+              onClick={() => void copyReport()}
             >
-              {t("Cancel")}
+              {copied ? t("Copied") : t("Copy error report")}
             </Button>
-          </Tooltip>
-        )}
-        <Button variant="ghost" icon={FileText} onClick={() => onLog(job)}>
-          {t("View log")}
-        </Button>
-        <Button
-          variant="ghost"
-          icon={ClipboardCopy}
-          onClick={() => void copyReport()}
-        >
-          {copied ? t("Copied") : t("Copy error report")}
-        </Button>
-      </div>
-    </div>
+          </div>
+        </div>
+      }
+    />
   );
 }

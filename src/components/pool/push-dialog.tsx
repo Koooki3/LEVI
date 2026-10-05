@@ -1,4 +1,5 @@
 "use client";
+import { useServerText } from "@/components/pages-ui/messages";
 import { Plus, Send, Server, Trash2, X } from "lucide-react";
 import { Button, IconButton } from "@/components/ds";
 import {
@@ -30,6 +31,7 @@ export function PushDialog({
   onClose: () => void;
 }) {
   const { t } = useLocale();
+  const serverText = useServerText();
   const confirm = useConfirmAction();
   const ref = useRef<HTMLDialogElement>(null);
   const [targets, setTargets] = useState<RemoteTarget[]>([]);
@@ -291,7 +293,7 @@ export function PushDialog({
             </p>
           )}
           {job.error && job.status === "cancelled" && (
-            <pre className="pg-code">{t(job.error)}</pre>
+            <pre className="pg-code">{serverText(job.error)}</pre>
           )}
         </JobCard>
       )}

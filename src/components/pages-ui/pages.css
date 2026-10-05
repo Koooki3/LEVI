@@ -10,12 +10,13 @@
 
 /* ── Page frame ─────────────────────────────────────────────────────── */
 .pg-workbench {
-  --pg-max: 1140px;
+  /* One page width for Conversion & review, Training pool and Explore; wide
+     tables scroll inside their own box instead of widening the page. */
+  --pg-max: 1360px;
   min-height: calc(100dvh - var(--levi-header-height, 56px));
   padding: var(--ds-space-10)
     max(var(--ds-space-6), calc((100% - var(--pg-max)) / 2));
 }
-.pg-workbench.pg-pool,
 .pg-workbench.pg-live {
   --pg-max: 1600px;
   padding: var(--ds-space-8)
@@ -95,7 +96,12 @@
 .pg-head-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--ds-space-2);
+}
+.pg-head-why {
+  max-width: 28ch;
+  text-align: right;
 }
 @keyframes pg-enter {
   from {
@@ -1036,24 +1042,6 @@
 .pg-pool-mixbar .failure {
   background: var(--ds-danger);
 }
-.pg-pool-banner {
-  border: 1px solid var(--ds-warning);
-  border-radius: var(--ds-radius-md);
-  padding: 10px 14px;
-  margin: 10px 0;
-  background: var(--ds-warning-bg);
-  line-height: 1.5;
-}
-.pg-pool-banner.fail {
-  border-color: var(--ds-danger);
-  background: var(--ds-danger-bg);
-}
-.pg-pool-banner p {
-  margin: 4px 0;
-}
-.pg-pool-banner-title strong {
-  font-size: var(--ds-text-body-size);
-}
 
 .pg-pool-link:disabled {
   opacity: 0.4;
@@ -1127,7 +1115,19 @@
   flex-direction: column;
   gap: 6px;
 }
-.pg-pool-banner .pg-row {
+/* A stopped job's note is the shared three-part box (pg-problem); its fix
+   slot holds the hint, the output folder and the action buttons. */
+.pg-pool-banner-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  min-width: 0;
+  width: 100%;
+}
+.pg-pool-banner-body p {
+  margin: 0;
+}
+.pg-pool-banner-body .pg-row {
   flex-wrap: wrap;
   gap: 8px;
 }
@@ -1855,28 +1855,6 @@
 .pg-pool-dialog .pg-pool-hint {
   color: var(--ds-text-secondary);
 }
-.pg-pool-banner {
-  border: 1px solid var(--ds-separator);
-  border-left: 3px solid var(--ds-warning);
-  background: var(--ds-surface-1);
-}
-.pg-pool-banner.fail {
-  border-color: var(--ds-separator);
-  border-left-color: var(--ds-danger);
-  background: var(--ds-surface-1);
-}
-.pg-pool-banner-title {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--ds-space-1) var(--ds-space-2);
-}
-.pg-pool-banner-title .ds-icon {
-  color: var(--ds-warning);
-}
-.pg-pool-banner.fail .pg-pool-banner-title .ds-icon {
-  color: var(--ds-danger);
-}
 .pg-pool-warnings {
   color: var(--ds-text-primary);
 }
@@ -2061,8 +2039,41 @@
   padding: var(--ds-space-2) var(--ds-space-2) var(--ds-space-2) 0;
   font-size: var(--ds-text-caption-size);
 }
+/* A composition row is two lines in the narrow side column: rank and the
+   task's name (up to three lines, the whole text in the tooltip), then the
+   count and the move / remove buttons on the right. The tooltip's anchor is
+   the flex item, so it is the one that must be allowed to shrink; without
+   that a long name pushes the count and the buttons out of the card. */
+.pg-pool-order .pg-pool-row {
+  flex-wrap: wrap;
+  row-gap: var(--ds-space-1);
+  min-width: 0;
+}
+.pg-pool-order .pg-pool-row > .ds-tooltip-anchor {
+  flex: none;
+}
+.pg-pool-order .pg-pool-row > .ds-tooltip-anchor:has(> .pg-pool-ellipsis) {
+  flex: 1 1 calc(100% - 40px);
+  min-width: 0;
+}
 .pg-pool-order .pg-pool-row .pg-pool-ellipsis {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
   max-width: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.pg-pool-order .pg-pool-row > :is(.pg-pool-rank, .pg-pool-count) {
+  flex: none;
+}
+.pg-pool-order .pg-pool-row > .pg-pool-count {
+  margin-left: 40px;
+  margin-right: auto;
 }
 .pg-jobcard__title {
   flex: 1 1 0;
@@ -2337,4 +2348,39 @@
 .pg-workbench input[type="date"]:focus {
   outline: 2px solid var(--ds-focus-ring);
   outline-offset: 2px;
+}
+
+/* ── Home: a running job's row ───────────────────────────────────────── */
+.pg-home-job__row {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  min-width: 0;
+}
+.pg-home-job__go {
+  flex: none;
+  color: var(--ds-icon);
+  transition: transform var(--ds-dur-fast) var(--ds-ease-standard);
+}
+.pg-home-job:hover .pg-home-job__go,
+.pg-home-job:focus-visible .pg-home-job__go {
+  color: var(--ds-text-primary);
+  transform: translateX(2px);
+}
+/* The row's title already says what the bar is for: keep the label for
+   assistive technology (the progressbar's aria-label), show the figure. */
+.pg-home-job__bar .ds-progress__label {
+  display: none;
+}
+.pg-home-job__bar .ds-progress__meta {
+  justify-content: flex-end;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pg-home-job__go {
+    transition: none;
+  }
+}
+[data-motion="reduce"] .pg-home-job__go {
+  animation: none;
+  transition: none;
 }
