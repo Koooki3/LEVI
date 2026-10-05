@@ -29,6 +29,9 @@ import "@/components/pages-ui/shared.css";
 //           control reads as part of the same strip.
 type Variant = "badge" | "ghost" | "tab";
 
+const sizeOf = (variant: Variant) =>
+  variant === "ghost" ? "sm" : variant === "tab" ? "lg" : "md";
+
 interface HfAuthButtonProps {
   variant?: Variant;
 }
@@ -38,14 +41,20 @@ export default function HfAuthButton({ variant = "badge" }: HfAuthButtonProps) {
   const { t } = useLocale();
   const [switching, setSwitching] = useState(false);
   if (switching)
-    return <TokenLogin initiallyOpen onClose={() => setSwitching(false)} />;
+    return (
+      <TokenLogin
+        variant={variant}
+        initiallyOpen
+        onClose={() => setSwitching(false)}
+      />
+    );
 
-  // Stable slot — auth state resolves async on mount (config fetch, then
-  // localStorage rehydrate), so the rendered control changes from
-  // null → signed-out → signed-in. Reserve the height so the surrounding
-  // layout doesn't reflow each time.
+  // Auth state resolves async on mount (config fetch, then localStorage
+  // rehydrate), so the control changes from the token login to the sign-in
+  // button or the signed-in menu. All of them are ds buttons of the same size
+  // per variant, so the surrounding layout does not reflow.
   if (!isAuthAvailable && !oauth) {
-    return <TokenLogin />;
+    return <TokenLogin variant={variant} />;
   }
 
   if (oauth) {
@@ -71,7 +80,7 @@ export default function HfAuthButton({ variant = "badge" }: HfAuthButtonProps) {
     >
       <Button
         variant={variant === "badge" ? "secondary" : "ghost"}
-        size={variant === "ghost" ? "sm" : variant === "tab" ? "lg" : "md"}
+        size={sizeOf(variant)}
         icon={LogIn}
         className={`levi-hf-auth levi-hf-auth--${variant}`}
         onClick={signIn}
@@ -133,9 +142,14 @@ function SignedInMenu({
 }
 
 function TokenLogin({
+  variant,
   initiallyOpen = false,
   onClose,
-}: { initiallyOpen?: boolean; onClose?: () => void } = {}) {
+}: {
+  variant: Variant;
+  initiallyOpen?: boolean;
+  onClose?: () => void;
+}) {
   const [open, setOpen] = useState(initiallyOpen),
     [token, setToken] = useState(""),
     [error, setError] = useState(""),
@@ -152,8 +166,8 @@ function TokenLogin({
     <>
       <Button
         variant="ghost"
-        size="sm"
-        className="levi-hf-auth"
+        size={sizeOf(variant)}
+        className={`levi-hf-auth levi-hf-auth--${variant}`}
         iconEnd={ArrowUpRight}
         onClick={() => setOpen(true)}
       >

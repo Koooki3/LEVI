@@ -20,6 +20,14 @@
   display: inline-flex;
   align-items: center;
 }
+/* The signed-in menu is always a medium button; hold it to the height of the
+   sign-in button of the same variant so the control does not jump. */
+.levi-hf-auth--ghost .ds-btn {
+  height: var(--ds-control-sm);
+}
+.levi-hf-auth--tab .ds-btn {
+  height: var(--ds-control-lg);
+}
 .levi-hf-auth-user {
   display: inline-flex;
   align-items: center;
