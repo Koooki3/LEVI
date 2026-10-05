@@ -2397,5 +2397,9 @@
   "Go to: Training pool": "Go to: Training pool",
   "Go to: Live evaluation": "Go to: Live evaluation",
   "Go to: Report": "Go to: Report",
-  "Go to: Guide": "Go to: Guide"
+  "Go to: Guide": "Go to: Guide",
+  "Training pool push": "Training pool push",
+  "finished": "finished",
+  "finished with errors": "finished with errors",
+  "Show the job": "Show the job"
 }

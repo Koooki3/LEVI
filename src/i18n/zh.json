@@ -2397,5 +2397,9 @@
   "Go to: Training pool": "跳转：训练池",
   "Go to: Live evaluation": "跳转：实时评测",
   "Go to: Report": "跳转：报告",
-  "Go to: Guide": "跳转：使用指南"
+  "Go to: Guide": "跳转：使用指南",
+  "Training pool push": "训练池推送",
+  "finished": "已完成",
+  "finished with errors": "已完成，但有错误",
+  "Show the job": "查看作业"
 }
