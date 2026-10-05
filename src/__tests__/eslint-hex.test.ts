@@ -17,7 +17,7 @@ async function hexHits(
     .length;
 }
 
-describe("ESLint: no hex colours in the global frame", () => {
+describe("ESLint: no hard-coded colours in src", () => {
   test("flags colours in strings, styles and templates", async () => {
     expect(await hexHits('export const a = "#fff";\n')).toBe(1);
     expect(await hexHits('export const a = "#ffffff80";\n')).toBe(1);
@@ -48,5 +48,40 @@ describe("ESLint: no hex colours in the global frame", () => {
       "src/lib/design/probe.ts",
     ])
       expect(await hexHits('export const a = "#fff";\n', file)).toBe(1);
+  }, 30000);
+
+  test("covers every interface source, the viewer and the pages too", async () => {
+    for (const file of [
+      "src/components/viewer/probe.tsx",
+      "src/components/pool/probe.tsx",
+      "src/components/live/probe.tsx",
+      "src/components/ds/probe.tsx",
+      "src/components/agent-probe.tsx",
+      "src/components/annotations-panel.tsx",
+      "src/app/pool/probe.tsx",
+      "src/app/design/probe.tsx",
+      "src/utils/probe.ts",
+      "src/app/[org]/[dataset]/[episode]/probe.tsx",
+    ])
+      expect(await hexHits('export const a = "#fff";\n', file)).toBe(1);
+  }, 30000);
+
+  test("also flags colour functions with literal numbers, not computed ones", async () => {
+    expect(await hexHits('export const a = "rgb(0 131 0)";\n')).toBe(1);
+    expect(await hexHits("export const b = `hsla(120, 50%, 40%, 1)`;\n")).toBe(
+      1,
+    );
+    expect(
+      await hexHits("export const c = (r: number) => `rgb(${r} 0 0)`;\n"),
+    ).toBe(0);
+  }, 30000);
+
+  test("the listed exceptions (robot materials, data palette, tests) may hold colours", async () => {
+    for (const file of [
+      "src/components/urdf-viewer.tsx",
+      "src/components/viewer/data-palette.ts",
+      "src/components/shell/__tests__/probe.test.ts",
+    ])
+      expect(await hexHits('export const a = "#fff";\n', file)).toBe(0);
   }, 30000);
 });
