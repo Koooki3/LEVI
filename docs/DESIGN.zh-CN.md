@@ -211,7 +211,7 @@ ESLint 的颜色规则和 `src` 里所有文件一样覆盖查看器的文件；
 - **辅助类**：`pg-small`、`pg-mt-2…6`、`pg-my-2/3`、`pg-full`、`pg-block`、`pg-mono`、`pg-between`、`pg-stack` 取代这些页面上的 Tailwind 间距和字号工具类：`ds-root` 在层外重置了标题和段落边距，层内的工具类在那里不生效（有测试防止回退）。`RequestProblem` 去掉“Error:”前缀（`cleanMessage`），支持 `onRetry`（“重试”按钮）。
 - **减少动态效果**：`pages.css` 和 `agent-content.css` 里所有有动画或过渡的规则，在 `data-motion="reduce"`（应用内开关）下也会停止，有测试。
 - **数据色**：对象工具的掩码叠加从画布元素的 CSS 颜色读取 `--ds-data-6`（canvas 读不到 CSS 变量）。
-- **已知缺口**：被截断的表格单元格仍用原生 `title` 显示全文（符合 `title=` 规则：单元格已经显示了关键内容）；两个会话报告同一模型和任务目录时，实时评测会话列表可能出现 React 重复 key 警告（取决于数据，这里没改）。
+- **已知缺口**：被截断的表格单元格仍用原生 `title` 显示全文（符合 `title=` 规则：单元格已经显示了关键内容）。
 
 ## 动效
 
@@ -261,7 +261,7 @@ ESLint 的颜色规则和 `src` 里所有文件一样覆盖查看器的文件；
 | 找不到页面和错误页 | 全局框架的外观，中英双语（`error-pages.tsx`）；框架默认页已去掉 |
 | 语言 | 每个 `t("…")` 字面量在两份目录里都有键（有测试）；两份目录的键相同 |
 
-后续项：上面列出的原生 `<select>` 改用 ds `Select`；`messages.ts`、`analysis-ui.tsx`、`agent-ui.tsx` 可以提升进 `ds`；训练池 API 里没翻译的报错往 `KNOWN` 补。已知并有意保留的缺口：实时评测会话列表里取决于数据的 React 重复 key 警告（见“页面”），以及被截断的表格单元格上的原生 `title`（见 `title=` 规则）。
+后续项：上面列出的原生 `<select>` 改用 ds `Select`；`messages.ts`、`analysis-ui.tsx`、`agent-ui.tsx` 可以提升进 `ds`；训练池 API 里没翻译的报错往 `KNOWN` 补。已知并有意保留的缺口：被截断的表格单元格上的原生 `title`（见 `title=` 规则）。同一模型和任务目录的两次运行是两张独立的会话卡（`sessionKeys` 按运行 id 给 key）。
 
 ## 测试
 

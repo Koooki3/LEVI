@@ -213,7 +213,7 @@ Live evaluation (`/live`), Conversion & review (`/workbench`), the training pool
 - **Helpers.** `pg-small`, `pg-mt-2…6`, `pg-my-2/3`, `pg-full`, `pg-block`, `pg-mono`, `pg-between`, `pg-stack` replace Tailwind spacing and text utilities on these pages: `ds-root` resets heading and paragraph margins outside any layer, so layered utilities lose there (a test keeps them out). `RequestProblem` drops an "Error:" prefix (`cleanMessage`) and takes `onRetry` (Try again).
 - **Reduced motion.** Every moving rule of `pages.css` and `agent-content.css` also stops under `data-motion="reduce"` (the app's own switch), tested.
 - **Data colour.** The object tool's mask overlay reads `--ds-data-6` from its canvas's CSS colour (canvas cannot read variables).
-- **Known gaps**: table cells whose text is cut keep a native `title` with the full text (allowed by the `title=` rule: the cell already shows what matters); the live session list can warn about a duplicate React key when two sessions report the same model and task folder (data-dependent, not changed here).
+- **Known gaps**: table cells whose text is cut keep a native `title` with the full text (allowed by the `title=` rule: the cell already shows what matters).
 
 ## Motion
 
@@ -263,7 +263,7 @@ No infinite decorative animation, parallax, scroll hijacking, animation longer t
 | Not-found and error pages | In the frame's look, bilingual (`error-pages.tsx`); the framework's defaults are gone |
 | Language | Every `t("…")` literal has a key in both catalogues (tested); the catalogues have the same keys |
 
-Follow-ups: the native `<select>` elements listed above move to the ds `Select`; `messages.ts`, `analysis-ui.tsx` and `agent-ui.tsx` can be promoted into `ds`; the training pool's untranslated API errors get entries in `KNOWN`. Known gaps kept on purpose: the data-dependent duplicate React key warning in the live session list (see Pages), and the native `title` on cut-off table cells (see the `title=` rule).
+Follow-ups: the native `<select>` elements listed above move to the ds `Select`; `messages.ts`, `analysis-ui.tsx` and `agent-ui.tsx` can be promoted into `ds`; the training pool's untranslated API errors get entries in `KNOWN`. Known gap kept on purpose: the native `title` on cut-off table cells (see the `title=` rule). Two runs of the same model and task folder are separate session cards (`sessionKeys` keys them by run id).
 
 ## Testing
 

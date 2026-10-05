@@ -7,6 +7,7 @@ import {
   isLost,
   resetRemaining,
   shortDuration,
+  sessionKeys,
   sortSessions,
   type FaultInfo,
 } from "./live-logic";
@@ -85,6 +86,7 @@ export function SessionState({ state }: { state: string }) {
 /** The red banner: the user asked to see an FR3 fault at once. */
 export function FaultBanner({ fault }: { fault: FaultInfo }) {
   const { t } = useLocale();
+  const faultKeys = sessionKeys(fault.sessions);
   if (!fault.active) return null;
   return (
     <section className="pg-live-banner" role="alert" aria-live="assertive">
@@ -104,7 +106,7 @@ export function FaultBanner({ fault }: { fault: FaultInfo }) {
         <p>
           {t("Session in fault")}:{" "}
           {fault.sessions.map((s, i) => (
-            <span key={`${s.group}/${s.task_folder}`}>
+            <span key={faultKeys[i]}>
               {i > 0 && ", "}
               <code>
                 {s.group} / {s.task_folder}
@@ -311,6 +313,7 @@ function SessionCard({ session: s }: { session: LiveSession }) {
 export function SessionsPanel({ sessions }: { sessions: LiveSession[] }) {
   const { t } = useLocale();
   sessions = sortSessions(sessions);
+  const cardKeys = sessionKeys(sessions);
   return (
     <section className="pg-live-section" aria-labelledby="live-sessions">
       <h2 id="live-sessions">
@@ -325,8 +328,8 @@ export function SessionsPanel({ sessions }: { sessions: LiveSession[] }) {
         </EmptyLine>
       ) : (
         <div className="pg-live-cards">
-          {sessions.map((s) => (
-            <SessionCard key={`${s.group}/${s.task_folder}`} session={s} />
+          {sessions.map((s, i) => (
+            <SessionCard key={cardKeys[i]} session={s} />
           ))}
         </div>
       )}
