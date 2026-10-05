@@ -195,7 +195,7 @@ export function toneForRatio(
   return higherIsWorse ? "danger" : "success";
 }
 
-/** `t("... {n} ...")` with its placeholders filled in. */
+/** A translated sentence key with its `{name}` placeholders filled in. */
 export function fill(
   template: string,
   values: Record<string, string | number>,

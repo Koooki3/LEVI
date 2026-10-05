@@ -1,4 +1,4 @@
-import { click, fire, render, setupDom } from "@/components/ds/__tests__/dom";
+import { click, render, setupDom } from "@/components/ds/__tests__/dom";
 import { describe, expect, mock, test } from "bun:test";
 import type {
   CrossEpisodeRequest,

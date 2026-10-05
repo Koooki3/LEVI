@@ -2385,5 +2385,15 @@
   "The 3D replay needs the episode's joint columns.": "The 3D replay needs the episode's joint columns.",
   "Loading 3D model…": "Loading 3D model…",
   "Loading episode {n}…": "Loading episode {n}…",
-  "Choose at least one check to run diagnostics.": "Choose at least one check to run diagnostics."
+  "Choose at least one check to run diagnostics.": "Choose at least one check to run diagnostics.",
+  "Choose a value-model checkpoint to compute advantages.": "Choose a value-model checkpoint to compute advantages.",
+  "Choose at least one camera.": "Choose at least one camera.",
+  "Enter at least one object prompt.": "Enter at least one object prompt.",
+  "Enter at least one object prompt to save a preset.": "Enter at least one object prompt to save a preset.",
+  "Name the preset to save it.": "Name the preset to save it.",
+  "Name the new student model.": "Name the new student model.",
+  "Playhead": "Playhead",
+  "Drag to scrub, or use the arrow keys": "Drag to scrub, or use the arrow keys",
+  "contradicted": "contradicted",
+  "Type a label to add it.": "Type a label to add it."
 }

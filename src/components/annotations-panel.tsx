@@ -1228,9 +1228,9 @@ const AtomEditor: React.FC<{
                     setTimestampDraft(String(atom.timestamp));
                 }}
               />
-              <button
-                type="button"
-                className="frame-pill"
+              <Button
+                size="sm"
+                variant="ghost"
                 onPointerDown={(e) => {
                   e.preventDefault();
                   commitSnappedTimestamp();
@@ -1242,8 +1242,8 @@ const AtomEditor: React.FC<{
                   }
                 }}
               >
-                <T>snap to frame</T>
-              </button>
+                {t("snap to frame")}
+              </Button>
             </div>
           </div>
 
@@ -1268,9 +1268,9 @@ const AtomEditor: React.FC<{
                       setToDraft(atom.to != null ? String(atom.to) : "");
                   }}
                 />
-                <button
-                  type="button"
-                  className="frame-pill"
+                <Button
+                  size="sm"
+                  variant="ghost"
                   onPointerDown={(e) => {
                     e.preventDefault();
                     commitSnappedTo();
@@ -1282,8 +1282,8 @@ const AtomEditor: React.FC<{
                     }
                   }}
                 >
-                  <T>snap to frame</T>
-                </button>
+                  {t("snap to frame")}
+                </Button>
               </div>
             </div>
           )}

@@ -30,6 +30,7 @@ import { T, useLocale } from "@/components/levi-locale";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { DraggablePopup } from "./draggable-popup";
+import { PopupActions } from "@/components/viewer/popup-actions";
 import {
   useAnnotations,
   type PendingBboxDraw,
@@ -982,18 +983,11 @@ const QuickLabelPopup: React.FC<{
               if (e.key === "Enter") onSubmit();
             }}
           />
-          <div className="quick-popup-actions">
-            <button onClick={onCancel} className="popup-btn">
-              <T>cancel</T>
-            </button>
-            <button
-              onClick={onSubmit}
-              disabled={!label.trim()}
-              className="popup-btn primary"
-            >
-              <T>add ↵</T>
-            </button>
-          </div>
+          <PopupActions
+            canAdd={label.trim().length > 0}
+            onCancel={onCancel}
+            onAdd={onSubmit}
+          />
         </DraggablePopup>
       }
     </T>

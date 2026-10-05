@@ -22,25 +22,34 @@ export interface AnchoredMarker {
   text: string;
 }
 
-const MARK: Record<AnchoredVerdict, string> = {
-  supported: "✓",
-  contradicted: "✗",
-  unknown: "?",
+/** A reading in words: a mark such as ✓ or ✗ would be a glyph, not a word. */
+const READING: Record<AnchoredVerdict, string> = {
+  supported: "supported",
+  contradicted: "contradicted",
+  unknown: "unknown",
 };
 
-export function eventText(event: AnchoredEvent): string {
+/**
+ * The tooltip body of an event: the answers, then each condition with its
+ * reading in words. `translate` renders the reading in the interface language.
+ */
+export function eventText(
+  event: AnchoredEvent,
+  translate: (text: string) => string = (text) => text,
+): string {
   const answers = Object.entries(event.answer)
     .map(([field, value]) => `${field}: ${value}`)
     .join(" · ");
   const checks = event.checks
-    .map((c) => `${MARK[c.result] ?? "?"} ${c.field}`)
-    .join("  ");
+    .map((c) => `${c.field} — ${translate(READING[c.result] ?? "unknown")}`)
+    .join(" · ");
   return checks ? `${answers}\n${checks}` : answers;
 }
 
 export function anchoredMarkers(
   record: AnchoredEpisode | null | undefined,
   duration: number,
+  translate?: (text: string) => string,
 ): AnchoredMarker[] {
   if (!record) return [];
   return record.events.map((event) => ({
@@ -51,7 +60,7 @@ export function anchoredMarkers(
         : null,
     verdict: event.verdict,
     meta: `${record.event} · ${event.timestamp.toFixed(2)}s · f${event.frame_index} · ${event.valid ? "valid" : event.verdict}`,
-    text: eventText(event),
+    text: eventText(event, translate),
   }));
 }
 

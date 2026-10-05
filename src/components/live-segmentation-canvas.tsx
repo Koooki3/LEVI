@@ -121,7 +121,7 @@ function draw(
       video.videoWidth,
     ];
   if (!imageW || !imageH) return;
-  ctx.font = "11px ui-sans-serif, system-ui";
+  ctx.font = "12px ui-sans-serif, system-ui";
   for (const object of result.objects) {
     const color = trackColor(object.track_id);
     const [x1, y1, x2, y2] = object.bbox_xyxy;
@@ -139,13 +139,13 @@ function draw(
     }
     const label = `${object.concept} #${object.track_id}`;
     const labelW = ctx.measureText(label).width + 8;
-    const top = Math.max(0, py - 16);
+    const top = Math.max(0, py - 18);
     ctx.fillStyle = MEDIA_LABEL_PLATE;
-    ctx.fillRect(px, top, labelW + 3, 16);
+    ctx.fillRect(px, top, labelW + 3, 18);
     ctx.fillStyle = color;
-    ctx.fillRect(px, top, 3, 16);
+    ctx.fillRect(px, top, 3, 18);
     ctx.fillStyle = MEDIA_LABEL_TEXT;
-    ctx.fillText(label, px + 7, top + 12);
+    ctx.fillText(label, px + 7, top + 13);
   }
 }
 
