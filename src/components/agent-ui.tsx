@@ -10,7 +10,12 @@ import "@/components/pages-ui/agent-content.css";
 import "@/components/pages-ui/pages.css";
 import { useId, type ReactNode } from "react";
 import { ChevronRight, type LucideIcon } from "lucide-react";
-import { Button, Icon, type ButtonProps } from "@/components/ds";
+import {
+  Button,
+  Icon,
+  type ButtonProps,
+  type ToastOptions,
+} from "@/components/ds";
 
 /**
  * A native `<details>` with the design system's look: a chevron that turns
@@ -145,4 +150,27 @@ export function ConnectionHead({
       {status}
     </div>
   );
+}
+
+/**
+ * The toast shown when a full-dataset export is done. The folder is the
+ * result a person has to find, so the toast stays until it is closed and
+ * offers to copy the path.
+ */
+export function exportedToast(
+  path: string,
+  t: (text: string) => string,
+): ToastOptions {
+  return {
+    title: t("Exported"),
+    description: path,
+    tone: "success",
+    duration: null,
+    action: {
+      label: t("Copy path"),
+      onClick: () => {
+        void navigator.clipboard?.writeText(path).catch(() => undefined);
+      },
+    },
+  };
 }

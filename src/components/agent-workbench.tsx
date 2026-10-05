@@ -46,7 +46,7 @@ import {
 import {
   Ban,
   Check,
-  CircleStop,
+  GitCommitHorizontal,
   Download,
   FilePlus2,
   Image as ImageIcon,
@@ -63,7 +63,13 @@ import {
   HumanActionMark,
   RequestProblem,
 } from "@/components/pages-ui/feedback";
-import { Actions, Disclosure, GatedButton, Hint } from "./agent-ui";
+import {
+  Actions,
+  Disclosure,
+  GatedButton,
+  Hint,
+  exportedToast,
+} from "./agent-ui";
 import { useConfirmAction } from "./shell/confirm";
 import { SHELL_EVENTS } from "./shell/shell-events";
 
@@ -1563,11 +1569,7 @@ export default function AgentWorkbench() {
                                 const result = await tool<{
                                   output_dir: string;
                                 }>("export.run", { run_id: run.id });
-                                toast.show({
-                                  title: t("Exported"),
-                                  description: result.output_dir,
-                                  tone: "success",
-                                });
+                                toast.show(exportedToast(result.output_dir, t));
                               })
                             }
                           >
@@ -1647,7 +1649,7 @@ export default function AgentWorkbench() {
                             <Button
                               size="sm"
                               variant="primary"
-                              icon={CircleStop}
+                              icon={GitCommitHorizontal}
                               disabled={busy}
                               onClick={() =>
                                 void act(async () => {
