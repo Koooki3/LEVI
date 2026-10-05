@@ -83,10 +83,33 @@ export async function dropFocus(): Promise<void> {
   });
 }
 
+/** The wait helpers' time budget multiplier (CI sets 2 for slower runners). */
+const TIME_SCALE = Number(process.env.LEVI_TEST_TIME_SCALE) || 1;
+
 export async function flush(ms = 0): Promise<void> {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, ms));
+    await new Promise((resolve) => setTimeout(resolve, ms * TIME_SCALE));
   });
+}
+
+/**
+ * Wait until `check` returns something truthy (a found element, `true`) and
+ * return it. A fixed `flush(80)` is a guess about how fast the machine is: a
+ * shared CI runner answers later than a workstation, so a test that needs a
+ * page to finish loading waits for the thing it needs instead.
+ */
+export async function waitFor<T>(
+  check: () => T | null | undefined | false,
+  { timeoutMs = 8000, label = "the expected state" } = {},
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const found = check();
+    if (found) return found;
+    if (Date.now() > deadline)
+      throw new Error(`timed out after ${timeoutMs} ms waiting for ${label}`);
+    await flush(10);
+  }
 }
 
 /** Make `matchMedia` answer `matches` for queries containing `fragment`. */

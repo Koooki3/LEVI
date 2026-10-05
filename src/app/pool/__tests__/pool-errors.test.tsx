@@ -1,4 +1,9 @@
-import { click, flush, render, setupDom } from "@/components/ds/__tests__/dom";
+import {
+  click,
+  render,
+  setupDom,
+  waitFor,
+} from "@/components/ds/__tests__/dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { LocaleProvider } from "@/components/levi-locale";
 
@@ -53,8 +58,9 @@ describe("the training pool's errors", () => {
   test("a failed read of the pool is a standing error: shown, not announced", async () => {
     serve(DOWN);
     const { host } = await render(<PoolPage />);
-    await flush(80);
-    const box = host.querySelector(".pg-problem")!;
+    const box = await waitFor(() => host.querySelector(".pg-problem"), {
+      label: "the pool's read error",
+    });
     expect(box.querySelector(".pg-problem__title")!.textContent).toBe(
       "The training pool request failed",
     );
@@ -77,14 +83,18 @@ describe("the training pool's errors", () => {
               : json({}),
     );
     const { host } = await render(<PoolPage />);
-    await flush(80);
+    const scan = await waitFor(
+      () =>
+        [...host.querySelectorAll("button")].find((b) =>
+          b.textContent?.includes("Scan now"),
+        ),
+      { label: "the Scan now button" },
+    );
     expect(host.querySelector(".pg-problem")).toBeNull();
-    const scan = [...host.querySelectorAll("button")].find((b) =>
-      b.textContent?.includes("Scan now"),
-    )!;
     await click(scan);
-    await flush(80);
-    const box = host.querySelector(".pg-problem")!;
+    const box = await waitFor(() => host.querySelector(".pg-problem"), {
+      label: "the scan error",
+    });
     expect(box.getAttribute("role")).toBe("alert");
     expect(box.textContent).toContain("A scan is already running");
   });
@@ -98,10 +108,16 @@ describe("the training pool's errors", () => {
           : json({}),
     );
     const { host } = await render(<PoolPage />);
-    await flush(80);
-    const exportButton = [...host.querySelectorAll("button")].find((b) =>
-      b.textContent?.includes("Export…"),
-    )!;
+    const exportButton = await waitFor(
+      () =>
+        [...host.querySelectorAll("button")].find((b) =>
+          b.textContent?.includes("Export…"),
+        ),
+      { label: "the Export button" },
+    );
+    await waitFor(() => exportButton.getAttribute("aria-describedby"), {
+      label: "the reason the Export button is off",
+    });
     expect(exportButton.disabled).toBe(true);
     const why = host.querySelector(
       `#${exportButton.getAttribute("aria-describedby")}`,
@@ -131,13 +147,17 @@ describe("the training pool's errors", () => {
         <PoolPage />
       </LocaleProvider>,
     );
-    await flush(120);
+    await waitFor(() => zh.host.textContent?.includes("上次扫描："), {
+      label: "the Chinese scan label",
+    });
     expect(zh.host.textContent).toContain("上次扫描：从未");
     expect(zh.host.textContent).not.toContain("上次扫描:");
     localStorage.clear();
     serve(answer);
     const en = await render(<PoolPage />);
-    await flush(80);
+    await waitFor(() => en.host.textContent?.includes("Last scan"), {
+      label: "the English scan label",
+    });
     expect(en.host.textContent).toContain("Last scan: never");
   });
 });
