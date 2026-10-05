@@ -29,7 +29,7 @@ This is how LEVI's interface is built today: graphite accent, light and dark the
 - **Semantic tokens only in components.** The raw steps `--ds-gray-l-*` / `--ds-gray-d-*` exist only to define the semantic tokens.
 - **One primary button per screen.** Accent A ("graphite") is the darkest grey: it is used only for the primary button, the focus ring, selection and progress. Links in running text are primary text with an underline.
 - **Status never by colour alone.** Status colours (success, warning, danger, info) appear only on badges, status dots, toasts and notes, always with an icon shape and words (`Badge`, `StatusDot`).
-- **Smallest text 12 px** (`--ds-text-caption-size`); weights 400, 500, 600.
+- **Smallest text 12 px** (`--ds-text-caption-size`); weights 400, 500, 600 (`b` and `strong` are semibold, not Tailwind's 700). A relative size (`em`, `%`) is written `max(0.88em, var(--ds-text-caption-size))` so it cannot fall under 12 px inside a small line; a test finds any other.
 - **Icons**: Lucide only, through `Icon` (16 px with stroke 1.75; 20 or 24 px with 1.5). Decorative icons are `aria-hidden`; an icon that carries meaning gets a `label`.
 - **`title=` is not an interface.** A control's name, an icon's meaning, a disabled button's reason and anything a person needs to act on are visible words, a `Tooltip` (hover and keyboard focus) or an `aria-describedby` pair; an icon-only button is an `IconButton`, which requires `label` (its `aria-label` and tooltip). A native `title` is allowed only as an extra on non-interactive text that already shows what matters: the full value of a cut-off table cell, an exact timestamp, an id or a path.
 - **No `window.confirm`.** Ask through `useConfirmAction()` (`src/components/shell/confirm.tsx`; a test fails on any `window.confirm` in `src/`), and only for an irreversible action; for an expected, undoable deletion, delete and offer Undo in a toast.
@@ -262,7 +262,7 @@ No infinite decorative animation, parallax, scroll hijacking, animation longer t
 | Colour | Tokens only, in CSS and TSX, checked on all of `src/` (one module, `viewer/data-palette.ts`, and the tests are exceptions); `levi.css` and the older variables and Tailwind remaps are deleted |
 | Icons | Lucide through `Icon`; remaining text arrows and check marks are in prose, keyboard hints and the 3D viewer's HUD |
 | Not-found and error pages | In the frame's look, bilingual (`error-pages.tsx`); the framework's defaults are gone |
-| Language | Every `t("…")` literal has a key in both catalogues (tested); the catalogues have the same keys |
+| Language | The catalogues have the same keys, and the code's written-out strings all have one (tested from the syntax tree): `t("…")` literals, both arms of `t(cond ? "a" : "b")`, JSX text and `{cond ? "a" : "b"}` children of `<T>` (entities decoded), quick-add placeholders; every dotted `t(`prefix.${x}`)` template has a listed member set with all its keys; sentences with numbers go through the locale patterns. Names and example values that read the same in both languages are listed in the test |
 
 Follow-ups: the native `<select>` elements listed above move to the ds `Select`; `messages.ts`, `analysis-ui.tsx` and `agent-ui.tsx` can be promoted into `ds`; the training pool's untranslated API errors get entries in `KNOWN`. Known gap kept on purpose: the native `title` on cut-off table cells (see the `title=` rule). Two runs of the same model and task folder are separate session cards (`sessionKeys` keys them by run id).
 

@@ -38,7 +38,7 @@
 }
 .annotations-skin input::placeholder,
 .annotations-skin textarea::placeholder {
-  color: var(--ds-text-secondary);
+  color: var(--ds-text-placeholder);
 }
 .annotations-skin input:not(.ds-input):focus,
 .annotations-skin textarea:not(.ds-input):focus,

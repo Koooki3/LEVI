@@ -837,6 +837,7 @@ export default function ObjectAnnotationPanel({
                 <input
                   value={presetNameDraft}
                   onChange={(event) => setPresetNameDraft(event.target.value)}
+                  aria-label={t("Preset name")}
                   placeholder={t("Preset name")}
                   disabled={busy}
                 />

@@ -876,7 +876,13 @@ function VarianceHeatmap({
       }
     >
       <div className="vw-a-histogram-wrap">
-        <svg width={svgW} height={svgH} className="vw-a-histogram">
+        <svg
+          width={svgW}
+          height={svgH}
+          className="vw-a-histogram"
+          role="img"
+          aria-label={t("Action variance across episodes, heatmap")}
+        >
           {/* Heatmap cells */}
           {variance.map((row, bi) =>
             row.map((v, di) => (
@@ -1079,6 +1085,8 @@ function SpeedVarianceSection({
             width={bins.length * barW}
             height={barH + 26}
             className="vw-a-histogram"
+            role="img"
+            aria-label={t("Speed distribution histogram")}
           >
             {bins.map((count: number, i: number) => {
               const h = maxBin > 0 ? (count / maxBin) * barH : 0;

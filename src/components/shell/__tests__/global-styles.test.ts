@@ -118,6 +118,33 @@ describe("global styles", () => {
       "utf8",
     );
     expect(header).toContain("<LeviWordmark");
+    // The narrow bar hides the Search label: the button keeps its name.
+    expect(header).toMatch(
+      /className="levi-shell-search[^"]*"[\s\S]{0,160}aria-label=\{t\("Search"\)\}/,
+    );
     expect(header).not.toMatch(/<span>LEVI<\/span>/);
+  });
+
+  test("bold is semibold, not Tailwind's 700", () => {
+    expect(code("app/globals.css")).toMatch(
+      /:where\(b, strong\) \{\s*font-weight:\s*var\(--ds-weight-semibold\)/,
+    );
+  });
+
+  test("no relative font size can fall under 12 px", () => {
+    // `0.88em` inside a 12 px line is 10.6 px: an em or % size must be
+    // wrapped in max(…, var(--ds-text-caption-size)).
+    const hits: string[] = [];
+    for (const file of new Bun.Glob("**/*.css").scanSync(src)) {
+      code(file)
+        .split("\n")
+        .forEach((line, index) => {
+          const size = /font-size:\s*([^;]+);/.exec(line)?.[1];
+          if (!size || !/[0-9.]+(em|%)/.test(size)) return;
+          if (!/^max\(.*var\(--ds-text-caption-size\)\)$/.test(size.trim()))
+            hits.push(`${file}:${index + 1} ${size.trim()}`);
+        });
+    }
+    expect(hits).toEqual([]);
   });
 });

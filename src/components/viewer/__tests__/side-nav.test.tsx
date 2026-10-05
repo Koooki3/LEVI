@@ -1,4 +1,10 @@
-import { click, render, setupDom } from "@/components/ds/__tests__/dom";
+import {
+  click,
+  mockMatchMedia,
+  press,
+  render,
+  setupDom,
+} from "@/components/ds/__tests__/dom";
 import { describe, expect, mock, test } from "bun:test";
 import Sidebar from "@/components/side-nav";
 import { FlaggedEpisodesProvider } from "@/context/flagged-episodes-context";
@@ -97,5 +103,54 @@ describe("episode list", () => {
       c.textContent?.startsWith("Flagged"),
     );
     expect(chip?.getAttribute("aria-pressed")).toBe("false");
+  });
+});
+
+describe("the narrow window's episode list drawer", () => {
+  const toggle = (host: HTMLElement) =>
+    host.querySelector<HTMLButtonElement>(".vw-sidebar-toggle button")!;
+
+  test("the toggle says expanded, not pressed, and names what it controls", async () => {
+    const { host } = await renderSidebar();
+    const button = toggle(host);
+    const nav = host.querySelector("nav")!;
+    expect(button.hasAttribute("aria-pressed")).toBe(false);
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+    expect(button.getAttribute("aria-controls")).toBe(nav.id);
+    await click(button);
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    expect(nav.getAttribute("data-mobile-hidden")).toBeNull();
+  });
+
+  test("Escape folds it and returns focus to the toggle; not from a text field, not on a wide window", async () => {
+    const restoreNarrow = mockMatchMedia(["max-width: 899px"]);
+    try {
+      const { host } = await renderSidebar();
+      const button = toggle(host);
+      const nav = host.querySelector("nav")!;
+      await click(button);
+      // A text field keeps its own Escape.
+      const field = document.createElement("input");
+      document.body.appendChild(field);
+      await press(field, "Escape");
+      expect(nav.getAttribute("data-mobile-hidden")).toBeNull();
+      field.remove();
+      await press(document.body, "Escape");
+      expect(nav.getAttribute("data-mobile-hidden")).toBe("true");
+      expect(button.getAttribute("aria-expanded")).toBe("false");
+      expect(document.activeElement).toBe(button);
+    } finally {
+      restoreNarrow();
+    }
+    // Wide window: the list is always there; Escape does nothing to it.
+    const restoreWide = mockMatchMedia([]);
+    try {
+      const { host } = await renderSidebar();
+      await click(toggle(host));
+      await press(document.body, "Escape");
+      expect(toggle(host).getAttribute("aria-expanded")).toBe("true");
+    } finally {
+      restoreWide();
+    }
   });
 });

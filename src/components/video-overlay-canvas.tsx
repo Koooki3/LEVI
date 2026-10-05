@@ -951,6 +951,7 @@ const QuickLabelPopup: React.FC<{
                 <T>{kind}</T>
               </span>
               <select
+                aria-label={t("Question kind")}
                 value={questionKind}
                 onChange={(e) =>
                   onQuestionKindChange(e.target.value as "detect" | "point")
@@ -974,6 +975,9 @@ const QuickLabelPopup: React.FC<{
           <input
             ref={inputRef}
             type="text"
+            aria-label={t(
+              kind === "bbox" ? "label (e.g. carrot)" : "label (e.g. handle)",
+            )}
             placeholder={t(
               kind === "bbox" ? "label (e.g. carrot)" : "label (e.g. handle)",
             )}

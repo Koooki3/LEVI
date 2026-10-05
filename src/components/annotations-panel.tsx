@@ -35,7 +35,7 @@ import "@/components/viewer/annotations.css";
  * interjection / speech / count / attribute / spatial.
  */
 
-import React, { useMemo, useState } from "react";
+import React, { useId, useMemo, useState } from "react";
 import { useTime } from "../context/time-context";
 import { useAnnotations } from "../context/annotations-context";
 import {
@@ -851,7 +851,7 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                 <input
                   key={f.name}
                   type={f.type === "number" ? "number" : "text"}
-                  placeholder={f.placeholder}
+                  placeholder={t(f.placeholder)}
                   className={f.grow ? "grow" : undefined}
                   style={f.width ? { width: f.width } : undefined}
                   value={qaValues[f.name] ?? ""}
@@ -1071,6 +1071,7 @@ export const AtomEditor: React.FC<{
   onDelete: () => void;
 }> = ({ atom, cameraKeys, vocabulary, onChange, onDelete }) => {
   const { t } = useLocale();
+  const uid = useId();
   const jump = useJump();
   const { snap } = useAnnotations();
   const isSpeech = isSpeechAtom(atom);
@@ -1214,10 +1215,15 @@ export const AtomEditor: React.FC<{
 
           {atom.style === "subtask" && vocabulary.subtasks.length > 0 && (
             <div className="field">
-              <label className="field-label">
+              {/* Two selects share this name: a group, not a label. */}
+              <span className="field-label" id={`${uid}-subtask`}>
                 <T>Subtask and outcome</T>
-              </label>
-              <div className="ts-row">
+              </span>
+              <div
+                className="ts-row"
+                role="group"
+                aria-labelledby={`${uid}-subtask`}
+              >
                 <SubtaskTagFields
                   vocabulary={vocabulary}
                   value={{
@@ -1233,11 +1239,12 @@ export const AtomEditor: React.FC<{
           )}
 
           <div className="field">
-            <label className="field-label">
+            <label className="field-label" htmlFor={`${uid}-timestamp`}>
               <T>Timestamp (s)</T>
             </label>
             <div className="ts-row">
               <input
+                id={`${uid}-timestamp`}
                 type="text"
                 inputMode="decimal"
                 value={timestampDraft}
@@ -1272,14 +1279,15 @@ export const AtomEditor: React.FC<{
           a range is meaningless there. */}
           {atom.style !== "task_aug" && (
             <div className="field">
-              <label className="field-label">
+              <label className="field-label" htmlFor={`${uid}-to`}>
                 <T>To (s) — optional range end</T>
               </label>
               <div className="ts-row">
                 <input
+                  id={`${uid}-to`}
                   type="text"
                   inputMode="decimal"
-                  placeholder="point in time"
+                  placeholder={t("point in time")}
                   value={toDraft}
                   onChange={(e) => setToDraft(e.target.value)}
                   onBlur={() => commitTo()}
@@ -1316,7 +1324,7 @@ export const AtomEditor: React.FC<{
             atom.style === "memory" ||
             atom.style === "interjection") && (
             <div className="field">
-              <label className="field-label">
+              <label className="field-label" htmlFor={`${uid}-content`}>
                 <T>
                   {atom.style === "subtask"
                     ? "Subtask"
@@ -1325,7 +1333,7 @@ export const AtomEditor: React.FC<{
                       : atom.style === "plan"
                         ? "Plan"
                         : atom.style === "memory"
-                          ? "Memory"
+                          ? "Robot memory"
                           : "Interjection"}
                 </T>
               </label>
@@ -1334,12 +1342,14 @@ export const AtomEditor: React.FC<{
                 atom.style === "subtask" ||
                 atom.style === "interjection" ? (
                   <textarea
+                    id={`${uid}-content`}
                     rows={3}
                     value={atom.content || ""}
                     onChange={(e) => onChange({ content: e.target.value })}
                   />
                 ) : (
                   <textarea
+                    id={`${uid}-content`}
                     rows={4}
                     value={atom.content || ""}
                     onChange={(e) => onChange({ content: e.target.value })}
@@ -1351,10 +1361,11 @@ export const AtomEditor: React.FC<{
 
           {isSpeech && atom.tool_calls && (
             <div className="field">
-              <label className="field-label">
+              <label className="field-label" htmlFor={`${uid}-speech`}>
                 <T>Robot speech (say tool call)</T>
               </label>
               <input
+                id={`${uid}-speech`}
                 type="text"
                 value={speechText(atom) || ""}
                 onChange={(e) => {
@@ -1402,6 +1413,7 @@ const CameraField: React.FC<{
   cameraKeys: string[];
   onChange: (updates: Partial<LanguageAtom>) => void;
 }> = ({ atom, cameraKeys, onChange }) => {
+  const uid = useId();
   if (atom.style !== "vqa") return null;
   if (cameraKeys.length === 0) return null;
   const value = atom.camera ?? "";
@@ -1409,10 +1421,11 @@ const CameraField: React.FC<{
     <T>
       {
         <div className="field">
-          <label className="field-label">
+          <label className="field-label" htmlFor={`${uid}-camera`}>
             <T>Camera</T>
           </label>
           <select
+            id={`${uid}-camera`}
             aria-label="Camera"
             value={value}
             onChange={(e) =>
@@ -1440,6 +1453,7 @@ const VqaEditorFields: React.FC<{
   atom: LanguageAtom;
   onChange: (updates: Partial<LanguageAtom>) => void;
 }> = ({ atom, onChange }) => {
+  const uid = useId();
   const parsed = parseVqaAnswer(atom.content);
   const kind = parsed ? classifyVqa(parsed) : null;
 
@@ -1448,10 +1462,11 @@ const VqaEditorFields: React.FC<{
       <T>
         {
           <div className="field">
-            <label className="field-label">
+            <label className="field-label" htmlFor={`${uid}-question`}>
               <T>Question</T>
             </label>
             <input
+              id={`${uid}-question`}
               type="text"
               value={atom.content || ""}
               onChange={(e) => onChange({ content: e.target.value })}
@@ -1467,11 +1482,12 @@ const VqaEditorFields: React.FC<{
     <T>
       {
         <div className="field">
-          <label className="field-label">
+          <label className="field-label" htmlFor={`${uid}-answer`}>
             <T>Answer (</T>
             {kind || "unknown"})
           </label>
           <textarea
+            id={`${uid}-answer`}
             rows={5}
             style={{
               fontFamily:

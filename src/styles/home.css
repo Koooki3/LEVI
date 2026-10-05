@@ -267,7 +267,7 @@
 }
 .levi-home-mono {
   font-family: var(--ds-font-mono);
-  font-size: 0.95em;
+  font-size: max(0.95em, var(--ds-text-caption-size));
 }
 .levi-home-empty {
   padding: var(--ds-space-4) 0;

@@ -68,7 +68,7 @@ function EpisodeLengthHistogram({
               return (
                 <g key={i}>
                   <title>
-                    <T>{`${bin.binLabel}: ${bin.count} episode${bin.count !== 1 ? "s" : ""}`}</T>
+                    {`${bin.binLabel}: ${bin.count} ${t(bin.count === 1 ? "episode" : "episodes")}`}
                   </title>
                   <rect
                     x={x}

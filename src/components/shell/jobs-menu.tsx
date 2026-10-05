@@ -8,7 +8,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Layers, ListChecks, Repeat } from "lucide-react";
+import { Layers, ListChecks, Repeat, RotateCw } from "lucide-react";
 import { Menu, useToast } from "@/components/ds";
 import { leviApi } from "@/components/levi-api";
 import { useLocale } from "@/components/levi-locale";
@@ -35,9 +35,17 @@ export function useRunningJobs(
 ): {
   counts: JobCounts | null;
   entries: JobEntry[];
+  /** Whether each list could be read: null before the first answer, false
+   * when the service did not answer (then "no job is running" would be a
+   * guess). */
+  readable: { pool: boolean | null; conversion: boolean | null };
   refresh: () => void;
 } {
   const [counts, setCounts] = useState<JobCounts | null>(null);
+  const [readable, setReadable] = useState<{
+    pool: boolean | null;
+    conversion: boolean | null;
+  }>({ pool: null, conversion: null });
   const [entries, setEntries] = useState<JobEntry[]>([]);
   const inFlight = useRef(false);
   const alive = useRef(true);
@@ -67,6 +75,10 @@ export function useRunningJobs(
           if (done.length) finishedRef.current?.(done);
           setEntries(next);
         }
+        setReadable({
+          pool: pool ? poolBody !== null : true,
+          conversion: conversionBody !== null,
+        });
         setCounts({
           pool: countPoolJobs(poolBody),
           conversion: countConversionJobs(conversionBody),
@@ -112,7 +124,7 @@ export function useRunningJobs(
       document.removeEventListener("visibilitychange", follow);
     };
   }, [refresh, active]);
-  return { counts, entries, refresh };
+  return { counts, entries, readable, refresh };
 }
 
 const percent = (fraction: number) => `${Math.round(fraction * 100)}%`;
@@ -123,30 +135,39 @@ export function JobsMenu({ pool }: { pool: boolean }) {
   const toast = useToast();
   // "Training pool export: finished" / "训练池导出：已完成".
   const colon = language === "zh" ? "：" : ": ";
-  const { counts, entries, refresh } = useRunningJobs(pool, (finished) => {
-    for (const { entry, outcome } of finished) {
-      const page = entry.kind === "pool" ? "/pool" : "/workbench";
-      toast.show({
-        tone:
-          outcome === "success"
-            ? "success"
-            : outcome === "warning"
-              ? "warning"
-              : "danger",
-        title:
-          outcome === "success"
-            ? `${t(entry.what)}${colon}${t("finished")}`
-            : outcome === "warning"
-              ? `${t(entry.what)}${colon}${t("finished with errors")}`
-              : `${t(entry.what)}${colon}${t("failed")}`,
-        description: entry.name || undefined,
-        action: { label: t("Show the job"), onClick: () => router.push(page) },
-      });
-    }
-  });
+  const { counts, entries, readable, refresh } = useRunningJobs(
+    pool,
+    (finished) => {
+      for (const { entry, outcome } of finished) {
+        const page = entry.kind === "pool" ? "/pool" : "/workbench";
+        toast.show({
+          tone:
+            outcome === "success"
+              ? "success"
+              : outcome === "warning"
+                ? "warning"
+                : "danger",
+          title:
+            outcome === "success"
+              ? `${t(entry.what)}${colon}${t("finished")}`
+              : outcome === "warning"
+                ? `${t(entry.what)}${colon}${t("finished with errors")}`
+                : `${t(entry.what)}${colon}${t("failed")}`,
+          description: entry.name || undefined,
+          action: {
+            label: t("Show the job"),
+            onClick: () => router.push(page),
+          },
+        });
+      }
+    },
+  );
   const total = totalJobs(counts);
   const running = (n: number, kind: "pool" | "conversion") => {
-    if (n === 0) return t("none running");
+    // Not read yet, or the service did not answer: say so, never "none".
+    if (readable[kind] === null) return t("being checked");
+    if (readable[kind] === false) return t("could not be checked just now");
+    if (n === 0) return t("no job is running");
     const base = t("{n} running").replace("{n}", String(n));
     const fraction = runningFraction(entries, kind);
     return fraction === null ? base : `${base} · ${percent(fraction)}`;
@@ -182,6 +203,16 @@ export function JobsMenu({ pool }: { pool: boolean }) {
           label: `${t("Conversions")} · ${running(counts?.conversion ?? 0, "conversion")}`,
           onSelect: () => router.push("/workbench"),
         },
+        ...(readable.pool === false || readable.conversion === false
+          ? [
+              {
+                id: "retry",
+                icon: RotateCw,
+                label: t("Try again"),
+                onSelect: refresh,
+              },
+            ]
+          : []),
       ]}
     />
   );

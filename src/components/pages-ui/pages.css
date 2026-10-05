@@ -39,7 +39,7 @@
 }
 .pg-workbench code {
   font-family: var(--ds-font-mono);
-  font-size: 0.92em;
+  font-size: max(0.92em, var(--ds-text-caption-size));
 }
 .pg-workbench a:not(.ds-btn) {
   color: var(--ds-text-primary);

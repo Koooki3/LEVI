@@ -225,4 +225,58 @@ describe("the Jobs entry", () => {
       window.localStorage.removeItem("levi-language");
     }
   });
+
+  test("when the service does not answer the menu says so, never 'no job is running', and offers a retry", async () => {
+    let answering = false;
+    const original = globalThis.fetch;
+    const asked: string[] = [];
+    globalThis.fetch = ((url: string) => {
+      asked.push(String(url));
+      return Promise.resolve(
+        answering
+          ? new Response(
+              JSON.stringify(String(url).includes("pool") ? { jobs: [] } : []),
+            )
+          : new Response("{}", { status: 502 }),
+      );
+    }) as unknown as typeof fetch;
+    try {
+      const { host } = await render(
+        <ToastProvider>
+          <JobsMenu pool />
+        </ToastProvider>,
+      );
+      const trigger = host.querySelector<HTMLButtonElement>(
+        'button[aria-haspopup="menu"]',
+      )!;
+      await act(async () => trigger.click());
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+      const items = () =>
+        [...document.querySelectorAll('[role="menuitem"]')].map(
+          (e) => e.textContent ?? "",
+        );
+      expect(items().join("|")).toContain("could not be checked just now");
+      expect(items().join("|")).not.toContain("no job is running");
+      expect(items().some((text) => text.includes("Try again"))).toBe(true);
+      // The service is back: a retry reads it and says there is none.
+      answering = true;
+      const retry = [...document.querySelectorAll('[role="menuitem"]')].find(
+        (e) => e.textContent?.includes("Try again"),
+      ) as HTMLElement;
+      await act(async () => retry.click());
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+      await act(async () => trigger.click());
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+      expect(items().join("|")).toContain("no job is running");
+      expect(asked.length).toBeGreaterThan(2);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
 });

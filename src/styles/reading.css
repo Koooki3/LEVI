@@ -175,7 +175,7 @@
   border-radius: var(--ds-radius-xs);
   background: var(--ds-surface-sunken);
   font-family: var(--ds-font-mono);
-  font-size: 0.875em;
+  font-size: max(0.875em, var(--ds-text-caption-size));
 }
 .levi-prose pre {
   margin: var(--ds-space-4) 0;

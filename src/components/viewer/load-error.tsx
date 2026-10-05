@@ -3,6 +3,7 @@ import Link from "next/link";
 import { AlertTriangle, RotateCw } from "lucide-react";
 import { Button, Icon } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
+import { useTitleOverride } from "@/components/shell/route-title";
 import "./viewer.css";
 
 /**
@@ -18,8 +19,11 @@ export function EpisodeLoadError({
   onRetry: () => void;
 }) {
   const { t } = useLocale();
+  // The address (episode_abc, episode_-1) may be no episode at all: name the
+  // tab for what the page says.
+  useTitleOverride("This episode could not be loaded");
   return (
-    <div className="vw-error ds-root">
+    <main className="vw-error ds-root">
       <div className="vw-error-card" role="alert">
         <h2>
           <Icon icon={AlertTriangle} size="md" />
@@ -43,6 +47,6 @@ export function EpisodeLoadError({
           </Link>
         </div>
       </div>
-    </div>
+    </main>
   );
 }

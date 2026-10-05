@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Clapperboard } from "lucide-react";
 import { Icon } from "@/components/ds";
+import { demoVideoUrl } from "@/lib/demo-datasets";
 
 /**
  * A dataset's first frame. Until a frame has loaded (and for good when the
@@ -10,7 +11,10 @@ import { Icon } from "@/components/ds";
  */
 export function DemoThumb({ id }: { id: string }) {
   const [loaded, setLoaded] = useState(false);
-  const [failed, setFailed] = useState(false);
+  // The demos are v3.0 datasets: the file is named per dataset (the same
+  // function the Explore page uses). Not a known demo: no video to try.
+  const url = demoVideoUrl(id);
+  const [failed, setFailed] = useState(url === null);
   const video = useRef<HTMLVideoElement>(null);
   // The video can load (or fail) before React has attached its handlers, in
   // which case the events are gone: look at what it has already done.
@@ -30,10 +34,10 @@ export function DemoThumb({ id }: { id: string }) {
           <Icon icon={Clapperboard} size="lg" />
         </span>
       )}
-      {!failed && (
+      {!failed && url && (
         <video
           ref={video}
-          src={`/api/proxy/datasets/${id}/resolve/main/videos/chunk-000/observation.images.front/episode_000000.mp4#t=0.1`}
+          src={`${url}#t=0.1`}
           muted
           playsInline
           preload="metadata"
