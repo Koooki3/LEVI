@@ -34,6 +34,45 @@ describe("the guide's example thumbnails", () => {
     expect(media.querySelector(".levi-guide-demos__placeholder")).toBeTruthy();
   });
 
+  test("a video that loaded or failed before hydration is not left on the placeholder", async () => {
+    const proto = HTMLVideoElement.prototype;
+    const ready = Object.getOwnPropertyDescriptor(proto, "readyState");
+    Object.defineProperty(proto, "readyState", {
+      configurable: true,
+      get: () => 4,
+    });
+    try {
+      const { host } = await render(
+        <DemoThumb id="lerobot/aloha_static_coffee" />,
+      );
+      expect(
+        host
+          .querySelector(".levi-guide-demos__media")!
+          .getAttribute("data-state"),
+      ).toBe("ready");
+    } finally {
+      if (ready) Object.defineProperty(proto, "readyState", ready);
+      else delete (proto as unknown as Record<string, unknown>).readyState;
+    }
+    const errorDescriptor = Object.getOwnPropertyDescriptor(proto, "error");
+    Object.defineProperty(proto, "error", {
+      configurable: true,
+      get: () => ({ code: 4 }),
+    });
+    try {
+      const { host } = await render(
+        <DemoThumb id="lerobot/svla_so101_pickplace" />,
+      );
+      const media = host.querySelector(".levi-guide-demos__media")!;
+      expect(media.getAttribute("data-state")).toBe("failed");
+      expect(media.querySelector("video")).toBeNull();
+    } finally {
+      if (errorDescriptor)
+        Object.defineProperty(proto, "error", errorDescriptor);
+      else delete (proto as unknown as Record<string, unknown>).error;
+    }
+  });
+
   test("the diagnose section names the merged Analysis tab", () => {
     const page = readFileSync(join(import.meta.dir, "../page.tsx"), "utf8");
     expect(page).toContain('"04 / Analyse"');

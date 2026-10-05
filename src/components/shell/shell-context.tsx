@@ -120,6 +120,9 @@ export function ShellProvider({
           const href = chordPage(event);
           if (href && navigateRef.current && !blocked()) {
             event.preventDefault();
+            // The palette or the list may still be open behind the jump.
+            setPaletteOpenState(false);
+            setShortcutsOpenState(false);
             navigateRef.current(href);
             return;
           }

@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Clapperboard } from "lucide-react";
 import { Icon } from "@/components/ds";
 
@@ -11,6 +11,15 @@ import { Icon } from "@/components/ds";
 export function DemoThumb({ id }: { id: string }) {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
+  const video = useRef<HTMLVideoElement>(null);
+  // The video can load (or fail) before React has attached its handlers, in
+  // which case the events are gone: look at what it has already done.
+  useEffect(() => {
+    const element = video.current;
+    if (!element) return;
+    if (element.error) setFailed(true);
+    else if (element.readyState >= 2) setLoaded(true);
+  }, []);
   return (
     <span
       className="levi-guide-demos__media"
@@ -23,6 +32,7 @@ export function DemoThumb({ id }: { id: string }) {
       )}
       {!failed && (
         <video
+          ref={video}
           src={`/api/proxy/datasets/${id}/resolve/main/videos/chunk-000/observation.images.front/episode_000000.mp4#t=0.1`}
           muted
           playsInline

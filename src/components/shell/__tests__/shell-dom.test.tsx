@@ -27,6 +27,8 @@ const { navPages, paletteDatasets, buildCommands, filterCommands } =
 const { CHORD_PAGES, chordPage, isChordLeader, shortcutGroups } =
   await import("../global-keys");
 const { SHELL_EVENTS } = await import("../shell-events");
+const { AppFrame } = await import("../app-frame");
+const { setUnsavedWork } = await import("../unsaved-work");
 const { JobsMenu } = await import("../jobs-menu");
 const { JOBS_POLL_MS } = await import("../jobs");
 
@@ -650,6 +652,89 @@ describe("go-to chords (G, then a letter)", () => {
       expect(row!.label in en).toBe(true);
       expect(row!.label in zh).toBe(true);
     }
+  });
+});
+
+describe("keyboard jumps and unsaved work", () => {
+  test("a jump closes the palette and the list left open behind it", async () => {
+    pushed.length = 0;
+    let shell: ReturnType<typeof useShell> | null = null;
+    function Probe() {
+      shell = useShell();
+      return null;
+    }
+    await render(
+      <ShellProvider navigate={(href) => pushed.push(href)}>
+        <Probe />
+      </ShellProvider>,
+    );
+    await act(async () => shell!.setShortcutsOpen(true));
+    expect(shell!.shortcutsOpen).toBe(true);
+    await press(document.body, "g");
+    await press(document.body, "r");
+    expect(pushed).toEqual(["/report"]);
+    expect(shell!.shortcutsOpen).toBe(false);
+    expect(shell!.paletteOpen).toBe(false);
+  });
+
+  test("with an unsaved draft the jump asks first; Stay keeps the page, Leave goes", async () => {
+    pushed.length = 0;
+    setUnsavedWork(true);
+    try {
+      await render(
+        <AppFrame>
+          <button type="button" id="page">
+            page
+          </button>
+        </AppFrame>,
+      );
+      const page = document.querySelector<HTMLButtonElement>("#page")!;
+      await focus(page);
+      await press(page, "g");
+      await press(page, "e");
+      await flush();
+      const dialog = document.querySelector('[role="alertdialog"]')!;
+      expect(dialog.textContent).toContain("Leave this page without saving?");
+      expect(pushed).toEqual([]);
+      const button = (label: string) =>
+        [...dialog.querySelectorAll("button")].find((b) =>
+          b.textContent?.includes(label),
+        )!;
+      await click(button("Stay here"));
+      await flush();
+      expect(pushed).toEqual([]);
+      await press(page, "g");
+      await press(page, "e");
+      await flush();
+      await click(
+        [...document.querySelectorAll('[role="alertdialog"] button')].find(
+          (b) => b.textContent?.includes("Leave without saving"),
+        ) ?? null,
+      );
+      await flush();
+      expect(pushed).toEqual(["/explore"]);
+    } finally {
+      setUnsavedWork(false);
+    }
+  });
+
+  test("with nothing unsaved the jump goes at once", async () => {
+    pushed.length = 0;
+    setUnsavedWork(false);
+    await render(
+      <AppFrame>
+        <button type="button" id="page">
+          page
+        </button>
+      </AppFrame>,
+    );
+    const page = document.querySelector<HTMLButtonElement>("#page")!;
+    await focus(page);
+    await press(page, "g");
+    await press(page, "p");
+    await flush();
+    expect(pushed).toEqual(["/pool"]);
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
   });
 });
 

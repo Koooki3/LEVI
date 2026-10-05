@@ -2406,5 +2406,9 @@
   "Relates to the \"coverage\" discussion in": "与“覆盖度”讨论相关，见",
   "Based on \"Is Diversity All You Need\" (AGI-Bot, 2025) which shows velocity normalization dramatically improves fine-tuning success rate.": "依据《Is Diversity All You Need》（AGI-Bot，2025），该研究表明速度归一化可显著提高微调成功率。",
   "Concepts (default: the model's concepts)": "概念（默认使用模型的概念）",
-  "Design system": "设计系统"
+  "Design system": "设计系统",
+  "Leave this page without saving?": "不保存就离开这个页面？",
+  "Your annotation edits on this page are not saved. Going to another page drops them.": "这个页面上的标注修改还没有保存，跳到别的页面会丢掉它们。",
+  "Leave without saving": "不保存并离开",
+  "Stay here": "留在这里"
 }

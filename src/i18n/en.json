@@ -2406,5 +2406,9 @@
   "Relates to the \"coverage\" discussion in": "Relates to the \"coverage\" discussion in",
   "Based on \"Is Diversity All You Need\" (AGI-Bot, 2025) which shows velocity normalization dramatically improves fine-tuning success rate.": "Based on \"Is Diversity All You Need\" (AGI-Bot, 2025) which shows velocity normalization dramatically improves fine-tuning success rate.",
   "Concepts (default: the model's concepts)": "Concepts (default: the model's concepts)",
-  "Design system": "Design system"
+  "Design system": "Design system",
+  "Leave this page without saving?": "Leave this page without saving?",
+  "Your annotation edits on this page are not saved. Going to another page drops them.": "Your annotation edits on this page are not saved. Going to another page drops them.",
+  "Leave without saving": "Leave without saving",
+  "Stay here": "Stay here"
 }
