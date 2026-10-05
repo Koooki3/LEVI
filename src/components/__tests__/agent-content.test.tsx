@@ -1,6 +1,6 @@
 import { click, fire, flush, render, setupDom } from "../ds/__tests__/dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { Actions, Disclosure, GatedButton } from "../agent-ui";
+import { Actions, Disclosure, GatedButton, exportedToast } from "../agent-ui";
 import AgentPlan, { type HarnessPlan } from "../agent-plan";
 import AgentReviewQueue from "../agent-review-queue";
 import ChipMultiSelect from "../chip-multi-select";
@@ -194,7 +194,7 @@ describe("AgentReviewQueue", () => {
 
 describe("ChipMultiSelect", () => {
   test("chips are ds Buttons used as listbox options; pressing one selects it", async () => {
-    const onChange = mock((_next: string[]) => undefined);
+    const onChange = mock<(next: string[]) => void>(() => undefined);
     const { host } = await render(
       <ChipMultiSelect
         label="Episodes"
@@ -320,5 +320,89 @@ describe("AgentActivity follows the reduced-motion setting when it scrolls", () 
     } finally {
       proto.scrollTo = before;
     }
+  });
+});
+
+describe("the export result stays on screen", () => {
+  test("the toast has no timer, shows the folder and copies it", async () => {
+    const written: string[] = [];
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: (text: string) => {
+          written.push(text);
+          return Promise.resolve();
+        },
+      },
+    });
+    const toast = exportedToast("/work/export/y", (text) => text);
+    expect(toast.duration).toBeNull();
+    expect(toast.tone).toBe("success");
+    expect(toast.description).toBe("/work/export/y");
+    expect(toast.action?.label).toBe("Copy path");
+    toast.action!.onClick();
+    expect(written).toEqual(["/work/export/y"]);
+  });
+});
+
+describe("AgentActivity task cards", () => {
+  const originalFetch = globalThis.fetch;
+  const originalSource = (globalThis as { EventSource?: unknown }).EventSource;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    (globalThis as { EventSource?: unknown }).EventSource = originalSource;
+  });
+
+  test("the toggle holds no other control; a note beside it does not toggle", async () => {
+    const task = {
+      run_id: "r1",
+      dataset: "local/x",
+      workflow: "Dataset review",
+      instruction: "i",
+      episodes: [0, 1],
+      completed: [0],
+      progress: 0.5,
+      status: "running",
+      waiting_for: "pilot review",
+      finished: false,
+      committed: false,
+      evidence_ready: true,
+      revision: null,
+      tokens: 100,
+      token_source: "measured",
+      usage_missing: true,
+      evidence_frames: null,
+      requests: 1,
+      artifacts: [],
+      last_action: null,
+    };
+    globalThis.fetch = mock((url: string) =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify(
+            String(url).includes("/activity/tasks")
+              ? { tasks: [task] }
+              : { events: [] },
+          ),
+        ),
+      ),
+    ) as unknown as typeof fetch;
+    (globalThis as { EventSource?: unknown }).EventSource = class {
+      close() {}
+    };
+    const { host } = await render(<AgentActivity open />);
+    await flush(10);
+    const toggle = host.querySelector("button[aria-pressed]") as HTMLElement;
+    expect(toggle).not.toBeNull();
+    expect(
+      toggle.querySelectorAll("button, a, [tabindex], input, select").length,
+    ).toBe(0);
+    const tips = host.querySelectorAll(".ag-task__meta .ag-has-tip");
+    expect(tips.length).toBe(2);
+    await click(tips[0]);
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    await click(toggle);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(host.querySelector(".ag-task")!.className).toContain("is-selected");
   });
 });
