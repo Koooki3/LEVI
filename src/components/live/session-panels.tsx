@@ -10,23 +10,54 @@ import {
   sortSessions,
   type FaultInfo,
 } from "./live-logic";
+import { Bot, OctagonAlert } from "lucide-react";
+import { EmptyLine, Problem } from "@/components/pages-ui/feedback";
+import {
+  Badge,
+  Icon,
+  Progress,
+  StatusDot,
+  Tooltip,
+  type Tone as DsTone,
+} from "@/components/ds";
 import type { Fr3Health, LiveSession } from "./types";
 
 export type Tone = "pass" | "warn" | "fail" | "";
 
+const CHIP_TONE: Record<Tone, DsTone> = {
+  pass: "success",
+  warn: "warning",
+  fail: "danger",
+  "": "neutral",
+};
+
+/** A state as a badge (icon shape + colour + words). `live` marks a running
+ * state with the breathing dot; `title` becomes a tooltip (hover and focus). */
 export function Chip({
   tone = "",
   children,
   title,
+  live = false,
 }: {
   tone?: Tone;
   children: React.ReactNode;
   title?: string;
+  live?: boolean;
 }) {
-  return (
-    <span className={`levi-status levi-live-chip ${tone}`} title={title}>
+  const chip = live ? (
+    <StatusDot tone={CHIP_TONE[tone]} live>
       {children}
-    </span>
+    </StatusDot>
+  ) : (
+    <Badge tone={CHIP_TONE[tone]}>{children}</Badge>
+  );
+  if (!title) return chip;
+  return (
+    <Tooltip content={title}>
+      <span tabIndex={0} className="pg-badge-trigger">
+        {chip}
+      </span>
+    </Tooltip>
   );
 }
 
@@ -44,7 +75,11 @@ const SESSION_STATES: Record<string, [string, Tone]> = {
 export function SessionState({ state }: { state: string }) {
   const { t } = useLocale();
   const [label, tone] = SESSION_STATES[state] ?? [state, ""];
-  return <Chip tone={tone}>{t(label)}</Chip>;
+  return (
+    <Chip tone={tone} live={state === "running"}>
+      {t(label)}
+    </Chip>
+  );
 }
 
 /** The red banner: the user asked to see an FR3 fault at once. */
@@ -52,8 +87,11 @@ export function FaultBanner({ fault }: { fault: FaultInfo }) {
   const { t } = useLocale();
   if (!fault.active) return null;
   return (
-    <section className="levi-live-banner" role="alert" aria-live="assertive">
-      <strong>{t("FR3 fault detected: the evaluation was interrupted")}</strong>
+    <section className="pg-live-banner" role="alert" aria-live="assertive">
+      <strong>
+        <Icon icon={OctagonAlert} size="md" />
+        {t("FR3 fault detected: the evaluation was interrupted")}
+      </strong>
       <p>
         {fault.redLight
           ? t("The FR3 health monitor reports the red light.")
@@ -76,7 +114,7 @@ export function FaultBanner({ fault }: { fault: FaultInfo }) {
         </p>
       )}
       {fault.reasons.length > 0 && (
-        <ul className="levi-live-reasons">
+        <ul className="pg-live-reasons">
           {fault.reasons.map((r) => (
             <li key={r}>{r}</li>
           ))}
@@ -136,7 +174,7 @@ function ResetWait({ session }: { session: LiveSession }) {
     return (
       <>
         {wait} s ·{" "}
-        <span className="levi-live-bad">
+        <span className="pg-live-bad">
           {t("the next episode should have started")}
         </span>
       </>
@@ -161,14 +199,14 @@ function SessionCard({ session: s }: { session: LiveSession }) {
     ...(inband.reasons ?? []),
   ].slice(0, 4);
   return (
-    <article className={`levi-live-card${fault ? " fault" : ""}`}>
+    <article className={`pg-live-card${fault ? " fault" : ""}`}>
       <header>
         <h3>
           <code>
             {s.group} / {s.task_folder}
           </code>
         </h3>
-        <div className="levi-live-chips">
+        <div className="pg-live-chips">
           <SessionState state={s.state} />
           {lost && (
             <Chip tone="warn" title={t("No heartbeat from the client")}>
@@ -179,13 +217,15 @@ function SessionCard({ session: s }: { session: LiveSession }) {
           {s.levi_enabled === false && <Chip>{t("Manual labelling")}</Chip>}
         </div>
       </header>
-      {s.prompt && <p className="levi-live-prompt">“{s.prompt}”</p>}
+      {s.prompt && <p className="pg-live-prompt">“{s.prompt}”</p>}
       {fault && (
-        <p className="levi-error">
-          {s.reason || t("The session reports a fault.")}
-        </p>
+        <Problem
+          live={false}
+          title={t("Fault")}
+          why={s.reason || t("The session reports a fault.")}
+        />
       )}
-      <dl className="levi-live-dl">
+      <dl className="pg-live-dl">
         <Field label={t("Run")}>
           {s.run_id ? <code>{s.run_id}</code> : t("manual session (no run)")}
         </Field>
@@ -195,7 +235,7 @@ function SessionCard({ session: s }: { session: LiveSession }) {
               {ep.no}
               {ep.target ? ` / ${ep.target}` : ""}
               {ep.counted != null && (
-                <span className="levi-pool-muted">
+                <span className="pg-pool-muted">
                   {" "}
                   · {t("counted")} {ep.counted}
                 </span>
@@ -208,22 +248,11 @@ function SessionCard({ session: s }: { session: LiveSession }) {
         <Field label={t("Steps")}>
           {ep.max_steps ? (
             <>
-              <span>
-                {ep.step ?? 0} / {ep.max_steps}
-              </span>
-              <div
-                className="levi-bar levi-live-bar"
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={Math.round((steps ?? 0) * 100)}
-              >
-                <span
-                  style={{
-                    width: `${(Math.min(1, steps ?? 0) * 100).toFixed(1)}%`,
-                  }}
-                />
-              </div>
+              <Progress
+                className="pg-live-bar"
+                value={Math.min(1, steps ?? 0) * 100}
+                label={`${ep.step ?? 0} / ${ep.max_steps}`}
+              />
             </>
           ) : (
             "—"
@@ -248,10 +277,7 @@ function SessionCard({ session: s }: { session: LiveSession }) {
               {last.duration_s != null &&
                 ` · ${shortDuration(last.duration_s)}`}
               {last.ended_at != null && (
-                <span className="levi-pool-muted">
-                  {" "}
-                  · {clock(last.ended_at)}
-                </span>
+                <span className="pg-pool-muted"> · {clock(last.ended_at)}</span>
               )}
             </>
           ) : (
@@ -263,14 +289,14 @@ function SessionCard({ session: s }: { session: LiveSession }) {
         </Field>
         <Field label={t("Robot (client's view)")}>
           {inband.ok === false || inbandProblems.length > 0 ? (
-            <span className="levi-live-bad">
+            <span className="pg-live-bad">
               {inbandProblems.join("; ") || t("not OK")}
             </span>
           ) : inband.ok === true ? (
             <>
               {inband.robot_mode_name || t("OK")}
               {inband.source && (
-                <span className="levi-pool-muted"> · {inband.source}</span>
+                <span className="pg-pool-muted"> · {inband.source}</span>
               )}
             </>
           ) : (
@@ -286,19 +312,19 @@ export function SessionsPanel({ sessions }: { sessions: LiveSession[] }) {
   const { t } = useLocale();
   sessions = sortSessions(sessions);
   return (
-    <section className="levi-live-section" aria-labelledby="live-sessions">
+    <section className="pg-live-section" aria-labelledby="live-sessions">
       <h2 id="live-sessions">
         {t("Evaluation sessions")}{" "}
-        <span className="levi-pool-muted">({sessions.length})</span>
+        <span className="pg-pool-muted">({sessions.length})</span>
       </h2>
       {sessions.length === 0 ? (
-        <p className="levi-pool-hint">
+        <EmptyLine icon={Bot}>
           {t(
             "No evaluation session is reporting. The evaluation client writes one status file per model and task folder while it runs.",
           )}
-        </p>
+        </EmptyLine>
       ) : (
-        <div className="levi-live-cards">
+        <div className="pg-live-cards">
           {sessions.map((s) => (
             <SessionCard key={`${s.group}/${s.task_folder}`} session={s} />
           ))}
@@ -314,7 +340,7 @@ function YesNo({ value }: { value: boolean | null | undefined }) {
   return value ? (
     <>{t("Yes")}</>
   ) : (
-    <span className="levi-live-bad">{t("No")}</span>
+    <span className="pg-live-bad">{t("No")}</span>
   );
 }
 
@@ -343,25 +369,25 @@ export function Fr3Panel({ fr3 }: { fr3: Fr3Health | null | undefined }) {
             ];
   return (
     <section
-      className={`levi-live-section${state === "red" ? " fault" : ""}`}
+      className={`pg-live-section${state === "red" ? " fault" : ""}`}
       aria-labelledby="live-fr3"
     >
       <h2 id="live-fr3">{t("FR3 robot arm")}</h2>
-      <div className="levi-live-chips">
+      <div className="pg-live-chips">
         <Chip tone={tone}>{t(label)}</Chip>
         {fr3?.age_s != null && state !== "missing" && (
-          <span className="levi-pool-muted">
+          <span className="pg-pool-muted">
             {t("Updated")} {ago(fr3.age_s, t)}
           </span>
         )}
       </div>
-      <p className="levi-pool-hint">{t(note)}</p>
+      <p className="pg-pool-hint">{t(note)}</p>
       {state && state !== "missing" && (
-        <dl className="levi-live-dl">
+        <dl className="pg-live-dl">
           <Field label={t("Robot mode")}>
             {fr3?.robot_mode_name || "—"}
             {fr3?.robot_mode != null && (
-              <span className="levi-pool-muted"> ({fr3.robot_mode})</span>
+              <span className="pg-pool-muted"> ({fr3.robot_mode})</span>
             )}
           </Field>
           <Field label={t("Hardware active")}>
@@ -372,7 +398,7 @@ export function Fr3Panel({ fr3 }: { fr3: Fr3Health | null | undefined }) {
           </Field>
           <Field label={t("Current errors")}>
             {fr3?.current_errors?.length ? (
-              <span className="levi-live-bad">
+              <span className="pg-live-bad">
                 {fr3.current_errors.join(", ")}
               </span>
             ) : (
@@ -393,8 +419,8 @@ export function Fr3Panel({ fr3 }: { fr3: Fr3Health | null | undefined }) {
       )}
       {fr3?.reasons && fr3.reasons.length > 0 && (
         <>
-          <h3 className="levi-live-sub">{t("Reasons")}</h3>
-          <ul className="levi-live-reasons">
+          <h3 className="pg-live-sub">{t("Reasons")}</h3>
+          <ul className="pg-live-reasons">
             {fr3.reasons.map((r) => (
               <li key={r}>{r}</li>
             ))}

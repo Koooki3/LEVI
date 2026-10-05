@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { T, useLocale } from "@/components/levi-locale";
 import { leviApi } from "@/components/levi-api";
+import { Badge } from "@/components/ds";
 import type { Formats } from "./types";
 
 /** What LEVI converts from and to (the format registry), with the evidence
@@ -17,53 +18,55 @@ export function FormatsTable() {
   if (!formats) return null;
   const outputs = Object.fromEntries(formats.outputs.map((o) => [o.id, o]));
   return (
-    <details className="mt-4">
-      <summary className="cursor-pointer text-xs">
+    <details className="pg-mt-4">
+      <summary className="pg-small">
         <T>Supported formats</T>
       </summary>
-      <table className="levi-table">
-        <thead>
-          <tr>
-            <th>
-              <T>Input</T>
-            </th>
-            <th>
-              <T>Exports to</T>
-            </th>
-            <th>
-              <T>Evidence</T>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {formats.inputs.map((input) => (
-            <tr key={input.id}>
-              <td>
-                {t(input.label)}
-                <p className="text-xs">{t(input.description)}</p>
-              </td>
-              <td>
-                {(formats.matrix[input.id] ?? [])
-                  .map((id) => t(outputs[id]?.label ?? id))
-                  .join(" · ") || "—"}
-              </td>
-              <td>{t(input.evidence)}</td>
+      <div className="ds-table-wrap pg-gap-top">
+        <table className="ds-table">
+          <thead>
+            <tr>
+              <th>
+                <T>Input</T>
+              </th>
+              <th>
+                <T>Exports to</T>
+              </th>
+              <th>
+                <T>Evidence</T>
+              </th>
             </tr>
-          ))}
-          {formats.unsupported.map((gap) => (
-            <tr key={gap.id}>
-              <td>{t(gap.label)}</td>
-              <td>
-                <span className="levi-status fail">
-                  <T>unsupported</T>
-                </span>
-                <p className="text-xs">{t(gap.reason)}</p>
-              </td>
-              <td className="text-xs">{t(gap.workaround)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {formats.inputs.map((input) => (
+              <tr key={input.id}>
+                <td>
+                  {t(input.label)}
+                  <p className="pg-small">{t(input.description)}</p>
+                </td>
+                <td>
+                  {(formats.matrix[input.id] ?? [])
+                    .map((id) => t(outputs[id]?.label ?? id))
+                    .join(" · ") || "—"}
+                </td>
+                <td>{t(input.evidence)}</td>
+              </tr>
+            ))}
+            {formats.unsupported.map((gap) => (
+              <tr key={gap.id}>
+                <td>{t(gap.label)}</td>
+                <td>
+                  <Badge tone="danger">
+                    <T>unsupported</T>
+                  </Badge>
+                  <p className="pg-small">{t(gap.reason)}</p>
+                </td>
+                <td className="pg-small">{t(gap.workaround)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </details>
   );
 }

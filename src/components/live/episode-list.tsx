@@ -1,4 +1,5 @@
 "use client";
+import { Problem } from "@/components/pages-ui/feedback";
 import { useEffect, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { ConfirmDialog } from "@/components/pool/confirm-dialog";
@@ -82,17 +83,22 @@ export function RemoveDialog({
           "You can bring them back at any time from the Removed list of this card.",
         )}
       </p>
-      <label className="levi-live-reason">
+      <label className="pg-live-reason">
         <span>{t("Reason (optional)")}</span>
         <input
-          className="levi-input grow"
+          className="ds-input ds-focus grow"
           type="text"
           maxLength={300}
           value={reason}
           onChange={(e) => onReason(e.target.value)}
         />
       </label>
-      {error && <p className="levi-error">{friendlyError(error, t)}</p>}
+      {error && (
+        <Problem
+          title={t("Nothing was removed")}
+          why={friendlyError(error, t)}
+        />
+      )}
     </ConfirmDialog>
   );
 }
@@ -142,41 +148,45 @@ function Row({
       <span>
         {demo.segments != null ? `${demo.segments} ${t("time segments")}` : "—"}
       </span>
-      <span className="levi-live-autocell">
+      <span className="pg-live-autocell">
         {removed ? (
-          <span className="levi-pool-muted">
+          <span className="pg-pool-muted">
             {demo.excluded?.reason || t("no reason given")}
             {demo.excluded?.at ? ` · ${clock(demo.excluded.at)}` : ""}
           </span>
         ) : demo.verdict ? (
           <>
-            <span className="levi-live-auto-tag">{t("auto")}</span>{" "}
+            <span className="pg-live-auto-tag">{t("auto")}</span>{" "}
             {demo.verdict.undecided || !demo.verdict.outcome
               ? t("undecided")
               : t(demo.verdict.outcome)}
             {demo.verdict.events != null &&
               ` (${demo.verdict.valid_events ?? 0}/${demo.verdict.events})`}
             {verdictReason(demo.verdict) && (
-              <span className="levi-pool-muted">
+              <span className="pg-pool-muted">
                 {" · "}
                 {t(verdictReason(demo.verdict) as string)}
               </span>
             )}
           </>
         ) : demo.reason ? (
-          <span className="levi-pool-muted">{demo.reason}</span>
+          <span className="pg-pool-muted">{demo.reason}</span>
         ) : (
           "—"
         )}
       </span>
       {removed ? (
-        <button type="button" className="levi-pool-link" onClick={onRestore}>
+        <button
+          type="button"
+          className="ds-btn ds-btn--ghost ds-btn--sm ds-focus"
+          onClick={onRestore}
+        >
           {t("Restore")}
         </button>
       ) : (
         <button
           type="button"
-          className="levi-pool-link"
+          className="ds-btn ds-btn--ghost ds-btn--sm ds-focus"
           aria-expanded={open}
           onClick={onOpen}
         >
@@ -184,8 +194,8 @@ function Row({
         </button>
       )}
       {open && !removed && (
-        <div className="levi-live-demo-detail">
-          <dl className="levi-live-dl">
+        <div className="pg-live-demo-detail">
+          <dl className="pg-live-dl">
             <dt>{t("Episode")}</dt>
             <dd>
               <code>
@@ -198,17 +208,17 @@ function Row({
             <dt>{t("Attempts")}</dt>
             <dd>{demo.attempts ?? 0}</dd>
           </dl>
-          <div className="levi-row levi-live-actions">
+          <div className="pg-row pg-live-actions">
             <button
               type="button"
-              className="levi-secondary"
+              className="ds-btn ds-btn--secondary ds-focus"
               disabled={block !== null}
               title={why || undefined}
               onClick={onRemove}
             >
               {t("Remove episode (restorable)")}
             </button>
-            {why && <span className="levi-pool-muted">{why}</span>}
+            {why && <span className="pg-pool-muted">{why}</span>}
           </div>
         </div>
       )}
@@ -286,8 +296,8 @@ export function EpisodeList({
   }
 
   return (
-    <div className="levi-live-demos">
-      <div className="levi-live-demos-head">
+    <div className="pg-live-demos">
+      <div className="pg-live-demos-head">
         <strong>
           {showRemoved
             ? t("Removed episodes (not counted, not labelled)")
@@ -295,7 +305,7 @@ export function EpisodeList({
         </strong>
         <button
           type="button"
-          className="levi-pool-link"
+          className="ds-btn ds-btn--ghost ds-btn--sm ds-focus"
           aria-pressed={showRemoved}
           onClick={() => {
             setShowRemoved((v) => !v);
@@ -309,7 +319,7 @@ export function EpisodeList({
         </button>
       </div>
       {candidates.length > 0 && (
-        <div className="levi-live-bulk">
+        <div className="pg-live-bulk">
           <label>
             <input
               type="checkbox"
@@ -325,7 +335,7 @@ export function EpisodeList({
               {showRemoved ? (
                 <button
                   type="button"
-                  className="levi-secondary"
+                  className="ds-btn ds-btn--secondary ds-focus"
                   disabled={busy}
                   onClick={() => void act("restore", chosen)}
                 >
@@ -334,7 +344,7 @@ export function EpisodeList({
               ) : (
                 <button
                   type="button"
-                  className="levi-secondary"
+                  className="ds-btn ds-btn--secondary ds-focus"
                   onClick={() => setPending(chosen)}
                 >
                   {t("Remove selected")} ({chosen.length})
@@ -342,7 +352,7 @@ export function EpisodeList({
               )}
               <button
                 type="button"
-                className="levi-pool-link"
+                className="ds-btn ds-btn--ghost ds-btn--sm ds-focus"
                 onClick={() => setSelected(new Set())}
               >
                 {t("Clear selection")}
@@ -352,12 +362,12 @@ export function EpisodeList({
         </div>
       )}
       {notice && (
-        <p className="levi-pool-hint" role="status">
+        <p className="pg-pool-hint" role="status">
           {notice}
         </p>
       )}
       {demos.length === 0 ? (
-        <p className="levi-pool-muted">
+        <p className="pg-pool-muted">
           {showRemoved
             ? t("No episode has been removed.")
             : t("Every episode has been removed.")}
@@ -384,7 +394,7 @@ export function EpisodeList({
       {demos.length > 10 && (
         <button
           type="button"
-          className="levi-pool-link"
+          className="ds-btn ds-btn--ghost ds-btn--sm ds-focus"
           onClick={() => setAll((v) => !v)}
         >
           {all ? t("Show fewer") : `${t("Show all")} ${demos.length}`}

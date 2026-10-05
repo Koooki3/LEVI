@@ -139,6 +139,7 @@ export default function AgentTaskConsole({
         <label>
           <T>Local model</T>
           <select
+            className="ds-input ds-focus"
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
           >
@@ -152,12 +153,16 @@ export default function AgentTaskConsole({
         <label>
           <T>Request</T>
           <textarea
+            className="ds-input ds-textarea ds-focus"
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder={t("TASK_REQUEST_EXAMPLE")}
           />
         </label>
-        <button disabled={busy || text.trim().length < 3}>
+        <button
+          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+          disabled={busy || text.trim().length < 3}
+        >
           <T>{busy ? "Working…" : "Interpret"}</T>
         </button>
       </form>
@@ -186,6 +191,7 @@ export default function AgentTaskConsole({
           <div className="levi-agent-actions">
             {task.status === "awaiting_approval" && (
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 disabled={busy}
                 onClick={() =>
                   void act(() =>
@@ -198,6 +204,7 @@ export default function AgentTaskConsole({
             )}
             {["approved", "running"].includes(task.status) && (
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 disabled={busy}
                 onClick={() =>
                   void act(() =>
@@ -209,6 +216,7 @@ export default function AgentTaskConsole({
               </button>
             )}
             <button
+              className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
               disabled={busy}
               onClick={() =>
                 void act(() => call<Task>("tasks.get", { task_id: task.id }))

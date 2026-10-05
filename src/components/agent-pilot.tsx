@@ -167,6 +167,7 @@ export default function AgentPilot({
       </p>
       {runtime && (
         <button
+          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
           disabled={!!active || !approved}
           onClick={() =>
             void act("/pilot/sessions", { run_id: runId, runtime })
@@ -182,17 +183,24 @@ export default function AgentPilot({
           {s.reason && <p role="status">{s.reason}</p>}
           {s.connection !== "disconnected" ? (
             <>
-              <button onClick={() => void act(`/pilot/sessions/${s.id}/pause`)}>
+              <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                onClick={() => void act(`/pilot/sessions/${s.id}/pause`)}
+              >
                 {t("Take over / pause")}
               </button>
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 onClick={() => void act(`/pilot/sessions/${s.id}/cancel`)}
               >
                 {t("Cancel")}
               </button>
             </>
           ) : (
-            <button onClick={() => void act(`/pilot/sessions/${s.id}/resume`)}>
+            <button
+              className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+              onClick={() => void act(`/pilot/sessions/${s.id}/resume`)}
+            >
               {t("Resume from task state")}
             </button>
           )}
@@ -209,12 +217,18 @@ export default function AgentPilot({
           <label>
             {t("Message Pilot")}
             <input
+              className="ds-input ds-focus"
               value={text}
               maxLength={12000}
               onChange={(e) => setText(e.target.value)}
             />
           </label>
-          <button disabled={!text.trim()}>{t("Send")}</button>
+          <button
+            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+            disabled={!text.trim()}
+          >
+            {t("Send")}
+          </button>
         </form>
       )}
       {permissions.map((p) => (
@@ -224,6 +238,7 @@ export default function AgentPilot({
           </strong>
           {p.options.map((o) => (
             <button
+              className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
               key={o.optionId}
               onClick={() =>
                 void act(`/pilot/permissions/${p.id}`, {
@@ -262,6 +277,7 @@ export default function AgentPilot({
         ))}
       </ol>
       <button
+        className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
         onClick={() => {
           void request<typeof manifest>(`/runs/${runId}/manifest`)
             .then(setManifest)
@@ -279,6 +295,7 @@ export default function AgentPilot({
                 <code>{a.path}</code> · {a.bytes} B
                 {a.evidence && (
                   <button
+                    className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                     disabled={edited}
                     onClick={() =>
                       window.dispatchEvent(

@@ -2,6 +2,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
+import { CircleCheck, Eraser, Trash2 } from "lucide-react";
+import { Button, Tooltip } from "@/components/ds";
+import { EmptyLine, RequestProblem } from "@/components/pages-ui/feedback";
 import { ConfirmDialog } from "./confirm-dialog";
 import { ago, bytes, duration } from "./pool-progress";
 import type { CleanupInventory, CleanupPartial } from "./types";
@@ -11,7 +14,7 @@ export function DiskUsage({ disk }: { disk: CleanupInventory["disk"] }) {
   const { t } = useLocale();
   if (!disk?.length) return null;
   return (
-    <ul className="levi-pool-disk">
+    <ul className="pg-pool-disk">
       {disk.map((d) => {
         const used = d.total_bytes ? 1 - d.free_bytes / d.total_bytes : 0;
         return (
@@ -19,7 +22,7 @@ export function DiskUsage({ disk }: { disk: CleanupInventory["disk"] }) {
             <code>{d.path}</code> · {t("free")}{" "}
             <strong>{bytes(d.free_bytes)}</strong> / {bytes(d.total_bytes)}
             <div
-              className="levi-bar"
+              className="pg-bar"
               role="progressbar"
               aria-label={t("Disk used")}
               aria-valuemin={0}
@@ -96,92 +99,104 @@ export function CleanupPanel({
   const empty =
     inventory && !inventory.partials.length && !inventory.jobs.length;
   return (
-    <section className="levi-pool-card" aria-labelledby="pool-cleanup">
+    <section className="pg-pool-card" aria-labelledby="pool-cleanup">
       <h2 id="pool-cleanup">{t("Cleanup")}</h2>
-      <p className="levi-pool-hint">
+      <p className="pg-pool-hint">
         {t(
           "Unfinished exports are kept so they can be resumed, then removed after the time shown. Finished exports are never listed here.",
         )}
       </p>
       {inventory && <DiskUsage disk={inventory.disk} />}
       {error && (
-        <p className="levi-error" role="alert">
-          {t(error)}
-        </p>
+        <RequestProblem
+          action="The cleanup did not complete"
+          message={error}
+          onRetry={() => void load()}
+        />
       )}
-      {empty && <p className="levi-pool-muted">{t("Nothing to clean up.")}</p>}
+      {empty && (
+        <EmptyLine icon={CircleCheck}>{t("Nothing to clean up.")}</EmptyLine>
+      )}
       {inventory && inventory.partials.length > 0 && (
-        <table className="levi-table">
-          <thead>
-            <tr>
-              <th>{t("Unfinished output")}</th>
-              <th>{t("State")}</th>
-              <th>{t("Size")}</th>
-              <th>{t("Age")}</th>
-              <th>{t("Removed in")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {inventory.partials.map((p) => (
-              <tr key={p.path}>
-                <td className="levi-pool-ellipsis">
-                  <code title={p.path}>{p.name}</code>
-                  {p.job && <small className="levi-pool-muted"> {p.job}</small>}
-                </td>
-                <td>
-                  {p.live
-                    ? t("running")
-                    : p.resumable
-                      ? t("can resume")
-                      : p.known
-                        ? t(p.status || "")
-                        : t("unknown job")}
-                </td>
-                <td>{bytes(p.bytes)}</td>
-                <td>{ago(p.age_seconds, t)}</td>
-                <td>
-                  {p.live
-                    ? "—"
-                    : p.expires_in_seconds
-                      ? duration(p.expires_in_seconds)
-                      : t("now")}
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className="levi-pool-link levi-pool-danger-link"
-                    disabled={p.live}
-                    onClick={() => setConfirming(p)}
-                  >
-                    {t("Delete")}
-                  </button>
-                </td>
+        <div className="ds-table-wrap">
+          <table className="ds-table ds-table--compact">
+            <thead>
+              <tr>
+                <th>{t("Unfinished output")}</th>
+                <th>{t("State")}</th>
+                <th>{t("Size")}</th>
+                <th>{t("Age")}</th>
+                <th>{t("Removed in")}</th>
+                <th>
+                  <span className="sr-only">{t("Actions")}</span>
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {inventory.partials.map((p) => (
+                <tr key={p.path}>
+                  <td className="pg-pool-ellipsis">
+                    <Tooltip content={p.path}>
+                      <code tabIndex={0}>{p.name}</code>
+                    </Tooltip>
+                    {p.job && <small className="pg-pool-muted"> {p.job}</small>}
+                  </td>
+                  <td>
+                    {p.live
+                      ? t("running")
+                      : p.resumable
+                        ? t("can resume")
+                        : p.known
+                          ? t(p.status || "")
+                          : t("unknown job")}
+                  </td>
+                  <td className="ds-num">{bytes(p.bytes)}</td>
+                  <td className="tabular">{ago(p.age_seconds, t)}</td>
+                  <td>
+                    {p.live
+                      ? "—"
+                      : p.expires_in_seconds
+                        ? duration(p.expires_in_seconds)
+                        : t("now")}
+                  </td>
+                  <td>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="pg-danger-text"
+                      icon={Trash2}
+                      disabled={p.live}
+                      onClick={() => setConfirming(p)}
+                    >
+                      {t("Delete")}
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {inventory && inventory.jobs.length > 0 && (
-        <p className="levi-pool-hint">
+        <p className="pg-pool-hint">
           {inventory.jobs.length} {t("finished job records with logs")} ·{" "}
           {bytes(inventory.jobs.reduce((n, j) => n + j.bytes, 0))}
         </p>
       )}
       {inventory && (
-        <div className="levi-row">
-          <span className="levi-pool-hint">
+        <div className="pg-row">
+          <span className="pg-pool-hint">
             {t("Ready to remove")}:{" "}
             <strong>{bytes(inventory.reclaimable_bytes)}</strong>
           </span>
-          <button
-            type="button"
-            className="levi-secondary"
+          <Button
+            size="sm"
+            icon={Eraser}
             disabled={!inventory.reclaimable_bytes && !inventory.jobs.length}
             onClick={() => setConfirming("expired")}
           >
             {t("Remove expired")}
-          </button>
+          </Button>
         </div>
       )}
       <ConfirmDialog

@@ -183,17 +183,23 @@ export default function AgentConnections({
             </p>
             <div className="levi-agent-actions">
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 disabled={busy || !p.enabled}
                 aria-pressed={selected === p.name}
                 onClick={() => select(p.name)}
               >
                 {t(selected === p.name ? "Selected" : "Use this model")}
               </button>
-              <button disabled={busy} onClick={() => edit(p)}>
+              <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                disabled={busy}
+                onClick={() => edit(p)}
+              >
                 Edit configuration
               </button>
               {p.kind !== "ollama" && (
                 <button
+                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                   disabled={busy}
                   onClick={() => {
                     setCredentialFor(p.name);
@@ -204,6 +210,7 @@ export default function AgentConnections({
                 </button>
               )}
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 disabled={busy}
                 onClick={() =>
                   void action(p.name, p.enabled ? "disconnect" : "activate")
@@ -211,7 +218,11 @@ export default function AgentConnections({
               >
                 {t(p.enabled ? "Disconnect" : "Reconnect")}
               </button>
-              <button disabled={busy} onClick={() => setRemove(p.name)}>
+              <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                disabled={busy}
+                onClick={() => setRemove(p.name)}
+              >
                 Remove configuration
               </button>
             </div>
@@ -228,6 +239,7 @@ export default function AgentConnections({
                 <label>
                   Session API key
                   <input
+                    className="ds-input ds-focus"
                     type="password"
                     autoComplete="off"
                     value={key}
@@ -238,8 +250,14 @@ export default function AgentConnections({
                 <p className="levi-agent-muted">
                   Held in server memory only; cleared on disconnect or restart.
                 </p>
-                <button disabled={busy}>Save session credential</button>
                 <button
+                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                  disabled={busy}
+                >
+                  Save session credential
+                </button>
+                <button
+                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                   type="button"
                   onClick={() => {
                     setCredentialFor(null);
@@ -256,10 +274,19 @@ export default function AgentConnections({
                   Remove this configuration? Existing task history will be
                   preserved.
                 </p>
-                <button disabled={busy} onClick={() => void action(p.name, "")}>
+                <button
+                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                  disabled={busy}
+                  onClick={() => void action(p.name, "")}
+                >
                   Remove configuration
                 </button>
-                <button onClick={() => setRemove(null)}>Cancel</button>
+                <button
+                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                  onClick={() => setRemove(null)}
+                >
+                  Cancel
+                </button>
               </div>
             )}
           </article>
@@ -308,6 +335,7 @@ export default function AgentConnections({
             </p>
           ))}
           <button
+            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
             disabled={busy || !external?.configured}
             onClick={async () => {
               if (!external) return;

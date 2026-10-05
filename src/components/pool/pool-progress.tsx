@@ -1,5 +1,6 @@
 "use client";
 import { useLocale } from "@/components/levi-locale";
+import { Badge, Progress, type Tone } from "@/components/ds";
 import type { PoolJob } from "./types";
 
 export function duration(seconds: number | null | undefined): string {
@@ -76,10 +77,22 @@ export function statusTone(status: string): "pass" | "warn" | "fail" | "" {
 
 const LEGACY_STATUS: Record<string, string> = { succeeded: "done" };
 
+const BADGE_TONE: Record<"pass" | "warn" | "fail" | "", Tone> = {
+  pass: "success",
+  warn: "warning",
+  fail: "danger",
+  "": "neutral",
+};
+
+/** A job's status as a badge (icon shape + words); running states are info. */
 export function StatusBadge({ status }: { status: string }) {
   const { t } = useLocale();
   const shown = LEGACY_STATUS[status] || status;
-  return <span className={`levi-status ${statusTone(shown)}`}>{t(shown)}</span>;
+  const tone =
+    RUNNING.has(shown) && shown !== "stalled"
+      ? "info"
+      : BADGE_TONE[statusTone(shown)];
+  return <Badge tone={tone}>{t(shown)}</Badge>;
 }
 
 /** Stage chips, a bar, done / total and timing of a pool job's progress
@@ -91,8 +104,8 @@ export function PoolJobProgress({ job }: { job: PoolJob }) {
   const running = RUNNING.has(job.status);
   const fraction = p.total ? Math.min(1, p.done / p.total) : 0;
   return (
-    <div className="levi-progress" aria-live="polite">
-      <ol className="levi-steps">
+    <div className="pg-progress" aria-live="polite">
+      <ol className="pg-steps">
         {p.stages.map((name, index) => (
           <li
             key={name}
@@ -109,17 +122,13 @@ export function PoolJobProgress({ job }: { job: PoolJob }) {
         ))}
       </ol>
       {running && p.total > 0 && (
-        <div
-          className="levi-bar"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={Math.round(fraction * 100)}
-        >
-          <span style={{ width: `${(fraction * 100).toFixed(1)}%` }} />
-        </div>
+        <Progress
+          value={fraction * 100}
+          showValue
+          label={t(p.stages[p.stage_index] ?? p.stage ?? "In progress")}
+        />
       )}
-      <p className="text-xs tabular">
+      <p className="pg-small tabular">
         {running && job.age_seconds !== undefined && (
           <>
             {t("Last update")} {ago(job.age_seconds, t)}
@@ -147,7 +156,7 @@ export function PoolJobProgress({ job }: { job: PoolJob }) {
         )}
       </p>
       {p.warnings.length > 0 && (
-        <ul className="levi-warnings">
+        <ul className="pg-warnings">
           {p.warnings.slice(-5).map((w) => (
             <li key={w}>{t(w)}</li>
           ))}

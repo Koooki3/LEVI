@@ -1,11 +1,13 @@
 "use client";
 import { T, useLocale } from "@/components/levi-locale";
+import { Check, Wand2 } from "lucide-react";
+import { Badge, Button } from "@/components/ds";
 import type { Solution, TargetCompatibility } from "./types";
 
 const STATUS = {
-  supported: "pass",
-  warnings: "warn",
-  unsupported: "fail",
+  supported: "success",
+  warnings: "warning",
+  unsupported: "danger",
 } as const;
 
 /** One card per output format: can this input be exported, why not, and
@@ -23,29 +25,27 @@ export function TargetCards({
 }) {
   const { t } = useLocale();
   return (
-    <div className="levi-cards">
+    <div className="pg-cards">
       {targets.map((target) => {
         const usable = target.status !== "unsupported";
         return (
           <div
             key={target.target}
-            className={`levi-card ${selected === target.target ? "selected" : ""}`}
+            className={`pg-card ${selected === target.target ? "selected" : ""}`}
           >
-            <div className="levi-row justify-between">
+            <div className="pg-row pg-between">
               <h3>{t(target.label)}</h3>
-              <span className={`levi-status ${STATUS[target.status]}`}>
-                {t(target.status)}
-              </span>
+              <Badge tone={STATUS[target.status]}>{t(target.status)}</Badge>
             </div>
             {target.reasons.length > 0 && (
-              <ul className="levi-reasons">
+              <ul className="pg-reasons">
                 {target.reasons.map((reason) => (
                   <li key={reason}>{t(reason)}</li>
                 ))}
               </ul>
             )}
             {Object.keys(target.defaults).length > 0 && (
-              <p className="text-xs">
+              <p className="pg-small">
                 <T>Defaults for this target</T>:{" "}
                 <code>
                   {Object.entries(target.defaults)
@@ -55,27 +55,28 @@ export function TargetCards({
               </p>
             )}
             {target.solutions.length > 0 && (
-              <div className="levi-row mt-3">
+              <div className="pg-row pg-mt-3">
                 {target.solutions.map((solution) => (
-                  <button
+                  <Button
                     key={solution.id}
-                    type="button"
-                    className="levi-secondary"
+                    size="sm"
+                    icon={Wand2}
                     onClick={() => onSolution(solution)}
                   >
                     {t(solution.label)}
-                  </button>
+                  </Button>
                 ))}
               </div>
             )}
-            <button
-              type="button"
-              className="levi-primary mt-4"
+            <Button
+              className="pg-mt-4 pg-choice"
+              icon={selected === target.target ? Check : undefined}
               disabled={!usable}
+              aria-pressed={selected === target.target}
               onClick={() => onSelect(target)}
             >
               <T>{usable ? "Choose this export" : "Not available"}</T>
-            </button>
+            </Button>
           </div>
         );
       })}

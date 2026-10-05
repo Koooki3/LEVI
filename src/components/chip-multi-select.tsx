@@ -56,12 +56,17 @@ export default function ChipMultiSelect({
     <div className="levi-chips-field">
       <div className="levi-chips-actions">
         <button
+          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
           type="button"
           onClick={() => onChange(options.map((o) => o.value))}
         >
           {t("Select all")}
         </button>
-        <button type="button" onClick={() => onChange([])}>
+        <button
+          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+          type="button"
+          onClick={() => onChange([])}
+        >
           {t("Clear")}
         </button>
         <span className="levi-agent-muted">

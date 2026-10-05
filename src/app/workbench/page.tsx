@@ -1,4 +1,5 @@
 "use client";
+import "@/components/pages-ui/pages.css";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { T, useLocale } from "@/components/levi-locale";
@@ -9,6 +10,18 @@ import { FormatsTable } from "@/components/conversion/formats-table";
 import { JobProgress } from "@/components/conversion/job-progress";
 import type { Job } from "@/components/conversion/types";
 import { DatasetFormatBadge } from "@/components/dataset-format";
+import {
+  ArrowRight,
+  ArrowUpRight,
+  Database,
+  FolderInput,
+  History,
+  Play,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
+import { Badge, Button, EmptyState, Icon, Tooltip } from "@/components/ds";
+import { EmptyLine, RequestProblem } from "@/components/pages-ui/feedback";
 import type { CatalogEntry } from "@/types/dataset-format.types";
 type Local = CatalogEntry;
 type SyncChange = {
@@ -32,6 +45,15 @@ type Catalog = {
   conversion_available: boolean;
   stages: string[];
 };
+const JOB_TONE: Record<string, "success" | "warning" | "danger" | "info"> = {
+  succeeded: "success",
+  running: "info",
+  queued: "info",
+  failed: "danger",
+  cancelled: "warning",
+  interrupted: "warning",
+};
+
 export default function Workbench() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [path, setPath] = useState("");
@@ -90,10 +112,7 @@ export default function Workbench() {
     }
   }
   return (
-    <main className="levi-workbench">
-      <span className="levi-eyebrow">
-        <T>LEVI / CONVERSION & CURATION</T>
-      </span>
+    <main className="ds-root pg-workbench">
       <h1>
         <T>From raw capture to reviewed data.</T>
       </h1>
@@ -104,11 +123,9 @@ export default function Workbench() {
         </T>
       </p>
       {error && (
-        <p className="levi-error" role="alert">
-          <T>{error}</T>
-        </p>
+        <RequestProblem action="The request did not complete" message={error} />
       )}
-      <section className="levi-box levi-pool-teaser">
+      <section className="pg-box pg-pool-teaser">
         <div>
           <h2>
             <T>Training pool</T>
@@ -121,16 +138,17 @@ export default function Workbench() {
             </T>
           </p>
         </div>
-        <Link className="levi-primary" href="/pool">
+        <Link className="ds-btn ds-btn--secondary ds-focus" href="/pool">
           <T>Open the training pool</T>
+          <Icon icon={ArrowRight} />
         </Link>
       </section>
-      <section className="levi-box">
+      <section className="pg-box">
         <h2>
           <T>Local datasets</T>
         </h2>
         <form
-          className="levi-row"
+          className="pg-row"
           onSubmit={(e) => {
             e.preventDefault();
             void action(async () => {
@@ -140,7 +158,7 @@ export default function Workbench() {
           }}
         >
           <input
-            className="levi-input grow"
+            className="ds-input ds-focus grow"
             aria-label={t("Dataset directory")}
             placeholder={t(
               "LeRobot dataset (meta/info.json) or raw capture directory",
@@ -149,18 +167,22 @@ export default function Workbench() {
             required
             onChange={(e) => setPath(e.target.value)}
           />
-          <button className="levi-primary" disabled={busy}>
+          <Button type="submit" icon={FolderInput} disabled={busy}>
             <T>Register & browse</T>
-          </button>
+          </Button>
         </form>
-        <p className="mt-3 text-xs">
+        <p className="pg-mt-3 pg-small">
           <T>Workspace</T>: <code>{catalog?.workspace || "…"}</code>
         </p>
-        <div className="levi-sync-bar">
-          <span
-            className={`levi-status ${
-              sync?.last_error ? "fail" : sync?.running ? "pass" : "warn"
-            }`}
+        <div className="pg-sync-bar">
+          <Badge
+            tone={
+              sync?.last_error
+                ? "danger"
+                : sync?.running
+                  ? "success"
+                  : "warning"
+            }
           >
             {t(
               !sync?.enabled
@@ -169,7 +191,7 @@ export default function Workbench() {
                   ? "Auto-sync on"
                   : "Auto-sync paused",
             )}
-          </span>
+          </Badge>
           <span>
             <T>
               New, changed and removed datasets in the workspace are picked up
@@ -187,21 +209,25 @@ export default function Workbench() {
               {sync.pending.length} {t("waiting for copying to finish")}
             </span>
           )}
-          <button
-            type="button"
-            className="levi-secondary"
+          <Button
+            size="sm"
+            icon={RefreshCw}
             disabled={busy}
             onClick={() => void action(() => leviApi("sync", {}))}
           >
             <T>Sync now</T>
-          </button>
+          </Button>
         </div>
         {sync?.last_error && (
-          <p className="levi-error mt-2">{t(sync.last_error)}</p>
+          <RequestProblem
+            action="Auto-sync stopped on an error"
+            message={sync.last_error}
+            fix={t("Press Sync now to try again.")}
+          />
         )}
         {sync && sync.changes.length > 0 && (
-          <details className="levi-sync-changes">
-            <summary className="cursor-pointer">
+          <details className="pg-sync-changes">
+            <summary className="">
               <T>Recent workspace changes</T> ({sync.changes.length})
             </summary>
             <ul>
@@ -217,102 +243,117 @@ export default function Workbench() {
             </ul>
           </details>
         )}
-        <table className="levi-table">
-          <thead>
-            <tr>
-              <th>
-                <T>Dataset</T>
-              </th>
-              <th>
-                <T>Format & version</T>
-              </th>
-              <th>
-                <T>Episodes</T>
-              </th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {catalog?.local.map((d) => (
-              <tr key={d.id}>
-                <td>
-                  {d.kind !== "raw" || d.view_status === "ready" ? (
-                    <Link className="text-cyan-300" href={`/${d.id}`}>
-                      <T>{d.name}</T> ↗
-                    </Link>
-                  ) : (
-                    <span>{d.name}</span>
-                  )}
-                  {d.view_status === "failed" && d.view_error && (
-                    <p className="text-xs levi-fix">{t(d.view_error)}</p>
-                  )}
-                  <p className="text-xs break-all">
-                    <T>{d.path}</T>
-                  </p>
-                </td>
-                <td className="levi-format-cell">
-                  <DatasetFormatBadge format={d.format} />
-                </td>
-                <td>{d.format?.episodes ?? d.info?.total_episodes ?? "—"}</td>
-                <td>
-                  <div className="flex flex-col gap-2 items-stretch">
-                    <button
-                      className="levi-secondary whitespace-nowrap"
-                      onClick={() => setSource(d.path)}
-                    >
-                      <T>Use as input</T>
-                    </button>
-                    <button
-                      className="text-xs text-slate-400 hover:text-red-300 whitespace-nowrap"
-                      title={t(
-                        "Remove from the list. Files, annotations and review flags are kept.",
+        {catalog?.local.length !== 0 && (
+          <div className="ds-table-wrap pg-gap-top">
+            <table className="ds-table">
+              <thead>
+                <tr>
+                  <th>
+                    <T>Dataset</T>
+                  </th>
+                  <th>
+                    <T>Format & version</T>
+                  </th>
+                  <th>
+                    <T>Episodes</T>
+                  </th>
+                  <th>
+                    <span className="sr-only">
+                      <T>Actions</T>
+                    </span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {catalog?.local.map((d) => (
+                  <tr key={d.id}>
+                    <td>
+                      {d.kind !== "raw" || d.view_status === "ready" ? (
+                        <Link href={`/${d.id}`}>
+                          <T>{d.name}</T>
+                          <Icon icon={ArrowUpRight} />
+                        </Link>
+                      ) : (
+                        <span>{d.name}</span>
                       )}
-                      onClick={async () => {
-                        if (
-                          await confirm({
-                            title: t("Remove {name} from the list?").replace(
-                              "{name}",
-                              d.name,
-                            ),
-                            description: t(
-                              "Remove this dataset from the list? Its files, annotations and review flags stay on disk. If it is still in the workspace, auto-sync will add it back.",
-                            ),
-                            confirmLabel: t("Unregister"),
-                          })
-                        )
-                          void action(() =>
-                            fetch(
-                              `/api/levi/catalog/${encodeURIComponent(d.name)}`,
-                              { method: "DELETE" },
-                            ),
-                          );
-                      }}
-                    >
-                      <T>Unregister</T>
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                      {d.view_status === "failed" && d.view_error && (
+                        <p className="pg-small pg-fix">{t(d.view_error)}</p>
+                      )}
+                      <p className="pg-small pg-break">
+                        <T>{d.path}</T>
+                      </p>
+                    </td>
+                    <td className="pg-format-cell">
+                      <DatasetFormatBadge format={d.format} />
+                    </td>
+                    <td className="ds-num">
+                      {d.format?.episodes ?? d.info?.total_episodes ?? "—"}
+                    </td>
+                    <td>
+                      <div className="pg-stack">
+                        <Button size="sm" onClick={() => setSource(d.path)}>
+                          <T>Use as input</T>
+                        </Button>
+                        <Tooltip
+                          content={t(
+                            "Remove from the list. Files, annotations and review flags are kept.",
+                          )}
+                        >
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            icon={Trash2}
+                            onClick={async () => {
+                              if (
+                                await confirm({
+                                  title: t(
+                                    "Remove {name} from the list?",
+                                  ).replace("{name}", d.name),
+                                  description: t(
+                                    "Remove this dataset from the list? Its files, annotations and review flags stay on disk. If it is still in the workspace, auto-sync will add it back.",
+                                  ),
+                                  confirmLabel: t("Unregister"),
+                                })
+                              )
+                                void action(() =>
+                                  fetch(
+                                    `/api/levi/catalog/${encodeURIComponent(d.name)}`,
+                                    { method: "DELETE" },
+                                  ),
+                                );
+                            }}
+                          >
+                            <T>Unregister</T>
+                          </Button>
+                        </Tooltip>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
         {catalog?.local.length === 0 && (
-          <p className="mt-4">
-            <T>No local datasets registered yet.</T>
-          </p>
+          <EmptyState
+            icon={Database}
+            title={t("No local datasets registered yet.")}
+            description={t(
+              "Enter a LeRobot dataset or a raw capture folder above and press Register & browse.",
+            )}
+          />
         )}
       </section>
-      <section className="levi-box">
-        <div className="levi-row justify-between">
+      <section className="pg-box">
+        <div className="pg-row pg-between">
           <h2>
-            <T>LEVI / </T>
             <T>Conversion pipeline</T>
           </h2>
-          <span className="levi-status">
+          <Badge tone={catalog?.conversion_available ? "success" : "warning"}>
             <T>
               {catalog?.conversion_available ? "Built in" : "Install ffmpeg"}
             </T>
-          </span>
+          </Badge>
         </div>
         <p>
           <T>
@@ -330,9 +371,9 @@ export default function Workbench() {
           onSourceChange={setSource}
         />
       </section>
-      <section className="levi-box">
+      <section className="pg-box">
         <details>
-          <summary className="cursor-pointer">
+          <summary className="">
             <T>Single stages (advanced)</T>
           </summary>
           <p>
@@ -358,10 +399,10 @@ export default function Workbench() {
               );
             }}
           >
-            <label className="block mt-5 text-xs">
+            <label className="pg-block pg-mt-5 pg-small">
               <T>Input directory</T>
               <input
-                className="levi-input w-full mt-2"
+                className="ds-input ds-focus pg-full pg-mt-2"
                 value={source}
                 onChange={(e) => {
                   setSource(e.target.value);
@@ -373,10 +414,10 @@ export default function Workbench() {
                 )}
               />
             </label>
-            <label className="block mt-4 text-xs">
+            <label className="pg-block pg-mt-4 pg-small">
               <T>Output directory (optional)</T>
               <input
-                className="levi-input w-full mt-2"
+                className="ds-input ds-focus pg-full pg-mt-2"
                 value={output}
                 onChange={(e) => {
                   setOutput(e.target.value);
@@ -387,10 +428,10 @@ export default function Workbench() {
                 )}
               />
             </label>
-            <div className="levi-row mt-4">
+            <div className="pg-row pg-mt-4">
               <select
                 aria-label={t("Conversion stage")}
-                className="levi-input grow"
+                className="ds-input ds-focus grow"
                 value={stage}
                 onChange={(e) => {
                   setStage(e.target.value);
@@ -406,10 +447,10 @@ export default function Workbench() {
                   ))}
               </select>
               {["images", "pipeline", "fps"].includes(stage) && (
-                <label className="text-xs">
+                <label className="pg-small">
                   <T>Source FPS</T>{" "}
                   <input
-                    className="levi-input w-20"
+                    className="ds-input ds-focus pg-w-num"
                     type="number"
                     min="1"
                     max="240"
@@ -421,10 +462,10 @@ export default function Workbench() {
                   />
                 </label>
               )}
-              <label className="text-xs">
+              <label className="pg-small">
                 <T>FPS </T>
                 <input
-                  className="levi-input w-20"
+                  className="ds-input ds-focus pg-w-num"
                   type="number"
                   min="1"
                   max="240"
@@ -435,29 +476,30 @@ export default function Workbench() {
                   }}
                 />
               </label>
-              <button
+              <Button
+                type="submit"
                 disabled={busy || !catalog?.conversion_available}
-                className="levi-primary"
               >
                 <T>Preview command</T>
-              </button>
+              </Button>
             </div>
-            <details className="mt-5">
-              <summary className="cursor-pointer">
+            <details className="pg-mt-5">
+              <summary className="">
                 <T>Advanced conversion options</T>
               </summary>
-              <p className="my-3 text-xs">
+              <p className="pg-my-3 pg-small">
                 <T>
                   JSON options: camera mapping, task mapping, excluded demo
                   paths, orientation, action mode and quality thresholds.
                 </T>{" "}
                 <Link href="/guide">
-                  <T>Guide</T> ↗
+                  <T>Guide</T>
+                  <Icon icon={ArrowUpRight} />
                 </Link>
               </p>
               <textarea
                 aria-label={t("Conversion options JSON")}
-                className="levi-input w-full font-mono text-xs"
+                className="ds-input ds-focus pg-full pg-mono pg-small"
                 rows={8}
                 value={options}
                 onChange={(e) => {
@@ -468,16 +510,16 @@ export default function Workbench() {
             </details>
           </form>
           {plan && (
-            <div className="mt-6">
+            <div className="pg-mt-6">
               <h3>
                 <T>Review this plan</T>
               </h3>
               <pre>{plan.argv.map((arg) => JSON.stringify(arg)).join(" ")}</pre>
-              <p className="my-3">
+              <p className="pg-my-3">
                 <T>New output</T>: <T>{plan.output}</T>
               </p>
-              <button
-                className="levi-primary"
+              <Button
+                icon={Play}
                 disabled={busy}
                 onClick={() =>
                   void action(async () => {
@@ -486,37 +528,47 @@ export default function Workbench() {
                   })
                 }
               >
-                <T>Run this plan</T> ↗
-              </button>
+                <T>Run this plan</T>
+              </Button>
             </div>
           )}
         </details>
       </section>
-      <section className="levi-box">
+      <section className="pg-box">
         <h2>
           <T>Task history & logs</T>
         </h2>
+        {jobs.every((j) => j.status === "planned") && (
+          <EmptyLine icon={History}>
+            {t("No conversion has run yet. Runs and their logs appear here.")}
+          </EmptyLine>
+        )}
         {jobs
           .filter((j) => j.status !== "planned")
           .map((j) => (
-            <details key={j.id} className="border-b border-white/10 py-4">
-              <summary className="cursor-pointer">
-                <span className="levi-status mr-3">
+            <details key={j.id} className="pg-history-item">
+              <summary>
+                <Badge
+                  tone={JOB_TONE[j.status] ?? "neutral"}
+                  className="pg-mr-3"
+                >
                   <T>{j.status}</T>
-                </span>
+                </Badge>
                 <T>{j.stage}</T>
-                <code className="ml-3 text-xs">
+                <code className="pg-ml-3 pg-small">
                   <T>{j.id}</T>
                 </code>
               </summary>
               <JobProgress job={j} />
               {j.error && (
-                <p className="levi-error" role="alert">
-                  {t(j.error)}
-                </p>
+                <RequestProblem
+                  action="The conversion did not finish"
+                  message={j.error}
+                  fix={t("Open the log below for the step that failed.")}
+                />
               )}
               <details>
-                <summary className="cursor-pointer text-xs">
+                <summary className="pg-small">
                   <T>Log</T>
                 </summary>
                 <pre>{j.log || t("Waiting for logs…")}</pre>
@@ -534,9 +586,8 @@ export default function Workbench() {
                   <pre>{JSON.stringify(j.result, null, 2)}</pre>
                 </details>
               )}
-              <div className="levi-row mt-4">
-                <button
-                  className="levi-secondary"
+              <div className="pg-row pg-mt-4">
+                <Button
                   disabled={j.status !== "succeeded" || !j.output_exists}
                   onClick={() => {
                     setSource(j.output);
@@ -544,10 +595,14 @@ export default function Workbench() {
                   }}
                 >
                   <T>Use output as next input</T>
-                </button>
+                </Button>
                 {j.dataset && (
-                  <Link className="levi-primary" href={`/${j.dataset}`}>
-                    <T>Review converted dataset</T> ↗
+                  <Link
+                    className="ds-btn ds-btn--secondary ds-focus"
+                    href={`/${j.dataset}`}
+                  >
+                    <T>Review converted dataset</T>
+                    <Icon icon={ArrowUpRight} />
                   </Link>
                 )}
               </div>

@@ -2,20 +2,23 @@
 "use client";
 import { T, useLocale } from "@/components/levi-locale";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useState } from "react";
+import { ArrowUpRight, LogIn, LogOut, Repeat } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
+import { Button, Dialog, Field, Input, Menu, Tooltip } from "@/components/ds";
+import { Problem } from "@/components/pages-ui/feedback";
+import "@/components/pages-ui/shared.css";
 
 const SIGNIN_BADGE_URL =
   "https://huggingface.co/datasets/huggingface/badges/resolve/main/sign-in-with-huggingface-md-dark.svg";
 
 // `badge` — the official HF brand badge. Use as a strong invitation when the
 //           auth path is itself the page's headline action.
-// `ghost`  — a quiet inline cyan link, sized to the surrounding body copy.
+// `ghost`  — a quiet inline link-button, sized to the surrounding body copy.
 //           Use when auth is a secondary affordance next to a primary CTA
 //           (e.g. the home page's search bar).
-// `tab`    — uppercase tracked text styled to match a tab strip; pairs with
-//           the episode viewer's tab bar so the auth control reads as part
-//           of the same register.
+// `tab`    — a quiet button for the episode viewer's tab bar, so the auth
+//           control reads as part of the same strip.
 type Variant = "badge" | "ghost" | "tab";
 
 // Slot height per variant. Matches the variant's rendered button so the
@@ -64,56 +67,45 @@ export default function HfAuthButton({ variant = "badge" }: HfAuthButtonProps) {
     );
   }
 
-  if (variant === "ghost") {
+  if (variant === "ghost" || variant === "tab") {
     return (
-      <button
-        onClick={signIn}
-        title={t("Sign in to access your private datasets")}
-        className="cursor-pointer inline-flex items-center h-7 gap-1.5 text-sm tracking-wide text-cyan-300/85 hover:text-cyan-200 transition-colors rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400/60"
-      >
-        <span aria-hidden>🤗</span>
-        <span>
-          <T>Sign in for private datasets</T>
-        </span>
-        <span aria-hidden className="opacity-60">
-          →
-        </span>
-      </button>
-    );
-  }
-
-  if (variant === "tab") {
-    return (
-      <button
-        onClick={signIn}
-        title={t("Sign in to access your private datasets")}
-        className="cursor-pointer inline-flex items-center h-10 gap-1.5 px-5 text-[11px] font-medium tracking-wide uppercase text-slate-400 hover:text-cyan-300 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400/60"
-      >
-        <span aria-hidden>🤗</span>
-        <span>
-          <T>Sign in</T>
-        </span>
-      </button>
+      <Tooltip content={t("Sign in to access your private datasets")}>
+        <Button
+          variant="ghost"
+          size={variant === "ghost" ? "sm" : "md"}
+          icon={LogIn}
+          className={`levi-hf-auth levi-hf-auth--${variant} ${SLOT_HEIGHT[variant]}`}
+          onClick={signIn}
+        >
+          <T>
+            {variant === "ghost" ? "Sign in for private datasets" : "Sign in"}
+          </T>
+        </Button>
+      </Tooltip>
     );
   }
 
   return (
-    <button
-      onClick={signIn}
-      title={t("Sign in with Hugging Face to access your private datasets")}
-      aria-label={t(
-        "Sign in with Hugging Face to access your private datasets",
-      )}
-      className="cursor-pointer inline-flex items-center h-8 rounded-md transition-all duration-150 hover:opacity-90 motion-safe:hover:-translate-y-px focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400/60"
+    <Tooltip
+      content={t("Sign in with Hugging Face to access your private datasets")}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={SIGNIN_BADGE_URL}
-        alt={t("Sign in with Hugging Face")}
-        height={32}
-        className="h-8 w-auto"
-      />
-    </button>
+      <button
+        type="button"
+        onClick={signIn}
+        aria-label={t(
+          "Sign in with Hugging Face to access your private datasets",
+        )}
+        className="levi-hf-auth-badge ds-focus"
+      >
+        {/* The official Hugging Face sign-in badge (brand artwork). */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={SIGNIN_BADGE_URL}
+          alt={t("Sign in with Hugging Face")}
+          height={32}
+        />
+      </button>
+    </Tooltip>
   );
 }
 
@@ -130,92 +122,39 @@ function SignedInMenu({
   onSwitch: () => void;
   variant: Variant;
 }) {
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
   const { t } = useLocale();
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (
-        wrapperRef.current &&
-        !wrapperRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
   return (
-    <div ref={wrapperRef} className="relative inline-flex">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className={`cursor-pointer inline-flex items-center ${SLOT_HEIGHT[variant]} gap-2 panel-raised bg-[var(--surface-0)]/85 backdrop-blur px-2 text-xs text-slate-300 hover:bg-white/[0.04] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400/60`}
-        title={t("Signed in as") + " " + name}
-      >
-        {avatar && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={avatar}
-            alt=""
-            width={22}
-            height={22}
-            className="rounded-full ring-1 ring-white/10"
-          />
-        )}
-        <span className="tabular max-w-[10rem] truncate">
-          <T>{name}</T>
-        </span>
-        <svg
-          aria-hidden
-          width="9"
-          height="9"
-          viewBox="0 0 8 8"
-          className={`text-slate-500 transition-transform ${open ? "rotate-180" : ""}`}
-        >
-          <path d="M1 2.5l3 3 3-3" stroke="currentColor" fill="none" />
-        </svg>
-      </button>
-
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 top-full mt-1.5 min-w-[10rem] panel-raised bg-[var(--surface-1)]/98 backdrop-blur shadow-xl p-1 z-50 text-xs animate-menu-pop"
-        >
-          <button
-            role="menuitem"
-            className="w-full text-left px-2 py-2"
-            onClick={() => {
-              setOpen(false);
-              onSwitch();
-            }}
-          >
-            <T>Switch account</T>
-          </button>
-          <button
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              onSignOut();
-            }}
-            className="cursor-pointer w-full text-left px-2 py-1.5 rounded text-slate-300 hover:bg-white/5 hover:text-slate-100 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400/60"
-          >
-            <T>Sign out</T>
-          </button>
-        </div>
-      )}
-    </div>
+    <span className={`levi-hf-auth levi-hf-auth--${variant}`}>
+      <Menu
+        variant="ghost"
+        align="end"
+        ariaLabel={`${t("Signed in as")} ${name}`}
+        tooltip={`${t("Signed in as")} ${name}`}
+        label={
+          <span className="levi-hf-auth-user">
+            {avatar && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avatar} alt="" width={22} height={22} />
+            )}
+            <span className="tabular">{name}</span>
+          </span>
+        }
+        items={[
+          {
+            id: "switch",
+            label: t("Switch account"),
+            icon: Repeat,
+            onSelect: onSwitch,
+          },
+          {
+            id: "signout",
+            label: t("Sign out"),
+            icon: LogOut,
+            onSelect: onSignOut,
+          },
+        ]}
+      />
+    </span>
   );
 }
 
@@ -229,83 +168,78 @@ function TokenLogin({
     [busy, setBusy] = useState(false);
   const { tokenSignIn } = useAuth();
   const { t } = useLocale();
+  const close = () => {
+    setOpen(false);
+    setToken("");
+    setError("");
+    onClose?.();
+  };
   return (
     <>
-      <button
-        className="text-xs text-cyan-300 whitespace-nowrap"
+      <Button
+        variant="ghost"
+        size="sm"
+        className="levi-hf-auth"
+        iconEnd={ArrowUpRight}
         onClick={() => setOpen(true)}
       >
-        <T>Connect Hugging Face</T> ↗
-      </button>
-      {open && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70"
-          role="dialog"
-          aria-modal="true"
-          aria-label={t("Connect Hugging Face")}
+        <T>Connect Hugging Face</T>
+      </Button>
+      <Dialog
+        open={open}
+        onClose={close}
+        size="sm"
+        title={t("Connect Hugging Face")}
+        description={t(
+          "Your token is stored in this browser for private dataset access. Sign out to clear it.",
+        )}
+      >
+        <form
+          className="levi-hf-token-form"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setBusy(true);
+            setError("");
+            try {
+              await tokenSignIn(token);
+              setToken("");
+              setOpen(false);
+              onClose?.();
+            } catch (e) {
+              setError(String(e));
+            } finally {
+              setBusy(false);
+            }
+          }}
         >
-          <form
-            className="levi-box w-[min(500px,90vw)]"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              setBusy(true);
-              setError("");
-              try {
-                await tokenSignIn(token);
-                setToken("");
-                setOpen(false);
-                onClose?.();
-              } catch (e) {
-                setError(String(e));
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            <h2 className="text-lg mb-4">
-              <T>Connect Hugging Face</T>
-            </h2>
-            <p className="text-xs text-slate-400 mb-4">
-              <T>
-                Your token is stored in this browser for private dataset access.
-                Sign out to clear it.
-              </T>
-            </p>
-            <input
+          <Field label={t("Hugging Face token")} required>
+            <Input
               autoFocus
-              className="levi-input w-full"
               type="password"
               autoComplete="off"
-              aria-label={t("Hugging Face token")}
               placeholder="hf_…"
               required
               value={token}
               onChange={(e) => setToken(e.target.value)}
             />
-            {error && (
-              <p className="levi-error mt-3">
-                <T>{error}</T>
-              </p>
-            )}
-            <div className="levi-row mt-5">
-              <button className="levi-primary" disabled={busy}>
-                <T>Connect</T>
-              </button>
-              <button
-                type="button"
-                className="levi-secondary"
-                onClick={() => {
-                  setOpen(false);
-                  setToken("");
-                  onClose?.();
-                }}
-              >
-                <T>Cancel</T>
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+          </Field>
+          {error && (
+            <Problem
+              title={t("The token was not accepted")}
+              why={t(error)}
+              fix={t("Check the token on huggingface.co and paste it again.")}
+            />
+          )}
+          <div className="levi-hf-token-actions">
+            <Button variant="ghost" onClick={close}>
+              <T>Cancel</T>
+            </Button>
+            <Button type="submit" variant="primary" loading={busy}>
+              <T>Connect</T>
+            </Button>
+          </div>
+        </form>
+      </Dialog>
     </>
   );
 }

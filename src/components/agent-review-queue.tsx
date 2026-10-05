@@ -92,6 +92,7 @@ export default function AgentReviewQueue({
         <label>
           Review filter
           <select
+            className="ds-input ds-focus"
             value={filter}
             onChange={(e) => {
               setFilter(e.target.value);
@@ -108,6 +109,7 @@ export default function AgentReviewQueue({
         </label>
         <div className="levi-agent-actions">
           <button
+            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
             disabled={disabled || !visible.length}
             onClick={() =>
               onDecision(
@@ -119,6 +121,7 @@ export default function AgentReviewQueue({
             Accept visible
           </button>
           <button
+            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
             disabled={disabled || !visible.length}
             onClick={() =>
               onDecision(
@@ -134,6 +137,7 @@ export default function AgentReviewQueue({
           <article>
             <div className="levi-agent-actions">
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 disabled={focus <= 0}
                 onClick={() => setFocus((v) => v - 1)}
               >
@@ -143,6 +147,7 @@ export default function AgentReviewQueue({
                 {Math.min(focus + 1, visible.length)}/{visible.length} · J / K
               </span>
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 disabled={focus >= visible.length - 1}
                 onClick={() => setFocus((v) => v + 1)}
               >
@@ -156,6 +161,7 @@ export default function AgentReviewQueue({
             <label>
               Proposal text
               <textarea
+                className="ds-input ds-textarea ds-focus"
                 disabled={disabled}
                 value={current.p.content}
                 onChange={(e) => edit("content", e.target.value)}
@@ -166,6 +172,7 @@ export default function AgentReviewQueue({
                 <label>
                   Subtask ID
                   <input
+                    className="ds-input ds-focus"
                     disabled={disabled}
                     value={current.p.subtask_id}
                     onChange={(e) => edit("subtask_id", e.target.value)}
@@ -174,6 +181,7 @@ export default function AgentReviewQueue({
                 <label>
                   Attempt
                   <input
+                    className="ds-input ds-focus"
                     type="number"
                     min={1}
                     disabled={disabled}
@@ -184,6 +192,7 @@ export default function AgentReviewQueue({
                 <label>
                   Observed outcome
                   <select
+                    className="ds-input ds-focus"
                     disabled={disabled}
                     value={current.p.outcome || "unknown"}
                     onChange={(e) => edit("outcome", e.target.value)}
@@ -203,6 +212,7 @@ export default function AgentReviewQueue({
               <label>
                 Start time
                 <input
+                  className="ds-input ds-focus"
                   type="number"
                   step="0.001"
                   min="0"
@@ -215,6 +225,7 @@ export default function AgentReviewQueue({
                 <label>
                   End time
                   <input
+                    className="ds-input ds-focus"
                     type="number"
                     step="0.001"
                     min="0"
@@ -228,6 +239,7 @@ export default function AgentReviewQueue({
             {current.p.end !== null && (
               <div className="levi-agent-actions">
                 <button
+                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                   disabled={disabled}
                   onClick={() => {
                     const midpoint = (current.p.start + current.p.end!) / 2;
@@ -246,6 +258,7 @@ export default function AgentReviewQueue({
                   Split segment at midpoint
                 </button>
                 <button
+                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                   disabled={disabled || current.i + 1 >= proposals.length}
                   onClick={() => {
                     const next = proposals[current.i + 1];
@@ -284,11 +297,16 @@ export default function AgentReviewQueue({
             )}
             <div className="levi-agent-actions">
               {current.p.evidence_ids.map((id, i) => (
-                <button key={id} onClick={() => onEvidence(id)}>
+                <button
+                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                  key={id}
+                  onClick={() => onEvidence(id)}
+                >
                   <T>Evidence</T> {i + 1}
                 </button>
               ))}
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 disabled={disabled}
                 onClick={() => {
                   onDecision([current.i], "accepted");
@@ -299,6 +317,7 @@ export default function AgentReviewQueue({
                 Accept & next
               </button>
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 disabled={disabled}
                 onClick={() => {
                   onDecision([current.i], "rejected");

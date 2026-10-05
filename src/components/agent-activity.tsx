@@ -295,7 +295,10 @@ export default function AgentActivity({ open }: { open: boolean }) {
                   {t("Open the result")}
                 </a>
               )}
-              <button onClick={() => setJustFinished(null)}>
+              <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                onClick={() => setJustFinished(null)}
+              >
                 {t("Dismiss")}
               </button>
             </div>

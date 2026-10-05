@@ -31,11 +31,22 @@ async function call<V>(name: string, args: unknown): Promise<V> {
     );
   return result;
 }
+/** "rgb(0, 131, 0)" → [0, 131, 0]; null for anything else. */
+export function parseRgb(value: string): [number, number, number] | null {
+  const m = value.match(/^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
 function Mask({ row }: { row: ObjectAnnotation }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const ctx = canvas.current?.getContext("2d");
-    if (!ctx) return;
+    if (!ctx || !canvas.current) return;
+    // The mask colour is a data colour (--ds-data-6, set as the canvas's
+    // CSS colour in agent-content.css): canvas cannot read CSS variables,
+    // so the resolved value is taken from the element.
+    const colour = getComputedStyle(canvas.current).color;
+    const [r, g, b] = parseRgb(colour) ?? [0, 131, 0];
     const [h, w] = row.mask_rle.size;
     const pixels = ctx.createImageData(w, h);
     let offset = 0,
@@ -44,13 +55,13 @@ function Mask({ row }: { row: ObjectAnnotation }) {
       if (foreground)
         for (let i = offset; i < offset + length; i++) {
           const p = ((i % h) * w + Math.floor(i / h)) * 4;
-          pixels.data.set([190, 232, 85, 105], p);
+          pixels.data.set([r, g, b, 105], p);
         }
       offset += length;
       foreground = !foreground;
     }
     ctx.putImageData(pixels, 0, 0);
-    ctx.strokeStyle = "#bee855";
+    ctx.strokeStyle = `rgb(${r} ${g} ${b})`;
     ctx.lineWidth = 2;
     const [x1, y1, x2, y2] = row.bbox_xyxy;
     ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
@@ -58,6 +69,7 @@ function Mask({ row }: { row: ObjectAnnotation }) {
   return (
     <canvas
       ref={canvas}
+      className="levi-agent-mask"
       width={row.image_size[1]}
       height={row.image_size[0]}
       aria-label="Object mask overlay"
@@ -182,6 +194,7 @@ export default function AgentObjectTool({
         <label>
           Object concepts
           <input
+            className="ds-input ds-focus"
             value={prompts}
             onChange={(e) => setPrompts(e.target.value)}
             placeholder={t("cup, plate, robot gripper")}
@@ -190,6 +203,7 @@ export default function AgentObjectTool({
         <label>
           Maximum frames per camera
           <input
+            className="ds-input ds-focus"
             type="number"
             min={1}
             max={10000}
@@ -198,6 +212,7 @@ export default function AgentObjectTool({
           />
         </label>
         <button
+          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
           disabled={
             disabled ||
             !prompts.trim() ||
@@ -230,6 +245,7 @@ export default function AgentObjectTool({
             {job.reason && <p>{job.reason}</p>}
             {job.status === "planned" && (
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 disabled={disabled || !ready}
                 onClick={() =>
                   void act(async () => {
@@ -251,12 +267,14 @@ export default function AgentObjectTool({
             </p>
             <div className="levi-agent-actions">
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 disabled={offset === 0}
                 onClick={() => setOffset((v) => v - 1)}
               >
                 Previous frame
               </button>
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 disabled={offset + 1 >= frame.frames}
                 onClick={() => setOffset((v) => v + 1)}
               >
@@ -264,6 +282,7 @@ export default function AgentObjectTool({
               </button>
             </div>
             <button
+              className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
               disabled={!frame.problem_offsets?.length}
               onClick={() =>
                 setOffset(
@@ -344,6 +363,7 @@ export default function AgentObjectTool({
             ))}
             <div className="levi-agent-actions">
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 onClick={() => {
                   if (!job) return;
                   void call<{ context: { repo_id: string } }>("runs.get", {
@@ -364,6 +384,7 @@ export default function AgentObjectTool({
                 Preview draft masks in current player
               </button>
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 onClick={() =>
                   window.dispatchEvent(
                     new CustomEvent("levi-agent-preview", { detail: null }),
@@ -387,18 +408,21 @@ export default function AgentObjectTool({
                 </p>
                 <div className="levi-agent-actions">
                   <button
+                    className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                     disabled={disabled}
                     onClick={() => void act(() => edit("accept", row))}
                   >
                     Accept track
                   </button>
                   <button
+                    className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                     disabled={disabled}
                     onClick={() => void act(() => edit("reject", row))}
                   >
                     Reject track
                   </button>
                   <button
+                    className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                     disabled={disabled || !label.trim()}
                     onClick={() => void act(() => edit("relabel", row))}
                   >
@@ -409,16 +433,22 @@ export default function AgentObjectTool({
             ))}
             <label>
               Corrected concept
-              <input value={label} onChange={(e) => setLabel(e.target.value)} />
+              <input
+                className="ds-input ds-focus"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+              />
             </label>
             <div className="levi-agent-actions">
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 disabled={disabled}
                 onClick={() => void act(() => edit("accept"))}
               >
                 Accept camera tracks
               </button>
               <button
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 disabled={disabled}
                 onClick={() => void act(() => edit("reject"))}
               >

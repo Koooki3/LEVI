@@ -1,4 +1,5 @@
 "use client";
+import "@/components/pages-ui/pages.css";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useLocale } from "@/components/levi-locale";
@@ -22,7 +23,12 @@ import {
   PoolJobProgress,
   RUNNING,
   STOPPED,
+  StatusBadge,
 } from "@/components/pool/pool-progress";
+import { ArrowLeft, Layers, PackagePlus, ScanSearch, X } from "lucide-react";
+import { PoolSteps, goToSection, poolStep } from "@/components/pool/pool-steps";
+import { Button, EmptyState, Icon, Skeleton, useToast } from "@/components/ds";
+import { JobCard, RequestProblem } from "@/components/pages-ui/feedback";
 import { defaultTiming } from "@/components/pool/types";
 import { isLiveWorkspace } from "@/components/live/embedding";
 import { useLivePulse } from "@/components/live/use-live-pulse";
@@ -98,15 +104,16 @@ export default function TrainingPoolPage() {
   const { enabled, embedded } = useLivePulse();
   if (isLiveWorkspace(enabled, embedded)) {
     return (
-      <main className="levi-workbench">
-        <section className="levi-live-offline" role="status">
-          <strong>{t("The training pool is in the product LEVI")}</strong>
-          <p>
-            {t(
+      <main className="ds-root pg-workbench">
+        <div role="status">
+          <EmptyState
+            icon={Layers}
+            title={t("The training pool is in the product LEVI")}
+            description={t(
               "This is the live annotation service's own workspace. Its pool would read this workspace's own index, recipes and labels, not the ones you work with, so it is not offered here: open the training pool in the product LEVI (by default http://127.0.0.1:7860/pool).",
             )}
-          </p>
-        </section>
+          />
+        </div>
       </main>
     );
   }
@@ -143,7 +150,15 @@ function TrainingPool() {
   // Bumped when jobs or files change, so the cleanup section reloads.
   const [cleanupKey, setCleanupKey] = useState(0);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  // Results of actions far from where they show (saved recipe, cleared
+  // jobs, freed space) are toasts.
+  const toast = useToast();
+  const setNotice = useCallback(
+    (text: string) => {
+      if (text) toast.show({ title: text });
+    },
+    [toast],
+  );
 
   const recipe: Recipe = useMemo(
     () => ({
@@ -355,28 +370,40 @@ function TrainingPool() {
   const summary = status?.last_scan;
 
   return (
-    <main className="levi-workbench levi-pool">
-      <span className="levi-eyebrow">{t("LEVI / TRAINING POOL")}</span>
-      <h1>{t("Training pool")}</h1>
+    <main className="ds-root pg-workbench pg-pool">
+      <div className="pg-head">
+        <h1>{t("Training pool")}</h1>
+        <div className="pg-head-actions">
+          <Button
+            variant={scanned ? "primary" : "secondary"}
+            icon={PackagePlus}
+            disabled={!scanned}
+            onClick={() => goToSection("pool-export", "pool-export-name")}
+          >
+            {t("Export…")}
+          </Button>
+        </div>
+      </div>
       <p>
         {t(
           "Every dataset under the pool folders, one row per episode. Pick tasks in order, preview what goes in, export a new training set and send it to a training machine. Sources stay read-only; held-out test episodes are never exported.",
         )}
       </p>
       {error && (
-        <p className="levi-error" role="alert">
-          {t(error)}
-        </p>
+        <RequestProblem
+          action="The training pool request failed"
+          message={error}
+          onRetry={() => {
+            setError("");
+            refreshStatus().catch((e) => setError(String(e)));
+            refreshRecipes().catch(() => {});
+          }}
+        />
       )}
       <PoolWarnings warnings={status?.warnings || []} />
-      {notice && (
-        <p className="levi-pool-notice" role="status">
-          {notice}
-        </p>
-      )}
 
-      <section className="levi-box levi-pool-scan" aria-labelledby="pool-scan">
-        <div className="levi-pool-scan-head">
+      <section className="pg-box pg-pool-scan" aria-labelledby="pool-scan">
+        <div className="pg-pool-scan-head">
           <div>
             <h2 id="pool-scan">{t("Pool folders")}</h2>
             {status && !status.enabled ? (
@@ -386,7 +413,7 @@ function TrainingPool() {
                 )}
               </p>
             ) : (
-              <ul className="levi-pool-roots">
+              <ul className="pg-pool-roots">
                 {status?.roots.map((r) => (
                   <li key={r}>
                     <code>{r}</code>
@@ -394,7 +421,7 @@ function TrainingPool() {
                 ))}
               </ul>
             )}
-            <p className="levi-pool-hint">
+            <p className="pg-pool-hint">
               {t("Last scan")}:{" "}
               {summary ? when(summary.scanned_at) : t("never")}
               {summary &&
@@ -404,11 +431,12 @@ function TrainingPool() {
                 : ""}
             </p>
           </div>
-          <div className="levi-row">
-            <button
-              type="button"
-              className="levi-primary"
-              disabled={!status?.enabled || scanRunning}
+          <div className="pg-row">
+            <Button
+              variant={scanned || !status?.enabled ? "secondary" : "primary"}
+              icon={ScanSearch}
+              loading={scanRunning}
+              disabled={!status?.enabled}
               onClick={() =>
                 void act(async () => {
                   await leviRequest("POST", "pool/scan");
@@ -417,11 +445,10 @@ function TrainingPool() {
               }
             >
               {scanRunning ? t("Scanning…") : t("Scan now")}
-            </button>
+            </Button>
             {scanRunning && scanJob && (
-              <button
-                type="button"
-                className="levi-secondary"
+              <Button
+                icon={X}
                 onClick={() =>
                   void act(async () => {
                     await leviRequest(
@@ -433,18 +460,29 @@ function TrainingPool() {
                 }
               >
                 {t("Cancel")}
-              </button>
+              </Button>
             )}
           </div>
         </div>
         {scanJob && RUNNING.has(scanJob.status) && (
-          <PoolJobProgress job={scanJob} />
+          <JobCard
+            label={t("Scan")}
+            status={<StatusBadge status={scanJob.status} />}
+            title={t("Scanning…")}
+          >
+            <PoolJobProgress job={scanJob} />
+          </JobCard>
         )}
         {status && status.jobs.length > 0 && (
-          <details className="levi-pool-jobs" open>
+          <details className="pg-pool-jobs">
             <summary>
               {t("Recent jobs")} ({status.jobs.length})
             </summary>
+            <p className="pg-pool-hint">
+              {t(
+                "Running jobs are also listed in the Jobs menu of the top bar.",
+              )}
+            </p>
             <RecentJobs
               jobs={status.jobs}
               onChanged={() => {
@@ -463,24 +501,36 @@ function TrainingPool() {
         <DiskUsage disk={status?.disk || []} />
       </section>
 
-      {!scanned && status?.enabled && (
-        <p className="levi-pool-muted">
-          {t("The pool has not been scanned yet: press Scan now.")}
-        </p>
+      {!scanned && status?.enabled && !scanRunning && (
+        <EmptyState
+          icon={ScanSearch}
+          title={t("The pool has not been scanned yet: press Scan now.")}
+        />
+      )}
+      {!status && !error && (
+        <div className="pg-pool-loading" aria-busy="true">
+          <span className="sr-only">{t("Loading…")}</span>
+          <Skeleton height={120} radius="md" />
+        </div>
       )}
 
       {scanned && (
-        <div className="levi-pool-layout">
+        <PoolSteps
+          current={poolStep(composition.tasks.length, !!shownExport)}
+        />
+      )}
+      {scanned && (
+        <div className="pg-pool-layout">
           <FacetsPanel
             facets={facets}
             filters={filters}
             onChange={setFilters}
           />
-          <div className="levi-pool-centre">
-            <section className="levi-pool-card" aria-labelledby="pool-tasks">
+          <div className="pg-pool-centre">
+            <section className="pg-pool-card" aria-labelledby="pool-tasks">
               <h2 id="pool-tasks">
                 {t("Tasks")}{" "}
-                <span className="levi-pool-muted">({tasks.length})</span>
+                <span className="pg-pool-muted">({tasks.length})</span>
               </h2>
               <TaskTable
                 tasks={tasks}
@@ -491,20 +541,21 @@ function TrainingPool() {
                 onAdd={addTask}
               />
             </section>
-            <section className="levi-pool-card" aria-labelledby="pool-episodes">
+            <section className="pg-pool-card" aria-labelledby="pool-episodes">
               <h2 id="pool-episodes">
                 {t("Episodes")}
                 {focus && (
                   <>
                     {" · "}
-                    <span className="levi-pool-muted">{focus}</span>{" "}
-                    <button
-                      type="button"
-                      className="levi-pool-link"
+                    <span className="pg-pool-muted">{focus}</span>{" "}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={X}
                       onClick={() => setFocus(null)}
                     >
                       {t("Show all tasks")}
-                    </button>
+                    </Button>
                   </>
                 )}
               </h2>
@@ -527,7 +578,7 @@ function TrainingPool() {
               />
             </section>
           </div>
-          <div className="levi-pool-side">
+          <div className="pg-pool-side">
             <CompositionPanel
               recipe={recipe}
               preview={preview}
@@ -639,9 +690,10 @@ function TrainingPool() {
           onNotice={setNotice}
         />
       )}
-      <p className="levi-pool-hint">
-        <Link className="text-cyan-300" href="/workbench">
-          ← {t("Conversion & review")}
+      <p className="pg-pool-hint">
+        <Link href="/workbench" className="pg-back-link">
+          <Icon icon={ArrowLeft} />
+          {t("Conversion & review")}
         </Link>
       </p>
       <PushDialog exportJob={pushFor} onClose={() => setPushFor(null)} />

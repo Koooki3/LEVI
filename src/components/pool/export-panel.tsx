@@ -2,6 +2,20 @@
 import { useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
+import {
+  ArrowRight,
+  ArrowUpRight,
+  FlaskConical,
+  PackagePlus,
+  Send,
+} from "lucide-react";
+import { Button, Icon } from "@/components/ds";
+import {
+  JobCard,
+  Note,
+  Problem,
+  RequestProblem,
+} from "@/components/pages-ui/feedback";
 import { PoolJobProgress, RUNNING, StatusBadge } from "./pool-progress";
 import { JobBanner, LogDialog } from "./job-panel";
 import {
@@ -137,13 +151,13 @@ export function ExportPanel({
     (job.status === "done" || job.status === "done_with_errors") &&
     job.kind === "export";
   return (
-    <section className="levi-pool-card" aria-labelledby="pool-export">
+    <section className="pg-pool-card" aria-labelledby="pool-export">
       <h2 id="pool-export">{t("Export")}</h2>
-      <div className="levi-pool-fields">
+      <div className="pg-pool-fields">
         <label className="wide">
           <span>{t("Format")}</span>
           <select
-            className="levi-input"
+            className="ds-input ds-focus"
             value={format}
             onChange={(e) => {
               onFormat(e.target.value as ExportFormat);
@@ -159,7 +173,8 @@ export function ExportPanel({
         <label className="wide">
           <span>{t("Dataset name")}</span>
           <input
-            className="levi-input"
+            id="pool-export-name"
+            className="ds-input ds-focus"
             value={name}
             required
             aria-invalid={!!nameProblem}
@@ -167,7 +182,7 @@ export function ExportPanel({
             onChange={(e) => setName(e.target.value)}
           />
           {nameProblem && (
-            <small className="levi-pool-bad">
+            <small className="pg-pool-bad">
               {t("Letters, digits, dot, dash and underscore")}
             </small>
           )}
@@ -175,7 +190,7 @@ export function ExportPanel({
         <label className="wide">
           <span>{t("Output directory")}</span>
           <input
-            className="levi-input"
+            className="ds-input ds-focus"
             value={outputDir}
             aria-invalid={!!dirProblem}
             aria-describedby="pool-export-roots"
@@ -183,13 +198,13 @@ export function ExportPanel({
             onChange={(e) => setOutputDir(e.target.value)}
           />
           {dirProblem && (
-            <small className="levi-pool-bad" role="alert">
+            <small className="pg-pool-bad" role="alert">
               {dirProblem === "outside"
                 ? `${t("This folder is outside LEVI_EXPORT_ROOTS.")} ${t("Allowed")}: ${exportRoots.join(", ")}`
                 : t(dirProblem)}
             </small>
           )}
-          <small id="pool-export-roots" className="levi-pool-hint">
+          <small id="pool-export-roots" className="pg-pool-hint">
             LEVI_EXPORT_ROOTS: {exportRoots.join(", ") || "—"}
           </small>
         </label>
@@ -198,7 +213,7 @@ export function ExportPanel({
             <label>
               <span>{t("FPS")}</span>
               <input
-                className="levi-input"
+                className="ds-input ds-focus"
                 type="number"
                 min={1}
                 max={240}
@@ -209,7 +224,7 @@ export function ExportPanel({
             <label className="wide">
               <span>{t("Timing")}</span>
               <select
-                className="levi-input"
+                className="ds-input ds-focus"
                 value={effectiveTiming ?? "resample"}
                 aria-describedby="pool-export-timing-hint"
                 onChange={(e) => onTiming(e.target.value as Timing)}
@@ -220,14 +235,14 @@ export function ExportPanel({
                   </option>
                 ))}
               </select>
-              <small id="pool-export-timing-hint" className="levi-pool-hint">
+              <small id="pool-export-timing-hint" className="pg-pool-hint">
                 {t(TIMING_HINTS[effectiveTiming ?? "resample"])}
               </small>
             </label>
             <label className="wide">
               <span>{t("Raw capture cameras (camera=output key)")}</span>
               <textarea
-                className="levi-input"
+                className="ds-input ds-focus"
                 rows={2}
                 value={cameras}
                 onChange={(e) => setCameras(e.target.value)}
@@ -236,7 +251,7 @@ export function ExportPanel({
             <label className="wide">
               <span>{t("LeRobot camera keys (source key=output key)")}</span>
               <textarea
-                className="levi-input"
+                className="ds-input ds-focus"
                 rows={2}
                 placeholder="observation.images.wrist=observation.images.hand"
                 value={cameraMap}
@@ -246,7 +261,7 @@ export function ExportPanel({
           </>
         )}
         {format === "recap_value" && (
-          <label className="levi-pool-check wide">
+          <label className="pg-pool-check wide">
             <input
               type="checkbox"
               checked={humanAsSuccess}
@@ -258,7 +273,7 @@ export function ExportPanel({
           </label>
         )}
         {format === "raw_capture" && (
-          <label className="levi-pool-check wide">
+          <label className="pg-pool-check wide">
             <input
               type="checkbox"
               checked={hardlink}
@@ -272,66 +287,70 @@ export function ExportPanel({
           </label>
         )}
       </div>
-      <p className="levi-pool-hint">
+      <p className="pg-pool-hint">
         {preview
           ? `${preview.episodes.toLocaleString()} ${t("episodes")} · ${preview.frames.toLocaleString()} ${t("frames")} · ${preview.excluded_heldout.toLocaleString()} ${t("held-out excluded")}`
           : t("Choose tasks to see a preview.")}
       </p>
       {stopped && (
-        <p className="levi-pool-bad" role="alert">
-          {t("Resolve the blocking notes in the composition first.")}
-        </p>
+        <Problem
+          tone="warning"
+          title={t("The export is blocked")}
+          why={t("Resolve the blocking notes in the composition first.")}
+        />
       )}
-      <div className="levi-row">
-        <button
-          type="button"
-          className="levi-secondary"
+      <div className="pg-row">
+        <Button
+          icon={FlaskConical}
           disabled={!canRun}
           onClick={() => void start(true)}
         >
           {t("Dry run")}
-        </button>
-        <button
-          type="button"
-          className="levi-primary"
-          disabled={!canRun}
+        </Button>
+        <Button
+          variant="primary"
+          icon={PackagePlus}
+          loading={busy}
+          disabled={!canRun && !busy}
           onClick={() => void start(false)}
         >
           {t("Start export")}
-        </button>
+        </Button>
       </div>
       {error && (
-        <p className="levi-error" role="alert">
-          {t(error)}
-        </p>
+        <RequestProblem action="The export did not start" message={error} />
       )}
       {plan && (
-        <div className="levi-pool-plan">
+        <Note tone="success" role="status" className="pg-pool-plan">
           <p>
             <strong>{t("Dry run")}</strong>: {plan.planned_episodes}{" "}
-            {t("episodes")} → <code>{plan.target}</code>
+            {t("episodes")}
+            <Icon icon={ArrowRight} />
+            <code>{plan.target}</code>
           </p>
-          <p className="levi-pool-hint">
+          <p className="pg-pool-hint">
             {plan.planned_excluded} {t("left out")} · {t("nothing was written")}
           </p>
-        </div>
+        </Note>
       )}
       {job && job.kind === "export" && (
-        <div className="levi-pool-job">
-          <p className="levi-row">
-            <StatusBadge status={job.status} />
-            <code className="levi-pool-ellipsis">
+        <JobCard
+          label={t("Export")}
+          status={<StatusBadge status={job.status} />}
+          title={
+            <code className="pg-pool-ellipsis">
               {job.result?.dataset_path || job.target}
             </code>
-          </p>
+          }
+        >
           <PoolJobProgress job={job} />
           <JobBanner job={job} onJob={onJob} onLog={setLogFor} />
           {job.error && job.status === "cancelled" && (
-            <p className="levi-pool-muted">{t(job.error)}</p>
+            <p className="pg-pool-muted">{t(job.error)}</p>
           )}
           {done && (
             <>
-              <p className="levi-pool-hint">
+              <p className="pg-pool-hint">
                 {job.result?.episodes?.toLocaleString()} {t("episodes")} ·{" "}
                 {job.result?.frames?.toLocaleString()} {t("frames")}
                 {Object.entries(job.result?.excluded || {}).map(
@@ -339,26 +358,23 @@ export function ExportPanel({
                     ` · ${t(REASON_LABELS[reason] || reason)} ${n}`,
                 )}
               </p>
-              <div className="levi-row">
+              <div className="pg-row">
                 <a
-                  className="levi-secondary"
+                  className="ds-btn ds-btn--secondary ds-focus"
                   href={`/api/levi/pool/jobs/${encodeURIComponent(job.id)}/summary`}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  pool_export.json ↗
+                  pool_export.json
+                  <Icon icon={ArrowUpRight} />
                 </a>
-                <button
-                  type="button"
-                  className="levi-primary"
-                  onClick={() => onPush(job)}
-                >
+                <Button icon={Send} onClick={() => onPush(job)}>
                   {t("Send to remote")}
-                </button>
+                </Button>
               </div>
             </>
           )}
-        </div>
+        </JobCard>
       )}
       <LogDialog job={logFor} onClose={() => setLogFor(null)} />
     </section>

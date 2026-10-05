@@ -34,13 +34,13 @@ export function OptionsForm({
   const recap = options.target === "recap_value";
   const to = options.target_options;
   return (
-    <div className="levi-options">
+    <div className="pg-options">
       {!fromDataset && (
         <>
           <label>
             <T>Frame timing</T>
             <select
-              className="levi-input"
+              className="ds-input ds-focus"
               value={options.timing}
               onChange={(e) =>
                 set({ timing: e.target.value as ConversionOptions["timing"] })
@@ -57,7 +57,7 @@ export function OptionsForm({
           <label>
             <T>Output FPS</T>
             <input
-              className="levi-input"
+              className="ds-input ds-focus"
               type="number"
               min={1}
               max={240}
@@ -66,7 +66,7 @@ export function OptionsForm({
               onChange={(e) => set({ fps: Number(e.target.value) })}
             />
             {measured && (
-              <span className="text-xs">
+              <span className="pg-small">
                 <T>Measured capture FPS</T>: {measured}
                 {options.timing === "retime" &&
                   ` · ${t("every captured frame is declared at this rate")}`}
@@ -77,7 +77,7 @@ export function OptionsForm({
             <label>
               <T>Source FPS</T>
               <input
-                className="levi-input"
+                className="ds-input ds-focus"
                 type="number"
                 min={1}
                 max={240}
@@ -87,7 +87,7 @@ export function OptionsForm({
               />
             </label>
           )}
-          <label className="levi-check">
+          <label className="pg-check">
             <input
               type="checkbox"
               checked={options.filter_static}
@@ -98,7 +98,7 @@ export function OptionsForm({
           <label>
             <T>Parallel workers</T>
             <input
-              className="levi-input"
+              className="ds-input ds-focus"
               type="number"
               min={1}
               max={64}
@@ -111,7 +111,7 @@ export function OptionsForm({
               }
             />
           </label>
-          <label className="levi-check">
+          <label className="pg-check">
             <input
               type="checkbox"
               checked={options.keep_intermediates}
@@ -126,7 +126,7 @@ export function OptionsForm({
           <label>
             <T>Dataset type</T>
             <select
-              className="levi-input"
+              className="ds-input ds-focus"
               value={String(to.dataset_type ?? "rollout")}
               onChange={(e) => setTarget({ dataset_type: e.target.value })}
             >
@@ -141,7 +141,7 @@ export function OptionsForm({
           <label>
             <T>Failure reward</T>
             <input
-              className="levi-input"
+              className="ds-input ds-focus"
               type="number"
               max={0}
               step="any"
@@ -154,7 +154,7 @@ export function OptionsForm({
           <label>
             <T>Discount (gamma)</T>
             <input
-              className="levi-input"
+              className="ds-input ds-focus"
               type="number"
               min={0.01}
               max={1}
@@ -166,7 +166,7 @@ export function OptionsForm({
           <label>
             <T>Returns tag (optional)</T>
             <input
-              className="levi-input"
+              className="ds-input ds-focus"
               value={String(to.tag ?? "")}
               placeholder="returns_<tag>.parquet"
               onChange={(e) => setTarget({ tag: e.target.value || null })}
@@ -174,10 +174,10 @@ export function OptionsForm({
           </label>
         </>
       )}
-      <label className="levi-wide">
+      <label className="pg-wide">
         <T>Output directory (optional)</T>
         <input
-          className="levi-input"
+          className="ds-input ds-focus"
           value={output}
           onChange={(e) => onOutputChange(e.target.value)}
           placeholder={t(
@@ -186,11 +186,11 @@ export function OptionsForm({
         />
       </label>
       {options.exclude_demos.length > 0 && (
-        <p className="levi-wide text-xs">
+        <p className="pg-wide pg-small">
           <T>Excluded episodes</T>: {options.exclude_demos.length}{" "}
           <button
             type="button"
-            className="underline"
+            className="pg-underline"
             onClick={() => set({ exclude_demos: [] })}
           >
             <T>clear</T>

@@ -4,7 +4,11 @@
 // nothing here starts, stops or approves anything. The one thing a person can
 // change is to remove an episode from a dataset and restore it (a soft
 // delete: no file is deleted).
+import "@/components/pages-ui/pages.css";
 import { useEffect, useMemo, useState } from "react";
+import { Inbox, Radio } from "lucide-react";
+import { EmptyState } from "@/components/ds";
+import { EmptyLine, Note } from "@/components/pages-ui/feedback";
 import { useLocale } from "@/components/levi-locale";
 import { ago } from "@/components/pool/pool-progress";
 import { DatasetCard } from "@/components/live/dataset-card";
@@ -29,6 +33,7 @@ import {
 } from "@/components/live/session-panels";
 import { disabledText } from "@/components/live/embedding";
 import { StatsPanel } from "@/components/live/stats-panel";
+import { LiveSummaryBar, liveSummary } from "@/components/live/live-summary";
 import { useDatasetDetails, useLivePoll } from "@/components/live/use-live";
 import {
   readBrowserStorage,
@@ -65,7 +70,7 @@ function Freshness({
     return () => clearInterval(timer);
   }, []);
   return (
-    <p className="levi-pool-hint levi-live-fresh" aria-live="off">
+    <p className="pg-pool-hint pg-live-fresh" aria-live="off">
       {lastOk == null
         ? t("Loading…")
         : `${t("Updated")} ${ago((now - lastOk) / 1000, t)}`}
@@ -75,7 +80,7 @@ function Freshness({
         String(Math.round(delay / 1000)),
       )}
       {failures > 0 && (
-        <span className="levi-live-bad">
+        <span className="pg-live-bad">
           {" · "}
           {t("last request failed")} ({error}), {t("retrying")}
         </span>
@@ -137,26 +142,28 @@ export default function LivePage() {
   const now = poll.lastOk ?? Date.now();
 
   return (
-    <main className="levi-workbench levi-live">
-      <span className="levi-eyebrow">{t("LEVI / LIVE")}</span>
+    <main className="ds-root pg-workbench pg-live">
       <h1>{t("Live evaluation & annotation")}</h1>
       {status?.enabled && status.workspace_name && (
-        <p className="levi-pool-muted">
+        <p className="pg-pool-muted">
           {t("Live workspace")}: <code>{status.workspace_name}</code>
         </p>
       )}
       {status?.enabled && status.pool_memory_full && (
-        <p className="levi-live-bad" role="status">
+        <Note tone="warning" role="status">
           {t(
             "The training pool already remembers 20 live workspaces and does not remember this one: episodes removed here are kept out of the pool only while this page shows it. Make room with `levi pool live-workspaces forget <path>`.",
           )}
-        </p>
+        </Note>
       )}
-      <p>
+      <Note tone="info">
         {t(
           "Watch a robot evaluation while it runs: the evaluation sessions, the FR3 arm, and how far the background LEVI has got with labelling the finished episodes. Nothing here starts, stops or approves anything; the only change you can make is to remove an episode from a dataset (restorable, nothing is deleted). Automatic results are unreviewed and their accuracy has not been evaluated.",
         )}
-      </p>
+      </Note>
+      {status?.enabled !== false && (
+        <LiveSummaryBar summary={liveSummary(sessions, rows, service)} />
+      )}
       <Freshness
         lastOk={poll.lastOk}
         delay={poll.delay}
@@ -168,10 +175,13 @@ export default function LivePage() {
       {alive && <BlockedRunsNote status={status} />}
 
       {status?.enabled === false ? (
-        <section className="levi-live-offline" role="status">
-          <strong>{t(disabledText(status.reason).title)}</strong>
-          <p>{t(disabledText(status.reason).body)}</p>
-        </section>
+        <div role="status">
+          <EmptyState
+            icon={Radio}
+            title={t(disabledText(status.reason).title)}
+            description={t(disabledText(status.reason).body)}
+          />
+        </div>
       ) : (
         <>
           {(coreDown || serviceDown) && (
@@ -180,30 +190,30 @@ export default function LivePage() {
               coreError={coreDown ? poll.error : ""}
             />
           )}
-          <div className="levi-live-grid">
-            <div className="levi-live-main">
-              <div className="levi-live-slot o1">
+          <div className="pg-live-grid">
+            <div className="pg-live-main">
+              <div className="pg-live-slot o1">
                 <SessionsPanel sessions={sessions} />
               </div>
               <section
-                className="levi-live-section levi-live-slot o3"
+                className="pg-live-section pg-live-slot o3"
                 aria-labelledby="live-pipeline"
               >
                 <h2 id="live-pipeline">
                   {t("Annotation pipeline")}{" "}
-                  <span className="levi-pool-muted">({ranked.length})</span>
+                  <span className="pg-pool-muted">({ranked.length})</span>
                 </h2>
-                <p className="levi-pool-hint">
+                <p className="pg-pool-hint">
                   {t(
                     "One card per model and task folder. Finished episodes are linked into LEVI, given time segments and an automatic success or failure; nothing is written as a person's label.",
                   )}
                 </p>
                 {ranked.length === 0 ? (
-                  <p className="levi-pool-hint">
+                  <EmptyLine icon={Inbox}>
                     {t("No dataset has been seen yet.")}
-                  </p>
+                  </EmptyLine>
                 ) : (
-                  <div className="levi-live-cards">
+                  <div className="pg-live-cards">
                     {ranked.map((name) => (
                       <DatasetCard
                         key={name}
@@ -241,11 +251,11 @@ export default function LivePage() {
                 enabled={status?.enabled === true}
               />
             </div>
-            <aside className="levi-live-side">
-              <div className="levi-live-slot o2">
+            <aside className="pg-live-side">
+              <div className="pg-live-slot o2">
                 <Fr3Panel fr3={fr3} />
               </div>
-              <div className="levi-live-slot o4">
+              <div className="pg-live-slot o4">
                 <ServicePanel status={status} alive={alive} now={now} />
               </div>
             </aside>

@@ -1,4 +1,5 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
+import "@/components/pages-ui/pages.css";
 import React from "react";
 import ExploreGrid from "./explore-grid";
 import { fetchJson, formatStringWithVars } from "@/utils/parquetUtils";

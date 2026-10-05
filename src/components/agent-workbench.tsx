@@ -29,7 +29,8 @@ import {
 } from "@/utils/browserStorage";
 import { T, useLocale } from "./levi-locale";
 import { friendlyError } from "./live/friendly-error";
-import { Sheet } from "./ds";
+import { Sheet, Tabs } from "./ds";
+import { HumanActionMark } from "@/components/pages-ui/feedback";
 import { useConfirmAction } from "./shell/confirm";
 import { SHELL_EVENTS } from "./shell/shell-events";
 
@@ -432,32 +433,18 @@ export default function AgentWorkbench() {
           <p className="levi-agent-muted">
             Sampled evidence · every suggestion is reviewed by you
           </p>
-          <nav className="levi-agent-tabs">
-            <button
-              aria-pressed={tab === "task"}
-              onClick={() => setTab("task")}
-            >
-              Tasks & review
-            </button>
-            <button
-              aria-pressed={tab === "activity"}
-              onClick={() => setTab("activity")}
-            >
-              Live activity
-            </button>
-            <button
-              aria-pressed={tab === "connections"}
-              onClick={() => setTab("connections")}
-            >
-              Accounts & connections
-            </button>
-            <button
-              aria-pressed={tab === "model"}
-              onClick={() => setTab("model")}
-            >
-              Model settings
-            </button>
-          </nav>
+          <Tabs
+            className="levi-agent-tabs"
+            label={t("Agent Workbench sections")}
+            value={tab}
+            onChange={(id) => setTab(id as typeof tab)}
+            items={[
+              { id: "task", label: t("Tasks & review") },
+              { id: "activity", label: t("Live activity") },
+              { id: "connections", label: t("Accounts & connections") },
+              { id: "model", label: t("Model settings") },
+            ]}
+          />
           {error && (
             <p role="alert" className="levi-agent-error">
               {friendlyError(error, t)}
@@ -471,6 +458,7 @@ export default function AgentWorkbench() {
               <label>
                 {t("Execution channel")}
                 <select
+                  className="ds-input ds-focus"
                   value={pilotRuntime}
                   onChange={(e) => {
                     setPilotRuntime(e.target.value as "" | "codex" | "claude");
@@ -550,6 +538,7 @@ export default function AgentWorkbench() {
                 <label>
                   Connection type
                   <select
+                    className="ds-input ds-focus"
                     value={providerKind}
                     onChange={(e) => {
                       const kind = e.target.value as ProviderKind;
@@ -593,6 +582,7 @@ export default function AgentWorkbench() {
                 <label>
                   Provider name
                   <input
+                    className="ds-input ds-focus"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     required
@@ -607,6 +597,7 @@ export default function AgentWorkbench() {
                         : "Compatible API base URL",
                   )}
                   <input
+                    className="ds-input ds-focus"
                     type="url"
                     value={url}
                     onChange={(e) => {
@@ -620,6 +611,7 @@ export default function AgentWorkbench() {
                 <label>
                   Model ID
                   <input
+                    className="ds-input ds-focus"
                     value={model}
                     onChange={(e) => {
                       setModel(e.target.value);
@@ -633,6 +625,7 @@ export default function AgentWorkbench() {
                     <label>
                       Server API-key environment variable
                       <input
+                        className="ds-input ds-focus"
                         value={keyEnv}
                         onChange={(e) => setKeyEnv(e.target.value)}
                         required
@@ -668,6 +661,7 @@ export default function AgentWorkbench() {
                     <label>
                       API-key environment variable (optional)
                       <input
+                        className="ds-input ds-focus"
                         value={keyEnv}
                         onChange={(e) => setKeyEnv(e.target.value)}
                         required
@@ -689,6 +683,7 @@ export default function AgentWorkbench() {
                     <label>
                       Context tokens
                       <input
+                        className="ds-input ds-focus"
                         type="number"
                         min={1024}
                         max={131072}
@@ -702,6 +697,7 @@ export default function AgentWorkbench() {
                     <label>
                       Images per request (empty: no limit)
                       <input
+                        className="ds-input ds-focus"
                         type="number"
                         min={1}
                         max={1000}
@@ -716,6 +712,7 @@ export default function AgentWorkbench() {
                     <label>
                       Longest image side sent, pixels (empty: native)
                       <input
+                        className="ds-input ds-focus"
                         type="number"
                         min={128}
                         max={4096}
@@ -738,6 +735,7 @@ export default function AgentWorkbench() {
                     <label>
                       Prompt style
                       <select
+                        className="ds-input ds-focus"
                         value={promptStyle}
                         onChange={(e) =>
                           setPromptStyle(e.target.value as "full" | "lean")
@@ -769,7 +767,12 @@ export default function AgentWorkbench() {
                   />
                   Allow an explicitly configured loopback model endpoint
                 </label>
-                <button disabled={busy}>Save model settings</button>
+                <button
+                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                  disabled={busy}
+                >
+                  Save model settings
+                </button>
                 <ul>
                   {providers.map((p) => (
                     <li key={p.name}>
@@ -829,6 +832,7 @@ export default function AgentWorkbench() {
                   <label>
                     Agent model
                     <select
+                      className="ds-input ds-focus"
                       value={provider}
                       onChange={(e) => setProvider(e.target.value)}
                       required
@@ -854,6 +858,7 @@ export default function AgentWorkbench() {
                   <label>
                     Dataset ID
                     <input
+                      className="ds-input ds-focus"
                       value={repo}
                       onChange={(e) => setRepo(e.target.value)}
                       placeholder="local/dataset or org/dataset"
@@ -927,6 +932,7 @@ export default function AgentWorkbench() {
                   <label>
                     {t("Task instructions")}
                     <textarea
+                      className="ds-input ds-textarea ds-focus"
                       value={instruction}
                       onChange={(e) => setInstruction(e.target.value)}
                       required
@@ -942,6 +948,7 @@ export default function AgentWorkbench() {
                   <label>
                     {t("Task type")}
                     <select
+                      className="ds-input ds-focus"
                       value={workflow}
                       onChange={(e) => setWorkflow(e.target.value)}
                     >
@@ -965,6 +972,7 @@ export default function AgentWorkbench() {
                         onChange={setDefinitions}
                       />
                       <button
+                        className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                         type="button"
                         onClick={() =>
                           setDefinitions(
@@ -994,6 +1002,7 @@ export default function AgentWorkbench() {
                       <label>
                         Coarse observation step (seconds)
                         <input
+                          className="ds-input ds-focus"
                           type="number"
                           min={0.05}
                           max={60}
@@ -1005,6 +1014,7 @@ export default function AgentWorkbench() {
                       <label>
                         Maximum evidence frames
                         <input
+                          className="ds-input ds-focus"
                           type="number"
                           min={3}
                           max={1000}
@@ -1018,6 +1028,7 @@ export default function AgentWorkbench() {
                     <label>
                       Target object concepts
                       <input
+                        className="ds-input ds-focus"
                         value={concepts}
                         onChange={(e) => setConcepts(e.target.value)}
                         placeholder="cup, plate"
@@ -1032,6 +1043,7 @@ export default function AgentWorkbench() {
                   <label>
                     {t("Working mode")}
                     <select
+                      className="ds-input ds-focus"
                       value={mode}
                       onChange={(e) => setMode(e.target.value)}
                     >
@@ -1062,6 +1074,7 @@ export default function AgentWorkbench() {
                         <label>
                           {t("Model calls")}
                           <input
+                            className="ds-input ds-focus"
                             type="number"
                             min={1}
                             max={1000}
@@ -1074,6 +1087,7 @@ export default function AgentWorkbench() {
                         <label>
                           {t("Tokens")}
                           <input
+                            className="ds-input ds-focus"
                             type="number"
                             min={256}
                             placeholder={t("No limit")}
@@ -1108,7 +1122,10 @@ export default function AgentWorkbench() {
                       "Saved annotations only. Unsaved changes in the editor are never submitted or overwritten.",
                     )}
                   </p>
-                  <button disabled={busy || !provider}>
+                  <button
+                    className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                    disabled={busy || !provider}
+                  >
                     Inspect & create plan
                   </button>
                 </form>
@@ -1116,6 +1133,7 @@ export default function AgentWorkbench() {
               <label>
                 {t("Open an existing task")}
                 <select
+                  className="ds-input ds-focus"
                   value={selected || ""}
                   onChange={async (e) => {
                     const next = e.target.value;
@@ -1191,6 +1209,7 @@ export default function AgentWorkbench() {
                         <label>
                           Call limit
                           <input
+                            className="ds-input ds-focus"
                             type="number"
                             min={1}
                             value={maxCalls}
@@ -1202,6 +1221,7 @@ export default function AgentWorkbench() {
                         <label>
                           Token limit
                           <input
+                            className="ds-input ds-focus"
                             type="number"
                             min={256}
                             placeholder={t("No limit")}
@@ -1216,6 +1236,7 @@ export default function AgentWorkbench() {
                           />
                         </label>
                         <button
+                          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                           disabled={busy}
                           onClick={() =>
                             void act(async () => {
@@ -1272,6 +1293,7 @@ export default function AgentWorkbench() {
                   <div className="levi-agent-actions">
                     {run.context.workflow?.kind === "objects" && (
                       <button
+                        className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                         disabled={busy || !run.plan?.approval}
                         onClick={() =>
                           void act(async () => {
@@ -1287,6 +1309,7 @@ export default function AgentWorkbench() {
                     ) &&
                       run.completed.length > 0 && (
                         <button
+                          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                           disabled={busy}
                           onClick={() =>
                             void act(async () => {
@@ -1308,6 +1331,7 @@ export default function AgentWorkbench() {
                       run.context.workflow?.kind !== "objects" && (
                         <>
                           <button
+                            className={`ds-btn ds-btn--sm ds-focus ${run.plan?.pilot_review?.accepted ? "ds-btn--secondary" : "ds-btn--primary"}`}
                             disabled={busy || !run.plan?.approval}
                             onClick={() =>
                               void act(async () => {
@@ -1321,6 +1345,7 @@ export default function AgentWorkbench() {
                             Run pilot
                           </button>
                           <button
+                            className={`ds-btn ds-btn--sm ds-focus ${run.plan?.pilot_review?.accepted ? "ds-btn--primary" : "ds-btn--secondary"}`}
                             disabled={busy || !run.plan?.pilot_review?.accepted}
                             onClick={() =>
                               void act(async () => {
@@ -1337,6 +1362,7 @@ export default function AgentWorkbench() {
                       )}
                     {["running", "queued"].includes(run.status) && (
                       <button
+                        className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                         disabled={busy}
                         onClick={() =>
                           void act(async () => {
@@ -1349,6 +1375,7 @@ export default function AgentWorkbench() {
                     )}
                     {!["succeeded", "cancelled"].includes(run.status) && (
                       <button
+                        className="ds-btn ds-btn--ghost ds-btn--sm ds-focus levi-agent-danger"
                         disabled={busy}
                         onClick={() =>
                           void act(async () => {
@@ -1373,7 +1400,11 @@ export default function AgentWorkbench() {
                       <summary>Sampled evidence</summary>
                       <div className="levi-agent-evidence">
                         {evidence.map((row) => (
-                          <button key={row.id} onClick={() => seek(row)}>
+                          <button
+                            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                            key={row.id}
+                            onClick={() => seek(row)}
+                          >
                             {/* Native image artifacts are authenticated same-origin resources. */}
                             {row.artifact && (
                               // eslint-disable-next-line @next/next/no-img-element
@@ -1468,6 +1499,7 @@ export default function AgentWorkbench() {
                       <div className="levi-agent-actions">
                         {change.status === "committed" && (
                           <button
+                            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                             disabled={busy}
                             onClick={() =>
                               void act(async () => {
@@ -1483,6 +1515,7 @@ export default function AgentWorkbench() {
                         )}
                         {change.status === "committed" && !change.undo_of && (
                           <button
+                            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                             disabled={busy}
                             onClick={() =>
                               void act(async () => {
@@ -1500,6 +1533,7 @@ export default function AgentWorkbench() {
                         )}
                         {draftEdited && (
                           <button
+                            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                             disabled={busy}
                             onClick={() =>
                               void act(async () => {
@@ -1520,7 +1554,11 @@ export default function AgentWorkbench() {
                           </button>
                         )}
                         {!draftEdited && change.status !== "committed" && (
+                          <HumanActionMark />
+                        )}
+                        {!draftEdited && change.status !== "committed" && (
                           <button
+                            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                             disabled={busy}
                             onClick={() =>
                               void act(async () => {
@@ -1541,6 +1579,7 @@ export default function AgentWorkbench() {
                         )}
                         {!draftEdited && change.status === "approved" && (
                           <button
+                            className="ds-btn ds-btn--primary ds-btn--sm ds-focus"
                             disabled={busy}
                             onClick={() =>
                               void act(async () => {
