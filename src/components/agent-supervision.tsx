@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { T, useLocale } from "./levi-locale";
+import { Badge, Card, Field, Radio, RadioGroup, Select } from "@/components/ds";
+import { Note } from "@/components/pages-ui/feedback";
+import { Hint } from "./agent-ui";
 
 export function TeacherChoice({
   dataset,
@@ -41,33 +44,29 @@ export function TeacherChoice({
       cancelled = true;
     };
   }, [dataset]);
+  const modes: Array<["none" | "shadow" | "supervised", string]> = [
+    ["none", "No teacher gate"],
+    ["shadow", "Shadow comparison"],
+    ["supervised", "Supervised annotation"],
+  ];
   return (
     <T>
-      <fieldset>
-        <legend>External teacher supervision</legend>
-        <label>
-          Supervision mode
-          <select
-            className="ds-input ds-focus"
-            value={mode}
-            onChange={(e) =>
-              change(
-                e.target.value as "none" | "shadow" | "supervised",
-                teacher,
-              )
-            }
-          >
-            <option value="none">No teacher gate</option>
-            <option value="shadow">Shadow comparison</option>
-            <option value="supervised">Supervised annotation</option>
-          </select>
-        </label>
+      <div className="ag-stack">
+        <RadioGroup legend={t("External teacher supervision")}>
+          {modes.map(([value, label]) => (
+            <Radio
+              key={value}
+              name="agent-supervision-mode"
+              label={t(label)}
+              checked={mode === value}
+              onChange={() => change(value, teacher)}
+            />
+          ))}
+        </RadioGroup>
         {mode !== "none" && (
           <>
-            <label>
-              Teacher connection
-              <select
-                className="ds-input ds-focus"
+            <Field label={t("Teacher connection")} required>
+              <Select
                 value={teacher}
                 required
                 onChange={(e) =>
@@ -88,22 +87,26 @@ export function TeacherChoice({
                       {g.client} · {g.id}
                     </option>
                   ))}
-              </select>
-            </label>
-            {error && <p role="alert">{t(error)}</p>}
-            <p className="levi-agent-muted">
+              </Select>
+            </Field>
+            {error && (
+              <Note tone="warning" role="alert">
+                {t(error)}
+              </Note>
+            )}
+            <Hint>
               Create a scoped Codex or Claude connection first. Both modes pause
               each annotation phase for teacher feedback; final human review is
               still required. No automatic promotion or weight training.
-            </p>
-            <p className="levi-agent-muted">
+            </Hint>
+            <Hint>
               Evidence sharing consent also covers the teacher. The teacher must
               use supervision.pending and supervision.feedback through its LEVI
               tools.
-            </p>
+            </Hint>
           </>
         )}
-      </fieldset>
+      </div>
     </T>
   );
 }
@@ -178,28 +181,34 @@ export function TeachingStatus({
   }, [runId, status]);
   return (
     <T>
-      <section className="levi-connection-card">
-        <h4>Teacher feedback</h4>
-        {error && <p role="alert">{t(error)}</p>}
+      <Card padding="compact" title={t("Teacher feedback")}>
+        {error && (
+          <Note tone="warning" role="alert">
+            {t(error)}
+          </Note>
+        )}
         {items.map((item) => (
-          <article key={item.id}>
-            <strong>
-              {t("Episode")} {item.episode} · {item.phase} · {t(item.status)}
-            </strong>
+          <div key={item.id} className="ag-stack">
+            <p>
+              <strong>
+                {t("Episode")} {item.episode} · {item.phase}
+              </strong>{" "}
+              <Badge tone="neutral">{t(item.status)}</Badge>
+            </p>
             <p>{item.learner_output.summary}</p>
             {item.feedback && (
               <p>
                 {t(item.feedback.decision)} · {item.feedback.note}
               </p>
             )}
-          </article>
+          </div>
         ))}
-        <p className="levi-agent-muted">
+        <Hint>
           After feedback is accepted, resume the pilot or execution. Completed
           model phases use cached results; teacher feedback does not approve
           publication.
-        </p>
-      </section>
+        </Hint>
+      </Card>
     </T>
   );
 }

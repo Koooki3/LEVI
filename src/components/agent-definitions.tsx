@@ -1,5 +1,8 @@
 "use client";
+import { Plus, Trash2 } from "lucide-react";
 import { T, useLocale } from "./levi-locale";
+import { Button, Field, Input } from "@/components/ds";
+import { Actions, Disclosure } from "./agent-ui";
 type Definition = {
   id: string;
   label: string;
@@ -32,56 +35,61 @@ export default function AgentDefinitions({
   }
   return (
     <T>
-      <div className="levi-review-queue">
+      <div className="ag-section">
         <h3>Subtask definitions</h3>
         {items.map((d, i) => (
-          <details key={i} open>
-            <summary>{d.label || t("New subtask")}</summary>
-            {fields.map(([k, label]) => (
-              <label key={k}>
-                {t(label)}
-                <input
-                  className="ds-input ds-focus"
-                  value={d[k]}
-                  onChange={(e) =>
-                    save(
-                      items.map((row, j) =>
-                        j === i ? { ...row, [k]: e.target.value } : row,
-                      ),
-                    )
-                  }
-                />
-              </label>
-            ))}
-            <button
-              className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-              type="button"
-              onClick={() => save(items.filter((_, j) => i !== j))}
-            >
-              Remove definition
-            </button>
-          </details>
+          <Disclosure key={i} defaultOpen summary={d.label || t("New subtask")}>
+            <div className="ag-form">
+              {fields.map(([k, label]) => (
+                <Field key={k} label={t(label)}>
+                  <Input
+                    value={d[k]}
+                    onChange={(e) =>
+                      save(
+                        items.map((row, j) =>
+                          j === i ? { ...row, [k]: e.target.value } : row,
+                        ),
+                      )
+                    }
+                  />
+                </Field>
+              ))}
+              <Actions>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="ag-danger"
+                  icon={Trash2}
+                  onClick={() => save(items.filter((_, j) => i !== j))}
+                >
+                  {t("Remove definition")}
+                </Button>
+              </Actions>
+            </div>
+          </Disclosure>
         ))}
-        <button
-          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-          type="button"
-          onClick={() =>
-            save([
-              ...items,
-              {
-                id: `subtask_${items.length + 1}`,
-                label: "",
-                definition: "",
-                starts_when: "",
-                ends_when: "",
-                success_when: "",
-                confusions: "",
-              },
-            ])
-          }
-        >
-          Add subtask definition
-        </button>
+        <Actions>
+          <Button
+            size="sm"
+            icon={Plus}
+            onClick={() =>
+              save([
+                ...items,
+                {
+                  id: `subtask_${items.length + 1}`,
+                  label: "",
+                  definition: "",
+                  starts_when: "",
+                  ends_when: "",
+                  success_when: "",
+                  confusions: "",
+                },
+              ])
+            }
+          >
+            {t("Add subtask definition")}
+          </Button>
+        </Actions>
       </div>
     </T>
   );

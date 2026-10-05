@@ -1,6 +1,8 @@
 "use client";
 import { useRef, useState } from "react";
 import { useLocale } from "./levi-locale";
+import { Button } from "@/components/ds";
+import "@/components/pages-ui/agent-content.css";
 
 export type ChipOption = { value: string; label: string; hint?: string };
 
@@ -46,35 +48,29 @@ export default function ChipMultiSelect({
 
   if (options.length === 0) {
     return (
-      <p className="levi-agent-muted">
-        {emptyHint ?? t("Nothing to choose yet")}
-      </p>
+      <p className="ag-muted">{emptyHint ?? t("Nothing to choose yet")}</p>
     );
   }
 
   return (
-    <div className="levi-chips-field">
-      <div className="levi-chips-actions">
-        <button
-          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-          type="button"
+    <div className="ag-chips-field">
+      <div className="ag-chips-actions">
+        <Button
+          size="sm"
+          variant="ghost"
           onClick={() => onChange(options.map((o) => o.value))}
         >
           {t("Select all")}
-        </button>
-        <button
-          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-          type="button"
-          onClick={() => onChange([])}
-        >
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => onChange([])}>
           {t("Clear")}
-        </button>
-        <span className="levi-agent-muted">
+        </Button>
+        <span className="ag-muted" aria-live="polite">
           {selected.length}/{options.length} {t("selected")}
         </span>
       </div>
       <div
-        className={`levi-chips ${columns ? "columns" : ""}`}
+        className={`ag-chips ${columns ? "is-columns" : ""}`}
         role="listbox"
         aria-multiselectable
         onPointerUp={() => {
@@ -89,13 +85,17 @@ export default function ChipMultiSelect({
         {options.map((option, index) => {
           const on = chosen.has(option.value);
           return (
-            <button
+            // A chip is a ds Button used as a listbox option: selected is the
+            // filled (primary) look, not selected the outlined one. Title is
+            // kept for options whose label is cut short (a long task text).
+            <Button
               key={option.value}
-              type="button"
+              size="sm"
+              variant={on ? "primary" : "secondary"}
               role="option"
               aria-selected={on}
               title={option.hint}
-              className={`levi-chip ${on ? "on" : ""}`}
+              className="ag-chip"
               onPointerDown={(event) => {
                 event.preventDefault();
                 anchor.current = index;
@@ -115,12 +115,12 @@ export default function ChipMultiSelect({
               }}
             >
               {option.label}
-            </button>
+            </Button>
           );
         })}
       </div>
       {dragging && (
-        <p className="levi-agent-muted">{t("Drag across to select a range")}</p>
+        <p className="ag-muted">{t("Drag across to select a range")}</p>
       )}
     </div>
   );

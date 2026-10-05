@@ -29,8 +29,41 @@ import {
 } from "@/utils/browserStorage";
 import { T, useLocale } from "./levi-locale";
 import { friendlyError } from "./live/friendly-error";
-import { Sheet, Tabs } from "./ds";
-import { HumanActionMark } from "@/components/pages-ui/feedback";
+import {
+  Badge,
+  Button,
+  Checkbox,
+  Field,
+  Input,
+  Progress,
+  SegmentedControl,
+  Select,
+  Sheet,
+  Tabs,
+  Textarea,
+  useToast,
+} from "./ds";
+import {
+  Ban,
+  Check,
+  CircleStop,
+  Download,
+  FilePlus2,
+  Image as ImageIcon,
+  ListChecks,
+  Pause,
+  Play,
+  Plus,
+  Save,
+  ScanSearch,
+  ShieldCheck,
+  Undo2,
+} from "lucide-react";
+import {
+  HumanActionMark,
+  RequestProblem,
+} from "@/components/pages-ui/feedback";
+import { Actions, Disclosure, GatedButton, Hint } from "./agent-ui";
 import { useConfirmAction } from "./shell/confirm";
 import { SHELL_EVENTS } from "./shell/shell-events";
 
@@ -190,7 +223,7 @@ export default function AgentWorkbench() {
   const [allowLocal, setAllowLocal] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const toast = useToast();
   const [draftEdited, setDraftEdited] = useState(false);
   const [pilotRuntime, setPilotRuntime] = useState<"" | "codex" | "claude">("");
   const [follow, setFollow] = useState(false);
@@ -309,7 +342,6 @@ export default function AgentWorkbench() {
   async function act(fn: () => Promise<void>) {
     setBusy(true);
     setError("");
-    setNotice("");
     try {
       await fn();
       setRuns(await api<Run[]>("/runs"));
@@ -372,12 +404,30 @@ export default function AgentWorkbench() {
         },
       }),
     );
-    setNotice(
-      "Evidence navigation stays in the current episode. Open other episodes manually after saving your edits.",
-    );
+    toast.show({
+      title: t(
+        "Evidence navigation stays in the current episode. Open other episodes manually after saving your edits.",
+      ),
+      tone: "info",
+    });
   }
   // A drawer beside the page (not modal): evidence seeks and annotation edits
   // on the page stay possible while it is open, as with the earlier dock.
+  const supervisionPicker = !pilotRuntime &&
+    !["external", "local-tools"].includes(provider) && (
+      <TeacherChoice
+        dataset={repo}
+        mode={supervision}
+        teacher={teacherGrant}
+        change={(mode, teacher) => {
+          setSupervision(mode);
+          setTeacherGrant(teacher);
+        }}
+      />
+    );
+  const approved = !!run?.plan?.approval;
+  const pilotAccepted = !!run?.plan?.pilot_review?.accepted;
+  const approveFirst = t("Approve the execution plan first.");
   return (
     <Sheet
       open={open}
@@ -389,7 +439,7 @@ export default function AgentWorkbench() {
       className="levi-agent-sheet"
     >
       <T>
-        <div className="levi-agent-dock">
+        <div className="ag-dock">
           {/* Drag the left edge to widen the panel; a long evidence path or a
             diff is unreadable at a fixed width. The chosen width is kept per
             browser. */}
@@ -430,11 +480,11 @@ export default function AgentWorkbench() {
             {...panelAria(width, viewport)}
             aria-valuetext={`${panelAria(width, viewport)["aria-valuenow"]} px`}
           />
-          <p className="levi-agent-muted">
+          <p className="ag-muted">
             Sampled evidence · every suggestion is reviewed by you
           </p>
           <Tabs
-            className="levi-agent-tabs"
+            className="ag-tabs"
             label={t("Agent Workbench sections")}
             value={tab}
             onChange={(id) => setTab(id as typeof tab)}
@@ -446,19 +496,17 @@ export default function AgentWorkbench() {
             ]}
           />
           {error && (
-            <p role="alert" className="levi-agent-error">
-              {friendlyError(error, t)}
-            </p>
+            <RequestProblem
+              action="That action did not complete"
+              message={friendlyError(error, t)}
+            />
           )}
-          {notice && <p role="status">{t(notice)}</p>}
           {tab === "activity" ? (
             <AgentActivity open={open && tab === "activity"} />
           ) : tab === "connections" ? (
             <>
-              <label>
-                {t("Execution channel")}
-                <select
-                  className="ds-input ds-focus"
+              <Field label={t("Execution channel")}>
+                <Select
                   value={pilotRuntime}
                   onChange={(e) => {
                     setPilotRuntime(e.target.value as "" | "codex" | "claude");
@@ -468,8 +516,8 @@ export default function AgentWorkbench() {
                   <option value="">{t("API / external MCP")}</option>
                   <option value="codex">Codex Pilot</option>
                   <option value="claude">Claude Code Pilot</option>
-                </select>
-              </label>
+                </Select>
+              </Field>
               <AgentRuntimeConnections />
               <AgentConnections
                 providers={providers}
@@ -500,293 +548,268 @@ export default function AgentWorkbench() {
               />
             </>
           ) : tab === "model" ? (
-            <>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void act(async () => {
-                    await api("/providers", {
-                      name,
-                      kind: providerKind,
-                      model_digest: modelDigest,
-                      context_tokens: contextTokens,
-                      base_url: url,
-                      model,
-                      key_env: keyEnv,
-                      vision,
-                      tools: supportsTools,
-                      structured_output: localKind,
-                      allow_localhost: allowLocal,
-                      // Local-model settings only where their inputs show.
-                      max_images: localKind ? maxImages : null,
-                      image_max_side: localKind ? imageMaxSide : null,
-                      think: localKind && think,
-                      fold_system:
-                        providerKind === "openai-local" && foldSystem,
-                      // Saving replaces the whole profile: send the style shown.
-                      prompt_style: localKind ? promptStyle : "full",
-                      requests_in_flight: localKind ? inFlight : 1,
-                    });
-                    setProviders(await api<Provider[]>("/providers"));
-                    setProvider(name);
-                    setNotice(
-                      "Provider saved. Credentials stay on the server.",
-                    );
+            <form
+              className="ag-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void act(async () => {
+                  await api("/providers", {
+                    name,
+                    kind: providerKind,
+                    model_digest: modelDigest,
+                    context_tokens: contextTokens,
+                    base_url: url,
+                    model,
+                    key_env: keyEnv,
+                    vision,
+                    tools: supportsTools,
+                    structured_output: localKind,
+                    allow_localhost: allowLocal,
+                    // Local-model settings only where their inputs show.
+                    max_images: localKind ? maxImages : null,
+                    image_max_side: localKind ? imageMaxSide : null,
+                    think: localKind && think,
+                    fold_system: providerKind === "openai-local" && foldSystem,
+                    // Saving replaces the whole profile: send the style shown.
+                    prompt_style: localKind ? promptStyle : "full",
+                    requests_in_flight: localKind ? inFlight : 1,
                   });
-                }}
-              >
-                <label>
-                  Connection type
-                  <select
-                    className="ds-input ds-focus"
-                    value={providerKind}
-                    onChange={(e) => {
-                      const kind = e.target.value as ProviderKind;
-                      setProviderKind(kind);
-                      setModelDigest(null);
-                      if (kind === "openai-compatible") {
-                        setKeyEnv((v) =>
-                          v === "LEVI_LOCAL_MODEL_KEY"
-                            ? "LEVI_MODEL_API_KEY"
-                            : v,
-                        );
-                      }
-                      if (kind === "ollama") {
-                        setName("ollama-local");
-                        setUrl("http://127.0.0.1:11434");
-                        setModel("qwen3.5:4b");
-                        setAllowLocal(true);
-                        setSupportsTools(false);
-                      }
-                      if (kind === "openai-local") {
-                        setName("vllm-local");
-                        setUrl("http://127.0.0.1:8100");
-                        setModel("");
-                        setContextTokens(32768);
-                        // Its own variable: a cloud key is never sent here.
-                        setKeyEnv("LEVI_LOCAL_MODEL_KEY");
-                        setAllowLocal(true);
-                        setSupportsTools(false);
-                      }
-                    }}
-                  >
-                    <option value="openai-compatible">
-                      OpenAI-compatible API
-                    </option>
-                    <option value="ollama">Ollama · local service</option>
-                    <option value="openai-local">
-                      Local OpenAI-compatible server (vLLM)
-                    </option>
-                  </select>
-                </label>
-                <label>
-                  Provider name
-                  <input
-                    className="ds-input ds-focus"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                  />
-                </label>
-                <label>
-                  {t(
-                    providerKind === "ollama"
-                      ? "Ollama service URL"
-                      : providerKind === "openai-local"
-                        ? "Local model server URL"
-                        : "Compatible API base URL",
-                  )}
-                  <input
-                    className="ds-input ds-focus"
-                    type="url"
-                    value={url}
-                    onChange={(e) => {
-                      setUrl(e.target.value);
-                      setModelDigest(null);
-                    }}
-                    placeholder="https://provider.example/v1"
-                    required
-                  />
-                </label>
-                <label>
-                  Model ID
-                  <input
-                    className="ds-input ds-focus"
-                    value={model}
-                    onChange={(e) => {
-                      setModel(e.target.value);
-                      setModelDigest(null);
-                    }}
-                    required
-                  />
-                </label>
-                {providerKind === "openai-compatible" && (
-                  <>
-                    <label>
-                      Server API-key environment variable
-                      <input
-                        className="ds-input ds-focus"
-                        value={keyEnv}
-                        onChange={(e) => setKeyEnv(e.target.value)}
-                        required
-                      />
-                    </label>
-                    <p className="levi-agent-muted">
-                      Set this environment variable before starting LEVI. Never
-                      paste the key here. Tool-call support is required.
-                    </p>
-                    <label className="levi-agent-check">
-                      <input
-                        type="checkbox"
-                        checked={supportsTools}
-                        onChange={(e) => setSupportsTools(e.target.checked)}
-                      />
-                      Model supports structured tool calls
-                    </label>
-                  </>
-                )}
-                {providerKind === "ollama" && (
-                  <p className="levi-agent-muted">
-                    Save this connection, then inspect and bind the installed
-                    model in Accounts & connections. No API key is required.
-                  </p>
-                )}
-                {providerKind === "openai-local" && (
-                  <>
-                    <p className="levi-agent-muted">
-                      Use the server root without /v1. Save this connection,
-                      then inspect and bind the served model in Accounts &
-                      connections.
-                    </p>
-                    <label>
-                      API-key environment variable (optional)
-                      <input
-                        className="ds-input ds-focus"
-                        value={keyEnv}
-                        onChange={(e) => setKeyEnv(e.target.value)}
-                        required
-                      />
-                    </label>
-                    <label className="levi-agent-check">
-                      <input
-                        type="checkbox"
-                        checked={foldSystem}
-                        onChange={(e) => setFoldSystem(e.target.checked)}
-                      />
-                      Send the system prompt in the first user turn (templates
-                      without a system role)
-                    </label>
-                  </>
-                )}
-                {localKind && (
-                  <>
-                    <label>
-                      Context tokens
-                      <input
-                        className="ds-input ds-focus"
-                        type="number"
-                        min={1024}
-                        max={131072}
-                        value={contextTokens}
-                        onChange={(e) =>
-                          setContextTokens(Number(e.target.value))
-                        }
-                        required
-                      />
-                    </label>
-                    <label>
-                      Images per request (empty: no limit)
-                      <input
-                        className="ds-input ds-focus"
-                        type="number"
-                        min={1}
-                        max={1000}
-                        value={maxImages ?? ""}
-                        onChange={(e) =>
-                          setMaxImages(
-                            e.target.value ? Number(e.target.value) : null,
-                          )
-                        }
-                      />
-                    </label>
-                    <label>
-                      Longest image side sent, pixels (empty: native)
-                      <input
-                        className="ds-input ds-focus"
-                        type="number"
-                        min={128}
-                        max={4096}
-                        value={imageMaxSide ?? ""}
-                        onChange={(e) =>
-                          setImageMaxSide(
-                            e.target.value ? Number(e.target.value) : null,
-                          )
-                        }
-                      />
-                    </label>
-                    <label className="levi-agent-check">
-                      <input
-                        type="checkbox"
-                        checked={think}
-                        onChange={(e) => setThink(e.target.checked)}
-                      />
-                      Let the model reason before answering
-                    </label>
-                    <label>
-                      Prompt style
-                      <select
-                        className="ds-input ds-focus"
-                        value={promptStyle}
-                        onChange={(e) =>
-                          setPromptStyle(e.target.value as "full" | "lean")
-                        }
-                      >
-                        <option value="full">
-                          Full: LEVI skills and context (dataset review)
-                        </option>
-                        <option value="lean">
-                          Lean: instruction and frame list (temporal annotation)
-                        </option>
-                      </select>
-                    </label>
-                  </>
-                )}
-                <label className="levi-agent-check">
-                  <input
-                    type="checkbox"
-                    checked={vision}
-                    onChange={(e) => setVision(e.target.checked)}
-                  />
-                  Model supports image input
-                </label>
-                <label className="levi-agent-check">
-                  <input
-                    type="checkbox"
-                    checked={allowLocal}
-                    onChange={(e) => setAllowLocal(e.target.checked)}
-                  />
-                  Allow an explicitly configured loopback model endpoint
-                </label>
-                <button
-                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                  disabled={busy}
+                  setProviders(await api<Provider[]>("/providers"));
+                  setProvider(name);
+                  toast.show({
+                    title: t("Provider saved"),
+                    description: t("Credentials stay on the server."),
+                    tone: "success",
+                  });
+                });
+              }}
+            >
+              <Field label={t("Connection type")}>
+                <Select
+                  value={providerKind}
+                  onChange={(e) => {
+                    const kind = e.target.value as ProviderKind;
+                    setProviderKind(kind);
+                    setModelDigest(null);
+                    if (kind === "openai-compatible") {
+                      setKeyEnv((v) =>
+                        v === "LEVI_LOCAL_MODEL_KEY" ? "LEVI_MODEL_API_KEY" : v,
+                      );
+                    }
+                    if (kind === "ollama") {
+                      setName("ollama-local");
+                      setUrl("http://127.0.0.1:11434");
+                      setModel("qwen3.5:4b");
+                      setAllowLocal(true);
+                      setSupportsTools(false);
+                    }
+                    if (kind === "openai-local") {
+                      setName("vllm-local");
+                      setUrl("http://127.0.0.1:8100");
+                      setModel("");
+                      setContextTokens(32768);
+                      // Its own variable: a cloud key is never sent here.
+                      setKeyEnv("LEVI_LOCAL_MODEL_KEY");
+                      setAllowLocal(true);
+                      setSupportsTools(false);
+                    }
+                  }}
                 >
-                  Save model settings
-                </button>
-                <ul>
+                  <option value="openai-compatible">
+                    {t("OpenAI-compatible API")}
+                  </option>
+                  <option value="ollama">{t("Ollama · local service")}</option>
+                  <option value="openai-local">
+                    {t("Local OpenAI-compatible server (vLLM)")}
+                  </option>
+                </Select>
+              </Field>
+              <Field label={t("Provider name")} required>
+                <Input value={name} onChange={(e) => setName(e.target.value)} />
+              </Field>
+              <Field
+                label={t(
+                  providerKind === "ollama"
+                    ? "Ollama service URL"
+                    : providerKind === "openai-local"
+                      ? "Local model server URL"
+                      : "Compatible API base URL",
+                )}
+                required
+              >
+                <Input
+                  type="url"
+                  value={url}
+                  onChange={(e) => {
+                    setUrl(e.target.value);
+                    setModelDigest(null);
+                  }}
+                  placeholder="https://provider.example/v1"
+                />
+              </Field>
+              <Field label={t("Model ID")} required>
+                <Input
+                  value={model}
+                  onChange={(e) => {
+                    setModel(e.target.value);
+                    setModelDigest(null);
+                  }}
+                />
+              </Field>
+              {providerKind === "openai-compatible" && (
+                <>
+                  <Field
+                    label={t("Server API-key environment variable")}
+                    hint={t(
+                      "Set this environment variable before starting LEVI. Never paste the key here. Tool-call support is required.",
+                    )}
+                    required
+                  >
+                    <Input
+                      value={keyEnv}
+                      onChange={(e) => setKeyEnv(e.target.value)}
+                    />
+                  </Field>
+                  <Checkbox
+                    label={t("Model supports structured tool calls")}
+                    checked={supportsTools}
+                    onChange={(e) => setSupportsTools(e.target.checked)}
+                  />
+                </>
+              )}
+              {providerKind === "ollama" && (
+                <Hint>
+                  Save this connection, then inspect and bind the installed
+                  model in Accounts & connections. No API key is required.
+                </Hint>
+              )}
+              {providerKind === "openai-local" && (
+                <>
+                  <Hint>
+                    Use the server root without /v1. Save this connection, then
+                    inspect and bind the served model in Accounts & connections.
+                  </Hint>
+                  <Field
+                    label={t("API-key environment variable (optional)")}
+                    required
+                  >
+                    <Input
+                      value={keyEnv}
+                      onChange={(e) => setKeyEnv(e.target.value)}
+                    />
+                  </Field>
+                  <Checkbox
+                    label={t(
+                      "Send the system prompt in the first user turn (templates without a system role)",
+                    )}
+                    checked={foldSystem}
+                    onChange={(e) => setFoldSystem(e.target.checked)}
+                  />
+                </>
+              )}
+              {localKind && (
+                <>
+                  <Field label={t("Context tokens")} required>
+                    <Input
+                      type="number"
+                      min={1024}
+                      max={131072}
+                      value={contextTokens}
+                      onChange={(e) => setContextTokens(Number(e.target.value))}
+                    />
+                  </Field>
+                  <Field label={t("Images per request (empty: no limit)")}>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={1000}
+                      value={maxImages ?? ""}
+                      onChange={(e) =>
+                        setMaxImages(
+                          e.target.value ? Number(e.target.value) : null,
+                        )
+                      }
+                    />
+                  </Field>
+                  <Field
+                    label={t("Longest image side sent, pixels (empty: native)")}
+                  >
+                    <Input
+                      type="number"
+                      min={128}
+                      max={4096}
+                      value={imageMaxSide ?? ""}
+                      onChange={(e) =>
+                        setImageMaxSide(
+                          e.target.value ? Number(e.target.value) : null,
+                        )
+                      }
+                    />
+                  </Field>
+                  <Checkbox
+                    label={t("Let the model reason before answering")}
+                    checked={think}
+                    onChange={(e) => setThink(e.target.checked)}
+                  />
+                  <Field label={t("Prompt style")}>
+                    <Select
+                      value={promptStyle}
+                      onChange={(e) =>
+                        setPromptStyle(e.target.value as "full" | "lean")
+                      }
+                    >
+                      <option value="full">
+                        {t("Full: LEVI skills and context (dataset review)")}
+                      </option>
+                      <option value="lean">
+                        {t(
+                          "Lean: instruction and frame list (temporal annotation)",
+                        )}
+                      </option>
+                    </Select>
+                  </Field>
+                </>
+              )}
+              <Checkbox
+                label={t("Model supports image input")}
+                checked={vision}
+                onChange={(e) => setVision(e.target.checked)}
+              />
+              <Checkbox
+                label={t(
+                  "Allow an explicitly configured loopback model endpoint",
+                )}
+                checked={allowLocal}
+                onChange={(e) => setAllowLocal(e.target.checked)}
+              />
+              <Actions>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="sm"
+                  icon={Save}
+                  loading={busy}
+                >
+                  {t("Save model settings")}
+                </Button>
+              </Actions>
+              {providers.length > 0 && (
+                <ul className="ag-list ag-list--plain">
                   {providers.map((p) => (
                     <li key={p.name}>
                       {p.name} ·{" "}
-                      <T>
-                        {p.credential_ready
-                          ? "Credential available"
-                          : "Credential missing"}
-                      </T>
+                      <Badge tone={p.credential_ready ? "success" : "warning"}>
+                        {t(
+                          p.credential_ready
+                            ? "Credential available"
+                            : "Credential missing",
+                        )}
+                      </Badge>
                     </li>
                   ))}
                 </ul>
-              </form>
-            </>
+              )}
+            </form>
           ) : (
             <>
               <AgentTaskConsole
@@ -794,9 +817,13 @@ export default function AgentWorkbench() {
                 supervision={supervision}
                 teacherGrant={teacherGrant}
               />
-              <details open={!run}>
-                <summary>New task · frozen scope</summary>
+              <Disclosure
+                open={!run}
+                icon={FilePlus2}
+                summary={t("New task · frozen scope")}
+              >
                 <form
+                  className="ag-form"
                   onSubmit={async (e) => {
                     e.preventDefault();
                     if (draftEdited && !(await discardDraft())) return;
@@ -817,25 +844,11 @@ export default function AgentWorkbench() {
                     });
                   }}
                 >
-                  {!pilotRuntime &&
-                    !["external", "local-tools"].includes(provider) && (
-                      <TeacherChoice
-                        dataset={repo}
-                        mode={supervision}
-                        teacher={teacherGrant}
-                        change={(mode, teacher) => {
-                          setSupervision(mode);
-                          setTeacherGrant(teacher);
-                        }}
-                      />
-                    )}
-                  <label>
-                    Agent model
-                    <select
-                      className="ds-input ds-focus"
+                  {supervisionPicker}
+                  <Field label={t("Agent model")} required>
+                    <Select
                       value={provider}
                       onChange={(e) => setProvider(e.target.value)}
-                      required
                     >
                       <option value="">
                         {t("Choose a configured provider")}
@@ -853,21 +866,18 @@ export default function AgentWorkbench() {
                           {p.name}
                         </option>
                       ))}
-                    </select>
-                  </label>
-                  <label>
-                    Dataset ID
-                    <input
-                      className="ds-input ds-focus"
+                    </Select>
+                  </Field>
+                  <Field label={t("Dataset ID")} required>
+                    <Input
                       value={repo}
                       onChange={(e) => setRepo(e.target.value)}
                       placeholder="local/dataset or org/dataset"
-                      required
                     />
-                  </label>
+                  </Field>
                   {facets.tasks.length > 1 && (
-                    <div className="levi-agent-field">
-                      <span className="levi-agent-label">{t("Tasks")}</span>
+                    <div className="ag-field">
+                      <span className="ag-label">{t("Tasks")}</span>
                       <ChipMultiSelect
                         options={facets.tasks.map((task) => ({
                           value: task,
@@ -879,15 +889,15 @@ export default function AgentWorkbench() {
                         onChange={setTasks}
                         columns
                       />
-                      <p className="levi-agent-tip">
+                      <Hint>
                         {t(
                           "This dataset declares several tasks. Choosing some is a note for the reader; the scope that is frozen is the episodes below.",
                         )}
-                      </p>
+                      </Hint>
                     </div>
                   )}
-                  <div className="levi-agent-field">
-                    <span className="levi-agent-label">{t("Episodes")}</span>
+                  <div className="ag-field">
+                    <span className="ag-label">{t("Episodes")}</span>
                     <ChipMultiSelect
                       options={facets.episodes.map((index) => ({
                         value: String(index),
@@ -902,14 +912,14 @@ export default function AgentWorkbench() {
                         "Enter a dataset ID above to list its episodes.",
                       )}
                     />
-                    <p className="levi-agent-tip">
+                    <Hint>
                       {t(
                         "Click an episode, or drag across several. The chosen set is frozen when the plan is created and cannot grow later.",
                       )}
-                    </p>
+                    </Hint>
                   </div>
-                  <div className="levi-agent-field">
-                    <span className="levi-agent-label">{t("Cameras")}</span>
+                  <div className="ag-field">
+                    <span className="ag-label">{t("Cameras")}</span>
                     <ChipMultiSelect
                       options={facets.cameras.map((key) => ({
                         value: key,
@@ -923,32 +933,28 @@ export default function AgentWorkbench() {
                       onChange={(next) => setCameras(next.join(","))}
                       emptyHint={t("This dataset declares no video cameras.")}
                     />
-                    <p className="levi-agent-tip">
+                    <Hint>
                       {t(
                         "Only frames from the chosen cameras are read. Subtask and object work needs at least one.",
                       )}
-                    </p>
+                    </Hint>
                   </div>
-                  <label>
-                    {t("Task instructions")}
-                    <textarea
-                      className="ds-input ds-textarea ds-focus"
+                  <Field
+                    label={t("Task instructions")}
+                    hint={t(
+                      "Say what to look for and how to judge it. This text is given to the agent with the evidence; it is not a search query.",
+                    )}
+                    required
+                  >
+                    <Textarea
                       value={instruction}
                       onChange={(e) => setInstruction(e.target.value)}
-                      required
                       rows={4}
                       placeholder={t("INSTRUCTION_TEMPLATE")}
                     />
-                  </label>
-                  <p className="levi-agent-tip">
-                    {t(
-                      "Say what to look for and how to judge it. This text is given to the agent with the evidence; it is not a search query.",
-                    )}
-                  </p>
-                  <label>
-                    {t("Task type")}
-                    <select
-                      className="ds-input ds-focus"
+                  </Field>
+                  <Field label={t("Task type")}>
+                    <Select
                       value={workflow}
                       onChange={(e) => setWorkflow(e.target.value)}
                     >
@@ -959,8 +965,8 @@ export default function AgentWorkbench() {
                       <option value="objects">
                         {t("Visible object masks")}
                       </option>
-                    </select>
-                  </label>
+                    </Select>
+                  </Field>
                   {workflow === "temporal" && (
                     <>
                       <p>
@@ -971,38 +977,38 @@ export default function AgentWorkbench() {
                         value={definitions}
                         onChange={setDefinitions}
                       />
-                      <button
-                        className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                        type="button"
-                        onClick={() =>
-                          setDefinitions(
-                            JSON.stringify(
-                              [
-                                {
-                                  id: "pick",
-                                  label: "Pick",
-                                  definition: "Lift the target object",
-                                  starts_when: "Gripper approaches target",
-                                  ends_when:
-                                    "Attempt completes or is abandoned",
-                                  success_when:
-                                    "Object leaves the surface and remains held",
-                                  confusions:
-                                    "Contact alone does not prove success",
-                                },
-                              ],
-                              null,
-                              2,
-                            ),
-                          )
-                        }
-                      >
-                        Insert editable definition example
-                      </button>
-                      <label>
-                        Coarse observation step (seconds)
-                        <input
-                          className="ds-input ds-focus"
+                      <Actions>
+                        <Button
+                          size="sm"
+                          icon={Plus}
+                          onClick={() =>
+                            setDefinitions(
+                              JSON.stringify(
+                                [
+                                  {
+                                    id: "pick",
+                                    label: "Pick",
+                                    definition: "Lift the target object",
+                                    starts_when: "Gripper approaches target",
+                                    ends_when:
+                                      "Attempt completes or is abandoned",
+                                    success_when:
+                                      "Object leaves the surface and remains held",
+                                    confusions:
+                                      "Contact alone does not prove success",
+                                  },
+                                ],
+                                null,
+                                2,
+                              ),
+                            )
+                          }
+                        >
+                          {t("Insert editable definition example")}
+                        </Button>
+                      </Actions>
+                      <Field label={t("Coarse observation step (seconds)")}>
+                        <Input
                           type="number"
                           min={0.05}
                           max={60}
@@ -1010,130 +1016,128 @@ export default function AgentWorkbench() {
                           value={step}
                           onChange={(e) => setStep(Number(e.target.value))}
                         />
-                      </label>
-                      <label>
-                        Maximum evidence frames
-                        <input
-                          className="ds-input ds-focus"
+                      </Field>
+                      <Field label={t("Maximum evidence frames")}>
+                        <Input
                           type="number"
                           min={3}
                           max={1000}
                           value={frameCap}
                           onChange={(e) => setFrameCap(Number(e.target.value))}
                         />
-                      </label>
+                      </Field>
                     </>
                   )}
                   {workflow === "objects" && (
-                    <label>
-                      Target object concepts
-                      <input
-                        className="ds-input ds-focus"
+                    <Field label={t("Target object concepts")}>
+                      <Input
                         value={concepts}
                         onChange={(e) => setConcepts(e.target.value)}
                         placeholder="cup, plate"
                       />
-                    </label>
+                    </Field>
                   )}
                   {clarifications.map((q) => (
-                    <p key={q} role="alert">
-                      {q}
-                    </p>
+                    <RequestProblem
+                      key={q}
+                      action="The plan needs one more answer"
+                      message={q}
+                    />
                   ))}
-                  <label>
-                    {t("Working mode")}
-                    <select
-                      className="ds-input ds-focus"
+                  <div className="ag-field">
+                    <span className="ag-label">{t("Working mode")}</span>
+                    <SegmentedControl
+                      label={t("Working mode")}
                       value={mode}
-                      onChange={(e) => setMode(e.target.value)}
-                    >
-                      <option value="draft">{t("Produce annotations")}</option>
-                      <option value="read_only">{t("Read only")}</option>
-                    </select>
-                  </label>
-                  <p className="levi-agent-tip">
-                    {t(
-                      "Produce annotations: the agent proposes and you review before anything is published. Read only: it may look but not propose.",
-                    )}
-                  </p>
+                      onChange={setMode}
+                      options={[
+                        { value: "draft", label: t("Produce annotations") },
+                        { value: "read_only", label: t("Read only") },
+                      ]}
+                    />
+                    <Hint>
+                      {t(
+                        "Produce annotations: the agent proposes and you review before anything is published. Read only: it may look but not propose.",
+                      )}
+                    </Hint>
+                  </div>
                   {provider === "external" ? (
-                    <p className="levi-agent-tip">
+                    <Hint>
                       {t(
                         "Your agent reads the evidence through the connection you created, which already names the datasets it may touch, and spends its own tokens — so LEVI sets no call or token limit here. plans.estimate prices a scope before you start.",
                       )}
-                    </p>
+                    </Hint>
                   ) : (
-                    <details className="levi-agent-advanced">
-                      <summary>{t("Spending limits for this model")}</summary>
-                      <p className="levi-agent-tip">
-                        {t(
-                          "These cap what LEVI itself spends at the model endpoint, and stop the run when reached.",
-                        )}
-                      </p>
-                      <div className="levi-agent-budget">
-                        <label>
-                          {t("Model calls")}
-                          <input
-                            className="ds-input ds-focus"
-                            type="number"
-                            min={1}
-                            max={1000}
-                            value={maxCalls}
-                            onChange={(e) =>
-                              setMaxCalls(Number(e.target.value))
-                            }
-                          />
-                        </label>
-                        <label>
-                          {t("Tokens")}
-                          <input
-                            className="ds-input ds-focus"
-                            type="number"
-                            min={256}
-                            placeholder={t("No limit")}
-                            value={maxTokens ?? ""}
-                            onChange={(e) =>
-                              setMaxTokens(
-                                e.target.value === ""
-                                  ? null
-                                  : Number(e.target.value),
-                              )
-                            }
-                          />
-                        </label>
-                      </div>
-                      <label className="levi-agent-check">
-                        <input
-                          type="checkbox"
+                    <Disclosure summary={t("Spending limits for this model")}>
+                      <div className="ag-form">
+                        <Hint>
+                          {t(
+                            "These cap what LEVI itself spends at the model endpoint, and stop the run when reached.",
+                          )}
+                        </Hint>
+                        <div className="ag-grid2">
+                          <Field label={t("Model calls")}>
+                            <Input
+                              type="number"
+                              min={1}
+                              max={1000}
+                              value={maxCalls}
+                              onChange={(e) =>
+                                setMaxCalls(Number(e.target.value))
+                              }
+                            />
+                          </Field>
+                          <Field label={t("Tokens")}>
+                            <Input
+                              type="number"
+                              min={256}
+                              placeholder={t("No limit")}
+                              value={maxTokens ?? ""}
+                              onChange={(e) =>
+                                setMaxTokens(
+                                  e.target.value === ""
+                                    ? null
+                                    : Number(e.target.value),
+                                )
+                              }
+                            />
+                          </Field>
+                        </div>
+                        <Checkbox
+                          label={t(
+                            "Send the chosen frames to this model endpoint",
+                          )}
+                          description={t(
+                            "Required before LEVI uploads any frame to a model you configured. Leave it off and the run stays text-only.",
+                          )}
                           checked={egress}
                           onChange={(e) => setEgress(e.target.checked)}
                         />
-                        {t("Send the chosen frames to this model endpoint")}
-                      </label>
-                      <p className="levi-agent-tip">
-                        {t(
-                          "Required before LEVI uploads any frame to a model you configured. Leave it off and the run stays text-only.",
-                        )}
-                      </p>
-                    </details>
+                      </div>
+                    </Disclosure>
                   )}
-                  <p className="levi-agent-tip">
+                  <Hint>
                     {t(
                       "Saved annotations only. Unsaved changes in the editor are never submitted or overwritten.",
                     )}
-                  </p>
-                  <button
-                    className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                    disabled={busy || !provider}
-                  >
-                    Inspect & create plan
-                  </button>
+                  </Hint>
+                  <Actions>
+                    <GatedButton
+                      type="submit"
+                      size="sm"
+                      icon={ListChecks}
+                      loading={busy}
+                      reason={
+                        !provider ? t("Choose an agent model first.") : null
+                      }
+                    >
+                      {t("Inspect & create plan")}
+                    </GatedButton>
+                  </Actions>
                 </form>
-              </details>
-              <label>
-                {t("Open an existing task")}
-                <select
-                  className="ds-input ds-focus"
+              </Disclosure>
+              <Field label={t("Open an existing task")}>
+                <Select
                   value={selected || ""}
                   onChange={async (e) => {
                     const next = e.target.value;
@@ -1151,33 +1155,51 @@ export default function AgentWorkbench() {
                       {r.context.repo_id} · {t(r.status)} · {r.id}
                     </option>
                   ))}
-                </select>
-              </label>
+                </Select>
+              </Field>
               {run && (
-                <section>
+                <section className="ag-section">
                   <h3>{run.context.repo_id}</h3>
                   <p>
-                    <strong>{t(run.status)}</strong> · {run.completed.length}/
-                    {run.context.episodes.length} <T>episodes processed</T>
+                    <Badge tone="neutral">{t(run.status)}</Badge>
                   </p>
-                  <progress
+                  <Progress
+                    label={`${run.completed.length}/${run.context.episodes.length} ${t("episodes processed")}`}
                     value={run.completed.length}
                     max={run.context.episodes.length}
                   />
-                  <p className="levi-agent-muted">
-                    <T>Snapshot MiB</T>:{" "}
-                    {(run.snapshot_bytes / 1048576).toFixed(1)} · <T>Calls</T>:{" "}
-                    {run.requests} · <T>Tokens</T>: {run.tokens} ·{" "}
-                    <T>Reserved tokens</T>: {run.reserved_tokens}
-                  </p>
+                  <dl className="ag-stats">
+                    <div>
+                      <dt>{t("Snapshot MiB")}</dt>
+                      <dd>{(run.snapshot_bytes / 1048576).toFixed(1)}</dd>
+                    </div>
+                    <div>
+                      <dt>{t("Calls")}</dt>
+                      <dd>{run.requests}</dd>
+                    </div>
+                    <div>
+                      <dt>{t("Tokens")}</dt>
+                      <dd>{run.tokens}</dd>
+                    </div>
+                    <div>
+                      <dt>{t("Reserved tokens")}</dt>
+                      <dd>{run.reserved_tokens}</dd>
+                    </div>
+                    <div>
+                      <dt>{t("Cache hits")}</dt>
+                      <dd>{run.cache_hits || 0}</dd>
+                    </div>
+                  </dl>
                   {run.reason && <p role="status">{t(run.reason)}</p>}
                   {run.context.supervision &&
                     run.context.supervision !== "none" && (
                       <TeachingStatus runId={run.id} status={run.status} />
                     )}
-                  <details>
-                    <summary>Approved scope and policy</summary>
-                    <pre>
+                  <Disclosure
+                    icon={ShieldCheck}
+                    summary={t("Approved scope and policy")}
+                  >
+                    <pre className="ag-pre">
                       {JSON.stringify(
                         {
                           dataset: run.context.repo_id,
@@ -1192,7 +1214,7 @@ export default function AgentWorkbench() {
                         2,
                       )}
                     </pre>
-                  </details>
+                  </Disclosure>
                   {![
                     "running",
                     "queued",
@@ -1201,56 +1223,57 @@ export default function AgentWorkbench() {
                     "cancelled",
                   ].includes(run.status) &&
                     run.plan && (
-                      <details>
-                        <summary>
-                          Revise budget and require new approval
-                        </summary>
-                        <p>Budget-only revision retains completed work.</p>
-                        <label>
-                          Call limit
-                          <input
-                            className="ds-input ds-focus"
-                            type="number"
-                            min={1}
-                            value={maxCalls}
-                            onChange={(e) =>
-                              setMaxCalls(Number(e.target.value))
-                            }
-                          />
-                        </label>
-                        <label>
-                          Token limit
-                          <input
-                            className="ds-input ds-focus"
-                            type="number"
-                            min={256}
-                            placeholder={t("No limit")}
-                            value={maxTokens ?? ""}
-                            onChange={(e) =>
-                              setMaxTokens(
-                                e.target.value === ""
-                                  ? null
-                                  : Number(e.target.value),
-                              )
-                            }
-                          />
-                        </label>
-                        <button
-                          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                          disabled={busy}
-                          onClick={() =>
-                            void act(async () => {
-                              await tool("plans.rebudget", {
-                                run_id: run.id,
-                                revision: run.plan?.revision,
-                                budget: context().budget,
-                              });
-                            })
-                          }
-                        >
-                          Revise budget and require new approval
-                        </button>
-                      </details>
+                      <Disclosure
+                        summary={t("Revise budget and require new approval")}
+                      >
+                        <div className="ag-form">
+                          <Hint>
+                            {t("Budget-only revision retains completed work.")}
+                          </Hint>
+                          <Field label={t("Call limit")}>
+                            <Input
+                              type="number"
+                              min={1}
+                              value={maxCalls}
+                              onChange={(e) =>
+                                setMaxCalls(Number(e.target.value))
+                              }
+                            />
+                          </Field>
+                          <Field label={t("Token limit")}>
+                            <Input
+                              type="number"
+                              min={256}
+                              placeholder={t("No limit")}
+                              value={maxTokens ?? ""}
+                              onChange={(e) =>
+                                setMaxTokens(
+                                  e.target.value === ""
+                                    ? null
+                                    : Number(e.target.value),
+                                )
+                              }
+                            />
+                          </Field>
+                          <Actions>
+                            <Button
+                              size="sm"
+                              disabled={busy}
+                              onClick={() =>
+                                void act(async () => {
+                                  await tool("plans.rebudget", {
+                                    run_id: run.id,
+                                    revision: run.plan?.revision,
+                                    budget: context().budget,
+                                  });
+                                })
+                              }
+                            >
+                              {t("Revise budget and require new approval")}
+                            </Button>
+                          </Actions>
+                        </div>
+                      </Disclosure>
                     )}
                   <AgentPilot
                     runId={run.id}
@@ -1287,29 +1310,28 @@ export default function AgentWorkbench() {
                       })
                     }
                   />
-                  <p>
-                    <T>Cache hits</T>: {run.cache_hits || 0}
-                  </p>
-                  <div className="levi-agent-actions">
+                  <Actions>
                     {run.context.workflow?.kind === "objects" && (
-                      <button
-                        className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                        disabled={busy || !run.plan?.approval}
+                      <GatedButton
+                        size="sm"
+                        icon={ScanSearch}
+                        disabled={busy}
+                        reason={!approved ? approveFirst : null}
                         onClick={() =>
                           void act(async () => {
                             await tool("runs.prepare", { run_id: run.id });
                           })
                         }
                       >
-                        Prepare object evidence without model calls
-                      </button>
+                        {t("Prepare object evidence without model calls")}
+                      </GatedButton>
                     )}
                     {["blocked", "paused", "interrupted", "cancelled"].includes(
                       run.status,
                     ) &&
                       run.completed.length > 0 && (
-                        <button
-                          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                        <Button
+                          size="sm"
                           disabled={busy}
                           onClick={() =>
                             void act(async () => {
@@ -1317,8 +1339,8 @@ export default function AgentWorkbench() {
                             })
                           }
                         >
-                          Read completed work
-                        </button>
+                          {t("Read completed work")}
+                        </Button>
                       )}
                     {[
                       "planned",
@@ -1330,9 +1352,12 @@ export default function AgentWorkbench() {
                       run.context.provider !== "external" &&
                       run.context.workflow?.kind !== "objects" && (
                         <>
-                          <button
-                            className={`ds-btn ds-btn--sm ds-focus ${run.plan?.pilot_review?.accepted ? "ds-btn--secondary" : "ds-btn--primary"}`}
-                            disabled={busy || !run.plan?.approval}
+                          <GatedButton
+                            size="sm"
+                            icon={Play}
+                            variant={pilotAccepted ? "secondary" : "primary"}
+                            disabled={busy}
+                            reason={!approved ? approveFirst : null}
                             onClick={() =>
                               void act(async () => {
                                 await tool("runs.execute", {
@@ -1342,11 +1367,18 @@ export default function AgentWorkbench() {
                               })
                             }
                           >
-                            Run pilot
-                          </button>
-                          <button
-                            className={`ds-btn ds-btn--sm ds-focus ${run.plan?.pilot_review?.accepted ? "ds-btn--primary" : "ds-btn--secondary"}`}
-                            disabled={busy || !run.plan?.pilot_review?.accepted}
+                            {t("Run pilot")}
+                          </GatedButton>
+                          <GatedButton
+                            size="sm"
+                            icon={Play}
+                            variant={pilotAccepted ? "primary" : "secondary"}
+                            disabled={busy}
+                            reason={
+                              !pilotAccepted
+                                ? t("Accept the pilot quality first.")
+                                : null
+                            }
                             onClick={() =>
                               void act(async () => {
                                 await tool("runs.resume", {
@@ -1356,13 +1388,14 @@ export default function AgentWorkbench() {
                               })
                             }
                           >
-                            Execute remaining
-                          </button>
+                            {t("Execute remaining")}
+                          </GatedButton>
                         </>
                       )}
                     {["running", "queued"].includes(run.status) && (
-                      <button
-                        className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                      <Button
+                        size="sm"
+                        icon={Pause}
                         disabled={busy}
                         onClick={() =>
                           void act(async () => {
@@ -1370,12 +1403,15 @@ export default function AgentWorkbench() {
                           })
                         }
                       >
-                        Pause at boundary
-                      </button>
+                        {t("Pause at boundary")}
+                      </Button>
                     )}
                     {!["succeeded", "cancelled"].includes(run.status) && (
-                      <button
-                        className="ds-btn ds-btn--ghost ds-btn--sm ds-focus levi-agent-danger"
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="ag-danger"
+                        icon={Ban}
                         disabled={busy}
                         onClick={() =>
                           void act(async () => {
@@ -1383,26 +1419,26 @@ export default function AgentWorkbench() {
                           })
                         }
                       >
-                        Cancel task
-                      </button>
+                        {t("Cancel task")}
+                      </Button>
                     )}
-                  </div>
-                  <label className="levi-agent-check">
-                    <input
-                      type="checkbox"
-                      checked={follow}
-                      onChange={(e) => setFollow(e.target.checked)}
-                    />
-                    Follow evidence in the current episode
-                  </label>
+                  </Actions>
+                  <Checkbox
+                    label={t("Follow evidence in the current episode")}
+                    checked={follow}
+                    onChange={(e) => setFollow(e.target.checked)}
+                  />
                   {evidence.length > 0 && (
-                    <details>
-                      <summary>Sampled evidence</summary>
-                      <div className="levi-agent-evidence">
+                    <Disclosure
+                      icon={ImageIcon}
+                      summary={t("Sampled evidence")}
+                    >
+                      <div className="ag-evidence">
                         {evidence.map((row) => (
-                          <button
-                            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                          <Button
                             key={row.id}
+                            size="sm"
+                            className="ag-evidence__item"
                             onClick={() => seek(row)}
                           >
                             {/* Native image artifacts are authenticated same-origin resources. */}
@@ -1413,12 +1449,14 @@ export default function AgentWorkbench() {
                                 alt={`${row.camera_key} / ${row.frame_index}`}
                               />
                             )}
-                            {row.episode_index} · {row.timestamp.toFixed(3)}s ·{" "}
-                            {row.camera_key}
-                          </button>
+                            <span>
+                              {row.episode_index} · {row.timestamp.toFixed(3)}s
+                              · {row.camera_key}
+                            </span>
+                          </Button>
                         ))}
                       </div>
-                    </details>
+                    </Disclosure>
                   )}
                   <AgentObjectTool
                     key={run.id}
@@ -1428,30 +1466,35 @@ export default function AgentWorkbench() {
                     refresh={() => setRefreshVersion((v) => v + 1)}
                   />
                   {activeEvidence?.artifact && (
-                    <div className="levi-agent-review-evidence">
+                    <div className="ag-review-evidence">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={`${base}/runs/${run.id}/artifacts/${activeEvidence.artifact}`}
                         alt={`${activeEvidence.camera_key} / ${activeEvidence.frame_index}`}
                       />
-                      <p>
+                      <p className="ag-muted">
                         {activeEvidence.camera_key} ·{" "}
                         {activeEvidence.timestamp.toFixed(3)}s
                       </p>
                     </div>
                   )}
                   {change && (
-                    <section className="levi-agent-review">
-                      <h3>Review proposed changes</h3>
+                    <section
+                      className="ag-section"
+                      aria-label={t("Review proposed changes")}
+                    >
+                      <h3>{t("Review proposed changes")}</h3>
                       <AgentQuality runId={run.id} revision={change.revision} />
                       <p>
-                        {t(change.status)} · <T>Base revision</T>:{" "}
-                        {change.base_revision}
+                        <Badge tone="neutral">{t(change.status)}</Badge>{" "}
+                        <span className="ag-muted">
+                          <T>Base revision</T>: {change.base_revision}
+                        </span>
                       </p>
-                      <p className="levi-agent-muted">
+                      <Hint>
                         Sparse samples are not full-episode coverage. Verify
                         boundaries and outcomes before approval.
-                      </p>
+                      </Hint>
                       {change.undo_of && (
                         <p>
                           Inverse ChangeSet · restores the previous saved
@@ -1459,16 +1502,23 @@ export default function AgentWorkbench() {
                         </p>
                       )}
                       {change.status !== "committed" && (
-                        <p className="levi-agent-muted">
+                        <Hint>
                           Approval accepts remaining language suggestions;
                           rejected items stay excluded. Object masks require
                           separate decisions.
-                        </p>
+                        </Hint>
                       )}
                       <AgentReviewQueue
                         proposals={change.proposals}
                         decisions={change.decisions || {}}
                         disabled={busy || change.status === "committed"}
+                        closedReason={
+                          change.status === "committed"
+                            ? t(
+                                "These changes are committed, so decisions are closed.",
+                              )
+                            : undefined
+                        }
                         onChange={(proposals) => {
                           setDraftEdited(true);
                           setChange({ ...change, proposals });
@@ -1479,9 +1529,12 @@ export default function AgentWorkbench() {
                         }}
                         onDecision={(indices, decision) => {
                           if (draftEdited) {
-                            setNotice(
-                              "Save draft edits before recording review decisions.",
-                            );
+                            toast.show({
+                              title: t(
+                                "Save draft edits before recording review decisions.",
+                              ),
+                              tone: "warning",
+                            });
                             return;
                           }
                           void act(async () => {
@@ -1496,26 +1549,32 @@ export default function AgentWorkbench() {
                           });
                         }}
                       />
-                      <div className="levi-agent-actions">
+                      <Actions>
                         {change.status === "committed" && (
-                          <button
-                            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                          <Button
+                            size="sm"
+                            icon={Download}
                             disabled={busy}
                             onClick={() =>
                               void act(async () => {
                                 const result = await tool<{
                                   output_dir: string;
                                 }>("export.run", { run_id: run.id });
-                                setNotice(result.output_dir);
+                                toast.show({
+                                  title: t("Exported"),
+                                  description: result.output_dir,
+                                  tone: "success",
+                                });
                               })
                             }
                           >
-                            Export full dataset with reviewed changes
-                          </button>
+                            {t("Export full dataset with reviewed changes")}
+                          </Button>
                         )}
                         {change.status === "committed" && !change.undo_of && (
-                          <button
-                            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                          <Button
+                            size="sm"
+                            icon={Undo2}
                             disabled={busy}
                             onClick={() =>
                               void act(async () => {
@@ -1528,12 +1587,13 @@ export default function AgentWorkbench() {
                               })
                             }
                           >
-                            Create undo draft
-                          </button>
+                            {t("Create undo draft")}
+                          </Button>
                         )}
                         {draftEdited && (
-                          <button
-                            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                          <Button
+                            size="sm"
+                            icon={Save}
                             disabled={busy}
                             onClick={() =>
                               void act(async () => {
@@ -1550,62 +1610,71 @@ export default function AgentWorkbench() {
                               })
                             }
                           >
-                            Save draft edits
-                          </button>
+                            {t("Save draft edits")}
+                          </Button>
                         )}
                         {!draftEdited && change.status !== "committed" && (
-                          <HumanActionMark />
-                        )}
-                        {!draftEdited && change.status !== "committed" && (
-                          <button
-                            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                            disabled={busy}
-                            onClick={() =>
-                              void act(async () => {
-                                await tool("changes.validate", {
-                                  changeset_id: change.id,
-                                });
-                                setChange(
-                                  await tool<Change>("changes.approve", {
+                          <>
+                            <HumanActionMark />
+                            <Button
+                              size="sm"
+                              icon={Check}
+                              disabled={busy}
+                              onClick={() =>
+                                void act(async () => {
+                                  await tool("changes.validate", {
                                     changeset_id: change.id,
-                                    revision: change.revision,
-                                  }),
-                                );
-                              })
-                            }
-                          >
-                            Validate & approve
-                          </button>
+                                  });
+                                  setChange(
+                                    await tool<Change>("changes.approve", {
+                                      changeset_id: change.id,
+                                      revision: change.revision,
+                                    }),
+                                  );
+                                })
+                              }
+                            >
+                              {t("Validate & approve")}
+                            </Button>
+                          </>
                         )}
                         {!draftEdited && change.status === "approved" && (
-                          <button
-                            className="ds-btn ds-btn--primary ds-btn--sm ds-focus"
-                            disabled={busy}
-                            onClick={() =>
-                              void act(async () => {
-                                await tool(
-                                  "changes.commit",
-                                  {
-                                    changeset_id: change.id,
-                                    revision: change.revision,
-                                  },
-                                  `commit:${change.id}:${change.revision}`,
-                                );
-                                setChange(
-                                  await tool<Change>("changes.diff", {
-                                    changeset_id: change.id,
-                                  }),
-                                );
-                                setNotice(
-                                  "Committed. Reload saved annotations to see the new revision.",
-                                );
-                              })
-                            }
-                          >
-                            Commit approved changes
-                          </button>
+                          <>
+                            <HumanActionMark />
+                            <Button
+                              size="sm"
+                              variant="primary"
+                              icon={CircleStop}
+                              disabled={busy}
+                              onClick={() =>
+                                void act(async () => {
+                                  await tool(
+                                    "changes.commit",
+                                    {
+                                      changeset_id: change.id,
+                                      revision: change.revision,
+                                    },
+                                    `commit:${change.id}:${change.revision}`,
+                                  );
+                                  setChange(
+                                    await tool<Change>("changes.diff", {
+                                      changeset_id: change.id,
+                                    }),
+                                  );
+                                  toast.show({
+                                    title: t(
+                                      "Committed. Reload saved annotations to see the new revision.",
+                                    ),
+                                    tone: "success",
+                                  });
+                                })
+                              }
+                            >
+                              {t("Commit approved changes")}
+                            </Button>
+                          </>
                         )}
-                      </div>
+                      </Actions>
                     </section>
                   )}
                 </section>
