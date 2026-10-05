@@ -46,7 +46,11 @@ interface Known {
   /** English catalogue key with {1}, {2} for the captured groups. */
   why: string;
   /** Fills the groups itself when they need translating too. */
-  render?: (match: RegExpExecArray, t: Translate) => string;
+  render?: (
+    match: RegExpExecArray,
+    t: Translate,
+    language: "en" | "zh",
+  ) => string;
   fix?: string;
 }
 
@@ -132,6 +136,38 @@ const KNOWN: Known[] = [
       ),
   },
   {
+    // Fast segmentation status (levi/segmentation/jobs.py, backend/segmentation.py).
+    re: /^worker source is missing from this checkout$/,
+    why: "The student worker's source is missing from this checkout.",
+  },
+  {
+    re: /^worker environment not found at (.+?); run integrations\/segmentation\/setup\.sh$/,
+    why: "The student worker environment was not found at {1}.",
+  },
+  {
+    re: /^SAM3 worker environment not found at (.+)$/,
+    why: "The SAM3 worker environment was not found at {1}.",
+  },
+  {
+    re: /^SAM3 checkpoint is not downloaded$/,
+    why: "The SAM3 checkpoint has not been downloaded.",
+  },
+  {
+    re: /^The SAM3 teacher is not ready: (.+)$/,
+    why: "The SAM3 teacher is not ready: {1}",
+    render: (match, t, language) =>
+      fill(t("The SAM3 teacher is not ready: {1}"), [
+        match[0],
+        describeMessage(match[1], t, language).text,
+      ]),
+  },
+  {
+    // levi/views.py: registering a folder that is not a dataset.
+    re: /^Not a LeRobot dataset \(meta\/info\.json\) or a recognized raw capture$/,
+    why: "This folder is not a LeRobot dataset (no meta/info.json) or a recognized raw capture.",
+    fix: "Check the path: a LeRobot dataset has meta/info.json; a raw capture has task folders with demo_NNNN folders inside.",
+  },
+  {
     re: /^HTTP (\d+)$/,
     why: "The service answered with an error (HTTP {1}).",
   },
@@ -172,7 +208,9 @@ export function describeMessage(
     const match = known.re.exec(cleaned);
     if (!match) continue;
     return {
-      text: known.render ? known.render(match, t) : fill(t(known.why), match),
+      text: known.render
+        ? known.render(match, t, language)
+        : fill(t(known.why), match),
       fix: known.fix ? t(known.fix) : undefined,
     };
   }
@@ -213,4 +251,11 @@ export function useDescribe(): (raw: string) => Described {
 export function useServerText(): (raw: string) => string {
   const { t, language } = useLocale();
   return (raw) => serverSentence(raw, t, language);
+}
+
+/** The colon between a label and its value: full-width in Chinese, a colon
+ * and a space in English. */
+export function useColon(): string {
+  const { language } = useLocale();
+  return language === "zh" ? "：" : ": ";
 }
