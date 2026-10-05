@@ -1660,7 +1660,7 @@ function ScopeControls({
                 onChange={(e) => setFrom(e.target.value)}
               />
             </Field>
-            <Field label={t("To")} hint={`0–${lastEpisode}`}>
+            <Field label={`${t("To")} (0–${lastEpisode})`}>
               <Input
                 type="number"
                 min={0}
