@@ -2,6 +2,7 @@
 import { T, useLocale } from "@/components/levi-locale";
 import { Check, Wand2 } from "lucide-react";
 import { Badge, Button } from "@/components/ds";
+import { useServerText } from "@/components/pages-ui/messages";
 import type { Solution, TargetCompatibility } from "./types";
 
 const STATUS = {
@@ -24,6 +25,7 @@ export function TargetCards({
   onSolution: (solution: Solution) => void;
 }) {
   const { t } = useLocale();
+  const serverText = useServerText();
   return (
     <div className="pg-cards">
       {targets.map((target) => {
@@ -40,7 +42,7 @@ export function TargetCards({
             {target.reasons.length > 0 && (
               <ul className="pg-reasons">
                 {target.reasons.map((reason) => (
-                  <li key={reason}>{t(reason)}</li>
+                  <li key={reason}>{serverText(reason)}</li>
                 ))}
               </ul>
             )}

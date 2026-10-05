@@ -1,4 +1,5 @@
 // Mirrors levi/pool/api.py, index.py, recipe.py, jobs.py and remote.py.
+import { serverSentence } from "@/components/pages-ui/messages";
 
 export const CATEGORIES = [
   "human",
@@ -388,8 +389,11 @@ export interface PoolWarning {
   blocking: boolean;
   message: string;
   tasks?: string[];
-  episodes?: number;
+  episodes?: number | string[];
   ids?: string[];
+  /** copy_task_conflict: how many picked episodes; ``episodes`` is then the
+   * list of their keys (up to 50), not a count. */
+  count?: number;
   /** The export would certainly be refused (the plan still runs). */
   refused?: boolean;
   /** "info" notes inform; they never block. */
@@ -456,7 +460,9 @@ export function sourceCounts(counts: Record<string, number>): string {
 export function warningText(
   w: PoolWarning,
   t: (key: string) => string,
+  language: "en" | "zh" = "en",
 ): string {
+  const episodes = typeof w.episodes === "number" ? w.episodes : (w.count ?? 0);
   if (w.code === "mixed_gripper") {
     const key = w.allowed
       ? GRIPPER_TEXT.allowed
@@ -467,13 +473,16 @@ export function warningText(
   }
   if (w.code === "gripper_unknown") {
     return t(GRIPPER_TEXT.unknown)
-      .replace("{count}", String(w.episodes ?? 0))
+      .replace("{count}", String(episodes))
       .replace("{sources}", sourceCounts(w.unknown_sources || {}));
   }
   const template = TIMING_WARNING_TEXT[w.code];
-  if (!template) return t(WARNING_LABELS[w.code] || w.message);
+  if (!template)
+    return WARNING_LABELS[w.code]
+      ? t(WARNING_LABELS[w.code])
+      : serverSentence(w.message, t, language);
   return t(template(w))
-    .replace("{count}", String(w.episodes ?? 0))
+    .replace("{count}", String(episodes))
     .replace("{min}", String(w.min_source_fps ?? ""))
     .replace("{fps}", String(w.export_fps ?? ""))
     .replace("{suggested}", String(w.suggested_fps ?? ""))

@@ -1,6 +1,7 @@
 "use client";
 import { useLocale } from "@/components/levi-locale";
 import { Badge, Progress, type Tone } from "@/components/ds";
+import { useServerText } from "@/components/pages-ui/messages";
 import type { PoolJob } from "./types";
 
 export function duration(seconds: number | null | undefined): string {
@@ -99,6 +100,7 @@ export function StatusBadge({ status }: { status: string }) {
  * file (levi/conversion/progress.py; a push adds bytes and rate). */
 export function PoolJobProgress({ job }: { job: PoolJob }) {
   const { t } = useLocale();
+  const serverText = useServerText();
   const p = job.progress;
   if (!p) return null;
   const running = RUNNING.has(job.status);
@@ -158,7 +160,7 @@ export function PoolJobProgress({ job }: { job: PoolJob }) {
       {p.warnings.length > 0 && (
         <ul className="pg-warnings">
           {p.warnings.slice(-5).map((w) => (
-            <li key={w}>{t(w)}</li>
+            <li key={w}>{serverText(w)}</li>
           ))}
         </ul>
       )}

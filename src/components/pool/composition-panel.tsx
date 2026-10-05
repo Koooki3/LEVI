@@ -43,7 +43,7 @@ const OUTCOME_SOURCES: Record<string, string> = {
 
 /** Server warnings; a blocking one stops the export until fixed. */
 export function PoolWarnings({ warnings }: { warnings: PoolWarning[] }) {
-  const { t } = useLocale();
+  const { t, language } = useLocale();
   if (!warnings?.length) return null;
   return (
     <ul className="pg-pool-warnings" role="status">
@@ -54,9 +54,11 @@ export function PoolWarnings({ warnings }: { warnings: PoolWarning[] }) {
           data-level={w.level}
         >
           <strong>{stopsExport(w) ? t("Blocks export") : t("Note")}</strong>{" "}
-          {warningText(w, t)}
+          {warningText(w, t, language)}
           {w.tasks?.length ? ` (${w.tasks.slice(0, 3).join("; ")})` : ""}
-          {w.episodes && !TIMING_WARNING_CODES.has(w.code)
+          {typeof w.episodes === "number" &&
+          w.episodes &&
+          !TIMING_WARNING_CODES.has(w.code)
             ? ` (${w.episodes.toLocaleString()})`
             : ""}
           {w.ids?.length ? ` (${w.ids.length})` : ""}
@@ -189,7 +191,8 @@ export function CompositionPanel({
                       ? counts.episodes.toLocaleString()
                       : preview
                         ? "0"
-                        : "…"}
+                        : "…"}{" "}
+                    {t("episodes")}
                   </span>
                   <IconButton
                     size="sm"
