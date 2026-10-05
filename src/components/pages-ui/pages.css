@@ -1,9 +1,8 @@
 /* Page styles for Live evaluation, Conversion & review, Training pool and
  * Explore (interface redesign, stage 4; docs/DESIGN.md "Pages (stage 4)").
  *
- * Classes start with `pg-`; they replace the pages' former `levi-*` classes
- * from levi.css (same layout, colours from the `--ds-*` tokens, so both
- * themes work). No colour literals here: a test fails on hex, rgb() or hsl().
+ * Classes start with `pg-`; colours come from the `--ds-*` tokens, so both
+ * themes work. No colour literals here: a test fails on hex, rgb() or hsl().
  * Buttons, inputs and tables use the design-system classes (`ds-btn`,
  * `ds-input`, `ds-table`) directly.
  */
@@ -15,11 +14,6 @@
   --pg-max: 1360px;
   min-height: calc(100dvh - var(--levi-header-height, 56px));
   padding: var(--ds-space-10)
-    max(var(--ds-space-6), calc((100% - var(--pg-max)) / 2));
-}
-.pg-workbench.pg-live {
-  --pg-max: 1600px;
-  padding: var(--ds-space-8)
     max(var(--ds-space-6), calc((100% - var(--pg-max)) / 2));
 }
 .pg-workbench h1 {
@@ -252,7 +246,7 @@
   color: var(--ds-icon);
 }
 
-/* ── Page components (formerly levi.css) ───────────────────────────── */
+/* ── Page components ───────────────────────────── */
 .pg-box {
   background: var(--ds-surface-1);
   border: 1px solid var(--ds-separator);
@@ -1167,9 +1161,6 @@
 }
 .pg-live-section.fault {
   border-color: var(--ds-danger);
-}
-.pg-live-section.stale {
-  opacity: 0.8;
 }
 .pg-live-section h2 {
   font-size: var(--ds-text-title-3-size);

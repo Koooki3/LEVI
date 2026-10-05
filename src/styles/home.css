@@ -269,11 +269,6 @@
   font-family: var(--ds-font-mono);
   font-size: 0.95em;
 }
-.levi-home-note {
-  margin: 0;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-text-callout-size);
-}
 .levi-home-empty {
   padding: var(--ds-space-4) 0;
 }
@@ -282,21 +277,6 @@
   color: var(--ds-text-secondary);
   font-size: var(--ds-text-body-size);
   font-weight: var(--ds-weight-regular);
-}
-/* A card's answer could not be read (three parts: what, why, retry). */
-.levi-home-error {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--ds-space-2);
-  margin-bottom: var(--ds-space-3);
-  padding: var(--ds-space-3);
-  border-left: 3px solid var(--ds-danger);
-  border-radius: var(--ds-radius-sm);
-  background: var(--ds-danger-bg);
-  color: var(--ds-text-primary);
-  font-size: var(--ds-text-callout-size);
-  line-height: var(--ds-text-callout-line);
 }
 .levi-home-skeleton {
   display: flex;

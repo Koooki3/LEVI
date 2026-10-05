@@ -65,7 +65,7 @@ export function useFormatDescription(format: DatasetFormat | undefined) {
     }
     return {
       badge: t("Raw capture"),
-      tone: format.view_status === "failed" ? "fail" : "warn",
+      tone: format.view_status === "failed" ? "fail" : "info",
       lines,
     };
   }
@@ -122,7 +122,7 @@ export function useFormatDescription(format: DatasetFormat | undefined) {
 const FORMAT_TONE: Record<string, Tone> = {
   pass: "neutral",
   // A raw capture is a fact about the data, not a problem: info, not warning.
-  warn: "info",
+  info: "info",
   fail: "danger",
   "": "neutral",
 };

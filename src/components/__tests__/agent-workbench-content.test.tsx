@@ -100,7 +100,7 @@ describe("Agent Workbench content", () => {
     }
   });
 
-  test("the content uses no class that only levi.css defines", () => {
+  test("the content uses only classes some live stylesheet defines (levi.css is gone)", () => {
     // levi-agent-sheet and levi-agent-grip belong to the frame; the levi-hf
     // and levi-format classes are defined in shared.css, next to the code.
     const allowed = /^levi-(agent-(sheet|grip)|hf-|format)/;
