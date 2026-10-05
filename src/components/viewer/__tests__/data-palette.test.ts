@@ -11,10 +11,11 @@ import {
 const dir = join(import.meta.dir, "..");
 const viewerCss = readFileSync(join(dir, "viewer.css"), "utf8");
 const annotationsCss = readFileSync(join(dir, "annotations.css"), "utf8");
+const tokensCss = readFileSync(join(dir, "../../styles/tokens.css"), "utf8");
 
-/** `--dv-N: #hex` pairs of one CSS block. */
+/** `--ds-data-N: #hex` of one block of tokens.css, in slot order. */
 function slots(block: string): string[] {
-  return [...block.matchAll(/--dv-(\d): var\(--ds-data-\1, (#[0-9a-f]{6})\)/g)]
+  return [...block.matchAll(/--ds-data-(\d): (#[0-9a-f]{6});/g)]
     .sort((a, b) => Number(a[1]) - Number(b[1]))
     .map((m) => m[2]);
 }
@@ -36,18 +37,35 @@ describe("viewer data palette", () => {
 
   test("the system and manual dark blocks are identical, and canvas uses the dark steps", () => {
     const system = slots(
-      block(viewerCss, ':root:not([data-theme="light"]) {\n    --dv-1'),
+      block(
+        tokensCss,
+        '@media (prefers-color-scheme: dark) {\n  :root:not([data-theme="light"]) {',
+      ),
     );
-    const manual = slots(block(viewerCss, '[data-theme="dark"] {\n  --dv-1'));
+    const manual = slots(
+      block(tokensCss, '[data-theme="dark"] {\n  color-scheme: dark;'),
+    );
     expect(system).toHaveLength(8);
     expect(manual).toEqual(system);
     expect([...DATA_ON_MEDIA]).toEqual(system);
   });
 
   test("light and dark steps differ (dark is selected, not flipped)", () => {
-    const light = slots(block(viewerCss, ':root,\n[data-theme="light"] {'));
+    const light = slots(block(tokensCss, ':root,\n[data-theme="light"] {'));
     expect(light).toHaveLength(8);
     expect(light).not.toEqual([...DATA_ON_MEDIA]);
+  });
+
+  test("every theme scope of viewer.css points --dv-N at --ds-data-N", () => {
+    for (const selector of [
+      ':root,\n[data-theme="light"] {',
+      ':root:not([data-theme="light"]) {',
+      '[data-theme="dark"] {',
+    ]) {
+      const text = block(viewerCss, selector);
+      for (let n = 1; n <= 8; n++)
+        expect(text).toContain(`--dv-${n}: var(--ds-data-${n});`);
+    }
   });
 
   test("no colour literal outside the palette blocks", () => {

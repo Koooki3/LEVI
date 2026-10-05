@@ -156,9 +156,17 @@ export default function LeviDoctor({ repoId }: { repoId: string }) {
               loading={busy}
               onClick={run}
               disabled={!checks.length}
+              aria-describedby={
+                !checks.length ? "doctor-run-reason" : undefined
+              }
             >
               {t(busy ? "Running diagnostics…" : "Run diagnostics")}
             </Button>
+            {!checks.length && (
+              <span id="doctor-run-reason" className="vw-a-hint">
+                {t("Choose at least one check to run diagnostics.")}
+              </span>
+            )}
             {!repoId.startsWith("local/") && (
               <a
                 className="vw-link inline-flex items-center gap-1 text-sm"

@@ -5,10 +5,20 @@ import {
   MEDIA_GRID,
   MEDIA_GRID_SECTION,
   mediaColor,
+  URDF_LIGHT,
+  URDF_MATERIAL,
 } from "@/components/viewer/data-palette";
-import { T } from "@/components/levi-locale";
-import { ChevronRight, LoaderCircle } from "lucide-react";
-import { Icon } from "@/components/ds";
+import { T, useLocale } from "@/components/levi-locale";
+import { ArrowRight, ChevronDown, ChevronRight } from "lucide-react";
+import {
+  Button,
+  EmptyState,
+  Icon,
+  SegmentedControl,
+  Select,
+  Spinner,
+  Table,
+} from "@/components/ds";
 
 import React, {
   useState,
@@ -30,6 +40,7 @@ import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
 import type { EpisodeData } from "@/app/[org]/[dataset]/[episode]/fetch-data";
 import { loadEpisodeFlatChartData } from "@/app/[org]/[dataset]/[episode]/fetch-data";
 import UrdfPlaybackBar from "@/components/urdf-playback-bar";
+import { fill } from "@/components/viewer/analysis-ui";
 import { CHART_CONFIG } from "@/utils/constants";
 import { getDatasetVersionAndInfo } from "@/utils/versionUtils";
 import type { DatasetMetadata } from "@/utils/parquetUtils";
@@ -341,7 +352,7 @@ function RobotScene({
                 const rebuilt = originals.map((orig) => {
                   const srcColor =
                     (orig as THREE.MeshStandardMaterial).color ??
-                    new THREE.Color("#c0c4cc");
+                    new THREE.Color(URDF_MATERIAL.fallback);
                   const hsl = { h: 0, s: 0, l: 0 };
                   srcColor.getHSL(hsl);
 
@@ -408,7 +419,7 @@ function RobotScene({
       // for direct `THREE.Mesh` instances), and skip the onLoad rebuild.
       const makeMesh = (geometry: THREE.BufferGeometry) => {
         // Defaults: neutral off-white plastic, matches OpenArm "light" archetype
-        let color = "#9ba1ab";
+        let color: string = URDF_MATERIAL.neutral;
         let metalness = 0.1;
         let roughness = 0.5;
         let side: THREE.Side = THREE.FrontSide;
@@ -421,16 +432,18 @@ function RobotScene({
             lower.includes("rubber") ||
             lower.includes("constraint") ||
             lower.includes("support");
-          color = isWhitePart ? "#9ca3af" : "#1f2937";
+          color = isWhitePart ? URDF_MATERIAL.g1Light : URDF_MATERIAL.g1Dark;
           metalness = 0.25;
           roughness = 0.6;
         } else if (url.includes("sts3215")) {
           // SO-arm / any STL servo housing — carbon-black archetype
-          color = "#171a20";
+          color = URDF_MATERIAL.servo;
           metalness = 0.15;
           roughness = 0.75;
         } else if (isOpenArm) {
-          color = url.includes("body_link0") ? "#3a3a4a" : "#f5f5f5";
+          color = url.includes("body_link0")
+            ? URDF_MATERIAL.openArmBase
+            : URDF_MATERIAL.openArmLight;
           metalness = 0.15;
           roughness = 0.6;
           side = THREE.DoubleSide;
@@ -645,7 +658,7 @@ function RobotScene({
       <T>
         {
           <Html center>
-            <span className="text-(--ds-danger)">
+            <span className="vw-urdf-error" role="alert">
               <T>Failed to load URDF</T>
             </span>
           </Html>
@@ -714,6 +727,7 @@ export default function URDFViewer({
   playToggleRef?: React.RefObject<(() => void) | undefined>;
 }) {
   const { datasetInfo } = data;
+  const { t } = useLocale();
   const fps = datasetInfo.fps || 30;
   const robotConfig = useMemo(
     () => getRobotConfig(datasetInfo.robot_type),
@@ -937,36 +951,31 @@ export default function URDFViewer({
 
   if (data.flatChartData.length === 0) {
     return (
-      <T>
-        {
-          <div className="text-(--ds-text-secondary) p-8 text-center">
-            <T>No trajectory data available.</T>
-          </div>
-        }
-      </T>
+      <EmptyState
+        title={t("No trajectory data available.")}
+        description={t("The 3D replay needs the episode's joint columns.")}
+      />
     );
   }
 
   return (
     <T>
       {
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="vw-urdf">
           {/* 3D Viewport */}
-          <div className="flex-1 min-h-0 bg-(--ds-media-bg) rounded-lg overflow-hidden border border-(--ds-separator) relative">
+          <div className="vw-urdf-viewport">
             {(episodeLoading || urdfLoading) && (
-              <div
-                className="absolute inset-0 z-10 flex items-center justify-center bg-(--ds-media-bg)"
-                data-theme="dark"
-                role="status"
-              >
-                <span className="inline-flex items-center gap-2 text-(--ds-text-primary)">
-                  <Icon icon={LoaderCircle} className="ds-spin" />
-                  <T>
-                    {urdfLoading
-                      ? "Loading 3D model…"
-                      : `Loading episode ${selectedEpisode}…`}
-                  </T>
-                </span>
+              <div className="vw-urdf-loading" data-theme="dark">
+                <Spinner
+                  showLabel
+                  label={
+                    urdfLoading
+                      ? t("Loading 3D model…")
+                      : fill(t("Loading episode {n}…"), {
+                          n: selectedEpisode,
+                        })
+                  }
+                />
               </div>
             )}
             <Canvas
@@ -992,7 +1001,7 @@ export default function URDFViewer({
               {/* 3-point studio rig — key is the only shadow caster */}
               <ambientLight intensity={0.12} />
               <directionalLight
-                color="#fff2e3"
+                color={URDF_LIGHT.key}
                 position={[3, 5, 3]}
                 intensity={1.0}
                 castShadow
@@ -1007,12 +1016,12 @@ export default function URDFViewer({
                 shadow-bias={-0.0005}
               />
               <directionalLight
-                color="#bfd9ff"
+                color={URDF_LIGHT.fill}
                 position={[-4, 2, -2]}
                 intensity={0.25}
               />
               <directionalLight
-                color="#ffffff"
+                color={URDF_LIGHT.rim}
                 position={[0, 3, -4]}
                 intensity={0.4}
               />
@@ -1059,7 +1068,7 @@ export default function URDFViewer({
           </div>
 
           {/* Controls */}
-          <div className="bg-(--ds-surface-1) border-t border-(--ds-separator) p-3 space-y-3 shrink-0">
+          <div className="vw-urdf-controls">
             <UrdfPlaybackBar
               frame={frame}
               totalFrames={totalFrames}
@@ -1073,74 +1082,70 @@ export default function URDFViewer({
             />
 
             {/* Collapsible joint mapping */}
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
+              className="vw-urdf-toggle"
+              icon={showMapping ? ChevronDown : ChevronRight}
+              aria-expanded={showMapping}
+              aria-controls="vw-urdf-mapping"
               onClick={() => setShowMapping((v) => !v)}
-              className="flex items-center gap-1.5 text-xs text-(--ds-text-secondary) hover:text-(--ds-text-primary) transition-colors"
             >
-              <span
-                className={`inline-flex transition-transform ${showMapping ? "rotate-90" : ""}`}
-              >
-                <Icon icon={ChevronRight} />
+              {t("Joint Mapping")}{" "}
+              <span className="vw-muted">
+                (
+                {fill(t("{a}/{b} mapped"), {
+                  a: Object.keys(mapping).filter((k) => mapping[k]).length,
+                  b: displayJointNames.length,
+                })}
+                )
               </span>
-              <T>Joint Mapping</T>
-              <span className="text-(--ds-text-secondary)">
-                (<T>{Object.keys(mapping).filter((k) => mapping[k]).length}</T>/
-                <T>{displayJointNames.length}</T>
-                <T> mapped)</T>
-              </span>
-            </button>
+            </Button>
 
             {showMapping && (
-              <div className="flex gap-4 items-start">
-                <div className="space-y-1 shrink-0">
-                  <label className="text-xs text-(--ds-text-secondary)">
-                    <T>Data source</T>
-                  </label>
-                  <div className="flex gap-1 flex-wrap">
-                    {groupNames.map((name) => (
-                      <button
-                        key={name}
-                        onClick={() => setSelectedGroup(name)}
-                        className={`px-2 py-1 text-xs rounded transition-colors ${
-                          selectedGroup === name
-                            ? "bg-(--ds-accent) text-(--ds-on-accent)"
-                            : "bg-(--ds-surface-sunken) text-(--ds-text-secondary) hover:bg-(--ds-surface-sunken)"
-                        }`}
-                      >
-                        <T>{name}</T>
-                      </button>
-                    ))}
-                  </div>
+              <div className="vw-urdf-mapping" id="vw-urdf-mapping">
+                <div className="ds-field">
+                  <span className="ds-field__label" aria-hidden="true">
+                    {t("Data source")}
+                  </span>
+                  <SegmentedControl
+                    label={t("Data source")}
+                    size="sm"
+                    value={selectedGroup}
+                    onChange={setSelectedGroup}
+                    options={groupNames.map((name) => ({
+                      value: name,
+                      label: name,
+                    }))}
+                  />
                 </div>
 
-                <div className="flex-1 overflow-x-auto max-h-48 overflow-y-auto">
-                  <table className="w-full text-xs">
-                    <thead className="sticky top-0 bg-(--ds-surface-1)">
-                      <tr className="text-(--ds-text-secondary)">
-                        <th className="text-left font-normal px-1">
+                <div className="vw-urdf-table">
+                  <Table density="compact" caption={t("Joint Mapping")}>
+                    <thead>
+                      <tr>
+                        <th>
                           <T>URDF Joint</T>
                         </th>
-                        <th className="text-left font-normal px-1">→</th>
-                        <th className="text-left font-normal px-1">
+                        <th aria-hidden="true" />
+                        <th>
                           <T>Dataset Column</T>
                         </th>
-                        <th className="text-right font-normal px-1">
+                        <th className="ds-num">
                           <T>Value</T>
                         </th>
                       </tr>
                     </thead>
                     <tbody>
                       {displayJointNames.map((jointName) => (
-                        <tr
-                          key={jointName}
-                          className="border-t border-(--ds-separator)"
-                        >
-                          <td className="px-1 py-0.5 text-(--ds-text-secondary) font-mono">
-                            <T>{jointName}</T>
+                        <tr key={jointName}>
+                          <td className="vw-code">{jointName}</td>
+                          <td aria-hidden="true">
+                            <Icon icon={ArrowRight} />
                           </td>
-                          <td className="px-1 text-(--ds-text-secondary)">→</td>
-                          <td className="px-1 py-0.5">
-                            <select
+                          <td>
+                            <Select
+                              aria-label={`${t("Dataset Column")}: ${jointName}`}
                               value={mapping[jointName] ?? ""}
                               onChange={(e) =>
                                 setMapping((m) => ({
@@ -1148,33 +1153,28 @@ export default function URDFViewer({
                                   [jointName]: e.target.value,
                                 }))
                               }
-                              className="bg-(--ds-surface-sunken) text-(--ds-text-primary) text-xs rounded px-1 py-0.5 border border-(--ds-separator) w-full max-w-[200px]"
                             >
-                              <option value="">
-                                <T>-- unmapped --</T>
-                              </option>
+                              <option value="">{t("-- unmapped --")}</option>
                               {selectedColumns.map((col) => {
                                 const label =
                                   col.split(SERIES_DELIM).pop() ?? col;
                                 return (
                                   <option key={col} value={col}>
-                                    <T>{label}</T>
+                                    {label}
                                   </option>
                                 );
                               })}
-                            </select>
+                            </Select>
                           </td>
-                          <td className="px-1 py-0.5 text-right tabular-nums text-(--ds-text-secondary) font-mono">
-                            <T>
-                              {jointValues[jointName] !== undefined
-                                ? jointValues[jointName].toFixed(3)
-                                : "—"}
-                            </T>
+                          <td className="ds-num vw-code">
+                            {jointValues[jointName] !== undefined
+                              ? jointValues[jointName].toFixed(3)
+                              : "—"}
                           </td>
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </Table>
                 </div>
               </div>
             )}
