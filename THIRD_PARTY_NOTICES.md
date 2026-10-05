@@ -2,7 +2,7 @@
 
 ## Scope and baseline / 范围与基线
 
-This is the source-release inventory for LEVI v0.3.0, refreshed on 2026-09-13. The dependency baseline remains the v0.3.0 lock and source commit; this release adds canonical dataset-version handling, task indexing/filtering, and cache-isolation hardening.
+This is the source-release inventory for LEVI v0.3.0, refreshed on 2026-09-13 and again on 2026-10-06 for the frontend icon, animation and test dependencies. The dependency baseline remains the v0.3.0 lock and source commit; this release adds canonical dataset-version handling, task indexing/filtering, and cache-isolation hardening.
 
 当前清单覆盖源码来源、随附或使用的素材、直接依赖及构建/运行工具。它不是尚未发布的 Docker、PyPI 或二进制产物的完整传递依赖清单；当前正式发行提供源码，不包含安装后的环境、依赖目录或数据集视频。未来发布这些产物前，必须按下文流程生成并维护实际分发清单与许可证文本。
 
@@ -13,19 +13,16 @@ This is the source-release inventory for LEVI v0.3.0, refreshed on 2026-09-13. T
 | Component / 组件 | Source and terms / 来源与条款 | Use / 使用方式 |
 | --- | --- | --- |
 | LeRobot Dataset Visualizer | [Hugging Face upstream](https://github.com/huggingface/lerobot-dataset-visualizer/tree/dc59887796fd41f37040c0df6b10e6f6a30a1854), Apache-2.0 | Modified source is included; retain upstream history, LICENSE and NOTICE. Original acknowledgement: @Mishig25 and LeRobot PR #1055. |
-| Demo screenshots | `docs/assets/home-zh.png`, `docs/assets/insights-zh.png`; footage from [samanthalhy/so100_strawberry_2](https://huggingface.co/datasets/samanthalhy/so100_strawberry_2) and [samanthalhy/eval_so100_smol_strawberry_2](https://huggingface.co/datasets/samanthalhy/eval_so100_smol_strawberry_2), whose dataset cards declared Apache-2.0 at the baseline check | Screenshots of the LEVI interface are included; original dataset videos are fetched on demand. Those two datasets have since been removed from the Hub. |
+| Demo screenshots | `docs/assets/ui-*.png` (interface screenshots, light and dark, English and Chinese), `docs/assets/home-en.png`, `docs/assets/home-zh.png`, `docs/assets/insights-zh.png`; the viewer shots show frames of [lerobot/svla_so101_pickplace](https://huggingface.co/datasets/lerobot/svla_so101_pickplace) (Apache-2.0 on its dataset card at the 2026-10-06 check); the older shots show footage from [samanthalhy/so100_strawberry_2](https://huggingface.co/datasets/samanthalhy/so100_strawberry_2) and [samanthalhy/eval_so100_smol_strawberry_2](https://huggingface.co/datasets/samanthalhy/eval_so100_smol_strawberry_2), whose dataset cards declared Apache-2.0 at the baseline check | Screenshots of the LEVI interface with public footage; the datasets are not bundled and keep their own licenses. The two strawberry datasets have since been removed from the Hub. |
 | Default demonstrations | [lerobot/svla_so101_pickplace](https://huggingface.co/datasets/lerobot/svla_so101_pickplace), [lerobot/aloha_static_coffee](https://huggingface.co/datasets/lerobot/aloha_static_coffee) | Listed in the interface and streamed on demand; nothing is bundled. |
-| Font Awesome Free 5 icons | [Font Awesome / Fonticons, Inc.](https://github.com/FortAwesome/Font-Awesome/tree/5.15.4); [CC BY 4.0 for SVG/JS icons](https://github.com/FortAwesome/Font-Awesome/blob/5.15.4/LICENSE.txt) | Used through `react-icons/fa` in playback and camera controls. React wrappers come from react-icons; LEVI styles/sizes the icons without editing their vector paths. Preserve this attribution in distributions containing these graphics. |
 | Robot URDFs/meshes | [lerobot/robot-urdfs](https://huggingface.co/buckets/lerobot/robot-urdfs); model-specific source terms | Loaded remotely; not included in the source archive. Record each actual model, revision and license before bundling it. |
 | Studio environment HDRI | [Studio Small 03 by Greg Zaal / Poly Haven](https://polyhaven.com/a/studio_small_03), [CC0](https://polyhaven.com/license); [Drei asset revision](https://github.com/pmndrs/drei-assets/blob/456060a26bbeb8fdf79326f224b6d99b8bcce736/hdri/studio_small_03_1k.hdr) | Loaded remotely by `Environment preset="studio"` in URDF playback; not included in the source archive. |
-| Hugging Face sign-in badge | [Hugging Face badges](https://huggingface.co/datasets/huggingface/badges); respective source and trademark terms | Loaded remotely by the sign-in button. It is not relicensed by LEVI; record applicable terms before bundling a copy. |
 | External lerobot-doctor service | External service linked from the workbench; see [UPSTREAM](docs/UPSTREAM.md) | Linked rather than vendored; LEVI's own diagnostics are separate source code. |
 | SAM3 adapter source | [facebookresearch/sam3](https://github.com/facebookresearch/sam3/tree/660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b), pinned Git dependency; [SAM License](https://github.com/facebookresearch/sam3/blob/main/LICENSE) | Installed only in integrations/sam3; adapter code and checkpoints are not bundled. |
 | SAM3 checkpoint mirror | [1038lab/sam3](https://huggingface.co/1038lab/sam3), sam3.pt; mirror/model-page terms apply | Downloaded at runtime after the user authenticates; never committed or included in source release. |
 | RLinf RECAP value-model code | [RLinf/RLinf](https://github.com/RLinf/RLinf) commit `807e5fd`, Apache-2.0 | Vendored in `integrations/recap_value/levi_recap_worker/rlinf/` (value model, processing, advantage helpers; changes marked in the files) and `integrations/recap_value/vendor/rlinf/compute_advantages.py` (tests only); each folder keeps the LICENSE. |
 | openpi `transformers_replace` | [Physical-Intelligence/openpi](https://github.com/Physical-Intelligence/openpi) `src/openpi/models_pytorch/transformers_replace` (as shipped in `rlinf-openpi==0.1.1`), Apache-2.0 | Vendored unmodified in `integrations/recap_value/vendor/openpi_transformers_replace/` with its LICENSE; `setup.sh` copies it over `transformers==4.53.2` in the worker environment only. |
 
-The react-icons package's MIT license does **not** replace the individual icon collections' licenses. Its installed `LICENSE` and `README.md` list those collections. If an artifact contains the entire react-icons package, inventory all included collections, not just the icons imported by LEVI.
 
 ## Direct Python dependencies / Python 直接依赖
 
@@ -79,7 +76,8 @@ Runtime dependencies:
 | [next](https://www.npmjs.com/package/next/v/15.5.25) | 15.5.25 | MIT |
 | [react](https://www.npmjs.com/package/react/v/19.2.4) | 19.2.4 | MIT |
 | [react-dom](https://www.npmjs.com/package/react-dom/v/19.2.4) | 19.2.4 | MIT |
-| [react-icons](https://www.npmjs.com/package/react-icons/v/5.5.0) | 5.5.0 | MIT (package code; icon licenses are separate) |
+| [lucide-react](https://www.npmjs.com/package/lucide-react/v/1.52.0) | 1.52.0 | ISC |
+| [motion](https://www.npmjs.com/package/motion/v/14.0.0) | 14.0.0 | MIT |
 | [react-markdown](https://www.npmjs.com/package/react-markdown/v/10.1.0) | 10.1.0 | MIT |
 | [recharts](https://www.npmjs.com/package/recharts/v/2.15.4) | 2.15.4 | MIT |
 | [remark-gfm](https://www.npmjs.com/package/remark-gfm/v/4.0.1) | 4.0.1 | MIT |
@@ -91,6 +89,7 @@ Development/build dependencies:
 | Package | Version | Declared package license |
 | --- | --- | --- |
 | [@eslint/eslintrc](https://www.npmjs.com/package/@eslint/eslintrc/v/3.3.3) | 3.3.3 | MIT |
+| [@happy-dom/global-registrator](https://www.npmjs.com/package/@happy-dom/global-registrator/v/20.14.5) | 20.14.5 | MIT |
 | [@tailwindcss/postcss](https://www.npmjs.com/package/@tailwindcss/postcss/v/4.1.18) | 4.1.18 | MIT |
 | [@types/bun](https://www.npmjs.com/package/@types/bun/v/1.3.10) | 1.3.10 | MIT |
 | [@types/node](https://www.npmjs.com/package/@types/node/v/20.19.33) | 20.19.33 | MIT |
@@ -99,6 +98,7 @@ Development/build dependencies:
 | [@types/three](https://www.npmjs.com/package/@types/three/v/0.182.0) | 0.182.0 | MIT |
 | [eslint](https://www.npmjs.com/package/eslint/v/9.39.2) | 9.39.2 | MIT |
 | [eslint-config-next](https://www.npmjs.com/package/eslint-config-next/v/15.5.25) | 15.5.25 | MIT |
+| [happy-dom](https://www.npmjs.com/package/happy-dom/v/20.14.5) | 20.14.5 | MIT |
 | [prettier](https://www.npmjs.com/package/prettier/v/3.8.2) | 3.8.2 | MIT |
 | [tailwindcss](https://www.npmjs.com/package/tailwindcss/v/4.1.18) | 4.1.18 | MIT |
 | [typescript](https://www.npmjs.com/package/typescript/v/5.9.3) | 5.9.3 | Apache-2.0 |
