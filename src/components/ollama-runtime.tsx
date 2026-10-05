@@ -1,7 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { Server } from "lucide-react";
 import { T, useLocale } from "./levi-locale";
+import { Badge, Button, Card, Checkbox, Field, Input } from "@/components/ds";
+import { RequestProblem } from "@/components/pages-ui/feedback";
+import { Actions, ConnectionHead, GatedButton, Hint } from "./agent-ui";
 
 type Runtime = {
   installed: boolean;
@@ -67,60 +71,77 @@ export default function OllamaRuntime({
       setBusy(false);
     }
   }
+  const needsConsent = t("Tick the authorization above first.");
   return (
     <T>
-      <article className="levi-connection-card">
-        <h3>LEVI-owned Ollama service</h3>
-        <p className="levi-agent-muted">
+      <Card padding="compact" className="ag-conn">
+        <ConnectionHead
+          icon={Server}
+          title={t("LEVI-owned Ollama service")}
+          status={
+            status ? (
+              <Badge
+                tone={
+                  status.stop_requested
+                    ? "warning"
+                    : status.running
+                      ? "success"
+                      : "neutral"
+                }
+              >
+                {t(
+                  status.stop_requested
+                    ? "Stop requested"
+                    : status.running
+                      ? "Service process running"
+                      : "Service stopped",
+                )}
+              </Badge>
+            ) : undefined
+          }
+        />
+        <Hint>
           Optional dedicated instance. Requires an explicitly installed Ollama
           executable. Starting it may initialize hardware; it does not download
           or run a model.
-        </p>
-        <p className="levi-agent-muted">
+        </Hint>
+        <Hint>
           Cloud features are disabled. This is not operating-system network
           isolation.
-        </p>
+        </Hint>
         {error && (
-          <p className="levi-agent-error" role="alert">
-            {t(error)}
-          </p>
+          <RequestProblem
+            action="The Ollama service request failed"
+            message={error}
+          />
         )}
-        <button
-          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-          disabled={busy}
-          onClick={() => void action("status")}
-        >
-          Check runtime installation
-        </button>
+        <Actions>
+          <Button
+            size="sm"
+            disabled={busy}
+            onClick={() => void action("status")}
+          >
+            {t("Check runtime installation")}
+          </Button>
+        </Actions>
         {status && (
-          <>
-            <p>
+          <div className="ag-stack">
+            <p className="ag-muted">
               {t(
                 status.installed
                   ? "Runtime installed"
                   : "Ollama executable not found",
-              )}
-            </p>
-            <p>
-              {t(
-                status.stop_requested
-                  ? "Stop requested"
-                  : status.running
-                    ? "Service process running"
-                    : "Service stopped",
               )}{" "}
               · {status.url}
             </p>
-            <p className="levi-agent-endpoint">
+            <p className="ag-endpoint">
               {t("Model storage")} · {status.models_path}
             </p>
-            <p className="levi-agent-endpoint">
+            <p className="ag-endpoint">
               {t("Service log")} · {status.log_path}
             </p>
-            <label>
-              Dedicated port
-              <input
-                className="ds-input ds-focus"
+            <Field label={t("Dedicated port")}>
+              <Input
                 type="number"
                 min={1024}
                 max={65535}
@@ -128,45 +149,63 @@ export default function OllamaRuntime({
                 disabled={status.running}
                 onChange={(e) => setPort(Number(e.target.value))}
               />
-            </label>
-            <label className="levi-agent-check">
-              <input
-                type="checkbox"
-                checked={consent}
-                onChange={(e) => setConsent(e.target.checked)}
-              />
-              I authorize this owned service operation
-            </label>
-            <div className="levi-agent-actions">
-              <button
-                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                disabled={
-                  busy || !status.installed || status.running || !consent
+            </Field>
+            <Checkbox
+              label={t("I authorize this owned service operation")}
+              checked={consent}
+              onChange={(e) => setConsent(e.target.checked)}
+            />
+            <Actions>
+              <GatedButton
+                size="sm"
+                disabled={busy}
+                reason={
+                  !status.installed
+                    ? t("The Ollama executable was not found on this machine.")
+                    : status.running
+                      ? t("The service is already running.")
+                      : !consent
+                        ? needsConsent
+                        : null
                 }
                 onClick={() => void action("start")}
               >
-                Start owned service
-              </button>
-              <button
-                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                disabled={busy || !status.running || !consent}
+                {t("Start owned service")}
+              </GatedButton>
+              <GatedButton
+                size="sm"
+                disabled={busy}
+                reason={
+                  !status.running
+                    ? t("The service is not running.")
+                    : !consent
+                      ? needsConsent
+                      : null
+                }
                 onClick={() => void action("stop")}
               >
-                Stop owned service
-              </button>
-              <button
-                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                disabled={
-                  busy || !status.running || !consent || connectionExists
+                {t("Stop owned service")}
+              </GatedButton>
+              <GatedButton
+                size="sm"
+                disabled={busy}
+                reason={
+                  !status.running
+                    ? t("The service is not running.")
+                    : connectionExists
+                      ? t("The Qwen connection is already configured.")
+                      : !consent
+                        ? needsConsent
+                        : null
                 }
                 onClick={() => void action("use")}
               >
-                Configure Qwen connection
-              </button>
-            </div>
-          </>
+                {t("Configure Qwen connection")}
+              </GatedButton>
+            </Actions>
+          </div>
         )}
-      </article>
+      </Card>
     </T>
   );
 }

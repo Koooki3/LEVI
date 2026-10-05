@@ -1,6 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
+import { RefreshCw, Unplug, Terminal } from "lucide-react";
 import { useLocale } from "./levi-locale";
+import { Badge, Button, Card } from "@/components/ds";
+import { RequestProblem } from "@/components/pages-ui/feedback";
+import { Actions, Disclosure, GatedButton, Hint } from "./agent-ui";
 
 type Profile = {
   id: string;
@@ -47,86 +51,102 @@ export default function AgentRuntimeConnections() {
     void refresh();
   }, []);
   return (
-    <details className="levi-pilot">
-      <summary>{t("Codex / Claude connections")}</summary>
-      <p>
-        {t(
-          "Login is owned by the official local client. LEVI does not copy account credentials.",
+    <Disclosure summary={t("Codex / Claude connections")} icon={Terminal}>
+      <div className="ag-stack">
+        <Hint>
+          {t(
+            "Login is owned by the official local client. LEVI does not copy account credentials.",
+          )}
+        </Hint>
+        <Actions>
+          <Button size="sm" icon={RefreshCw} onClick={() => void refresh()}>
+            {t("Refresh status")}
+          </Button>
+        </Actions>
+        {profiles.map((p) => (
+          <Card key={p.id} padding="compact" title={p.id}>
+            <dl className="ag-facts">
+              <dt>{t("This machine")}</dt>
+              <dd>
+                {p.cli_installed
+                  ? p.cli_version
+                  : t("command not found on the service's PATH")}
+              </dd>
+              <dt>{t("LEVI adapter")}</dt>
+              <dd>
+                {t(
+                  (p.adapter_installed ?? p.installed)
+                    ? "installed"
+                    : "not installed",
+                )}{" "}
+                · {t("pinned")} {p.adapter_version ?? p.version}
+              </dd>
+              <dt>{t("Official login / switch account")}</dt>
+              <dd>
+                <code>{p.login_command}</code>
+              </dd>
+              <dt>{t("Official logout affects other local clients")}</dt>
+              <dd>
+                <code>{p.logout_command}</code>
+              </dd>
+            </dl>
+            <Hint>
+              {t(
+                "Login is checked by the official client, not by LEVI, so it is not reported here.",
+              )}
+            </Hint>
+          </Card>
+        ))}
+        <Hint>
+          {t(
+            "Use levi agent connect to review and apply project MCP configuration.",
+          )}
+        </Hint>
+        {grants.map((g) => {
+          const live = g.enabled && g.expires * 1000 > Date.now();
+          return (
+            <Card
+              key={g.id}
+              padding="compact"
+              title={g.client}
+              description={g.datasets.join(", ")}
+              actions={
+                <Badge tone={live ? "success" : "neutral"}>
+                  {t(live ? "Connected" : "Disconnected")}
+                </Badge>
+              }
+            >
+              <p className="ag-muted">
+                {g.calls}/{g.max_tool_calls} ·{" "}
+                {new Date(g.expires * 1000).toLocaleString()}
+              </p>
+              <Actions>
+                <GatedButton
+                  size="sm"
+                  icon={Unplug}
+                  reason={!g.enabled ? t("Already disconnected.") : null}
+                  onClick={async () => {
+                    const r = await fetch(
+                      `/api/levi/agent/v1/grants/${g.id}/revoke`,
+                      { method: "POST" },
+                    );
+                    if (!r.ok) setError(t("Disconnect failed"));
+                    else await refresh();
+                  }}
+                >
+                  {t("Disconnect LEVI only")}
+                </GatedButton>
+              </Actions>
+            </Card>
+          );
+        })}
+        {error && (
+          <RequestProblem
+            action="The connection status could not be read"
+            message={error}
+          />
         )}
-      </p>
-      <button
-        className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-        onClick={() => void refresh()}
-      >
-        {t("Refresh status")}
-      </button>
-      {profiles.map((p) => (
-        <article key={p.id}>
-          <h4>{p.id}</h4>
-          <p>
-            {t("This machine")}:{" "}
-            {p.cli_installed
-              ? p.cli_version
-              : t("command not found on the service's PATH")}
-          </p>
-          <p>
-            {t("LEVI adapter")}:{" "}
-            {t(
-              (p.adapter_installed ?? p.installed)
-                ? "installed"
-                : "not installed",
-            )}{" "}
-            · {t("pinned")} {p.adapter_version ?? p.version}
-          </p>
-          <p className="levi-agent-muted">
-            {t(
-              "Login is checked by the official client, not by LEVI, so it is not reported here.",
-            )}
-          </p>
-          <p>
-            {t("Official login / switch account")}:{" "}
-            <code>{p.login_command}</code>
-          </p>
-          <p>
-            {t("Official logout affects other local clients")}:{" "}
-            <code>{p.logout_command}</code>
-          </p>
-        </article>
-      ))}
-      <p>
-        {t(
-          "Use levi agent connect to review and apply project MCP configuration.",
-        )}
-      </p>
-      {grants.map((g) => (
-        <article key={g.id}>
-          <strong>{g.client}</strong> · {g.datasets.join(", ")}
-          <p>
-            {t(
-              g.enabled && g.expires * 1000 > Date.now()
-                ? "Connected"
-                : "Disconnected",
-            )}{" "}
-            · {g.calls}/{g.max_tool_calls} ·{" "}
-            {new Date(g.expires * 1000).toLocaleString()}
-          </p>
-          <button
-            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-            disabled={!g.enabled}
-            onClick={async () => {
-              const r = await fetch(
-                `/api/levi/agent/v1/grants/${g.id}/revoke`,
-                { method: "POST" },
-              );
-              if (!r.ok) setError(t("Disconnect failed"));
-              else await refresh();
-            }}
-          >
-            {t("Disconnect LEVI only")}
-          </button>
-        </article>
-      ))}
-      {error && <p role="status">{error}</p>}
-    </details>
+      </div>
+    </Disclosure>
   );
 }

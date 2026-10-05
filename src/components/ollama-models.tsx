@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 import type { Connection } from "./agent-connections";
+import { Download as DownloadIcon, X } from "lucide-react";
 import { T, useLocale } from "./levi-locale";
+import { Badge, Button, Checkbox, Progress, Tag } from "@/components/ds";
+import { RequestProblem } from "@/components/pages-ui/feedback";
+import { Actions, Disclosure, GatedButton, Hint } from "./agent-ui";
 
 type Inventory = {
   version: string;
@@ -108,59 +112,70 @@ export default function OllamaModels({
   const active = downloads.some((item) =>
     ["running", "queued"].includes(item.status),
   );
+  const consentFirst = t("Tick the authorization above first.");
   return (
     <T>
       <section
-        className="levi-connection-card"
+        className="ag-subcard"
         aria-label={t(server ? "Local server model" : "Local Ollama models")}
       >
         <h4>{t(server ? "Local server model" : "Local Ollama models")}</h4>
         {server ? (
-          <p className="levi-agent-muted">
+          <Hint>
             External server: its weights, context and GPU memory belong to the
             process that serves it. LEVI inspects and binds what it serves; it
             never downloads, loads or stops it.
-          </p>
+          </Hint>
         ) : (
-          <p className="levi-agent-muted">
+          <Hint>
             External service: model storage and process lifecycle are managed by
             Ollama. LEVI does not stop this service or guess its model
             directory.
-          </p>
+          </Hint>
         )}
-        <p className="levi-agent-muted">
+        <Hint>
           No model inference or automatic download occurs when opening this
           panel.
-        </p>
+        </Hint>
         {error && (
-          <p className="levi-agent-error" role="alert">
-            {t(error)}
-          </p>
+          <RequestProblem
+            action="The local model request failed"
+            message={error}
+          />
         )}
-        <button
-          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-          disabled={busy || !connection.enabled}
-          onClick={() =>
-            void action(async () => {
-              setInventory(await request<Inventory>(path));
-            })
-          }
-        >
-          Inspect local models
-        </button>
+        <Actions>
+          <GatedButton
+            size="sm"
+            disabled={busy}
+            reason={
+              !connection.enabled
+                ? t("Reconnect this model before you inspect it.")
+                : null
+            }
+            onClick={() =>
+              void action(async () => {
+                setInventory(await request<Inventory>(path));
+              })
+            }
+          >
+            {t("Inspect local models")}
+          </GatedButton>
+        </Actions>
         {inventory && (
-          <div>
+          <div className="ag-stack">
             <p>
               {server ? t("Server") : "Ollama"} {inventory.version} ·{" "}
-              {t(
-                inventory.model
-                  ? server
-                    ? "Model served"
-                    : "Model installed"
-                  : server
-                    ? "Model not served"
-                    : "Model not installed",
-              )}
+              <Badge tone={inventory.model ? "success" : "warning"}>
+                {t(
+                  inventory.model
+                    ? server
+                      ? "Model served"
+                      : "Model installed"
+                    : server
+                      ? "Model not served"
+                      : "Model not installed",
+                )}
+              </Badge>
             </p>
             {inventory.model && (
               <>
@@ -171,9 +186,7 @@ export default function OllamaModels({
                       {inventory.model.max_model_len ?? t("Unknown")}
                     </p>
                     {inventory.model.root && (
-                      <p className="levi-agent-endpoint">
-                        {inventory.model.root}
-                      </p>
+                      <p className="ag-endpoint">{inventory.model.root}</p>
                     )}
                   </>
                 ) : (
@@ -182,7 +195,7 @@ export default function OllamaModels({
                     {(inventory.model.size / 1024 ** 3).toFixed(2)} GiB
                   </p>
                 )}
-                <p className="levi-agent-endpoint">{inventory.model.digest}</p>
+                <p className="ag-endpoint">{inventory.model.digest}</p>
                 {server ? (
                   <p>
                     The server declares no capabilities; confirm them for this
@@ -191,155 +204,179 @@ export default function OllamaModels({
                 ) : (
                   <p>
                     {t("Service-declared capabilities")} ·{" "}
-                    {inventory.capabilities.join(", ") || t("Unknown")}
+                    {inventory.capabilities.length
+                      ? inventory.capabilities.map((c) => (
+                          <Tag key={c}>{c}</Tag>
+                        ))
+                      : t("Unknown")}
                   </p>
                 )}
-                <p className="levi-agent-muted">
+                <Hint>
                   Declared capabilities are not a quality evaluation. Binding a
                   new digest requires a new task plan.
-                </p>
-                <label className="levi-agent-check">
-                  <input
-                    type="checkbox"
-                    checked={structured}
-                    onChange={(e) => setStructured(e.target.checked)}
-                  />
-                  I confirm this model supports structured JSON output
-                </label>
-                <label className="levi-agent-check">
-                  <input
-                    type="checkbox"
-                    checked={vision}
-                    disabled={
-                      !server && !inventory.capabilities.includes("vision")
-                    }
-                    onChange={(e) => setVision(e.target.checked)}
-                  />
-                  Model supports image input
-                </label>
-                <button
-                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                  disabled={busy || !structured}
-                  onClick={() =>
-                    void action(async () => {
-                      await request(path + "/bind", {
-                        digest: inventory.model!.digest,
-                        vision,
-                        structured_output: true,
-                      });
-                      await refresh();
-                      setInventory(await request<Inventory>(path));
-                    })
-                  }
-                >
-                  {t(
-                    server
-                      ? inventory.digest_matches
-                        ? "Rebind served model"
-                        : "Bind served model"
-                      : inventory.digest_matches
-                        ? "Rebind installed model"
-                        : "Bind installed model",
+                </Hint>
+                <Checkbox
+                  label={t(
+                    "I confirm this model supports structured JSON output",
                   )}
-                </button>
+                  checked={structured}
+                  onChange={(e) => setStructured(e.target.checked)}
+                />
+                <Checkbox
+                  label={t("Model supports image input")}
+                  checked={vision}
+                  disabled={
+                    !server && !inventory.capabilities.includes("vision")
+                  }
+                  onChange={(e) => setVision(e.target.checked)}
+                />
+                <Actions>
+                  <GatedButton
+                    size="sm"
+                    disabled={busy}
+                    reason={
+                      !structured
+                        ? t("Confirm structured JSON output above first.")
+                        : null
+                    }
+                    onClick={() =>
+                      void action(async () => {
+                        await request(path + "/bind", {
+                          digest: inventory.model!.digest,
+                          vision,
+                          structured_output: true,
+                        });
+                        await refresh();
+                        setInventory(await request<Inventory>(path));
+                      })
+                    }
+                  >
+                    {t(
+                      server
+                        ? inventory.digest_matches
+                          ? "Rebind served model"
+                          : "Bind served model"
+                        : inventory.digest_matches
+                          ? "Rebind installed model"
+                          : "Bind installed model",
+                    )}
+                  </GatedButton>
+                </Actions>
               </>
             )}
           </div>
         )}
         {connection.model_digest && !server && (
-          <div>
-            <p className="levi-agent-muted">
+          <div className="ag-stack">
+            <Hint>
               This request may initialize model hardware. It will not download a
               missing model.
-            </p>
-            <label className="levi-agent-check">
-              <input
-                type="checkbox"
-                checked={memoryConsent}
-                onChange={(e) => setMemoryConsent(e.target.checked)}
-              />
-              I authorize model memory management
-            </label>
-            {(["load", "unload"] as const).map((operation) => (
-              <button
-                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                key={operation}
-                disabled={busy || !connection.enabled || !memoryConsent}
-                onClick={() =>
-                  void action(async () => {
-                    await request(path + "/memory", {
-                      operation,
-                      approve_hardware_use: true,
-                    });
-                    setMemoryConsent(false);
-                    setMemoryDone(true);
-                  })
-                }
-              >
-                {t(
-                  operation === "load"
-                    ? "Load bound model"
-                    : "Unload bound model",
-                )}
-              </button>
-            ))}
+            </Hint>
+            <Checkbox
+              label={t("I authorize model memory management")}
+              checked={memoryConsent}
+              onChange={(e) => setMemoryConsent(e.target.checked)}
+            />
+            <Actions>
+              {(["load", "unload"] as const).map((operation) => (
+                <GatedButton
+                  size="sm"
+                  key={operation}
+                  disabled={busy}
+                  reason={
+                    !connection.enabled
+                      ? t("Reconnect this model first.")
+                      : !memoryConsent
+                        ? consentFirst
+                        : null
+                  }
+                  onClick={() =>
+                    void action(async () => {
+                      await request(path + "/memory", {
+                        operation,
+                        approve_hardware_use: true,
+                      });
+                      setMemoryConsent(false);
+                      setMemoryDone(true);
+                    })
+                  }
+                >
+                  {t(
+                    operation === "load"
+                      ? "Load bound model"
+                      : "Unload bound model",
+                  )}
+                </GatedButton>
+              ))}
+            </Actions>
             {memoryDone && (
-              <p role="status">Model memory operation completed</p>
+              <p role="status">{t("Model memory operation completed")}</p>
             )}
           </div>
         )}
         {!server && (
-          <details>
-            <summary>Download model explicitly</summary>
-            <p>
+          <Disclosure
+            summary={t("Download model explicitly")}
+            icon={DownloadIcon}
+          >
+            <p className="ag-endpoint">
               {connection.model} · {connection.base_url}
             </p>
-            <p className="levi-agent-muted">
+            <Hint>
               The Ollama service will access its model registry. Review the
               model license and available disk space first. Download size is not
               GPU memory usage.
-            </p>
-            <label className="levi-agent-check">
-              <input
-                type="checkbox"
-                checked={confirmed}
-                onChange={(e) => setConfirmed(e.target.checked)}
-              />
-              I authorize this model download and have reviewed its license
-            </label>
-            <button
-              className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-              disabled={busy || active || !confirmed || !connection.enabled}
-              onClick={() =>
-                void action(async () => {
-                  const job = await request<Download>(path + "/download", {
-                    request_id: crypto.randomUUID(),
-                    approve_download: true,
-                  });
-                  setDownloads((rows) => [...rows, job]);
-                  setConfirmed(false);
-                })
-              }
-            >
-              Start model download
-            </button>
-          </details>
+            </Hint>
+            <Checkbox
+              label={t(
+                "I authorize this model download and have reviewed its license",
+              )}
+              checked={confirmed}
+              onChange={(e) => setConfirmed(e.target.checked)}
+            />
+            <Actions>
+              <GatedButton
+                size="sm"
+                disabled={busy}
+                reason={
+                  active
+                    ? t("A download is already running.")
+                    : !connection.enabled
+                      ? t("Reconnect this model first.")
+                      : !confirmed
+                        ? consentFirst
+                        : null
+                }
+                onClick={() =>
+                  void action(async () => {
+                    const job = await request<Download>(path + "/download", {
+                      request_id: crypto.randomUUID(),
+                      approve_download: true,
+                    });
+                    setDownloads((rows) => [...rows, job]);
+                    setConfirmed(false);
+                  })
+                }
+              >
+                {t("Start model download")}
+              </GatedButton>
+            </Actions>
+          </Disclosure>
         )}
         {downloads.map((job) => (
-          <article key={job.id} aria-label={job.id}>
+          <div key={job.id} className="ag-download" aria-label={job.id}>
             <p>
               {job.model} · {t(job.status)}{" "}
               {job.cancel_requested ? t("Cancellation requested") : ""}
             </p>
             {job.progress?.total != null && job.progress.total > 0 ? (
               <>
-                <progress
-                  aria-label={t("Current model layer download")}
+                <Progress
+                  label={t("Current model layer download")}
                   max={job.progress.total}
                   value={job.progress.completed ?? 0}
                 />
-                <p>
-                  {t("Current model layer download")} ·{" "}
+                <p className="ag-muted">
                   {((job.progress.completed ?? 0) / 1024 ** 2).toFixed(1)} /{" "}
                   {(job.progress.total / 1024 ** 2).toFixed(1)} MiB
                 </p>
@@ -347,35 +384,43 @@ export default function OllamaModels({
             ) : (
               <p>{job.progress?.status ?? t("Waiting for progress")}</p>
             )}
-            {job.error_code && <p role="alert">{t(job.error_code)}</p>}
-            {["queued", "running"].includes(job.status) && (
-              <button
-                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                disabled={busy || job.cancel_requested}
-                onClick={() =>
-                  void action(async () => {
-                    const updated = await request<Download>(
-                      `/model-downloads/${encodeURIComponent(job.id)}/cancel`,
-                      {},
-                    );
-                    setDownloads((rows) =>
-                      rows.map((row) =>
-                        row.id === updated.id ? updated : row,
-                      ),
-                    );
-                  })
-                }
-              >
-                Cancel download
-              </button>
+            {job.error_code && (
+              <RequestProblem
+                action="The model download failed"
+                message={job.error_code}
+              />
             )}
-          </article>
+            {["queued", "running"].includes(job.status) && (
+              <Actions>
+                <Button
+                  size="sm"
+                  icon={X}
+                  disabled={busy || job.cancel_requested}
+                  onClick={() =>
+                    void action(async () => {
+                      const updated = await request<Download>(
+                        `/model-downloads/${encodeURIComponent(job.id)}/cancel`,
+                        {},
+                      );
+                      setDownloads((rows) =>
+                        rows.map((row) =>
+                          row.id === updated.id ? updated : row,
+                        ),
+                      );
+                    })
+                  }
+                >
+                  {t("Cancel download")}
+                </Button>
+              </Actions>
+            )}
+          </div>
         ))}
         {!server && (
-          <p className="levi-agent-muted">
+          <Hint>
             Cancellation closes LEVI&apos;s download stream; a download shared
             with another Ollama client may continue.
-          </p>
+          </Hint>
         )}
       </section>
     </T>
