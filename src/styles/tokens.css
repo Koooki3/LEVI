@@ -2,10 +2,8 @@
  *
  * Source: levi-hub UI redesign proposal §4 with the user's decisions of
  * 2026-10-04 (accent A "graphite", light + dark following the system,
- * system fonts only). Every name starts with `--ds-` so these tokens never
- * collide with the older `--bg` / `--accent` / `--surface-*` variables in
- * globals.css, levi.css and annotations-skin.css; importing this file changes
- * nothing on existing pages.
+ * system fonts only). Every name starts with `--ds-`; the older `--bg` /
+ * `--accent` / `--surface-*` variables and `levi.css` no longer exist.
  *
  * Themes: light is the default; dark applies when the system asks for it
  * (`prefers-color-scheme: dark`) unless an ancestor says

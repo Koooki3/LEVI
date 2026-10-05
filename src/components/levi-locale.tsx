@@ -209,20 +209,3 @@ export function T({ children }: { children: React.ReactNode }) {
   };
   return <>{translate(children)}</>;
 }
-export function LanguageSwitch() {
-  const { language, setLanguage, t } = useLocale();
-  const nextLanguage: AppLanguage = language === "zh" ? "en" : "zh";
-  const switchLabel = t(
-    language === "zh" ? "Switch to English" : "Switch to Chinese",
-  );
-  return (
-    <button
-      className="levi-language"
-      aria-label={switchLabel}
-      title={switchLabel}
-      onClick={() => setLanguage(nextLanguage)}
-    >
-      {language === "zh" ? "EN / 中文" : "中文 / EN"}
-    </button>
-  );
-}

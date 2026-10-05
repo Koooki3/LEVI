@@ -1,9 +1,10 @@
 "use client";
-// The live evaluation entry of the navigation and of the home page. Both
-// appear where a live annotation service is shown: the product LEVI once it
-// finds the live workspace (levi/live/locate.py), or the live workspace's own
-// page (`levi live start --ui`). Without one they render nothing (and cost a
-// status request a minute, see live-pulse-store).
+// The live evaluation entry of the navigation. It appears where a live
+// annotation service is shown: the product LEVI once it finds the live
+// workspace (levi/live/locate.py), or the live workspace's own page
+// (`levi live start --ui`). Without one it renders nothing (and costs a
+// status request a minute, see live-pulse-store). The home page has its own
+// live card (src/components/home).
 import Link from "next/link";
 import { CircleDot } from "lucide-react";
 import { Icon, TONE_ICON, Tooltip, type Tone } from "@/components/ds";
@@ -79,30 +80,5 @@ export function LiveNavLink({ current = false }: { current?: boolean }) {
         {count && <span className="levi-pulse-count">{count}</span>}
       </Link>
     </Tooltip>
-  );
-}
-
-/** A large link at the top of the home page while a live service is shown. */
-export function LiveBanner() {
-  const { t } = useLocale();
-  const { enabled, pulse } = useLivePulse();
-  const note = usePulseNote(pulse);
-  if (!enabled) return null;
-  return (
-    <Link
-      href="/live"
-      className={`levi-live-home is-${pulse.light}`}
-      aria-label={`${t("Live evaluation & annotation")}: ${note}`}
-    >
-      <PulseDot pulse={pulse} />
-      <span className="levi-live-home-text">
-        <strong>{t("Live evaluation & annotation")}</strong>
-        <span>{note}</span>
-      </span>
-      {pulse.count > 0 && (
-        <span className="levi-pulse-count">{Math.min(pulse.count, 99)}</span>
-      )}
-      <span className="levi-live-home-go">{t("Open the live page")} →</span>
-    </Link>
   );
 }

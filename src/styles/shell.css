@@ -132,28 +132,40 @@
   flex: none;
   align-items: stretch;
 }
-.levi-shell-nav .levi-pulse-dot {
+.levi-pulse-dot {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
   color: var(--ds-text-tertiary);
 }
-.levi-shell-nav .levi-pulse-dot.is-green {
+.levi-pulse-dot.is-green {
   color: var(--ds-success);
 }
-.levi-shell-nav .levi-pulse-dot.is-blue {
+.levi-pulse-dot.is-blue {
   color: var(--ds-info);
 }
-.levi-shell-nav .levi-pulse-dot.is-amber {
+.levi-pulse-dot.is-amber {
   color: var(--ds-warning);
 }
-.levi-shell-nav .levi-pulse-dot.is-red {
+.levi-pulse-dot.is-red {
   color: var(--ds-danger);
 }
-.levi-shell-nav .levi-pulse-count {
+/* The number of things that need a person, beside the live entry. */
+.levi-pulse-count {
+  display: inline-block;
+  min-width: 18px;
+  padding: 1px var(--ds-space-2);
+  border-radius: var(--ds-radius-full);
   background: var(--ds-warning-bg);
   color: var(--ds-text-primary);
+  font-size: var(--ds-text-caption-size);
+  line-height: 16px;
+  font-weight: var(--ds-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }
-.levi-shell-nav .levi-live-nav.is-red .levi-pulse-count {
+.levi-live-nav.is-red .levi-pulse-count {
   background: var(--ds-danger-bg);
-  color: var(--ds-text-primary);
 }
 
 .levi-shell-actions {

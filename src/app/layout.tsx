@@ -1,7 +1,6 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 import type { Metadata } from "next";
 import "./globals.css";
-import "./levi.css";
 import "@/styles/tokens.css";
 import "@/styles/ds.css";
 import "@/styles/shell.css";
