@@ -1974,3 +1974,11 @@
   z-index: 6;
   background: var(--ds-surface-1);
 }
+
+/* No tooltip while the playhead is being dragged (the pointer stays over the
+   handle, so hover would otherwise open it after half a second). */
+.annotations-skin
+  .tl-playhead-handle-wrap[data-dragging="true"]
+  [role="tooltip"] {
+  display: none;
+}

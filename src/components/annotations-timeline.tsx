@@ -1016,6 +1016,7 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                 <div className="tl-playhead" style={{ left: playheadLeft }} />
                 <div
                   className="tl-playhead-handle-wrap"
+                  data-dragging={drag?.kind === "playhead" ? "true" : undefined}
                   style={{ left: playheadLeft }}
                 >
                   <Tip
