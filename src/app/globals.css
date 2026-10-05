@@ -108,9 +108,3 @@ input[type="range"],
 progress {
   accent-color: var(--ds-accent);
 }
-
-/* The dataset format note (src/components/dataset-format.tsx). */
-.levi-format p {
-  margin: var(--ds-space-1) 0 0;
-  line-height: 1.5;
-}

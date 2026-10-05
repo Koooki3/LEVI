@@ -57,11 +57,40 @@ export function routeTitle(
   return parts.join(" · ");
 }
 
+/**
+ * Sets the tab title and keeps it: the framework puts the metadata's title
+ * back (it streams it in, after the page has hydrated, and again on a route
+ * change), so a title written once is lost. The observer watches the title
+ * element, and the places a new one would be inserted, and writes the wanted
+ * title again whenever another one lands.
+ */
 export function RouteTitle() {
   const pathname = usePathname();
   const { t, language } = useLocale();
   useEffect(() => {
-    document.title = routeTitle(pathname, t);
+    const want = routeTitle(pathname, t);
+    let watched: Element | null = null;
+    const observer = new MutationObserver(() => sync());
+    const watch = () => {
+      observer.disconnect();
+      observer.observe(document.head, { childList: true });
+      observer.observe(document.body, { childList: true });
+      watched = document.querySelector("title");
+      if (watched)
+        observer.observe(watched, {
+          childList: true,
+          characterData: true,
+          subtree: true,
+        });
+    };
+    function sync() {
+      if (document.title !== want) document.title = want;
+      // A replaced title element needs a new watch.
+      if (document.querySelector("title") !== watched) watch();
+    }
+    watch();
+    sync();
+    return () => observer.disconnect();
     // `t` is rebuilt on every render; the language is what changes it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, language]);

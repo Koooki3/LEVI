@@ -267,8 +267,12 @@ export function ServicePanel({
   const vllmTone: Tone =
     vllm === "ready" ? "pass" : vllm === "error" ? "fail" : vllm ? "" : "";
   return (
+    // A service that is not running is said in words ("Not running", the note
+    // below), not by fading the section: opacity would take the text under
+    // the contrast the rest of the page keeps.
     <section
-      className={`pg-live-section${alive ? "" : " stale"}`}
+      className="pg-live-section"
+      data-alive={alive ? "true" : "false"}
       aria-labelledby="live-service"
     >
       <h2 id="live-service">{t("Service and resources")}</h2>
