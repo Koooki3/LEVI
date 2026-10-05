@@ -1,6 +1,7 @@
 "use client";
 import { T, useLocale } from "@/components/levi-locale";
 import { Progress } from "@/components/ds";
+import { useServerText } from "@/components/pages-ui/messages";
 import type { Job } from "./types";
 
 function duration(seconds: number | null | undefined): string {
@@ -15,6 +16,7 @@ function duration(seconds: number | null | undefined): string {
  * structured progress file (written by the conversion worker). */
 export function JobProgress({ job }: { job: Job }) {
   const { t } = useLocale();
+  const serverText = useServerText();
   const p = job.progress;
   if (!p) return null;
   const running = job.status === "running" || job.status === "queued";
@@ -63,7 +65,7 @@ export function JobProgress({ job }: { job: Job }) {
       {p.warnings.length > 0 && (
         <ul className="pg-warnings" aria-label={t("Warnings")}>
           {p.warnings.map((w) => (
-            <li key={w}>{t(w)}</li>
+            <li key={w}>{serverText(w)}</li>
           ))}
         </ul>
       )}

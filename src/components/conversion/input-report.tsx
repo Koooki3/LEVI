@@ -2,6 +2,7 @@
 import { T, useLocale } from "@/components/levi-locale";
 import { Badge, StatusDot, type Tone } from "@/components/ds";
 import { Problem } from "@/components/pages-ui/feedback";
+import { useServerText } from "@/components/pages-ui/messages";
 import type { InputReport, RequirementStatus } from "./types";
 
 const TONE: Record<RequirementStatus, Tone> = {
@@ -20,12 +21,13 @@ const WORD: Record<RequirementStatus, string> = {
 /** Detected format, summary and the requirement checklist of an inspection. */
 export function InputReportView({ report }: { report: InputReport }) {
   const { t } = useLocale();
+  const serverText = useServerText();
   const s = report.summary;
   if (!report.format) {
     return (
       <Problem
         title={t("Input format not recognized")}
-        why={s.hint ? t(s.hint) : undefined}
+        why={s.hint ? serverText(s.hint) : undefined}
         fix={t(
           "Choose a raw capture folder (task/demo_NNNN) or a LeRobot dataset with meta/info.json.",
         )}
@@ -119,10 +121,10 @@ export function InputReportView({ report }: { report: InputReport }) {
                     </span>
                   )}
                   {r.detail && (
-                    <p className="pg-small pg-break">{t(r.detail)}</p>
+                    <p className="pg-small pg-break">{serverText(r.detail)}</p>
                   )}
                   {r.fix && (r.status !== "pass" || r.verified !== "now") && (
-                    <p className="pg-small pg-fix">{t(r.fix)}</p>
+                    <p className="pg-small pg-fix">{serverText(r.fix)}</p>
                   )}
                 </td>
               </tr>

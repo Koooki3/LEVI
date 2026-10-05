@@ -20,8 +20,16 @@ import {
   RefreshCw,
   Trash2,
 } from "lucide-react";
-import { Badge, Button, EmptyState, Icon, Tooltip } from "@/components/ds";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  Icon,
+  Skeleton,
+  Tooltip,
+} from "@/components/ds";
 import { EmptyLine, RequestProblem } from "@/components/pages-ui/feedback";
+import { useServerText } from "@/components/pages-ui/messages";
 import type { CatalogEntry } from "@/types/dataset-format.types";
 type Local = CatalogEntry;
 type SyncChange = {
@@ -71,8 +79,13 @@ export default function Workbench() {
   const [plan, setPlan] = useState<Job | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState("");
+  // What the failed action was trying to do (the error box's title).
+  const [errorWhat, setErrorWhat] = useState("The request did not complete");
+  // The last read of the page's state failed (null: the answer is unknown).
+  const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
   const { t } = useLocale();
+  const serverText = useServerText();
   const confirm = useConfirmAction();
   const [sync, setSync] = useState<SyncStatus | null>(null);
   const refresh = useCallback(async () => {
@@ -84,29 +97,54 @@ export default function Workbench() {
     setCatalog(c);
     setJobs(j);
     setSync(st);
+    setLoadError("");
   }, []);
+  const reload = useCallback(
+    () =>
+      refresh().catch((e) =>
+        setLoadError(e instanceof Error ? e.message : String(e)),
+      ),
+    [refresh],
+  );
   // Poll every second while anything runs (live progress), else every 4 s.
   const active = jobs.some(
     (j) => j.status === "running" || j.status === "queued",
   );
   useEffect(() => {
-    refresh().catch((e) => setError(String(e)));
-  }, [refresh]);
+    void reload();
+  }, [reload]);
   useEffect(() => {
-    const timer = setInterval(
-      () => refresh().catch(() => {}),
-      active ? 1000 : 4000,
-    );
+    const timer = setInterval(() => void reload(), active ? 1000 : 4000);
     return () => clearInterval(timer);
-  }, [refresh, active]);
-  async function action(fn: () => Promise<unknown>) {
+  }, [reload, active]);
+  const loading = catalog === null && !loadError;
+  // What the page shows as the service's state is only as fresh as the last
+  // read: after a failed read it is unknown, not what it was before.
+  const known = catalog !== null && !loadError;
+  const syncNow = known ? sync : null;
+  const canPlan = known && !!catalog?.conversion_available;
+  /** The advanced options box is JSON; say so when it is not. */
+  function parseOptions(text: string): unknown {
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error(t("The conversion options are not valid JSON."));
+    }
+  }
+  async function action(
+    fn: () => Promise<unknown>,
+    what = "The request did not complete",
+  ) {
     setError("");
+    setErrorWhat(what);
     setBusy(true);
     try {
       await fn();
-      await refresh();
+      // The action worked; a failed re-read is the load error's to report
+      // (it says the page cannot read the state), not this action's.
+      void reload();
     } catch (e) {
-      setError(String(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -122,9 +160,15 @@ export default function Workbench() {
           task through its logs. New outputs preserve the original capture.
         </T>
       </p>
-      {error && (
-        <RequestProblem action="The request did not complete" message={error} />
+      {loadError && (
+        <RequestProblem
+          action="The page could not read LEVI's state"
+          message={loadError}
+          live={false}
+          onRetry={() => void reload()}
+        />
       )}
+      {error && <RequestProblem action={errorWhat} message={error} />}
       <section className="pg-box pg-pool-teaser">
         <div>
           <h2>
@@ -154,7 +198,7 @@ export default function Workbench() {
             void action(async () => {
               await leviApi("catalog", { path });
               setPath("");
-            });
+            }, "The dataset was not registered");
           }}
         >
           <input
@@ -177,19 +221,23 @@ export default function Workbench() {
         <div className="pg-sync-bar">
           <Badge
             tone={
-              sync?.last_error
-                ? "danger"
-                : sync?.running
-                  ? "success"
-                  : "warning"
+              !syncNow
+                ? "neutral"
+                : syncNow.last_error
+                  ? "danger"
+                  : syncNow.running
+                    ? "success"
+                    : "warning"
             }
           >
             {t(
-              !sync?.enabled
-                ? "Auto-sync off"
-                : sync.running
-                  ? "Auto-sync on"
-                  : "Auto-sync paused",
+              !syncNow
+                ? "Auto-sync: cannot tell right now"
+                : !syncNow.enabled
+                  ? "Auto-sync off"
+                  : syncNow.running
+                    ? "Auto-sync on"
+                    : "Auto-sync paused",
             )}
           </Badge>
           <span>
@@ -198,52 +246,68 @@ export default function Workbench() {
               automatically.
             </T>
           </span>
-          {sync?.last_scan && (
+          {syncNow?.last_scan && (
             <span className="tabular">
               {t("Last checked")}{" "}
-              {new Date(sync.last_scan * 1000).toLocaleTimeString()}
+              {new Date(syncNow.last_scan * 1000).toLocaleTimeString()}
             </span>
           )}
-          {sync && sync.pending.length > 0 && (
+          {syncNow && syncNow.pending.length > 0 && (
             <span>
-              {sync.pending.length} {t("waiting for copying to finish")}
+              {syncNow.pending.length} {t("waiting for copying to finish")}
             </span>
           )}
           <Button
             size="sm"
             icon={RefreshCw}
-            disabled={busy}
-            onClick={() => void action(() => leviApi("sync", {}))}
+            disabled={busy || !known}
+            aria-describedby={known ? undefined : "wb-sync-why"}
+            onClick={() =>
+              void action(() => leviApi("sync", {}), "The sync did not run")
+            }
           >
             <T>Sync now</T>
           </Button>
+          {!known && (
+            <span id="wb-sync-why" className="pg-small">
+              {t("Sync is off until the page can read LEVI's state.")}
+            </span>
+          )}
         </div>
-        {sync?.last_error && (
+        {syncNow?.last_error && (
           <RequestProblem
             action="Auto-sync stopped on an error"
-            message={sync.last_error}
+            message={syncNow.last_error}
             fix={t("Press Sync now to try again.")}
           />
         )}
-        {sync && sync.changes.length > 0 && (
+        {syncNow && syncNow.changes.length > 0 && (
           <details className="pg-sync-changes">
             <summary className="">
-              <T>Recent workspace changes</T> ({sync.changes.length})
+              <T>Recent workspace changes</T> ({syncNow.changes.length})
             </summary>
             <ul>
-              {sync.changes.slice(0, 15).map((c) => (
+              {syncNow.changes.slice(0, 15).map((c) => (
                 <li key={`${c.time}-${c.name}-${c.kind}`}>
                   <span className="tabular">
                     {new Date(c.time * 1000).toLocaleTimeString()}
                   </span>{" "}
-                  <strong>{t(`sync.${c.kind}`)}</strong> {c.name}
+                  <strong>{t(`syncNow.${c.kind}`)}</strong> {c.name}
                   {c.detail ? ` — ${t(c.detail)}` : ""}
                 </li>
               ))}
             </ul>
           </details>
         )}
-        {catalog?.local.length !== 0 && (
+        {loading && (
+          <div className="pg-gap-top" aria-busy="true">
+            <span className="sr-only" role="status">
+              {t("Loading…")}
+            </span>
+            <Skeleton height={96} radius="md" />
+          </div>
+        )}
+        {catalog && catalog.local.length !== 0 && (
           <div className="ds-table-wrap pg-gap-top">
             <table className="ds-table">
               <thead>
@@ -265,7 +329,7 @@ export default function Workbench() {
                 </tr>
               </thead>
               <tbody>
-                {catalog?.local.map((d) => (
+                {catalog.local.map((d) => (
                   <tr key={d.id}>
                     <td>
                       {d.kind !== "raw" || d.view_status === "ready" ? (
@@ -277,7 +341,9 @@ export default function Workbench() {
                         <span>{d.name}</span>
                       )}
                       {d.view_status === "failed" && d.view_error && (
-                        <p className="pg-small pg-fix">{t(d.view_error)}</p>
+                        <p className="pg-small pg-fix">
+                          {serverText(d.view_error)}
+                        </p>
                       )}
                       <p className="pg-small pg-break">
                         <T>{d.path}</T>
@@ -315,11 +381,13 @@ export default function Workbench() {
                                   confirmLabel: t("Unregister"),
                                 })
                               )
-                                void action(() =>
-                                  fetch(
-                                    `/api/levi/catalog/${encodeURIComponent(d.name)}`,
-                                    { method: "DELETE" },
-                                  ),
+                                void action(
+                                  () =>
+                                    fetch(
+                                      `/api/levi/catalog/${encodeURIComponent(d.name)}`,
+                                      { method: "DELETE" },
+                                    ),
+                                  "The dataset was not removed from the list",
                                 );
                             }}
                           >
@@ -334,7 +402,7 @@ export default function Workbench() {
             </table>
           </div>
         )}
-        {catalog?.local.length === 0 && (
+        {catalog && catalog.local.length === 0 && (
           <EmptyState
             icon={Database}
             title={t("No local datasets registered yet.")}
@@ -349,9 +417,21 @@ export default function Workbench() {
           <h2>
             <T>Conversion pipeline</T>
           </h2>
-          <Badge tone={catalog?.conversion_available ? "success" : "warning"}>
+          <Badge
+            tone={
+              !known || !catalog
+                ? "neutral"
+                : catalog.conversion_available
+                  ? "success"
+                  : "warning"
+            }
+          >
             <T>
-              {catalog?.conversion_available ? "Built in" : "Install ffmpeg"}
+              {!known || !catalog
+                ? "Cannot tell right now"
+                : catalog.conversion_available
+                  ? "Built in"
+                  : "Install ffmpeg"}
             </T>
           </Badge>
         </div>
@@ -366,7 +446,7 @@ export default function Workbench() {
         <ConversionWizard
           jobs={jobs}
           refresh={refresh}
-          available={!!catalog?.conversion_available}
+          available={known && catalog ? !!catalog.conversion_available : null}
           source={source}
           onSourceChange={setSource}
         />
@@ -385,17 +465,19 @@ export default function Workbench() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              void action(async () =>
-                setPlan(
-                  await leviApi<Job>("jobs/plan", {
-                    source,
-                    stage,
-                    fps,
-                    source_fps: sourceFps,
-                    options: JSON.parse(options),
-                    ...(output.trim() ? { output: output.trim() } : {}),
-                  }),
-                ),
+              void action(
+                async () =>
+                  setPlan(
+                    await leviApi<Job>("jobs/plan", {
+                      source,
+                      stage,
+                      fps,
+                      source_fps: sourceFps,
+                      options: parseOptions(options),
+                      ...(output.trim() ? { output: output.trim() } : {}),
+                    }),
+                  ),
+                "The command could not be previewed",
               );
             }}
           >
@@ -478,11 +560,21 @@ export default function Workbench() {
               </label>
               <Button
                 type="submit"
-                disabled={busy || !catalog?.conversion_available}
+                disabled={busy || !canPlan}
+                aria-describedby={canPlan ? undefined : "wb-plan-why"}
               >
                 <T>Preview command</T>
               </Button>
             </div>
+            {!canPlan && (
+              <p id="wb-plan-why" className="pg-small pg-mt-2">
+                {t(
+                  known
+                    ? "Previewing a command needs ffmpeg, which was not found."
+                    : "Previewing is off until the page can read LEVI's state.",
+                )}
+              </p>
+            )}
             <details className="pg-mt-5">
               <summary className="">
                 <T>Advanced conversion options</T>
@@ -525,7 +617,7 @@ export default function Workbench() {
                   void action(async () => {
                     await leviApi(`jobs/${plan.id}/run`, {});
                     setPlan(null);
-                  })
+                  }, "The plan did not start")
                 }
               >
                 <T>Run this plan</T>

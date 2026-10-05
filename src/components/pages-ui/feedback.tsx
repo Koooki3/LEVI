@@ -6,7 +6,7 @@
  * then they live here so that the shared `src/components/ds/` stays with its
  * owner. Styles: `pages.css` (`pg-problem`, `pg-note`, `pg-jobcard`).
  */
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import {
   CircleAlert,
   CircleCheck,
@@ -19,6 +19,9 @@ import {
 } from "lucide-react";
 import { Badge, Button, Icon } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
+import { cleanMessage, useDescribe } from "./messages";
+
+export { cleanMessage };
 
 /**
  * An error in three parts: what happened (`title`), why (`why`: usually the
@@ -73,10 +76,17 @@ export function Problem({
   );
 }
 
-/** "Error: busy" → "busy": the exception's class name says nothing to a
- * person (String(error) adds it). */
-export function cleanMessage(message: string): string {
-  return message.replace(/^(?:[A-Z]\w*)?Error:\s*/, "").trim();
+/** `uv run levi serve` between backticks becomes inline code. */
+export function withCode(text: string): ReactNode {
+  const parts = text.split("`");
+  if (parts.length < 3) return text;
+  return parts.map((part, index) =>
+    index % 2 ? (
+      <code key={index}>{part}</code>
+    ) : (
+      <Fragment key={index}>{part}</Fragment>
+    ),
+  );
 }
 
 /**
@@ -92,27 +102,33 @@ export function RequestProblem({
   fix,
   onRetry,
   className,
+  live,
 }: {
   action: string;
   message: string;
   fix?: ReactNode;
   onRetry?: () => void;
   className?: string;
+  live?: boolean;
 }) {
   const { t } = useLocale();
+  const described = useDescribe()(message);
+  const advice =
+    fix ??
+    (described.fix ? withCode(described.fix) : undefined) ??
+    (onRetry
+      ? null
+      : t("Check the reason above, change what it names and try again."));
   return (
     <Problem
       className={className}
       title={t(action)}
-      why={t(cleanMessage(message))}
+      why={withCode(described.text)}
+      details={described.details}
+      live={live}
       fix={
         <>
-          {fix ??
-            (onRetry
-              ? null
-              : t(
-                  "Check the reason above, change what it names and try again.",
-                ))}
+          {advice}
           {onRetry && (
             <Button size="sm" icon={RotateCcw} onClick={onRetry}>
               {t("Try again")}
