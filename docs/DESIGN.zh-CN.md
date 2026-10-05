@@ -25,7 +25,7 @@
 
 ## 新代码的规则
 
-- **禁止硬编码颜色。** 用语义令牌（`var(--ds-text-secondary)`、`var(--ds-surface-1)`）或 `ds-*` 类。CSS 和 TSX 里不写十六进制、`rgb()`、`hsl()`，也不写 Tailwind 任意颜色值。三道检查：ESLint（`no-restricted-syntax`）在 **所有** `src/**/*.{ts,tsx}` 里拒绝十六进制颜色，以及带字面数字的 `rgb()` / `hsl()`，只有 `eslint.config.mjs` 里 `HEX_EXCEPTIONS` 列出的文件除外（URDF 查看器的机器人材质、给 canvas 和 WebGL 用的 `data-palette.ts`、测试；每一项都在注释里写明理由，新增例外必须说明令牌为什么不能用）。颜色指字符串开头或空格、`(`、`,`、`:` 之后的 `#` 加 3、4、6 或 8 位十六进制数字；`href`、`to`、`id`、`htmlFor` 的值是链接，不检查。测试（`global-styles.test.ts`、`tokens-contrast.test.ts`、各页面样式测试）在 `globals.css`、`ds.css`、`shell.css`、`home.css`、`reading.css`、`report.css`、`pages.css`、`agent-content.css`、`viewer.css`、`annotations.css` 出现颜色字面量时失败（`viewer.css` 里的数据配色是 `tokens.css` 的镜像，见[数据色](#数据色)），在 `src/` 任何地方出现 Tailwind 色板类（`text-white`、`bg-slate-800`、`border-cyan-400`……）时也失败。
+- **禁止硬编码颜色。** 用语义令牌（`var(--ds-text-secondary)`、`var(--ds-surface-1)`）或 `ds-*` 类。CSS 和 TSX 里不写十六进制、`rgb()`、`hsl()`，也不写 Tailwind 任意颜色值。三道检查：ESLint（`no-restricted-syntax`）在 **所有** `src/**/*.{ts,tsx}` 里拒绝十六进制颜色，以及带字面数字的 `rgb()` / `hsl()`，只有 `eslint.config.mjs` 里 `HEX_EXCEPTIONS` 列出的文件除外（`viewer/data-palette.ts`（canvas 和 WebGL 需要的数值，机器人模型的材质和灯光颜色也在其中）和测试；每一项都在注释里写明理由，新增例外必须说明令牌为什么不能用）。颜色指字符串开头或空格、`(`、`,`、`:` 之后的 `#` 加 3、4、6 或 8 位十六进制数字；`href`、`to`、`id`、`htmlFor` 的值是链接，不检查。测试（`global-styles.test.ts`、`tokens-contrast.test.ts`、各页面样式测试）在 `globals.css`、`ds.css`、`shell.css`、`home.css`、`reading.css`、`report.css`、`pages.css`、`agent-content.css`、`viewer.css`、`annotations.css` 出现颜色字面量时失败（`viewer.css` 里的数据配色是 `tokens.css` 的镜像，见[数据色](#数据色)），在 `src/` 任何地方出现 Tailwind 色板类（`text-white`、`bg-slate-800`、`border-cyan-400`……）时也失败。
 - **组件里只用语义令牌。** 原始灰阶 `--ds-gray-l-*`、`--ds-gray-d-*` 只用来定义语义令牌。
 - **每屏一个主要按钮。** 强调色 A“石墨”是最深的灰，只用于主要按钮、焦点环、选中态和进度。正文中的链接用主文字色加下划线。
 - **状态不只靠颜色。** 状态色（成功、警告、错误、信息）只出现在徽章、状态点、Toast 和行内提示上，并且总带图标形状和文字（`Badge`、`StatusDot`）。
@@ -113,14 +113,15 @@
 | `ConfirmProvider`（`confirm.tsx`） | 根部唯一的确认对话框。`const confirm = useConfirmAction(); if (!(await confirm({ title, confirmLabel, tone }))) return;`。“取消”、Esc、点遮罩都返回 false，与 `window.confirm` 的“取消”一致；在 provider 之外总是返回 false。原生模态 `<dialog>` 打开时（训练池的推送对话框）页面其余部分是 inert 的，所以问题渲染在那个对话框里面 |
 | 顶栏（`levi-header.tsx`） | 高 56 px，**吸顶**：页面滚动时留在顶部，用顶栏材质绘制（`--ds-material-bar` 加 `--ds-material-filter`：半透明加模糊；在 `prefers-reduced-transparency` 或 `prefers-contrast: more` 下不透明），带分隔线。字标（`brand.tsx` 的 `LeviWordmark`）；页面导航（实时评测，始终显示：有实时服务时带服务状态和需要人处理的数量，否则是指向说明如何启动的页面的普通链接；探索数据、转换与审核、提供训练池时有“训练池”、使用指南、报告），当前页标 `aria-current="page"`、字重 600、下方 2 px 指示条；右侧是搜索（打开命令面板）、作业、Agent 工作台开关、设置（账号与连接、命令面板、快捷键、动效）、外观和语言。窄于 900 px 时页面导航移到单独一行，顶栏高 100 px（`--levi-header-height`），并随页面滚走而不吸顶（否则会遮住手机屏幕的一大块） |
 | 顶栏之下（`shell.css`、`globals.css`） | `--levi-header-height` 是顶栏高度（整屏高度的页面要减去它）；`--levi-sticky-top` 是滚动时顶栏盖住的顶部高度（宽屏同为 56 px，窄于 900 px 为 0）。`scroll-padding-top`、阅读版式的锚点（`scroll-margin-top`）和目录（`top`），以及自己吸顶的页面部件（实时评测横幅、训练池筛选面板、样张页的标题）都从它下面开始。吸附在窗口顶部的页面部件用 `top: calc(var(--levi-sticky-top) + …)`；吸附在自己滚动框里的（表头、标注列表）不用 |
-| 标签页标题（`route-title.tsx`） | 根布局的元数据只有名称（“LEVI”，描述为中英双语）；`RouteTitle` 把 `document.title` 设为当前语言下的页面名加名称：“Explore · LEVI”、“训练池 · LEVI”、“Episode viewer · lerobot/aloha_static_coffee · LEVI”。页面和名称见 `routePageName`（首页、使用指南、报告、探索数据、转换与审核、训练池、实时评测、片段查看器、样张页） |
+| 标签页标题（`route-title.tsx`） | 根布局的元数据只有名称（“LEVI”，描述为中英双语）；`RouteTitle` 把 `document.title` 设为当前语言下的页面名加名称：“Explore · LEVI”、“训练池 · LEVI”、“Episode viewer · lerobot/aloha_static_coffee · Episode 3 · LEVI”。框架自己回答的页面自己命名（“这个页面不存在 · LEVI”“这个页面出错了 · LEVI”），通过 `useTitleOverride` 实现，因为路径分不出“不存在的地址”和数据集路径。页面和名称见 `routePageName`（首页、使用指南、报告、探索数据、转换与审核、训练池、实时评测、片段查看器、样张页） |
 | 作业（`jobs-menu.tsx`、`jobs.ts`） | 正在运行的训练池作业和转换作业数量，读现有的 `/api/levi/pool/jobs` 和 `/api/levi/jobs`，首次加载、打开菜单、切回标签页时各查一次，标签页可见时每 60 秒一次（有作业在跑时每 5 秒一次；隐藏时不请求，上一个请求未返回时不再发）。菜单在作业上报进度时显示运行中作业的进度，并通向训练池和转换与审核。看到在运行、之后完成、完成但有错误或失败的作业，会用 Toast 提示一次，带通往对应页面的按钮（失败的提示保留到被关闭）；加载时就已结束的、已取消的和被中断的不提示 |
 | 命令面板（`command-palette.tsx`、`commands.ts`） | macOS 上 ⌘K，其他系统 Ctrl+K，或点“搜索”。组合框加列表框：跳到页面或数据集（目录里的本地数据集和公开示例，打开面板时从 `/api/levi/catalog` 读取），打开 Agent 工作台、账号与连接或快捷键总表，选择外观或语言。按两种语言的标签以及中英文关键词匹配 |
 | 快捷键总表（`shortcuts-dialog.tsx`） | 按 `?` 打开（在输入框中不触发）。列出全局快捷键、跳转组合键和页面已有的快捷键（片段查看器、标注、审核队列） |
 | 设置菜单（`levi-header.tsx`） | 账号与连接、命令面板、快捷键，以及动效设置：跟随系统（默认）、减少、正常（见[动效](#动效)） |
-| 错误页和“找不到页面”（`error-pages.tsx`；`app/not-found.tsx`、`app/error.tsx`、`app/global-error.tsx`） | 框架自己回答的页面，用全局框架的外观和读者的语言，分三段（发生了什么、为什么、怎么办）：地址不存在时给出回首页和探索数据；没人接住的错误给出重试，并把消息折叠在“技术细节”里。它们正好占满顶栏以下的空间，页面不会出现滚动条；最后兜底的边界会替换整个布局，自带 `<html>`、令牌样式表，并同时写两种语言 |
+| 跳到正文链接（`skip-to-content.tsx`） | 每个页面的第一个 Tab 停靠点，只在获得焦点时可见：“跳到正文”把焦点移到页面的 `main`。片段查看器在它之后仍保留自己通往正文和检查器的链接 |
+| 错误页和“找不到页面”（`error-pages.tsx`；`app/not-found.tsx`、`app/error.tsx`、`app/global-error.tsx`） | 框架自己回答的页面，用全局框架的外观和读者的语言，分三段（发生了什么、为什么、怎么办）：地址不存在时给出回首页和探索数据；没人接住的错误给出重试，并把消息折叠在“技术细节”里。它们保留页面的 `main` 地标，只把标题和说明作为 `role="alert"` 播报，并把焦点移到标题；它们正好占满顶栏以下的空间，页面不会出现滚动条；最后兜底的边界会替换整个布局，自带 `<html>`、令牌样式表，并同时写两种语言 |
 
-**快捷键。** 全局框架绑定 ⌘K / Ctrl+K、`?`（也接受全角 `？` 和用 AltGr 打出的 `?`）和跳转组合键：先按 `G`，再按 `H` 首页、`E` 探索数据、`W` 转换与审核、`P` 训练池、`L` 实时评测、`R` 报告、`U` 使用指南（第二个键要在 1.5 秒内；见 `global-keys.ts` 的 `CHORD_PAGES`）。输入法组字时都不触发，`?` 和组合键在输入框中不触发，另一个模态对话框（确认框、页面自己的对话框、原生 `showModal()` 对话框）打开时也都不触发。在模态层里按的键（Tab 和 Esc 除外，由层自己处理）不会传到 `window` 上的监听，页面快捷键不会在对话框背后生效，和原生 `confirm()` 一样；确认框开着时切换页面，按“取消”作答。页面保留自己的快捷键：Space、↑/↓、J/K、Esc、Ctrl/⌘+S/Z/Y。
+**快捷键。** 全局框架绑定 ⌘K / Ctrl+K、`?`（也接受全角 `？` 和用 AltGr 打出的 `?`）和跳转组合键：先按 `G`，再按 `H` 首页、`E` 探索数据、`W` 转换与审核、`P` 训练池、`L` 实时评测、`R` 报告、`U` 使用指南（第二个键要在 1.5 秒内；见 `global-keys.ts` 的 `CHORD_PAGES`）。跳转会关闭打开着的命令面板或快捷键总表；标注编辑器有未保存的草稿时（`shell/unsaved-work.ts`，由 `annotations-context.tsx` 设置），框架先通过唯一的确认对话框问“不保存就离开这个页面？”。输入法组字时都不触发，`?` 和组合键在输入框中不触发，另一个模态对话框（确认框、页面自己的对话框、原生 `showModal()` 对话框）打开时也都不触发。在模态层里按的键（Tab 和 Esc 除外，由层自己处理）不会传到 `window` 上的监听，页面快捷键不会在对话框背后生效，和原生 `confirm()` 一样；确认框开着时切换页面，按“取消”作答。页面保留自己的快捷键：Space、↑/↓、J/K、Esc、Ctrl/⌘+S/Z/Y。
 
 **加载遮罩。** `loading-component.tsx` 是 `role="status"` 加 `aria-busy="true"`，不是对话框：不拿焦点，也不困住焦点。
 
@@ -184,7 +185,7 @@
 
 **反馈**：加载遮罩 300 ms 后才出现（加载快就不显示），减少动态效果时转圈停止；其他地方的转圈都换成 Lucide 的转圈；页面错误说明发生了什么、原因（技术细节）和怎么办（重试、返回探索数据）；“数据集已变化”卡片放在左下角，不挡住 Toast。
 
-ESLint 的颜色规则和 `src` 里所有文件一样覆盖查看器的文件；例外只有 `data-palette.ts`（给 canvas 和 WebGL 用的数值配色）和 URDF 查看器（机器人模型的材质和灯光颜色）。
+ESLint 的颜色规则和 `src` 里所有文件一样覆盖查看器的文件；例外只有 `data-palette.ts`（canvas、WebGL 和机器人模型材质的数值）和测试。
 ## 页面（第 4 阶段）
 
 实时评测（`/live`）、转换与审核（`/workbench`）、训练池（`/pool`）、探索数据（`/explore`）和 Agent 工作台抽屉里的内容都已改用令牌，随主题切换。接口调用、作业和数据都没变，只改了标记、类名和反馈方式。
@@ -227,7 +228,7 @@ ESLint 的颜色规则和 `src` 里所有文件一样覆盖查看器的文件；
 | 运行中状态 | 每 2 秒一次透明度呼吸 | 静止 |
 | 拖拽与重排（Motion） | 抓起时 `scale(1.02)` + 阴影加深，弹性到位 | 直接到位 |
 
-`prefers-reduced-motion: reduce` 时，`--ds-dur-base`、`--ds-dur-slow`（及退出时长）变为 0，`--ds-ease-spring` 变为 `linear`，所有位移令牌归零；旋转图标、不确定进度条、呼吸状态点都停下。祖先元素上的 `data-motion="reduce"` 有同样效果（用于预览和测试）。渲染内容会变的组件用 `usePrefersReducedMotion()`；`ReorderList` 用 Motion 的 `useReducedMotion` 和 `MotionConfig reducedMotion="user"`。`ReducedMotionScope reduce` 可对一个子树强制走减少动态效果的路径（样张页的预览开关就是这样做的；同时在元素上加 `data-motion="reduce"`，让 CSS 也跟着变）。第 1 阶段没有退出动画，关闭时直接消失。
+`prefers-reduced-motion: reduce` 时，`--ds-dur-base`、`--ds-dur-slow`（及退出时长）变为 0，`--ds-ease-spring` 变为 `linear`，所有位移令牌归零；旋转图标、不确定进度条、呼吸状态点都停下（应用内选*正常*时不停：停在 30% 的进度条会像卡住了，所以媒体查询对 `data-motion="full"` 让路）。祖先元素上的 `data-motion="reduce"` 有同样效果（用于预览和测试）。渲染内容会变的组件用 `usePrefersReducedMotion()`；`ReorderList` 先看应用内设置（*减少*时 `MotionConfig reducedMotion` 为 `"always"`，*正常*时为 `"never"`），否则用 Motion 的 `useReducedMotion`（`"user"`）。`ReducedMotionScope reduce` 可对一个子树强制走减少动态效果的路径（样张页的预览开关就是这样做的；同时在元素上加 `data-motion="reduce"`，让 CSS 也跟着变）。第 1 阶段没有退出动画，关闭时直接消失。
 
 **应用内动效设置**（设置菜单）：*跟随系统*（默认）、*减少*或*正常*，存在 `levi-motion` 键下，由 `<head>` 里的脚本在首次绘制前写到 `<html>` 上，成为 `data-motion="reduce"` 或 `data-motion="full"`（跟随系统时不写），与主题的处理方式相同。*减少*的效果和系统设置相同（上面的令牌，以及所有读 `data-motion="reduce"` 的规则）；*正常*则在系统要求减少动态效果时仍保留动效令牌（媒体查询里的 `:root:not([data-motion="full"])`）。渲染内容会变的组件（`usePrefersReducedMotion`、`ReorderList`）实时跟随它。页面样式表里直接写在 `@media (prefers-reduced-motion)` 下的规则，在*正常*下仍只跟随系统；它们各自也有 `data-motion="reduce"` 的对应规则，用于*减少*。
 
@@ -256,7 +257,7 @@ ESLint 的颜色规则和 `src` 里所有文件一样覆盖查看器的文件；
 | 实时评测、转换与审核、训练池、探索数据 | `pg-*` 样式配令牌，使用 ds 按钮、输入框、表格、徽章和反馈组件（`pages-ui/`） |
 | Agent 工作台内容 | ds 组件加 `agent-ui.tsx`；`agent-content.css` 只管布局（`ag-*`） |
 | 片段查看器 | 框架、标签、片段列表、播放和检查器用 `vw-*` 样式和 ds 组件（`viewer/`）；分析视图用 `analysis-ui.tsx` 的共用件（Tailwind 只用于布局）；标注面板、时间轴和泳道用 `annotations.css`；三维查看器用 Tailwind 工具类自己排版，颜色是令牌值。原生 `<select>` 还留在 `object-annotation-panel.tsx`（4 个）、`fast-segmentation-panel.tsx`（4 个）、`annotations-panel.tsx`（2 个）、`video-overlay-canvas.tsx`（1 个）和 `subtask-vocabulary.tsx`（2 个） |
-| 颜色 | CSS 和 TSX 里只用令牌，检查覆盖整个 `src/`（两个有记录的例外）；`levi.css`、旧变量和 Tailwind 重映射已删除 |
+| 颜色 | CSS 和 TSX 里只用令牌，检查覆盖整个 `src/`（只有一个模块 `viewer/data-palette.ts` 和测试是例外）；`levi.css`、旧变量和 Tailwind 重映射已删除 |
 | 图标 | 经 `Icon` 用 Lucide；剩下的文字箭头和对勾出现在正文、键盘提示和三维查看器的 HUD 里 |
 | 找不到页面和错误页 | 全局框架的外观，中英双语（`error-pages.tsx`）；框架默认页已去掉 |
 | 语言 | 每个 `t("…")` 字面量在两份目录里都有键（有测试）；两份目录的键相同 |
