@@ -52,6 +52,11 @@ describe("pool warnings read in one language", () => {
     expect(host.textContent).not.toContain("canonical");
     expect(host.textContent).toContain("提示");
   });
+  test("the list is a list: the live region is its wrapper, not the <ul>", async () => {
+    const { host } = await render(<PoolWarnings warnings={[conflict]} />);
+    expect(host.querySelector("ul")!.getAttribute("role")).toBeNull();
+    expect(host.querySelector("div[role=status] > ul > li")).not.toBeNull();
+  });
   test("a worker message with numbers is translated, not left in English", () => {
     const text = warningText(
       {

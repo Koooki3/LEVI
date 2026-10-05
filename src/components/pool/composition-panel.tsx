@@ -46,25 +46,27 @@ export function PoolWarnings({ warnings }: { warnings: PoolWarning[] }) {
   const { t, language } = useLocale();
   if (!warnings?.length) return null;
   return (
-    <ul className="pg-pool-warnings" role="status">
-      {warnings.map((w) => (
-        <li
-          key={w.code}
-          className={stopsExport(w) ? "blocking" : ""}
-          data-level={w.level}
-        >
-          <strong>{stopsExport(w) ? t("Blocks export") : t("Note")}</strong>{" "}
-          {warningText(w, t, language)}
-          {w.tasks?.length ? ` (${w.tasks.slice(0, 3).join("; ")})` : ""}
-          {typeof w.episodes === "number" &&
-          w.episodes &&
-          !TIMING_WARNING_CODES.has(w.code)
-            ? ` (${w.episodes.toLocaleString()})`
-            : ""}
-          {w.ids?.length ? ` (${w.ids.length})` : ""}
-        </li>
-      ))}
-    </ul>
+    <div role="status">
+      <ul className="pg-pool-warnings">
+        {warnings.map((w) => (
+          <li
+            key={w.code}
+            className={stopsExport(w) ? "blocking" : ""}
+            data-level={w.level}
+          >
+            <strong>{stopsExport(w) ? t("Blocks export") : t("Note")}</strong>{" "}
+            {warningText(w, t, language)}
+            {w.tasks?.length ? ` (${w.tasks.slice(0, 3).join("; ")})` : ""}
+            {typeof w.episodes === "number" &&
+            w.episodes &&
+            !TIMING_WARNING_CODES.has(w.code)
+              ? ` (${w.episodes.toLocaleString()})`
+              : ""}
+            {w.ids?.length ? ` (${w.ids.length})` : ""}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
