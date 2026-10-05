@@ -8,8 +8,40 @@ setupDom();
 
 const read = (file: string) =>
   readFileSync(join(import.meta.dir, "..", file), "utf8");
+const strip = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, "");
 
-describe("Agent Workbench content (stage 4)", () => {
+/** The files that make the Agent Workbench's four sections. */
+const CONTENT = [
+  "agent-workbench.tsx",
+  "agent-activity.tsx",
+  "agent-connections.tsx",
+  "agent-definitions.tsx",
+  "agent-object-tool.tsx",
+  "agent-pilot.tsx",
+  "agent-plan.tsx",
+  "agent-quality.tsx",
+  "agent-review-queue.tsx",
+  "agent-runtime-connections.tsx",
+  "agent-supervision.tsx",
+  "agent-task-console.tsx",
+  "chip-multi-select.tsx",
+  "ollama-models.tsx",
+  "ollama-runtime.tsx",
+  "hf-auth-button.tsx",
+];
+
+/** The opening tag of the Button (or GatedButton) that carries `label`. */
+const buttonOf = (code: string, label: string) => {
+  const at = code.indexOf(label);
+  expect(at).toBeGreaterThan(0);
+  const open = Math.max(
+    code.lastIndexOf("<Button", at),
+    code.lastIndexOf("<GatedButton", at),
+  );
+  return code.slice(open, at);
+};
+
+describe("Agent Workbench content", () => {
   test("a person-only action is marked with words and an icon", async () => {
     const { host } = await render(<HumanActionMark />);
     const badge = host.querySelector(".ds-badge")!;
@@ -24,63 +56,117 @@ describe("Agent Workbench content (stage 4)", () => {
   });
 
   test("approve, accept-pilot and commit carry the mark and are the primary", () => {
-    const buttonOf = (code: string, label: string) => {
-      const at = code.indexOf(label);
-      return code.slice(code.lastIndexOf("<button", at), at);
-    };
     const plan = read("agent-plan.tsx");
     expect(plan.match(/<HumanActionMark \/>/g)?.length).toBe(2);
     expect(buttonOf(plan, "Approve execution plan")).toContain(
-      "ds-btn--primary",
+      'variant="primary"',
     );
-    expect(buttonOf(plan, "Accept pilot quality")).toContain("ds-btn--primary");
+    expect(buttonOf(plan, "Accept pilot quality")).toContain(
+      'variant="primary"',
+    );
     const workbench = read("agent-workbench.tsx");
-    expect(workbench).toContain("<HumanActionMark />");
     expect(buttonOf(workbench, "Commit approved changes")).toContain(
-      "ds-btn--primary",
+      'variant="primary"',
     );
-    expect(buttonOf(workbench, "Cancel task")).toContain("ds-btn--ghost");
+    expect(buttonOf(workbench, "Cancel task")).toContain('variant="ghost"');
+    // Validate & approve, commit, the task approval and a runtime permission
+    // are the other actions only a person takes.
+    expect(workbench.match(/<HumanActionMark \/>/g)?.length).toBe(2);
+    expect(read("agent-task-console.tsx")).toContain("<HumanActionMark />");
+    expect(read("agent-pilot.tsx")).toContain("<HumanActionMark />");
   });
 
-  test("every button and field of the drawer content has a ds class", () => {
+  test("no raw button, select, textarea or input is hand-written in the content", () => {
+    for (const file of CONTENT) {
+      const code = read(file);
+      const raw = code.match(/<(button|select|textarea|input)\b/g);
+      expect([file, raw]).toEqual([file, null]);
+    }
+  });
+
+  test("no hand-drawn icon, emoji arrow or native title on a button", () => {
+    for (const file of CONTENT) {
+      const code = read(file)
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      expect([file, code.match(/<svg\b|react-icons/g)]).toEqual([file, null]);
+      // A native title="" tooltip on a plain element (ds components take
+      // `title` as a prop of their own, and a Button may keep one for a label
+      // that is cut short).
+      expect([
+        file,
+        code.match(/<(?:button|span|div|a|p|summary)\b[^>]*\stitle=/g),
+      ]).toEqual([file, null]);
+    }
+  });
+
+  test("the content uses no class that only levi.css defines", () => {
+    // levi-agent-sheet and levi-agent-grip belong to the frame; the levi-hf
+    // and levi-format classes are defined in shared.css, next to the code.
+    const allowed = /^levi-(agent-(sheet|grip)|hf-|format)/;
     for (const file of [
-      "agent-workbench.tsx",
-      "agent-plan.tsx",
-      "agent-pilot.tsx",
-      "agent-review-queue.tsx",
-      "agent-connections.tsx",
+      ...CONTENT,
+      "dataset-format.tsx",
+      "agent-ui.tsx",
+      "draggable-popup.tsx",
     ]) {
       const code = read(file);
-      const bare = code.match(
-        /<(button|select|textarea)(?![^>]*className)\s*\n?\s*[a-z]/g,
-      );
-      expect([file, bare]).toEqual([file, null]);
+      const used = [
+        ...code.matchAll(/className=(?:"([^"]*)"|\{`([^`]*)`\})/g),
+      ].flatMap((m) => (m[1] ?? m[2]).split(/\s+/));
+      const old = used.filter((c) => c.startsWith("levi-") && !allowed.test(c));
+      expect([file, old]).toEqual([file, []]);
     }
+  });
+
+  test("the HF sign-in is a ds Button and loads nothing from huggingface.co", () => {
+    const code = read("hf-auth-button.tsx");
+    expect(code).not.toContain("huggingface.co/datasets");
+    expect(code).not.toMatch(/<img\b/);
+    expect(code).toContain("LogIn");
   });
 });
 
-describe("ds controls inside the drawer win over levi.css's dock rules", () => {
-  test("every ds.css rule of a button-like control is restated under the dock", () => {
-    const strip = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, "");
-    const ds = strip(
-      readFileSync(join(import.meta.dir, "../../styles/ds.css"), "utf8"),
+describe("agent-content.css", () => {
+  const css = strip(read("pages-ui/agent-content.css"));
+
+  test("lays out ds components; it does not restate their look", () => {
+    expect(css).not.toContain("levi-agent-dock");
+    for (const selector of [
+      ".ds-btn {",
+      ".ds-btn--primary",
+      ".ds-btn--secondary",
+      ".ds-focus:focus-visible",
+      ".ds-tab {",
+      ".ds-icon-btn {",
+    ])
+      expect(css).not.toMatch(
+        new RegExp(`(^|\\n)${selector.replace(/[.{}]/g, "\\$&")}`),
+      );
+  });
+
+  test("tokens only: no colour literal, no infinite animation, weights 400-600", () => {
+    expect(css.match(/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/g)).toBeNull();
+    expect(css).not.toMatch(/infinite|@keyframes|animation:\s*(?!\s|none)/);
+    expect(css.match(/font-weight:\s*[^;]+/g)?.sort()).toEqual(
+      css
+        .match(/font-weight:\s*[^;]+/g)
+        ?.filter((w) => /var\(--ds-weight-(regular|medium|semibold)\)/.test(w))
+        .sort(),
     );
-    const agent = strip(read("pages-ui/agent-content.css")).replace(
-      /\s+/g,
-      " ",
+    // No size below 12px: sizes come from the type tokens or are not set.
+    const sizes = css.match(/font-size:[^;]+/g) ?? [];
+    expect(
+      sizes.filter((v) => !/var\(--ds-text-[a-z0-9-]+-size\)/.test(v)),
+    ).toEqual([]);
+  });
+
+  test("motion goes through the duration tokens, which reduced motion zeroes", () => {
+    const transitions = (css.match(/transition:[^;]+;/g) ?? []).filter(
+      (rule) => !/transition:\s*none/.test(rule),
     );
-    const control =
-      /^\.ds-(btn|icon-btn|menu__item|menu-trigger|tab|tag__remove|reorder__handle|toast__action)\b|^\.ds-focus:focus-visible/;
-    const missing: string[] = [];
-    for (const m of ds.matchAll(/([^{}@]+)\{[^{}]*\}/g))
-      for (const sel of m[1].split(",").map((s) => s.trim()))
-        if (control.test(sel) && !agent.includes(`.levi-agent-dock ${sel}`))
-          missing.push(sel);
-    expect(missing).toEqual([]);
-    for (const variant of ["primary", "secondary", "ghost", "danger"])
-      expect(agent).toContain(`.levi-agent-dock .ds-btn--${variant} {`);
-    expect(agent).toContain(".levi-agent-dock .ds-btn--ghost:hover");
-    expect(agent).toContain(".levi-agent-dock .ds-btn:disabled");
-    expect(agent).toContain(".levi-agent-dock .ds-focus:focus-visible");
+    expect(transitions.length).toBeGreaterThan(0);
+    for (const rule of transitions)
+      expect(rule).toMatch(/var\(--ds-dur-(base|slow)\)/);
   });
 });
