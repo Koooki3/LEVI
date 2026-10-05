@@ -1,4 +1,4 @@
-import { flush, render, setupDom } from "@/components/ds/__tests__/dom";
+import { click, flush, render, setupDom } from "@/components/ds/__tests__/dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { LocaleProvider } from "@/components/levi-locale";
 
@@ -145,5 +145,113 @@ describe("Conversion & review with a working service", () => {
     expect(text).toContain("Auto-sync on");
     expect(text).toContain("Inspection needs ffmpeg");
     expect(host.querySelector(".pg-problem")).toBeNull();
+  });
+});
+
+const CATALOG = {
+  local: [],
+  workspace: "/w",
+  conversion_available: true,
+  stages: [],
+};
+const SYNC = {
+  enabled: true,
+  running: true,
+  interval_seconds: 5,
+  last_scan: null,
+  last_error: null,
+  pending: [],
+  changes: [],
+};
+const FORMATS = { inputs: [], outputs: [], unsupported: [] };
+
+/** A service that answers while `up.value` is true and, for a POST, with
+ * `post` (default: an empty object). */
+function flaky(up: { value: boolean }, post?: () => Response) {
+  globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (!up.value && !(init?.method === "POST" && post))
+      return Promise.resolve(DOWN());
+    if (init?.method === "POST")
+      return Promise.resolve((post ?? (() => json({})))());
+    return Promise.resolve(
+      path.includes("/convert/formats")
+        ? json(FORMATS)
+        : path.includes("/catalog")
+          ? json(CATALOG)
+          : path.includes("/sync")
+            ? json(SYNC)
+            : json([]),
+    );
+  }) as unknown as typeof fetch;
+}
+
+const syncNow = (host: HTMLElement) =>
+  [...host.querySelectorAll("button")].find((b) =>
+    b.textContent?.includes("Sync now"),
+  )!;
+
+describe("Conversion & review keeps what it knows honest", () => {
+  test("an action that worked is not reported as failed because the re-read failed", async () => {
+    const up = { value: true };
+    // The sync request itself is answered; the reads after it are not.
+    flaky(up, () => {
+      up.value = false;
+      return json({});
+    });
+    const { host } = await render(<Workbench />);
+    await flush(80);
+    expect(host.querySelector(".pg-problem")).toBeNull();
+    await click(syncNow(host));
+    await flush(120);
+    const titles = [...host.querySelectorAll(".pg-problem__title")].map(
+      (e) => e.textContent,
+    );
+    expect(titles).not.toContain("The sync did not run");
+    expect(titles).toContain("The page could not read LEVI's state");
+  });
+
+  test("a service that stops while the page is open turns the badges to 'cannot tell'", async () => {
+    const up = { value: true };
+    // The service answers the sync request and is gone for the re-read, as
+    // when it stops while the page is open and the next poll fails.
+    flaky(up, () => {
+      up.value = false;
+      return json({});
+    });
+    const { host } = await render(<Workbench />);
+    await flush(80);
+    expect(host.textContent).toContain("Built in");
+    expect(host.textContent).toContain("Auto-sync on");
+    await click(syncNow(host));
+    await flush(120);
+    const text = host.textContent ?? "";
+    expect(text).not.toContain("Built in");
+    expect(text).not.toContain("Auto-sync on");
+    expect(text).toContain("Cannot tell right now");
+    expect(text).toContain("Auto-sync: cannot tell right now");
+    expect(syncNow(host).disabled).toBe(true);
+    expect(
+      host.querySelector(`#${syncNow(host).getAttribute("aria-describedby")}`)!
+        .textContent,
+    ).toContain("Sync is off");
+    const inspect = [...host.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Inspect input"),
+    )!;
+    expect(inspect.disabled).toBe(true);
+  });
+
+  test("a reply that is not JSON is not blamed on the conversion options", async () => {
+    const up = { value: true };
+    flaky(up, () => new Response("<html>proxy</html>", { status: 200 }));
+    const { host } = await render(<Workbench />);
+    await flush(80);
+    await click(syncNow(host));
+    await flush(80);
+    const box = host.querySelector(".pg-problem")!;
+    expect(box.querySelector(".pg-problem__title")!.textContent).toBe(
+      "The sync did not run",
+    );
+    expect(box.textContent).not.toContain("not valid JSON");
   });
 });

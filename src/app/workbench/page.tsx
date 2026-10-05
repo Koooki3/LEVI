@@ -118,6 +118,19 @@ export default function Workbench() {
     return () => clearInterval(timer);
   }, [reload, active]);
   const loading = catalog === null && !loadError;
+  // What the page shows as the service's state is only as fresh as the last
+  // read: after a failed read it is unknown, not what it was before.
+  const known = catalog !== null && !loadError;
+  const syncNow = known ? sync : null;
+  const canPlan = known && !!catalog?.conversion_available;
+  /** The advanced options box is JSON; say so when it is not. */
+  function parseOptions(text: string): unknown {
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error(t("The conversion options are not valid JSON."));
+    }
+  }
   async function action(
     fn: () => Promise<unknown>,
     what = "The request did not complete",
@@ -127,15 +140,11 @@ export default function Workbench() {
     setBusy(true);
     try {
       await fn();
-      await refresh();
+      // The action worked; a failed re-read is the load error's to report
+      // (it says the page cannot read the state), not this action's.
+      void reload();
     } catch (e) {
-      setError(
-        e instanceof SyntaxError
-          ? t("The conversion options are not valid JSON.")
-          : e instanceof Error
-            ? e.message
-            : String(e),
-      );
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -212,21 +221,21 @@ export default function Workbench() {
         <div className="pg-sync-bar">
           <Badge
             tone={
-              !sync
+              !syncNow
                 ? "neutral"
-                : sync.last_error
+                : syncNow.last_error
                   ? "danger"
-                  : sync.running
+                  : syncNow.running
                     ? "success"
                     : "warning"
             }
           >
             {t(
-              !sync
+              !syncNow
                 ? "Auto-sync: cannot tell right now"
-                : !sync.enabled
+                : !syncNow.enabled
                   ? "Auto-sync off"
-                  : sync.running
+                  : syncNow.running
                     ? "Auto-sync on"
                     : "Auto-sync paused",
             )}
@@ -237,47 +246,53 @@ export default function Workbench() {
               automatically.
             </T>
           </span>
-          {sync?.last_scan && (
+          {syncNow?.last_scan && (
             <span className="tabular">
               {t("Last checked")}{" "}
-              {new Date(sync.last_scan * 1000).toLocaleTimeString()}
+              {new Date(syncNow.last_scan * 1000).toLocaleTimeString()}
             </span>
           )}
-          {sync && sync.pending.length > 0 && (
+          {syncNow && syncNow.pending.length > 0 && (
             <span>
-              {sync.pending.length} {t("waiting for copying to finish")}
+              {syncNow.pending.length} {t("waiting for copying to finish")}
             </span>
           )}
           <Button
             size="sm"
             icon={RefreshCw}
-            disabled={busy || !catalog}
+            disabled={busy || !known}
+            aria-describedby={known ? undefined : "wb-sync-why"}
             onClick={() =>
               void action(() => leviApi("sync", {}), "The sync did not run")
             }
           >
             <T>Sync now</T>
           </Button>
+          {!known && (
+            <span id="wb-sync-why" className="pg-small">
+              {t("Sync is off until the page can read LEVI's state.")}
+            </span>
+          )}
         </div>
-        {sync?.last_error && (
+        {syncNow?.last_error && (
           <RequestProblem
             action="Auto-sync stopped on an error"
-            message={sync.last_error}
+            message={syncNow.last_error}
             fix={t("Press Sync now to try again.")}
           />
         )}
-        {sync && sync.changes.length > 0 && (
+        {syncNow && syncNow.changes.length > 0 && (
           <details className="pg-sync-changes">
             <summary className="">
-              <T>Recent workspace changes</T> ({sync.changes.length})
+              <T>Recent workspace changes</T> ({syncNow.changes.length})
             </summary>
             <ul>
-              {sync.changes.slice(0, 15).map((c) => (
+              {syncNow.changes.slice(0, 15).map((c) => (
                 <li key={`${c.time}-${c.name}-${c.kind}`}>
                   <span className="tabular">
                     {new Date(c.time * 1000).toLocaleTimeString()}
                   </span>{" "}
-                  <strong>{t(`sync.${c.kind}`)}</strong> {c.name}
+                  <strong>{t(`syncNow.${c.kind}`)}</strong> {c.name}
                   {c.detail ? ` — ${t(c.detail)}` : ""}
                 </li>
               ))}
@@ -404,7 +419,7 @@ export default function Workbench() {
           </h2>
           <Badge
             tone={
-              !catalog
+              !known || !catalog
                 ? "neutral"
                 : catalog.conversion_available
                   ? "success"
@@ -412,7 +427,7 @@ export default function Workbench() {
             }
           >
             <T>
-              {!catalog
+              {!known || !catalog
                 ? "Cannot tell right now"
                 : catalog.conversion_available
                   ? "Built in"
@@ -431,7 +446,7 @@ export default function Workbench() {
         <ConversionWizard
           jobs={jobs}
           refresh={refresh}
-          available={catalog ? !!catalog.conversion_available : null}
+          available={known && catalog ? !!catalog.conversion_available : null}
           source={source}
           onSourceChange={setSource}
         />
@@ -458,7 +473,7 @@ export default function Workbench() {
                       stage,
                       fps,
                       source_fps: sourceFps,
-                      options: JSON.parse(options),
+                      options: parseOptions(options),
                       ...(output.trim() ? { output: output.trim() } : {}),
                     }),
                   ),
@@ -545,18 +560,16 @@ export default function Workbench() {
               </label>
               <Button
                 type="submit"
-                disabled={busy || !catalog?.conversion_available}
-                aria-describedby={
-                  catalog?.conversion_available ? undefined : "wb-plan-why"
-                }
+                disabled={busy || !canPlan}
+                aria-describedby={canPlan ? undefined : "wb-plan-why"}
               >
                 <T>Preview command</T>
               </Button>
             </div>
-            {!catalog?.conversion_available && (
+            {!canPlan && (
               <p id="wb-plan-why" className="pg-small pg-mt-2">
                 {t(
-                  catalog
+                  known
                     ? "Previewing a command needs ffmpeg, which was not found."
                     : "Previewing is off until the page can read LEVI's state.",
                 )}
