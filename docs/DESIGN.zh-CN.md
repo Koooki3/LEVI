@@ -29,7 +29,7 @@
 - **组件里只用语义令牌。** 原始灰阶 `--ds-gray-l-*`、`--ds-gray-d-*` 只用来定义语义令牌。
 - **每屏一个主要按钮。** 强调色 A“石墨”是最深的灰，只用于主要按钮、焦点环、选中态和进度。正文中的链接用主文字色加下划线。
 - **状态不只靠颜色。** 状态色（成功、警告、错误、信息）只出现在徽章、状态点、Toast 和行内提示上，并且总带图标形状和文字（`Badge`、`StatusDot`）。
-- **最小字号 12 px**（`--ds-text-caption-size`）；字重只用 400、500、600。
+- **最小字号 12 px**（`--ds-text-caption-size`）；字重只用 400、500、600（`b` 和 `strong` 是半粗，不是 Tailwind 的 700）。相对字号（`em`、`%`）写成 `max(0.88em, var(--ds-text-caption-size))`，免得在小字行里算出低于 12 px；有测试查找其他写法。
 - **图标**只用 Lucide，经 `Icon` 引入（16 px 配描边 1.75；20、24 px 配 1.5）。装饰性图标 `aria-hidden`；承载含义的图标给 `label`。
 - **`title=` 不是界面。** 控件的名称、图标的含义、按钮被禁用的原因，以及一切需要人据此行动的信息，都用可见的文字、`Tooltip`（悬停和键盘焦点都会出现）或 `aria-describedby` 关联；只有图标的按钮用 `IconButton`，它必须有 `label`（即 `aria-label` 和提示文字）。原生 `title` 只允许作为补充，加在已经显示了关键内容的非交互文字上：被截断的表格单元格的全文、精确时间、id 或路径。
 - **不用 `window.confirm`。** 通过 `useConfirmAction()`（`src/components/shell/confirm.tsx`）询问，`src/` 里出现 `window.confirm` 会让测试失败；只有不可逆的操作才询问；预期内、可撤销的删除直接删除，并在 Toast 里给“撤销”。
