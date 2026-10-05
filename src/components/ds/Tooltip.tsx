@@ -12,6 +12,50 @@ import {
 import { cx } from "./internal";
 
 const OPEN_DELAY_MS = 500;
+/** A focus that follows a navigation key within this long is the keyboard's. */
+const KEYBOARD_FOCUS_MS = 600;
+const NAVIGATION_KEYS = new Set([
+  "Tab",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+]);
+
+// Focus moved by the program (a dialog or drawer putting focus on its first
+// control when it opens) must not pop a tooltip: it is not the person
+// looking at that control, and the layer's edge would cut it off. Only a
+// focus that comes right after a navigation key counts as keyboard focus;
+// a pointer press or any other key (Enter that opened the layer) does not.
+let lastNavigationKeyAt = -Infinity;
+let tracking = false;
+function trackInputModality() {
+  if (tracking || typeof document === "undefined") return;
+  tracking = true;
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      lastNavigationKeyAt = NAVIGATION_KEYS.has(event.key)
+        ? performance.now()
+        : -Infinity;
+    },
+    true,
+  );
+  document.addEventListener(
+    "pointerdown",
+    () => {
+      lastNavigationKeyAt = -Infinity;
+    },
+    true,
+  );
+}
+function focusIsFromKeyboard(): boolean {
+  return performance.now() - lastNavigationKeyAt < KEYBOARD_FOCUS_MS;
+}
 
 type TriggerProps = {
   "aria-describedby"?: string;
@@ -19,7 +63,8 @@ type TriggerProps = {
 
 /**
  * A tooltip that keyboard users see too: it opens on hover (after 0.5 s) and
- * at once on keyboard focus, closes on pointer leave, focus loss and Escape. Use it instead
+ * at once on keyboard focus (a Tab or arrow key moved it; not a focus the
+ * program set, e.g. a dialog's first control), closes on pointer leave, focus loss and Escape. Use it instead
  * of `title=`. The trigger gets `aria-describedby` unless `describe` is false
  * (for an icon button whose tooltip repeats its `aria-label`).
  */
@@ -46,6 +91,7 @@ export function Tooltip({
     timer.current = null;
   };
   useEffect(() => clear, []);
+  useEffect(() => trackInputModality(), []);
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
@@ -79,8 +125,9 @@ export function Tooltip({
       }}
       onFocus={() => {
         clear();
-        // Only keyboard focus opens it: a click should not pop the tooltip.
-        if (!pointerDown.current) setOpen(true);
+        // Only keyboard focus opens it: not a click, not a focus the program
+        // moved (see focusIsFromKeyboard).
+        if (!pointerDown.current && focusIsFromKeyboard()) setOpen(true);
         pointerDown.current = false;
       }}
       onBlur={() => {

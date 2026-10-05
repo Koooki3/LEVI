@@ -143,7 +143,11 @@ export function ReorderList<T>({
     );
   };
   return (
-    <MotionConfig reducedMotion={forced ? "always" : "user"}>
+    <MotionConfig
+      reducedMotion={
+        forced === true ? "always" : forced === false ? "never" : "user"
+      }
+    >
       <div className={cx("ds-reorder", className)}>
         <p id={helpId} className="ds-sr-only">
           {t("Drag the handle, or focus it and press the up and down arrows.")}
