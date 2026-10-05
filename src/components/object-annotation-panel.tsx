@@ -1035,7 +1035,6 @@ export default function ObjectAnnotationPanel({
                 content={t(
                   "Uses the configured CUDA worker and 1038lab/sam3 checkpoint",
                 )}
-                describe={false}
               >
                 <Button
                   variant="primary"
@@ -1043,7 +1042,9 @@ export default function ObjectAnnotationPanel({
                   icon={Play}
                   onClick={() => void runSam3Annotation()}
                   disabled={busy || !!runBlocked}
-                  aria-describedby={runBlocked ? "oa-run-reason" : undefined}
+                  aria-describedby={
+                    runBlocked && !busy ? "oa-run-reason" : undefined
+                  }
                 >
                   {t("Run SAM3 annotation")}
                 </Button>

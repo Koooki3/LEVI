@@ -943,7 +943,9 @@ export default function FastSegmentationPanel({
                 disabled={!!liveBusy || (!liveOn && !!liveBlocked)}
                 aria-pressed={liveOn}
                 aria-describedby={
-                  !liveOn && liveBlocked ? "fast-seg-live-reason" : undefined
+                  !liveOn && liveBlocked && !liveBusy
+                    ? "fast-seg-live-reason"
+                    : undefined
                 }
               >
                 {liveBusy === "starting"
@@ -1110,7 +1112,9 @@ export default function FastSegmentationPanel({
                 onClick={() => void startLabel()}
                 disabled={labelActive || labelBusy || !!labelBlocked}
                 aria-describedby={
-                  labelBlocked ? "fast-seg-label-reason" : undefined
+                  labelBlocked && !labelActive && !labelBusy
+                    ? "fast-seg-label-reason"
+                    : undefined
                 }
               >
                 {t("Start labelling")}
@@ -1242,7 +1246,9 @@ export default function FastSegmentationPanel({
                 onClick={() => void startDistil()}
                 disabled={distilActive || distilBusy || !!distilBlocked}
                 aria-describedby={
-                  distilBlocked ? "fast-seg-distil-reason" : undefined
+                  distilBlocked && !distilActive && !distilBusy
+                    ? "fast-seg-distil-reason"
+                    : undefined
                 }
               >
                 {t("Start distillation")}

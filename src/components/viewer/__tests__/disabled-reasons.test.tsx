@@ -49,9 +49,12 @@ describe("a disabled button says why, on screen", () => {
     )!;
     expect(run.disabled).toBe(true);
     // The reason is a visible element, and the old title-only hint is gone.
-    expect(described(host, run)).toBe(
+    // Both the reason and the tooltip text are part of its description.
+    const description = described(host, run);
+    expect(description).toContain(
       "Complete Hub access, worker and checkpoint setup above.",
     );
+    expect(description).toContain("1038lab/sam3");
     expect(run.hasAttribute("title")).toBe(false);
     expect(run.closest("[title]")).toBeNull();
     // The explanation of what Run uses is a ds tooltip (role=tooltip).
