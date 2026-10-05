@@ -1,6 +1,13 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { Eye, Pause, Play, RefreshCw, Send, X } from "lucide-react";
 import { useLocale } from "./levi-locale";
+import { Button, Card, Field, Input, StatusDot } from "@/components/ds";
+import {
+  HumanActionMark,
+  RequestProblem,
+} from "@/components/pages-ui/feedback";
+import { Actions, Disclosure, GatedButton, Hint } from "./agent-ui";
 
 type Event = {
   seq: number;
@@ -153,171 +160,212 @@ export default function AgentPilot({
   }
   const active = sessions.find((s) => s.connection !== "disconnected");
   return (
-    <section className="levi-pilot" aria-label={t("Pilot activity")}>
-      <header>
-        <h3>{t("Pilot activity")}</h3>
-        <span>{t(connected ? "Live" : "Reconnecting / replay")}</span>
-      </header>
-      <p>
-        {t(
-          runtime
-            ? "Managed session: public runtime events and LEVI actions"
-            : "API or external session: LEVI actions and artifacts",
-        )}
-      </p>
-      {runtime && (
-        <button
-          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-          disabled={!!active || !approved}
-          onClick={() =>
-            void act("/pilot/sessions", { run_id: runId, runtime })
-          }
-        >
-          {t("Start Pilot")}: {runtime}
-        </button>
-      )}
-      {sessions.map((s) => (
-        <div key={s.id} className="levi-pilot-session">
-          <strong>{s.runtime}</strong> · {t(s.state)} · {t(s.connection)} ·{" "}
-          {s.turns} {t("turns")}
-          {s.reason && <p role="status">{s.reason}</p>}
-          {s.connection !== "disconnected" ? (
-            <>
-              <button
-                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                onClick={() => void act(`/pilot/sessions/${s.id}/pause`)}
-              >
-                {t("Take over / pause")}
-              </button>
-              <button
-                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                onClick={() => void act(`/pilot/sessions/${s.id}/cancel`)}
-              >
-                {t("Cancel")}
-              </button>
-            </>
-          ) : (
-            <button
-              className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-              onClick={() => void act(`/pilot/sessions/${s.id}/resume`)}
-            >
-              {t("Resume from task state")}
-            </button>
+    <Card
+      padding="compact"
+      className="ag-pilot"
+      aria-label={t("Pilot activity")}
+      title={t("Pilot activity")}
+      actions={
+        <StatusDot tone={connected ? "info" : "neutral"} live={connected}>
+          {t(connected ? "Live" : "Reconnecting / replay")}
+        </StatusDot>
+      }
+    >
+      <div className="ag-stack">
+        <p className="ag-muted">
+          {t(
+            runtime
+              ? "Managed session: public runtime events and LEVI actions"
+              : "API or external session: LEVI actions and artifacts",
           )}
-        </div>
-      ))}
-      {active && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void act(`/pilot/sessions/${active.id}/message`, { text });
-            setText("");
-          }}
-        >
-          <label>
-            {t("Message Pilot")}
-            <input
-              className="ds-input ds-focus"
-              value={text}
-              maxLength={12000}
-              onChange={(e) => setText(e.target.value)}
-            />
-          </label>
-          <button
-            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-            disabled={!text.trim()}
-          >
-            {t("Send")}
-          </button>
-        </form>
-      )}
-      {permissions.map((p) => (
-        <div key={p.id}>
-          <strong>
-            {t("Runtime permission")}: {p.tool}
-          </strong>
-          {p.options.map((o) => (
-            <button
-              className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-              key={o.optionId}
+        </p>
+        {runtime && (
+          <Actions>
+            <GatedButton
+              size="sm"
+              icon={Play}
+              reason={
+                active
+                  ? t("A Pilot session is already running for this task.")
+                  : !approved
+                    ? t("Approve the execution plan before you start a Pilot.")
+                    : null
+              }
               onClick={() =>
-                void act(`/pilot/permissions/${p.id}`, {
-                  option_id: o.optionId,
-                })
+                void act("/pilot/sessions", { run_id: runId, runtime })
               }
             >
-              {o.name}
-            </button>
-          ))}
-        </div>
-      ))}
-      <p>
-        {t(
-          "Following pauses while draft edits are unsaved. Runtime usage may be unknown.",
+              {t("Start Pilot")}: {runtime}
+            </GatedButton>
+          </Actions>
         )}
-      </p>
-      <ol className="levi-pilot-events" aria-live="polite">
-        {events.map((e) => (
-          <li key={e.seq}>
-            <small>
-              #{e.seq} · {e.session_id ? t("Runtime") : t("LEVI core")}
-            </small>
-            <strong>{e.tool || t(e.type)}</strong>
-            {e.state && <span> · {t(e.state)}</span>}
-            {e.elapsed_seconds !== undefined && (
-              <span> · {e.elapsed_seconds.toFixed(2)}s</span>
-            )}
-            {e.activity !== undefined && (
-              <details>
-                <summary>{t("Details")}</summary>
-                <pre>{JSON.stringify(e.activity, null, 2)}</pre>
-              </details>
-            )}
-          </li>
-        ))}
-      </ol>
-      <button
-        className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-        onClick={() => {
-          void request<typeof manifest>(`/runs/${runId}/manifest`)
-            .then(setManifest)
-            .catch((e) => setError(String(e)));
-        }}
-      >
-        {t("Refresh artifact manifest")}
-      </button>
-      {manifest && (
-        <div>
-          <p>{t(manifest.status)}</p>
-          <ul>
-            {manifest.artifacts.map((a) => (
-              <li key={a.path}>
-                <code>{a.path}</code> · {a.bytes} B
-                {a.evidence && (
-                  <button
-                    className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                    disabled={edited}
-                    onClick={() =>
-                      window.dispatchEvent(
-                        new CustomEvent("levi-agent-seek", {
-                          detail: {
-                            ...a.evidence,
-                            repo_id: repo,
-                            follow: true,
-                          },
-                        }),
-                      )
-                    }
+        {sessions.map((s) => (
+          <div key={s.id} className="ag-stack">
+            <p>
+              <strong>{s.runtime}</strong> · {t(s.state)} · {t(s.connection)} ·{" "}
+              {s.turns} {t("turns")}
+            </p>
+            {s.reason && <p role="status">{s.reason}</p>}
+            <Actions>
+              {s.connection !== "disconnected" ? (
+                <>
+                  <Button
+                    size="sm"
+                    icon={Pause}
+                    onClick={() => void act(`/pilot/sessions/${s.id}/pause`)}
                   >
-                    {t("View evidence")}
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {error && <p role="alert">{error}</p>}
-    </section>
+                    {t("Take over / pause")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    icon={X}
+                    onClick={() => void act(`/pilot/sessions/${s.id}/cancel`)}
+                  >
+                    {t("Cancel")}
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  size="sm"
+                  icon={Play}
+                  onClick={() => void act(`/pilot/sessions/${s.id}/resume`)}
+                >
+                  {t("Resume from task state")}
+                </Button>
+              )}
+            </Actions>
+          </div>
+        ))}
+        {active && (
+          <form
+            className="ag-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void act(`/pilot/sessions/${active.id}/message`, { text });
+              setText("");
+            }}
+          >
+            <Field label={t("Message Pilot")}>
+              <Input
+                value={text}
+                maxLength={12000}
+                onChange={(e) => setText(e.target.value)}
+              />
+            </Field>
+            <Actions>
+              <GatedButton
+                type="submit"
+                size="sm"
+                icon={Send}
+                reason={!text.trim() ? t("Write a message to send it.") : null}
+              >
+                {t("Send")}
+              </GatedButton>
+            </Actions>
+          </form>
+        )}
+        {permissions.map((p) => (
+          <div key={p.id} className="ag-stack">
+            <strong>
+              {t("Runtime permission")}: {p.tool}
+            </strong>
+            <Actions>
+              <HumanActionMark />
+              {p.options.map((o) => (
+                <Button
+                  size="sm"
+                  key={o.optionId}
+                  onClick={() =>
+                    void act(`/pilot/permissions/${p.id}`, {
+                      option_id: o.optionId,
+                    })
+                  }
+                >
+                  {o.name}
+                </Button>
+              ))}
+            </Actions>
+          </div>
+        ))}
+        <Hint>
+          {t(
+            "Following pauses while draft edits are unsaved. Runtime usage may be unknown.",
+          )}
+        </Hint>
+        <ol className="ag-pilot-events" aria-live="polite">
+          {events.map((e) => (
+            <li key={e.seq}>
+              <small>
+                #{e.seq} · {e.session_id ? t("Runtime") : t("LEVI core")}
+              </small>
+              <strong>{e.tool || t(e.type)}</strong>
+              {e.state && <span> · {t(e.state)}</span>}
+              {e.elapsed_seconds !== undefined && (
+                <span> · {e.elapsed_seconds.toFixed(2)}s</span>
+              )}
+              {e.activity !== undefined && (
+                <Disclosure summary={t("Details")}>
+                  <pre className="ag-pre">
+                    {JSON.stringify(e.activity, null, 2)}
+                  </pre>
+                </Disclosure>
+              )}
+            </li>
+          ))}
+        </ol>
+        <Actions>
+          <Button
+            size="sm"
+            icon={RefreshCw}
+            onClick={() => {
+              void request<typeof manifest>(`/runs/${runId}/manifest`)
+                .then(setManifest)
+                .catch((e) => setError(String(e)));
+            }}
+          >
+            {t("Refresh artifact manifest")}
+          </Button>
+        </Actions>
+        {manifest && (
+          <div className="ag-stack">
+            <p>{t(manifest.status)}</p>
+            <ul className="ag-list ag-list--rows">
+              {manifest.artifacts.map((a) => (
+                <li key={a.path}>
+                  <code>{a.path}</code> · {a.bytes} B
+                  {a.evidence && (
+                    <GatedButton
+                      size="sm"
+                      icon={Eye}
+                      reason={
+                        edited
+                          ? t("Save your draft edits before you view evidence.")
+                          : null
+                      }
+                      onClick={() =>
+                        window.dispatchEvent(
+                          new CustomEvent("levi-agent-seek", {
+                            detail: {
+                              ...a.evidence,
+                              repo_id: repo,
+                              follow: true,
+                            },
+                          }),
+                        )
+                      }
+                    >
+                      {t("View evidence")}
+                    </GatedButton>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {error && (
+          <RequestProblem action="The Pilot request failed" message={error} />
+        )}
+      </div>
+    </Card>
   );
 }

@@ -121,12 +121,13 @@ export function useFormatDescription(format: DatasetFormat | undefined) {
 
 const FORMAT_TONE: Record<string, Tone> = {
   pass: "neutral",
-  warn: "warning",
+  // A raw capture is a fact about the data, not a problem: info, not warning.
+  warn: "info",
   fail: "danger",
   "": "neutral",
 };
 
-/** The format as a ds badge (raw captures: warning, a failed view: danger,
+/** The format as a ds badge (raw captures: info, a failed view: danger,
  * converted and registered datasets: neutral) with its detail lines. The same
  * look on every page, the episode viewer's raw-capture notice included. */
 export function DatasetFormatBadge({

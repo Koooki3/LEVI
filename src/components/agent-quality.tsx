@@ -1,6 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
+import { Gauge } from "lucide-react";
 import { T, useLocale } from "./levi-locale";
+import { Note } from "@/components/pages-ui/feedback";
+import { Disclosure, Hint } from "./agent-ui";
 type Report = {
   episode: number;
   uncovered_intervals: [number, number][];
@@ -44,39 +47,46 @@ export default function AgentQuality({
   }, [runId, revision]);
   return (
     <T>
-      <details className="levi-review-queue" open>
-        <summary>Coverage and uncertainty</summary>
-        <p>
-          Uncovered time is not evidence of inactivity. Review short events
-          between samples.
-        </p>
-        {error && (
-          <p role="alert">
-            Quality report unavailable; validate before approval.
-          </p>
-        )}
-        {reports.map((row) => (
-          <div key={row.episode}>
-            <strong>
-              <T>Episode</T> {row.episode}
-            </strong>
-            <p>
-              <T>Uncovered intervals</T>:{" "}
-              {row.uncovered_intervals
-                .map(([a, b]) => `${a.toFixed(3)}–${b.toFixed(3)} s`)
-                .join(", ") || t("None reported")}
-            </p>
-            <ul>
-              {row.warnings.map((w, i) => (
-                <li key={i}>
-                  #{w.proposal + 1} · {t(w.reason)}{" "}
-                  {w.boundary !== undefined ? `${w.boundary.toFixed(3)} s` : ""}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </details>
+      <Disclosure
+        defaultOpen
+        icon={Gauge}
+        summary={t("Coverage and uncertainty")}
+      >
+        <div className="ag-stack">
+          <Hint>
+            Uncovered time is not evidence of inactivity. Review short events
+            between samples.
+          </Hint>
+          {error && (
+            <Note tone="warning" role="alert">
+              Quality report unavailable; validate before approval.
+            </Note>
+          )}
+          {reports.map((row) => (
+            <div key={row.episode} className="ag-stack">
+              <strong>
+                <T>Episode</T> {row.episode}
+              </strong>
+              <p>
+                <T>Uncovered intervals</T>:{" "}
+                {row.uncovered_intervals
+                  .map(([a, b]) => `${a.toFixed(3)}–${b.toFixed(3)} s`)
+                  .join(", ") || t("None reported")}
+              </p>
+              <ul className="ag-list">
+                {row.warnings.map((w, i) => (
+                  <li key={i}>
+                    #{w.proposal + 1} · {t(w.reason)}{" "}
+                    {w.boundary !== undefined
+                      ? `${w.boundary.toFixed(3)} s`
+                      : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </Disclosure>
     </T>
   );
 }

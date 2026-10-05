@@ -164,10 +164,16 @@ export const DraggablePopup: React.FC<DraggablePopupProps> = ({
       <div
         className="quick-popup-head quick-popup-drag-handle"
         onPointerDown={beginDrag}
-        title={t("Drag to move")}
       >
         {header}
-        <span className="quick-popup-grip" aria-hidden="true">
+        {/* Dragging is pointer-only, so the hint is visible text and the grip
+            is decoration. */}
+        <span
+          className="quick-popup-grip"
+          aria-hidden="true"
+          style={{ alignItems: "center", gap: "var(--ds-space-1)" }}
+        >
+          <span>{t("Drag to move")}</span>
           <Icon icon={GripVertical} />
         </span>
       </div>

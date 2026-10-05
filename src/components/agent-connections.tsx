@@ -4,7 +4,23 @@ import { useAuth } from "@/context/auth-context";
 import OllamaRuntime from "./ollama-runtime";
 import OllamaModels from "./ollama-models";
 import HfAuthButton from "./hf-auth-button";
+import {
+  Check,
+  Cloud,
+  Cpu,
+  KeyRound,
+  Pencil,
+  Plug,
+  Server,
+  Trash2,
+  Unplug,
+  UserRound,
+} from "lucide-react";
 import { T, useLocale } from "./levi-locale";
+import { Badge, Button, Card, Field, Input, type Tone } from "@/components/ds";
+import { RequestProblem } from "@/components/pages-ui/feedback";
+import { useConfirmAction } from "./shell/confirm";
+import { Actions, ConnectionHead, GatedButton, Hint } from "./agent-ui";
 
 export type Connection = {
   kind?: "openai-compatible" | "ollama" | "openai-local";
@@ -76,11 +92,11 @@ export default function AgentConnections({
   }, []);
   const { oauth } = useAuth();
   const { t } = useLocale();
+  const confirm = useConfirmAction();
   const [credentialFor, setCredentialFor] = useState<string | null>(null);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [remove, setRemove] = useState<string | null>(null);
   async function action(name: string, operation: string, body?: unknown) {
     setBusy(true);
     setError("");
@@ -99,7 +115,6 @@ export default function AgentConnections({
       }
       setKey("");
       setCredentialFor(null);
-      setRemove(null);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -107,221 +122,222 @@ export default function AgentConnections({
       setBusy(false);
     }
   }
+  async function remove(name: string) {
+    // The configuration goes, the task history stays: ask before it goes.
+    const yes = await confirm({
+      title: t("Remove this configuration?"),
+      description: `${name} · ${t("Existing task history will be preserved.")}`,
+      confirmLabel: t("Remove configuration"),
+      tone: "danger",
+    });
+    if (yes) await action(name, "");
+  }
+  const providerStatus = (p: Connection): { tone: Tone; text: string } =>
+    !p.enabled
+      ? { tone: "neutral", text: "Disconnected" }
+      : p.credential_ready
+        ? { tone: "success", text: "Configured" }
+        : { tone: "warning", text: "Credential missing" };
+  const externalStatus = (): { tone: Tone; text: string } =>
+    !external?.enabled
+      ? { tone: "neutral", text: "Disconnected" }
+      : external.live
+        ? { tone: "success", text: "Connected" }
+        : external.grants?.length
+          ? { tone: "info", text: "Waiting for the agent to call" }
+          : external.configured
+            ? { tone: "success", text: "Configured" }
+            : { tone: "neutral", text: "Disconnected" };
+  const ext = externalStatus();
   return (
     <T>
-      <section className="levi-connections" aria-label="Accounts & connections">
-        <h3>Accounts & connections</h3>
+      <section className="ag-section" aria-label={t("Accounts & connections")}>
+        <h3>{t("Accounts & connections")}</h3>
         {error && (
-          <p role="alert" className="levi-agent-error">
-            {error}
-          </p>
+          <RequestProblem
+            action="The connection was not updated"
+            message={error}
+          />
         )}
-        <article className="levi-connection-card">
-          <div className="levi-connection-title">
-            <span className="levi-connection-avatar">HF</span>
-            <div>
-              <strong>Hugging Face</strong>
-              <p>
-                {oauth
-                  ? oauth.userInfo?.preferred_username || oauth.userInfo?.name
-                  : t("Signed out")}
-              </p>
-            </div>
-            <span className={`levi-connection-status ${oauth ? "ready" : ""}`}>
-              {t(oauth ? "Signed in" : "Signed out")}
-            </span>
-          </div>
-          <p className="levi-agent-muted">
+        <Card padding="compact" className="ag-conn">
+          <ConnectionHead
+            icon={UserRound}
+            title="Hugging Face"
+            subtitle={
+              oauth
+                ? oauth.userInfo?.preferred_username || oauth.userInfo?.name
+                : t("Signed out")
+            }
+            status={
+              <Badge tone={oauth ? "success" : "neutral"}>
+                {t(oauth ? "Signed in" : "Signed out")}
+              </Badge>
+            }
+          />
+          <Hint>
             Dataset and checkpoint access. This account does not grant Agent
             commit permissions.
-          </p>
-          <div className="levi-agent-actions">
+          </Hint>
+          <Actions>
             <HfAuthButton variant="ghost" />
-          </div>
-        </article>
+          </Actions>
+        </Card>
         <OllamaRuntime
           configured={refresh}
           connectionExists={providers.some((p) => p.name === "ollama-managed")}
         />
-        {providers.map((p) => (
-          <article
-            key={p.name}
-            className={`levi-connection-card ${p.name === selected ? "selected" : ""}`}
-          >
-            <div className="levi-connection-title">
-              <span className="levi-connection-avatar">
-                {p.name.slice(0, 2).toUpperCase()}
-              </span>
-              <div>
-                <strong>{p.name}</strong>
-                <p>{p.model}</p>
-              </div>
-              <span
-                className={`levi-connection-status ${p.enabled && p.credential_ready ? "ready" : ""}`}
-              >
-                {t(
-                  !p.enabled
-                    ? "Disconnected"
-                    : p.credential_ready
-                      ? "Configured"
-                      : "Credential missing",
-                )}
-              </span>
-            </div>
-            <p className="levi-agent-endpoint">{p.base_url}</p>
-            <p className="levi-agent-muted">
-              {t(p.vision ? "Image + text" : "Text only")} ·{" "}
-              {t(
-                p.credential_source === "not_required"
-                  ? "No API key required"
-                  : p.credential_source === "session"
-                    ? "Session credential"
-                    : p.credential_source === "environment"
-                      ? "Environment credential"
-                      : "Credential missing",
-              )}
-            </p>
-            <div className="levi-agent-actions">
-              <button
-                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                disabled={busy || !p.enabled}
-                aria-pressed={selected === p.name}
-                onClick={() => select(p.name)}
-              >
-                {t(selected === p.name ? "Selected" : "Use this model")}
-              </button>
-              <button
-                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                disabled={busy}
-                onClick={() => edit(p)}
-              >
-                Edit configuration
-              </button>
-              {p.kind !== "ollama" && (
-                <button
-                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                  disabled={busy}
-                  onClick={() => {
-                    setCredentialFor(p.name);
-                    setKey("");
-                  }}
-                >
-                  {t("Set session credential")}
-                </button>
-              )}
-              <button
-                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                disabled={busy}
-                onClick={() =>
-                  void action(p.name, p.enabled ? "disconnect" : "activate")
-                }
-              >
-                {t(p.enabled ? "Disconnect" : "Reconnect")}
-              </button>
-              <button
-                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                disabled={busy}
-                onClick={() => setRemove(p.name)}
-              >
-                Remove configuration
-              </button>
-            </div>
-            {(p.kind === "ollama" || p.kind === "openai-local") && (
-              <OllamaModels connection={p} refresh={refresh} />
-            )}
-            {credentialFor === p.name && (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void action(p.name, "session", { key });
-                }}
-              >
-                <label>
-                  Session API key
-                  <input
-                    className="ds-input ds-focus"
-                    type="password"
-                    autoComplete="off"
-                    value={key}
-                    onChange={(e) => setKey(e.target.value)}
-                    required
-                  />
-                </label>
-                <p className="levi-agent-muted">
-                  Held in server memory only; cleared on disconnect or restart.
-                </p>
-                <button
-                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                  disabled={busy}
-                >
-                  Save session credential
-                </button>
-                <button
-                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                  type="button"
-                  onClick={() => {
-                    setCredentialFor(null);
-                    setKey("");
-                  }}
-                >
-                  Cancel
-                </button>
-              </form>
-            )}
-            {remove === p.name && (
-              <div role="alert">
-                <p>
-                  Remove this configuration? Existing task history will be
-                  preserved.
-                </p>
-                <button
-                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                  disabled={busy}
-                  onClick={() => void action(p.name, "")}
-                >
-                  Remove configuration
-                </button>
-                <button
-                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                  onClick={() => setRemove(null)}
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-          </article>
-        ))}
-        <article className="levi-connection-card">
-          <div className="levi-connection-title">
-            <span className="levi-connection-avatar">MCP</span>
-            <strong>External Agent</strong>
-            <span
-              className={`levi-connection-status ${external?.configured && external.enabled ? "ready" : ""}`}
+        {providers.map((p) => {
+          const status = providerStatus(p);
+          return (
+            <Card
+              key={p.name}
+              padding="compact"
+              className={`ag-conn ${p.name === selected ? "is-selected" : ""}`}
             >
-              {t(
-                !external?.enabled
-                  ? "Disconnected"
-                  : external.live
-                    ? "Connected"
-                    : external.grants?.length
-                      ? "Waiting for the agent to call"
-                      : external.configured
-                        ? "Configured"
-                        : "Disconnected",
+              <ConnectionHead
+                icon={p.kind === "openai-compatible" ? Cloud : Cpu}
+                title={p.name}
+                subtitle={p.model}
+                status={<Badge tone={status.tone}>{t(status.text)}</Badge>}
+              />
+              <p className="ag-endpoint">{p.base_url}</p>
+              <p className="ag-muted">
+                {t(p.vision ? "Image + text" : "Text only")} ·{" "}
+                {t(
+                  p.credential_source === "not_required"
+                    ? "No API key required"
+                    : p.credential_source === "session"
+                      ? "Session credential"
+                      : p.credential_source === "environment"
+                        ? "Environment credential"
+                        : "Credential missing",
+                )}
+              </p>
+              <Actions>
+                <GatedButton
+                  size="sm"
+                  icon={selected === p.name ? Check : undefined}
+                  aria-pressed={selected === p.name}
+                  disabled={busy}
+                  reason={
+                    !p.enabled
+                      ? t("Reconnect this model before you use it.")
+                      : null
+                  }
+                  onClick={() => select(p.name)}
+                >
+                  {t(selected === p.name ? "Selected" : "Use this model")}
+                </GatedButton>
+                <Button
+                  size="sm"
+                  icon={Pencil}
+                  disabled={busy}
+                  onClick={() => edit(p)}
+                >
+                  {t("Edit configuration")}
+                </Button>
+                {p.kind !== "ollama" && (
+                  <Button
+                    size="sm"
+                    icon={KeyRound}
+                    disabled={busy}
+                    onClick={() => {
+                      setCredentialFor(p.name);
+                      setKey("");
+                    }}
+                  >
+                    {t("Set session credential")}
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  icon={p.enabled ? Unplug : Plug}
+                  disabled={busy}
+                  onClick={() =>
+                    void action(p.name, p.enabled ? "disconnect" : "activate")
+                  }
+                >
+                  {t(p.enabled ? "Disconnect" : "Reconnect")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="ag-danger"
+                  icon={Trash2}
+                  disabled={busy}
+                  onClick={() => void remove(p.name)}
+                >
+                  {t("Remove configuration")}
+                </Button>
+              </Actions>
+              {(p.kind === "ollama" || p.kind === "openai-local") && (
+                <OllamaModels connection={p} refresh={refresh} />
               )}
-            </span>
-          </div>
-          <p className="levi-agent-muted">
+              {credentialFor === p.name && (
+                <form
+                  className="ag-form"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void action(p.name, "session", { key });
+                  }}
+                >
+                  <Field
+                    label={t("Session API key")}
+                    hint={t(
+                      "Held in server memory only; cleared on disconnect or restart.",
+                    )}
+                    required
+                  >
+                    <Input
+                      type="password"
+                      autoComplete="off"
+                      value={key}
+                      onChange={(e) => setKey(e.target.value)}
+                    />
+                  </Field>
+                  <Actions>
+                    <Button
+                      type="submit"
+                      size="sm"
+                      variant="primary"
+                      loading={busy}
+                    >
+                      {t("Save session credential")}
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setCredentialFor(null);
+                        setKey("");
+                      }}
+                    >
+                      {t("Cancel")}
+                    </Button>
+                  </Actions>
+                </form>
+              )}
+            </Card>
+          );
+        })}
+        <Card padding="compact" className="ag-conn">
+          <ConnectionHead
+            icon={Server}
+            title={t("External Agent")}
+            status={<Badge tone={ext.tone}>{t(ext.text)}</Badge>}
+          />
+          <Hint>
             External credentials and dataset scopes are server-managed. HF login
             does not change these permissions.
-          </p>
+          </Hint>
           {external?.datasets?.length ? (
-            <p>{external.datasets.join(" · ")}</p>
+            <p className="ag-endpoint">{external.datasets.join(" · ")}</p>
           ) : (
-            <p>No external dataset scope configured.</p>
+            <p className="ag-muted">
+              {t("No external dataset scope configured.")}
+            </p>
           )}
           {external?.grants?.map((grant) => (
-            <p key={grant.id} className="levi-agent-muted">
+            <p key={grant.id} className="ag-muted">
               {t("Scoped connection")} · {grant.calls} {t("calls")} ·{" "}
               {grant.expires_in_seconds == null
                 ? t("no expiry — until you disconnect")
@@ -334,38 +350,46 @@ export default function AgentConnections({
                 }`}
             </p>
           ))}
-          <button
-            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-            disabled={busy || !external?.configured}
-            onClick={async () => {
-              if (!external) return;
-              setBusy(true);
-              setError("");
-              try {
-                const response = await fetch(
-                  "/api/levi/agent/v1/connections/external",
-                  {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ enabled: !external.enabled }),
-                  },
-                );
-                if (!response.ok) throw new Error("Connection update failed");
-                setExternal({ ...external, enabled: !external.enabled });
-              } catch (e) {
-                setError(String(e));
-              } finally {
-                setBusy(false);
+          <Actions>
+            <GatedButton
+              size="sm"
+              icon={external?.enabled ? Unplug : Plug}
+              disabled={busy}
+              reason={
+                !external?.configured
+                  ? t("No external connection is configured on the server yet.")
+                  : null
               }
-            }}
-          >
-            {t(
-              external?.enabled
-                ? "Disconnect external Agent"
-                : "Reconnect external Agent",
-            )}
-          </button>
-        </article>
+              onClick={async () => {
+                if (!external) return;
+                setBusy(true);
+                setError("");
+                try {
+                  const response = await fetch(
+                    "/api/levi/agent/v1/connections/external",
+                    {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ enabled: !external.enabled }),
+                    },
+                  );
+                  if (!response.ok) throw new Error("Connection update failed");
+                  setExternal({ ...external, enabled: !external.enabled });
+                } catch (e) {
+                  setError(String(e));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {t(
+                external?.enabled
+                  ? "Disconnect external Agent"
+                  : "Reconnect external Agent",
+              )}
+            </GatedButton>
+          </Actions>
+        </Card>
       </section>
     </T>
   );

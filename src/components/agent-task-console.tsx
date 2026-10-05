@@ -5,7 +5,23 @@ import {
   removeBrowserStorage,
   writeBrowserStorage,
 } from "@/utils/browserStorage";
+import { Check, ChevronsRight, RefreshCw, Sparkles } from "lucide-react";
 import { T, useLocale } from "./levi-locale";
+import {
+  Badge,
+  Button,
+  Field,
+  Select,
+  Table,
+  Textarea,
+  TableRow,
+} from "@/components/ds";
+import {
+  HumanActionMark,
+  Note,
+  RequestProblem,
+} from "@/components/pages-ui/feedback";
+import { Actions, Disclosure, GatedButton } from "./agent-ui";
 
 // The task this viewer last worked on: closing the panel or reloading the
 // page must not lose a task that is still running.
@@ -111,159 +127,177 @@ export default function AgentTaskConsole({
 
   if (!local.length)
     return (
-      <p className="levi-agent-muted">
+      <Note tone="info">
         <T>
           Configure and bind a local model (Ollama or a local server) to
           describe tasks in words.
         </T>
-      </p>
+      </Note>
     );
   return (
-    <details open>
-      <summary>
-        <T>Describe a task in words</T>
-      </summary>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void act(() =>
-            call<Task>("tasks.interpret", {
-              text,
-              provider: provider || local[0].name,
-              supervision: teacherGrant ? supervision : "none",
-              teacher_grant: teacherGrant || null,
-            }),
-          );
-        }}
-      >
-        <label>
-          <T>Local model</T>
-          <select
-            className="ds-input ds-focus"
-            value={provider}
-            onChange={(e) => setProvider(e.target.value)}
-          >
-            {local.map((p) => (
-              <option key={p.name} value={p.name}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <T>Request</T>
-          <textarea
-            className="ds-input ds-textarea ds-focus"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder={t("TASK_REQUEST_EXAMPLE")}
-          />
-        </label>
-        <button
-          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-          disabled={busy || text.trim().length < 3}
+    <Disclosure
+      defaultOpen
+      icon={Sparkles}
+      summary={t("Describe a task in words")}
+    >
+      <div className="ag-stack">
+        <form
+          className="ag-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void act(() =>
+              call<Task>("tasks.interpret", {
+                text,
+                provider: provider || local[0].name,
+                supervision: teacherGrant ? supervision : "none",
+                teacher_grant: teacherGrant || null,
+              }),
+            );
+          }}
         >
-          <T>{busy ? "Working…" : "Interpret"}</T>
-        </button>
-      </form>
-      {error && (
-        <p role="alert" className="levi-error">
-          {error}
-        </p>
-      )}
-      {task && (
-        <div aria-live="polite">
-          <p>
-            <strong>{task.id}</strong> · <T>{task.status}</T> ·{" "}
-            <T>interpretation</T>: {task.interpretation.tokens ?? "?"} tokens (
-            {task.interpretation.token_source}), {task.interpretation.seconds}s
-          </p>
-          {task.problems.length > 0 && (
-            <ul className="levi-error">
-              {task.problems.map((p) => (
-                <li key={p}>{p}</li>
+          <Field label={t("Local model")}>
+            <Select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+            >
+              {local.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                </option>
               ))}
-            </ul>
-          )}
-          <pre className="levi-agent-json">
-            {JSON.stringify(task.spec, null, 2)}
-          </pre>
-          <div className="levi-agent-actions">
-            {task.status === "awaiting_approval" && (
-              <button
-                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                disabled={busy}
-                onClick={() =>
-                  void act(() =>
-                    call<Task>("tasks.approve", { task_id: task.id }),
-                  )
-                }
-              >
-                <T>Approve this task</T>
-              </button>
-            )}
-            {["approved", "running"].includes(task.status) && (
-              <button
-                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                disabled={busy}
-                onClick={() =>
-                  void act(() =>
-                    call<Task>("tasks.advance", { task_id: task.id }),
-                  )
-                }
-              >
-                <T>Continue</T>
-              </button>
-            )}
-            <button
-              className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-              disabled={busy}
-              onClick={() =>
-                void act(() => call<Task>("tasks.get", { task_id: task.id }))
+            </Select>
+          </Field>
+          <Field label={t("Request")}>
+            <Textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={t("TASK_REQUEST_EXAMPLE")}
+            />
+          </Field>
+          <Actions>
+            <GatedButton
+              type="submit"
+              size="sm"
+              loading={busy}
+              reason={
+                text.trim().length < 3
+                  ? t("Write at least three characters to interpret.")
+                  : null
               }
             >
-              <T>Refresh</T>
-            </button>
-          </div>
-          {task.steps.length > 0 && (
-            <ol>
-              {task.steps.map((s, i) => (
-                <li key={i}>
-                  {s.kind} · <T>{s.state}</T>
-                  {s.run_id ? ` · ${s.run_id}` : ""}
-                  {s.status ? ` · ${s.status}` : ""}
-                  {s.waiting_for ? ` · ${s.waiting_for}` : ""}
-                </li>
-              ))}
-            </ol>
-          )}
-          {task.report && (
-            <table>
-              <tbody>
-                {task.report.parts.map((p) => (
-                  <tr key={p.part}>
-                    <td>{p.part}</td>
-                    <td>
-                      {p.tokens ?? "?"} tokens ({p.token_source})
-                    </td>
-                    <td>{p.seconds ?? "?"} s</td>
-                  </tr>
+              {t(busy ? "Working…" : "Interpret")}
+            </GatedButton>
+          </Actions>
+        </form>
+        {error && (
+          <RequestProblem
+            action="The task request did not complete"
+            message={error}
+          />
+        )}
+        {task && (
+          <div className="ag-stack" aria-live="polite">
+            <p>
+              <strong>{task.id}</strong>{" "}
+              <Badge tone="neutral">{t(task.status)}</Badge>{" "}
+              <span className="ag-muted">
+                {t("interpretation")}: {task.interpretation.tokens ?? "?"}{" "}
+                tokens ({task.interpretation.token_source}),{" "}
+                {task.interpretation.seconds}s
+              </span>
+            </p>
+            {task.problems.length > 0 && (
+              <Note tone="warning" role="alert">
+                <ul className="ag-list">
+                  {task.problems.map((p) => (
+                    <li key={p}>{p}</li>
+                  ))}
+                </ul>
+              </Note>
+            )}
+            <pre className="ag-pre">{JSON.stringify(task.spec, null, 2)}</pre>
+            <Actions>
+              {task.status === "awaiting_approval" && (
+                <>
+                  <HumanActionMark />
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    icon={Check}
+                    disabled={busy}
+                    onClick={() =>
+                      void act(() =>
+                        call<Task>("tasks.approve", { task_id: task.id }),
+                      )
+                    }
+                  >
+                    {t("Approve this task")}
+                  </Button>
+                </>
+              )}
+              {["approved", "running"].includes(task.status) && (
+                <Button
+                  size="sm"
+                  icon={ChevronsRight}
+                  disabled={busy}
+                  onClick={() =>
+                    void act(() =>
+                      call<Task>("tasks.advance", { task_id: task.id }),
+                    )
+                  }
+                >
+                  {t("Continue")}
+                </Button>
+              )}
+              <Button
+                size="sm"
+                icon={RefreshCw}
+                disabled={busy}
+                onClick={() =>
+                  void act(() => call<Task>("tasks.get", { task_id: task.id }))
+                }
+              >
+                {t("Refresh")}
+              </Button>
+            </Actions>
+            {task.steps.length > 0 && (
+              <ol className="ag-list">
+                {task.steps.map((s, i) => (
+                  <li key={i}>
+                    {s.kind} · {t(s.state)}
+                    {s.run_id ? ` · ${s.run_id}` : ""}
+                    {s.status ? ` · ${s.status}` : ""}
+                    {s.waiting_for ? ` · ${s.waiting_for}` : ""}
+                  </li>
                 ))}
-                <tr>
-                  <th>
-                    <T>Total</T>
-                  </th>
-                  <th>{task.report.tokens} tokens</th>
-                  <th>
-                    {task.report.seconds_worked} s · <T>wall</T>{" "}
-                    {task.report.wall_seconds} s
-                  </th>
-                </tr>
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
-    </details>
+              </ol>
+            )}
+            {task.report && (
+              <Table density="compact" caption={t("Cost of this task")}>
+                <tbody>
+                  {task.report.parts.map((p) => (
+                    <TableRow key={p.part}>
+                      <td>{p.part}</td>
+                      <td className="ds-num">
+                        {p.tokens ?? "?"} tokens ({p.token_source})
+                      </td>
+                      <td className="ds-num">{p.seconds ?? "?"} s</td>
+                    </TableRow>
+                  ))}
+                  <TableRow>
+                    <th scope="row">{t("Total")}</th>
+                    <th className="ds-num">{task.report.tokens} tokens</th>
+                    <th className="ds-num">
+                      {task.report.seconds_worked} s · {t("wall")}{" "}
+                      {task.report.wall_seconds} s
+                    </th>
+                  </TableRow>
+                </tbody>
+              </Table>
+            )}
+          </div>
+        )}
+      </div>
+    </Disclosure>
   );
 }

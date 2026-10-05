@@ -16,7 +16,8 @@ import {
   type Vocabulary,
 } from "../utils/annotationsClient";
 import { T, useLocale } from "./levi-locale";
-import { Button } from "@/components/ds";
+import { Button, Textarea } from "@/components/ds";
+import { Note } from "@/components/pages-ui/feedback";
 
 export type SubtaskTag = {
   subtask_id?: string | null;
@@ -50,6 +51,8 @@ export function SubtaskTagFields({
   const { t } = useLocale();
   if (!vocabulary.subtasks.length) return null;
   const special = vocabulary.special ?? ["other", "unknown"];
+  // These two selects sit in the annotation toolbar's row, which the viewer
+  // lays out and skins (viewer/annotations.css), so they stay native there.
   return (
     <>
       <select
@@ -140,7 +143,8 @@ export function VocabularyEditor({
           annotations.
         </T>
       </p>
-      <textarea
+      <Textarea
+        aria-label={t("Subtask vocabulary")}
         rows={Math.max(4, text.split("\n").length + 1)}
         value={text}
         placeholder="grasp | grasp | close the fingers on the plate rim"
@@ -170,12 +174,12 @@ export function VocabularyEditor({
         >
           {t("Save vocabulary")}
         </Button>
-        {error && (
-          <span className="text-xs text-(--ds-danger)" role="alert">
-            {error}
-          </span>
-        )}
       </div>
+      {error && (
+        <Note tone="warning" role="alert">
+          {error}
+        </Note>
+      )}
     </details>
   );
 }

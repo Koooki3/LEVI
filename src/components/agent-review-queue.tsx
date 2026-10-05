@@ -1,6 +1,28 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  Image as ImageIcon,
+  Merge,
+  Scissors,
+  X,
+} from "lucide-react";
 import { T, useLocale } from "./levi-locale";
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  Input,
+  Kbd,
+  Select,
+  Textarea,
+} from "@/components/ds";
+import { Note } from "@/components/pages-ui/feedback";
+import { Actions, Hint } from "./agent-ui";
 
 export type ReviewProposal = {
   episode_index: number;
@@ -19,6 +41,7 @@ export default function AgentReviewQueue({
   proposals,
   decisions,
   disabled,
+  closedReason,
   onChange,
   onDecision,
   onEvidence,
@@ -26,6 +49,8 @@ export default function AgentReviewQueue({
   proposals: ReviewProposal[];
   decisions: Record<string, string>;
   disabled: boolean;
+  /** Why decisions are closed (a committed change), written beside them. */
+  closedReason?: string;
   onChange: (proposals: ReviewProposal[]) => void;
   onDecision: (indices: number[], decision: "accepted" | "rejected") => void;
   onEvidence: (id: string) => void;
@@ -70,29 +95,37 @@ export default function AgentReviewQueue({
       proposals.map((p, i) => (i === current.i ? { ...p, [field]: value } : p)),
     );
   }
+  const closedId = useId();
+  const emptyId = useId();
+  const why = disabled && closedReason ? closedId : undefined;
+  const tone = (decision?: string) =>
+    decision === "accepted"
+      ? "success"
+      : decision === "rejected"
+        ? "danger"
+        : "neutral";
   return (
     <T>
-      <div className="levi-review-queue">
-        <div className="levi-agent-budget">
+      <div className="ag-stack">
+        <dl className="ag-stats">
           <div>
-            <strong>{proposals.length}</strong>
-            <p>Total suggestions</p>
+            <dt>Total suggestions</dt>
+            <dd>{proposals.length}</dd>
           </div>
           <div>
-            <strong>
+            <dt>Accepted</dt>
+            <dd>
               {Object.values(decisions).filter((d) => d === "accepted").length}
-            </strong>
-            <p>Accepted</p>
+            </dd>
           </div>
           <div>
-            <strong>{proposals.length - Object.keys(decisions).length}</strong>
-            <p>Pending</p>
+            <dt>Pending</dt>
+            <dd>{proposals.length - Object.keys(decisions).length}</dd>
           </div>
-        </div>
-        <label>
-          Review filter
-          <select
-            className="ds-input ds-focus"
+        </dl>
+        {disabled && closedReason && <Hint id={closedId}>{closedReason}</Hint>}
+        <Field label={t("Review filter")}>
+          <Select
             value={filter}
             onChange={(e) => {
               setFilter(e.target.value);
@@ -105,12 +138,14 @@ export default function AgentReviewQueue({
             <option value="outcome">{t("Outcome suggestions")}</option>
             <option value="segment">{t("Segments")}</option>
             <option value="event">{t("Events")}</option>
-          </select>
-        </label>
-        <div className="levi-agent-actions">
-          <button
-            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+          </Select>
+        </Field>
+        <Actions>
+          <Button
+            size="sm"
+            icon={Check}
             disabled={disabled || !visible.length}
+            aria-describedby={why ?? (!visible.length ? emptyId : undefined)}
             onClick={() =>
               onDecision(
                 visible.map(({ i }) => i),
@@ -118,11 +153,13 @@ export default function AgentReviewQueue({
               )
             }
           >
-            Accept visible
-          </button>
-          <button
-            className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+            {t("Accept visible")}
+          </Button>
+          <Button
+            size="sm"
+            icon={X}
             disabled={disabled || !visible.length}
+            aria-describedby={why ?? (!visible.length ? emptyId : undefined)}
             onClick={() =>
               onDecision(
                 visible.map(({ i }) => i),
@@ -130,117 +167,130 @@ export default function AgentReviewQueue({
               )
             }
           >
-            Reject visible
-          </button>
-        </div>
+            {t("Reject visible")}
+          </Button>
+        </Actions>
         {current ? (
-          <article>
-            <div className="levi-agent-actions">
-              <button
-                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+          <Card padding="compact" className="ag-proposal">
+            <div className="ag-proposal__nav">
+              <Button
+                size="sm"
+                icon={ArrowLeft}
                 disabled={focus <= 0}
                 onClick={() => setFocus((v) => v - 1)}
               >
-                Previous
-              </button>
-              <span>
-                {Math.min(focus + 1, visible.length)}/{visible.length} · J / K
+                {t("Previous")}
+              </Button>
+              <span className="ag-muted">
+                {Math.min(focus + 1, visible.length)}/{visible.length} ·{" "}
+                <Kbd>J</Kbd> <Kbd>K</Kbd>
               </span>
-              <button
-                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+              <Button
+                size="sm"
+                iconEnd={ArrowRight}
                 disabled={focus >= visible.length - 1}
                 onClick={() => setFocus((v) => v + 1)}
               >
-                Next
-              </button>
+                {t("Next")}
+              </Button>
             </div>
-            <small>
-              {t(current.p.kind)} · <T>Episode</T> {current.p.episode_index} ·{" "}
-              {t(decisions[String(current.i)] || "Pending")}
-            </small>
-            <label>
-              Proposal text
-              <textarea
-                className="ds-input ds-textarea ds-focus"
-                disabled={disabled}
-                value={current.p.content}
-                onChange={(e) => edit("content", e.target.value)}
-              />
-            </label>
-            {current.p.subtask_id && (
-              <div className="levi-agent-budget">
-                <label>
-                  Subtask ID
-                  <input
-                    className="ds-input ds-focus"
-                    disabled={disabled}
-                    value={current.p.subtask_id}
-                    onChange={(e) => edit("subtask_id", e.target.value)}
-                  />
-                </label>
-                <label>
-                  Attempt
-                  <input
-                    className="ds-input ds-focus"
-                    type="number"
-                    min={1}
-                    disabled={disabled}
-                    value={current.p.attempt || 1}
-                    onChange={(e) => edit("attempt", Number(e.target.value))}
-                  />
-                </label>
-                <label>
-                  Observed outcome
-                  <select
-                    className="ds-input ds-focus"
-                    disabled={disabled}
-                    value={current.p.outcome || "unknown"}
-                    onChange={(e) => edit("outcome", e.target.value)}
-                  >
-                    <option value="unknown">{t("unknown")}</option>
-                    <option value="success">{t("success")}</option>
-                    <option value="failure">{t("failure")}</option>
-                  </select>
-                </label>
-              </div>
-            )}
-            {current.p.uncertainty && (
-              <p role="status">{current.p.uncertainty}</p>
-            )}
-            {current.p.evidence_note && <p>{current.p.evidence_note}</p>}
-            <div className="levi-agent-budget">
-              <label>
-                Start time
-                <input
-                  className="ds-input ds-focus"
-                  type="number"
-                  step="0.001"
-                  min="0"
+            <p className="ag-proposal__meta">
+              <Badge tone="neutral" icon={null}>
+                {t(current.p.kind)}
+              </Badge>
+              <span className="ag-muted">
+                <T>Episode</T> {current.p.episode_index}
+              </span>
+              <Badge
+                tone={tone(decisions[String(current.i)])}
+                icon={
+                  decisions[String(current.i)] === "accepted"
+                    ? Check
+                    : decisions[String(current.i)] === "rejected"
+                      ? X
+                      : undefined
+                }
+              >
+                {t(decisions[String(current.i)] || "Pending")}
+              </Badge>
+            </p>
+            <div className="ag-form">
+              <Field label={t("Proposal text")}>
+                <Textarea
                   disabled={disabled}
-                  value={current.p.start}
-                  onChange={(e) => edit("start", Number(e.target.value))}
+                  value={current.p.content}
+                  onChange={(e) => edit("content", e.target.value)}
                 />
-              </label>
-              {current.p.end !== null && (
-                <label>
-                  End time
-                  <input
-                    className="ds-input ds-focus"
+              </Field>
+              {current.p.subtask_id && (
+                <div className="ag-grid3">
+                  <Field label={t("Subtask ID")}>
+                    <Input
+                      disabled={disabled}
+                      value={current.p.subtask_id}
+                      onChange={(e) => edit("subtask_id", e.target.value)}
+                    />
+                  </Field>
+                  <Field label={t("Attempt")}>
+                    <Input
+                      type="number"
+                      min={1}
+                      disabled={disabled}
+                      value={current.p.attempt || 1}
+                      onChange={(e) => edit("attempt", Number(e.target.value))}
+                    />
+                  </Field>
+                  <Field label={t("Observed outcome")}>
+                    <Select
+                      disabled={disabled}
+                      value={current.p.outcome || "unknown"}
+                      onChange={(e) => edit("outcome", e.target.value)}
+                    >
+                      <option value="unknown">{t("unknown")}</option>
+                      <option value="success">{t("success")}</option>
+                      <option value="failure">{t("failure")}</option>
+                    </Select>
+                  </Field>
+                </div>
+              )}
+              {current.p.uncertainty && (
+                <Note tone="warning" role="status">
+                  {current.p.uncertainty}
+                </Note>
+              )}
+              {current.p.evidence_note && <p>{current.p.evidence_note}</p>}
+              <div className="ag-grid3">
+                <Field label={t("Start time")}>
+                  <Input
                     type="number"
                     step="0.001"
                     min="0"
                     disabled={disabled}
-                    value={current.p.end}
-                    onChange={(e) => edit("end", Number(e.target.value))}
+                    value={current.p.start}
+                    onChange={(e) => edit("start", Number(e.target.value))}
                   />
-                </label>
-              )}
+                </Field>
+                {current.p.end !== null && (
+                  <Field label={t("End time")}>
+                    <Input
+                      type="number"
+                      step="0.001"
+                      min="0"
+                      disabled={disabled}
+                      value={current.p.end}
+                      onChange={(e) => edit("end", Number(e.target.value))}
+                    />
+                  </Field>
+                )}
+              </div>
             </div>
             {current.p.end !== null && (
-              <div className="levi-agent-actions">
-                <button
-                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+              <Actions>
+                <Button
+                  size="sm"
+                  icon={Scissors}
                   disabled={disabled}
+                  aria-describedby={why}
                   onClick={() => {
                     const midpoint = (current.p.start + current.p.end!) / 2;
                     onChange(
@@ -255,11 +305,13 @@ export default function AgentReviewQueue({
                     );
                   }}
                 >
-                  Split segment at midpoint
-                </button>
-                <button
-                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                  {t("Split segment at midpoint")}
+                </Button>
+                <Button
+                  size="sm"
+                  icon={Merge}
                   disabled={disabled || current.i + 1 >= proposals.length}
+                  aria-describedby={why}
                   onClick={() => {
                     const next = proposals[current.i + 1];
                     if (
@@ -291,49 +343,59 @@ export default function AgentReviewQueue({
                     );
                   }}
                 >
-                  Merge next matching segment
-                </button>
-              </div>
+                  {t("Merge next matching segment")}
+                </Button>
+              </Actions>
             )}
-            <div className="levi-agent-actions">
+            <Actions>
               {current.p.evidence_ids.map((id, i) => (
-                <button
-                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={ImageIcon}
                   key={id}
                   onClick={() => onEvidence(id)}
                 >
                   <T>Evidence</T> {i + 1}
-                </button>
+                </Button>
               ))}
-              <button
-                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+              <Button
+                size="sm"
+                icon={Check}
                 disabled={disabled}
+                aria-describedby={why}
                 onClick={() => {
                   onDecision([current.i], "accepted");
                   if (filter !== "pending")
                     setFocus((v) => Math.min(v + 1, visible.length - 1));
                 }}
               >
-                Accept & next
-              </button>
-              <button
-                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                {t("Accept & next")}
+              </Button>
+              <Button
+                size="sm"
+                icon={X}
                 disabled={disabled}
+                aria-describedby={why}
                 onClick={() => {
                   onDecision([current.i], "rejected");
                   if (filter !== "pending")
                     setFocus((v) => Math.min(v + 1, visible.length - 1));
                 }}
               >
-                Reject & next
-              </button>
-            </div>
-          </article>
+                {t("Reject & next")}
+              </Button>
+            </Actions>
+          </Card>
         ) : (
-          <p role="status">
-            No suggestions in this filter. Review accepted items or continue to
-            validation.
-          </p>
+          <div id={emptyId} role="status">
+            <EmptyState
+              title={t("No suggestions in this filter.")}
+              description={t(
+                "Review accepted items or continue to validation.",
+              )}
+            />
+          </div>
         )}
       </div>
     </T>

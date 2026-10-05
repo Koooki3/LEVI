@@ -1,6 +1,26 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowUpRight,
+  Bot,
+  Check,
+  Copy,
+  User,
+  Activity as ActivityIcon,
+} from "lucide-react";
 import { T, useLocale } from "@/components/levi-locale";
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  Icon,
+  StatusDot,
+  Tag,
+  Tooltip,
+} from "@/components/ds";
+import { prefersReducedMotion } from "@/lib/design/motion";
+import { Actions } from "./agent-ui";
 
 export type ActivityEvent = {
   seq: number;
@@ -208,7 +228,12 @@ export default function AgentActivity({ open }: { open: boolean }) {
 
   useEffect(() => {
     if (!follow.current || !listRef.current) return;
-    listRef.current.scrollTo({ top: 0, behavior: "smooth" });
+    // Glide to the newest row unless motion is reduced (the system setting
+    // or the app's own switch, `data-motion="reduce"` on an ancestor).
+    listRef.current.scrollTo({
+      top: 0,
+      behavior: prefersReducedMotion(listRef.current) ? "auto" : "smooth",
+    });
   }, [rows.length]);
 
   // A "started" with no outcome is only in progress for as long as an action
@@ -246,13 +271,36 @@ export default function AgentActivity({ open }: { open: boolean }) {
     }
   }
 
+  const pathButton = (artifact: { label: string; path: string }) => (
+    <Button
+      key={artifact.path}
+      size="sm"
+      variant="secondary"
+      className="ag-path"
+      icon={copied === artifact.path ? Check : Copy}
+      onClick={() => void copy(artifact.path)}
+    >
+      <span className="ag-path__label">{t(artifact.label)}</span>
+      <code className="ag-path__code">{artifact.path}</code>
+      <span className="ag-path__action">
+        {copied === artifact.path ? t("Copied") : t("Copy")}
+      </span>
+    </Button>
+  );
+
+  const rowState = (row: ActivityEvent) =>
+    row.status === "started" && now - row.at >= STALE_AFTER
+      ? "stale"
+      : row.status;
+
   return (
     <T>
-      <section className="levi-activity" aria-label="Agent activity">
-        <header className="levi-activity-head">
-          <span className={`levi-activity-pulse ${live ? "live" : ""}`} />
-          <strong>{t(live ? "Live" : "Reconnecting…")}</strong>
-          <span className="levi-agent-muted">
+      <section className="ag-activity" aria-label={t("Agent activity")}>
+        <header className="ag-activity__head">
+          <StatusDot tone={live ? "info" : "neutral"} live={live}>
+            <strong>{t(live ? "Live" : "Reconnecting…")}</strong>
+          </StatusDot>
+          <span className="ag-muted">
             {running > 0
               ? `${running} ${t("in progress")}`
               : `${rows.length} ${t("recent actions")}`}
@@ -260,117 +308,125 @@ export default function AgentActivity({ open }: { open: boolean }) {
         </header>
 
         {justFinished && (
-          <div className="levi-activity-done" role="status">
-            <div>
-              <strong>{t("Task finished")}</strong>
-              <p className="levi-agent-muted">
+          <Card
+            padding="compact"
+            className="ag-done"
+            role="status"
+            title={t("Task finished")}
+            description={
+              <>
                 {t(justFinished.workflow)} ·{" "}
                 {justFinished.dataset.replace(/^local\//, "")} ·{" "}
                 {justFinished.episodes.length} {t("episodes")}
                 {justFinished.tokens != null &&
                   ` · ${justFinished.tokens.toLocaleString()} ${t("tokens")}`}
-              </p>
-              {justFinished.artifacts.map((artifact) => (
-                <button
-                  key={artifact.path}
-                  className="levi-activity-path"
-                  onClick={() => void copy(artifact.path)}
-                >
-                  <span className="levi-activity-path-label">
-                    {t(artifact.label)}
-                  </span>
-                  <code>{artifact.path}</code>
-                  <span className="levi-activity-copy">
-                    {copied === artifact.path ? t("Copied") : t("Copy")}
-                  </span>
-                </button>
-              ))}
-            </div>
-            <div className="levi-agent-actions">
-              {viewerLink(justFinished) && (
-                <a
-                  className="levi-activity-jump"
-                  href={viewerLink(justFinished) as string}
-                >
-                  {t("Open the result")}
-                </a>
-              )}
-              <button
-                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                onClick={() => setJustFinished(null)}
-              >
-                {t("Dismiss")}
-              </button>
-            </div>
-          </div>
+              </>
+            }
+            actions={
+              <Actions>
+                {viewerLink(justFinished) && (
+                  <a
+                    className="ds-btn ds-btn--primary ds-btn--sm ds-focus"
+                    href={viewerLink(justFinished) as string}
+                  >
+                    <span className="ds-btn__label">
+                      {t("Open the result")}
+                    </span>
+                    <Icon icon={ArrowUpRight} />
+                  </a>
+                )}
+                <Button size="sm" onClick={() => setJustFinished(null)}>
+                  {t("Dismiss")}
+                </Button>
+              </Actions>
+            }
+          >
+            {justFinished.artifacts.length > 0 && (
+              <div className="ag-paths">
+                {justFinished.artifacts.map(pathButton)}
+              </div>
+            )}
+          </Card>
         )}
 
         {tasks.length > 0 && (
-          <div className="levi-activity-tasks">
-            <h4>
-              {t("Tasks")}
+          <div className="ag-activity__tasks">
+            <div className="ag-subhead">
+              <h4>{t("Tasks")}</h4>
               {selected && (
-                <button
-                  className="levi-activity-clear"
+                <Button
+                  size="sm"
+                  variant="ghost"
                   onClick={() => setSelected(null)}
                 >
                   {t("Show all activity")}
-                </button>
+                </Button>
               )}
-            </h4>
+            </div>
             {tasks.map((task) => (
-              <button
+              <div
                 key={task.run_id}
-                className={`levi-activity-task ${
-                  selected === task.run_id ? "selected" : ""
-                } ${task.committed ? "done" : ""}`}
-                aria-pressed={selected === task.run_id}
-                onClick={() =>
-                  setSelected((value) =>
-                    value === task.run_id ? null : task.run_id,
-                  )
-                }
+                className={`ag-task ${task.committed ? "is-done" : ""} ${
+                  selected === task.run_id ? "is-selected" : ""
+                }`}
               >
-                <span className="levi-activity-task-head">
-                  <span className="levi-activity-action">
-                    {t(task.workflow)} · {task.dataset.replace(/^local\//, "")}
+                <Button
+                  variant="ghost"
+                  className="ag-task__toggle"
+                  aria-pressed={selected === task.run_id}
+                  onClick={() =>
+                    setSelected((value) =>
+                      value === task.run_id ? null : task.run_id,
+                    )
+                  }
+                >
+                  <span className="ag-task__head">
+                    <span className="ag-task__name">
+                      {t(task.workflow)} ·{" "}
+                      {task.dataset.replace(/^local\//, "")}
+                    </span>
+                    <Tag>
+                      {task.completed.length}/{task.episodes.length}
+                    </Tag>
                   </span>
-                  <span className="levi-activity-chip">
-                    {task.completed.length}/{task.episodes.length}
+                  <span className="ag-bar" aria-hidden="true">
+                    <span
+                      style={{
+                        width: `${Math.round((task.committed ? 1 : task.progress) * 100)}%`,
+                      }}
+                    />
                   </span>
-                </span>
-                <span className="levi-activity-progress">
-                  <span
-                    style={{
-                      width: `${Math.round((task.committed ? 1 : task.progress) * 100)}%`,
-                    }}
-                  />
-                </span>
-                <span className="levi-activity-meta">
+                </Button>
+                {/* Outside the toggle: a tooltip trigger is its own focus stop
+                    and a click on it must not change the selection. */}
+                <div className="ag-task__meta">
                   <span>{t(task.waiting_for)}</span>
                   {task.usage_missing && (
-                    <span
-                      className="levi-activity-chip"
-                      title={t(
+                    <Tooltip
+                      content={t(
                         "LEVI cannot see an external agent's tokens. Ask it to call runs.report_usage so the estimate improves.",
                       )}
                     >
-                      {t("usage not reported")}
-                    </span>
+                      <span className="ag-has-tip" tabIndex={0}>
+                        <Tag>{t("usage not reported")}</Tag>
+                      </span>
+                    </Tooltip>
                   )}
                   {task.tokens != null && (
-                    <span
-                      title={t(
+                    <Tooltip
+                      content={t(
                         task.token_source === "measured"
                           ? "Metered by LEVI"
                           : "Reported by the agent",
                       )}
                     >
-                      {task.tokens.toLocaleString()} {t("tokens")}
-                      {task.evidence_frames
-                        ? ` · ${task.evidence_frames} ${t("frames")}`
-                        : ""}
-                    </span>
+                      <span className="ag-has-tip" tabIndex={0}>
+                        {task.tokens.toLocaleString()} {t("tokens")}
+                        {task.evidence_frames
+                          ? ` · ${task.evidence_frames} ${t("frames")}`
+                          : ""}
+                      </span>
+                    </Tooltip>
                   )}
                   {task.last_action && (
                     <span>
@@ -378,97 +434,98 @@ export default function AgentActivity({ open }: { open: boolean }) {
                       {relative(task.last_action.at, now, t)}
                     </span>
                   )}
-                </span>
-              </button>
+                </div>
+              </div>
             ))}
           </div>
         )}
 
         {paths.length > 0 && (
-          <div className="levi-activity-paths">
-            <h4>{t("Artifact paths")}</h4>
-            {paths.map((artifact) => (
-              <button
-                key={artifact.path}
-                className="levi-activity-path"
-                title={t("Copy path")}
-                onClick={() => void copy(artifact.path)}
-              >
-                <span className="levi-activity-path-label">
-                  {t(artifact.label)}
-                </span>
-                <code>{artifact.path}</code>
-                <span className="levi-activity-copy">
-                  {copied === artifact.path ? t("Copied") : t("Copy")}
-                </span>
-              </button>
-            ))}
+          <div className="ag-activity__paths">
+            <div className="ag-subhead">
+              <h4>{t("Artifact paths")}</h4>
+            </div>
+            <div className="ag-paths">{paths.map(pathButton)}</div>
           </div>
         )}
 
         <ol
-          className="levi-activity-list"
+          className="ag-activity__list ds-focus"
+          tabIndex={0}
           ref={listRef}
           onScroll={(e) => {
             follow.current = e.currentTarget.scrollTop < 24;
           }}
         >
           {rows.length === 0 && (
-            <li className="levi-agent-muted levi-activity-empty">
-              {t("No agent activity yet. Actions appear here as they happen.")}
+            <li>
+              <EmptyState
+                icon={ActivityIcon}
+                title={t(
+                  "No agent activity yet. Actions appear here as they happen.",
+                )}
+              />
             </li>
           )}
-          {[...rows].reverse().map((row) => (
-            <li
-              key={row.seq}
-              className={`levi-activity-row ${
-                row.status === "started" && now - row.at >= STALE_AFTER
-                  ? "stale"
-                  : row.status
-              }`}
-            >
-              <span
-                className={`levi-activity-dot ${
-                  row.status === "started" && now - row.at >= STALE_AFTER
-                    ? "stale"
-                    : row.status
-                }`}
-              />
-              <div className="levi-activity-body">
-                <p className="levi-activity-line">
-                  <span className={`levi-activity-who ${row.channel}`}>
-                    {t(row.channel === "human" ? "You" : "Agent")}
-                  </span>
-                  <span className="levi-activity-action">{t(row.action)}</span>
-                  {typeof row.detail?.apply === "boolean" && (
-                    <span className="levi-activity-chip">
-                      {t(row.detail.apply ? "applied" : "preview")}
+          {[...rows].reverse().map((row) => {
+            const state = rowState(row);
+            return (
+              <li key={row.seq} className={`ag-event is-${state}`}>
+                <div className="ag-event__line">
+                  <StatusDot
+                    tone={
+                      state === "completed"
+                        ? "success"
+                        : state === "failed"
+                          ? "danger"
+                          : state === "started"
+                            ? "info"
+                            : "neutral"
+                    }
+                    live={state === "started"}
+                  >
+                    <span className="ds-sr-only">
+                      {t(
+                        state === "completed"
+                          ? "Done"
+                          : state === "failed"
+                            ? "Failed"
+                            : state === "started"
+                              ? "Running"
+                              : "No outcome recorded",
+                      )}
                     </span>
+                  </StatusDot>
+                  <Badge
+                    tone={row.channel === "agent" ? "info" : "neutral"}
+                    icon={row.channel === "human" ? User : Bot}
+                  >
+                    {t(row.channel === "human" ? "You" : "Agent")}
+                  </Badge>
+                  <span className="ag-event__action">{t(row.action)}</span>
+                  {typeof row.detail?.apply === "boolean" && (
+                    <Tag>{t(row.detail.apply ? "applied" : "preview")}</Tag>
                   )}
                   {typeof row.detail?.episode === "number" && (
-                    <span className="levi-activity-chip">
+                    <Tag>
                       {t("episode")} {String(row.detail.episode)}
-                    </span>
+                    </Tag>
                   )}
                   {row.dataset && (
-                    <span className="levi-activity-chip dataset">
-                      {row.dataset.replace(/^local\//, "")}
-                    </span>
+                    <Tag>{row.dataset.replace(/^local\//, "")}</Tag>
                   )}
-                </p>
-                {row.error && (
-                  <p className="levi-activity-error">{row.error}</p>
-                )}
-                <p className="levi-activity-meta">
+                </div>
+                {row.error && <p className="ag-event__error">{row.error}</p>}
+                <p className="ag-event__meta">
                   <span>{relative(row.at, now, t)}</span>
                   {row.elapsed_seconds != null && (
                     <span>{row.elapsed_seconds.toFixed(2)}s</span>
                   )}
                   <code>{row.tool}</code>
                 </p>
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ol>
       </section>
     </T>

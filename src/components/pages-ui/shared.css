@@ -20,23 +20,13 @@
   display: inline-flex;
   align-items: center;
 }
-.levi-hf-auth-badge {
-  display: inline-flex;
-  align-items: center;
-  height: 32px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--ds-radius-sm);
-  background: transparent;
-  cursor: pointer;
-  transition: opacity var(--ds-dur-fast) var(--ds-ease-standard);
+/* The signed-in menu is always a medium button; hold it to the height of the
+   sign-in button of the same variant so the control does not jump. */
+.levi-hf-auth--ghost .ds-btn {
+  height: var(--ds-control-sm);
 }
-.levi-hf-auth-badge:hover {
-  opacity: 0.9;
-}
-.levi-hf-auth-badge img {
-  height: 32px;
-  width: auto;
+.levi-hf-auth--tab .ds-btn {
+  height: var(--ds-control-lg);
 }
 .levi-hf-auth-user {
   display: inline-flex;
@@ -48,10 +38,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.levi-hf-auth-user img {
-  border-radius: var(--ds-radius-full);
-  box-shadow: 0 0 0 1px var(--ds-separator);
 }
 .levi-hf-token-form {
   display: flex;
