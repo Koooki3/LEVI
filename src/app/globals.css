@@ -38,6 +38,12 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* Bold is semibold: Tailwind's preflight sets `bolder` (700), and the type
+   scale has only 400, 500 and 600. */
+:where(b, strong) {
+  font-weight: var(--ds-weight-semibold);
+}
+
 /* Numeric readouts always use tabular figures so rows don't jitter. */
 .tabular,
 [data-tabular] {

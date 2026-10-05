@@ -4,7 +4,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  CircleAlert,
   Clock,
   Cpu,
   FileQuestion,
@@ -12,9 +11,11 @@ import {
   HardDrive,
   List,
   Radio,
+  RotateCcw,
   WifiOff,
 } from "lucide-react";
 import {
+  Button,
   Card,
   EmptyState,
   Icon,
@@ -23,6 +24,7 @@ import {
   useToast,
 } from "@/components/ds";
 import { leviApi } from "@/components/levi-api";
+import { Problem } from "@/components/pages-ui/feedback";
 import { LeviMark } from "@/components/shell/brand";
 import { useLocale } from "@/components/levi-locale";
 import {
@@ -76,6 +78,8 @@ const ReportMarkdown = memo(function ReportMarkdown({
   markdown: string;
   headings: Heading[];
 }) {
+  const { t } = useLocale();
+  const tableLabel = t("report.table");
   const components = useMemo<Components>(() => {
     const ids = new Map(headings.map((h) => [h.line, h.id]));
     const id = (node: unknown) => {
@@ -130,13 +134,20 @@ const ReportMarkdown = memo(function ReportMarkdown({
       },
       table({ children }) {
         return (
-          <div className="lr-table-wrap">
+          // A wide table scrolls sideways: the box must take focus to scroll
+          // from the keyboard, and have a name.
+          <div
+            className="lr-table-wrap"
+            tabIndex={0}
+            role="region"
+            aria-label={tableLabel}
+          >
             <table className="lr-table lr-md-table">{children}</table>
           </div>
         );
       },
     };
-  }, [headings]);
+  }, [headings, tableLabel]);
   return (
     <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
       {markdown}
@@ -325,6 +336,8 @@ export default function ReportView() {
     [lang],
   );
 
+  // The first read, and "Try again" after it failed.
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let stopped = false;
     load(false).catch((e: unknown) => {
@@ -350,7 +363,7 @@ export default function ReportView() {
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [lang, load]);
+  }, [lang, load, attempt]);
 
   // "Updated": a note in the frame's toast region (polite, hides itself).
   const toasts = useToast();
@@ -381,19 +394,29 @@ export default function ReportView() {
         {report && <StatusStrip report={report} live={live} now={now} />}
       </div>
       {error && !report && (
-        <Card className="lr-empty" role="alert">
-          <EmptyState
-            icon={CircleAlert}
-            title={t("report.unavailable")}
-            description={
-              <>
-                {error}
-                <br />
-                {t("report.unavailableFix")}
-              </>
-            }
-          />
-        </Card>
+        // The same three-part error as the pages: what happened, why (in the
+        // page's language; the raw answer under "Technical details"), what to do.
+        <Problem
+          className="lr-empty"
+          title={t("report.unavailable")}
+          why={t("The LEVI service did not answer, or answered with an error.")}
+          details={error}
+          fix={
+            <>
+              {t("report.unavailableFix")}
+              <Button
+                size="sm"
+                icon={RotateCcw}
+                onClick={() => {
+                  setError(null);
+                  setAttempt((n) => n + 1);
+                }}
+              >
+                {t("Try again")}
+              </Button>
+            </>
+          }
+        />
       )}
       {!report && !error && (
         <div className="lr-loading" role="status" aria-busy="true">

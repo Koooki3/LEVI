@@ -120,7 +120,7 @@
 }
 .lr-ref {
   font-family: var(--ds-font-mono);
-  font-size: 0.88em;
+  font-size: max(0.88em, var(--ds-text-caption-size));
   color: var(--ds-text-secondary);
   border-bottom: 1px dotted var(--ds-separator-strong);
 }

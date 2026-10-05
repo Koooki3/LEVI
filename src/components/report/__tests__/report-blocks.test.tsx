@@ -50,6 +50,16 @@ describe("report table block", () => {
     expect(host.textContent).not.toMatch(GLYPHS);
   });
 
+  test("a table that can scroll sideways is a named region you can focus", async () => {
+    const { host } = await render(
+      <ReportBlock language="levi-table" source={source} />,
+    );
+    const wrap = host.querySelector(".lr-table-wrap")!;
+    expect(wrap.getAttribute("tabindex")).toBe("0");
+    expect(wrap.getAttribute("role")).toBe("region");
+    expect(wrap.getAttribute("aria-label")).toBe("Table");
+  });
+
   test("the sort hint is a tooltip, not a title attribute", async () => {
     const { host } = await render(
       <ReportBlock language="levi-table" source={source} />,

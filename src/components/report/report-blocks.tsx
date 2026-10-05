@@ -474,7 +474,12 @@ function TableBlock({ data }: { data: Parameters<typeof lookupTable>[1] }) {
     rows.some((row) => typeof row[key] === "number") &&
     rows.every((row) => row[key] == null || typeof row[key] === "number");
   return (
-    <div className="lr-table-wrap">
+    <div
+      className="lr-table-wrap"
+      tabIndex={0}
+      role="region"
+      aria-label={t("report.table")}
+    >
       <table className="lr-table">
         <thead>
           <tr>

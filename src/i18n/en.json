@@ -2084,7 +2084,6 @@
   "Theme: Dark": "Theme: Dark",
   "Training pool jobs": "Training pool jobs",
   "Undo": "Undo",
-  "none running": "none running",
   "to close": "to close",
   "to move": "to move",
   "to open": "to open",
@@ -2411,5 +2410,10 @@
   "Leave without saving": "Leave without saving",
   "Stay here": "Stay here",
   "Skip to main content": "Skip to main content",
-  "Your annotation edits are not saved to the workspace yet; they stay only in this browser tab.": "Your annotation edits are not saved to the workspace yet; they stay only in this browser tab."
+  "Your annotation edits are not saved to the workspace yet; they stay only in this browser tab.": "Your annotation edits are not saved to the workspace yet; they stay only in this browser tab.",
+  "report.table": "Table",
+  "The LEVI service did not answer, or answered with an error.": "The LEVI service did not answer, or answered with an error.",
+  "no job is running": "no job is running",
+  "being checked": "being checked",
+  "could not be checked just now": "could not be checked just now"
 }

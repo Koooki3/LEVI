@@ -126,6 +126,7 @@ export default function LeviHeader() {
             type="button"
             className="levi-shell-search ds-focus"
             onClick={() => setPaletteOpen(true)}
+            aria-label={t("Search")}
             aria-keyshortcuts={apple ? "Meta+K" : "Control+K"}
           >
             <Icon icon={Search} />

@@ -2084,7 +2084,6 @@
   "Theme: Dark": "外观：深色",
   "Training pool jobs": "训练池作业",
   "Undo": "撤销",
-  "none running": "没有运行中的",
   "to close": "关闭",
   "to move": "移动",
   "to open": "打开",
@@ -2411,5 +2410,10 @@
   "Leave without saving": "不保存并离开",
   "Stay here": "留在这里",
   "Skip to main content": "跳到正文",
-  "Your annotation edits are not saved to the workspace yet; they stay only in this browser tab.": "标注修改还没有保存到工作区，只留在这个浏览器标签页里。"
+  "Your annotation edits are not saved to the workspace yet; they stay only in this browser tab.": "标注修改还没有保存到工作区，只留在这个浏览器标签页里。",
+  "report.table": "表格",
+  "The LEVI service did not answer, or answered with an error.": "LEVI 服务没有回应，或者回应了一个错误。",
+  "no job is running": "没有运行中的作业",
+  "being checked": "正在检查",
+  "could not be checked just now": "暂时无法判断"
 }
