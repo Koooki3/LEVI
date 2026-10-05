@@ -1,5 +1,9 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import { Maximize2, Minimize2 } from "lucide-react";
+import { Button } from "@/components/ds";
+import { seriesColor, seriesDash } from "@/components/viewer/data-palette";
+import { SeriesSwatch } from "@/components/viewer/series-swatch";
 import { T } from "@/components/levi-locale";
 
 import React, {
@@ -29,21 +33,6 @@ type DataGraphProps = {
 };
 
 const SERIES_NAME_DELIMITER = " | ";
-
-const CHART_COLORS = [
-  "#f97316",
-  "#3b82f6",
-  "#22c55e",
-  "#ef4444",
-  "#a855f7",
-  "#eab308",
-  "#06b6d4",
-  "#ec4899",
-  "#14b8a6",
-  "#f59e0b",
-  "#6366f1",
-  "#84cc16",
-];
 
 function mergeGroups(data: ChartRow[][]): ChartRow[] {
   if (data.length <= 1) return data[0] ?? [];
@@ -89,45 +78,14 @@ export const DataRecharts = React.memo(
           <div>
             {data.length > 1 && (
               <div className="flex justify-end mb-2">
-                <button
+                <Button
+                  size="sm"
+                  icon={expanded ? Minimize2 : Maximize2}
+                  aria-pressed={expanded}
                   onClick={() => setExpanded((v) => !v)}
-                  className={`text-xs px-2.5 py-1 rounded transition-colors flex items-center gap-1.5 ${
-                    expanded
-                      ? "bg-cyan-400/15 text-cyan-300 border border-cyan-400/40"
-                      : "bg-[var(--surface-1)]/60 text-slate-400 hover:text-slate-200 border border-white/10/50"
-                  }`}
                 >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <T>
-                      {expanded ? (
-                        <>
-                          <polyline points="4 14 10 14 10 20" />
-                          <polyline points="20 10 14 10 14 4" />
-                          <line x1="14" y1="10" x2="21" y2="3" />
-                          <line x1="3" y1="21" x2="10" y2="14" />
-                        </>
-                      ) : (
-                        <>
-                          <polyline points="15 3 21 3 21 9" />
-                          <polyline points="9 21 3 21 3 15" />
-                          <line x1="21" y1="3" x2="14" y2="10" />
-                          <line x1="3" y1="21" x2="10" y2="14" />
-                        </>
-                      )}
-                    </T>
-                  </svg>
                   <T>{expanded ? "Split charts" : "Combine all"}</T>
-                </button>
+                </Button>
               </div>
             )}
 
@@ -236,7 +194,7 @@ const SingleDataGraph = React.memo(
       setVisibleKeys(dataKeys);
     }
 
-    const { groups, singles, groupColorMap } = useMemo(() => {
+    const { groups, singles, groupColorMap, groupIndex } = useMemo(() => {
       const grouped: Record<string, string[]> = {};
       const singleList: string[] = [];
       dataKeys.forEach((key) => {
@@ -252,10 +210,17 @@ const SingleDataGraph = React.memo(
 
       const allGroups = [...Object.keys(grouped), ...singleList];
       const colorMap: Record<string, string> = {};
+      const indexMap: Record<string, number> = {};
       allGroups.forEach((group, idx) => {
-        colorMap[group] = CHART_COLORS[idx % CHART_COLORS.length];
+        colorMap[group] = seriesColor(idx);
+        indexMap[group] = idx;
       });
-      return { groups: grouped, singles: singleList, groupColorMap: colorMap };
+      return {
+        groups: grouped,
+        singles: singleList,
+        groupColorMap: colorMap,
+        groupIndex: indexMap,
+      };
     }, [dataKeys]);
 
     // Find the closest data point to the current time for highlighting
@@ -333,7 +298,8 @@ const SingleDataGraph = React.memo(
                         className="size-3"
                         style={{ accentColor: color }}
                       />
-                      <span className="text-xs font-semibold text-slate-200">
+                      <SeriesSwatch index={groupIndex[group] ?? 0} />
+                      <span className="text-xs font-semibold text-(--ds-text-primary)">
                         <T>{group}</T>
                       </span>
                     </label>
@@ -354,12 +320,12 @@ const SingleDataGraph = React.memo(
                               style={{ accentColor: color }}
                             />
                             <span
-                              className={`text-xs ${visibleKeys.includes(key) ? "text-slate-300" : "text-slate-500"}`}
+                              className={`text-xs ${visibleKeys.includes(key) ? "text-(--ds-text-secondary)" : "text-(--ds-text-secondary)"}`}
                             >
                               <T>{label}</T>
                             </span>
                             <span
-                              className={`text-xs font-mono tabular-nums ml-1 ${visibleKeys.includes(key) ? "text-cyan-200/80" : "text-slate-600"}`}
+                              className={`text-xs font-mono tabular-nums ml-1 ${visibleKeys.includes(key) ? "text-(--ds-text-primary)" : "text-(--ds-text-secondary)"}`}
                             >
                               <T>
                                 {typeof currentData[key] === "number"
@@ -388,13 +354,14 @@ const SingleDataGraph = React.memo(
                       className="size-3"
                       style={{ accentColor: color }}
                     />
+                    <SeriesSwatch index={groupIndex[key] ?? 0} />
                     <span
-                      className={`text-xs ${visibleKeys.includes(key) ? "text-slate-200" : "text-slate-500"}`}
+                      className={`text-xs ${visibleKeys.includes(key) ? "text-(--ds-text-primary)" : "text-(--ds-text-secondary)"}`}
                     >
                       <T>{key}</T>
                     </span>
                     <span
-                      className={`text-xs font-mono tabular-nums ml-1 ${visibleKeys.includes(key) ? "text-cyan-200/80" : "text-slate-600"}`}
+                      className={`text-xs font-mono tabular-nums ml-1 ${visibleKeys.includes(key) ? "text-(--ds-text-primary)" : "text-(--ds-text-secondary)"}`}
                     >
                       <T>
                         {typeof currentData[key] === "number"
@@ -427,10 +394,10 @@ const SingleDataGraph = React.memo(
     return (
       <T>
         {
-          <div className="w-full bg-[var(--surface-1)]/40 rounded-lg border border-white/10/50 p-3">
+          <div className="vw-chart vw-panel w-full p-3">
             {chartTitle && (
               <p
-                className="text-xs font-medium text-slate-300 mb-1 px-1 truncate"
+                className="text-xs font-medium text-(--ds-text-secondary) mb-1 px-1 truncate"
                 title={chartTitle}
               >
                 <T>{chartTitle}</T>
@@ -456,8 +423,7 @@ const SingleDataGraph = React.memo(
                 >
                   <CartesianGrid
                     strokeDasharray="3 3"
-                    stroke="#334155"
-                    strokeOpacity={0.6}
+                    stroke="var(--ds-separator)"
                   />
                   <XAxis
                     dataKey="timestamp"
@@ -466,15 +432,15 @@ const SingleDataGraph = React.memo(
                       chartData.at(-1)?.timestamp ?? 0,
                     ]}
                     tickFormatter={(v: number) => `${v.toFixed(1)}s`}
-                    stroke="#64748b"
-                    tick={{ fontSize: 12, fill: "#94a3b8" }}
+                    stroke="var(--ds-separator-strong)"
+                    tick={{ fontSize: 12, fill: "var(--ds-text-secondary)" }}
                     minTickGap={30}
                     allowDataOverflow={true}
                   />
                   <YAxis
                     domain={["auto", "auto"]}
-                    stroke="#64748b"
-                    tick={{ fontSize: 12, fill: "#94a3b8" }}
+                    stroke="var(--ds-separator-strong)"
+                    tick={{ fontSize: 12, fill: "var(--ds-text-secondary)" }}
                     width={55}
                     allowDataOverflow={true}
                     tickFormatter={(v: number) => {
@@ -498,9 +464,8 @@ const SingleDataGraph = React.memo(
 
                   <ReferenceLine
                     x={currentTime}
-                    stroke="#f97316"
+                    stroke="var(--ds-text-primary)"
                     strokeWidth={1.5}
-                    strokeOpacity={0.7}
                   />
 
                   {dataKeys.map((key) => {
@@ -508,7 +473,11 @@ const SingleDataGraph = React.memo(
                       ? key.split(SERIES_NAME_DELIMITER)[0]
                       : key;
                     const color = groupColorMap[group];
-                    let strokeDasharray: string | undefined = undefined;
+                    // Past eight groups the colours repeat: the pattern tells
+                    // them apart (the legend shows it too).
+                    let strokeDasharray: string | undefined = seriesDash(
+                      groupIndex[group] ?? 0,
+                    );
                     if (groups[group] && groups[group].length > 1) {
                       const idxInGroup = groups[group].indexOf(key);
                       if (idxInGroup > 0) strokeDasharray = "5 5";

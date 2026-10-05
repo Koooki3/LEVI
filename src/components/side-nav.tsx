@@ -1,6 +1,17 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
 import { T, useLocale } from "@/components/levi-locale";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Circle,
+  CircleCheck,
+  CircleX,
+  Flag,
+  PanelLeft,
+} from "lucide-react";
+import { Button, Icon, IconButton, Select, Tooltip } from "@/components/ds";
+import "@/components/viewer/viewer.css";
 
 import Link from "next/link";
 import React, { useMemo, useState } from "react";
@@ -28,28 +39,38 @@ function AnnotationDots({
   const hasVision = !!summary.vision[key];
   if (!hasLanguage && !hasVision) return null;
   return (
-    <span className="flex items-center gap-1 shrink-0">
+    <span className="vw-episode-marks">
       {hasLanguage && (
-        <span
-          className="w-1.5 h-1.5 rounded-full bg-cyan-400"
-          title={t("Has language/event annotations")}
-        />
+        <Tooltip content={t("Has language/event annotations")} describe={false}>
+          <span
+            className="vw-mark vw-mark--language"
+            role="img"
+            aria-label={t("Has language/event annotations")}
+          />
+        </Tooltip>
       )}
       {hasVision && (
-        <span
-          className="w-1.5 h-1.5 rounded-full bg-lime-400"
-          title={t("Has object/vision (SAM3) annotations")}
-        />
+        <Tooltip
+          content={t("Has object/vision (SAM3) annotations")}
+          describe={false}
+        >
+          <span
+            className="vw-mark vw-mark--vision"
+            role="img"
+            aria-label={t("Has object/vision (SAM3) annotations")}
+          />
+        </Tooltip>
       )}
     </span>
   );
 }
 
-/** Success/failure dot. Metadata outcomes (`levi_outcome`, from a
- * policy-eval rollout capture) show as a plain dot; human labels get a ring.
- * With `onChange`, the dot is a button cycling the human label
+/** Success/failure mark: shape + colour + words (a filled check circle,
+ * a crossed circle, or an empty circle). Metadata outcomes (`levi_outcome`,
+ * from a policy-eval rollout capture) show the plain shape; human labels get
+ * a ring. With `onChange`, the mark is a button cycling the human label
  * success → failure → cleared (back to the metadata outcome, if any); an
- * episode with no outcome shows a hollow dot on hover to start labeling. */
+ * episode with no outcome shows the empty circle on hover to start labeling. */
 function OutcomeBadge({
   outcome,
   human,
@@ -61,25 +82,28 @@ function OutcomeBadge({
 }) {
   const { t } = useLocale();
   if (!outcome && !onChange) return null;
-  const color = !outcome
-    ? "border border-slate-500 opacity-0 group-hover:opacity-100"
-    : outcome === "success"
-      ? "bg-emerald-400"
-      : "bg-red-400";
-  const ring = human
-    ? " ring-1 ring-offset-1 ring-offset-slate-900 ring-white/70"
-    : "";
   const label = !outcome
     ? t("No outcome")
     : t(outcome === "success" ? "Episode succeeded" : "Episode failed");
-  const dot = (
-    <span className={`block w-1.5 h-1.5 rounded-full ${color}${ring}`} />
-  );
+  const glyph = !outcome
+    ? Circle
+    : outcome === "success"
+      ? CircleCheck
+      : CircleX;
+  const state = outcome ?? "none";
   if (!onChange) {
     return (
-      <span className="shrink-0" title={label}>
-        {dot}
-      </span>
+      <Tooltip content={label} describe={false}>
+        <span
+          className="vw-outcome"
+          data-outcome={state}
+          data-human={human ? "true" : undefined}
+          role="img"
+          aria-label={label}
+        >
+          <Icon icon={glyph} />
+        </span>
+      </Tooltip>
     );
   }
   const next: EpisodeOutcome | null = !human
@@ -87,26 +111,30 @@ function OutcomeBadge({
     : outcome === "success"
       ? "failure"
       : null;
+  const hint = `${label}${human ? ` (${t("labelled by a person")})` : ""} — ${t(
+    "click to cycle success / failure / clear",
+  )}`;
   return (
-    <button
-      type="button"
-      className="shrink-0 p-1 -m-1 rounded hover:bg-white/10"
-      title={`${label}${human ? ` (${t("labelled by a person")})` : ""} — ${t(
-        "click to cycle success / failure / clear",
-      )}`}
-      aria-label={label}
-      onClick={(event) => {
-        event.stopPropagation();
-        onChange(next);
-      }}
-    >
-      {dot}
-    </button>
+    <Tooltip content={hint} describe={false}>
+      <button
+        type="button"
+        className="vw-outcome ds-focus"
+        data-outcome={state}
+        data-human={human ? "true" : undefined}
+        aria-label={hint}
+        onClick={(event) => {
+          event.stopPropagation();
+          onChange(next);
+        }}
+      >
+        <Icon icon={glyph} />
+      </button>
+    </Tooltip>
   );
 }
 
 /** Share of an episode's frames with a positive RECAP advantage label, as a
- * small green/red bar (value-model result; absent without one). */
+ * small two-colour bar (value-model result; absent without one). */
 function RecapBadge({ fraction }: { fraction: number | undefined }) {
   const { t } = useLocale();
   if (fraction == null || !Number.isFinite(fraction)) return null;
@@ -114,14 +142,11 @@ function RecapBadge({ fraction }: { fraction: number | undefined }) {
   // Attributes are not reached by <T>; translate them here.
   const label = t(`Positive advantage: ${pct}% of frames`);
   return (
-    <span
-      className="shrink-0 flex h-1 w-3.5 overflow-hidden rounded-full bg-red-400/80"
-      role="img"
-      title={label}
-      aria-label={label}
-    >
-      <span className="h-full bg-emerald-400" style={{ width: `${pct}%` }} />
-    </span>
+    <Tooltip content={label} describe={false}>
+      <span className="vw-recap-bar" role="img" aria-label={label}>
+        <span style={{ width: `${pct}%` }} />
+      </span>
+    </Tooltip>
   );
 }
 
@@ -225,246 +250,182 @@ const Sidebar: React.FC<SidebarProps> = ({
     failureCount,
   ]);
 
-  return (
-    <T>
-      {
-        <div className="flex z-10 shrink-0">
-          <nav
-            className={`shrink-0 overflow-y-auto bg-[var(--surface-0)] border-r border-white/5 p-4 break-words w-60 ${
-              mobileVisible ? "block" : "hidden"
-            } md:block`}
-            aria-label="Sidebar navigation"
-          >
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-slate-400 tabular">
-              <dt className="uppercase tracking-wide text-[10px] text-slate-500">
-                <T>Frames</T>
-              </dt>
-              <dd className="text-slate-200">
-                {datasetInfo.total_frames.toLocaleString()}
-              </dd>
-              <dt className="uppercase tracking-wide text-[10px] text-slate-500">
-                <T>Episodes</T>
-              </dt>
-              <dd className="text-slate-200">
-                {datasetInfo.total_episodes.toLocaleString()}
-              </dd>
-              <dt className="uppercase tracking-wide text-[10px] text-slate-500">
-                <T>FPS</T>
-              </dt>
-              <dd className="text-slate-200">
-                <T>{datasetInfo.fps}</T>
-              </dd>
-            </dl>
+  const { t } = useLocale();
 
-            {tasks.length > 1 && onTaskFilterChange && (
-              <div className="mt-5">
-                <p className="text-[10px] uppercase tracking-wide text-slate-500">
-                  <T>Task filter</T>
-                </p>
-                <select
-                  value={taskFilter ?? ""}
-                  onChange={(e) => onTaskFilterChange(e.target.value || null)}
-                  className="mt-1 w-full bg-[var(--surface-1)] border border-white/10 rounded-md px-2 py-1 text-xs text-slate-100 [color-scheme:dark]"
-                  aria-label="Filter episodes by task"
-                >
-                  <option value="" className="bg-[#f4f7ed] text-[#172018]">
-                    {`All tasks (${tasks.length})`}
-                  </option>
-                  {tasks.map((name) => (
-                    <option
-                      key={name}
-                      value={name}
-                      className="bg-[#f4f7ed] text-[#172018]"
-                    >
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            <div className="mt-5 flex items-center justify-between">
-              <p className="text-[10px] uppercase tracking-wide text-slate-500">
-                <T>Episodes</T>
-                {taskFilter && filteredEpisodeCount !== undefined && (
-                  <span className="ml-1 text-slate-400 tabular">
-                    <T>{`· ${filteredEpisodeCount}`}</T>
-                  </span>
-                )}
-              </p>
-              <div className="flex items-center gap-1.5">
-                {failureCount > 0 && onShowFailuresOnlyChange && (
-                  <button
-                    onClick={() => onShowFailuresOnlyChange(!showFailuresOnly)}
-                    className={`text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-md transition-colors ${
-                      showFailuresOnly
-                        ? "bg-red-500/15 text-red-300 border border-red-500/30"
-                        : "text-slate-500 hover:text-slate-300 border border-white/10"
-                    }`}
-                  >
-                    <T>Failures · </T>
-                    <T>{failureCount}</T>
-                  </button>
-                )}
-                {count > 0 && (
-                  <button
-                    onClick={() => onShowFlaggedOnlyChange(!showFlaggedOnly)}
-                    className={`text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-md transition-colors ${
-                      showFlaggedOnly
-                        ? "bg-orange-500/15 text-orange-300 border border-orange-500/30"
-                        : "text-slate-500 hover:text-slate-300 border border-white/10"
-                    }`}
-                  >
-                    <T>Flagged · </T>
-                    <T>{count}</T>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {displayEpisodes.length === 0 && (
-              <p className="mt-2 text-xs text-slate-500 italic">
-                <T>No episodes match this task.</T>
-              </p>
-            )}
-
-            <ul className="mt-2 space-y-px">
-              {displayEpisodes.map((episode) => {
-                const active = episode === episodeId;
-                const itemClass = `group flex items-center justify-between gap-2 px-2 py-1 rounded-md text-xs tabular transition-colors ${
-                  active
-                    ? "bg-cyan-400/10 text-cyan-300"
-                    : "text-slate-300 hover:bg-white/5"
-                }`;
-                return (
-                  <li key={episode}>
-                    <T>
-                      {onEpisodeSelect ? (
-                        <div className={itemClass}>
-                          <button
-                            onClick={() => onEpisodeSelect(episode)}
-                            className="flex-1 text-left"
-                          >
-                            Episode {episode}
-                          </button>
-                          {annotationSummary && (
-                            <AnnotationDots
-                              episode={episode}
-                              summary={annotationSummary}
-                            />
-                          )}
-                          {recapFractions && (
-                            <RecapBadge
-                              fraction={recapFractions[String(episode)]}
-                            />
-                          )}
-                          <OutcomeBadge
-                            outcome={episodeOutcomes?.[String(episode)]}
-                            human={humanOutcomes?.has(String(episode))}
-                            onChange={
-                              onOutcomeChange
-                                ? (next) => onOutcomeChange(episode, next)
-                                : undefined
-                            }
-                          />
-                          <button
-                            onClick={() => toggle(episode)}
-                            className={`text-xs leading-none transition-colors ${
-                              flagged.has(episode)
-                                ? "text-orange-400 hover:text-orange-300"
-                                : "text-slate-600 hover:text-slate-400 opacity-0 group-hover:opacity-100"
-                            }`}
-                            title={flagged.has(episode) ? "Unflag" : "Flag"}
-                          >
-                            ⚑
-                          </button>
-                        </div>
-                      ) : (
-                        <div className={itemClass}>
-                          <Link
-                            href={`./episode_${episode}`}
-                            className="flex-1 text-left"
-                          >
-                            Episode {episode}
-                          </Link>
-                          {annotationSummary && (
-                            <AnnotationDots
-                              episode={episode}
-                              summary={annotationSummary}
-                            />
-                          )}
-                          {recapFractions && (
-                            <RecapBadge
-                              fraction={recapFractions[String(episode)]}
-                            />
-                          )}
-                          <OutcomeBadge
-                            outcome={episodeOutcomes?.[String(episode)]}
-                            human={humanOutcomes?.has(String(episode))}
-                            onChange={
-                              onOutcomeChange
-                                ? (next) => onOutcomeChange(episode, next)
-                                : undefined
-                            }
-                          />
-                          <button
-                            onClick={() => toggle(episode)}
-                            className={`text-xs leading-none transition-colors ${
-                              flagged.has(episode)
-                                ? "text-orange-400 hover:text-orange-300"
-                                : "text-slate-600 hover:text-slate-400 opacity-0 group-hover:opacity-100"
-                            }`}
-                            title={flagged.has(episode) ? "Unflag" : "Flag"}
-                          >
-                            ⚑
-                          </button>
-                        </div>
-                      )}
-                    </T>
-                  </li>
-                );
-              })}
-            </ul>
-
-            {!showFlaggedOnly && totalPages > 1 && (
-              <div className="mt-3 flex items-center gap-2 text-[10px] uppercase tracking-wide text-slate-400">
-                <button
-                  onClick={prevPage}
-                  className={`px-2 py-1 rounded-md border border-white/10 transition-colors hover:bg-white/5 hover:text-slate-200 ${
-                    currentPage === 1 ? "cursor-not-allowed opacity-40" : ""
-                  }`}
-                  disabled={currentPage === 1}
-                >
-                  <T>‹ Prev</T>
-                </button>
-                <span className="tabular text-slate-500">
-                  <T>{currentPage}</T> / <T>{totalPages}</T>
-                </span>
-                <button
-                  onClick={nextPage}
-                  className={`ml-auto px-2 py-1 rounded-md border border-white/10 transition-colors hover:bg-white/5 hover:text-slate-200 ${
-                    currentPage === totalPages
-                      ? "cursor-not-allowed opacity-40"
-                      : ""
-                  }`}
-                  disabled={currentPage === totalPages}
-                >
-                  <T>Next ›</T>
-                </button>
-              </div>
-            )}
-          </nav>
-
-          <button
-            className="mx-1 flex items-center opacity-50 hover:opacity-100 focus:outline-none focus:ring-0 md:hidden"
-            onClick={() => setMobileVisible((prev) => !prev)}
-            title="Toggle sidebar"
-          >
-            <div className="h-10 w-1 rounded-full bg-white/20" />
-          </button>
+  const row = (episode: number) => {
+    const active = episode === episodeId;
+    const isFlagged = flagged.has(episode);
+    const name = t(`Episode ${episode}`);
+    return (
+      <li key={episode}>
+        <div className="vw-episode" aria-current={active ? "true" : undefined}>
+          {onEpisodeSelect ? (
+            <button
+              type="button"
+              onClick={() => onEpisodeSelect(episode)}
+              className="vw-episode-link ds-focus"
+              aria-current={active ? "page" : undefined}
+            >
+              {name}
+            </button>
+          ) : (
+            <Link
+              href={`./episode_${episode}`}
+              className="vw-episode-link ds-focus"
+              aria-current={active ? "page" : undefined}
+            >
+              {name}
+            </Link>
+          )}
+          {annotationSummary && (
+            <AnnotationDots episode={episode} summary={annotationSummary} />
+          )}
+          {recapFractions && (
+            <RecapBadge fraction={recapFractions[String(episode)]} />
+          )}
+          <OutcomeBadge
+            outcome={episodeOutcomes?.[String(episode)]}
+            human={humanOutcomes?.has(String(episode))}
+            onChange={
+              onOutcomeChange
+                ? (next) => onOutcomeChange(episode, next)
+                : undefined
+            }
+          />
+          <Tooltip content={t(isFlagged ? "Unflag" : "Flag")} describe={false}>
+            <button
+              type="button"
+              onClick={() => toggle(episode)}
+              className="vw-flag ds-focus"
+              aria-pressed={isFlagged}
+              aria-label={`${t(isFlagged ? "Unflag" : "Flag")} · ${name}`}
+            >
+              <Icon icon={Flag} />
+            </button>
+          </Tooltip>
         </div>
-      }
-    </T>
+      </li>
+    );
+  };
+
+  return (
+    <div className="vw-sidebar-wrap">
+      <nav
+        className="vw-sidebar"
+        data-mobile-hidden={mobileVisible ? undefined : "true"}
+        aria-label={t("Episode list")}
+      >
+        <dl className="vw-facts">
+          <dt>{t("Frames")}</dt>
+          <dd>{datasetInfo.total_frames.toLocaleString()}</dd>
+          <dt>{t("Episodes")}</dt>
+          <dd>{datasetInfo.total_episodes.toLocaleString()}</dd>
+          <dt>{t("FPS")}</dt>
+          <dd>{datasetInfo.fps}</dd>
+        </dl>
+
+        {tasks.length > 1 && onTaskFilterChange && (
+          <div className="vw-sidebar-section">
+            <label className="vw-label" htmlFor="vw-task-filter">
+              {t("Task filter")}
+            </label>
+            <Select
+              id="vw-task-filter"
+              value={taskFilter ?? ""}
+              onChange={(e) => onTaskFilterChange(e.target.value || null)}
+              className="mt-1 w-full"
+              aria-label={t("Filter episodes by task")}
+            >
+              <option value="">{t(`All tasks (${tasks.length})`)}</option>
+              {tasks.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
+
+        <div className="vw-sidebar-section">
+          <div className="vw-sidebar-head">
+            <h2 className="vw-label">
+              {t("Episodes")}
+              {taskFilter && filteredEpisodeCount !== undefined && (
+                <span className="tabular"> · {filteredEpisodeCount}</span>
+              )}
+            </h2>
+            <div className="vw-filter-chips">
+              {failureCount > 0 && onShowFailuresOnlyChange && (
+                <button
+                  type="button"
+                  className="vw-chip ds-focus"
+                  aria-pressed={showFailuresOnly}
+                  onClick={() => onShowFailuresOnlyChange(!showFailuresOnly)}
+                >
+                  <Icon icon={CircleX} />
+                  {t("Failures")} · {failureCount}
+                </button>
+              )}
+              {count > 0 && (
+                <button
+                  type="button"
+                  className="vw-chip ds-focus"
+                  aria-pressed={showFlaggedOnly}
+                  onClick={() => onShowFlaggedOnlyChange(!showFlaggedOnly)}
+                >
+                  <Icon icon={Flag} />
+                  {t("Flagged")} · {count}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {displayEpisodes.length === 0 && (
+            <p className="mt-2 px-1 vw-faint">
+              <T>No episodes match this task.</T>
+            </p>
+          )}
+
+          <ul className="vw-episodes">{displayEpisodes.map(row)}</ul>
+
+          {!showFlaggedOnly && totalPages > 1 && (
+            <div className="vw-pager">
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={ChevronLeft}
+                onClick={prevPage}
+                disabled={currentPage === 1}
+              >
+                {t("Previous")}
+              </Button>
+              <span>
+                {currentPage} / {totalPages}
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                iconEnd={ChevronRight}
+                onClick={nextPage}
+                disabled={currentPage === totalPages}
+              >
+                {t("Next")}
+              </Button>
+            </div>
+          )}
+        </div>
+      </nav>
+
+      <div className="vw-sidebar-toggle">
+        <IconButton
+          icon={PanelLeft}
+          label={t("Toggle sidebar")}
+          size="sm"
+          pressed={mobileVisible}
+          onClick={() => setMobileVisible((prev) => !prev)}
+        />
+      </div>
+    </div>
   );
 };
 

@@ -1,11 +1,14 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
 import { setObjectMarks } from "./object-marks";
-import { T } from "@/components/levi-locale";
+import { T, useLocale } from "@/components/levi-locale";
+import { Eye, Maximize2, Minimize2, X } from "lucide-react";
+import { IconButton, Menu } from "@/components/ds";
+import "@/components/viewer/viewer.css";
+import { useEscape } from "@/components/viewer/use-escape";
 
 import React, { useEffect, useRef } from "react";
 import { useTime } from "../context/time-context";
-import { FaExpand, FaCompress, FaTimes, FaEye } from "react-icons/fa";
 import type { VideoInfo } from "@/types";
 import type { ObjectAnnotation } from "@/types/object-annotation.types";
 import { fetchObjectAnnotations } from "@/utils/annotationsClient";
@@ -69,7 +72,7 @@ export const SimpleVideosPlayer = ({
   }
   const [hiddenVideos, setHiddenVideos] = React.useState<string[]>([]);
   const [enlargedVideo, setEnlargedVideo] = React.useState<string | null>(null);
-  const [showHiddenMenu, setShowHiddenMenu] = React.useState(false);
+  useEscape(enlargedVideo !== null, () => setEnlargedVideo(null));
   const [videosReady, setVideosReady] = React.useState(false);
   const [objectAnnotations, setObjectAnnotations] = React.useState<
     ObjectAnnotation[]
@@ -367,152 +370,119 @@ export const SimpleVideosPlayer = ({
     });
   }, [externalSeekVersion, currentTime, videosInfo, videosReady, hiddenSet]);
 
+  const { t } = useLocale();
+  const visibleCount = videosInfo.filter(
+    (v) => !hiddenVideos.includes(v.filename),
+  ).length;
+
   return (
-    <T>
-      {
-        <>
-          {/* Hidden videos menu */}
-          {hiddenVideos.length > 0 && (
-            <div className="relative mb-4">
-              <button
-                className="inline-flex items-center gap-2 h-8 rounded-md panel px-3 text-xs text-slate-300 hover:text-slate-100 hover:bg-white/5 transition-colors"
-                onClick={() => setShowHiddenMenu(!showHiddenMenu)}
-              >
-                <FaEye size={11} />
-                <T> Show hidden · </T>
-                <T>{hiddenVideos.length}</T>
-              </button>
-              {showHiddenMenu && (
-                <div className="absolute left-0 mt-1.5 w-max panel-raised bg-[var(--surface-1)] shadow-xl p-1.5 z-50">
-                  <div className="mb-1 px-2 text-[10px] uppercase tracking-wide text-slate-500">
-                    <T>Restore hidden videos</T>
-                  </div>
-                  {hiddenVideos.map((filename) => (
-                    <button
-                      key={filename}
-                      className="block w-full text-left px-2 py-1 rounded-md text-xs text-slate-300 hover:text-slate-100 hover:bg-white/5 transition-colors"
-                      onClick={() =>
-                        setHiddenVideos((prev) =>
-                          prev.filter((v) => v !== filename),
-                        )
+    <>
+      {/* Hidden videos menu */}
+      {hiddenVideos.length > 0 && (
+        <div>
+          <Menu
+            label={`${t("Show hidden")} · ${hiddenVideos.length}`}
+            icon={Eye}
+            items={hiddenVideos.map((filename) => ({
+              id: filename,
+              label: filename,
+              onSelect: () =>
+                setHiddenVideos((prev) => prev.filter((v) => v !== filename)),
+            }))}
+          />
+        </div>
+      )}
+
+      {/* Videos: black in both themes; the camera bar is drawn dark. */}
+      <div className="vw-videos">
+        {videosInfo.map((info, idx) => {
+          if (hiddenVideos.includes(info.filename)) return null;
+
+          const isEnlarged = enlargedVideo === info.filename;
+
+          return (
+            <div
+              key={info.filename}
+              className={`vw-video${isEnlarged ? " vw-video-enlarged" : ""}`}
+              data-theme="dark"
+            >
+              <div className="vw-video-bar">
+                <span>{info.filename}</span>
+                <span className="vw-video-tools">
+                  <IconButton
+                    icon={isEnlarged ? Minimize2 : Maximize2}
+                    label={t(isEnlarged ? "Minimize" : "Enlarge")}
+                    shortcut={isEnlarged ? "Esc" : undefined}
+                    size="sm"
+                    tooltipPlacement="bottom"
+                    onClick={() =>
+                      setEnlargedVideo(isEnlarged ? null : info.filename)
+                    }
+                  />
+                  <IconButton
+                    icon={X}
+                    label={t("Hide Video")}
+                    size="sm"
+                    tooltipPlacement="bottom"
+                    onClick={() => {
+                      setHiddenVideos((prev) => [...prev, info.filename]);
+                      // If the user hid the camera that was enlarged, clear
+                      // the enlarged state too — otherwise it stays pointed
+                      // at the now-hidden filename and pops back to fullscreen
+                      // the moment the user un-hides it.
+                      if (enlargedVideo === info.filename) {
+                        setEnlargedVideo(null);
                       }
-                    >
-                      <T>{filename}</T>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Videos */}
-          <div className="flex flex-wrap gap-x-2 gap-y-6">
-            {videosInfo.map((info, idx) => {
-              if (hiddenVideos.includes(info.filename)) return null;
-
-              const isEnlarged = enlargedVideo === info.filename;
-
-              return (
-                <div
-                  key={info.filename}
-                  className={`${
-                    isEnlarged
-                      ? "z-40 fixed inset-0 bg-black bg-opacity-90 flex flex-col items-center justify-center"
-                      : "max-w-96"
-                  }`}
+                    }}
+                    disabled={visibleCount === 1}
+                  />
+                </span>
+              </div>
+              <div className="relative w-full">
+                <video
+                  ref={videoRefCallbacksRef.current[idx]}
+                  className={`w-full object-contain ${
+                    isEnlarged ? "max-h-[90vh]" : ""
+                  } ${info.isGrayscale ? "opacity-0" : ""}`}
+                  muted
+                  preload="auto"
+                  crossOrigin="anonymous"
                 >
-                  <p className="truncate w-full rounded-t-md bg-[var(--surface-1)] border border-b-0 border-white/5 px-2.5 py-1 text-[11px] text-slate-400 flex items-center justify-between gap-2">
-                    <span className="truncate">
-                      <T>{info.filename}</T>
-                    </span>
-                    <span className="flex gap-0.5 shrink-0">
-                      <button
-                        title={isEnlarged ? "Minimize" : "Enlarge"}
-                        className="p-1 rounded text-slate-500 hover:text-slate-200 hover:bg-white/5 transition-colors"
-                        onClick={() =>
-                          setEnlargedVideo(isEnlarged ? null : info.filename)
-                        }
-                      >
-                        <T>
-                          {isEnlarged ? (
-                            <FaCompress size={10} />
-                          ) : (
-                            <FaExpand size={10} />
-                          )}
-                        </T>
-                      </button>
-                      <button
-                        title="Hide Video"
-                        className="p-1 rounded text-slate-500 hover:text-slate-200 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
-                        onClick={() => {
-                          setHiddenVideos((prev) => [...prev, info.filename]);
-                          // If the user hid the camera that was enlarged, clear
-                          // the enlarged state too — otherwise it stays pointed
-                          // at the now-hidden filename and pops back to fullscreen
-                          // the moment the user un-hides it.
-                          if (enlargedVideo === info.filename) {
-                            setEnlargedVideo(null);
-                          }
-                        }}
-                        disabled={
-                          videosInfo.filter(
-                            (v) => !hiddenVideos.includes(v.filename),
-                          ).length === 1
-                        }
-                      >
-                        <FaTimes size={10} />
-                      </button>
-                    </span>
-                  </p>
-                  <div className="relative w-full">
-                    <video
-                      ref={videoRefCallbacksRef.current[idx]}
-                      className={`w-full object-contain ${
-                        isEnlarged ? "max-h-[90vh] max-w-[90vw]" : ""
-                      } ${info.isGrayscale ? "opacity-0" : ""}`}
-                      muted
-                      preload="auto"
-                      crossOrigin="anonymous"
-                    >
-                      <source src={proxyHfUrl(info.url)} type="video/mp4" />
-                      <T>Your browser does not support the video tag.</T>
-                    </video>
-                    {/* Grayscale feeds: the hidden <video> above still decodes and
-                    drives timing; this canvas paints its frames recolored with
-                    the viridis colormap. */}
-                    <ColormappedVideo
-                      videoEl={videoEls[idx] ?? null}
-                      active={info.isGrayscale}
-                      range={info.colormapRange}
-                    />
-                    {/* VQA bbox/keypoint overlay. Reads atoms + drawMode from
-                    AnnotationsContext; pointer-events fall through when
-                    not in draw mode so video controls remain usable. */}
-                    <VideoOverlayCanvas
-                      videoEl={videoEls[idx] ?? null}
-                      cameraKey={info.filename}
-                      objectAnnotations={
-                        liveActive ? NO_OBJECTS : objectAnnotations
-                      }
-                    />
-                    {/* Live segmentation (fast segmentation panel): drawn on
-                    top, follows the video element's own clock. */}
-                    <LiveSegmentationCanvas
-                      videoEl={videoEls[idx] ?? null}
-                      cameraKey={info.filename}
-                      episodeId={annotationEpisodeId}
-                      segmentStart={
-                        info.isSegmented ? (info.segmentStart ?? 0) : 0
-                      }
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      }
-    </T>
+                  <source src={proxyHfUrl(info.url)} type="video/mp4" />
+                  <T>Your browser does not support the video tag.</T>
+                </video>
+                {/* Grayscale feeds: the hidden <video> above still decodes and
+                drives timing; this canvas paints its frames recolored with
+                the viridis colormap. */}
+                <ColormappedVideo
+                  videoEl={videoEls[idx] ?? null}
+                  active={info.isGrayscale}
+                  range={info.colormapRange}
+                />
+                {/* VQA bbox/keypoint overlay. Reads atoms + drawMode from
+                AnnotationsContext; pointer-events fall through when
+                not in draw mode so video controls remain usable. */}
+                <VideoOverlayCanvas
+                  videoEl={videoEls[idx] ?? null}
+                  cameraKey={info.filename}
+                  objectAnnotations={
+                    liveActive ? NO_OBJECTS : objectAnnotations
+                  }
+                />
+                {/* Live segmentation (fast segmentation panel): drawn on
+                top, follows the video element's own clock. */}
+                <LiveSegmentationCanvas
+                  videoEl={videoEls[idx] ?? null}
+                  cameraKey={info.filename}
+                  episodeId={annotationEpisodeId}
+                  segmentStart={info.isSegmented ? (info.segmentStart ?? 0) : 0}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 };
 

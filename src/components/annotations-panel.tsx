@@ -2,8 +2,22 @@
 "use client";
 import { T, useLocale } from "@/components/levi-locale";
 import { useConfirmAction } from "@/components/shell/confirm";
+import {
+  DatabaseZap,
+  PanelRight,
+  Play,
+  Plus,
+  Save,
+  Trash2,
+} from "lucide-react";
+import { Button, IconButton } from "@/components/ds";
+import {
+  InspectorPortal,
+  useInspectorReveal,
+  useInspectorSlot,
+} from "@/components/viewer/inspector";
 
-import "./annotations-skin.css";
+import "@/components/viewer/annotations.css";
 
 /**
  * Editor UI for v3.1 language atoms.
@@ -519,6 +533,9 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
   const { currentTime } = useTime();
   const { t } = useLocale();
   const confirm = useConfirmAction();
+  // In the episode viewer the inspector form lives in the right column.
+  const inspectorDocked = useInspectorSlot() !== null;
+  const revealInspector = useInspectorReveal();
 
   // ============ Inline quick-add state ============
   const [qaKind, setQaKind] = useState<QuickAddKind>("subtask");
@@ -741,35 +758,41 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                   <T>backend offline — edits saved to sessionStorage only</T>
                 </span>
               )}
-              <button
-                disabled={saving || !dirty}
+              <Button
+                variant="primary"
+                size="sm"
+                icon={Save}
+                loading={saving}
+                disabled={!dirty}
                 onClick={handleSave}
-                title="Save episode (Ctrl/Cmd+S)"
-                className="text-xs h-7 px-3 rounded border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-40"
+                aria-keyshortcuts="Control+S Meta+S"
               >
-                <T>{saving ? "Saving…" : "Save episode"}</T>
-              </button>
-              <button
+                {t(saving ? "Saving…" : "Save episode")}
+              </Button>
+              <Button
+                size="sm"
+                icon={DatabaseZap}
                 disabled={!backendEnabled}
                 onClick={handleSaveDataset}
-                className="text-xs h-7 px-3 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40"
               >
-                <T>Save dataset</T>
-              </button>
-              <button
+                {t("Save dataset")}
+              </Button>
+              <Button
+                variant="secondary"
+                className="vw-btn-danger-outline"
+                size="sm"
+                icon={Trash2}
                 disabled={!backendEnabled || saving}
                 onClick={handleDeleteFile}
-                title="Delete this episode's saved annotation file (not just the current draft)"
-                className="text-xs h-7 px-3 rounded border border-red-500/40 bg-red-500/10 text-red-200 hover:bg-red-500/20 disabled:opacity-40"
               >
-                <T>Delete file</T>
-              </button>
+                {t("Delete file")}
+              </Button>
             </div>
           </div>
 
           {isRaw && showExportHint && <RawCaptureNotice feature="export" />}
           {exportStatus && (
-            <div className="save-status">
+            <div className="save-status" role="status">
               <T>{exportStatus}</T>
             </div>
           )}
@@ -798,6 +821,7 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                 </T>
               </span>
               <select
+                aria-label="Annotation kind"
                 value={qaKind}
                 onChange={(e) => {
                   setQaKind(e.target.value as QuickAddKind);
@@ -835,9 +859,14 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                   }
                 />
               ))}
-              <button className="add-btn" onClick={handleQuickAdd}>
-                <T>+ Add at frame</T>
-              </button>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={Plus}
+                onClick={handleQuickAdd}
+              >
+                {t("Add at frame")}
+              </Button>
             </div>
             {backendEnabled && (
               <VocabularyEditor
@@ -848,7 +877,9 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
             )}
           </section>
 
-          <div className="workspace inspector-workspace">
+          <div
+            className={`workspace inspector-workspace${inspectorDocked ? " is-docked" : ""}`}
+          >
             <div className="rail annotation-list">
               <div className="list-head">
                 <div>
@@ -860,7 +891,19 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                     <T> atoms in this episode</T>
                   </p>
                 </div>
-                <span className="ts-pill">{fmtTime(currentTime)}</span>
+                <span className="flex items-center gap-2">
+                  {revealInspector && selectedAtom && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={PanelRight}
+                      onClick={revealInspector}
+                    >
+                      {t("Go to inspector")}
+                    </Button>
+                  )}
+                  <span className="ts-pill">{fmtTime(currentTime)}</span>
+                </span>
               </div>
               {atoms.length === 0 && (
                 <div className="rail-empty">
@@ -908,31 +951,33 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
               })}
             </div>
 
-            <div className="editor inspector">
-              <T>
-                {selectedAtom == null ? (
-                  <div className="editor-empty">
-                    <span className="section-kicker">
-                      <T>Inspector</T>
-                    </span>
-                    <p>
-                      Select an annotation from the list or timeline, or draw a
-                      new bbox/keypoint on the video.
-                    </p>
-                  </div>
-                ) : (
-                  <AtomEditor
-                    atom={selectedAtom}
-                    cameraKeys={cameraKeys}
-                    vocabulary={vocabulary}
-                    onChange={(updates) =>
-                      updateAtom(selectedIdx as number, updates)
-                    }
-                    onDelete={() => deleteAtom(selectedAtom)}
-                  />
-                )}
-              </T>
-            </div>
+            <InspectorPortal>
+              <div className="editor inspector">
+                <T>
+                  {selectedAtom == null ? (
+                    <div className="editor-empty">
+                      <span className="section-kicker">
+                        <T>Inspector</T>
+                      </span>
+                      <p>
+                        Select an annotation from the list or timeline, or draw
+                        a new bbox/keypoint on the video.
+                      </p>
+                    </div>
+                  ) : (
+                    <AtomEditor
+                      atom={selectedAtom}
+                      cameraKeys={cameraKeys}
+                      vocabulary={vocabulary}
+                      onChange={(updates) =>
+                        updateAtom(selectedIdx as number, updates)
+                      }
+                      onDelete={() => deleteAtom(selectedAtom)}
+                    />
+                  )}
+                </T>
+              </div>
+            </InspectorPortal>
           </div>
         </div>
       }
@@ -952,6 +997,7 @@ const RailGroup: React.FC<{
 }> = ({ title, dotClass, entries, currentTime }) => {
   const { selectedIdx, selectAtom } = useAnnotations();
   const jump = useJump();
+  const revealInspector = useInspectorReveal();
   if (entries.length === 0) return null;
   return (
     <T>
@@ -975,9 +1021,23 @@ const RailGroup: React.FC<{
               <div
                 key={idx}
                 className={`rail-row ${sel ? "selected" : ""} ${active ? "active-now" : ""}`}
+                role="button"
+                tabIndex={0}
+                aria-pressed={sel}
                 onClick={() => {
                   selectAtom(idx);
                   jump(atom.timestamp);
+                }}
+                onKeyDown={(event) => {
+                  // Enter or Space selects, as a click does; Enter also
+                  // takes the keyboard to the inspector form.
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
+                  // Keep Space from also toggling playback (window key).
+                  event.stopPropagation();
+                  selectAtom(idx);
+                  jump(atom.timestamp);
+                  if (event.key === "Enter") revealInspector?.();
                 }}
               >
                 <span className="ts">{fmtTime(atom.timestamp)}</span>
@@ -1004,6 +1064,7 @@ const AtomEditor: React.FC<{
   onChange: (updates: Partial<LanguageAtom>) => void;
   onDelete: () => void;
 }> = ({ atom, cameraKeys, vocabulary, onChange, onDelete }) => {
+  const { t } = useLocale();
   const jump = useJump();
   const { snap } = useAnnotations();
   const isSpeech = isSpeechAtom(atom);
@@ -1115,20 +1176,18 @@ const AtomEditor: React.FC<{
               </div>
             </div>
             <div className="right">
-              <button
-                className="icon-btn"
-                title="Jump to this atom's frame"
+              <IconButton
+                icon={Play}
+                size="sm"
+                label={t("Jump to this atom's frame")}
                 onClick={() => jump(atom.timestamp)}
-              >
-                ▶
-              </button>
-              <button
-                className="icon-btn danger"
-                title="Delete this atom"
+              />
+              <IconButton
+                icon={Trash2}
+                size="sm"
+                label={t("Delete this atom")}
                 onClick={onDelete}
-              >
-                ×
-              </button>
+              />
             </div>
           </div>
 
@@ -1333,6 +1392,7 @@ const CameraField: React.FC<{
             <T>Camera</T>
           </label>
           <select
+            aria-label="Camera"
             value={value}
             onChange={(e) =>
               onChange({
@@ -1400,7 +1460,7 @@ const VqaEditorFields: React.FC<{
             onChange={(e) => onChange({ content: e.target.value })}
           />
           {parsed && kind === "bbox" && (
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-xs text-(--ds-text-secondary) mt-1">
               <T>
                 Tip: bbox values are 0..1 image-relative (xyxy). Edit on the
                 video itself by deleting this and re-drawing.
@@ -1408,7 +1468,7 @@ const VqaEditorFields: React.FC<{
             </p>
           )}
           {parsed && kind === "keypoint" && (
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-xs text-(--ds-text-secondary) mt-1">
               <T>Tip: point values are 0..1 image-relative (xy).</T>
             </p>
           )}

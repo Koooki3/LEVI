@@ -1,5 +1,9 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import {
+  formatClock,
+  formatClockPrecise,
+} from "@/components/viewer/time-format";
 import { T, useLocale } from "@/components/levi-locale";
 
 /**
@@ -81,17 +85,27 @@ const TRACK_GROUPS = [
       {
         key: "task_aug",
         label: "task aug",
-        color: "#38bdf8",
+        color: "var(--style-task-aug)",
         render: "task-aug",
       },
       {
         key: "subtask",
         label: "subtask",
-        color: "#ffd21e",
+        color: "var(--style-subtask)",
         render: "span-edit",
       },
-      { key: "plan", label: "plan", color: "#5b8cff", render: "span-ro" },
-      { key: "memory", label: "memory", color: "#b78bff", render: "tick" },
+      {
+        key: "plan",
+        label: "plan",
+        color: "var(--style-plan)",
+        render: "span-ro",
+      },
+      {
+        key: "memory",
+        label: "memory",
+        color: "var(--style-memory)",
+        render: "tick",
+      },
     ],
   },
   {
@@ -102,10 +116,10 @@ const TRACK_GROUPS = [
       {
         key: "interjection",
         label: "speech",
-        color: "#ef5350",
+        color: "var(--style-interjection)",
         render: "tick",
       },
-      { key: "vqa", label: "vqa", color: "#34d399", render: "tick" },
+      { key: "vqa", label: "vqa", color: "var(--style-vqa)", render: "tick" },
     ],
   },
 ] as const;
@@ -598,7 +612,7 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
               <T>Annotations timeline</T>
             </span>
             <span className="ts-display">
-              {currentTime.toFixed(2)}s / {duration.toFixed(2)}s
+              {formatClockPrecise(currentTime)} / {formatClockPrecise(duration)}
             </span>
           </div>
 
@@ -622,7 +636,7 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                     className="tick-mark"
                     style={{ left: `${left}%` }}
                   >
-                    <T>{t}</T>s
+                    {formatClock(t)}
                   </div>
                 );
               },
@@ -702,14 +716,17 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                                   onMouseEnter={(e) =>
                                     showTip(
                                       e,
-                                      `subtask · ${s.start.toFixed(2)}s → ${s.end.toFixed(2)}s`,
+                                      `subtask · ${formatClockPrecise(s.start)} → ${formatClockPrecise(s.end)}`,
                                       s.label,
                                     )
                                   }
                                   onMouseMove={moveTip}
                                   onMouseLeave={hideTip}
                                 >
-                                  <span style={{ opacity: 0.7, fontSize: 10 }}>
+                                  <span
+                                    className="vw-muted"
+                                    style={{ fontSize: 12 }}
+                                  >
                                     <T>{k}</T>
                                   </span>
                                   <span
@@ -860,7 +877,7 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                                   onMouseEnter={(e) =>
                                     showTip(
                                       e,
-                                      `${tk.label} · ${s.start.toFixed(2)}s → ${s.end.toFixed(2)}s`,
+                                      `${tk.label} · ${formatClockPrecise(s.start)} → ${formatClockPrecise(s.end)}`,
                                       s.label,
                                     )
                                   }
@@ -1031,8 +1048,8 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                     <T>{pendingCreate.trackKey}</T>
                   </span>
                   <span style={{ marginLeft: "auto", fontFamily: "monospace" }}>
-                    {pendingCreate.start.toFixed(2)}s →{" "}
-                    {pendingCreate.end.toFixed(2)}s
+                    {formatClockPrecise(pendingCreate.start)} →{" "}
+                    {formatClockPrecise(pendingCreate.end)}
                   </span>
                 </>
               }
@@ -1053,32 +1070,17 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
               />
               <div className="quick-popup-actions">
                 <button
+                  type="button"
+                  className="popup-btn"
                   onClick={cancelPendingCreate}
-                  style={{
-                    fontSize: 11,
-                    padding: "4px 8px",
-                    borderRadius: 6,
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    background: "transparent",
-                    color: "var(--fg-2, #cbd5e1)",
-                    cursor: "pointer",
-                  }}
                 >
                   <T>cancel</T>
                 </button>
                 <button
+                  type="button"
+                  className="popup-btn primary"
                   onClick={commitPendingCreate}
                   disabled={!createLabel.trim()}
-                  style={{
-                    fontSize: 11,
-                    padding: "4px 8px",
-                    borderRadius: 6,
-                    border: "1px solid #5b8cff",
-                    background: "rgba(91,140,255,0.15)",
-                    color: "#c7d6ff",
-                    cursor: "pointer",
-                    opacity: createLabel.trim() ? 1 : 0.4,
-                  }}
                 >
                   <T>add ↵</T>
                 </button>

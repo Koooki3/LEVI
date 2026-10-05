@@ -1,6 +1,8 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
-import { T } from "@/components/levi-locale";
+import { T, useLocale } from "@/components/levi-locale";
+import { Button, Icon, IconButton, SegmentedControl } from "@/components/ds";
+import { ChevronLeft, ChevronRight, Flag, LoaderCircle } from "lucide-react";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import type {
@@ -18,6 +20,7 @@ function FrameThumbnail({
   info: EpisodeFrameInfo;
   showLast: boolean;
 }) {
+  const { t } = useLocale();
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [inView, setInView] = useState(false);
@@ -66,7 +69,7 @@ function FrameThumbnail({
     <T>
       {
         <div ref={containerRef} className="flex flex-col items-center">
-          <div className="w-full aspect-video bg-[var(--surface-1)] rounded overflow-hidden relative group">
+          <div className="w-full aspect-video bg-(--ds-surface-1) rounded overflow-hidden relative group">
             <T>
               {inView ? (
                 <video
@@ -77,40 +80,31 @@ function FrameThumbnail({
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <div className="w-full h-full animate-pulse bg-white/5" />
+                <div
+                  className="w-full h-full bg-(--ds-skeleton)"
+                  aria-hidden="true"
+                />
               )}
             </T>
-            <button
-              onClick={() => toggle(info.episodeIndex)}
-              className={`absolute top-1 right-1 p-1 rounded transition-opacity ${
-                isFlagged
-                  ? "opacity-100 text-cyan-300"
-                  : "opacity-0 group-hover:opacity-100 text-slate-400 hover:text-cyan-300"
-              }`}
-              title={isFlagged ? "Unflag episode" : "Flag episode"}
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill={isFlagged ? "currentColor" : "none"}
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
-                <line x1="4" y1="22" x2="4" y2="15" />
-              </svg>
-            </button>
+            <span className="absolute top-1 right-1">
+              <IconButton
+                icon={Flag}
+                size="sm"
+                variant="secondary"
+                className="vw-flag-btn vw-thumb-flag"
+                pressed={isFlagged}
+                label={t(isFlagged ? "Unflag episode" : "Flag episode")}
+                onClick={() => toggle(info.episodeIndex)}
+              />
+            </span>
           </div>
           <p
-            className={`text-xs mt-1 tabular-nums ${isFlagged ? "text-cyan-300" : "text-slate-400"}`}
+            className={`text-xs mt-1 tabular-nums ${isFlagged ? "text-(--ds-text-primary)" : "text-(--ds-text-secondary)"}`}
           >
-            <T>ep </T>
-            <T>{info.episodeIndex}</T>
-            <T>{isFlagged ? " ⚑" : ""}</T>
+            {t(`Episode ${info.episodeIndex}`)}
+            {isFlagged && (
+              <Icon icon={Flag} label={t("Flagged")} className="ml-1 inline" />
+            )}
           </p>
         </div>
       }
@@ -131,6 +125,7 @@ export default function OverviewPanel({
   flaggedOnly = false,
   onFlaggedOnlyChange,
 }: OverviewPanelProps) {
+  const { t } = useLocale();
   const { flagged, count: flagCount } = useFlaggedEpisodes();
   const [selectedCamera, setSelectedCamera] = useState<string>("");
   const [showLast, setShowLast] = useState(false);
@@ -155,26 +150,8 @@ export default function OverviewPanel({
     return (
       <T>
         {
-          <div className="flex items-center gap-2 text-slate-400 text-sm py-12 justify-center">
-            <svg
-              className="animate-spin h-4 w-4"
-              viewBox="0 0 24 24"
-              fill="none"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-              />
-            </svg>
+          <div className="flex items-center gap-2 text-(--ds-text-secondary) text-sm py-12 justify-center">
+            <Icon icon={LoaderCircle} className="ds-spin" />
             <T>Loading episode frames…</T>
           </div>
         }
@@ -192,7 +169,7 @@ export default function OverviewPanel({
       <T>
         {
           <div className="text-center py-8 space-y-2">
-            <p className="text-slate-500 italic">
+            <p className="text-(--ds-text-secondary) italic">
               <T>
                 {flaggedOnly
                   ? "No flagged episodes to show."
@@ -202,7 +179,7 @@ export default function OverviewPanel({
             {flaggedOnly && onFlaggedOnlyChange && (
               <button
                 onClick={() => onFlaggedOnlyChange(false)}
-                className="text-xs text-cyan-300 hover:text-cyan-200 underline"
+                className="text-xs text-(--ds-text-primary) hover:text-(--ds-text-primary) underline"
               >
                 <T>Show all episodes</T>
               </button>
@@ -220,7 +197,7 @@ export default function OverviewPanel({
     <T>
       {
         <div className="max-w-7xl mx-auto py-6 space-y-5">
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-(--ds-text-secondary)">
             <T>
               Use first/last frame views to spot episodes with bad end states or
               other anomalies. Hover over a thumbnail and click the flag icon to
@@ -230,13 +207,15 @@ export default function OverviewPanel({
 
           {/* Controls row */}
           <div className="flex items-center justify-between flex-wrap gap-4">
-            <div className="flex items-center gap-5">
+            <div className="flex flex-wrap items-center gap-3">
               {/* Camera selector */}
               {data.cameras.length > 1 && (
                 <select
+                  aria-label="Camera"
                   value={selectedCamera}
                   onChange={handleCameraChange}
-                  className="bg-[var(--surface-1)] text-slate-200 text-sm rounded px-3 py-1.5 border border-white/10 focus:outline-none focus:border-cyan-400"
+                  className="ds-input"
+                  style={{ width: "auto", maxWidth: "100%" }}
                 >
                   {data.cameras.map((cam) => (
                     <option key={cam} value={cam}>
@@ -249,79 +228,57 @@ export default function OverviewPanel({
               {/* Flagged only toggle */}
               {flagCount > 0 && onFlaggedOnlyChange && (
                 <button
+                  type="button"
+                  className="vw-chip ds-focus"
+                  aria-pressed={flaggedOnly}
                   onClick={() => {
                     onFlaggedOnlyChange(!flaggedOnly);
                     setPage(0);
                   }}
-                  className={`text-xs px-2.5 py-1 rounded transition-colors flex items-center gap-1.5 ${
-                    flaggedOnly
-                      ? "bg-cyan-400/15 text-cyan-300 border border-cyan-400/40"
-                      : "text-slate-400 hover:text-slate-200 border border-white/10"
-                  }`}
                 >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill={flaggedOnly ? "currentColor" : "none"}
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
-                    <line x1="4" y1="22" x2="4" y2="15" />
-                  </svg>
-                  <T>Flagged only (</T>
-                  <T>{flagCount}</T>)
+                  <Icon icon={Flag} />
+                  {t("Flagged only")} · {flagCount}
                 </button>
               )}
 
-              {/* First / Last toggle */}
-              <div className="flex items-center gap-3">
-                <span
-                  className={`text-sm ${!showLast ? "text-slate-100 font-medium" : "text-slate-500"}`}
-                >
-                  <T>First Frame</T>
-                </span>
-                <button
-                  onClick={() => setShowLast((v) => !v)}
-                  className={`relative inline-flex items-center w-9 h-5 rounded-full transition-colors shrink-0 ${showLast ? "bg-cyan-500" : "bg-white/10"}`}
-                  aria-label="Toggle first/last frame"
-                >
-                  <span
-                    className={`inline-block w-3.5 h-3.5 bg-white rounded-full transition-transform ${showLast ? "translate-x-[18px]" : "translate-x-[3px]"}`}
-                  />
-                </button>
-                <span
-                  className={`text-sm ${showLast ? "text-slate-100 font-medium" : "text-slate-500"}`}
-                >
-                  <T>Last Frame</T>
-                </span>
-              </div>
+              {/* First / Last frame */}
+              <SegmentedControl
+                label={t("Frame shown")}
+                size="sm"
+                className="vw-nowrap"
+                value={showLast ? "last" : "first"}
+                onChange={(value) => setShowLast(value === "last")}
+                options={[
+                  { value: "first", label: t("First Frame") },
+                  { value: "last", label: t("Last Frame") },
+                ]}
+              />
             </div>
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className="flex items-center gap-2 text-sm text-slate-300">
-                <button
+              <div className="flex items-center gap-2 text-sm text-(--ds-text-secondary)">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={ChevronLeft}
                   disabled={page === 0}
                   onClick={() => setPage((p) => p - 1)}
-                  className="px-2 py-1 rounded bg-[var(--surface-1)] hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed"
                 >
-                  <T>← Prev</T>
-                </button>
+                  {t("Previous")}
+                </Button>
                 <span className="tabular-nums">
                   {page + 1} / <T>{totalPages}</T>
                 </span>
-                <button
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  iconEnd={ChevronRight}
                   disabled={page === totalPages - 1}
                   onClick={() => setPage((p) => p + 1)}
-                  className="px-2 py-1 rounded bg-[var(--surface-1)] hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed"
                 >
-                  <T>Next →</T>
-                </button>
+                  {t("Next")}
+                </Button>
               </div>
             )}
           </div>

@@ -1,6 +1,9 @@
 "use client";
 import Link from "next/link";
 import { T } from "@/components/levi-locale";
+import { ArrowUpRight, Info } from "lucide-react";
+import { Icon } from "@/components/ds";
+import "@/components/viewer/viewer.css";
 import { DatasetFormatBadge } from "@/components/dataset-format";
 import { useDatasetSource } from "@/context/dataset-source-context";
 
@@ -19,7 +22,8 @@ export function RawCaptureNotice({
   const isDroid = format?.input_format === "droid_raw";
   if (compact) {
     return (
-      <div className="levi-raw-notice compact" role="note">
+      <div className="vw-note vw-note--compact" role="note">
+        <Icon icon={Info} />
         <DatasetFormatBadge format={format ?? undefined} compact />
         <span>
           <T>
@@ -29,16 +33,18 @@ export function RawCaptureNotice({
           </T>
         </span>
         {!isDroid && (
-          <Link className="levi-raw-link" href={convertHref}>
-            <T>Convert in the Workbench</T> ↗
+          <Link className="vw-link vw-note-action" href={convertHref}>
+            <T>Convert in the Workbench</T>
+            <Icon icon={ArrowUpRight} />
           </Link>
         )}
       </div>
     );
   }
   return (
-    <div className="levi-raw-notice" role="note">
-      <div className="levi-raw-notice-head">
+    <div className="vw-note" role="note">
+      <div className="vw-note-head">
+        <Icon icon={Info} />
         <DatasetFormatBadge format={format ?? undefined} compact />
         <strong>
           <T>
@@ -64,8 +70,12 @@ export function RawCaptureNotice({
         </T>
       </p>
       {!isDroid && (
-        <Link className="levi-secondary inline-block mt-2" href={convertHref}>
-          <T>Convert in the Workbench</T> ↗
+        <Link
+          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus mt-2"
+          href={convertHref}
+        >
+          <T>Convert in the Workbench</T>
+          <Icon icon={ArrowUpRight} />
         </Link>
       )}
     </div>

@@ -1,5 +1,7 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import { Icon } from "@/components/ds";
+import { LoaderCircle } from "lucide-react";
 import { T } from "@/components/levi-locale";
 
 import type {
@@ -42,7 +44,7 @@ function EpisodeLengthHistogram({
   );
   const chartHeight = 150;
   const labelHeight = 30;
-  const topPad = 16;
+  const topPad = 18;
   const svgWidth = data.length * (barWidth + gap);
   const labelStep = Math.max(1, Math.ceil(data.length / 10));
 
@@ -70,16 +72,16 @@ function EpisodeLengthHistogram({
                     y={y}
                     width={barWidth}
                     height={barH}
-                    className="fill-orange-500/80 hover:fill-orange-400 transition-colors"
+                    className="fill-(--dv-1) hover:opacity-80 transition-opacity"
                     rx={Math.min(2, barWidth / 4)}
                   />
-                  {bin.count > 0 && barWidth >= 8 && (
+                  {bin.count > 0 && barWidth >= 14 && (
                     <text
                       x={x + barWidth / 2}
                       y={y - 3}
                       textAnchor="middle"
-                      className="fill-slate-400"
-                      fontSize={Math.min(10, barWidth - 1)}
+                      className="fill-(--ds-text-secondary)"
+                      fontSize={12}
                     >
                       <T>{bin.count}</T>
                     </text>
@@ -96,10 +98,10 @@ function EpisodeLengthHistogram({
                 <text
                   key={idx}
                   x={idx * (barWidth + gap) + barWidth / 2}
-                  y={topPad + chartHeight + 14}
+                  y={topPad + chartHeight + 16}
                   textAnchor="middle"
-                  className="fill-slate-400"
-                  fontSize={9}
+                  className="fill-(--ds-text-secondary)"
+                  fontSize={12}
                 >
                   <T>{label}</T>s
                 </text>
@@ -116,11 +118,11 @@ function Card({ label, value }: { label: string; value: string | number }) {
   return (
     <T>
       {
-        <div className="bg-[var(--surface-1)]/60 rounded-lg p-4 border border-white/10">
-          <p className="text-xs text-slate-400 uppercase tracking-wide">
+        <div className="bg-(--ds-surface-1) rounded-lg p-4 border border-(--ds-separator)">
+          <p className="text-xs text-(--ds-text-secondary) ">
             <T>{label}</T>
           </p>
-          <p className="text-xl font-bold tabular-nums mt-1">
+          <p className="text-xl font-semibold tabular-nums mt-1">
             <T>{value}</T>
           </p>
         </div>
@@ -142,12 +144,12 @@ function StatsPanel({
       {
         <div className="max-w-4xl mx-auto py-6 space-y-8">
           <div>
-            <h2 className="text-xl text-slate-100">
-              <span className="font-bold">
+            <h2 className="text-xl text-(--ds-text-primary)">
+              <span className="font-semibold">
                 <T>Dataset Statistics:</T>
               </span>
               <T> </T>
-              <span className="font-normal text-slate-400">
+              <span className="font-normal text-(--ds-text-secondary)">
                 <T>{datasetInfo.repoId}</T>
               </span>
             </h2>
@@ -184,23 +186,23 @@ function StatsPanel({
 
           {/* Camera resolutions */}
           {datasetInfo.cameras.length > 0 && (
-            <div className="bg-[var(--surface-1)]/60 rounded-lg p-5 border border-white/10">
-              <h3 className="text-sm font-semibold text-slate-200 mb-3">
+            <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator)">
+              <h3 className="text-sm font-semibold text-(--ds-text-primary) mb-3">
                 <T>Camera Resolutions</T>
               </h3>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 {datasetInfo.cameras.map((cam: CameraInfo) => (
                   <div
                     key={cam.name}
-                    className="bg-[var(--surface-0)]/50 rounded-md p-3"
+                    className="bg-(--ds-surface-sunken) rounded-md p-3"
                   >
                     <p
-                      className="text-xs text-slate-400 mb-1 truncate"
+                      className="text-xs text-(--ds-text-secondary) mb-1 truncate"
                       title={cam.name}
                     >
                       <T>{cam.name}</T>
                     </p>
-                    <p className="text-base font-bold tabular-nums">
+                    <p className="text-base font-semibold tabular-nums">
                       <T>{cam.width}</T>×<T>{cam.height}</T>
                     </p>
                   </div>
@@ -211,26 +213,8 @@ function StatsPanel({
 
           {/* Loading spinner for async stats */}
           {loading && (
-            <div className="flex items-center gap-2 text-slate-400 text-sm py-4">
-              <svg
-                className="animate-spin h-4 w-4"
-                viewBox="0 0 24 24"
-                fill="none"
-              >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                />
-              </svg>
+            <div className="flex items-center gap-2 text-(--ds-text-secondary) text-sm py-4">
+              <Icon icon={LoaderCircle} className="ds-spin" />
               <T>Computing episode statistics…</T>
             </div>
           )}
@@ -238,8 +222,8 @@ function StatsPanel({
           {/* Episode length section */}
           {els && (
             <>
-              <div className="bg-[var(--surface-1)]/60 rounded-lg p-5 border border-white/10">
-                <h3 className="text-sm font-semibold text-slate-200 mb-4">
+              <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator)">
+                <h3 className="text-sm font-semibold text-(--ds-text-primary) mb-4">
                   <T>Episode Lengths</T>
                 </h3>
                 <div className="grid grid-cols-3 md:grid-cols-5 gap-4 mb-4">
@@ -258,10 +242,10 @@ function StatsPanel({
               </div>
 
               {els.episodeLengthHistogram.length > 0 && (
-                <div className="bg-[var(--surface-1)]/60 rounded-lg p-5 border border-white/10">
-                  <h3 className="text-sm font-semibold text-slate-200 mb-4">
+                <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator)">
+                  <h3 className="text-sm font-semibold text-(--ds-text-primary) mb-4">
                     <T>Episode Length Distribution</T>
-                    <span className="text-xs text-slate-500 ml-2 font-normal">
+                    <span className="text-xs text-(--ds-text-secondary) ml-2 font-normal">
                       <T>{els.episodeLengthHistogram.length}</T>
                       <T>
                         {els.episodeLengthHistogram.length !== 1

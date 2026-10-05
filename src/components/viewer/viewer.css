@@ -1,0 +1,1085 @@
+/* Episode viewer (design stage 3): frame, tabs, episode list, media and
+ * playback, and the data-visualisation palette the viewer's timelines,
+ * charts and overlays share.
+ *
+ * Interface colours are --ds-* tokens only. The one exception is the data
+ * palette below (--dv-*): data colours are not interface colours (proposal
+ * §4.5), so they are defined here, once, in light and dark steps. Candidate
+ * for promotion into src/styles/tokens.css.
+ */
+
+/* ── Data palette (categorical, fixed order) ─────────────────────────
+ * One source: --dv-N is the design token --ds-data-N (tokens.css, same
+ * values); the value after the comma only applies where that token is not
+ * defined yet. Each theme scope redeclares it so a dark subtree (video
+ * tiles) resolves the dark step.
+ * Eight hues validated with the dataviz palette checks (adjacent CVD
+ * ΔE ≥ 8.4, normal-vision ΔE ≥ 19.3; dark steps ≥ 3:1 on the dark card).
+ * Three light steps (aqua, yellow, magenta) are below 3:1 on white, so a
+ * series always has a visible label next to its colour (lane names,
+ * legends). Never use them for text: text stays in --ds-text-*.
+ * The two blocks for dark must stay identical (system and manual). */
+:root,
+[data-theme="light"] {
+  --dv-1: var(--ds-data-1, #2a78d6); /* blue */
+  --dv-2: var(--ds-data-2, #eb6834); /* orange */
+  --dv-3: var(--ds-data-3, #1baf7a); /* aqua */
+  --dv-4: var(--ds-data-4, #eda100); /* yellow */
+  --dv-5: var(--ds-data-5, #e87ba4); /* magenta */
+  --dv-6: var(--ds-data-6, #008300); /* green */
+  --dv-7: var(--ds-data-7, #4a3aa7); /* violet */
+  --dv-8: var(--ds-data-8, #e34948); /* red */
+  /* Diverging midpoint and the neutral "no data" fill. */
+  --dv-neutral: #b8b8be;
+  /* Positive / negative (RECAP advantage, value): blue ↔ red poles. */
+  --dv-positive: var(--dv-1);
+  --dv-negative: var(--dv-8);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --dv-1: var(--ds-data-1, #3987e5);
+    --dv-2: var(--ds-data-2, #d95926);
+    --dv-3: var(--ds-data-3, #199e70);
+    --dv-4: var(--ds-data-4, #c98500);
+    --dv-5: var(--ds-data-5, #d55181);
+    --dv-6: var(--ds-data-6, #008300);
+    --dv-7: var(--ds-data-7, #9085e9);
+    --dv-8: var(--ds-data-8, #e66767);
+    --dv-neutral: #48484a;
+  }
+}
+[data-theme="dark"] {
+  --dv-1: var(--ds-data-1, #3987e5);
+  --dv-2: var(--ds-data-2, #d95926);
+  --dv-3: var(--ds-data-3, #199e70);
+  --dv-4: var(--ds-data-4, #c98500);
+  --dv-5: var(--ds-data-5, #d55181);
+  --dv-6: var(--ds-data-6, #008300);
+  --dv-7: var(--ds-data-7, #9085e9);
+  --dv-8: var(--ds-data-8, #e66767);
+  --dv-neutral: #48484a;
+}
+
+/* ── Frame ──────────────────────────────────────────────────────────── */
+.vw-root {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--levi-header-height, 56px));
+  max-height: calc(100vh - var(--levi-header-height, 56px));
+  background: var(--ds-bg);
+  color: var(--ds-text-primary);
+}
+.vw-tabbar {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-4);
+  flex-shrink: 0;
+  min-height: 48px;
+  padding: 0 var(--ds-space-4);
+  border-bottom: 1px solid var(--ds-separator);
+  background: var(--ds-bg);
+  overflow-x: auto;
+}
+.vw-tabbar .ds-tabs__list {
+  border-bottom: 0;
+}
+.vw-tabbar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  flex-shrink: 0;
+}
+.vw-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.vw-main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-4);
+  flex: 1;
+  min-width: 0;
+  padding: var(--ds-space-4) var(--ds-space-6);
+  overflow-y: auto;
+}
+.vw-main[data-loading="true"] {
+  overflow: hidden;
+}
+
+/* Page heading row: dataset, episode, prev/next, actions. */
+.vw-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.vw-heading-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.vw-heading-title a,
+.vw-heading-title h1 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-title-3-size);
+  line-height: var(--ds-text-title-3-line);
+  font-weight: var(--ds-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.vw-heading-title a:hover {
+  text-decoration: underline;
+}
+.vw-heading-meta {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+  line-height: var(--ds-text-callout-line);
+  font-variant-numeric: tabular-nums;
+}
+.vw-heading-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-1);
+}
+.vw-heading-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  flex-wrap: wrap;
+}
+
+/* A card section inside the viewer (instruction, panels). */
+.vw-card {
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+  box-shadow: var(--ds-shadow-1), var(--ds-ring-raised);
+  padding: var(--ds-space-4);
+}
+.vw-label {
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+  line-height: var(--ds-text-caption-line);
+  font-weight: var(--ds-weight-medium);
+}
+.vw-muted {
+  color: var(--ds-text-secondary);
+}
+.vw-faint {
+  color: var(--ds-text-tertiary);
+}
+
+/* Error, three parts: what happened, why, what to do. */
+.vw-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(100vh - var(--levi-header-height, 56px));
+  padding: var(--ds-space-6);
+  background: var(--ds-bg);
+}
+.vw-error-card {
+  max-width: 36rem;
+  width: 100%;
+  display: grid;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-6);
+  border: 1px solid var(--ds-separator);
+  border-left: 3px solid var(--ds-danger);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-surface-1);
+  color: var(--ds-text-primary);
+}
+.vw-error-card h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  margin: 0;
+  font-size: var(--ds-text-title-2-size);
+  line-height: var(--ds-text-title-2-line);
+  font-weight: var(--ds-weight-semibold);
+}
+.vw-error-card h2 .ds-icon {
+  color: var(--ds-danger);
+}
+.vw-error-card details {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+}
+.vw-error-card pre {
+  margin: var(--ds-space-2) 0 0;
+  padding: var(--ds-space-3);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-sunken);
+  color: var(--ds-text-primary);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Analysis tab: one segmented control over the three analysis views. */
+.vw-analysis-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+  flex-wrap: wrap;
+}
+.vw-analysis-head p {
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+}
+
+/* ── Episode list (left column) ─────────────────────────────────────── */
+.vw-sidebar-wrap {
+  display: flex;
+  flex-shrink: 0;
+  z-index: var(--ds-z-sticky);
+}
+.vw-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: var(--ds-space-4) var(--ds-space-3);
+  border-right: 1px solid var(--ds-separator);
+  background: var(--ds-surface-sunken);
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-callout-size);
+  line-height: var(--ds-text-callout-line);
+  overflow-wrap: anywhere;
+}
+.vw-sidebar[data-mobile-hidden="true"] {
+  display: none;
+}
+@media (min-width: 900px) {
+  .vw-sidebar[data-mobile-hidden="true"] {
+    display: block;
+  }
+  .vw-sidebar-toggle {
+    display: none !important;
+  }
+}
+.vw-sidebar-toggle {
+  display: flex;
+  align-items: center;
+  margin: 0 var(--ds-space-1);
+}
+.vw-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--ds-space-1) var(--ds-space-3);
+  margin: 0;
+  padding: 0 var(--ds-space-1);
+  font-variant-numeric: tabular-nums;
+}
+.vw-facts dt {
+  color: var(--ds-text-tertiary-on-sunken);
+  font-size: var(--ds-text-caption-size);
+}
+.vw-facts dd {
+  margin: 0;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-caption-size);
+}
+.vw-sidebar-section {
+  margin-top: var(--ds-space-5);
+}
+.vw-sidebar-section > .vw-label {
+  padding: 0 var(--ds-space-1);
+  color: var(--ds-text-tertiary-on-sunken);
+}
+/* The heading never breaks inside a word; when the filter chips do not
+   fit beside it they move to the next line. */
+.vw-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--ds-space-1) var(--ds-space-2);
+  padding: 0 var(--ds-space-1);
+}
+.vw-sidebar-head .vw-label {
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: var(--ds-text-tertiary-on-sunken);
+}
+.vw-filter-chips {
+  display: flex;
+  gap: var(--ds-space-1);
+  flex-wrap: wrap;
+}
+.vw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-1);
+  min-height: 24px;
+  padding: 0 var(--ds-space-2);
+  border: 1px solid var(--ds-border-control);
+  border-radius: var(--ds-radius-full);
+  background: transparent;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    background-color var(--ds-dur-fast) var(--ds-ease-standard),
+    color var(--ds-dur-fast) var(--ds-ease-standard);
+}
+.vw-chip:hover {
+  background: var(--ds-surface-hover);
+  color: var(--ds-text-primary);
+}
+.vw-chip[aria-pressed="true"] {
+  border-color: var(--ds-accent);
+  background: var(--ds-accent);
+  color: var(--ds-on-accent);
+}
+.vw-episodes {
+  margin: var(--ds-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 1px;
+}
+.vw-episode {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  min-height: 28px;
+  padding: 0 var(--ds-space-1) 0 var(--ds-space-2);
+  border-radius: var(--ds-radius-sm);
+  color: var(--ds-text-primary);
+  font-variant-numeric: tabular-nums;
+  transition: background-color var(--ds-dur-fast) var(--ds-ease-standard);
+}
+.vw-episode:hover {
+  background: var(--ds-surface-hover);
+}
+.vw-episode[aria-current="true"] {
+  background: var(--ds-surface-selected);
+  font-weight: var(--ds-weight-medium);
+}
+.vw-episode[aria-current="true"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--ds-selected-indicator);
+}
+.vw-episode-link {
+  flex: 1;
+  min-width: 0;
+  padding: var(--ds-space-1) 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.vw-episode-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-1);
+  flex-shrink: 0;
+}
+/* Small identity marks: language annotations (blue), vision (violet). */
+.vw-mark {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+}
+.vw-mark--language {
+  background: var(--dv-1);
+}
+.vw-mark--vision {
+  background: var(--dv-7);
+  border-radius: 1px;
+}
+/* RECAP share bar: positive (blue) over negative (red). */
+.vw-recap-bar {
+  display: flex;
+  width: 16px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--dv-negative);
+}
+.vw-recap-bar > span {
+  height: 100%;
+  background: var(--dv-positive);
+}
+/* Outcome: shape + colour (success ●, failure ✕ in a circle, none ○). */
+.vw-outcome {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin: 0 -4px;
+  border: 0;
+  border-radius: var(--ds-radius-xs);
+  background: none;
+  color: var(--ds-text-tertiary-on-sunken);
+}
+button.vw-outcome {
+  cursor: pointer;
+}
+button.vw-outcome:hover {
+  background: var(--ds-surface-hover);
+}
+.vw-outcome[data-outcome="success"] {
+  color: var(--ds-success);
+}
+.vw-outcome[data-outcome="failure"] {
+  color: var(--ds-danger);
+}
+.vw-outcome[data-outcome="none"] {
+  opacity: 0;
+}
+.vw-episode:hover .vw-outcome[data-outcome="none"],
+.vw-outcome[data-outcome="none"]:focus-visible {
+  opacity: 1;
+}
+/* A human label wears a ring around the shape. */
+.vw-outcome[data-human="true"] .ds-icon {
+  border-radius: 999px;
+  box-shadow: 0 0 0 1.5px var(--ds-text-primary);
+}
+.vw-flag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--ds-radius-xs);
+  background: none;
+  color: var(--ds-text-tertiary-on-sunken);
+  cursor: pointer;
+  opacity: 0;
+}
+.vw-flag:hover {
+  background: var(--ds-surface-hover);
+  color: var(--ds-text-primary);
+}
+.vw-episode:hover .vw-flag,
+.vw-flag:focus-visible,
+.vw-flag[aria-pressed="true"] {
+  opacity: 1;
+}
+.vw-flag[aria-pressed="true"] {
+  color: var(--ds-warning);
+}
+.vw-flag[aria-pressed="true"] svg {
+  fill: currentColor;
+}
+.vw-pager {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  margin-top: var(--ds-space-3);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+  font-variant-numeric: tabular-nums;
+}
+.vw-pager > :last-child {
+  margin-left: auto;
+}
+
+@media (hover: none) {
+  .vw-flag,
+  .vw-outcome[data-outcome="none"] {
+    opacity: 1;
+  }
+}
+
+/* ── Media: always black, controls drawn in the dark theme ──────────── */
+.vw-videos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-3);
+}
+.vw-video {
+  position: relative;
+  overflow: hidden;
+  max-width: 24rem;
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-media-bg);
+}
+.vw-video-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+  min-height: 32px;
+  padding: 0 var(--ds-space-1) 0 var(--ds-space-3);
+  background: var(--ds-media-bg);
+  color: var(--ds-text-secondary);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+}
+.vw-video-bar > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vw-video-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+/* Above the top bar (overlay + 5), so the camera bar and its Minimize
+   button stay reachable; Escape also leaves (useEscape). */
+.vw-video-enlarged {
+  position: fixed;
+  inset: 0;
+  z-index: var(--ds-z-dialog);
+  max-width: none;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+}
+.vw-video-enlarged video {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Playback bar: a floating strip under the videos. */
+.vw-playback {
+  position: sticky;
+  bottom: var(--ds-space-3);
+  z-index: var(--ds-z-sticky);
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+  width: 100%;
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-material-bar);
+  -webkit-backdrop-filter: var(--ds-material-filter);
+  backdrop-filter: var(--ds-material-filter);
+  box-shadow: var(--ds-shadow-2), var(--ds-ring-raised);
+  color: var(--ds-text-primary);
+}
+.vw-playback-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.vw-scrubber {
+  position: relative;
+  flex: 1;
+  min-width: 80px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+}
+.vw-scrubber input[type="range"] {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--ds-accent);
+  cursor: pointer;
+}
+.vw-scrubber-mark {
+  position: absolute;
+  top: 2px;
+  width: 2px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--dv-2);
+  pointer-events: none;
+}
+.vw-time {
+  flex-shrink: 0;
+  color: var(--ds-text-secondary);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  font-variant-numeric: tabular-nums;
+}
+.vw-shortcut-hints {
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--ds-text-tertiary);
+  font-size: var(--ds-text-caption-size);
+}
+.vw-shortcut-hints > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-1);
+}
+@media (min-width: 1200px) {
+  .vw-shortcut-hints {
+    display: flex;
+  }
+}
+
+/* Generic small icon button that keeps the 24 px target inside the dense
+   annotation layouts (the ds IconButton is used where there is room). */
+.vw-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--ds-radius-sm);
+  background: transparent;
+  color: var(--ds-icon);
+  cursor: pointer;
+  transition: background-color var(--ds-dur-fast) var(--ds-ease-standard);
+}
+.vw-icon-btn:hover {
+  background: var(--ds-surface-hover);
+  color: var(--ds-text-primary);
+}
+.vw-icon-btn:disabled {
+  color: var(--ds-text-disabled);
+  cursor: not-allowed;
+  background: transparent;
+}
+
+/* ── Charts (Recharts) ──────────────────────────────────────────────── */
+.vw-chart .recharts-cartesian-grid line {
+  stroke: var(--ds-separator);
+}
+.vw-chart .recharts-cartesian-axis-line,
+.vw-chart .recharts-cartesian-axis-tick-line {
+  stroke: var(--ds-separator-strong);
+}
+.vw-chart .recharts-cartesian-axis-tick-value,
+.vw-chart .recharts-text {
+  fill: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.vw-chart .recharts-tooltip-wrapper .recharts-default-tooltip {
+  border: 1px solid var(--ds-separator) !important;
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-2) !important;
+  color: var(--ds-text-primary);
+  box-shadow: var(--ds-shadow-2);
+}
+.vw-chart .recharts-reference-line line {
+  stroke: var(--ds-text-primary);
+}
+
+/* Reduced motion: nothing in the viewer moves by itself. */
+@media (prefers-reduced-motion: reduce) {
+  .vw-root *,
+  .vw-root *::before,
+  .vw-root *::after {
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Links in running text: primary text, underlined. */
+.vw-link {
+  color: var(--ds-text-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--ds-separator-strong);
+  text-underline-offset: 2px;
+}
+.vw-link:hover {
+  text-decoration-color: currentColor;
+}
+
+/* Loading overlay over the viewer's content (loading-component.tsx). */
+@keyframes vw-loading-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.vw-loading {
+  position: absolute;
+  inset: 0;
+  z-index: var(--ds-z-sticky);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ds-space-1);
+  background: color-mix(in srgb, var(--ds-bg) 88%, transparent);
+  color: var(--ds-text-secondary);
+  animation: vw-loading-in var(--ds-dur-base) var(--ds-ease-standard) 300ms both;
+}
+.vw-loading .ds-icon {
+  margin-bottom: var(--ds-space-2);
+  color: var(--ds-text-primary);
+}
+.vw-loading-title {
+  margin: 0;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-body-size);
+  font-weight: var(--ds-weight-medium);
+}
+.vw-loading-detail {
+  margin: 0;
+  font-size: var(--ds-text-callout-size);
+}
+@media (prefers-reduced-motion: reduce) {
+  .vw-loading {
+    animation: none;
+  }
+}
+
+/* A bordered panel inside the viewer (replaces the dark-only .panel). */
+.vw-panel {
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+}
+
+/* Inline notes (raw-capture notice): an info icon, words, the next step. */
+.vw-note {
+  display: grid;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-3) var(--ds-space-4);
+  border: 1px solid var(--ds-separator);
+  border-left: 3px solid var(--ds-info);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-callout-size);
+  line-height: var(--ds-text-callout-line);
+}
+.vw-note p {
+  margin: 0;
+  color: var(--ds-text-secondary);
+}
+.vw-note-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+.vw-note > .ds-icon,
+.vw-note-head > .ds-icon {
+  color: var(--ds-info);
+  flex-shrink: 0;
+}
+.vw-note--compact {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: var(--ds-space-2) var(--ds-space-3);
+  color: var(--ds-text-secondary);
+}
+.vw-note-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* Dataset changed on disk: a floating card, bottom left (toasts are on the
+   right), until the person reloads. */
+.vw-update {
+  position: fixed;
+  left: var(--ds-space-4);
+  bottom: var(--ds-space-4);
+  z-index: var(--ds-z-toast);
+  display: grid;
+  gap: var(--ds-space-2);
+  max-width: 22rem;
+  padding: var(--ds-space-4);
+  border: 1px solid var(--ds-separator);
+  border-left: 3px solid var(--ds-info);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-2);
+  box-shadow: var(--ds-shadow-3), var(--ds-ring-raised);
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-callout-size);
+  animation: ds-fade-in var(--ds-dur-base) var(--ds-ease-standard);
+}
+.vw-update p {
+  margin: 0;
+  color: var(--ds-text-secondary);
+}
+.vw-update > :last-child {
+  justify-self: start;
+}
+
+.vw-note--danger {
+  border-left-color: var(--ds-danger);
+}
+.vw-code {
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+  overflow-wrap: anywhere;
+}
+.vw-pre {
+  margin: 0;
+  max-height: 32rem;
+  overflow: auto;
+  padding: var(--ds-space-4);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-sunken);
+  color: var(--ds-text-primary);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  line-height: 1.5;
+}
+.vw-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2) var(--ds-space-5);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.vw-checks > legend {
+  width: 100%;
+  margin-bottom: var(--ds-space-2);
+}
+/* Metric tiles: a large tabular number over a small label. */
+.vw-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: var(--ds-space-3);
+  margin: 0;
+}
+.vw-metrics > div {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: var(--ds-space-1);
+  padding: var(--ds-space-3) var(--ds-space-4);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+}
+.vw-metrics dt {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.vw-metrics dd {
+  margin: 0;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-title-2-size);
+  line-height: var(--ds-text-title-2-line);
+  font-weight: var(--ds-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.vw-findings {
+  display: grid;
+  gap: var(--ds-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--ds-text-callout-size);
+}
+.vw-findings li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+}
+
+/* A flag toggle in the analysis lists: the flag fills when set. */
+.vw-flag-btn[aria-pressed="true"] {
+  color: var(--ds-warning);
+}
+.vw-flag-btn[aria-pressed="true"] svg {
+  fill: currentColor;
+}
+.vw-note > a.ds-btn {
+  justify-self: start;
+}
+.vw-main:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: -2px;
+}
+/* The flag on a frame-gallery thumbnail: shown on hover or focus, kept
+   when set. */
+.vw-thumb-flag {
+  opacity: 0;
+}
+.group:hover .vw-thumb-flag,
+.vw-thumb-flag:focus-visible,
+.vw-thumb-flag[aria-pressed="true"] {
+  opacity: 1;
+}
+@media (hover: none) {
+  .vw-thumb-flag {
+    opacity: 1;
+  }
+}
+
+/* Keeps a control (segmented control, chip) on one line; its row wraps. */
+.vw-nowrap {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.vw-chip {
+  white-space: nowrap;
+}
+
+/* A view's loading overlay covers the view only, never the switch above
+   it, so another view can still be chosen while one loads. */
+.vw-analysis-body {
+  position: relative;
+  min-height: 12rem;
+}
+
+/* An irreversible action at rest: outlined in the danger colour; the
+   confirmation it opens carries the solid danger button. */
+.ds-btn.vw-btn-danger-outline {
+  border-color: var(--ds-danger);
+  color: var(--ds-danger);
+}
+.ds-btn.vw-btn-danger-outline:hover:not(:disabled) {
+  background: var(--ds-danger-bg);
+}
+
+/* Narrow windows: the actions move under the tabs instead of being cut. */
+.vw-tabbar {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+.vw-tabbar > nav {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* ── Inspector column (proposal §8.3) ───────────────────────────────── */
+.vw-inspector {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  flex-shrink: 0;
+  min-height: 0;
+  border-left: 1px solid var(--ds-separator);
+  background: var(--ds-surface-sunken);
+  color: var(--ds-text-primary);
+}
+.vw-inspector[data-open="false"] {
+  width: 48px;
+}
+.vw-inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+  min-height: 48px;
+  padding: 0 var(--ds-space-2) 0 var(--ds-space-4);
+  border-bottom: 1px solid var(--ds-separator);
+}
+.vw-inspector[data-open="false"] .vw-inspector-head {
+  justify-content: center;
+  padding: 0;
+}
+.vw-inspector[data-open="false"] .vw-inspector-head h2 {
+  display: none;
+}
+.vw-inspector-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--ds-space-4);
+}
+.vw-inspector-body[hidden] {
+  display: none;
+}
+/* The panels' own form, flattened into the column. */
+.vw-inspector .editor.inspector {
+  position: static;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+.vw-inspector .editor-empty {
+  min-height: 0;
+  padding: var(--ds-space-8) 0;
+  text-align: left;
+}
+.vw-inspector .editor-empty .section-kicker {
+  display: none;
+}
+.vw-inspector .vw-object-inspector {
+  display: grid;
+  gap: var(--ds-space-4);
+}
+.vw-inspector .vw-object-inspector .inspector-title span {
+  display: block;
+  font-size: var(--ds-text-caption-size);
+}
+/* With the form in the column, the list takes the whole row. */
+.annotations-skin .workspace.inspector-workspace.is-docked {
+  grid-template-columns: minmax(0, 1fr);
+}
+.annotations-skin .object-annotation-row.is-selected {
+  box-shadow: inset 2px 0 0 var(--ds-selected-indicator);
+  background: var(--ds-surface-selected);
+}
+
+/* Below 1200 px the column becomes a drawer along the bottom edge. */
+@media (max-width: 1199px) {
+  .vw-inspector {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: var(--ds-z-dock);
+    width: auto;
+    max-height: 55vh;
+    border-left: 0;
+    border-top: 1px solid var(--ds-separator);
+    border-radius: var(--ds-radius-lg) var(--ds-radius-lg) 0 0;
+    background: var(--ds-surface-2);
+    box-shadow: var(--ds-shadow-3), var(--ds-ring-raised);
+  }
+  .vw-inspector[data-open="false"] {
+    width: auto;
+  }
+  .vw-inspector[data-open="false"] .vw-inspector-head {
+    justify-content: space-between;
+    padding: 0 var(--ds-space-2) 0 var(--ds-space-4);
+    border-bottom: 0;
+  }
+  .vw-inspector[data-open="false"] .vw-inspector-head h2 {
+    display: block;
+  }
+  /* The drawer is fixed over the bottom edge: the content and the episode
+     list keep as much room below as the drawer is tall (inspector.tsx
+     publishes --vw-inspector-h), so their last lines scroll above it, and
+     the playback bar floats above the drawer, not under it. */
+  .vw-body:has(.vw-inspector) .vw-main {
+    padding-bottom: calc(var(--vw-inspector-h, 48px) + var(--ds-space-4));
+    scroll-padding-bottom: calc(
+      var(--vw-inspector-h, 48px) + var(--ds-space-4)
+    );
+  }
+  .vw-body:has(.vw-inspector) .vw-sidebar {
+    padding-bottom: calc(var(--vw-inspector-h, 48px) + var(--ds-space-4));
+  }
+  .vw-body:has(.vw-inspector) .vw-playback {
+    bottom: calc(var(--vw-inspector-h, 48px) + var(--ds-space-3));
+  }
+}

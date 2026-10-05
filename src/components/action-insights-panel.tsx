@@ -1,6 +1,10 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import { Flag, Info, LoaderCircle, Maximize2, Minimize2 } from "lucide-react";
+import { Button, Icon, IconButton, SegmentedControl } from "@/components/ds";
 import { T, useLocale } from "@/components/levi-locale";
+import { DATA_SERIES, seriesDash } from "@/components/viewer/data-palette";
+import { SeriesSwatch } from "@/components/viewer/series-swatch";
 
 import React, { useMemo, useState, useEffect } from "react";
 import {
@@ -30,44 +34,28 @@ const useIsFullscreen = () => React.useContext(FullscreenCtx);
 
 function InfoToggle({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
+  const { t } = useLocale();
   return (
-    <T>
-      {
-        <>
-          <button
-            onClick={() => setOpen((v) => !v)}
-            className="p-0.5 rounded-full text-slate-500 hover:text-slate-300 transition-colors shrink-0"
-            title="Toggle description"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="16" x2="12" y2="12" />
-              <line x1="12" y1="8" x2="12.01" y2="8" />
-            </svg>
-          </button>
-          {open && (
-            <div className="mt-1">
-              <T>{children}</T>
-            </div>
-          )}
-        </>
-      }
-    </T>
+    <>
+      <IconButton
+        icon={Info}
+        size="sm"
+        label={t("Toggle description")}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      />
+      {open && (
+        <div className="mt-1">
+          <T>{children}</T>
+        </div>
+      )}
+    </>
   );
 }
 
 function FullscreenWrapper({ children }: { children: React.ReactNode }) {
   const [fs, setFs] = useState(false);
+  const { t } = useLocale();
 
   useEffect(() => {
     if (!fs) return;
@@ -79,159 +67,64 @@ function FullscreenWrapper({ children }: { children: React.ReactNode }) {
   }, [fs]);
 
   return (
-    <T>
-      {
-        <div className="relative">
-          <button
-            onClick={() => setFs((v) => !v)}
-            className="absolute top-3 right-3 z-10 p-1.5 rounded bg-white/5/60 hover:bg-white/5 text-slate-400 hover:text-slate-200 transition-colors backdrop-blur-sm"
-            title={fs ? "Exit fullscreen" : "Fullscreen"}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <T>
-                {fs ? (
-                  <>
-                    <polyline points="4 14 10 14 10 20" />
-                    <polyline points="20 10 14 10 14 4" />
-                    <line x1="14" y1="10" x2="21" y2="3" />
-                    <line x1="3" y1="21" x2="10" y2="14" />
-                  </>
-                ) : (
-                  <>
-                    <polyline points="15 3 21 3 21 9" />
-                    <polyline points="9 21 3 21 3 15" />
-                    <line x1="21" y1="3" x2="14" y2="10" />
-                    <line x1="3" y1="21" x2="10" y2="14" />
-                  </>
-                )}
-              </T>
-            </svg>
-          </button>
-          <T>
-            {fs ? (
-              <div className="fixed inset-0 z-50 bg-[var(--bg)]/95 overflow-auto p-6">
-                <button
-                  onClick={() => setFs(false)}
-                  className="fixed top-4 right-4 z-50 p-2 rounded bg-white/5/80 hover:bg-white/5 text-slate-300 hover:text-white transition-colors"
-                  title="Exit fullscreen (Esc)"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <polyline points="4 14 10 14 10 20" />
-                    <polyline points="20 10 14 10 14 4" />
-                    <line x1="14" y1="10" x2="21" y2="3" />
-                    <line x1="3" y1="21" x2="10" y2="14" />
-                  </svg>
-                </button>
-                <div className="max-w-7xl mx-auto">
-                  <FullscreenCtx.Provider value={true}>
-                    {children}
-                  </FullscreenCtx.Provider>
-                </div>
-              </div>
-            ) : (
-              children
-            )}
-          </T>
+    <div className="relative">
+      <div className="absolute top-3 right-3 z-10">
+        <IconButton
+          icon={fs ? Minimize2 : Maximize2}
+          size="sm"
+          label={t(fs ? "Exit fullscreen" : "Fullscreen")}
+          onClick={() => setFs((v) => !v)}
+        />
+      </div>
+      {fs ? (
+        <div className="ds-root fixed inset-0 z-50 overflow-auto p-6">
+          <div className="fixed top-4 right-4 z-50">
+            <IconButton
+              icon={Minimize2}
+              variant="secondary"
+              label={t("Exit fullscreen (Esc)")}
+              shortcut="Esc"
+              onClick={() => setFs(false)}
+            />
+          </div>
+          <div className="max-w-7xl mx-auto">
+            <FullscreenCtx.Provider value={true}>
+              {children}
+            </FullscreenCtx.Provider>
+          </div>
         </div>
-      }
-    </T>
+      ) : (
+        children
+      )}
+    </div>
   );
 }
 
 function FlagBtn({ id }: { id: number }) {
   const { has, toggle } = useFlaggedEpisodes();
+  const { t } = useLocale();
   const flagged = has(id);
   return (
-    <T>
-      {
-        <button
-          onClick={() => toggle(id)}
-          title={flagged ? "Unflag episode" : "Flag for review"}
-          className={`p-0.5 rounded transition-colors ${flagged ? "text-cyan-300" : "text-slate-600 hover:text-slate-400"}`}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill={flagged ? "currentColor" : "none"}
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
-            <line x1="4" y1="22" x2="4" y2="15" />
-          </svg>
-        </button>
-      }
-    </T>
+    <IconButton
+      icon={Flag}
+      size="sm"
+      className="vw-flag-btn"
+      pressed={flagged}
+      label={t(flagged ? "Unflag episode" : "Flag for review")}
+      onClick={() => toggle(id)}
+    />
   );
 }
 
 function FlagAllBtn({ ids, label }: { ids: number[]; label?: string }) {
   const { addMany } = useFlaggedEpisodes();
   return (
-    <T>
-      {
-        <button
-          onClick={() => addMany(ids)}
-          className="text-xs text-slate-500 hover:text-cyan-300 transition-colors flex items-center gap-1"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="10"
-            height="10"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
-            <line x1="4" y1="22" x2="4" y2="15" />
-          </svg>
-          {label ?? "Flag all"}
-        </button>
-      }
-    </T>
+    <Button size="sm" variant="ghost" icon={Flag} onClick={() => addMany(ids)}>
+      <T>{label ?? "Flag all"}</T>
+    </Button>
   );
 }
-const COLORS = [
-  "#f97316",
-  "#3b82f6",
-  "#22c55e",
-  "#ef4444",
-  "#a855f7",
-  "#eab308",
-  "#06b6d4",
-  "#ec4899",
-  "#14b8a6",
-  "#f59e0b",
-  "#6366f1",
-  "#84cc16",
-];
+const COLORS = DATA_SERIES;
 
 function shortName(key: string): string {
   const parts = key.split(CHART_CONFIG.SERIES_NAME_DELIMITER);
@@ -357,7 +250,7 @@ function AutocorrelationSection({
     return (
       <T>
         {
-          <p className="text-slate-500 italic">
+          <p className="text-(--ds-text-secondary) italic">
             <T>No action columns found.</T>
           </p>
         }
@@ -367,24 +260,24 @@ function AutocorrelationSection({
   return (
     <T>
       {
-        <div className="bg-[var(--surface-1)]/60 rounded-lg p-5 border border-white/10 space-y-4">
+        <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator) space-y-4">
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-slate-200">
+              <h3 className="text-sm font-semibold text-(--ds-text-primary)">
                 <T>Action Autocorrelation</T>
-                <span className="text-xs text-slate-500 ml-2 font-normal">
+                <span className="text-xs text-(--ds-text-secondary) ml-2 font-normal">
                   <T>{numEpisodesLabel}</T>
                 </span>
               </h3>
               <InfoToggle>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-(--ds-text-secondary)">
                   <T>
                     Shows how correlated each action dimension is with itself
                     over increasing time lags. Where autocorrelation drops below
                     0.5 suggests a
                   </T>
                   <T> </T>
-                  <span className="text-cyan-300 font-medium">
+                  <span className="text-(--ds-text-primary) font-medium">
                     <T>natural action chunk boundary</T>
                   </span>
                   <T> </T>
@@ -393,7 +286,7 @@ function AutocorrelationSection({
                     executing them open-loop offers diminishing returns.
                   </T>
                   <br />
-                  <span className="text-slate-500">
+                  <span className="text-(--ds-text-secondary)">
                     <T>
                       Grounded in the theoretical result that chunk length
                       should scale logarithmically with system stability
@@ -403,7 +296,7 @@ function AutocorrelationSection({
                       href="https://arxiv.org/abs/2507.09061"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="underline hover:text-slate-300"
+                      className="underline hover:text-(--ds-text-secondary)"
                     >
                       <T>Zhang et al., 2025</T>
                     </a>
@@ -415,18 +308,18 @@ function AutocorrelationSection({
           </div>
 
           {suggestedChunk && (
-            <div className="flex items-center gap-3 bg-cyan-400/10 border border-cyan-400/30 rounded-md px-4 py-2.5">
-              <span className="text-cyan-300 font-bold text-lg tabular-nums">
+            <div className="flex items-center gap-3 bg-(--ds-surface-selected) border border-(--ds-border-control) rounded-md px-4 py-2.5">
+              <span className="text-(--ds-text-primary) font-semibold text-lg tabular-nums">
                 <T>{suggestedChunk}</T>
               </span>
               <div>
-                <p className="text-sm text-cyan-200 font-medium">
+                <p className="text-sm text-(--ds-text-primary) font-medium">
                   <T>Suggested chunk length: </T>
                   <T>{suggestedChunk}</T>
                   <T> steps (</T>
                   {(suggestedChunk / fps).toFixed(2)}s)
                 </p>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-(--ds-text-secondary)">
                   <T>
                     Median lag where autocorrelation drops below 0.5 across
                     action dimensions
@@ -443,27 +336,30 @@ function AutocorrelationSection({
                 data={chartData}
                 margin={{ top: 8, right: 16, left: 0, bottom: 16 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="var(--ds-separator)"
+                />
                 <XAxis
                   dataKey="lag"
-                  stroke="#94a3b8"
+                  stroke="var(--ds-separator-strong)"
                   label={{
                     value: "Lag (steps)",
                     position: "insideBottom",
                     offset: -8,
-                    fill: "#94a3b8",
+                    fill: "var(--ds-text-secondary)",
                     fontSize: 13,
                   }}
                 />
                 <YAxis
-                  stroke="#94a3b8"
+                  stroke="var(--ds-separator-strong)"
                   domain={yDomain}
                   tickFormatter={(v) => Number(v.toFixed(2)).toString()}
                 />
                 <Tooltip
                   contentStyle={{
-                    background: "#1e293b",
-                    border: "1px solid #475569",
+                    background: "var(--ds-surface-2)",
+                    border: "1px solid var(--ds-separator)",
                     borderRadius: 6,
                   }}
                   labelFormatter={(v) =>
@@ -473,7 +369,7 @@ function AutocorrelationSection({
                 />
                 <Line
                   dataKey={() => 0.5}
-                  stroke="#64748b"
+                  stroke="var(--ds-text-tertiary)"
                   strokeDasharray="6 4"
                   dot={false}
                   name="0.5 threshold"
@@ -485,6 +381,7 @@ function AutocorrelationSection({
                     key={name}
                     dataKey={name}
                     stroke={COLORS[i % COLORS.length]}
+                    strokeDasharray={seriesDash(i)}
                     dot={false}
                     strokeWidth={1.5}
                     legendType="none"
@@ -499,11 +396,8 @@ function AutocorrelationSection({
           <div className="flex flex-wrap gap-x-4 gap-y-1 px-1">
             {shortKeys.map((name, i) => (
               <div key={name} className="flex items-center gap-1.5">
-                <span
-                  className="w-3 h-[3px] rounded-full shrink-0"
-                  style={{ background: COLORS[i % COLORS.length] }}
-                />
-                <span className="text-xs text-slate-400">
+                <SeriesSwatch index={i} />
+                <span className="text-xs text-(--ds-text-secondary)">
                   <T>{name}</T>
                 </span>
               </div>
@@ -630,14 +524,14 @@ function ActionVelocitySection({
 
     let verdict: { label: string; color: string };
     if (active.length === 0) {
-      verdict = { label: "N/A", color: "text-zinc-400" };
+      verdict = { label: "N/A", color: "text-(--ds-text-secondary)" };
     } else {
       const smoothRatio = smooth.length / active.length;
       if (smoothRatio >= 0.6 && jerkyNonGripper.length === 0)
-        verdict = { label: "Smooth", color: "text-green-400" };
+        verdict = { label: "Smooth", color: "text-(--ds-success)" };
       else if (jerkyNonGripper.length <= 2 && smoothRatio >= 0.3)
-        verdict = { label: "Moderate", color: "text-yellow-400" };
-      else verdict = { label: "Jerky", color: "text-red-400" };
+        verdict = { label: "Moderate", color: "text-(--ds-warning)" };
+      else verdict = { label: "Jerky", color: "text-(--ds-danger)" };
     }
 
     const lines: string[] = [];
@@ -691,7 +585,7 @@ function ActionVelocitySection({
     return (
       <T>
         {
-          <p className="text-slate-500 italic">
+          <p className="text-(--ds-text-secondary) italic">
             <T>No action data for velocity analysis.</T>
           </p>
         }
@@ -701,12 +595,12 @@ function ActionVelocitySection({
   return (
     <T>
       {
-        <div className="bg-[var(--surface-1)]/60 rounded-lg p-5 border border-white/10 space-y-4">
+        <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator) space-y-4">
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-slate-200">
+              <h3 className="text-sm font-semibold text-(--ds-text-primary)">
                 <T>Action Velocity (Δa) — Smoothness Proxy</T>
-                <span className="text-xs text-slate-500 ml-2 font-normal">
+                <span className="text-xs text-(--ds-text-secondary) ml-2 font-normal">
                   <T>
                     {isAgg
                       ? `(${numEpisodes} episodes sampled)`
@@ -715,7 +609,7 @@ function ActionVelocitySection({
                 </span>
               </h3>
               <InfoToggle>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-(--ds-text-secondary)">
                   <T>
                     Shows the distribution of frame-to-frame action changes (Δa
                     = a
@@ -723,7 +617,7 @@ function ActionVelocitySection({
                   <sub>t+1</sub> − a<sub>t</sub>
                   <T>) for each dimension. A</T>
                   <T> </T>
-                  <span className="text-green-400">
+                  <span className="text-(--ds-success)">
                     <T>tight distribution around zero</T>
                   </span>
                   <T> </T>
@@ -731,7 +625,7 @@ function ActionVelocitySection({
                     means smooth, predictable control — the system is likely
                     stable and benefits from longer action chunks.
                   </T>
-                  <span className="text-red-400">
+                  <span className="text-(--ds-danger)">
                     <T> Fat tails or high std</T>
                   </span>
                   <T> </T>
@@ -740,7 +634,7 @@ function ActionVelocitySection({
                     potentially beneficial noise injection.
                   </T>
                   <br />
-                  <span className="text-slate-500">
+                  <span className="text-(--ds-text-secondary)">
                     <T>Relates to the Lipschitz constant L</T>
                     <sub>π</sub>
                     <T> and smoothness C</T>
@@ -751,7 +645,7 @@ function ActionVelocitySection({
                       href="https://arxiv.org/abs/2507.09061"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="underline hover:text-slate-300"
+                      className="underline hover:text-(--ds-text-secondary)"
                     >
                       <T>Zhang et al. (2025)</T>
                     </a>
@@ -786,21 +680,21 @@ function ActionVelocitySection({
               return (
                 <div
                   key={s.name}
-                  className={`rounded-md px-2.5 py-2 space-y-1 ${dimmed ? "bg-[var(--surface-0)]/30 opacity-50" : "bg-[var(--surface-0)]/50"}`}
+                  className={`rounded-md px-2.5 py-2 space-y-1 ${dimmed ? "border border-dashed border-(--ds-border-control)" : "bg-(--ds-surface-sunken)"}`}
                 >
                   <p
-                    className={`text-xs font-medium truncate ${dimmed ? "text-slate-500" : "text-slate-200"}`}
+                    className={`text-xs font-medium truncate ${dimmed ? "text-(--ds-text-secondary)" : "text-(--ds-text-primary)"}`}
                     title={s.name}
                   >
                     <T>{s.name}</T>
                     {tag && (
-                      <span className="text-slate-600 ml-1 font-normal">
+                      <span className="text-(--ds-text-secondary) ml-1 font-normal">
                         (<T>{tag}</T>)
                       </span>
                     )}
                   </p>
                   <div
-                    className={`flex gap-2 text-xs tabular-nums ${dimmed ? "text-slate-600" : "text-slate-400"}`}
+                    className={`flex gap-2 text-xs tabular-nums ${dimmed ? "text-(--ds-text-secondary)" : "text-(--ds-text-secondary)"}`}
                   >
                     <span>σ={s.std.toFixed(4)}</span>
                     <span>
@@ -828,24 +722,28 @@ function ActionVelocitySection({
                           y={barH - h}
                           width={0.85}
                           height={h}
-                          fill={dimmed ? "#475569" : COLORS[si % COLORS.length]}
+                          fill={
+                            dimmed
+                              ? "var(--dv-neutral)"
+                              : COLORS[si % COLORS.length]
+                          }
                           opacity={dimmed ? 0.4 : 0.7}
                         />
                       );
                     })}
                   </svg>
-                  <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+                  <div className="h-1 w-full bg-(--ds-surface-sunken) rounded-full overflow-hidden">
                     <div
                       className="h-full rounded-full"
                       style={{
                         width: `${Math.min(100, (s.std / maxStd) * 100)}%`,
                         background: dimmed
-                          ? "#475569"
+                          ? "var(--dv-neutral)"
                           : s.std / maxStd < 0.4
-                            ? "#22c55e"
+                            ? "var(--ds-success)"
                             : s.std / maxStd < 0.7
-                              ? "#eab308"
-                              : "#ef4444",
+                              ? "var(--ds-warning)"
+                              : "var(--ds-danger)",
                       }}
                     />
                   </div>
@@ -855,22 +753,22 @@ function ActionVelocitySection({
           </div>
 
           {insight && (
-            <div className="bg-[var(--surface-0)]/60 rounded-md px-4 py-3 border border-white/10/60 space-y-1.5">
-              <p className="text-sm font-medium text-slate-200">
+            <div className="bg-(--ds-surface-sunken) rounded-md px-4 py-3 border border-(--ds-separator) space-y-1.5">
+              <p className="text-sm font-medium text-(--ds-text-primary)">
                 <T>Overall:</T>
                 <T> </T>
                 <span className={insight.verdict.color}>
                   <T>{insight.verdict.label}</T>
                 </span>
               </p>
-              <ul className="text-xs text-slate-400 space-y-0.5 list-disc list-inside">
+              <ul className="text-xs text-(--ds-text-secondary) space-y-0.5 list-disc list-inside">
                 {insight.lines.map((l, i) => (
                   <li key={i}>
                     <T>{l}</T>
                   </li>
                 ))}
               </ul>
-              <p className="text-xs text-slate-500 pt-1">
+              <p className="text-xs text-(--ds-text-secondary) pt-1">
                 <T>{insight.tip}</T>
               </p>
             </div>
@@ -892,12 +790,12 @@ function JerkyEpisodesList({ episodes }: { episodes: JerkyEpisode[] }) {
   return (
     <T>
       {
-        <div className="bg-[var(--surface-0)]/60 rounded-md px-4 py-3 border border-white/10/60 space-y-2">
+        <div className="bg-(--ds-surface-sunken) rounded-md px-4 py-3 border border-(--ds-separator) space-y-2">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-slate-200">
+            <p className="text-sm font-medium text-(--ds-text-primary)">
               <T>Most Jerky Episodes</T>
               <T> </T>
-              <span className="text-xs text-slate-500 font-normal">
+              <span className="text-xs text-(--ds-text-secondary) font-normal">
                 <T>sorted by mean |Δa|</T>
               </span>
             </p>
@@ -906,7 +804,7 @@ function JerkyEpisodesList({ episodes }: { episodes: JerkyEpisode[] }) {
               {episodes.length > 15 && (
                 <button
                   onClick={() => setShowAll((v) => !v)}
-                  className="text-xs text-slate-400 hover:text-slate-200 transition-colors"
+                  className="text-xs text-(--ds-text-secondary) hover:text-(--ds-text-primary) transition-colors"
                 >
                   <T>
                     {showAll ? "Show top 15" : `Show all ${episodes.length}`}
@@ -918,8 +816,12 @@ function JerkyEpisodesList({ episodes }: { episodes: JerkyEpisode[] }) {
           <div className="max-h-48 overflow-y-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="text-slate-500 border-b border-white/10">
-                  <th className="w-5 py-1" />
+                <tr className="text-(--ds-text-secondary) border-b border-(--ds-separator)">
+                  <th className="w-5 py-1">
+                    <span className="ds-sr-only">
+                      <T>Flag</T>
+                    </span>
+                  </th>
                   <th className="text-left py-1 pr-3">
                     <T>Episode</T>
                   </th>
@@ -932,7 +834,7 @@ function JerkyEpisodesList({ episodes }: { episodes: JerkyEpisode[] }) {
                 {display.map((e) => (
                   <tr
                     key={e.episodeIndex}
-                    className="border-b border-white/5/40 text-slate-300"
+                    className="border-b border-(--ds-separator) text-(--ds-text-secondary)"
                   >
                     <td className="py-1">
                       <FlagBtn id={e.episodeIndex} />
@@ -970,30 +872,12 @@ function VarianceHeatmap({
     return (
       <T>
         {
-          <div className="bg-[var(--surface-1)]/60 rounded-lg p-5 border border-white/10">
-            <h3 className="text-sm font-semibold text-slate-200 mb-2">
+          <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator)">
+            <h3 className="text-sm font-semibold text-(--ds-text-primary) mb-2">
               <T>Cross-Episode Action Variance</T>
             </h3>
-            <div className="flex items-center gap-2 text-slate-400 text-sm py-8 justify-center">
-              <svg
-                className="animate-spin h-4 w-4"
-                viewBox="0 0 24 24"
-                fill="none"
-              >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                />
-              </svg>
+            <div className="flex items-center gap-2 text-(--ds-text-secondary) text-sm py-8 justify-center">
+              <Icon icon={LoaderCircle} className="ds-spin" />
               <T>Loading cross-episode data…</T>
             </div>
           </div>
@@ -1006,11 +890,11 @@ function VarianceHeatmap({
     return (
       <T>
         {
-          <div className="bg-[var(--surface-1)]/60 rounded-lg p-5 border border-white/10">
-            <h3 className="text-sm font-semibold text-slate-200 mb-2">
+          <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator)">
+            <h3 className="text-sm font-semibold text-(--ds-text-primary) mb-2">
               <T>Cross-Episode Action Variance</T>
             </h3>
-            <p className="text-slate-500 italic text-sm">
+            <p className="text-(--ds-text-secondary) italic text-sm">
               <T>Not enough episodes or no action data to compute variance.</T>
             </p>
           </div>
@@ -1035,38 +919,35 @@ function VarianceHeatmap({
     Math.min(isFs ? 56 : 36, Math.floor(baseH / numDims)),
   );
   const labelW = 100;
-  const svgW = labelW + numBins * cellW + 60;
-  const svgH = numDims * cellH + 40;
+  const svgW = labelW + numBins * cellW + 72;
+  const svgH = numDims * cellH + 48;
 
-  function varColor(v: number): string {
+  // Sequential, one hue: the data blue, stronger with more variance.
+  function varOpacity(v: number): number {
     const t = Math.sqrt(v / maxVar); // sqrt for better visual spread
-    // Dark blue → teal → orange
-    const r = Math.round(t * 249);
-    const g = Math.round(t < 0.5 ? 80 + t * 200 : 180 - (t - 0.5) * 200);
-    const b = Math.round((1 - t) * 200 + 30);
-    return `rgb(${r},${g},${b})`;
+    return 0.08 + 0.92 * Math.min(1, Math.max(0, t));
   }
 
   return (
     <T>
       {
-        <div className="bg-[var(--surface-1)]/60 rounded-lg p-5 border border-white/10 space-y-4">
+        <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator) space-y-4">
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-slate-200">
+              <h3 className="text-sm font-semibold text-(--ds-text-primary)">
                 <T>Cross-Episode Action Variance</T>
-                <span className="text-xs text-slate-500 ml-2 font-normal">
+                <span className="text-xs text-(--ds-text-secondary) ml-2 font-normal">
                   (<T>{numEpisodes}</T>
                   <T> episodes sampled)</T>
                 </span>
               </h3>
               <InfoToggle>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-(--ds-text-secondary)">
                   <T>
                     Shows how much each action dimension varies across episodes
                     at each point in time (normalized 0–100%).
                   </T>
-                  <span className="text-cyan-300">
+                  <span className="text-(--ds-text-primary)">
                     <T> High-variance regions</T>
                   </span>
                   <T> </T>
@@ -1075,20 +956,20 @@ function VarianceHeatmap({
                     generative policies (diffusion, flow-matching) and action
                     chunking help here by modeling multiple modes.
                   </T>
-                  <span className="text-blue-400">
+                  <span className="text-(--ds-info)">
                     <T> Low-variance regions</T>
                   </span>
                   <T> </T>
                   <T>indicate consistent behavior across demonstrations.</T>
                   <br />
-                  <span className="text-slate-500">
+                  <span className="text-(--ds-text-secondary)">
                     <T>Relates to the &quot;coverage&quot; discussion in</T>
                     <T> </T>
                     <a
                       href="https://arxiv.org/abs/2507.09061"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="underline hover:text-slate-300"
+                      className="underline hover:text-(--ds-text-secondary)"
                     >
                       <T>Zhang et al. (2025)</T>
                     </a>
@@ -1114,8 +995,9 @@ function VarianceHeatmap({
                     y={di * cellH}
                     width={cellW}
                     height={cellH}
-                    fill={varColor(v)}
-                    stroke="#1e293b"
+                    fill="var(--dv-1)"
+                    fillOpacity={varOpacity(v)}
+                    stroke="var(--ds-surface-1)"
                     strokeWidth={0.5}
                   >
                     <title>
@@ -1133,8 +1015,8 @@ function VarianceHeatmap({
                   y={di * cellH + cellH / 2}
                   textAnchor="end"
                   dominantBaseline="central"
-                  className="fill-slate-400"
-                  fontSize={Math.min(11, cellH - 4)}
+                  className="fill-(--ds-text-secondary)"
+                  fontSize={12}
                 >
                   {shortName(name)}
                 </text>
@@ -1147,10 +1029,10 @@ function VarianceHeatmap({
                   <text
                     key={frac}
                     x={labelW + binIdx * cellW + cellW / 2}
-                    y={numDims * cellH + 14}
+                    y={numDims * cellH + 16}
                     textAnchor="middle"
-                    className="fill-slate-400"
-                    fontSize={9}
+                    className="fill-(--ds-text-secondary)"
+                    fontSize={12}
                   >
                     {(frac * 100).toFixed(0)}%
                   </text>
@@ -1158,10 +1040,10 @@ function VarianceHeatmap({
               })}
               <text
                 x={labelW + (numBins * cellW) / 2}
-                y={numDims * cellH + 30}
+                y={numDims * cellH + 38}
                 textAnchor="middle"
-                className="fill-slate-500"
-                fontSize={10}
+                className="fill-(--ds-text-secondary)"
+                fontSize={12}
               >
                 <T>Episode progress</T>
               </text>
@@ -1178,15 +1060,16 @@ function VarianceHeatmap({
                     y={(9 - i) * barH}
                     width={12}
                     height={barH}
-                    fill={varColor(t * maxVar)}
+                    fill="var(--dv-1)"
+                    fillOpacity={varOpacity(t * maxVar)}
                   />
                 );
               })}
               <text
                 x={labelW + numBins * cellW + 34}
                 y={10}
-                className="fill-slate-500"
-                fontSize={8}
+                className="fill-(--ds-text-secondary)"
+                fontSize={12}
                 dominantBaseline="central"
               >
                 <T>high</T>
@@ -1194,8 +1077,8 @@ function VarianceHeatmap({
               <text
                 x={labelW + numBins * cellW + 34}
                 y={numDims * cellH - 4}
-                className="fill-slate-500"
-                fontSize={8}
+                className="fill-(--ds-text-secondary)"
+                fontSize={12}
                 dominantBaseline="central"
               >
                 <T>low</T>
@@ -1241,19 +1124,19 @@ function SpeedVarianceSection({
       if (c < 0.2)
         v = {
           label: "Consistent",
-          color: "text-green-400",
+          color: "text-(--ds-success)",
           tip: "Demonstrators execute at similar speeds — no velocity normalization needed.",
         };
       else if (c < 0.4)
         v = {
           label: "Moderate variance",
-          color: "text-yellow-400",
+          color: "text-(--ds-warning)",
           tip: "Some speed variation across demonstrators. Consider velocity normalization for best results.",
         };
       else
         v = {
           label: "High variance",
-          color: "text-red-400",
+          color: "text-(--ds-danger)",
           tip: "Large speed differences between demonstrations. Velocity normalization before training is strongly recommended.",
         };
 
@@ -1279,25 +1162,25 @@ function SpeedVarianceSection({
   return (
     <T>
       {
-        <div className="bg-[var(--surface-1)]/60 rounded-lg p-5 border border-white/10 space-y-4">
+        <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator) space-y-4">
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-slate-200">
+              <h3 className="text-sm font-semibold text-(--ds-text-primary)">
                 <T>Demonstrator Speed Variance</T>
-                <span className="text-xs text-slate-500 ml-2 font-normal">
+                <span className="text-xs text-(--ds-text-secondary) ml-2 font-normal">
                   (<T>{numEpisodes}</T>
                   <T> episodes)</T>
                 </span>
               </h3>
               <InfoToggle>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-(--ds-text-secondary)">
                   <T>Distribution of average execution speed (mean ‖Δa</T>
                   <sub>t</sub>
                   <T>
                     ‖ per frame) across all episodes. Different human
                     demonstrators often execute at{" "}
                   </T>
-                  <span className="text-cyan-300">
+                  <span className="text-(--ds-text-primary)">
                     <T>different speeds</T>
                   </span>
                   <T>
@@ -1307,7 +1190,7 @@ function SpeedVarianceSection({
                     trajectory speed before training.
                   </T>
                   <br />
-                  <span className="text-slate-500">
+                  <span className="text-(--ds-text-secondary)">
                     <T>
                       Based on &quot;Is Diversity All You Need&quot; (AGI-Bot,
                       2025) which shows velocity normalization dramatically
@@ -1323,7 +1206,7 @@ function SpeedVarianceSection({
             <div className="flex-1 overflow-x-auto">
               <svg
                 width={bins.length * barW}
-                height={barH + 24}
+                height={barH + 26}
                 className="block"
               >
                 {bins.map((count: number, i: number) => {
@@ -1332,7 +1215,11 @@ function SpeedVarianceSection({
                   const ratio = median > 0 ? speed / median : 1;
                   const dev = Math.abs(ratio - 1);
                   const color =
-                    dev < 0.2 ? "#22c55e" : dev < 0.5 ? "#eab308" : "#ef4444";
+                    dev < 0.2
+                      ? "var(--ds-success)"
+                      : dev < 0.5
+                        ? "var(--ds-warning)"
+                        : "var(--ds-danger)";
                   return (
                     <rect
                       key={i}
@@ -1356,10 +1243,10 @@ function SpeedVarianceSection({
                     <text
                       key={frac}
                       x={idx * barW + barW / 2}
-                      y={barH + 14}
+                      y={barH + 16}
                       textAnchor="middle"
-                      className="fill-slate-400"
-                      fontSize={9}
+                      className="fill-(--ds-text-secondary)"
+                      fontSize={12}
                     >
                       {(lo + idx * binW).toFixed(2)}
                     </text>
@@ -1369,38 +1256,38 @@ function SpeedVarianceSection({
             </div>
             <div className="flex flex-col gap-2 text-xs shrink-0 min-w-[120px]">
               <div>
-                <span className="text-slate-500">
+                <span className="text-(--ds-text-secondary)">
                   <T>Mean</T>
                 </span>
                 <T> </T>
-                <span className="text-slate-200 tabular-nums ml-1">
+                <span className="text-(--ds-text-primary) tabular-nums ml-1">
                   {mean.toFixed(4)}
                 </span>
               </div>
               <div>
-                <span className="text-slate-500">
+                <span className="text-(--ds-text-secondary)">
                   <T>Median</T>
                 </span>
                 <T> </T>
-                <span className="text-slate-200 tabular-nums ml-1">
+                <span className="text-(--ds-text-primary) tabular-nums ml-1">
                   {median.toFixed(4)}
                 </span>
               </div>
               <div>
-                <span className="text-slate-500">
+                <span className="text-(--ds-text-secondary)">
                   <T>Std</T>
                 </span>
                 <T> </T>
-                <span className="text-slate-200 tabular-nums ml-1">
+                <span className="text-(--ds-text-primary) tabular-nums ml-1">
                   {std.toFixed(4)}
                 </span>
               </div>
               <div>
-                <span className="text-slate-500">
+                <span className="text-(--ds-text-secondary)">
                   <T>CV</T>
                 </span>
                 <span
-                  className={`tabular-nums ml-1 font-bold ${verdict.color}`}
+                  className={`tabular-nums ml-1 font-semibold ${verdict.color}`}
                 >
                   {cv.toFixed(3)}
                 </span>
@@ -1408,14 +1295,14 @@ function SpeedVarianceSection({
             </div>
           </div>
 
-          <div className="bg-[var(--surface-0)]/60 rounded-md px-4 py-3 border border-white/10/60 space-y-1.5">
-            <p className="text-sm font-medium text-slate-200">
+          <div className="bg-(--ds-surface-sunken) rounded-md px-4 py-3 border border-(--ds-separator) space-y-1.5">
+            <p className="text-sm font-medium text-(--ds-text-primary)">
               <T>Verdict: </T>
               <span className={verdict.color}>
                 <T>{verdict.label}</T>
               </span>
             </p>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-(--ds-text-secondary)">
               <T>{verdict.tip}</T>
             </p>
           </div>
@@ -1585,38 +1472,38 @@ function StateActionAlignmentSection({
   return (
     <T>
       {
-        <div className="bg-[var(--surface-1)]/60 rounded-lg p-5 border border-white/10 space-y-4">
+        <div className="bg-(--ds-surface-1) rounded-lg p-5 border border-(--ds-separator) space-y-4">
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-slate-200">
+              <h3 className="text-sm font-semibold text-(--ds-text-primary)">
                 <T>State–Action Temporal Alignment</T>
-                <span className="text-xs text-slate-500 ml-2 font-normal">
+                <span className="text-xs text-(--ds-text-secondary) ml-2 font-normal">
                   (<T>{scopeLabel}</T>, <T>{numPairs}</T>
                   <T> matched pair</T>
                   <T>{numPairs !== 1 ? "s" : ""}</T>)
                 </span>
               </h3>
               <InfoToggle>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-(--ds-text-secondary)">
                   <T>Per-dimension cross-correlation between Δaction</T>
                   <sub>d</sub>
                   <T>(t) and Δstate</T>
                   <sub>d</sub>
                   <T>(t+lag), aggregated as</T>
-                  <span className="text-cyan-300">
+                  <span className="text-(--ds-text-primary)">
                     <T> max</T>
                   </span>
                   ,<T> </T>
-                  <span className="text-slate-200">
+                  <span className="text-(--ds-text-primary)">
                     <T>mean</T>
                   </span>
                   <T>, and</T>
-                  <span className="text-blue-400">
+                  <span className="text-(--ds-info)">
                     <T> min</T>
                   </span>
                   <T> across all matched action–state pairs. The</T>
                   <T> </T>
-                  <span className="text-cyan-300">
+                  <span className="text-(--ds-text-primary)">
                     <T>peak lag</T>
                   </span>
                   <T>
@@ -1626,13 +1513,13 @@ function StateActionAlignmentSection({
                     changes.
                   </T>
                   <br />
-                  <span className="text-slate-500">
+                  <span className="text-(--ds-text-secondary)">
                     <T>Central to ACT (</T>
                     <a
                       href="https://arxiv.org/abs/2304.13705"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="underline hover:text-slate-300"
+                      className="underline hover:text-(--ds-text-secondary)"
                     >
                       <T>Zhao et al., 2023</T>
                     </a>
@@ -1646,7 +1533,7 @@ function StateActionAlignmentSection({
                       href="https://arxiv.org/abs/2506.07339"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="underline hover:text-slate-300"
+                      className="underline hover:text-(--ds-text-secondary)"
                     >
                       <T>Black et al., 2025</T>
                     </a>
@@ -1655,7 +1542,7 @@ function StateActionAlignmentSection({
                       href="https://arxiv.org/abs/2512.05964"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="underline hover:text-slate-300"
+                      className="underline hover:text-(--ds-text-secondary)"
                     >
                       <T>Black et al., 2025</T>
                     </a>
@@ -1670,18 +1557,18 @@ function StateActionAlignmentSection({
           </div>
 
           {meanPeakLag !== 0 && (
-            <div className="flex items-center gap-3 bg-cyan-400/10 border border-cyan-400/30 rounded-md px-4 py-2.5">
-              <span className="text-cyan-300 font-bold text-lg tabular-nums">
+            <div className="flex items-center gap-3 bg-(--ds-surface-selected) border border-(--ds-border-control) rounded-md px-4 py-2.5">
+              <span className="text-(--ds-text-primary) font-semibold text-lg tabular-nums">
                 <T>{meanPeakLag}</T>
               </span>
               <div>
-                <p className="text-sm text-cyan-200 font-medium">
+                <p className="text-sm text-(--ds-text-primary) font-medium">
                   <T>Mean control delay: </T>
                   <T>{meanPeakLag}</T>
                   <T>{Math.abs(meanPeakLag) !== 1 ? " steps" : " step"}</T> (
                   {(meanPeakLag / fps).toFixed(3)}s)
                 </p>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-(--ds-text-secondary)">
                   <T>
                     {meanPeakLag > 0
                       ? `State changes lag behind actions by ~${meanPeakLag} frames on average. Consider aligning action[t] with state[t+${meanPeakLag}].`
@@ -1700,27 +1587,30 @@ function StateActionAlignmentSection({
                 data={ccData}
                 margin={{ top: 8, right: 16, left: 0, bottom: 16 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="var(--ds-separator)"
+                />
                 <XAxis
                   dataKey="lag"
-                  stroke="#94a3b8"
+                  stroke="var(--ds-separator-strong)"
                   label={{
                     value: "Lag (steps)",
                     position: "insideBottom",
                     offset: -8,
-                    fill: "#94a3b8",
+                    fill: "var(--ds-text-secondary)",
                     fontSize: 13,
                   }}
                 />
                 <YAxis
-                  stroke="#94a3b8"
+                  stroke="var(--ds-separator-strong)"
                   domain={[-0.5, 1]}
                   tickFormatter={(v) => Number(v.toFixed(2)).toString()}
                 />
                 <Tooltip
                   contentStyle={{
-                    background: "#1e293b",
-                    border: "1px solid #475569",
+                    background: "var(--ds-surface-2)",
+                    border: "1px solid var(--ds-separator)",
                     borderRadius: 6,
                   }}
                   labelFormatter={(v) =>
@@ -1730,7 +1620,7 @@ function StateActionAlignmentSection({
                 />
                 <Line
                   dataKey="max"
-                  stroke="#f97316"
+                  stroke="var(--dv-2)"
                   dot={false}
                   strokeWidth={2}
                   isAnimationActive={false}
@@ -1738,7 +1628,7 @@ function StateActionAlignmentSection({
                 />
                 <Line
                   dataKey="mean"
-                  stroke="#94a3b8"
+                  stroke="var(--ds-text-secondary)"
                   dot={false}
                   strokeWidth={2}
                   isAnimationActive={false}
@@ -1746,7 +1636,7 @@ function StateActionAlignmentSection({
                 />
                 <Line
                   dataKey="min"
-                  stroke="#3b82f6"
+                  stroke="var(--dv-1)"
                   dot={false}
                   strokeWidth={2}
                   isAnimationActive={false}
@@ -1754,7 +1644,7 @@ function StateActionAlignmentSection({
                 />
                 <Line
                   dataKey={() => 0}
-                  stroke="#64748b"
+                  stroke="var(--ds-text-tertiary)"
                   strokeDasharray="6 4"
                   dot={false}
                   name="zero"
@@ -1767,22 +1657,22 @@ function StateActionAlignmentSection({
 
           <div className="flex flex-wrap gap-x-4 gap-y-1 px-1">
             <div className="flex items-center gap-1.5">
-              <span className="w-3 h-[3px] rounded-full shrink-0 bg-cyan-500" />
-              <span className="text-xs text-slate-400">
+              <span className="w-3 h-[3px] rounded-full shrink-0 bg-(--dv-2)" />
+              <span className="text-xs text-(--ds-text-secondary)">
                 <T>max (peak: lag </T>
                 <T>{maxPeakLag}</T>, r={maxPeakCorr.toFixed(3)})
               </span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-3 h-[3px] rounded-full shrink-0 bg-slate-400" />
-              <span className="text-xs text-slate-400">
+              <span className="w-3 h-[3px] rounded-full shrink-0 bg-(--ds-text-secondary)" />
+              <span className="text-xs text-(--ds-text-secondary)">
                 <T>mean (peak: lag </T>
                 <T>{meanPeakLag}</T>, r={meanPeakCorr.toFixed(3)})
               </span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-3 h-[3px] rounded-full shrink-0 bg-blue-500" />
-              <span className="text-xs text-slate-400">
+              <span className="w-3 h-[3px] rounded-full shrink-0 bg-(--dv-1)" />
+              <span className="text-xs text-(--ds-text-secondary)">
                 <T>min (peak: lag </T>
                 <T>{minPeakLag}</T>, r={minPeakCorr.toFixed(3)})
               </span>
@@ -1790,7 +1680,7 @@ function StateActionAlignmentSection({
           </div>
 
           {meanPeakLag === 0 && (
-            <p className="text-xs text-green-400">
+            <p className="text-xs text-(--ds-success)">
               <T>Mean peak correlation at lag 0 (r=</T>
               {meanPeakCorr.toFixed(3)}
               <T>
@@ -1900,20 +1790,20 @@ function ScopeControls({
   return (
     <T>
       {
-        <div className="bg-[var(--surface-1)]/60 rounded-lg p-4 border border-white/10 space-y-3">
+        <div className="bg-(--ds-surface-1) rounded-lg p-4 border border-(--ds-separator) space-y-3">
           <div className="flex items-center flex-wrap gap-x-4 gap-y-2">
-            <span className="text-[10px] uppercase tracking-wide text-slate-500">
+            <span className="text-xs text-(--ds-text-secondary)">
               <T>Analysis scope</T>
             </span>
-            <div className="flex items-center gap-1 rounded-md border border-white/10 p-0.5">
+            <div className="flex items-center gap-1 rounded-md border border-(--ds-separator) p-0.5">
               {kinds.map((option) => (
                 <button
                   key={option.value}
                   onClick={() => setKind(option.value)}
                   className={`px-2.5 py-1 text-xs rounded transition-colors ${
                     kind === option.value
-                      ? "bg-cyan-400/15 text-cyan-300"
-                      : "text-slate-400 hover:text-slate-200"
+                      ? "bg-(--ds-surface-selected) text-(--ds-text-primary)"
+                      : "text-(--ds-text-secondary) hover:text-(--ds-text-primary)"
                   }`}
                 >
                   <T>{option.label}</T>
@@ -1922,7 +1812,7 @@ function ScopeControls({
             </div>
 
             {kind === "range" && (
-              <div className="flex items-center gap-2 text-xs text-slate-400">
+              <div className="flex items-center gap-2 text-xs text-(--ds-text-secondary)">
                 <label className="flex items-center gap-1">
                   <T>From</T>
                   <input
@@ -1931,7 +1821,7 @@ function ScopeControls({
                     max={lastEpisode}
                     value={from}
                     onChange={(e) => setFrom(e.target.value)}
-                    className="w-20 bg-[var(--surface-0)] border border-white/10 rounded px-2 py-1 text-slate-200 tabular-nums"
+                    className="w-20 bg-(--ds-surface-sunken) border border-(--ds-separator) rounded px-2 py-1 text-(--ds-text-primary) tabular-nums"
                   />
                 </label>
                 <label className="flex items-center gap-1">
@@ -1942,10 +1832,10 @@ function ScopeControls({
                     max={lastEpisode}
                     value={to}
                     onChange={(e) => setTo(e.target.value)}
-                    className="w-20 bg-[var(--surface-0)] border border-white/10 rounded px-2 py-1 text-slate-200 tabular-nums"
+                    className="w-20 bg-(--ds-surface-sunken) border border-(--ds-separator) rounded px-2 py-1 text-(--ds-text-primary) tabular-nums"
                   />
                 </label>
-                <span className="text-slate-600">
+                <span className="text-(--ds-text-secondary)">
                   <T>{`0–${lastEpisode}`}</T>
                 </span>
               </div>
@@ -1955,7 +1845,7 @@ function ScopeControls({
               <select
                 value={task}
                 onChange={(e) => setTask(e.target.value)}
-                className="max-w-xs bg-[var(--surface-0)] border border-white/10 rounded px-2 py-1 text-xs text-slate-200"
+                className="max-w-xs bg-(--ds-surface-sunken) border border-(--ds-separator) rounded px-2 py-1 text-xs text-(--ds-text-primary)"
                 aria-label="Select a task"
               >
                 {tasks.map((name) => (
@@ -1966,7 +1856,7 @@ function ScopeControls({
               </select>
             )}
 
-            <label className="flex items-center gap-1 text-xs text-slate-400">
+            <label className="flex items-center gap-1 text-xs text-(--ds-text-secondary)">
               <T>Sample</T>
               <select
                 value={shownSample === null ? "all" : String(shownSample)}
@@ -1975,7 +1865,7 @@ function ScopeControls({
                     e.target.value === "all" ? null : Number(e.target.value),
                   )
                 }
-                className="bg-[var(--surface-0)] border border-white/10 rounded px-2 py-1 text-slate-200 tabular-nums"
+                className="bg-(--ds-surface-sunken) border border-(--ds-separator) rounded px-2 py-1 text-(--ds-text-primary) tabular-nums"
                 aria-label="Episode sample size"
               >
                 {sampleOptions.map((n) => (
@@ -1994,20 +1884,20 @@ function ScopeControls({
               disabled={loading || !dirty}
               className={`ml-auto px-3 py-1 text-xs rounded-md border transition-colors ${
                 loading || !dirty
-                  ? "border-white/10 text-slate-600 cursor-not-allowed"
-                  : "border-cyan-400/40 text-cyan-300 hover:bg-cyan-400/10"
+                  ? "border-(--ds-separator) text-(--ds-text-secondary) cursor-not-allowed"
+                  : "border-(--ds-accent) text-(--ds-text-primary) hover:bg-(--ds-surface-selected)"
               }`}
             >
               <T>{loading ? "Analyzing…" : dirty ? "Analyze" : "Analyzed"}</T>
             </button>
           </div>
 
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-(--ds-text-secondary)">
             {loading && progress ? (
               <T>{`Loading ${progress.loaded} / ${progress.total} episodes…`}</T>
             ) : data ? (
               <>
-                <span className="text-slate-300">
+                <span className="text-(--ds-text-secondary)">
                   <T>{describeScope(data.scope)}</T>
                 </span>
                 <T> · </T>
@@ -2060,6 +1950,7 @@ function ActionInsightsPanel({
   onCrossEpisodeRequestChange,
   crossEpisodeProgress,
 }: ActionInsightsPanelProps) {
+  const { t } = useLocale();
   const [mode, setMode] = useState<"episode" | "dataset">("dataset");
   const showAgg = mode === "dataset" && !!crossEpisodeData;
 
@@ -2069,42 +1960,30 @@ function ActionInsightsPanel({
         <div className="max-w-5xl mx-auto py-6 space-y-8">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <h2 className="text-xl font-bold text-slate-100">
+              <h2 className="text-xl font-semibold text-(--ds-text-primary)">
                 <T>Action Insights</T>
               </h2>
-              <p className="text-sm text-slate-400 mt-1">
+              <p className="text-sm text-(--ds-text-secondary) mt-1">
                 <T>
                   Data-driven analysis to guide action chunking, data quality
                   assessment, and training configuration.
                 </T>
               </p>
             </div>
-            <div className="flex items-center gap-3 shrink-0">
-              <span
-                className={`text-sm ${mode === "episode" ? "text-slate-100 font-medium" : "text-slate-500"}`}
-              >
-                <T>Current Episode</T>
-              </span>
-              <button
-                onClick={() =>
-                  setMode((m) => (m === "episode" ? "dataset" : "episode"))
-                }
-                className={`relative inline-flex items-center w-9 h-5 rounded-full transition-colors shrink-0 ${mode === "dataset" ? "bg-cyan-500" : "bg-white/10"}`}
-                aria-label="Toggle episode/dataset scope"
-              >
-                <span
-                  className={`inline-block w-3.5 h-3.5 bg-white rounded-full transition-transform ${mode === "dataset" ? "translate-x-[18px]" : "translate-x-[3px]"}`}
-                />
-              </button>
-              <span
-                className={`text-sm ${mode === "dataset" ? "text-slate-100 font-medium" : "text-slate-500"}`}
-              >
-                <T>All Episodes</T>
-                <T>
-                  {crossEpisodeData ? ` (${crossEpisodeData.numEpisodes})` : ""}
-                </T>
-              </span>
-            </div>
+            <SegmentedControl
+              label={t("Analysis scope")}
+              value={mode}
+              onChange={(value) => setMode(value as typeof mode)}
+              options={[
+                { value: "episode", label: t("Current Episode") },
+                {
+                  value: "dataset",
+                  label: `${t("All Episodes")}${
+                    crossEpisodeData ? ` (${crossEpisodeData.numEpisodes})` : ""
+                  }`,
+                },
+              ]}
+            />
           </div>
 
           {mode === "dataset" && (

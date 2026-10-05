@@ -16,6 +16,7 @@ import {
   type Vocabulary,
 } from "../utils/annotationsClient";
 import { T, useLocale } from "./levi-locale";
+import { Button } from "@/components/ds";
 
 export type SubtaskTag = {
   subtask_id?: string | null;
@@ -119,6 +120,7 @@ export function VocabularyEditor({
   vocabulary: Vocabulary;
   onSaved: (vocabulary: Vocabulary) => void;
 }) {
+  const { t } = useLocale();
   const [text, setText] = useState(() => format(vocabulary.subtasks));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -127,11 +129,11 @@ export function VocabularyEditor({
   }, [vocabulary.subtasks]);
   const suggested = vocabulary.suggested ?? [];
   return (
-    <details className="vocab-editor">
+    <details className="vw-vocab">
       <summary>
         <T>Subtask vocabulary</T> ({vocabulary.subtasks.length})
       </summary>
-      <p className="levi-agent-muted">
+      <p>
         <T>
           One subtask per line: id | label | definition. With a vocabulary each
           subtask span gets an id and an outcome, comparable with agent
@@ -144,15 +146,16 @@ export function VocabularyEditor({
         placeholder="grasp | grasp | close the fingers on the plate rim"
         onChange={(e) => setText(e.target.value)}
       />
-      <div className="vocab-actions">
+      <div className="vw-vocab-actions">
         {!vocabulary.subtasks.length && suggested.length > 0 && (
-          <button type="button" onClick={() => setText(format(suggested))}>
-            <T>{"Use the last agent plan's subtasks"}</T> ({suggested.length})
-          </button>
+          <Button size="sm" onClick={() => setText(format(suggested))}>
+            {t("Use the last agent plan's subtasks")} ({suggested.length})
+          </Button>
         )}
-        <button
-          type="button"
-          disabled={busy}
+        <Button
+          size="sm"
+          variant="primary"
+          loading={busy}
           onClick={async () => {
             setBusy(true);
             setError("");
@@ -165,10 +168,10 @@ export function VocabularyEditor({
             }
           }}
         >
-          <T>Save vocabulary</T>
-        </button>
+          {t("Save vocabulary")}
+        </Button>
         {error && (
-          <span className="levi-error" role="alert">
+          <span className="text-xs text-(--ds-danger)" role="alert">
             {error}
           </span>
         )}

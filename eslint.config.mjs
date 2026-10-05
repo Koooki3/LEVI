@@ -25,6 +25,38 @@ const FRAME_FILES = [
   "src/components/report/**/*.{ts,tsx}",
   "src/lib/design/**/*.{ts,tsx}",
 ];
+// The episode viewer (design stage 3). Its data colours live in
+// src/components/viewer/data-palette.ts (the one viewer file with hex: canvas
+// and the 3D scene cannot read CSS variables) and in viewer.css; the URDF
+// viewer keeps the robot models' material colours.
+const VIEWER_FILES = [
+  "src/app/[[]org]/[[]dataset]/[[]episode]/*.tsx",
+  "src/components/viewer/*.tsx",
+  "src/components/action-insights-panel.tsx",
+  "src/components/anchored-review-section.tsx",
+  "src/components/annotation-recorder.tsx",
+  "src/components/annotations-panel.tsx",
+  "src/components/annotations-timeline.tsx",
+  "src/components/data-recharts.tsx",
+  "src/components/dataset-update-notice.tsx",
+  "src/components/draggable-popup.tsx",
+  "src/components/fast-segmentation-panel.tsx",
+  "src/components/filtering-panel.tsx",
+  "src/components/levi-doctor.tsx",
+  "src/components/levi-review.tsx",
+  "src/components/live-segmentation-canvas.tsx",
+  "src/components/object-annotation-panel.tsx",
+  "src/components/overview-panel.tsx",
+  "src/components/playback-bar.tsx",
+  "src/components/raw-capture-notice.tsx",
+  "src/components/recap-value-section.tsx",
+  "src/components/side-nav.tsx",
+  "src/components/simple-videos-player.tsx",
+  "src/components/stats-panel.tsx",
+  "src/components/subtask-vocabulary.tsx",
+  "src/components/urdf-playback-bar.tsx",
+  "src/components/video-overlay-canvas.tsx",
+];
 // A colour: # and exactly 3, 4, 6 or 8 hex digits, at the start of the
 // string or after a space, "(", "," or ":", and not followed by another
 // word character. "#heading", "#12345" and "url#abc" are not colours.
@@ -49,6 +81,23 @@ const eslintConfig = [
     // Design stage 2: the global frame uses `--ds-*` tokens, never a
     // hard-coded colour. Older pages follow in stage 6 (docs/DESIGN.md).
     files: FRAME_FILES,
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: `Literal[value=${HEX}]${NOT_LINK}`,
+          message: HEX_MESSAGE,
+        },
+        {
+          selector: `TemplateElement[value.raw=${HEX}]`,
+          message: HEX_MESSAGE,
+        },
+      ],
+    },
+  },
+  {
+    // Design stage 3: the episode viewer, the same rule.
+    files: VIEWER_FILES,
     rules: {
       "no-restricted-syntax": [
         "error",

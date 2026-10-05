@@ -148,6 +148,34 @@ One mark everywhere: a graphite tile with a geometric "L" and a square point, on
 **Home** (`/`): the work entrance. Continue (the last episode or dataset opened in this browser; the frame records visits in `localStorage` under `levi-recent`, nothing is sent), Needs you (agent tasks whose `waiting_for` is a person's approval, review or commit, from `/api/levi/agent/v1/activity/tasks`), Running (conversions and training pool jobs with their progress), the live evaluation card when a live service is shown, and recent datasets (visited first, then the other registered ones). Each card loads on its own with a skeleton and gives up after 10 s; it refreshes every 15 s while the tab is visible. The Hugging Face search and the older `/?path=` and `/?dataset=` links stay. The introduction moved to the guide.
 
 **Reading layout** (`reading.css`, the guide and the report): one column up to 760 px, contents on the left that stay in view and mark the current section (`aria-current="location"`), reading text 16/26 (`--ds-text-reading-*`), Markdown headings, lists, links (primary text, underlined), quotes, code and tables in `.levi-prose`. The report's charts use `--ds-data-*` (read through `useCssTokens`; Recharts also accepts `var(--ds-…)` directly in current browsers, the hook is needed only for canvas and WebGL), running states are shown by colour and words with no looping animation, and "Updated" is a frame toast.
+## Episode viewer (stage 3)
+
+The episode viewer (`src/app/[org]/[dataset]/[episode]/`) uses the tokens in both themes. Its styles are in `src/components/viewer/`:
+
+| What | Where |
+| --- | --- |
+| Frame, tab bar, episode list, media, playback, notes, metric tiles | `viewer.css` (classes `vw-*`) |
+| Annotation panels, timeline, value-model and anchored-review lanes, segmentation | `annotations.css` (scoped under `.annotations-skin`; replaces `annotations-skin.css`) |
+| Data palette | `viewer.css` (`--dv-1` … `--dv-8` = the tokens `--ds-data-1` … `--ds-data-8`, `--dv-positive`, `--dv-negative`, `--dv-neutral`) and `data-palette.ts` |
+| Tabs and the Analysis tab | `viewer-tabs.ts`, `analysis-tab.tsx` |
+| Error page | `load-error.tsx` |
+| Tests | `src/components/viewer/__tests__/` |
+
+**Tabs.** Episodes, Annotations, 3D Replay (when the robot is supported), Statistics, Frame gallery and **Analysis**. Analysis holds the former Action insights, Filtering and Doctor tabs as a segmented control; each view loads exactly what its tab loaded. A tab id stored by an older session (`insights`, `filtering`, `doctor`) opens Analysis on that view; the view is kept in `sessionStorage` (`analysisView`). The tab bar and the annotation sub-tabs are ds `Tabs` (←/→ between tabs).
+
+**Inspector.** On the Annotations tab a right column (320 px, `inspector.tsx`) shows the selected time segment's form, or on Objects & Tracking the selected object (its facts and Accept / Reject). The panels still render their own forms with the same state and handlers; `InspectorPortal` only moves the form's DOM into the column, and without a column (`useInspectorSlot()` is null) it renders in place. The column collapses to a rail; below 1200 px it is a drawer along the bottom edge that starts collapsed. Escape, Ctrl/⌘+S/Z/Y keep working (they listen on the window).
+
+**Data colours** are not interface colours. Eight categorical hues in a fixed order, with their own light and dark steps (checked with the palette validator: adjacent colour-blind ΔE ≥ 8.4, normal-vision ΔE ≥ 19.3, dark steps ≥ 3:1 on the dark card; three light steps are below 3:1 on white, so a coloured mark always has a visible label). Annotation styles map to slots in `annotations.css` (`--style-subtask` … `--style-memory`); chart series take `seriesColor(i)` in order; RECAP advantage uses `--dv-positive` / `--dv-negative`. Text never takes a data colour: pills, lane names and legends are text colours with a coloured dot or bar beside them. Status (pass/warn/fail, success/failure) uses the status tokens with an icon and words. Canvas and the 3D scene cannot read CSS variables: they use `DATA_ON_MEDIA` (the dark steps; a test keeps them equal to `viewer.css`), and `data-palette.ts` is the one viewer file allowed to hold hex values.
+
+**Media** is black in both themes (`--ds-media-bg`); each camera tile and the 3D viewport carry `data-theme="dark"` so the controls drawn on them are dark. Labels on video are near-white words on a dark plate with a coloured bar. The 3D background is black.
+
+**Episode list.** Outcome is a shape and words (check circle, crossed circle, empty circle; a ring for a person's label) and stays a button that cycles the label; flag is a pressed toggle; Failures and Flagged are filter chips. The heading row has previous/next episode buttons that do what ↑/↓ do.
+
+**Kept keys.** Space (play/pause), ↑/↓ (episode), Escape and Ctrl/⌘+S/Z/Y in the annotation editor, as before; none fires while typing.
+
+**Feedback.** The loading overlay appears after 300 ms (none for a fast load) with a spinner that stops under reduced motion; spinners elsewhere are the Lucide spinner; errors on the page say what happened, why (technical details) and what to do (Try again, Back to Explore); the dataset-changed card sits bottom left so it never covers the toasts.
+
+ESLint rejects hex colours in the viewer's files (`VIEWER_FILES` in `eslint.config.mjs`); the URDF viewer keeps the robot models' material colours and is not in that list.
 
 ## Motion
 

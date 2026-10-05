@@ -1,50 +1,25 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
-import { T } from "@/components/levi-locale";
+import { LoaderCircle } from "lucide-react";
+import { Icon } from "@/components/ds";
+import { useLocale } from "@/components/levi-locale";
+import "@/components/viewer/viewer.css";
 
 export default function Loading() {
+  const { t } = useLocale();
+  // A loading overlay is a status, not a dialog: it takes no focus and traps
+  // nothing; screen readers hear "Loading" once (polite). It fades in only
+  // after 300 ms, so a fast load never flashes it (proposal §7.2).
   return (
-    <T>
-      {
-        // A loading overlay is a status, not a dialog: it takes no focus and
-        // traps nothing; screen readers hear "Loading" once (polite).
-        <div
-          className="absolute inset-0 flex flex-col items-center justify-center bg-[var(--bg)]/80 backdrop-blur-sm z-10 text-slate-200"
-          role="status"
-          aria-live="polite"
-          aria-busy="true"
-        >
-          <svg
-            aria-hidden="true"
-            className="animate-spin mb-5 text-cyan-300"
-            width="42"
-            height="42"
-            viewBox="0 0 24 24"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <circle
-              className="opacity-15"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="3"
-            />
-            <path
-              className="opacity-80"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-            />
-          </svg>
-          <h1 className="text-sm font-medium tracking-wide uppercase text-slate-300">
-            <T>Loading</T>
-          </h1>
-          <p className="text-xs text-slate-500 mt-1">
-            <T>preparing data &amp; videos</T>
-          </p>
-        </div>
-      }
-    </T>
+    <div
+      className="vw-loading"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <Icon icon={LoaderCircle} size="lg" className="ds-spin" />
+      <p className="vw-loading-title">{t("Loading")}</p>
+      <p className="vw-loading-detail">{t("preparing data & videos")}</p>
+    </div>
   );
 }

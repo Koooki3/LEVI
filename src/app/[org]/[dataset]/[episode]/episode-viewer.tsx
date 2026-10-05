@@ -1,6 +1,34 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
-import { T } from "@/components/levi-locale";
+import { T, useLocale } from "@/components/levi-locale";
+import {
+  Box,
+  ChartColumn,
+  ChartSpline,
+  ChevronDown,
+  ChevronUp,
+  Film,
+  LayoutGrid,
+  MessageSquareText,
+  ScanSearch,
+  Tags,
+} from "lucide-react";
+import { IconButton, Kbd, Tabs, Tooltip } from "@/components/ds";
+import { AnalysisTab } from "@/components/viewer/analysis-tab";
+import { EpisodeLoadError } from "@/components/viewer/load-error";
+import { InspectorLayout } from "@/components/viewer/inspector";
+import {
+  useViewerTabs,
+  type TabLoaders,
+} from "@/components/viewer/use-viewer-tabs";
+import {
+  adjacentEpisode,
+  restoreViewerTab,
+  showsEpisodeList,
+  type ViewerTab,
+} from "@/components/viewer/viewer-tabs";
+import "@/components/viewer/viewer.css";
+import "@/components/viewer/annotations.css";
 
 import {
   useState,
@@ -104,16 +132,6 @@ function isKeyboardFocusInsideTextEntry(target: EventTarget | null): boolean {
   );
 }
 
-type ActiveTab =
-  | "episodes"
-  | "annotations"
-  | "statistics"
-  | "frames"
-  | "insights"
-  | "filtering"
-  | "doctor"
-  | "urdf";
-
 // Subscribes to `currentTime` so its parent doesn't have to. Keeping this
 // in a leaf component means the throttled time ticks (~12.5/s during
 // playback) only re-render this no-op sub-tree, not the entire 700-line
@@ -148,45 +166,6 @@ function UrlTimeSync() {
   }, [isPlaying, currentTime, searchParams]);
 
   return null;
-}
-
-// Hoisted to module scope. Defining inside EpisodeViewerInner created a new
-// component type on every parent render — and the parent re-renders ~12.5×/s
-// during playback because it consumes `currentTime` from useTime. React
-// would unmount and remount every tab on every tick.
-function TabButton({
-  active,
-  onClick,
-  label,
-  title,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-  title?: string;
-}) {
-  return (
-    <T>
-      {
-        <button
-          onClick={onClick}
-          title={title}
-          className={`relative px-5 py-3 text-xs font-medium tracking-wide uppercase transition-colors ${
-            active ? "text-cyan-300" : "text-slate-400 hover:text-slate-100"
-          }`}
-        >
-          <T>{label}</T>
-          <span
-            className={`pointer-events-none absolute bottom-0 left-3 right-3 h-px transition-all ${
-              active
-                ? "bg-cyan-400 shadow-[0_0_8px_rgba(56,189,248,0.55)]"
-                : "bg-transparent"
-            }`}
-          />
-        </button>
-      }
-    </T>
-  );
 }
 
 export default function EpisodeViewer({
@@ -264,32 +243,18 @@ export default function EpisodeViewer({
 
   if (error) {
     return (
-      <T>
-        {
-          <div className="flex h-screen items-center justify-center bg-[var(--bg)] text-red-300">
-            <div className="panel-raised max-w-xl p-6 border-red-500/40">
-              <h2 className="text-xl font-medium mb-3">
-                <T>Something went wrong</T>
-              </h2>
-              <p className="text-sm font-mono whitespace-pre-wrap text-red-200/90">
-                <T>{error}</T>
-              </p>
-            </div>
-          </div>
-        }
-      </T>
+      <EpisodeLoadError
+        message={error}
+        onRetry={() => setAuthRevision((value) => value + 1)}
+      />
     );
   }
 
   if (!data) {
     return (
-      <T>
-        {
-          <div className="relative h-screen bg-[var(--bg)]">
-            <Loading />
-          </div>
-        }
-      </T>
+      <div className="vw-root ds-root relative">
+        <Loading />
+      </div>
     );
   }
 
@@ -353,6 +318,7 @@ function EpisodeViewerInner({
     task,
   } = data;
 
+  const { t } = useLocale();
   const [videosReady, setVideosReady] = useState(!videosInfo.length);
   const [chartsReady, setChartsReady] = useState(false);
 
@@ -364,27 +330,28 @@ function EpisodeViewerInner({
   // Tab state & lazy stats — read sessionStorage in the initializer so the
   // correct tab renders on the very first frame (no post-mount flash).
   // Safe because EpisodeViewerInner only mounts client-side (behind a loading gate).
-  const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
-    if (typeof window !== "undefined") {
-      const stored = readBrowserStorage("session", "activeTab");
-      if (
-        stored &&
-        [
-          "episodes",
-          "annotations",
-          "statistics",
-          "frames",
-          "insights",
-          "filtering",
-          "urdf",
-          "doctor",
-        ].includes(stored)
-      ) {
-        return stored as ActiveTab;
-      }
-    }
-    return "episodes";
+  // "Action insights", "Filtering" and "Doctor" are views of one "Analysis"
+  // tab; an old stored tab id opens that view (restoreViewerTab).
+  const [initialTabs] = useState(() =>
+    typeof window !== "undefined"
+      ? restoreViewerTab(
+          readBrowserStorage("session", "activeTab"),
+          readBrowserStorage("session", "analysisView"),
+        )
+      : restoreViewerTab(null, null),
+  );
+  // Loaders are defined further down; the hook reads them through the ref.
+  const tabLoadersRef = useRef<TabLoaders>({
+    stats: () => {},
+    frames: () => {},
+    insights: () => {},
   });
+  const {
+    activeTab,
+    analysisView,
+    changeTab: handleTabChange,
+    changeView: handleAnalysisViewChange,
+  } = useViewerTabs(initialTabs, tabLoadersRef);
   // Sub-tab within "Annotations": language/event annotation is a fully
   // decoupled system from SAM3 object/track/mask annotation. sessionStorage
   // (not local-only state) because episode navigation goes through
@@ -672,6 +639,7 @@ function EpisodeViewerInner({
   // of these would silently reset on every episode switch.
   useEffect(() => {
     writeBrowserStorage("session", "activeTab", activeTab);
+    writeBrowserStorage("session", "analysisView", analysisView);
     writeBrowserStorage(
       "session",
       "sidebarFlaggedOnly",
@@ -693,6 +661,7 @@ function EpisodeViewerInner({
     else removeBrowserStorage("session", taskFilterKey);
   }, [
     activeTab,
+    analysisView,
     sidebarFlaggedOnly,
     sidebarFailuresOnly,
     framesFlaggedOnly,
@@ -801,27 +770,10 @@ function EpisodeViewerInner({
     loadInsights(request);
   };
 
-  // Re-trigger data loading for the restored tab on mount
-  useEffect(() => {
-    if (activeTab === "statistics") loadStats();
-    if (activeTab === "frames") loadFrames();
-    if (activeTab === "insights") loadInsights();
-    if (activeTab === "filtering") {
-      loadStats();
-      loadInsights();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleTabChange = (tab: ActiveTab) => {
-    setActiveTab(tab);
-    if (tab === "statistics") loadStats();
-    if (tab === "frames") loadFrames();
-    if (tab === "insights") loadInsights();
-    if (tab === "filtering") {
-      loadStats();
-      loadInsights();
-    }
+  tabLoadersRef.current = {
+    stats: loadStats,
+    frames: loadFrames,
+    insights: () => loadInsights(),
   };
 
   // `currentTime` is intentionally NOT read here. Subscribing to it would
@@ -1001,6 +953,29 @@ function EpisodeViewerInner({
     urdfEpisode,
   };
 
+  // ↑/↓ and the heading's previous/next buttons: one step through the
+  // visible (task-filtered) episodes; on the 3D Replay tab the replay's own
+  // episode changes instead of the route.
+  const stepEpisodeRef = useRef<(delta: 1 | -1) => void>(() => {});
+  stepEpisodeRef.current = (delta) => {
+    const s = keyStateRef.current;
+    if (s.taskFilter && s.visibleEpisodes.length === 0) return;
+    const navigationEpisodes = s.taskFilter
+      ? s.visibleEpisodes
+      : s.visibleEpisodes.length > 0
+        ? s.visibleEpisodes
+        : s.episodes;
+    const current = s.activeTab === "urdf" ? s.urdfEpisode : s.episodeId;
+    const nextEp = adjacentEpisode(navigationEpisodes, current, delta);
+    if (nextEp === undefined) return;
+    if (s.activeTab === "urdf") {
+      setUrdfEpisode(nextEp);
+      urdfChangerRef.current?.(nextEp);
+    } else {
+      router.push(`./episode_${nextEp}`);
+    }
+  };
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const { key } = e;
@@ -1018,29 +993,7 @@ function EpisodeViewerInner({
       } else if (key === "ArrowDown" || key === "ArrowUp") {
         if (inTextEntry) return;
         e.preventDefault();
-        if (s.taskFilter && s.visibleEpisodes.length === 0) return;
-        const navigationEpisodes = s.taskFilter
-          ? s.visibleEpisodes
-          : s.visibleEpisodes.length > 0
-            ? s.visibleEpisodes
-            : s.episodes;
-        const current = s.activeTab === "urdf" ? s.urdfEpisode : s.episodeId;
-        const currentIndex = navigationEpisodes.indexOf(current);
-        const delta = key === "ArrowDown" ? 1 : -1;
-        const nextIndex =
-          currentIndex === -1
-            ? delta > 0
-              ? 0
-              : navigationEpisodes.length - 1
-            : currentIndex + delta;
-        const nextEp = navigationEpisodes[nextIndex];
-        if (nextEp === undefined) return;
-        if (s.activeTab === "urdf") {
-          setUrdfEpisode(nextEp);
-          urdfChangerRef.current?.(nextEp);
-        } else {
-          router.push(`./episode_${nextEp}`);
-        }
+        stepEpisodeRef.current(key === "ArrowDown" ? 1 : -1);
       }
     };
 
@@ -1062,342 +1015,392 @@ function EpisodeViewerInner({
     }
   };
 
-  const renderTab = (tab: ActiveTab, label: string, title?: string) => (
-    <TabButton
-      active={activeTab === tab}
-      onClick={() => handleTabChange(tab)}
-      label={label}
-      title={title}
-    />
+  const tabItems = [
+    { id: "episodes", label: t("Episodes"), icon: Film },
+    {
+      id: "annotations",
+      label: (
+        <Tooltip
+          content={t(
+            "Edit subtask / plan / memory / interjection / VQA atoms (lerobot v3.1 schema)",
+          )}
+          placement="bottom"
+        >
+          <span>{t("Annotations")}</span>
+        </Tooltip>
+      ),
+      icon: Tags,
+    },
+    ...(hasURDFSupport(datasetInfo.robot_type)
+      ? [{ id: "urdf", label: t("3D Replay"), icon: Box }]
+      : []),
+    { id: "statistics", label: t("Statistics"), icon: ChartColumn },
+    { id: "frames", label: t("Frame gallery"), icon: LayoutGrid },
+    { id: "analysis", label: t("Analysis"), icon: ChartSpline },
+  ];
+
+  const navEpisodes = taskFilter
+    ? visibleEpisodes
+    : visibleEpisodes.length > 0
+      ? visibleEpisodes
+      : episodes;
+  const shownEpisode = activeTab === "urdf" ? urdfEpisode : episodeId;
+  const episodePosition = navEpisodes.indexOf(shownEpisode);
+
+  const heading = (
+    <div className="vw-heading">
+      <div className="vw-heading-nav">
+        <IconButton
+          icon={ChevronUp}
+          label={t("Previous episode")}
+          shortcut="↑"
+          size="sm"
+          disabled={
+            adjacentEpisode(navEpisodes, shownEpisode, -1) === undefined
+          }
+          onClick={() => stepEpisodeRef.current(-1)}
+        />
+        <IconButton
+          icon={ChevronDown}
+          label={t("Next episode")}
+          shortcut="↓"
+          size="sm"
+          disabled={adjacentEpisode(navEpisodes, shownEpisode, 1) === undefined}
+          onClick={() => stepEpisodeRef.current(1)}
+        />
+      </div>
+      <div className="vw-heading-title">
+        <h1>{t(`Episode ${episodeId}`)}</h1>
+        <span className="vw-heading-meta">
+          {org === "local" ? (
+            datasetInfo.repoId
+          ) : (
+            <a
+              href={`https://huggingface.co/datasets/${datasetInfo.repoId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="vw-link"
+            >
+              {datasetInfo.repoId}
+            </a>
+          )}
+          {episodePosition >= 0 && (
+            <>
+              {" · "}
+              {episodePosition + 1} / {navEpisodes.length}
+            </>
+          )}
+        </span>
+      </div>
+      {activeTab === "annotations" && (
+        <div className="vw-heading-actions">
+          <AnnotationRecorder />
+        </div>
+      )}
+    </div>
   );
 
   return (
-    <T>
-      {
-        <div className="flex flex-col h-screen max-h-screen bg-[var(--bg)] text-[var(--text-primary)]">
-          <UrlTimeSync />
-          {/* Top tab bar */}
-          <div className="flex items-center border-b border-white/5 bg-[var(--surface-0)] shrink-0 overflow-x-auto">
-            {renderTab("episodes", "Episodes")}
-            {renderTab(
-              "annotations",
-              "Annotations",
-              "Edit subtask / plan / memory / interjection / VQA atoms (lerobot v3.1 schema)",
-            )}
-            {hasURDFSupport(datasetInfo.robot_type) &&
-              renderTab("urdf", "3D Replay")}
-            {renderTab("statistics", "Statistics")}
-            {renderTab("filtering", "Filtering")}
-            {renderTab("frames", "Frame gallery")}
-            {renderTab("insights", "Action Insights")}
-            {renderTab(
-              "doctor",
-              "Doctor",
-              "Dataset quality diagnostics (powered by lerobot-doctor)",
-            )}
-            <div className="ml-auto flex items-center">
-              <LeviReview repoId={`${org}/${dataset}`} />
-              <HfAuthButton variant="tab" />
-            </div>
-          </div>
+    <div className="vw-root ds-root">
+      <UrlTimeSync />
+      {/* Top tab bar */}
+      <div className="vw-tabbar">
+        <nav aria-label={t("Episode viewer views")} className="min-w-0">
+          <Tabs
+            label={t("Episode viewer")}
+            items={tabItems}
+            value={activeTab}
+            onChange={(id) => handleTabChange(id as ViewerTab)}
+          />
+        </nav>
+        <div className="vw-tabbar-actions">
+          <LeviReview repoId={`${org}/${dataset}`} />
+          <HfAuthButton variant="tab" />
+        </div>
+      </div>
 
-          {/* Body: sidebar + content */}
-          <div className="flex flex-1 min-h-0">
-            {/* Sidebar — on Episodes and 3D Replay tabs */}
-            {(activeTab === "episodes" ||
-              activeTab === "annotations" ||
-              activeTab === "urdf") && (
-              <Sidebar
+      {/* Body: sidebar + content */}
+      <div className="vw-body">
+        {/* Episode list — on Episodes, Annotations and 3D Replay */}
+        {showsEpisodeList(activeTab) && (
+          <Sidebar
+            datasetInfo={datasetInfo}
+            paginatedEpisodes={paginatedEpisodes}
+            allVisibleEpisodes={visibleEpisodes}
+            episodeId={activeTab === "urdf" ? urdfEpisode : episodeId}
+            totalPages={totalPages}
+            currentPage={currentPage}
+            prevPage={prevPage}
+            nextPage={nextPage}
+            showFlaggedOnly={sidebarFlaggedOnly}
+            onShowFlaggedOnlyChange={setSidebarFlaggedOnly}
+            showFailuresOnly={sidebarFailuresOnly}
+            onShowFailuresOnlyChange={setSidebarFailuresOnly}
+            tasks={taskIndex?.tasks ?? []}
+            taskFilter={taskFilter}
+            onTaskFilterChange={setTaskFilter}
+            filteredEpisodeCount={visibleEpisodes.length}
+            annotationSummary={annotationSummary ?? undefined}
+            episodeOutcomes={mergedOutcomes ?? undefined}
+            humanOutcomes={humanOutcomeKeys}
+            recapFractions={recapFractions ?? undefined}
+            onOutcomeChange={
+              isAnnotateBackendEnabled() ? changeOutcome : undefined
+            }
+            onEpisodeSelect={
+              activeTab === "urdf"
+                ? (ep) => {
+                    setUrdfEpisode(ep);
+                    urdfChangerRef.current?.(ep);
+                  }
+                : activeTab === "annotations"
+                  ? (ep) => router.push(`./episode_${ep}`)
+                  : undefined
+            }
+          />
+        )}
+
+        {/* Main content, and the inspector column on the Annotations tab */}
+        <InspectorLayout enabled={activeTab === "annotations"}>
+          <main
+            className="vw-main vw-chart"
+            // Focusable so the content scrolls by keyboard (axe
+            // scrollable-region-focusable) when it holds no control.
+            tabIndex={0}
+            data-loading={isLoading ? "true" : undefined}
+            aria-busy={isLoading || undefined}
+          >
+            {isLoading && <Loading />}
+            {/* The heading row (with its h1) shows on Episodes and
+              Annotations; the other tabs still need a page heading. */}
+            {activeTab !== "episodes" && activeTab !== "annotations" && (
+              <h1 className="ds-sr-only">
+                {t(`Episode ${episodeId}`)} ·{" "}
+                {t(
+                  {
+                    urdf: "3D Replay",
+                    statistics: "Statistics",
+                    frames: "Frame gallery",
+                    analysis: "Analysis",
+                  }[activeTab as string] ?? "",
+                )}
+              </h1>
+            )}
+
+            {activeTab === "episodes" && (
+              <>
+                {heading}
+
+                <RawCaptureNotice compact />
+
+                {/* Videos */}
+                {videosInfo.length > 0 && (
+                  <SimpleVideosPlayer
+                    videosInfo={videosInfo}
+                    onVideosReady={() => setVideosReady(true)}
+                    annotationEpisodeId={episodeId}
+                    annotationRepoId={datasetInfo.repoId}
+                  />
+                )}
+
+                {/* Language instruction */}
+                {task && (
+                  <section className="vw-card">
+                    <h2 className="vw-label">
+                      <T>Language Instruction</T>
+                    </h2>
+                    <div className="mt-1.5 space-y-0.5">
+                      {task
+                        .split("\n")
+                        .map((instruction: string, index: number) => (
+                          <p key={index} className="m-0">
+                            {t(instruction)}
+                          </p>
+                        ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* Graph */}
+                <Suspense fallback={null}>
+                  <DataRecharts
+                    data={chartDataGroups}
+                    onChartsReady={() => setChartsReady(true)}
+                  />
+                </Suspense>
+
+                <PlaybackBar />
+              </>
+            )}
+
+            {activeTab === "annotations" && (
+              <div className="annotations-skin flex flex-col gap-4">
+                {heading}
+                {videosInfo.length > 0 && (
+                  <SimpleVideosPlayer
+                    videosInfo={videosInfo}
+                    onVideosReady={() => setVideosReady(true)}
+                    annotationEpisodeId={episodeId}
+                    annotationRepoId={datasetInfo.repoId}
+                  />
+                )}
+                <PlaybackBar />
+
+                {/* Sub-tabs: language/event annotation vs. SAM3 object
+              annotation are fully independent systems — keep the video
+              player + scrubber shared above (both need it, and keeping
+              it mounted across sub-tab switches avoids a reload), but
+              split everything else so users always know which system
+              they're working in. */}
+                <Tabs
+                  label={t("Annotation type")}
+                  value={annotationsSubTab}
+                  onChange={(id) =>
+                    setAnnotationsSubTab(id as "language" | "vision")
+                  }
+                  items={[
+                    {
+                      id: "language",
+                      label: t("Language & Events"),
+                      icon: MessageSquareText,
+                    },
+                    {
+                      id: "vision",
+                      label: t("Objects & Tracking"),
+                      icon: ScanSearch,
+                    },
+                  ]}
+                />
+
+                {annotationsSubTab === "language" && (
+                  <>
+                    <div className="grounding-intro">
+                      <h2 className="vw-label">
+                        <T>Grounded VQA</T>
+                      </h2>
+                      <ul>
+                        <li>
+                          <T>
+                            Draw directly on the active video to create visual
+                            questions. Drag for a bounding box, click for a
+                            point. The camera is detected from the video you
+                            draw on.
+                          </T>
+                        </li>
+                        <li>
+                          <T>
+                            Drag on any video to add a bbox question. Click any
+                            video to add a keypoint question. Confirm the popup
+                            with{" "}
+                          </T>
+                          <Kbd>↵</Kbd>
+                          <T> or </T>
+                          <Kbd>Ctrl/Cmd+S</Kbd>
+                          <T>, or cancel with </T>
+                          <Kbd>{t("Esc")}</Kbd>.
+                        </li>
+                      </ul>
+                    </div>
+                    <AnnotationsTimeline duration={data.duration} />
+                    <AnnotationsPanel
+                      cameraKeys={videosInfo.map((v) => v.filename)}
+                    />
+                  </>
+                )}
+
+                {annotationsSubTab === "vision" && (
+                  <>
+                    <FastSegmentationPanel
+                      episodeId={episodeId}
+                      ident={{ repoId: datasetInfo.repoId }}
+                      cameraKeys={videosInfo.map((v) => v.filename)}
+                      allEpisodes={availableEpisodes}
+                    />
+                    <ObjectAnnotationPanel
+                      episodeId={episodeId}
+                      ident={{ repoId: datasetInfo.repoId }}
+                      cameraKeys={videosInfo.map((v) => v.filename)}
+                      allEpisodes={availableEpisodes}
+                      taskIndex={taskIndex}
+                    />
+                  </>
+                )}
+              </div>
+            )}
+
+            {activeTab === "statistics" && (
+              <StatsPanel
                 datasetInfo={datasetInfo}
-                paginatedEpisodes={paginatedEpisodes}
-                allVisibleEpisodes={visibleEpisodes}
-                episodeId={activeTab === "urdf" ? urdfEpisode : episodeId}
-                totalPages={totalPages}
-                currentPage={currentPage}
-                prevPage={prevPage}
-                nextPage={nextPage}
-                showFlaggedOnly={sidebarFlaggedOnly}
-                onShowFlaggedOnlyChange={setSidebarFlaggedOnly}
-                showFailuresOnly={sidebarFailuresOnly}
-                onShowFailuresOnlyChange={setSidebarFailuresOnly}
-                tasks={taskIndex?.tasks ?? []}
-                taskFilter={taskFilter}
-                onTaskFilterChange={setTaskFilter}
-                filteredEpisodeCount={visibleEpisodes.length}
-                annotationSummary={annotationSummary ?? undefined}
-                episodeOutcomes={mergedOutcomes ?? undefined}
-                humanOutcomes={humanOutcomeKeys}
-                recapFractions={recapFractions ?? undefined}
-                onOutcomeChange={
-                  isAnnotateBackendEnabled() ? changeOutcome : undefined
-                }
-                onEpisodeSelect={
-                  activeTab === "urdf"
-                    ? (ep) => {
-                        setUrdfEpisode(ep);
-                        urdfChangerRef.current?.(ep);
-                      }
-                    : activeTab === "annotations"
-                      ? (ep) => router.push(`./episode_${ep}`)
-                      : undefined
-                }
+                taskCount={taskIndex?.tasks.length}
+                episodeLengthStats={episodeLengthStats}
+                loading={statsLoading}
               />
             )}
 
-            {/* Main content */}
-            <div
-              className={`flex flex-col gap-4 p-4 flex-1 relative ${isLoading ? "overflow-hidden" : "overflow-y-auto"}`}
-            >
-              {isLoading && <Loading />}
+            {activeTab === "frames" && (
+              <OverviewPanel
+                data={episodeFramesData}
+                loading={framesLoading}
+                flaggedOnly={framesFlaggedOnly}
+                onFlaggedOnlyChange={setFramesFlaggedOnly}
+              />
+            )}
 
-              {activeTab === "episodes" && (
-                <>
-                  <div className="flex items-center gap-4 mb-2">
-                    <a
-                      href="https://github.com/huggingface/lerobot"
-                      target="_blank"
-                      className="block shrink-0 opacity-90 hover:opacity-100 transition-opacity"
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src="https://github.com/huggingface/lerobot/raw/main/media/readme/lerobot-logo-thumbnail.png"
-                        alt="LeRobot Logo"
-                        className="w-24"
-                      />
-                    </a>
-
-                    <div className="min-w-0">
-                      <a
-                        href={`https://huggingface.co/datasets/${datasetInfo.repoId}`}
-                        target="_blank"
-                        className="text-slate-200 hover:text-cyan-300 transition-colors"
-                      >
-                        <p className="text-base font-medium truncate">
-                          <T>{datasetInfo.repoId}</T>
-                        </p>
-                      </a>
-                      <p className="text-[10px] uppercase tracking-wide text-slate-500 mt-0.5 tabular">
-                        <T>Episode · </T>
-                        <T>{episodeId}</T>
-                      </p>
-                    </div>
-                  </div>
-
-                  <RawCaptureNotice compact />
-
-                  {/* Videos */}
-                  {videosInfo.length > 0 && (
-                    <SimpleVideosPlayer
-                      videosInfo={videosInfo}
-                      onVideosReady={() => setVideosReady(true)}
-                      annotationEpisodeId={episodeId}
-                      annotationRepoId={datasetInfo.repoId}
-                    />
-                  )}
-
-                  {/* Language Instruction */}
-                  {task && (
-                    <div className="mb-6 panel p-4">
-                      <p className="text-[10px] uppercase tracking-wide text-slate-500">
-                        <T>Language Instruction</T>
-                      </p>
-                      <div className="mt-1.5 space-y-0.5 text-sm text-slate-200">
-                        {task
-                          .split("\n")
-                          .map((instruction: string, index: number) => (
-                            <p key={index}>
-                              <T>{instruction}</T>
-                            </p>
-                          ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Graph */}
-                  <div className="mb-4">
-                    <Suspense fallback={null}>
-                      <DataRecharts
-                        data={chartDataGroups}
-                        onChartsReady={() => setChartsReady(true)}
+            {activeTab === "analysis" && (
+              <AnalysisTab
+                view={analysisView}
+                onViewChange={handleAnalysisViewChange}
+              >
+                {(view) =>
+                  view === "insights" ? (
+                    <Suspense fallback={<Loading />}>
+                      <ActionInsightsPanel
+                        flatChartData={data.flatChartData}
+                        fps={datasetInfo.fps}
+                        crossEpisodeData={crossEpData}
+                        crossEpisodeLoading={insightsLoading}
+                        totalEpisodes={datasetInfo.total_episodes}
+                        tasks={taskIndex?.tasks ?? []}
+                        crossEpisodeRequest={insightsRequest}
+                        onCrossEpisodeRequestChange={applyInsightsRequest}
+                        crossEpisodeProgress={insightsProgress}
                       />
                     </Suspense>
-                  </div>
-
-                  <PlaybackBar />
-                </>
-              )}
-
-              {activeTab === "annotations" && (
-                <div className="annotations-skin flex flex-col gap-4">
-                  <div className="flex items-center gap-3">
-                    <p className="text-base font-medium text-slate-200 truncate">
-                      <T>{datasetInfo.repoId}</T>
-                    </p>
-                    <p className="text-[10px] uppercase tracking-wide text-slate-500 tabular">
-                      <T>Episode · </T>
-                      <T>{episodeId}</T>
-                    </p>
-                    <AnnotationRecorder />
-                  </div>
-                  {videosInfo.length > 0 && (
-                    <SimpleVideosPlayer
-                      videosInfo={videosInfo}
-                      onVideosReady={() => setVideosReady(true)}
-                      annotationEpisodeId={episodeId}
-                      annotationRepoId={datasetInfo.repoId}
-                    />
-                  )}
-                  <PlaybackBar />
-
-                  {/* Sub-tabs: language/event annotation vs. SAM3 object
-                  annotation are fully independent systems — keep the video
-                  player + scrubber shared above (both need it, and keeping
-                  it mounted across sub-tab switches avoids a reload), but
-                  split everything else so users always know which system
-                  they're working in. */}
-                  <div className="flex items-center border-b border-white/5 -mx-1">
-                    <TabButton
-                      active={annotationsSubTab === "language"}
-                      onClick={() => setAnnotationsSubTab("language")}
-                      label="Language & Events"
-                      title="Task augmentation, subtask, plan, memory, interjection, VQA"
-                    />
-                    <TabButton
-                      active={annotationsSubTab === "vision"}
-                      onClick={() => setAnnotationsSubTab("vision")}
-                      label="Objects & Tracking"
-                      title="SAM3 object detection, tracking and mask review"
-                    />
-                  </div>
-
-                  {annotationsSubTab === "language" && (
-                    <>
-                      <div className="grounding-intro">
-                        <span className="section-kicker">
-                          <T>Grounded VQA</T>
-                        </span>
-                        <ul>
-                          <li>
-                            <T>
-                              Draw directly on the active video to create visual
-                              questions. Drag for a bounding box, click for a
-                              point. The camera is detected from the video you
-                              draw on.
-                            </T>
-                          </li>
-                          <li>
-                            <T>
-                              Drag on any video to add a bbox question. Click
-                              any video to add a keypoint question. Confirm the
-                              popup with{" "}
-                            </T>
-                            <kbd>↵</kbd>
-                            <T> or </T>
-                            <kbd>Ctrl/Cmd+S</kbd>
-                            <T>, or cancel with </T>
-                            <kbd>
-                              <T>Esc</T>
-                            </kbd>
-                            .
-                          </li>
-                        </ul>
-                      </div>
-                      <AnnotationsTimeline duration={data.duration} />
-                      <AnnotationsPanel
-                        cameraKeys={videosInfo.map((v) => v.filename)}
+                  ) : view === "filtering" ? (
+                    <Suspense fallback={<Loading />}>
+                      <FilteringPanel
+                        repoId={datasetInfo.repoId}
+                        crossEpisodeData={crossEpData}
+                        crossEpisodeLoading={insightsLoading}
+                        episodeLengthStats={episodeLengthStats}
+                        flatChartData={data.flatChartData}
+                        onViewFlaggedEpisodes={() => {
+                          setSidebarFlaggedOnly(true);
+                          handleTabChange("episodes");
+                        }}
                       />
-                    </>
-                  )}
+                    </Suspense>
+                  ) : (
+                    <LeviDoctor repoId={`${org}/${dataset}`} />
+                  )
+                }
+              </AnalysisTab>
+            )}
 
-                  {annotationsSubTab === "vision" && (
-                    <>
-                      <FastSegmentationPanel
-                        episodeId={episodeId}
-                        ident={{ repoId: datasetInfo.repoId }}
-                        cameraKeys={videosInfo.map((v) => v.filename)}
-                        allEpisodes={availableEpisodes}
-                      />
-                      <ObjectAnnotationPanel
-                        episodeId={episodeId}
-                        ident={{ repoId: datasetInfo.repoId }}
-                        cameraKeys={videosInfo.map((v) => v.filename)}
-                        allEpisodes={availableEpisodes}
-                        taskIndex={taskIndex}
-                      />
-                    </>
-                  )}
-                </div>
-              )}
-
-              {activeTab === "statistics" && (
-                <StatsPanel
-                  datasetInfo={datasetInfo}
-                  taskCount={taskIndex?.tasks.length}
-                  episodeLengthStats={episodeLengthStats}
-                  loading={statsLoading}
+            {activeTab === "urdf" && (
+              <Suspense fallback={<Loading />}>
+                <URDFViewer
+                  data={data}
+                  org={org}
+                  dataset={dataset}
+                  episodeChangerRef={urdfChangerRef}
+                  playToggleRef={urdfPlayToggleRef}
                 />
-              )}
-
-              {activeTab === "frames" && (
-                <OverviewPanel
-                  data={episodeFramesData}
-                  loading={framesLoading}
-                  flaggedOnly={framesFlaggedOnly}
-                  onFlaggedOnlyChange={setFramesFlaggedOnly}
-                />
-              )}
-
-              {activeTab === "insights" && (
-                <Suspense fallback={<Loading />}>
-                  <ActionInsightsPanel
-                    flatChartData={data.flatChartData}
-                    fps={datasetInfo.fps}
-                    crossEpisodeData={crossEpData}
-                    crossEpisodeLoading={insightsLoading}
-                    totalEpisodes={datasetInfo.total_episodes}
-                    tasks={taskIndex?.tasks ?? []}
-                    crossEpisodeRequest={insightsRequest}
-                    onCrossEpisodeRequestChange={applyInsightsRequest}
-                    crossEpisodeProgress={insightsProgress}
-                  />
-                </Suspense>
-              )}
-
-              {activeTab === "filtering" && (
-                <Suspense fallback={<Loading />}>
-                  <FilteringPanel
-                    repoId={datasetInfo.repoId}
-                    crossEpisodeData={crossEpData}
-                    crossEpisodeLoading={insightsLoading}
-                    episodeLengthStats={episodeLengthStats}
-                    flatChartData={data.flatChartData}
-                    onViewFlaggedEpisodes={() => {
-                      setSidebarFlaggedOnly(true);
-                      handleTabChange("episodes");
-                    }}
-                  />
-                </Suspense>
-              )}
-
-              {activeTab === "doctor" && (
-                <LeviDoctor repoId={`${org}/${dataset}`} />
-              )}
-
-              {activeTab === "urdf" && (
-                <Suspense fallback={<Loading />}>
-                  <URDFViewer
-                    data={data}
-                    org={org}
-                    dataset={dataset}
-                    episodeChangerRef={urdfChangerRef}
-                    playToggleRef={urdfPlayToggleRef}
-                  />
-                </Suspense>
-              )}
-            </div>
-          </div>
-        </div>
-      }
-    </T>
+              </Suspense>
+            )}
+          </main>
+        </InspectorLayout>
+      </div>
+    </div>
   );
 }
