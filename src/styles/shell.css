@@ -296,7 +296,7 @@
   outline-offset: 2px;
 }
 .levi-palette__input::placeholder {
-  color: var(--ds-text-tertiary-on-raised, var(--ds-text-secondary));
+  color: var(--ds-text-placeholder);
 }
 .levi-palette__list {
   max-height: min(52vh, 420px);

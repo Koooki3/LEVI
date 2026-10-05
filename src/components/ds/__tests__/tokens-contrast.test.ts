@@ -364,6 +364,10 @@ describe("data colours", () => {
     expect(DS).toMatch(
       /\.ds-input::placeholder \{[^}]*color:\s*var\(--ds-text-placeholder\)/,
     );
+    const shell = readFileSync(join(STYLES, "shell.css"), "utf8");
+    expect(shell).toMatch(
+      /\.levi-palette__input::placeholder \{[^}]*var\(--ds-text-placeholder\)/,
+    );
     const raised = /\.ds-on-raised \{[^}]*\}/.exec(TOKENS)?.[0] ?? "";
     expect(raised).not.toContain("--ds-text-placeholder");
     for (const scope of [LIGHT, DARK])
