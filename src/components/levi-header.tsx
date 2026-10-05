@@ -10,6 +10,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
+  Activity,
   Bot,
   Keyboard,
   Languages,
@@ -37,6 +38,7 @@ import {
   toggleAgentWorkbench,
 } from "./shell/shell-events";
 import { LeviWordmark } from "./shell/brand";
+import type { MotionPreference } from "./shell/motion-preference";
 import { ShortcutsDialog } from "./shell/shortcuts-dialog";
 
 const THEME_ICON = { system: Monitor, light: Sun, dark: Moon } as const;
@@ -57,7 +59,14 @@ function useAgentOpen(): boolean {
 export default function LeviHeader() {
   const { t, language, setLanguage } = useLocale();
   const pathname = usePathname();
-  const { theme, setTheme, setPaletteOpen, setShortcutsOpen } = useShell();
+  const {
+    theme,
+    setTheme,
+    motion,
+    setMotion,
+    setPaletteOpen,
+    setShortcutsOpen,
+  } = useShell();
   // The live workspace's own LEVI (`levi live start --ui`) offers no training
   // pool: the pool is the product LEVI's (docs/LIVE.md).
   const { enabled, embedded } = useLivePulse();
@@ -77,6 +86,11 @@ export default function LeviHeader() {
   );
   const themeLabel = `${t("Theme")}: ${t(THEME_LABEL[theme])}`;
   const themes: ThemePreference[] = ["system", "light", "dark"];
+  const motions: Array<[MotionPreference, string]> = [
+    ["system", "Motion: follow the system"],
+    ["reduce", "Motion: reduced"],
+    ["full", "Motion: normal"],
+  ];
 
   return (
     <>
@@ -156,6 +170,13 @@ export default function LeviHeader() {
                 shortcut: "?",
                 onSelect: () => setShortcutsOpen(true),
               },
+              ...motions.map(([value, label]) => ({
+                id: `motion-${value}`,
+                icon: Activity,
+                label: t(label),
+                checked: motion === value,
+                onSelect: () => setMotion(value),
+              })),
             ]}
           />
           <Menu

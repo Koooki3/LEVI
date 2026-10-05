@@ -2375,5 +2375,13 @@
   "The list of local datasets could not be read": "读不到本地数据集列表",
   "Go to {page}": "前往{page}",
   "The training pool is not enabled, so there is nothing to export.": "训练池未启用，没有可导出的内容。",
-  "report.unavailableFix": "确认 LEVI 服务正在运行，然后刷新页面。"
+  "report.unavailableFix": "确认 LEVI 服务正在运行，然后刷新页面。",
+  "Back to the home page": "回到首页",
+  "This page does not exist": "没有这个页面",
+  "The address may be mistyped, or the dataset or episode it names may have been removed or renamed. Start from the home page or Explore.": "地址可能输错了，或者它指向的数据集、片段已被移除或改名。可以从首页或“探索数据”重新开始。",
+  "Something went wrong on this page": "这个页面出错了",
+  "LEVI hit an error while showing this page. Your data is untouched. Try again; if it keeps happening, go back to the home page and open the page again.": "LEVI 显示这个页面时出错了，你的数据没有受到影响。请重试；如果反复出现，回到首页再重新打开这个页面。",
+  "Motion: follow the system": "动效：跟随系统",
+  "Motion: reduced": "动效：减少",
+  "Motion: normal": "动效：正常"
 }

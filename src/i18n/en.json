@@ -2375,5 +2375,13 @@
   "The list of local datasets could not be read": "The list of local datasets could not be read",
   "Go to {page}": "Go to {page}",
   "The training pool is not enabled, so there is nothing to export.": "The training pool is not enabled, so there is nothing to export.",
-  "report.unavailableFix": "Check that the LEVI service is running, then reload the page."
+  "report.unavailableFix": "Check that the LEVI service is running, then reload the page.",
+  "Back to the home page": "Back to the home page",
+  "This page does not exist": "This page does not exist",
+  "The address may be mistyped, or the dataset or episode it names may have been removed or renamed. Start from the home page or Explore.": "The address may be mistyped, or the dataset or episode it names may have been removed or renamed. Start from the home page or Explore.",
+  "Something went wrong on this page": "Something went wrong on this page",
+  "LEVI hit an error while showing this page. Your data is untouched. Try again; if it keeps happening, go back to the home page and open the page again.": "LEVI hit an error while showing this page. Your data is untouched. Try again; if it keeps happening, go back to the home page and open the page again.",
+  "Motion: follow the system": "Motion: follow the system",
+  "Motion: reduced": "Motion: reduced",
+  "Motion: normal": "Motion: normal"
 }

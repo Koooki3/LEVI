@@ -384,7 +384,9 @@
 
 /* ── Reduced motion (§4.9): no movement, no long fades. ── */
 @media (prefers-reduced-motion: reduce) {
-  :root {
+  /* data-motion="full" on <html> (the in-app "normal" choice) keeps the
+     motion tokens even when the system asks for less. */
+  :root:not([data-motion="full"]) {
     --ds-dur-base: 0ms;
     --ds-dur-base-exit: 0ms;
     --ds-dur-slow: 0ms;
@@ -397,7 +399,8 @@
     --ds-motion-drawer-shift: 0px;
   }
 }
-/* Same switch by attribute, for previews and tests. */
+/* Same switch by attribute: the in-app "reduced" choice (on <html>), previews
+   and tests. */
 [data-motion="reduce"] {
   --ds-dur-base: 0ms;
   --ds-dur-base-exit: 0ms;

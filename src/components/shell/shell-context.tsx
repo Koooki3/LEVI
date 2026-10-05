@@ -22,12 +22,19 @@ import {
   type ThemePreference,
 } from "@/lib/design/theme";
 import { openModalDialog } from "./confirm";
+import {
+  applyMotion,
+  useMotionPreference,
+  type MotionPreference,
+} from "./motion-preference";
 import { globalShortcut } from "./global-keys";
 
 type Shell = {
   theme: ThemePreference;
   resolvedTheme: ResolvedTheme;
   setTheme: (theme: ThemePreference) => void;
+  motion: MotionPreference;
+  setMotion: (motion: MotionPreference) => void;
   paletteOpen: boolean;
   setPaletteOpen: (open: boolean) => void;
   shortcutsOpen: boolean;
@@ -44,6 +51,8 @@ const OUTSIDE: Shell = {
   theme: THEME_DEFAULT_PREFERENCE,
   resolvedTheme: "dark",
   setTheme: () => undefined,
+  motion: "system",
+  setMotion: () => undefined,
   paletteOpen: false,
   setPaletteOpen: () => undefined,
   shortcutsOpen: false,
@@ -56,6 +65,7 @@ export function useShell(): Shell {
 
 export function ShellProvider({ children }: { children: ReactNode }) {
   const { preference, resolved, setPreference, ready } = useThemePreference();
+  const motion = useMotionPreference();
   const [paletteOpen, setPaletteOpenState] = useState(false);
   const [shortcutsOpen, setShortcutsOpenState] = useState(false);
 
@@ -64,6 +74,10 @@ export function ShellProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (ready) applyTheme(document.documentElement, preference);
   }, [preference, ready]);
+
+  useEffect(() => {
+    if (motion.ready) applyMotion(document.documentElement, motion.preference);
+  }, [motion.preference, motion.ready]);
 
   const setPaletteOpen = useCallback((open: boolean) => {
     setPaletteOpenState(open);
@@ -100,6 +114,8 @@ export function ShellProvider({ children }: { children: ReactNode }) {
       theme: preference,
       resolvedTheme: resolved,
       setTheme: setPreference,
+      motion: motion.preference,
+      setMotion: motion.setPreference,
       paletteOpen,
       setPaletteOpen,
       shortcutsOpen,
@@ -109,6 +125,8 @@ export function ShellProvider({ children }: { children: ReactNode }) {
       preference,
       resolved,
       setPreference,
+      motion.preference,
+      motion.setPreference,
       paletteOpen,
       setPaletteOpen,
       shortcutsOpen,
