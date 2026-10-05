@@ -114,6 +114,7 @@ const PAIRS: Array<[string, string, number]> = [
   ["--ds-text-tertiary", "--ds-bg", TEXT],
   ["--ds-text-tertiary", "--ds-surface-1", TEXT],
   ["--ds-text-tertiary", "--ds-field-bg", TEXT],
+  ["--ds-text-placeholder", "--ds-field-bg", TEXT],
   ["--ds-text-tertiary-on-sunken", "--ds-surface-sunken", TEXT],
   ["--ds-text-tertiary-on-hover", "--ds-surface-hover", TEXT],
   ["--ds-text-tertiary-on-selected", "--ds-surface-selected", TEXT],
@@ -354,5 +355,35 @@ describe("data colours", () => {
       expect(resolve(DARK, `--ds-data-${i}`)).toBe(
         resolve(DARK_MEDIA, `--ds-data-${i}`),
       );
+  });
+
+  test("a placeholder is lighter than a typed value, also in a dialog", () => {
+    // Raised layers remap tertiary text one step darker (hover rows); a field
+    // there would show its placeholder as dark as a value. The placeholder
+    // has its own token, which no surface class remaps, 4.5:1 on the field.
+    expect(DS).toMatch(
+      /\.ds-input::placeholder \{[^}]*color:\s*var\(--ds-text-placeholder\)/,
+    );
+    const raised = /\.ds-on-raised \{[^}]*\}/.exec(TOKENS)?.[0] ?? "";
+    expect(raised).not.toContain("--ds-text-placeholder");
+    for (const scope of [LIGHT, DARK])
+      expect(
+        contrast(
+          resolve(scope, "--ds-text-placeholder"),
+          resolve(scope, "--ds-field-bg"),
+        ),
+      ).toBeGreaterThanOrEqual(4.5);
+    // Lighter than the secondary text a value uses.
+    expect(
+      contrast(
+        resolve(LIGHT, "--ds-text-placeholder"),
+        resolve(LIGHT, "--ds-field-bg"),
+      ),
+    ).toBeLessThan(
+      contrast(
+        resolve(LIGHT, "--ds-text-secondary"),
+        resolve(LIGHT, "--ds-field-bg"),
+      ),
+    );
   });
 });

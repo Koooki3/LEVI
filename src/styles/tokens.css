@@ -168,6 +168,10 @@
   --ds-text-primary: var(--ds-gray-l-11);
   --ds-text-secondary: var(--ds-gray-l-9);
   --ds-text-tertiary: var(--ds-gray-l-8);
+  /* Placeholder text: the plain tertiary step on a field, which dialogs and
+     menus do not remap (their tertiary is darker, and a placeholder
+     would read as a typed value). */
+  --ds-text-placeholder: var(--ds-gray-l-8);
   /* gray-8 fails 4.5:1 on sunken (4.34) and hover (3.97): use gray-9 there. */
   --ds-text-tertiary-on-sunken: var(--ds-gray-l-9);
   --ds-text-tertiary-on-hover: var(--ds-gray-l-9);
@@ -254,6 +258,7 @@
     --ds-text-primary: var(--ds-gray-d-12);
     --ds-text-secondary: var(--ds-gray-d-10);
     --ds-text-tertiary: var(--ds-gray-d-9);
+    --ds-text-placeholder: var(--ds-gray-d-9);
     --ds-text-tertiary-on-sunken: var(--ds-gray-d-9);
     --ds-text-tertiary-on-hover: var(--ds-gray-d-9);
     --ds-text-tertiary-on-selected: var(--ds-gray-d-10);
@@ -322,6 +327,7 @@
   --ds-text-primary: var(--ds-gray-d-12);
   --ds-text-secondary: var(--ds-gray-d-10);
   --ds-text-tertiary: var(--ds-gray-d-9);
+  --ds-text-placeholder: var(--ds-gray-d-9);
   --ds-text-tertiary-on-sunken: var(--ds-gray-d-9);
   --ds-text-tertiary-on-hover: var(--ds-gray-d-9);
   --ds-text-tertiary-on-selected: var(--ds-gray-d-10);
@@ -422,12 +428,14 @@
     --ds-border-control: var(--ds-gray-l-8);
     --ds-text-secondary: var(--ds-gray-l-10);
     --ds-text-tertiary: var(--ds-gray-l-9);
+    --ds-text-placeholder: var(--ds-gray-l-9);
   }
   [data-theme="dark"] {
     --ds-separator: var(--ds-gray-d-7);
     --ds-border-control: var(--ds-gray-d-9);
     --ds-text-secondary: var(--ds-gray-d-11);
     --ds-text-tertiary: var(--ds-gray-d-10);
+    --ds-text-placeholder: var(--ds-gray-d-10);
   }
 }
 @media (prefers-contrast: more) and (prefers-color-scheme: dark) {
@@ -436,6 +444,7 @@
     --ds-border-control: var(--ds-gray-d-9);
     --ds-text-secondary: var(--ds-gray-d-11);
     --ds-text-tertiary: var(--ds-gray-d-10);
+    --ds-text-placeholder: var(--ds-gray-d-10);
   }
 }
 

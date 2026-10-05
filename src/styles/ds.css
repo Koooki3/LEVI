@@ -393,7 +393,7 @@
   transition: border-color var(--ds-dur-fast) var(--ds-ease-standard);
 }
 .ds-input::placeholder {
-  color: var(--ds-text-tertiary);
+  color: var(--ds-text-placeholder);
 }
 .ds-input[aria-invalid="true"] {
   border-color: var(--ds-danger);
