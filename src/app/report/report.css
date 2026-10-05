@@ -204,6 +204,12 @@
   font-weight: var(--ds-weight-semibold);
   white-space: nowrap;
 }
+/* Markdown tables: the first column names the row, so it never shrinks to a
+   character a line (the auto layout gives the long columns everything). */
+.lr-md-table th:first-child,
+.lr-md-table td:first-child {
+  min-width: 6.5em;
+}
 .lr-table tbody tr:last-child td {
   border-bottom: 0;
 }

@@ -38,6 +38,7 @@ import {
   isReportBlock,
   workstreamLabel,
 } from "@/utils/report";
+import { currentHeadingIndex, readingLine, stickyTop } from "./active-section";
 import { ReportBlock, ReportContext } from "./report-blocks";
 
 const POLL_MS = 5000;
@@ -173,14 +174,17 @@ function useActiveHeading(headings: Heading[]) {
   const [active, setActive] = useState("");
   useEffect(() => {
     if (!headings.length) return;
+    const marked = headings.filter((h) => h.level >= 2 && h.level <= 3);
     const onScroll = () => {
-      let current = "";
-      for (const h of headings) {
-        if (h.level < 2 || h.level > 3) continue;
-        const el = document.getElementById(h.id);
-        if (el && el.getBoundingClientRect().top < 120) current = h.id;
-      }
-      setActive(current);
+      const tops = marked.map(
+        (h) =>
+          document.getElementById(h.id)?.getBoundingClientRect().top ?? null,
+      );
+      const index = currentHeadingIndex(
+        tops,
+        readingLine(window.innerHeight, stickyTop()),
+      );
+      setActive(index >= 0 ? marked[index].id : "");
     };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });

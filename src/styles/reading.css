@@ -79,6 +79,12 @@
 }
 
 /* ── Prose: Markdown and other long text ── */
+/* Chinese has no italic: a slanted CJK face is a computed slant and reads as
+   a rendering fault. Emphasis there is a heavier weight. */
+:lang(zh) .levi-prose :is(em, i, cite, address, dfn) {
+  font-style: normal;
+  font-weight: var(--ds-weight-medium);
+}
 .levi-prose {
   min-width: 0;
   color: var(--ds-text-primary);
@@ -299,18 +305,37 @@
   border-color: var(--ds-separator-strong);
   background: var(--ds-surface-hover);
 }
-/* Media stay black in both themes. */
+/* Media stay black in both themes once a frame shows; before that (or when
+   the remote file cannot be reached) a quiet placeholder stands in. */
 .levi-guide-demos__media {
+  position: relative;
   display: block;
   aspect-ratio: 16 / 10;
   overflow: hidden;
   border-radius: var(--ds-radius-sm);
   background: var(--ds-media-bg);
 }
+.levi-guide-demos__media[data-state="ready"] {
+  background: var(--ds-media-bg);
+}
+.levi-guide-demos__media:not([data-state="ready"]) {
+  background: var(--ds-surface-sunken);
+}
+.levi-guide-demos__placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ds-icon);
+}
 .levi-guide-demos__media video {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+.levi-guide-demos__media:not([data-state="ready"]) video {
+  opacity: 0;
 }
 .levi-guide-demos__text {
   display: flex;
