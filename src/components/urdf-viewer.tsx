@@ -1087,7 +1087,7 @@ export default function URDFViewer({
                         onClick={() => setSelectedGroup(name)}
                         className={`px-2 py-1 text-xs rounded transition-colors ${
                           selectedGroup === name
-                            ? "bg-cyan-500 text-white"
+                            ? "bg-[var(--ds-accent)] text-[var(--ds-on-accent)]"
                             : "bg-white/5 text-slate-300 hover:bg-white/5"
                         }`}
                       >

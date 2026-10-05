@@ -93,7 +93,7 @@ export default function ExploreGrid({
                   }}
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent z-10 pointer-events-none" />
-                <div className="relative z-20 w-full px-3 py-2 text-xs text-slate-200 truncate">
+                <div className="relative z-20 w-full px-3 py-2 text-xs text-on-media truncate">
                   <T>{ds.id}</T>
                 </div>
               </Link>

@@ -1,0 +1,357 @@
+/* Home page (src/components/home/home-dashboard.tsx). Tokens only; a test
+ * fails on any colour literal here. */
+
+.levi-home {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--ds-space-10) var(--ds-space-6) var(--ds-space-16);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-6);
+  color: var(--ds-text-primary);
+}
+@media (min-width: 1280px) {
+  .levi-home {
+    padding-left: var(--ds-space-8);
+    padding-right: var(--ds-space-8);
+  }
+}
+
+/* ── Head: greeting and "open a dataset" ── */
+.levi-home-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 480px);
+  align-items: center;
+  gap: var(--ds-space-6);
+}
+.levi-home-title {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-4);
+  min-width: 0;
+}
+.levi-home-title h1 {
+  margin: 0;
+  font-size: var(--ds-text-display-size);
+  line-height: var(--ds-text-display-line);
+  font-weight: var(--ds-weight-semibold);
+  letter-spacing: var(--ds-tracking-display);
+}
+.levi-home-title p {
+  margin: var(--ds-space-1) 0 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+  line-height: var(--ds-text-callout-line);
+}
+.levi-home-open {
+  position: relative;
+}
+.levi-home-search {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-1);
+  padding-left: var(--ds-space-3);
+  border: 1px solid var(--ds-border-control);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-field-bg);
+  transition: border-color var(--ds-dur-fast) var(--ds-ease-standard);
+}
+/* Focus is drawn on the frame: 2 px, the focus-ring colour. */
+.levi-home-search:has(.levi-home-search__input:focus-visible) {
+  border-color: var(--ds-focus-ring);
+  box-shadow: 0 0 0 1px var(--ds-focus-ring);
+}
+.levi-home-search__icon {
+  flex: none;
+  color: var(--ds-text-tertiary);
+}
+.levi-home-search__input {
+  flex: 1;
+  min-width: 0;
+  height: var(--ds-control-md);
+  border: 0;
+  background: transparent;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-body-size);
+}
+.levi-home-search__input::placeholder {
+  color: var(--ds-text-tertiary);
+}
+/* The frame (.levi-home-search) shows focus; the field itself needs none. */
+.levi-home-search__input:focus-visible {
+  outline: none;
+}
+.levi-home-suggestions {
+  position: absolute;
+  z-index: var(--ds-z-popover);
+  top: calc(100% + var(--ds-space-1));
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: var(--ds-space-1);
+  list-style: none;
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-2);
+  box-shadow: var(--ds-shadow-2), var(--ds-ring-raised);
+}
+.levi-home-suggestions button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+  min-height: var(--ds-control-md);
+  padding: 0 var(--ds-space-2);
+  border-radius: var(--ds-radius-sm);
+  color: var(--ds-text-primary);
+  text-align: left;
+}
+.levi-home-suggestions button:hover {
+  background: var(--ds-surface-hover-on-raised);
+}
+
+/* ── Live evaluation and Continue: full-width rows ── */
+.levi-home-live,
+.levi-home-continue {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-4);
+  padding: var(--ds-space-4) var(--ds-space-5);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+  box-shadow: var(--ds-shadow-1);
+  color: var(--ds-text-primary);
+  text-decoration: none;
+  transition:
+    background-color var(--ds-dur-fast) var(--ds-ease-standard),
+    border-color var(--ds-dur-fast) var(--ds-ease-standard);
+}
+.levi-home-live:hover,
+.levi-home-continue:hover {
+  border-color: var(--ds-separator-strong);
+  background: var(--ds-surface-hover);
+  --ds-text-tertiary: var(--ds-text-tertiary-on-hover);
+}
+.levi-home-live__text,
+.levi-home-continue__text {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--ds-space-0-5);
+}
+.levi-home-live__text strong,
+.levi-home-continue__text strong {
+  font-size: var(--ds-text-title-3-size);
+  line-height: var(--ds-text-title-3-line);
+  font-weight: var(--ds-weight-semibold);
+  overflow-wrap: anywhere;
+}
+.levi-home-live__text > span {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+}
+.levi-home-live__go,
+.levi-home-continue__go {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--ds-space-1);
+  font-weight: var(--ds-weight-medium);
+}
+.levi-home-continue__icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--ds-control-lg);
+  height: var(--ds-control-lg);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-sunken);
+  color: var(--ds-icon);
+}
+
+/* ── The three cards ── */
+.levi-home-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ds-space-4);
+  align-items: start;
+}
+.levi-home-card {
+  min-width: 0;
+}
+.levi-home-card .ds-card__title {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+.levi-home-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 var(--ds-space-1);
+  border-radius: var(--ds-radius-full);
+  background: var(--ds-accent);
+  color: var(--ds-on-accent);
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.levi-home-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0 0 var(--ds-space-3);
+  padding: 0;
+  list-style: none;
+}
+.levi-home-list > li {
+  border-top: 1px solid var(--ds-separator);
+}
+.levi-home-list > li:first-child {
+  border-top: 0;
+}
+.levi-home-list > li > span,
+.levi-home-job,
+.levi-home-dataset {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-2) var(--ds-space-1);
+  border-radius: var(--ds-radius-sm);
+  color: var(--ds-text-primary);
+  text-decoration: none;
+}
+.levi-home-job {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--ds-space-1);
+}
+.levi-home-job:hover,
+.levi-home-dataset:hover {
+  background: var(--ds-surface-hover);
+  --ds-text-tertiary: var(--ds-text-tertiary-on-hover);
+}
+.levi-home-dataset > svg {
+  flex: none;
+  color: var(--ds-icon);
+}
+.levi-home-list__main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--ds-space-0-5);
+}
+.levi-home-list__main strong {
+  font-weight: var(--ds-weight-medium);
+  overflow-wrap: anywhere;
+}
+.levi-home-meta {
+  color: var(--ds-text-tertiary);
+  font-size: var(--ds-text-caption-size);
+  line-height: var(--ds-text-caption-line);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.levi-home-label {
+  color: var(--ds-text-tertiary);
+  font-size: var(--ds-text-caption-size);
+  line-height: var(--ds-text-caption-line);
+  font-weight: var(--ds-weight-medium);
+}
+.levi-home-mono {
+  font-family: var(--ds-font-mono);
+  font-size: 0.95em;
+}
+.levi-home-note {
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+}
+.levi-home-empty {
+  padding: var(--ds-space-4) 0;
+}
+/* In a card the empty state is a quiet line, not a headline. */
+.levi-home-empty .ds-empty__title {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-body-size);
+  font-weight: var(--ds-weight-regular);
+}
+/* A card's answer could not be read (three parts: what, why, retry). */
+.levi-home-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ds-space-2);
+  margin-bottom: var(--ds-space-3);
+  padding: var(--ds-space-3);
+  border-left: 3px solid var(--ds-danger);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-danger-bg);
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-callout-size);
+  line-height: var(--ds-text-callout-line);
+}
+.levi-home-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-2) 0;
+}
+
+/* ── Links ── */
+.levi-home-link,
+.levi-home-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  border-radius: var(--ds-radius-xs);
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-callout-size);
+  font-weight: var(--ds-weight-medium);
+  text-decoration: underline;
+  text-decoration-color: var(--ds-separator-strong);
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+.levi-home-link:hover,
+.levi-home-cta:hover {
+  text-decoration-color: currentColor;
+}
+.levi-home-more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-3) var(--ds-space-6);
+  padding-top: var(--ds-space-4);
+  border-top: 1px solid var(--ds-separator);
+}
+.levi-home-more svg {
+  color: var(--ds-icon);
+}
+
+@media (max-width: 1199px) {
+  .levi-home-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 899px) {
+  .levi-home {
+    padding: var(--ds-space-6) var(--ds-space-4) var(--ds-space-12);
+  }
+  .levi-home-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .levi-home-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .levi-home-live__go span,
+  .levi-home-continue__go {
+    display: none;
+  }
+}

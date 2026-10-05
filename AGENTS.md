@@ -175,11 +175,12 @@ Reserved/bookkeeping columns from lerobot — see `EXCLUDED_COLUMNS` in `src/uti
 
 ## Design system
 
-`src/app/globals.css` retains upstream base styles. LEVI overrides live in
-`src/app/levi.css`: graphite green surfaces, parchment text and lime accents.
-The redesign's design system (stage 1: `--ds-*` tokens in `src/styles/tokens.css`, `ds-*` styles in `src/styles/ds.css`, components in `src/components/ds/`, specimen at `/design` in development) is not used by existing pages yet; new UI code uses it and never hard-codes colours. See docs/DESIGN.md.
+`src/app/globals.css` sets the page base from the design tokens and maps the
+older variables and Tailwind colour names onto them; `src/app/levi.css` holds
+the older page styles, whose colours also point at the tokens.
+The design system: `--ds-*` tokens in `src/styles/tokens.css`, `ds-*` styles in `src/styles/ds.css`, components in `src/components/ds/`, the frame in `src/components/shell/`, one LEVI mark in `src/components/shell/brand.tsx`, a specimen at `/design` in development. New UI code uses it and never hard-codes colours; pages still on older classes move over in their stages. See docs/DESIGN.md.
 `src/components/levi-locale.tsx` and `src/i18n/` supply the Chinese/English UI.
-Preserve the LEVI theme, keyboard access and responsive layouts when editing inherited components.
+Preserve the light and dark themes, keyboard access and responsive layouts when editing inherited components.
 
 ## Built-in conversion and service
 

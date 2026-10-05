@@ -1,314 +1,52 @@
-/* LEVI original art direction: graphite, parchment and acid-lime instrument accents. */
-:root {
-  /* LEVI has no light mode — tell the browser so native controls (select
-     option lists, scrollbars, checkboxes) default to dark chrome instead of
-     the OS light theme clashing with the app's dark surfaces. */
-  color-scheme: dark;
-  --bg: #101510;
-  --surface-0: #161d17;
-  --surface-1: #1d251e;
-  --surface-2: #283228;
-  --text-primary: #f1efdf;
-  --text-muted: #afb7a8;
-  --text-faint: #89927f;
-  --accent: #d4f779;
-  --accent-soft: #d4f77920;
-  --accent-ring: #d4f77970;
-  --font-geist-sans: Arial, "Noto Sans SC", "Microsoft YaHei", sans-serif;
-  --font-geist-mono: "SFMono-Regular", Consolas, monospace;
-}
-@theme inline {
-  --color-cyan-200: #e5fbb6;
-  --color-cyan-300: #d4f779;
-  --color-cyan-400: #c7ed66;
-  --color-cyan-500: #9ec345;
-  --color-slate-100: #f1efdf;
-  --color-slate-200: #dedfcf;
-  --color-slate-300: #c7caba;
-  --color-slate-400: #adb5a4;
-  --color-slate-500: #8f9a84;
-  --color-slate-600: #68765e;
-  --color-slate-700: #3c4934;
-  --color-slate-800: #252f23;
-  --color-slate-900: #161d17;
-}
-html {
-  font-size: 16px;
-}
-body {
-  font-family: Arial, "Noto Sans SC", "Microsoft YaHei", sans-serif;
-}
+/* LEVI page styles from before the redesign. Their colours now point at the
+ * design tokens (src/styles/tokens.css), so the older pages follow the light
+ * and dark themes and look like the frame while they move to `ds-*`
+ * components; classes no page uses any more are removed as the pages move.
+ * The variables and Tailwind colour names they rely on are mapped in
+ * globals.css. */
 .levi-language {
-  border: 1px solid #ffffff2a;
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 16%, transparent);
   border-radius: 5px;
   padding: 7px 12px;
-  font-size: 11px;
+  font-size: 12px;
 }
-.levi-home {
-  max-width: 1370px;
-  margin: auto;
-  padding: 0 5%;
-}
-.levi-hero {
-  display: grid;
-  grid-template-columns: 1.45fr 1fr;
-  gap: 6%;
-  padding: 70px 0 64px;
-}
+/* Section label above a page title ("LEVI / TRAINING POOL"): caption
+   size, tertiary text, light tracking; set normally in Chinese. */
 .levi-eyebrow {
-  font: 10px/1.8 monospace;
-  letter-spacing: 2.2px;
-  color: #a7b397;
+  display: inline-block;
+  font-family: var(--ds-font-sans);
+  font-size: var(--ds-text-caption-size);
+  line-height: var(--ds-text-caption-line);
+  font-weight: var(--ds-weight-medium);
+  letter-spacing: 0.06em;
+  color: var(--ds-text-tertiary);
 }
-.levi-hero h1 {
-  font-size: clamp(42px, 4.2vw, 67px);
-  line-height: 1.22;
-  letter-spacing: -2px;
-  margin: 23px 0;
-}
-.levi-hero h1 em {
-  font-style: normal;
-  color: #d4f779;
-}
-.levi-intro {
-  color: #aeb8a4;
-  line-height: 1.9;
-  font-size: 14px;
-  max-width: 550px;
-  margin: 20px 0 27px;
-}
-.levi-search {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border: 1px solid #626f4b;
-  border-radius: 7px;
-  padding: 7px;
-  background: #1b2218;
-  position: relative;
-}
-.levi-search > span {
-  font-size: 24px;
-  margin-left: 7px;
-}
-.levi-search input {
-  min-width: 0;
-  flex: 1;
-  background: transparent;
-  outline: none;
-  font-size: 12px;
-  padding: 8px 0;
-}
-.levi-search button,
+/* Older buttons, drawn like the ds Button (primary / secondary). */
 .levi-primary {
-  background: #d4f779;
-  color: #17220e;
-  border-radius: 4px;
-  padding: 11px 17px;
-  font-weight: 600;
-  font-size: 12px;
-  white-space: nowrap;
-}
-.levi-suggestions {
-  background: #242d20;
-  border: 1px solid #526044;
-  border-radius: 4px;
-}
-.levi-suggestions button {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 8px 12px;
-  font: 12px monospace;
-}
-.levi-hero-actions {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 20px;
-  margin-top: 16px;
-  font-size: 12px;
-  color: #c9d7b5;
-}
-.levi-orbit {
-  position: relative;
-  display: flex;
   justify-content: center;
-  align-items: center;
-  min-height: 330px;
-  background-image: radial-gradient(#c2d3a329 1px, transparent 1px);
-  background-size: 18px 18px;
-  overflow: hidden;
-  border-radius: 50%;
-  mask-image: radial-gradient(circle, black 45%, transparent 74%);
-}
-.levi-orbit-ring {
-  width: 280px;
-  height: 280px;
-  border: 1px solid #9cae6c70;
-  border-radius: 50%;
-  position: absolute;
-  transform: rotate(-35deg) scaleY(0.56);
-}
-.ring-two {
-  transform: rotate(40deg) scaleY(0.65);
-  width: 340px;
-  height: 340px;
-}
-.levi-orbit-core {
-  font:
-    italic 130px Georgia,
-    serif;
-  line-height: 1;
-  color: #d4f779;
-  transform: rotate(-10deg);
-  text-shadow: 8px 16px 1px #283818;
-}
-.levi-orbit-core span {
-  font: 70px Arial;
-  position: absolute;
-  right: -55px;
-  top: -8px;
-}
-.levi-orbit-note {
-  position: absolute;
-  bottom: 17%;
-  left: 8%;
-  font: 9px/1.7 monospace;
-  color: #a8b991;
-  letter-spacing: 2px;
-}
-.levi-orbit-coordinate {
-  position: absolute;
-  right: 6%;
-  top: 20%;
-  font: 9px/1.6 monospace;
-  color: #a8b991;
-}
-.levi-section-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: end;
-  margin-bottom: 23px;
-  border-top: 1px solid #ffffff1c;
-  padding-top: 27px;
-}
-.levi-section-heading h2 {
-  font-size: 22px;
-  margin-top: 7px;
-  font-weight: 500;
-}
-.levi-section-heading > a {
-  font-size: 12px;
-  color: #c9d7b5;
-}
-.levi-demo-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-}
-.levi-demo {
-  background: #1c241c;
-  border: 1px solid #ffffff15;
-  border-radius: 9px;
-  overflow: hidden;
+  gap: var(--ds-space-2);
+  min-height: var(--ds-control-md);
+  padding: 0 var(--ds-space-4);
+  border: 1px solid var(--ds-accent);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-accent);
+  color: var(--ds-on-accent);
+  font-size: var(--ds-text-body-size);
+  font-weight: var(--ds-weight-medium);
+  white-space: nowrap;
   transition:
-    transform 0.2s,
-    border-color 0.2s;
+    background-color var(--ds-dur-fast) var(--ds-ease-standard),
+    transform var(--ds-dur-fast) var(--ds-ease-standard);
 }
-.levi-demo:hover {
-  transform: translateY(-4px);
-  border-color: #b7d978;
+.levi-primary:hover:not(:disabled) {
+  background: var(--ds-accent-hover);
+  border-color: var(--ds-accent-hover);
 }
-.levi-demo-video {
-  aspect-ratio: 1.94;
-  position: relative;
-  background: #293225;
-}
-.levi-demo-video video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.levi-demo-badge {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  background: #11180ddd;
-  border: 1px solid #ffffff3a;
-  border-radius: 3px;
-  padding: 6px 9px;
-  font: 9px monospace;
-  letter-spacing: 1.5px;
-  color: #d4f779;
-}
-.levi-demo-arrow {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
-  background: #d4f779;
-  color: #182011;
-  font-size: 24px;
-  width: 40px;
-  height: 40px;
-  text-align: center;
-  border-radius: 50%;
-}
-.levi-demo-caption {
-  padding: 20px;
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-}
-.levi-demo-caption h3 {
-  font-size: 17px;
-  margin-bottom: 7px;
-}
-.levi-demo-caption p {
-  font: 10px monospace;
-  color: #a4af98;
-  overflow-wrap: anywhere;
-}
-.levi-demo-caption > span {
-  text-align: right;
-  color: #a4af98;
-  font: 10px/1.6 monospace;
-  flex-shrink: 0;
-}
-.levi-workflow {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr 0.8fr;
-  gap: 28px;
-  padding: 38px 0;
-  margin-top: 35px;
-  border-top: 1px solid #ffffff20;
-}
-.levi-workflow > div > span {
-  font: 10px monospace;
-  color: #d4f779;
-}
-.levi-workflow h3 {
-  font-size: 15px;
-  margin: 9px 0;
-}
-.levi-workflow p {
-  font-size: 12px;
-  line-height: 1.8;
-  color: #a1ad94;
-}
-.levi-workflow > a {
-  align-self: center;
-  color: #d4f779;
-  font-size: 13px;
-  text-align: right;
-}
-.levi-footer {
-  border-top: 1px solid #ffffff16;
-  padding: 24px 0;
-  display: flex;
-  justify-content: space-between;
-  font: 9px monospace;
-  letter-spacing: 1px;
-  color: #859077;
+.levi-primary:active:not(:disabled),
+.levi-secondary:active:not(:disabled) {
+  transform: scale(var(--ds-motion-press-scale));
 }
 /* Full-height pages fill the viewport below the top bar (shell.css sets
    --levi-header-height). */
@@ -320,146 +58,214 @@ body {
 }
 .panel,
 .panel-raised {
-  border-color: #ffffff15;
+  border-color: color-mix(in srgb, var(--ds-text-primary) 8%, transparent);
   border-radius: 9px;
 }
+/* ── Older page frame and shared parts, drawn like the ds components ── */
 .levi-workbench {
-  max-width: 1250px;
-  margin: auto;
-  padding: 45px 5%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--ds-space-10) var(--ds-space-6) var(--ds-space-16);
+}
+@media (min-width: 1280px) {
+  .levi-workbench {
+    padding-left: var(--ds-space-8);
+    padding-right: var(--ds-space-8);
+  }
 }
 .levi-workbench h1 {
-  font-size: 32px;
-  font-weight: 500;
-  margin: 10px 0 14px;
+  margin: var(--ds-space-2) 0 var(--ds-space-2);
+  font-size: var(--ds-text-title-1-size);
+  line-height: var(--ds-text-title-1-line);
+  font-weight: var(--ds-weight-semibold);
+  letter-spacing: var(--ds-tracking-display);
 }
 .levi-workbench h2 {
-  font-size: 19px;
-  margin-bottom: 15px;
+  margin-bottom: var(--ds-space-3);
+  font-size: var(--ds-text-title-2-size);
+  line-height: var(--ds-text-title-2-line);
+  font-weight: var(--ds-weight-semibold);
+  letter-spacing: var(--ds-tracking-title);
 }
 .levi-workbench p {
-  font-size: 13px;
-  color: #b3bfaa;
-  line-height: 1.8;
+  font-size: var(--ds-text-body-size);
+  line-height: var(--ds-text-body-line);
+  color: var(--ds-text-secondary);
 }
+/* Card. */
 .levi-box {
-  background: #1b231b;
-  border: 1px solid #ffffff20;
-  border-radius: 10px;
-  padding: 24px;
-  margin: 22px 0;
+  margin: var(--ds-space-5) 0;
+  padding: var(--ds-space-6);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+  box-shadow: var(--ds-shadow-1);
 }
 .levi-row {
   display: flex;
-  gap: 12px;
+  gap: var(--ds-space-3);
   align-items: center;
   flex-wrap: wrap;
 }
+/* Field. */
 .levi-input {
-  background: #11180f;
-  border: 1px solid #ffffff30;
-  border-radius: 5px;
-  padding: 10px 12px;
   min-width: 0;
-  font-size: 13px;
-  color: #e5ebdc;
+  min-height: var(--ds-control-md);
+  padding: var(--ds-space-1) var(--ds-space-3);
+  border: 1px solid var(--ds-border-control);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-field-bg);
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-body-size);
+}
+.levi-input::placeholder {
+  color: var(--ds-text-tertiary);
 }
 .levi-input.grow {
   flex: 1;
 }
+/* Secondary button. */
 .levi-secondary {
-  border: 1px solid #a7be7880;
-  border-radius: 4px;
-  padding: 9px 14px;
-  font-size: 12px;
-  color: #d4f779;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ds-space-2);
+  min-height: var(--ds-control-md);
+  padding: 0 var(--ds-space-3);
+  border: 1px solid var(--ds-border-control);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-1);
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-body-size);
+  font-weight: var(--ds-weight-medium);
+  transition:
+    background-color var(--ds-dur-fast) var(--ds-ease-standard),
+    transform var(--ds-dur-fast) var(--ds-ease-standard);
 }
+.levi-secondary:hover:not(:disabled) {
+  background: var(--ds-surface-hover);
+}
+/* Code block. */
 .levi-workbench pre,
 .levi-code {
-  background: #0f150d;
-  padding: 16px;
-  border: 1px solid #ffffff15;
-  border-radius: 5px;
-  font: 11px/1.7 monospace;
-  overflow: auto;
+  margin-top: var(--ds-space-3);
+  padding: var(--ds-space-4);
   max-height: 380px;
+  overflow: auto;
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-sunken);
+  color: var(--ds-text-primary);
+  font: var(--ds-text-caption-size) / 1.7 var(--ds-font-mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  margin-top: 14px;
 }
+/* Neutral badge; the state is in its words. */
 .levi-status {
-  border: 1px solid #ffffff30;
-  padding: 4px 9px;
-  border-radius: 3px;
-  font: 11px monospace;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--ds-space-2);
+  border: 1px solid var(--ds-separator-strong);
+  border-radius: var(--ds-radius-xs);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+  line-height: var(--ds-text-caption-line);
+  font-weight: var(--ds-weight-medium);
 }
 .levi-status.fail {
-  color: #ff9c94;
+  border-color: transparent;
+  background: var(--ds-danger-bg);
+  color: var(--ds-danger);
 }
 .levi-status.warn {
-  color: #f1c677;
+  border-color: transparent;
+  background: var(--ds-warning-bg);
+  color: var(--ds-warning);
 }
 .levi-status.pass {
-  color: #d4f779;
+  border-color: transparent;
+  background: var(--ds-success-bg);
+  color: var(--ds-success);
 }
+/* Error note: a status-coloured bar, primary text. */
 .levi-error {
-  color: #ffaaa3;
-  padding: 12px;
-  border: 1px solid #ffaaa350;
-  border-radius: 5px;
+  padding: var(--ds-space-3) var(--ds-space-4);
+  border: 1px solid transparent;
+  border-left: 3px solid var(--ds-danger);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-danger-bg);
+  color: var(--ds-text-primary);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* Table, like ds Table. */
 .levi-table {
   width: 100%;
-  font-size: 12px;
   border-collapse: collapse;
+  font-size: var(--ds-text-body-size);
+  font-variant-numeric: tabular-nums;
+}
+.levi-table th {
+  background: var(--ds-surface-sunken);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-semibold);
 }
 .levi-table td,
 .levi-table th {
-  padding: 13px 10px;
+  padding: var(--ds-space-2) var(--ds-space-3);
   text-align: left;
-  border-bottom: 1px solid #ffffff12;
+  border-bottom: 1px solid var(--ds-separator);
+}
+.levi-table tbody tr:hover {
+  background: var(--ds-surface-hover);
 }
 .levi-diagnostic {
-  padding: 24px;
+  width: 100%;
   max-width: 1200px;
   margin: auto;
-  width: 100%;
+  padding: var(--ds-space-6);
 }
 .levi-diagnostic h2 {
-  font-size: 24px;
+  font-size: var(--ds-text-title-1-size);
+  line-height: var(--ds-text-title-1-line);
+  font-weight: var(--ds-weight-semibold);
 }
 .levi-checks {
   display: flex;
-  gap: 14px;
+  gap: var(--ds-space-3);
   flex-wrap: wrap;
-  margin: 18px 0;
+  margin: var(--ds-space-4) 0;
 }
 .levi-checks label {
-  font-size: 12px;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--ds-space-1);
+  font-size: var(--ds-text-callout-size);
 }
-input[type="checkbox"] {
-  accent-color: #c7ed66;
-}
+/* Metric cards: large tabular numbers, small caption. */
 .levi-metrics {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 12px;
-  margin: 20px 0;
+  gap: var(--ds-space-3);
+  margin: var(--ds-space-5) 0;
 }
 .levi-metrics > div {
-  padding: 15px;
-  border: 1px solid #ffffff20;
-  border-radius: 6px;
+  padding: var(--ds-space-4);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
 }
 .levi-metrics strong {
   display: block;
-  font: 26px monospace;
-  margin-top: 5px;
+  margin-top: var(--ds-space-1);
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-title-1-size);
+  line-height: var(--ds-text-title-1-line);
+  font-weight: var(--ds-weight-semibold);
+  font-variant-numeric: tabular-nums;
 }
 .levi-tabs-scroll {
   overflow-x: auto;
@@ -469,64 +275,27 @@ button {
 }
 button:disabled {
   opacity: 0.45;
-  cursor: wait;
+  cursor: not-allowed;
 }
-a,
-button,
-input,
-select,
-textarea {
-  outline-offset: 4px;
-}
-/* `color-scheme: dark` above gets native popovers (select option lists,
-   scrollbars) most of the way there, but Chromium still needs the option
-   background/foreground spelled out explicitly to pick up the graphite
-   theme instead of its own default. */
-select option,
-select optgroup {
-  color: #172018 !important;
-  background-color: #f4f7ed !important;
-}
+/* One focus ring everywhere (proposal §10): 2 px, offset 2 px, graphite. */
 *:focus-visible {
-  outline: 2px solid #d4f779;
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
+@media (forced-colors: active) {
+  *:focus-visible {
+    outline-color: Highlight;
+  }
+}
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"],
+progress {
+  accent-color: var(--ds-accent);
 }
 @media (max-width: 800px) {
-  .levi-hero {
-    grid-template-columns: 1fr;
-    padding: 40px 0;
-  }
-  .levi-orbit {
-    display: none;
-  }
-  .levi-demo-grid {
-    grid-template-columns: 1fr;
-  }
-  .levi-workflow {
-    grid-template-columns: 1fr 1fr;
-  }
-  .levi-hero h1 {
-    font-size: 44px;
-  }
-  .levi-footer {
-    gap: 20px;
-  }
-  .levi-demo-caption p {
-    font-size: 9px;
-  }
   .levi-metrics {
     grid-template-columns: repeat(3, 1fr);
-  }
-  .levi-section-heading {
-    gap: 15px;
-  }
-  .levi-section-heading h2 {
-    font-size: 19px;
-  }
-  .levi-search button {
-    padding: 10px;
-  }
-  .levi-hero-actions {
-    flex-wrap: wrap;
   }
 }
 
@@ -534,7 +303,7 @@ select optgroup {
 .levi-workbench h3 {
   font-size: 15px;
   margin-bottom: 8px;
-  color: #e5ebdc;
+  color: var(--ds-text-primary);
 }
 .levi-summary {
   display: grid;
@@ -543,27 +312,27 @@ select optgroup {
   margin: 14px 0;
 }
 .levi-summary div {
-  border: 1px solid #ffffff18;
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 9%, transparent);
   border-radius: 6px;
   padding: 8px 10px;
 }
 .levi-summary dt {
-  font-size: 11px;
-  color: #8f9b86;
+  font-size: 12px;
+  color: var(--ds-text-tertiary);
 }
 .levi-summary dd {
-  font: 14px/1.5 monospace;
-  color: #e5ebdc;
+  font: 14px/1.5 var(--ds-font-mono);
+  color: var(--ds-text-primary);
 }
 .levi-checklist td {
   vertical-align: top;
   padding: 7px 8px;
 }
 .levi-checklist tr.fail td {
-  background: #ff9c9408;
+  background: color-mix(in srgb, var(--ds-danger) 3%, transparent);
 }
 .levi-fix {
-  color: #f1c677 !important;
+  color: var(--ds-warning) !important;
 }
 .levi-cards {
   display: grid;
@@ -571,15 +340,15 @@ select optgroup {
   gap: 14px;
 }
 .levi-card {
-  border: 1px solid #ffffff20;
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 13%, transparent);
   border-radius: 8px;
   padding: 16px;
   display: flex;
   flex-direction: column;
 }
 .levi-card.selected {
-  border-color: #d4f779;
-  box-shadow: 0 0 0 1px #d4f77940;
+  border-color: var(--ds-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ds-accent) 25%, transparent);
 }
 .levi-card > .levi-primary {
   align-self: flex-start;
@@ -590,7 +359,7 @@ select optgroup {
   padding-left: 18px;
   list-style: disc;
   font-size: 12px;
-  color: #c9d3bf;
+  color: var(--ds-text-primary);
   line-height: 1.6;
 }
 .levi-options {
@@ -603,7 +372,7 @@ select optgroup {
   flex-direction: column;
   gap: 6px;
   font-size: 12px;
-  color: #b3bfaa;
+  color: var(--ds-text-secondary);
 }
 .levi-options label.levi-check {
   flex-direction: row;
@@ -619,40 +388,40 @@ select optgroup {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  font-size: 11px;
+  font-size: 12px;
   margin-bottom: 10px;
 }
 .levi-steps li {
-  border: 1px solid #ffffff25;
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 15%, transparent);
   border-radius: 999px;
   padding: 3px 10px;
-  color: #8f9b86;
+  color: var(--ds-text-tertiary);
 }
 .levi-steps li.done {
-  color: #d4f779;
-  border-color: #d4f77960;
+  color: var(--ds-text-primary);
+  border-color: color-mix(in srgb, var(--ds-accent) 38%, transparent);
 }
 .levi-steps li.active {
-  color: #11180f;
-  background: #d4f779;
-  border-color: #d4f779;
+  color: var(--ds-on-accent);
+  background: var(--ds-accent);
+  border-color: var(--ds-accent);
 }
 .levi-bar {
   height: 6px;
   border-radius: 3px;
-  background: #ffffff15;
+  background: color-mix(in srgb, var(--ds-text-primary) 8%, transparent);
   overflow: hidden;
 }
 .levi-bar span {
   display: block;
   height: 100%;
-  background: #d4f779;
+  background: var(--ds-accent);
   transition: width 0.4s ease;
 }
 .levi-warnings {
   margin-top: 8px;
   font-size: 12px;
-  color: #f1c677;
+  color: var(--ds-warning);
   list-style: disc;
   padding-left: 18px;
 }
@@ -676,13 +445,13 @@ select optgroup {
   max-width: 420px;
 }
 .levi-raw-notice {
-  border: 1px solid #f1c67755;
-  background: #f1c67710;
+  border: 1px solid color-mix(in srgb, var(--ds-warning) 33%, transparent);
+  background: color-mix(in srgb, var(--ds-warning) 6%, transparent);
   border-radius: 8px;
   padding: 14px 16px;
   margin-bottom: 16px;
   font-size: 13px;
-  color: #d9dfd0;
+  color: var(--ds-text-primary);
 }
 .levi-raw-notice-head {
   display: flex;
@@ -692,7 +461,7 @@ select optgroup {
   margin-bottom: 6px;
 }
 .levi-raw-notice p {
-  color: #b3bfaa;
+  color: var(--ds-text-secondary);
   line-height: 1.7;
 }
 .levi-raw-notice.compact {
@@ -705,17 +474,17 @@ select optgroup {
 }
 .levi-raw-notice.compact .levi-raw-link,
 .levi-raw-notice .levi-secondary {
-  color: #d4f779;
+  color: var(--ds-text-primary);
   white-space: nowrap;
 }
 .levi-raw-notice .levi-status {
-  border: 1px solid #ffffff30;
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 19%, transparent);
   padding: 3px 8px;
   border-radius: 3px;
-  font: 11px monospace;
+  font: 12px var(--ds-font-mono);
 }
 .levi-raw-notice .levi-status.warn {
-  color: #f1c677;
+  color: var(--ds-warning);
 }
 
 /* Dataset changed on disk (src/components/dataset-update-notice.tsx) */
@@ -725,20 +494,20 @@ select optgroup {
   bottom: 20px;
   z-index: 60;
   max-width: 360px;
-  background: #1b231b;
-  border: 1px solid #d4f77966;
+  background: var(--ds-surface-1);
+  border: 1px solid color-mix(in srgb, var(--ds-accent) 40%, transparent);
   border-radius: 10px;
   padding: 14px 16px;
-  box-shadow: 0 10px 30px #00000080;
+  box-shadow: var(--ds-shadow-3), var(--ds-ring-raised);
   font-size: 13px;
-  color: #e5ebdc;
+  color: var(--ds-text-primary);
   display: flex;
   flex-direction: column;
   gap: 8px;
   align-items: flex-start;
 }
 .levi-update-toast p {
-  color: #b3bfaa;
+  color: var(--ds-text-secondary);
   line-height: 1.6;
   margin: 0;
 }
@@ -755,25 +524,24 @@ select optgroup {
   align-items: center;
   gap: 10px;
   font-size: 12px;
-  color: #b3bfaa;
+  color: var(--ds-text-secondary);
   margin-top: 8px;
 }
 .levi-sync-changes {
   margin-top: 8px;
   font-size: 12px;
-  color: #b3bfaa;
+  color: var(--ds-text-secondary);
   line-height: 1.7;
 }
 
-/* Agent Workbench: existing graphite, parchment and lime palette. */
 /* The Agent Workbench's content. The drawer around it (a ds Sheet, see
-   shell.css) places and sizes it; the content keeps this palette until its
-   own stage. */
+   shell.css) places and sizes it; its colours point at the design tokens
+   until its own stage moves it to ds components. */
 .levi-agent-dock {
   min-height: 100%;
   padding: 22px;
-  background: #15271f;
-  color: #eeeadd;
+  background: var(--ds-surface-1);
+  color: var(--ds-text-primary);
   font-size: 14px;
 }
 .levi-agent-dock header {
@@ -792,7 +560,7 @@ select optgroup {
 }
 .levi-agent-dock small,
 .levi-agent-muted {
-  color: #bdc9bc;
+  color: var(--ds-text-primary);
 }
 .levi-agent-dock p {
   margin: 12px 0;
@@ -809,21 +577,21 @@ select optgroup {
 .levi-agent-dock textarea {
   width: 100%;
   padding: 8px;
-  background: #edf0e3;
-  color: #16221a;
-  border: 1px solid #74836c;
+  background: var(--ds-field-bg);
+  color: var(--ds-text-primary);
+  border: 1px solid var(--ds-border-control);
   border-radius: 7px;
 }
 .levi-agent-dock select option {
-  background: #edf0e3;
-  color: #16221a;
+  background: var(--ds-surface-2);
+  color: var(--ds-text-primary);
 }
 .levi-agent-dock button {
-  border: 1px solid #607455;
+  border: 1px solid var(--ds-border-control);
   border-radius: 7px;
   padding: 7px 11px;
-  color: #ddecce;
-  background: #263b2b;
+  color: var(--ds-text-primary);
+  background: var(--ds-surface-hover);
   cursor: pointer;
 }
 .levi-agent-dock button:disabled {
@@ -834,12 +602,12 @@ select optgroup {
 .levi-agent-dock input:focus-visible,
 .levi-agent-dock textarea:focus-visible,
 .levi-agent-dock select:focus-visible {
-  outline: 2px solid #c4ec78;
+  outline: 2px solid var(--ds-accent);
   outline-offset: 2px;
 }
 .levi-agent-dock button[aria-pressed="true"] {
-  background: #c4ec78;
-  color: #14221a;
+  background: var(--ds-accent);
+  color: var(--ds-on-accent);
 }
 .levi-agent-tabs,
 .levi-agent-actions {
@@ -862,13 +630,13 @@ select optgroup {
   gap: 8px;
 }
 .levi-agent-error {
-  color: #ffc4b5;
+  color: var(--ds-danger);
   padding: 10px;
-  background: #522d28;
+  background: var(--ds-surface-hover);
   border-radius: 8px;
 }
 .levi-agent-review article {
-  border-top: 1px solid #40523d;
+  border-top: 1px solid var(--ds-separator);
   padding: 12px 0;
 }
 .levi-agent-review textarea {
@@ -877,7 +645,7 @@ select optgroup {
 }
 .levi-agent-dock progress {
   width: 100%;
-  accent-color: #c4ec78;
+  accent-color: var(--ds-accent);
 }
 .levi-agent-evidence {
   display: grid;
@@ -893,15 +661,19 @@ select optgroup {
   padding: 10px 0;
 }
 .levi-connection-card {
-  border: 1px solid #42583e;
+  border: 1px solid var(--ds-separator);
   border-radius: 14px;
   padding: 15px;
   margin: 12px 0;
-  background: linear-gradient(135deg, #203428, #182a22);
+  background: linear-gradient(
+    135deg,
+    var(--ds-surface-hover),
+    var(--ds-surface-1)
+  );
 }
 .levi-connection-card.selected {
-  border-color: #c4ec78;
-  box-shadow: inset 3px 0 #c4ec78;
+  border-color: var(--ds-accent);
+  box-shadow: inset 3px 0 var(--ds-accent);
 }
 .levi-connection-title {
   display: flex;
@@ -911,7 +683,7 @@ select optgroup {
 .levi-connection-title p {
   margin: 2px 0;
   font-size: 12px;
-  color: #b5c4ac;
+  color: var(--ds-text-secondary);
 }
 .levi-connection-avatar {
   display: grid;
@@ -920,8 +692,8 @@ select optgroup {
   width: 38px;
   height: 38px;
   border-radius: 12px;
-  background: #bad783;
-  color: #132519;
+  background: var(--ds-accent);
+  color: var(--ds-on-accent);
   font-weight: 800;
   font-size: 12px;
 }
@@ -929,23 +701,23 @@ select optgroup {
   margin-left: auto;
   border-radius: 20px;
   padding: 3px 8px;
-  font-size: 11px;
-  background: #4c4330;
-  color: #f3d5a0;
+  font-size: 12px;
+  background: var(--ds-surface-hover);
+  color: var(--ds-warning);
 }
 .levi-connection-status.ready {
-  background: #344c2c;
-  color: #d4eea0;
+  background: var(--ds-surface-hover);
+  color: var(--ds-text-primary);
 }
 .levi-agent-endpoint {
-  font-family: monospace;
-  font-size: 11px;
+  font-family: var(--ds-font-mono);
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 
 .levi-agent-mask-frame {
   position: relative;
-  background: #10120f;
+  background: var(--ds-surface-sunken);
 }
 .levi-agent-mask-frame img,
 .levi-agent-review-evidence img {
@@ -962,13 +734,13 @@ select optgroup {
   pointer-events: none;
 }
 .levi-agent-object article {
-  border-bottom: 1px solid var(--levi-border, #d8d8cc);
+  border-bottom: 1px solid var(--levi-border, var(--ds-text-primary));
   padding: 10px 0;
 }
 .levi-agent-review-evidence {
   position: sticky;
   top: 0;
-  background: #15271f;
+  background: var(--ds-surface-1);
   padding: 8px;
   z-index: 2;
 }
@@ -978,22 +750,22 @@ select optgroup {
 }
 
 .levi-agent-dock progress::-webkit-progress-bar {
-  background: #344632;
+  background: var(--ds-surface-hover);
   border-radius: 6px;
 }
 .levi-agent-dock progress::-webkit-progress-value {
-  background: #c4ec78;
+  background: var(--ds-accent);
   border-radius: 6px;
 }
 .levi-agent-dock progress::-moz-progress-bar {
-  background: #c4ec78;
+  background: var(--ds-accent);
 }
 
-/* Pilot shares the graphite, parchment and lime Workbench palette. */
+/* Pilot shares the Agent Workbench styles (colours from the tokens). */
 .levi-pilot {
   margin-block: 1rem;
   padding: 1rem;
-  border: 1px solid var(--levi-border, #496153);
+  border: 1px solid var(--levi-border, var(--ds-separator));
   border-radius: 12px;
 }
 .levi-pilot header {
@@ -1155,7 +927,7 @@ select optgroup {
   }
 }
 .levi-activity-row.failed {
-  border-color: #6d3a33;
+  border-color: var(--ds-danger);
 }
 .levi-activity-dot {
   width: 8px;
@@ -1169,10 +941,10 @@ select optgroup {
   animation: levi-pulse 1.4s ease-out infinite;
 }
 .levi-activity-dot.completed {
-  background: #7fce8a;
+  background: var(--ds-success);
 }
 .levi-activity-dot.failed {
-  background: #ffc4b5;
+  background: var(--ds-danger);
 }
 .levi-activity-body {
   min-width: 0;
@@ -1213,7 +985,7 @@ select optgroup {
 .levi-activity-error {
   margin: 4px 0 0;
   font-size: 0.78rem;
-  color: #ffc4b5;
+  color: var(--ds-danger);
 }
 .levi-activity-meta {
   display: flex;
@@ -1295,7 +1067,7 @@ select optgroup {
   background: var(--surface-1);
 }
 .levi-activity-task.done .levi-activity-progress > span {
-  background: #7fce8a;
+  background: var(--ds-success);
 }
 .levi-activity-task-head {
   display: flex;
@@ -1337,7 +1109,7 @@ select optgroup {
   padding: 6px 12px;
   border-radius: 8px;
   background: var(--accent);
-  color: #14221a;
+  color: var(--ds-on-accent);
   font-size: 0.82rem;
   text-decoration: none;
   white-space: nowrap;
@@ -1473,7 +1245,7 @@ select optgroup {
 .levi-chip.on {
   background: var(--accent);
   border-color: var(--accent);
-  color: #14221a;
+  color: var(--ds-on-accent);
 }
 .levi-agent-advanced {
   margin: 10px 0;
@@ -1578,7 +1350,7 @@ select optgroup {
 .levi-chip.on {
   background: var(--accent);
   border-color: var(--accent);
-  color: #14221a;
+  color: var(--ds-on-accent);
 }
 .levi-agent-advanced {
   margin: 8px 0;
@@ -1607,60 +1379,60 @@ select optgroup {
   font-size: 0.75rem;
 }
 .levi-recorder button {
-  border: 1px solid rgb(255 255 255 / 0.15);
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 15%, transparent);
   border-radius: 0.375rem;
   padding: 0.25rem 0.6rem;
-  color: rgb(226 232 240);
-  background: rgb(255 255 255 / 0.04);
+  color: var(--ds-text-primary);
+  background: color-mix(in srgb, var(--ds-text-primary) 4%, transparent);
 }
 .levi-recorder button:hover:not(:disabled) {
-  background: rgb(255 255 255 / 0.1);
+  background: color-mix(in srgb, var(--ds-text-primary) 10%, transparent);
 }
 .levi-recorder button:disabled {
   opacity: 0.5;
 }
 .levi-recorder .levi-recorder-done {
-  border-color: rgb(52 211 153 / 0.6);
-  color: rgb(110 231 183);
+  border-color: color-mix(in srgb, var(--ds-success) 60%, transparent);
+  color: var(--ds-success);
 }
 .levi-recorder .levi-recorder-start {
-  color: rgb(252 165 165);
+  color: var(--ds-danger);
 }
 .levi-recorder .levi-recorder-stop {
-  border-color: rgb(248 113 113 / 0.7);
-  color: rgb(254 202 202);
+  border-color: color-mix(in srgb, var(--ds-danger) 70%, transparent);
+  color: var(--ds-danger);
   font-variant-numeric: tabular-nums;
 }
 .levi-recorder .levi-recorder-link {
   border: none;
   background: none;
   text-decoration: underline;
-  color: rgb(148 163 184);
+  color: var(--ds-text-secondary);
 }
 .levi-recorder-count,
 .levi-recorder-result {
-  color: rgb(148 163 184);
+  color: var(--ds-text-secondary);
 }
 .levi-recorder-result code {
-  color: rgb(203 213 225);
+  color: var(--ds-text-primary);
 }
 
 /* Subtask vocabulary editor under the quick-add bar. */
 .vocab-editor {
   margin-top: 0.5rem;
   font-size: 0.75rem;
-  color: rgb(203 213 225);
+  color: var(--ds-text-primary);
 }
 .vocab-editor summary {
   cursor: pointer;
-  color: rgb(148 163 184);
+  color: var(--ds-text-secondary);
 }
 .vocab-editor textarea {
   width: 100%;
   margin-top: 0.4rem;
-  font-family: ui-monospace, monospace;
-  background: rgb(15 23 42 / 0.6);
-  border: 1px solid rgb(255 255 255 / 0.1);
+  font-family: var(--ds-font-mono);
+  background: color-mix(in srgb, var(--ds-surface-sunken) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 10%, transparent);
   border-radius: 0.375rem;
   padding: 0.4rem;
   color: inherit;
@@ -1672,7 +1444,7 @@ select optgroup {
   margin-top: 0.4rem;
 }
 .vocab-actions button {
-  border: 1px solid rgb(255 255 255 / 0.15);
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 15%, transparent);
   border-radius: 0.375rem;
   padding: 0.2rem 0.6rem;
 }
@@ -1711,7 +1483,7 @@ select optgroup {
 }
 .levi-pool-jobs summary {
   cursor: pointer;
-  color: #c9d3bf;
+  color: var(--ds-text-primary);
 }
 .levi-pool-jobs .levi-table td {
   padding: 8px 8px;
@@ -1730,8 +1502,8 @@ select optgroup {
   min-width: 0;
 }
 .levi-pool-card {
-  background: #1b231b;
-  border: 1px solid #ffffff20;
+  background: var(--ds-surface-1);
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 13%, transparent);
   border-radius: 10px;
   padding: 18px;
   min-width: 0;
@@ -1743,11 +1515,11 @@ select optgroup {
 .levi-pool-card h3 {
   font-size: 13px;
   margin: 14px 0 8px;
-  color: #dedfcf;
+  color: var(--ds-text-primary);
 }
 .levi-pool-facets {
-  background: #161d17;
-  border: 1px solid #ffffff18;
+  background: var(--ds-surface-1);
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 9%, transparent);
   border-radius: 10px;
   padding: 14px;
   display: flex;
@@ -1766,10 +1538,10 @@ select optgroup {
 }
 .levi-pool-facets legend,
 .levi-pool-label {
-  font: 10px/1.8 monospace;
+  font: 12px/1.8 var(--ds-font-mono);
   letter-spacing: 1.6px;
   text-transform: uppercase;
-  color: #a7b397;
+  color: var(--ds-text-secondary);
   margin-bottom: 4px;
 }
 .levi-pool-check {
@@ -1777,13 +1549,13 @@ select optgroup {
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: #d8dccb;
+  color: var(--ds-text-primary);
   padding: 3px 2px;
   border-radius: 4px;
   min-width: 0;
 }
 .levi-pool-check:hover {
-  background: #ffffff08;
+  background: color-mix(in srgb, var(--ds-text-primary) 3%, transparent);
 }
 .levi-pool-check .grow,
 .levi-pool-order .grow {
@@ -1791,11 +1563,11 @@ select optgroup {
   min-width: 0;
 }
 .levi-pool-check input {
-  accent-color: #d4f779;
+  accent-color: var(--ds-accent);
 }
 .levi-pool-count {
-  font: 11px monospace;
-  color: #89927f;
+  font: 12px var(--ds-font-mono);
+  color: var(--ds-text-tertiary);
 }
 .levi-pool-scroll {
   max-height: 220px;
@@ -1815,8 +1587,8 @@ select optgroup {
   display: grid;
   grid-template-columns: 40px 1fr;
   align-items: center;
-  font-size: 11px;
-  color: #afb7a8;
+  font-size: 12px;
+  color: var(--ds-text-secondary);
 }
 .levi-pool-dates .levi-input {
   padding: 6px 8px;
@@ -1840,22 +1612,22 @@ select optgroup {
   overflow-wrap: anywhere;
 }
 .levi-pool-muted {
-  color: #89927f;
+  color: var(--ds-text-tertiary);
   font-size: 12px;
 }
 .levi-pool-hint {
-  color: #afb7a8;
+  color: var(--ds-text-secondary);
   font-size: 12px;
   line-height: 1.6;
   margin: 6px 0;
   overflow-wrap: anywhere;
 }
 .levi-pool-notice {
-  color: #d4f779;
+  color: var(--ds-text-primary);
   font-size: 12px;
 }
 .levi-pool-link {
-  color: #d4f779;
+  color: var(--ds-text-primary);
   font-size: 12px;
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -1869,9 +1641,9 @@ select optgroup {
 .levi-pool-table th {
   position: sticky;
   top: 0;
-  background: #1b231b;
+  background: var(--ds-surface-1);
   font-weight: 600;
-  color: #c7caba;
+  color: var(--ds-text-primary);
   white-space: nowrap;
   z-index: 1;
 }
@@ -1883,36 +1655,36 @@ select optgroup {
   text-align: right;
 }
 .levi-pool-table tr.levi-pool-focus td {
-  background: #d4f77912;
+  background: color-mix(in srgb, var(--ds-accent) 7%, transparent);
 }
 .levi-pool-task {
   text-align: left;
-  color: #f1efdf;
+  color: var(--ds-text-primary);
 }
 .levi-pool-task:hover,
 .levi-pool-task[aria-pressed="true"] {
-  color: #d4f779;
+  color: var(--ds-text-primary);
 }
 .levi-pool-add {
-  border: 1px solid #a7be7870;
+  border: 1px solid color-mix(in srgb, var(--ds-accent) 44%, transparent);
   border-radius: 4px;
   padding: 3px 9px;
-  font-size: 11px;
-  color: #d4f779;
+  font-size: 12px;
+  color: var(--ds-text-primary);
   white-space: nowrap;
 }
 .levi-pool-add:disabled {
-  color: #89927f;
-  border-color: #ffffff20;
+  color: var(--ds-text-tertiary);
+  border-color: color-mix(in srgb, var(--ds-text-primary) 13%, transparent);
 }
 .levi-pool-badge {
   display: inline-block;
   margin-left: 6px;
   padding: 1px 6px;
   border-radius: 999px;
-  border: 1px solid #ffffff30;
-  font-size: 10px;
-  color: #c7caba;
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 19%, transparent);
+  font-size: 12px;
+  color: var(--ds-text-primary);
   white-space: nowrap;
 }
 .levi-pool-methods {
@@ -1923,21 +1695,21 @@ select optgroup {
 }
 .levi-pool-badge.heldout {
   margin-left: 0;
-  border-color: #f1c67790;
-  color: #f1c677;
+  border-color: color-mix(in srgb, var(--ds-warning) 56%, transparent);
+  color: var(--ds-warning);
 }
 .levi-pool-badge.warn {
-  color: #f1c677;
+  color: var(--ds-warning);
 }
 .levi-pool-outcome.success {
-  color: #d4f779;
+  color: var(--ds-text-primary);
 }
 .levi-pool-outcome.failure {
-  color: #ff9c94;
+  color: var(--ds-danger);
 }
 .levi-pool-path {
-  font-size: 11px;
-  color: #afb7a8;
+  font-size: 12px;
+  color: var(--ds-text-secondary);
 }
 .levi-pool-pager {
   display: flex;
@@ -1957,9 +1729,9 @@ select optgroup {
   flex-direction: column;
   gap: 6px;
   padding: 6px 8px;
-  border: 1px solid #ffffff1c;
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 11%, transparent);
   border-radius: 6px;
-  background: #161d17;
+  background: var(--ds-surface-1);
   font-size: 12px;
 }
 .levi-pool-row {
@@ -1975,40 +1747,40 @@ select optgroup {
   opacity: 0.5;
 }
 .levi-pool-order li.drop {
-  border-color: #d4f779;
-  box-shadow: 0 0 0 1px #d4f77950;
+  border-color: var(--ds-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ds-accent) 31%, transparent);
 }
 .levi-pool-order li.levi-pool-empty {
   cursor: default;
-  color: #89927f;
+  color: var(--ds-text-tertiary);
   border-style: dashed;
 }
 .levi-pool-order button {
   width: 24px;
   height: 24px;
   border-radius: 4px;
-  border: 1px solid #ffffff20;
-  color: #d4f779;
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 13%, transparent);
+  color: var(--ds-text-primary);
   font-size: 12px;
   line-height: 1;
 }
 .levi-pool-order button:disabled {
-  color: #56604f;
+  color: var(--ds-text-tertiary);
 }
 .levi-pool-order button:focus-visible,
 .levi-pool-add:focus-visible,
 .levi-pool-task:focus-visible,
 .levi-pool-link:focus-visible {
-  outline: 2px solid #d4f779;
+  outline: 2px solid var(--ds-accent);
   outline-offset: 2px;
 }
 .levi-pool-grip {
-  color: #68765e;
+  color: var(--ds-text-tertiary);
   letter-spacing: -2px;
 }
 .levi-pool-rank {
-  color: #a7b397;
-  font: 11px monospace;
+  color: var(--ds-text-secondary);
+  font: 12px var(--ds-font-mono);
   min-width: 16px;
 }
 .levi-pool-fields {
@@ -2022,8 +1794,8 @@ select optgroup {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 11px;
-  color: #afb7a8;
+  font-size: 12px;
+  color: var(--ds-text-secondary);
   min-width: 0;
 }
 .levi-pool-fields .wide {
@@ -2033,15 +1805,15 @@ select optgroup {
   flex-direction: row;
 }
 .levi-pool-fields textarea {
-  font: 11px/1.6 monospace;
+  font: 12px/1.6 var(--ds-font-mono);
   resize: vertical;
 }
 .levi-pool-bad {
-  color: #ffaaa3;
-  font-size: 11px;
+  color: var(--ds-danger);
+  font-size: 12px;
 }
 .levi-input[aria-invalid="true"] {
-  border-color: #ffaaa3;
+  border-color: var(--ds-danger);
 }
 .levi-pool-constraints {
   display: flex;
@@ -2054,14 +1826,15 @@ select optgroup {
   width: 100%;
 }
 .levi-pool-chip {
-  border: 1px solid #d4f77950;
+  border: 1px solid color-mix(in srgb, var(--ds-accent) 31%, transparent);
   border-radius: 999px;
   padding: 2px 9px;
-  font-size: 11px;
-  color: #e5fbb6;
+  font-size: 12px;
+  color: var(--ds-text-primary);
 }
 .levi-pool-preview {
-  border-top: 1px solid #ffffff15;
+  border-top: 1px solid
+    color-mix(in srgb, var(--ds-text-primary) 8%, transparent);
   margin-top: 12px;
 }
 .levi-pool-stats {
@@ -2070,7 +1843,7 @@ select optgroup {
   gap: 8px;
 }
 .levi-pool-stats div {
-  border: 1px solid #ffffff1c;
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 11%, transparent);
   border-radius: 6px;
   padding: 8px;
   display: flex;
@@ -2078,17 +1851,17 @@ select optgroup {
 }
 .levi-pool-stats strong {
   font-size: 18px;
-  color: #f1efdf;
+  color: var(--ds-text-primary);
 }
 .levi-pool-stats span {
-  font-size: 11px;
-  color: #afb7a8;
+  font-size: 12px;
+  color: var(--ds-text-secondary);
 }
 .levi-pool-stats .heldout {
-  border-color: #f1c67760;
+  border-color: color-mix(in srgb, var(--ds-warning) 38%, transparent);
 }
 .levi-pool-stats .heldout strong {
-  color: #f1c677;
+  color: var(--ds-warning);
 }
 .levi-pool-reasons {
   width: 100%;
@@ -2097,21 +1870,22 @@ select optgroup {
 }
 .levi-pool-reasons caption {
   text-align: left;
-  color: #a7b397;
-  font-size: 11px;
+  color: var(--ds-text-secondary);
+  font-size: 12px;
   padding-bottom: 4px;
 }
 .levi-pool-reasons th {
   text-align: left;
   font-weight: normal;
-  color: #c9d3bf;
+  color: var(--ds-text-primary);
   padding: 3px 0;
 }
 .levi-pool-reasons .num {
   text-align: right;
 }
 .levi-pool-recipes {
-  border-top: 1px solid #ffffff15;
+  border-top: 1px solid
+    color-mix(in srgb, var(--ds-text-primary) 8%, transparent);
   margin-top: 14px;
   display: flex;
   flex-direction: column;
@@ -2123,8 +1897,8 @@ select optgroup {
   gap: 8px;
 }
 .levi-secondary.danger {
-  color: #ffaaa3;
-  border-color: #ffaaa360;
+  color: var(--ds-danger);
+  border-color: color-mix(in srgb, var(--ds-danger) 38%, transparent);
 }
 .levi-secondary:disabled,
 .levi-primary:disabled {
@@ -2134,7 +1908,8 @@ select optgroup {
 .levi-pool-plan,
 .levi-pool-job {
   margin-top: 12px;
-  border-top: 1px solid #ffffff15;
+  border-top: 1px solid
+    color-mix(in srgb, var(--ds-text-primary) 8%, transparent);
   padding-top: 10px;
   font-size: 12px;
 }
@@ -2143,9 +1918,9 @@ select optgroup {
   min-width: 0;
 }
 .levi-pool-dialog {
-  background: #1b231b;
-  color: #f1efdf;
-  border: 1px solid #ffffff30;
+  background: var(--ds-surface-1);
+  color: var(--ds-text-primary);
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 19%, transparent);
   border-radius: 12px;
   padding: 22px;
   width: min(640px, calc(100vw - 32px));
@@ -2153,7 +1928,7 @@ select optgroup {
   margin: auto;
 }
 .levi-pool-dialog::backdrop {
-  background: #05080599;
+  background: color-mix(in srgb, var(--ds-surface-sunken) 60%, transparent);
 }
 .levi-pool-dialog-head {
   display: flex;
@@ -2170,10 +1945,10 @@ select optgroup {
   margin: 12px 0;
 }
 .levi-pool-targets legend {
-  font: 10px/1.8 monospace;
+  font: 12px/1.8 var(--ds-font-mono);
   letter-spacing: 1.6px;
   text-transform: uppercase;
-  color: #a7b397;
+  color: var(--ds-text-secondary);
 }
 @media (max-width: 1280px) {
   .levi-pool-layout {
@@ -2211,24 +1986,24 @@ select optgroup {
   margin: 10px 0;
   padding-left: 0;
   font-size: 12px;
-  color: #f1c677;
+  color: var(--ds-warning);
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 .levi-pool-warnings li {
-  border: 1px solid #f1c67750;
+  border: 1px solid color-mix(in srgb, var(--ds-warning) 31%, transparent);
   border-radius: 6px;
   padding: 6px 9px;
   line-height: 1.5;
 }
 .levi-pool-warnings li.blocking {
-  border-color: #ff9c94;
-  color: #ffaaa3;
+  border-color: var(--ds-danger);
+  color: var(--ds-danger);
 }
 .levi-pool-warnings li[data-level="info"] {
-  border-color: #9fb3c850;
-  color: #b6c4d3;
+  border-color: color-mix(in srgb, var(--ds-border-control) 31%, transparent);
+  color: var(--ds-text-secondary);
 }
 
 .levi-pool-pick {
@@ -2236,7 +2011,7 @@ select optgroup {
   flex-direction: column;
   gap: 4px;
   padding-left: 22px;
-  color: #c7caba;
+  color: var(--ds-text-primary);
 }
 .levi-pool-pick-line {
   display: flex;
@@ -2253,7 +2028,7 @@ select optgroup {
   height: auto;
   border: 0;
   border-radius: 0;
-  font-size: 11px;
+  font-size: 12px;
 }
 .levi-pool-notes {
   display: flex;
@@ -2268,8 +2043,8 @@ select optgroup {
   background: none;
 }
 .levi-pool-warn {
-  color: #f1c677;
-  font-size: 11px;
+  color: var(--ds-warning);
+  font-size: 12px;
   line-height: 1.5;
 }
 .levi-pool-picker {
@@ -2282,8 +2057,8 @@ select optgroup {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 11px;
-  color: #afb7a8;
+  font-size: 12px;
+  color: var(--ds-text-secondary);
   min-width: 0;
 }
 .levi-pool-picker-row {
@@ -2298,7 +2073,7 @@ select optgroup {
 .levi-pool-picker-row input[type="range"] {
   flex: 1;
   min-width: 80px;
-  accent-color: #d4f779;
+  accent-color: var(--ds-accent);
 }
 .levi-pool-picker-two {
   display: grid;
@@ -2306,7 +2081,7 @@ select optgroup {
   gap: 10px;
 }
 .levi-pool-chooser-row td {
-  background: #161d17;
+  background: var(--ds-surface-1);
   padding: 0;
 }
 .levi-pool-chooser {
@@ -2314,7 +2089,7 @@ select optgroup {
   flex-direction: column;
   gap: 6px;
   padding: 12px 14px;
-  border-left: 3px solid #d4f779;
+  border-left: 3px solid var(--ds-accent);
   box-sizing: border-box;
   position: sticky;
   left: 0;
@@ -2322,12 +2097,12 @@ select optgroup {
 }
 .levi-pool-picked summary {
   cursor: pointer;
-  font-size: 11px;
-  color: #a7be78;
+  font-size: 12px;
+  color: var(--ds-text-primary);
   padding-left: 22px;
 }
 .levi-pool-picked summary:focus-visible {
-  outline: 2px solid #d4f779;
+  outline: 2px solid var(--ds-accent);
   outline-offset: 2px;
 }
 .levi-pool-picked-list {
@@ -2345,10 +2120,11 @@ select optgroup {
   gap: 2px 8px;
   padding: 4px 6px;
   border: 0;
-  border-bottom: 1px solid #ffffff10;
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--ds-text-primary) 6%, transparent);
   border-radius: 0;
   background: none;
-  font-size: 11px;
+  font-size: 12px;
 }
 .levi-pool-picked-name {
   overflow: hidden;
@@ -2356,30 +2132,30 @@ select optgroup {
   white-space: nowrap;
 }
 .levi-pool-picked-list .levi-pool-outcome.none {
-  color: #89927f;
+  color: var(--ds-text-tertiary);
 }
 .levi-pool-why {
   grid-column: 1 / -1;
-  font-size: 10px;
-  color: #a7b397;
+  font-size: 12px;
+  color: var(--ds-text-secondary);
 }
 .levi-pool-mix h4 {
   font-size: 12px;
   margin: 12px 0 6px;
-  color: #dedfcf;
+  color: var(--ds-text-primary);
 }
 .levi-pool-mixbar {
   display: flex;
   height: 8px;
   border-radius: 4px;
   overflow: hidden;
-  background: #ffffff14;
+  background: color-mix(in srgb, var(--ds-text-primary) 8%, transparent);
 }
 .levi-pool-mixbar .success {
-  background: #a7be78;
+  background: var(--ds-accent);
 }
 .levi-pool-mixbar .failure {
-  background: #e08b82;
+  background: var(--ds-danger);
 }
 @media (max-width: 860px) {
   .levi-pool-picker-row {
@@ -2398,16 +2174,16 @@ select optgroup {
 
 /* Training pool: job states, banners, deletion and cleanup */
 .levi-pool-banner {
-  border: 1px solid #f1c67780;
+  border: 1px solid color-mix(in srgb, var(--ds-warning) 50%, transparent);
   border-radius: 8px;
   padding: 10px 14px;
   margin: 10px 0;
-  background: #f1c67714;
+  background: color-mix(in srgb, var(--ds-warning) 8%, transparent);
   line-height: 1.5;
 }
 .levi-pool-banner.fail {
-  border-color: #ff9c94;
-  background: #ff9c9414;
+  border-color: var(--ds-danger);
+  background: color-mix(in srgb, var(--ds-danger) 8%, transparent);
 }
 .levi-pool-banner p {
   margin: 4px 0;
@@ -2417,9 +2193,9 @@ select optgroup {
 }
 .levi-pool-danger,
 button.levi-pool-danger {
-  background: #a3372f;
-  color: #fff;
-  border: 1px solid #ff9c94;
+  background: var(--ds-danger);
+  color: var(--ds-text-primary);
+  border: 1px solid var(--ds-danger);
   border-radius: 6px;
   padding: 8px 14px;
   cursor: pointer;
@@ -2429,11 +2205,11 @@ button.levi-pool-danger {
   cursor: not-allowed;
 }
 .levi-pool-danger:focus-visible {
-  outline: 2px solid #ffd3ce;
+  outline: 2px solid var(--ds-text-primary);
   outline-offset: 2px;
 }
 .levi-pool-danger-link {
-  color: #ffaaa3;
+  color: var(--ds-danger);
 }
 .levi-pool-link:disabled {
   opacity: 0.4;
@@ -2455,11 +2231,11 @@ button.levi-pool-danger {
 .levi-pool-log {
   max-height: 55dvh;
   overflow: auto;
-  background: #0f140f;
-  border: 1px solid #ffffff20;
+  background: var(--ds-surface-sunken);
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 13%, transparent);
   border-radius: 6px;
   padding: 10px;
-  font: 11px/1.5 monospace;
+  font: 12px/1.5 var(--ds-font-mono);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -2474,14 +2250,15 @@ button.levi-pool-danger {
   font-size: 12px;
 }
 .levi-pool-facts dt {
-  color: #c7caba;
+  color: var(--ds-text-primary);
 }
 .levi-pool-facts dd {
   margin: 0;
   word-break: break-all;
 }
 .levi-pool-confirm-job {
-  border-top: 1px solid #ffffff20;
+  border-top: 1px solid
+    color-mix(in srgb, var(--ds-text-primary) 13%, transparent);
   padding-top: 8px;
   margin-top: 8px;
 }
@@ -2528,7 +2305,7 @@ button.levi-pool-danger {
   margin-bottom: 0;
 }
 .levi-live-bad {
-  color: #ff9c94;
+  color: var(--ds-danger);
 }
 .levi-live-grid {
   display: grid;
@@ -2545,14 +2322,14 @@ button.levi-pool-danger {
   min-width: 0;
 }
 .levi-live-section {
-  background: #1b231b;
-  border: 1px solid #ffffff20;
+  background: var(--ds-surface-1);
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 13%, transparent);
   border-radius: 10px;
   padding: 18px;
   min-width: 0;
 }
 .levi-live-section.fault {
-  border-color: #ff6b5e;
+  border-color: var(--ds-danger);
 }
 .levi-live-section.stale {
   opacity: 0.8;
@@ -2564,7 +2341,7 @@ button.levi-pool-danger {
 .levi-live-sub {
   font-size: 13px;
   margin: 14px 0 8px;
-  color: #dedfcf;
+  color: var(--ds-text-primary);
 }
 .levi-live-banner {
   position: sticky;
@@ -2572,11 +2349,11 @@ button.levi-pool-danger {
   z-index: 40;
   margin: 16px 0 0;
   padding: 14px 18px;
-  border: 2px solid #ff6b5e;
+  border: 2px solid var(--ds-danger);
   border-radius: 8px;
-  background: #5a1410;
-  color: #ffe3df;
-  box-shadow: 0 6px 24px #00000080;
+  background: var(--ds-danger-bg);
+  color: var(--ds-text-primary);
+  box-shadow: var(--ds-shadow-2), var(--ds-ring-raised);
 }
 .levi-live-banner strong {
   display: block;
@@ -2584,7 +2361,7 @@ button.levi-pool-danger {
   margin-bottom: 4px;
 }
 .levi-live-banner p {
-  color: #ffd2cc;
+  color: var(--ds-danger);
   margin: 4px 0;
 }
 .levi-live-banner ul {
@@ -2596,24 +2373,24 @@ button.levi-pool-danger {
 .levi-live-offline {
   margin: 16px 0 0;
   padding: 14px 18px;
-  border: 1px solid #f1c67780;
+  border: 1px solid color-mix(in srgb, var(--ds-warning) 50%, transparent);
   border-radius: 8px;
-  background: #2a2412;
+  background: var(--ds-surface-1);
 }
 .levi-live-offline strong {
-  color: #f1c677;
+  color: var(--ds-warning);
 }
 .levi-live-offline p {
   margin: 6px 0;
   font-size: 13px;
 }
 .levi-live-command {
-  background: #0f150d;
-  border: 1px solid #ffffff25;
+  background: var(--ds-surface-sunken);
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 15%, transparent);
   border-radius: 4px;
   padding: 8px 12px;
-  font: 13px monospace;
-  color: #e5fbb6;
+  font: 13px var(--ds-font-mono);
+  color: var(--ds-text-primary);
 }
 .levi-live-cards {
   display: grid;
@@ -2621,8 +2398,8 @@ button.levi-pool-danger {
   gap: 14px;
 }
 .levi-live-card {
-  background: #161d17;
-  border: 1px solid #ffffff18;
+  background: var(--ds-surface-1);
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 9%, transparent);
   border-radius: 8px;
   padding: 14px;
   min-width: 0;
@@ -2631,8 +2408,8 @@ button.levi-pool-danger {
   gap: 10px;
 }
 .levi-live-card.fault {
-  border-color: #ff6b5e;
-  box-shadow: inset 4px 0 0 #ff6b5e;
+  border-color: var(--ds-danger);
+  box-shadow: inset 4px 0 0 var(--ds-danger);
 }
 .levi-live-card header {
   display: flex;
@@ -2655,7 +2432,7 @@ button.levi-pool-danger {
   padding: 3px 8px;
 }
 .levi-live-prompt {
-  color: #afb7a8;
+  color: var(--ds-text-secondary);
   font-size: 12px;
   line-height: 1.5;
   margin: 0;
@@ -2669,7 +2446,7 @@ button.levi-pool-danger {
   margin: 0;
 }
 .levi-live-dl dt {
-  color: #89927f;
+  color: var(--ds-text-tertiary);
 }
 .levi-live-dl dd {
   margin: 0;
@@ -2685,7 +2462,7 @@ button.levi-pool-danger {
   gap: 6px;
 }
 .levi-live-stats div {
-  border: 1px solid #ffffff1c;
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 11%, transparent);
   border-radius: 6px;
   padding: 6px 8px;
   display: flex;
@@ -2697,8 +2474,8 @@ button.levi-pool-danger {
   font-weight: 500;
 }
 .levi-live-stats span {
-  font-size: 10px;
-  color: #89927f;
+  font-size: 12px;
+  color: var(--ds-text-tertiary);
   overflow-wrap: anywhere;
 }
 /* Live statistics panel (src/components/live/stats-panel.tsx) */
@@ -2714,7 +2491,7 @@ button.levi-pool-danger {
   flex-direction: column;
   gap: 4px;
   font-size: 12px;
-  color: #89927f;
+  color: var(--ds-text-tertiary);
   min-width: 0;
 }
 .levi-live-scope select {
@@ -2724,12 +2501,12 @@ button.levi-pool-danger {
   flex-direction: row !important;
   align-items: center;
   gap: 6px !important;
-  color: #c7caba !important;
+  color: var(--ds-text-primary) !important;
   font-size: 13px !important;
 }
 .levi-live-check small {
-  color: #89927f;
-  font-size: 11px;
+  color: var(--ds-text-tertiary);
+  font-size: 12px;
 }
 .levi-live-export {
   margin: 0 0 0 auto;
@@ -2742,7 +2519,7 @@ button.levi-pool-danger {
   margin-bottom: 14px;
 }
 .levi-live-kpi {
-  border: 1px solid #ffffff1c;
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 11%, transparent);
   border-radius: 8px;
   padding: 10px 12px;
   display: flex;
@@ -2752,7 +2529,7 @@ button.levi-pool-danger {
 }
 .levi-live-kpi span {
   font-size: 12px;
-  color: #c7caba;
+  color: var(--ds-text-primary);
 }
 .levi-live-kpi strong {
   font-size: 22px;
@@ -2760,8 +2537,8 @@ button.levi-pool-danger {
   overflow-wrap: anywhere;
 }
 .levi-live-kpi small {
-  font-size: 11px;
-  color: #89927f;
+  font-size: 12px;
+  color: var(--ds-text-tertiary);
   overflow-wrap: anywhere;
 }
 .levi-live-section h3 {
@@ -2769,17 +2546,17 @@ button.levi-pool-danger {
   margin: 16px 0 8px;
 }
 .levi-live-toggle {
-  border: 1px solid #ffffff30;
+  border: 1px solid color-mix(in srgb, var(--ds-text-primary) 19%, transparent);
   border-radius: 6px;
   background: transparent;
-  color: #c7caba;
+  color: var(--ds-text-primary);
   padding: 3px 10px;
   font-size: 12px;
   cursor: pointer;
 }
 .levi-live-toggle.on {
-  border-color: #d4f779;
-  color: #d4f779;
+  border-color: var(--ds-accent);
+  color: var(--ds-text-primary);
 }
 .levi-live-stats-table {
   font-size: 12px;
@@ -2798,7 +2575,7 @@ button.levi-pool-danger {
   overflow-wrap: anywhere;
 }
 .levi-live-auto {
-  border: 1px dashed #89927f;
+  border: 1px dashed var(--ds-border-control);
   border-radius: 6px;
   padding: 8px 10px;
   display: flex;
@@ -2813,40 +2590,40 @@ button.levi-pool-danger {
   align-items: baseline;
 }
 .levi-live-auto-tag {
-  border: 1px dashed #89927f;
+  border: 1px dashed var(--ds-border-control);
   border-radius: 3px;
   padding: 0 5px;
-  font: 10px monospace;
+  font: 12px var(--ds-font-mono);
   letter-spacing: 1px;
   text-transform: uppercase;
-  color: #afb7a8;
+  color: var(--ds-text-secondary);
 }
 .levi-live-autochip {
-  border: 1px dashed #89927f;
+  border: 1px dashed var(--ds-border-control);
   border-radius: 999px;
   padding: 2px 9px;
-  font-size: 11px;
-  color: #c7caba;
+  font-size: 12px;
+  color: var(--ds-text-primary);
 }
 .levi-live-autochip.dim {
-  color: #89927f;
+  color: var(--ds-text-tertiary);
 }
 .levi-live-gate {
   margin-top: 8px;
   padding: 8px 12px;
-  border-left: 3px solid #89927f;
-  background: #11180f;
+  border-left: 3px solid var(--ds-border-control);
+  background: var(--ds-surface-sunken);
   font-size: 12px;
 }
 .levi-live-gate.warn {
-  border-left-color: #f1c677;
+  border-left-color: var(--ds-warning);
 }
 .levi-live-gate.pass {
-  border-left-color: #d4f779;
+  border-left-color: var(--ds-accent);
 }
 .levi-live-gate p {
   margin: 4px 0 0;
-  color: #afb7a8;
+  color: var(--ds-text-secondary);
   line-height: 1.6;
 }
 .levi-live-reasons {
@@ -2857,11 +2634,12 @@ button.levi-pool-danger {
 }
 .levi-live-path {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
 }
 .levi-live-reviews,
 .levi-live-demos {
-  border-top: 1px solid #ffffff15;
+  border-top: 1px solid
+    color-mix(in srgb, var(--ds-text-primary) 8%, transparent);
   padding-top: 8px;
   font-size: 12px;
 }
@@ -2911,7 +2689,8 @@ button.levi-pool-danger {
 }
 .levi-live-demo-detail {
   flex-basis: 100%;
-  border-left: 2px solid #ffffff22;
+  border-left: 2px solid
+    color-mix(in srgb, var(--ds-text-primary) 13%, transparent);
   padding: 4px 10px;
   margin: 2px 0 6px 20px;
 }
@@ -2927,13 +2706,13 @@ button.levi-pool-danger {
 }
 .levi-live-events summary {
   cursor: pointer;
-  color: #c9d3bf;
+  color: var(--ds-text-primary);
 }
 .levi-live-events li {
   overflow-wrap: anywhere;
 }
 .levi-live-events li.error {
-  color: #ffaaa3;
+  color: var(--ds-danger);
 }
 @media (max-width: 1100px) {
   .levi-live-grid {
@@ -2973,30 +2752,30 @@ button.levi-pool-danger {
 .levi-live-attention {
   margin: 16px 0 0;
   padding: 14px 18px;
-  border: 2px solid #f1c677;
+  border: 2px solid var(--ds-warning);
   border-radius: 8px;
-  background: #33280f;
-  color: #fbe9c3;
+  background: var(--ds-surface-hover);
+  color: var(--ds-warning);
 }
 .levi-live-attention strong {
   display: block;
   font-size: 17px;
   margin-bottom: 4px;
-  color: #f1c677;
+  color: var(--ds-warning);
 }
 .levi-live-attention p {
   margin: 6px 0;
   font-size: 13px;
-  color: #f5dcaa;
+  color: var(--ds-warning);
   overflow-wrap: anywhere;
 }
 .levi-live-await {
   font-size: 12px;
   margin: 0;
   padding: 8px 10px;
-  border-left: 3px solid #f1c677;
-  background: #11180f;
-  color: #dbc58f;
+  border-left: 3px solid var(--ds-warning);
+  background: var(--ds-surface-sunken);
+  color: var(--ds-warning);
   line-height: 1.6;
 }
 .levi-live-attention strong.levi-live-inline {
@@ -3006,49 +2785,37 @@ button.levi-pool-danger {
 }
 
 /* The live evaluation entry: navigation link and home banner, shown only in
-   the live annotation workspace (src/components/live/live-nav.tsx). The dot
-   colours say the state (green fine, blue labelling, amber needs attention,
-   red robot fault); the label and the hover say it in words. */
+   the live annotation workspace (src/components/live/live-nav.tsx). The
+   state is a shape in a status colour (check fine, breathing dot labelling,
+   triangle needs attention, cross robot fault, circle unknown); the label,
+   hidden words and the hover say it in words. */
 :root {
-  --pulse-green: #6fdc8c;
-  --pulse-blue: #6cb8ff;
-  --pulse-amber: #f1c677;
-  --pulse-red: #ff6b5e;
-  --pulse-grey: #8a9285;
+  --pulse-green: var(--ds-success);
+  --pulse-blue: var(--ds-info);
+  --pulse-amber: var(--ds-warning);
+  --pulse-red: var(--ds-danger);
+  --pulse-grey: var(--ds-surface-selected);
 }
+/* The state is a ds status shape (live-nav.tsx PulseDot) in its colour;
+   only "labelling" breathes, once every 2 s (.ds-breathe), still under
+   reduced motion. */
 .levi-pulse-dot {
-  display: inline-block;
+  display: inline-flex;
   flex: 0 0 auto;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--pulse-grey);
-  box-shadow: 0 0 0 3px #ffffff14;
+  align-items: center;
+  color: var(--ds-text-tertiary);
 }
 .levi-pulse-dot.is-green {
-  background: var(--pulse-green);
+  color: var(--pulse-green);
 }
 .levi-pulse-dot.is-blue {
-  background: var(--pulse-blue);
-  animation: levi-pulse-beat 1.6s ease-in-out infinite;
+  color: var(--pulse-blue);
 }
 .levi-pulse-dot.is-amber {
-  background: var(--pulse-amber);
+  color: var(--pulse-amber);
 }
 .levi-pulse-dot.is-red {
-  background: var(--pulse-red);
-  animation: levi-pulse-beat 0.9s ease-in-out infinite;
-}
-@keyframes levi-pulse-beat {
-  50% {
-    box-shadow: 0 0 0 6px #ffffff00;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .levi-pulse-dot.is-blue,
-  .levi-pulse-dot.is-red {
-    animation: none;
-  }
+  color: var(--pulse-red);
 }
 .levi-pulse-count {
   display: inline-block;
@@ -3056,16 +2823,14 @@ button.levi-pool-danger {
   padding: 1px 6px;
   border-radius: 9px;
   background: var(--pulse-amber);
-  color: #1d1a0e;
-  font:
-    700 11px/16px Arial,
-    sans-serif;
+  color: var(--ds-on-danger);
+  font: 700 12px/16px var(--ds-font-sans);
   text-align: center;
 }
 .levi-live-nav.is-red .levi-pulse-count,
 .levi-live-home.is-red .levi-pulse-count {
   background: var(--pulse-red);
-  color: #2a0a07;
+  color: var(--ds-on-danger);
 }
 .levi-live-home {
   display: flex;
@@ -3073,24 +2838,24 @@ button.levi-pool-danger {
   gap: 16px;
   margin: 24px 0 0;
   padding: 18px 22px;
-  border: 1px solid #d4f77960;
+  border: 1px solid color-mix(in srgb, var(--ds-accent) 38%, transparent);
   border-radius: 12px;
-  background: #1d251e;
-  color: #f1efdf;
+  background: var(--ds-surface-1);
+  color: var(--ds-text-primary);
 }
 .levi-live-home:hover {
-  border-color: #d4f779;
+  border-color: var(--ds-accent);
 }
 .levi-live-home.is-amber {
-  border-color: #f1c67790;
+  border-color: color-mix(in srgb, var(--ds-warning) 56%, transparent);
 }
 .levi-live-home.is-red {
-  border-color: #ff6b5ea0;
-  background: #3a1613;
+  border-color: color-mix(in srgb, var(--ds-danger) 63%, transparent);
+  background: var(--ds-surface-1);
 }
-.levi-live-home .levi-pulse-dot {
-  width: 14px;
-  height: 14px;
+.levi-live-home .levi-pulse-dot svg {
+  width: 20px;
+  height: 20px;
 }
 .levi-live-home-text {
   display: flex;
@@ -3104,12 +2869,12 @@ button.levi-pool-danger {
 }
 .levi-live-home-text span {
   font-size: 13px;
-  color: #bec5b5;
+  color: var(--ds-text-secondary);
 }
 .levi-live-home-go {
   flex: 0 0 auto;
   font-weight: 700;
-  color: #d4f779;
+  color: var(--ds-text-primary);
   white-space: nowrap;
 }
 @media (max-width: 800px) {

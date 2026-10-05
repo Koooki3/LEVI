@@ -17,6 +17,13 @@ const FRAME_FILES = [
   "src/components/agent-workbench.tsx",
   "src/components/live/live-nav.tsx",
   "src/components/shell/**/*.{ts,tsx}",
+  // Design stage 5 (global layer): home, guide, report, the token hook.
+  "src/app/page.tsx",
+  "src/app/guide/**/*.{ts,tsx}",
+  "src/app/report/**/*.{ts,tsx}",
+  "src/components/home/**/*.{ts,tsx}",
+  "src/components/report/**/*.{ts,tsx}",
+  "src/lib/design/**/*.{ts,tsx}",
 ];
 // A colour: # and exactly 3, 4, 6 or 8 hex digits, at the start of the
 // string or after a space, "(", "," or ":", and not followed by another

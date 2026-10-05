@@ -1,0 +1,332 @@
+/* Reading layout for long text (design proposal §8.6): the guide and the
+ * report. One column of 680–760 px (about 38–42 Chinese characters a line),
+ * contents on the left that stay in view and mark the current section,
+ * reading text 16/26. Tokens only; a test fails on any colour literal. */
+
+.levi-reading {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--ds-space-8) var(--ds-space-6) var(--ds-space-16);
+  color: var(--ds-text-primary);
+}
+.levi-reading__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-2) var(--ds-space-5);
+  padding-bottom: var(--ds-space-4);
+  margin-bottom: var(--ds-space-6);
+  border-bottom: 1px solid var(--ds-separator);
+}
+.levi-reading__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  color: var(--ds-text-tertiary);
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-medium);
+}
+.levi-reading__layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 760px);
+  gap: var(--ds-space-12);
+  align-items: start;
+  justify-content: center;
+}
+.levi-reading__aside {
+  position: sticky;
+  top: var(--ds-space-6);
+  max-height: calc(100vh - var(--ds-space-12));
+  overflow: auto;
+}
+
+/* ── Contents ── */
+.levi-toc__title {
+  margin-bottom: var(--ds-space-2);
+  color: var(--ds-text-tertiary);
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-semibold);
+}
+.levi-toc ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-left: 1px solid var(--ds-separator);
+}
+.levi-toc a {
+  display: block;
+  margin-left: -1px;
+  padding: var(--ds-space-1) 0 var(--ds-space-1) var(--ds-space-3);
+  border-left: 2px solid transparent;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+  line-height: var(--ds-text-callout-line);
+  text-decoration: none;
+  transition: color var(--ds-dur-fast) var(--ds-ease-standard);
+}
+.levi-toc a:hover {
+  color: var(--ds-text-primary);
+}
+.levi-toc a[aria-current] {
+  border-left-color: var(--ds-selected-indicator);
+  color: var(--ds-text-primary);
+  font-weight: var(--ds-weight-semibold);
+}
+
+/* ── Prose: Markdown and other long text ── */
+.levi-prose {
+  min-width: 0;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-reading-size);
+  line-height: var(--ds-text-reading-line);
+}
+.levi-prose :where(h1, h2, h3, h4) {
+  color: var(--ds-text-primary);
+  font-weight: var(--ds-weight-semibold);
+  scroll-margin-top: var(--ds-space-6);
+}
+.levi-prose h1 {
+  margin: 0 0 var(--ds-space-5);
+  font-size: var(--ds-text-display-size);
+  line-height: var(--ds-text-display-line);
+  letter-spacing: var(--ds-tracking-display);
+}
+.levi-prose h2 {
+  margin: var(--ds-space-12) 0 var(--ds-space-3);
+  padding-top: var(--ds-space-5);
+  border-top: 1px solid var(--ds-separator);
+  font-size: var(--ds-text-title-1-size);
+  line-height: var(--ds-text-title-1-line);
+  letter-spacing: var(--ds-tracking-display);
+}
+.levi-prose h3 {
+  margin: var(--ds-space-8) 0 var(--ds-space-2);
+  font-size: var(--ds-text-title-2-size);
+  line-height: var(--ds-text-title-2-line);
+  letter-spacing: var(--ds-tracking-title);
+}
+.levi-prose h4 {
+  margin: var(--ds-space-6) 0 var(--ds-space-2);
+  font-size: var(--ds-text-title-3-size);
+  line-height: var(--ds-text-title-3-line);
+}
+.levi-prose p {
+  margin: var(--ds-space-3) 0;
+}
+.levi-prose :where(p, li, blockquote, td) {
+  overflow-wrap: anywhere;
+}
+.levi-prose :where(ul, ol:not([class])) {
+  margin: var(--ds-space-3) 0;
+  padding-left: var(--ds-space-6);
+}
+.levi-prose ul {
+  list-style: disc;
+}
+.levi-prose ol:not([class]) {
+  list-style: decimal;
+}
+.levi-prose li {
+  margin: var(--ds-space-1) 0;
+}
+.levi-prose li::marker {
+  color: var(--ds-text-tertiary);
+}
+/* Links in running text: primary text with an underline. */
+.levi-prose a {
+  border-radius: var(--ds-radius-xs);
+  color: var(--ds-text-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--ds-separator-strong);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  transition: text-decoration-color var(--ds-dur-fast) var(--ds-ease-standard);
+}
+.levi-prose a:hover {
+  text-decoration-color: currentColor;
+}
+.levi-prose strong {
+  font-weight: var(--ds-weight-semibold);
+}
+.levi-prose blockquote {
+  margin: var(--ds-space-4) 0;
+  padding: var(--ds-space-2) var(--ds-space-4);
+  border-left: 3px solid var(--ds-separator-strong);
+  color: var(--ds-text-secondary);
+}
+.levi-prose hr {
+  margin: var(--ds-space-8) 0;
+  border: 0;
+  border-top: 1px solid var(--ds-separator);
+}
+.levi-prose :not(pre) > code {
+  padding: 1px var(--ds-space-1);
+  border-radius: var(--ds-radius-xs);
+  background: var(--ds-surface-sunken);
+  font-family: var(--ds-font-mono);
+  font-size: 0.875em;
+}
+.levi-prose pre {
+  margin: var(--ds-space-4) 0;
+  padding: var(--ds-space-3) var(--ds-space-4);
+  overflow: auto;
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-sunken);
+  font: var(--ds-text-caption-size) / 1.65 var(--ds-font-mono);
+}
+.levi-prose img {
+  max-width: 100%;
+  height: auto;
+  margin: var(--ds-space-2) 0;
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+}
+.levi-prose table:not([class]) {
+  width: 100%;
+  margin: var(--ds-space-4) 0;
+  border-collapse: collapse;
+  font-size: var(--ds-text-callout-size);
+  line-height: var(--ds-text-callout-line);
+  font-variant-numeric: tabular-nums;
+}
+.levi-prose table:not([class]) :where(th, td) {
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border-bottom: 1px solid var(--ds-separator);
+  text-align: left;
+  vertical-align: top;
+}
+.levi-prose table:not([class]) th {
+  background: var(--ds-surface-sunken);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.levi-prose .levi-prose__lead {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-title-3-size);
+  line-height: 1.6;
+}
+
+@media (max-width: 899px) {
+  .levi-reading {
+    padding: var(--ds-space-5) var(--ds-space-4) var(--ds-space-12);
+  }
+  .levi-reading__layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .levi-reading__aside {
+    position: static;
+    max-height: none;
+    margin-bottom: var(--ds-space-5);
+    padding: var(--ds-space-3);
+    border: 1px solid var(--ds-separator);
+    border-radius: var(--ds-radius-md);
+    background: var(--ds-surface-1);
+  }
+}
+
+/* ── Guide: the introduction ── */
+.levi-prose h2.levi-guide-sub {
+  margin: var(--ds-space-8) 0 var(--ds-space-2);
+  padding-top: 0;
+  border-top: 0;
+  font-size: var(--ds-text-title-2-size);
+  line-height: var(--ds-text-title-2-line);
+  letter-spacing: var(--ds-tracking-title);
+}
+.levi-guide-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ds-space-3);
+  margin: var(--ds-space-6) 0;
+  padding: 0;
+  list-style: none;
+}
+.levi-guide-steps > li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  margin: 0;
+  padding: var(--ds-space-4);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+  font-size: var(--ds-text-callout-size);
+  line-height: var(--ds-text-callout-line);
+  color: var(--ds-text-secondary);
+}
+.levi-guide-steps strong {
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-title-3-size);
+  line-height: var(--ds-text-title-3-line);
+}
+.levi-guide-steps__icon {
+  margin-bottom: var(--ds-space-1);
+  color: var(--ds-icon);
+}
+.levi-prose .levi-guide-demos {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ds-space-3);
+  margin: var(--ds-space-3) 0;
+  padding: 0;
+  list-style: none;
+}
+.levi-guide-demos > li {
+  margin: 0;
+}
+.levi-prose .levi-guide-demos a {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-2);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+  text-decoration: none;
+  transition:
+    background-color var(--ds-dur-fast) var(--ds-ease-standard),
+    border-color var(--ds-dur-fast) var(--ds-ease-standard);
+}
+.levi-prose .levi-guide-demos a:hover {
+  border-color: var(--ds-separator-strong);
+  background: var(--ds-surface-hover);
+}
+/* Media stay black in both themes. */
+.levi-guide-demos__media {
+  display: block;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-media-bg);
+}
+.levi-guide-demos__media video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.levi-guide-demos__text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  font-size: var(--ds-text-callout-size);
+  line-height: var(--ds-text-callout-line);
+}
+.levi-guide-demos__text > span {
+  color: var(--ds-text-tertiary);
+  font-size: var(--ds-text-caption-size);
+  overflow-wrap: anywhere;
+}
+.levi-guide-credit {
+  color: var(--ds-text-tertiary);
+  font-size: var(--ds-text-caption-size);
+}
+@media (max-width: 639px) {
+  .levi-guide-steps,
+  .levi-prose .levi-guide-demos {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -200,7 +200,26 @@
   --ds-info-bg: #e9eff6;
   --ds-on-danger: #ffffff;
 
+  /* Data colours (charts, time segments, series), fixed order. Validated
+     with the dataviz palette checks (adjacent colour-vision-deficiency
+     ΔE ≥ 8.4, normal vision ΔE ≥ 19.3); every dark step is at least 3:1 on
+     the dark page and card. Light steps 3, 4 and 5 (aqua, yellow, magenta)
+     are under 3:1 on white, so a series always has words beside its colour
+     (legend, lane name). Never used for text or interface state. */
+  --ds-data-1: #2a78d6; /* blue */
+  --ds-data-2: #eb6834; /* orange */
+  --ds-data-3: #1baf7a; /* aqua */
+  --ds-data-4: #eda100; /* yellow */
+  --ds-data-5: #e87ba4; /* magenta */
+  --ds-data-6: #008300; /* green */
+  --ds-data-7: #4a3aa7; /* violet */
+  --ds-data-8: #e34948; /* red */
+
   --ds-media-bg: #000000;
+  /* Text and icons drawn over video or images: white in both themes. */
+  --ds-on-media: #ffffff;
+  --ds-on-media-secondary: rgb(255 255 255 / 0.78);
+  --ds-media-scrim: rgb(0 0 0 / 0.56);
   --ds-scrim: rgb(0 0 0 / 0.32);
 
   --ds-shadow-1: 0 1px 2px rgb(0 0 0 / 0.06);
@@ -262,7 +281,19 @@
     --ds-info-bg: #1c2a3a;
     --ds-on-danger: var(--ds-gray-d-1);
 
+    --ds-data-1: #3987e5; /* blue */
+    --ds-data-2: #d95926; /* orange */
+    --ds-data-3: #199e70; /* aqua */
+    --ds-data-4: #c98500; /* yellow */
+    --ds-data-5: #d55181; /* magenta */
+    --ds-data-6: #008300; /* green */
+    --ds-data-7: #9085e9; /* violet */
+    --ds-data-8: #e66767; /* red */
+
     --ds-media-bg: #000000;
+    --ds-on-media: #ffffff;
+    --ds-on-media-secondary: rgb(255 255 255 / 0.78);
+    --ds-media-scrim: rgb(0 0 0 / 0.56);
     --ds-scrim: rgb(0 0 0 / 0.56);
 
     --ds-shadow-1: 0 0 0 0 transparent;
@@ -318,7 +349,19 @@
   --ds-info-bg: #1c2a3a;
   --ds-on-danger: var(--ds-gray-d-1);
 
+  --ds-data-1: #3987e5; /* blue */
+  --ds-data-2: #d95926; /* orange */
+  --ds-data-3: #199e70; /* aqua */
+  --ds-data-4: #c98500; /* yellow */
+  --ds-data-5: #d55181; /* magenta */
+  --ds-data-6: #008300; /* green */
+  --ds-data-7: #9085e9; /* violet */
+  --ds-data-8: #e66767; /* red */
+
   --ds-media-bg: #000000;
+  --ds-on-media: #ffffff;
+  --ds-on-media-secondary: rgb(255 255 255 / 0.78);
+  --ds-media-scrim: rgb(0 0 0 / 0.56);
   --ds-scrim: rgb(0 0 0 / 0.56);
 
   --ds-shadow-1: 0 0 0 0 transparent;

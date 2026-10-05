@@ -9,12 +9,8 @@
   --levi-header-height: 56px;
 }
 
-/* Until the pages use the tokens they stay dark: a light/dark choice must
-   not turn their native controls (scrollbars, select lists) light. The
-   frame's own layers set their scheme themselves. */
-:root[data-theme] {
-  color-scheme: dark;
-}
+/* Native controls follow the theme: tokens.css sets color-scheme on
+   [data-theme], globals.css "light dark" otherwise. */
 
 /* ── Top bar ───────────────────────────────────────────────────────── */
 .levi-shell-header {
@@ -53,23 +49,27 @@
   letter-spacing: 0.08em;
   text-decoration: none;
 }
-/* The mark: a graphite square with a cut corner (no Unicode glyph). */
-.levi-shell-mark {
-  position: relative;
-  width: 18px;
-  height: 18px;
-  border-radius: var(--ds-radius-xs);
-  background: var(--ds-accent);
+/* The mark (src/components/shell/brand.tsx): graphite tile, glyph in the
+   accent's text colour, so it inverts with the theme like a primary button.
+   Used by the bar, the home page, the guide and the report. */
+.levi-mark {
+  flex: none;
+  display: block;
 }
-.levi-shell-mark::after {
-  content: "";
-  position: absolute;
-  right: 3px;
-  top: 3px;
-  width: 6px;
-  height: 6px;
-  border-radius: 1px;
-  background: var(--ds-on-accent);
+.levi-mark__tile {
+  fill: var(--ds-accent);
+}
+.levi-mark__glyph {
+  fill: var(--ds-on-accent);
+}
+.levi-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  color: var(--ds-text-primary);
+  font-family: var(--ds-font-sans);
+  font-weight: var(--ds-weight-semibold);
+  letter-spacing: 0.08em;
 }
 
 .levi-shell-nav {
@@ -133,19 +133,19 @@
   align-items: stretch;
 }
 .levi-shell-nav .levi-pulse-dot {
-  background: var(--ds-text-tertiary);
+  color: var(--ds-text-tertiary);
 }
 .levi-shell-nav .levi-pulse-dot.is-green {
-  background: var(--ds-success);
+  color: var(--ds-success);
 }
 .levi-shell-nav .levi-pulse-dot.is-blue {
-  background: var(--ds-info);
+  color: var(--ds-info);
 }
 .levi-shell-nav .levi-pulse-dot.is-amber {
-  background: var(--ds-warning);
+  color: var(--ds-warning);
 }
 .levi-shell-nav .levi-pulse-dot.is-red {
-  background: var(--ds-danger);
+  color: var(--ds-danger);
 }
 .levi-shell-nav .levi-pulse-count {
   background: var(--ds-warning-bg);
@@ -386,4 +386,10 @@
 }
 .levi-agent-sheet .ds-dialog__body {
   flex: 1;
+}
+
+/* The name is Latin in both languages and keeps its tracking. */
+:lang(zh) .levi-shell-brand,
+:lang(zh) .levi-wordmark {
+  letter-spacing: 0.08em;
 }

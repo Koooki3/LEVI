@@ -13,6 +13,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { DATA_TOKENS, useCssTokens } from "@/lib/design/css-tokens";
 import { useLocale } from "@/components/levi-locale";
 import {
   type BlockSpec,
@@ -54,15 +55,18 @@ export const ReportContext = createContext<ReportContextValue>({
   now: 0,
 });
 
-/** Categorical series colours, validated for the dark report surface. */
-export const SERIES_COLORS = [
-  "#7fa22c",
-  "#3987e5",
-  "#d95926",
-  "#9085e9",
-  "#c98500",
-  "#d55181",
-];
+/** Categorical series colours: the design system's data colours (each at
+ * least 3:1 on the page and on cards, in both themes). */
+export const SERIES_COLORS = DATA_TOKENS;
+const CHART_TOKENS = [
+  ...DATA_TOKENS,
+  "--ds-text-secondary",
+  "--ds-text-tertiary",
+  "--ds-separator",
+  "--ds-separator-strong",
+  "--ds-surface-hover",
+  "--ds-surface-1",
+] as const;
 
 export function BlockError({ message }: { message: string }) {
   const { t } = useLocale();
@@ -218,6 +222,8 @@ function ChartTooltip({
 
 function ChartBlock({ spec }: { spec: Extract<BlockSpec, { kind: "chart" }> }) {
   const { status, lang } = useContext(ReportContext);
+  // SVG attributes cannot read CSS variables: take the values themselves.
+  const color = useCssTokens(CHART_TOKENS);
   const found = lookupChart(status, spec.data);
   if (!found.ok) return <BlockError message={found.error} />;
   const rows = found.value.map((row) => {
@@ -240,24 +246,28 @@ function ChartBlock({ spec }: { spec: Extract<BlockSpec, { kind: "chart" }> }) {
   );
   const title = pick(spec.title, lang);
   const yLabel = pick(spec.y_label, lang);
-  const axis = { stroke: "#89927f", fontSize: 11 };
+  const axis = { stroke: color["--ds-text-tertiary"], fontSize: 12 };
   const common = {
     data: rows,
     margin: { top: 8, right: 16, bottom: 4, left: yLabel ? 12 : 0 },
   };
   const children = [
-    <CartesianGrid key="grid" stroke="#ffffff12" vertical={false} />,
+    <CartesianGrid
+      key="grid"
+      stroke={color["--ds-separator"]}
+      vertical={false}
+    />,
     <XAxis
       key="x"
       dataKey={spec.x}
-      tick={{ fill: "#afb7a8", fontSize: 11 }}
-      stroke="#ffffff30"
+      tick={{ fill: color["--ds-text-secondary"], fontSize: 12 }}
+      stroke={color["--ds-separator-strong"]}
       interval="preserveStartEnd"
     />,
     <YAxis
       key="y"
-      tick={{ fill: "#afb7a8", fontSize: 11 }}
-      stroke="#ffffff30"
+      tick={{ fill: color["--ds-text-secondary"], fontSize: 12 }}
+      stroke={color["--ds-separator-strong"]}
       domain={
         spec.y_domain ??
         (spec.type === "line" || !nonNegative ? ["auto", "auto"] : [0, "auto"])
@@ -271,7 +281,7 @@ function ChartBlock({ spec }: { spec: Extract<BlockSpec, { kind: "chart" }> }) {
               angle: -90,
               position: "insideLeft",
               fill: axis.stroke,
-              fontSize: 11,
+              fontSize: 12,
               style: { textAnchor: "middle" },
             }
           : undefined
@@ -281,13 +291,15 @@ function ChartBlock({ spec }: { spec: Extract<BlockSpec, { kind: "chart" }> }) {
       key="tooltip"
       content={<ChartTooltip />}
       cursor={
-        spec.type === "line" ? { stroke: "#ffffff40" } : { fill: "#ffffff0d" }
+        spec.type === "line"
+          ? { stroke: color["--ds-separator-strong"] }
+          : { fill: color["--ds-surface-hover"] }
       }
     />,
     series.length > 1 ? (
       <Legend
         key="legend"
-        wrapperStyle={{ fontSize: 12, color: "#afb7a8" }}
+        wrapperStyle={{ fontSize: 12, color: color["--ds-text-secondary"] }}
         iconType="circle"
         iconSize={8}
         formatter={(value: string) => (
@@ -313,10 +325,18 @@ function ChartBlock({ spec }: { spec: Extract<BlockSpec, { kind: "chart" }> }) {
                     type="monotone"
                     dataKey={item.key}
                     name={pick(item.label, lang) || item.key}
-                    stroke={SERIES_COLORS[index]}
+                    stroke={color[SERIES_COLORS[index]]}
                     strokeWidth={2}
-                    dot={{ r: 3, strokeWidth: 0, fill: SERIES_COLORS[index] }}
-                    activeDot={{ r: 5, stroke: "#1b231b", strokeWidth: 2 }}
+                    dot={{
+                      r: 3,
+                      strokeWidth: 0,
+                      fill: color[SERIES_COLORS[index]],
+                    }}
+                    activeDot={{
+                      r: 5,
+                      stroke: color["--ds-surface-1"],
+                      strokeWidth: 2,
+                    }}
                     connectNulls
                     isAnimationActive={false}
                   />
@@ -330,7 +350,7 @@ function ChartBlock({ spec }: { spec: Extract<BlockSpec, { kind: "chart" }> }) {
                     key={item.key}
                     dataKey={item.key}
                     name={pick(item.label, lang) || item.key}
-                    fill={SERIES_COLORS[index]}
+                    fill={color[SERIES_COLORS[index]]}
                     radius={[4, 4, 0, 0]}
                     maxBarSize={48}
                     isAnimationActive={false}

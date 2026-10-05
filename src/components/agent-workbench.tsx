@@ -1,5 +1,13 @@
 "use client";
 
+import {
+  PANEL_DEFAULT,
+  PANEL_GUTTER,
+  PANEL_MIN,
+  clampPanelWidth,
+  panelAria,
+  panelWidthForKey,
+} from "./shell/panel-width";
 import { useEffect, useState, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { TeacherChoice, TeachingStatus } from "./agent-supervision";
@@ -191,10 +199,18 @@ export default function AgentWorkbench() {
   const facets = useDatasetFacets(repo);
   const [width, setWidth] = useState<number | null>(null);
   const dragFrom = useRef<{ x: number; width: number } | null>(null);
+  // The window width bounds the drawer (aria-valuemax); read after mount.
+  const [viewport, setViewport] = useState(PANEL_DEFAULT + PANEL_GUTTER);
+  useEffect(() => {
+    const update = () => setViewport(window.innerWidth);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
 
   useEffect(() => {
     const saved = Number(readBrowserStorage("local", "levi-agent-width"));
-    if (saved >= 360) setWidth(saved);
+    if (saved >= PANEL_MIN) setWidth(saved);
   }, []);
   useEffect(() => {
     if (width) writeBrowserStorage("local", "levi-agent-width", String(width));
@@ -393,24 +409,25 @@ export default function AgentWorkbench() {
               if (!dragFrom.current) return;
               const next =
                 dragFrom.current.width + (dragFrom.current.x - event.clientX);
-              setWidth(Math.min(Math.max(360, next), window.innerWidth - 32));
+              setWidth(clampPanelWidth(next, window.innerWidth));
             }}
             onPointerUp={(event) => {
               event.currentTarget.releasePointerCapture(event.pointerId);
               dragFrom.current = null;
             }}
             onKeyDown={(event) => {
-              const step = event.shiftKey ? 80 : 24;
-              if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-                event.preventDefault();
-                setWidth((current) => {
-                  const base = current || 490;
-                  const next =
-                    event.key === "ArrowLeft" ? base + step : base - step;
-                  return Math.min(Math.max(360, next), window.innerWidth - 32);
-                });
-              }
+              const next = panelWidthForKey(
+                event.key,
+                event.shiftKey,
+                width,
+                window.innerWidth,
+              );
+              if (next === null) return;
+              event.preventDefault();
+              setWidth(next);
             }}
+            {...panelAria(width, viewport)}
+            aria-valuetext={`${panelAria(width, viewport)["aria-valuenow"]} px`}
           />
           <p className="levi-agent-muted">
             Sampled evidence · every suggestion is reviewed by you
