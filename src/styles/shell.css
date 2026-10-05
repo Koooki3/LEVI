@@ -466,3 +466,7 @@ body .dsp-panel__header {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* The headline takes focus when the page appears; it is not a control. */
+.levi-error-page__title:focus {
+  outline: none;
+}

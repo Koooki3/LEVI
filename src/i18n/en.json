@@ -2405,5 +2405,6 @@
   "Clear the selected annotation": "Clear the selected annotation",
   "Relates to the \"coverage\" discussion in": "Relates to the \"coverage\" discussion in",
   "Based on \"Is Diversity All You Need\" (AGI-Bot, 2025) which shows velocity normalization dramatically improves fine-tuning success rate.": "Based on \"Is Diversity All You Need\" (AGI-Bot, 2025) which shows velocity normalization dramatically improves fine-tuning success rate.",
-  "Concepts (default: the model's concepts)": "Concepts (default: the model's concepts)"
+  "Concepts (default: the model's concepts)": "Concepts (default: the model's concepts)",
+  "Design system": "Design system"
 }

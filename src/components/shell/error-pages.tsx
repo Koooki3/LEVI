@@ -7,16 +7,43 @@
  * exactly the space below the top bar, so the page does not scroll.
  */
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Compass, Home, RotateCw, TriangleAlert } from "lucide-react";
 import { Button, Card, EmptyState } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
+import { useTitleOverride } from "./route-title";
 
-function Frame({ children, role }: { children: ReactNode; role?: "alert" }) {
+/** The page keeps its `main` landmark; only the words that tell what
+ * happened are announced (`alert`), and focus moves to them so a keyboard or
+ * screen-reader user lands on the news, not on the top bar. */
+function Frame({ children }: { children: ReactNode }) {
   return (
-    <main className="levi-error-page" role={role}>
+    <main className="levi-error-page">
       <Card className="levi-error-page__card">{children}</Card>
     </main>
+  );
+}
+
+/** The headline: focusable (focus lands here when the page appears), and
+ * announced when `alert`. */
+function Headline({
+  children,
+  alert,
+}: {
+  children: ReactNode;
+  alert: boolean;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => ref.current?.focus(), []);
+  return (
+    <span
+      ref={ref}
+      tabIndex={-1}
+      className="levi-error-page__title"
+      role={alert ? "alert" : undefined}
+    >
+      {children}
+    </span>
   );
 }
 
@@ -36,11 +63,14 @@ function HomeLink({ primary }: { primary: boolean }) {
 /** The 404 page. */
 export function NotFoundPage() {
   const { t } = useLocale();
+  useTitleOverride("This page does not exist");
   return (
     <Frame>
       <EmptyState
         icon={Compass}
-        title={t("This page does not exist")}
+        title={
+          <Headline alert={false}>{t("This page does not exist")}</Headline>
+        }
         description={t(
           "The address may be mistyped, or the dataset or episode it names may have been removed or renamed. Start from the home page or Explore.",
         )}
@@ -65,14 +95,21 @@ export function RouteErrorPage({
   onRetry: () => void;
 }) {
   const { t } = useLocale();
+  useTitleOverride("Something went wrong on this page");
   return (
-    <Frame role="alert">
+    <Frame>
       <EmptyState
         icon={TriangleAlert}
-        title={t("Something went wrong on this page")}
-        description={t(
-          "LEVI hit an error while showing this page. Your data is untouched. Try again; if it keeps happening, go back to the home page and open the page again.",
-        )}
+        title={
+          <Headline alert>{t("Something went wrong on this page")}</Headline>
+        }
+        description={
+          <span role="alert">
+            {t(
+              "LEVI hit an error while showing this page. Your data is untouched. Try again; if it keeps happening, go back to the home page and open the page again.",
+            )}
+          </span>
+        }
         action={
           <Button variant="primary" icon={RotateCw} onClick={onRetry}>
             {t("Try again")}

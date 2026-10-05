@@ -1255,9 +1255,14 @@
 
 /* ── Reduced motion: nothing spins, shuttles or breathes. ─────────── */
 @media (prefers-reduced-motion: reduce) {
-  .ds-spin,
-  .ds-breathe,
-  .ds-progress__track--indeterminate .ds-progress__bar {
+  /* Not under the in-app "normal" choice (data-motion="full" on <html>): the
+     person asked for motion, and a still indeterminate bar would look like a
+     frozen 30 %. The component follows the same setting (usePrefersReducedMotion). */
+  :root:not([data-motion="full"]) .ds-spin,
+  :root:not([data-motion="full"]) .ds-breathe,
+  :root:not([data-motion="full"])
+    .ds-progress__track--indeterminate
+    .ds-progress__bar {
     animation: none;
   }
 }

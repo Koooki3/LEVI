@@ -6,6 +6,7 @@ import "@/styles/tokens.css";
 import "@/styles/ds.css";
 import "@/styles/shell.css";
 import "./globals.css";
+import { useEffect, useRef } from "react";
 
 export default function GlobalError({
   error,
@@ -14,17 +15,34 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const headline = useRef<HTMLSpanElement>(null);
+  useEffect(() => headline.current?.focus(), []);
   return (
     <html lang="en">
       <body>
-        <main className="levi-error-page levi-error-page--bare" role="alert">
+        <main className="levi-error-page levi-error-page--bare">
           <div className="ds-card ds-card--default ds-card--regular levi-error-page__card">
             <div className="ds-empty">
-              <p className="ds-empty__title">Something went wrong · 出错了</p>
-              <p className="ds-empty__description">
-                LEVI could not show this page. Reload it; your data is
-                untouched. · LEVI
-                无法显示此页面。请重新加载；你的数据没有受到影响。
+              <p className="ds-empty__title">
+                <span
+                  ref={headline}
+                  tabIndex={-1}
+                  role="alert"
+                  className="levi-error-page__title"
+                >
+                  <span lang="en">Something went wrong</span> ·{" "}
+                  <span lang="zh">出错了</span>
+                </span>
+              </p>
+              <p className="ds-empty__description" role="alert">
+                <span lang="en">
+                  LEVI could not show this page. Reload it; your data is
+                  untouched.
+                </span>{" "}
+                ·{" "}
+                <span lang="zh">
+                  LEVI 无法显示此页面。请重新加载；你的数据没有受到影响。
+                </span>
               </p>
               <div className="ds-empty__actions">
                 <button
@@ -32,13 +50,16 @@ export default function GlobalError({
                   className="ds-btn ds-btn--primary ds-focus"
                   onClick={reset}
                 >
-                  Try again · 重试
+                  <span lang="en">Try again</span> · <span lang="zh">重试</span>
                 </button>
               </div>
             </div>
             {error.message && (
               <details className="levi-error-page__details">
-                <summary>Technical details · 技术细节</summary>
+                <summary>
+                  <span lang="en">Technical details</span> ·{" "}
+                  <span lang="zh">技术细节</span>
+                </summary>
                 <pre>{error.message}</pre>
               </details>
             )}

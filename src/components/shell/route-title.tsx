@@ -5,7 +5,7 @@
  * language-neutral name; the language is a browser-side choice, so this
  * component sets `document.title` from the path.
  */
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import { useLocale } from "@/components/levi-locale";
 
@@ -44,22 +44,48 @@ export function routePageName(pathname: string | null): string | null {
   }
 }
 
-/** "Explore · LEVI"; the viewer adds the dataset: "Episode viewer ·
- * lerobot/aloha · LEVI". */
+/** "Explore · LEVI"; the viewer adds the dataset and the episode: "Episode
+ * viewer · lerobot/aloha · Episode 3 · LEVI". `override` (a catalogue key)
+ * replaces the page name: the not-found and error pages name themselves. */
 export function routeTitle(
   pathname: string | null,
   translate: (text: string) => string = (text) => text,
+  override: string | null = null,
 ): string {
+  if (override) return `${translate(override)} · ${PRODUCT_TITLE}`;
   const name = routePageName(pathname);
   if (!name) return PRODUCT_TITLE;
   const parts = [translate(name)];
   if (name === "Episode viewer" && pathname) {
-    const [org, dataset] = pathname.split("/").filter(Boolean);
+    const [org, dataset, episode] = pathname.split("/").filter(Boolean);
     if (org && dataset)
       parts.push(`${decodeURIComponent(org)}/${decodeURIComponent(dataset)}`);
+    const number = /^episode_(\d+)$/.exec(episode ?? "")?.[1];
+    if (number) parts.push(translate(`Episode ${number}`));
   }
   parts.push(PRODUCT_TITLE);
   return parts.join(" · ");
+}
+
+// A page the framework answers itself (404, error) cannot be told from the
+// path: it names itself here, and RouteTitle shows that.
+let override: string | null = null;
+const listeners = new Set<() => void>();
+export function setTitleOverride(name: string | null) {
+  override = name;
+  listeners.forEach((listener) => listener());
+}
+const subscribe = (listener: () => void) => {
+  listeners.add(listener);
+  return () => void listeners.delete(listener);
+};
+
+/** Names the page for the tab title while the component is mounted. */
+export function useTitleOverride(name: string) {
+  useEffect(() => {
+    setTitleOverride(name);
+    return () => setTitleOverride(null);
+  }, [name]);
 }
 
 /**
@@ -72,8 +98,13 @@ export function routeTitle(
 export function RouteTitle() {
   const pathname = usePathname();
   const { t, language } = useLocale();
+  const named = useSyncExternalStore(
+    subscribe,
+    () => override,
+    () => null,
+  );
   useEffect(() => {
-    const want = routeTitle(pathname, t);
+    const want = routeTitle(pathname, t, named);
     let watched: Element | null = null;
     const observer = new MutationObserver(() => sync());
     const watch = () => {
@@ -98,6 +129,6 @@ export function RouteTitle() {
     return () => observer.disconnect();
     // `t` is rebuilt on every render; the language is what changes it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname, language]);
+  }, [pathname, language, named]);
   return null;
 }

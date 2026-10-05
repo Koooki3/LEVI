@@ -6,7 +6,9 @@ import zh from "@/i18n/zh.json";
 import { navPages } from "../commands";
 import { routePageName, routeTitle } from "../route-title";
 
-const zhText = (text: string) => (zh as Record<string, string>)[text] ?? text;
+const zhText = (text: string) =>
+  (zh as Record<string, string>)[text] ??
+  text.replace(/^Episode (\d+)$/, "片段 $1");
 
 describe("tab titles", () => {
   test("every page names itself and the product", () => {
@@ -18,7 +20,7 @@ describe("tab titles", () => {
     expect(routeTitle("/pool")).toBe("Training pool · LEVI");
     expect(routeTitle("/live")).toBe("Live evaluation · LEVI");
     expect(routeTitle("/lerobot/aloha_static_coffee/episode_3")).toBe(
-      "Episode viewer · lerobot/aloha_static_coffee · LEVI",
+      "Episode viewer · lerobot/aloha_static_coffee · Episode 3 · LEVI",
     );
   });
 
@@ -29,13 +31,22 @@ describe("tab titles", () => {
     expect(routeTitle("/org/ds")).toBe("Episode viewer · org/ds · LEVI");
   });
 
+  test("a page that names itself (not found, error) overrides the path", () => {
+    expect(routeTitle("/no/such", undefined, "This page does not exist")).toBe(
+      "This page does not exist · LEVI",
+    );
+    expect(
+      routeTitle("/no/such", zhText, "Something went wrong on this page"),
+    ).toBe("这个页面出错了 · LEVI");
+  });
+
   test("the name is in the reader's language", () => {
     expect(routeTitle("/explore", zhText)).toBe("探索数据 · LEVI");
     expect(routeTitle("/pool", zhText)).toBe("训练池 · LEVI");
     expect(routeTitle("/live", zhText)).toBe("实时评测 · LEVI");
     expect(routeTitle("/", zhText)).toBe("首页 · LEVI");
     expect(routeTitle("/org/ds/episode_0", zhText)).toBe(
-      "片段查看器 · org/ds · LEVI",
+      "片段查看器 · org/ds · 片段 0 · LEVI",
     );
   });
 
@@ -45,7 +56,7 @@ describe("tab titles", () => {
       expect((en as Record<string, string>)[page.label]).toBeTruthy();
       expect((zh as Record<string, string>)[page.label]).toBeTruthy();
     }
-    for (const name of ["Home", "Episode viewer"]) {
+    for (const name of ["Home", "Episode viewer", "Design system"]) {
       expect((zh as Record<string, string>)[name]).toBeTruthy();
     }
   });

@@ -1,5 +1,11 @@
 import { act, type ReactNode } from "react";
-import { flush, render, setupDom } from "@/components/ds/__tests__/dom";
+import {
+  flush,
+  mockMatchMedia,
+  render,
+  setupDom,
+} from "@/components/ds/__tests__/dom";
+import { Progress } from "@/components/ds";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -107,5 +113,41 @@ describe("the motion setting", () => {
       "Motion: normal",
     ])
       expect(header).toContain(key);
+  });
+
+  test("'normal' keeps the indeterminate bar moving when the system asks for less", async () => {
+    const restore = mockMatchMedia(["prefers-reduced-motion"]);
+    try {
+      document.documentElement.removeAttribute("data-motion");
+      const { host } = await render(<Progress label="Reading" value={null} />);
+      const track = () => host.querySelector(".ds-progress__track")!;
+      await flush();
+      // The system asks for less: still, with the words.
+      expect(track().className).toContain("ds-progress__track--still");
+      await act(async () => {
+        document.documentElement.setAttribute("data-motion", "full");
+      });
+      await flush();
+      // The person chose normal: moving, not a frozen 30 %.
+      expect(track().className).not.toContain("ds-progress__track--still");
+      expect(host.textContent).not.toContain("In progress");
+    } finally {
+      document.documentElement.removeAttribute("data-motion");
+      restore();
+    }
+  });
+
+  test("the stylesheet's media query stands down under 'normal'", () => {
+    const css = readFileSync(
+      join(import.meta.dir, "../../../styles/ds.css"),
+      "utf8",
+    );
+    expect(css).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{[^}]*:root:not\(\[data-motion="full"\]\) \.ds-spin/,
+    );
+    expect(css).toMatch(/:root:not\(\[data-motion="full"\]\) \.ds-breathe/);
+    expect(css).toMatch(
+      /:root:not\(\[data-motion="full"\]\)\s+\.ds-progress__track--indeterminate\s+\.ds-progress__bar/,
+    );
   });
 });
