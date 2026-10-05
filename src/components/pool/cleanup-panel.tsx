@@ -1,4 +1,5 @@
 "use client";
+import { useColon } from "@/components/pages-ui/messages";
 import { useCallback, useEffect, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
@@ -51,6 +52,7 @@ export function CleanupPanel({
   onNotice: (text: string) => void;
 }) {
   const { t } = useLocale();
+  const colon = useColon();
   const [inventory, setInventory] = useState<CleanupInventory | null>(null);
   const [error, setError] = useState("");
   const [confirming, setConfirming] = useState<
@@ -99,7 +101,7 @@ export function CleanupPanel({
   const empty =
     inventory && !inventory.partials.length && !inventory.jobs.length;
   return (
-    <section className="pg-pool-card" aria-labelledby="pool-cleanup">
+    <section className="pg-box pg-pool-cleanup" aria-labelledby="pool-cleanup">
       <h2 id="pool-cleanup">{t("Cleanup")}</h2>
       <p className="pg-pool-hint">
         {t(
@@ -186,7 +188,8 @@ export function CleanupPanel({
       {inventory && (
         <div className="pg-row">
           <span className="pg-pool-hint">
-            {t("Ready to remove")}:{" "}
+            {t("Ready to remove")}
+            {colon}
             <strong>{bytes(inventory.reclaimable_bytes)}</strong>
           </span>
           <Button

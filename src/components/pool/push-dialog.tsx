@@ -1,4 +1,5 @@
 "use client";
+import { useColon } from "@/components/pages-ui/messages";
 import { useServerText } from "@/components/pages-ui/messages";
 import { Plus, Send, Server, Trash2, X } from "lucide-react";
 import { Button, IconButton } from "@/components/ds";
@@ -31,6 +32,7 @@ export function PushDialog({
   onClose: () => void;
 }) {
   const { t } = useLocale();
+  const colon = useColon();
   const serverText = useServerText();
   const confirm = useConfirmAction();
   const ref = useRef<HTMLDialogElement>(null);
@@ -92,7 +94,9 @@ export function PushDialog({
         />
       </form>
       <p className="pg-pool-hint">
-        {t("Export")}: <code>{source}</code>
+        {t("Export")}
+        {colon}
+        <code>{source}</code>
       </p>
       <p className="pg-pool-hint">
         {t(
@@ -117,7 +121,7 @@ export function PushDialog({
               variant="ghost"
               className="pg-danger-text"
               icon={Trash2}
-              aria-label={`${t("Delete")}: ${x.name}`}
+              aria-label={`${t("Delete")}${colon}${x.name}`}
               onClick={() =>
                 void act(async () => {
                   if (
@@ -226,7 +230,8 @@ export function PushDialog({
       </fieldset>
       {chosen && (
         <p className="pg-pool-hint">
-          {t("Destination")}:{" "}
+          {t("Destination")}
+          {colon}
           <code>
             {chosen.display?.split(" ")[0]}/{source.split("/").pop()}/
           </code>

@@ -2375,3 +2375,12 @@
   animation: none;
   transition: none;
 }
+
+/* The training pool's cleanup card is a card like the pool folders one, and
+   the link back to Conversion & review does not touch it. */
+.pg-workbench .pg-pool-cleanup {
+  margin-bottom: var(--ds-space-5);
+}
+.pg-workbench .pg-pool-footer {
+  margin-top: var(--ds-space-6);
+}

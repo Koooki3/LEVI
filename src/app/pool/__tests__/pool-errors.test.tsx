@@ -1,5 +1,6 @@
 import { click, flush, render, setupDom } from "@/components/ds/__tests__/dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
+import { LocaleProvider } from "@/components/levi-locale";
 
 mock.module("next/navigation", () => ({
   useRouter: () => ({ push: () => {}, replace: () => {} }),
@@ -107,5 +108,36 @@ describe("the training pool's errors", () => {
     )!;
     expect(why.textContent).toContain("not enabled");
     expect(why.textContent).not.toContain("Scan the pool");
+  });
+
+  test("Chinese labels take the full-width colon; English keeps its own", async () => {
+    const answer = (path: string) =>
+      path.includes("/pool/status")
+        ? json(STATUS)
+        : path.includes("/pool/recipes")
+          ? json({ recipes: [] })
+          : path.includes("/pool/cleanup")
+            ? json({
+                partials: [],
+                jobs: [],
+                disk: [],
+                freeable: 0,
+              })
+            : json({});
+    localStorage.setItem("levi-language", "zh");
+    serve(answer);
+    const zh = await render(
+      <LocaleProvider>
+        <PoolPage />
+      </LocaleProvider>,
+    );
+    await flush(120);
+    expect(zh.host.textContent).toContain("上次扫描：从未");
+    expect(zh.host.textContent).not.toContain("上次扫描:");
+    localStorage.clear();
+    serve(answer);
+    const en = await render(<PoolPage />);
+    await flush(80);
+    expect(en.host.textContent).toContain("Last scan: never");
   });
 });

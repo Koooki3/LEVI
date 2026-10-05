@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ServicePanel } from "../service-panel";
+import { ServiceOffline, ServicePanel } from "../service-panel";
 import type { LiveStatusResponse } from "../types";
 
 const status = {
@@ -29,5 +29,15 @@ describe("the service panel with no status file at all", () => {
     expect(html).toContain("No status file yet.");
     expect(html).not.toMatch(/class="[^"]*\bstale\b/);
     expect(html).not.toContain("Not running");
+  });
+});
+
+describe("the offline note when the live core does not answer", () => {
+  test("a command in backticks is code, not backticks on the page", () => {
+    const html = renderToStaticMarkup(
+      <ServiceOffline status={null} coreError="HTTP 502" />,
+    );
+    expect(html).toContain("<code>levi live start</code>");
+    expect(html).not.toContain("`");
   });
 });

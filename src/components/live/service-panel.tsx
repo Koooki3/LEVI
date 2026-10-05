@@ -14,7 +14,7 @@ import {
 import { Chip, Field, type Tone } from "./session-panels";
 import { Check, ClipboardCopy, Hand, PlugZap, Server } from "lucide-react";
 import { Button, Icon } from "@/components/ds";
-import { EmptyLine, Problem } from "@/components/pages-ui/feedback";
+import { EmptyLine, Problem, withCode } from "@/components/pages-ui/feedback";
 import type { LiveStatusResponse } from "./types";
 import { PAUSE_NOTES, type NeedsPerson } from "./live-logic";
 
@@ -199,8 +199,10 @@ export function ServiceOffline({
       </strong>
       <p>
         {coreError
-          ? t(
-              "This page cannot reach the live LEVI core, so nothing below is current. Check that `levi live start` is running and that this page belongs to it.",
+          ? withCode(
+              t(
+                "This page cannot reach the live LEVI core, so nothing below is current. Check that `levi live start` is running and that this page belongs to it.",
+              ),
             )
           : t(
               "Finished rollouts are not being labelled. Evaluation sessions and the FR3 state below are still read straight from their files.",

@@ -1,4 +1,5 @@
 "use client";
+import { useColon } from "@/components/pages-ui/messages";
 import { ArrowUpRight, Check, Pencil } from "lucide-react";
 import { Button, Icon, SkeletonText } from "@/components/ds";
 import { RequestProblem } from "@/components/pages-ui/feedback";
@@ -38,6 +39,7 @@ export function TaskPick({
   onChange: (patch: Partial<TaskEntry>) => void;
 }) {
   const { t } = useLocale();
+  const colon = useColon();
   const [editing, setEditing] = useState(false);
   const short = report && (report.shortfall > 0 || report.notes.length > 0);
   return (
@@ -57,7 +59,10 @@ export function TaskPick({
           <span className="pg-pool-muted">…</span>
         )}
         <span className="pg-pool-badge">
-          <span className="sr-only">{t("How to pick")}: </span>
+          <span className="sr-only">
+            {t("How to pick")}
+            {colon}
+          </span>
           {t(STRATEGY_LABELS[entry.strategy])}
         </span>
         <Button
@@ -118,6 +123,7 @@ export function PickedList({
   load: (task: string) => Promise<PickedEpisodes>;
 }) {
   const { t } = useLocale();
+  const colon = useColon();
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<PickedEpisodes | null>(null);
   const [error, setError] = useState("");
@@ -164,7 +170,7 @@ export function PickedList({
       {open && data && (
         <ol
           className="pg-pool-picked-list"
-          aria-label={`${t("Picked episodes")}: ${task}`}
+          aria-label={`${t("Picked episodes")}${colon}${task}`}
         >
           {data.episodes.map((row) => (
             <li key={row.key} title={row.sel_stratum}>
@@ -268,6 +274,7 @@ export function GripperMix({
  * how rollouts were run, so a lean shows before it is exported. */
 export function MixSummary({ mix }: { mix: Mix }) {
   const { t } = useLocale();
+  const colon = useColon();
   if (!mix.episodes) return null;
   const decided = mix.successes + mix.failures;
   return (
@@ -316,7 +323,8 @@ export function MixSummary({ mix }: { mix: Mix }) {
       </div>
       {mix.lean && (
         <p className="pg-pool-warn" role="status">
-          {t("The composition leans to one group")}:{" "}
+          {t("The composition leans to one group")}
+          {colon}
           {t(
             mix.lean.dimension === "category"
               ? CATEGORY_NAMES[mix.lean.value] || mix.lean.value

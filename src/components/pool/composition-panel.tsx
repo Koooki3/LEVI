@@ -1,4 +1,5 @@
 "use client";
+import { useColon } from "@/components/pages-ui/messages";
 import { useState } from "react";
 import {
   ArrowDown,
@@ -110,6 +111,7 @@ export function CompositionPanel({
   refreshKey: string;
 }) {
   const { t } = useLocale();
+  const colon = useColon();
   const confirm = useConfirmAction();
   const [announce, setAnnounce] = useState("");
   const [chosenRecipe, setChosenRecipe] = useState("");
@@ -131,19 +133,21 @@ export function CompositionPanel({
   );
   const constraints: string[] = [
     ...recipe.categories.map((c) => t(CATEGORY_LABELS[c] || c)),
-    ...recipe.sources.map((s) => `${t("Source")}: ${s}`),
-    ...recipe.policies.map((p) => `${t("Policy")}: ${p}`),
-    ...(recipe.policy_models || []).map((p) => `${t("Policy model")}: ${p}`),
+    ...recipe.sources.map((s) => `${t("Source")}${colon}${s}`),
+    ...recipe.policies.map((p) => `${t("Policy")}${colon}${p}`),
+    ...(recipe.policy_models || []).map(
+      (p) => `${t("Policy model")}${colon}${p}`,
+    ),
     ...(recipe.policy_checkpoints || []).map(
-      (p) => `${t("Policy checkpoint")}: ${p}`,
+      (p) => `${t("Policy checkpoint")}${colon}${p}`,
     ),
     ...(recipe.policy_methods || []).map(
-      (p) => `${t("How it was run")}: ${t(METHOD_LABELS[p] || p)}`,
+      (p) => `${t("How it was run")}${colon}${t(METHOD_LABELS[p] || p)}`,
     ),
     ...(recipe.grippers || []).map(
-      (g) => `${t("Gripper")}: ${gripperLabel(g, t)}`,
+      (g) => `${t("Gripper")}${colon}${gripperLabel(g, t)}`,
     ),
-    ...(recipe.robots || []).map((r) => `${t("Robot")}: ${r}`),
+    ...(recipe.robots || []).map((r) => `${t("Robot")}${colon}${r}`),
     ...(recipe.outcome !== "all"
       ? [
           t(
@@ -199,21 +203,21 @@ export function CompositionPanel({
                   <IconButton
                     size="sm"
                     icon={ArrowUp}
-                    label={`${t("Move up")}: ${task}`}
+                    label={`${t("Move up")}${colon}${task}`}
                     disabled={index === 0}
                     onClick={() => reorder(index, index - 1)}
                   />
                   <IconButton
                     size="sm"
                     icon={ArrowDown}
-                    label={`${t("Move down")}: ${task}`}
+                    label={`${t("Move down")}${colon}${task}`}
                     disabled={index === recipe.tasks.length - 1}
                     onClick={() => reorder(index, index + 1)}
                   />
                   <IconButton
                     size="sm"
                     icon={X}
-                    label={`${t("Remove")}: ${task}`}
+                    label={`${t("Remove")}${colon}${task}`}
                     onClick={() =>
                       set({
                         tasks: recipe.tasks.filter((x) => x.task !== task),
@@ -405,7 +409,8 @@ export function CompositionPanel({
             )}
             {Object.keys(preview.outcome_sources || {}).length > 0 && (
               <p className="pg-pool-hint">
-                {t("Outcome from")}:{" "}
+                {t("Outcome from")}
+                {colon}
                 {Object.entries(preview.outcome_sources)
                   .map(
                     ([source, n]) =>
@@ -422,7 +427,8 @@ export function CompositionPanel({
             <PoolWarnings warnings={preview.warnings} />
             {preview.tasks_without_episodes.length > 0 && (
               <p className="pg-warnings">
-                {t("No episodes left for")}:{" "}
+                {t("No episodes left for")}
+                {colon}
                 {preview.tasks_without_episodes.join(", ")}
               </p>
             )}
