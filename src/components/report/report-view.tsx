@@ -240,10 +240,16 @@ function StatusStrip({
       >
         <span
           className={`lr-live ${live ? "lr-live-on" : "lr-live-off"}`}
-          tabIndex={0}
+          role="status"
         >
           <Icon icon={live ? Radio : WifiOff} />
           {t(live ? "report.live" : "report.offline")}
+          {/* The hint is a hover tooltip for the pointer; the words are here
+              for everyone else (the badge is not a control to focus). */}
+          <span className="ds-sr-only">
+            {" — "}
+            {t(live ? "report.liveHint" : "report.offlineHint")}
+          </span>
         </span>
       </Tooltip>
       {status?.generated_at && (

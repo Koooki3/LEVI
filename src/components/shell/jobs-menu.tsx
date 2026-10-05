@@ -118,9 +118,11 @@ export function useRunningJobs(
 const percent = (fraction: number) => `${Math.round(fraction * 100)}%`;
 
 export function JobsMenu({ pool }: { pool: boolean }) {
-  const { t } = useLocale();
+  const { t, language } = useLocale();
   const router = useRouter();
   const toast = useToast();
+  // "Training pool export: finished" / "训练池导出：已完成".
+  const colon = language === "zh" ? "：" : ": ";
   const { counts, entries, refresh } = useRunningJobs(pool, (finished) => {
     for (const { entry, outcome } of finished) {
       const page = entry.kind === "pool" ? "/pool" : "/workbench";
@@ -133,10 +135,10 @@ export function JobsMenu({ pool }: { pool: boolean }) {
               : "danger",
         title:
           outcome === "success"
-            ? `${t(entry.what)}: ${t("finished")}`
+            ? `${t(entry.what)}${colon}${t("finished")}`
             : outcome === "warning"
-              ? `${t(entry.what)}: ${t("finished with errors")}`
-              : `${t(entry.what)}: ${t("failed")}`,
+              ? `${t(entry.what)}${colon}${t("finished with errors")}`
+              : `${t(entry.what)}${colon}${t("failed")}`,
         description: entry.name || undefined,
         action: { label: t("Show the job"), onClick: () => router.push(page) },
       });

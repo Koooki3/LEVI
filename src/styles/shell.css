@@ -470,3 +470,35 @@ body .dsp-panel__header {
 .levi-error-page__title:focus {
   outline: none;
 }
+
+/* ── Skip to main content ───────────────────────────────────────────── */
+/* Out of sight until it takes keyboard focus, then above the bar. */
+.levi-skip {
+  position: absolute;
+  top: var(--ds-space-2);
+  left: var(--ds-space-2);
+  z-index: calc(var(--ds-z-overlay) + 10);
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.levi-skip:focus {
+  width: auto;
+  height: auto;
+  padding: var(--ds-space-2) var(--ds-space-3);
+  overflow: visible;
+  clip-path: none;
+  border: 1px solid var(--ds-border-control);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-2);
+  color: var(--ds-text-primary);
+  box-shadow: var(--ds-shadow-2);
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
+/* The main element takes focus from the link; it is not a control. */
+main:focus {
+  outline: none;
+}

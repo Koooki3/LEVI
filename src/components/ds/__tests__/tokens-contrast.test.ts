@@ -270,7 +270,7 @@ describe("token structure", () => {
     expect(media["--ds-motion-press-scale"]).toBe("1");
     // Spinners, shuttles and breathing stop too.
     expect(DS).toMatch(
-      /@media \(prefers-reduced-motion: reduce\) \{\s*\.ds-spin,\s*\.ds-breathe,[^}]*animation: none;/,
+      /@media \(prefers-reduced-motion: reduce\) \{[^{}]*?:root:not\(\[data-motion="full"\]\) \.ds-spin,\s*:root:not\(\[data-motion="full"\]\) \.ds-breathe,[^}]*animation: none;/,
     );
   });
 

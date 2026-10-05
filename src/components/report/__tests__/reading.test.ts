@@ -37,4 +37,17 @@ describe("reading styles", () => {
       /\.lr-md-table td:first-child \{[^}]*min-width:\s*6\.5em/,
     );
   });
+
+  test("the live badge is a status, not a focusable span with a hidden tooltip", () => {
+    const view = readFileSync(
+      join(src, "components/report/report-view.tsx"),
+      "utf8",
+    );
+    const badge =
+      /className=\{`lr-live [^`]*`\}[\s\S]*?>/.exec(view)?.[0] ?? "";
+    expect(badge).toContain('role="status"');
+    expect(badge).not.toContain("tabIndex");
+    // The hint is in words for everyone, besides the pointer's tooltip.
+    expect(view).toMatch(/ds-sr-only[\s\S]{0,120}report\.liveHint/);
+  });
 });

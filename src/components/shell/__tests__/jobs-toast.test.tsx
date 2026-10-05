@@ -169,4 +169,60 @@ describe("the Jobs entry", () => {
       globalThis.setInterval = realSetInterval;
     }
   });
+
+  test("in Chinese the title uses the full-width colon", async () => {
+    const { LocaleProvider } = await import("@/components/levi-locale");
+    window.localStorage.setItem("levi-language", "zh");
+    let phase: "running" | "done" = "running";
+    const original = globalThis.fetch;
+    globalThis.fetch = ((url: string) =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify(
+            String(url).includes("pool")
+              ? {
+                  jobs: [
+                    {
+                      id: "p1",
+                      kind: "export",
+                      status: phase,
+                      options: { name: "plates-v3" },
+                    },
+                  ],
+                }
+              : [],
+          ),
+        ),
+      )) as unknown as typeof fetch;
+    const realSetInterval = globalThis.setInterval;
+    const ticks: Array<() => void> = [];
+    globalThis.setInterval = ((fn: () => void) => {
+      ticks.push(fn);
+      return ticks.length as unknown as ReturnType<typeof setInterval>;
+    }) as unknown as typeof setInterval;
+    try {
+      await render(
+        <LocaleProvider>
+          <ToastProvider>
+            <JobsMenu pool />
+          </ToastProvider>
+        </LocaleProvider>,
+      );
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      phase = "done";
+      await act(async () => {
+        ticks.forEach((tick) => tick());
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      const region = document.body.textContent ?? "";
+      expect(region).toContain("训练池导出：已完成");
+      expect(region).not.toContain("训练池导出: ");
+    } finally {
+      globalThis.fetch = original;
+      globalThis.setInterval = realSetInterval;
+      window.localStorage.removeItem("levi-language");
+    }
+  });
 });

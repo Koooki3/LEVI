@@ -9,6 +9,7 @@ import { LocaleProvider } from "@/components/levi-locale";
 import AgentWorkbench from "@/components/agent-workbench";
 import LeviHeader from "@/components/levi-header";
 import { AppFrame } from "@/components/shell/app-frame";
+import { SkipToContent } from "@/components/shell/skip-to-content";
 import { RouteTitle } from "@/components/shell/route-title";
 import { THEME_BOOT_SCRIPT } from "@/components/shell/theme-boot";
 // The name is the same in both languages; the tab title gets the page's name
@@ -35,6 +36,7 @@ export default function RootLayout({
         <LocaleProvider>
           <AuthProvider>
             <AppFrame>
+              <SkipToContent />
               <RouteTitle />
               <LeviHeader />
               {children}
