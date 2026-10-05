@@ -3,86 +3,18 @@
    not UI code, and its words must not add utilities to the stylesheet. */
 @source not "../../docs";
 
-/* ── Global page base (design stage 5) ─────────────────────────────
+/* ── Global page base ──────────────────────────────────────────────
  * Every colour here is a --ds-* token (src/styles/tokens.css), so the
- * whole site follows the light and dark themes. No colour literals.
- *
- * Older names, kept while pages move to the tokens: the variables below
- * (`--bg`, `--surface-*`, `--text-*`, `--accent*`) and the Tailwind colour
- * scales (`slate`, `cyan`, `white`, the status hues) point at the tokens,
- * so a page that still uses them already looks like the rest. New code uses
- * the tokens and `ds-*` classes directly (docs/DESIGN.md, "Older names"). */
-:root {
-  --bg: var(--ds-bg);
-  --surface-0: var(--ds-surface-sunken);
-  --surface-1: var(--ds-surface-1);
-  --surface-2: var(--ds-surface-2);
-  --border-subtle: var(--ds-separator);
-  --border-strong: var(--ds-separator-strong);
-  --text-primary: var(--ds-text-primary);
-  --text-muted: var(--ds-text-secondary);
-  --text-faint: var(--ds-text-tertiary);
-  --accent: var(--ds-accent);
-  --accent-soft: color-mix(in srgb, var(--ds-accent) 12%, transparent);
-  --accent-ring: var(--ds-focus-ring);
-  --radius: var(--ds-radius-sm);
-  /* Older font names some components still read. */
-  --font-geist-sans: var(--ds-font-sans);
-  --font-geist-mono: var(--ds-font-mono);
-}
-
+ * whole site follows the light and dark themes. No colour literals, and no
+ * older names: the `--bg`/`--accent` variables and the remapped Tailwind
+ * colour scales (`white`, `slate`, `cyan`, ...) are gone, so a Tailwind
+ * colour class means Tailwind's colour. Use the tokens and `ds-*` classes
+ * (docs/DESIGN.md). */
 @theme inline {
-  --color-bg: var(--ds-bg);
-  --color-surface-0: var(--ds-surface-sunken);
-  --color-surface-1: var(--ds-surface-1);
-  --color-surface-2: var(--ds-surface-2);
-  --color-accent: var(--ds-accent);
   /* Text over video and images: white in both themes (`text-on-media`). */
   --color-on-media: var(--ds-on-media);
   --font-sans: var(--ds-font-sans);
   --font-mono: var(--ds-font-mono);
-
-  /* Older Tailwind colour scales, onto the tokens. `white` was the text
-     colour on the dark pages (`border-white/10` a faint line, `bg-white/5`
-     a faint fill): it becomes the primary text colour, which is dark in the
-     light theme. `black` stays black: media areas are black in both. */
-  --color-white: var(--ds-text-primary);
-  --color-cyan-200: var(--ds-accent-hover);
-  --color-cyan-300: var(--ds-accent);
-  --color-cyan-400: var(--ds-accent);
-  --color-cyan-500: var(--ds-accent);
-  --color-cyan-600: var(--ds-accent-hover);
-  --color-slate-100: var(--ds-text-primary);
-  --color-slate-200: var(--ds-text-primary);
-  --color-slate-300: var(--ds-text-secondary);
-  --color-slate-400: var(--ds-text-secondary);
-  --color-slate-500: var(--ds-text-secondary);
-  --color-slate-600: var(--ds-text-tertiary);
-  --color-slate-700: var(--ds-separator-strong);
-  --color-slate-800: var(--ds-separator);
-  --color-slate-900: var(--ds-surface-1);
-  --color-slate-950: var(--ds-bg);
-  --color-zinc-400: var(--ds-text-secondary);
-  --color-lime-200: var(--ds-accent);
-  --color-lime-300: var(--ds-accent);
-  --color-lime-400: var(--ds-accent);
-  --color-red-200: var(--ds-danger);
-  --color-red-300: var(--ds-danger);
-  --color-red-400: var(--ds-danger);
-  --color-red-500: var(--ds-danger);
-  --color-red-600: var(--ds-danger);
-  --color-orange-300: var(--ds-warning);
-  --color-orange-400: var(--ds-warning);
-  --color-orange-500: var(--ds-warning);
-  --color-amber-300: var(--ds-warning);
-  --color-yellow-400: var(--ds-warning);
-  --color-green-400: var(--ds-success);
-  --color-emerald-200: var(--ds-success);
-  --color-emerald-300: var(--ds-success);
-  --color-emerald-400: var(--ds-success);
-  --color-emerald-500: var(--ds-success);
-  --color-blue-400: var(--ds-info);
-  --color-blue-500: var(--ds-info);
 }
 
 html {
@@ -90,8 +22,9 @@ html {
   /* Native controls (scrollbars, select lists, date pickers) follow the
      theme; tokens.css sets light or dark on [data-theme]. */
   color-scheme: light dark;
-  /* The top bar must not hide a focused element when the page scrolls. */
-  scroll-padding-top: calc(var(--levi-header-height, 56px) + var(--ds-space-2));
+  /* The top bar stays in view, so it must not hide a focused element or an
+     anchor when the page scrolls (--levi-sticky-top, shell.css). */
+  scroll-padding-top: calc(var(--levi-sticky-top, 0px) + var(--ds-space-2));
 }
 
 body {
@@ -129,19 +62,6 @@ body {
   color: var(--ds-text-primary);
 }
 
-/* ── Older panel helpers, on the tokens ──────────────────────────── */
-.panel {
-  border: 1px solid var(--ds-separator);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-surface-1);
-}
-.panel-raised {
-  border: 1px solid var(--ds-separator);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-surface-2);
-  box-shadow: var(--ds-shadow-2), var(--ds-ring-raised);
-}
-
 /* Scrollbar: thin, quiet, from the separator greys. */
 * {
   scrollbar-color: var(--ds-separator-strong) transparent;
@@ -164,21 +84,27 @@ body {
   background-clip: padding-box;
 }
 
-/* Pop-in for older dropdowns (Hugging Face account menu): the token
-   duration, and none under reduced motion. */
-@keyframes menuPop {
-  from {
-    opacity: 0;
-    transform: translateY(calc(-1 * var(--ds-motion-shift)))
-      scale(var(--ds-motion-dialog-scale));
-  }
-  to {
-    opacity: 1;
-    transform: none;
+/* ── Page-wide base for controls ───────────────────────────────────── */
+button {
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* One focus ring everywhere (proposal §10): 2 px, offset 2 px, graphite. */
+*:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
+@media (forced-colors: active) {
+  *:focus-visible {
+    outline-color: Highlight;
   }
 }
-
-.animate-menu-pop {
-  animation: menuPop var(--ds-dur-base) var(--ds-ease-standard) both;
-  transform-origin: top right;
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"],
+progress {
+  accent-color: var(--ds-accent);
 }

@@ -7,6 +7,10 @@
 
 :root {
   --levi-header-height: 56px;
+  /* How far down the top bar covers the page while it is scrolled: the bar
+     stays in view on wide screens (0 where it scrolls away, below). Page
+     parts that stick, anchors and the contents column start below it. */
+  --levi-sticky-top: var(--levi-header-height);
 }
 
 /* Native controls follow the theme: tokens.css sets color-scheme on
@@ -14,7 +18,8 @@
 
 /* ── Top bar ───────────────────────────────────────────────────────── */
 .levi-shell-header {
-  position: relative;
+  position: sticky;
+  top: 0;
   z-index: calc(var(--ds-z-overlay) + 5);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -24,11 +29,11 @@
   height: var(--levi-header-height);
   padding: 0 var(--ds-space-6);
   border-bottom: 1px solid var(--ds-separator);
-  /* Opaque for now: the bar does not stay on top while the page scrolls
-     (pages have sticky parts of their own at top: 0), so a translucent
-     material would only show the older pages' dark background through it
-     and lower the text contrast. It becomes ds-material once it is sticky. */
-  background: var(--ds-bg);
+  /* The bar material (translucent and blurred; opaque under reduced
+     transparency or more contrast, see tokens.css). */
+  background: var(--ds-material-bar);
+  -webkit-backdrop-filter: var(--ds-material-filter);
+  backdrop-filter: var(--ds-material-filter);
   color: var(--ds-text-primary);
   font-family: var(--ds-font-sans);
   font-size: var(--ds-text-body-size);
@@ -132,28 +137,40 @@
   flex: none;
   align-items: stretch;
 }
-.levi-shell-nav .levi-pulse-dot {
+.levi-pulse-dot {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
   color: var(--ds-text-tertiary);
 }
-.levi-shell-nav .levi-pulse-dot.is-green {
+.levi-pulse-dot.is-green {
   color: var(--ds-success);
 }
-.levi-shell-nav .levi-pulse-dot.is-blue {
+.levi-pulse-dot.is-blue {
   color: var(--ds-info);
 }
-.levi-shell-nav .levi-pulse-dot.is-amber {
+.levi-pulse-dot.is-amber {
   color: var(--ds-warning);
 }
-.levi-shell-nav .levi-pulse-dot.is-red {
+.levi-pulse-dot.is-red {
   color: var(--ds-danger);
 }
-.levi-shell-nav .levi-pulse-count {
+/* The number of things that need a person, beside the live entry. */
+.levi-pulse-count {
+  display: inline-block;
+  min-width: 18px;
+  padding: 1px var(--ds-space-2);
+  border-radius: var(--ds-radius-full);
   background: var(--ds-warning-bg);
   color: var(--ds-text-primary);
+  font-size: var(--ds-text-caption-size);
+  line-height: 16px;
+  font-weight: var(--ds-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }
-.levi-shell-nav .levi-live-nav.is-red .levi-pulse-count {
+.levi-live-nav.is-red .levi-pulse-count {
   background: var(--ds-danger-bg);
-  color: var(--ds-text-primary);
 }
 
 .levi-shell-actions {
@@ -201,8 +218,12 @@
 @media (max-width: 899px) {
   :root {
     --levi-header-height: 100px;
+    /* Two rows tall: too much of a phone screen to keep, so it scrolls
+       away with the page. */
+    --levi-sticky-top: 0px;
   }
   .levi-shell-header {
+    position: relative;
     grid-template-columns: auto minmax(0, 1fr);
     grid-template-rows: 56px 44px;
     grid-template-areas:
@@ -275,7 +296,7 @@
   outline-offset: 2px;
 }
 .levi-palette__input::placeholder {
-  color: var(--ds-text-tertiary-on-raised, var(--ds-text-secondary));
+  color: var(--ds-text-placeholder);
 }
 .levi-palette__list {
   max-height: min(52vh, 420px);
@@ -392,4 +413,96 @@
 :lang(zh) .levi-shell-brand,
 :lang(zh) .levi-wordmark {
   letter-spacing: 0.08em;
+}
+
+/* ── Page parts that stick below the bar ───────────────────────────── */
+/* These parts keep their own `position: sticky` (their stylesheets know
+   nothing of the bar); they start below it instead of under it. `body`
+   makes these win over those stylesheets, which load after this one. */
+body .pg-live-banner {
+  top: calc(var(--levi-sticky-top) + var(--ds-space-2));
+}
+body .pg-pool-facets {
+  top: calc(var(--levi-sticky-top) + var(--ds-space-3));
+  max-height: calc(100dvh - var(--levi-sticky-top) - var(--ds-space-6));
+}
+body .dsp-panel__header {
+  top: var(--levi-sticky-top);
+}
+
+/* ── Error and not-found pages (src/components/shell/error-pages.tsx) ── */
+/* Exactly the space below the bar: nothing to scroll. */
+.levi-error-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: calc(100dvh - var(--levi-header-height, 0px));
+  padding: var(--ds-space-6) var(--ds-space-4);
+  background: var(--ds-bg);
+  color: var(--ds-text-primary);
+}
+/* The last-resort page has no top bar. */
+.levi-error-page--bare {
+  min-height: 100dvh;
+}
+.levi-error-page__card {
+  width: min(100%, 36rem);
+}
+.levi-error-page__details {
+  margin-top: var(--ds-space-3);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+}
+.levi-error-page__details pre {
+  margin: var(--ds-space-2) 0 0;
+  padding: var(--ds-space-3);
+  overflow: auto;
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-sunken);
+  color: var(--ds-text-primary);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* The headline takes focus when the page appears; it is not a control. */
+.levi-error-page__title:focus {
+  outline: none;
+}
+
+/* ── Skip to main content ───────────────────────────────────────────── */
+/* Out of sight until it takes keyboard focus, then above the bar. */
+.levi-skip {
+  position: absolute;
+  top: var(--ds-space-2);
+  left: var(--ds-space-2);
+  z-index: calc(var(--ds-z-overlay) + 10);
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.levi-skip:focus {
+  width: auto;
+  height: auto;
+  padding: var(--ds-space-2) var(--ds-space-3);
+  overflow: visible;
+  clip-path: none;
+  border: 1px solid var(--ds-border-control);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-2);
+  color: var(--ds-text-primary);
+  box-shadow: var(--ds-shadow-2);
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
+/* The main element takes focus from the link; it is not a control. */
+main:focus {
+  outline: none;
+}
+/* Scrolled to by the skip link: start below the sticky bar. */
+main {
+  scroll-margin-top: var(--levi-sticky-top, 0px);
 }

@@ -1,7 +1,6 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 import type { Metadata } from "next";
 import "./globals.css";
-import "./levi.css";
 import "@/styles/tokens.css";
 import "@/styles/ds.css";
 import "@/styles/shell.css";
@@ -10,11 +9,16 @@ import { LocaleProvider } from "@/components/levi-locale";
 import AgentWorkbench from "@/components/agent-workbench";
 import LeviHeader from "@/components/levi-header";
 import { AppFrame } from "@/components/shell/app-frame";
+import { SkipToContent } from "@/components/shell/skip-to-content";
+import { RouteTitle } from "@/components/shell/route-title";
 import { THEME_BOOT_SCRIPT } from "@/components/shell/theme-boot";
+// The name is the same in both languages; the tab title gets the page's name
+// in the reader's language from <RouteTitle /> (the language is chosen in the
+// browser, so the server cannot know it).
 export const metadata: Metadata = {
-  title: "LEVI · Robot Data Atelier",
+  title: "LEVI",
   description:
-    "A bilingual LeRobot workbench for dataset exploration, validation, annotation and conversion.",
+    "LEVI, a bilingual workbench for robot demonstration data: explore, convert, label and review LeRobot datasets. 中英双语的机器人示范数据工作台：浏览、转换、标注与审核。",
 };
 export default function RootLayout({
   children,
@@ -32,6 +36,8 @@ export default function RootLayout({
         <LocaleProvider>
           <AuthProvider>
             <AppFrame>
+              <SkipToContent />
+              <RouteTitle />
               <LeviHeader />
               {children}
               <AgentWorkbench />

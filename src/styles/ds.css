@@ -25,6 +25,7 @@
 .ds-root :where(h1, h2, h3, h4, p) {
   margin: 0;
 }
+:lang(zh) .ds-eyebrow,
 .ds-root :lang(zh) .ds-eyebrow,
 .ds-root:lang(zh) .ds-eyebrow {
   text-transform: none;
@@ -392,7 +393,7 @@
   transition: border-color var(--ds-dur-fast) var(--ds-ease-standard);
 }
 .ds-input::placeholder {
-  color: var(--ds-text-tertiary);
+  color: var(--ds-text-placeholder);
 }
 .ds-input[aria-invalid="true"] {
   border-color: var(--ds-danger);
@@ -1254,9 +1255,14 @@
 
 /* ── Reduced motion: nothing spins, shuttles or breathes. ─────────── */
 @media (prefers-reduced-motion: reduce) {
-  .ds-spin,
-  .ds-breathe,
-  .ds-progress__track--indeterminate .ds-progress__bar {
+  /* Not under the in-app "normal" choice (data-motion="full" on <html>): the
+     person asked for motion, and a still indeterminate bar would look like a
+     frozen 30 %. The component follows the same setting (usePrefersReducedMotion). */
+  :root:not([data-motion="full"]) .ds-spin,
+  :root:not([data-motion="full"]) .ds-breathe,
+  :root:not([data-motion="full"])
+    .ds-progress__track--indeterminate
+    .ds-progress__bar {
     animation: none;
   }
 }

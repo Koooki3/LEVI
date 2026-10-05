@@ -2,10 +2,8 @@
  *
  * Source: levi-hub UI redesign proposal §4 with the user's decisions of
  * 2026-10-04 (accent A "graphite", light + dark following the system,
- * system fonts only). Every name starts with `--ds-` so these tokens never
- * collide with the older `--bg` / `--accent` / `--surface-*` variables in
- * globals.css, levi.css and annotations-skin.css; importing this file changes
- * nothing on existing pages.
+ * system fonts only). Every name starts with `--ds-`; the older `--bg` /
+ * `--accent` / `--surface-*` variables and `levi.css` no longer exist.
  *
  * Themes: light is the default; dark applies when the system asks for it
  * (`prefers-color-scheme: dark`) unless an ancestor says
@@ -170,6 +168,10 @@
   --ds-text-primary: var(--ds-gray-l-11);
   --ds-text-secondary: var(--ds-gray-l-9);
   --ds-text-tertiary: var(--ds-gray-l-8);
+  /* Placeholder text: the plain tertiary step on a field, which dialogs and
+     menus do not remap (their tertiary is darker, and a placeholder
+     would read as a typed value). */
+  --ds-text-placeholder: var(--ds-gray-l-8);
   /* gray-8 fails 4.5:1 on sunken (4.34) and hover (3.97): use gray-9 there. */
   --ds-text-tertiary-on-sunken: var(--ds-gray-l-9);
   --ds-text-tertiary-on-hover: var(--ds-gray-l-9);
@@ -256,6 +258,7 @@
     --ds-text-primary: var(--ds-gray-d-12);
     --ds-text-secondary: var(--ds-gray-d-10);
     --ds-text-tertiary: var(--ds-gray-d-9);
+    --ds-text-placeholder: var(--ds-gray-d-9);
     --ds-text-tertiary-on-sunken: var(--ds-gray-d-9);
     --ds-text-tertiary-on-hover: var(--ds-gray-d-9);
     --ds-text-tertiary-on-selected: var(--ds-gray-d-10);
@@ -324,6 +327,7 @@
   --ds-text-primary: var(--ds-gray-d-12);
   --ds-text-secondary: var(--ds-gray-d-10);
   --ds-text-tertiary: var(--ds-gray-d-9);
+  --ds-text-placeholder: var(--ds-gray-d-9);
   --ds-text-tertiary-on-sunken: var(--ds-gray-d-9);
   --ds-text-tertiary-on-hover: var(--ds-gray-d-9);
   --ds-text-tertiary-on-selected: var(--ds-gray-d-10);
@@ -386,7 +390,9 @@
 
 /* ── Reduced motion (§4.9): no movement, no long fades. ── */
 @media (prefers-reduced-motion: reduce) {
-  :root {
+  /* data-motion="full" on <html> (the in-app "normal" choice) keeps the
+     motion tokens even when the system asks for less. */
+  :root:not([data-motion="full"]) {
     --ds-dur-base: 0ms;
     --ds-dur-base-exit: 0ms;
     --ds-dur-slow: 0ms;
@@ -399,7 +405,8 @@
     --ds-motion-drawer-shift: 0px;
   }
 }
-/* Same switch by attribute, for previews and tests. */
+/* Same switch by attribute: the in-app "reduced" choice (on <html>), previews
+   and tests. */
 [data-motion="reduce"] {
   --ds-dur-base: 0ms;
   --ds-dur-base-exit: 0ms;
@@ -421,12 +428,14 @@
     --ds-border-control: var(--ds-gray-l-8);
     --ds-text-secondary: var(--ds-gray-l-10);
     --ds-text-tertiary: var(--ds-gray-l-9);
+    --ds-text-placeholder: var(--ds-gray-l-9);
   }
   [data-theme="dark"] {
     --ds-separator: var(--ds-gray-d-7);
     --ds-border-control: var(--ds-gray-d-9);
     --ds-text-secondary: var(--ds-gray-d-11);
     --ds-text-tertiary: var(--ds-gray-d-10);
+    --ds-text-placeholder: var(--ds-gray-d-10);
   }
 }
 @media (prefers-contrast: more) and (prefers-color-scheme: dark) {
@@ -435,6 +444,7 @@
     --ds-border-control: var(--ds-gray-d-9);
     --ds-text-secondary: var(--ds-gray-d-11);
     --ds-text-tertiary: var(--ds-gray-d-10);
+    --ds-text-placeholder: var(--ds-gray-d-10);
   }
 }
 

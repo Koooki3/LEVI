@@ -8,11 +8,14 @@
  * page (./recent.ts).
  */
 import { useEffect, type ReactNode } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { ToastProvider } from "@/components/ds";
-import { ConfirmProvider } from "./confirm";
+import { useLocale } from "@/components/levi-locale";
+import { ConfirmProvider, useConfirmAction } from "./confirm";
 import { recordVisit } from "./recent";
 import { ShellProvider } from "./shell-context";
+import { SHELL_EVENTS, requestGo } from "./shell-events";
+import { hasUnsavedWork } from "./unsaved-work";
 
 function VisitRecorder() {
   const pathname = usePathname();
@@ -22,12 +25,47 @@ function VisitRecorder() {
   return null;
 }
 
+/**
+ * Goes where a keyboard jump (G then a letter) asks, but first asks when the
+ * page holds work that is not saved: a jump is a key press away from losing
+ * an annotation draft.
+ */
+function KeyboardJumps() {
+  const router = useRouter();
+  const confirm = useConfirmAction();
+  const { t } = useLocale();
+  useEffect(() => {
+    const onGo = async (event: Event) => {
+      const href = (event as CustomEvent<string>).detail;
+      if (typeof href !== "string") return;
+      if (
+        hasUnsavedWork() &&
+        !(await confirm({
+          title: t("Leave this page without saving?"),
+          description: t(
+            "Your annotation edits are not saved to the workspace yet; they stay only in this browser tab.",
+          ),
+          confirmLabel: t("Leave without saving"),
+          cancelLabel: t("Stay here"),
+          tone: "danger",
+        }))
+      )
+        return;
+      router.push(href);
+    };
+    window.addEventListener(SHELL_EVENTS.go, onGo);
+    return () => window.removeEventListener(SHELL_EVENTS.go, onGo);
+  }, [confirm, router, t]);
+  return null;
+}
+
 export function AppFrame({ children }: { children: ReactNode }) {
   return (
-    <ShellProvider>
+    <ShellProvider navigate={requestGo}>
       <ToastProvider>
         <ConfirmProvider>
           <VisitRecorder />
+          <KeyboardJumps />
           {children}
         </ConfirmProvider>
       </ToastProvider>

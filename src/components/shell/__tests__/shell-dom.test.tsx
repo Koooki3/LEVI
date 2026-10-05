@@ -8,6 +8,8 @@ import {
 } from "@/components/ds/__tests__/dom";
 import { describe, expect, mock, test } from "bun:test";
 import { act } from "react";
+import en from "@/i18n/en.json";
+import zh from "@/i18n/zh.json";
 
 const pushed: string[] = [];
 const route = { path: "/pool" };
@@ -20,8 +22,13 @@ const { ConfirmProvider, useConfirmAction } = await import("../confirm");
 const { ShellProvider, useShell } = await import("../shell-context");
 const { CommandPalette } = await import("../command-palette");
 const { ShortcutsDialog } = await import("../shortcuts-dialog");
-const { navPages } = await import("../commands");
+const { navPages, paletteDatasets, buildCommands, filterCommands } =
+  await import("../commands");
+const { CHORD_PAGES, chordPage, isChordLeader, shortcutGroups } =
+  await import("../global-keys");
 const { SHELL_EVENTS } = await import("../shell-events");
+const { AppFrame } = await import("../app-frame");
+const { setUnsavedWork } = await import("../unsaved-work");
 const { JobsMenu } = await import("../jobs-menu");
 const { JOBS_POLL_MS } = await import("../jobs");
 
@@ -548,5 +555,269 @@ describe("shortcut list", () => {
     await press(document.activeElement, "Escape");
     expect(Boolean(document.querySelector(".levi-shortcuts"))).toBe(false);
     expect(document.activeElement).toBe(before);
+  });
+});
+
+const CATALOG = {
+  demos: ["lerobot/aloha_static_coffee"],
+  local: [
+    { id: "local/screws_dev24", name: "screws_dev24", kind: "raw" },
+    { id: "bad id", name: "x" },
+    null,
+  ],
+};
+
+function ChordFrame() {
+  return (
+    <ShellProvider navigate={(href) => pushed.push(href)}>
+      <button type="button" id="before">
+        Before
+      </button>
+      <input id="field" />
+      <CommandPalette pages={navPages({ live: true, pool: true })} />
+      <ShortcutsDialog />
+    </ShellProvider>
+  );
+}
+
+describe("go-to chords (G, then a letter)", () => {
+  test("pure: the leader and the pages", () => {
+    expect(isChordLeader({ key: "g" })).toBe(true);
+    expect(isChordLeader({ key: "G" })).toBe(true);
+    expect(isChordLeader({ key: "g", ctrlKey: true })).toBe(false);
+    expect(isChordLeader({ key: "g", shiftKey: true })).toBe(false);
+    expect(isChordLeader({ key: "g", isComposing: true })).toBe(false);
+    expect(chordPage({ key: "e" })).toBe("/explore");
+    expect(chordPage({ key: "w" })).toBe("/workbench");
+    expect(chordPage({ key: "p" })).toBe("/pool");
+    expect(chordPage({ key: "l" })).toBe("/live");
+    expect(chordPage({ key: "r" })).toBe("/report");
+    expect(chordPage({ key: "h" })).toBe("/");
+    expect(chordPage({ key: "u" })).toBe("/guide");
+    expect(chordPage({ key: "x" })).toBeNull();
+    expect(chordPage({ key: "e", metaKey: true })).toBeNull();
+  });
+
+  test("G then E goes to Explore; a wrong second key does nothing", async () => {
+    pushed.length = 0;
+    await render(<ChordFrame />);
+    const before = document.querySelector<HTMLButtonElement>("#before")!;
+    await focus(before);
+    await press(before, "g");
+    await press(before, "e");
+    expect(pushed).toEqual(["/explore"]);
+    await press(before, "g");
+    await press(before, "x");
+    await press(before, "e");
+    expect(pushed).toEqual(["/explore"]);
+    // Every page of the list.
+    for (const [letter, page] of Object.entries(CHORD_PAGES)) {
+      await press(before, "g");
+      await press(before, letter);
+      expect(pushed.at(-1)).toBe(page.href);
+    }
+  });
+
+  test("not while typing in a field, and not too late", async () => {
+    pushed.length = 0;
+    await render(<ChordFrame />);
+    const field = document.querySelector<HTMLInputElement>("#field")!;
+    await focus(field);
+    await press(field, "g");
+    await press(field, "e");
+    expect(pushed).toEqual([]);
+    const before = document.querySelector<HTMLButtonElement>("#before")!;
+    const now = Date.now;
+    let at = 1_000_000;
+    Date.now = () => at;
+    try {
+      await press(before, "g");
+      at += 1600;
+      await press(before, "e");
+      expect(pushed).toEqual([]);
+    } finally {
+      Date.now = now;
+    }
+  });
+
+  test("the shortcut list names every chord, in both languages", async () => {
+    const rows = shortcutGroups(false).find(
+      (g) => g.title === "Everywhere",
+    )!.rows;
+    for (const [letter, page] of Object.entries(CHORD_PAGES)) {
+      const row = rows.find(
+        (r) => r.keys[0].join("") === `G${letter.toUpperCase()}`,
+      );
+      expect(row?.label).toBe(`Go to: ${page.label}`);
+      expect(row!.label in en).toBe(true);
+      expect(row!.label in zh).toBe(true);
+    }
+  });
+});
+
+describe("keyboard jumps and unsaved work", () => {
+  test("a jump closes the palette and the list left open behind it", async () => {
+    pushed.length = 0;
+    let shell: ReturnType<typeof useShell> | null = null;
+    function Probe() {
+      shell = useShell();
+      return null;
+    }
+    await render(
+      <ShellProvider navigate={(href) => pushed.push(href)}>
+        <Probe />
+      </ShellProvider>,
+    );
+    await act(async () => shell!.setShortcutsOpen(true));
+    expect(shell!.shortcutsOpen).toBe(true);
+    await press(document.body, "g");
+    await press(document.body, "r");
+    expect(pushed).toEqual(["/report"]);
+    expect(shell!.shortcutsOpen).toBe(false);
+    expect(shell!.paletteOpen).toBe(false);
+  });
+
+  test("with an unsaved draft the jump asks first; Stay keeps the page, Leave goes", async () => {
+    pushed.length = 0;
+    setUnsavedWork(true);
+    try {
+      await render(
+        <AppFrame>
+          <button type="button" id="page">
+            page
+          </button>
+        </AppFrame>,
+      );
+      const page = document.querySelector<HTMLButtonElement>("#page")!;
+      await focus(page);
+      await press(page, "g");
+      await press(page, "e");
+      await flush();
+      const dialog = document.querySelector('[role="alertdialog"]')!;
+      expect(dialog.textContent).toContain("Leave this page without saving?");
+      // True to what happens: the draft is kept per tab, not in the workspace.
+      expect(dialog.textContent).toContain(
+        "not saved to the workspace yet; they stay only in this browser tab",
+      );
+      expect(dialog.textContent).not.toContain("drops them");
+      expect(pushed).toEqual([]);
+      const button = (label: string) =>
+        [...dialog.querySelectorAll("button")].find((b) =>
+          b.textContent?.includes(label),
+        )!;
+      await click(button("Stay here"));
+      await flush();
+      expect(pushed).toEqual([]);
+      await press(page, "g");
+      await press(page, "e");
+      await flush();
+      await click(
+        [...document.querySelectorAll('[role="alertdialog"] button')].find(
+          (b) => b.textContent?.includes("Leave without saving"),
+        ) ?? null,
+      );
+      await flush();
+      expect(pushed).toEqual(["/explore"]);
+    } finally {
+      setUnsavedWork(false);
+    }
+  });
+
+  test("with nothing unsaved the jump goes at once", async () => {
+    pushed.length = 0;
+    setUnsavedWork(false);
+    await render(
+      <AppFrame>
+        <button type="button" id="page">
+          page
+        </button>
+      </AppFrame>,
+    );
+    const page = document.querySelector<HTMLButtonElement>("#page")!;
+    await focus(page);
+    await press(page, "g");
+    await press(page, "p");
+    await flush();
+    expect(pushed).toEqual(["/pool"]);
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  });
+});
+
+describe("the shortcut list", () => {
+  test("every row and group has a catalogue entry in both languages, and the viewer's keys are listed", () => {
+    const groups = shortcutGroups(false);
+    for (const group of groups) {
+      expect(group.title in zh).toBe(true);
+      for (const row of group.rows) {
+        expect(row.label in en).toBe(true);
+        expect(row.label in zh).toBe(true);
+      }
+    }
+    const labels = groups.flatMap((g) => g.rows.map((r) => r.label));
+    for (const label of [
+      "Clear the selected annotation",
+      "In a text field, Undo is left to the field",
+      "Playhead slider: 0.1 s back or forward",
+      "Playhead slider: 1 s back or forward",
+      "Playhead slider: start or end",
+      "Move within an episode list row",
+    ])
+      expect(labels).toContain(label);
+  });
+});
+
+describe("the palette finds datasets", () => {
+  test("paletteDatasets keeps the local ones and the demos, skips the rest", () => {
+    expect(paletteDatasets(CATALOG)).toEqual([
+      { repo: "local/screws_dev24", name: "screws_dev24" },
+      {
+        repo: "lerobot/aloha_static_coffee",
+        name: "lerobot/aloha_static_coffee",
+      },
+    ]);
+    expect(paletteDatasets(null)).toEqual([]);
+    expect(paletteDatasets({ local: "x", demos: 3 })).toEqual([]);
+    const commands = buildCommands({
+      pages: [],
+      datasets: paletteDatasets(CATALOG),
+      theme: "system",
+      language: "en",
+      setTheme: () => {},
+      setLanguage: () => {},
+      toggleAgent: () => {},
+      openConnections: () => {},
+      openShortcuts: () => {},
+    });
+    const hit = filterCommands(commands, "screws");
+    expect(hit[0].group).toBe("Datasets");
+    expect(hit[0].href).toBe("/local/screws_dev24");
+  });
+
+  test("typing a dataset name in the palette and pressing Enter opens it", async () => {
+    pushed.length = 0;
+    const original = globalThis.fetch;
+    globalThis.fetch = mock(
+      async () =>
+        new Response(JSON.stringify(CATALOG), {
+          headers: { "content-type": "application/json" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      await render(<ChordFrame />);
+      const before = document.querySelector<HTMLButtonElement>("#before")!;
+      await focus(before);
+      await press(before, "k", { ctrlKey: true });
+      await flush(50);
+      const input =
+        document.querySelector<HTMLInputElement>('[role="combobox"]')!;
+      await type(input, "screws");
+      await flush(20);
+      const options = [...document.querySelectorAll('[role="option"]')];
+      expect(options.map((o) => o.textContent)).toContain("screws_dev24");
+      await press(input, "Enter");
+      expect(pushed).toEqual(["/local/screws_dev24"]);
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 });

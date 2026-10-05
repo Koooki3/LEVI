@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
 const src = join(import.meta.dir, "../../..");
@@ -24,18 +24,49 @@ describe("global styles", () => {
     expect(hits).toEqual([]);
   });
 
-  test("the older page styles carry no colour of the old palette", () => {
-    // levi.css colours point at tokens; black stays for media and shadows.
-    const hits = code("app/levi.css")
-      .split("\n")
-      .filter((line) => LITERAL.test(line))
-      .filter((line) => !/rgba?\(\s*0[ ,]+0[ ,]+0\b|#000(000)?\b/.test(line));
-    expect(hits).toEqual([]);
+  test("the old page stylesheet is gone and nothing imports it", () => {
+    expect(existsSync(join(src, "app/levi.css"))).toBe(false);
+    for (const file of new Bun.Glob("**/*.{ts,tsx,css}").scanSync(src)) {
+      if (file.includes("__tests__")) continue;
+      expect(readFileSync(join(src, file), "utf8")).not.toMatch(
+        /import\s+["'][^"']*levi\.css["']|@import\s+["'][^"']*levi\.css["']/,
+      );
+    }
   });
 
   test("the old lime, parchment and cyan are gone from the global layer", () => {
-    for (const file of [...TOKEN_ONLY, "app/levi.css"])
+    for (const file of TOKEN_ONLY)
       expect(code(file)).not.toMatch(/d4f779|f1efdf|38bdf8|101510/i);
+  });
+
+  test("the old variable names and Tailwind colour remaps are gone", () => {
+    const css = code("app/globals.css");
+    // `--bg`, `--accent`, `--text-muted`... and `--color-white`,
+    // `--color-slate-*`... pointed older pages at the tokens; a Tailwind
+    // colour class now means Tailwind's own colour (white stays white).
+    expect(css).not.toMatch(
+      /--(bg|surface-[012]|border-subtle|border-strong|text-primary|text-muted|text-faint|accent|accent-soft|accent-ring|radius)\s*:/,
+    );
+    expect(css).not.toMatch(
+      /--color-(white|black|cyan|slate|zinc|lime|red|orange|amber|yellow|green|emerald|blue)/,
+    );
+  });
+
+  test("no Tailwind palette colour class is left in the interface", () => {
+    // Colours come from --ds-* tokens: text-(--ds-text-primary), ds-* classes.
+    const palette =
+      /(^|[\s"'`:!])(text|bg|border|ring|fill|stroke|from|to|via|divide|outline|decoration|accent|caret|placeholder)-(white|cyan|slate|zinc|lime|red|orange|amber|yellow|green|emerald|blue|gray|neutral|stone|sky|teal|indigo|violet|purple|pink|rose|fuchsia)(-\d+)?(\/\d+)?(?![\w-])/;
+    const hits: string[] = [];
+    for (const file of new Bun.Glob("**/*.{ts,tsx,css}").scanSync(src)) {
+      if (file.includes("__tests__")) continue;
+      readFileSync(join(src, file), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .split("\n")
+        .forEach((line, index) => {
+          if (palette.test(line)) hits.push(`${file}:${index + 1}`);
+        });
+    }
+    expect(hits).toEqual([]);
   });
 
   test("no coloured fill with white text in one class list", () => {
@@ -61,10 +92,32 @@ describe("global styles", () => {
     expect(code("app/report/report.css")).not.toMatch(/\binfinite\b/);
   });
 
-  test("Tailwind slate-500 is secondary text, not tertiary", () => {
-    // Older pages put it on sunken and raised surfaces, where tertiary text
-    // falls under 4.5:1 (proposal §4.3).
-    const line = /--color-slate-500:\s*([^;]+);/.exec(code("app/globals.css"));
-    expect(line?.[1].trim()).toBe("var(--ds-text-secondary)");
+  test("the top bar stays in view as a material, and pages start below it", () => {
+    const shell = code("styles/shell.css");
+    const header = /\.levi-shell-header \{[^}]*\}/.exec(shell)?.[0] ?? "";
+    expect(header).toMatch(/position:\s*sticky/);
+    expect(header).toMatch(/top:\s*0/);
+    expect(header).toContain("var(--ds-material-bar)");
+    expect(header).toContain("var(--ds-material-filter)");
+    // Opaque again under reduced transparency (tokens.css).
+    expect(code("styles/tokens.css")).toMatch(
+      /prefers-reduced-transparency[\s\S]*--ds-material-bar:\s*var\(--ds-surface-1\)/,
+    );
+    // On a phone the two-row bar scrolls away, so nothing is reserved.
+    expect(shell).toMatch(/--levi-sticky-top:\s*0px/);
+    expect(code("app/globals.css")).toContain("var(--levi-sticky-top");
+    // Anchors and the contents column start below the bar.
+    const reading = code("styles/reading.css");
+    expect(reading).toMatch(/scroll-margin-top:[^;]*--levi-sticky-top/);
+    expect(reading).toMatch(/top:\s*calc\(var\(--levi-sticky-top/);
+  });
+
+  test("the top bar draws the wordmark from brand.tsx", () => {
+    const header = readFileSync(
+      join(src, "components/levi-header.tsx"),
+      "utf8",
+    );
+    expect(header).toContain("<LeviWordmark");
+    expect(header).not.toMatch(/<span>LEVI<\/span>/);
   });
 });

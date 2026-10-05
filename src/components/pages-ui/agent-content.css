@@ -4,7 +4,7 @@
  * (shell.css). Its content is built from ds components (Button, Field,
  * Input, Select, Checkbox, Badge, Card, Tabs, Progress, ...) and the small
  * pieces in agent-ui.tsx; this file only lays them out (`ag-*`) and keeps the
- * drag grip. Tokens only, no colour literals, nothing from levi.css.
+ * drag grip. Tokens only, no colour literals.
  * Motion goes through the --ds-dur-* tokens, which tokens.css sets to 0
  * under prefers-reduced-motion and under [data-motion="reduce"].
  */

@@ -81,15 +81,54 @@ describe("IconButton and Tooltip", () => {
     const tip = host.querySelector('[role="tooltip"]') as HTMLElement;
     expect(button.getAttribute("aria-describedby")).toBe(tip.id);
     expect(tip.hidden).toBe(true);
+    await press(document.body, "Tab");
     await focus(button);
     expect(tip.hidden).toBe(false);
     await press(document.body, "Escape");
     expect(tip.hidden).toBe(true);
     await fire(button, new FocusEvent("focusout", { bubbles: true }));
+    await press(document.body, "Tab");
     await fire(button, new FocusEvent("focusin", { bubbles: true }));
     expect(tip.hidden).toBe(false);
     await fire(button, new FocusEvent("focusout", { bubbles: true }));
     expect(tip.hidden).toBe(true);
+  });
+
+  test("a focus the program sets does not open it; one after Tab or an arrow does", async () => {
+    const { host } = await render(
+      <div>
+        <Tooltip content="Closes the dialog">
+          <button type="button" id="close">
+            Close
+          </button>
+        </Tooltip>
+        <Tooltip content="Next one">
+          <button type="button" id="next">
+            Next
+          </button>
+        </Tooltip>
+      </div>,
+    );
+    const tips = host.querySelectorAll<HTMLElement>('[role="tooltip"]');
+    // A dialog opened with Enter puts focus on its first control.
+    await press(document.body, "Enter");
+    await focus(host.querySelector("#close"));
+    expect(tips[0].hidden).toBe(true);
+    await fire(
+      host.querySelector("#close"),
+      new FocusEvent("focusout", { bubbles: true }),
+    );
+    // Focus set long after the last key, or by a script with no key at all.
+    await focus(host.querySelector("#next"));
+    expect(tips[1].hidden).toBe(true);
+    // The person then tabs or arrows to a control: that opens it.
+    await fire(
+      host.querySelector("#next"),
+      new FocusEvent("focusout", { bubbles: true }),
+    );
+    await press(document.body, "ArrowRight");
+    await focus(host.querySelector("#close"));
+    expect(tips[0].hidden).toBe(false);
   });
 
   test("tooltip opens after a hover delay, not on a click", async () => {

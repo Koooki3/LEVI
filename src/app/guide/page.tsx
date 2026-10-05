@@ -6,10 +6,16 @@
  */
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowRight, Eye, Microscope, Sparkles } from "lucide-react";
+import { ArrowRight, Eye, List, Microscope, Sparkles } from "lucide-react";
 import { Icon } from "@/components/ds";
 import { T, useLocale } from "@/components/levi-locale";
+import {
+  currentHeadingIndex,
+  readingLine,
+  stickyTop,
+} from "@/components/report/active-section";
 import { LeviMark } from "@/components/shell/brand";
+import { DemoThumb } from "./demo-thumb";
 import "@/styles/reading.css";
 import "@/styles/home.css";
 
@@ -52,8 +58,8 @@ const SECTIONS: [string, string][] = [
     "Under Annotations → Objects, Fast segmentation outlines and tracks objects while an episode plays (Live overlay) and labels whole datasets offline, using a small student model distilled from SAM3. Choose Quality (teacher model) to label with SAM3 itself. The student runs in its own worker environment (docs/SEGMENTATION.md). Results are ordinary object annotations, suggested until a person reviews them.",
   ],
   [
-    "04 / Diagnose",
-    "Statistics describes metadata and episode lengths. Filtering ranks low movement, sudden motion and unusual lengths. Action Insights computes autocorrelation, temporal alignment, speed variance and cross-episode variance. Doctor runs version-aware checks.",
+    "04 / Analyse",
+    "The Statistics tab describes metadata and episode lengths. The Analysis tab holds three views, chosen with a switch: Filtering ranks low movement, sudden motion and unusual lengths; Action Insights computes autocorrelation, temporal alignment, speed variance and cross-episode variance; Doctor runs version-aware checks.",
   ],
   [
     "05 / Review",
@@ -89,12 +95,14 @@ function useCurrentSection(ids: string[]): string {
   const [current, setCurrent] = useState(ids[0]);
   useEffect(() => {
     const onScroll = () => {
-      let found = ids[0];
-      for (const id of ids) {
-        const element = document.getElementById(id);
-        if (element && element.getBoundingClientRect().top < 140) found = id;
-      }
-      setCurrent(found);
+      const index = currentHeadingIndex(
+        ids.map(
+          (id) =>
+            document.getElementById(id)?.getBoundingClientRect().top ?? null,
+        ),
+        readingLine(window.innerHeight, stickyTop()),
+      );
+      setCurrent(ids[Math.max(index, 0)]);
     };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
@@ -113,7 +121,7 @@ export default function Guide() {
       <div className="levi-reading__head">
         <span className="levi-reading__brand">
           <LeviMark size={18} />
-          <span className="levi-eyebrow">
+          <span className="ds-eyebrow">
             <T>LEVI / FIELD GUIDE</T>
           </span>
         </span>
@@ -121,7 +129,10 @@ export default function Guide() {
       <div className="levi-reading__layout">
         <aside className="levi-reading__aside">
           <nav className="levi-toc" aria-label={t("Contents")}>
-            <div className="levi-toc__title">{t("Contents")}</div>
+            <div className="levi-toc__title">
+              <Icon icon={List} />
+              {t("Contents")}
+            </div>
             <ol>
               <li>
                 <a
@@ -175,20 +186,7 @@ export default function Guide() {
               {DEMOS.map((demo) => (
                 <li key={demo.id}>
                   <Link href={`/${demo.id}`} className="ds-focus">
-                    <span className="levi-guide-demos__media">
-                      <video
-                        src={`/api/proxy/datasets/${demo.id}/resolve/main/videos/chunk-000/observation.images.front/episode_000000.mp4#t=0.1`}
-                        muted
-                        playsInline
-                        preload="metadata"
-                        aria-hidden="true"
-                        tabIndex={-1}
-                        onMouseEnter={(e) =>
-                          void e.currentTarget.play().catch(() => {})
-                        }
-                        onMouseLeave={(e) => e.currentTarget.pause()}
-                      />
-                    </span>
+                    <DemoThumb id={demo.id} />
                     <span className="levi-guide-demos__text">
                       <strong>{t(demo.title)}</strong>
                       <span className="levi-home-mono">{demo.id}</span>

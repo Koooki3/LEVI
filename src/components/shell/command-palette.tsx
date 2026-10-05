@@ -1,7 +1,7 @@
 "use client";
 /**
- * The command palette (⌘K / Ctrl+K): jump to a page, open a panel, change
- * the theme or the language. A combobox over a list box: type to filter,
+ * The command palette (⌘K / Ctrl+K): jump to a page or a dataset, open a
+ * panel, change the theme or the language. A combobox over a list box: type to filter,
  * ↑/↓ move, Enter runs, Escape closes and focus returns to where it was.
  */
 import { useEffect, useId, useMemo, useRef, useState } from "react";
@@ -9,11 +9,14 @@ import { useRouter } from "next/navigation";
 import { Check, CornerDownLeft, Search } from "lucide-react";
 import { Dialog, Icon, Kbd } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
+import { leviApi } from "@/components/levi-api";
 import {
   buildCommands,
   filterCommands,
+  paletteDatasets,
   type Command,
   type NavPage,
+  type PaletteDataset,
 } from "./commands";
 import { globalShortcut } from "./global-keys";
 import { SHELL_OVERLAY_CLASS, useShell } from "./shell-context";
@@ -26,6 +29,7 @@ export function CommandPalette({ pages }: { pages: NavPage[] }) {
     useShell();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
+  const [datasets, setDatasets] = useState<PaletteDataset[]>([]);
   const input = useRef<HTMLInputElement>(null);
   const listId = useId();
 
@@ -33,6 +37,7 @@ export function CommandPalette({ pages }: { pages: NavPage[] }) {
     () =>
       buildCommands({
         pages,
+        datasets,
         theme,
         language,
         setTheme,
@@ -41,7 +46,7 @@ export function CommandPalette({ pages }: { pages: NavPage[] }) {
         openConnections: openAgentConnections,
         openShortcuts: () => setShortcutsOpen(true),
       }),
-    [pages, theme, language, setTheme, setLanguage, setShortcutsOpen],
+    [pages, datasets, theme, language, setTheme, setLanguage, setShortcutsOpen],
   );
   const results = useMemo(
     () => filterCommands(commands, query, t),
@@ -54,7 +59,19 @@ export function CommandPalette({ pages }: { pages: NavPage[] }) {
     if (!paletteOpen) {
       setQuery("");
       setActive(0);
+      return;
     }
+    // The datasets are read when the palette opens (the catalogue is the
+    // existing answer; no new route). Without an answer there are just none.
+    let stale = false;
+    leviApi<unknown>("catalog")
+      .then((body) => {
+        if (!stale) setDatasets(paletteDatasets(body));
+      })
+      .catch(() => undefined);
+    return () => {
+      stale = true;
+    };
   }, [paletteOpen]);
   useEffect(() => setActive(0), [query]);
   useEffect(() => {
@@ -108,8 +125,8 @@ export function CommandPalette({ pages }: { pages: NavPage[] }) {
           aria-activedescendant={
             results.length ? `${listId}-${active}` : undefined
           }
-          aria-label={t("Search commands and pages")}
-          placeholder={t("Search commands and pages")}
+          aria-label={t("Search commands, pages and datasets")}
+          placeholder={t("Search commands, pages and datasets")}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onKeyDown}

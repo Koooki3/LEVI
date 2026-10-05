@@ -9,54 +9,20 @@ const compat = new FlatCompat({
   baseDirectory: __dirname,
 });
 
-/** Files of the global frame (design stage 2) that must not hard-code colours. */
-const FRAME_FILES = [
-  "src/app/layout.tsx",
-  "src/components/levi-header.tsx",
-  "src/components/loading-component.tsx",
-  "src/components/agent-workbench.tsx",
-  "src/components/live/live-nav.tsx",
-  "src/components/shell/**/*.{ts,tsx}",
-  // Design stage 5 (global layer): home, guide, report, the token hook.
-  "src/app/page.tsx",
-  "src/app/guide/**/*.{ts,tsx}",
-  "src/app/report/**/*.{ts,tsx}",
-  "src/components/home/**/*.{ts,tsx}",
-  "src/components/report/**/*.{ts,tsx}",
-  "src/lib/design/**/*.{ts,tsx}",
-];
-// The episode viewer (design stage 3). Its data colours live in
-// src/components/viewer/data-palette.ts (the one viewer file with hex: canvas
-// and the 3D scene cannot read CSS variables; the robot models' paint and
-// lights are there too) and in viewer.css.
-const VIEWER_FILES = [
-  "src/app/[[]org]/[[]dataset]/[[]episode]/*.tsx",
-  "src/components/viewer/*.tsx",
-  "src/components/action-insights-panel.tsx",
-  "src/components/anchored-review-section.tsx",
-  "src/components/annotation-recorder.tsx",
-  "src/components/annotations-panel.tsx",
-  "src/components/annotations-timeline.tsx",
-  "src/components/data-recharts.tsx",
-  "src/components/dataset-update-notice.tsx",
-  "src/components/draggable-popup.tsx",
-  "src/components/fast-segmentation-panel.tsx",
-  "src/components/filtering-panel.tsx",
-  "src/components/levi-doctor.tsx",
-  "src/components/levi-review.tsx",
-  "src/components/live-segmentation-canvas.tsx",
-  "src/components/object-annotation-panel.tsx",
-  "src/components/overview-panel.tsx",
-  "src/components/playback-bar.tsx",
-  "src/components/raw-capture-notice.tsx",
-  "src/components/recap-value-section.tsx",
-  "src/components/side-nav.tsx",
-  "src/components/simple-videos-player.tsx",
-  "src/components/stats-panel.tsx",
-  "src/components/subtask-vocabulary.tsx",
-  "src/components/urdf-playback-bar.tsx",
-  "src/components/urdf-viewer.tsx",
-  "src/components/video-overlay-canvas.tsx",
+/**
+ * Files that may hold a colour literal, each for a reason. Everything else
+ * under `src` uses a `--ds-*` token or a `ds-*` class (docs/DESIGN.md).
+ * Keep every entry commented; a new entry needs a reason a token cannot
+ * serve (canvas, WebGL and SVG attributes that cannot read CSS variables).
+ */
+const HEX_EXCEPTIONS = [
+  // The viewer's categorical data colours as numbers for canvas and the 3D
+  // scene, and the robot models' material and light colours (WebGL takes
+  // numbers, and a robot's paint is not a theme colour): the one viewer
+  // module with hex; viewer.css holds the CSS side.
+  "src/components/viewer/data-palette.ts",
+  // Tests build colour strings to assert on them.
+  "src/**/__tests__/**",
 ];
 // A colour: # and exactly 3, 4, 6 or 8 hex digits, at the start of the
 // string or after a space, "(", "," or ":", and not followed by another
@@ -67,26 +33,11 @@ const HEX =
 // href/to/id/htmlFor attribute or property is not checked.
 const LINK_ATTR = "/^(href|to|id|htmlFor|hash)$/";
 const NOT_LINK = `:not(JSXAttribute[name.name=${LINK_ATTR}] > Literal):not(Property[key.name=${LINK_ATTR}] > Literal)`;
+// A colour function with literal numbers: rgb(0 131 0), hsla(120, 50%, 40%, 1).
+// Computed ones (`rgb(${r} ${g} ${b})` from a palette) are not matched.
+const COLOR_FUNCTION = "/\\b(rgba?|hsla?)\\(\\s*\\d/";
 const HEX_MESSAGE =
   "Use a --ds-* token or a ds-* class instead of a hex colour (docs/DESIGN.md).";
-
-// Stage 4 pages (Live evaluation, Conversion & review, Training pool,
-// Explore) and the Agent Workbench content: the same hex rule as the frame.
-const PAGE_FILES = [
-  "src/app/live/**/*.tsx",
-  "src/app/workbench/**/*.tsx",
-  "src/app/pool/**/*.tsx",
-  "src/app/explore/**/*.tsx",
-  "src/components/live/**/*.tsx",
-  "src/components/conversion/**/*.tsx",
-  "src/components/pool/**/*.tsx",
-  "src/components/pages-ui/**/*.tsx",
-  "src/components/agent-*.tsx",
-  "src/components/ollama-*.tsx",
-  "src/components/chip-multi-select.tsx",
-  "src/components/hf-auth-button.tsx",
-  "src/components/dataset-format.tsx",
-];
 
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
@@ -97,9 +48,10 @@ const eslintConfig = [
     },
   },
   {
-    // Design stage 2: the global frame uses `--ds-*` tokens, never a
-    // hard-coded colour. Older pages follow in stage 6 (docs/DESIGN.md).
-    files: [...FRAME_FILES, ...PAGE_FILES],
+    // Every interface source uses `--ds-*` tokens, never a hard-coded
+    // colour; the exceptions above say why they differ.
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: HEX_EXCEPTIONS,
     rules: {
       "no-restricted-syntax": [
         "error",
@@ -111,21 +63,12 @@ const eslintConfig = [
           selector: `TemplateElement[value.raw=${HEX}]`,
           message: HEX_MESSAGE,
         },
-      ],
-    },
-  },
-  {
-    // Design stage 3: the episode viewer, the same rule.
-    files: VIEWER_FILES,
-    rules: {
-      "no-restricted-syntax": [
-        "error",
         {
-          selector: `Literal[value=${HEX}]${NOT_LINK}`,
+          selector: `Literal[value=${COLOR_FUNCTION}]`,
           message: HEX_MESSAGE,
         },
         {
-          selector: `TemplateElement[value.raw=${HEX}]`,
+          selector: `TemplateElement[value.raw=${COLOR_FUNCTION}]`,
           message: HEX_MESSAGE,
         },
       ],

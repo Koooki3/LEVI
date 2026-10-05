@@ -2,7 +2,7 @@
 
 [English](DESIGN.md)
 
-LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默认跟随系统，只用系统字体，图标用 Lucide，Motion 只用于拖拽和列表重排。第 1 阶段加入了设计令牌、主题偏好和一组基础组件。第 2 阶段（见[全局框架](#全局框架第-2-阶段)）把全局框架迁到上面：顶栏、Toast、确认对话框、命令面板、快捷键总表和 Agent 工作台抽屉。第 5 阶段的全局部分（见[品牌标识](#品牌标识)和[全局页面基础](#全局页面基础第-5-阶段)）统一了标识，把页面基础和所有旧页面样式接到令牌上，并重做了首页、使用指南和报告页。片段查看器和其他页面在各自阶段把标记换成 `ds-*` 组件；在那之前，它们通过映射到令牌的旧名称跟随两套外观。
+这份文档说明 LEVI 界面现在的构成：石墨强调色，浅色和深色两套外观（没有人选择时跟随系统），只用系统字体，图标用 Lucide，Motion 只用于拖拽和列表重排。每个路由的颜色都来自 `--ds-*` 令牌和定义它们的样式表；旧样式表 `levi.css`、旧的 CSS 变量（`--bg`、`--accent`、`--surface-*`）和被映射过的 Tailwind 色板都已删除。文档保留各阶段的小标题（更新日志里链接到它们）；哪些部分已经用 `ds-*` 组件、哪些仍是在令牌之上拼 Tailwind 工具类，见[迁移状态](#迁移状态)。
 
 | 内容 | 位置 |
 | --- | --- |
@@ -15,36 +15,39 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 | 样张页（仅开发用） | `/design`（`src/app/design/`） |
 | 全局框架（第 2 阶段） | `src/components/shell/`、`src/components/levi-header.tsx`、`src/styles/shell.css` |
 | 标识（唯一定义） | `src/components/shell/brand.tsx`；浏览器标签图标由 `scripts/brand_icons.py` 据此生成（`src/app/icon.svg`、`apple-icon.png`、`favicon.ico`） |
-| 页面基础与旧名称（第 5 阶段） | `src/app/globals.css`、`src/app/levi.css` |
+| 页面基础（第 5 阶段） | `src/app/globals.css`（除上面三份外唯一的全局样式表） |
+| 标签页标题 | `src/components/shell/route-title.tsx` |
 | 首页、使用指南、报告页（第 5 阶段） | `src/components/home/`、`src/styles/home.css`；`src/app/guide/`、`src/styles/reading.css`；`src/components/report/`、`src/app/report/report.css` |
 | 代码里取令牌值（canvas、WebGL） | `src/lib/design/css-tokens.ts`（`useCssTokens`） |
+| 颜色 lint | `eslint.config.mjs`（`HEX_EXCEPTIONS`）、`src/__tests__/eslint-hex.test.ts` |
+| 语言目录 | `src/i18n/en.json`、`src/i18n/zh.json`，由 `src/i18n/__tests__/catalog.test.ts` 检查 |
 | 测试 | `src/components/ds/__tests__/`、`src/lib/design/__tests__/`、`src/components/shell/__tests__/` |
 
 ## 新代码的规则
 
-- **禁止硬编码颜色。** 用语义令牌（`var(--ds-text-secondary)`、`var(--ds-surface-1)`）或 `ds-*` 类。新的 CSS 和 TSX 里不写十六进制、`rgb()`、`hsl()`，也不写 Tailwind 任意值；`ds.css`、`shell.css`、样张页 CSS、组件和样张页的 TSX 里出现就会让测试失败；全局框架的 TSX 里出现十六进制颜色时 ESLint 报错（`no-restricted-syntax`，文件清单是 `eslint.config.mjs` 的 `FRAME_FILES`；颜色指字符串开头或空格、`(`、`,`、`:` 之后的 `#` 加 3、4、6 或 8 位十六进制数字；`href`、`to`、`id`、`htmlFor` 的值是链接，不检查；测试在 `src/__tests__/eslint-hex.test.ts`）。旧页面在第 6 阶段清理。数据配色（时间片段、掩码、图表序列）是单独一套，第 4 阶段定义。
+- **禁止硬编码颜色。** 用语义令牌（`var(--ds-text-secondary)`、`var(--ds-surface-1)`）或 `ds-*` 类。CSS 和 TSX 里不写十六进制、`rgb()`、`hsl()`，也不写 Tailwind 任意颜色值。三道检查：ESLint（`no-restricted-syntax`）在 **所有** `src/**/*.{ts,tsx}` 里拒绝十六进制颜色，以及带字面数字的 `rgb()` / `hsl()`，只有 `eslint.config.mjs` 里 `HEX_EXCEPTIONS` 列出的文件除外（`viewer/data-palette.ts`（canvas 和 WebGL 需要的数值，机器人模型的材质和灯光颜色也在其中）和测试；每一项都在注释里写明理由，新增例外必须说明令牌为什么不能用）。颜色指字符串开头或空格、`(`、`,`、`:` 之后的 `#` 加 3、4、6 或 8 位十六进制数字；`href`、`to`、`id`、`htmlFor` 的值是链接，不检查。测试（`global-styles.test.ts`、`tokens-contrast.test.ts`、各页面样式测试）在 `globals.css`、`ds.css`、`shell.css`、`home.css`、`reading.css`、`report.css`、`pages.css`、`agent-content.css`、`viewer.css`、`annotations.css` 出现颜色字面量时失败（`viewer.css` 里的数据配色是 `tokens.css` 的镜像，见[数据色](#数据色)），在 `src/` 任何地方出现 Tailwind 色板类（`text-white`、`bg-slate-800`、`border-cyan-400`……）时也失败。
 - **组件里只用语义令牌。** 原始灰阶 `--ds-gray-l-*`、`--ds-gray-d-*` 只用来定义语义令牌。
 - **每屏一个主要按钮。** 强调色 A“石墨”是最深的灰，只用于主要按钮、焦点环、选中态和进度。正文中的链接用主文字色加下划线。
 - **状态不只靠颜色。** 状态色（成功、警告、错误、信息）只出现在徽章、状态点、Toast 和行内提示上，并且总带图标形状和文字（`Badge`、`StatusDot`）。
 - **最小字号 12 px**（`--ds-text-caption-size`）；字重只用 400、500、600。
 - **图标**只用 Lucide，经 `Icon` 引入（16 px 配描边 1.75；20、24 px 配 1.5）。装饰性图标 `aria-hidden`；承载含义的图标给 `label`。
-- **不用 `title=` 做提示。** 用 `Tooltip`（悬停和键盘焦点都会出现）；只有图标的按钮用 `IconButton`，它必须有 `label`（即 `aria-label` 和提示文字）。
+- **`title=` 不是界面。** 控件的名称、图标的含义、按钮被禁用的原因，以及一切需要人据此行动的信息，都用可见的文字、`Tooltip`（悬停和键盘焦点都会出现）或 `aria-describedby` 关联；只有图标的按钮用 `IconButton`，它必须有 `label`（即 `aria-label` 和提示文字）。原生 `title` 只允许作为补充，加在已经显示了关键内容的非交互文字上：被截断的表格单元格的全文、精确时间、id 或路径。
 - **不用 `window.confirm`。** 通过 `useConfirmAction()`（`src/components/shell/confirm.tsx`）询问，`src/` 里出现 `window.confirm` 会让测试失败；只有不可逆的操作才询问；预期内、可撤销的删除直接删除，并在 Toast 里给“撤销”。
 - **文案**走语言目录（`useLocale().t`，`en.json` 和 `zh.json` 同时加）。组件的默认文字（Close、Cancel、Loading、In progress、Dismiss notification、Notifications、Move、Theme、System、Light、Dark）已经在目录里。
 
 ## 令牌
 
-全部令牌是 `:root` 上的 CSS 自定义属性，统一以 `--ds-` 开头，不会与旧的 `--bg`、`--accent`、`--surface-*` 冲突。
+全部令牌是 `:root` 上的 CSS 自定义属性，统一以 `--ds-` 开头。（旧的 `--bg`、`--accent`、`--surface-*` 变量已不存在。）
 
 | 分组 | 令牌 |
 | --- | --- |
 | 中性灰阶 | 浅色 `--ds-gray-l-0…11`，深色 `--ds-gray-d-0…12`（略带冷调的中性灰，提案 §4.1） |
 | 表面 | `--ds-bg`、`--ds-bg-reading`、`--ds-surface-sunken`、`--ds-surface-1`（卡片）、`--ds-surface-2`（抬升：菜单、对话框）、`--ds-surface-hover`、`--ds-surface-hover-on-raised`、`--ds-surface-selected`、`--ds-field-bg`、`--ds-skeleton`、`--ds-media-bg`（两套都是黑）、`--ds-scrim` |
 | 线 | `--ds-separator`、`--ds-separator-strong`、`--ds-border-control`、`--ds-border-control-on-raised` |
-| 文字 | `--ds-text-primary`、`--ds-text-secondary`、`--ds-text-tertiary`、`--ds-text-tertiary-on-sunken`、`-on-hover`、`-on-selected`、`-on-raised`、`--ds-text-disabled`、`--ds-icon` |
+| 文字 | `--ds-text-primary`、`--ds-text-secondary`、`--ds-text-tertiary`、`--ds-text-tertiary-on-sunken`、`-on-hover`、`-on-selected`、`-on-raised`、`--ds-text-placeholder`（输入框的占位文字：普通的三级文字色阶，抬升层不重映射它，所以对话框里的占位文字仍比已输入的值浅）、`--ds-text-disabled`、`--ds-icon` |
 | 强调色 A | `--ds-accent`、`--ds-accent-hover`、`--ds-on-accent`、`--ds-focus-ring`、`--ds-selected-indicator`、`--ds-progress`、`--ds-progress-track` |
 | 状态 | `--ds-success`、`--ds-warning`、`--ds-danger`、`--ds-info`，各带 `-bg`；`--ds-on-danger` |
-| 数据 | `--ds-data-1…8`（蓝、橙、青绿、黄、品红、绿、紫、红，顺序固定）：序列、时间片段和类别颜色，浅深两套。用 dataviz 配色检查校验过：相邻颜色在色觉障碍下（ΔE ≥ 8.4）和正常视觉下（ΔE ≥ 19.3）都能分开；深色各级对深色页面底和卡片都至少 3:1（有测试）。浅色的青绿、黄、品红对白底不到 3:1，所以有颜色的标记旁边总要有文字（图例、轨道名）。不用于文字和界面状态 |
+| 数据 | `--ds-data-1…8`（蓝、橙、青绿、黄、品红、绿、紫、红，顺序固定）：序列、时间片段和类别颜色，浅深两套。用 dataviz 配色检查校验过：相邻颜色在色觉障碍下（ΔE ≥ 8.4）和正常视觉下（ΔE ≥ 19.3）都能分开；详见[数据色](#数据色)。不用于文字和界面状态 |
 | 媒体 | `--ds-media-bg`（黑）、`--ds-on-media`、`--ds-on-media-secondary`（视频和图像上的白色文字，两套外观相同；Tailwind `text-on-media`）、`--ds-media-scrim` |
 | 层次与材质 | `--ds-shadow-1…3`、`--ds-ring-raised`（深色）、`--ds-material-bar`、`--ds-material-filter` |
 | 字体 | `--ds-font-sans`、`--ds-font-mono`；`--ds-text-{display,title-1,title-2,title-3,body,reading,callout,caption}-{size,line}`；`--ds-weight-{regular,medium,semibold}`；`--ds-tracking-{title,display}` |
@@ -56,15 +59,19 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 
 **对比度。** 两套主题下，文字配对都达到 4.5:1，控件边界、焦点环、选中竖条和进度达到 3:1；`tokens-contrast.test.ts` 直接从 `tokens.css` 读取数值，用 WCAG 公式计算。提案判为不达标的配对用专门的令牌替代：凹陷区、悬停行、选中行和抬升层里的三级文字，深色抬升层里的控件边界，以及深色抬升层里的悬停底（gray-6，比抬升表面 gray-5 更亮）。有两个状态色与提案不同，以便在悬停底上也达标：浅色“信息”`#3a6693`（原 `#3d6a99`，在悬停底上 4.41:1），深色“错误”`#ee8f80`（原 `#e8806f`，在抬升层悬停底上 4.19:1）。状态色对卡片、抬升层、输入框底、悬停底、抬升层悬停底都做检查，危险按钮悬停色对其文字也做检查。在 `Card variant="sunken"`、菜单、对话框、抽屉、提示、Toast，以及悬停或选中的表格行里，这些替换自动生效（`ds-on-sunken`、`ds-on-raised`）；其他画在这些表面上的容器，自己加上 `ds-on-sunken` 或 `ds-on-raised` 类。
 
-**有意偏差：三个浅色数据色低于 3:1。** 浅色主题下 `--ds-data-3`、`--ds-data-4`、`--ds-data-5`（青绿、黄、品红）对白底不到 3:1（约 2.8、2.2、2.7），低于提案对图形要求的 3:1。这是有意的：把它们压暗到 3:1，相邻颜色在色觉障碍下就分不开了，而让所有人都能区分序列优先（相邻色觉障碍 ΔE ≥ 8.4）。约束：数据色从不单独表达含义。每个有颜色的标记旁边都有文字（图例、轨道名，或用文字色写的标签），数据色从不用于文字；测试只允许这三个在浅色下低到 2:1。深色各级都达到 3:1。
-
 **层次。** 相邻表面差一到两级灰；卡片始终有 1 px 分隔线描边（浅色卡片与背景只有 1.09:1）。阴影用于浅色；深色用更亮的表面加内描边。玻璃材质（`ds-material`）只给浮在内容上的功能层（顶栏、浮动工具条）；在 `prefers-reduced-transparency` 或 `prefers-contrast: more` 下变为不透明。
+
+### 数据色
+
+数据色不是界面色。唯一来源是 `tokens.css`：8 个分类色按固定顺序使用（`--ds-data-1…8`），浅深各有一级。用 dataviz 配色检查校验过：相邻颜色在色觉障碍下（ΔE ≥ 8.4）和正常视觉下（ΔE ≥ 19.3）都能分开，深色各级对深色页面底和卡片都至少 3:1（有测试）。其余一切都从这里取：图表序列（`seriesColor(i)`，报告页图表经 `useCssTokens`）、标注样式（`annotations.css` 里的 `--style-subtask` … `--style-memory`）、RECAP 优势（`--dv-positive`、`--dv-negative`）、时间片段和视频上的标签。`viewer.css` 把它们命名为 `--dv-1…8`，各自直接指向 `--ds-data-N`（没有 hex 回退），`--dv-neutral` 即 `--ds-separator-strong`；画布和三维场景读不到 CSS 变量，用 `data-palette.ts` 里的 `DATA_ON_MEDIA`（深色阶的数值，有测试保证与 `viewer.css` 一致），这是查看器里唯一允许出现 hex 的文件。
+
+**有意偏差：三个浅色数据色低于 3:1。** 浅色主题下 `--ds-data-3`、`--ds-data-4`、`--ds-data-5`（青绿、黄、品红）对白底不到 3:1（约 2.8、2.2、2.7），低于提案对图形要求的 3:1。这是有意的：把它们压暗到 3:1，相邻颜色在色觉障碍下就分不开了，而让所有人都能区分序列优先（相邻色觉障碍 ΔE ≥ 8.4）。约束：数据色从不单独表达含义。每个有颜色的标记旁边都有文字（图例、轨道名，或用文字色写的标签），数据色从不用于文字；测试只允许这三个在浅色下低到 2:1。状态（通过/警告/失败、成功/失败）用状态色令牌，并配图标和文字，不用数据色。
 
 ## 主题
 
-默认浅色。系统为深色（`prefers-color-scheme: dark`）且祖先元素没有 `data-theme="light"` 时用深色；`data-theme="dark"` 下总是深色。`data-theme` 可以放在任何元素上，单独给一个子树换主题（样张页就是这样并排显示两套）。`prefers-contrast: more` 时，分隔线、控件边界和次要文字各提高一级。
+样式表的基础是浅色；系统为深色（`prefers-color-scheme: dark`）且祖先元素没有 `data-theme="light"` 时用深色；`data-theme="dark"` 下总是深色。`data-theme` 可以放在任何元素上，单独给一个子树换主题（样张页就是这样并排显示两套）。`prefers-contrast: more` 时，分隔线、控件边界和次要文字各提高一级。
 
-`useThemePreference()` 返回 `{ preference, resolved, setPreference }`：取值 `"system" | "light" | "dark"`，存在 `localStorage` 的 `levi-theme` 键下。任何显式选择都会保存，包括与默认值相同的选择（默认值以后改了，这个选择仍然有效）；只有从没选过的人没有存储值，这时（或存储不可用时）取 `THEME_DEFAULT_PREFERENCE`。默认值是 `"system"`（跟随系统；第 5 阶段起。页面还是深色时默认是 `"dark"`，当时显式选过的人保留自己的选择）。这个值是 `src/lib/design/theme.ts` 里的一个常量，`theme-boot.ts` 里重复了一份，有测试保证两者相同。读写都经过不会抛异常的 `browserStorage`。它跟随系统外观的变化和其他标签页的修改。这个 hook 本身不改 `<html>`，`applyTheme(element, preference)` 才改。从第 2 阶段起，全局框架（`ShellProvider`）持有唯一的偏好并把它作用到 `<html>`；根布局 `<head>` 里的一小段脚本（`theme-boot.ts`）在首次绘制前应用同一个偏好（已存浅色/深色就写入；已存“跟随系统”或没有存储值时都不写），顶栏不会先闪一下另一套外观。原生控件跟随主题：`<html>` 的 `color-scheme` 为 `light dark`，有 `data-theme` 时按它设置（第 5 阶段起；之前固定为深色）。`ThemePicker` 是“跟随系统 / 浅色 / 深色”的切换控件；顶栏用一个有同样三个选项的菜单。
+`useThemePreference()` 返回 `{ preference, resolved, setPreference }`：取值 `"system" | "light" | "dark"`，存在 `localStorage` 的 `levi-theme` 键下。**默认值是 `"system"`**：从没选过的人跟随系统，存储不可用时也一样（`src/lib/design/theme.ts` 里的 `THEME_DEFAULT_PREFERENCE`，`theme-boot.ts` 里重复了一份，有测试保证两者相同）。任何显式选择（包括“跟随系统”）都会保存，所以默认值以后改了，这个选择仍然有效。读写都经过不会抛异常的 `browserStorage`。这个 hook 跟随系统外观的变化和其他标签页的修改；它本身不改 `<html>`，`applyTheme(element, preference)` 才改。全局框架（`ShellProvider`）持有唯一的偏好并把它作用到 `<html>`；根布局 `<head>` 里的一小段脚本（`theme-boot.ts`）在首次绘制前应用已存的浅色/深色选择（已存“跟随系统”或没有存储值时不写），顶栏不会先闪一下另一套外观。原生控件跟随主题：`<html>` 的 `color-scheme` 为 `light dark`，有 `data-theme` 时按它设置。`ThemePicker` 是“跟随系统 / 浅色 / 深色”的切换控件；顶栏用一个有同样三个选项的菜单。
 
 给容器加 `ds-root` 类，它就使用设计系统的字体、文字色和背景，`color-scheme` 也随主题变化。
 
@@ -77,7 +84,7 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 | `Button` | `variant` 主要 / 次要（默认）/ 幽灵 / 危险；`size` sm / md / lg（28 / 32 / 40 px）；`loading`（旋转图标、`aria-busy`、忽略点击、保留文字）；`icon`、`iconEnd`；默认 `type="button"` |
 | `IconButton` | `label` 必填（无障碍名称和提示文字）；`shortcut`；切换按钮用 `pressed`（`aria-pressed`） |
 | `Icon` | Lucide 图标，`size` sm / md / lg；给 `label` 时为 `role="img"` |
-| `Tooltip` | 悬停 0.5 秒后出现，键盘获得焦点时立即出现（点击不出现）；Esc、指针移开、失去焦点时关闭；给触发元素设 `aria-describedby` |
+| `Tooltip` | 悬停 0.5 秒后出现，键盘获得焦点时立即出现：指 Tab、方向键、Home、End 或翻页键之后 0.6 秒内的焦点。点击不出现，程序设置的焦点也不出现（对话框或抽屉打开时把焦点放到第一个控件上，通常是按 Enter 打开之后），否则会弹出一个在弹层边缘被裁掉的提示。Esc、指针移开、失去焦点时关闭；给触发元素设 `aria-describedby` |
 | `Field`、`Input`、`Textarea`、`Select` | `Field` 把标签、提示和错误关联到内部控件（`aria-describedby`、`aria-invalid`、`required`）；`Select` 是原生下拉框 |
 | `Checkbox`、`Radio`、`RadioGroup`、`Switch` | 原生输入控件；`Checkbox indeterminate` 表示部分选中；`RadioGroup` 是带 legend 的 fieldset；`Switch` 是 `role="switch"` 的复选框 |
 | `Badge`、`StatusDot`、`Tag` | 状态用图标形状 + 颜色 + 文字表示（`tone`：neutral、success、warning、danger、info）；`StatusDot live` 每 2 秒呼吸一次（减少动态效果时静止）；`Tag onRemove` 带“Remove …”按钮，可点区域 24 × 24 px（视觉 16 px）；标签内容不是纯文本时必须给 `removeLabel`（类型检查强制） |
@@ -104,13 +111,17 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 | `ShellProvider`（`shell-context.tsx`） | 主题偏好（只有一个实例，作用到 `<html>`）；命令面板和快捷键总表是否打开；全局快捷键（`global-keys.ts`） |
 | `ToastProvider` | 右下角的 Toast 区域，一个 polite、一个 assertive 的 live 区域。下面任何组件都可以用 `@/components/ds` 的 `useToast().show({...})` |
 | `ConfirmProvider`（`confirm.tsx`） | 根部唯一的确认对话框。`const confirm = useConfirmAction(); if (!(await confirm({ title, confirmLabel, tone }))) return;`。“取消”、Esc、点遮罩都返回 false，与 `window.confirm` 的“取消”一致；在 provider 之外总是返回 false。原生模态 `<dialog>` 打开时（训练池的推送对话框）页面其余部分是 inert 的，所以问题渲染在那个对话框里面 |
-| 顶栏（`levi-header.tsx`） | 高 56 px，不透明的 `--ds-bg` 加分隔线（顶栏还不随页面滚动固定，半透明材质只会透出旧页面的深色背景；改成粘性后再用 `ds-material`）。字标；页面导航（显示实时评测时有“实时评测”、探索数据、转换与审核、提供训练池时有“训练池”、使用指南、报告），当前页标 `aria-current="page"`、字重 600、下方 2 px 指示条；右侧是搜索（打开命令面板）、作业、Agent 工作台开关、设置（账号与连接、命令面板、快捷键）、外观和语言。窄于 900 px 时页面导航移到单独一行、可横向滚动（`--levi-header-height` 变为 100 px，`.h-screen` 页面减去它） |
-| 作业（`jobs-menu.tsx`、`jobs.ts`） | 正在运行的训练池作业和转换作业数量，读现有的 `/api/levi/pool/jobs` 和 `/api/levi/jobs`，首次加载、打开菜单、切回标签页时各查一次，标签页可见时每 60 秒一次（隐藏时不请求，上一个请求未返回时不再发）；菜单通向训练池和转换与审核 |
-| 命令面板（`command-palette.tsx`、`commands.ts`） | macOS 上 ⌘K，其他系统 Ctrl+K，或点“搜索”。组合框加列表框：跳到页面，打开 Agent 工作台、账号与连接或快捷键总表，选择外观或语言。按两种语言的标签以及中英文关键词匹配 |
-| 快捷键总表（`shortcuts-dialog.tsx`） | 按 `?` 打开（在输入框中不触发）。列出全局快捷键和页面已有的快捷键（片段查看器、标注、审核队列） |
-| Agent 工作台抽屉 | `agent-workbench.tsx` 把原有内容（未改动）放进顶栏下方、右侧的非模态 `Sheet`（`levi-agent-sheet`）；旁边的页面仍可操作，左边缘仍可拖动调整宽度（也可聚焦后按 ←/→，Shift 步长更大，Home/End 到最窄/最宽；它是带 `aria-valuemin`、`aria-valuenow`、`aria-valuemax`（单位 px，`panel-width.ts`）的分隔条；宽度按浏览器保存）。顶栏的开关、命令面板和原有的窗口事件 `levi-agent-toggle` / `levi-agent-connections` 都能打开它；它用 `levi-agent-state` 报告开关状态 |
+| 顶栏（`levi-header.tsx`） | 高 56 px，**吸顶**：页面滚动时留在顶部，用顶栏材质绘制（`--ds-material-bar` 加 `--ds-material-filter`：半透明加模糊；在 `prefers-reduced-transparency` 或 `prefers-contrast: more` 下不透明），带分隔线。字标（`brand.tsx` 的 `LeviWordmark`）；页面导航（实时评测，始终显示：有实时服务时带服务状态和需要人处理的数量，否则是指向说明如何启动的页面的普通链接；探索数据、转换与审核、提供训练池时有“训练池”、使用指南、报告），当前页标 `aria-current="page"`、字重 600、下方 2 px 指示条；右侧是搜索（打开命令面板）、作业、Agent 工作台开关、设置（账号与连接、命令面板、快捷键、动效）、外观和语言。窄于 900 px 时页面导航移到单独一行，顶栏高 100 px（`--levi-header-height`），并随页面滚走而不吸顶（否则会遮住手机屏幕的一大块） |
+| 顶栏之下（`shell.css`、`globals.css`） | `--levi-header-height` 是顶栏高度（整屏高度的页面要减去它）；`--levi-sticky-top` 是滚动时顶栏盖住的顶部高度（宽屏同为 56 px，窄于 900 px 为 0）。`scroll-padding-top`、阅读版式的锚点（`scroll-margin-top`）和目录（`top`），以及自己吸顶的页面部件（实时评测横幅、训练池筛选面板、样张页的标题）都从它下面开始。吸附在窗口顶部的页面部件用 `top: calc(var(--levi-sticky-top) + …)`；吸附在自己滚动框里的（表头、标注列表）不用 |
+| 标签页标题（`route-title.tsx`） | 根布局的元数据只有名称（“LEVI”，描述为中英双语）；`RouteTitle` 把 `document.title` 设为当前语言下的页面名加名称：“Explore · LEVI”、“训练池 · LEVI”、“Episode viewer · lerobot/aloha_static_coffee · Episode 3 · LEVI”。框架自己回答的页面自己命名（“这个页面不存在 · LEVI”“这个页面出错了 · LEVI”），通过 `useTitleOverride` 实现，因为路径分不出“不存在的地址”和数据集路径。页面和名称见 `routePageName`（首页、使用指南、报告、探索数据、转换与审核、训练池、实时评测、片段查看器、样张页） |
+| 作业（`jobs-menu.tsx`、`jobs.ts`） | 正在运行的训练池作业和转换作业数量，读现有的 `/api/levi/pool/jobs` 和 `/api/levi/jobs`，首次加载、打开菜单、切回标签页时各查一次，标签页可见时每 60 秒一次（有作业在跑时每 5 秒一次；隐藏时不请求，上一个请求未返回时不再发）。菜单在作业上报进度时显示运行中作业的进度，并通向训练池和转换与审核。看到在运行、之后完成、完成但有错误或失败的作业，会用 Toast 提示一次，带通往对应页面的按钮（失败的提示保留到被关闭）；加载时就已结束的、已取消的和被中断的不提示 |
+| 命令面板（`command-palette.tsx`、`commands.ts`） | macOS 上 ⌘K，其他系统 Ctrl+K，或点“搜索”。组合框加列表框：跳到页面或数据集（目录里的本地数据集和公开示例，打开面板时从 `/api/levi/catalog` 读取），打开 Agent 工作台、账号与连接或快捷键总表，选择外观或语言。按两种语言的标签以及中英文关键词匹配 |
+| 快捷键总表（`shortcuts-dialog.tsx`） | 按 `?` 打开（在输入框中不触发）。列出全局快捷键、跳转组合键和页面已有的快捷键（片段查看器、标注、审核队列） |
+| 设置菜单（`levi-header.tsx`） | 账号与连接、命令面板、快捷键，以及动效设置：跟随系统（默认）、减少、正常（见[动效](#动效)） |
+| 跳到正文链接（`skip-to-content.tsx`） | 每个页面的第一个 Tab 停靠点，只在获得焦点时可见：“跳到正文”把焦点移到页面的 `main`（或 `role="main"` 区域，再不然是查看器的 `#vw-main`）；每个页面（包括样张页）都有 `main`，它滚动到时停在吸顶顶栏之下（`scroll-margin-top`）。片段查看器在它之后仍保留自己通往正文和检查器的链接 |
+| 错误页和“找不到页面”（`error-pages.tsx`；`app/not-found.tsx`、`app/error.tsx`、`app/global-error.tsx`） | 框架自己回答的页面，用全局框架的外观和读者的语言，分三段（发生了什么、为什么、怎么办）：地址不存在时给出回首页和探索数据；没人接住的错误给出重试，并把消息折叠在“技术细节”里。它们保留页面的 `main` 地标，并把焦点移到标题，由焦点移动来朗读标题；只有错误页（`error.tsx`、`global-error.tsx`）还会用 `role="alert"` 播报说明（加在说明上，不加在标题上），404 只移动焦点，因为找不到地址不算事故；它们正好占满顶栏以下的空间，页面不会出现滚动条；最后兜底的边界会替换整个布局，自带 `<html>`、令牌样式表，并同时写两种语言 |
 
-**快捷键。** 全局框架只绑定 ⌘K / Ctrl+K 和 `?`（也接受全角 `？` 和用 AltGr 打出的 `?`）。输入法组字时都不触发，`?` 在输入框中不触发，另一个模态对话框（确认框、页面自己的对话框、原生 `showModal()` 对话框）打开时也都不触发。在模态层里按的键（Tab 和 Esc 除外，由层自己处理）不会传到 `window` 上的监听，页面快捷键不会在对话框背后生效，和原生 `confirm()` 一样；确认框开着时切换页面，按“取消”作答。页面保留自己的快捷键：Space、↑/↓、J/K、Esc、Ctrl/⌘+S/Z/Y。
+**快捷键。** 全局框架绑定 ⌘K / Ctrl+K、`?`（也接受全角 `？` 和用 AltGr 打出的 `?`）和跳转组合键：先按 `G`，再按 `H` 首页、`E` 探索数据、`W` 转换与审核、`P` 训练池、`L` 实时评测、`R` 报告、`U` 使用指南（第二个键要在 1.5 秒内；见 `global-keys.ts` 的 `CHORD_PAGES`）。跳转会关闭打开着的命令面板或快捷键总表；标注编辑器有未保存的草稿时（`shell/unsaved-work.ts`，由 `annotations-context.tsx` 设置），框架先通过唯一的确认对话框问“不保存就离开这个页面？”，对话框的文字与实际一致：这些修改还没有保存到工作区，只留在这个浏览器标签页里（编辑器把草稿放在标签页的 session storage 里，所以在同一标签页里离开再回来草稿还在）。输入法组字时都不触发，`?` 和组合键在输入框中不触发，另一个模态对话框（确认框、页面自己的对话框、原生 `showModal()` 对话框）打开时也都不触发。在模态层里按的键（Tab 和 Esc 除外，由层自己处理）不会传到 `window` 上的监听，页面快捷键不会在对话框背后生效，和原生 `confirm()` 一样；确认框开着时切换页面，按“取消”作答。页面保留自己的快捷键：Space、↑/↓、J/K、Esc、Ctrl/⌘+S/Z/Y。
 
 **加载遮罩。** `loading-component.tsx` 是 `role="status"` 加 `aria-busy="true"`，不是对话框：不拿焦点，也不困住焦点。
 
@@ -118,36 +129,31 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 
 ## 品牌标识
 
-全站只有一个标识：32 单位网格上的石墨色方块，里面是几何的“L”和一个方点。`src/components/shell/brand.tsx` 里的 `LEVI_MARK` 是它唯一的定义；`<LeviMark size>` 在页面里画它（方块用 `--ds-accent`，字形用 `--ds-on-accent`，所以和主要按钮一样，浅色下黑、深色下白），`<LeviWordmark>` 再加上名称。顶栏、首页、使用指南和报告页都用它。浏览器标签图标 `src/app/icon.svg`（黑色方块，浏览器为深色主题时换成白色）、`apple-icon.png`（180 px，满版）和 `favicon.ico`（16、32、48 px）按同一组数字生成：改了标识后运行 `uv run --with pillow python scripts/brand_icons.py`；`icon.svg` 与定义不一致时 `brand.test.ts` 失败。页面不再自己画标识，酸橙绿已经去掉。
+全站只有一个标识：32 单位网格上的石墨色方块，里面是几何的“L”和一个方点。`src/components/shell/brand.tsx` 里的 `LEVI_MARK` 是它唯一的定义；`<LeviMark size>` 在页面里画它（方块用 `--ds-accent`，字形用 `--ds-on-accent`，所以和主要按钮一样，浅色下黑、深色下白），`<LeviWordmark>` 再加上名称。顶栏画字标；首页、使用指南和报告页画图标。浏览器标签图标 `src/app/icon.svg`（黑色方块，浏览器为深色主题时换成白色）、`apple-icon.png`（180 px，满版）和 `favicon.ico`（16、32、48 px）按同一组数字生成：改了标识后运行 `uv run --with pillow python scripts/brand_icons.py`；`icon.svg` 与定义不一致时 `brand.test.ts` 失败。页面不再自己画标识，酸橙绿已经去掉。
 
 ## 全局页面基础（第 5 阶段）
 
-`globals.css` 用令牌设置页面：背景 `--ds-bg`、主文字、正文字号的系统字体、`color-scheme: light dark`（滚动条、下拉列表、日期选择器随主题变化）、低调的滚动条、选中文字底色、给顶栏留出的 `scroll-padding-top`，以及所有元素统一的石墨色焦点环（`levi.css`，`outline: 2px`，外偏 2 px；强制颜色模式下用 `Highlight`）。中文下旧的全大写、加宽字距标签按正常排版显示。
+`globals.css` 是唯一的全局样式表。它用令牌设置页面：背景 `--ds-bg`、主文字、正文字号的系统字体、`color-scheme: light dark`（滚动条、下拉列表、日期选择器随主题变化）、低调的滚动条、选中文字底色、给吸顶顶栏留出的 `scroll-padding-top`、等宽数字（`.tabular`）、所有元素统一的石墨色焦点环（`outline: 2px`，外偏 2 px；强制颜色模式下用 `Highlight`）、按钮的指针和禁用外观，以及复选框、单选框、滑块和 `<progress>` 的强调色。中文下仍留的少数全大写、加宽字距标签按正常排版显示（`ds-eyebrow` 也一样：`:lang(zh)`）。它还把 Tailwind 的 `font-sans`、`font-mono` 和 `text-on-media`（视频和图像上的白色）映射到令牌。
 
-**旧名称。** 还没迁移的页面保留原来的类名；它们的颜色现在来自令牌，所以每个页面都跟随浅色和深色，不再出现旧的深绿、羊皮纸色、酸橙绿或青色。迁移时按下表替换：
+**旧名称已经没有了。** `levi.css`（重构前的页面样式）和把旧代码指向令牌的映射都已删除：`--bg`、`--surface-*`、`--text-*`、`--accent*`、`--border-*`，以及被重映射的 Tailwind `white`、`slate`、`cyan`、`lime` 和状态色。Tailwind 色板类又变回 Tailwind 自己的颜色，所以代码里不能再留下它们（有测试查）。从旧分支移植代码时：
 
-| 旧名称 | 现在指向 | 迁移时改用 |
-| --- | --- | --- |
-| `--bg`、`--surface-0/1/2` | `--ds-bg`、`--ds-surface-sunken`、`--ds-surface-1`、`--ds-surface-2` | 对应的 `--ds-*` |
-| `--text-primary/muted/faint` | `--ds-text-primary/secondary/tertiary` | 同左 |
-| `--accent`、`--accent-soft`、`--accent-ring` | `--ds-accent`、12% 强调色、`--ds-focus-ring` | `--ds-accent` 只用于主要按钮、选中和进度；选中的底色用 `--ds-surface-selected` |
-| `--border-subtle`、`--border-strong` | `--ds-separator`、`--ds-separator-strong` | 同左；输入框用 `--ds-border-control` |
-| Tailwind `white`（`text-white`、`border-white/10`、`bg-white/5`） | `--ds-text-primary`（两套外观下都是淡线或淡底） | `--ds-separator` / `--ds-surface-hover`；视频上的文字用 `text-on-media` |
-| Tailwind `slate-100…200` / `300…500` / `600` | 主 / 次要 / 三级文字（`500` 用次要文字：旧页面把它放在凹陷区和弹出层上，三级文字在那里不到 4.5:1） | 文字令牌 |
-| Tailwind `slate-700` / `800` / `900` / `950` | `--ds-separator-strong` / `--ds-separator` / `--ds-surface-1` / `--ds-bg` | 同左 |
-| Tailwind `cyan-*`、`lime-*` | `--ds-accent`（`cyan-200`、`600` 为 `--ds-accent-hover`） | `Button variant="primary"`、`--ds-surface-selected` |
-| Tailwind `red-*`、`orange/amber/yellow-*`、`green/emerald-*`、`blue-*` | `--ds-danger`、`--ds-warning`、`--ds-success`、`--ds-info` | 带 tone 的 `Badge`、`StatusDot`；图表序列用 `--ds-data-*` |
-| `.levi-workbench`、`.levi-box` | 页面框架、卡片 | `Card`，页面自己的布局 |
-| `.levi-primary`、`.levi-secondary` | 画成 ds 按钮的样子 | `Button variant="primary"` / `"secondary"` |
-| `.levi-input` | 画成 ds 输入框的样子 | `Field` 里的 `Input`、`Select`、`Textarea` |
-| `.levi-table`、`.levi-status`、`.levi-error`、`.levi-code`、`.levi-metrics`、`.levi-eyebrow` | ds 表格、中性或状态徽章、错误提示、代码块、指标卡、分区标签 | `Table`、`Badge`、三段式错误（发生了什么、为什么、怎么办）、`ds-*` 样式的 `<pre>` |
-| `.panel`、`.panel-raised` | 卡片、抬升卡片 | `Card`、`Card variant="raised"` |
+| 旧名称 | 改用 |
+| --- | --- |
+| `--bg`、`--surface-0/1/2` | `--ds-bg`、`--ds-surface-sunken`、`--ds-surface-1`、`--ds-surface-2` |
+| `--text-primary/muted/faint` | `--ds-text-primary/secondary/tertiary` |
+| `--accent`、`--accent-soft`、`--accent-ring` | `--ds-accent` 只用于主要按钮、选中和进度；选中的底色用 `--ds-surface-selected`；`--ds-focus-ring` |
+| `--border-subtle`、`--border-strong` | `--ds-separator`、`--ds-separator-strong`；输入框用 `--ds-border-control` |
+| Tailwind `white`（`text-white`、`border-white/10`、`bg-white/5`） | `--ds-text-primary`、`--ds-separator`、`--ds-surface-hover`；视频上的文字用 `text-on-media` |
+| Tailwind `slate-*`、`zinc-*` | 文字令牌（主、次要、三级）、`--ds-separator(-strong)`、`--ds-surface-1`、`--ds-bg` |
+| Tailwind `cyan-*`、`lime-*` | `--ds-accent`；`Button variant="primary"`；`--ds-surface-selected` |
+| Tailwind `red-*`、`orange/amber/yellow-*`、`green/emerald-*`、`blue-*` | 经 `Badge` 或 `StatusDot` 用 `--ds-danger`、`--ds-warning`、`--ds-success`、`--ds-info`；图表序列用 `--ds-data-*` |
+| `.levi-box`、`.levi-eyebrow`、`.levi-primary`、`.levi-secondary`、`.levi-input`、`.levi-table`、`.levi-status`、`.levi-error`、`.panel` | `Card` / `EmptyState`、`ds-eyebrow`、`Button`、`Field` 里的 `Input` / `Select` / `Textarea`、`Table`、`Badge`、三段式错误（`Problem`）、`Card` |
 
-`levi.css` 里仍是片段查看器、实时评测、训练池、转换与审核、Agent 工作台的页面样式；其中每个写死的颜色都按用途（表面、文字、线、强调、状态）映射到了令牌。某个类没有页面再用时，就从 `levi.css` 删除。`global-styles.test.ts` 在 `globals.css`、`home.css`、`reading.css`、`report.css` 出现颜色字面量、`levi.css` 出现黑色以外的颜色字面量，或这些文件里出现旧配色时失败。
+`global-styles.test.ts` 在 `globals.css`、`home.css`、`reading.css`、`report.css` 出现颜色字面量、出现旧配色、旧变量名或旧映射、`levi.css` 重新出现，或 `src/` 任何地方出现 Tailwind 色板类时失败。
 
 **首页**（`/`）是工作入口：继续（这个浏览器里最近打开的片段或数据集；框架把访问记录存在 `localStorage` 的 `levi-recent` 里，不发送到任何地方）、需要你处理（`waiting_for` 为人工批准、审核或提交的 agent 任务，来自 `/api/levi/agent/v1/activity/tasks`）、正在运行（转换和训练池作业及其进度）、显示实时评测时的状态卡，以及最近的数据集（先列打开过的，再列其他已登记的）。每张卡单独加载，先显示骨架，10 秒没有回应就放弃；标签页可见时每 15 秒刷新。Hugging Face 搜索和旧的 `/?path=`、`/?dataset=` 链接保留。原来的介绍移到了使用指南。
 
-**阅读型版式**（`reading.css`，使用指南和报告页）：单栏，最宽 760 px；左侧目录始终可见并标出当前小节（`aria-current="location"`）；正文 16/26（`--ds-text-reading-*`）；`.levi-prose` 统一 Markdown 的标题、列表、链接（主文字加下划线）、引用、代码和表格。报告页的图表使用 `--ds-data-*`（经 `useCssTokens` 取值；当前浏览器里 Recharts 也能直接用 `var(--ds-…)`，这个 hook 只在 canvas、WebGL 里必需），运行中状态只用颜色和文字表示、没有循环动画，“已更新”用全局 Toast 提示。
+**阅读型版式**（`reading.css`，使用指南和报告页）：单栏，最宽 760 px；左侧目录始终可见并标出当前小节（`aria-current="location"`）；正文 16/26（`--ds-text-reading-*`）；`.levi-prose` 统一 Markdown 的标题、列表、链接（主文字加下划线）、引用、代码和表格。目录在小节标题越过窗口 40% 高度处的一条线后才标出该小节（`active-section.ts`），标记不会比内容慢一节；中文里强调用加粗一档的字重，不用计算出来的斜体；Markdown 表格的第一列至少保留 6.5 em 宽。使用指南的示例缩略图在帧加载出来之前（远程文件连不上时一直如此）显示安静底色上的图标，不再是一块黑。报告页的图表使用 `--ds-data-*`（经 `useCssTokens` 取值；当前浏览器里 Recharts 也能直接用 `var(--ds-…)`，这个 hook 只在 canvas、WebGL 里必需），运行中状态只用颜色和文字表示、没有循环动画，“已更新”用全局 Toast 提示。
 ## 片段查看器（第 3 阶段）
 
 片段查看器（`src/app/[org]/[dataset]/[episode]/`）在浅深两套主题下都用令牌。样式在 `src/components/viewer/`：
@@ -156,7 +162,7 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 | --- | --- |
 | 框架、标签栏、片段列表、媒体、播放、提示、指标卡 | `viewer.css`（类名 `vw-*`） |
 | 标注面板、时间轴、价值模型和锚定复核泳道、分割 | `annotations.css`（作用域 `.annotations-skin`，取代 `annotations-skin.css`） |
-| 数据配色 | `viewer.css`（`--dv-1` … `--dv-8` 即令牌 `--ds-data-1` … `--ds-data-8`、`--dv-positive`、`--dv-negative`、`--dv-neutral`）和 `data-palette.ts` |
+| 数据配色 | `viewer.css`（`--dv-1` … `--dv-8` 直接指向 `--ds-data-1` … `--ds-data-8`、`--dv-positive`、`--dv-negative`、`--dv-neutral` 即 `--ds-separator-strong`）和 `data-palette.ts` |
 | 标签页与“分析”标签 | `viewer-tabs.ts`、`analysis-tab.tsx` |
 | 错误页 | `load-error.tsx` |
 | 测试 | `src/components/viewer/__tests__/` |
@@ -165,7 +171,11 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 
 **检查器**：“标注”标签右侧有一栏（320 px，`inspector.tsx`），显示选中时间片段的编辑表单；在“物体标注”下显示选中物体的信息和接受/拒绝。表单仍由各面板渲染，状态和处理函数不变，`InspectorPortal` 只把表单的 DOM 移到这一栏；没有这一栏时（`useInspectorSlot()` 为 null）表单留在原处。这一栏可以收起成窄条；窗口窄于 1200 px 时变成底部抽屉，默认收起。Esc、Ctrl/⌘+S/Z/Y 照常可用（它们监听的是 window）。
 
-**数据色**不是界面色。8 个分类色按固定顺序使用，浅深各有一套色阶（用配色校验脚本检查：相邻色在色觉障碍下 ΔE ≥ 8.4，正常视觉 ΔE ≥ 19.3，深色阶在深色卡片上 ≥ 3:1；浅色下有三个色在白底上低于 3:1，所以有颜色的标记旁边总有可见的文字标签）。标注样式在 `annotations.css` 里映射到固定槽位（`--style-subtask` … `--style-memory`）；图表序列按顺序取 `seriesColor(i)`；RECAP 优势用 `--dv-positive` / `--dv-negative`。文字从不使用数据色：标签胶囊、泳道名、图例都是文字色，旁边配一个彩色圆点或色条。状态（通过/警告/失败、成功/失败）用状态色令牌，并配图标和文字。画布和三维场景读不到 CSS 变量，用 `DATA_ON_MEDIA`（深色阶，有测试保证与 `viewer.css` 一致）；`data-palette.ts` 是查看器里唯一允许出现 hex 的文件。
+**分析视图。** 动作洞察、筛选、统计、概览和数据诊断由 `src/components/viewer/analysis-ui.tsx` 里的共用件搭成，样式是 `viewer.css` 的 `.vw-a-*` 规则，只用令牌和 `--dv-N`；Tailwind 只留给布局。`AnalysisCard` 是 ds `Card`，带可选的说明开关（信息按钮，带 `aria-expanded` 和 `aria-controls`）；`AnalysisNote` 和 `Callout` 分别是说明和突出显示的发现；`Meter` 是装饰性的细条，所以数值一定印在旁边；`StatList` 是名称/数值列表；`StateBadge` 用形状加文字表示状态；`fill()` 翻译带 `{name}` 参数的整句（每句一个目录键，不用碎片拼句）。
+
+**禁用控件和按键。** 被禁用的按钮在旁边用文字说明原因，并用 `aria-describedby` 指向这段文字，不靠 `title`（Agent 抽屉用 `GatedButton`，查看器的弹窗用 `viewer/popup-actions.tsx`）。纯图标按钮和简短的事实说明用 ds `Tooltip`，键盘聚焦时也会出现。全局按键（Ctrl/⌘+Z、Esc、Space）在 input、textarea、select 和 contenteditable 里不起作用（`viewer/text-entry.ts`），输入框里的 Ctrl/⌘+Z 不拦截，留给输入框自己。Esc 按下面的顺序只做第一件事：关闭打开的弹层或菜单；在输入框里不做任何事；关闭窄屏检查器抽屉；清除选中的标注（抽屉的监听挂在 `document` 的冒泡阶段）。长列表整体是一个 Tab 停靠点，里面用方向键移动，并带 `aria-keyshortcuts`；查看器开头有跳到正文区和检查器的 skip link。播放头是 `role="slider"`：←/→ 移动 0.1 秒，Shift 移动 1 秒，Home/End 跳到两端，拖动时隐藏它的提示。帧率和时间戳输入框最多显示两位小数，没改动就不回写。
+
+**数据色**（时间片段、图表序列、掩码、视频上的标签）使用[数据色](#数据色)一节描述的配色，从不用强调色。文字从不使用数据色：标签胶囊、泳道名、图例都是文字色，旁边配一个彩色圆点或色条。
 
 **媒体区**两种主题下都是黑底（`--ds-media-bg`）；每个相机画面和三维视口带 `data-theme="dark"`，画在上面的控件是深色的。视频上的标签是深色底板上的近白文字加一条彩色竖条。三维背景是黑色。
 
@@ -175,7 +185,7 @@ LEVI 界面分阶段重构：石墨强调色，浅色和深色两套外观、默
 
 **反馈**：加载遮罩 300 ms 后才出现（加载快就不显示），减少动态效果时转圈停止；其他地方的转圈都换成 Lucide 的转圈；页面错误说明发生了什么、原因（技术细节）和怎么办（重试、返回探索数据）；“数据集已变化”卡片放在左下角，不挡住 Toast。
 
-ESLint 拒绝查看器文件里的 hex 颜色（`eslint.config.mjs` 的 `VIEWER_FILES`）；三维回放保留机器人模型的材质颜色，不在这个列表里。
+ESLint 的颜色规则和 `src` 里所有文件一样覆盖查看器的文件；例外只有 `data-palette.ts`（canvas、WebGL 和机器人模型材质的数值）和测试。
 ## 页面（第 4 阶段）
 
 实时评测（`/live`）、转换与审核（`/workbench`）、训练池（`/pool`）、探索数据（`/explore`）和 Agent 工作台抽屉里的内容都已改用令牌，随主题切换。接口调用、作业和数据都没变，只改了标记、类名和反馈方式。
@@ -183,24 +193,26 @@ ESLint 拒绝查看器文件里的 hex 颜色（`eslint.config.mjs` 的 `VIEWER_
 | 内容 | 位置 |
 | --- | --- |
 | 页面样式（类名 `pg-*`） | `src/components/pages-ui/pages.css`，由四个页面引入 |
-| Agent 工作台内容样式 | `src/components/pages-ui/agent-content.css`（规则都在 `.levi-agent-sheet` 之下；抽屉本身属于全局框架） |
+| Agent 工作台内容 | `src/components/agent-ui.tsx`（小构件）、`src/components/pages-ui/agent-content.css`（只管布局：`.levi-agent-sheet .ag-dock` 之下的 `ag-*` 类；抽屉本身属于全局框架） |
+| 服务端的话 | `src/components/pages-ui/messages.ts`（`describeMessage`、`useServerText`） |
 | 反馈组件 | `src/components/pages-ui/feedback.tsx` |
 | 测试 | `src/components/pages-ui/__tests__/`、`src/components/pool/__tests__/composition-order.test.tsx` |
 
-- **类名**：这些页面原来用 `levi.css` 里的 `levi-*` 类，现在改写为 `pg-*`，布局不变，颜色换成令牌；按钮、输入框和表格直接用 `ds-btn`、`ds-input`、`ds-table`（或对应组件）。Agent 工作台内容保留 `levi-agent-*`、`levi-activity-*`、`levi-connection-*` 类名（与抽屉共用），`agent-content.css` 在 `.levi-agent-sheet` 下用令牌重写；其中的按钮和输入框加了 `ds-btn` / `ds-input`，按下的按钮（标签、开关）显示为选中态。两份样式表都没有颜色字面量（有测试），这些页面的 TSX 也受十六进制颜色的 lint 规则约束（`eslint.config.mjs` 的 `PAGE_FILES`）。
+- **类名**：这些页面原来用 `levi.css` 里的 `levi-*` 类，现在改写为 `pg-*`，布局不变，颜色换成令牌；按钮、输入框和表格直接用 `ds-btn`、`ds-input`、`ds-table`（或对应组件）。Agent 工作台内容由 ds 组件加 `agent-ui.tsx` 的小构件搭成，`agent-content.css` 只负责布局（`ag-*`，根类名 `ag-dock`）。两份样式表都没有颜色字面量（有测试），这些页面的 TSX 也和 `src` 里所有文件一样受颜色 lint 规则约束。`levi.css` 删除之后，这些规则自成一体（背后没有更旧的规则）；其中提到它的注释属于历史说明。
 - **反馈组件**（以后可提升进 `ds`）：`Problem` 是三段式错误（发生了什么、为什么——通常是服务端原话——、怎么办，可选折叠的“技术细节”；默认 `role="alert"`，常驻的错误用 `live={false}`）；`RequestProblem` 写明哪个操作失败，并把服务端消息作为原因；`Note` 是行内的信息/成功/警告提示；`JobCard` 是各页统一的作业卡（状态徽章、标题、右侧元数据，下面放该页的进度和结果）；`EmptyLine` 是卡片内的一行空状态。
 - **状态**一律用 `Badge` 或 `StatusDot`（形状、颜色、文字）：训练池作业状态、转换的检查项、实时评测的会话和服务状态（运行中的会话会呼吸）、片段结局。进度条用 `Progress`。
 - **加载和结果**：布局已知的地方用骨架屏（训练池预览、选中片段、实时评测统计）；结果不在操作旁边时（配方已保存、记录已清除、已释放空间）用 Toast；错误留在出错的操作旁边。
 - **训练池的任务顺序**改用 `ReorderList`（Motion）：拖动手柄，或聚焦手柄后按 ↑/↓；每个任务仍保留上移、下移和移除按钮。
 - **每屏一个主要按钮**：登记并浏览（转换与审核）、开始导出（训练池；从未扫描时是“立即扫描”）、有计划后的“运行转换”。
-- **这些页面里用到、但别处也用的共享组件**（`dataset-format.tsx`、`hf-auth-button.tsx`）只在这些页面内按类名改了外观，等其所有者迁移。
-- **页面版式**：训练池加了步骤条（① 选择 ② 组合 ③ 导出，`pool-steps.tsx`；当前步骤随组合和导出变化，点击跳到对应区块），标题行放“导出…”作为本页主要操作（滚到导出表单并聚焦名称；只有从未扫描时“立即扫描”是主要按钮）；“最近的作业”默认折叠，并提示顶栏“作业”菜单。实时评测顶部加一行汇总（运行中的会话、已标注/已完成片段、最近一次错误；`live-summary.tsx`），“只看不控”的说明改为信息色 `Note`。转换与审核里，主要按钮归向导的当前步骤（检查输入、审核计划、运行转换，完成后“审核转换结果”；转换运行中没有主要按钮）；选中的导出卡片显示为按下并描边。
-- **Agent 工作台内容**：分区改用 ds `Tabs`；运行操作里“运行试点”或“执行剩余”是主要按钮；批准计划、接受试点、提交更改带 `HumanActionMark`（“需要你确认”），并作为该步的主要按钮。
+- **页面版式**：训练池加了步骤条（① 选择 ② 组合 ③ 导出，`pool-steps.tsx`；当前步骤随组合和导出变化，点击跳到对应区块），标题行放“导出…”作为本页主要操作（滚到导出表单并聚焦名称；只有从未扫描时“立即扫描”是主要按钮）；“最近的作业”默认折叠，并提示顶栏“作业”菜单。实时评测的空状态把反引号里的命令画成 `<code>`，并用一个按钮复制第一条命令（`command-text.tsx`）；统计里的选择框有描边；面板不再变淡：服务没运行时用文字说明，因为降低不透明度会让文字低于 4.5:1。实时评测顶部加一行汇总（运行中的会话、已标注/已完成片段、最近一次错误；`live-summary.tsx`），“只看不控”的说明改为信息色 `Note`。转换与审核里，主要按钮归向导的当前步骤（检查输入、审核计划、运行转换，完成后“审核转换结果”；转换运行中没有主要按钮）；选中的导出卡片显示为按下并描边。
+- **Agent 工作台内容**：由 ds 组件和 `src/components/agent-ui.tsx` 的小构件搭成（`Disclosure`、`Actions`、`Hint`、`GatedButton`、`ConnectionHead`、`HumanActionMark`、`exportedToast`）；分区用 ds `Tabs`。只有人能做的动作（批准计划、通过试点、校验并批准、提交变更、批准任务、回答运行时授权）在按钮前放 `HumanActionMark`（“需要你确认”），并且是该步的主要按钮。删除类操作走全局 `ConfirmDialog`；结果用 Toast，导出目录的 Toast 不自动消失，并带“复制路径”；错误是三段式（`RequestProblem`）。Hugging Face 登录是带 `LogIn` 图标的 ds Button：不从 huggingface.co 加载任何东西（没有徽章图，没有远程头像）。
+- **服务端的话**：服务返回的话在页面语言下只显示一份：用 `describeMessage` / `useServerText`（`pages-ui/messages.ts`），不要直接 `t(后端的句子)`。带数字或路径的句子在 `KNOWN` 里加模板（并在 en、zh 里加条目）；中文下没人翻译的英文句显示一行简短说明，原文放进“技术细节”。错误统一用 `Problem` / `RequestProblem`：常驻的加载或轮询错误用 `live={false}`，用户操作引起的错误保持播报（首页卡片和停止作业横幅也一样）。
+- **页面宽度**：转换与审核、训练池、探索数据和实时评测共用 1360 px 版心（`pages.css` 的 `--pg-max`）；宽表格在自己的框里横向滚动，不撑宽页面。首页（1200 px）以及使用指南和报告的阅读版式（1200 px，正文栏 760 px）有意更窄。
 - **共享组件** `hf-auth-button.tsx`（ds 按钮、菜单、对话框）和 `dataset-format.tsx`（ds 徽章）自带样式（`pages-ui/shared.css`），在所有页面（包括片段查看器）外观一致。
 - **辅助类**：`pg-small`、`pg-mt-2…6`、`pg-my-2/3`、`pg-full`、`pg-block`、`pg-mono`、`pg-between`、`pg-stack` 取代这些页面上的 Tailwind 间距和字号工具类：`ds-root` 在层外重置了标题和段落边距，层内的工具类在那里不生效（有测试防止回退）。`RequestProblem` 去掉“Error:”前缀（`cleanMessage`），支持 `onRetry`（“重试”按钮）。
 - **减少动态效果**：`pages.css` 和 `agent-content.css` 里所有有动画或过渡的规则，在 `data-motion="reduce"`（应用内开关）下也会停止，有测试。
 - **数据色**：对象工具的掩码叠加从画布元素的 CSS 颜色读取 `--ds-data-6`（canvas 读不到 CSS 变量）。
-- **已知缺口**：被截断的表格单元格仍用原生 `title` 显示全文；两个会话报告同一模型和任务目录时，实时评测会话列表可能出现 React 重复 key 警告（取决于数据，这里没改）。
+- **已知缺口**：被截断的表格单元格仍用原生 `title` 显示全文（符合 `title=` 规则：单元格已经显示了关键内容）。
 
 ## 动效
 
@@ -216,7 +228,9 @@ ESLint 拒绝查看器文件里的 hex 颜色（`eslint.config.mjs` 的 `VIEWER_
 | 运行中状态 | 每 2 秒一次透明度呼吸 | 静止 |
 | 拖拽与重排（Motion） | 抓起时 `scale(1.02)` + 阴影加深，弹性到位 | 直接到位 |
 
-`prefers-reduced-motion: reduce` 时，`--ds-dur-base`、`--ds-dur-slow`（及退出时长）变为 0，`--ds-ease-spring` 变为 `linear`，所有位移令牌归零；旋转图标、不确定进度条、呼吸状态点都停下。祖先元素上的 `data-motion="reduce"` 有同样效果（用于预览和测试）。渲染内容会变的组件用 `usePrefersReducedMotion()`；`ReorderList` 用 Motion 的 `useReducedMotion` 和 `MotionConfig reducedMotion="user"`。`ReducedMotionScope reduce` 可对一个子树强制走减少动态效果的路径（样张页的预览开关就是这样做的；同时在元素上加 `data-motion="reduce"`，让 CSS 也跟着变）。第 1 阶段没有退出动画，关闭时直接消失。
+`prefers-reduced-motion: reduce` 时，`--ds-dur-base`、`--ds-dur-slow`（及退出时长）变为 0，`--ds-ease-spring` 变为 `linear`，所有位移令牌归零；旋转图标、不确定进度条、呼吸状态点都停下（应用内选*正常*时不停：停在 30% 的进度条会像卡住了，所以媒体查询对 `data-motion="full"` 让路）。祖先元素上的 `data-motion="reduce"` 有同样效果（用于预览和测试）。渲染内容会变的组件用 `usePrefersReducedMotion()`；`ReorderList` 先看应用内设置（*减少*时 `MotionConfig reducedMotion` 为 `"always"`，*正常*时为 `"never"`），否则用 Motion 的 `useReducedMotion`（`"user"`）。`ReducedMotionScope reduce` 可对一个子树强制走减少动态效果的路径（样张页的预览开关就是这样做的；同时在元素上加 `data-motion="reduce"`，让 CSS 也跟着变）。第 1 阶段没有退出动画，关闭时直接消失。
+
+**应用内动效设置**（设置菜单）：*跟随系统*（默认）、*减少*或*正常*，存在 `levi-motion` 键下，由 `<head>` 里的脚本在首次绘制前写到 `<html>` 上，成为 `data-motion="reduce"` 或 `data-motion="full"`（跟随系统时不写），与主题的处理方式相同。*减少*的效果和系统设置相同（上面的令牌，以及所有读 `data-motion="reduce"` 的规则）；*正常*则在系统要求减少动态效果时仍保留动效令牌（媒体查询里的 `:root:not([data-motion="full"])`）。渲染内容会变的组件（`usePrefersReducedMotion`、`ReorderList`）实时跟随它。页面样式表里直接写在 `@media (prefers-reduced-motion)` 下的规则，在*正常*下仍只跟随系统；它们各自也有 `data-motion="reduce"` 的对应规则，用于*减少*。
 
 禁止无限循环的装饰动画、视差、滚动劫持、超过 400 ms 的动画和阻塞操作的动画。
 
@@ -227,13 +241,31 @@ ESLint 拒绝查看器文件里的 hex 颜色（`eslint.config.mjs` 的 `VIEWER_
 - 焦点环：2 px `--ds-focus-ring`，外偏 2 px（每个可交互组件都带 `ds-focus` 类）；Windows 高对比模式下用 `Highlight`。
 - 每个弹出层都有焦点陷阱（监听挂在 `document` 上，焦点跑到哪里都管得住），Esc 关闭，关闭后焦点返回；菜单和标签页遵循 ARIA 模式；Toast 用一个 polite 和一个 assertive 的 live 区域。
 - 可点区域至少 24 × 24 px。
+- 全局按键从不在输入框里起作用；Esc 的顺序、播放头滑块和 skip link 见“片段查看器”一节的“禁用控件和按键”。
+- 被禁用的控件在旁边用文字说明原因，并用 `aria-describedby` 关联（实时评测片段列表的移除功能是范例）；吸顶的顶栏不会挡住获得焦点的元素或锚点（`scroll-padding-top`、`scroll-margin-top`）。
 
 ## 样张页
 
 `/design` 并排展示浅色和深色下的全部令牌和组件（`?only=light` 或 `?only=dark` 只显示一套，`?motion=reduce` 以减少动态效果开始）。`next dev` 下可访问；生产服务（`next start`、`levi serve`）里，除非环境里设了 `LEVI_DESIGN_PAGE=1`（`src/lib/design/gate.ts`），`src/middleware.ts` 会在路由之前直接返回纯文本 404，不发送页面的元数据和样式。导航里没有它的入口。
 
+## 迁移状态
+
+| 范围 | 状态 |
+| --- | --- |
+| 全局框架：顶栏、Toast、确认框、命令面板、快捷键总表、Agent 工作台抽屉 | 已用 `ds-*` 组件和令牌（`shell.css`） |
+| 首页、使用指南、报告页 | 令牌、`ds-*` 组件、Lucide 图标；首页和使用指南共用 `home.css` 和 `reading.css` |
+| 实时评测、转换与审核、训练池、探索数据 | `pg-*` 样式配令牌，使用 ds 按钮、输入框、表格、徽章和反馈组件（`pages-ui/`） |
+| Agent 工作台内容 | ds 组件加 `agent-ui.tsx`；`agent-content.css` 只管布局（`ag-*`） |
+| 片段查看器 | 框架、标签、片段列表、播放和检查器用 `vw-*` 样式和 ds 组件（`viewer/`）；分析视图用 `analysis-ui.tsx` 的共用件（Tailwind 只用于布局）；标注面板、时间轴和泳道用 `annotations.css`；三维查看器用 Tailwind 工具类自己排版，颜色是令牌值。原生 `<select>` 还留在 `object-annotation-panel.tsx`（4 个）、`fast-segmentation-panel.tsx`（4 个）、`annotations-panel.tsx`（2 个）、`video-overlay-canvas.tsx`（1 个）和 `subtask-vocabulary.tsx`（2 个） |
+| 颜色 | CSS 和 TSX 里只用令牌，检查覆盖整个 `src/`（只有一个模块 `viewer/data-palette.ts` 和测试是例外）；`levi.css`、旧变量和 Tailwind 重映射已删除 |
+| 图标 | 经 `Icon` 用 Lucide；剩下的文字箭头和对勾出现在正文、键盘提示和三维查看器的 HUD 里 |
+| 找不到页面和错误页 | 全局框架的外观，中英双语（`error-pages.tsx`）；框架默认页已去掉 |
+| 语言 | 每个 `t("…")` 字面量在两份目录里都有键（有测试）；两份目录的键相同 |
+
+后续项：上面列出的原生 `<select>` 改用 ds `Select`；`messages.ts`、`analysis-ui.tsx`、`agent-ui.tsx` 可以提升进 `ds`；训练池 API 里没翻译的报错往 `KNOWN` 补。已知并有意保留的缺口：被截断的表格单元格上的原生 `title`（见 `title=` 规则）。同一模型和任务目录的两次运行是两张独立的会话卡（`sessionKeys` 按运行 id 给 key）。
+
 ## 测试
 
-`global-styles.test.ts` 检查页面基础和旧样式（见上），`brand.test.ts` 检查标识，`recent.test.ts` 和 `home-data.test.ts` 检查首页的数据；ESLint 的十六进制颜色规则也覆盖首页、使用指南、报告页和 `src/lib/design/`。
+`global-styles.test.ts` 检查页面基础、吸顶顶栏、字标、`levi.css` 的缺席、旧名称和 Tailwind 色板类；`brand.test.ts` 检查标识；`route-title.test.ts` 检查标签页标题；`lint-config.test.ts` 和 `src/__tests__/eslint-hex.test.ts` 检查颜色规则（覆盖每个源文件，例外都列出并带注释，`rgb()` / `hsl()` 也会被拦住）；`src/i18n/__tests__/catalog.test.ts` 检查语言目录；`recent.test.ts` 和 `home-data.test.ts` 检查首页的数据；`report-blocks.test.tsx` 检查报告页的排序表头（`aria-sort`、图标、提示）、指标变化图标和状态图标；`shell-dom.test.tsx` 检查组合键、命令面板里的数据集和对话框；`jobs-toast.test.tsx` 检查作业结果和进度；`motion-preference.test.tsx` 检查动效设置；`error-pages.test.tsx` 检查“找不到页面”和错误页。
 
 `bun test` 在 DOM（happy-dom，开发依赖）里运行组件测试。组件测试先引入 `./dom` 并调用 `setupDom()`，其中有 `render`、`press`、`click`、`focus`、`dropFocus`、`fire`、`flush`、`mockMatchMedia`。每个这样的测试文件结束后会移除 DOM 全局对象，其他测试仍在没有 DOM 的环境里运行。`tokens-contrast.test.ts` 还会在组件或样张页的 TSX 里发现颜色字面量（十六进制、`rgb()`、`hsl()`）或 Tailwind 任意值时报错。

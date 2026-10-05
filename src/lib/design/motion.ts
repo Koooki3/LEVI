@@ -19,8 +19,19 @@ import {
 
 const REDUCE_QUERY = "(prefers-reduced-motion: reduce)";
 
+/** The in-app motion setting on <html> (`data-motion`): true for "reduce",
+ * false for "full" (keep motion although the system asks for less), null
+ * when the system decides. */
+export function documentMotionOverride(): boolean | null {
+  if (typeof document === "undefined") return null;
+  const value = document.documentElement.getAttribute("data-motion");
+  return value === "reduce" ? true : value === "full" ? false : null;
+}
+
 export function prefersReducedMotion(element?: Element | null): boolean {
   if (element?.closest?.('[data-motion="reduce"]')) return true;
+  const app = documentMotionOverride();
+  if (app !== null) return app;
   try {
     return (
       typeof window !== "undefined" &&
@@ -53,9 +64,26 @@ export function ReducedMotionScope({
   );
 }
 
-/** True inside a `ReducedMotionScope reduce`, else null. */
+/**
+ * True inside a `ReducedMotionScope reduce` or when the in-app setting says
+ * "reduced", false when it says "normal", else null (the system decides).
+ */
 export function useReducedMotionOverride(): boolean | null {
-  return useContext(ReducedMotionOverride);
+  const scoped = useContext(ReducedMotionOverride);
+  const [app, setApp] = useState<boolean | null>(null);
+  useEffect(() => {
+    setApp(documentMotionOverride());
+    if (typeof MutationObserver === "undefined") return;
+    const observer = new MutationObserver(() =>
+      setApp(documentMotionOverride()),
+    );
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-motion"],
+    });
+    return () => observer.disconnect();
+  }, []);
+  return scoped ?? app;
 }
 
 /**
@@ -63,7 +91,7 @@ export function useReducedMotionOverride(): boolean | null {
  * `ReducedMotionScope reduce`.
  */
 export function usePrefersReducedMotion(): boolean {
-  const override = useContext(ReducedMotionOverride);
+  const override = useReducedMotionOverride();
   const [reduced, setReduced] = useState(false);
   useEffect(() => {
     setReduced(prefersReducedMotion());

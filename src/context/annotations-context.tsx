@@ -2,6 +2,7 @@
 "use client";
 import { T } from "@/components/levi-locale";
 import { isTextEntry } from "@/components/viewer/text-entry";
+import { setUnsavedWork } from "@/components/shell/unsaved-work";
 
 /**
  * Per-episode annotation state for the v3.1 language schema.
@@ -186,6 +187,11 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const backendEnabled = isAnnotateBackendEnabled();
+  // The frame asks before a keyboard jump drops an unsaved draft.
+  useEffect(() => {
+    setUnsavedWork(dirty);
+    return () => setUnsavedWork(false);
+  }, [dirty]);
 
   // Track the last saved snapshot to detect dirtiness honestly.
   const savedSnapshotRef = useRef<string>("[]");

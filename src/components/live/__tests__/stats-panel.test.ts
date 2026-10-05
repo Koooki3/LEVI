@@ -127,6 +127,10 @@ describe("statistics panel render", () => {
     expect(html).toContain("Evaluation sessions");
     expect(html).toContain("Per episode");
     expect(html).toContain("a dash means the figure was not measured");
+    // Both selectors are outlined fields (a bare select has no boundary).
+    const selects = html.match(/<select[^>]*>/g) ?? [];
+    expect(selects.length).toBe(2);
+    for (const select of selects) expect(select).toContain("ds-input");
   });
 
   test("the switch for removed episodes is there and says how many are left out", () => {

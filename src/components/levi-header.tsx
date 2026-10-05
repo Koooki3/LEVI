@@ -10,6 +10,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
+  Activity,
   Bot,
   Keyboard,
   Languages,
@@ -36,7 +37,8 @@ import {
   openAgentConnections,
   toggleAgentWorkbench,
 } from "./shell/shell-events";
-import { LeviMark } from "./shell/brand";
+import { LeviWordmark } from "./shell/brand";
+import type { MotionPreference } from "./shell/motion-preference";
 import { ShortcutsDialog } from "./shell/shortcuts-dialog";
 
 const THEME_ICON = { system: Monitor, light: Sun, dark: Moon } as const;
@@ -57,14 +59,23 @@ function useAgentOpen(): boolean {
 export default function LeviHeader() {
   const { t, language, setLanguage } = useLocale();
   const pathname = usePathname();
-  const { theme, setTheme, setPaletteOpen, setShortcutsOpen } = useShell();
+  const {
+    theme,
+    setTheme,
+    motion,
+    setMotion,
+    setPaletteOpen,
+    setShortcutsOpen,
+  } = useShell();
   // The live workspace's own LEVI (`levi live start --ui`) offers no training
   // pool: the pool is the product LEVI's (docs/LIVE.md).
   const { enabled, embedded } = useLivePulse();
   const pool = offersTrainingPool(enabled, embedded);
   const pages = useMemo(
-    () => navPages({ live: Boolean(enabled), pool }),
-    [enabled, pool],
+    // The Live evaluation entry is always offered: with no live service it
+    // opens a page that says how to start one (LiveNavLink draws it plain).
+    () => navPages({ live: true, pool }),
+    [pool],
   );
   const agentOpen = useAgentOpen();
   // Rendered after mount so the server and the first client render agree.
@@ -77,13 +88,17 @@ export default function LeviHeader() {
   );
   const themeLabel = `${t("Theme")}: ${t(THEME_LABEL[theme])}`;
   const themes: ThemePreference[] = ["system", "light", "dark"];
+  const motions: Array<[MotionPreference, string]> = [
+    ["system", "Motion: follow the system"],
+    ["reduce", "Motion: reduced"],
+    ["full", "Motion: normal"],
+  ];
 
   return (
     <>
       <header className="levi-shell-header">
         <Link href="/" className="levi-shell-brand ds-focus">
-          <LeviMark size={20} />
-          <span>LEVI</span>
+          <LeviWordmark size={20} />
         </Link>
         <nav className="levi-shell-nav" aria-label={t("Main navigation")}>
           {pages.map((page) =>
@@ -157,6 +172,13 @@ export default function LeviHeader() {
                 shortcut: "?",
                 onSelect: () => setShortcutsOpen(true),
               },
+              ...motions.map(([value, label]) => ({
+                id: `motion-${value}`,
+                icon: Activity,
+                label: t(label),
+                checked: motion === value,
+                onSelect: () => setMotion(value),
+              })),
             ]}
           />
           <Menu

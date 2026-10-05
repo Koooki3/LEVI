@@ -2,6 +2,23 @@
 // Components for the report's fenced blocks (src/utils/report.ts).
 import { createContext, useContext, useState } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  ChartColumn,
+  ChartLine,
+  CircleAlert,
+  CircleCheck,
+  CircleDot,
+  CircleX,
+  Clock,
+  Circle,
+  Minus,
+  Timer,
+  UserRound,
+  type LucideIcon,
+} from "lucide-react";
+import {
   Bar,
   BarChart,
   CartesianGrid,
@@ -14,6 +31,7 @@ import {
   YAxis,
 } from "recharts";
 import { DATA_TOKENS, useCssTokens } from "@/lib/design/css-tokens";
+import { Icon, Tooltip as Hint } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import {
   type BlockSpec,
@@ -68,11 +86,32 @@ const CHART_TOKENS = [
   "--ds-surface-1",
 ] as const;
 
+/** Each workstream state is a shape as well as a colour. */
+export const STATE_ICON: Record<string, LucideIcon> = {
+  running: CircleDot,
+  done: CircleCheck,
+  blocked: CircleX,
+  waiting: Clock,
+  planned: Circle,
+};
+
+/** The metric delta's direction as an arrow icon (never colour alone). */
+export function deltaIcon(
+  value: unknown,
+  baseline: unknown,
+): LucideIcon | null {
+  if (typeof value !== "number" || typeof baseline !== "number") return null;
+  return value > baseline ? ArrowUp : value < baseline ? ArrowDown : Minus;
+}
+
 export function BlockError({ message }: { message: string }) {
   const { t } = useLocale();
   return (
     <div className="lr-block-error" role="alert">
-      <strong>{t("report.blockError")}</strong> {message}
+      <Icon icon={CircleAlert} />
+      <span>
+        <strong>{t("report.blockError")}</strong> {message}
+      </span>
     </div>
   );
 }
@@ -139,7 +178,7 @@ function ProgressBlock({ id }: { id?: string }) {
                 {pick(item.title, lang) || item.id}
               </span>
               <span className={`lr-state lr-state-badge-${state}`}>
-                <span className="lr-state-dot" aria-hidden="true" />
+                <Icon icon={STATE_ICON[state] ?? Circle} />
                 {t(`report.state.${state}`)}
               </span>
               <span className="lr-progress-pct">
@@ -161,17 +200,20 @@ function ProgressBlock({ id }: { id?: string }) {
                 <span className="lr-stage">{pick(item.stage, lang)}</span>
               )}
               {age && (
-                <span title={item.updated_at ?? undefined}>
+                <span className="lr-meta" title={item.updated_at ?? undefined}>
+                  <Icon icon={Clock} />
                   {t("report.updatedAgo")} {age}
                 </span>
               )}
               {eta && (
-                <span>
+                <span className="lr-meta">
+                  <Icon icon={Timer} />
                   {t("report.eta")} {eta}
                 </span>
               )}
               {owner.text && ownerId !== item.id && (
-                <span title={owner.id ?? undefined}>
+                <span className="lr-meta" title={owner.id ?? undefined}>
+                  <Icon icon={UserRound} />
                   {t("report.owner")} {owner.text}
                 </span>
               )}
@@ -310,7 +352,12 @@ function ChartBlock({ spec }: { spec: Extract<BlockSpec, { kind: "chart" }> }) {
   ];
   return (
     <figure className="lr-chart">
-      {title && <figcaption>{title}</figcaption>}
+      {title && (
+        <figcaption>
+          <Icon icon={spec.type === "line" ? ChartLine : ChartColumn} />
+          {title}
+        </figcaption>
+      )}
       {!rows.length ? (
         <p className="lr-muted">—</p>
       ) : (
@@ -372,14 +419,7 @@ function MetricCard({ metric }: { metric: Metric }) {
   const { t } = useLocale();
   const tone = deltaTone(metric.value, metric.baseline, metric.better);
   const delta = formatDelta(metric.value, metric.baseline, metric.format, lang);
-  const arrow =
-    typeof metric.value === "number" && typeof metric.baseline === "number"
-      ? metric.value > metric.baseline
-        ? "▲"
-        : metric.value < metric.baseline
-          ? "▼"
-          : "="
-      : "";
+  const arrow = deltaIcon(metric.value, metric.baseline);
   return (
     <div className="lr-metric">
       <div className="lr-metric-label">{pick(metric.label, lang)}</div>
@@ -388,7 +428,8 @@ function MetricCard({ metric }: { metric: Metric }) {
       </div>
       {delta && (
         <div className={`lr-delta lr-tone-${tone}`}>
-          <span aria-hidden="true">{arrow}</span> {delta}
+          {arrow && <Icon icon={arrow} />}
+          <span>{delta}</span>
           <span className="lr-baseline">
             {" "}
             {t("report.vsBaseline")}{" "}
@@ -451,24 +492,34 @@ function TableBlock({ data }: { data: Parameters<typeof lookupTable>[1] }) {
                   }
                   className={numeric(column.key) ? "lr-num" : undefined}
                 >
-                  <button
-                    type="button"
-                    title={t("report.sort")}
-                    onClick={() =>
-                      setSort(
-                        active && sort.dir === "asc"
-                          ? { key: column.key, dir: "desc" }
-                          : active
-                            ? { key: null, dir: "asc" }
-                            : { key: column.key, dir: "asc" },
-                      )
-                    }
-                  >
-                    {pick(column.label, lang) || column.key}
-                    <span className="lr-sort" aria-hidden="true">
-                      {active ? (sort.dir === "asc" ? "↑" : "↓") : "↕"}
-                    </span>
-                  </button>
+                  <Hint content={t("report.sort")} placement="bottom">
+                    <button
+                      type="button"
+                      className="ds-focus"
+                      onClick={() =>
+                        setSort(
+                          active && sort.dir === "asc"
+                            ? { key: column.key, dir: "desc" }
+                            : active
+                              ? { key: null, dir: "asc" }
+                              : { key: column.key, dir: "asc" },
+                        )
+                      }
+                    >
+                      {pick(column.label, lang) || column.key}
+                      <span className="lr-sort">
+                        <Icon
+                          icon={
+                            active
+                              ? sort.dir === "asc"
+                                ? ArrowUp
+                                : ArrowDown
+                              : ArrowUpDown
+                          }
+                        />
+                      </span>
+                    </button>
+                  </Hint>
                 </th>
               );
             })}

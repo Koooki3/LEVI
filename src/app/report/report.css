@@ -51,6 +51,15 @@
   gap: var(--ds-space-1);
   white-space: nowrap;
 }
+.lr-strip-item > .ds-icon,
+.lr-meta > .ds-icon {
+  color: var(--ds-text-tertiary);
+}
+.lr-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-1);
+}
 .lr-strip-key {
   color: var(--ds-text-tertiary);
   font-weight: var(--ds-weight-medium);
@@ -84,23 +93,11 @@
   border-radius: var(--ds-radius-full);
   font-weight: var(--ds-weight-medium);
 }
-.lr-live-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--lr-planned);
-}
 .lr-live-on {
   color: var(--ds-success);
 }
-.lr-live-on .lr-live-dot {
-  background: var(--ds-success);
-}
 .lr-live-off {
   color: var(--ds-warning);
-}
-.lr-live-off .lr-live-dot {
-  background: var(--ds-warning);
 }
 
 /* ── Document: .levi-prose does the typography ── */
@@ -149,6 +146,9 @@
   font-size: var(--ds-text-callout-size);
 }
 .lr-block-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ds-space-2);
   margin: var(--ds-space-4) 0;
   padding: var(--ds-space-3) var(--ds-space-4);
   border-left: 3px solid var(--ds-danger);
@@ -158,21 +158,17 @@
   font-size: var(--ds-text-callout-size);
   overflow-wrap: anywhere;
 }
+.lr-block-error > .ds-icon {
+  margin-top: 3px;
+  color: var(--ds-danger);
+}
 .lr-block-error ul {
   margin: var(--ds-space-1) 0 0;
   padding-left: var(--ds-space-5);
   list-style: disc;
 }
-.lr-empty h2 {
-  margin-bottom: var(--ds-space-2);
-  font-size: var(--ds-text-title-2-size);
-  line-height: var(--ds-text-title-2-line);
-  font-weight: var(--ds-weight-semibold);
-}
-.lr-empty p {
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-text-body-size);
-  line-height: var(--ds-text-body-line);
+.lr-empty {
+  margin: var(--ds-space-5) 0;
 }
 .lr-loading {
   max-width: 760px;
@@ -208,6 +204,12 @@
   font-weight: var(--ds-weight-semibold);
   white-space: nowrap;
 }
+/* Markdown tables: the first column names the row, so it never shrinks to a
+   character a line (the auto layout gives the long columns everything). */
+.lr-md-table th:first-child,
+.lr-md-table td:first-child {
+  min-width: 6.5em;
+}
 .lr-table tbody tr:last-child td {
   border-bottom: 0;
 }
@@ -229,8 +231,8 @@
   flex-direction: row-reverse;
 }
 .lr-sort {
+  display: inline-flex;
   color: var(--ds-text-tertiary-on-sunken);
-  font-size: var(--ds-text-caption-size);
 }
 .lr-table th[aria-sort="ascending"] .lr-sort,
 .lr-table th[aria-sort="descending"] .lr-sort {
@@ -282,11 +284,8 @@
   color: var(--ds-text-primary);
   font-size: var(--ds-text-caption-size);
 }
-.lr-state-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--lr-tone);
+.lr-state > .ds-icon {
+  color: var(--lr-tone);
 }
 .lr-progress-pct {
   min-width: 42px;
@@ -350,6 +349,10 @@
   letter-spacing: var(--ds-tracking-display);
 }
 .lr-delta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--ds-space-1);
   font-size: var(--ds-text-caption-size);
   font-variant-numeric: tabular-nums;
 }
@@ -382,6 +385,9 @@
   background: var(--ds-surface-1);
 }
 .lr-chart figcaption {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
   margin: 0 var(--ds-space-1) var(--ds-space-3);
   color: var(--ds-text-primary);
   font-size: var(--ds-text-callout-size);

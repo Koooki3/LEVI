@@ -1,6 +1,6 @@
 "use client";
 import { Problem } from "@/components/pages-ui/feedback";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { ConfirmDialog } from "@/components/pool/confirm-dialog";
 import { friendlyError } from "./friendly-error";
@@ -133,18 +133,27 @@ function Row({
       : block === "not_part"
         ? t("Never taken into the dataset")
         : "";
+  // The reason a removal is unavailable is words in the row and the details,
+  // tied to the disabled controls, not a hover-only `title`.
+  const whyId = useId();
+  const showWhy = !removed && why !== "";
   return (
     <li>
       <input
         type="checkbox"
         aria-label={`${t("Select")} ${demo.demo}`}
+        aria-describedby={showWhy ? `${whyId}-row` : undefined}
         checked={checked}
         disabled={!removed && block !== null}
-        title={why || undefined}
         onChange={onCheck}
       />
       <code>{demo.demo}</code>
       <span>{t(DEMO_STATES[demo.state ?? ""] ?? demo.state ?? "—")}</span>
+      {showWhy && (
+        <span id={`${whyId}-row`} className="pg-pool-muted">
+          {why}
+        </span>
+      )}
       <span>
         {demo.segments != null ? `${demo.segments} ${t("time segments")}` : "—"}
       </span>
@@ -213,12 +222,16 @@ function Row({
               type="button"
               className="ds-btn ds-btn--secondary ds-focus"
               disabled={block !== null}
-              title={why || undefined}
+              aria-describedby={showWhy ? `${whyId}-detail` : undefined}
               onClick={onRemove}
             >
               {t("Remove episode (restorable)")}
             </button>
-            {why && <span className="pg-pool-muted">{why}</span>}
+            {why && (
+              <span id={`${whyId}-detail`} className="pg-pool-muted">
+                {why}
+              </span>
+            )}
           </div>
         </div>
       )}

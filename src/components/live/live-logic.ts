@@ -789,3 +789,25 @@ export function nameList(demos: string[], limit = 6): string {
   const shown = demos.slice(0, limit).join(", ");
   return demos.length > limit ? `${shown} +${demos.length - limit}` : shown;
 }
+
+/**
+ * A React key for each session of a list. Two sessions can share a model and a
+ * task folder (two runs of the same evaluation); the run id tells them apart,
+ * and a repeat of even that (a manual session has none) gets a counter, so no
+ * key is used twice and no card is dropped.
+ */
+export function sessionKeys(
+  sessions: ReadonlyArray<{
+    group: string;
+    task_folder: string;
+    run_id?: string;
+  }>,
+): string[] {
+  const seen = new Map<string, number>();
+  return sessions.map((s) => {
+    const base = `${s.group}/${s.task_folder}/${s.run_id ?? ""}`;
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    return n === 0 ? base : `${base}#${n}`;
+  });
+}

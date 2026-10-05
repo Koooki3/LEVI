@@ -3,7 +3,25 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { SkeletonText, useToast } from "@/components/ds";
+import {
+  CircleAlert,
+  Clock,
+  Cpu,
+  FileQuestion,
+  GitCommitHorizontal,
+  HardDrive,
+  List,
+  Radio,
+  WifiOff,
+} from "lucide-react";
+import {
+  Card,
+  EmptyState,
+  Icon,
+  SkeletonText,
+  Tooltip,
+  useToast,
+} from "@/components/ds";
 import { leviApi } from "@/components/levi-api";
 import { LeviMark } from "@/components/shell/brand";
 import { useLocale } from "@/components/levi-locale";
@@ -20,6 +38,7 @@ import {
   isReportBlock,
   workstreamLabel,
 } from "@/utils/report";
+import { currentHeadingIndex, readingLine, stickyTop } from "./active-section";
 import { ReportBlock, ReportContext } from "./report-blocks";
 
 const POLL_MS = 5000;
@@ -131,7 +150,10 @@ function Toc({ headings, active }: { headings: Heading[]; active: string }) {
   if (!items.length) return null;
   return (
     <nav className="levi-toc" aria-label={t("report.contents")}>
-      <div className="levi-toc__title">{t("report.contents")}</div>
+      <div className="levi-toc__title">
+        <Icon icon={List} />
+        {t("report.contents")}
+      </div>
       <ol>
         {items.map((h) => (
           <li key={h.id} className={`lr-toc-l${h.level}`}>
@@ -152,14 +174,17 @@ function useActiveHeading(headings: Heading[]) {
   const [active, setActive] = useState("");
   useEffect(() => {
     if (!headings.length) return;
+    const marked = headings.filter((h) => h.level >= 2 && h.level <= 3);
     const onScroll = () => {
-      let current = "";
-      for (const h of headings) {
-        if (h.level < 2 || h.level > 3) continue;
-        const el = document.getElementById(h.id);
-        if (el && el.getBoundingClientRect().top < 120) current = h.id;
-      }
-      setActive(current);
+      const tops = marked.map(
+        (h) =>
+          document.getElementById(h.id)?.getBoundingClientRect().top ?? null,
+      );
+      const index = currentHeadingIndex(
+        tops,
+        readingLine(window.innerHeight, stickyTop()),
+      );
+      setActive(index >= 0 ? marked[index].id : "");
     };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
@@ -168,7 +193,7 @@ function useActiveHeading(headings: Heading[]) {
   return active;
 }
 
-function EmptyState({ report }: { report: ReportPayload }) {
+function ReportEmpty({ report }: { report: ReportPayload }) {
   const { t } = useLocale();
   const [title, body] = !report.configured
     ? ["report.empty.unconfigured", "report.empty.unconfiguredBody"]
@@ -176,9 +201,8 @@ function EmptyState({ report }: { report: ReportPayload }) {
       ? ["report.empty.missingDir", "report.empty.missingDirBody"]
       : ["report.empty.missingDoc", "report.empty.missingDocBody"];
   return (
-    <section className="levi-box lr-empty">
-      <h2>{t(title)}</h2>
-      <p>{t(body)}</p>
+    <Card className="lr-empty">
+      <EmptyState icon={FileQuestion} title={t(title)} description={t(body)} />
       {report.dir && <pre className="lr-pre">{report.dir}</pre>}
       <pre className="lr-pre">
         LEVI_REPORT_DIR=/path/to/report{"\n"}
@@ -187,7 +211,7 @@ function EmptyState({ report }: { report: ReportPayload }) {
         {"  "}status.json{"\n"}
         {"  "}assets/
       </pre>
-    </section>
+    </Card>
   );
 }
 
@@ -210,15 +234,27 @@ function StatusStrip({
   const age = formatAge(status?.generated_at, now, lang);
   return (
     <div className="lr-strip" aria-live="off">
-      <span
-        className={`lr-live ${live ? "lr-live-on" : "lr-live-off"}`}
-        title={t(live ? "report.liveHint" : "report.offlineHint")}
+      <Tooltip
+        content={t(live ? "report.liveHint" : "report.offlineHint")}
+        placement="bottom"
       >
-        <span className="lr-live-dot" aria-hidden="true" />
-        {t(live ? "report.live" : "report.offline")}
-      </span>
+        <span
+          className={`lr-live ${live ? "lr-live-on" : "lr-live-off"}`}
+          role="status"
+        >
+          <Icon icon={live ? Radio : WifiOff} />
+          {t(live ? "report.live" : "report.offline")}
+          {/* The hint is a hover tooltip for the pointer; the words are here
+              for everyone else (the badge is not a control to focus). */}
+          <span className="ds-sr-only">
+            {" — "}
+            {t(live ? "report.liveHint" : "report.offlineHint")}
+          </span>
+        </span>
+      </Tooltip>
       {status?.generated_at && (
         <span className="lr-strip-item" title={status.generated_at}>
+          <Icon icon={Clock} />
           <span className="lr-strip-key">{t("report.generated")}</span>
           {formatStamp(status.generated_at)}
           {age && <span className="lr-faint"> · {age}</span>}
@@ -226,12 +262,14 @@ function StatusStrip({
       )}
       {status?.levi_main && (
         <span className="lr-strip-item">
+          <Icon icon={GitCommitHorizontal} />
           <span className="lr-strip-key">{t("report.leviMain")}</span>
           <code>{status.levi_main}</code>
         </span>
       )}
       {gpu && (
         <span className="lr-strip-item">
+          <Icon icon={Cpu} />
           <span className="lr-strip-key">GPU</span>
           <span className="lr-mini-bar" aria-hidden="true">
             <span style={{ width: `${Math.round(gpu.fraction * 100)}%` }} />
@@ -245,6 +283,7 @@ function StatusStrip({
       )}
       {typeof disk === "number" && Number.isFinite(disk) && (
         <span className="lr-strip-item">
+          <Icon icon={HardDrive} />
           <span className="lr-strip-key">{t("report.diskFree")}</span>
           {disk >= 1000
             ? `${(disk / 1000).toFixed(2)} TB`
@@ -337,15 +376,24 @@ export default function ReportView() {
       <div className="lr-top">
         <span className="lr-brand">
           <LeviMark size={18} />
-          <span className="levi-eyebrow">{t("report.eyebrow")}</span>
+          <span className="ds-eyebrow">{t("report.eyebrow")}</span>
         </span>
         {report && <StatusStrip report={report} live={live} now={now} />}
       </div>
       {error && !report && (
-        <section className="levi-box lr-empty" role="alert">
-          <h2>{t("report.unavailable")}</h2>
-          <p>{error}</p>
-        </section>
+        <Card className="lr-empty" role="alert">
+          <EmptyState
+            icon={CircleAlert}
+            title={t("report.unavailable")}
+            description={
+              <>
+                {error}
+                <br />
+                {t("report.unavailableFix")}
+              </>
+            }
+          />
+        </Card>
       )}
       {!report && !error && (
         <div className="lr-loading" role="status" aria-busy="true">
@@ -363,7 +411,7 @@ export default function ReportView() {
           </ul>
         </div>
       )}
-      {report && !markdown && <EmptyState report={report} />}
+      {report && !markdown && <ReportEmpty report={report} />}
       {report && markdown && (
         <div className="levi-reading__layout">
           <aside className="levi-reading__aside">

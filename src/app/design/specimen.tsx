@@ -719,14 +719,14 @@ export default function Specimen({
 }) {
   const [reduceMotion, setReduceMotion] = useState(initialReduce);
   const { preference, resolved } = useThemePreference();
-  const top = useRef<HTMLDivElement>(null);
+  const top = useRef<HTMLElement>(null);
   useEffect(
     () => applyTheme(top.current, only ?? preference),
     [only, preference],
   );
   const themes: Theme[] = only ? [only] : ["light", "dark"];
   return (
-    <div ref={top} className="ds-root dsp-page">
+    <main ref={top} className="ds-root dsp-page">
       <div className="dsp-intro">
         <p className="ds-eyebrow">LEVI design system · stage 0 / 1</p>
         <h1 className="ds-text-title-1">Design specimen</h1>
@@ -746,6 +746,6 @@ export default function Specimen({
           <Panel key={theme} theme={theme} reduceMotion={reduceMotion} />
         ))}
       </div>
-    </div>
+    </main>
   );
 }

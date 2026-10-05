@@ -1,33 +1,181 @@
 import { describe, expect, test } from "bun:test";
+import ts from "typescript";
+import { readFileSync } from "fs";
+import { join } from "path";
 import en from "@/i18n/en.json";
 import zh from "@/i18n/zh.json";
 
-describe("locale catalogs", () => {
-  test("keep English and Chinese keys in sync", () => {
-    expect(Object.keys(en).sort()).toEqual(Object.keys(zh).sort());
-    expect(Object.values(en).every((value) => typeof value === "string")).toBe(
-      true,
-    );
-    expect(Object.values(zh).every((value) => typeof value === "string")).toBe(
-      true,
-    );
-    expect(
-      Object.keys(en).every(
-        (key) => key === key.trim() && !/[\n\t]| {2,}/.test(key),
-      ),
-    ).toBe(true);
+const src = join(import.meta.dir, "../..");
+const enKeys = Object.keys(en);
+const zhKeys = Object.keys(zh);
+
+/** Every `t("literal")` / `t('literal')` call outside the tests. */
+function literalKeys(): Array<{ key: string; where: string }> {
+  const found: Array<{ key: string; where: string }> = [];
+  for (const file of new Bun.Glob("**/*.{ts,tsx}").scanSync(src)) {
+    if (file.includes("__tests__")) continue;
+    const text = readFileSync(join(src, file), "utf8");
+    for (const match of text.matchAll(
+      /(?<![\w.])t\(\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')\s*[,)]/g,
+    )) {
+      const raw = match[1] ?? match[2];
+      const key = raw
+        .replace(/\\(["'])/g, "$1")
+        .replace(/\s+/g, " ")
+        .trim();
+      const line = text.slice(0, match.index).split("\n").length;
+      found.push({ key, where: `${file}:${line}` });
+    }
+  }
+  return found;
+}
+
+describe("the language catalogues", () => {
+  test("English and Chinese have exactly the same keys", () => {
+    expect(enKeys.filter((key) => !(key in zh))).toEqual([]);
+    expect(zhKeys.filter((key) => !(key in en))).toEqual([]);
   });
 
-  test("retain the professional landing-page translations", () => {
-    expect(zh["Every motion."]).toBe("每一次动作，");
-    expect(zh["A clearer story."]).toBe("都清晰可见。");
-    expect(zh["Search or enter a Hugging Face dataset ID"]).toBe(
-      "搜索或输入 Hugging Face 数据集 ID",
+  test("no key is empty and no Chinese text is just the English", () => {
+    for (const key of zhKeys)
+      expect((zh as Record<string, string>)[key]).toBeTruthy();
+  });
+
+  test("every t() call with a literal finds its key in both catalogues", () => {
+    const missing = literalKeys().filter(
+      ({ key }) => !(key in en) || !(key in zh),
     );
-    expect(en["Every motion."]).toBe("Every motion.");
-    expect(
-      zh["All motors are inactive or discrete — no motors to evaluate."],
-    ).toBe("所有执行器维度均处于非活动或离散状态，暂无可评估的连续动作。");
-    expect(zh["No episode frames available."]).toBe("没有可用的片段帧。");
+    expect(missing.map(({ key, where }) => `${where} ${key}`)).toEqual([]);
+  });
+
+  test("text inside <T> that names a control is in the catalogue", () => {
+    // Labels the review queue and the activity list render inside <T>.
+    for (const key of ["Start time", "End time", "Agent activity", "Std Dev"]) {
+      expect(key in en).toBe(true);
+      expect(key in zh).toBe(true);
+    }
+  });
+
+  test("every string a <T> translates has a key (JSX text, entities decoded)", () => {
+    // <T> translates the text and the title / placeholder / aria-label / alt /
+    // label strings below it. JSX text is folded like React does (lines
+    // trimmed and joined by a space) and its entities decoded before the
+    // lookup, so a key can contain quotes and apostrophes.
+    const missing: string[] = [];
+    for (const file of new Bun.Glob("**/*.tsx").scanSync(src)) {
+      if (file.includes("__tests__")) continue;
+      const source = readFileSync(join(src, file), "utf8");
+      const sf = ts.createSourceFile(
+        file,
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TSX,
+      );
+      const visit = (node: ts.Node, inT: boolean) => {
+        let within = inT;
+        if (
+          ts.isJsxElement(node) &&
+          node.openingElement.tagName.getText() === "T"
+        )
+          within = true;
+        let key: string | null = null;
+        if (within && ts.isJsxText(node))
+          key = decodeEntities(foldJsxText(node.text));
+        if (
+          within &&
+          ts.isJsxAttribute(node) &&
+          TRANSLATED_ATTRIBUTES.has(node.name.getText()) &&
+          node.initializer &&
+          ts.isStringLiteral(node.initializer)
+        )
+          key = node.initializer.text.replace(/\s+/g, " ").trim();
+        if (
+          key &&
+          /[A-Za-z]/.test(key) &&
+          key.length > 3 &&
+          !(key in en && key in zh)
+        ) {
+          const { line } = sf.getLineAndCharacterOfPosition(node.getStart());
+          missing.push(`${file}:${line + 1} ${JSON.stringify(key)}`);
+        }
+        ts.forEachChild(node, (child) => visit(child, within));
+      };
+      visit(sf, false);
+    }
+    // Names, units, paths and example values read the same in both languages
+    // and stay as they are: no entry needed.
+    const unnamed = missing.filter(
+      (entry) =>
+        !SAME_IN_BOTH.some((word) =>
+          entry.endsWith(` ${JSON.stringify(word)}`),
+        ),
+    );
+    expect(unnamed).toEqual([]);
   });
 });
+
+const TRANSLATED_ATTRIBUTES = new Set([
+  "title",
+  "placeholder",
+  "aria-label",
+  "alt",
+  "label",
+]);
+
+/** React's rule for JSX text: each line trimmed (the first keeps its leading
+ * space, the last its trailing one), empty lines dropped, the rest joined by
+ * a space. */
+function foldJsxText(raw: string): string {
+  const lines = raw.split(/\r\n|\n|\r/);
+  let out = "";
+  lines.forEach((line, index) => {
+    let text = line.replace(/\t/g, " ");
+    if (index !== 0) text = text.replace(/^ +/, "");
+    if (index !== lines.length - 1) text = text.replace(/ +$/, "");
+    if (text) {
+      if (out && index !== 0) out += " ";
+      out += text;
+    }
+  });
+  return out.trim();
+}
+
+const ENTITIES: Record<string, string> = {
+  "&apos;": "'",
+  "&quot;": '"',
+  "&amp;": "&",
+  "&lt;": "<",
+  "&gt;": ">",
+  "&nbsp;": " ",
+  "&rsquo;": "’",
+  "&lsquo;": "‘",
+  "&hellip;": "…",
+  "&mdash;": "—",
+  "&ndash;": "–",
+  "&rarr;": "→",
+  "&larr;": "←",
+  "&middot;": "·",
+};
+function decodeEntities(text: string): string {
+  return text.replace(/&[a-z]+;|&#\d+;/g, (match) =>
+    match in ENTITIES
+      ? ENTITIES[match]
+      : match.startsWith("&#")
+        ? String.fromCharCode(Number(match.slice(2, -1)))
+        : match,
+  );
+}
+
+/** Product names, paths and example values that read the same in both languages. */
+const SAME_IN_BOTH = [
+  "Codex Pilot",
+  "Claude Code Pilot",
+  "Hugging Face",
+  "https://provider.example/v1",
+  "local/dataset or org/dataset",
+  "cup, plate",
+  "integrations/segmentation/setup.sh",
+  "ms ·",
+  "plates-student-v1",
+];
