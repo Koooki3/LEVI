@@ -63,7 +63,7 @@
 
 ### 数据色
 
-数据色不是界面色。唯一来源是 `tokens.css`：8 个分类色按固定顺序使用（`--ds-data-1…8`），浅深各有一级。用 dataviz 配色检查校验过：相邻颜色在色觉障碍下（ΔE ≥ 8.4）和正常视觉下（ΔE ≥ 19.3）都能分开，深色各级对深色页面底和卡片都至少 3:1（有测试）。其余一切都从这里取：图表序列（`seriesColor(i)`，报告页图表经 `useCssTokens`）、标注样式（`annotations.css` 里的 `--style-subtask` … `--style-memory`）、RECAP 优势（`--dv-positive`、`--dv-negative`）、时间片段和视频上的标签。`viewer.css` 把它们镜像成 `--dv-1…8`（令牌的别名）；画布和三维场景读不到 CSS 变量，用 `data-palette.ts` 里的 `DATA_ON_MEDIA`（深色阶的数值，有测试保证与 `viewer.css` 一致），这是查看器里唯一允许出现 hex 的文件。
+数据色不是界面色。唯一来源是 `tokens.css`：8 个分类色按固定顺序使用（`--ds-data-1…8`），浅深各有一级。用 dataviz 配色检查校验过：相邻颜色在色觉障碍下（ΔE ≥ 8.4）和正常视觉下（ΔE ≥ 19.3）都能分开，深色各级对深色页面底和卡片都至少 3:1（有测试）。其余一切都从这里取：图表序列（`seriesColor(i)`，报告页图表经 `useCssTokens`）、标注样式（`annotations.css` 里的 `--style-subtask` … `--style-memory`）、RECAP 优势（`--dv-positive`、`--dv-negative`）、时间片段和视频上的标签。`viewer.css` 把它们命名为 `--dv-1…8`，各自直接指向 `--ds-data-N`（没有 hex 回退），`--dv-neutral` 即 `--ds-separator-strong`；画布和三维场景读不到 CSS 变量，用 `data-palette.ts` 里的 `DATA_ON_MEDIA`（深色阶的数值，有测试保证与 `viewer.css` 一致），这是查看器里唯一允许出现 hex 的文件。
 
 **有意偏差：三个浅色数据色低于 3:1。** 浅色主题下 `--ds-data-3`、`--ds-data-4`、`--ds-data-5`（青绿、黄、品红）对白底不到 3:1（约 2.8、2.2、2.7），低于提案对图形要求的 3:1。这是有意的：把它们压暗到 3:1，相邻颜色在色觉障碍下就分不开了，而让所有人都能区分序列优先（相邻色觉障碍 ΔE ≥ 8.4）。约束：数据色从不单独表达含义。每个有颜色的标记旁边都有文字（图例、轨道名，或用文字色写的标签），数据色从不用于文字；测试只允许这三个在浅色下低到 2:1。状态（通过/警告/失败、成功/失败）用状态色令牌，并配图标和文字，不用数据色。
 
@@ -161,7 +161,7 @@
 | --- | --- |
 | 框架、标签栏、片段列表、媒体、播放、提示、指标卡 | `viewer.css`（类名 `vw-*`） |
 | 标注面板、时间轴、价值模型和锚定复核泳道、分割 | `annotations.css`（作用域 `.annotations-skin`，取代 `annotations-skin.css`） |
-| 数据配色 | `viewer.css`（`--dv-1` … `--dv-8` 即令牌 `--ds-data-1` … `--ds-data-8`、`--dv-positive`、`--dv-negative`、`--dv-neutral`）和 `data-palette.ts` |
+| 数据配色 | `viewer.css`（`--dv-1` … `--dv-8` 直接指向 `--ds-data-1` … `--ds-data-8`、`--dv-positive`、`--dv-negative`、`--dv-neutral` 即 `--ds-separator-strong`）和 `data-palette.ts` |
 | 标签页与“分析”标签 | `viewer-tabs.ts`、`analysis-tab.tsx` |
 | 错误页 | `load-error.tsx` |
 | 测试 | `src/components/viewer/__tests__/` |
@@ -169,6 +169,10 @@
 **标签页**：片段、标注、三维回放（机器人受支持时）、统计、帧概览、**分析**。“分析”用分段控件收纳原来的动作洞察、筛选、数据诊断三个标签，每个视图加载的数据和原标签完全一样。旧会话存下的标签 id（`insights`、`filtering`、`doctor`）会打开“分析”并选中对应视图；视图存在 `sessionStorage`（`analysisView`）。标签栏和标注子标签都是 ds `Tabs`（←/→ 切换）。
 
 **检查器**：“标注”标签右侧有一栏（320 px，`inspector.tsx`），显示选中时间片段的编辑表单；在“物体标注”下显示选中物体的信息和接受/拒绝。表单仍由各面板渲染，状态和处理函数不变，`InspectorPortal` 只把表单的 DOM 移到这一栏；没有这一栏时（`useInspectorSlot()` 为 null）表单留在原处。这一栏可以收起成窄条；窗口窄于 1200 px 时变成底部抽屉，默认收起。Esc、Ctrl/⌘+S/Z/Y 照常可用（它们监听的是 window）。
+
+**分析视图。** 动作洞察、筛选、统计、概览和数据诊断由 `src/components/viewer/analysis-ui.tsx` 里的共用件搭成，样式是 `viewer.css` 的 `.vw-a-*` 规则，只用令牌和 `--dv-N`；Tailwind 只留给布局。`AnalysisCard` 是 ds `Card`，带可选的说明开关（信息按钮，带 `aria-expanded` 和 `aria-controls`）；`AnalysisNote` 和 `Callout` 分别是说明和突出显示的发现；`Meter` 是装饰性的细条，所以数值一定印在旁边；`StatList` 是名称/数值列表；`StateBadge` 用形状加文字表示状态；`fill()` 翻译带 `{name}` 参数的整句（每句一个目录键，不用碎片拼句）。
+
+**禁用控件和按键。** 被禁用的按钮在旁边用文字说明原因，并用 `aria-describedby` 指向这段文字，不靠 `title`（Agent 抽屉用 `GatedButton`，查看器的弹窗用 `viewer/popup-actions.tsx`）。纯图标按钮和简短的事实说明用 ds `Tooltip`，键盘聚焦时也会出现。全局按键（Ctrl/⌘+Z、Esc、Space）在 input、textarea、select 和 contenteditable 里不起作用（`viewer/text-entry.ts`），输入框里的 Ctrl/⌘+Z 不拦截，留给输入框自己。Esc 按下面的顺序只做第一件事：关闭打开的弹层或菜单；在输入框里不做任何事；关闭窄屏检查器抽屉；清除选中的标注（抽屉的监听挂在 `document` 的冒泡阶段）。长列表整体是一个 Tab 停靠点，里面用方向键移动，并带 `aria-keyshortcuts`；查看器开头有跳到正文区和检查器的 skip link。播放头是 `role="slider"`：←/→ 移动 0.1 秒，Shift 移动 1 秒，Home/End 跳到两端，拖动时隐藏它的提示。帧率和时间戳输入框最多显示两位小数，没改动就不回写。
 
 **数据色**（时间片段、图表序列、掩码、视频上的标签）使用[数据色](#数据色)一节描述的配色，从不用强调色。文字从不使用数据色：标签胶囊、泳道名、图例都是文字色，旁边配一个彩色圆点或色条。
 
@@ -188,18 +192,21 @@ ESLint 的颜色规则和 `src` 里所有文件一样覆盖查看器的文件；
 | 内容 | 位置 |
 | --- | --- |
 | 页面样式（类名 `pg-*`） | `src/components/pages-ui/pages.css`，由四个页面引入 |
-| Agent 工作台内容样式 | `src/components/pages-ui/agent-content.css`（规则都在 `.levi-agent-sheet` 之下；抽屉本身属于全局框架） |
+| Agent 工作台内容 | `src/components/agent-ui.tsx`（小构件）、`src/components/pages-ui/agent-content.css`（只管布局：`.levi-agent-sheet .ag-dock` 之下的 `ag-*` 类；抽屉本身属于全局框架） |
+| 服务端的话 | `src/components/pages-ui/messages.ts`（`describeMessage`、`useServerText`） |
 | 反馈组件 | `src/components/pages-ui/feedback.tsx` |
 | 测试 | `src/components/pages-ui/__tests__/`、`src/components/pool/__tests__/composition-order.test.tsx` |
 
-- **类名**：这些页面原来用 `levi.css` 里的 `levi-*` 类，现在改写为 `pg-*`，布局不变，颜色换成令牌；按钮、输入框和表格直接用 `ds-btn`、`ds-input`、`ds-table`（或对应组件）。Agent 工作台内容保留 `levi-agent-*`、`levi-activity-*`、`levi-connection-*` 类名（与抽屉共用），`agent-content.css` 在 `.levi-agent-sheet` 下用令牌重写；其中的按钮和输入框加了 `ds-btn` / `ds-input`，按下的按钮（标签、开关）显示为选中态。两份样式表都没有颜色字面量（有测试），这些页面的 TSX 也和 `src` 里所有文件一样受颜色 lint 规则约束。`levi.css` 删除之后，这些规则自成一体（背后没有更旧的规则）；其中提到它的注释属于历史说明。
+- **类名**：这些页面原来用 `levi.css` 里的 `levi-*` 类，现在改写为 `pg-*`，布局不变，颜色换成令牌；按钮、输入框和表格直接用 `ds-btn`、`ds-input`、`ds-table`（或对应组件）。Agent 工作台内容由 ds 组件加 `agent-ui.tsx` 的小构件搭成，`agent-content.css` 只负责布局（`ag-*`，根类名 `ag-dock`）。两份样式表都没有颜色字面量（有测试），这些页面的 TSX 也和 `src` 里所有文件一样受颜色 lint 规则约束。`levi.css` 删除之后，这些规则自成一体（背后没有更旧的规则）；其中提到它的注释属于历史说明。
 - **反馈组件**（以后可提升进 `ds`）：`Problem` 是三段式错误（发生了什么、为什么——通常是服务端原话——、怎么办，可选折叠的“技术细节”；默认 `role="alert"`，常驻的错误用 `live={false}`）；`RequestProblem` 写明哪个操作失败，并把服务端消息作为原因；`Note` 是行内的信息/成功/警告提示；`JobCard` 是各页统一的作业卡（状态徽章、标题、右侧元数据，下面放该页的进度和结果）；`EmptyLine` 是卡片内的一行空状态。
 - **状态**一律用 `Badge` 或 `StatusDot`（形状、颜色、文字）：训练池作业状态、转换的检查项、实时评测的会话和服务状态（运行中的会话会呼吸）、片段结局。进度条用 `Progress`。
 - **加载和结果**：布局已知的地方用骨架屏（训练池预览、选中片段、实时评测统计）；结果不在操作旁边时（配方已保存、记录已清除、已释放空间）用 Toast；错误留在出错的操作旁边。
 - **训练池的任务顺序**改用 `ReorderList`（Motion）：拖动手柄，或聚焦手柄后按 ↑/↓；每个任务仍保留上移、下移和移除按钮。
 - **每屏一个主要按钮**：登记并浏览（转换与审核）、开始导出（训练池；从未扫描时是“立即扫描”）、有计划后的“运行转换”。
 - **页面版式**：训练池加了步骤条（① 选择 ② 组合 ③ 导出，`pool-steps.tsx`；当前步骤随组合和导出变化，点击跳到对应区块），标题行放“导出…”作为本页主要操作（滚到导出表单并聚焦名称；只有从未扫描时“立即扫描”是主要按钮）；“最近的作业”默认折叠，并提示顶栏“作业”菜单。实时评测的空状态把反引号里的命令画成 `<code>`，并用一个按钮复制第一条命令（`command-text.tsx`）；统计里的选择框有描边；面板不再变淡：服务没运行时用文字说明，因为降低不透明度会让文字低于 4.5:1。实时评测顶部加一行汇总（运行中的会话、已标注/已完成片段、最近一次错误；`live-summary.tsx`），“只看不控”的说明改为信息色 `Note`。转换与审核里，主要按钮归向导的当前步骤（检查输入、审核计划、运行转换，完成后“审核转换结果”；转换运行中没有主要按钮）；选中的导出卡片显示为按下并描边。
-- **Agent 工作台内容**：分区改用 ds `Tabs`；运行操作里“运行试点”或“执行剩余”是主要按钮；批准计划、接受试点、提交更改带 `HumanActionMark`（“需要你确认”），并作为该步的主要按钮。
+- **Agent 工作台内容**：由 ds 组件和 `src/components/agent-ui.tsx` 的小构件搭成（`Disclosure`、`Actions`、`Hint`、`GatedButton`、`ConnectionHead`、`HumanActionMark`、`exportedToast`）；分区用 ds `Tabs`。只有人能做的动作（批准计划、通过试点、校验并批准、提交变更、批准任务、回答运行时授权）在按钮前放 `HumanActionMark`（“需要你确认”），并且是该步的主要按钮。删除类操作走全局 `ConfirmDialog`；结果用 Toast，导出目录的 Toast 不自动消失，并带“复制路径”；错误是三段式（`RequestProblem`）。Hugging Face 登录是带 `LogIn` 图标的 ds Button：不从 huggingface.co 加载任何东西（没有徽章图，没有远程头像）。
+- **服务端的话**：服务返回的话在页面语言下只显示一份：用 `describeMessage` / `useServerText`（`pages-ui/messages.ts`），不要直接 `t(后端的句子)`。带数字或路径的句子在 `KNOWN` 里加模板（并在 en、zh 里加条目）；中文下没人翻译的英文句显示一行简短说明，原文放进“技术细节”。错误统一用 `Problem` / `RequestProblem`：常驻的加载或轮询错误用 `live={false}`，用户操作引起的错误保持播报（首页卡片和停止作业横幅也一样）。
+- **页面宽度**：转换与审核、训练池、探索数据和实时评测共用 1360 px 版心（`pages.css` 的 `--pg-max`）；宽表格在自己的框里横向滚动，不撑宽页面。首页（1200 px）以及使用指南和报告的阅读版式（1200 px，正文栏 760 px）有意更窄。
 - **共享组件** `hf-auth-button.tsx`（ds 按钮、菜单、对话框）和 `dataset-format.tsx`（ds 徽章）自带样式（`pages-ui/shared.css`），在所有页面（包括片段查看器）外观一致。
 - **辅助类**：`pg-small`、`pg-mt-2…6`、`pg-my-2/3`、`pg-full`、`pg-block`、`pg-mono`、`pg-between`、`pg-stack` 取代这些页面上的 Tailwind 间距和字号工具类：`ds-root` 在层外重置了标题和段落边距，层内的工具类在那里不生效（有测试防止回退）。`RequestProblem` 去掉“Error:”前缀（`cleanMessage`），支持 `onRetry`（“重试”按钮）。
 - **减少动态效果**：`pages.css` 和 `agent-content.css` 里所有有动画或过渡的规则，在 `data-motion="reduce"`（应用内开关）下也会停止，有测试。
@@ -233,6 +240,7 @@ ESLint 的颜色规则和 `src` 里所有文件一样覆盖查看器的文件；
 - 焦点环：2 px `--ds-focus-ring`，外偏 2 px（每个可交互组件都带 `ds-focus` 类）；Windows 高对比模式下用 `Highlight`。
 - 每个弹出层都有焦点陷阱（监听挂在 `document` 上，焦点跑到哪里都管得住），Esc 关闭，关闭后焦点返回；菜单和标签页遵循 ARIA 模式；Toast 用一个 polite 和一个 assertive 的 live 区域。
 - 可点区域至少 24 × 24 px。
+- 全局按键从不在输入框里起作用；Esc 的顺序、播放头滑块和 skip link 见“片段查看器”一节的“禁用控件和按键”。
 - 被禁用的控件在旁边用文字说明原因，并用 `aria-describedby` 关联（实时评测片段列表的移除功能是范例）；吸顶的顶栏不会挡住获得焦点的元素或锚点（`scroll-padding-top`、`scroll-margin-top`）。
 
 ## 样张页
@@ -246,14 +254,14 @@ ESLint 的颜色规则和 `src` 里所有文件一样覆盖查看器的文件；
 | 全局框架：顶栏、Toast、确认框、命令面板、快捷键总表、Agent 工作台抽屉 | 已用 `ds-*` 组件和令牌（`shell.css`） |
 | 首页、使用指南、报告页 | 令牌、`ds-*` 组件、Lucide 图标；首页和使用指南共用 `home.css` 和 `reading.css` |
 | 实时评测、转换与审核、训练池、探索数据 | `pg-*` 样式配令牌，使用 ds 按钮、输入框、表格、徽章和反馈组件（`pages-ui/`） |
-| Agent 工作台内容 | 保留 `levi-agent-*`、`levi-activity-*`、`levi-connection-*` 类名（抽屉共用）；`agent-content.css` 在 `.levi-agent-sheet` 下给它们设样式；其中的控件带 `ds-btn` / `ds-input` |
-| 片段查看器 | 框架、标签、片段列表、播放和检查器用 `vw-*` 样式和 ds 组件（`viewer/`）；标注面板、时间轴和泳道用 `annotations.css`；分析视图（动作洞察、筛选、统计、概览、数据诊断）和三维查看器用 Tailwind 工具类自己排版，颜色是令牌值（`text-(--ds-text-secondary)`），还不是 `ds-*` 组件 |
+| Agent 工作台内容 | ds 组件加 `agent-ui.tsx`；`agent-content.css` 只管布局（`ag-*`） |
+| 片段查看器 | 框架、标签、片段列表、播放和检查器用 `vw-*` 样式和 ds 组件（`viewer/`）；分析视图用 `analysis-ui.tsx` 的共用件（Tailwind 只用于布局）；标注面板、时间轴和泳道用 `annotations.css`；三维查看器用 Tailwind 工具类自己排版，颜色是令牌值。原生 `<select>` 还留在 `object-annotation-panel.tsx`（4 个）、`fast-segmentation-panel.tsx`（4 个）、`annotations-panel.tsx`（2 个）、`video-overlay-canvas.tsx`（1 个）和 `subtask-vocabulary.tsx`（2 个） |
 | 颜色 | CSS 和 TSX 里只用令牌，检查覆盖整个 `src/`（两个有记录的例外）；`levi.css`、旧变量和 Tailwind 重映射已删除 |
 | 图标 | 经 `Icon` 用 Lucide；剩下的文字箭头和对勾出现在正文、键盘提示和三维查看器的 HUD 里 |
 | 找不到页面和错误页 | 全局框架的外观，中英双语（`error-pages.tsx`）；框架默认页已去掉 |
 | 语言 | 每个 `t("…")` 字面量在两份目录里都有键（有测试）；两份目录的键相同 |
 
-已知并有意保留的缺口：实时评测会话列表里取决于数据的 React 重复 key 警告（见“页面”），以及被截断的表格单元格上的原生 `title`（见 `title=` 规则）。
+后续项：上面列出的原生 `<select>` 改用 ds `Select`；`messages.ts`、`analysis-ui.tsx`、`agent-ui.tsx` 可以提升进 `ds`；训练池 API 里没翻译的报错往 `KNOWN` 补。已知并有意保留的缺口：实时评测会话列表里取决于数据的 React 重复 key 警告（见“页面”），以及被截断的表格单元格上的原生 `title`（见 `title=` 规则）。
 
 ## 测试
 

@@ -2396,5 +2396,11 @@
   "Go to: Training pool": "跳转：训练池",
   "Go to: Live evaluation": "跳转：实时评测",
   "Go to: Report": "跳转：报告",
-  "Go to: Guide": "跳转：使用指南"
+  "Go to: Guide": "跳转：使用指南",
+  "Move within an episode list row": "在片段列表行内移动",
+  "Playhead slider: 0.1 s back or forward": "播放头滑块：后退或前进 0.1 秒",
+  "Playhead slider: 1 s back or forward": "播放头滑块：后退或前进 1 秒",
+  "Playhead slider: start or end": "播放头滑块：跳到开头或结尾",
+  "In a text field, Undo is left to the field": "在输入框里，撤销交给输入框本身",
+  "Clear the selected annotation": "清除选中的标注"
 }

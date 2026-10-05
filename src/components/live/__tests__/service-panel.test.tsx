@@ -20,3 +20,14 @@ describe("the service panel of a service that is not running", () => {
     expect(html).toContain('data-alive="false"');
   });
 });
+
+describe("the service panel with no status file at all", () => {
+  test("is an empty line in words, with no fade and no service state", () => {
+    const html = renderToStaticMarkup(
+      <ServicePanel status={null} alive={false} now={0} />,
+    );
+    expect(html).toContain("No status file yet.");
+    expect(html).not.toMatch(/class="[^"]*\bstale\b/);
+    expect(html).not.toContain("Not running");
+  });
+});

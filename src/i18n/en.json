@@ -2396,5 +2396,11 @@
   "Go to: Training pool": "Go to: Training pool",
   "Go to: Live evaluation": "Go to: Live evaluation",
   "Go to: Report": "Go to: Report",
-  "Go to: Guide": "Go to: Guide"
+  "Go to: Guide": "Go to: Guide",
+  "Move within an episode list row": "Move within an episode list row",
+  "Playhead slider: 0.1 s back or forward": "Playhead slider: 0.1 s back or forward",
+  "Playhead slider: 1 s back or forward": "Playhead slider: 1 s back or forward",
+  "Playhead slider: start or end": "Playhead slider: start or end",
+  "In a text field, Undo is left to the field": "In a text field, Undo is left to the field",
+  "Clear the selected annotation": "Clear the selected annotation"
 }

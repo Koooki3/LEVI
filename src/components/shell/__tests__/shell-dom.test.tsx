@@ -653,6 +653,29 @@ describe("go-to chords (G, then a letter)", () => {
   });
 });
 
+describe("the shortcut list", () => {
+  test("every row and group has a catalogue entry in both languages, and the viewer's keys are listed", () => {
+    const groups = shortcutGroups(false);
+    for (const group of groups) {
+      expect(group.title in zh).toBe(true);
+      for (const row of group.rows) {
+        expect(row.label in en).toBe(true);
+        expect(row.label in zh).toBe(true);
+      }
+    }
+    const labels = groups.flatMap((g) => g.rows.map((r) => r.label));
+    for (const label of [
+      "Clear the selected annotation",
+      "In a text field, Undo is left to the field",
+      "Playhead slider: 0.1 s back or forward",
+      "Playhead slider: 1 s back or forward",
+      "Playhead slider: start or end",
+      "Move within an episode list row",
+    ])
+      expect(labels).toContain(label);
+  });
+});
+
 describe("the palette finds datasets", () => {
   test("paletteDatasets keeps the local ones and the demos, skips the rest", () => {
     expect(paletteDatasets(CATALOG)).toEqual([

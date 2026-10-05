@@ -145,6 +145,19 @@ export function shortcutGroups(apple: boolean = isApplePlatform()) {
       rows: [
         { keys: [["Space"]], label: "Play or pause" },
         { keys: [["↑"], ["↓"]], label: "Previous or next episode" },
+        { keys: [["←"], ["→"]], label: "Move within an episode list row" },
+        {
+          keys: [["←"], ["→"]],
+          label: "Playhead slider: 0.1 s back or forward",
+        },
+        {
+          keys: [
+            ["Shift", "←"],
+            ["Shift", "→"],
+          ],
+          label: "Playhead slider: 1 s back or forward",
+        },
+        { keys: [["Home"], ["End"]], label: "Playhead slider: start or end" },
       ],
     },
     {
@@ -159,6 +172,11 @@ export function shortcutGroups(apple: boolean = isApplePlatform()) {
           ],
           label: "Redo",
         },
+        {
+          keys: [[mod, "Z"]],
+          label: "In a text field, Undo is left to the field",
+        },
+        { keys: [["Esc"]], label: "Clear the selected annotation" },
       ],
     },
     {
