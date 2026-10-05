@@ -11,6 +11,12 @@ import { useLocale } from "@/components/levi-locale";
 
 export const PRODUCT_TITLE = "LEVI";
 
+function isViewerPath(pathname: string): boolean {
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts.length === 2) return true;
+  return parts.length === 3 && /^episode_\d+$/.test(parts[2]);
+}
+
 /** The English page name for a path (the catalog key), or null for the
  * product name alone. */
 export function routePageName(pathname: string | null): string | null {
@@ -32,10 +38,9 @@ export function routePageName(pathname: string | null): string | null {
     case "design":
       return "Design system";
     default:
-      // /<org>/<dataset>/<episode>: the episode viewer.
-      return pathname.split("/").filter(Boolean).length >= 2
-        ? "Episode viewer"
-        : null;
+      // /<org>/<dataset> and /<org>/<dataset>/episode_<n>: the episode
+      // viewer. Any other address is not a page (the framework's 404).
+      return isViewerPath(pathname) ? "Episode viewer" : null;
   }
 }
 

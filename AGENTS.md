@@ -175,11 +175,9 @@ Reserved/bookkeeping columns from lerobot — see `EXCLUDED_COLUMNS` in `src/uti
 
 ## Design system
 
-`src/app/globals.css` sets the page base from the design tokens and maps the
-older variables and Tailwind colour names onto them; `src/app/levi.css` holds
-the older page styles, whose colours also point at the tokens.
-The design system: `--ds-*` tokens in `src/styles/tokens.css`, `ds-*` styles in `src/styles/ds.css`, components in `src/components/ds/`, the frame in `src/components/shell/`, one LEVI mark in `src/components/shell/brand.tsx`, a specimen at `/design` in development. New UI code uses it and never hard-codes colours; pages still on older classes move over in their stages. See docs/DESIGN.md.
-`src/components/levi-locale.tsx` and `src/i18n/` supply the Chinese/English UI.
+`src/app/globals.css` is the one global stylesheet: it sets the page base from the design tokens (`src/app/levi.css` and the older variables and Tailwind colour remaps are gone; a Tailwind colour class is Tailwind's own colour, and a test rejects any left in `src/`).
+The design system: `--ds-*` tokens in `src/styles/tokens.css`, `ds-*` styles in `src/styles/ds.css`, components in `src/components/ds/`, the frame (sticky top bar, palette, toasts, error pages) in `src/components/shell/` and `src/styles/shell.css`, one LEVI mark in `src/components/shell/brand.tsx`, a specimen at `/design` in development. Every route uses it. New UI code uses `ds-*` components and tokens and never hard-codes a colour (ESLint covers all of `src`; the exceptions are listed with reasons in `eslint.config.mjs`). `title=` is never the only carrier of a control's name, a disabled reason or an icon's meaning. See docs/DESIGN.md (its "Migration status" says what still lays itself out with Tailwind utilities over the tokens).
+`src/components/levi-locale.tsx` and `src/i18n/` supply the Chinese/English UI; `src/i18n/__tests__/catalog.test.ts` keeps the two catalogues equal and finds a `t("…")` without a key.
 Preserve the light and dark themes, keyboard access and responsive layouts when editing inherited components.
 
 ## Built-in conversion and service

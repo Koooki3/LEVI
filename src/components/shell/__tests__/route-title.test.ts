@@ -22,6 +22,13 @@ describe("tab titles", () => {
     );
   });
 
+  test("an address that is no page is the product name alone", () => {
+    expect(routeTitle("/no/such/page/at/all")).toBe("LEVI");
+    expect(routeTitle("/nope")).toBe("LEVI");
+    expect(routeTitle("/org/ds/notes")).toBe("LEVI");
+    expect(routeTitle("/org/ds")).toBe("Episode viewer · org/ds · LEVI");
+  });
+
   test("the name is in the reader's language", () => {
     expect(routeTitle("/explore", zhText)).toBe("探索数据 · LEVI");
     expect(routeTitle("/pool", zhText)).toBe("训练池 · LEVI");
