@@ -282,8 +282,17 @@ describe("the list", () => {
         new RegExp(`<input[^>]*aria-label="Select ${name}"[^>]*>`),
       )?.[0] ?? "";
     expect(box("demo_0002")).toContain("disabled");
-    expect(box("demo_0002")).toContain("Being labelled now");
     expect(box("demo_0001")).not.toContain("disabled");
+    // The reason is words in the row, tied to the control: not a `title`.
+    expect(box("demo_0002")).not.toContain("title=");
+    const described = box("demo_0002").match(/aria-describedby="([^"]+)"/);
+    expect(described).not.toBeNull();
+    expect(out).toMatch(
+      new RegExp(
+        `<span id="${described![1].replace(/:/g, "\\:")}"[^>]*>Being labelled now`,
+      ),
+    );
+    expect(box("demo_0001")).not.toContain("aria-describedby");
     const rejected = html(
       {},
       detail({ demos: [demo("demo_0009", { state: "rejected" })] }),
