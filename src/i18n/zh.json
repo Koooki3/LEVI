@@ -2389,5 +2389,13 @@
   "Could not copy the command": "无法复制命令",
   "Select it and copy it by hand.": "请选中后手动复制。",
   "04 / Analyse": "04 / 分析",
-  "The Statistics tab describes metadata and episode lengths. The Analysis tab holds three views, chosen with a switch: Filtering ranks low movement, sudden motion and unusual lengths; Action Insights computes autocorrelation, temporal alignment, speed variance and cross-episode variance; Doctor runs version-aware checks.": "「统计」标签展示元数据与片段长度。「分析」标签用切换控件收纳三个视图：「筛选」定位低运动、突变和长度异常；「动作洞察」计算自相关、时序对齐、速度差异与跨片段方差；「数据诊断」执行与版本匹配的检查。"
+  "The Statistics tab describes metadata and episode lengths. The Analysis tab holds three views, chosen with a switch: Filtering ranks low movement, sudden motion and unusual lengths; Action Insights computes autocorrelation, temporal alignment, speed variance and cross-episode variance; Doctor runs version-aware checks.": "「统计」标签展示元数据与片段长度。「分析」标签用切换控件收纳三个视图：「筛选」定位低运动、突变和长度异常；「动作洞察」计算自相关、时序对齐、速度差异与跨片段方差；「数据诊断」执行与版本匹配的检查。",
+  "Search commands, pages and datasets": "搜索命令、页面和数据集",
+  "Go to: Home": "跳转：首页",
+  "Go to: Explore": "跳转：探索数据",
+  "Go to: Conversion & review": "跳转：转换与审核",
+  "Go to: Training pool": "跳转：训练池",
+  "Go to: Live evaluation": "跳转：实时评测",
+  "Go to: Report": "跳转：报告",
+  "Go to: Guide": "跳转：使用指南"
 }

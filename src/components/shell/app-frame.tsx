@@ -8,7 +8,7 @@
  * page (./recent.ts).
  */
 import { useEffect, type ReactNode } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { ToastProvider } from "@/components/ds";
 import { ConfirmProvider } from "./confirm";
 import { recordVisit } from "./recent";
@@ -23,8 +23,9 @@ function VisitRecorder() {
 }
 
 export function AppFrame({ children }: { children: ReactNode }) {
+  const router = useRouter();
   return (
-    <ShellProvider>
+    <ShellProvider navigate={(href) => router.push(href)}>
       <ToastProvider>
         <ConfirmProvider>
           <VisitRecorder />

@@ -5,7 +5,12 @@
  */
 import type { ThemePreference } from "@/lib/design/theme";
 
-export type CommandGroup = "Go to" | "Panels" | "Appearance" | "Language";
+export type CommandGroup =
+  | "Go to"
+  | "Datasets"
+  | "Panels"
+  | "Appearance"
+  | "Language";
 
 export type Command = {
   id: string;
@@ -75,8 +80,37 @@ export function isCurrentPage(href: string, pathname: string | null): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+/** A dataset the palette can open: `repo` is the address (`org/name`). */
+export type PaletteDataset = { repo: string; name: string };
+
+/**
+ * The datasets of the catalogue answer (`GET /api/levi/catalog`): the local
+ * ones (registered captures and datasets) and the public demos. Anything that
+ * is not in the expected shape is skipped.
+ */
+export function paletteDatasets(body: unknown): PaletteDataset[] {
+  if (!body || typeof body !== "object") return [];
+  const { local, demos } = body as { local?: unknown; demos?: unknown };
+  const found: PaletteDataset[] = [];
+  if (Array.isArray(local))
+    for (const entry of local) {
+      const id = entry && typeof entry.id === "string" ? entry.id : null;
+      if (!id || !/^[\w.-]+\/[\w.-]+$/.test(id)) continue;
+      found.push({
+        repo: id,
+        name: typeof entry.name === "string" && entry.name ? entry.name : id,
+      });
+    }
+  if (Array.isArray(demos))
+    for (const id of demos)
+      if (typeof id === "string" && /^[\w.-]+\/[\w.-]+$/.test(id))
+        found.push({ repo: id, name: id });
+  return found;
+}
+
 export function buildCommands(options: {
   pages: NavPage[];
+  datasets?: PaletteDataset[];
   theme: ThemePreference;
   language: "en" | "zh";
   setTheme: (theme: ThemePreference) => void;
@@ -101,6 +135,13 @@ export function buildCommands(options: {
       href: page.href,
     })),
   ];
+  const datasets: Command[] = (options.datasets ?? []).map((dataset) => ({
+    id: `dataset-${dataset.repo}`,
+    group: "Datasets" as const,
+    label: dataset.name,
+    keywords: [dataset.repo, "dataset", "数据集"],
+    href: `/${dataset.repo}`,
+  }));
   const panels: Command[] = [
     {
       id: "agent",
@@ -155,7 +196,7 @@ export function buildCommands(options: {
       run: () => options.setLanguage("zh"),
     },
   ];
-  return [...go, ...panels, ...appearance, ...languages];
+  return [...go, ...datasets, ...panels, ...appearance, ...languages];
 }
 
 function normalise(text: string): string {

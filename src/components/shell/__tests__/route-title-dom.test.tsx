@@ -4,6 +4,7 @@ import { act } from "react";
 
 const route = { path: "/explore" };
 mock.module("next/navigation", () => ({
+  useRouter: () => ({ push: () => {}, replace: () => {} }),
   usePathname: () => route.path,
 }));
 

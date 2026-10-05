@@ -6,7 +6,12 @@
  * - ? (or the full-width ？, also typed with AltGr) opens the shortcut list,
  *   never while typing.
  *
- * Neither fires during IME composition. Pages bind Space, arrows, J/K,
+ * - G, then a letter, goes to a page (G H home, G E explore, G W conversion &
+ *   review, G P training pool, G L live evaluation, G R report, G U guide):
+ *   the second key must follow within CHORD_WINDOW_MS and never fires while
+ *   typing.
+ *
+ * None fires during IME composition. Pages bind Space, arrows, J/K,
  * Escape and Ctrl/⌘+S/Z/Y (see SHORTCUT_GROUPS); none of those is used here.
  */
 export type GlobalShortcut = "palette" | "shortcuts";
@@ -73,6 +78,39 @@ export function globalShortcut(
   return null;
 }
 
+/** Pages reached by G and a letter. `label` is the catalogue key. */
+export const CHORD_PAGES: Record<string, { href: string; label: string }> = {
+  h: { href: "/", label: "Home" },
+  e: { href: "/explore", label: "Explore" },
+  w: { href: "/workbench", label: "Conversion & review" },
+  p: { href: "/pool", label: "Training pool" },
+  l: { href: "/live", label: "Live evaluation" },
+  r: { href: "/report", label: "Report" },
+  u: { href: "/guide", label: "Guide" },
+};
+/** How long after G the letter may come. */
+export const CHORD_WINDOW_MS = 1500;
+
+/** A plain letter (no modifier), not typed into a field or an input method. */
+function plainLetter(event: KeyLike): string | null {
+  if (event.isComposing || event.keyCode === 229) return null;
+  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey)
+    return null;
+  if (isEditableTarget(event.target)) return null;
+  return event.key.length === 1 ? event.key.toLowerCase() : null;
+}
+
+/** Whether this key starts a "go to" chord. */
+export function isChordLeader(event: KeyLike): boolean {
+  return plainLetter(event) === "g";
+}
+
+/** The page the second key of a chord names, or null. */
+export function chordPage(event: KeyLike): string | null {
+  const letter = plainLetter(event);
+  return letter && CHORD_PAGES[letter] ? CHORD_PAGES[letter].href : null;
+}
+
 /** The label of the palette shortcut on this platform. */
 export function paletteKeys(apple: boolean = isApplePlatform()): string[] {
   return apple ? ["⌘", "K"] : ["Ctrl", "K"];
@@ -95,6 +133,10 @@ export function shortcutGroups(apple: boolean = isApplePlatform()) {
       rows: [
         { keys: [paletteKeys(apple)], label: "Open the command palette" },
         { keys: [["?"]], label: "Show keyboard shortcuts" },
+        ...Object.entries(CHORD_PAGES).map(([letter, page]) => ({
+          keys: [["G", letter.toUpperCase()]],
+          label: `Go to: ${page.label}`,
+        })),
         { keys: [["Esc"]], label: "Close the topmost panel or dialog" },
       ],
     },

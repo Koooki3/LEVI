@@ -2389,5 +2389,13 @@
   "Could not copy the command": "Could not copy the command",
   "Select it and copy it by hand.": "Select it and copy it by hand.",
   "04 / Analyse": "04 / Analyse",
-  "The Statistics tab describes metadata and episode lengths. The Analysis tab holds three views, chosen with a switch: Filtering ranks low movement, sudden motion and unusual lengths; Action Insights computes autocorrelation, temporal alignment, speed variance and cross-episode variance; Doctor runs version-aware checks.": "The Statistics tab describes metadata and episode lengths. The Analysis tab holds three views, chosen with a switch: Filtering ranks low movement, sudden motion and unusual lengths; Action Insights computes autocorrelation, temporal alignment, speed variance and cross-episode variance; Doctor runs version-aware checks."
+  "The Statistics tab describes metadata and episode lengths. The Analysis tab holds three views, chosen with a switch: Filtering ranks low movement, sudden motion and unusual lengths; Action Insights computes autocorrelation, temporal alignment, speed variance and cross-episode variance; Doctor runs version-aware checks.": "The Statistics tab describes metadata and episode lengths. The Analysis tab holds three views, chosen with a switch: Filtering ranks low movement, sudden motion and unusual lengths; Action Insights computes autocorrelation, temporal alignment, speed variance and cross-episode variance; Doctor runs version-aware checks.",
+  "Search commands, pages and datasets": "Search commands, pages and datasets",
+  "Go to: Home": "Go to: Home",
+  "Go to: Explore": "Go to: Explore",
+  "Go to: Conversion & review": "Go to: Conversion & review",
+  "Go to: Training pool": "Go to: Training pool",
+  "Go to: Live evaluation": "Go to: Live evaluation",
+  "Go to: Report": "Go to: Report",
+  "Go to: Guide": "Go to: Guide"
 }
