@@ -2402,5 +2402,8 @@
   "Playhead slider: 1 s back or forward": "Playhead slider: 1 s back or forward",
   "Playhead slider: start or end": "Playhead slider: start or end",
   "In a text field, Undo is left to the field": "In a text field, Undo is left to the field",
-  "Clear the selected annotation": "Clear the selected annotation"
+  "Clear the selected annotation": "Clear the selected annotation",
+  "Relates to the \"coverage\" discussion in": "Relates to the \"coverage\" discussion in",
+  "Based on \"Is Diversity All You Need\" (AGI-Bot, 2025) which shows velocity normalization dramatically improves fine-tuning success rate.": "Based on \"Is Diversity All You Need\" (AGI-Bot, 2025) which shows velocity normalization dramatically improves fine-tuning success rate.",
+  "Concepts (default: the model's concepts)": "Concepts (default: the model's concepts)"
 }

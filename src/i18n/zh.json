@@ -2402,5 +2402,8 @@
   "Playhead slider: 1 s back or forward": "播放头滑块：后退或前进 1 秒",
   "Playhead slider: start or end": "播放头滑块：跳到开头或结尾",
   "In a text field, Undo is left to the field": "在输入框里，撤销交给输入框本身",
-  "Clear the selected annotation": "清除选中的标注"
+  "Clear the selected annotation": "清除选中的标注",
+  "Relates to the \"coverage\" discussion in": "与“覆盖度”讨论相关，见",
+  "Based on \"Is Diversity All You Need\" (AGI-Bot, 2025) which shows velocity normalization dramatically improves fine-tuning success rate.": "依据《Is Diversity All You Need》（AGI-Bot，2025），该研究表明速度归一化可显著提高微调成功率。",
+  "Concepts (default: the model's concepts)": "概念（默认使用模型的概念）"
 }

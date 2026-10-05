@@ -80,7 +80,8 @@ describe("the language catalogues", () => {
         )
           within = true;
         let key: string | null = null;
-        if (within && ts.isJsxText(node)) key = decodeEntities(foldJsxText(node.text));
+        if (within && ts.isJsxText(node))
+          key = decodeEntities(foldJsxText(node.text));
         if (
           within &&
           ts.isJsxAttribute(node) &&
@@ -89,7 +90,12 @@ describe("the language catalogues", () => {
           ts.isStringLiteral(node.initializer)
         )
           key = node.initializer.text.replace(/\s+/g, " ").trim();
-        if (key && /[A-Za-z]/.test(key) && key.length > 3 && !(key in en && key in zh)) {
+        if (
+          key &&
+          /[A-Za-z]/.test(key) &&
+          key.length > 3 &&
+          !(key in en && key in zh)
+        ) {
           const { line } = sf.getLineAndCharacterOfPosition(node.getStart());
           missing.push(`${file}:${line + 1} ${JSON.stringify(key)}`);
         }
@@ -97,9 +103,14 @@ describe("the language catalogues", () => {
       };
       visit(sf, false);
     }
-    // Words that are the same in both languages (names, units, code) need no
-    // entry: they stay as they are.
-    const unnamed = missing.filter((entry) => !SAME_IN_BOTH.test(entry));
+    // Names, units, paths and example values read the same in both languages
+    // and stay as they are: no entry needed.
+    const unnamed = missing.filter(
+      (entry) =>
+        !SAME_IN_BOTH.some((word) =>
+          entry.endsWith(` ${JSON.stringify(word)}`),
+        ),
+    );
     expect(unnamed).toEqual([]);
   });
 });
@@ -156,5 +167,15 @@ function decodeEntities(text: string): string {
   );
 }
 
-/** Product and code words that read the same in both languages. */
-const SAME_IN_BOTH = /^$/;
+/** Product names, paths and example values that read the same in both languages. */
+const SAME_IN_BOTH = [
+  "Codex Pilot",
+  "Claude Code Pilot",
+  "Hugging Face",
+  "https://provider.example/v1",
+  "local/dataset or org/dataset",
+  "cup, plate",
+  "integrations/segmentation/setup.sh",
+  "ms ·",
+  "plates-student-v1",
+];
