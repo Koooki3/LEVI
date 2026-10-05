@@ -364,33 +364,42 @@ export default function AgentActivity({ open }: { open: boolean }) {
               )}
             </div>
             {tasks.map((task) => (
-              <Button
+              <div
                 key={task.run_id}
-                variant="secondary"
-                className={`ag-task ${task.committed ? "is-done" : ""}`}
-                aria-pressed={selected === task.run_id}
-                onClick={() =>
-                  setSelected((value) =>
-                    value === task.run_id ? null : task.run_id,
-                  )
-                }
+                className={`ag-task ${task.committed ? "is-done" : ""} ${
+                  selected === task.run_id ? "is-selected" : ""
+                }`}
               >
-                <span className="ag-task__head">
-                  <span className="ag-task__name">
-                    {t(task.workflow)} · {task.dataset.replace(/^local\//, "")}
+                <Button
+                  variant="ghost"
+                  className="ag-task__toggle"
+                  aria-pressed={selected === task.run_id}
+                  onClick={() =>
+                    setSelected((value) =>
+                      value === task.run_id ? null : task.run_id,
+                    )
+                  }
+                >
+                  <span className="ag-task__head">
+                    <span className="ag-task__name">
+                      {t(task.workflow)} ·{" "}
+                      {task.dataset.replace(/^local\//, "")}
+                    </span>
+                    <Tag>
+                      {task.completed.length}/{task.episodes.length}
+                    </Tag>
                   </span>
-                  <Tag>
-                    {task.completed.length}/{task.episodes.length}
-                  </Tag>
-                </span>
-                <span className="ag-bar" aria-hidden="true">
-                  <span
-                    style={{
-                      width: `${Math.round((task.committed ? 1 : task.progress) * 100)}%`,
-                    }}
-                  />
-                </span>
-                <span className="ag-task__meta">
+                  <span className="ag-bar" aria-hidden="true">
+                    <span
+                      style={{
+                        width: `${Math.round((task.committed ? 1 : task.progress) * 100)}%`,
+                      }}
+                    />
+                  </span>
+                </Button>
+                {/* Outside the toggle: a tooltip trigger is its own focus stop
+                    and a click on it must not change the selection. */}
+                <div className="ag-task__meta">
                   <span>{t(task.waiting_for)}</span>
                   {task.usage_missing && (
                     <Tooltip
@@ -425,8 +434,8 @@ export default function AgentActivity({ open }: { open: boolean }) {
                       {relative(task.last_action.at, now, t)}
                     </span>
                   )}
-                </span>
-              </Button>
+                </div>
+              </div>
             ))}
           </div>
         )}
