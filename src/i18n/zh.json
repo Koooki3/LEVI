@@ -2438,5 +2438,8 @@
   "syncNow.updated": "更新",
   "syncNow.rebuilding": "重建视图",
   "syncNow.failed": "失败",
-  "syncNow.skipped": "跳过"
+  "syncNow.skipped": "跳过",
+  "Question kind": "问题类型",
+  "Action variance across episodes, heatmap": "跨片段动作方差热力图",
+  "Speed distribution histogram": "速度分布直方图"
 }

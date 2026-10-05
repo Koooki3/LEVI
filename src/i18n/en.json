@@ -2438,5 +2438,8 @@
   "syncNow.updated": "Updated",
   "syncNow.rebuilding": "Rebuilding view",
   "syncNow.failed": "Failed",
-  "syncNow.skipped": "Skipped"
+  "syncNow.skipped": "Skipped",
+  "Question kind": "Question kind",
+  "Action variance across episodes, heatmap": "Action variance across episodes, heatmap",
+  "Speed distribution histogram": "Speed distribution histogram"
 }

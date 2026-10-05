@@ -1101,6 +1101,7 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
             >
               <input
                 type="text"
+                aria-label={t("label (e.g. grasp the sponge)")}
                 placeholder={t("label (e.g. grasp the sponge)")}
                 autoFocus
                 value={createLabel}

@@ -9,7 +9,7 @@
 import Link from "next/link";
 import { useEffect, useRef, type ReactNode } from "react";
 import { Compass, Home, RotateCw, TriangleAlert } from "lucide-react";
-import { Button, Card, EmptyState } from "@/components/ds";
+import { Button, Card, EmptyState, Icon } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { useTitleOverride } from "./route-title";
 
@@ -43,7 +43,7 @@ function HomeLink({ primary }: { primary: boolean }) {
       href="/"
       className={`ds-btn ds-btn--${primary ? "primary" : "secondary"} ds-focus`}
     >
-      <Home className="ds-icon" width={16} height={16} aria-hidden="true" />
+      <Icon icon={Home} />
       {t("Back to the home page")}
     </Link>
   );
