@@ -25,6 +25,7 @@
 .ds-root :where(h1, h2, h3, h4, p) {
   margin: 0;
 }
+:lang(zh) .ds-eyebrow,
 .ds-root :lang(zh) .ds-eyebrow,
 .ds-root:lang(zh) .ds-eyebrow {
   text-transform: none;

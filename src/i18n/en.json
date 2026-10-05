@@ -2450,5 +2450,6 @@
   "The job lists could not be read": "The job lists could not be read",
   "The list of local datasets could not be read": "The list of local datasets could not be read",
   "Go to {page}": "Go to {page}",
-  "The training pool is not enabled, so there is nothing to export.": "The training pool is not enabled, so there is nothing to export."
+  "The training pool is not enabled, so there is nothing to export.": "The training pool is not enabled, so there is nothing to export.",
+  "report.unavailableFix": "Check that the LEVI service is running, then reload the page."
 }

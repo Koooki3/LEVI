@@ -6,7 +6,7 @@
  */
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowRight, Eye, Microscope, Sparkles } from "lucide-react";
+import { ArrowRight, Eye, List, Microscope, Sparkles } from "lucide-react";
 import { Icon } from "@/components/ds";
 import { T, useLocale } from "@/components/levi-locale";
 import { LeviMark } from "@/components/shell/brand";
@@ -113,7 +113,7 @@ export default function Guide() {
       <div className="levi-reading__head">
         <span className="levi-reading__brand">
           <LeviMark size={18} />
-          <span className="levi-eyebrow">
+          <span className="ds-eyebrow">
             <T>LEVI / FIELD GUIDE</T>
           </span>
         </span>
@@ -121,7 +121,10 @@ export default function Guide() {
       <div className="levi-reading__layout">
         <aside className="levi-reading__aside">
           <nav className="levi-toc" aria-label={t("Contents")}>
-            <div className="levi-toc__title">{t("Contents")}</div>
+            <div className="levi-toc__title">
+              <Icon icon={List} />
+              {t("Contents")}
+            </div>
             <ol>
               <li>
                 <a

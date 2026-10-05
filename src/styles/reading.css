@@ -36,13 +36,17 @@
 }
 .levi-reading__aside {
   position: sticky;
-  top: var(--ds-space-6);
-  max-height: calc(100vh - var(--ds-space-12));
+  /* Below the top bar, which stays in view (--levi-sticky-top, shell.css). */
+  top: calc(var(--levi-sticky-top, 0px) + var(--ds-space-6));
+  max-height: calc(100vh - var(--levi-sticky-top, 0px) - var(--ds-space-12));
   overflow: auto;
 }
 
 /* ── Contents ── */
 .levi-toc__title {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-1);
   margin-bottom: var(--ds-space-2);
   color: var(--ds-text-tertiary);
   font-size: var(--ds-text-caption-size);
@@ -84,7 +88,7 @@
 .levi-prose :where(h1, h2, h3, h4) {
   color: var(--ds-text-primary);
   font-weight: var(--ds-weight-semibold);
-  scroll-margin-top: var(--ds-space-6);
+  scroll-margin-top: calc(var(--levi-sticky-top, 0px) + var(--ds-space-6));
 }
 .levi-prose h1 {
   margin: 0 0 var(--ds-space-5);

@@ -2450,5 +2450,6 @@
   "The job lists could not be read": "读不到作业列表",
   "The list of local datasets could not be read": "读不到本地数据集列表",
   "Go to {page}": "前往{page}",
-  "The training pool is not enabled, so there is nothing to export.": "训练池未启用，没有可导出的内容。"
+  "The training pool is not enabled, so there is nothing to export.": "训练池未启用，没有可导出的内容。",
+  "report.unavailableFix": "确认 LEVI 服务正在运行，然后刷新页面。"
 }
