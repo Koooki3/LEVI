@@ -91,4 +91,33 @@ describe("global styles", () => {
   test("the report has no looping animation", () => {
     expect(code("app/report/report.css")).not.toMatch(/\binfinite\b/);
   });
+
+  test("the top bar stays in view as a material, and pages start below it", () => {
+    const shell = code("styles/shell.css");
+    const header = /\.levi-shell-header \{[^}]*\}/.exec(shell)?.[0] ?? "";
+    expect(header).toMatch(/position:\s*sticky/);
+    expect(header).toMatch(/top:\s*0/);
+    expect(header).toContain("var(--ds-material-bar)");
+    expect(header).toContain("var(--ds-material-filter)");
+    // Opaque again under reduced transparency (tokens.css).
+    expect(code("styles/tokens.css")).toMatch(
+      /prefers-reduced-transparency[\s\S]*--ds-material-bar:\s*var\(--ds-surface-1\)/,
+    );
+    // On a phone the two-row bar scrolls away, so nothing is reserved.
+    expect(shell).toMatch(/--levi-sticky-top:\s*0px/);
+    expect(code("app/globals.css")).toContain("var(--levi-sticky-top");
+    // Anchors and the contents column start below the bar.
+    const reading = code("styles/reading.css");
+    expect(reading).toMatch(/scroll-margin-top:[^;]*--levi-sticky-top/);
+    expect(reading).toMatch(/top:\s*calc\(var\(--levi-sticky-top/);
+  });
+
+  test("the top bar draws the wordmark from brand.tsx", () => {
+    const header = readFileSync(
+      join(src, "components/levi-header.tsx"),
+      "utf8",
+    );
+    expect(header).toContain("<LeviWordmark");
+    expect(header).not.toMatch(/<span>LEVI<\/span>/);
+  });
 });

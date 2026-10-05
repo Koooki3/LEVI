@@ -36,7 +36,7 @@ import {
   openAgentConnections,
   toggleAgentWorkbench,
 } from "./shell/shell-events";
-import { LeviMark } from "./shell/brand";
+import { LeviWordmark } from "./shell/brand";
 import { ShortcutsDialog } from "./shell/shortcuts-dialog";
 
 const THEME_ICON = { system: Monitor, light: Sun, dark: Moon } as const;
@@ -82,8 +82,7 @@ export default function LeviHeader() {
     <>
       <header className="levi-shell-header">
         <Link href="/" className="levi-shell-brand ds-focus">
-          <LeviMark size={20} />
-          <span>LEVI</span>
+          <LeviWordmark size={20} />
         </Link>
         <nav className="levi-shell-nav" aria-label={t("Main navigation")}>
           {pages.map((page) =>

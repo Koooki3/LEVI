@@ -7,6 +7,10 @@
 
 :root {
   --levi-header-height: 56px;
+  /* How far down the top bar covers the page while it is scrolled: the bar
+     stays in view on wide screens (0 where it scrolls away, below). Page
+     parts that stick, anchors and the contents column start below it. */
+  --levi-sticky-top: var(--levi-header-height);
 }
 
 /* Native controls follow the theme: tokens.css sets color-scheme on
@@ -14,7 +18,8 @@
 
 /* ── Top bar ───────────────────────────────────────────────────────── */
 .levi-shell-header {
-  position: relative;
+  position: sticky;
+  top: 0;
   z-index: calc(var(--ds-z-overlay) + 5);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -24,11 +29,11 @@
   height: var(--levi-header-height);
   padding: 0 var(--ds-space-6);
   border-bottom: 1px solid var(--ds-separator);
-  /* Opaque for now: the bar does not stay on top while the page scrolls
-     (pages have sticky parts of their own at top: 0), so a translucent
-     material would only show the older pages' dark background through it
-     and lower the text contrast. It becomes ds-material once it is sticky. */
-  background: var(--ds-bg);
+  /* The bar material (translucent and blurred; opaque under reduced
+     transparency or more contrast, see tokens.css). */
+  background: var(--ds-material-bar);
+  -webkit-backdrop-filter: var(--ds-material-filter);
+  backdrop-filter: var(--ds-material-filter);
   color: var(--ds-text-primary);
   font-family: var(--ds-font-sans);
   font-size: var(--ds-text-body-size);
@@ -213,8 +218,12 @@
 @media (max-width: 899px) {
   :root {
     --levi-header-height: 100px;
+    /* Two rows tall: too much of a phone screen to keep, so it scrolls
+       away with the page. */
+    --levi-sticky-top: 0px;
   }
   .levi-shell-header {
+    position: relative;
     grid-template-columns: auto minmax(0, 1fr);
     grid-template-rows: 56px 44px;
     grid-template-areas:
@@ -404,4 +413,19 @@
 :lang(zh) .levi-shell-brand,
 :lang(zh) .levi-wordmark {
   letter-spacing: 0.08em;
+}
+
+/* ── Page parts that stick below the bar ───────────────────────────── */
+/* These parts keep their own `position: sticky` (their stylesheets know
+   nothing of the bar); they start below it instead of under it. `body`
+   makes these win over those stylesheets, which load after this one. */
+body .pg-live-banner {
+  top: calc(var(--levi-sticky-top) + var(--ds-space-2));
+}
+body .pg-pool-facets {
+  top: calc(var(--levi-sticky-top) + var(--ds-space-3));
+  max-height: calc(100dvh - var(--levi-sticky-top) - var(--ds-space-6));
+}
+body .dsp-panel__header {
+  top: var(--levi-sticky-top);
 }

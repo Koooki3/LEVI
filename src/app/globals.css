@@ -22,8 +22,9 @@ html {
   /* Native controls (scrollbars, select lists, date pickers) follow the
      theme; tokens.css sets light or dark on [data-theme]. */
   color-scheme: light dark;
-  /* The top bar must not hide a focused element when the page scrolls. */
-  scroll-padding-top: calc(var(--levi-header-height, 56px) + var(--ds-space-2));
+  /* The top bar stays in view, so it must not hide a focused element or an
+     anchor when the page scrolls (--levi-sticky-top, shell.css). */
+  scroll-padding-top: calc(var(--levi-sticky-top, 0px) + var(--ds-space-2));
 }
 
 body {
