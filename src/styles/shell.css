@@ -429,3 +429,40 @@ body .pg-pool-facets {
 body .dsp-panel__header {
   top: var(--levi-sticky-top);
 }
+
+/* ── Error and not-found pages (src/components/shell/error-pages.tsx) ── */
+/* Exactly the space below the bar: nothing to scroll. */
+.levi-error-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: calc(100dvh - var(--levi-header-height, 0px));
+  padding: var(--ds-space-6) var(--ds-space-4);
+  background: var(--ds-bg);
+  color: var(--ds-text-primary);
+}
+/* The last-resort page has no top bar. */
+.levi-error-page--bare {
+  min-height: 100dvh;
+}
+.levi-error-page__card {
+  width: min(100%, 36rem);
+}
+.levi-error-page__details {
+  margin-top: var(--ds-space-3);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+}
+.levi-error-page__details pre {
+  margin: var(--ds-space-2) 0 0;
+  padding: var(--ds-space-3);
+  overflow: auto;
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-sunken);
+  color: var(--ds-text-primary);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
