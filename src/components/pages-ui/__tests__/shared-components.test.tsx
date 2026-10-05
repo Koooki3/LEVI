@@ -9,7 +9,7 @@ import type { DatasetFormat } from "@/types/dataset-format.types";
 setupDom();
 
 describe("DatasetFormatBadge (stage 4, same on every page)", () => {
-  test("a raw capture is a warning badge with its detail lines", async () => {
+  test("a raw capture is an info badge (a fact, not a warning) with its detail lines", async () => {
     const { host } = await render(
       <DatasetFormatBadge
         format={
@@ -23,7 +23,8 @@ describe("DatasetFormatBadge (stage 4, same on every page)", () => {
       />,
     );
     const badge = host.querySelector(".ds-badge")!;
-    expect(badge.className).toContain("ds-badge--warning");
+    expect(badge.className).toContain("ds-badge--info");
+    expect(badge.className).not.toContain("ds-badge--warning");
     expect(badge.textContent).toBe("Raw capture");
     expect(host.querySelectorAll(".levi-format-line").length).toBe(2);
     expect(host.querySelector(".levi-status")).toBeNull();
