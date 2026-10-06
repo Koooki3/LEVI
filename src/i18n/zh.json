@@ -2589,5 +2589,17 @@
   "2 is the default and the safer choice. 1 trusts a single still frame: more episodes pass, but some of them may show an object that is still falling.": "2 为默认，更安全。1 只信一帧静止：会多放行一些片段，但其中可能有物体仍在下落的。",
   "Also reverse episodes without a grasp": "也反转没有抓取的片段",
   "Risky: pushing, pouring and wiping make no physical sense backwards (the object is pulled back, the liquid flows up).": "有风险：推、倒水、擦拭反转后没有物理意义（物体被拉回，水倒流）。",
-  "Settling needs the arm to stay still for at least two frames after the release. Pausing about 0.5 s after opening the gripper before lifting the arm makes many more episodes reversible.": "落稳需要机械臂在松爪后静止至少两帧；采集时松爪后停约 0.5 秒再抬臂，可反转的片段会多很多。"
+  "Settling needs the arm to stay still for at least two frames after the release. Pausing about 0.5 s after opening the gripper before lifting the arm makes many more episodes reversible.": "落稳需要机械臂在松爪后静止至少两帧；采集时松爪后停约 0.5 秒再抬臂，可反转的片段会多很多。",
+  "Live evaluation · read-only": "实时评测 · 只读",
+  "Read-only: belongs to the live evaluation workspace": "只读：属于实时评测工作区",
+  "This is a dataset of the live evaluation workspace: read-only. Time segments, outcome labels and automatic verdicts come from the live service; to label or review, do it in the workspace where the live service keeps them.": "这是实时评测工作区的数据集：只读。时间片段、结局标签和自动判定都来自实时服务；要标注或复核，请在实时服务所在的工作区里做。",
+  "This dataset belongs to the live evaluation workspace and is read-only here; review and label it where the live service keeps it": "这个数据集属于实时评测工作区，在这里只读；请在实时服务保存它的地方复核和标注。",
+  "From the live evaluation workspace {workspace}": "来自实时评测工作区 {workspace}",
+  "Datasets of the live evaluation workspace {workspace} ({count}) are listed below, read-only. They are not copied, and the live service does not need to be running to view them.": "实时评测工作区 {workspace} 的数据集（{count} 个）列在下面，只读，不复制；实时服务不用开着也能看。",
+  "Select an atom from the timeline or list to read it in the inspector.": "从时间轴或列表选择一条标注，在检查器中查看。",
+  "Select an annotation from the list or timeline to read it here.": "从列表或时间轴选择一条标注，在这里查看。",
+  "Subtask / plan / memory / interjection / VQA atoms (lerobot v3.1 schema), read-only": "子任务、计划、记忆、插话和视觉问答标注（lerobot v3.1 结构），只读",
+  "Objects & Tracking (SAM3 and fast segmentation) writes masks and tracks, so it is off for a read-only dataset.": "物体标注（SAM3 和快速分割）会写入掩码和轨迹，所以对只读数据集关闭。",
+  "Content": "内容",
+  "Opens read-only in this LEVI; label and review it where the live service keeps it.": "在本 LEVI 里只读打开；标注和复核请到实时服务保存它的地方做。"
 }

@@ -16,8 +16,10 @@ export function RawCaptureNotice({
   feature?: "export" | "doctor";
   compact?: boolean;
 }) {
-  const { isRaw, entry, format } = useDatasetSource();
-  if (!isRaw || !entry) return null;
+  const { isRaw, entry, format, linked } = useDatasetSource();
+  // A live workspace's dataset is not converted from here: its own notice
+  // (LinkedDatasetNotice) says what it is.
+  if (!isRaw || !entry || linked) return null;
   const convertHref = `/workbench?source=${encodeURIComponent(entry.path)}`;
   const isDroid = format?.input_format === "droid_raw";
   if (compact) {

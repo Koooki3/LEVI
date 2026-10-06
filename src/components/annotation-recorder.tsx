@@ -29,6 +29,7 @@ import {
 import { T, useLocale } from "./levi-locale";
 import { CircleCheck, Circle, Square, Trash2 } from "lucide-react";
 import { Button, Tooltip } from "@/components/ds";
+import { ReadOnlyReason } from "./linked-dataset-notice";
 
 function clock(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
@@ -41,7 +42,8 @@ function clock(seconds: number): string {
 export default function AnnotationRecorder() {
   const { t } = useLocale();
   const confirm = useConfirmAction();
-  const { episodeId, ident, dirty, save, backendEnabled } = useAnnotations();
+  const { episodeId, ident, dirty, save, backendEnabled, readOnly } =
+    useAnnotations();
   const [session, setSession] = useState<RecordingSession | null>(null);
   const [status, setStatus] = useState<Record<string, EpisodeStatus>>({});
   const [now, setNow] = useState(() => Date.now() / 1000);
@@ -51,7 +53,8 @@ export default function AnnotationRecorder() {
   const identKey = `${ident.repoId ?? ""}|${ident.localPath ?? ""}`;
 
   const refresh = useCallback(async () => {
-    if (!backendEnabled || (!ident.repoId && !ident.localPath)) return;
+    if (readOnly || !backendEnabled || (!ident.repoId && !ident.localPath))
+      return;
     const [current, done] = await Promise.all([
       fetchRecording(ident),
       fetchEpisodeStatus(ident),
@@ -59,7 +62,7 @@ export default function AnnotationRecorder() {
     setSession(current);
     setStatus(done);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identKey, backendEnabled]);
+  }, [identKey, backendEnabled, readOnly]);
 
   useEffect(() => {
     void refresh();
@@ -84,6 +87,17 @@ export default function AnnotationRecorder() {
   }
 
   if (!backendEnabled || episodeId === null) return null;
+  // A linked (live workspace) dataset is confirmed and recorded where the
+  // live service keeps it: nothing here to press, and the reason in words.
+  if (readOnly)
+    return (
+      <div
+        className="flex flex-wrap items-center gap-2"
+        data-testid="annotation-recorder"
+      >
+        <ReadOnlyReason />
+      </div>
+    );
   const confirmed = status[String(episodeId)];
   const confirmedInSession = session
     ? Object.values(status).filter((s) => s.confirmed_at >= session.started_at)

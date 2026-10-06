@@ -45,10 +45,30 @@ export interface DatasetFormat {
   capabilities: DatasetCapabilities;
 }
 
+/** A dataset of a live evaluation workspace shown here read-only
+ * (levi/links.py): never copied, never written from this LEVI. */
+export interface LinkedDataset {
+  kind: "live";
+  /** The dataset's name in the live workspace's own catalog. */
+  source: string;
+  /** The live workspace's folder name (never its path). */
+  workspace: string;
+  readonly: true;
+}
+
+/** What the catalog says is linked: one row per live workspace. */
+export interface LinkedWorkspace {
+  kind: "live";
+  workspace: string;
+  datasets: number;
+}
+
 export interface CatalogEntry {
   id: string;
   name: string;
   path: string;
+  /** Set when this entry is a live evaluation workspace's dataset. */
+  linked?: LinkedDataset;
   kind?: "lerobot" | "raw";
   view?: string;
   view_status?: "building" | "ready" | "failed";

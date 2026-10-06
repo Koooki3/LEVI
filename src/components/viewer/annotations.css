@@ -1982,3 +1982,20 @@
   [role="tooltip"] {
   display: none;
 }
+
+/* The selected atom of a linked (read-only) dataset: the inspector's fields
+   as plain text. */
+.vw-readonly-fields {
+  margin: 0;
+  display: grid;
+  gap: var(--ds-space-3);
+}
+.vw-readonly-fields .field {
+  margin: 0;
+}
+.vw-readonly-value {
+  margin: 0;
+  color: var(--ds-text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

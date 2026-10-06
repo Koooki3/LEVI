@@ -666,6 +666,9 @@ def manifest_list(repo_id: str):
 def manifest_build(payload: TrainingManifest):
     from .training_manifest import build
 
+    # A manifest is written under this workspace's exports from this
+    # workspace's labels and reviews: a live dataset's are in its own.
+    links.refuse_write(display_name(payload.repo_id, None))
     result = build(
         payload.repo_id,
         payload.operation,

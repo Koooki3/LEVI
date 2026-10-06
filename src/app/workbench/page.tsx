@@ -16,6 +16,7 @@ import {
   Database,
   FolderInput,
   History,
+  Lock,
   Play,
   RefreshCw,
   Trash2,
@@ -28,9 +29,17 @@ import {
   Skeleton,
   Tooltip,
 } from "@/components/ds";
-import { EmptyLine, RequestProblem } from "@/components/pages-ui/feedback";
+import {
+  EmptyLine,
+  Note,
+  RequestProblem,
+} from "@/components/pages-ui/feedback";
 import { useColon, useServerText } from "@/components/pages-ui/messages";
-import type { CatalogEntry } from "@/types/dataset-format.types";
+import type {
+  CatalogEntry,
+  LinkedWorkspace,
+} from "@/types/dataset-format.types";
+import { LINKED_REASON } from "@/utils/linkedDataset";
 type Local = CatalogEntry;
 type SyncChange = {
   time: number;
@@ -52,6 +61,8 @@ type Catalog = {
   workspace: string;
   conversion_available: boolean;
   stages: string[];
+  /** The live evaluation workspaces whose datasets are listed read-only. */
+  linked?: LinkedWorkspace[];
 };
 const JOB_TONE: Record<string, "success" | "warning" | "danger" | "info"> = {
   succeeded: "success",
@@ -302,6 +313,16 @@ export default function Workbench() {
             </ul>
           </details>
         )}
+        {known &&
+          (catalog?.linked ?? []).map((link) => (
+            <Note key={`${link.kind}:${link.workspace}`}>
+              {t(
+                "Datasets of the live evaluation workspace {workspace} ({count}) are listed below, read-only. They are not copied, and the live service does not need to be running to view them.",
+              )
+                .replace("{workspace}", link.workspace)
+                .replace("{count}", String(link.datasets))}
+            </Note>
+          ))}
         {loading && (
           <div className="pg-gap-top" aria-busy="true">
             <span className="sr-only" role="status">
@@ -348,9 +369,20 @@ export default function Workbench() {
                           {serverText(d.view_error)}
                         </p>
                       )}
-                      <p className="pg-small pg-break">
-                        <T>{d.path}</T>
-                      </p>
+                      {d.linked ? (
+                        <p className="pg-small pg-break">
+                          <Badge tone="info" icon={Lock}>
+                            {t("Live evaluation · read-only")}
+                          </Badge>{" "}
+                          {t(
+                            "From the live evaluation workspace {workspace}",
+                          ).replace("{workspace}", d.linked.workspace)}
+                        </p>
+                      ) : (
+                        <p className="pg-small pg-break">
+                          <T>{d.path}</T>
+                        </p>
+                      )}
                     </td>
                     <td className="pg-format-cell">
                       <DatasetFormatBadge format={d.format} />
@@ -360,43 +392,70 @@ export default function Workbench() {
                     </td>
                     <td>
                       <div className="pg-stack">
-                        <Button size="sm" onClick={() => setSource(d.path)}>
+                        <Button
+                          size="sm"
+                          disabled={!!d.linked}
+                          aria-describedby={
+                            d.linked ? `wb-linked-why-${d.name}` : undefined
+                          }
+                          onClick={() => setSource(d.path)}
+                        >
                           <T>Use as input</T>
                         </Button>
-                        <Tooltip
-                          content={t(
-                            "Remove from the list. Files, annotations and review flags are kept.",
-                          )}
-                        >
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            icon={Trash2}
-                            onClick={async () => {
-                              if (
-                                await confirm({
-                                  title: t(
-                                    "Remove {name} from the list?",
-                                  ).replace("{name}", d.name),
-                                  description: t(
-                                    "Remove this dataset from the list? Its files, annotations and review flags stay on disk. If it is still in the workspace, auto-sync will add it back.",
-                                  ),
-                                  confirmLabel: t("Unregister"),
-                                })
-                              )
-                                void action(
-                                  () =>
-                                    fetch(
-                                      `/api/levi/catalog/${encodeURIComponent(d.name)}`,
-                                      { method: "DELETE" },
-                                    ),
-                                  "The dataset was not removed from the list",
-                                );
-                            }}
+                        {d.linked ? (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              icon={Trash2}
+                              disabled
+                              aria-describedby={`wb-linked-why-${d.name}`}
+                            >
+                              <T>Unregister</T>
+                            </Button>
+                            <span
+                              id={`wb-linked-why-${d.name}`}
+                              className="pg-small"
+                            >
+                              {t(LINKED_REASON)}
+                            </span>
+                          </>
+                        ) : (
+                          <Tooltip
+                            content={t(
+                              "Remove from the list. Files, annotations and review flags are kept.",
+                            )}
                           >
-                            <T>Unregister</T>
-                          </Button>
-                        </Tooltip>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              icon={Trash2}
+                              onClick={async () => {
+                                if (
+                                  await confirm({
+                                    title: t(
+                                      "Remove {name} from the list?",
+                                    ).replace("{name}", d.name),
+                                    description: t(
+                                      "Remove this dataset from the list? Its files, annotations and review flags stay on disk. If it is still in the workspace, auto-sync will add it back.",
+                                    ),
+                                    confirmLabel: t("Unregister"),
+                                  })
+                                )
+                                  void action(
+                                    () =>
+                                      fetch(
+                                        `/api/levi/catalog/${encodeURIComponent(d.name)}`,
+                                        { method: "DELETE" },
+                                      ),
+                                    "The dataset was not removed from the list",
+                                  );
+                              }}
+                            >
+                              <T>Unregister</T>
+                            </Button>
+                          </Tooltip>
+                        )}
                       </div>
                     </td>
                   </tr>

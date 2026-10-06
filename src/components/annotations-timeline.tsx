@@ -188,7 +188,8 @@ export const PLAYHEAD_STEP = 0.1;
 export const PLAYHEAD_BIG_STEP = 1;
 
 export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
-  const { atoms, addAtom, updateAtom, snap, selectAtom } = useAnnotations();
+  const { atoms, addAtom, updateAtom, snap, selectAtom, readOnly } =
+    useAnnotations();
   const { t } = useLocale();
   const { currentTime, seek, setIsPlaying } = useTime();
   const trackBandRef = useRef<HTMLDivElement | null>(null);
@@ -449,7 +450,7 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
   const onTrackDown = (e: React.PointerEvent, trackKey: TrackKey) => {
     // Only fire when the mousedown lands on the track itself, not on a
     // child span/edge (those stop propagation in their own handlers).
-    if (drag || pendingCreate) return;
+    if (readOnly || drag || pendingCreate) return;
     if (e.button !== 0) return;
     if (!(trackKey in CREATE_ATOM_DEFAULTS)) return;
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -705,12 +706,12 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                           }`}
                           ref={tk.key === "subtask" ? trackBandRef : undefined}
                           onClick={
-                            tk.render === "span-edit"
+                            tk.render === "span-edit" && !readOnly
                               ? undefined
                               : onTrackBandClick
                           }
                           onPointerDown={
-                            tk.key in CREATE_ATOM_DEFAULTS
+                            tk.key in CREATE_ATOM_DEFAULTS && !readOnly
                               ? (e) => onTrackDown(e, tk.key)
                               : undefined
                           }
@@ -761,23 +762,28 @@ export const AnnotationsTimeline: React.FC<Props> = ({ duration }) => {
                                   >
                                     <T>{s.label}</T>
                                   </span>
-                                  <div
-                                    className="resize l"
-                                    onPointerDown={(e) => onEdgeDown(e, "l", k)}
-                                  />
+                                  {!readOnly && (
+                                    <div
+                                      className="resize l"
+                                      onPointerDown={(e) =>
+                                        onEdgeDown(e, "l", k)
+                                      }
+                                    />
+                                  )}
                                   {/* Right handle: legacy adjacency-resize
                                   needs a next span to move; a span with its
                                   own explicit `to` can always resize itself,
                                   even as the last (or only) span. */}
-                                  {(s.atom.to != null ||
-                                    k + 1 < lanes.subtask.length) && (
-                                    <div
-                                      className="resize r"
-                                      onPointerDown={(e) =>
-                                        onEdgeDown(e, "r", k)
-                                      }
-                                    />
-                                  )}
+                                  {!readOnly &&
+                                    (s.atom.to != null ||
+                                      k + 1 < lanes.subtask.length) && (
+                                      <div
+                                        className="resize r"
+                                        onPointerDown={(e) =>
+                                          onEdgeDown(e, "r", k)
+                                        }
+                                      />
+                                    )}
                                 </div>
                               );
                             })}

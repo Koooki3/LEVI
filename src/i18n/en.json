@@ -2589,5 +2589,17 @@
   "2 is the default and the safer choice. 1 trusts a single still frame: more episodes pass, but some of them may show an object that is still falling.": "2 is the default and the safer choice. 1 trusts a single still frame: more episodes pass, but some of them may show an object that is still falling.",
   "Also reverse episodes without a grasp": "Also reverse episodes without a grasp",
   "Risky: pushing, pouring and wiping make no physical sense backwards (the object is pulled back, the liquid flows up).": "Risky: pushing, pouring and wiping make no physical sense backwards (the object is pulled back, the liquid flows up).",
-  "Settling needs the arm to stay still for at least two frames after the release. Pausing about 0.5 s after opening the gripper before lifting the arm makes many more episodes reversible.": "Settling needs the arm to stay still for at least two frames after the release. Pausing about 0.5 s after opening the gripper before lifting the arm makes many more episodes reversible."
+  "Settling needs the arm to stay still for at least two frames after the release. Pausing about 0.5 s after opening the gripper before lifting the arm makes many more episodes reversible.": "Settling needs the arm to stay still for at least two frames after the release. Pausing about 0.5 s after opening the gripper before lifting the arm makes many more episodes reversible.",
+  "Live evaluation · read-only": "Live evaluation · read-only",
+  "Read-only: belongs to the live evaluation workspace": "Read-only: belongs to the live evaluation workspace",
+  "This is a dataset of the live evaluation workspace: read-only. Time segments, outcome labels and automatic verdicts come from the live service; to label or review, do it in the workspace where the live service keeps them.": "This is a dataset of the live evaluation workspace: read-only. Time segments, outcome labels and automatic verdicts come from the live service; to label or review, do it in the workspace where the live service keeps them.",
+  "This dataset belongs to the live evaluation workspace and is read-only here; review and label it where the live service keeps it": "This dataset belongs to the live evaluation workspace and is read-only here; review and label it where the live service keeps it",
+  "From the live evaluation workspace {workspace}": "From the live evaluation workspace {workspace}",
+  "Datasets of the live evaluation workspace {workspace} ({count}) are listed below, read-only. They are not copied, and the live service does not need to be running to view them.": "Datasets of the live evaluation workspace {workspace} ({count}) are listed below, read-only. They are not copied, and the live service does not need to be running to view them.",
+  "Select an atom from the timeline or list to read it in the inspector.": "Select an atom from the timeline or list to read it in the inspector.",
+  "Select an annotation from the list or timeline to read it here.": "Select an annotation from the list or timeline to read it here.",
+  "Subtask / plan / memory / interjection / VQA atoms (lerobot v3.1 schema), read-only": "Subtask / plan / memory / interjection / VQA atoms (lerobot v3.1 schema), read-only",
+  "Objects & Tracking (SAM3 and fast segmentation) writes masks and tracks, so it is off for a read-only dataset.": "Objects & Tracking (SAM3 and fast segmentation) writes masks and tracks, so it is off for a read-only dataset.",
+  "Content": "Content",
+  "Opens read-only in this LEVI; label and review it where the live service keeps it.": "Opens read-only in this LEVI; label and review it where the live service keeps it."
 }

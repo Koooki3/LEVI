@@ -42,6 +42,8 @@ import {
   removeBrowserStorage,
   writeBrowserStorage,
 } from "../utils/browserStorage";
+import { LINKED_READ_ONLY } from "../utils/linkedDataset";
+import { useDatasetSource } from "./dataset-source-context";
 
 const STORAGE_PREFIX = "lerobot-annotations:v2:";
 
@@ -106,6 +108,9 @@ interface AnnotationsContextType {
   drawMode: DrawMode;
   drawLabel: string;
   backendEnabled: boolean;
+  /** A live evaluation workspace's dataset, linked read-only: nothing here
+   * edits, saves or deletes its annotations (the service refuses it too). */
+  readOnly: boolean;
   dirty: boolean;
   saving: boolean;
 
@@ -187,6 +192,10 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const backendEnabled = isAnnotateBackendEnabled();
+  const { linked: readOnly } = useDatasetSource();
+  // Read by the callbacks below without making each of them depend on it.
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
   // The frame asks before a keyboard jump drops an unsaved draft.
   useEffect(() => {
     setUnsavedWork(dirty);
@@ -326,7 +335,7 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // Persist to sessionStorage on every change once we have an episode.
   useEffect(() => {
-    if (episodeId == null) return;
+    if (episodeId == null || readOnlyRef.current) return;
     try {
       writeBrowserStorage(
         "session",
@@ -347,6 +356,7 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const addAtom = useCallback(
     (atom: LanguageAtom) => {
+      if (readOnlyRef.current) return;
       setAtoms((prev) => {
         recordBeforeChange(prev);
         return [...prev, atom];
@@ -357,6 +367,7 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const addAtoms = useCallback(
     (newAtoms: LanguageAtom[]) => {
+      if (readOnlyRef.current) return;
       setAtoms((prev) => {
         recordBeforeChange(prev);
         return [...prev, ...newAtoms];
@@ -367,6 +378,7 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const updateAtom = useCallback(
     (index: number, updates: Partial<LanguageAtom>) => {
+      if (readOnlyRef.current) return;
       setAtoms((prev) => {
         if (index < 0 || index >= prev.length) return prev;
         recordBeforeChange(prev);
@@ -380,6 +392,7 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const deleteAtom = useCallback(
     (atom: LanguageAtom) => {
+      if (readOnlyRef.current) return;
       setAtoms((prev) => {
         recordBeforeChange(prev);
         const next = prev.filter((a) => a !== atom);
@@ -401,6 +414,7 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 
   const resetAtoms = useCallback(() => {
+    if (readOnlyRef.current) return;
     setAtoms((prev) => {
       recordBeforeChange(prev);
       return [];
@@ -416,6 +430,7 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
   // same index, so the editor should stay open on it, not snap closed) and
   // dropped only when it can't possibly still mean anything.
   const undo = useCallback(() => {
+    if (readOnlyRef.current) return;
     flushPendingGroup();
     const prev = historyRef.current.pop();
     if (prev === undefined) return;
@@ -435,6 +450,7 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [flushPendingGroup]);
 
   const redo = useCallback(() => {
+    if (readOnlyRef.current) return;
     const next = redoRef.current.pop();
     if (next === undefined) return;
     setAtoms((current) => {
@@ -488,7 +504,7 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [selectedIdx]);
 
   const setPendingDraw = useCallback((draw: PendingDraw) => {
-    setPendingDrawState(draw);
+    setPendingDrawState(readOnlyRef.current ? null : draw);
   }, []);
 
   const clearPendingDraw = useCallback(() => setPendingDrawState(null), []);
@@ -497,7 +513,10 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
     setActiveCameraState(c);
   }, []);
 
-  const setDrawMode = useCallback((m: DrawMode) => setDrawModeState(m), []);
+  const setDrawMode = useCallback(
+    (m: DrawMode) => setDrawModeState(readOnlyRef.current ? "off" : m),
+    [],
+  );
   const setDrawLabel = useCallback((l: string) => setDrawLabelState(l), []);
   const setActiveVideoEl = useCallback(
     (el: HTMLVideoElement | null) => setActiveVideoElState(el),
@@ -515,6 +534,7 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
     path?: string | null;
   }> => {
     if (episodeId == null) return { ok: false, error: "no episode" };
+    if (readOnlyRef.current) return { ok: false, error: LINKED_READ_ONLY };
     if (!isAnnotateBackendEnabled()) {
       // Persistence is sessionStorage-only — that already happened in the
       // effect above. Report the storage key as the location so the UI can
@@ -550,6 +570,7 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
     error?: string;
   }> => {
     if (episodeId == null) return { ok: false, error: "no episode" };
+    if (readOnlyRef.current) return { ok: false, error: LINKED_READ_ONLY };
     setSaving(true);
     try {
       if (isAnnotateBackendEnabled()) {
@@ -573,7 +594,7 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [episodeId, ident]);
 
   const flushAllEpisodes = useCallback(async (): Promise<void> => {
-    if (!isAnnotateBackendEnabled()) return;
+    if (!isAnnotateBackendEnabled() || readOnlyRef.current) return;
     const prefix = `${STORAGE_PREFIX}${identKey(ident)}::`;
     const pending: Promise<unknown>[] = [];
     for (const key of listBrowserStorageKeys("session", prefix)) {
@@ -612,6 +633,7 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
       selectedIdx,
       selectAtom,
       backendEnabled,
+      readOnly,
       dirty,
       saving,
       setEpisode,
@@ -646,6 +668,7 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
       selectedIdx,
       selectAtom,
       backendEnabled,
+      readOnly,
       dirty,
       saving,
       setEpisode,

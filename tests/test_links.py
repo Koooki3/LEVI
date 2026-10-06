@@ -178,6 +178,7 @@ def test_nothing_is_ever_written_into_the_live_workspace(client, live):
         ("post", "/annotations/api/sam3/edits", {}),
         ("post", "/annotations/api/recap/run", {}),
         ("post", "/api/levi/review", {"flagged": [0]}),
+        ("post", "/api/levi/manifest", {"operation": "all"}),
     ],
 )
 def test_every_write_to_a_live_dataset_is_refused(client, live, method, url, body):
@@ -330,3 +331,14 @@ def test_reading_a_closed_store_makes_no_file_beside_it(tmp_path):
     assert ReadStore(state).head("d") == "r7"
     assert ReadStore(state).list("runs") == []
     assert sorted(p.name for p in (state / "agent").iterdir()) == before
+
+
+def test_a_quality_inspection_of_a_live_dataset_reads_and_writes_only_here(
+    client, live
+):
+    before = tree(live)
+    response = client.post(
+        "/api/levi/diagnostics", json={"repo_id": "local/" + LINKED, "max_episodes": 1}
+    )
+    assert response.status_code == 200, response.text
+    assert tree(live) == before

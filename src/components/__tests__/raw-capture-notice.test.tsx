@@ -1,31 +1,50 @@
-import { render, setupDom } from "@/components/ds/__tests__/dom";
-import { describe, expect, mock, test } from "bun:test";
+import { render, setupDom, waitFor } from "@/components/ds/__tests__/dom";
+import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { DatasetFormatBadge } from "@/components/dataset-format";
+import { DatasetSourceProvider } from "@/context/dataset-source-context";
+import { RawCaptureNotice } from "../raw-capture-notice";
 import type { DatasetFormat } from "@/types/dataset-format.types";
 
-const source = {
-  isRaw: true,
-  entry: { path: "/data/task_a" },
+// The real source context, answered by a catalog entry (a module mock of it
+// would stay in force for every other test file of the run).
+const entry = {
+  id: "local/task_a",
+  name: "task_a",
+  path: "/data/task_a",
   format: {
+    kind: "raw",
     origin: "raw_capture",
     input_format: "robot_capture",
     view_status: "ready",
   },
 };
-mock.module("@/context/dataset-source-context", () => ({
-  useDatasetSource: () => source,
-}));
-const { RawCaptureNotice } = await import("../raw-capture-notice");
+const realFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = realFetch;
+});
+function Shown({ compact }: { compact: boolean }) {
+  return (
+    <DatasetSourceProvider org="local" dataset="task_a">
+      <RawCaptureNotice compact={compact} />
+    </DatasetSourceProvider>
+  );
+}
 
 setupDom();
 
 describe("a raw capture is a fact, not a warning", () => {
   test("the notice is an info note with an info badge, in both sizes", async () => {
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(JSON.stringify(entry), {
+          headers: { "Content-Type": "application/json" },
+        }),
+      )) as unknown as typeof fetch;
     for (const compact of [false, true]) {
-      const { host } = await render(<RawCaptureNotice compact={compact} />);
-      const note = host.querySelector(".vw-note")!;
+      const { host } = await render(<Shown compact={compact} />);
+      const note = await waitFor(() => host.querySelector(".vw-note"));
       expect(note.getAttribute("role")).toBe("note");
       expect(note.className).not.toContain("vw-note--danger");
       const badge = note.querySelector(".ds-badge")!;

@@ -61,6 +61,8 @@ import {
 import { isSaveShortcut } from "../utils/keyboardShortcuts";
 import { useDatasetSource } from "../context/dataset-source-context";
 import { RawCaptureNotice } from "./raw-capture-notice";
+import { ReadOnlyReason } from "./linked-dataset-notice";
+import { LINKED_READ_ONLY } from "../utils/linkedDataset";
 
 interface Props {
   cameraKeys: string[];
@@ -533,6 +535,7 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
     selectedIdx,
     selectAtom,
     ident,
+    readOnly,
   } = useAnnotations();
   const { currentTime } = useTime();
   const { t } = useLocale();
@@ -645,6 +648,10 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
 
   // ============ Save / export ============
   const handleSave = React.useCallback(async () => {
+    if (readOnly) {
+      setExportStatus(LINKED_READ_ONLY);
+      return;
+    }
     const r = await save();
     if (!r.ok) {
       setExportStatus(`Save failed: ${r.error || "unknown"}`);
@@ -655,10 +662,11 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
           : "Saved episode (backend did not report a path — update/restart backend/app.py).",
       );
     }
-  }, [save]);
+  }, [save, readOnly]);
 
   // Ctrl/Cmd+S saves the current episode when no field has a local draft.
   React.useEffect(() => {
+    if (readOnly) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (!isSaveShortcut(e) || e.defaultPrevented) return;
       const target = e.target;
@@ -673,7 +681,7 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handleSave, saving]);
+  }, [handleSave, saving, readOnly]);
 
   const handleSaveDataset = async () => {
     if (isRaw) {
@@ -751,8 +759,9 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
               </h3>
               <p>
                 <T>
-                  Select an atom from the timeline or list, then edit it in the
-                  inspector.
+                  {readOnly
+                    ? "Select an atom from the timeline or list to read it in the inspector."
+                    : "Select an atom from the timeline or list, then edit it in the inspector."}
                 </T>
               </p>
             </div>
@@ -762,35 +771,41 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                   <T>backend offline — edits saved to sessionStorage only</T>
                 </span>
               )}
-              <Button
-                variant="primary"
-                size="sm"
-                icon={Save}
-                loading={saving}
-                disabled={!dirty}
-                onClick={handleSave}
-                aria-keyshortcuts="Control+S Meta+S"
-              >
-                {t(saving ? "Saving…" : "Save episode")}
-              </Button>
-              <Button
-                size="sm"
-                icon={DatabaseZap}
-                disabled={!backendEnabled}
-                onClick={handleSaveDataset}
-              >
-                {t("Save dataset")}
-              </Button>
-              <Button
-                variant="secondary"
-                className="vw-btn-danger-outline"
-                size="sm"
-                icon={Trash2}
-                disabled={!backendEnabled || saving}
-                onClick={handleDeleteFile}
-              >
-                {t("Delete file")}
-              </Button>
+              {readOnly ? (
+                <ReadOnlyReason />
+              ) : (
+                <>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    icon={Save}
+                    loading={saving}
+                    disabled={!dirty}
+                    onClick={handleSave}
+                    aria-keyshortcuts="Control+S Meta+S"
+                  >
+                    {t(saving ? "Saving…" : "Save episode")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    icon={DatabaseZap}
+                    disabled={!backendEnabled}
+                    onClick={handleSaveDataset}
+                  >
+                    {t("Save dataset")}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="vw-btn-danger-outline"
+                    size="sm"
+                    icon={Trash2}
+                    disabled={!backendEnabled || saving}
+                    onClick={handleDeleteFile}
+                  >
+                    {t("Delete file")}
+                  </Button>
+                </>
+              )}
             </div>
           </div>
 
@@ -801,87 +816,89 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
             </div>
           )}
 
-          <section className="annotation-composer">
-            <div className="composer-copy">
-              <span className="section-kicker">
-                <T>Add text annotation</T>
-              </span>
-              <p>
-                <T>
-                  Adds task phrasing, subtask, plan, memory, speech, or
-                  non-spatial VQA atoms. Task phrasings are saved at episode
-                  start.
-                </T>
-              </p>
-            </div>
-            <div
-              className="quick-add"
-              data-annotation-draft-active={qaHasDraft ? "true" : "false"}
-            >
-              <span className="ts-pill">
-                t ={" "}
-                <T>
-                  {qaDef.atEpisodeStart
-                    ? formatSeconds(0)
-                    : formatSeconds(currentTime)}
-                </T>
-              </span>
-              <select
-                aria-label="Annotation kind"
-                value={qaKind}
-                onChange={(e) => {
-                  setQaKind(e.target.value as QuickAddKind);
-                  setQaValues({});
-                }}
+          {!readOnly && (
+            <section className="annotation-composer">
+              <div className="composer-copy">
+                <span className="section-kicker">
+                  <T>Add text annotation</T>
+                </span>
+                <p>
+                  <T>
+                    Adds task phrasing, subtask, plan, memory, speech, or
+                    non-spatial VQA atoms. Task phrasings are saved at episode
+                    start.
+                  </T>
+                </p>
+              </div>
+              <div
+                className="quick-add"
+                data-annotation-draft-active={qaHasDraft ? "true" : "false"}
               >
-                {QUICK_ADD_DEFS.map((d) => (
-                  <option key={d.kind} value={d.kind}>
-                    <T>{d.label}</T>
-                  </option>
+                <span className="ts-pill">
+                  t ={" "}
+                  <T>
+                    {qaDef.atEpisodeStart
+                      ? formatSeconds(0)
+                      : formatSeconds(currentTime)}
+                  </T>
+                </span>
+                <select
+                  aria-label="Annotation kind"
+                  value={qaKind}
+                  onChange={(e) => {
+                    setQaKind(e.target.value as QuickAddKind);
+                    setQaValues({});
+                  }}
+                >
+                  {QUICK_ADD_DEFS.map((d) => (
+                    <option key={d.kind} value={d.kind}>
+                      <T>{d.label}</T>
+                    </option>
+                  ))}
+                </select>
+                {qaKind === "subtask" && (
+                  <SubtaskTagFields
+                    vocabulary={vocabulary}
+                    value={qaTag}
+                    onChange={setQaTag}
+                  />
+                )}
+                {qaDef.fields.map((f, i) => (
+                  <input
+                    key={f.name}
+                    type={f.type === "number" ? "number" : "text"}
+                    placeholder={t(f.placeholder)}
+                    className={f.grow ? "grow" : undefined}
+                    style={f.width ? { width: f.width } : undefined}
+                    value={qaValues[f.name] ?? ""}
+                    onChange={(e) =>
+                      setQaValues((v) => ({ ...v, [f.name]: e.target.value }))
+                    }
+                    onKeyDown={
+                      i === qaDef.fields.length - 1
+                        ? (e) => e.key === "Enter" && handleQuickAdd()
+                        : undefined
+                    }
+                  />
                 ))}
-              </select>
-              {qaKind === "subtask" && (
-                <SubtaskTagFields
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={Plus}
+                  onClick={handleQuickAdd}
+                >
+                  {t("Add at frame")}
+                </Button>
+              </div>
+              {backendEnabled && (
+                <VocabularyEditor
+                  ident={ident}
                   vocabulary={vocabulary}
-                  value={qaTag}
-                  onChange={setQaTag}
+                  onSaved={setVocabulary}
                 />
               )}
-              {qaDef.fields.map((f, i) => (
-                <input
-                  key={f.name}
-                  type={f.type === "number" ? "number" : "text"}
-                  placeholder={t(f.placeholder)}
-                  className={f.grow ? "grow" : undefined}
-                  style={f.width ? { width: f.width } : undefined}
-                  value={qaValues[f.name] ?? ""}
-                  onChange={(e) =>
-                    setQaValues((v) => ({ ...v, [f.name]: e.target.value }))
-                  }
-                  onKeyDown={
-                    i === qaDef.fields.length - 1
-                      ? (e) => e.key === "Enter" && handleQuickAdd()
-                      : undefined
-                  }
-                />
-              ))}
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={Plus}
-                onClick={handleQuickAdd}
-              >
-                {t("Add at frame")}
-              </Button>
-            </div>
-            {backendEnabled && (
-              <VocabularyEditor
-                ident={ident}
-                vocabulary={vocabulary}
-                onSaved={setVocabulary}
-              />
-            )}
-          </section>
+            </section>
+          )}
 
           <div
             className={`workspace inspector-workspace${inspectorDocked ? " is-docked" : ""}`}
@@ -914,8 +931,12 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
               {atoms.length === 0 && (
                 <div className="rail-empty">
                   <T>No annotations yet.</T>
-                  <br />
-                  <T>Add text above or draw on the active video.</T>
+                  {!readOnly && (
+                    <>
+                      <br />
+                      <T>Add text above or draw on the active video.</T>
+                    </>
+                  )}
                 </div>
               )}
               {(["persistent", "events"] as const).map((column) => {
@@ -966,10 +987,13 @@ export const AnnotationsPanel: React.FC<Props> = ({ cameraKeys }) => {
                         <T>Inspector</T>
                       </span>
                       <p>
-                        Select an annotation from the list or timeline, or draw
-                        a new bbox/keypoint on the video.
+                        {readOnly
+                          ? "Select an annotation from the list or timeline to read it here."
+                          : "Select an annotation from the list or timeline, or draw a new bbox/keypoint on the video."}
                       </p>
                     </div>
+                  ) : readOnly ? (
+                    <ReadOnlyAtom atom={selectedAtom} />
                   ) : (
                     <AtomEditor
                       atom={selectedAtom}
@@ -1056,6 +1080,81 @@ const RailGroup: React.FC<{
         </div>
       }
     </T>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// ReadOnlyAtom — the selected atom of a linked (live workspace) dataset: what
+// AtomEditor shows, without a field to change.
+// ---------------------------------------------------------------------------
+
+export const ReadOnlyAtom: React.FC<{ atom: LanguageAtom }> = ({ atom }) => {
+  const { t } = useLocale();
+  const jump = useJump();
+  const roleLabel = isSpeechAtom(atom) ? "speech" : atom.role;
+  const cameraLabel = atom.camera ?? "all cameras";
+  const rows: { label: string; value: string }[] = [
+    {
+      label: "Timestamp (s)",
+      value: `${roundTo2(atom.timestamp)}${
+        atom.to != null && atom.to > atom.timestamp
+          ? ` → ${roundTo2(atom.to)}`
+          : ""
+      }`,
+    },
+  ];
+  if (atom.levi?.subtask_id)
+    rows.push({ label: "Subtask ID", value: atom.levi.subtask_id });
+  if (atom.levi?.outcome)
+    rows.push({
+      label: "Outcome",
+      value: t(
+        atom.levi.outcome === "success"
+          ? "Success"
+          : atom.levi.outcome === "failure"
+            ? "Failure"
+            : "Unknown",
+      ),
+    });
+  if (atom.levi?.attempt != null)
+    rows.push({ label: "Attempt", value: String(atom.levi.attempt) });
+  if (atom.content) rows.push({ label: "Content", value: atom.content });
+  return (
+    <div className="inspector-body">
+      <div className="editor-head inspector-head">
+        <div className="inspector-title">
+          <StylePill style={atom.style} />
+          <div>
+            <strong>
+              {formatSeconds(atom.timestamp)}
+              {atom.to != null && atom.to > atom.timestamp
+                ? ` → ${formatSeconds(atom.to)}`
+                : ""}
+            </strong>
+            <span>
+              <T>{roleLabel}</T> · <T>{cameraLabel}</T>
+            </span>
+          </div>
+        </div>
+        <div className="right">
+          <IconButton
+            icon={Play}
+            size="sm"
+            label={t("Jump to this atom's frame")}
+            onClick={() => jump(atom.timestamp)}
+          />
+        </div>
+      </div>
+      <dl className="vw-readonly-fields">
+        {rows.map((row) => (
+          <div className="field" key={row.label}>
+            <dt className="field-label">{t(row.label)}</dt>
+            <dd className="vw-readonly-value">{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+      <ReadOnlyReason />
+    </div>
   );
 };
 

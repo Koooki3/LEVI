@@ -19,6 +19,7 @@ import React, { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { Badge, Button, Select, Tooltip } from "@/components/ds";
 import { T, useLocale } from "@/components/levi-locale";
 import { useAnnotations } from "@/context/annotations-context";
+import { ReadOnlyReason } from "@/components/linked-dataset-notice";
 import {
   advantageRuns,
   formatSigned,
@@ -102,7 +103,7 @@ export const RecapValueSection: React.FC<Props> = ({
   moveTip,
   hideTip,
 }) => {
-  const { episodeId, ident } = useAnnotations();
+  const { episodeId, ident, readOnly } = useAnnotations();
   const { t } = useLocale();
   const repoId = ident.repoId ?? null;
 
@@ -303,6 +304,9 @@ export const RecapValueSection: React.FC<Props> = ({
           : "none",
     controlsOpen: showControls,
   });
+  // A linked (live workspace) dataset only shows labels: nothing computes
+  // here, and the header says why instead of offering it.
+  const control = readOnly && view.control !== "progress" ? null : view.control;
 
   // ---- Header pieces ----
   const legend = (
@@ -351,14 +355,14 @@ export const RecapValueSection: React.FC<Props> = ({
 
   // A disabled <option>'s tooltip rarely shows: say why under the header.
   const notReady =
-    view.control === "compute"
+    control === "compute"
       ? (status?.checkpoints ?? []).filter((c) => !c.ready)
       : [];
 
   // Why Compute is off, in words next to the head (the button points at it
   // with aria-describedby); a tooltip alone never carries the reason.
   const computeBlocked =
-    view.control === "compute"
+    control === "compute"
       ? (workerReason ??
         (readyCheckpoints.length === 0
           ? t("No ready checkpoint")
@@ -512,8 +516,8 @@ export const RecapValueSection: React.FC<Props> = ({
       )}
       <span className="recap-head-right">
         {view.showMeta && legend}
-        {view.control === "progress" && progress}
-        {view.control === "recompute" && (
+        {control === "progress" && progress}
+        {control === "recompute" && (
           <Tooltip content={t("Compute the advantage labels again")}>
             <Button
               size="sm"
@@ -524,7 +528,10 @@ export const RecapValueSection: React.FC<Props> = ({
             </Button>
           </Tooltip>
         )}
-        {view.control === "compute" && computeControl}
+        {control === "compute" && computeControl}
+        {readOnly && view.control !== null && view.control !== "progress" && (
+          <ReadOnlyReason />
+        )}
       </span>
     </div>
   );

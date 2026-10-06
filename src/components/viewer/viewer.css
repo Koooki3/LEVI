@@ -792,6 +792,17 @@ button.vw-outcome:hover {
   padding: var(--ds-space-2) var(--ds-space-3);
   color: var(--ds-text-secondary);
 }
+/* The viewer's top-of-page note on a linked dataset: a row of its own in the
+ * frame (never scrolled away, never shrunk by the body below). */
+.vw-note--linked {
+  flex-shrink: 0;
+  margin: var(--ds-space-2) var(--ds-space-4) 0;
+}
+/* Why a control is off on a linked (read-only) dataset: words beside it. */
+.vw-readonly-reason {
+  font-size: var(--ds-text-caption-size);
+  line-height: var(--ds-text-caption-line);
+}
 .vw-note-action {
   display: inline-flex;
   align-items: center;

@@ -33,6 +33,7 @@ const STATUS_WORD: Record<string, string> = {
   fail: "Fail",
 };
 import { leviApi, downloadJson, exportName } from "./levi-api";
+import { isLinkedRefusal, LINKED_READ_ONLY } from "@/utils/linkedDataset";
 import { useFlaggedEpisodes } from "@/context/flagged-episodes-context";
 import { RawCaptureNotice } from "@/components/raw-capture-notice";
 const CHECKS = [
@@ -91,7 +92,7 @@ export default function LeviDoctor({ repoId }: { repoId: string }) {
         }),
       );
     } catch (e) {
-      setError(String(e));
+      setError(isLinkedRefusal(String(e)) ? t(LINKED_READ_ONLY) : String(e));
     } finally {
       setBusy(false);
     }

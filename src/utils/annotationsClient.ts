@@ -9,6 +9,7 @@
  */
 
 import type { LanguageAtom } from "../types/language.types";
+import { isLinkedRefusal, LINKED_READ_ONLY } from "./linkedDataset";
 import type {
   ObjectAnnotation,
   Sam3Capabilities,
@@ -167,6 +168,8 @@ export async function saveEpisodeAtoms(
   );
   if (!res.ok) {
     const text = await res.text().catch(() => `${res.status}`);
+    // A linked (live workspace) dataset refuses writes: say that, not JSON.
+    if (isLinkedRefusal(text)) throw new Error(LINKED_READ_ONLY);
     throw new Error(text || `save atoms: ${res.status}`);
   }
   const data = (await res.json().catch(() => ({}))) as { path?: string | null };
@@ -191,6 +194,8 @@ export async function deleteEpisodeAtoms(
   );
   if (!res.ok) {
     const text = await res.text().catch(() => `${res.status}`);
+    // A linked (live workspace) dataset refuses writes: say that, not JSON.
+    if (isLinkedRefusal(text)) throw new Error(LINKED_READ_ONLY);
     throw new Error(text || `delete atoms: ${res.status}`);
   }
   const data = (await res.json().catch(() => ({}))) as { deleted?: boolean };
@@ -259,6 +264,8 @@ export async function saveOutcomeLabel(
   );
   if (!res.ok) {
     const text = await res.text().catch(() => `${res.status}`);
+    // A linked (live workspace) dataset refuses writes: say that, not JSON.
+    if (isLinkedRefusal(text)) throw new Error(LINKED_READ_ONLY);
     throw new Error(text || `save outcome: ${res.status}`);
   }
 }

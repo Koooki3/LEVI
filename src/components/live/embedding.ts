@@ -33,9 +33,10 @@ export interface LiveLink {
 }
 
 /** Where the dataset's viewer and its review (Conversion & review) are. In
- * the live workspace's own LEVI: right here. In the product LEVI: on the
- * live workspace's own page, when the service runs one; else nowhere (the
- * product LEVI does not hold the live datasets). */
+ * the live workspace's own LEVI: right here. In the product LEVI: the viewer
+ * is right here too when this LEVI links the live workspace read-only
+ * (`linked_repo_id`), else on the live workspace's own page when the service
+ * runs one, else nowhere; the review is on that page (it is read-only here). */
 export function datasetLinks(detail: DatasetDetail | null | undefined): {
   viewer: LiveLink | null;
   review: LiveLink | null;
@@ -50,11 +51,16 @@ export function datasetLinks(detail: DatasetDetail | null | undefined): {
     };
   }
   const page = (detail.live_ui ?? "").replace(/\/+$/, "");
-  if (!page) return { viewer: null, review: null };
+  const linked: LiveLink | null = detail.linked_repo_id
+    ? { href: `/${detail.linked_repo_id}`, external: false }
+    : null;
+  if (!page) return { viewer: linked, review: null };
   return {
-    viewer: detail.repo_id
-      ? { href: `${page}/${detail.repo_id}`, external: true }
-      : null,
+    viewer:
+      linked ??
+      (detail.repo_id
+        ? { href: `${page}/${detail.repo_id}`, external: true }
+        : null),
     review: { href: `${page}/workbench`, external: true },
   };
 }

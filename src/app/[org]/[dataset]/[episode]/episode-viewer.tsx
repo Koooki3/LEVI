@@ -45,7 +45,14 @@ import { SimpleVideosPlayer } from "@/components/simple-videos-player";
 import PlaybackBar from "@/components/playback-bar";
 import { TimeProvider, useTime } from "@/context/time-context";
 import { FlaggedEpisodesProvider } from "@/context/flagged-episodes-context";
-import { DatasetSourceProvider } from "@/context/dataset-source-context";
+import {
+  DatasetSourceProvider,
+  useDatasetSource,
+} from "@/context/dataset-source-context";
+import {
+  LinkedDatasetNotice,
+  ReadOnlyReason,
+} from "@/components/linked-dataset-notice";
 import { RawCaptureNotice } from "@/components/raw-capture-notice";
 import { DatasetUpdateNotice } from "@/components/dataset-update-notice";
 import {
@@ -320,6 +327,9 @@ function EpisodeViewerInner({
   } = data;
 
   const { t } = useLocale();
+  // A live evaluation workspace's dataset, linked read-only: the viewer reads
+  // it and offers nothing that writes.
+  const { linked } = useDatasetSource();
   const [videosReady, setVideosReady] = useState(!videosInfo.length);
   const [chartsReady, setChartsReady] = useState(false);
 
@@ -1099,6 +1109,7 @@ function EpisodeViewerInner({
     <div className="vw-root ds-root">
       <SkipLinks inspector={activeTab === "annotations"} />
       <UrlTimeSync />
+      <LinkedDatasetNotice />
       {/* Top tab bar */}
       <div className="vw-tabbar">
         <nav aria-label={t("Episode viewer views")} className="min-w-0">
@@ -1142,7 +1153,7 @@ function EpisodeViewerInner({
             humanOutcomes={humanOutcomeKeys}
             recapFractions={recapFractions ?? undefined}
             onOutcomeChange={
-              isAnnotateBackendEnabled() ? changeOutcome : undefined
+              isAnnotateBackendEnabled() && !linked ? changeOutcome : undefined
             }
             onEpisodeSelect={
               activeTab === "urdf"
@@ -1274,36 +1285,40 @@ function EpisodeViewerInner({
                   <>
                     <p className="vw-a-hint">
                       {t(
-                        "Edit subtask / plan / memory / interjection / VQA atoms (lerobot v3.1 schema)",
+                        linked
+                          ? "Subtask / plan / memory / interjection / VQA atoms (lerobot v3.1 schema), read-only"
+                          : "Edit subtask / plan / memory / interjection / VQA atoms (lerobot v3.1 schema)",
                       )}
                     </p>
-                    <div className="grounding-intro">
-                      <h2 className="vw-label">
-                        <T>Grounded VQA</T>
-                      </h2>
-                      <ul>
-                        <li>
-                          <T>
-                            Draw directly on the active video to create visual
-                            questions. Drag for a bounding box, click for a
-                            point. The camera is detected from the video you
-                            draw on.
-                          </T>
-                        </li>
-                        <li>
-                          <T>
-                            Drag on any video to add a bbox question. Click any
-                            video to add a keypoint question. Confirm the popup
-                            with{" "}
-                          </T>
-                          <Kbd>↵</Kbd>
-                          <T> or </T>
-                          <Kbd>Ctrl/Cmd+S</Kbd>
-                          <T>, or cancel with </T>
-                          <Kbd>{t("Esc")}</Kbd>.
-                        </li>
-                      </ul>
-                    </div>
+                    {!linked && (
+                      <div className="grounding-intro">
+                        <h2 className="vw-label">
+                          <T>Grounded VQA</T>
+                        </h2>
+                        <ul>
+                          <li>
+                            <T>
+                              Draw directly on the active video to create visual
+                              questions. Drag for a bounding box, click for a
+                              point. The camera is detected from the video you
+                              draw on.
+                            </T>
+                          </li>
+                          <li>
+                            <T>
+                              Drag on any video to add a bbox question. Click
+                              any video to add a keypoint question. Confirm the
+                              popup with{" "}
+                            </T>
+                            <Kbd>↵</Kbd>
+                            <T> or </T>
+                            <Kbd>Ctrl/Cmd+S</Kbd>
+                            <T>, or cancel with </T>
+                            <Kbd>{t("Esc")}</Kbd>.
+                          </li>
+                        </ul>
+                      </div>
+                    )}
                     <AnnotationsTimeline duration={data.duration} />
                     <AnnotationsPanel
                       cameraKeys={videosInfo.map((v) => v.filename)}
@@ -1311,7 +1326,17 @@ function EpisodeViewerInner({
                   </>
                 )}
 
-                {annotationsSubTab === "vision" && (
+                {annotationsSubTab === "vision" && linked && (
+                  <div className="vw-note vw-note--compact" role="note">
+                    <T>
+                      Objects & Tracking (SAM3 and fast segmentation) writes
+                      masks and tracks, so it is off for a read-only dataset.
+                    </T>
+                    <ReadOnlyReason />
+                  </div>
+                )}
+
+                {annotationsSubTab === "vision" && !linked && (
                   <>
                     <FastSegmentationPanel
                       episodeId={episodeId}

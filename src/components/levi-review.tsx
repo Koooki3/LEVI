@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useFlaggedEpisodes } from "@/context/flagged-episodes-context";
+import { useDatasetSource } from "@/context/dataset-source-context";
+import { ReadOnlyReason } from "./linked-dataset-notice";
 import { useLocale } from "./levi-locale";
 import { Download, Pencil } from "lucide-react";
 import {
@@ -14,6 +16,8 @@ import {
 import { leviApi, downloadJson, exportName } from "./levi-api";
 export default function LeviReview({ repoId }: { repoId: string }) {
   const { flagged } = useFlaggedEpisodes();
+  // A live workspace's dataset: reviewed where the live service keeps it.
+  const { linked } = useDatasetSource();
   const [busy, setBusy] = useState(false),
     [notes, setNotes] = useState(""),
     [editing, setEditing] = useState(false);
@@ -31,6 +35,7 @@ export default function LeviReview({ repoId }: { repoId: string }) {
     };
   }, [repoId]);
   async function save() {
+    if (linked) return;
     setBusy(true);
     try {
       const review = await leviApi("review", {
@@ -60,7 +65,14 @@ export default function LeviReview({ repoId }: { repoId: string }) {
   }
   return (
     <div className="flex items-center gap-1 whitespace-nowrap">
-      <Button size="sm" icon={Download} loading={busy} onClick={save}>
+      <Button
+        size="sm"
+        icon={Download}
+        loading={busy}
+        disabled={linked}
+        aria-describedby={linked ? "review-readonly-why" : undefined}
+        onClick={save}
+      >
         {t("Export review")} ({flagged.size})
       </Button>
       <IconButton
@@ -68,8 +80,11 @@ export default function LeviReview({ repoId }: { repoId: string }) {
         size="sm"
         label={t("Review notes")}
         tooltipPlacement="bottom"
+        disabled={linked}
+        aria-describedby={linked ? "review-readonly-why" : undefined}
         onClick={() => setEditing(true)}
       />
+      <ReadOnlyReason id="review-readonly-why" />
       <Dialog
         open={editing}
         onClose={() => setEditing(false)}

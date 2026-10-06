@@ -300,6 +300,10 @@ export interface DatasetDetail {
   name: string;
   /** The dataset's id in the live workspace's catalog (its viewer is there). */
   repo_id?: string | null;
+  /** The dataset's id in THIS LEVI (`local/live.<name>`) when this is the
+   * product LEVI showing the live page and it links the live workspace
+   * read-only (levi/links.py); null when it does not. */
+  linked_repo_id?: string | null;
   embedded?: boolean;
   live_ui?: string | null;
   group?: string | null;

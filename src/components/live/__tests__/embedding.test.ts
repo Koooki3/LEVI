@@ -89,6 +89,89 @@ describe("the live page in the product LEVI", () => {
     });
   });
 
+  test("the product links its own read-only viewer when it links the live workspace", () => {
+    // The viewer is local to the product LEVI, whether or not the service
+    // runs a page of its own; the review stays on that page.
+    expect(
+      datasetLinks(
+        detail({
+          embedded: true,
+          live_ui: null,
+          linked_repo_id: "local/live.g__t",
+        }),
+      ),
+    ).toEqual({
+      viewer: { href: "/local/live.g__t", external: false },
+      review: null,
+    });
+    expect(
+      datasetLinks(
+        detail({
+          embedded: true,
+          live_ui: "http://127.0.0.1:7880/",
+          linked_repo_id: "local/live.g__t",
+        }),
+      ),
+    ).toEqual({
+      viewer: { href: "/local/live.g__t", external: false },
+      review: { href: "http://127.0.0.1:7880/workbench", external: true },
+    });
+    // Without a link nothing changes (null, or no field at all).
+    expect(
+      datasetLinks(
+        detail({
+          embedded: true,
+          live_ui: "http://127.0.0.1:7880",
+          linked_repo_id: null,
+        }),
+      ).viewer,
+    ).toEqual({ href: "http://127.0.0.1:7880/local/g__t", external: true });
+    // The live workspace's own LEVI never uses the product's link.
+    expect(
+      datasetLinks(detail({ embedded: false, linked_repo_id: "local/live.x" }))
+        .viewer,
+    ).toEqual({ href: "/local/g__t", external: false });
+    // Linked, but the live service has no repo_id of its own (never opened).
+    expect(
+      datasetLinks(
+        detail({
+          embedded: true,
+          live_ui: "http://127.0.0.1:7880",
+          repo_id: null,
+          linked_repo_id: "local/live.g__t",
+        }),
+      ).viewer,
+    ).toEqual({ href: "/local/live.g__t", external: false });
+  });
+
+  test("the card of a linked dataset opens the product's viewer and drops the --ui hint", () => {
+    const html = card(
+      detail({
+        embedded: true,
+        live_ui: null,
+        linked_repo_id: "local/live.g__t",
+      }),
+    );
+    expect(html).toContain('href="/local/live.g__t"');
+    expect(html).not.toContain('target="_blank"');
+    expect(html).not.toContain("levi live start --ui");
+    expect(html).toContain("Opens read-only in this LEVI");
+    // No link: the hint stays.
+    expect(card(detail({ embedded: true, live_ui: null }))).toContain(
+      "levi live start --ui",
+    );
+    // With a page of its own, the review link is that page's, outside.
+    const both = card(
+      detail({
+        embedded: true,
+        live_ui: "http://127.0.0.1:7880",
+        linked_repo_id: "local/live.g__t",
+      }),
+    );
+    expect(both).toContain('href="/local/live.g__t"');
+    expect(both).toContain('href="http://127.0.0.1:7880/workbench"');
+  });
+
   test("the card in the product says where the viewer is", () => {
     const html = card(detail({ embedded: true, live_ui: null }));
     expect(html).not.toContain('href="/local/g__t"');
@@ -131,6 +214,7 @@ describe("the live page in the product LEVI", () => {
       "The episodes' viewer and their review are on the live workspace's own page: start the service with `levi live start --ui` to open them.",
       "That is the live workspace's own page (Conversion & review below), not this LEVI.",
       "That is the live workspace's own page, not this LEVI: start the service with `levi live start --ui` to open it, or with --auto-approve to let it approve its own plans.",
+      "Opens read-only in this LEVI; label and review it where the live service keeps it.",
     ]) {
       expect((en as Record<string, string>)[key]).toBe(key);
       expect((zh as Record<string, string>)[key]).toBeTruthy();

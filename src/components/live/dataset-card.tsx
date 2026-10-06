@@ -398,13 +398,22 @@ export function DatasetCard({
       </p>
       <div className="pg-row pg-live-actions">
         {links.viewer ? (
-          <LinkTo
-            className="ds-btn ds-btn--secondary ds-focus"
-            link={links.viewer}
-          >
-            {t("Open in the viewer")}
-            <Icon icon={ArrowUpRight} />
-          </LinkTo>
+          <>
+            <LinkTo
+              className="ds-btn ds-btn--secondary ds-focus"
+              link={links.viewer}
+            >
+              {t("Open in the viewer")}
+              <Icon icon={ArrowUpRight} />
+            </LinkTo>
+            {detail?.linked_repo_id && (
+              <span className="pg-pool-muted">
+                {t(
+                  "Opens read-only in this LEVI; label and review it where the live service keeps it.",
+                )}
+              </span>
+            )}
+          </>
         ) : (
           <span className="pg-pool-muted">
             {!detail
