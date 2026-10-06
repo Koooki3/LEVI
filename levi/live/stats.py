@@ -51,6 +51,12 @@ a value that could not be measured is ``null``.
                spec{guideline,release_review,release_review_version,
                sha256{file: hash}}, provider,
                model
+    operator_label     the operator label (ground truth) from the rollout's
+                       metadata (``criteria.operator_label``): {outcome, by},
+                       outcome success/failure/discarded/unlabeled, by who
+                       decided it (``operator``, ``key``...); null when the
+                       operator gave none or the record is older. Never part
+                       of ``result.verdict`` (the automatic, unreviewed label)
 
 Standard library only.
 """
@@ -128,6 +134,7 @@ TEMPLATE = {
         "provider": None,
         "model": None,
     },
+    "operator_label": None,
 }
 
 
@@ -782,11 +789,132 @@ def summarize(rows, *, gate=None, session_ends=None) -> dict:
         "gpu": gpu,
         "outcome": outcome,
         "in_session": in_session(rows, session_ends),
+        # The agent label against the operator label (ground truth), newest
+        # record per demo; ``pairs`` 0 when no record carries an operator label.
+        "agreement": agreement(_pairs_of(last)),
         "window": {
             "first_at": _round(min(begun), 3) if begun else None,
             "last_at": _round(max(stamps), 3) if stamps else None,
         },
     }
+
+
+# --- agent vs operator ---------------------------------------------------------
+
+LABELS = ("success", "failure")
+AGENT_KINDS = ("success", "failure", "undecided", "none")
+
+
+def operator_brief(label) -> dict | None:
+    """What a record keeps of a state row's ``operator_label``: outcome and
+    who decided it."""
+    if not isinstance(label, dict) or not label.get("outcome"):
+        return None
+    return {k: label.get(k) for k in ("outcome", "by")}
+
+
+def operator_of(value) -> str | None:
+    """The operator's success/failure (from an ``operator_label`` dict or the
+    outcome itself); None for anything else (no label, discarded,
+    unlabeled)."""
+    if isinstance(value, dict):
+        value = value.get("outcome")
+    return value if value in LABELS else None
+
+
+def agent_of(verdict) -> str:
+    """The agent label of one episode: ``success``/``failure``, ``undecided``
+    when the verdict says so, ``none`` without a verdict."""
+    if not isinstance(verdict, dict):
+        return "none"
+    if verdict.get("undecided") is True:
+        return "undecided"
+    outcome = verdict.get("outcome")
+    return outcome if outcome in LABELS else "none"
+
+
+def agree_of(operator, verdict) -> str | None:
+    """One episode: ``yes`` or ``no`` (the agent judged and agrees or not),
+    ``undecided``, ``no_agent`` (no verdict yet), or None when the operator
+    gave no success/failure."""
+    op = operator_of(operator)
+    if op is None:
+        return None
+    ag = agent_of(verdict)
+    if ag == "none":
+        return "no_agent"
+    if ag == "undecided":
+        return "undecided"
+    return "yes" if ag == op else "no"
+
+
+def wilson(k, n, z=1.96):
+    """The Wilson score interval of ``k`` in ``n`` (95 % by default) as
+    ``[low, high]`` rounded to 3 digits, or None when ``n`` is 0."""
+    k, n = num(k), num(n)
+    if not n or k is None:
+        return None
+    p = k / n
+    centre = p + z * z / (2 * n)
+    spread = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
+    scale = 1 + z * z / n
+    return [
+        round(max(0.0, (centre - spread) / scale), 3),
+        round(min(1.0, (centre + spread) / scale), 3),
+    ]
+
+
+def _share(k, n) -> dict:
+    return {"n": k, "of": n, "rate": ratio(k, n), "wilson95": wilson(k, n)}
+
+
+def agreement(pairs) -> dict:
+    """The agent label against the operator label (ground truth).
+
+    ``pairs`` is ``[(operator, verdict)]``: the operator's outcome (or its
+    ``operator_label`` dict) and the episode's verdict dict. Only episodes the
+    operator labelled success or failure count (``pairs``). ``judged`` are
+    those the agent called success or failure; ``undecided`` and ``none`` (no
+    verdict yet: missing coverage, never counted as agreement) are kept
+    apart. ``rate_undecided_as_failure`` reads an undecided verdict as a
+    failure. ``false_success``: the agent said success where the operator said
+    failure; ``missed_success``: the agent said failure or undecided where the
+    operator said success; both over the episodes the agent judged or left
+    undecided, with a Wilson 95 % interval."""
+    matrix = {op: {ag: 0 for ag in AGENT_KINDS} for op in LABELS}
+    for operator, verdict in pairs or ():
+        op = operator_of(operator)
+        if op is not None:
+            matrix[op][agent_of(verdict)] += 1
+    s, f = matrix["success"], matrix["failure"]
+    count = sum(sum(row.values()) for row in matrix.values())
+    judged = sum(row["success"] + row["failure"] for row in matrix.values())
+    seen = judged + s["undecided"] + f["undecided"]
+    agree = s["success"] + f["failure"]
+    return {
+        "pairs": count,
+        "matrix": matrix,
+        "judged": judged,
+        "agree": agree,
+        "rate": ratio(agree, judged),
+        "rate_undecided_as_failure": ratio(agree + f["undecided"], seen),
+        "false_success": _share(
+            f["success"], f["success"] + f["failure"] + f["undecided"]
+        ),
+        "missed_success": _share(
+            s["failure"] + s["undecided"], s["success"] + s["failure"] + s["undecided"]
+        ),
+        "undecided": s["undecided"] + f["undecided"],
+        "no_agent": s["none"] + f["none"],
+        "operator_success_rate": ratio(sum(s.values()), count),
+        "agent_success_rate": ratio(s["success"] + f["success"], seen),
+    }
+
+
+def _pairs_of(rows) -> list:
+    return [
+        (dig(r, "operator_label", "outcome"), dig(r, "result", "verdict")) for r in rows
+    ]
 
 
 def _short(values) -> dict:
@@ -829,6 +957,10 @@ def _episode_row(row, ends) -> dict:
         "review": dig(row, "result", "review"),
         "in_session": during,
         "excluded": row.get("excluded") is True,
+        "operator": dig(row, "operator_label", "outcome"),
+        "agreement": agree_of(
+            dig(row, "operator_label", "outcome"), dig(row, "result", "verdict")
+        ),
     }
 
 
@@ -885,6 +1017,15 @@ def session_rows(rows, *, session_ends=None) -> list:
                 "closed_wait_s": found["gpu"]["closed_wait_s"],
                 "success": verdicts.get("success", 0),
                 "failure": verdicts.get("failure", 0),
+                # Agent vs operator (see ``agreement``): counts only.
+                "pairs": found["agreement"]["pairs"],
+                "agree": found["agreement"]["agree"],
+                "judged": found["agreement"]["judged"],
+                "false_success": found["agreement"]["false_success"]["n"],
+                "missed_success": found["agreement"]["missed_success"]["n"],
+                "operator_success": sum(
+                    found["agreement"]["matrix"]["success"].values()
+                ),
             }
         )
     out.sort(key=lambda r: -(r["last_at"] or 0))

@@ -987,6 +987,8 @@ class Worker:
                 "provider": self.provider_spec.get("name"),
                 "model": self.provider_spec.get("model"),
             },
+            # The operator label (ground truth), apart from the verdict.
+            "operator_label": stats.operator_brief(row.get("operator_label")),
         }
 
     def finish(self, batch, index=None):

@@ -49,6 +49,7 @@ from . import (
     mirror,
     resumer,
     sessions,
+    stats,
     statsfmt,
     statsview,
 )
@@ -304,7 +305,18 @@ def _demo_row(name, row):
         }
         if verdict
         else None,
+        # The operator label (ground truth, from the rollout's metadata) and
+        # whether the agent's automatic, unreviewed verdict agrees with it.
+        "operator_label": _operator(row),
+        "agreement": stats.agree_of(row.get("operator_label"), row.get("verdict")),
     }
+
+
+def _operator(row):
+    label = row.get("operator_label")
+    if not isinstance(label, dict):
+        return None
+    return {k: label.get(k) for k in ("outcome", "by", "source")}
 
 
 @router.get("/datasets/{name}")
@@ -360,6 +372,10 @@ def dataset_view(name: str):
         "last_error": state.get("last_error"),
         "review": "auto",
         "evaluated": False,
+        # Over every kept demo (not only the listed ones), from the state.
+        "agreement": stats.agreement(
+            [(demos[d].get("operator_label"), demos[d].get("verdict")) for d in kept]
+        ),
         "pipeline": {"temporal": config.pipeline.temporal},
     }
 

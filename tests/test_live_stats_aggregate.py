@@ -317,3 +317,139 @@ def test_removed_episodes_are_left_out_unless_asked_for():
     assert stats.select([own], include_excluded=False) == []
     assert stats.summarize(kept)["episodes"]["count"] == 3
     assert stats.summarize(stats.select(marked))["episodes"]["excluded"] == 1
+
+
+# --- agent vs operator ----------------------------------------------------------
+
+
+def verdict(outcome, undecided=False):
+    return {"outcome": outcome, "events": 1, "valid_events": 1, "undecided": undecided}
+
+
+def labelled(demo, n, operator, agent, **parts):
+    """Episode ``n`` with the operator's label and the agent's verdict
+    (``agent`` None: no verdict yet)."""
+    return full(
+        demo,
+        n,
+        result__verdict=agent or stats.normalize({})["result"]["verdict"],
+        **parts,
+    ) | {
+        "operator_label": None
+        if operator is None
+        else {"outcome": operator, "by": "operator"}
+    }
+
+
+def dual_set():
+    """Twelve episodes: every cell of the matrix, an unlabelled one, a
+    discarded one and an old record without the field."""
+    s, f = "success", "failure"
+    rows = [
+        labelled("demo_0000", 0, s, verdict(s)),
+        labelled("demo_0001", 1, s, verdict(s)),
+        labelled("demo_0002", 2, s, verdict(f)),
+        labelled("demo_0003", 3, s, verdict(s, undecided=True)),
+        labelled("demo_0004", 4, s, None),
+        labelled("demo_0005", 5, f, verdict(f)),
+        labelled("demo_0006", 6, f, verdict(f)),
+        labelled("demo_0007", 7, f, verdict(f)),
+        labelled("demo_0008", 8, f, verdict(s)),
+        labelled("demo_0009", 9, f, verdict(f, undecided=True)),
+        labelled("demo_0010", 10, "unlabeled", verdict(s)),
+        labelled("demo_0011", 11, "discarded", verdict(f)),
+    ]
+    old = full("demo_0012", 12)  # written before the field existed
+    del old["operator_label"]
+    return [*rows, stats.normalize(old)]
+
+
+def test_agreement_is_an_exact_matrix_with_its_rates():
+    found = stats.summarize(dual_set())["agreement"]
+    assert found["matrix"] == {
+        "success": {"success": 2, "failure": 1, "undecided": 1, "none": 1},
+        "failure": {"success": 1, "failure": 3, "undecided": 1, "none": 0},
+    }
+    assert found["pairs"] == 10
+    assert found["judged"] == 7 and found["agree"] == 5
+    assert found["rate"] == round(5 / 7, 3)
+    # An undecided verdict read as a failure: one more agreement, two more seen.
+    assert found["rate_undecided_as_failure"] == round(6 / 9, 3)
+    assert found["false_success"] == {
+        "n": 1,
+        "of": 5,
+        "rate": 0.2,
+        "wilson95": [0.036, 0.624],
+    }
+    assert found["missed_success"] == {
+        "n": 2,
+        "of": 4,
+        "rate": 0.5,
+        "wilson95": [0.15, 0.85],
+    }
+    assert found["undecided"] == 2
+    # No verdict yet is missing coverage, never agreement.
+    assert found["no_agent"] == 1
+    assert found["operator_success_rate"] == 0.5
+    assert found["agent_success_rate"] == round(3 / 9, 3)
+
+
+def test_wilson_intervals_are_pinned():
+    assert stats.wilson(5, 59) == [0.037, 0.184]  # the offline figure for version 3
+    assert stats.wilson(1, 59) == [0.003, 0.09]
+    assert stats.wilson(0, 10) == [0.0, 0.278]
+    assert stats.wilson(10, 10) == [0.722, 1.0]
+    assert stats.wilson(0, 0) is None and stats.wilson(None, 5) is None
+
+
+def test_one_episode_agrees_disagrees_or_has_no_pair():
+    s, f = "success", "failure"
+    assert stats.agree_of(s, verdict(s)) == "yes"
+    assert stats.agree_of({"outcome": f}, verdict(s)) == "no"
+    assert stats.agree_of(s, verdict(s, undecided=True)) == "undecided"
+    assert stats.agree_of(f, None) == "no_agent"
+    assert stats.agree_of(f, {"outcome": None, "undecided": None}) == "no_agent"
+    assert stats.agree_of("unlabeled", verdict(s)) is None
+    assert stats.agree_of("discarded", verdict(s)) is None
+    assert stats.agree_of(None, verdict(s)) is None
+
+
+def test_without_operator_labels_there_are_no_pairs_and_old_records_count_none():
+    rows = [full(f"demo_{n:04d}", n) for n in range(3)]
+    found = stats.summarize(rows)["agreement"]
+    assert found["pairs"] == 0 and found["judged"] == 0
+    assert found["rate"] is None and found["false_success"]["wilson95"] is None
+    assert stats.summarize([])["agreement"]["pairs"] == 0
+    old = stats.normalize({"demo": "demo_0000", "dataset": "g__t"})
+    assert old["operator_label"] is None
+
+
+def test_the_newest_record_of_a_demo_is_the_one_paired():
+    first = labelled("demo_0000", 0, "success", None)
+    first["at"] = 10.0
+    second = labelled("demo_0000", 0, "success", verdict("failure"))
+    second["at"] = 20.0
+    found = stats.summarize([first, second])["agreement"]
+    assert found["pairs"] == 1 and found["missed_success"]["n"] == 1
+
+
+def test_sessions_and_episodes_carry_the_agreement():
+    rows = dual_set()
+    other = labelled("demo_0100", 1, "success", verdict("success"), session="s2")
+    session_rows = {r["session"]: r for r in stats.session_rows([*rows, other])}
+    one = session_rows["s1"]
+    assert (one["pairs"], one["agree"], one["judged"]) == (10, 5, 7)
+    assert (one["false_success"], one["missed_success"]) == (1, 2)
+    assert one["operator_success"] == 5
+    two = session_rows["s2"]
+    assert (two["pairs"], two["agree"], two["judged"]) == (1, 1, 1)
+    episodes = {r["demo"]: r for r in stats.episode_rows(rows)}
+    assert episodes["demo_0002"]["operator"] == "success"
+    assert episodes["demo_0002"]["agreement"] == "no"
+    assert episodes["demo_0000"]["agreement"] == "yes"
+    assert episodes["demo_0003"]["agreement"] == "undecided"
+    assert episodes["demo_0004"]["agreement"] == "no_agent"
+    assert episodes["demo_0010"]["operator"] == "unlabeled"
+    assert episodes["demo_0010"]["agreement"] is None
+    assert episodes["demo_0012"]["operator"] is None
+    assert episodes["demo_0012"]["agreement"] is None

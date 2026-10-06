@@ -34,6 +34,8 @@ EPISODE_COLUMNS = (
     "review",
     "in_session",
     "excluded",
+    "operator",
+    "agreement",
 )
 
 KEY_FIGURES = (
@@ -128,6 +130,18 @@ TEXT = {
         "model_s": "model s",
         "commit": "commit",
         "verdict": "verdict",
+        "agreement": "Agent vs operator",
+        "agreement_note": "The operator label (ground truth) is the operator's own success or failure, given in the evaluation terminal after each episode; the agent label (automatic, unreviewed) is the release review's verdict. Only episodes the operator labelled success or failure count; an episode without an agent verdict yet is missing coverage, never agreement.",
+        "both_labels": "both labels (operator success/failure)",
+        "agree": "agree (of the agent's success/failure)",
+        "agree_undecided": "agree, reading an undecided verdict as failure",
+        "false_success": "false success: agent success, operator failure (n/of, Wilson 95 %)",
+        "missed_success": "missed success: agent failure or undecided, operator success (n/of, Wilson 95 %)",
+        "agent_undecided": "agent undecided",
+        "no_agent": "no agent verdict yet",
+        "success_rates": "success rate: operator / agent",
+        "operator_vs_agent": "operator \\ agent",
+        "agent_none": "no verdict",
         "metrics": {
             "episodes": "episodes",
             "median_commit": "median time to committed segments (s)",
@@ -229,6 +243,18 @@ TEXT = {
         "model_s": "模型秒",
         "commit": "提交",
         "verdict": "判定",
+        "agreement": "agent 与操作员对照",
+        "agreement_note": "操作员标签（真值）是操作员在评测终端里对每个片段给出的成功或失败；agent 标签（自动、未审）是释放复核的判定。只统计操作员判为成功或失败的片段；还没有 agent 判定的片段算覆盖缺口，不算一致。",
+        "both_labels": "两个标签都有（操作员判成功/失败）",
+        "agree": "一致（在 agent 判成功/失败的片段中）",
+        "agree_undecided": "一致，把未决按失败计",
+        "false_success": "假成功：agent 判成功、操作员判失败（个数/总数，Wilson 95 %）",
+        "missed_success": "漏判成功：agent 判失败或未决、操作员判成功（个数/总数，Wilson 95 %）",
+        "agent_undecided": "agent 未决",
+        "no_agent": "agent 尚未判定",
+        "success_rates": "成功率：操作员 / agent",
+        "operator_vs_agent": "操作员 \\ agent",
+        "agent_none": "无判定",
         "metrics": {
             "episodes": "片段数",
             "median_commit": "到时间片段提交的中位秒数",
@@ -329,6 +355,58 @@ def pairs(rows, t) -> list:
     return table([t["metric"], t["value"]], rows)
 
 
+def _share(found) -> str:
+    found = found if isinstance(found, dict) else {}
+    band = found.get("wilson95")
+    text = f"{num(found.get('n'))}/{num(found.get('of'))} ({pct(found.get('rate'))}"
+    if isinstance(band, list) and len(band) == 2:
+        text += f", {num(band[0], 3)}-{num(band[1], 3)}"
+    return text + ")"
+
+
+def agreement_block(found, t) -> list:
+    """The "Agent vs operator" section: nothing at all without a single
+    operator-labelled episode, so reports without operator labels are
+    unchanged."""
+    if not isinstance(found, dict) or not found.get("pairs"):
+        return []
+    matrix = found.get("matrix") or {}
+    out = [f"## {t['agreement']}", "", t["agreement_note"], ""]
+    out += pairs(
+        [
+            (t["both_labels"], num(found.get("pairs"))),
+            (
+                t["agree"],
+                f"{num(found.get('agree'))}/{num(found.get('judged'))} ({pct(found.get('rate'))})",
+            ),
+            (t["agree_undecided"], pct(found.get("rate_undecided_as_failure"))),
+            (t["false_success"], _share(found.get("false_success"))),
+            (t["missed_success"], _share(found.get("missed_success"))),
+            (t["agent_undecided"], num(found.get("undecided"))),
+            (t["no_agent"], num(found.get("no_agent"))),
+            (
+                t["success_rates"],
+                f"{pct(found.get('operator_success_rate'))} / {pct(found.get('agent_success_rate'))}",
+            ),
+        ],
+        t,
+    )
+    out += table(
+        [t["operator_vs_agent"], "success", "failure", "undecided", t["agent_none"]],
+        [
+            [
+                op,
+                *(
+                    num((matrix.get(op) or {}).get(ag))
+                    for ag in ("success", "failure", "undecided", "none")
+                ),
+            ]
+            for op in ("success", "failure")
+        ],
+    )
+    return out
+
+
 def to_markdown(
     payload, lang="en", *, title=None, settings=None, previous=None, max_rows=None
 ) -> str:
@@ -395,6 +473,7 @@ def to_markdown(
         ),
     ]
     out += pairs(rows, t)
+    out += agreement_block(s.get("agreement"), t)
 
     out += [f"## {t['latency']}", ""]
     out += table(

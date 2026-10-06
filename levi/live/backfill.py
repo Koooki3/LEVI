@@ -130,6 +130,11 @@ def rebuild(workspace, name, demo, row, *, events=run_events, labels=change_labe
     put("session", row.get("run_id"), f"{state}: run_id (eval.run_id of the demo)")
     put("attempts", row.get("attempts"), f"{state}: attempts")
     put(
+        "operator_label",
+        stats.operator_brief(row.get("operator_label")),
+        f"{state}: operator_label (eval.* of the demo's metadata)",
+    )
+    put(
         "excluded",
         exclusion.is_excluded(row),
         f"{state}: excluded (a person's removal; the record is kept, marked)",

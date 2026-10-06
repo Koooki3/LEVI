@@ -170,3 +170,47 @@ def abort_reason(directory) -> str | None:
     if isinstance(meta, dict):
         return (meta.get("eval") or {}).get("abort_reason")
     return None
+
+
+# Who decided ``eval.outcome`` by a key press in the evaluation client: the
+# operator (``key``) or the operator after a timeout (``timeout-adjudicated``).
+OPERATOR_KEYS = ("key", "timeout-adjudicated")
+
+
+def operator_label(meta) -> dict | None:
+    """The operator's own label of a rollout, read from its ``metadata.json``
+    (``eval.*``), or None when the operator gave none.
+
+    The operator label (ground truth) is kept apart from everything LEVI
+    decides: it is never an outcome label of LEVI's (``annotations/outcomes``),
+    never part of the automatic verdict and never shown to the model.
+
+    1. ``eval.operator_outcome`` (a dual-label run: written once, at the
+       operator's key press, and never changed afterwards, even when the
+       client later discards an invalid episode);
+    2. else ``eval.outcome`` success/failure decided by a key press
+       (``eval.verdict_by`` ``key`` or ``timeout-adjudicated``);
+    3. else ``eval.outcome`` unlabeled or discarded, as written (no label, but
+       a record that the operator gave none or threw the episode away).
+
+    Anything else (``aborted``, no ``eval`` block, values of another shape) is
+    None. ``success_flag_final`` is never read: it is a placeholder in a
+    rollout nobody labelled."""
+    if not isinstance(meta, dict):
+        return None
+    ev = meta.get("eval")
+    if not isinstance(ev, dict):
+        return None
+    by = ev.get("verdict_by") if isinstance(ev.get("verdict_by"), str) else None
+    source = "capture-metadata"
+    operator = ev.get("operator_outcome")
+    if isinstance(operator, str) and operator in ("success", "failure", "discarded"):
+        return {"outcome": operator, "by": "operator", "source": source}
+    outcome = ev.get("outcome")
+    if not isinstance(outcome, str):
+        return None
+    if outcome in ("success", "failure") and by in OPERATOR_KEYS:
+        return {"outcome": outcome, "by": by, "source": source}
+    if outcome in ("unlabeled", "discarded"):
+        return {"outcome": outcome, "by": by, "source": source}
+    return None

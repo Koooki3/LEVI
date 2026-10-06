@@ -858,6 +858,15 @@ def review_only(e):
     e.config.validate()
 
 
+def label(e, n, **fields):
+    """The operator's label in a finished demo's ``metadata.json`` (what the
+    evaluation client writes at the key press)."""
+    path = e.rollouts.demo(n) / "metadata.json"
+    meta = json.loads(path.read_text())
+    meta["eval"].update(fields)
+    path.write_text(json.dumps(meta))
+
+
 def anchored_runs(e):
     return [r for r in e.records("runs") if r["context"]["workflow"].get("anchored")]
 
@@ -1052,6 +1061,71 @@ def test_with_time_segments_on_a_missing_verdict_still_waits_for_them(tmp_path):
     row = mirror.load_state(c, NAME)["demos"]["demo_0000"]
     assert row["state"] == "mirrored" and row["attempts"] == 0
     assert "episode_index" not in row and row["verdict"] is None
+
+
+def test_operator_label_is_kept_apart_and_never_reaches_the_model(env):
+    """A dual-label demo: the operator said success, the agent (the fake model
+    sees the object land elsewhere) says failure. Both are kept, apart; the
+    model was asked the spec's question and nothing of the operator's label."""
+    from levi.live import api, generic, stats
+
+    marker = "OPERATOR-MARKER-7f3a"
+    e = env(answers={"landed": "elsewhere"})
+    review_only(e)
+    e.rollouts.write(0)
+    label(
+        e,
+        0,
+        outcome="success",
+        verdict_by="operator",
+        operator_outcome="success",
+        operator_labelled_at=marker,
+        eval_note=marker,
+        label_mode="dual",
+    )
+    e.run()
+    row = e.state()["demos"]["demo_0000"]
+    assert row["operator_label"] == {
+        "outcome": "success",
+        "by": "operator",
+        "source": "capture-metadata",
+    }
+    assert row["outcome_recorded"] == "success"
+    assert row["verdict"]["outcome"] == "failure"
+    assert "operator" not in json.dumps(row["verdict"])
+    # What the model was asked: the spec's question, never the label.
+    question = generic.anchored_spec(e.rollouts.text, "generic-release.v3.json")[
+        "question"
+    ]
+    asked = [
+        payload for payload in e.fake.calls if payload.get("max_completion_tokens") != 1
+    ]
+    assert asked
+    for payload in asked:
+        texts = [
+            part.get("text", "")
+            for message in payload["messages"]
+            for part in (
+                message["content"]
+                if isinstance(message["content"], list)
+                else [{"text": message["content"]}]
+            )
+            if isinstance(part, dict)
+        ]
+        assert question in texts
+        assert marker not in json.dumps(payload)
+    # Nothing written back: no outcome label, the source metadata unchanged.
+    assert not list(e.ws.rglob("outcomes"))
+    meta = json.loads((e.rollouts.demo(0) / "metadata.json").read_text())
+    assert meta["eval"]["outcome"] == "success"
+    # The record, the page and the agreement keep both.
+    (record,) = stats.read(e.ws / "live")
+    assert record["operator_label"] == {"outcome": "success", "by": "operator"}
+    assert record["result"]["verdict"]["outcome"] == "failure"
+    assert stats.summarize([record])["agreement"]["missed_success"]["n"] == 1
+    page = api._demo_row("demo_0000", row)
+    assert page["operator_label"]["outcome"] == "success"
+    assert page["agreement"] == "no"
 
 
 def test_the_default_pipeline_still_makes_a_temporal_run(env):

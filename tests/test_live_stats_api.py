@@ -11,6 +11,7 @@ from test_live_service import cfg
 from test_live_stats_aggregate import full
 
 from levi.live import api, cli, gating, mirror, stats
+from levi.live import config as live_config
 
 
 @pytest.fixture
@@ -247,3 +248,78 @@ def test_a_dataset_name_with_a_root_mark_works_in_filters_exports_and_urls(
     assert client.get("/api/levi/live/stats?dataset=%2E%2E").status_code == 400
     assert client.get("/api/levi/live/stats?dataset=a%2Fb").status_code == 400
     assert client.get("/api/levi/live/stats?dataset=a%20b").status_code == 200
+
+
+# --- agent vs operator ----------------------------------------------------------
+
+
+def test_the_operator_label_and_the_agreement_reach_stats_and_exports(live_stats):
+    client, c, _ = live_stats
+    # Unlabelled records: no pair, and the block stays out of the report.
+    body = client.get("/api/levi/live/stats").json()
+    assert body["summary"]["agreement"]["pairs"] == 0
+    md = client.get("/api/levi/live/stats/export?format=md").text
+    assert "Agent vs operator" not in md
+    row = full(
+        "demo_0009", 9, result__verdict={"outcome": "failure", "undecided": False}
+    )
+    row["operator_label"] = {"outcome": "success", "by": "operator"}
+    stats.record(c.live_dir, row)
+    body = client.get("/api/levi/live/stats?session=s1").json()
+    found = body["summary"]["agreement"]
+    assert found["pairs"] == 1 and found["missed_success"]["n"] == 1
+    (session,) = body["sessions"]
+    assert session["pairs"] == 1 and session["agree"] == 0
+    rows = list(
+        csv.DictReader(
+            io.StringIO(client.get("/api/levi/live/stats/export?format=csv").text)
+        )
+    )
+    assert list(rows[0])[-2:] == ["operator", "agreement"]
+    labelled = next(r for r in rows if r["demo"] == "demo_0009")
+    assert labelled["operator"] == "success" and labelled["agreement"] == "no"
+    assert next(r for r in rows if r["demo"] == "demo_0000")["operator"] == ""
+    md = client.get("/api/levi/live/stats/export?format=md").text
+    assert "## Agent vs operator" in md
+    zh = client.get("/api/levi/live/stats/export?format=md&lang=zh").text
+    assert "## agent 与操作员对照" in zh
+
+
+def test_a_dataset_counts_agreement_over_every_demo_not_the_listed_ones(live_stats):
+    client, c, _ = live_stats
+    demos = {}
+    for n in range(250):
+        demos[f"demo_{n:04d}"] = {
+            "state": "done",
+            "episode_index": n,
+            "operator_label": {
+                "outcome": "success" if n % 2 else "failure",
+                "by": "operator",
+                "source": "capture-metadata",
+            },
+            "verdict": {"outcome": "success", "undecided": False, "review": "auto"},
+        }
+    demos["demo_0300"] = {"state": "rejected", "reason": "camera stalled"}
+    mirror.jsonio.write(mirror.state_path(c, "g__t"), {"name": "g__t", "demos": demos})
+    body = client.get("/api/levi/live/datasets/g__t").json()
+    assert len(body["demos"]) == api.MAX_DEMOS and body["total_demos"] == 251
+    found = body["agreement"]
+    assert found["pairs"] == 250 and found["agree"] == 125
+    assert found["false_success"]["n"] == 125
+    assert body["pipeline"] == {"temporal": True}
+    first = next(d for d in body["demos"] if d["demo"] == "demo_0249")
+    assert first["operator_label"] == {
+        "outcome": "success",
+        "by": "operator",
+        "source": "capture-metadata",
+    }
+    assert first["agreement"] == "yes"
+    rejected = next(d for d in body["demos"] if d["demo"] == "demo_0300")
+    assert rejected["operator_label"] is None and rejected["agreement"] is None
+    # A review-only service says so.
+    c.pipeline.temporal = False
+    c.pipeline.anchored_spec = "generic-release.v3.json"
+    (c.live_dir / "effective.toml").write_text(live_config.render(c))
+    assert client.get("/api/levi/live/datasets/g__t").json()["pipeline"] == {
+        "temporal": False
+    }

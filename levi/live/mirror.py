@@ -429,7 +429,12 @@ class Scanner:
             if done.ok:
                 scan.ready.append(entry.name)
             elif done.state == "rejected":
-                rejected.append((entry.name, done.reason, done.completed_at))
+                # The operator's label still counts (operator-labelled, never
+                # judged by the agent).
+                label = criteria.operator_label(
+                    jsonio.read(Path(entry.path) / "metadata.json") or {}
+                )
+                rejected.append((entry.name, done.reason, done.completed_at, label))
             else:
                 mark = criteria.newest_mtime(entry.path)
                 if now - mark > w.stuck_s:
@@ -465,10 +470,15 @@ class Scanner:
         def change(value):
             if not value:
                 value = empty_state(self.config, key, cutoff, name)
-            for demo, reason, at in rejected:
+            for demo, reason, at, label in rejected:
                 value["demos"].setdefault(
                     demo,
-                    {"state": "rejected", "reason": reason, "completed_at": at},
+                    {
+                        "state": "rejected",
+                        "reason": reason,
+                        "completed_at": at,
+                        "operator_label": label,
+                    },
                 )
             for demo, reason, mark in stuck:
                 value["demos"][demo] = {
@@ -738,6 +748,9 @@ def mirror_dataset(config, state: dict, names, *, now: float | None = None) -> d
                         "sig": source_signature(source / demo),
                         "run_id": (meta.get("eval") or {}).get("run_id"),
                         "outcome_recorded": (meta.get("eval") or {}).get("outcome"),
+                        # The operator label (ground truth), apart from the
+                        # agent's ``verdict``; never read by the labelling.
+                        "operator_label": criteria.operator_label(meta),
                         "mirrored_at": now,
                         "completed_at": result.get("completed_at"),
                         "attempts": 0,

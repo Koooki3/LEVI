@@ -57,7 +57,7 @@ def test_the_schema_is_fixed_and_a_record_is_filled_with_nulls():
             "result.segment_labels", "result.verdict.outcome",
             "result.verdict.events", "result.verdict.valid_events",
             "result.verdict.undecided", "result.review", "result.spec",
-            "result.provider", "result.model",
+            "result.provider", "result.model", "operator_label",
         ]
     )  # fmt: skip
 

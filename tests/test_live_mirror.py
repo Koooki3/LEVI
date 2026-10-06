@@ -3,6 +3,7 @@ finished ones (and only those) into the workspace."""
 
 import errno
 import hashlib
+import json
 import os
 import time
 from pathlib import Path
@@ -337,3 +338,128 @@ def test_sessions_of_one_task_under_two_roots_do_not_overwrite_each_other(
         str(tmp_path / "root1"): "running",
         str(tmp_path / "root2"): "finished",
     }
+
+
+# --- the operator label (ground truth) ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "ev,expected",
+    [
+        # A dual-label run: the operator's own field, kept even when the client
+        # later discarded the episode as invalid.
+        (
+            {
+                "outcome": "success",
+                "verdict_by": "operator",
+                "operator_outcome": "success",
+            },
+            {"outcome": "success", "by": "operator"},
+        ),
+        (
+            {
+                "outcome": "discarded",
+                "verdict_by": "auto-invalid",
+                "operator_outcome": "failure",
+            },
+            {"outcome": "failure", "by": "operator"},
+        ),
+        (
+            {
+                "outcome": "discarded",
+                "verdict_by": "operator",
+                "operator_outcome": "discarded",
+            },
+            {"outcome": "discarded", "by": "operator"},
+        ),
+        # A manual run: the key press.
+        (
+            {"outcome": "failure", "verdict_by": "key"},
+            {"outcome": "failure", "by": "key"},
+        ),
+        (
+            {"outcome": "success", "verdict_by": "timeout-adjudicated"},
+            {"outcome": "success", "by": "timeout-adjudicated"},
+        ),
+        # Nobody labelled it, or it was thrown away: said so, no success/failure.
+        (
+            {"outcome": "unlabeled", "verdict_by": "pending-levi"},
+            {"outcome": "unlabeled", "by": "pending-levi"},
+        ),
+        (
+            {"outcome": "discarded", "verdict_by": "auto-invalid"},
+            {"outcome": "discarded", "by": "auto-invalid"},
+        ),
+        # Not an operator's label.
+        ({"outcome": "success", "verdict_by": "pending-levi"}, None),
+        ({"outcome": "success"}, None),
+        ({"outcome": "aborted", "abort_reason": "fr3_fault"}, None),
+        ({"operator_outcome": "maybe", "outcome": 3}, None),
+        ({"operator_outcome": ["success"]}, None),
+        ({}, None),
+    ],
+)
+def test_the_operator_label_comes_from_the_capture_s_eval_block(ev, expected):
+    got = criteria.operator_label({"eval": ev, "success_flag_final": 1})
+    if expected is None:
+        assert got is None
+    else:
+        assert got == {**expected, "source": "capture-metadata"}
+
+
+@pytest.mark.parametrize("meta", [None, [], "x", {}, {"eval": None}, {"eval": "x"}])
+def test_no_eval_block_is_no_operator_label(meta):
+    assert criteria.operator_label(meta) is None
+    # Never the placeholder flag.
+    assert criteria.operator_label({"success_flag_final": 1}) is None
+
+
+def label(rollouts, n, **fields):
+    path = rollouts.demo(n) / "metadata.json"
+    meta = json.loads(path.read_text())
+    meta["eval"].update(fields)
+    path.write_text(json.dumps(meta))
+
+
+def test_the_mirrored_row_carries_the_operator_label_apart(cfg, rollouts):
+    rollouts.write(0)
+    label(
+        rollouts,
+        0,
+        outcome="failure",
+        verdict_by="operator",
+        operator_outcome="failure",
+    )
+    rollouts.write(1)  # unattended: nobody labelled it
+    rollouts.write(2, stalled=["wrist"])  # rejected, but labelled by the operator
+    label(rollouts, 2, outcome="success", verdict_by="key")
+    rollouts.write(3)
+    label(rollouts, 3, outcome="success", verdict_by="key")
+    rollouts.discard(3)  # never mirrored, never counted as a pair
+    scan = mirror.Scanner(cfg).scan()[0]
+    assert scan.ready == ["demo_0000", "demo_0001"] and scan.discarded == 1
+    state = mirror.load_state(cfg, scan.name)
+    rejected = state["demos"]["demo_0002"]
+    assert rejected["state"] == "rejected"
+    assert rejected["operator_label"] == {
+        "outcome": "success",
+        "by": "key",
+        "source": "capture-metadata",
+    }
+    mirror.mirror_dataset(cfg, state, scan.ready)
+    rows = mirror.load_state(cfg, scan.name)["demos"]
+    assert rows["demo_0000"]["operator_label"]["outcome"] == "failure"
+    assert rows["demo_0000"]["outcome_recorded"] == "failure"  # unchanged
+    assert rows["demo_0001"]["operator_label"]["outcome"] == "unlabeled"
+    assert rows["demo_0001"]["outcome_recorded"] == "unlabeled"
+    assert "demo_0003" not in rows and "discarded_0003" not in rows
+    assert all("verdict" not in r for r in rows.values())
+
+
+def test_a_session_that_declined_levi_carries_no_operator_label_in(cfg, rollouts):
+    rollouts.write(0)
+    label(rollouts, 0, outcome="success", verdict_by="key")
+    rollouts.session("running", levi=False)
+    found = sessions.read_sessions(cfg.watch.roots)
+    assert mirror.Scanner(cfg).scan(found) == []
+    assert mirror.load_state(cfg, "pi05_fake__stack_the_plates") in (None, {})

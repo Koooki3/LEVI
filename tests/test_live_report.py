@@ -441,7 +441,7 @@ def test_backfill_keeps_a_removed_episode_marked_and_handles_root_marks(env):  #
     assert {i["dataset"] for i in backfill.plan(e.config, marked)} == {marked}
 
 
-# --- review only ---------------------------------------------
+# --- review only and agent vs operator ---------------------------------------------
 
 
 def test_settings_name_whether_time_segments_run():
@@ -473,3 +473,71 @@ def test_a_review_only_report_keeps_its_spec_block(tmp_path):
     md = report.render(built)
     assert "spec.guideline | -" in md
     assert "spec.sha256 generic-release.v3.json | 0123456789ab" in md
+
+
+def test_the_agent_vs_operator_block_only_appears_with_operator_labels(tmp_path):
+    c = synthetic(tmp_path)
+    session_rows(c, "s1", 1000.0, n=3)
+    built = report.build(c, "g__t", "s1", now=2000.0)
+    assert built["summary"]["agreement"]["pairs"] == 0
+    for lang, heading in (("en", "Agent vs operator"), ("zh", "agent 与操作员对照")):
+        md = report.render(built, lang)
+        assert heading not in md
+        # Without operator labels the report is what it was before the block
+        # existed (the setting ``pipeline.temporal`` is the only new line).
+        older = json.loads(json.dumps(built))
+        del older["summary"]["agreement"]
+        assert report.render(older, lang) == md
+    # One operator-labelled episode: the block, in both languages.
+    rows = stats.read(c.live_dir)
+    rows[0]["operator_label"] = {"outcome": "failure", "by": "operator"}
+    rows[1]["operator_label"] = {"outcome": "success", "by": "key"}
+    rows[0]["at"] += 1
+    rows[1]["at"] += 1
+    stats.record(c.live_dir, rows[0])
+    stats.record(c.live_dir, rows[1])
+    built = report.build(c, "g__t", "s1", now=3000.0)
+    found = built["summary"]["agreement"]
+    assert found["pairs"] == 2 and found["agree"] == 1
+    md = report.render(built, "en")
+    assert "## Agent vs operator" in md
+    assert "| both labels (operator success/failure) | 2 |" in md
+    assert "| agree (of the agent's success/failure) | 1/2 (50%) |" in md
+    assert "| missed success: agent failure or undecided" in md
+    assert "| success | 0 | 1 | 0 | 0 |" in md
+    zh = report.render(built, "zh")
+    assert (
+        "## agent 与操作员对照" in zh
+        and "| 两个标签都有（操作员判成功/失败） | 2 |" in zh
+    )
+    assert "操作员标签（真值）" in zh and "agent 标签（自动、未审）" in zh
+    # The block sits between the facts and the latency table.
+    assert (
+        md.index("## Facts") < md.index("## Agent vs operator") < md.index("## Latency")
+    )
+
+
+def test_backfill_carries_the_operator_label_from_the_dataset_state(tmp_path):
+    row = {
+        "state": "done",
+        "run_id": "s1",
+        "episode_index": 0,
+        "completed_at": 100.0,
+        "operator_label": {
+            "outcome": "failure",
+            "by": "operator",
+            "source": "capture-metadata",
+        },
+        "verdict": {"outcome": "success", "undecided": False, "at": 110.0},
+    }
+    record, sources = backfill.rebuild(
+        tmp_path, "g__t", "demo_0000", row, events=lambda *a: [], labels=lambda *a: {}
+    )
+    assert record["operator_label"] == {"outcome": "failure", "by": "operator"}
+    assert record["result"]["verdict"]["outcome"] == "success"
+    assert sources["operator_label"].startswith("dataset state: operator_label")
+    del row["operator_label"]
+    record, sources = backfill.rebuild(
+        tmp_path, "g__t", "demo_0000", row, events=lambda *a: [], labels=lambda *a: {}
+    )
+    assert record["operator_label"] is None
