@@ -1045,3 +1045,26 @@ def test_a_pid_record_without_an_identity_is_no_running_service(tmp_path):
         {"pid": os.getpid(), "identity": controller.gpumgr.identity(os.getpid())},
     )
     assert instance.holder()["pid"] == os.getpid()
+
+
+# --- documentation -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("doc", ["docs/LIVE.md", "docs/LIVE.zh-CN.md"])
+def test_every_pipeline_setting_is_documented(doc):
+    """Each ``[pipeline]`` key of live.toml is named (in backticks) in both
+    live guides: ``levi docs check`` does not cover live.toml keys."""
+    import dataclasses
+    import re
+
+    text = (PROJECT / doc).read_text(encoding="utf-8")
+    spans = re.findall(r"`([^`\n]+)`", text)
+    missing = [
+        f.name
+        for f in dataclasses.fields(live_config.Pipeline)
+        if not any(
+            re.search(rf"(?<![A-Za-z0-9_]){f.name}(?![A-Za-z0-9_])", span)
+            for span in spans
+        )
+    ]
+    assert missing == [], f"{doc} does not name {missing}"

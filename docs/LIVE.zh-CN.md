@@ -89,6 +89,8 @@ uv run levi live stop                            # 只停自己的进程
 各表、各键、默认值和含义与英文版表格一致（`service`、`watch`、`fr3`、`gpu`、`vllm`、`provider`、`pipeline`、`resources`），见 [LIVE.md](LIVE.md#settings-livetoml)。要点：
 
 - `gpu.mode` 默认 `auto`：等于 `timeshare`（两者常驻 + 闸门）；`coexist` 和 `manual` 是手动选项。`gpu.busy_states` 默认 `["running"]`；`gpu.min_free_mib` 600、`gpu.policy_budget_mib` 8500 决定 vLLM 何时睡眠。
+- `pipeline.temporal` 默认 true（时间片段运行：粗标 + 精修）。设为 false 时不做时间片段，只由释放复核给每个片段判定；这要求 `pipeline.anchored = true`，并且复核规格没有 `episode.require_place`（例如 `generic-release.v3.json`），否则配置校验拒绝。见[双标签](#双标签操作员和-agent)。
+- `pipeline.coarse_step_seconds` 0.5、`pipeline.refine` `always`：评测过的时间片段设置，长片段会放宽步长使帧数不超过 `max_images`。`pipeline.cleanup` true：丢弃已完成运行的冻结输入和证据。
 - `pipeline.auto_approve` 默认 **false**。`pipeline.keep_review_runs` 10：每个数据集保留冻结输入的开着的释放复核运行数（提交它需要输入），更旧的被取消并清理。`watch.stuck_s` 600：没有完成、也没有变化的片段超过这个时间算 `stuck`。`gpu.lead_s`/`lead_grace_s` 3/5：闸门在下一集开始前提前关闭。`service.gate_poll_s` 0.25。
 - `resources.report_keep` 默认 20：`live/reports/` 里保留的会话报告份数，写入新报告时删除最旧的。
 - `gpu.policy_ports` 默认 `[8000]`，只在内核的 socket 表里查，从不连接。`gpu.policy_loaded_min_mib` 6000、`gpu.policy_load_wait_s` 120：监听着的策略端口只有进程占用到这么多显存才算“策略服务器已加载”（用于预算规划）；占得更少说明还在加载，vLLM 等待（`settling`），端口出现 `policy_load_wait_s` 秒后按“只有 vLLM”规划；读不到显存同样按“只有 vLLM”的保守预算。`gpu.standby_min_s` 20：冷启动要等会话在 `standby` 待满这么久（它的第一集几秒内就会开始）；这是缓解，不是保证，评测前用 `--prewarm`。`gpu.wake_margin_mib` 850：唤醒时在预算（减去睡眠中的 vLLM 仍占的部分）之外保留的空闲显存；启动用 `vllm.margin_mib`。**在真 GPU 上测过**（策略服务器 `.22`）：睡眠的 vLLM 旁空闲 22768 MiB，唤醒并做完第一批请求用了约 21758 MiB。原来的 300 会在空闲 21843 MiB 时放行唤醒，唤醒后只剩约 85 MiB，低于 `min_free_mib`（600），vLLM 会立刻又被放睡；800 在放行线上仍只剩约 585；850 时唤醒需要 22393，正好在线上也剩 635 MiB，实测的 22768 放行，富余约 375 MiB（按这些数字算出来的，没有观察到真正的来回抖动）。`gpu.blocked_pause_s` 300：GPU 锁被别的 agent 持有、:8100 上有别人的 vLLM、睡眠的 vLLM 因显存不够唤不醒，持续这么久后写进 `labelling_paused`。`gpu.resume_stable_s` 3（0.5–60 秒）、`gpu.resume_max_bounces` 3：人的运行被实时闸门拦住（`blocked`）后，闸门连续开着这么久就自动继续（避开 `episode_imminent` 窗口；用监督进程写在 `gate.json` 里的 `opened_at`，所以两次采样之间的关上又打开也算），每次打开一次；连续被拦这么多次、中间没有进展（完成片段或结算了 token），就留给人点“继续”；0 表示关闭自动恢复。`gpu.unknown_client_pause_s` 600：没有会话为之作证的策略服务器让闸门一直关着，超过这么久状态里 `labelling_paused` 写 `unknown_client`。
@@ -158,12 +160,13 @@ uv run levi live stop                            # 只停自己的进程
 
 ## 通用配置
 
-被评测的任务不是 LEVI 调优用过的任务，所以没有任何任务专用内容。`levi/live/specs/` 里四个文件，版本号在文件名里，用过之后不再改（改动=新文件+新设置）：
+被评测的任务不是 LEVI 调优用过的任务，所以没有任何任务专用内容。`levi/live/specs/` 里的文件，版本号在文件名里，用过之后不再改（改动=新文件+新设置）：
 
 - `generic-guideline.v1.md`：标注指南。引用 rollout 的任务指令（`task_description.txt`，否则元数据的 `task_description`，否则目录名），逐步按它判断。六个子任务 id 与其他地方一致：`approach grasp transport place retreat other`。
 - `generic-definitions.v1.json` / `generic-vocabulary.v1.json`：定义（每个数据集的词表只写一次）。
 - `generic-release.v1.json`：锚定复核用的释放复核规格，**状态 `candidate`，未在任何任务上评估**。每次夹爪张开问一个问题：侧视 −2.5…+1.2 s、腕部 −1.5…+0.4 s（plates 复核用的那些帧），引用任务指令：是否夹着物体、物体是否落在指令指定的目的地、是否稳定不滑落。片段在至少 `pipeline.anchored_min_valid`（默认 1）次张开有效时判成功。它分不清需要两次放置的任务和一次放置的任务；这类任务设 `anchored_min_valid = 2`。它的准确率未知：信任判定前要先在开发数据上评估；每个判定都只能读作“自动、未审”。
 - `generic-release.v2.json`：同一个释放复核，判定还会看片段怎么结束（最后一次有效释放之后没有再抓，最后一个放置不是失败）；候选，不是默认；不要求任务只放一次（见其局限）。见[终态感知的判定](#终态感知的判定候选)。
+- `generic-release.v3.json`：去掉放置条件的第 2 版：至少 `min_valid` 次释放有效、并且最后一次有效释放之后夹爪没有再闭合，就判成功。它不读时间片段，所以能和 `pipeline.temporal = false`（只做释放复核）一起用。候选，不是默认；离线（一个任务，92 个片段）保住了 33 个成功中的 33 个，把 59 个失败中的 5 个判成成功（0.085，Wilson 95 % 0.037–0.184），第 2 版在同样的片段上是 59 个中 1 个。见[双标签](#双标签操作员和-agent)。
 
 时间片段运行使用评测过的配置（粗步 0.5 s、始终精修、lean 提示、`qwen38-27b-vllm-48k-lean` 配置同时两个请求），只用侧视相机；长片段会放宽步长，使帧数不超过模型的图像上限（LEVI 拒绝悄悄稀疏化）。
 
@@ -203,6 +206,48 @@ anchored_spec = "generic-release.v2.json"
 - 依赖时间片段的 `place` 结局，那是模型的第二次读图；换模型、相机或任务后，两个信号不一定还在不同的片段上出错。
 - 复核回答为未知时按“无效”处理（离线评估把它们当不确定输入；评估过的片段里没有这种情况）。
 - 夹爪通道按二值命令（开/合）读取，本机的 `robot_capture` 数据就是这样记录的。通道是测得宽度的数据集上，闭合帧来自宽度范围的穿越，会滞后于命令；夹着较宽的物体时，宽度可能一直高于闭合阈值，重新抓起可能检测不到。
+
+## 双标签：操作员和 agent
+
+双标签评测给每个片段两个标签，并且互不混用：**操作员标签（真值）**是操作员自己判定的成功或失败；**agent 标签（自动、未审）**是释放复核的判定。在新片段上比较两者，可以测出自动标签有多可信。
+
+**流程。** 评测客户端（策略仓库 FR3 示例里的 `--levi-mode dual`）让每个片段跑满步数预算，和无人值守运行一样（运行中 `s`/`f` 无效，`q` 结束本轮）。跑完后问操作员：`s` 成功、`f` 失败、`d` 作废。机械臂回零位，操作员复位场景，按 Enter 开始下一个片段。标签在 rollout 被标为完成之前写进它的 `metadata.json`，所以 LEVI 不会在操作员标签出现之前判定这个片段。之后 LEVI 在后台判定同一个片段。评测终端从不显示 agent 的判定；操作员给一个片段打标签之前，不要先去 `/live` 看它。
+
+**服务设置**（`live.toml`；改完要重启服务，因为 `live/effective.toml` 在启动时写出）：
+
+```toml
+[pipeline]
+auto_approve = true
+temporal = false
+anchored = true
+anchored_spec = "generic-release.v3.json"
+anchored_min_valid = 1
+
+[vllm]
+prewarm = true
+```
+
+`temporal = false` 跳过时间片段：一个片段的模型时间约 80 % 花在时间片段上，而一次释放复核请求约为每次张开 2 秒。配置校验拒绝没有释放复核（`anchored = false`）的 `temporal = false`，也拒绝要读放置时间片段的规格（`episode.require_place`，即第 2 版）。默认仍是 `temporal = true` 加 `generic-release.v1.json`。
+
+**启动顺序。** 1. `levi live start --prewarm`，等 `levi live status` 显示 vLLM `ready`（评测期间不允许冷启动模型，冷着启动的服务要等本轮结束才开始标注）。2. 策略服务器。3. 带 `--levi-mode dual` 的客户端。客户端连不上服务时会用红字说明，并退回手动运行（`s`/`f`），没有 agent 标签。
+
+**两个标签各在哪里。**
+
+| | 操作员标签（真值） | agent 标签（自动、未审） |
+| --- | --- | --- |
+| 谁写 | 评测客户端，在按键时 | 实时 worker，在释放复核之后 |
+| 来源 | rollout 的 `metadata.json`：`eval.operator_outcome`（之后不再改）、`eval.outcome`、`eval.verdict_by = "operator"`、`eval.label_mode = "dual"` | 锚定复核记录（`anchored.get`） |
+| 数据集状态里 | `demos[demo].operator_label` = `{outcome, by, source}`（被拒收的片段也有） | `demos[demo].verdict` |
+| `live/stats.jsonl` 里 | `operator_label` = `{outcome, by}` | `result.verdict` |
+| 页面上 | 判定前面一个实线框的“操作员”标记 | 虚线框的“auto”标记 |
+
+`criteria.operator_label` 这样读操作员标签：双标签运行的 `eval.operator_outcome`；否则是操作员按键判定的成功或失败（`verdict_by` 为 `key` 或 `timeout-adjudicated`）；否则照原样记 `unlabeled` 或 `discarded`（没有成功或失败）。它从不读 `success_flag_final`。会话文件写 `levi.mode = "dual_label"`；页面给这种会话标“双标签”，等 Enter 时不显示倒计时，而是写“由操作员按 Enter 开始下一个片段”。操作员复位和打标签时（`waiting_reset`，没有倒计时）GPU 闸门开着，片段运行时关上。
+
+**两者为什么独立。** 操作员标签在 agent 能判定之前就已存在（rollout 标为完成之后 LEVI 才会取它）。模型只看到释放复核的帧和问题：`levi/agent` 和 `levi/live` 里没有任何代码把 `eval.*` 或 `success_flag` 交给模型。判定不读操作员标签。什么都不写回：没有 `annotations/outcomes` 文件，`eval.*` 和任何源文件都不改。自动批准主体仍然不能提交成败标签。
+
+**一致性统计。** `stats.agreement` 用每个片段最新的一条记录比较两者。只统计操作员判为成功或失败的片段（`pairs`）。agent 标签是 `success`、`failure`、`undecided`（判定自己说未决）或 `none`（还没有判定）。`agree` 是 agent 判了成功或失败（`judged`）的片段里与操作员一致的比例；`rate_undecided_as_failure` 把未决按失败计。`false_success`（假成功）是操作员判失败、agent 判成功，分母是 agent 判了或未决的操作员失败片段；`missed_success`（漏判成功）是操作员判成功、agent 判失败或未决。两者都带 Wilson 95 % 区间。`none` 是覆盖缺口，不算一致。这些数字出现在统计汇总（`summary.agreement`）、每个会话的行（`pairs`、`agree`、`judged`、`false_success`、`missed_success`、`operator_success`）、逐片段的行和 CSV（`operator`、`agreement`：`yes`、`no`、`undecided`、`no_agent`）、数据集视图（覆盖全部片段，不只是列出的 200 个）、页面，以及报告里的“agent 与操作员对照”一节；只有至少一个片段有操作员标签时才出现。
+
+**局限。** 第 3 版是候选，只在一个任务上检查过（把物体放进盘子，一台机器人，同一模型的两个策略，92 个片段，真值由 agent 看视频核对，没有人确认）。它防假成功不如第 2 版：没有检查最后一次放置是否成功。每个片段都跑满预算，费机器人时间，但 agent 的输入与无人值守运行相同，所以测得的一致性能推广到无人值守使用。操作员不看 `/live` 是对操作员的要求，页面不强制。传 `--allow-candidate-anchored` 时，训练清单仍把候选的锚定标签排在机器人自己的标记之前（见“自动批准主体”）。
 
 ## 保持轻量
 
@@ -329,6 +374,7 @@ anchored_spec = "generic-release.v2.json"
 | `result.review` | `auto` 或 `human`（谁提交的时间片段） |
 | `result.spec` | `{guideline, release_review, release_review_version, sha256}`：用到的文件和它们的哈希；判定没有记录复核规格版本时为 null |
 | `result.provider`、`result.model` | 模型配置名和服务的模型 |
+| `operator_label` | `{outcome, by}`：来自 rollout 元数据的操作员标签（真值）（`success`、`failure`、`discarded` 或 `unlabeled`；`by` 为 `operator`、`key`、`timeout-adjudicated` 等），或 `null`（没有标签，或旧记录）。它从不属于 `result.verdict`；见[双标签](#双标签操作员和-agent) |
 
 这个文件是本服务工作的记录，LEVI 自己从不读取，也不是训练数据。
 
@@ -350,6 +396,7 @@ anchored_spec = "generic-release.v2.json"
 | GPU 与门控 | `closed_wait_s` 和 `interruptions`：worker 因闸门关闭而让路的秒数和次数，**每个批次只算一次**（批次由 `batch.id` 确定；没有它的记录，写入时间相差不超过 5 秒且数字相同的算同一批）；vLLM 唤醒和冷启动（次数、合计、最长），记在它们所服务批次的第一个片段上；`gate_window`：第一个片段结束到最后一条记录之间闸门关闭的秒数和占比、关闭次数和 `unknown_s`，来自 `live/gate.jsonl`。闸门从开（或未知）变成关时才算一次关闭，所以关闭期间只是原因代码变化不算又一次；没有状态的转换（服务停止）会截断它之前的区间：到下一次转换之前什么都不知道，这段时间记入 `unknown_s`，不算关闭时间（策略推理时闸门关闭，所以这是不允许标注的时间，不是 worker 等待的时间）。`closed_wait_s` 近似对应运行账本里的 `stood_down_seconds`（两者在不同地方测量，略有差别；账本的 `wall_seconds` 已经扣掉它，以及运行等人的时间，见“账本里的运行时间”）；这些统计不读账本，这里所有墙钟数字（`span_s`、各延迟）都是包含这些等待的实际经过时间。vLLM 睡眠没有任何地方记录，显示“未记录” |
 | 会话内标注比例 | **首个模型请求发生在所属评测会话最后一个片段结束之前**的片段占比：衡量标注有多“实时”。会话的结束时刻取它各片段 `timeline.completed_at` 的最大值，数据集状态里已知但还没有记录的片段也算进去（还在进行的会话不会显得比实际更实时）。会话的最后一个片段在分母里但永远不可能在分子里（它的请求不可能早于它自己的结束），所以 n 个片段时这个比例最大是 (n−1)/n：只有一个片段就是 0 %。没发过请求的片段算“不在会话内”。被人排除的片段不会改变会话的结束时刻，除非要求 `include_excluded`。没有会话 id（`eval.run_id`）或没有 `completed_at`（旧记录）的片段不进分子也不进分母；一个都不剩时显示“—” |
 | 结果 | 时间片段总数和每个片段的数量（均值、范围、直方图）、各标签的计数、自动成败判定（`success`、`failure`、`none`）及未决数、谁提交的时间片段（`auto`、`human`） |
+| agent 与操作员对照 | `agreement`：在操作员判为成功或失败的片段上，agent 标签对照操作员标签（真值）：矩阵、`judged`、`agree` 和 `rate`、`rate_undecided_as_failure`、`false_success` 和 `missed_success`（各为 `{n, of, rate, wilson95}`）、`undecided`、`no_agent`、两边的成功率；没有操作员标签时 `pairs` 为 0。每个会话：`pairs`、`agree`、`judged`、`false_success`、`missed_success`、`operator_success`；逐片段和 CSV：`operator`、`agreement`。页面的表只在有数据时显示这些列，报告也只在那时加这一节。定义见[双标签](#双标签操作员和-agent) |
 
 **会话报告。** 评测会话结束（会话文件是 `stopped`、`finished` 或已崩溃，或被更新的会话取代），且它的每个片段都已标完或放弃（没有 `mirrored`、`annotating` 或在队列里等待的）后，服务写出 `<工作区>/live/reports/<数据集>__<会话>.md`（英文）、`.zh-CN.md` 和 `.json`。每 30 s 检查一次，批次运行期间不检查，在独立的线程里做（历史再长也不会拖慢 GPU 让出和 gate 文件的刷新），每次检查最多生成两份报告。只考虑最新的 `resources.report_keep` 个已结束会话，`reports/index.json` 记录每份报告的 signature（记录数、最后一条记录的时间、被排除的片段数）和为了不超过上限而被删除的报告名：报告是否最新由索引和对记录的一次遍历决定，没有变化就不生成，被删掉的旧报告不会再写回（`levi live report` 仍可随时生成任何会话的报告）。报告内容：设置（当时生效的模型配置、管线、vLLM 和 GPU 设置，取自生效配置，不含路径、端口或密钥；标注指南和释放复核规格及各文件哈希的前 12 位；会话文件里的策略 config 和 checkpoint 文件夹名）、事实、延迟和开销表、GPU 与门控数字、每个片段一行的明细、与同一数据集上一份报告的对比、口径说明。写入是幂等的：记录没变的报告不会重写，迟到的记录会就地更新报告，每个文件先渲染好、再写 `.partial` 并改名，所以失败时上一份报告保持完整；只保留最新的 `resources.report_keep` 份（默认 20，按会话最后一条记录的时间）。报告里没有令牌和路径。逐会话表不显示 gate 窗口。跨两个会话的批次，它的 `closed_wait_s` 会同时出现在两个会话的行里，所以各行之和可能大于总数（总数里每个批次只算一次）。
 
@@ -359,7 +406,7 @@ anchored_spec = "generic-release.v2.json"
 
 ## 状态文件（接口 C4）
 
-`~/.levi-live/status.json`，每 `heartbeat_s`（4 秒，≤ 5 秒）原子重写。评测客户端只有在**全部**满足时才认为服务可用：`schema` 以 `levi.live.status.` 开头；`updated_at`（纪元秒）不到 15 秒；`pid` 存活；`accepts_sessions` 为真；`state` 是 `idle active annotating gpu_wait` 之一；`watch_roots`（绝对路径）中有一个等于或包含客户端的 `--rollout-root`（或被它包含）。否则客户端退回手动标注。`accepts_sessions` 在 `starting` 以及 `stopped`/`error` 时为假；`gpu_wait`（有活在等模型：闸门关闭、vLLM 正在启动或在睡眠）算可用。 `gpu.free_mib` 是最近一次 `nvidia-smi` 的读数，**只在不到 30 秒内才给出**，否则为 `null`（睡眠中的 vLLM 有意不去探测，睡下之前的读数，例如 2254 MiB，不是现在的空闲显存）；`gpu.free_mib_at` 是读数的时间。`gpu.idle_since` 是 vLLM 开始闲置的时间（有活、正在载入或本就该常驻时为 `null`），`gpu.prewarm` 说明它是否以预热方式启动；`levi live doctor` 会读这两个字段。`attention` 在服务放弃启动 vLLM、需要人（`levi live resume`）时设置，此时标注暂停，但不改变 `accepts_sessions` 和 `state`。**`labelling_paused`** 为 `null`，或在“没有标注、且原因不会自己消失”时为 `{code, reason, since}`：`vllm_failed`（放弃启动 vLLM，`levi live resume`）、`vllm_error`（启动失败、正在退避）、`insufficient_vram`（空闲显存连最短上下文也装不下）、`policy_large`（策略服务器占用超过 `gpu.policy_budget_mib`：改用 `.22`；立即报告，按服务器的显存判断，不管闸门或评测在做什么，是一次稳定的暂停）、`unknown_client`（没有会话为之作证的策略服务器让闸门关了 `gpu.unknown_client_pause_s` 以上），以及持续 `gpu.blocked_pause_s` 之后的 `vram`（睡眠的 vLLM 唤不醒，或启动没有足够显存）、`lock`（别的 agent 持有 GPU 锁）、`external_busy`（`vllm.port` 上有别人的 vLLM）和 `gpu_not_free`（vLLM 已停但它的进程仍占着显存，所以锁保留）。策略推理时闸门关闭、策略服务器还在加载，都是正常等待，不设置它；它也不改变 `accepts_sessions`。`loop_at` 是主循环上次 tick 的时间（`updated_at` 来自单独的心跳线程，循环卡住时它仍然新鲜；`levi live doctor` 在 `loop_at` 超过 5 分钟时告警）。`frontend` 说明服务启动的页面/核心 API 是否真的起来（`levi live start --daemon` 失败时打印原因并以退出码 2 返回，标注继续运行）。新增字段：数据集行的 `stuck`、`source_changed`、`review_runs_open`、`awaiting`，会话的 `root`、`reset_wait_s`、`waiting_reset_since`，闸门代码 `episode_imminent`，决策代码 `evaluation_active`、`standby_settling`、`prewarm_waiting_for_policy`、`gpu_not_free`。完整 JSON 形状见 [LIVE.md](LIVE.md#status-file-interface-c4)。
+`~/.levi-live/status.json`，每 `heartbeat_s`（4 秒，≤ 5 秒）原子重写。评测客户端只有在**全部**满足时才认为服务可用：`schema` 以 `levi.live.status.` 开头；`updated_at`（纪元秒）不到 15 秒；`pid` 存活；`accepts_sessions` 为真；`state` 是 `idle active annotating gpu_wait` 之一；`watch_roots`（绝对路径）中有一个等于或包含客户端的 `--rollout-root`（或被它包含）。否则客户端退回手动标注。`accepts_sessions` 在 `starting` 以及 `stopped`/`error` 时为假；`gpu_wait`（有活在等模型：闸门关闭、vLLM 正在启动或在睡眠）算可用。 `gpu.free_mib` 是最近一次 `nvidia-smi` 的读数，**只在不到 30 秒内才给出**，否则为 `null`（睡眠中的 vLLM 有意不去探测，睡下之前的读数，例如 2254 MiB，不是现在的空闲显存）；`gpu.free_mib_at` 是读数的时间。`gpu.idle_since` 是 vLLM 开始闲置的时间（有活、正在载入或本就该常驻时为 `null`），`gpu.prewarm` 说明它是否以预热方式启动；`levi live doctor` 会读这两个字段。`attention` 在服务放弃启动 vLLM、需要人（`levi live resume`）时设置，此时标注暂停，但不改变 `accepts_sessions` 和 `state`。**`labelling_paused`** 为 `null`，或在“没有标注、且原因不会自己消失”时为 `{code, reason, since}`：`vllm_failed`（放弃启动 vLLM，`levi live resume`）、`vllm_error`（启动失败、正在退避）、`insufficient_vram`（空闲显存连最短上下文也装不下）、`policy_large`（策略服务器占用超过 `gpu.policy_budget_mib`：改用 `.22`；立即报告，按服务器的显存判断，不管闸门或评测在做什么，是一次稳定的暂停）、`unknown_client`（没有会话为之作证的策略服务器让闸门关了 `gpu.unknown_client_pause_s` 以上），以及持续 `gpu.blocked_pause_s` 之后的 `vram`（睡眠的 vLLM 唤不醒，或启动没有足够显存）、`lock`（别的 agent 持有 GPU 锁）、`external_busy`（`vllm.port` 上有别人的 vLLM）和 `gpu_not_free`（vLLM 已停但它的进程仍占着显存，所以锁保留）。策略推理时闸门关闭、策略服务器还在加载，都是正常等待，不设置它；它也不改变 `accepts_sessions`。`loop_at` 是主循环上次 tick 的时间（`updated_at` 来自单独的心跳线程，循环卡住时它仍然新鲜；`levi live doctor` 在 `loop_at` 超过 5 分钟时告警）。`frontend` 说明服务启动的页面/核心 API 是否真的起来（`levi live start --daemon` 失败时打印原因并以退出码 2 返回，标注继续运行）。新增字段：数据集行的 `stuck`、`source_changed`、`review_runs_open`、`awaiting`，会话的 `root`、`reset_wait_s`、`waiting_reset_since`、`label_mode`（`dual_label`、`unattended` 或 null），顶层的 `pipeline`（`temporal`、`anchored`、`anchored_spec`），闸门代码 `episode_imminent`，决策代码 `evaluation_active`、`standby_settling`、`prewarm_waiting_for_policy`、`gpu_not_free`。完整 JSON 形状见 [LIVE.md](LIVE.md#status-file-interface-c4)。
 
 ## 服务读取的机器人侧接口
 
@@ -375,7 +422,7 @@ anchored_spec = "generic-release.v2.json"
 | `GET /status` | `{"enabled", "embedded"（由不是实时工作区的 LEVI，即产品 LEVI 提供时为 true）, "live_ui"（服务运行着自己的页面且页面正常时为其地址，否则 null）, "workspace_name"（实时工作区的目录名）, "alive", "age_s", "service": <status.json 或 null；在产品 LEVI 上去掉其中的 `workspace` 和 `config` 路径>, "faults": [{"dataset", "reasons": []}], "fr3_red", "blocked_runs": {"count", "waiting", "needs_person"}}`。`alive` = pid 存在、`updated_at` 不到 15 秒、状态不是 `stopped`。 |
 | `GET /sessions` | `{"enabled", "sessions": [ {会话字段, "dataset", "fault"} ], "fr3": {…}, "active"}`，直接读机器人侧文件（≤ 64 个）。 |
 | `GET /datasets` | `{"enabled", "datasets": {名字: 行}}`（`status.json` 里的行）。 |
-| `GET /datasets/{name}` | 数据集详情：`repo_id`（实时工作区目录里登记后的数据集 id，否则 null）、`embedded` 和 `live_ui`（同 `/status`）、任务文本、各状态计数（被排除的片段不计入）、`total_demos`（数据集里的片段数）、片段列表（最新在前，≤ 200；每项有 `excluded`（null）、状态、集序号、`run_id`、尝试次数、时间片段数、提交时间、自动判定 `verdict`：`outcome/events/valid_events/undecided/spec/review: "auto"/evaluated: false`，另有 `rule/place_outcome/closes_after_last_valid/min_valid`，默认规则下为空；以及 `spec_version`）、`excluded_count` 和 `excluded_demos`（被排除的片段，行的格式相同，带 `excluded: {at, by: "person", reason}`，最新在前，全部列出，不在 200 处截断）、`incomplete`（含按原因计数）、进行中的批次、上一批、`last_error`。未知名字返回 404。 |
+| `GET /datasets/{name}` | 数据集详情：`repo_id`（实时工作区目录里登记后的数据集 id，否则 null）、`embedded` 和 `live_ui`（同 `/status`）、任务文本、各状态计数（被排除的片段不计入）、`total_demos`（数据集里的片段数）、片段列表（最新在前，≤ 200；每项有 `excluded`（null）、状态、集序号、`run_id`、尝试次数、时间片段数、提交时间、自动判定 `verdict`：`outcome/events/valid_events/undecided/spec/review: "auto"/evaluated: false`，另有 `rule/place_outcome/closes_after_last_valid/min_valid`，默认规则下为空；以及 `spec_version`）、`excluded_count` 和 `excluded_demos`（被排除的片段，行的格式相同，带 `excluded: {at, by: "person", reason}`，最新在前，全部列出，不在 200 处截断）、`incomplete`（含按原因计数）、进行中的批次、上一批、`last_error`；每个片段另有 `operator_label`（`{outcome, by, source}` 或 null）和 `agreement`（`yes`、`no`、`undecided`、`no_agent` 或 null），整个数据集有 `agreement`（覆盖全部保留的片段，不只是列出的 200 个）和 `pipeline`（`{"temporal"}`）。未知名字返回 404。 |
 | `GET /stats?dataset=&session=&since=&limit=100&offset=0&include_excluded=false` | `{"enabled", "schema": "levi.live.stats.v1", "generated_at", "scope", "datasets": [有记录的数据集名], "summary": {…各项聚合，见“统计与报告”}, "sessions": [每个（数据集，会话）一行，最新在前，≤ 200], "sessions_total", "episodes": {"total", "offset", "limit", "rows": [每个片段一行，最新在前，limit ≤ 500]}}`。`dataset` 和 `session` 只能是普通名字（否则 400）；`since` 是纪元秒。不含路径、令牌或密钥。 |
 | `GET /stats/export?format=csv\|json\|md&dataset=&session=&since=&lang=en\|zh&include_excluded=false` | 同样的统计，作为下载（`Content-Disposition: attachment`）：`csv` 每个片段一行（以 `=`、`+`、`-`、`@`、制表符或回车开头的文本单元格前面会加一个撇号，电子表格不会把它当公式执行），`json` 含全部片段的完整数据，`md` 一份可读报告。 |
 | `GET /audit?limit=50` | 自动批准主体的审计记录，最新在前，≤ 100 条，每条含 `tool`、`decision: allowed/refused`、`run_id` 等。人排除或恢复片段的行是 `principal: "local-human"`、`actor: "person"`、`tool: "episode.exclude"` 或 `"episode.restore"`、`dataset`、`demo`、可选的 `reason`、可选的 `via: "product"`（在产品 LEVI 页面上操作）、`decision: "completed"`。 |
