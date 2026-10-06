@@ -979,7 +979,7 @@ class _ReviewOnlyWorker:
     the store and the model replaced: the review run 'ends' and has no record
     for the episode (``anchored.get`` raises KeyError)."""
 
-    def __init__(self, config):
+    def __init__(self, config, records=()):
         from levi.live.worker import Worker
 
         self.worker = Worker.__new__(Worker)
@@ -994,9 +994,16 @@ class _ReviewOnlyWorker:
         w.drive = lambda run_id, what: {"id": run_id, "status": "waiting_for_review"}
         w.run_state = lambda run_id: {"id": run_id, "status": "waiting_for_review"}
 
+        # One ``anchored.get`` answer per call, in order (None: no record);
+        # past the end, no record.
+        answers = list(records)
+
         def call(name, arguments, key=None, principal=None):
             if name == "anchored.get":
-                raise KeyError(arguments["episode"])
+                record = answers.pop(0) if answers else None
+                if record is None:
+                    raise KeyError(arguments["episode"])
+                return record
             raise AssertionError(name)
 
         w.call = call
@@ -1040,6 +1047,43 @@ def test_review_only_missing_verdict_retries_then_fails(tmp_path):
     assert row["reason"].startswith("no release-review verdict: ")
     # Nothing is left to label: the worker's next batch is empty (NOTHING).
     assert mirror.waiting_demos(mirror.load_state(c, NAME), 2) == []
+
+
+def test_review_only_retry_that_succeeds_drops_the_earlier_reason(tmp_path):
+    """Review only: attempt 1 has no record, attempt 2 a success verdict. The
+    done episode keeps no failure reason, in the state or the statistics."""
+    c = live_config.Config()
+    c.service.workspace = str(tmp_path / "ws")
+    c.service.home = str(tmp_path / "home")
+    c.pipeline.cleanup = False
+    review_only(type("E", (), {"config": c})())
+    jsonio.write(
+        mirror.state_path(c, NAME),
+        {
+            "name": NAME,
+            "task_text": "put the eggplant on the plate",
+            "demos": {"demo_0000": {"state": "mirrored", "attempts": 0}},
+        },
+    )
+    success = {
+        "events": [{"valid": True}],
+        "outcome": "success",
+        "basis": {"valid_events": 1},
+        "spec": {"id": "generic-release", "version": 3},
+    }
+    probe = _ReviewOnlyWorker(c, records=[None, success])
+    assert probe.batch() is not None
+    row = mirror.load_state(c, NAME)["demos"]["demo_0000"]
+    assert row["attempts"] == 1 and row["reason"].startswith("no release-review")
+    assert probe.batch() is not None
+    row = mirror.load_state(c, NAME)["demos"]["demo_0000"]
+    assert row["state"] == "done" and row["verdict"]["outcome"] == "success"
+    assert row.get("reason") is None and row.get("verdict_reason") is None
+    record = probe.worker.stats_row(
+        "demo_0000", 3, row, [], first=False, frames=None, waking={}
+    )
+    assert record["result"]["state"] == "done"
+    assert record["result"]["reason"] is None
 
 
 def test_with_time_segments_on_a_missing_verdict_still_waits_for_them(tmp_path):

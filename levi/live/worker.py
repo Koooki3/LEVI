@@ -773,6 +773,10 @@ class Worker:
                     row["episode_index"] = index[demo]
                     if verdict is not None:
                         row["state"] = "annotating"
+                        # An earlier attempt's failure no longer describes
+                        # the episode (the statistics would report it).
+                        row.pop("reason", None)
+                        row.pop("verdict_reason", None)
                     else:
                         row["attempts"] = row.get("attempts", 0) + 1
                         row["reason"] = (
