@@ -89,7 +89,7 @@ uv run levi live stop                            # 只停自己的进程
 各表、各键、默认值和含义与英文版表格一致（`service`、`watch`、`fr3`、`gpu`、`vllm`、`provider`、`pipeline`、`resources`），见 [LIVE.md](LIVE.md#settings-livetoml)。要点：
 
 - `gpu.mode` 默认 `auto`：等于 `timeshare`（两者常驻 + 闸门）；`coexist` 和 `manual` 是手动选项。`gpu.busy_states` 默认 `["running"]`；`gpu.min_free_mib` 600、`gpu.policy_budget_mib` 8500 决定 vLLM 何时睡眠。
-- `pipeline.temporal` 默认 true（时间片段运行：粗标 + 精修）。设为 false 时不做时间片段，只由释放复核给每个片段判定；这要求 `pipeline.anchored = true`，并且复核规格没有 `episode.require_place`（例如 `generic-release.v3.json`），否则配置校验拒绝。见[双标签](#双标签操作员和-agent)。
+- `pipeline.temporal` 默认 true（时间片段运行：粗标 + 精修）。设为 false 时不做时间片段，只由释放复核给每个片段判定；这要求 `pipeline.anchored = true`，并且复核规格没有 `episode.require_place`（例如 `generic-release.v3.json` 或 `generic-final.v1.json`），否则配置校验拒绝。见[双标签](#双标签操作员和-agent)。
 - `pipeline.coarse_step_seconds` 0.5、`pipeline.refine` `always`：评测过的时间片段设置，长片段会放宽步长使帧数不超过 `max_images`。`pipeline.cleanup` true：丢弃已完成运行的冻结输入和证据。
 - `pipeline.auto_approve` 默认 **false**。`pipeline.keep_review_runs` 10：每个数据集保留冻结输入的开着的释放复核运行数（提交它需要输入），更旧的被取消并清理。`watch.stuck_s` 600：没有完成、也没有变化的片段超过这个时间算 `stuck`。`gpu.lead_s`/`lead_grace_s` 3/5：闸门在下一集开始前提前关闭。`service.gate_poll_s` 0.25。
 - `resources.report_keep` 默认 20：`live/reports/` 里保留的会话报告份数，写入新报告时删除最旧的。
@@ -167,6 +167,7 @@ uv run levi live stop                            # 只停自己的进程
 - `generic-release.v1.json`：锚定复核用的释放复核规格，**状态 `candidate`，未在任何任务上评估**。每次夹爪张开问一个问题：侧视 −2.5…+1.2 s、腕部 −1.5…+0.4 s（plates 复核用的那些帧），引用任务指令：是否夹着物体、物体是否落在指令指定的目的地、是否稳定不滑落。片段在至少 `pipeline.anchored_min_valid`（默认 1）次张开有效时判成功。它分不清需要两次放置的任务和一次放置的任务；这类任务设 `anchored_min_valid = 2`。它的准确率未知：信任判定前要先在开发数据上评估；每个判定都只能读作“自动、未审”。
 - `generic-release.v2.json`：同一个释放复核，判定还会看片段怎么结束（最后一次有效释放之后没有再抓，最后一个放置不是失败）；候选，不是默认；不要求任务只放一次（见其局限）。见[终态感知的判定](#终态感知的判定候选)。
 - `generic-release.v3.json`：去掉放置条件的第 2 版：至少 `min_valid` 次释放有效、并且最后一次有效释放之后夹爪没有再闭合，就判成功。它不读时间片段，所以能和 `pipeline.temporal = false`（只做释放复核）一起用。候选，不是默认；离线（一个任务，92 个片段）保住了 33 个成功中的 33 个，把 59 个失败中的 5 个判成成功（0.085，Wilson 95 % 0.037–0.184），第 2 版在同样的片段上是 59 个中 1 个。见[双标签](#双标签操作员和-agent)。
+- `generic-final.v1.json`：另一种问法，不是释放复核的新版本：每个片段只问一次，看录像最后几秒（指令说的那个物体现在在哪里、是否静止）。它不读夹爪通道和时间片段，所以能和 `pipeline.temporal = false` 一起用。候选，不是默认，**没有在任何数据上评估过**。见[最终状态判定](#最终状态判定候选)。
 
 时间片段运行使用评测过的配置（粗步 0.5 s、始终精修、lean 提示、`qwen38-27b-vllm-48k-lean` 配置同时两个请求），只用侧视相机；长片段会放宽步长，使帧数不超过模型的图像上限（LEVI 拒绝悄悄稀疏化）。
 
@@ -207,6 +208,39 @@ anchored_spec = "generic-release.v2.json"
 - 复核回答为未知时按“无效”处理（离线评估把它们当不确定输入；评估过的片段里没有这种情况）。
 - 夹爪通道按二值命令（开/合）读取，本机的 `robot_capture` 数据就是这样记录的。通道是测得宽度的数据集上，闭合帧来自宽度范围的穿越，会滞后于命令；夹着较宽的物体时，宽度可能一直高于闭合阈值，重新抓起可能检测不到。
 
+## 最终状态判定（候选）
+
+`generic-final.v1.json`（id `generic-final`，版本 1）按片段**怎么结束**来判定，不按夹爪张开的次数。释放规格（`generic-release.v1` 到 `v3`）在每次张开时问“夹着的物体有没有落到指令说的地方”，判定由这些张开推出（v3 再要求之后夹爪没有重新合上）。它们从不看最终画面，所以没人检查最后一次放置是否成功；片段在夹爪张开之前就结束时，也没有张开可判。最终状态规格反过来问，每个片段只问一次。
+
+**问什么。** 锚点是片段的最后一帧（`anchor.event = end`）。模型看到侧视相机在结尾前 3.0、2.0、1.2、0.6、0.2 和 0 s，腕部相机在结尾前 2.0、1.0、0.4 和 0 s（共 10 张图），问题里引用任务指令，答两个字段：
+
+- `object_state`：`resting_at_destination`（落在指令说的目的地上或里面，由目的地托着；手指可以还在它周围）、`held_over_destination`（在目的地上方，但仍挂在手指上）、`elsewhere`（桌面、别的物体、错的容器，或已经掉落）、`in_gripper`（挂在手指上，不在目的地）、`unclear`；
+- `stable`：`yes`、`no`（滑动、滚动、倾倒、掉落）或 `unclear`。
+
+措辞里没有任何任务专用的词：目的地就是指令说的地方。片段比 3 s 窗口短时，落在片段开头之前的偏移用第一帧代替（只有一帧的片段，每张图都是这一帧）；偏移会被夹到有效范围，不会报错。
+
+**规则**（`episode.rule = "final_state"`）。成功：物体静止地放在目的地上，且稳定。失败：任何明确的其他答案（被夹着、在夹爪里、在别处、不稳定）。**不确定**：有 `unclear` 答案，且没有明确的失败答案压过它。“不确定”沿用框架已有的含义：判定记为失败并标“不确定”，统计里算作失败、另外再算一次“不确定”，不会记为成功。所以 `elsewhere` 加 `stable = unclear` 是确定的失败，`resting_at_destination` 加 `stable = unclear` 是不确定的失败。规则只读模型的这两个答案：不读夹爪通道、不读闭合帧、不读时间片段、不读 `eval.*` 元数据、不读操作员标签。判定只有一个事件：`events` 为 1，成功时 `valid_events` 为 1、否则为 0，另有 `rule` 为 `final_state`、`min_valid` 为 1 和 `basis.final_reading`。和所有实时判定一样，它是自动、未审的，不写 `annotations/outcomes`，也不计入任何成功率。配合它时 `pipeline.anchored_min_valid` 必须保持 1（每个片段只问一次，更大的值永远满足不了），配置校验拒绝更大的值。
+
+**怎么启用**（设置在服务启动时读取，所以要重启实时服务；产品 LEVI 不受影响）：
+
+```toml
+[pipeline]
+temporal = false
+anchored_spec = "generic-final.v1.json"
+```
+
+`temporal = true` 时它也能跑，但时间片段白白占用模型时间，这个规格用不到它们。数据集状态里已有的判定不会重算。
+
+**什么时候用。** 评测客户端在操作员判定后立刻结束片段、录像因此比步数预算短、可能在夹爪张开之前就结束时：这种片段没有张开可看，释放复核会把它判成失败。它也是目前唯一看最终画面的实时规格。信任它的判定之前，先拿它和操作员标签的一致情况对比（见[双标签](#双标签操作员和-agent)），并且把每个判定都读作“自动、未审”。
+
+**已知局限。**
+
+- **没有在任何数据上测过准确率。** 问法和规则都没有检验过；释放规格的离线数字不能搬过来。
+- 它只看最后几秒。片段早先的错误放置、第二个出错的物体、或者半途停下但第一个物体已经到位，都看不到；指令需要几个物体、什么顺序，也不检查。对多物体的任务，它只能判结束时的场景。
+- 操作员在夹爪张开之前就判定：物体还挂在手指上时读作 `held_over_destination`，片段判失败，即使操作员的意思是“这次会成功”。物体已经落在目的地上、手指还在周围，算静止。模型分不分得清这两种，没有测过。
+- 结尾时两个相机都看不到目的地，读作 `unclear`，判定为不确定。
+- 录像最后几帧可能是策略在复位或退出；问题问的是物体在哪里，不是手臂在做什么，但退出的手臂可能在侧视里挡住物体。
+
 ## 双标签：操作员和 agent
 
 双标签评测给每个片段两个标签，并且互不混用：**操作员标签（真值）**是操作员自己判定的成功或失败；**agent 标签（自动、未审）**是释放复核的判定。在新片段上比较两者，可以测出自动标签有多可信。
@@ -227,7 +261,7 @@ anchored_min_valid = 1
 prewarm = true
 ```
 
-`temporal = false` 跳过时间片段：一个片段的模型时间约 80 % 花在时间片段上，而一次释放复核请求约为每次张开 2 秒。配置校验拒绝没有释放复核（`anchored = false`）的 `temporal = false`，也拒绝要读放置时间片段的规格（`episode.require_place`，即第 2 版）。默认仍是 `temporal = true` 加 `generic-release.v1.json`。
+`temporal = false` 跳过时间片段：一个片段的模型时间约 80 % 花在时间片段上，而一次释放复核请求约为每次张开 2 秒。配置校验拒绝没有释放复核（`anchored = false`）的 `temporal = false`，也拒绝要读放置时间片段的规格（`episode.require_place`，即第 2 版）。`generic-final.v1.json` 是另一个能这样运行的规格（见[最终状态判定](#最终状态判定候选)）。默认仍是 `temporal = true` 加 `generic-release.v1.json`。
 
 **启动顺序。** 1. `levi live start --prewarm`，等 `levi live status` 显示 vLLM `ready`（评测期间不允许冷启动模型，冷着启动的服务要等本轮结束才开始标注）。2. 策略服务器。3. 带 `--levi-mode dual` 的客户端。客户端连不上服务时会用红字说明，并退回手动运行（`s`/`f`），没有 agent 标签。
 
@@ -370,7 +404,7 @@ prewarm = true
 | `gate.vllm_wake_s`、`gate.vllm_cold_start_s` | 监督进程在启动 worker 之前 10 分钟内做的唤醒（约 0.75 秒）或冷启动的耗时。它记在做完的那个批次的第一个片段上；worker 没活可做、在等模型或等人、或失败时，会把它留给下一个 worker，超过 10 分钟的丢弃，所以不会记到几小时后的批次上。其余片段为 `null` |
 | `result.state`、`result.reason` | `done`、`failed` 或 `mirrored`（之后重试）；没做完时的原因 |
 | `result.segments`、`result.segment_labels` | 提交的时间片段数，以及按子任务 id 的计数 |
-| `result.verdict` | 自动释放复核的 `{outcome, events, valid_events, undecided}`，或 `null`；终态感知规则下的判定另有 `rule` 和 `place_outcome` |
+| `result.verdict` | 自动释放复核的 `{outcome, events, valid_events, undecided}`，或 `null`；终态感知规则下的判定另有 `rule` 和 `place_outcome`；最终状态规则（`final_state`）下另有 `rule` 和 `min_valid`，`basis` 里有 `final_reading`（`supported`、`contradicted` 或 `unknown`） |
 | `result.review` | `auto` 或 `human`（谁提交的时间片段） |
 | `result.spec` | `{guideline, release_review, release_review_version, sha256}`：用到的文件和它们的哈希；判定没有记录复核规格版本时为 null |
 | `result.provider`、`result.model` | 模型配置名和服务的模型 |

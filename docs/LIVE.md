@@ -125,7 +125,7 @@ A finished demo is hard-linked file by file into `<workspace>/captures/<name>/.p
 | `provider` | `name`, `prompt_style`, `requests_in_flight` | `live-qwen38`, `lean`, 2 | the model profile created and bound in the live workspace |
 | `pipeline` | `auto_approve` | **false** | the automatic approver |
 | | `coarse_step_seconds`, `refine` | 0.5, `always` | the evaluated temporal settings; the step widens for long episodes so frames fit `max_images` |
-| | `temporal` | true | false: no time segments; the release review alone labels each episode (needs `anchored = true` and a spec without `episode.require_place`, e.g. `generic-release.v3.json`); see [Dual labels](#dual-labels-operator-and-agent) |
+| | `temporal` | true | false: no time segments; the release review alone labels each episode (needs `anchored = true` and a spec without `episode.require_place`, e.g. `generic-release.v3.json` or `generic-final.v1.json`); see [Dual labels](#dual-labels-operator-and-agent) |
 | | `guideline`, `vocabulary`, `anchored`, `anchored_spec`, `anchored_min_valid` | generic v1 files, true, 1 | see "The generic configuration" |
 | | `human_recheck_s` | 30 | with `auto_approve` off, how often a waiting plan or draft is checked for a person's decision |
 | | `budget_seconds` | 86400 | the wall-time budget of each run the worker plans (never more than 86400); a run that spends it stops as `blocked` |
@@ -204,6 +204,7 @@ The evaluated tasks are not the ones LEVI was tuned on, so nothing is task-speci
 - `generic-release.v1.json`: the release-review spec for the anchored review, **status `candidate`, not evaluated on any task**. One question at every gripper opening with the side camera at −2.5…+1.2 s and the wrist camera at −1.5…+0.4 s (the frames of the plates review), quoting the task instruction: was an object held, did it land at the destination the instruction names, does it stay. The episode succeeds when at least `pipeline.anchored_min_valid` (default 1) openings are valid. It cannot tell a task that needs two placements from one; set `anchored_min_valid = 2` for such a task. Its accuracy is unknown: evaluate it on development data before trusting a verdict, and read every verdict as "automatic, unreviewed".
 - `generic-release.v2.json`: the same review with a verdict that also looks at how the episode ends (no grasp after the last valid release, last placement not a failure); a candidate, never the default; it does not need a task that places once (see its limits). See [Terminal-aware verdict](#terminal-aware-verdict-candidate).
 - `generic-release.v3.json`: version 2 without the place condition: success when at least `min_valid` releases are valid and the gripper does not close again after the last valid one. It reads no time segments, so it can run with `pipeline.temporal = false` (the release review alone). A candidate, never the default; offline (one task, 92 episodes) it kept 33 of 33 successes and called 5 of 59 failures a success (0.085, Wilson 95 % 0.037-0.184), against 1 of 59 for version 2. See [Dual labels](#dual-labels-operator-and-agent).
+- `generic-final.v1.json`: a different question, not a version of the release review: one question per episode on the last seconds of the recording (where is the object the instruction is about, does it stay still). It reads no gripper channel and no time segments, so it runs with `pipeline.temporal = false`. A candidate, never the default, **not evaluated on any data**. See [Final-state judgement](#final-state-judgement-candidate).
 
 The temporal run is the evaluated configuration (coarse 0.5 s, refinement always, lean prompt, profile `qwen38-27b-vllm-48k-lean` with two requests in flight) on the side camera, with the step widened for long episodes so the frames fit the model's image limit (LEVI refuses to thin silently).
 
@@ -244,6 +245,39 @@ It applies to the batches planned after the service restarts; verdicts already i
 - Unknown review answers count as not valid (the offline evaluation treated them as unknown inputs; no evaluated episode had one).
 - The gripper channel is read as a binary command (open/close), which is what a `robot_capture` dataset records here. On a dataset whose channel is a measured width, the closes come from crossings of its range and lag the command, and a wide object held in the gripper may keep the width above the closing threshold, so a new grasp can go undetected.
 
+## Final-state judgement (candidate)
+
+`generic-final.v1.json` (id `generic-final`, version 1) judges an episode by how it **ends**, not by its gripper openings. The release specs (`generic-release.v1` to `v3`) ask at each opening whether a held object landed where the instruction says, and the verdict follows from those openings (v3 adds that the gripper must not close again afterwards). They never look at the final picture, so nobody checks that the last placement worked, and an episode that ends before the gripper opens has no opening to judge. The final-state spec asks the other way round, once per episode.
+
+**The question.** The anchor is the episode's last frame (`anchor.event = end`). The model sees the side camera at 3.0, 2.0, 1.2, 0.6, 0.2 and 0 s before the end and the wrist camera at 2.0, 1.0, 0.4 and 0 s before the end (10 images), with the task instruction quoted, and answers two fields:
+
+- `object_state`: `resting_at_destination` (down on or in the place the instruction names as the destination, supported by it; the fingers may still be around it), `held_over_destination` (above the destination but hanging from the fingers), `elsewhere` (the table, another object, a wrong container, or fallen), `in_gripper` (hanging from the fingers away from the destination), or `unclear`;
+- `stable`: `yes`, `no` (sliding, rolling, tipping, falling) or `unclear`.
+
+The wording names no task: the destination is whatever the instruction says. An episode shorter than the 3 s window shows its first frame in place of the offsets that fall before it (a one-frame episode shows that frame in every image); the offsets are clamped, never an error.
+
+**The rule** (`episode.rule = "final_state"`). Success: the object rests at the destination and is stable. Failure: any definite other answer (held, in the gripper, elsewhere, or not stable). **Undecided**: an `unclear` answer that no definite failing answer outweighs. Undecided follows the framework's existing meaning: the verdict is recorded as a failure, marked undecided, counted by the statistics as a failure and separately as undecided, and never as a success. So `elsewhere` with `stable = unclear` is a certain failure, and `resting_at_destination` with `stable = unclear` is an undecided one. The rule reads nothing but the model's two answers: no gripper channel, no close frames, no time segments, no `eval.*` metadata, no operator label. The verdict has one event: `events` 1, `valid_events` 1 for a success and 0 otherwise, `rule` `final_state`, `min_valid` 1, and `basis.final_reading`. It is automatic and unreviewed like every live verdict, writes no `annotations/outcomes`, and is not counted into any success rate. `pipeline.anchored_min_valid` must stay 1 with it (one question per episode, so more cannot be met); validation refuses a larger value.
+
+**Turning it on** (the settings are read at start, so restart the live service; the product LEVI is not involved):
+
+```toml
+[pipeline]
+temporal = false
+anchored_spec = "generic-final.v1.json"
+```
+
+With `temporal = true` it also runs, but then the time segments cost the model time for nothing this spec uses. Verdicts already in a dataset's state are not recomputed.
+
+**When to use it.** For a run in which the evaluation client ends an episode as soon as the operator judges it, so the recording is shorter than the step budget and may end before the gripper opens: there the release review has no opening to look at and would call such an episode a failure. It is also the only live spec that looks at the final picture. Compare its agreement with the operator's label (see [Dual labels](#dual-labels-operator-and-agent)) before trusting any of its verdicts, and read each one as "automatic, unreviewed".
+
+**Known limits.**
+
+- **No accuracy has been measured on any data.** The question and the rule are untested; the release specs' offline numbers do not carry over.
+- It sees only the last seconds. A wrong placement earlier in the episode, a second object that went wrong, or an episode that stops half way with the first object in place cannot be seen, and the number or order of objects the instruction needs is not checked. For a task with several objects it can only call the scene as it ends.
+- An operator who judges before the gripper has opened: an object still hanging from the fingers is read as `held_over_destination` and the episode is a failure, even if the operator meant "this will be a success". An object already down on the destination with the fingers still around it counts as resting. Whether the model tells the two apart has not been measured.
+- A destination that neither camera shows at the end reads `unclear`, so the verdict is undecided.
+- The last frames of a recording can be a policy resetting or retreating; the question asks where the object is, not what the arm does, but a retreating arm may hide the object from the side camera.
+
 ## Dual labels: operator and agent
 
 A dual-label evaluation gives every episode two labels and keeps them apart: the **operator label (ground truth)**, the operator's own success or failure, and the **agent label (automatic, unreviewed)**, the release review's verdict. Comparing them on new episodes measures how far the automatic label can be trusted.
@@ -264,7 +298,7 @@ anchored_min_valid = 1
 prewarm = true
 ```
 
-`temporal = false` skips the time segments: about 80 % of an episode's model time goes to them, while a release-review request is about 2 s per gripper opening. Validation refuses `temporal = false` without the review (`anchored = false`) or with a spec that reads place time segments (`episode.require_place`, version 2). The default stays `temporal = true` with `generic-release.v1.json`.
+`temporal = false` skips the time segments: about 80 % of an episode's model time goes to them, while a release-review request is about 2 s per gripper opening. Validation refuses `temporal = false` without the review (`anchored = false`) or with a spec that reads place time segments (`episode.require_place`, version 2). `generic-final.v1.json` is the other spec that runs this way (see [Final-state judgement](#final-state-judgement-candidate)). The default stays `temporal = true` with `generic-release.v1.json`.
 
 **Start order.** 1. `levi live start --prewarm` and wait until `levi live status` shows vLLM `ready` (no model cold start is allowed during an evaluation, so a service started cold labels only after the run ends). 2. The policy server. 3. The client with `--levi-mode dual`. If the client cannot reach the service, it says so in red and falls back to a manual run (`s`/`f`), with no agent label.
 
@@ -407,7 +441,7 @@ A person can take an episode out of a live dataset from the live page (a mishap,
 | `gate.vllm_wake_s`, `gate.vllm_cold_start_s` | the wake (about 0.75 s) or cold start the supervisor did in the 10 minutes before it started the worker. It is recorded on the first demo of the batch that finishes; a worker that finds nothing to do, waits for the model or a person, or fails passes it on to the next worker, and one older than 10 minutes is dropped, so it never lands on a batch hours later. Other demos: `null` |
 | `result.state`, `result.reason` | `done`, `failed` or `mirrored` (to be tried again); why, when not done |
 | `result.segments`, `result.segment_labels` | time segments committed, and their count per subtask id |
-| `result.verdict` | `{outcome, events, valid_events, undecided}` of the automatic release review, or `null`; a verdict made under the terminal-aware rule adds `rule` and `place_outcome` |
+| `result.verdict` | `{outcome, events, valid_events, undecided}` of the automatic release review, or `null`; a verdict made under the terminal-aware rule adds `rule` and `place_outcome`; under the final-state rule (`final_state`) it adds `rule` and `min_valid`, and its `basis` names `final_reading` (`supported`, `contradicted` or `unknown`) |
 | `result.review` | `auto` or `human` (who committed the segments) |
 | `result.spec` | `{guideline, release_review, release_review_version, sha256}`: the files used and their hashes; the review's spec version is null when the verdict did not record it |
 | `result.provider`, `result.model` | the provider profile name and the served model |

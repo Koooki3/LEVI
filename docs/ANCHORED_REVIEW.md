@@ -57,13 +57,13 @@ A spec is JSON (`levi/agent/anchored_specs/<id>.json` for the built-in ones):
 | `status` | `stable` (the default, left out of the frozen form) or `candidate`: still being validated, listed and plannable when named, never a default. |
 | `title` | Optional display name per language, e.g. `{"en": "Plates release-review rules", "zh": "plates 释放复核规则"}`. The viewer and the outcome proposal show it; the id is shown only when a spec has no title. |
 | `aliases` | Built-in specs only: former ids that still resolve to this spec. |
-| `anchor` | `{"signal": "gripper", "event": "open" \| "close"}`, optionally `column` (a float vector column), `dimension` (its dimension name) and `open_level` (`high`, the default, or `low` for a channel that records closure). |
+| `anchor` | `{"signal": "gripper", "event": "open" \| "close" \| "end"}`, optionally `column` (a float vector column), `dimension` (its dimension name) and `open_level` (`high`, the default, or `low` for a channel that records closure). The event `end` is the episode's last frame: exactly one event, no gripper channel read, `column`, `dimension` and `open_level` unused; it goes with `episode.rule` `final_state` and only with it. |
 | `views` | Per camera: a `role`, the `camera` key and `offsets` in frames or `offsets_seconds` (converted with the dataset's fps), counted from the anchor event. Offsets are clamped to the episode. The images are sent in this order, native size, PNG. The spec's own views are always at the anchor; `"at": "start"` / `"at": "end"` (offsets from the episode's first / last frame) belong to the start check's views, and a veto's own views may use them too. |
 | `question` | The whole instruction; no system prompt, skills or evidence ledger are added. |
 | `fields` | Ordered answer fields, each with its `enum`. The server decodes them in this order, all required. |
 | `valid_when` | Conditions `{"field", "in": [...]}` or `{"field", "not_in": [...]}`; an event is valid when all hold. |
 | `unknown_values` | Answers that mean "cannot tell" (default `["unclear"]`). |
-| `episode` | `{"label_field", "require_labels": [...]}`: success when every label has a valid event; or `{"min_valid": n}`, optionally with `"rule": "last_valid_not_regrasped"` (also needs the gripper not to close again after the last valid event; `basis` gets `rule`, `last_valid_frame`, `closes_after_last_valid`, `require_place`, and the record gets `closes`, the frames where the gripper closes) and `"require_place": true` (the live service also requires the episode's last `place` time segment not to be a failure or unknown; the review cannot see time segments). The default `"rule": "any_valid"` is left out of the frozen form. See [Live annotation service](LIVE.md#terminal-aware-verdict-candidate). |
+| `episode` | `{"label_field", "require_labels": [...]}`: success when every label has a valid event; or `{"min_valid": n}`, optionally with `"rule": "last_valid_not_regrasped"` (also needs the gripper not to close again after the last valid event; `basis` gets `rule`, `last_valid_frame`, `closes_after_last_valid`, `require_place`, and the record gets `closes`, the frames where the gripper closes) and `"require_place": true` (the live service also requires the episode's last `place` time segment not to be a failure or unknown; the review cannot see time segments). The default `"rule": "any_valid"` is left out of the frozen form. `"rule": "final_state"` (with `anchor.event` `end`; no `min_valid` above 1, no `require_place`) judges the one end-of-episode event: success when it is valid, failure when it is contradicted, and a failure that is undecided when it is unknown (`basis` gets `rule`, `valid_events`, `min_valid` and `final_reading`: `supported`, `contradicted` or `unknown`, null with no frame to read; `anchored.undecided` is true when it is unknown or null); the record has no `closes`. The live service's `generic-final.v1.json` is such a spec; see [Final-state judgement](LIVE.md#final-state-judgement-candidate). See [Live annotation service](LIVE.md#terminal-aware-verdict-candidate). |
 | `max_output_tokens` | The answer's allowance (default 200). |
 | `start` | Optional [start check](#start-check-and-vetoes): one question per episode on frames at its start, whose answer can waive required labels. |
 | `vetoes` | Optional [vetoes](#start-check-and-vetoes): rules any event can break, each read from the event's answer or asked as its own question. |
@@ -130,7 +130,8 @@ Like the evidence [signals](AGENTS.md#evidence-and-refinement), anchors are read
 | Raw robot capture (browsed through its view) | The view's gripper dimension is the per-frame gripper command (`open=1`, `close=0`, from `gripper_state.csv` `last_gripper_command`), so anchors are the command's transitions to the frame. On the frozen test set (60 plates episodes) they equal the transitions of the CSV itself in all 60 episodes. |
 | LeRobot dataset with a binary gripper command | The command's transitions. With `action_mode: next_state` conversions, `action` leads the state by one frame; the default (state) matches the capture. |
 | LeRobot dataset with a measured aperture | Crossings of 35 % / 65 % of the range. They lag the command by the gripper's travel; set offsets accordingly, or anchor on the command column (`anchor.column: "action"`). |
-| No gripper-named dimension | Not supported: the run blocks on the first episode and names the missing channel. Name one with `anchor.column` / `anchor.dimension`. |
+| Any dataset, anchor `end` | The episode's last frame, one event; nothing is read from the gripper, so no gripper dimension is needed. Offsets count back from it and are clamped to the episode, so an episode shorter than the offsets shows its first frame in their place. |
+| No gripper-named dimension (anchor `open` or `close`) | Not supported: the run blocks on the first episode and names the missing channel. Name one with `anchor.column` / `anchor.dimension`. |
 
 ## What a run keeps
 
@@ -156,7 +157,7 @@ The candidate rule set 3 (`plates-release-3`) was checked on development data on
 
 ## Limits
 
-- One anchor signal: gripper crossings. Other events (contact, a button, a height turn) are not yet anchors.
+- One anchor signal: gripper crossings. Other events (contact, a button, a height turn) are not yet anchors, apart from the episode's end (`end`), which judges only the last frames and sees nothing of the steps before them.
 - Offsets are fixed per spec; a gripper that moves much faster or slower than the one a spec was written for needs its own offsets.
 - The episode rule is a set cover or a count, narrowed by a start check and broken by vetoes. Order constraints (this before that) are not expressed, and a later event cannot undo an earlier `episode` veto (use `effect: event` for a fault a later event can correct).
 - Greedy answers are deterministic within one server session; a restarted server can change a few answers.
