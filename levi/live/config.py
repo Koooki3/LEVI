@@ -260,6 +260,9 @@ class Pipeline:
     auto_approve: bool = False
     coarse_step_seconds: float = 0.5
     refine: str = "always"
+    # Time segments (the temporal run: coarse + refine). false: the release review alone
+    # labels each episode (needs anchored = true and a spec without episode.require_place).
+    temporal: bool = True
     # The generic subtask vocabulary and guideline shipped with LEVI.
     guideline: str = "generic-guideline.v1.md"
     vocabulary: str = "generic-vocabulary.v1.json"
@@ -391,6 +394,8 @@ class Config:
             problems.append("watch.backlog must be skip or process")
         if p.refine not in ("always", "auto"):
             problems.append("pipeline.refine must be always or auto")
+        if not p.temporal:
+            problems.extend(_review_only_problems(p))
         if s.ui_port == s.core_port:
             problems.append("service.ui_port and service.core_port must differ")
         for name, port in (("ui_port", s.ui_port), ("core_port", s.core_port)):
@@ -437,6 +442,38 @@ class Config:
         if problems:
             raise ValueError("Invalid live configuration: " + "; ".join(problems))
         return self
+
+
+def _review_only_problems(p) -> list:
+    """Why ``pipeline.temporal = false`` cannot run with these settings: the
+    release review must be on and its spec must not read place time segments."""
+    if not p.anchored:
+        return [
+            (
+                "pipeline.temporal = false needs pipeline.anchored = true "
+                "(nothing would label the episodes)"
+            )
+        ]
+    import json
+
+    from levi.live import generic
+
+    name = p.anchored_spec
+    try:
+        spec = json.loads(generic.text(name))
+    except (OSError, ValueError) as exc:
+        return [f"pipeline.anchored_spec {name!r} cannot be read: {exc}"]
+    if not isinstance(spec, dict):
+        return [f"pipeline.anchored_spec {name!r} cannot be read: not a JSON object"]
+    if (spec.get("episode") or {}).get("require_place"):
+        return [
+            (
+                f"pipeline.temporal = false cannot use {name}: its "
+                "episode.require_place reads the place time segments; use "
+                "generic-release.v3.json"
+            )
+        ]
+    return []
 
 
 def resolve_path(value) -> Path:

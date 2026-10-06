@@ -439,3 +439,37 @@ def test_backfill_keeps_a_removed_episode_marked_and_handles_root_marks(env):  #
     names = {i["dataset"] for i in backfill.plan(e.config)}
     assert names == {NAME, marked}
     assert {i["dataset"] for i in backfill.plan(e.config, marked)} == {marked}
+
+
+# --- review only ---------------------------------------------
+
+
+def test_settings_name_whether_time_segments_run():
+    assert "temporal" in report.SETTINGS["pipeline"]
+    c = live_config.Config()
+    assert report.settings(c)["pipeline"]["temporal"] is True
+    c.pipeline.temporal = False
+    assert report.settings(c)["pipeline"]["temporal"] is False
+
+
+def test_a_review_only_report_keeps_its_spec_block(tmp_path):
+    c = synthetic(tmp_path)
+    session_rows(c, "s1", 1000.0, n=2)
+    for row in stats.read(c.live_dir):
+        row["result"]["spec"] = {
+            "guideline": None,
+            "release_review": "generic-release",
+            "release_review_version": 3,
+            "sha256": {"generic-release.v3.json": "0123456789abcdef0123"},
+        }
+        row["at"] += 1
+        stats.record(c.live_dir, row)
+    built = report.build(c, "g__t", "s1", now=2000.0)
+    assert built["settings"]["spec"] == {
+        "guideline": None,
+        "release_review": "generic-release",
+        "files": {"generic-release.v3.json": "0123456789ab"},
+    }
+    md = report.render(built)
+    assert "spec.guideline | -" in md
+    assert "spec.sha256 generic-release.v3.json | 0123456789ab" in md

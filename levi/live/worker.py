@@ -15,7 +15,8 @@ The pipeline for a batch of finished demos of one task:
    raw-capture path); map demos to episode indices *from the view*, never from
    memory, because a view rebuild can renumber episodes;
 3. leave out demos that already carry a person's annotations;
-4. **temporal run** (subtask segments and per-segment outcomes) with the
+4. **temporal run** (subtask segments and per-segment outcomes; skipped with
+   ``pipeline.temporal = false``, when the release review alone labels) with the
    generic guideline quoting the task instruction: plan, approve, execute,
    validate, approve, commit -- every human gate taken by the audited
    automatic approver (auto.py), or left for a person when it is off;
@@ -76,12 +77,15 @@ def model_use(events, episode) -> dict:
     return use
 
 
-def episode_line(demo, episode, size, stages, row, gated) -> str:
+def episode_line(demo, episode, size, stages, row, gated, temporal=True) -> str:
     """One readable, greppable line for a labelled demo (``episode demo=...``).
 
     ``stages`` is ``{name: (wall_s, use)}``: the stage's wall clock (shared by
     the batch) and this episode's model use in it; ``gated`` is ``(count,
-    seconds)`` the batch spent standing down for the policy server."""
+    seconds)`` the batch spent standing down for the policy server.
+    ``temporal`` false (``pipeline.temporal``: the release review alone)
+    leaves out the time-segment count."""
+    segments_on = temporal
     parts = [f"episode demo={demo} ep={episode} batch={size}"]
     for name, (wall, use) in stages.items():
         parts.append(
@@ -90,7 +94,8 @@ def episode_line(demo, episode, size, stages, row, gated) -> str:
         )
     temporal = row.get("temporal") or {}
     verdict = row.get("verdict")
-    parts.append(f"segments={temporal.get('segments', 0)}")
+    if segments_on:
+        parts.append(f"segments={temporal.get('segments', 0)}")
     if verdict:
         parts.append(
             f"verdict={verdict.get('outcome')} valid_events={verdict.get('valid_events')}"
@@ -289,7 +294,9 @@ class Worker:
                 entry = views.request(capture, options)
         self.entry = entry
         self.repo_id = entry["id"]
-        self.ensure_vocabulary()
+        if self.config.pipeline.temporal:
+            # Review only writes no annotations: no vocabulary either.
+            self.ensure_vocabulary()
         return entry
 
     @staticmethod
@@ -750,6 +757,8 @@ class Worker:
                     {k: basis[k] for k in VERDICT_RULE_KEYS if k in basis}
                 )
 
+        review_only = not p.temporal
+
         def change_state(value):
             for demo, verdict in results.items():
                 row = value["demos"].setdefault(demo, {})
@@ -758,6 +767,17 @@ class Worker:
                     row["verdict_reason"] = (
                         "no anchored record (episode set aside or no gripper openings)"
                     )
+                if review_only:
+                    # Without a temporal run the review is the episode's only
+                    # label: it maps the episode and counts the attempt.
+                    row["episode_index"] = index[demo]
+                    if verdict is not None:
+                        row["state"] = "annotating"
+                    else:
+                        row["attempts"] = row.get("attempts", 0) + 1
+                        row["reason"] = (
+                            "no release-review verdict: " + row["verdict_reason"]
+                        )[:300]
             return value
 
         self.update(change_state)
@@ -817,7 +837,13 @@ class Worker:
                     stages[stage] = (wall, use)
                 self.log(
                     episode_line(
-                        demo, episode, len(batch["demos"]), stages, row, self.gated
+                        demo,
+                        episode,
+                        len(batch["demos"]),
+                        stages,
+                        row,
+                        self.gated,
+                        temporal=self.config.pipeline.temporal,
                     )
                 )
             with contextlib.suppress(Exception):
@@ -951,7 +977,7 @@ class Worker:
                 else None,
                 "review": temporal.get("review") or verdict.get("review"),
                 "spec": {
-                    "guideline": p.guideline,
+                    "guideline": p.guideline if p.temporal else None,
                     "release_review": verdict.get("spec") or p.anchored_spec
                     if p.anchored
                     else None,
@@ -965,12 +991,13 @@ class Worker:
 
     def finish(self, batch, index=None):
         now = time.time()
+        review_only = not self.config.pipeline.temporal
 
         def change_state(value):
             for demo in batch["demos"]:
                 row = value["demos"].get(demo)
                 if row and row.get("state") in ("mirrored", "annotating"):
-                    if row.get("temporal"):
+                    if row.get("temporal") or (review_only and row.get("verdict")):
                         row["state"] = "done"
                     elif row.get("attempts", 0) >= self.config.pipeline.max_attempts:
                         row["state"] = "failed"
@@ -1072,7 +1099,10 @@ class Worker:
         self.walls = dict(batch.get("walls") or {})
         self.gated = list(batch.get("gated") or [0, 0.0])
         if batch["demos"]:
-            self.timed(batch, "temporal", lambda: self.temporal(batch, index, lengths))
+            if self.config.pipeline.temporal:
+                self.timed(
+                    batch, "temporal", lambda: self.temporal(batch, index, lengths)
+                )
             if self.config.pipeline.anchored:
                 self.timed(batch, "review", lambda: self.anchored(batch, index))
         self.finish(batch, index)
@@ -1153,7 +1183,10 @@ class Worker:
                         + json.dumps(excluded.get(demo))[:200],
                     )
                 elif (
-                    index[demo] not in ours
+                    # Review only writes no annotations: a person's time
+                    # segments are never written over, so it judges these too.
+                    self.config.pipeline.temporal
+                    and index[demo] not in ours
                     and self.human_annotated(index[demo])
                     and not row.get("temporal")
                 ):

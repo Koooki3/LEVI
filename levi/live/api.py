@@ -360,6 +360,7 @@ def dataset_view(name: str):
         "last_error": state.get("last_error"),
         "review": "auto",
         "evaluated": False,
+        "pipeline": {"temporal": config.pipeline.temporal},
     }
 
 

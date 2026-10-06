@@ -847,3 +847,226 @@ def test_a_demo_without_committed_time_segments_is_judged_on_the_gripper_alone()
         worker.place_of({"temporal": {"changeset": "gone"}, "episode_index": 4}, 4)
         == "missing"
     )
+
+
+# --- review only (pipeline.temporal = false) and the operator label ---------------
+
+
+def review_only(e):
+    e.config.pipeline.temporal = False
+    e.config.pipeline.anchored_spec = "generic-release.v3.json"
+    e.config.validate()
+
+
+def anchored_runs(e):
+    return [r for r in e.records("runs") if r["context"]["workflow"].get("anchored")]
+
+
+def temporal_runs(e):
+    return [
+        r for r in e.records("runs") if not r["context"]["workflow"].get("anchored")
+    ]
+
+
+def test_review_only_labels_without_time_segments(env):
+    from levi.live import api, stats
+
+    frames = 30
+    e = env()
+    review_only(e)
+    e.rollouts.write(0)  # released at 18, closed again at 24
+    rewrite_gripper(e, 1, ["open"] * 6 + ["close"] * 12 + ["open"] * (frames - 18))
+    e.run()
+    assert temporal_runs(e) == [] and len(anchored_runs(e)) == 1
+    state = e.state()
+    for demo, episode in (("demo_0000", 0), ("demo_0001", 1)):
+        row = state["demos"][demo]
+        assert row["state"] == "done" and row["episode_index"] == episode
+        assert "temporal" not in row and row["verdict"]["spec_version"] == 3
+    assert state["demos"]["demo_0001"]["verdict"]["outcome"] == "success"
+    assert state["demos"]["demo_0001"]["verdict"]["undecided"] is False
+    # No vocabulary, no annotation, no outcome label: nothing was committed.
+    outputs = e.ws / "outputs"
+    assert not list(outputs.rglob("vocabulary.json"))
+    assert not [p for p in outputs.rglob("episode_*.json") if "annotations" in p.parts]
+    assert not list(e.ws.rglob("outcomes"))
+    assert not [c for c in e.records("changes") if c["status"] == "committed"]
+    # The statistics say what ran: no segments, no guideline, version 3.
+    rows = {r["demo"]: r for r in stats.read(e.ws / "live")}
+    result = rows["demo_0001"]["result"]
+    assert result["segments"] is None and result["segment_labels"] is None
+    assert result["spec"]["guideline"] is None
+    assert result["spec"]["release_review"] == "generic-release"
+    assert result["spec"]["release_review_version"] == 3
+    assert set(result["spec"]["sha256"]) == {"generic-release.v3.json"}
+    assert rows["demo_0001"]["timeline"]["to_commit_s"] is None
+    assert rows["demo_0001"]["timeline"]["to_verdict_s"] is not None
+    # The log line leaves out the segment count.
+    log = (e.ws / "live/logs/worker.log").read_text()
+    lines = [x for x in log.splitlines() if "episode demo=demo_0001" in x]
+    assert lines and "segments=" not in lines[-1] and "verdict=success" in lines[-1]
+    # A second pass does no work: nothing loops back to "mirrored".
+    calls = len(e.fake.calls)
+    e.run()
+    assert len(e.fake.calls) == calls
+    page = api._demo_row("demo_0001", e.state()["demos"]["demo_0001"])
+    assert page["segments"] is None and page["verdict"]["outcome"] == "success"
+
+
+def test_review_only_regrasp_is_a_failure(env):
+    """Version 3 is version 2's gripper rule without the place condition: a
+    release followed by a grasp is a failure, and nothing reads a place
+    time segment."""
+    e = env()
+    review_only(e)
+    e.rollouts.write(0)  # released at 18, closed again at 24
+    e.run()
+    verdict = e.state()["demos"]["demo_0000"]["verdict"]
+    assert verdict["outcome"] == "failure" and verdict["undecided"] is False
+    assert verdict["rule"] == "last_valid_not_regrasped"
+    assert verdict["closes_after_last_valid"] == 1 and verdict["valid_events"] == 1
+    assert "place_outcome" not in verdict
+    assert verdict["basis"].get("require_place") in (None, False)
+    assert "missing_inputs" not in verdict["basis"]
+    (record,) = e.records("anchored")
+    assert record["closes"] == [6, 24] and record["spec"]["version"] == 3
+
+
+def test_review_only_judges_an_episode_a_person_annotated(env):
+    """The review writes no annotation, so a person's time segments are never
+    written over: their episode is judged like the others, and their file is
+    left as it was."""
+    e = env()
+    review_only(e)
+    e.rollouts.write(0)
+    e.rollouts.write(1)
+    human = [
+        {
+            "role": "user",
+            "content": "my label",
+            "style": "subtask",
+            "timestamp": 0.5,
+            "to": 1.5,
+        }
+    ]
+    folder = e.ws / f"outputs/LEVI/workbench/annotations/{NAME}"
+    folder.mkdir(parents=True)
+    path = folder / "episode_000001.json"
+    path.write_text(json.dumps({"episode_index": 1, "atoms": human}))
+    before = path.read_bytes()
+    e.run()
+    state = e.state()
+    assert {d: r["state"] for d, r in state["demos"].items()} == {
+        "demo_0000": "done",
+        "demo_0001": "done",
+    }
+    assert state["demos"]["demo_0001"]["verdict"]["outcome"] == "failure"
+    assert path.read_bytes() == before
+    assert not (folder / "vocabulary.json").exists()
+
+
+class _ReviewOnlyWorker:
+    """``Worker.anchored`` and ``Worker.finish`` against a real state file, with
+    the store and the model replaced: the review run 'ends' and has no record
+    for the episode (``anchored.get`` raises KeyError)."""
+
+    def __init__(self, config):
+        from levi.live.worker import Worker
+
+        self.worker = Worker.__new__(Worker)
+        w = self.worker
+        w.config, w.name = config, NAME
+        w.progress_path = config.live_dir / "worker.json"
+        w.detail, w._beat, w.stopping = {}, 0.0, False
+        w.repo_id, w.view, w.walls, w.gated, w.lengths = "local/x", None, {}, [0, 0], {}
+        w.provider_spec = {"name": "fake"}
+        w.context = lambda *a: {"fake": True}
+        w.plan = lambda context: "run-1"
+        w.drive = lambda run_id, what: {"id": run_id, "status": "waiting_for_review"}
+        w.run_state = lambda run_id: {"id": run_id, "status": "waiting_for_review"}
+
+        def call(name, arguments, key=None, principal=None):
+            if name == "anchored.get":
+                raise KeyError(arguments["episode"])
+            raise AssertionError(name)
+
+        w.call = call
+
+    def batch(self):
+        state = mirror.load_state(self.worker.config, NAME)
+        demos = mirror.waiting_demos(state, self.worker.config.pipeline.max_attempts)
+        if not demos:
+            return None
+        batch = {"demos": demos, "temporal": {}, "anchored": None, "done": []}
+        index = {d: 3 for d in demos}
+        self.worker.anchored(batch, index)
+        self.worker.finish(batch, index)
+        return batch
+
+
+def test_review_only_missing_verdict_retries_then_fails(tmp_path):
+    c = live_config.Config()
+    c.service.workspace = str(tmp_path / "ws")
+    c.service.home = str(tmp_path / "home")
+    c.pipeline.cleanup = False
+    c.pipeline.max_attempts = 2
+    review_only(type("E", (), {"config": c})())
+    jsonio.write(
+        mirror.state_path(c, NAME),
+        {
+            "name": NAME,
+            "task_text": "put the eggplant on the plate",
+            "demos": {"demo_0000": {"state": "mirrored", "attempts": 0}},
+        },
+    )
+    probe = _ReviewOnlyWorker(c)
+    batches = 0
+    while probe.batch() is not None:
+        batches += 1
+        assert batches <= c.pipeline.max_attempts, "the batch would loop forever"
+    row = mirror.load_state(c, NAME)["demos"]["demo_0000"]
+    assert batches == 2
+    assert row["state"] == "failed" and row["attempts"] == 2
+    assert row["episode_index"] == 3 and row["verdict"] is None
+    assert row["reason"].startswith("no release-review verdict: ")
+    # Nothing is left to label: the worker's next batch is empty (NOTHING).
+    assert mirror.waiting_demos(mirror.load_state(c, NAME), 2) == []
+
+
+def test_with_time_segments_on_a_missing_verdict_still_waits_for_them(tmp_path):
+    """The default pipeline: a missing review verdict does not count an attempt
+    (the temporal run decides), exactly as before."""
+    c = live_config.Config()
+    c.service.workspace = str(tmp_path / "ws")
+    c.service.home = str(tmp_path / "home")
+    c.pipeline.cleanup = False
+    jsonio.write(
+        mirror.state_path(c, NAME),
+        {
+            "name": NAME,
+            "task_text": "x",
+            "demos": {"demo_0000": {"state": "mirrored", "attempts": 0}},
+        },
+    )
+    _ReviewOnlyWorker(c).batch()
+    row = mirror.load_state(c, NAME)["demos"]["demo_0000"]
+    assert row["state"] == "mirrored" and row["attempts"] == 0
+    assert "episode_index" not in row and row["verdict"] is None
+
+
+def test_the_default_pipeline_still_makes_a_temporal_run(env):
+    from levi.live import generic
+
+    e = env()
+    assert e.config.pipeline.temporal is True
+    e.rollouts.write(0)
+    e.run()
+    assert len(temporal_runs(e)) >= 1 and len(anchored_runs(e)) == 1
+    assert e.state()["demos"]["demo_0000"]["temporal"]["segments"] == 5
+    # The default configuration's texts and their hashes, as before.
+    assert generic.manifest(live_config.Config()) == {
+        "generic-guideline.v1.md": "582af9bd27deeb5d59be9c9e212a546ef819f63febbb671672419768ec039fc9",
+        "generic-vocabulary.v1.json": "a47a7d1e315e1dc14f36e9f072231acc58200fd226eb6179b8d91b05fe58e548",
+        "generic-definitions.v1.json": "e846f31f1c19201677e0e324ace425a5dfcd3745eab9caa9559408fe9fce7f66",
+        "generic-release.v1.json": "b111653582dca15a9c8f652810af8c94ef336eb95ebb5f07d77f9437cd0abc30",
+    }

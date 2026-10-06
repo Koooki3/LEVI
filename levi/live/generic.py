@@ -76,7 +76,10 @@ def anchored_spec(
 def manifest(config) -> dict:
     """Which texts a configuration uses, with their hashes (for records)."""
     p = config.pipeline
-    files = [p.guideline, p.vocabulary, "generic-definitions.v1.json"]
+    # Review only (``pipeline.temporal = false``) uses no time-segment texts.
+    files = (
+        [p.guideline, p.vocabulary, "generic-definitions.v1.json"] if p.temporal else []
+    )
     if p.anchored:
         files.append(p.anchored_spec)
     return {name: sha256(name) for name in files}

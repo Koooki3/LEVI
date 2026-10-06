@@ -54,6 +54,7 @@ def test_the_rendered_file_reads_back_as_the_same_configuration(tmp_path):
         ("[gpu]\npolicy_ports = [5000]\n", "5000"),
         ("[watch]\nbacklog = 'maybe'\n", "backlog"),
         ("[pipeline]\nauto_approve = 'yes'\n", "must be bool"),
+        ("[pipeline]\ntemporal = 'no'\n", "must be bool"),
         ("[nothing]\na = 1\n", "Unknown table"),
     ],
 )
@@ -69,6 +70,85 @@ def test_the_approver_is_off_by_default_and_ports_avoid_the_robot_and_the_produc
     assert c.pipeline.auto_approve is False
     assert (c.service.ui_port, c.service.core_port) == (7880, 7881)
     assert c.gpu.mode == "auto" and c.effective_gpu_mode() == "timeshare"
+
+
+# --- review only (pipeline.temporal) -----------------------------------------------
+
+
+def test_time_segments_are_on_by_default_and_the_file_says_so(tmp_path):
+    c = live_config.Config()
+    assert c.pipeline.temporal is True
+    assert "temporal = true" in live_config.render(c)
+    c.pipeline.temporal = False
+    c.pipeline.anchored_spec = "generic-release.v3.json"
+    path = tmp_path / "live.toml"
+    path.write_text(live_config.render(c))
+    back = live_config.load(path)
+    assert back.pipeline.temporal is False
+    assert back.pipeline.anchored_spec == "generic-release.v3.json"
+    assert back == live_config.Config(
+        path=str(path),
+        pipeline=live_config.Pipeline(
+            temporal=False, anchored_spec="generic-release.v3.json"
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "toml,message",
+    [
+        ("temporal = false\nanchored = false\n", "needs pipeline.anchored = true"),
+        (
+            "temporal = false\nanchored_spec = 'generic-release.v2.json'\n",
+            "cannot use generic-release.v2.json: its episode.require_place",
+        ),
+        (
+            "temporal = false\nanchored_spec = 'generic-release.v9.json'\n",
+            "'generic-release.v9.json' cannot be read",
+        ),
+        (
+            "temporal = false\nanchored_spec = '../config.py'\n",
+            "cannot be read",
+        ),
+    ],
+)
+def test_review_only_needs_a_review_that_reads_no_time_segments(
+    tmp_path, toml, message
+):
+    path = tmp_path / "live.toml"
+    path.write_text("[pipeline]\n" + toml)
+    with pytest.raises(ValueError, match=message):
+        live_config.load(path)
+
+
+@pytest.mark.parametrize(
+    "toml",
+    [
+        "temporal = false\nanchored_spec = 'generic-release.v3.json'\n",
+        "temporal = false\n",  # version 1, the default: no place condition
+        "anchored_spec = 'generic-release.v2.json'\n",  # on: unchanged
+        "anchored = false\n",  # on: unchanged
+    ],
+)
+def test_review_only_settings_that_can_run(tmp_path, toml):
+    path = tmp_path / "live.toml"
+    path.write_text("[pipeline]\n" + toml)
+    live_config.load(path)
+
+
+def test_the_status_says_what_each_batch_runs(tmp_path):
+    c = cfg(tmp_path)
+    status = controller.Controller(c, log=lambda *a: None).status()
+    assert status["pipeline"] == {
+        "temporal": True,
+        "anchored": True,
+        "anchored_spec": "generic-release.v1.json",
+    }
+    c.pipeline.temporal = False
+    c.pipeline.anchored_spec = "generic-release.v3.json"
+    status = controller.Controller(c, log=lambda *a: None).status()
+    assert status["pipeline"]["temporal"] is False
+    assert status["pipeline"]["anchored_spec"] == "generic-release.v3.json"
 
 
 # --- the robot side's files ---------------------------------------------------------

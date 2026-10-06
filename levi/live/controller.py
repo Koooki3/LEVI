@@ -1377,6 +1377,13 @@ class Controller:
             "workspace": str(c.workspace),
             "config": c.path,
             "auto_approve": c.pipeline.auto_approve,
+            # What each batch runs: time segments (off: the release review
+            # alone labels each episode) and the release review's spec.
+            "pipeline": {
+                "temporal": c.pipeline.temporal,
+                "anchored": c.pipeline.anchored,
+                "anchored_spec": c.pipeline.anchored_spec,
+            },
             # Absolute: the client checks that one covers its --rollout-root.
             "watch_roots": [str(Path(r).expanduser().resolve()) for r in c.watch.roots],
             "gpu": {

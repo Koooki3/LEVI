@@ -36,6 +36,7 @@ SETTINGS = {
         "auto_approve",
         "coarse_step_seconds",
         "refine",
+        "temporal",
         "guideline",
         "vocabulary",
         "anchored",
@@ -96,10 +97,13 @@ def settings(config) -> dict:
 
 def spec_of(rows) -> dict | None:
     """The guideline and release-review spec of the newest record that names
-    them, with the first 12 hex digits of each file's hash."""
+    either (a review-only record has no guideline), with the first 12 hex
+    digits of each file's hash."""
     for row in reversed(rows):
         spec = (row.get("result") or {}).get("spec")
-        if isinstance(spec, dict) and spec.get("guideline"):
+        if isinstance(spec, dict) and (
+            spec.get("guideline") or spec.get("release_review")
+        ):
             hashes = spec.get("sha256") if isinstance(spec.get("sha256"), dict) else {}
             return {
                 "guideline": spec.get("guideline"),
