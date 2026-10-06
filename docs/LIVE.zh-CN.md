@@ -245,7 +245,7 @@ anchored_spec = "generic-final.v1.json"
 
 双标签评测给每个片段两个标签，并且互不混用：**操作员标签（真值）**是操作员自己判定的成功或失败；**agent 标签（自动、未审）**是释放复核的判定。在新片段上比较两者，可以测出自动标签有多可信。
 
-**流程。** 评测客户端（策略仓库 FR3 示例里的 `--levi-mode dual`）让每个片段跑满步数预算，和无人值守运行一样（运行中 `s`/`f` 无效，`q` 结束本轮）。跑完后问操作员：`s` 成功、`f` 失败、`d` 作废。机械臂回零位，操作员复位场景，按 Enter 开始下一个片段。标签在 rollout 被标为完成之前写进它的 `metadata.json`，所以 LEVI 不会在操作员标签出现之前判定这个片段。之后 LEVI 在后台判定同一个片段。评测终端从不显示 agent 的判定；操作员给一个片段打标签之前，不要先去 `/live` 看它。
+**流程。** 评测客户端（策略仓库 FR3 示例里的 `--levi-mode dual`）默认允许操作员在运行中判定：按 `s` 成功、`f` 失败或 `d` 作废，这一集立即结束（`--no-dual-early-key` 恢复旧行为：每个片段跑满步数预算，和无人值守运行一样，运行中 `s`/`f` 无效；两种情况下 `q` 都结束本轮）。没有被按键结束的片段跑满预算，之后客户端再问操作员打标签。客户端把过程写进 rollout 元数据：`eval.ended_by`（`operator_key` 或 `budget`）、`eval.operator_label_timing`（`during_run` 或 `after_budget`）、`eval.operator_labelled_step`。机械臂回零位，操作员复位场景，按 Enter 开始下一个片段。标签在 rollout 被标为完成之前写进它的 `metadata.json`，所以 LEVI 不会在操作员标签出现之前判定这个片段。之后 LEVI 在后台判定同一个片段。评测终端从不显示 agent 的判定；操作员给一个片段打标签之前，不要先去 `/live` 看它。
 
 **服务设置**（`live.toml`；改完要重启服务，因为 `live/effective.toml` 在启动时写出）：
 
@@ -279,9 +279,9 @@ prewarm = true
 
 **两者为什么独立。** 操作员标签在 agent 能判定之前就已存在（rollout 标为完成之后 LEVI 才会取它）。模型只看到释放复核的帧和问题：`levi/agent` 和 `levi/live` 里没有任何代码把 `eval.*` 或 `success_flag` 交给模型。判定不读操作员标签。什么都不写回：没有 `annotations/outcomes` 文件，`eval.*` 和任何源文件都不改。自动批准主体仍然不能提交成败标签。
 
-**一致性统计。** `stats.agreement` 用每个片段最新的一条记录比较两者。只统计操作员判为成功或失败的片段（`pairs`）。agent 标签是 `success`、`failure`、`undecided`（判定自己说未决）或 `none`（还没有判定）。`agree` 是 agent 判了成功或失败（`judged`）的片段里与操作员一致的比例；`rate_undecided_as_failure` 把未决按失败计。`false_success`（假成功）是操作员判失败、agent 判成功，分母是 agent 判了或未决的操作员失败片段；`missed_success`（漏判成功）是操作员判成功、agent 判失败或未决。两者都带 Wilson 95 % 区间。`none` 是覆盖缺口，不算一致。这些数字出现在统计汇总（`summary.agreement`）、每个会话的行（`pairs`、`agree`、`judged`、`false_success`、`missed_success`、`operator_success`）、逐片段的行和 CSV（`operator`、`agreement`：`yes`、`no`、`undecided`、`no_agent`）、数据集视图（覆盖全部片段，不只是列出的 200 个）、页面，以及报告里的“agent 与操作员对照”一节；只有至少一个片段有操作员标签时才出现。
+**一致性统计。** `stats.agreement` 用每个片段最新的一条记录比较两者。只统计操作员判为成功或失败的片段（`pairs`）。agent 标签是 `success`、`failure`、`undecided`（判定自己说未决）或 `none`（还没有判定）。`agree` 是 agent 判了成功或失败（`judged`）的片段里与操作员一致的比例；`rate_undecided_as_failure` 把未决按失败计。`false_success`（假成功）是操作员判失败、agent 判成功，分母是 agent 判了或未决的操作员失败片段；`missed_success`（漏判成功）是操作员判成功、agent 判失败或未决。两者都带 Wilson 95 % 区间。`none` 是覆盖缺口，不算一致。这些数字出现在统计汇总（`summary.agreement`）、每个会话的行（`pairs`、`agree`、`judged`、`false_success`、`missed_success`、`operator_success`）、逐片段的行和 CSV（`operator`、`agreement`：`yes`、`no`、`undecided`、`no_agent`）、数据集视图（覆盖全部片段，不只是列出的 200 个）、页面，以及报告里的“agent 与操作员对照”一节；只有至少一个片段有操作员标签时才出现。标签里写明片段怎么结束（`ended_by`）时，`agreement.by_ended_by` 把这些数字（`pairs`、`matrix`、`judged`、`agree`、`false_success`、`missed_success` 等）按 `budget` 和 `operator_key` 分开再给一遍；没有 `ended_by` 的标签（旧片段、其他来源）计入总体和第三组 `unknown`，不会报错。没有任何标签带 `ended_by` 时这个键不出现；逐片段的行和 CSV 有 `ended_by` 列；报告只在有两组或更多时才加“片段怎么结束的”一张表。数据集状态、`stats.jsonl` 和数据集视图里的操作员标签同样带 `ended_by`（读自 `eval.ended_by`，不读 `success_flag`，也不给模型看）。
 
-**局限。** 第 3 版是候选，只在一个任务上检查过（把物体放进盘子，一台机器人，同一模型的两个策略，92 个片段，真值由 agent 看视频核对，没有人确认）。它防假成功不如第 2 版：没有检查最后一次放置是否成功。每个片段都跑满预算，费机器人时间，但 agent 的输入与无人值守运行相同，所以测得的一致性能推广到无人值守使用。操作员不看 `/live` 是对操作员的要求，页面不强制。传 `--allow-candidate-anchored` 时，训练清单仍把候选的锚定标签排在机器人自己的标记之前（见“自动批准主体”）。
+**局限。** 第 3 版是候选，只在一个任务上检查过（把物体放进盘子，一台机器人，同一模型的两个策略，92 个片段，真值由 agent 看视频核对，没有人确认）。它防假成功不如第 2 版：没有检查最后一次放置是否成功。默认的运行中按键会在操作员判定后立刻结束片段，所以片段比无人值守的短，全部片段的一致率不能直接外推到无人值守。只有 `ended_by = "budget"` 的片段（跑满了预算）给 agent 的输入与无人值守相同，它们的一致率才能外推；按键提前结束（`operator_key`）的片段单独看（`summary.agreement.by_ended_by`）。操作员在夹爪还没松开时就判定，释放复核（第 1、2、3 版）没有张开事件可看，会把这个片段判成失败；这种运行请用[最终状态判定](#最终状态判定候选)。操作员不看 `/live` 是对操作员的要求，页面不强制。传 `--allow-candidate-anchored` 时，训练清单仍把候选的锚定标签排在机器人自己的标记之前（见“自动批准主体”）。
 
 ## 保持轻量
 
@@ -408,7 +408,7 @@ prewarm = true
 | `result.review` | `auto` 或 `human`（谁提交的时间片段） |
 | `result.spec` | `{guideline, release_review, release_review_version, sha256}`：用到的文件和它们的哈希；判定没有记录复核规格版本时为 null |
 | `result.provider`、`result.model` | 模型配置名和服务的模型 |
-| `operator_label` | `{outcome, by}`：来自 rollout 元数据的操作员标签（真值）（`success`、`failure`、`discarded` 或 `unlabeled`；`by` 为 `operator`、`key`、`timeout-adjudicated` 等），或 `null`（没有标签，或旧记录）。它从不属于 `result.verdict`；见[双标签](#双标签操作员和-agent) |
+| `operator_label` | `{outcome, by}`（元数据写明片段怎么结束时另有 `ended_by`，取值 `budget` 或 `operator_key`）：来自 rollout 元数据的操作员标签（真值）（`success`、`failure`、`discarded` 或 `unlabeled`；`by` 为 `operator`、`key`、`timeout-adjudicated` 等），或 `null`（没有标签，或旧记录）。它从不属于 `result.verdict`；见[双标签](#双标签操作员和-agent) |
 
 这个文件是本服务工作的记录，LEVI 自己从不读取，也不是训练数据。
 
