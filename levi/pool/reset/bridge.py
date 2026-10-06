@@ -81,6 +81,9 @@ class Join:
     row: int | None = None  # last row of the record kept
     reason: str | None = None
     metrics: dict | None = None
+    # 2*pi multiples to add to the recording's angles so that they continue
+    # the forward episode's (roll near +-pi is on either side of the cut).
+    angle_shift: list[float] | None = None
 
     def record(self) -> dict:
         return {
@@ -98,6 +101,7 @@ def find_join(
     anchor_state: np.ndarray,
     gripper: int,
     opened: float,
+    anchor_width: float | None = None,
 ) -> Join:
     """Where the recording hands over to the reversed forward episode."""
     metrics: dict = {}
@@ -106,15 +110,17 @@ def find_join(
     if start > profile.SPLICE_START_TOL:
         return Join(False, reason="bridge_start_mismatch", metrics=metrics)
     held = record_state[:, gripper] != opened
-    if not held.any():
+    # A grasp happened: the gripper starts open and closes. A recording that is
+    # closed from the first row grasped nothing.
+    if held[0] or not held.any():
         return Join(False, reason="bridge_no_grasp", metrics=metrics)
-    best, best_row = None, None
     first_hold = int(np.argmax(held))
+    best, best_row = None, None
     for i in range(first_hold, len(record_state)):
         if not held[i]:
             break  # the gripper let go again: nothing after is a clean hold
         d = float(np.linalg.norm(record_state[i, :3] - anchor_state[:3]))
-        r = float(np.abs(record_state[i, 3:6] - anchor_state[3:6]).max())
+        r = float(np.abs(_wrap(record_state[i, 3:6] - anchor_state[3:6])).max())
         near = d <= profile.JOIN_POSITION_TOL and r <= profile.JOIN_ROTATION_TOL
         if near and (best is None or d <= best):
             best, best_row = d, i
@@ -124,13 +130,29 @@ def find_join(
     if record_width is not None:
         w = float(record_width[best_row])
         metrics["hold_width"] = round(w, 4)
-        if not 0.0005 < w < profile.HOLD_WIDTH_MAX:
+        if anchor_width is not None:
+            metrics["anchor_width"] = round(float(anchor_width), 4)
+            held_like_forward = abs(w - anchor_width) <= profile.BRIDGE_WIDTH_TOL
+        else:
+            held_like_forward = w < float(np.nanmax(record_width)) - profile.HOLD_MARGIN
+        if not held_like_forward:
             return Join(False, best_row, "bridge_nothing_held", metrics)
-    return Join(True, best_row, None, metrics)
+    shift = (
+        2
+        * np.pi
+        * np.round((anchor_state[3:6] - record_state[best_row, 3:6]) / (2 * np.pi))
+    )
+    return Join(True, best_row, None, metrics, [float(x) for x in shift])
+
+
+def _wrap(delta):
+    return (np.asarray(delta) + np.pi) % (2 * np.pi) - np.pi
 
 
 def visual_join(forward_frame, record_frame) -> tuple[bool, dict]:
-    """Do the two wrist-camera frames at the join show the same hold?"""
+    """Do the two wrist-camera frames at the join show the same hold? Both the
+    scene match and the colours must agree: colours alone are the same for a
+    table with and without the object."""
     m = vision.measure(forward_frame, record_frame)
-    ok = m["same"] >= profile.SPLICE_SAME or m["hist"] >= profile.SPLICE_HIST
+    ok = m["same"] >= profile.SPLICE_SAME and m["hist"] >= profile.SPLICE_HIST
     return ok, m

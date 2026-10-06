@@ -153,8 +153,12 @@ class ExportOptions(BaseModel):
                 )
             # A static-frame filter would drop the rows in which an object
             # settles after a release: the evidence a reset is judged on.
-            if self.filter_static is None:
-                self.filter_static = False
+            if self.filter_static:
+                raise ValueError(
+                    "Reset episodes need the rows in which an object settles: "
+                    "turn the static-frame filter off (filter_static false)"
+                )
+            self.filter_static = False
         return self
 
     @model_validator(mode="after")
@@ -783,6 +787,7 @@ def _levi_commit():
 
 BATCH_EPISODES = 8  # raw episodes per conversion part (one journal line each)
 PARTS = ".parts"
+SCRATCH_BYTES = 6 * 1024**3  # 3 min of 720p at 10 fps, uncompressed, one camera
 SIZE_FACTOR = 1.3  # planned source video bytes -> bytes the export may write
 
 
@@ -851,6 +856,8 @@ def check_space(job: dict, staging: Path | None = None) -> dict:
     if reset.get("direction") == "forward_and_reset":
         wanted *= 2  # the reversed videos are written next to the forward ones
     wanted += estimate_bytes(job.get("bridge_records") or [])
+    if reset.get("direction") in ("forward_and_reset", "reset_only"):
+        wanted += SCRATCH_BYTES  # one decoded video at a time (reset stage)
     have = _tree_bytes(staging) if staging is not None and Path(staging).exists() else 0
     volume = _volume(Path(job["target"]).parent)
     free = shutil.disk_usage(volume).free
@@ -1022,7 +1029,10 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
     settings.guard_write(staging, sources)
     job_path = settings.job_path(job["id"]) if job.get("id") else None
     log = joblog.JobLog(joblog.paths(job_path)["log"]) if job_path else _NullLog()
-    progress = Progress(progress_path, STAGES)
+    reset_on = bool(options.reset and options.reset.enabled)
+    progress = Progress(
+        progress_path, [s for s in STAGES if reset_on or s != "Reverse for reset"]
+    )
     progress.stage("Check", len(job["episodes"]))
     episodes = job["episodes"]
     log.info(
@@ -1040,8 +1050,8 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
     if job.get("embodiment_check") or any("gripper" in e for e in episodes):
         # A plan from before the gripper fields (no marker, no gripper key
         # on any episode) has nothing to check.
-        verify_embodiment(episodes)
-        refuse_mixed_gripper(episodes, job["recipe"])
+        verify_embodiment(guarded)
+        refuse_mixed_gripper(guarded, job["recipe"])
     # A correction approved when planned and rejected since stops the export.
     corrections.verify(episodes, job["recipe"])
     _unchanged(guarded)
@@ -1538,6 +1548,15 @@ def _place_video(src: Path, dst: Path, converted: bool) -> str | None:
     return _copy_hashed(src, dst)
 
 
+def _reset_failure(ctx: "RunContext", plan, exc: BaseException) -> dict:
+    """A reset episode that failed to write: fatal errors stop the export, the
+    others leave out that episode (``reset_write_error``) and say why."""
+    if _is_fatal(exc):
+        raise exc
+    row = ctx.fail(plan.ep, exc, "Reverse for reset", f"reset|{plan.ep['key']}")
+    return {**row, "reason": "reset_write_error", "write_error": True}
+
+
 def _provenance_positions(part: "Part") -> dict[str, list[int]]:
     """Source row positions of a conversion part's episodes, by episode id."""
     path = part.dir / "meta/levi_provenance.jsonl"
@@ -1707,6 +1726,8 @@ def _lerobot(ctx: RunContext) -> dict:
         }
         if ep["format"] == "robot_capture":
             row["source_demo"] = ep["key"]
+        if located.already_reset:  # keep the mark, so it is never reversed again
+            row["levi_reset"] = source_episodes[ep["source_path"]][old]["levi_reset"]
         if ep.get("outcome") in ("success", "failure"):
             row["levi_outcome"] = ep["outcome"]
             row["levi_outcome_source"] = ep.get("outcome_source")
@@ -1820,6 +1841,7 @@ def _lerobot(ctx: RunContext) -> dict:
         )
         dropped += [p.excluded for p in plans if p.excluded]
         todo = reset_run.exported(plans)
+        progress.state["total"] += len(todo)  # writing is counted too
         if not todo and not writes_forward:
             raise ValueError(
                 "No episode can be reversed: "
@@ -1844,14 +1866,26 @@ def _lerobot(ctx: RunContext) -> dict:
             staging=staging,
             data_path=DATA_PATH,
             video_path=VIDEO_PATH,
+            fail=lambda plan, exc: _reset_failure(ctx, plan, exc),
         )
+        written_plans = {id(w["plan"]) for w in written}
+        dropped += [
+            p.excluded
+            for p in todo
+            if id(p) not in written_plans
+            and p.excluded
+            and p.excluded.get("write_error")
+        ]
+        ctx.check_budget()
+        if not episodes_meta and not written:
+            raise ValueError("No episode could be written")
         for item in written:
             plan, built, new = item["plan"], item["built"], item["episode"]
             episodes_meta.append(item["row"])
             stats = {
                 k: v
                 for k, v in built["stats"].items()
-                if k in BASE_COLUMNS or k.startswith("observation.images.")
+                if k in BASE_COLUMNS or k in plan.located.source.mapping.values()
             }
             epstats.append({"episode_index": new, "stats": stats})
             provenance.append(
@@ -1891,7 +1925,11 @@ def _lerobot(ctx: RunContext) -> dict:
                     "generation": plan.generation,
                     "scope": plan.analysis.scope,
                     "source_fps": timing_mod.rounded(plan.located.source_fps),
-                    "time_scale": None,
+                    "time_scale": timing_mod.rounded(
+                        timing_mod.time_scale(
+                            plan.located.source_fps, options.fps, options.timing
+                        )
+                    ),
                 }
             )
             offset += item["length"]

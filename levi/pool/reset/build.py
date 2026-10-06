@@ -8,6 +8,8 @@ put in the new order and encoded once, a temporal map saying which source frame
 every output frame is, and the statistics the dataset format asks for.
 """
 
+import hashlib
+import json
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -77,12 +79,16 @@ def runs(sequence: list[tuple[str, int]]) -> list[dict]:
     return out
 
 
-def write_video(journal, unit, staging, rel, parts, fps, expected):
+def write_video(journal, unit, staging, rel, parts, fps, expected, order):
     """Encode ``parts`` (``[(Path, rows)]``) to ``staging/rel`` unless the
     journal already holds a verified copy. Returns (probe, pixel stats)."""
+    # What the video holds is part of the unit: a resume reuses it only if the
+    # order of frames it was made with is the one asked for now.
+    order_sha = hashlib.sha256(json.dumps(order, default=str).encode()).hexdigest()
     recorded = journal.done(unit)
     if (
         recorded
+        and recorded.get("order_sha") == order_sha
         and set(recorded["files"]) == {rel}
         and journal.verified(recorded["files"])
     ):
@@ -109,6 +115,7 @@ def write_video(journal, unit, staging, rel, parts, fps, expected):
         files={rel: journal_mod.file_record(staging, rel)},
         probe=probe,
         stats=info["stats"],
+        order_sha=order_sha,
     )
     return probe, info["stats"]
 
@@ -135,6 +142,7 @@ def write(
     semantics: str,
     record: Source | None,
     record_rows: int | None,
+    record_shift: list[float] | None,
     new: int,
     offset: int,
     task_index: int,
@@ -147,7 +155,10 @@ def write(
     metadata. Returns the pieces the metadata needs."""
     states = contract_mod.reversed_states(source.state, keep, edits, gripper)
     if record is not None:
-        states = np.vstack([record.state[:record_rows].astype(np.float32), states])
+        head = record.state[:record_rows].astype(np.float32).copy()
+        if record_shift:
+            head[:, 3:6] += np.asarray(record_shift, dtype=np.float32)
+        states = np.vstack([head, states])
     actions = contract_mod.reversed_actions(states, semantics)
     n = len(states)
     seq = sequence(keep, source.key, record_rows, record.key if record else "")
@@ -184,7 +195,11 @@ def write(
             episode_chunk=new // 1000, episode_index=new, video_key=out_key
         )
         unit = f"reset|{source.key}|{out_key}"
-        probe, pixel_stats = write_video(ctx.journal, unit, staging, rel, parts, fps, n)
+        order = [[str(path), list(map(int, rows))] for path, rows in parts]
+        probe, pixel_stats = write_video(
+            ctx.journal, unit, staging, rel, parts, fps, n, order
+        )
+        ctx.progress.advance(unit, step=0)
         probes[rel] = probe
         stats[out_key] = pixel_stats
         features[out_key] = (src_key, probe)

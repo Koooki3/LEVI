@@ -72,8 +72,15 @@ def wrist(row: int, scenario: str, seed: int = 1) -> np.ndarray:
         cx, cy, r = W // 2, int(0.45 * H), 16
         if row >= RELEASE:
             t = float(np.clip((row - RELEASE) / (OPEN_DONE - RELEASE), 0, 1))
-            if scenario == "in_reach":
-                cy, r = int(cy + 6 * t), int(r - 2 * t)
+            if scenario.startswith("late_"):
+                # Still between the open fingers when they finish opening, the
+                # fall comes after: rows OPEN_DONE+1 .. OPEN_DONE+3.
+                t = float(np.clip((row - OPEN_DONE) / 3, 0, 1))
+                scenario = scenario[5:]
+            if scenario == "drop":
+                cy, r = int(cy + 9 * t), int(r - 3 * t)
+            elif scenario == "in_reach":
+                cy = int(cy + 4 * t)
             elif scenario == "escaped":
                 cx, cy, r = int(cx + 44 * t), int(cy + 30 * t), int(r - 6 * t)
         _disc(frame, cx, cy, r)
@@ -119,6 +126,8 @@ def make_demo(
     start=(0.4, 0.0, 0.2),
     end_override=None,
     seed: int = 0,
+    leave_at: int | None = None,
+    no_grasp: bool = False,
 ):
     """One raw capture: approach, grasp at GRASP, carry, release at RELEASE,
     still until REST_LAST, then the arm lifts (or, with ``arm_leaves``, at
@@ -131,6 +140,8 @@ def make_demo(
     xyz[GRASP:RELEASE] = np.linspace((0.3, 0.1, 0.1), (0.1, 0.3, 0.12), RELEASE - GRASP)
     xyz[RELEASE:] = (0.1, 0.3, 0.12)
     lift_from = RELEASE + 1 if arm_leaves else REST_LAST + 1
+    if leave_at is not None:
+        lift_from = leave_at
     for i in range(lift_from, n):
         xyz[i] = (0.1, 0.3, 0.12 + 0.03 * (i - lift_from + 1))
     if end_override is not None:
@@ -152,10 +163,15 @@ def make_demo(
     )
     pose.to_csv(demo / "end_effector_pose.csv", index=False)
     cmd = ["open"] * GRASP + ["close"] * (RELEASE - GRASP) + ["open"] * (n - RELEASE)
+    if no_grasp:
+        cmd = ["open"] * n
     width = np.full(n, 0.084)
-    width[GRASP : GRASP + 3] = [0.07, 0.05, 0.03]
-    width[GRASP + 3 : RELEASE] = 0.03
-    width[RELEASE : OPEN_DONE + 1] = np.linspace(0.03, 0.084, OPEN_DONE - RELEASE + 1)
+    if not no_grasp:
+        width[GRASP : GRASP + 3] = [0.07, 0.05, 0.03]
+        width[GRASP + 3 : RELEASE] = 0.03
+        width[RELEASE : OPEN_DONE + 1] = np.linspace(
+            0.03, 0.084, OPEN_DONE - RELEASE + 1
+        )
     pd.DataFrame(
         {
             "timestamp_sec": t,

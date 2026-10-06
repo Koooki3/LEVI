@@ -563,8 +563,17 @@ def reset_analyze(payload: ResetAnalysis):
     conversion = Options(filter_static=False, timing="retime")
     if payload.cameras:
         conversion = conversion.model_copy(update={"cameras": payload.cameras})
+    reviewer = None
+    if payload.reset.review_model:
+        from .reset import review
+
+        reviewer = review.open_reviewer(payload.reset.review_model)
     result = reset_preview.analyze_rows(
-        rows[: payload.limit], payload.reset, conversion, payload.camera_map
+        rows[: payload.limit],
+        payload.reset,
+        conversion,
+        payload.camera_map,
+        reviewer=reviewer,
     )
     return {
         **result,

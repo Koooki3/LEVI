@@ -215,14 +215,18 @@ class FrameStore:
         )
         self.shape: tuple[int, int, int] | None = None
         count = 0
-        with self.file.open("wb") as out:
-            for frame in decode(self.path):
-                if self.shape is None:
-                    self.shape = frame.shape
-                elif frame.shape != self.shape:
-                    raise ValueError(f"Video changes dimensions: {self.path.name}")
-                out.write(np.ascontiguousarray(frame).tobytes())
-                count += 1
+        try:
+            with self.file.open("wb") as out:
+                for frame in decode(self.path):
+                    if self.shape is None:
+                        self.shape = frame.shape
+                    elif frame.shape != self.shape:
+                        raise ValueError(f"Video changes dimensions: {self.path.name}")
+                    out.write(np.ascontiguousarray(frame).tobytes())
+                    count += 1
+        except BaseException:
+            self.file.unlink(missing_ok=True)
+            raise
         if count == 0 or self.shape is None:
             self.file.unlink(missing_ok=True)
             raise ValueError(f"No decodable frames: {self.path.name}")

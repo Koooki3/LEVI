@@ -20,7 +20,10 @@ import {
   ON_INELIGIBLE_LABELS,
   RELEASE_CLASS_HINTS,
   RELEASE_CLASS_LABELS,
+  MAX_SETTLED_ROWS,
+  MIN_SETTLED_ROWS,
   analysisPayload,
+  clampSettledRows,
   isResetDirection,
   parseBridges,
   previewText,
@@ -201,6 +204,11 @@ export function AnalysisResult({
           "This is an image-based estimate of whether the object stays within the fingers' reach after a release, not a guarantee. Thresholds: profile",
         )}{" "}
         <code>{result.profile}</code>
+      </p>
+      <p className="pg-pool-hint">
+        {t(
+          "Settling needs the arm to stay still for at least two frames after the release. Pausing about 0.5 s after opening the gripper before lifting the arm makes many more episodes reversible.",
+        )}
       </p>
     </div>
   );
@@ -408,6 +416,47 @@ export function ResetPanel({
                     "The output camera key the object is looked for in after a release.",
                   )}
                 </small>
+              </label>
+              <label className="wide">
+                <span>{t("Frames in a row that show the object settled")}</span>
+                <input
+                  className="ds-input ds-focus"
+                  type="number"
+                  min={MIN_SETTLED_ROWS}
+                  max={MAX_SETTLED_ROWS}
+                  step={1}
+                  value={state.minSettledRows}
+                  aria-describedby="reset-settled-hint"
+                  onChange={(e) =>
+                    onChange({
+                      minSettledRows: clampSettledRows(Number(e.target.value)),
+                    })
+                  }
+                />
+                <small id="reset-settled-hint" className="pg-pool-hint">
+                  {t(
+                    "2 is the default and the safer choice. 1 trusts a single still frame: more episodes pass, but some of them may show an object that is still falling.",
+                  )}
+                </small>
+              </label>
+              <label className="pg-pool-check wide">
+                <input
+                  type="checkbox"
+                  checked={state.allowNoGrasp}
+                  aria-describedby="reset-nograsp-hint"
+                  onChange={() =>
+                    onChange({ allowNoGrasp: !state.allowNoGrasp })
+                  }
+                />
+                <span>
+                  {t("Also reverse episodes without a grasp")}
+                  <small id="reset-nograsp-hint" className="pg-pool-hint">
+                    {" "}
+                    {t(
+                      "Risky: pushing, pouring and wiping make no physical sense backwards (the object is pulled back, the liquid flows up).",
+                    )}
+                  </small>
+                </span>
               </label>
               <label className="wide">
                 <span>{t("Local vision model connection (optional)")}</span>

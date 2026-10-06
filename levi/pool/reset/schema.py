@@ -40,6 +40,14 @@ class ResetOptions(BaseModel):
     # ("exclude"), or keep the part from its last safe hold on ("partial": the
     # reset then starts with the object in the gripper; flagged in the record).
     on_ineligible: Literal["exclude", "partial"] = "exclude"
+    # Rest frames (the arm still, the fingers open) that must agree before an
+    # object counts as at rest. One frame proves nothing: at 10 Hz a falling
+    # object is often not blurred. 1 trusts a single frame (more episodes,
+    # some of them wrong); the default is the safe one.
+    min_settled_rows: int = Field(2, ge=1, le=6)
+    # An episode with no grasp (pushing, pouring, wiping) is not reversed: its
+    # reversal is physically meaningless and the signals cannot tell.
+    allow_no_grasp: bool = False
     # Only demonstrations that finished the task are reversed.
     require_forward_success: bool = True
     # The camera the object is looked for in after a release.
@@ -66,6 +74,18 @@ class ResetOptions(BaseModel):
     @property
     def writes_forward(self) -> bool:
         return self.direction != "reset_only"
+
+    def looks_reset(self, text: str) -> bool:
+        """Whether ``text`` already has this template's shape (``Reset: …``):
+        the forward text of an episode that is itself a reset."""
+        before, _, after = self.task_template.partition("{task}")
+        if not (before or after):
+            return False
+        return (
+            len(text) > len(before) + len(after)
+            and text.startswith(before)
+            and text.endswith(after)
+        )
 
     def reset_text(self, forward_text: str) -> str:
         return self.task_template.replace("{task}", forward_text)

@@ -186,6 +186,8 @@ export interface ResetOptions {
   require_forward_success?: boolean;
   release_camera?: string;
   gripper_lead_rows?: number;
+  allow_no_grasp?: boolean;
+  min_settled_rows?: number;
   review_model?: string | null;
   bridges?: { source: string; record: string }[];
 }
@@ -718,6 +720,13 @@ export const REASON_LABELS: Record<string, string> = {
     "Reset data: the recorded stretch shows a different scene",
   reset_bridge_visual_unchecked:
     "Reset data: the recorded stretch could not be compared with the demonstration",
+  reset_no_grasp:
+    "Reset data: the episode has no grasp (pushing, pouring or wiping is not reversed)",
+  reset_video_rows:
+    "Reset data: the video and the state rows have different lengths",
+  reset_bridge_cameras:
+    "Reset data: the recorded stretch lacks a camera or has another resolution",
+  reset_write_error: "Reset data: writing this reset episode failed",
 };
 
 /** Server warnings (recipe.find_warnings) as UI text. */

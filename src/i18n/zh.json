@@ -2577,5 +2577,16 @@
   "Check reversibility": "检查可逆性",
   "Episodes to check": "检查的片段数",
   "Reading the video of the first {n} episodes. This takes a few seconds to a minute.": "正在读取最前面 {n} 个片段的视频，需要几秒到一分钟。",
-  "The reversibility check did not run": "可逆性检查没有运行"
+  "The reversibility check did not run": "可逆性检查没有运行",
+  "Reset data: the episode has no grasp (pushing, pouring or wiping is not reversed)": "复位数据：片段里没有抓取（推、倒、擦这类动作默认不反转）",
+  "Reset data: the video and the state rows have different lengths": "复位数据：视频帧数与状态行数不一致，无法逐帧反转",
+  "Reset data: the recorded stretch lacks a camera or has another resolution": "复位数据：补录片段缺相机，或分辨率不同",
+  "Reset data: writing this reset episode failed": "复位数据：这条复位片段写入出错（只排除它自己）",
+  "the object did not settle (the arm left too soon after the release)": "物体没有落稳：松爪后机械臂很快离开，没有足够多的静止帧可以确认",
+  "the vision model's review failed, so the release was not accepted": "本地视觉模型复核失败，保守地不放行",
+  "Frames in a row that show the object settled": "确认物体落稳所需的连续静止帧数",
+  "2 is the default and the safer choice. 1 trusts a single still frame: more episodes pass, but some of them may show an object that is still falling.": "2 为默认，更安全。1 只信一帧静止：会多放行一些片段，但其中可能有物体仍在下落的。",
+  "Also reverse episodes without a grasp": "也反转没有抓取的片段",
+  "Risky: pushing, pouring and wiping make no physical sense backwards (the object is pulled back, the liquid flows up).": "有风险：推、倒水、擦拭反转后没有物理意义（物体被拉回，水倒流）。",
+  "Settling needs the arm to stay still for at least two frames after the release. Pausing about 0.5 s after opening the gripper before lifting the arm makes many more episodes reversible.": "落稳需要机械臂在松爪后静止至少两帧；采集时松爪后停约 0.5 秒再抬臂，可反转的片段会多很多。"
 }

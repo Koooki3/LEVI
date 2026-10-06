@@ -48,7 +48,9 @@ class ResumeRefused(ValueError):
 
 
 def plan_hash(job: dict) -> str:
-    frozen = {k: job.get(k) for k in PLAN_KEYS}
+    # ``bridge_records`` joined the plan with the reset export: a plan without
+    # any hashes as it always did, so an export begun before still resumes.
+    frozen = {k: job.get(k) for k in PLAN_KEYS if k != "bridge_records" or job.get(k)}
     text = json.dumps(frozen, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(text.encode()).hexdigest()
 

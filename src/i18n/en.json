@@ -2577,5 +2577,16 @@
   "Check reversibility": "Check reversibility",
   "Episodes to check": "Episodes to check",
   "Reading the video of the first {n} episodes. This takes a few seconds to a minute.": "Reading the video of the first {n} episodes. This takes a few seconds to a minute.",
-  "The reversibility check did not run": "The reversibility check did not run"
+  "The reversibility check did not run": "The reversibility check did not run",
+  "Reset data: the episode has no grasp (pushing, pouring or wiping is not reversed)": "Reset data: the episode has no grasp (pushing, pouring or wiping is not reversed)",
+  "Reset data: the video and the state rows have different lengths": "Reset data: the video and the state rows have different lengths",
+  "Reset data: the recorded stretch lacks a camera or has another resolution": "Reset data: the recorded stretch lacks a camera or has another resolution",
+  "Reset data: writing this reset episode failed": "Reset data: writing this reset episode failed",
+  "the object did not settle (the arm left too soon after the release)": "the object did not settle (the arm left too soon after the release)",
+  "the vision model's review failed, so the release was not accepted": "the vision model's review failed, so the release was not accepted",
+  "Frames in a row that show the object settled": "Frames in a row that show the object settled",
+  "2 is the default and the safer choice. 1 trusts a single still frame: more episodes pass, but some of them may show an object that is still falling.": "2 is the default and the safer choice. 1 trusts a single still frame: more episodes pass, but some of them may show an object that is still falling.",
+  "Also reverse episodes without a grasp": "Also reverse episodes without a grasp",
+  "Risky: pushing, pouring and wiping make no physical sense backwards (the object is pulled back, the liquid flows up).": "Risky: pushing, pouring and wiping make no physical sense backwards (the object is pulled back, the liquid flows up).",
+  "Settling needs the arm to stay still for at least two frames after the release. Pausing about 0.5 s after opening the gripper before lifting the arm makes many more episodes reversible.": "Settling needs the arm to stay still for at least two frames after the release. Pausing about 0.5 s after opening the gripper before lifting the arm makes many more episodes reversible."
 }

@@ -169,13 +169,16 @@ def rpool(tmp_path, monkeypatch):
     return {"root": root, "out": tmp_path / "exports", "tmp": tmp_path}
 
 
-def run_export(rpool, tasks, name, direction="forward_and_reset", **reset):
+def run_export(
+    rpool, tasks, name, direction="forward_and_reset", export_options=None, **reset
+):
     rec = Recipe(name="r", categories=["rollout"], tasks=[TASKS[t] for t in tasks])
     options = export.ExportOptions(
         format="lerobot_v21",
         name=name,
         output_dir=str(rpool["out"]),
         reset={"direction": direction, **reset},
+        **(export_options or {}),
     )
     job = jobs.plan_export(rec, options)
     result = jobs.execute(job)
@@ -251,14 +254,17 @@ def test_a_stable_release_is_reversed_frame_for_frame(rpool):
 def test_the_reversed_gripper_command_leads_the_fingers(rpool):
     _, _, out, _ = run_export(rpool, ["in_place"], "lead", direction="reset_only")
     _, state, action = read_episode(out, 0)
-    grip = state[:, 6]
     # Forward the fingers finish opening at OPEN_DONE: that is the reversed row
     # at which the command must already say "closed" (action = next state).
     row = N - 1 - OPEN_DONE
     assert state[row, 6] == 1.0 and action[row, 6] == 0.0
-    # And it opens (the reversed grasp) as the fingers start to, not after.
-    grasp_end = [i for i in range(len(grip)) if grip[i] == 0][-1]
-    assert action[grasp_end, 6] == 1.0
+    # And the reversed grasp opens as the fingers start to, not after: the
+    # fingers stop closing at source row 12 (width plateau), so at the reversed
+    # row of source row 12 the state is still "closed" and the action says
+    # "open"; the state of the next row (source row 11) already is.
+    row = N - 1 - 12
+    assert state[row, 6] == 0.0 and action[row, 6] == 1.0
+    assert state[row + 1, 6] == 1.0
 
 
 def test_a_fall_into_reach_is_cut_out_and_the_rest_stays_real(rpool):
@@ -720,3 +726,289 @@ def test_the_cli_exports_and_analyzes(rpool, capsys):
         TASKS["in_place"],
         "Undo: " + TASKS["in_place"],
     ]
+
+
+# ------------------------------------------------------------------ review round: settling, bridges, chains
+
+
+def _analysis_of(rpool, scenario, **demo):
+    """Analyse one synthetic demo on its own (no export)."""
+    from levi.conversion.options import Options
+    from levi.pool.reset import preview
+
+    path = (
+        rpool["root"]
+        / f"orig/models/pi/t_x_{scenario}_{len(list((rpool['root'] / 'orig/models/pi').iterdir()))}/demo_0000"
+    )
+    make_demo(
+        path,
+        scenario,
+        task="x " + path.parent.name,
+        seed=len(path.name) + hash(path.parent.name) % 50,
+        **demo,
+    )
+    row = {
+        "key": str(path),
+        "format": "robot_capture",
+        "task": "x",
+        "source": "s",
+        "outcome": "success",
+    }
+    return preview.analyze_row(
+        row,
+        ResetOptions(direction="reset_only"),
+        Options(filter_static=False, timing="retime"),
+    )
+
+
+def test_a_fall_that_starts_after_the_fingers_open_is_not_left_in(rpool):
+    # The object is still between the open fingers when they finish opening
+    # (row OPEN_DONE) and drops afterwards. A small drop that ends in reach is
+    # accepted with every frame of it cut out; a big one, or one that leaves
+    # the fingers, is not accepted at all (and never with the fall left in).
+    small = _analysis_of(rpool, "late_in_reach")
+    (release,) = small["releases"]
+    assert small["eligible"] and release["class"] == "in_reach"
+    assert release["rest_row"] >= OPEN_DONE
+    big = _analysis_of(rpool, "late_drop")
+    # Whether a 9-pixel drop passes depends on the picture; what may never
+    # happen is a seam before the fall ends (rows OPEN_DONE+1.. are the fall).
+    assert not big["eligible"] or big["releases"][0]["rest_row"] >= OPEN_DONE + 2
+    gone = _analysis_of(rpool, "late_escaped")
+    assert not gone["eligible"]
+
+
+def test_an_arm_that_leaves_while_the_object_is_falling_is_not_read_as_at_rest(rpool):
+    # One rest frame (the fingers just opened, the object has not moved yet): a
+    # single frame proves nothing, the arm leaves on the next one.
+    out = _analysis_of(rpool, "late_escaped", leave_at=OPEN_DONE + 1)
+    (release,) = out["releases"]
+    assert not out["eligible"] and release["class"] == "unknown"
+    assert release["reason"] == "not_settled"
+
+
+def test_a_task_with_no_grasp_is_not_reversed_unasked(rpool):
+    from levi.conversion.options import Options
+    from levi.pool import index
+    from levi.pool.reset import preview
+
+    path = rpool["root"] / "orig/models/pi/t_push/demo_0000"
+    make_demo(path, "in_place", task="push the block", seed=7, no_grasp=True)
+    scanner.scan()
+    row = next(
+        r
+        for r in index.episodes(limit=100)["episodes"]
+        if r["task"] == "push the block"
+    )
+    conv = Options(filter_static=False, timing="retime")
+    out = preview.analyze_row(row, ResetOptions(direction="reset_only"), conv)
+    assert out["reason"] == "reset_no_grasp"
+    allowed = preview.analyze_row(
+        row, ResetOptions(direction="reset_only", allow_no_grasp=True), conv
+    )
+    assert allowed["eligible"] and allowed["releases"] == []
+
+
+def test_a_wide_object_is_not_taken_for_an_empty_hand():
+    # Fingers 80 mm apart on a 85 mm opening: something is held (an absolute
+    # limit of 78 mm would call it an empty release and skip every check).
+    opened = np.array([0, 0, 0, 1, 1, 1], dtype=float)
+    width = np.array([0.080, 0.080, 0.080, 0.082, 0.085, 0.085])
+    (release,) = events.find_events(opened, width, 3)
+    assert release.kind == "release" and release.held
+    empty = events.find_events(
+        opened, np.array([0.085, 0.085, 0.085, 0.085, 0.085, 0.085]), 3
+    )
+    assert empty[0].held is False
+
+
+def _evidence_with_two_pick_and_place(first, second):
+    """grasp, release, grasp, release; the frames are what ``first`` and
+    ``second`` (wrist scenarios) show at hold and rest."""
+    from levi.pool.reset.analysis import Evidence
+
+    n = 60
+    state = np.zeros((n, 7), dtype=np.float32)
+    state[:, 6] = 1.0
+    for a, b in ((5, 20), (30, 45)):
+        state[a:b, 6] = 0.0
+    state[:, 0] = np.linspace(0, 0.1, n)  # slow drift, within the seam tolerance
+    action = np.vstack([state[1:], state[-1:]])
+    return Evidence("k", state, action, release_video=Path("x.mp4")), first, second
+
+
+def test_a_recording_cannot_replace_an_end_that_picks_something_else_up():
+    from levi.pool.reset import analysis
+
+    ev, first, second = _evidence_with_two_pick_and_place("escaped", "in_place")
+    shown = {19: wrist(RELEASE - 1, first)}
+    for r in range(20, 33):
+        shown[r] = wrist(REST_LAST, first)
+    for r in range(44, 60):
+        shown[r] = wrist(RELEASE - 1 if r == 44 else REST_LAST, second)
+
+    # only the first release is bad; a later grasp follows it
+    def frames(path, rows):
+        return {
+            r: (
+                wrist(RELEASE - 1, first)
+                if r < 25
+                else wrist(RELEASE - 1, second)
+                if r < 46 and r in (44,)
+                else wrist(REST_LAST, second if r > 40 else first)
+            )
+            for r in rows
+        }
+
+    c = contract.resolve("fr3-robotiq@1")
+    out = analysis.analyze(ev, c, ResetOptions(direction="reset_only"), frames=frames)
+    bad = [r for r in out.releases if r.klass == "escaped"]
+    assert bad and not out.bridgeable and out.bridge_anchor is None
+
+
+def test_a_join_wants_a_real_grasp_and_the_same_width_and_continues_the_angles():
+    from levi.pool.reset import bridge
+
+    def rec(n=20, closed_from=0, roll=3.14):
+        s = np.zeros((n, 7), dtype=np.float32)
+        s[:, 6] = 1.0
+        s[closed_from:, 6] = 0.0
+        s[:, 3] = roll
+        return s
+
+    end, anchor = np.zeros(7, dtype=np.float32), np.zeros(7, dtype=np.float32)
+    anchor[3], anchor[6] = -3.14, 0.0
+    # Closed from the first row: nothing was grasped.
+    bad = bridge.find_join(rec(closed_from=0), None, end, anchor, 6, 1.0)
+    assert not bad.ok and bad.reason == "bridge_no_grasp"
+    # A grasp, a roll on the other side of +-pi: joined, and shifted to continue.
+    ok = bridge.find_join(rec(closed_from=5), None, end, anchor, 6, 1.0)
+    assert (
+        ok.ok
+        and ok.row == 19
+        and ok.angle_shift == pytest.approx([-2 * np.pi, 0, 0], abs=1e-5)
+    )
+    # Width: the recording holds 40 mm, the forward episode held 30 mm.
+    width = np.full(20, 0.04)
+    wrong = bridge.find_join(
+        rec(closed_from=5), width, end, anchor, 6, 1.0, anchor_width=0.03
+    )
+    assert not wrong.ok and wrong.reason == "bridge_nothing_held"
+    right = bridge.find_join(
+        rec(closed_from=5), np.full(20, 0.031), end, anchor, 6, 1.0, anchor_width=0.03
+    )
+    assert right.ok
+
+
+def test_an_old_plan_without_bridge_records_hashes_as_it_did():
+    from levi.pool import journal
+
+    job = {"format": "lerobot_v21", "options": {"a": 1}, "episodes": [{"k": 1}]}
+    same = journal.plan_hash({**job, "bridge_records": []})
+    assert (
+        same
+        == journal.plan_hash(job)
+        == journal.plan_hash({**job, "bridge_records": None})
+    )
+    assert journal.plan_hash({**job, "bridge_records": [{"key": "r"}]}) != same
+
+
+def test_a_reset_of_a_lerobot_source_follows_camera_map_and_is_never_chained(rpool):
+    # A forward export of the synthetic demos is a LeRobot source of its own.
+    _, _, out, _ = run_export(
+        rpool,
+        ["in_place", "in_reach"],
+        "src",
+        direction="forward_only",
+        export_options={"filter_static": False},
+    )
+    import shutil
+
+    target = rpool["root"] / "lerobot/src"
+    target.parent.mkdir(parents=True)
+    shutil.copytree(out, target)
+    declare_grippers(rpool["root"])
+    scanner.scan()
+    rec = Recipe(name="lr", formats=["lerobot"], tasks=[TASKS["in_place"]])
+    options = export.ExportOptions(
+        format="lerobot_v21",
+        name="from-lerobot",
+        output_dir=str(rpool["out"]),
+        camera_map={"observation.images.hand": "observation.images.wrist"},
+        reset={
+            "direction": "reset_only",
+            "require_forward_success": False,
+            "release_camera": "observation.images.wrist",
+        },
+    )
+    result = jobs.execute(jobs.plan_export(rec, options))
+    assert result["reset_episodes"] == 1, result["excluded"]
+    out2 = rpool["out"] / "from-lerobot"
+    assert video_markers(out2, 0, "observation.images.wrist") == list(
+        range(N - 1, -1, -1)
+    )
+    # A reset export offered as a source, copied forward, then asked to reverse
+    # again: every step refuses.
+    shutil.copytree(out2, rpool["root"] / "lerobot/chain1")
+    scanner.scan()
+    rec = Recipe(name="c1", formats=["lerobot"], tasks=["Reset: " + TASKS["in_place"]])
+    forward = export.ExportOptions(
+        format="lerobot_v21",
+        name="chain2",
+        output_dir=str(rpool["out"]),
+        camera_map={"observation.images.wrist": "observation.images.hand"},
+    )
+    jobs.execute(jobs.plan_export(rec, forward))
+    rows = [
+        json.loads(x)
+        for x in (rpool["out"] / "chain2/meta/episodes.jsonl").read_text().splitlines()
+    ]
+    assert all("levi_reset" in r for r in rows)  # the mark travels with the episode
+    shutil.copytree(rpool["out"] / "chain2", rpool["root"] / "lerobot/chain2")
+    scanner.scan()
+    rec = Recipe(name="c2", formats=["lerobot"], tasks=["Reset: " + TASKS["in_place"]])
+    again = export.ExportOptions(
+        format="lerobot_v21",
+        name="chain3",
+        output_dir=str(rpool["out"]),
+        reset={"direction": "reset_only", "require_forward_success": False},
+    )
+    with pytest.raises(ValueError, match="reset_already_reset"):
+        jobs.execute(jobs.plan_export(rec, again))
+
+
+def test_one_episode_that_cannot_be_written_costs_only_itself(rpool, monkeypatch):
+    from levi.pool.reset import build
+
+    real = media.encode
+    calls = {"n": 0}
+
+    def flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ValueError("this episode's video will not encode")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(build.media, "encode", flaky)
+    _, result, out, record = run_export(
+        rpool,
+        ["in_place", "in_reach"],
+        "flaky",
+        export_options={"on_error_max_fraction": 0.6},
+    )
+    assert result["reset_episodes"] == 1
+    assert record["counts"]["excluded"] == {"reset_write_error": 1}
+    info = json.loads((out / "meta/info.json").read_text())
+    assert info["total_episodes"] == 3 and info["total_videos"] == 6
+    assert json.loads((out / "meta/levi_validation.json").read_text())["ok"]
+    assert result["errors"] == 1  # reported, not fatal
+
+
+def test_the_filter_for_static_frames_cannot_be_forced_on():
+    with pytest.raises(ValueError, match="static-frame filter"):
+        export.ExportOptions(
+            format="lerobot_v21",
+            name="x",
+            filter_static=True,
+            reset={"direction": "reset_only"},
+        )

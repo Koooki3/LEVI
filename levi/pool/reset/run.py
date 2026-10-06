@@ -10,6 +10,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 from ...conversion import media
@@ -42,6 +43,7 @@ class Plan:
     keep: list[int] = field(default_factory=list)
     record: Located | None = None
     record_rows: int | None = None
+    record_shift: list[float] | None = None
     join: dict | None = None
     excluded: dict | None = None  # the export's exclusion row when not exported
 
@@ -110,67 +112,91 @@ def analyze(
     links = {b.source: b.record for b in opts.bridges}
     plans: list[Plan] = []
     requests: list[dict] = []
-    fps = None
     for ep in kept:
-        located = locate(ep)
-        src = located.source.load()
-        fps = fps or (src.info.get("fps"))
-        text = opts.reset_text(texts.get(ep["task"], ep["task"]))
-        ok, why = (True, None)
-        if opts.require_forward_success:
-            ok, why = forward_ok(ep)
-        if not ok:
-            plans.append(
-                Plan(
-                    ep,
-                    located,
-                    text,
-                    analysis_mod.Analysis(ep["key"]),
-                    excluded=_exclusion(ep, why, f"outcome {ep.get('outcome')!r}"),
-                )
+        try:
+            plan = _plan_one(
+                ep, locate, records, links, opts, contract, texts, reviewer, requests
             )
-            continue
-        release_key = _camera_source_key(src, opts.release_camera)
-        ev = analysis_mod.Evidence(
-            key=ep["key"],
-            state=src.state,
-            action=src.action,
-            width=located.width,
-            release_video=src.video_path(release_key) if release_key else None,
-            already_reset=located.already_reset,
-        )
-        found = analysis_mod.analyze(ev, contract, opts, reviewer=reviewer)
-        plan = Plan(
-            ep, located, text, found, generation=found.generation, keep=found.keep
-        )
-        if found.eligible:
-            plans.append(plan)
-        else:
-            plan.excluded = _exclusion(ep, found.reason, found.detail)
-            link = links.get(ep["key"])
-            if link and found.bridgeable:
-                _join(plan, ev, records, link, opts, contract)
-            elif found.bridgeable:
-                requests.append(
-                    bridge_mod.capture_request(
-                        ep["key"],
-                        texts.get(ep["task"], ep["task"]),
-                        text,
-                        src.state[-1],
-                        src.state[found.bridge_anchor],
-                        found.bridge_anchor,
-                        found.detail or found.reason,
-                        None
-                        if ev.width is None
-                        else float(ev.width[max(0, found.bridge_anchor)]),
-                        list(src.mapping.values()),
-                        float(src.info.get("fps") or 0),
-                    )
-                )
-            plans.append(plan)
-        if progress:
-            progress.advance(ep["key"])
+        finally:
+            if progress:
+                progress.advance(ep["key"])
+        plans.append(plan)
     return plans, requests
+
+
+def _rows_problem(source: build.Source) -> str | None:
+    """A source whose videos do not hold one frame per row cannot be reversed
+    frame for frame (a longer video would silently shift every frame)."""
+    rows = len(source.state)
+    for src_key in source.mapping:
+        try:
+            declared = media.probe_cached(source.video_path(src_key))["declared_frames"]
+        except (OSError, ValueError, KeyError) as exc:
+            return f"{src_key}: {str(exc)[:80]}"
+        if declared is not None and declared != rows:
+            return f"{src_key} has {declared} frames for {rows} rows"
+    return None
+
+
+def _plan_one(
+    ep, locate, records, links, opts, contract, texts, reviewer, requests
+) -> Plan:
+    located = locate(ep)
+    src = located.source.load()
+    forward_text = texts.get(ep["task"], ep["task"])
+    text = opts.reset_text(forward_text)
+
+    def out(reason, detail=None, found=None):
+        return Plan(
+            ep,
+            located,
+            text,
+            found or analysis_mod.Analysis(ep["key"]),
+            excluded=_exclusion(ep, reason, detail),
+        )
+
+    if opts.require_forward_success:
+        ok, why = forward_ok(ep)
+        if not ok:
+            return out(why, f"outcome {ep.get('outcome')!r}")
+    if located.already_reset or opts.looks_reset(forward_text):
+        return out("reset_already_reset", "the source is itself a reset")
+    problem = _rows_problem(src)
+    if problem:
+        return out("reset_video_rows", problem)
+    release_key = _camera_source_key(src, opts.release_camera)
+    ev = analysis_mod.Evidence(
+        key=ep["key"],
+        state=src.state,
+        action=src.action,
+        width=located.width,
+        release_video=src.video_path(release_key) if release_key else None,
+    )
+    found = analysis_mod.analyze(ev, contract, opts, reviewer=reviewer)
+    plan = Plan(ep, located, text, found, generation=found.generation, keep=found.keep)
+    if found.eligible:
+        return plan
+    plan.excluded = _exclusion(ep, found.reason, found.detail)
+    link = links.get(ep["key"])
+    if link and found.bridgeable:
+        _join(plan, ev, records, link, opts, contract)
+    elif found.bridgeable:
+        anchor = found.bridge_anchor
+        requests.append(
+            bridge_mod.capture_request(
+                ep["key"],
+                forward_text,
+                text,
+                src.state[-1],
+                src.state[anchor],
+                anchor,
+                found.detail or found.reason,
+                None if ev.width is None else float(ev.width[anchor]),
+                list(src.mapping.values()),
+                float(src.info.get("fps") or 0),
+            )
+        )
+    return plan
 
 
 def _join(plan: Plan, ev, records, link, opts, contract) -> None:
@@ -182,19 +208,39 @@ def _join(plan: Plan, ev, records, link, opts, contract) -> None:
         )
         return
     rec = located.source.load()
+    src = plan.located.source
     try:
         contract_mod.check(contract, rec.state, rec.action)
     except contract_mod.ContractProblem as exc:
         plan.excluded = _exclusion(ep, "reset_bridge_contract", str(exc))
         return
-    src = plan.located.source
+    missing = [k for k in src.mapping.values() if k not in rec.mapping.values()]
+    if missing:
+        plan.excluded = _exclusion(
+            ep, "reset_bridge_cameras", f"the recording has no camera {missing}"
+        )
+        return
+    problem = _rows_problem(rec)
+    if problem:
+        plan.excluded = _exclusion(ep, "reset_bridge_cameras", problem)
+        return
+    for out_key in src.mapping.values():
+        a = media.probe_cached(src.video_path(_camera_source_key(src, out_key)))
+        b = media.probe_cached(rec.video_path(_camera_source_key(rec, out_key)))
+        if (a["width"], a["height"]) != (b["width"], b["height"]):
+            plan.excluded = _exclusion(
+                ep, "reset_bridge_cameras", f"{out_key} differs in resolution"
+            )
+            return
+    anchor = found.bridge_anchor
     join = bridge_mod.find_join(
         rec.state,
         located.width,
         src.state[-1],
-        src.state[found.bridge_anchor],
+        src.state[anchor],
         contract.gripper_index,
         contract.gripper_open_value,
+        None if ev.width is None else float(ev.width[anchor]),
     )
     detail = join.record()
     if join.ok:
@@ -205,10 +251,10 @@ def _join(plan: Plan, ev, records, link, opts, contract) -> None:
             )
         else:
             try:
-                a = media.frames_at(ev.release_video, [found.bridge_anchor])
+                a = media.frames_at(ev.release_video, [anchor])
                 b = media.frames_at(rec.video_path(release_key), [join.row])
-                same, m = bridge_mod.visual_join(a[found.bridge_anchor], b[join.row])
-            except (KeyError, ValueError, OSError):
+                same, m = bridge_mod.visual_join(a[anchor], b[join.row])
+            except (KeyError, ValueError, OSError, cv2.error):
                 same, m = False, {}
             detail["visual"] = m
             if not same:
@@ -228,6 +274,7 @@ def _join(plan: Plan, ev, records, link, opts, contract) -> None:
     plan.keep = found.anchor_keep
     plan.record = located
     plan.record_rows = join.row + 1
+    plan.record_shift = join.angle_shift
 
 
 def exported(plans: list[Plan]) -> list[Plan]:
@@ -246,6 +293,7 @@ def write(
     staging: Path,
     data_path: str,
     video_path: str,
+    fail,
 ) -> list[dict]:
     """Write the exported plans as episodes ``new0, new0 + 1, …``. One dict
     per episode: the metadata row, its statistics, provenance and the pieces
@@ -255,23 +303,33 @@ def write(
     new, offset = new0, offset0
     for plan in exported(plans):
         src = plan.located.source
-        built = build.write(
-            ctx=ctx,
-            source=src,
-            keep=plan.keep,
-            edits=plan.analysis.edits,
-            gripper=contract.gripper_index,
-            semantics=plan.analysis.semantics,
-            record=plan.record.source if plan.record else None,
-            record_rows=plan.record_rows,
-            new=new,
-            offset=offset,
-            task_index=task_index[plan.text],
-            fps=fps,
-            staging=staging,
-            data_path=data_path,
-            video_path=video_path,
-        )
+        try:
+            built = build.write(
+                ctx=ctx,
+                source=src,
+                keep=plan.keep,
+                edits=plan.analysis.edits,
+                gripper=contract.gripper_index,
+                semantics=plan.analysis.semantics,
+                record=plan.record.source if plan.record else None,
+                record_rows=plan.record_rows,
+                record_shift=plan.record_shift,
+                new=new,
+                offset=offset,
+                task_index=task_index[plan.text],
+                fps=fps,
+                staging=staging,
+                data_path=data_path,
+                video_path=video_path,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # One episode's trouble is its own: a fatal one (disk, memory, a
+            # stop) still stops the export, through ``fail``.
+            plan.excluded = fail(plan, exc)
+            for rel in _written(staging, data_path, video_path, new, src):
+                (staging / rel).unlink(missing_ok=True)
+            continue
+        ctx.progress.advance(plan.ep["key"])
         n = built["rows"]
         meta = {
             "scope": plan.analysis.scope,
@@ -310,3 +368,17 @@ def write(
         new += 1
         offset += n
     return out
+
+
+def _written(
+    staging: Path, data_path: str, video_path: str, new: int, src
+) -> list[str]:
+    """The files an episode that failed half-way may have left."""
+    rels = [data_path.format(episode_chunk=new // 1000, episode_index=new)]
+    for out_key in src.mapping.values():
+        rels.append(
+            video_path.format(
+                episode_chunk=new // 1000, episode_index=new, video_key=out_key
+            )
+        )
+    return rels

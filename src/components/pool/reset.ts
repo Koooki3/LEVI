@@ -13,6 +13,18 @@ import {
 export const DEFAULT_TEMPLATE = "Reset: {task}";
 export const DEFAULT_CONTRACT = "fr3-robotiq@1";
 export const DEFAULT_RELEASE_CAMERA = "observation.images.hand";
+export const DEFAULT_SETTLED_ROWS = 2;
+export const MIN_SETTLED_ROWS = 1;
+export const MAX_SETTLED_ROWS = 6;
+
+/** The settled-frames count as the backend accepts it (integer 1..6). */
+export function clampSettledRows(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_SETTLED_ROWS;
+  return Math.min(
+    MAX_SETTLED_ROWS,
+    Math.max(MIN_SETTLED_ROWS, Math.round(value)),
+  );
+}
 
 /** What the reset form holds (strings as typed; ``resetPayload`` converts). */
 export interface ResetState {
@@ -24,6 +36,10 @@ export interface ResetState {
   releaseCamera: string;
   /** Local vision model connection name; empty = none. */
   reviewModel: string;
+  /** Also reverse episodes without a grasp (pushing, pouring, wiping). */
+  allowNoGrasp: boolean;
+  /** Still frames in a row that show the object has settled (1..6). */
+  minSettledRows: number;
   /** One ``forward key = recorded key`` per line. */
   bridgesText: string;
 }
@@ -36,6 +52,8 @@ export const DEFAULT_RESET_STATE: ResetState = {
   onIneligible: "exclude",
   releaseCamera: DEFAULT_RELEASE_CAMERA,
   reviewModel: "",
+  allowNoGrasp: false,
+  minSettledRows: DEFAULT_SETTLED_ROWS,
   bridgesText: "",
 };
 
@@ -112,6 +130,10 @@ function buildOptions(state: ResetState): ResetOptions {
       ? { release_camera: camera }
       : {}),
     ...(model ? { review_model: model } : {}),
+    ...(state.allowNoGrasp ? { allow_no_grasp: true } : {}),
+    ...(clampSettledRows(state.minSettledRows) !== DEFAULT_SETTLED_ROWS
+      ? { min_settled_rows: clampSettledRows(state.minSettledRows) }
+      : {}),
     ...(bridges.length ? { bridges } : {}),
   };
 }
@@ -235,6 +257,10 @@ export const RELEASE_REASON_LABELS: Record<string, string> = {
   low_texture: "too little texture to follow the object",
   object_left_the_fingers: "the object left the fingers' reach",
   vlm_veto: "the vision model did not accept it",
+  not_settled:
+    "the object did not settle (the arm left too soon after the release)",
+  review_failed:
+    "the vision model's review failed, so the release was not accepted",
   event_in_seam: "the release falls on the splice",
   release_camera_unreadable: "the release camera video could not be read",
 };

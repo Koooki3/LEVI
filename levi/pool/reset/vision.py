@@ -96,7 +96,13 @@ def classify(m: dict) -> tuple[str, str | None]:
     """(class, reason): ``in_place``, ``in_reach``, ``escaped`` or ``unknown``."""
     if m.get("texture") is not None and m["texture"] < profile.TEXTURE_MIN:
         return "unknown", "low_texture"  # a plain background matches itself
-    near = abs(m["dx"]) <= profile.REACH_SHIFT and abs(m["dy"]) <= profile.REACH_SHIFT
+    near = (
+        abs(m["dx"]) <= profile.REACH_SHIFT
+        and abs(m["dy"]) <= profile.REACH_SHIFT
+        and m["dy"] >= -profile.REACH_UP
+        and m["dy"] <= profile.REACH_DOWN
+        and m["scale"] <= profile.REACH_SCALE
+    )
     if m["same"] >= profile.SAME_PLACE_NCC:
         klass = "in_place"
     elif m["best"] >= profile.REACH_NCC and near:
@@ -110,3 +116,17 @@ def classify(m: dict) -> tuple[str, str | None]:
     if m.get("sharp") is not None and m["sharp"] < profile.BLUR_RATIO:
         return "unknown", "object_still_moving"
     return klass, None
+
+
+def same_scene(m: dict) -> bool:
+    """Two rest frames, measured against each other: the object has not moved
+    between them. A little camera motion is allowed (the arm may be starting
+    to lift): the object must still be found at the same place or, at most a
+    tenth of the image away, with a strong match."""
+    if m["same"] >= profile.SETTLED_SAME:
+        return True
+    return (
+        m["best"] >= profile.SETTLED_BEST
+        and abs(m["dx"]) <= profile.SETTLED_SHIFT
+        and abs(m["dy"]) <= profile.SETTLED_SHIFT
+    )

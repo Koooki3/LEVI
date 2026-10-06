@@ -22,10 +22,11 @@ uv run levi pool export pi05-mix --format lerobot_v21 --name pi05-mix-reset --re
 uv run levi pool export pi05-mix --format lerobot_v21 --name pi05-reset-only --reset reset_only \
     [--reset-template "Undo: {task}"] [--reset-max-release in_place|in_reach] [--reset-partial] \
     [--reset-contract fr3-robotiq@1] [--reset-review-model <连接名>] \
+    [--reset-min-settled-rows 2] [--reset-allow-no-grasp] \
     [--reset-bridge <正向片段键>=<补录片段键>] [--reset-any-outcome]
 ```
 
-训练池页面的导出面板在“复位数据”下有同样的设置和“检查可逆性”按钮。接口：`ExportOptions.reset`（`direction`、`task_template`、`action_contract`、`max_release`、`on_ineligible`、`require_forward_success`、`release_camera`、`gripper_lead_rows`、`review_model`、`bridges`）和 `POST /api/levi/pool/reset/analyze`。不带 `reset`，或 `direction` 为 `forward_only` 时，导出和以前完全一样。
+训练池页面的导出面板在“复位数据”下有同样的设置和“检查可逆性”按钮。接口：`ExportOptions.reset`（`direction`、`task_template`、`action_contract`、`max_release`、`on_ineligible`、`min_settled_rows`、`allow_no_grasp`、`require_forward_success`、`release_camera`、`gripper_lead_rows`、`review_model`、`bridges`）和 `POST /api/levi/pool/reset/analyze`。不带 `reset`，或 `direction` 为 `forward_only` 时，导出和以前完全一样。
 
 复位片段只写进 `lerobot_v21` 导出（`raw_capture` 是原始录制的拷贝；`recap_value` 要给没人做过的任务编造奖励）。你按任务要的数量指**正向来源片段**数；每个最多派生一条复位片段，所以 `forward_and_reset` 最多是两倍。
 
@@ -61,25 +62,34 @@ uv run levi pool export pi05-mix --format lerobot_v21 --name pi05-reset-only --r
 
 ### 度量怎么做
 
-松爪后机械臂常常静止几行，物体在这段时间下落并停稳，腕部相机随手一起动。机械臂没动的时候，抓持帧（物体在闭合的手指间）和落稳帧（手指张开、物体静止）是同一个场景、同一个位置，差异就是物体和手指。分析比较两张图的中心（物体夹在两指之间的位置）：同一位置的相关系数（`same`）、中心附近多种尺寸下的最佳匹配（`best`、`dx`、`dy`、`scale`：掉下去的物体更低更小）、抓持帧中心有多平（`texture`：一块平的托盘总能匹配自己）、落稳帧有多清晰（`sharp`：模糊说明还在动）。落稳帧取最早的、已经显示物体在够得着范围内的清晰帧（此时机械臂动得最少，接缝处状态跳变最小）；决定类别的是最后一个清晰帧，即物体最终的位置。
+松爪后机械臂常常静止几行，物体在这段时间下落并停稳，腕部相机随手一起动。机械臂不动的时候，抓持帧（物体在闭合的手指间）和落稳帧（手指张开、物体静止）是同一个场景、同一个位置，差异就是物体和手指。分析从手指张开的那一行起，取机械臂每行移动小于 3 mm 且离抓持位姿 2.5 cm 以内的行，比较两张图的中心（物体夹在两指之间的位置）：同一位置的相关系数（`same`）、中心附近多种尺寸下的最佳匹配（`best`、`dx`、`dy`、`scale`：掉下去的物体更低更小，不会更大或更高）、抓持帧中心有多平（`texture`：一块平的托盘总能匹配自己）、落稳帧有多清晰（`sharp`：模糊说明还在动）。
 
-这是测量，不是识别：它不知道物体是什么。阈值（`levi/pool/reset/profile.py`，版本号记入每次导出）在真实的 FR3 + Robotiq 10 Hz 采集上标定，并且刻意从严：只凭颜色相似从不放行，因为盘子或桌面有没有物体看起来都一样。换机器人或相机要重新看一遍数字：`levi pool reset-analyze` 会打印它们。可选的本地视觉模型（`review_model`）只能**否决**已放行的松爪（`vlm_veto`），不能放行被拒的：已发表的评测里，视觉语言模型判断操作是否成功大约是 0.6–0.8 的平衡准确率，并偏向判“成功”，拿来抓错误够用，单独做数据决定不够。
+物体只有在至少 `min_settled_rows`（默认 2）个连续的清晰落稳帧与最后一帧一致时，才算**已落稳**。一帧什么也证明不了：10 Hz 下落体常常并不模糊，机械臂也可能在物体还在路上时就离开。类别按最后一个落稳帧判定（物体最终的位置）。对 `in_reach`，缝放在落稳段里最早的一帧，从这一帧到结尾每一帧都已显示物体在够得着的范围内：掉落的帧一帧都不留，机械臂也动得最少（缝处状态跳变只有几毫米：下面这批数据上中位数 4 mm，90 分位 16 mm）。
+
+这是测量，不是识别：它不知道物体是什么。阈值（`levi/pool/reset/profile.py`，版本号记入每次导出）在真实的 FR3 + Robotiq 10 Hz 采集上标定，并且刻意从严：只凭颜色相似从不放行，因为盘子或桌面有没有物体看起来都一样。换机器人或相机要重新看一遍数字：`levi pool reset-analyze` 会打印它们。已知弱点：杂乱背景上的小物体（螺丝）物体走了仍可能继续匹配上，平整的背景则会匹配自己；建议用 `reset-analyze` 抽查导出。可选的本地视觉模型（`review_model`）只能**否决**已放行的松爪（`vlm_veto`），不能放行被拒的（模型没能回答时，该松爪保持 `unknown`）：一个公开的视觉语言模型操作失败判断评测（FailBench，2026）里，整体平衡准确率最好 0.77，物体运动可见的类别约 0.8，接触类不超过 0.6，并偏向判“成功”：拿来抓错误够用，单独做决定不够。
 
 ### 在本工作区数据上的实测
 
-仅分析，`data_collection_robotiq` 随机 300 条遥操作采集（10 Hz、640×480、不过滤静止帧），按出厂阈值：
+仅分析，`data_collection_robotiq` 随机 300 条遥操作采集（10 Hz、640×480、不过滤静止帧），共 507 次松爪，按出厂阈值：
 
-<!-- RESET-MEASURED-ZH -->
+| | `min_settled_rows` 2（默认） | 1（只信一帧） |
+| --- | --- | --- |
+| 能整条反转的片段 | 46（15%） | 66（22%） |
+| 松爪 `in_place` / `in_reach` | 29 / 59 | 53 / 103 |
+| 松爪 `escaped` | 6 | 7 |
+| 松爪 `unknown` | 413 | 344 |
+
+`unknown` 的松爪主要是 `not_settled`（机械臂一两帧内就离开：184）、`ambiguous_match`（158）、`object_still_moving` 和 `arm_left_before_settle`（各 34）。损失多半出在采集而不是方法：这批示范在打开夹爪后约 0.3 秒内就抬臂。**松爪后停约 0.5 秒再抬臂**，能证明的片段会多很多。带静止帧过滤转换的 LeRobot 数据集（`lerobot_fr3_filtered_robotiq_screws_plates`，89 个片段）恰好丢掉了这里需要的行：没有一个能反转。更早的、更宽松的阈值在同一批采集上放行了 56%；审查发现它会放行不该放行的掉落（机械臂离开时物体还在下落、缝放在掉落之前），所以现在的规则用产量换证据。
 
 ## 无法反转的部分
 
 某次松爪是 `escaped` 或 `unknown` 的片段，有三种处理：
 
-- **排除**（`on_ineligible: "exclude"`，默认）。正向片段不受影响。导出列出原因和度量（`meta/levi_reset.json` 的 `analysis_of_excluded`）。
+- **排除**（`on_ineligible: "exclude"`，默认）。正向片段不受影响，但仍会以 `reset_…` 原因出现在 `excluded` 里（看原因的前缀：`forward_and_reset` 会把复位的排除和已正向导出的片段列在一起）。度量在 `meta/levi_reset.json` 的 `analysis_of_excluded`。
 - **从最后一次安全抓持处起反转**（`"partial"`）。复位从物体已经在夹爪里开始，位姿是正向片段在出问题的松爪之前抓持的位姿。它带标记（`levi_reset.scope: "partial"`，生成方式 `partial`）：教的是搬运并放回，不是把物体从落点拿起来，起点也不是正向任务真实的终态。
-- **用录制补全**（`bridges`）。问题只出在一次松爪时，可以把一段真实录制接在反转序列前面：池里的另一个片段，从正向片段最后的位姿出发，物体在它躺的地方，接近、抓住，把它带到反转序列接手的位姿。衔接是检查出来的，不是假设：录制起点离正向终点在 3 cm 内；夹爪闭合并保持闭合；测得的宽度（如有）说明确实夹着东西；衔接处的位姿和旋转与正向的抓持吻合；衔接处两张腕部相机帧是同一个场景。任何一项不过，该片段连同原因（`reset_bridge_*`）被排除。录制必须是池里单独的一个片段（它和其他来源一样要过留出名单和移除检查），不会作为正向片段导出。
+- **用录制补全**（`bridges`）。问题只出在一次松爪、且它之后不再有抓取时（否则录制还得把后面的操作也撤销），可以把一段真实录制接在反转序列前面：池里的另一个片段，从正向片段最后的位姿出发，物体在它躺的地方，接近、抓住，把它带到反转序列接手的位姿。衔接是检查出来的，不是假设：录制起点离正向终点在 3 cm 内；夹爪闭合并保持闭合；测得的宽度（如有）与正向抓持宽度一致，没有宽度时夹爪至少要先张开再闭合；衔接处的位姿和旋转与正向的抓持吻合；衔接处两张腕部相机帧是同一个场景。任何一项不过，该片段连同原因（`reset_bridge_*`）被排除。录制必须是池里单独的一个片段（它和其他来源一样要过留出名单和移除检查），不会作为正向片段导出。
 
-能补全但还没有录制的片段，会在 `meta/levi_reset_capture_requests.json` 里有一条：起始位姿、抓着物体结束的位姿、抓持宽度、相机和 fps，以及一句话说明。录这些（或者整条复位，作为任务指令为 `Reset: …` 的普通片段）是补上缺口的办法，训练池像其他片段一样收回录制。
+只出在那一次松爪、且还没有录制的片段，会在 `meta/levi_reset_capture_requests.json` 里有一条：起始位姿、抓着物体结束的位姿、抓持宽度、相机和 fps，以及一句话说明。录这些（或者整条复位，作为任务指令为 `Reset: …` 的普通片段）是补上缺口的办法，训练池像其他片段一样收回录制。
 
 ### 纯信号处理或本地模型能补全吗
 
@@ -93,13 +103,14 @@ uv run levi pool export pi05-mix --format lerobot_v21 --name pi05-reset-only --r
 - 留出和已移除的片段，对正向和复位一视同仁地拒绝，补录片段也一样；复位导出不能作为另一个导出的来源。
 - 动作契约是对照数据检查的声明。目前只登记了 `fr3-robotiq@1`；换机器人要先在 `levi.counterfactual` 登记它的契约，才能反转它的片段。
 - 复位导出默认不过滤静止帧（物体落稳的那几行就是判断依据）。开了过滤，或 fps 低于采集，分析读的是保留下来的行，可能少到看不出物体落稳：更多片段变成 `unknown`。
+- 没有抓取的片段（推、倒、擦）不反转（`reset_no_grasp`；`allow_no_grasp` 可覆盖）：反转后物体会被拉回、水会倒流，而信号分不清这些和无害的伸臂。
 - LeRobot v3 来源不反转（训练池本来就把它们列为不可导出）。
 - 复位片段记录的是示范倒着做了什么，**不是**机器人复位成功的证据，也没有成功标签。要求每条都有标签的训练端需要另找来源。
 - 成本：每条复位片段每路相机一次解码、一次编码，外加一个解码视频的临时拷贝（640×480 约每帧 0.9 MB），放在暂存目录，该阶段结束就删。
 
 ## 排除原因
 
-`reset_forward_failed`、`reset_forward_unlabeled`（只反转完成了的任务；没有结局的人工录制算完成）、`reset_already_reset`、`reset_action_contract`（数据不符合契约）、`reset_release_escaped`、`reset_release_unknown`、`reset_release_in_reach`（`max_release: "in_place"` 时）、`reset_unreadable`；补录相关：`reset_bridge_missing`、`reset_bridge_contract`、`reset_bridge_start_mismatch`、`reset_bridge_no_grasp`、`reset_bridge_never_reaches_anchor`、`reset_bridge_nothing_held`、`reset_bridge_visual_mismatch`、`reset_bridge_visual_unchecked`。单次松爪自己的原因是：`no_hold_frame`、`arm_left_before_settle`、`no_release_camera`、`object_still_moving`、`ambiguous_match`、`low_texture`、`object_left_the_fingers`、`vlm_veto`。
+`reset_forward_failed`、`reset_forward_unlabeled`（只反转完成了的任务；没有结局的人工录制算完成）、`reset_already_reset`、`reset_action_contract`（数据不符合契约）、`reset_release_escaped`、`reset_release_unknown`、`reset_release_in_reach`（`max_release: "in_place"` 时）、`reset_no_grasp`、`reset_video_rows`（视频帧数与行数不一致）、`reset_write_error`（这一条写入失败，其他不受影响）、`reset_unreadable`；补录相关：`reset_bridge_missing`、`reset_bridge_contract`、`reset_bridge_cameras`、`reset_bridge_start_mismatch`、`reset_bridge_no_grasp`、`reset_bridge_never_reaches_anchor`、`reset_bridge_nothing_held`、`reset_bridge_visual_mismatch`、`reset_bridge_visual_unchecked`。单次松爪自己的原因是：`no_hold_frame`、`arm_left_before_settle`、`not_settled`、`review_failed`、`no_release_camera`、`object_still_moving`、`ambiguous_match`、`low_texture`、`object_left_the_fingers`、`vlm_veto`。
 
 ## 相关工作
 

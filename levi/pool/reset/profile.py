@@ -15,7 +15,15 @@ VERSION = "reset-profile-1"
 HOLD_ROWS_BEFORE = 3  # hold frame: one of the last rows before the command edge
 SETTLE_ROWS_AFTER = 12  # rest frame: searched this many rows after the fingers opened
 OPEN_FRACTION = 0.95  # fingers count as open at this share of the widest opening
-HOLD_WIDTH_MAX = 0.078  # m: wider than this at release, nothing was held
+HOLD_MARGIN = 0.003  # m: a release counts as holding something when the fingers
+# were at least this much narrower than the widest opening of the episode
+# (relative, so a wide object is still seen; 2F-85 opens about 0.085)
+STILL_STEP = 0.003  # m: the arm moves less than this between two rest rows
+STILL_TURN = 0.03  # rad
+SETTLED_BEST = 0.75  # or a strong match, a little way off (the arm starts to lift)
+SETTLED_SHIFT = 0.10
+SETTLED_SAME = 0.70  # two rest frames this alike (same place, arm still): at rest
+BRIDGE_WIDTH_TOL = 0.006  # m: a recording's hold width vs the forward hold width
 
 # The arm may not have moved between hold frame and rest frame for the wrist
 # camera to see the same scene from the same place.
@@ -28,10 +36,13 @@ JOIN_ROTATION_TOL = 0.10  # rad
 
 # Wrist camera, hold frame vs rest frame (see vision.py).
 SAME_PLACE_NCC = 0.75  # the object did not move at all
-REACH_NCC = 0.60  # a scale-tolerant match is found near the centre
+REACH_NCC = 0.65  # a scale-tolerant match is found near the centre
 ESCAPED_NCC = 0.50  # neither is found: the object left the fingers' reach
 ESCAPED_HIST = 0.50
-REACH_SHIFT = 0.30  # largest match shift, as a share of the image size
+REACH_SHIFT = 0.20  # largest match shift, as a share of the image size
+REACH_DOWN = 0.10  # lower in the image by at most this (it dropped, not far)
+REACH_SCALE = 1.05  # a dropped object only gets smaller (further from the camera)
+REACH_UP = 0.05  # ... and lower in the image, never higher by more than this
 TEXTURE_MIN = 14.0  # grey-level std of the hold frame's centre
 BLUR_RATIO = 0.35  # rest frame this much blurrier than the hold frame: still moving
 

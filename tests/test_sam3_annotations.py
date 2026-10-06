@@ -613,9 +613,7 @@ def test_worker_propagates_every_prompt_not_only_the_last(tmp_path: Path) -> Non
     video.parent.mkdir(parents=True)
     video.write_bytes(b"fixture")
     (tmp_path / "meta").mkdir()
-    (tmp_path / "meta/episodes.jsonl").write_text(
-        '{"episode_index": 0, "length": 5}\n'
-    )
+    (tmp_path / "meta/episodes.jsonl").write_text('{"episode_index": 0, "length": 5}\n')
 
     class ResettingPredictor:
         """Mimics SAM3: add_prompt resets the session to the new prompt only;

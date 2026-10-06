@@ -586,6 +586,17 @@ def _reset_args(parser) -> None:
         "completes its reset (repeatable)",
     )
     parser.add_argument(
+        "--reset-min-settled-rows",
+        type=int,
+        help="rest frames (arm still, fingers open) that must agree before an "
+        "object counts as at rest (default 2; 1 trusts a single frame)",
+    )
+    parser.add_argument(
+        "--reset-allow-no-grasp",
+        action="store_true",
+        help="also reverse episodes with no grasp (pushing, pouring, wiping)",
+    )
+    parser.add_argument(
         "--reset-any-outcome",
         action="store_true",
         help="also reverse episodes that failed or have no outcome",
@@ -608,6 +619,13 @@ def _reset_options(args, direction: str):
         value["review_model"] = args.reset_review_model
     if args.reset_any_outcome:
         value["require_forward_success"] = False
+    if args.reset_min_settled_rows is not None:
+        value["min_settled_rows"] = args.reset_min_settled_rows
+    if args.reset_allow_no_grasp:
+        value["allow_no_grasp"] = True
+    for pair in args.reset_bridge:
+        if "=" not in pair:
+            raise ValueError(f"--reset-bridge wants FORWARD=RECORD, not {pair!r}")
     if args.reset_bridge:
         value["bridges"] = [
             {"source": a, "record": b}

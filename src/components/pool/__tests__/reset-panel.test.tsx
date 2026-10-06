@@ -37,6 +37,8 @@ describe("reset panel", () => {
     expect(html).toContain("Worst release allowed");
     expect(html).toContain("does not filter out still frames");
     expect(html).toContain("Check reversibility");
+    expect(html).toContain("Also reverse episodes without a grasp");
+    expect(html).toContain("Frames in a row that show the object settled");
     expect(html).not.toContain("pg-pool-bad");
   });
 
@@ -97,6 +99,7 @@ describe("reversibility result", () => {
     expect(html).toContain("run/demo_0003");
     expect(html).toContain("reset-profile-test");
     expect(html).toContain("not a guarantee");
+    expect(html).toContain("about 0.5 s after opening the gripper");
     expect(html).not.toContain("changed since this check");
   });
 

@@ -44,4 +44,6 @@ def test_names_and_messages_cannot_break_the_table(tmp_path):
 </testsuite>"""
     )
     text = load().summary(xml)
-    assert "| failure | `tests.test_a::test_bad[a\\|b'c<d]` | &lt;details&gt; x |" in text
+    assert (
+        "| failure | `tests.test_a::test_bad[a\\|b'c<d]` | &lt;details&gt; x |" in text
+    )

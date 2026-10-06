@@ -13,6 +13,7 @@ import {
   RELEASE_CLASS_LABELS,
   RELEASE_REASON_LABELS,
   analysisPayload,
+  clampSettledRows,
   isResetReason,
   needsCapture,
   parseBridges,
@@ -77,6 +78,32 @@ describe("resetPayload", () => {
         { source: "c", record: "d" },
       ],
     });
+  });
+
+  test("the grasp and settling options are sent only when they differ from the default", () => {
+    const plain = resetPayload(on(), "lerobot_v21");
+    expect(plain).not.toHaveProperty("allow_no_grasp");
+    expect(plain).not.toHaveProperty("min_settled_rows");
+    expect(
+      resetPayload(
+        on({ allowNoGrasp: true, minSettledRows: 1 }),
+        "lerobot_v21",
+      ),
+    ).toMatchObject({ allow_no_grasp: true, min_settled_rows: 1 });
+    expect(
+      resetPayload(on({ minSettledRows: 2 }), "lerobot_v21"),
+    ).not.toHaveProperty("min_settled_rows");
+    expect(
+      resetPayload(on({ minSettledRows: 99 }), "lerobot_v21")?.min_settled_rows,
+    ).toBe(6);
+    expect(analysisPayload(on({ minSettledRows: 3 })).min_settled_rows).toBe(3);
+  });
+
+  test("the settled-frames count is kept to 1..6", () => {
+    expect(clampSettledRows(0)).toBe(1);
+    expect(clampSettledRows(3.4)).toBe(3);
+    expect(clampSettledRows(7)).toBe(6);
+    expect(clampSettledRows(NaN)).toBe(2);
   });
 
   test("an empty contract falls back to the default", () => {
@@ -197,6 +224,10 @@ describe("labels and order", () => {
       RELEASE_REASON_LABELS.low_texture,
     );
     expect(releaseReasonLabel("brand_new")).toBe("brand_new");
+    expect(releaseReasonLabel("not_settled")).toBe(
+      RELEASE_REASON_LABELS.not_settled,
+    );
+    expect(RELEASE_REASON_LABELS.review_failed).toBeTruthy();
   });
 
   test("short keys keep the end of a path", () => {
@@ -235,6 +266,10 @@ describe("catalogue", () => {
     "reset_bridge_nothing_held",
     "reset_bridge_visual_mismatch",
     "reset_bridge_visual_unchecked",
+    "reset_no_grasp",
+    "reset_video_rows",
+    "reset_bridge_cameras",
+    "reset_write_error",
   ];
 
   test("every reset exclusion code has a label", () => {

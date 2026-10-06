@@ -62,13 +62,14 @@ def find_events(
     where it changes; a release is closed -> open, a grasp open -> closed."""
     cmd = np.asarray(open_command) > 0.5
     n = len(cmd)
+    top = None if width is None else float(np.nanmax(width))
     changes = [int(i) for i in np.flatnonzero(cmd[1:] != cmd[:-1]) + 1]
     out = []
     for j, row in enumerate(changes):
         nxt = changes[j + 1] if j + 1 < len(changes) else n
         if cmd[row]:  # closed -> open
             before = None if width is None else float(width[max(0, row - 1)])
-            held = before is None or before < profile.HOLD_WIDTH_MAX
+            held = before is None or before < top - profile.HOLD_MARGIN
             out.append(
                 GripEvent(
                     "release",
