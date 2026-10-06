@@ -396,6 +396,7 @@ class Config:
             problems.append("pipeline.refine must be always or auto")
         if not p.temporal:
             problems.extend(_review_only_problems(p))
+        problems.extend(_final_state_problems(p))
         if s.ui_port == s.core_port:
             problems.append("service.ui_port and service.core_port must differ")
         for name, port in (("ui_port", s.ui_port), ("core_port", s.core_port)):
@@ -470,7 +471,34 @@ def _review_only_problems(p) -> list:
             (
                 f"pipeline.temporal = false cannot use {name}: its "
                 "episode.require_place reads the place time segments; use "
-                "generic-release.v3.json"
+                "generic-release.v3.json or generic-final.v1.json"
+            )
+        ]
+    return []
+
+
+def _final_state_problems(p) -> list:
+    """The final-state judgement (``episode.rule`` ``final_state``) asks one
+    question per episode, so ``pipeline.anchored_min_valid`` above 1 can never
+    be met. A spec that cannot be read is reported elsewhere (or by the run)."""
+    if not p.anchored or p.anchored_min_valid == 1:
+        return []
+    import json
+
+    from levi.live import generic
+
+    try:
+        spec = json.loads(generic.text(p.anchored_spec))
+    except (OSError, ValueError):
+        return []
+    if isinstance(spec, dict) and (spec.get("episode") or {}).get("rule") == (
+        "final_state"
+    ):
+        return [
+            (
+                f"pipeline.anchored_min_valid = {p.anchored_min_valid} cannot be "
+                f"used with {p.anchored_spec}: it asks one question per episode, "
+                "so it cannot have more than one valid event; leave it at 1"
             )
         ]
     return []

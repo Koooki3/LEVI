@@ -1,0 +1,81 @@
+{
+ "id": "generic-final",
+ "version": 1,
+ "title": {
+  "en": "Generic final-state judgement, last seconds of the episode (candidate v1)",
+  "zh": "通用最终状态判定，只看片段最后几秒（候选 v1）"
+ },
+ "status": "candidate",
+ "description": "A different question from the release review (`generic-release`): ask ONCE per episode about the last seconds of the recording: where is the object the instruction is about, and does it stay still. The anchor is the episode's last frame (`anchor.event = end`), so it needs no gripper channel and no time segments and runs with `pipeline.temporal = false`. Rule `final_state`: success when the object rests at the destination the instruction names (supported by it, not hanging from the fingers) and stays still; failure when it is elsewhere, in the gripper or held over the destination; an `unclear` answer that no definite answer outweighs makes the verdict undecided (recorded as a failure and shown as undecided). The question names no task: the destination is whatever the instruction says. Meant for episodes cut short by a key press (the recording is shorter than the step budget and may end before the gripper opens); a short episode shows its first frame in place of offsets that fall before it. KNOWN LIMITS: (1) NOT EVALUATED: no accuracy is known on any data. (2) It sees only the final frames: a wrong placement earlier, a second object that went wrong, or an episode that stops half way with the first object in place is invisible, and how many objects the instruction needs is not checked. (3) An object still hanging from the fingers when the recording ends (judged before the gripper opened) reads as a failure; an object already down on the destination with the fingers still around it counts as resting. (4) A destination hidden from both cameras reads unclear. CANDIDATE, NOT THE DEFAULT: set `pipeline.anchored_spec` together with `pipeline.temporal = false`. Written 2026-10-06. The live page shows its verdict as automatic and unreviewed.",
+ "anchor": {
+  "signal": "gripper",
+  "event": "end"
+ },
+ "views": [
+  {
+   "role": "side",
+   "camera": "observation.images.view1",
+   "offsets_seconds": [
+    -3.0,
+    -2.0,
+    -1.2,
+    -0.6,
+    -0.2,
+    0.0
+   ]
+  },
+  {
+   "role": "wrist",
+   "camera": "observation.images.hand",
+   "offsets_seconds": [
+    -2.0,
+    -1.0,
+    -0.4,
+    0.0
+   ]
+  }
+ ],
+ "question": "A robot arm with a two-finger gripper has just been carrying out this instruction: \"{task}\". Work out what the instruction asks the robot to pick up and where it should end up (the destination).\nThese are the LAST seconds of the recording. Images 1-6 are the side camera at 3.0, 2.0, 1.2, 0.6, 0.2 and 0 s before the end (the last image is the final frame); images 7-10 are the wrist camera (looking down between the fingers) at 2.0, 1.0, 0.4 and 0 s before the end. If the recording is shorter than that, the earliest images repeat its first frame.\nJudge the object at the final frame, strictly from what the images show, not from what the robot seems to be trying to do. The gripper holds an object by pinching it, so a held object may hang tilted under the fingers; it counts as held if the whole object is off the surface it lay on and moves together with the gripper across the images. An object that stays on the surface while the fingers touch or drag it is NOT held.\n- object_state: resting_at_destination if the object is down on or in the place the instruction names as its destination and that place supports it (the fingers may still be around it, but it does not hang from them); held_over_destination if it is above the destination but still hanging from the fingers; elsewhere if it rests somewhere else (the table, another object, a wrong container, or it fell); in_gripper if it hangs from the fingers away from the destination; unclear if the images do not show it.\n- stable: across the last images does the object stay where it is (not sliding, rolling, tipping or falling)?\nUse unclear whenever the images do not show it.",
+ "fields": [
+  {
+   "name": "object_state",
+   "enum": [
+    "resting_at_destination",
+    "held_over_destination",
+    "elsewhere",
+    "in_gripper",
+    "unclear"
+   ]
+  },
+  {
+   "name": "stable",
+   "enum": [
+    "yes",
+    "no",
+    "unclear"
+   ]
+  }
+ ],
+ "valid_when": [
+  {
+   "field": "object_state",
+   "in": [
+    "resting_at_destination"
+   ]
+  },
+  {
+   "field": "stable",
+   "in": [
+    "yes"
+   ]
+  }
+ ],
+ "unknown_values": [
+  "unclear"
+ ],
+ "episode": {
+  "min_valid": 1,
+  "rule": "final_state"
+ },
+ "max_output_tokens": 100
+}

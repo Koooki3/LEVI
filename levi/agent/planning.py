@@ -185,8 +185,12 @@ def attach(run):
         "questions": clarify(run["context"])["questions"],
         "estimate": {
             "basis": (
-                "one request per anchor event (the robot's recorded "
-                f"gripper {flow.anchored['anchor']['event']}) per episode"
+                (
+                    "one request per episode on the frames at its end"
+                    if flow.anchored["anchor"]["event"] == "end"
+                    else "one request per anchor event (the robot's recorded "
+                    f"gripper {flow.anchored['anchor']['event']}) per episode"
+                )
                 + _extra_requests(flow.anchored)
             )
             if flow.anchored

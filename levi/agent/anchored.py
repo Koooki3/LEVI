@@ -54,7 +54,9 @@ MAX_CITED = 32
 
 class AnchorSpec(Contract):
     signal: Literal["gripper"] = "gripper"
-    event: Literal["open", "close"] = "open"
+    # "end" is the episode's last frame: one event per episode, no gripper
+    # channel read (the rule ``final_state`` judges how the episode ends).
+    event: Literal["open", "close", "end"] = "open"
     # Which vector column and dimension: by default the first recorded state
     # column (observation.*) with a gripper-named dimension, else action.
     column: str | None = Field(default=None, max_length=200)
@@ -179,7 +181,11 @@ class EpisodeRule(Contract):
     # event, so a task that grasps again between placements is not failed by
     # it; what it cannot stop is a half-done or twice-placed episode (use
     # ``min_valid`` as a task-level lower bound).
-    rule: Literal["any_valid", "last_valid_not_regrasped"] = "any_valid"
+    # ``final_state``: for a spec whose only event is the episode's end
+    # (``anchor.event`` ``end``): success when that one event is valid, failure
+    # when it is contradicted, and a failure that is undecided when it is
+    # unknown. It reads no gripper channel and no time segment.
+    rule: Literal["any_valid", "last_valid_not_regrasped", "final_state"] = "any_valid"
     # Also require that the episode's last time segment of the subtask
     # ``place`` (the one that starts last) is not a failure or unknown. The
     # review cannot see time segments: the live service applies this part
@@ -228,11 +234,21 @@ class AnchoredSpec(Contract):
                     "episode.rule and episode.require_place apply to a spec "
                     "without require_labels"
                 )
-            if self.anchor.event != "open":
+            if rule.rule != "final_state" and self.anchor.event != "open":
                 raise ValueError(
                     "episode.rule reads the closes after an opening: the anchor "
                     "event must be open"
                 )
+        if (rule.rule == "final_state") != (self.anchor.event == "end"):
+            raise ValueError(
+                "episode.rule final_state goes with anchor.event end (the "
+                "episode's last frame), and only with it"
+            )
+        if rule.rule == "final_state" and (rule.require_place or rule.min_valid != 1):
+            raise ValueError(
+                "episode.rule final_state has one event per episode: it takes "
+                "neither require_place nor a min_valid above 1"
+            )
         if rule.require_place and rule.rule == "any_valid":
             raise ValueError(
                 "episode.require_place goes with episode.rule last_valid_not_regrasped"
@@ -534,6 +550,10 @@ def anchor_rows(table, info, stats, anchor):
     """(row positions of the anchor events, row positions where the gripper
     closes, channel description). The closes are every closing the channel
     crosses, whatever the anchor event is."""
+    if anchor.event == "end":
+        # The episode's last frame, the one event; nothing is read from the
+        # gripper.
+        return ([len(table) - 1] if len(table) else []), [], "episode end"
     key, name, values, bounds = _gripper_channel(table, info, stats, anchor)
     found = crossings(values, bounds, anchor.open_level)
     return (
@@ -686,6 +706,18 @@ def outcome(spec, events, start_answer=None, closes=None):
                     for e in events
                 )
             ]
+    elif rule.rule == "final_state":
+        # One event, the episode's end. Success when it is valid; a definite
+        # "not there" is a failure; an unknown reading is a failure too, but
+        # an undecided one (``final_reading`` names which).
+        reading = events[-1]["verdict"] if events else None
+        basis = {
+            "valid_events": len(valid),
+            "min_valid": rule.min_valid,
+            "rule": rule.rule,
+            "final_reading": reading,
+        }
+        verdict = "success" if reading == "supported" else "failure"
     else:
         ok = len(valid) >= rule.min_valid
         basis = {"valid_events": len(valid), "min_valid": rule.min_valid}
@@ -733,10 +765,15 @@ def outcome(spec, events, start_answer=None, closes=None):
 
 def undecided(verdict, basis):
     """Whether an outcome rests on something undecided: a required label (or
-    its waiver), or -- for a success -- a veto, a contested waiver or an input
-    its rule needed and did not have (``missing_inputs``)."""
+    its waiver), the final state the rule ``final_state`` could not read, or
+    -- for a success -- a veto, a contested waiver or an input its rule needed
+    and did not have (``missing_inputs``)."""
     return bool(
         basis.get("undecided_labels")
+        or (
+            basis.get("rule") == "final_state"
+            and basis.get("final_reading") in (None, "unknown")
+        )
         or (
             verdict == "success"
             and (
@@ -972,7 +1009,7 @@ def review_episode(wb, id, config, context, episode, started):
     }
     if start is not None:
         record["start"] = start
-    if spec.episode.rule != "any_valid":
+    if spec.episode.rule == "last_valid_not_regrasped":
         # Frames where the gripper closes, for the rule that reads them. A
         # spec with the default rule leaves them out, so its records stay as
         # they were (a record without them reads as unknown to ``outcome``).
@@ -1033,7 +1070,7 @@ def review_episode(wb, id, config, context, episode, started):
         return "; " + ", ".join(hits) if hits else ""
 
     parts = [
-        f"{'valid' if e['valid'] else e['verdict']} {name} at {e['timestamp']:.1f} s ("
+        f"{'valid' if e['valid'] else e['verdict']} {'final state' if name == 'end' else name} at {e['timestamp']:.1f} s ("
         + ", ".join(f"{k}={v}" for k, v in e["answer"].items())
         + vetoed(e)
         + ")"
@@ -1048,7 +1085,11 @@ def review_episode(wb, id, config, context, episode, started):
             if start is not None
             else ""
         )
-        + f"{len(events)} gripper {name} event(s); "
+        + (
+            f"{len(events)} gripper {name} event(s); "
+            if name != "end"
+            else "final-state check on the episode's last frames; "
+        )
         + ("; ".join(parts) if parts else "none recorded")
         + f". Outcome {verdict}."
     )
@@ -1078,6 +1119,8 @@ def review_episode(wb, id, config, context, episode, started):
         doubts.append(
             "the last-placement condition is not applied here: the live verdict decides"
         )
+    if basis.get("rule") == "final_state" and undecided(verdict, basis):
+        doubts.append("the final state could not be read from the last frames")
     if verdict == "success" and basis.get("undecided_vetoes"):
         doubts.append(
             "veto undecided: "

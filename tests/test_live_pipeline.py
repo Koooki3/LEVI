@@ -1172,6 +1172,101 @@ def test_operator_label_is_kept_apart_and_never_reaches_the_model(env):
     assert page["agreement"] == "no"
 
 
+def final_only(e):
+    e.config.pipeline.temporal = False
+    e.config.pipeline.anchored_spec = "generic-final.v1.json"
+    e.config.validate()
+
+
+def test_the_final_state_judgement_labels_without_gripper_or_time_segments(env):
+    """``generic-final.v1``: one question per episode on its last frames. The
+    demo here closes, opens and closes again; none of that is read. No
+    outcome label is written and the verdict is automatic and unreviewed."""
+    from levi.live import api, stats
+
+    e = env()
+    final_only(e)
+    e.rollouts.write(0)
+    e.rollouts.write(1)
+    e.run()
+    assert temporal_runs(e) == [] and len(anchored_runs(e)) == 1
+    # One question per episode: two requests for two episodes.
+    asked = [p for p in e.fake.calls if p.get("max_completion_tokens") != 1]
+    assert len(asked) == 2
+    state = e.state()
+    for demo in ("demo_0000", "demo_0001"):
+        row = state["demos"][demo]
+        assert row["state"] == "done" and "temporal" not in row
+        verdict = row["verdict"]
+        assert verdict["outcome"] == "success" and verdict["undecided"] is False
+        assert verdict["events"] == 1 and verdict["valid_events"] == 1
+        assert verdict["spec"] == "generic-final" and verdict["spec_version"] == 1
+        assert verdict["rule"] == "final_state" and verdict["min_valid"] == 1
+        assert verdict["basis"]["final_reading"] == "supported"
+        assert "closes_after_last_valid" not in verdict
+        assert "place_outcome" not in verdict
+        assert verdict["review"] == "auto" and verdict["evaluated"] is False
+    for record in e.records("anchored"):
+        assert record["event"] == "end" and "closes" not in record
+        assert len(record["events"]) == 1
+    # Never a label: nothing under annotations/outcomes, no committed change set.
+    assert not list(e.ws.rglob("outcomes"))
+    assert not [c for c in e.records("changes") if c["status"] == "committed"]
+    rows = {r["demo"]: r for r in stats.read(e.ws / "live")}
+    result = rows["demo_0000"]["result"]
+    assert result["spec"]["release_review"] == "generic-final"
+    assert set(result["spec"]["sha256"]) == {"generic-final.v1.json"}
+    assert result["verdict"]["rule"] == "final_state"
+    summary = stats.summarize(list(rows.values()))
+    assert summary["agreement"]["pairs"] == 0
+    page = api._demo_row("demo_0000", state["demos"]["demo_0000"])
+    assert page["verdict"]["outcome"] == "success"
+    assert page["verdict"]["rule"] == "final_state"
+    # A second pass does no work.
+    calls = len(e.fake.calls)
+    e.run()
+    assert len(e.fake.calls) == calls
+
+
+def test_the_final_state_judgement_is_undecided_when_the_model_cannot_tell(env):
+    """An unclear answer is a failure the page and the statistics call
+    undecided, and it never reads the operator's label (here: success)."""
+    from levi.live import stats
+
+    e = env(answers={"object_state": "unclear"})
+    final_only(e)
+    e.rollouts.write(0)
+    label(
+        e,
+        0,
+        outcome="success",
+        verdict_by="operator",
+        operator_outcome="success",
+        label_mode="dual",
+    )
+    e.run()
+    verdict = e.state()["demos"]["demo_0000"]["verdict"]
+    assert verdict["outcome"] == "failure" and verdict["undecided"] is True
+    assert (
+        verdict["valid_events"] == 0 and verdict["basis"]["final_reading"] == "unknown"
+    )
+    (record,) = stats.read(e.ws / "live")
+    agreement = stats.summarize([record])["agreement"]
+    assert agreement["pairs"] == 1 and agreement["undecided"] == 1
+    assert agreement["judged"] == 0
+    assert "operator" not in json.dumps(e.fake.calls)
+
+
+def test_a_definite_answer_that_the_object_is_not_there_is_a_certain_failure(env):
+    e = env(answers={"object_state": "in_gripper", "stable": "unclear"})
+    final_only(e)
+    e.rollouts.write(0)
+    e.run()
+    verdict = e.state()["demos"]["demo_0000"]["verdict"]
+    assert verdict["outcome"] == "failure" and verdict["undecided"] is False
+    assert verdict["basis"]["final_reading"] == "contradicted"
+
+
 def test_the_default_pipeline_still_makes_a_temporal_run(env):
     from levi.live import generic
 

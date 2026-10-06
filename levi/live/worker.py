@@ -55,7 +55,13 @@ VERDICT_RULE_KEYS = (
     "closes_after_last_valid",
     "min_valid",
 )
-RULE_KEYS = (*VERDICT_RULE_KEYS, "last_valid_frame", "require_place", "missing_inputs")
+RULE_KEYS = (
+    *VERDICT_RULE_KEYS,
+    "last_valid_frame",
+    "require_place",
+    "missing_inputs",
+    "final_reading",
+)
 
 
 class Stop(Exception):
