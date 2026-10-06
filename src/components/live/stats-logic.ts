@@ -332,10 +332,13 @@ export const AGREEMENT_LABEL: Record<Agreement, string> = {
   no_agent: "no agent verdict yet",
 };
 
-/** Whether any episode row carries an operator label: the agent-vs-operator
- * columns are shown only then. */
+/** Whether any episode row carries an operator success or failure (an
+ * unattended episode's "unlabeled" is none): the agent-vs-operator columns
+ * are shown only then. */
 export function hasOperatorLabels(rows: StatsEpisode[] | undefined): boolean {
-  return (rows ?? []).some((r) => !!r.operator);
+  return (rows ?? []).some(
+    (r) => r.operator === "success" || r.operator === "failure",
+  );
 }
 
 /** Whether any session has an episode both labels can be compared on. */

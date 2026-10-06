@@ -36,11 +36,14 @@ const AGREEMENT_TEXT: Record<string, string> = {
 
 /** The operator label (ground truth) of one episode, before the agent's
  * automatic verdict and drawn differently (a solid outline, not the dashed
- * "auto" tag), with whether the agent agrees; nothing without a label. */
+ * "auto" tag), with whether the agent agrees; nothing without a label (an
+ * unattended episode is "unlabeled": no label). */
 export function OperatorChip({ demo }: { demo: DemoRow }) {
   const { t } = useLocale();
   const outcome = demo.operator_label?.outcome;
-  if (!outcome) return null;
+  // Unlabeled (an unattended run) is no operator label to show.
+  if (outcome !== "success" && outcome !== "failure" && outcome !== "discarded")
+    return null;
   const agreement =
     demo.agreement ?? agreeOf(demo.operator_label, demo.verdict);
   const mark = agreement ? AGREEMENT_TEXT[agreement] : undefined;

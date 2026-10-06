@@ -517,6 +517,11 @@ describe("the operator label beside the automatic verdict", () => {
         demos: [
           demo("demo_0001", { verdict }),
           demo("demo_0000", { verdict, operator_label: null }),
+          // An unattended episode: the operator gave no label.
+          demo("demo_0003", {
+            verdict,
+            operator_label: { outcome: "unlabeled", by: "pending-levi" },
+          }),
         ],
       }),
     );

@@ -198,6 +198,9 @@ describe("tables", () => {
     for (const view of ["latency", "cost"] as const) {
       const keys = (rows: StatsEpisode[]) =>
         columns(view, rows).map((c) => c.key);
+      expect(keys([row, { ...row, operator: "unlabeled" }])).toEqual(
+        columns(view).map((c) => c.key),
+      );
       expect(keys([row, { ...row, operator: null }])).toEqual(
         columns(view).map((c) => c.key),
       );
