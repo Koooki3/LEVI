@@ -123,7 +123,7 @@ LEVI checks the spec against the catalog and waits for your approval before anyt
 | Topic | Guides |
 | --- | --- |
 | **Start** | [Install](INSTALL.md) · [中文](INSTALL.zh-CN.md) · [for agents](INSTALL.agent.md) · [Workspace](docs/WORKSPACE.md) · [Design system](docs/DESIGN.md) · [中文](docs/DESIGN.zh-CN.md) |
-| **Data** | [Conversion](docs/CONVERSION.md) · [Data quality](docs/QUALITY.md) · [Training pool](docs/TRAINING_POOL.md) · [Training manifests](docs/TRAINING_MANIFEST.md) · [RECAP](docs/RECAP.md) · [Counterfactual data](docs/COUNTERFACTUAL.md) · [中文](docs/COUNTERFACTUAL.zh-CN.md) |
+| **Data** | [Conversion](docs/CONVERSION.md) · [Data quality](docs/QUALITY.md) · [Training pool](docs/TRAINING_POOL.md) · [Reset export](docs/RESET_EXPORT.md) · [Training manifests](docs/TRAINING_MANIFEST.md) · [RECAP](docs/RECAP.md) · [Counterfactual data](docs/COUNTERFACTUAL.md) · [中文](docs/COUNTERFACTUAL.zh-CN.md) |
 | **Agents and models** | [Agents](docs/AGENTS.md) · [Local models](docs/OLLAMA.md) · [中文](docs/OLLAMA.zh-CN.md) · [vLLM](docs/VLLM.md) · [中文](docs/VLLM.zh-CN.md) · [Pilot](docs/PILOT.md) · [中文](docs/PILOT.zh-CN.md) · [Built-in knowledge](docs/KNOWLEDGE.md) |
 | **Labelling methods** | [Live annotation service](docs/LIVE.md) · [中文](docs/LIVE.zh-CN.md) · [Anchored review](docs/ANCHORED_REVIEW.md) · [SAM3](docs/SAM3.md) · [Fast segmentation](docs/SEGMENTATION.md) · [Evaluation records](docs/EVALUATION.md) |
 | **Reference** | [API](docs/API.md) · [Validation](docs/VALIDATION.md) · [Architecture status](docs/architecture/IMPLEMENTATION_STATUS.md) · [Upstream](docs/UPSTREAM.md) · [Releasing](docs/RELEASING.md) · [Changelog](CHANGELOG.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) |

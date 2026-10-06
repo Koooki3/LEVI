@@ -595,8 +595,14 @@ def _commit():
 
 def _brief(job: dict) -> dict:
     """A job without its frozen episode list (kept on disk)."""
-    out = {k: v for k, v in job.items() if k not in ("episodes", "excluded")}
+    out = {
+        k: v
+        for k, v in job.items()
+        if k not in ("episodes", "excluded", "bridge_records")
+    }
     out["status"] = normalize(out.get("status"))
+    if job.get("bridge_records"):
+        out["planned_bridge_records"] = len(job["bridge_records"])
     if "episodes" in job:
         out["planned_episodes"] = len(job["episodes"])
         out["planned_excluded"] = len(job.get("excluded") or [])

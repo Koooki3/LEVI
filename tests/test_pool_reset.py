@@ -648,3 +648,75 @@ def test_a_vision_model_can_veto_but_never_rescue(rpool):
     assert kept["eligible"]
     rescued = preview.analyze_row(gone, opts, conv, reviewer=yes)
     assert not rescued["eligible"] and yes.client.calls == [("m", 2)]  # not even asked
+
+
+# ------------------------------------------------------------------ API and CLI
+
+
+def test_the_api_analyzes_and_exports_a_reset(rpool, client):
+    recipe_body = {
+        "name": "api",
+        "categories": ["rollout"],
+        "tasks": [TASKS["in_place"], TASKS["escaped"], TASKS["in_reach"]],
+    }
+    out = client.post(
+        "/api/levi/pool/reset/analyze", json={"recipe": recipe_body, "limit": 5}
+    ).json()
+    assert out["selected"] == 3 and out["analyzed"] == 3
+    assert out["summary"]["reversible"] == 2
+    assert out["summary"]["reasons"] == {"reset_release_escaped": 1}
+    assert out["profile"].startswith("reset-profile")
+    bad = client.post(
+        "/api/levi/pool/reset/analyze",
+        json={"recipe": recipe_body, "reset": {"direction": "reset_only", "x": 1}},
+    )
+    assert bad.status_code == 422 or bad.status_code == 400
+    dry = client.post(
+        "/api/levi/pool/export",
+        json={
+            "recipe": recipe_body,
+            "dry_run": True,
+            "options": {
+                "format": "lerobot_v21",
+                "name": "viaapi",
+                "output_dir": str(rpool["out"]),
+                "reset": {"direction": "forward_and_reset"},
+            },
+        },
+    ).json()
+    assert dry["options"]["reset"]["direction"] == "forward_and_reset"
+    assert dry["options"]["filter_static"] is False and "bridge_records" not in dry
+    refused = client.post(
+        "/api/levi/pool/export",
+        json={
+            "recipe": recipe_body,
+            "dry_run": True,
+            "options": {
+                "format": "recap_value",
+                "name": "nope",
+                "reset": {"direction": "reset_only"},
+            },
+        },
+    )
+    assert refused.status_code in (400, 422)
+
+
+def test_the_cli_exports_and_analyzes(rpool, capsys):
+    from levi.pool import cli, recipe
+
+    recipe.save(Recipe(name="cli", categories=["rollout"], tasks=[TASKS["in_place"]]))
+    assert cli.main(["reset-analyze", "cli", "--limit", "3"]) == 0
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["summary"]["reversible"] == 1
+    code = cli.main(
+        [
+            "export", "cli", "--format", "lerobot_v21", "--name", "viacli",
+            "--output-dir", str(rpool["out"]), "--reset", "forward_and_reset",
+            "--reset-template", "Undo: {task}",
+        ]
+    )  # fmt: skip
+    assert code == 0
+    assert tasks_of(rpool["out"] / "viacli") == [
+        TASKS["in_place"],
+        "Undo: " + TASKS["in_place"],
+    ]

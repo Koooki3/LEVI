@@ -23,6 +23,8 @@ from . import (
 )
 from .export import ExportOptions
 from .recipe import Recipe
+from .reset import profile as reset_profile
+from .reset.schema import ResetOptions
 
 Strings = Annotated[list[str] | None, Query()]
 Outcome = Literal[
@@ -525,6 +527,51 @@ def export(payload: Export):
         jobs.discard(job["id"])
         return jobs._brief(job)
     return jobs._brief(jobs.launch(job["id"]))
+
+
+class ResetAnalysis(BaseModel):
+    """What a reset export would do with a recipe's episodes, measured now."""
+
+    model_config = ConfigDict(extra="forbid")
+    recipe: Recipe | None = None
+    recipe_name: str | None = None
+    reset: ResetOptions = Field(
+        default_factory=lambda: ResetOptions(direction="reset_only")
+    )
+    # Episodes looked at (the first ones of the selection, in export order);
+    # each costs a few seconds of video decoding.
+    limit: int = Field(12, ge=1, le=100)
+    cameras: dict[str, str] | None = None
+    camera_map: dict[str, str] = Field(default_factory=dict)
+
+
+@router.post("/reset/analyze")
+def reset_analyze(payload: ResetAnalysis):
+    """Which of the selected episodes can be reversed, which release is the
+    problem and the measures behind it. Nothing is written."""
+    from ..conversion.options import Options
+    from .recipe import select_detailed
+    from .reset import preview as reset_preview
+
+    if (payload.recipe is None) == (payload.recipe_name is None):
+        raise ValueError("Give either recipe or recipe_name")
+    try:
+        chosen = payload.recipe or recipe.load(payload.recipe_name)
+    except KeyError:
+        raise HTTPException(404, "Recipe not found") from None
+    rows = select_detailed(chosen, target="lerobot_v21").chosen
+    conversion = Options(filter_static=False, timing="retime")
+    if payload.cameras:
+        conversion = conversion.model_copy(update={"cameras": payload.cameras})
+    result = reset_preview.analyze_rows(
+        rows[: payload.limit], payload.reset, conversion, payload.camera_map
+    )
+    return {
+        **result,
+        "selected": len(rows),
+        "analyzed": min(len(rows), payload.limit),
+        "profile": reset_profile.VERSION,
+    }
 
 
 # ------------------------------------------------------------------ remote

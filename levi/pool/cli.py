@@ -236,6 +236,23 @@ def build_parser() -> argparse.ArgumentParser:
         "to convert; failing episodes are left out and listed (default 0.1)",
     )
     export.add_argument("--dry-run", action="store_true", help="plan only")
+    export.add_argument(
+        "--reset",
+        choices=["forward_and_reset", "reset_only"],
+        help="also write (or only write) reset episodes: the forward ones reversed "
+        "in time, instruction `Reset: <task>`; lerobot_v21 only (docs/RESET_EXPORT.md)",
+    )
+    _reset_args(export)
+    ra = sub.add_parser(
+        "reset-analyze",
+        help="what a reset export would do with a recipe's episodes (writes nothing)",
+        description="Looks at the first --limit episodes of a recipe's selection: "
+        "every release of the gripper, where the object went afterwards, and "
+        "whether the episode can be reversed. See docs/RESET_EXPORT.md.",
+    )
+    ra.add_argument("recipe")
+    ra.add_argument("--limit", type=int, default=12)
+    _reset_args(ra)
     listing = sub.add_parser(
         "jobs",
         help="scan, export and push jobs: list, log, delete, clear-failed",
@@ -453,6 +470,8 @@ def main(argv=None) -> int:
                 _print({"deleted": recipe.delete(args.name)})
         elif args.action == "export":
             return _export(args, jobs, recipe)
+        elif args.action == "reset-analyze":
+            return _reset_analyze(args, recipe)
         elif args.action == "jobs":
             if args.jobs_action == "log":
                 print(jobs.log_tail(args.job, 128))
@@ -536,6 +555,87 @@ def main(argv=None) -> int:
     return 0
 
 
+def _reset_args(parser) -> None:
+    parser.add_argument(
+        "--reset-template", help="reset instruction, {task} = the forward text"
+    )
+    parser.add_argument(
+        "--reset-max-release",
+        choices=["in_place", "in_reach"],
+        help="the worst release a reversed episode may hold (default in_reach)",
+    )
+    parser.add_argument(
+        "--reset-partial",
+        action="store_true",
+        help="an episode that cannot be reversed whole is reversed from its last "
+        "safe hold on (flagged `partial`) instead of left out",
+    )
+    parser.add_argument(
+        "--reset-contract", help="action contract id@version (default fr3-robotiq@1)"
+    )
+    parser.add_argument(
+        "--reset-review-model",
+        help="local vision model connection that may veto an accepted release",
+    )
+    parser.add_argument(
+        "--reset-bridge",
+        action="append",
+        default=[],
+        metavar="FORWARD=RECORD",
+        help="pool key of a forward episode = pool key of the recording that "
+        "completes its reset (repeatable)",
+    )
+    parser.add_argument(
+        "--reset-any-outcome",
+        action="store_true",
+        help="also reverse episodes that failed or have no outcome",
+    )
+
+
+def _reset_options(args, direction: str):
+    from .reset.schema import ResetOptions
+
+    value = {"direction": direction}
+    if args.reset_template:
+        value["task_template"] = args.reset_template
+    if args.reset_max_release:
+        value["max_release"] = args.reset_max_release
+    if args.reset_partial:
+        value["on_ineligible"] = "partial"
+    if args.reset_contract:
+        value["action_contract"] = args.reset_contract
+    if args.reset_review_model:
+        value["review_model"] = args.reset_review_model
+    if args.reset_any_outcome:
+        value["require_forward_success"] = False
+    if args.reset_bridge:
+        value["bridges"] = [
+            {"source": a, "record": b}
+            for a, b in (p.split("=", 1) for p in args.reset_bridge)
+        ]
+    return ResetOptions.model_validate(value)
+
+
+def _reset_analyze(args, recipe) -> int:
+    from ..conversion.options import Options
+    from .recipe import select_detailed
+    from .reset import preview
+
+    chosen = recipe.load(args.recipe)
+    rows = select_detailed(chosen, target="lerobot_v21").chosen[: args.limit]
+    opts = _reset_options(args, "reset_only")
+    reviewer = None
+    if opts.review_model:
+        from .reset import review
+
+        reviewer = review.open_reviewer(opts.review_model)
+    out = preview.analyze_rows(
+        rows, opts, Options(filter_static=False, timing="retime"), reviewer=reviewer
+    )
+    _print(out)
+    return 0
+
+
 def _export(args, jobs, recipe) -> int:
     """``levi pool export``: plan and run in this process (with the job
     worker's record keeping, heartbeat and journal), or ``--resume`` one."""
@@ -564,6 +664,7 @@ def _export(args, jobs, recipe) -> int:
             human_as_success=args.human_as_success,
             timing=args.timing,
             filter_static=args.filter_static,
+            reset=_reset_options(args, args.reset) if args.reset else None,
             **extra,
         )
         job = jobs.plan_export(recipe.load(args.recipe), options)

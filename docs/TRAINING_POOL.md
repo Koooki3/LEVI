@@ -296,7 +296,11 @@ uv run levi pool clean [--dry-run] [--all-partials]                         # ex
 
 `pool_export.json` also records the effective conversion parameters (`conversion`: fps, timing, static-frame filter, orientation, cameras, …), the timing mode used (`timing`, see [Frame rates](#frame-rates--帧率)), each episode's `group`, the held-out lists (or `heldout_disabled`) and the warnings that applied. Two tasks that would be written under one text are refused at planning; `camera_map` and `cameras` must map to distinct output keys; LeRobot sources whose `observation.state` names differ from the output's are refused with the differences. A dry run runs the same held-out group check as the export and leaves no plan behind.
 
+**Reset episodes.** `--reset forward_and_reset|reset_only` (a `lerobot_v21` export only) also writes the forward episodes reversed in time, with every camera, the state and the rebuilt action in the new order and the instruction `Reset: <task>`; a release is reversed only where the object is still within the open fingers' reach, and what cannot be reversed is left out, reversed from its last safe hold on, or completed with a recording. See [Reset export](RESET_EXPORT.md) (`levi pool reset-analyze` shows what would happen without writing).
+
 Each episode row in `meta/episodes.jsonl` of a LeRobot export carries `pool_key`, `pool_source` and `pool_fingerprint`; `meta/levi_provenance.jsonl` maps new to source episode indices. Not in this version: LeRobot v3 output (needs lerobot's v2.1→v3 converter; convert the v2.1 export with it) and exporting a recipe as a training manifest without copying data. To move an export to another machine see [Remote transfer](#remote-transfer--远程传输).
+
+复位片段：`--reset forward_and_reset|reset_only`（仅 `lerobot_v21`）把正向片段在时间上反转后一并写出，指令为 `Reset: <任务>`；只有物体仍在张开的手指够得着的位置时才反转松爪，反转不了的部分排除、从最后一次安全抓持处起反转，或用录制补全。详见 [复位数据导出](RESET_EXPORT.zh-CN.md)。
 
 导出格式：LeRobot v2.1（多来源合并，按任务顺序→来源→片段排序，统一相机键和 fps，状态/动作维度或分辨率不一致时拒绝并列出差异）、RECAP 价值数据集（结局按“人工标签 > 机器人标志”，无结局的片段排除并列出）、原始采集目录（按任务重编号，可硬链接）。暂不支持：LeRobot v3 输出、导出为训练清单。传到其他机器见 [远程传输](#remote-transfer--远程传输)。
 
@@ -457,6 +461,7 @@ All routes are behind the service's UI token and same-origin check.
 | POST | `/api/levi/pool/selection` | `{ "recipe": {…}, "task": "…" }` → the episodes picked for that task (`quality_score`, `sel_stratum`, `selection_reason`, `viewer`) and the task's report; 404 for a task the recipe lacks |
 | POST | `/api/levi/pool/suggest` | `{ "recipe": {…}, "task": "…" }` → `available`, `successes`, `failures`, `suggested_count` (the balanced default) for adding that task |
 | POST | `/api/levi/pool/export` | `{ "recipe_name": "…" or "recipe": {…}, "options": {"format", "name", "output_dir", "fps", "timing", "cameras", "camera_map", "hardlink", …}, "dry_run": false }`; 403 for a path outside `LEVI_EXPORT_ROOTS` or inside a source, 400 for an existing target or an empty selection |
+| POST | `/api/levi/pool/reset/analyze` | `{ "recipe_name": "…" or "recipe": {…}, "reset": {…}, "limit": 12 }` → per selected episode whether it can be reversed, every release's class and measures, and a summary; writes nothing (see [Reset export](RESET_EXPORT.md)) |
 | GET | `/api/levi/pool/facets?category=&show_heldout=&show_copies=&show_archive=` | Facet counts for the page (including `policy_models`, `policy_checkpoints`, `policy_methods`, `robots`, `grippers`) and what the toggles hide |
 | POST | `/api/levi/pool/jobs/{id}/cancel` | Stop a running job for good (an export's partial is removed); an interrupted or failed job becomes cancelled and loses its partial |
 | POST | `/api/levi/pool/jobs/{id}/resume` | Continue an interrupted or failed job (409 with the reason when an export's unfinished output cannot be trusted) |
