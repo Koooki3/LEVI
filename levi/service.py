@@ -12,15 +12,15 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import children, jobs
+from . import children, jobs, links
 from .auth import hub_token, token
 from .catalog import (
     DEMOS,
     aliases,
     atomic,
     canonical_id,
-    datasets,
     display_name,
+    known,
     local_root,
     read,
     register,
@@ -307,7 +307,10 @@ def catalog():
     return {
         "demos": DEMOS,
         # Each entry with what it is and what LEVI can do with it.
-        "local": [_entry(item) for item in datasets().values()],
+        "local": [_entry(item) for item in known().values()],
+        # Read-only links to other workspaces (the live service's): what is
+        # linked, so the page can say where those datasets come from.
+        "linked": links.status(),
         "sync": {"enabled": SYNC.interval > 0, "last_scan": SYNC.last_scan},
         # Legacy hash ids → current names, so the UI can carry over state
         # (e.g. flagged episodes) stored under an old id.
@@ -349,7 +352,7 @@ def catalog_entry(name: str):
         resolved = resolve_name("local/" + name)
     except ValueError:
         resolved = None
-    item = datasets().get(resolved) if resolved else None
+    item = known().get(resolved) if resolved else None
     if item is None:
         raise HTTPException(404, "Dataset is not registered (it may have been removed)")
     return _entry(item)
@@ -358,6 +361,7 @@ def catalog_entry(name: str):
 @app.delete("/api/levi/catalog/{name}")
 def remove_dataset(name: str):
     """Unregister a dataset. Files on disk, annotations and reviews stay."""
+    links.refuse_write(name)
     removed = remove_entry(name)
     if removed is None:
         raise HTTPException(404, "Dataset is not registered")
@@ -465,6 +469,10 @@ def dataset_file(slug: str, path: str):
 def get_review(repo_id: str):
     from .agent.store import Store
 
+    if links.is_linked(display_name(repo_id, None)):
+        # A linked (live workspace) dataset has no review of this LEVI's own.
+        empty = {"repo_id": repo_id, "flagged": [], "notes": ""}
+        return JSONResponse(empty, headers={"X-LEVI-Annotation-Revision": "linked"})
     response = JSONResponse(
         read(review_path(repo_id), {"repo_id": repo_id, "flagged": [], "notes": ""})
     )
@@ -482,6 +490,7 @@ def save_review(payload: Review):
     if any(ep < 0 for ep in payload.flagged):
         raise ValueError("Episode IDs must be non-negative")
     name = display_name(payload.repo_id, None)
+    links.refuse_write(name)
     with (
         dataset_lock(STATE, name),
         transaction(STATE, name, expected=expected_revision.get()) as revision,

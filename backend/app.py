@@ -62,14 +62,15 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from pydantic import BaseModel, Field
 
-from levi import children, naming
+from levi import children, links, naming
 from levi.agent.legacy import editor
+from levi.agent.store import ReadStore, resolve_readonly
 from levi.agent.store import resolve as bundle_resolve
 from levi.annotations import (
     ObjectAnnotation,
@@ -348,6 +349,11 @@ class DatasetState:
         opaque blob for the whole dataset. Lets a user (or another tool) add,
         replace or delete a single episode's annotations directly on disk.
         """
+        home = links.state_of(self.display_slug)
+        if home is not None:  # a live workspace's dataset: read there, never write
+            return resolve_readonly(
+                home, links.source_name(self.display_slug), "annotations"
+            )
         return bundle_resolve(STATE, self.display_slug, "annotations")
 
     def annotation_file(self, episode_index: int) -> Path:
@@ -363,6 +369,11 @@ class DatasetState:
     @property
     def object_annotations_path(self) -> Path:
         """Workspace sidecar root, independent from the source dataset tree."""
+        home = links.state_of(self.display_slug)
+        if home is not None:
+            return resolve_readonly(
+                home, links.source_name(self.display_slug), "object_annotations"
+            )
         return bundle_resolve(STATE, self.display_slug, "object_annotations")
 
 
@@ -386,7 +397,13 @@ def _ensure_state(req: DatasetRef) -> DatasetState:
         name = resolve_name(req.repo_id)
         req = DatasetRef(local_path=str(local_root(req.repo_id)))
     if req.local_path:
-        req.local_path = str(inside(req.local_path))
+        # A linked (live workspace) dataset's folder lies outside this
+        # workspace: ``local_root`` has already checked it (levi/links.py).
+        req.local_path = str(
+            links.inside(req.local_path)
+            if links.is_linked(name)
+            else inside(req.local_path)
+        )
         # A registered folder asked for by path is its base dataset.
         name = name or name_for_path(req.local_path)
     # By catalog name when known: namespaces of one dataset share its path.
@@ -423,10 +440,24 @@ def _sidecar(state: DatasetState) -> SidecarStore:
     }
     if state.repo_id:
         identity["credential_scope"] = state.credential_scope
-    store = SidecarStore(state.object_annotations_path, identity=identity)
+    linked = links.is_linked(state.display_slug)
+    store = SidecarStore(
+        state.object_annotations_path, identity=identity, create=not linked
+    )
     # Worker jobs are mutable runtime records, never part of immutable bundles.
     store.staging_root = STATE / "object_annotations" / state.display_slug / "staging"
     return store
+
+
+def _agent_store(state: DatasetState):
+    """The agent store a dataset's reviews live in, and the key they use
+    there: this LEVI's own (writable), or a linked workspace's, read-only."""
+    home = links.state_of(state.display_slug)
+    if home is not None:
+        return ReadStore(home), links.source_name(state.display_slug)
+    from levi.agent.store import Store
+
+    return Store(STATE), state.display_slug
 
 
 def _validate_sam3_plan(state: DatasetState, request: Sam3PlanRequest) -> None:
@@ -984,6 +1015,8 @@ def _migrate_legacy_annotations(state: DatasetState) -> None:
     read again — rather than deleted: it's user data, and there's no reason
     to remove it once migrated.
     """
+    if links.is_linked(state.display_slug):
+        return  # never write into another workspace
     legacy_path = state.legacy_annotations_path
     if not legacy_path.exists() or state.annotations_dir.exists():
         return
@@ -1799,7 +1832,36 @@ def _do_export(
 
 # --- FastAPI app --------------------------------------------------------------
 
-app = FastAPI(title="LeRobot dataset visualizer — annotation backend")
+
+async def _linked_read_only(request: Request) -> None:
+    """A dataset of a linked (live) workspace is read here and nowhere
+    written: any request that is not a read and names one is refused, whatever
+    route it takes (the editors refuse it too; this also covers the routes
+    that do not go through them: SAM3 and RECAP runs, exports)."""
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return
+    if request.url.path == "/api/dataset/load":
+        return  # loading only reads
+    refs = [request.query_params.get("repo_id"), request.query_params.get("local_path")]
+    if "json" in request.headers.get("content-type", ""):
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        if isinstance(body, dict):
+            refs += [body.get("repo_id"), body.get("local_path")]
+    for ref in refs:
+        if not ref:
+            continue
+        name = ref.split("/", 1)[1] if ref.startswith("local/") else None
+        if links.is_linked(name) or (name is None and links.name_for_path(ref)):
+            raise HTTPException(403, links.READ_ONLY)
+
+
+app = FastAPI(
+    title="LeRobot dataset visualizer — annotation backend",
+    dependencies=[Depends(_linked_read_only)],
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[],
@@ -2064,12 +2126,11 @@ def _suggested_subtasks(state: DatasetState) -> list[dict]:
     """The definitions of the latest agent plan on this dataset, offered as a
     starting vocabulary; a person still has to save them."""
     try:
-        from levi.agent.store import Store
-
+        agent_store, key = _agent_store(state)
         runs = [
             r
-            for r in Store(STATE).list("runs")
-            if r.get("dataset_key") == state.display_slug
+            for r in agent_store.list("runs")
+            if r.get("dataset_key") == key
             and (r["context"].get("workflow") or {}).get("definitions")
         ]
     except Exception:  # noqa: BLE001 - a suggestion is optional
@@ -3054,9 +3115,9 @@ def recap_episode(
 
 def _anchored(state: DatasetState, episode: int | None, run_id: str | None):
     from levi.agent.anchored import payload
-    from levi.agent.store import Store
 
-    found = payload(Store(STATE), state.display_slug, episode, run_id)
+    agent_store, key = _agent_store(state)
+    found = payload(agent_store, key, episode, run_id)
     if found is None:
         raise HTTPException(404, "No anchored review result")
     return JSONResponse(found)

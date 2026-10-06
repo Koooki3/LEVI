@@ -407,6 +407,74 @@ class Store:
                 )
 
 
+class ReadStore(Store):
+    """An existing store opened read-only (``levi/links.py``): another LEVI's
+    workspace, which this one may read and must never create or change. No
+    folder is made, no table created, no journal mode set; a store that is not
+    there reads as empty (every dataset is ``legacy``)."""
+
+    def __init__(self, state: Path):
+        self.state = Path(state)
+        self.root = self.state / "agent"
+
+    @contextmanager
+    def connect(self):
+        path = self.root / "workbench.sqlite3"
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        # A store nobody has open is read as it lies (``immutable``: no lock,
+        # and above all no ``-shm``/``-wal`` file made beside it: opening a
+        # WAL database read-only otherwise creates them). While a writer has
+        # it open its ``-wal`` file exists and the normal read-only open
+        # shares that writer's index without making anything.
+        wal = path.with_name(path.name + "-wal")
+        mode = "mode=ro" if wal.exists() else "mode=ro&immutable=1"
+        db = sqlite3.connect(f"file:{path}?{mode}", uri=True, timeout=30)
+        try:
+            yield db
+        finally:
+            db.close()
+
+    def head(self, dataset, db=None):
+        try:
+            return super().head(dataset, db)
+        except (OSError, sqlite3.Error):
+            return "legacy"
+
+    def list(self, kind):
+        try:
+            return super().list(kind)
+        except (OSError, sqlite3.Error):
+            return []
+
+    def get(self, kind, id):
+        try:
+            return super().get(kind, id)
+        except (OSError, sqlite3.Error):
+            raise KeyError(id) from None
+
+    def events(self, run_id, after=0):
+        try:
+            return super().events(run_id, after)
+        except (OSError, sqlite3.Error):
+            return []
+
+
+def resolve_readonly(state: Path, dataset: str, category: str):
+    """``resolve`` for a workspace that is only read: the same folder a
+    reader there would use, found without opening a writable store."""
+    store = ReadStore(state)
+    head = store.head(dataset)
+    if head != "legacy":
+        folder = store.bundle(dataset, head)
+        return folder / ("review.json" if category == "reviews" else category)
+    return (
+        Path(state)
+        / category
+        / (dataset + ".json" if category == "reviews" else dataset)
+    )
+
+
 @contextmanager
 def pin(state, dataset, folder):
     key = (str(state), dataset)

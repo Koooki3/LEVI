@@ -116,11 +116,14 @@ EVENT_SCHEMA = pa.schema(
 class SidecarStore:
     """Persist one dataset's object annotations beneath a workspace directory."""
 
-    def __init__(self, root: Path, identity: dict[str, Any] | None = None):
+    def __init__(
+        self, root: Path, identity: dict[str, Any] | None = None, *, create: bool = True
+    ):
         self.root = root
         self.identity = identity or {}
         self.staging_root = root / "staging"
-        self.root.mkdir(parents=True, exist_ok=True)
+        if create:  # a store only read (another workspace's) is never made
+            self.root.mkdir(parents=True, exist_ok=True)
 
     @property
     def meta_path(self) -> Path:

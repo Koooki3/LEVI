@@ -104,6 +104,14 @@ def _workspace() -> Path | None:
     return found.workspace
 
 
+def _linked_id(workspace: Path, name: str) -> str | None:
+    if not _embedded(workspace):
+        return None
+    from levi import links
+
+    return links.product_id(workspace, name)
+
+
 def _embedded(root: Path) -> bool:
     """Shown by a LEVI that is not the live workspace itself (the product
     LEVI's page)."""
@@ -355,6 +363,9 @@ def dataset_view(name: str):
         "enabled": True,
         "name": name,
         "repo_id": repo_id,
+        # Where this LEVI opens the dataset when it is not the live workspace
+        # itself: its read-only link (``levi/links.py``), if it has one.
+        "linked_repo_id": _linked_id(config.workspace, name),
         **where,
         "group": state.get("group"),
         "task_folder": state.get("task_folder"),

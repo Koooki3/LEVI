@@ -82,6 +82,15 @@ def aliases():
     return read(STATE / "dataset_aliases.json", {})
 
 
+def known():
+    """What this LEVI can read: its own datasets and the read-only datasets of
+    linked workspaces (``levi/links.py``). Writers use ``datasets()`` alone: a
+    linked entry is computed, never stored in this catalog."""
+    from . import links
+
+    return {**links.entries(), **datasets()}
+
+
 def _base_name(root: Path) -> str:
     name = root.name
     if name.lower() in GENERIC_FOLDER_NAMES and root.parent.name:
@@ -240,6 +249,8 @@ def resolve_name(repo: str) -> str | None:
     items = datasets()
     if key in items:
         return key
+    if key in known():
+        return key
     target = aliases().get(key)
     if target and target in items:
         return target
@@ -256,6 +267,8 @@ def local_root(repo: str):
     if name is None:
         return None
     items = datasets()
+    if name not in items:
+        return _linked_root(name)
     item = items[name]
     # A namespace reads its base's source and view.
     item = items.get(item.get("base") or "", item)
@@ -270,11 +283,33 @@ def local_root(repo: str):
     return inside(item["path"])
 
 
+def _linked_root(name: str):
+    """The folder of a linked (live workspace) dataset: readable, never
+    writable (``levi/links.py``)."""
+    from . import links
+
+    item = links.entries().get(name)
+    if item is None:
+        raise ValueError("Local dataset is not registered")
+    if item.get("kind") == "raw":
+        if not item.get("view") or item.get("view_status") != "ready":
+            raise ValueError(
+                "The browsing view of this live dataset is not ready "
+                f"({item.get('view_status', 'missing')})"
+            )
+        return links.inside(item["view"])
+    return links.inside(item["path"])
+
+
 def name_for_path(path) -> str | None:
     if not path:
         return None
     item = _entry_for_path(datasets(), Path(path))
-    return item["name"] if item else None
+    if item:
+        return item["name"]
+    from . import links
+
+    return links.name_for_path(path)
 
 
 def display_name(repo_id: str | None, local_path: str | None) -> str:

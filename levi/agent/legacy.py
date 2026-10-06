@@ -14,8 +14,10 @@ from contextvars import ContextVar
 
 from fastapi import HTTPException
 
+from .. import links
 from .store import (
     Conflict,
+    ReadStore,
     Store,
     annotation_digest,
     current_pin,
@@ -94,6 +96,17 @@ def editor(*, read_only=False, internal=False):
                 **{k: fields.get(k) for k in ("repo_id", "revision", "local_path")}
             )
             state = app._ensure_state(ref)
+            home = links.state_of(state.display_slug)
+            if home is not None:
+                # A linked (live workspace) dataset: its annotations are read
+                # where they are kept; nothing is ever written there.
+                if not read_only:
+                    raise HTTPException(403, links.READ_ONLY)
+                response = fn(*args, **kwargs)
+                response.headers["X-LEVI-Annotation-Revision"] = ReadStore(home).head(
+                    links.source_name(state.display_slug)
+                )
+                return response
             store = Store(app.STATE)
             head = store.head(state.display_slug)
             expected = head if internal else expected_revision.get()

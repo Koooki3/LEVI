@@ -17,7 +17,10 @@ def workspace() -> Path:
 ROOT = workspace()
 
 
-def inside(path: str | Path, base: Path = ROOT) -> Path:
+def inside(path: str | Path, base: Path | None = None) -> Path:
+    # The workspace is read when asked, not when this module was imported, so a
+    # test (or a second workspace in one process) can point it elsewhere.
+    base = ROOT if base is None else base
     result = Path(path).expanduser()
     if not result.is_absolute():
         result = base / result

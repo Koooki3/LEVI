@@ -575,3 +575,29 @@ def test_a_removal_refuses_an_audit_log_or_lock_linked_out_of_the_workspace(
     assert answer.status_code == 409
     assert not exclusion.is_excluded(e.state()["demos"]["demo_0000"])
     assert target.read_text() == ""
+
+
+def test_the_detail_names_the_product_viewer_id_of_a_linked_dataset(
+    client, env, product, monkeypatch
+):
+    """The product LEVI links the live workspace its page shows (levi/links.py):
+    the card then opens the dataset in the product's own viewer."""
+    from levi import links, paths
+
+    e = env()
+    ws, home = product
+    mirror_only(e, 0, 1)
+    jsonio.write(
+        e.ws / "outputs/LEVI/workbench/datasets.json",
+        {NAME: {"id": "local/the-live-one", "name": NAME}},
+    )
+    write_status(home, e.ws)
+    monkeypatch.setattr(paths, "ROOT", ws)
+    detail = client.get(f"/api/levi/live/datasets/{NAME}").json()
+    assert detail["embedded"] is True
+    assert detail["linked_repo_id"] == "local/live." + NAME
+    # Not linked (no such live workspace here): nothing to open.
+    monkeypatch.setattr(links, "workspaces", list)
+    assert (
+        client.get(f"/api/levi/live/datasets/{NAME}").json()["linked_repo_id"] is None
+    )
