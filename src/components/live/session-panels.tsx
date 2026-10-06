@@ -151,9 +151,18 @@ function outcomeLabel(outcome: string | null | undefined): string {
       return "Success";
     case "failure":
       return "Failure";
+    case "discarded":
+      return "Discarded";
     default:
       return outcome || "—";
   }
+}
+
+/** Whether a dual-label session waits for the operator's label of the
+ * episode just run (the client's reason "operator labelling episode N"),
+ * not for Enter. */
+export function operatorLabelling(session: LiveSession): boolean {
+  return /^operator labelling\b/.test(session.reason ?? "");
 }
 
 /** The reset wait, counting down in the browser between polls. */
@@ -170,9 +179,16 @@ function ResetWait({ session }: { session: LiveSession }) {
   }, [counting]);
   const wait = session.reset_wait_s;
   const left = resetRemaining(session, now / 1000);
-  // No countdown (a dual-label run): the operator starts each episode.
+  // No countdown (a dual-label run): the operator labels the episode just
+  // run, then starts the next one.
   if (wait == null && session.state === "waiting_reset")
-    return <>{t("the operator starts the next episode (Enter)")}</>;
+    return (
+      <>
+        {operatorLabelling(session)
+          ? t("the operator is labelling the episode")
+          : t("the operator starts the next episode (Enter)")}
+      </>
+    );
   if (wait == null) return <>—</>;
   if (left == null) return <>{wait} s</>;
   if (left <= 0)
@@ -286,13 +302,14 @@ function SessionCard({ session: s }: { session: LiveSession }) {
         <Field label={t("Most recent episode")}>
           {last.outcome || last.steps != null ? (
             <>
-              {s.label_mode === "dual_label" && last.outcome && (
-                <>
-                  <span className="pg-live-optag">
-                    {t("Operator label")}
-                  </span>{" "}
-                </>
-              )}
+              {s.label_mode === "dual_label" &&
+                (last.outcome === "success" || last.outcome === "failure") && (
+                  <>
+                    <span className="pg-live-optag">
+                      {t("Operator label")}
+                    </span>{" "}
+                  </>
+                )}
               {t(outcomeLabel(last.outcome))}
               {last.steps != null && ` · ${last.steps} ${t("steps")}`}
               {last.duration_s != null &&

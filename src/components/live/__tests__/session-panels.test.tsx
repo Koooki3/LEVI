@@ -32,6 +32,39 @@ describe("a dual-label session", () => {
     const out = html(session({ label_mode: "dual_label", reset_wait_s: null }));
     expect(out).toContain("the operator starts the next episode (Enter)");
   });
+  test("while the operator labels, the wait says so", () => {
+    const out = html(
+      session({
+        label_mode: "dual_label",
+        reset_wait_s: null,
+        reason: "operator labelling episode 3",
+      }),
+    );
+    expect(out).toContain("the operator is labelling the episode");
+    expect(out).not.toContain("the operator starts the next episode");
+    const reset = html(
+      session({
+        label_mode: "dual_label",
+        reset_wait_s: null,
+        reason:
+          "waiting for the operator: reset the scene, Enter starts episode 4",
+      }),
+    );
+    expect(reset).toContain("the operator starts the next episode (Enter)");
+  });
+  test("a discarded episode reads Discarded, without the operator chip", () => {
+    for (const label_mode of ["dual_label", "unattended"] as const) {
+      const out = html(
+        session({
+          label_mode,
+          reset_wait_s: null,
+          last_episode: { outcome: "discarded", steps: 6 },
+        }),
+      );
+      expect(out).toContain("Discarded · 6");
+      expect(out).not.toContain("pg-live-optag");
+    }
+  });
   test("an unattended or older session is shown as before", () => {
     for (const s of [
       session({ label_mode: "unattended", reset_wait_s: 10 }),

@@ -2478,5 +2478,7 @@
   "the operator starts the next episode (Enter)": "由操作员按 Enter 开始下一个片段",
   "off: release review only": "关闭：只做释放复核",
   "success rate: operator / agent": "成功率：操作员 / agent",
-  "Every episode gets the operator label (ground truth) and the agent label (automatic, unreviewed)": "每个片段都有操作员标签（真值）和 agent 标签（自动、未审）"
+  "Every episode gets the operator label (ground truth) and the agent label (automatic, unreviewed)": "每个片段都有操作员标签（真值）和 agent 标签（自动、未审）",
+  "Discarded": "已作废",
+  "the operator is labelling the episode": "操作员正在给这个片段打标签"
 }

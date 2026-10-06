@@ -241,7 +241,7 @@ prewarm = true
 | `live/stats.jsonl` 里 | `operator_label` = `{outcome, by}` | `result.verdict` |
 | 页面上 | 判定前面一个实线框的“操作员”标记 | 虚线框的“auto”标记 |
 
-`criteria.operator_label` 这样读操作员标签：双标签运行的 `eval.operator_outcome`；否则是操作员按键判定的成功或失败（`verdict_by` 为 `key` 或 `timeout-adjudicated`）；否则照原样记 `unlabeled` 或 `discarded`（没有成功或失败）。它从不读 `success_flag_final`。会话文件写 `levi.mode = "dual_label"`；页面给这种会话标“双标签”，等 Enter 时不显示倒计时，而是写“由操作员按 Enter 开始下一个片段”。操作员复位和打标签时（`waiting_reset`，没有倒计时）GPU 闸门开着，片段运行时关上。
+`criteria.operator_label` 这样读操作员标签：双标签运行的 `eval.operator_outcome`；否则是操作员按键判定的成功或失败（`verdict_by` 为 `key` 或 `timeout-adjudicated`）；否则照原样记 `unlabeled` 或 `discarded`（没有成功或失败）。它从不读 `success_flag_final`。会话文件写 `levi.mode = "dual_label"`；页面给这种会话标“双标签”，不显示倒计时：操作员打标签时（客户端的原因写 `operator labelling episode N`）写“操作员正在给这个片段打标签”，等 Enter 时写“由操作员按 Enter 开始下一个片段”。最近一个片段只在成功或失败时带“操作员标签”字样；作废的片段写“已作废”。操作员复位和打标签时（`waiting_reset`，没有倒计时）GPU 闸门开着，片段运行时关上。
 
 **两者为什么独立。** 操作员标签在 agent 能判定之前就已存在（rollout 标为完成之后 LEVI 才会取它）。模型只看到释放复核的帧和问题：`levi/agent` 和 `levi/live` 里没有任何代码把 `eval.*` 或 `success_flag` 交给模型。判定不读操作员标签。什么都不写回：没有 `annotations/outcomes` 文件，`eval.*` 和任何源文件都不改。自动批准主体仍然不能提交成败标签。
 

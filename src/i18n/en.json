@@ -2478,5 +2478,7 @@
   "the operator starts the next episode (Enter)": "the operator starts the next episode (Enter)",
   "off: release review only": "off: release review only",
   "success rate: operator / agent": "success rate: operator / agent",
-  "Every episode gets the operator label (ground truth) and the agent label (automatic, unreviewed)": "Every episode gets the operator label (ground truth) and the agent label (automatic, unreviewed)"
+  "Every episode gets the operator label (ground truth) and the agent label (automatic, unreviewed)": "Every episode gets the operator label (ground truth) and the agent label (automatic, unreviewed)",
+  "Discarded": "Discarded",
+  "the operator is labelling the episode": "the operator is labelling the episode"
 }
