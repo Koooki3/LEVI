@@ -407,11 +407,61 @@ class Store:
                 )
 
 
+class StoreUnavailable(RuntimeError):
+    """Another workspace's store could not be read right now (it is being
+    written, or is damaged). Never answered as an empty store: a reader that
+    took "cannot read" for "no annotations" would show the wrong ones."""
+
+
+_SNAPSHOTS: dict[str, tuple] = {}
+
+
+def _stamp(path: Path):
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_ino, st.st_size, st.st_mtime_ns)
+
+
+def _snapshot(source: Path) -> Path:
+    """A private copy of another workspace's store (its database and, while a
+    writer has one, its ``-wal`` file), to read from. Opening the original,
+    even read-only, can make ``-shm`` and ``-wal`` files beside it, and which
+    open is safe depends on whether a writer is there at that moment: a copy
+    needs no such decision and writes nothing into that workspace. Reused
+    while the originals are unchanged."""
+    from levi import paths
+
+    wal = source.with_name(source.name + "-wal")
+    stamp = (_stamp(source), _stamp(wal))
+    folder = (
+        paths.CACHE
+        / "linked-stores"
+        / hashlib.sha256(str(source).encode()).hexdigest()[:16]
+    )
+    copy = folder / "workbench.sqlite3"
+    cached = _SNAPSHOTS.get(str(copy))
+    if cached and cached == stamp and copy.is_file():
+        return copy
+    folder.mkdir(parents=True, exist_ok=True)
+    for suffix in ("", "-wal", "-shm"):
+        (folder / f"workbench.sqlite3{suffix}").unlink(missing_ok=True)
+    shutil.copyfile(source, copy)
+    if wal.is_file():
+        try:
+            shutil.copyfile(wal, folder / "workbench.sqlite3-wal")
+        except FileNotFoundError:
+            pass  # a checkpoint just emptied it: the database holds it all
+    _SNAPSHOTS[str(copy)] = stamp
+    return copy
+
+
 class ReadStore(Store):
-    """An existing store opened read-only (``levi/links.py``): another LEVI's
-    workspace, which this one may read and must never create or change. No
-    folder is made, no table created, no journal mode set; a store that is not
-    there reads as empty (every dataset is ``legacy``)."""
+    """An existing store of another workspace, read from a private snapshot
+    (``levi/links.py``): that workspace may be read and must never be created
+    in or changed. A store that is not there reads as empty (every dataset is
+    ``legacy``); one that cannot be read raises ``StoreUnavailable``."""
 
     def __init__(self, state: Path):
         self.state = Path(state)
@@ -419,17 +469,23 @@ class ReadStore(Store):
 
     @contextmanager
     def connect(self):
-        path = self.root / "workbench.sqlite3"
-        if not path.is_file():
-            raise FileNotFoundError(path)
-        # A store nobody has open is read as it lies (``immutable``: no lock,
-        # and above all no ``-shm``/``-wal`` file made beside it: opening a
-        # WAL database read-only otherwise creates them). While a writer has
-        # it open its ``-wal`` file exists and the normal read-only open
-        # shares that writer's index without making anything.
-        wal = path.with_name(path.name + "-wal")
-        mode = "mode=ro" if wal.exists() else "mode=ro&immutable=1"
-        db = sqlite3.connect(f"file:{path}?{mode}", uri=True, timeout=30)
+        source = self.root / "workbench.sqlite3"
+        if not source.is_file():
+            raise FileNotFoundError(source)
+        last = None
+        for attempt in range(4):
+            try:
+                db = sqlite3.connect(
+                    f"file:{_snapshot(source)}?mode=ro", uri=True, timeout=30
+                )
+                db.execute("SELECT 1 FROM sqlite_master LIMIT 1")
+                break
+            except (OSError, sqlite3.Error) as exc:
+                last = exc
+                _SNAPSHOTS.clear()
+                time.sleep(0.05 * (attempt + 1))
+        else:
+            raise StoreUnavailable(str(last)) from last
         try:
             yield db
         finally:
@@ -438,25 +494,25 @@ class ReadStore(Store):
     def head(self, dataset, db=None):
         try:
             return super().head(dataset, db)
-        except (OSError, sqlite3.Error):
+        except FileNotFoundError:
             return "legacy"
 
     def list(self, kind):
         try:
             return super().list(kind)
-        except (OSError, sqlite3.Error):
+        except FileNotFoundError:
             return []
 
     def get(self, kind, id):
         try:
             return super().get(kind, id)
-        except (OSError, sqlite3.Error):
+        except FileNotFoundError:
             raise KeyError(id) from None
 
     def events(self, run_id, after=0):
         try:
             return super().events(run_id, after)
-        except (OSError, sqlite3.Error):
+        except FileNotFoundError:
             return []
 
 

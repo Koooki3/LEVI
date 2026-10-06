@@ -725,9 +725,11 @@ def main(argv=None):
                 # The active bundle is whatever the viewer reads, which the
                 # backend alone resolves; a second path guess would relink a
                 # copy nobody sees.
-                store = app._sidecar(
-                    app._ensure_state(app.DatasetRef(repo_id=args.dataset))
-                )
+                from levi import links
+
+                state = app._ensure_state(app.DatasetRef(repo_id=args.dataset))
+                links.refuse_write(state.display_slug)
+                store = app._sidecar(state)
                 current = store.current_revision()
                 if not current:
                     raise ValueError(f"{args.dataset} has no published object revision")

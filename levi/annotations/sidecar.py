@@ -12,6 +12,7 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from .. import links
 from ..naming import timestamp_id
 from .rle import validate_rle
 from .schema import ObjectAnnotation, ObjectEdit, ObjectTrack, ReviewStatus
@@ -20,6 +21,7 @@ SCHEMA_VERSION = "levi.sam3.sidecar.v1"
 
 
 def _write_json(path: Path, value: Any) -> None:
+    links.refuse_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(path.name + f".{time.time_ns()!s}.tmp")
     temp.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False))
@@ -27,6 +29,7 @@ def _write_json(path: Path, value: Any) -> None:
 
 
 def _write_table(path: Path, rows: list[dict[str, Any]], schema: pa.Schema) -> None:
+    links.refuse_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     table = pa.Table.from_pylist(rows, schema=schema)
     temp = path.with_suffix(path.suffix + f".{time.time_ns()!s}.tmp")
@@ -134,6 +137,7 @@ class SidecarStore:
         return self.root / "current.json"
 
     def initialize(self) -> None:
+        links.refuse_path(self.root)
         if not self.meta_path.exists():
             _write_json(
                 self.meta_path,
@@ -176,6 +180,7 @@ class SidecarStore:
         parent_revision: str | None = None,
         model: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        links.refuse_path(self.root)
         self.initialize()
         # Pydantic models normally validate at construction time, but review
         # edits can update model attributes in place. Re-validate at the write
@@ -286,6 +291,7 @@ class SidecarStore:
         objects. Untouched mask files are hard-linked (revisions are
         immutable), so saving one episode costs the same on a fully labelled
         dataset as on an empty one."""
+        links.refuse_path(self.root)
         self.initialize()
         annotations = [
             ObjectAnnotation.model_validate(row.model_dump()) for row in annotations
@@ -398,6 +404,7 @@ class SidecarStore:
         return revision_info
 
     def apply_edit(self, edit: ObjectEdit) -> dict[str, Any]:
+        links.refuse_path(self.root)
         current = self.current_revision()
         if edit.base_revision and edit.base_revision != current:
             raise ValueError("annotation revision is stale; reload before editing")

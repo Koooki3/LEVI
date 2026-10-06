@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 from typing import Literal
 
+from .. import links
+
 Outcome = Literal["success", "failure"]
 _FILE = re.compile(r"episode_(\d{6,})\.json")
 
@@ -47,6 +49,7 @@ def write_label(
     """Set (or with ``None`` clear) one episode's label, atomically."""
     if episode < 0:
         raise ValueError("Episode index must be non-negative")
+    links.refuse_path(annotations_dir)
     folder = outcome_dir(annotations_dir)
     path = folder / f"episode_{episode:06d}.json"
     if outcome is None:

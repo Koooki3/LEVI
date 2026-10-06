@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from . import children, jobs, links
+from .agent.store import StoreUnavailable
 from .auth import hub_token, token
 from .catalog import (
     DEMOS,
@@ -252,6 +253,14 @@ async def local_request(request: Request, call_next):
 @app.exception_handler(ValueError)
 async def value_error(request, exc):
     return JSONResponse({"detail": str(exc)}, status_code=400)
+
+
+@app.exception_handler(StoreUnavailable)
+async def store_unavailable(request, exc):
+    return JSONResponse(
+        {"detail": "The live workspace's store is busy; try again in a moment"},
+        status_code=503,
+    )
 
 
 @app.exception_handler(PermissionError)

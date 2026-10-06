@@ -119,10 +119,15 @@ def test_a_rollout_view_opens_and_streams_without_the_live_service(client, live)
     video = f"{base}/videos/chunk-000/observation.images.hand/episode_000000.mp4"
     assert client.head(video).status_code == 200
     assert client.get(video, headers={"Range": "bytes=0-3"}).status_code == 206
-    # Only the dataset's assets, and only inside its folder.
-    assert client.get(f"{base}/meta/../../../datasets.json").status_code != 200
+    # Only the dataset's assets, and only inside its folder (the client
+    # normalises a literal "..", so the dots are percent-encoded).
+    out = client.get(f"{base}/meta/%2e%2e/%2e%2e/%2e%2e/live/workspace.json")
+    assert out.status_code in (400, 403) and "outside" not in out.text
     assert client.get(f"{base}/outputs/LEVI/workbench/datasets.json").status_code == 403
-    assert client.get(f"{base}/../../live/workspace.json").status_code != 200
+    assert client.get(f"{base}/meta/%2e%2e/%2e%2e/datasets.json").status_code in (
+        400,
+        403,
+    )
 
 
 def test_time_segments_and_outcome_labels_are_read_from_the_live_workspace(
@@ -146,17 +151,29 @@ def test_time_segments_and_outcome_labels_are_read_from_the_live_workspace(
 def test_nothing_is_ever_written_into_the_live_workspace(client, live):
     before = tree(live)
     repo = "local/" + LINKED
-    client.get("/api/levi/catalog")
-    client.get(f"/api/levi/catalog/{LINKED}")
-    client.get(f"/api/levi/files/{LINKED}/meta/info.json")
-    client.get("/annotations/api/episodes/0/atoms", params={"repo_id": repo})
-    client.get("/annotations/api/episodes/outcomes", params={"repo_id": repo})
-    client.get("/annotations/api/episodes/annotation-summary", params={"repo_id": repo})
-    client.get("/annotations/api/dataset/vocabulary", params={"repo_id": repo})
-    client.get("/annotations/api/anchored/summary", params={"repo_id": repo})
-    client.get("/annotations/api/sam3/revisions", params={"repo_id": repo})
-    client.get("/api/levi/review", params={"repo_id": repo})
-    client.post("/annotations/api/dataset/load", json={"repo_id": repo})
+    reads = [
+        ("get", "/api/levi/catalog", None),
+        ("get", f"/api/levi/catalog/{LINKED}", None),
+        ("get", f"/api/levi/files/{LINKED}/meta/info.json", None),
+        ("get", "/annotations/api/episodes/0/atoms", {"repo_id": repo}),
+        ("get", "/annotations/api/episodes/outcomes", {"repo_id": repo}),
+        ("get", "/annotations/api/episodes/annotation-summary", {"repo_id": repo}),
+        ("get", "/annotations/api/dataset/vocabulary", {"repo_id": repo}),
+        ("get", "/annotations/api/anchored/summary", {"repo_id": repo}),
+        ("get", "/annotations/api/sam3/revisions", {"repo_id": repo}),
+        ("get", "/api/levi/review", {"repo_id": repo}),
+    ]
+    for method, url, params in reads:
+        response = getattr(client, method)(url, params=params)
+        # 404 is "no such thing yet" (no anchored review): not an error.
+        assert response.status_code in (200, 404), (
+            url,
+            response.status_code,
+            response.text,
+        )
+    # Loading reads (the app is mounted under /annotations).
+    loaded = client.post("/annotations/api/dataset/load", json={"repo_id": repo})
+    assert loaded.status_code == 200, loaded.text
     # Not a file more, not a folder more (no agent store, no sidecar root).
     assert tree(live) == before
 
@@ -342,3 +359,118 @@ def test_a_quality_inspection_of_a_live_dataset_reads_and_writes_only_here(
     )
     assert response.status_code == 200, response.text
     assert tree(live) == before
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Content-Type": "Application/JSON"},
+        {"Content-Type": "application/json; charset=utf-8"},
+        {"Content-Type": "text/plain"},
+    ],
+)
+@pytest.mark.parametrize(
+    "url", ["/annotations/api/export", "/annotations/api/sam3/plan"]
+)
+def test_a_content_type_variant_does_not_get_a_write_past_the_guard(
+    client, live, url, headers
+):
+    body = json.dumps({"repo_id": "local/" + LINKED, "episode_indices": [0]})
+    response = client.post(url, content=body, headers=headers)
+    assert response.status_code == 403, (headers, response.status_code, response.text)
+
+
+def test_the_write_functions_themselves_refuse_a_live_dataset(client, live):
+    """Whatever route, agent or command reaches them: the lowest layer."""
+    import backend.app as backend
+    from levi.annotations import outcomes
+
+    repo = "local/" + LINKED
+    state = backend._ensure_state(backend.DatasetRef(repo_id=repo))
+    before = tree(live)
+    with pytest.raises(PermissionError):
+        backend._write_episode_annotations(state, 1, [])
+    with pytest.raises(PermissionError):
+        backend._delete_episode_annotations(state, 0)
+    with pytest.raises(PermissionError):
+        outcomes.write_label(state.annotations_dir, 1, "success")
+    with pytest.raises(PermissionError):
+        backend._sidecar(state).publish([])
+    with pytest.raises(PermissionError):
+        backend._sidecar(state).initialize()
+    with pytest.raises(PermissionError):
+        links.refuse_path(live / "outputs/LEVI/workbench/annotations/x")
+    links.refuse_path(live.parent / "elsewhere")  # not a linked workspace
+    assert tree(live) == before
+
+
+def test_a_dataset_of_this_levis_own_named_live_x_is_not_shadowed(
+    client, live, tmp_path
+):
+    from test_pool import make_lerobot
+
+    folder = tmp_path / "product" / LINKED  # registered here under that name
+    make_lerobot(folder, 7, episodes=1, task="mine")
+    entry = client.post("/api/levi/catalog", json={"path": str(folder)}).json()
+    assert entry["name"] == LINKED and "linked" not in entry
+    assert not links.is_linked(LINKED)
+    repo = "local/" + LINKED
+    payload = {
+        "repo_id": repo,
+        "episode_index": 0,
+        "atoms": [
+            {
+                "role": "assistant",
+                "content": "mine",
+                "style": "subtask",
+                "timestamp": 0.0,
+            }
+        ],
+    }
+    assert (
+        client.post("/annotations/api/episodes/0/atoms", json=payload).status_code
+        == 200
+    )
+    got = client.get("/annotations/api/episodes/0/atoms", params={"repo_id": repo})
+    assert [a["content"] for a in got.json()["atoms"]] == ["mine"]
+    assert client.delete(f"/api/levi/catalog/{LINKED}").status_code == 200
+
+
+def test_a_store_that_cannot_be_read_is_not_taken_for_an_empty_one(client, live):
+    """A damaged or busy store of the live workspace answers 503; it is never
+    read as "no annotations" (which would show the wrong ones)."""
+    store = live / "outputs/LEVI/workbench/agent"
+    store.mkdir(parents=True)
+    (store / "workbench.sqlite3").write_bytes(b"this is not a database" * 100)
+    response = client.get(
+        "/annotations/api/episodes/0/atoms", params={"repo_id": "local/" + LINKED}
+    )
+    assert response.status_code == 503, response.text
+    assert sorted(p.name for p in store.iterdir()) == ["workbench.sqlite3"]
+
+
+def test_a_store_being_written_is_read_from_a_copy_and_left_as_it_is(client, live):
+    import sqlite3
+
+    from levi.agent.store import ReadStore
+
+    state = live / "outputs/LEVI/workbench"
+    (state / "agent").mkdir(parents=True)
+    writer = sqlite3.connect(state / "agent/workbench.sqlite3")
+    writer.execute("PRAGMA journal_mode=WAL")
+    writer.execute(
+        "CREATE TABLE heads(dataset TEXT PRIMARY KEY, revision TEXT NOT NULL)"
+    )
+    writer.execute("INSERT INTO heads VALUES('d', 'r1')")
+    writer.commit()  # the writer stays open: -wal and -shm exist beside the file
+    names = sorted(p.name for p in (state / "agent").iterdir())
+    assert "workbench.sqlite3-wal" in names
+    assert ReadStore(state).head("d") == "r1"
+    writer.execute("UPDATE heads SET revision='r2' WHERE dataset='d'")
+    writer.commit()
+    assert ReadStore(state).head("d") == "r2"  # the copy is made again: not stale
+    assert sorted(p.name for p in (state / "agent").iterdir()) == names
+    writer.close()
+    after = sorted(p.name for p in (state / "agent").iterdir())
+    assert ReadStore(state).head("d") == "r2"
+    assert sorted(p.name for p in (state / "agent").iterdir()) == after

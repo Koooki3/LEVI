@@ -37,6 +37,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -83,8 +84,28 @@ def _usable(candidate: Path | None) -> bool:
     return not locate.refused(candidate, paths.ROOT)
 
 
+_WORKSPACES: dict = {}
+TTL = 1.0  # seconds a discovery is reused (a request reads annotations often)
+
+
 def workspaces() -> list[Path]:
     """The live workspaces linked now, in a stable order, without duplicates."""
+    key = (
+        str(paths.ROOT),
+        os.environ.get(ENV),
+        os.environ.get("LEVI_LIVE_HOME"),
+        os.environ.get("LEVI_LIVE_WORKSPACE"),
+    )
+    cached = _WORKSPACES.get(key)
+    if cached and time.monotonic() - cached[0] < TTL:
+        return list(cached[1])
+    found = _discover()
+    _WORKSPACES.clear()
+    _WORKSPACES[key] = (time.monotonic(), found)
+    return list(found)
+
+
+def _discover() -> list[Path]:
     from .live import locate
 
     found: list = []
@@ -140,12 +161,17 @@ def _mark(workspace: Path) -> str:
 
 def links() -> dict[str, Link]:
     """Every linked dataset, by its name here."""
+    from . import catalog
+
+    own = catalog.datasets()  # a dataset of this LEVI's own keeps its name
     out: dict[str, Link] = {}
     for workspace in workspaces():
         for source, item in sorted(_catalog(workspace).items()):
             if not isinstance(item, dict) or item.get("base"):
                 continue  # a namespace is another experiment of one dataset
             name = PREFIX + source
+            if name in own:
+                continue
             if name in out:  # the same name in two live workspaces
                 name = f"{PREFIX}{_mark(workspace)}.{source}"
             out[name] = Link(name, source, workspace)
@@ -274,3 +300,16 @@ class ReadOnly(PermissionError):
 def refuse_write(name: str | None) -> None:
     if is_linked(name):
         raise ReadOnly(READ_ONLY)
+
+
+def refuse_path(path) -> None:
+    """The lowest guard: whatever asks, a path inside a linked workspace is
+    never written. Called by every function that writes annotations, labels
+    and sidecars, so a route, an agent or a command that bypasses the HTTP
+    checks still cannot reach the live workspace."""
+    target = _resolve(path)
+    if target is None:
+        return
+    for workspace in workspaces():
+        if target.is_relative_to(workspace):
+            raise ReadOnly(READ_ONLY)

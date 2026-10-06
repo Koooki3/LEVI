@@ -217,6 +217,10 @@ class Workbench:
         self.provider = provider or RoutedProvider()
 
     def plan(self, context: TaskContext, principal=None):
+        from levi import links
+
+        if context.repo_id.startswith("local/"):
+            links.refuse_write(context.repo_id.split("/", 1)[1])
         from .supervision import require_teacher
 
         if context.workflow.get("kind") == "temporal" and not context.workflow.get(
@@ -1241,10 +1245,13 @@ class Workbench:
         produced again. Rebasing keeps the staged work, re-reads what is now
         published, and drops the approval so a human decides again.
         """
+        from levi import links
+
         from .store import Conflict, annotation_digest, dataset_lock
 
         change = self.store.get("changes", id)
         run = self.store.get("runs", change["run_id"])
+        links.refuse_write(run["dataset_key"])
         with dataset_lock(self.store.state, run["dataset_key"]):
             change = self.store.get("changes", id)
             if change["status"] == "committed":

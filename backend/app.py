@@ -70,7 +70,7 @@ from pydantic import BaseModel, Field
 
 from levi import children, links, naming
 from levi.agent.legacy import editor
-from levi.agent.store import ReadStore, resolve_readonly
+from levi.agent.store import ReadStore, StoreUnavailable, resolve_readonly
 from levi.agent.store import resolve as bundle_resolve
 from levi.annotations import (
     ObjectAnnotation,
@@ -990,6 +990,8 @@ def _write_episode_annotations(
     a different, deliberate state from "never touched". To remove the
     record entirely, use ``_delete_episode_annotations``.
     """
+    links.refuse_write(state.display_slug)
+    links.refuse_path(state.annotations_dir)
     state.annotations_dir.mkdir(parents=True, exist_ok=True)
     path = state.annotation_file(episode_index)
     atomic(path, {"episode_index": episode_index, "atoms": atoms})
@@ -1000,6 +1002,8 @@ def _write_episode_annotations(
 def _delete_episode_annotations(state: DatasetState, episode_index: int) -> bool:
     """Delete one episode's annotation file entirely. Returns whether a file
     actually existed to delete."""
+    links.refuse_write(state.display_slug)
+    links.refuse_path(state.annotations_dir)
     path = state.annotation_file(episode_index)
     existed = path.exists()
     if existed:
@@ -1840,10 +1844,12 @@ async def _linked_read_only(request: Request) -> None:
     that do not go through them: SAM3 and RECAP runs, exports)."""
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return
-    if request.url.path == "/api/dataset/load":
-        return  # loading only reads
+    if request.url.path.endswith("/api/dataset/load"):
+        return  # loading only reads (the app is mounted under a prefix)
     refs = [request.query_params.get("repo_id"), request.query_params.get("local_path")]
-    if "json" in request.headers.get("content-type", ""):
+    if "multipart" not in request.headers.get("content-type", "").lower():
+        # Whatever the content type says (its case, a charset, none at all):
+        # a body that parses as an object is read for the dataset it names.
         try:
             body = await request.json()
         except ValueError:
@@ -1862,6 +1868,16 @@ app = FastAPI(
     title="LeRobot dataset visualizer — annotation backend",
     dependencies=[Depends(_linked_read_only)],
 )
+
+
+@app.exception_handler(StoreUnavailable)
+async def store_unavailable(request, exc):
+    return JSONResponse(
+        {"detail": "The live workspace's store is busy; try again in a moment"},
+        status_code=503,
+    )
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[],
