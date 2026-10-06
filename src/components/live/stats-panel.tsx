@@ -47,7 +47,7 @@ export function KeyFigures({ summary }: { summary: StatsResponse["summary"] }) {
 export function SessionsTable({ rows }: { rows: StatsSession[] }) {
   const { t } = useLocale();
   if (rows.length === 0) return null;
-  // Agent vs operator, only when some session has both labels.
+  // Agent vs operator, only when the operator labelled some episode success or failure.
   const pairs = hasPairs(rows);
   return (
     <>

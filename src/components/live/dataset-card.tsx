@@ -92,8 +92,9 @@ const share = (found: AgreementShare | undefined) =>
   `${count(found?.n)}/${count(found?.of)}`;
 
 /** The agent label (automatic, unreviewed) against the operator label (ground
- * truth) over every episode of the dataset; nothing until an episode has
- * both. */
+ * truth) over every episode of the dataset; nothing until the operator
+ * labelled an episode success or failure. The first figure counts those
+ * episodes, whether or not the agent has judged them yet. */
 export function AgentVsOperator({
   agreement,
 }: {
@@ -103,7 +104,7 @@ export function AgentVsOperator({
   if (!agreement?.pairs) return null;
   const a = agreement;
   const parts = [
-    `${t("both labels")} ${count(a.pairs)}`,
+    `${t("operator labelled success or failure")} ${count(a.pairs)}`,
     `${t("agree")} ${count(a.agree)}/${count(a.judged)} (${percent(a.rate)})`,
     `${t("false success")} ${share(a.false_success)}`,
     `${t("missed success")} ${share(a.missed_success)}`,

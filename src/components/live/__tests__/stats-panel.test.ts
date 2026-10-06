@@ -189,7 +189,7 @@ describe("statistics panel render", () => {
 
 describe("agent vs operator in the tables", () => {
   const sessions = data.sessions ?? [];
-  test("no agreement columns without a session that has both labels", () => {
+  test("no agreement columns without an operator success or failure", () => {
     const html = renderToStaticMarkup(
       createElement(SessionsTable, { rows: sessions }),
     );

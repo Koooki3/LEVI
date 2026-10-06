@@ -501,15 +501,15 @@ def test_the_agent_vs_operator_block_only_appears_with_operator_labels(tmp_path)
     assert found["pairs"] == 2 and found["agree"] == 1
     md = report.render(built, "en")
     assert "## Agent vs operator" in md
-    assert "| both labels (operator success/failure) | 2 |" in md
+    assert "| operator labelled success or failure | 2 |" in md
+    # The count is the operator's, not "both labels" (an episode may have no
+    # agent verdict yet).
+    assert "both labels" not in md
     assert "| agree (of the agent's success/failure) | 1/2 (50%) |" in md
     assert "| missed success: agent failure or undecided" in md
     assert "| success | 0 | 1 | 0 | 0 |" in md
     zh = report.render(built, "zh")
-    assert (
-        "## agent 与操作员对照" in zh
-        and "| 两个标签都有（操作员判成功/失败） | 2 |" in zh
-    )
+    assert "## agent 与操作员对照" in zh and "| 操作员判了成功或失败的片段 | 2 |" in zh
     assert "操作员标签（真值）" in zh and "agent 标签（自动、未审）" in zh
     # The block sits between the facts and the latency table.
     assert (

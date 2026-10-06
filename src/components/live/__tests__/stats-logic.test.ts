@@ -227,7 +227,7 @@ describe("tables", () => {
       "—",
     ]);
   });
-  test("the session columns need a session with both labels", () => {
+  test("the session columns need an operator success or failure", () => {
     expect(hasPairs([{ session: "s1" }, { session: "s2", pairs: 0 }])).toBe(
       false,
     );

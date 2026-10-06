@@ -132,7 +132,7 @@ TEXT = {
         "verdict": "verdict",
         "agreement": "Agent vs operator",
         "agreement_note": "The operator label (ground truth) is the operator's own success or failure, given in the evaluation terminal after each episode; the agent label (automatic, unreviewed) is the release review's verdict. Only episodes the operator labelled success or failure count; an episode without an agent verdict yet is missing coverage, never agreement.",
-        "both_labels": "both labels (operator success/failure)",
+        "operator_labelled": "operator labelled success or failure",
         "agree": "agree (of the agent's success/failure)",
         "agree_undecided": "agree, reading an undecided verdict as failure",
         "false_success": "false success: agent success, operator failure (n/of, Wilson 95 %)",
@@ -245,7 +245,7 @@ TEXT = {
         "verdict": "判定",
         "agreement": "agent 与操作员对照",
         "agreement_note": "操作员标签（真值）是操作员在评测终端里对每个片段给出的成功或失败；agent 标签（自动、未审）是释放复核的判定。只统计操作员判为成功或失败的片段；还没有 agent 判定的片段算覆盖缺口，不算一致。",
-        "both_labels": "两个标签都有（操作员判成功/失败）",
+        "operator_labelled": "操作员判了成功或失败的片段",
         "agree": "一致（在 agent 判成功/失败的片段中）",
         "agree_undecided": "一致，把未决按失败计",
         "false_success": "假成功：agent 判成功、操作员判失败（个数/总数，Wilson 95 %）",
@@ -374,7 +374,7 @@ def agreement_block(found, t) -> list:
     out = [f"## {t['agreement']}", "", t["agreement_note"], ""]
     out += pairs(
         [
-            (t["both_labels"], num(found.get("pairs"))),
+            (t["operator_labelled"], num(found.get("pairs"))),
             (
                 t["agree"],
                 f"{num(found.get('agree'))}/{num(found.get('judged'))} ({pct(found.get('rate'))})",

@@ -18,7 +18,7 @@ const summary = (over: AgreementSummary = {}): AgreementSummary => ({
 });
 
 describe("agent vs operator on a dataset", () => {
-  test("nothing until an episode has both labels", () => {
+  test("nothing until the operator labelled an episode success or failure", () => {
     expect(
       renderToStaticMarkup(
         <AgentVsOperator agreement={summary({ pairs: 0 })} />,
@@ -36,7 +36,7 @@ describe("agent vs operator on a dataset", () => {
     expect(html).toContain("Operator label (ground truth)");
     expect(html).toContain("agent label (automatic, unreviewed)");
     for (const part of [
-      "both labels 10",
+      "operator labelled success or failure 10",
       "agree 5/7 (71%)",
       "false success 1/5",
       "missed success 2/4",
@@ -45,6 +45,9 @@ describe("agent vs operator on a dataset", () => {
       "success rate: operator / agent 50% / 33%",
     ])
       expect(html).toContain(part);
+    // The count includes the episode with no agent verdict yet: it is not
+    // called "both labels".
+    expect(html).not.toContain("both labels");
   });
 });
 

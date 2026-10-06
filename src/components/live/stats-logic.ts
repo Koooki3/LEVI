@@ -341,7 +341,7 @@ export function hasOperatorLabels(rows: StatsEpisode[] | undefined): boolean {
   );
 }
 
-/** Whether any session has an episode both labels can be compared on. */
+/** Whether any session has an episode the operator labelled success or failure. */
 export function hasPairs(rows: StatsSession[] | undefined): boolean {
   return (rows ?? []).some((r) => (r.pairs ?? 0) > 0);
 }
