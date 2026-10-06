@@ -19,6 +19,14 @@ import {
   RequestProblem,
 } from "@/components/pages-ui/feedback";
 import { PoolJobProgress, RUNNING, StatusBadge } from "./pool-progress";
+import { ResetPanel, resetFormProblem } from "./reset-panel";
+import {
+  DEFAULT_RESET_STATE,
+  DIRECTION_LABELS,
+  needsCapture,
+  resetPayload,
+  type ResetState,
+} from "./reset";
 import { JobBanner, LogDialog } from "./job-panel";
 import {
   FORMAT_LABELS,
@@ -104,6 +112,7 @@ export function ExportPanel({
   const [cameras, setCameras] = useState(DEFAULT_CAMERAS);
   const [cameraMap, setCameraMap] = useState("");
   const [hardlink, setHardlink] = useState(false);
+  const [reset, setReset] = useState<ResetState>(DEFAULT_RESET_STATE);
   const [plan, setPlan] = useState<PoolJob | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -112,12 +121,20 @@ export function ExportPanel({
   const nameProblem = name && !NAME.test(name);
   const effectiveTiming = timing ?? defaultTiming(format);
   const stopped = !!preview?.warnings?.some(stopsExport);
+  // Reset data exists for LeRobot v2.1 only; other formats never send it.
+  const resetOptions = resetPayload(reset, format);
+  const resetProblem =
+    format === "lerobot_v21" ? resetFormProblem(reset) : null;
+  const firstTask = recipe.tasks[0]
+    ? (recipe.task_text?.[recipe.tasks[0].task] ?? recipe.tasks[0].task)
+    : "";
   const canRun =
     recipe.tasks.length > 0 &&
     !stopped &&
     !!name &&
     !nameProblem &&
     !dirProblem &&
+    !resetProblem &&
     !busy &&
     !(job && RUNNING.has(job.status));
   // Why the buttons are off, in words next to them (the blocked-export note
@@ -136,7 +153,9 @@ export function ExportPanel({
               ? "Fix the dataset name above."
               : dirProblem
                 ? "Fix the output folder above."
-                : "An export is already running.";
+                : resetProblem
+                  ? resetProblem
+                  : "An export is already running.";
   async function start(dryRun: boolean) {
     setError("");
     setBusy(true);
@@ -153,6 +172,7 @@ export function ExportPanel({
           camera_map: pairs(cameraMap),
           hardlink: format === "raw_capture" && hardlink,
           human_as_success: format === "recap_value" && humanAsSuccess,
+          ...(resetOptions ? { reset: resetOptions } : {}),
         },
         dry_run: dryRun,
       });
@@ -281,6 +301,16 @@ export function ExportPanel({
             </label>
           </>
         )}
+        {format === "lerobot_v21" && (
+          <ResetPanel
+            state={reset}
+            onChange={(patch) => setReset((prev) => ({ ...prev, ...patch }))}
+            recipe={recipe}
+            cameras={pairs(cameras)}
+            cameraMap={pairs(cameraMap)}
+            firstTask={firstTask}
+          />
+        )}
         {format === "recap_value" && (
           <label className="pg-pool-check wide">
             <input
@@ -360,6 +390,16 @@ export function ExportPanel({
           <p className="pg-pool-hint">
             {plan.planned_excluded} {t("left out")} · {t("nothing was written")}
           </p>
+          {plan.options?.reset && (
+            <p className="pg-pool-hint">
+              {t("Reset data")}
+              {colon}
+              {t(DIRECTION_LABELS[plan.options.reset.direction])}
+              {plan.planned_bridge_records
+                ? ` · ${t("{n} recorded stretch(es) used").replace("{n}", String(plan.planned_bridge_records))}`
+                : ""}
+            </p>
+          )}
         </Note>
       )}
       {job && job.kind === "export" && (
@@ -386,7 +426,17 @@ export function ExportPanel({
                   ([reason, n]) =>
                     ` · ${t(REASON_LABELS[reason] || reason)} ${n}`,
                 )}
+                {job.result?.reset_episodes
+                  ? ` · ${t("reset episodes")} ${job.result.reset_episodes.toLocaleString()}`
+                  : ""}
               </p>
+              {needsCapture(job.result?.excluded) && (
+                <p className="pg-pool-hint">
+                  {t(
+                    "Episodes that need a recorded stretch are listed in the export folder, meta/levi_reset_capture_requests.json.",
+                  )}
+                </p>
+              )}
               <div className="pg-row">
                 <a
                   className="ds-btn ds-btn--secondary ds-focus"

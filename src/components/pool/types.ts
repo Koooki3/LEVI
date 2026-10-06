@@ -161,6 +161,74 @@ export const TIMING_HINTS: Record<Timing, string> = {
     "Keeps every frame and declares it at the export FPS (the time axis stretches or shrinks slightly, so motion plays slightly faster or slower).",
 };
 
+/** Reset data: forward demonstrations reversed in time (levi/pool/reset/). */
+export type ResetDirection =
+  | "forward_only"
+  | "forward_and_reset"
+  | "reset_only";
+export type ResetMaxRelease = "in_place" | "in_reach";
+export type ResetOnIneligible = "exclude" | "partial";
+export type ReleaseClass = "in_place" | "in_reach" | "escaped" | "unknown";
+
+export const RESET_DIRECTIONS: ResetDirection[] = [
+  "forward_only",
+  "forward_and_reset",
+  "reset_only",
+];
+
+/** ``options.reset`` of ``POST pool/export`` (levi/pool/reset/schema.py). */
+export interface ResetOptions {
+  direction: ResetDirection;
+  task_template: string;
+  action_contract: string;
+  max_release: ResetMaxRelease;
+  on_ineligible: ResetOnIneligible;
+  require_forward_success?: boolean;
+  release_camera?: string;
+  gripper_lead_rows?: number;
+  review_model?: string | null;
+  bridges?: { source: string; record: string }[];
+}
+
+/** One release (the gripper opening on an object) in a reversed episode. */
+export interface ResetRelease {
+  row: number;
+  hold_row?: number | null;
+  rest_row?: number | null;
+  class: ReleaseClass;
+  reason: string | null;
+  metrics?: Record<string, unknown>;
+  seam?: { position_jump: number; rotation_jump: number };
+}
+
+export interface ResetEpisodeVerdict {
+  key: string;
+  task?: string | null;
+  source?: string | null;
+  eligible: boolean;
+  reason: string | null;
+  detail?: string;
+  scope?: "full" | "partial";
+  generation?: string;
+  rows?: number;
+  rows_kept?: number;
+  releases: ResetRelease[];
+}
+
+/** ``POST pool/reset/analyze``. */
+export interface ResetAnalysis {
+  summary: {
+    episodes: number;
+    reversible: number;
+    reasons: Record<string, number>;
+    release_classes: Partial<Record<ReleaseClass, number>>;
+  };
+  episodes: ResetEpisodeVerdict[];
+  selected: number;
+  analyzed: number;
+  profile: string;
+}
+
 export interface ScanSummary {
   scanned_at: string;
   seconds: number;
@@ -237,8 +305,14 @@ export interface PoolJob {
   destination?: string;
   dry_run?: boolean;
   remote?: RemoteTarget;
-  options?: { format?: ExportFormat; name?: string };
+  options?: {
+    format?: ExportFormat;
+    name?: string;
+    reset?: ResetOptions;
+  };
   planned_episodes?: number;
+  /** Reset export: recorded stretches (bridges) the plan would use. */
+  planned_bridge_records?: number;
   planned_excluded?: number;
   progress?: PoolProgress;
   result?: {
@@ -247,6 +321,8 @@ export interface PoolJob {
     episodes?: number;
     frames?: number;
     excluded?: Record<string, number>;
+    /** Reset episodes written (levi/pool/reset/). */
+    reset_episodes?: number;
     warnings?: (string | { code: string; message: string })[];
     errors?: number;
     resumed?: boolean;
@@ -615,6 +691,33 @@ export const REASON_LABELS: Record<string, string> = {
   label_conflict: "Conflicting human labels",
   conversion_preflight: "Failed capture checks",
   convert_error: "Conversion failed",
+  reset_forward_failed: "Reset data: the demonstration did not succeed",
+  reset_forward_unlabeled: "Reset data: the demonstration has no outcome label",
+  reset_already_reset: "Reset data: already a reset episode",
+  reset_action_contract:
+    "Reset data: the actions do not follow the action contract",
+  reset_release_escaped:
+    "Reset data: the object ended out of the gripper's reach after a release",
+  reset_release_unknown:
+    "Reset data: a release could not be judged from the images",
+  reset_release_in_reach:
+    "Reset data: the object settled within the fingers' reach after a release",
+  reset_unreadable: "Reset data: the episode could not be read",
+  reset_bridge_missing: "Reset data: the recorded stretch is not in the pool",
+  reset_bridge_contract:
+    "Reset data: the recorded stretch does not follow the action contract",
+  reset_bridge_start_mismatch:
+    "Reset data: the recorded stretch does not start where the demonstration ended",
+  reset_bridge_no_grasp:
+    "Reset data: the recorded stretch never grasps the object",
+  reset_bridge_never_reaches_anchor:
+    "Reset data: the recorded stretch never reaches the last safe hold",
+  reset_bridge_nothing_held:
+    "Reset data: nothing is held at the end of the recorded stretch",
+  reset_bridge_visual_mismatch:
+    "Reset data: the recorded stretch shows a different scene",
+  reset_bridge_visual_unchecked:
+    "Reset data: the recorded stretch could not be compared with the demonstration",
 };
 
 /** Server warnings (recipe.find_warnings) as UI text. */
