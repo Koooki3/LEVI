@@ -1198,6 +1198,7 @@
   "Outcome from the valid events; a person commits it in the review queue": "Outcome from the valid events; a person commits it in the review queue",
   "releases": "releases",
   "closes": "closes",
+  "final state": "final state",
   "threshold set by hand for this run": "threshold set by hand for this run",
   "the checkpoint's unified threshold": "the checkpoint's unified threshold",
   "quantile of this dataset's advantages": "quantile of this dataset's advantages",

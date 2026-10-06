@@ -1198,6 +1198,7 @@
   "Outcome from the valid events; a person commits it in the review queue": "由有效事件得出的结果；需由人在复核队列中提交",
   "releases": "释放",
   "closes": "闭合",
+  "final state": "最终状态",
   "threshold set by hand for this run": "本次运行手动设定的阈值",
   "the checkpoint's unified threshold": "检查点的统一阈值",
   "quantile of this dataset's advantages": "本数据集优势值的分位数",

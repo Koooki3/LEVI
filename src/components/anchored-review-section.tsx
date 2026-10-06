@@ -116,7 +116,13 @@ export const AnchoredReviewSection: React.FC<Props> = ({
         <div className="tl-row">
           <div className="label">
             <span className="style-dot dot-anchored" />
-            {t(record.event === "close" ? "closes" : "releases")}
+            {t(
+              record.event === "close"
+                ? "closes"
+                : record.event === "end"
+                  ? "final state"
+                  : "releases",
+            )}
           </div>
           <div
             className="track"
