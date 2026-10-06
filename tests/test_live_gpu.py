@@ -2012,3 +2012,39 @@ def test_an_unusable_lock_file_keeps_vllm_down_when_the_setting_says_wait(
     assert step(ctl, t) == "lock_unavailable" and not ctl.vllm.mine()
     assert "gpu.lock_unavailable is wait" in ctl.decision.reason
     assert ctl.status()["gpu"]["lock"]["on_unavailable"] == "wait"
+
+
+def test_a_dual_label_session_closes_the_gate_only_while_the_policy_runs(tmp_path):
+    """A dual-label client (the operator starts every episode with Enter and
+    labels it after the full budget) never writes ``standby``: it waits in
+    ``waiting_reset`` with no countdown (``reset_wait_s`` null). The gate is
+    open there and while homing, closed while running; no cold start happens
+    at any point of the evaluation."""
+    c = cfg_for()
+    c.service.workspace = str(tmp_path / "ws")
+    c.service.home = str(tmp_path / "home")
+    ctl = controller.Controller(c, log=lambda *a: None)
+    now = time.time()
+    s = session("waiting_reset")
+    assert s.reset_wait_s is None
+    since = {s.path: now - 3600}  # the operator has been resetting for an hour
+    for state, open_ in (
+        ("waiting_reset", True),  # the start gate: Enter starts the episode
+        ("homing", True),
+        ("running", False),  # settle and the full budget
+        ("waiting_reset", True),  # the operator labels the episode
+        ("homing", True),
+        ("waiting_reset", True),
+    ):
+        s.state = state
+        sessions = {("g", "t"): s}
+        found = gpumgr.gate(
+            c, "timeshare", sessions, True, now=now, waiting_since=since
+        )
+        assert found.open is open_, (state, found)
+        if not open_:
+            assert found.code == "policy_inferring"
+        ctl.sessions = sessions
+        assert ctl._evaluation_unfinished() is True, state
+    s.state = "finished"
+    assert ctl._evaluation_unfinished() is False
