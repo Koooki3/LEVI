@@ -404,7 +404,7 @@ prewarm = true
 | `gate.vllm_wake_s`、`gate.vllm_cold_start_s` | 监督进程在启动 worker 之前 10 分钟内做的唤醒（约 0.75 秒）或冷启动的耗时。它记在做完的那个批次的第一个片段上；worker 没活可做、在等模型或等人、或失败时，会把它留给下一个 worker，超过 10 分钟的丢弃，所以不会记到几小时后的批次上。其余片段为 `null` |
 | `result.state`、`result.reason` | `done`、`failed` 或 `mirrored`（之后重试）；没做完时的原因 |
 | `result.segments`、`result.segment_labels` | 提交的时间片段数，以及按子任务 id 的计数 |
-| `result.verdict` | 自动释放复核的 `{outcome, events, valid_events, undecided}`，或 `null`；终态感知规则下的判定另有 `rule` 和 `place_outcome`；最终状态规则（`final_state`）下另有 `rule` 和 `min_valid`，`basis` 里有 `final_reading`（`supported`、`contradicted` 或 `unknown`） |
+| `result.verdict` | 自动释放复核的 `{outcome, events, valid_events, undecided}`，或 `null`；终态感知规则下的判定另有 `rule` 和 `place_outcome`；最终状态规则（`final_state`）下另有 `rule`（`min_valid` 和带 `final_reading` 的 `basis` 在数据集状态的 `verdict` 里，不在这里） |
 | `result.review` | `auto` 或 `human`（谁提交的时间片段） |
 | `result.spec` | `{guideline, release_review, release_review_version, sha256}`：用到的文件和它们的哈希；判定没有记录复核规格版本时为 null |
 | `result.provider`、`result.model` | 模型配置名和服务的模型 |

@@ -441,7 +441,7 @@ A person can take an episode out of a live dataset from the live page (a mishap,
 | `gate.vllm_wake_s`, `gate.vllm_cold_start_s` | the wake (about 0.75 s) or cold start the supervisor did in the 10 minutes before it started the worker. It is recorded on the first demo of the batch that finishes; a worker that finds nothing to do, waits for the model or a person, or fails passes it on to the next worker, and one older than 10 minutes is dropped, so it never lands on a batch hours later. Other demos: `null` |
 | `result.state`, `result.reason` | `done`, `failed` or `mirrored` (to be tried again); why, when not done |
 | `result.segments`, `result.segment_labels` | time segments committed, and their count per subtask id |
-| `result.verdict` | `{outcome, events, valid_events, undecided}` of the automatic release review, or `null`; a verdict made under the terminal-aware rule adds `rule` and `place_outcome`; under the final-state rule (`final_state`) it adds `rule` and `min_valid`, and its `basis` names `final_reading` (`supported`, `contradicted` or `unknown`) |
+| `result.verdict` | `{outcome, events, valid_events, undecided}` of the automatic release review, or `null`; a verdict made under the terminal-aware rule adds `rule` and `place_outcome`; under the final-state rule (`final_state`) it adds `rule` (the `min_valid` and the `basis` with `final_reading` are in the dataset state's `verdict`, not here) |
 | `result.review` | `auto` or `human` (who committed the segments) |
 | `result.spec` | `{guideline, release_review, release_review_version, sha256}`: the files used and their hashes; the review's spec version is null when the verdict did not record it |
 | `result.provider`, `result.model` | the provider profile name and the served model |

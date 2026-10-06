@@ -8,7 +8,7 @@ import json
 import pytest
 from test_live_stats_aggregate import full, labelled, verdict
 
-from levi.live import criteria, report, stats, statsfmt
+from levi.live import criteria, stats, statsfmt
 
 S, F = "success", "failure"
 
@@ -50,9 +50,9 @@ def test_a_missing_or_unknown_ended_by_leaves_the_label_as_it_was(ended):
 
 def test_the_label_never_reads_the_success_flag_for_it():
     # ended_by does not make a label: without an operator outcome there is none.
-    assert criteria.operator_label(meta(ended_by="budget")) is None or (
-        criteria.operator_label(meta(ended_by="budget"))["outcome"] == "unlabeled"
-    )
+    label = criteria.operator_label(meta(ended_by="budget"))
+    assert label is None or label["outcome"] == "unlabeled"
+    assert label is None or label["outcome"] != "success"
     assert criteria.operator_label({"success_flag_final": 1, "eval": None}) is None
 
 
@@ -158,8 +158,13 @@ def test_the_summary_the_episode_rows_and_the_csv_carry_it():
     assert episodes["demo_0000"]["ended_by"] == "budget"
     assert episodes["demo_0001"]["ended_by"] == "operator_key"
     assert episodes["demo_0002"]["ended_by"] is None
-    # The columns the table always ended with are still its last two.
+    # The columns the table always had keep their places; ended_by is appended.
     assert list(episodes["demo_0000"])[-3:] == ["ended_by", "operator", "agreement"]
+    assert statsfmt.EPISODE_COLUMNS[-3:] == ("operator", "agreement", "ended_by")
+    table = statsfmt.to_csv({"episodes": {"rows": list(episodes.values())}})
+    header, first, *_ = table.splitlines()
+    cols = header.split(",")
+    assert cols[-1] == "ended_by" and first.split(",")[-1] == "budget"
 
 
 # --- the report ---------------------------------------------------------------
@@ -185,16 +190,20 @@ def test_the_report_adds_the_split_only_when_both_kinds_exist():
     text = block(both)
     assert "ran the whole budget (carries over) | 1 | 1/1 (100%)" in text
     assert "| ended early by the operator's key | 1 | 0/1 (0%)" in text
-    # One kind alone, or none: the block is what it was.
+    # Budget alone, or no label saying how it ended: the block is what it was.
     only = [with_ended(labelled("demo_0000", 0, S, verdict(S)), "budget")]
     plain = [labelled("demo_0000", 0, S, verdict(S))]
     for rows in (only, plain):
         assert "How the episode ended" not in block(rows)
     assert block(only) == block(plain)
+    # A run in which every episode ended on the operator's key still says so:
+    # its agreement does not carry over to unattended use.
+    keys = [with_ended(labelled("demo_0000", 0, S, verdict(S)), "operator_key")]
+    assert "How the episode ended" in block(keys)
 
 
 def test_a_report_made_before_the_split_renders_unchanged():
     old = stats.summarize([stats.normalize(full("demo_0000", 0))])
     assert "by_ended_by" not in old["agreement"]
     assert statsfmt.agreement_block(old["agreement"], statsfmt.TEXT["en"]) == []
-    assert report is not None and json.dumps(old["agreement"])
+    assert json.dumps(old["agreement"])

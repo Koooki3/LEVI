@@ -36,6 +36,7 @@ EPISODE_COLUMNS = (
     "excluded",
     "operator",
     "agreement",
+    "ended_by",
 )
 
 KEY_FIGURES = (
@@ -415,9 +416,9 @@ def agreement_block(found, t) -> list:
         ],
     )
     split = found.get("by_ended_by")
-    # Only when the episodes ended in two or more ways (a single kind says
-    # nothing the total does not).
-    if isinstance(split, dict) and len(split) > 1:
+    # Whenever some episodes did not run the whole budget: their agreement does
+    # not carry over to unattended use, even when every episode ended that way.
+    if isinstance(split, dict) and (len(split) > 1 or set(split) - {"budget"}):
         out += [f"### {t['ended_by']}", "", t["ended_by_note"], ""]
         out += table(
             [

@@ -275,7 +275,8 @@ def test_the_operator_label_and_the_agreement_reach_stats_and_exports(live_stats
             io.StringIO(client.get("/api/levi/live/stats/export?format=csv").text)
         )
     )
-    assert list(rows[0])[-2:] == ["operator", "agreement"]
+    # ended_by is appended: every column keeps the place it had.
+    assert list(rows[0])[-3:] == ["operator", "agreement", "ended_by"]
     labelled = next(r for r in rows if r["demo"] == "demo_0009")
     assert labelled["operator"] == "success" and labelled["agreement"] == "no"
     assert next(r for r in rows if r["demo"] == "demo_0000")["operator"] == ""

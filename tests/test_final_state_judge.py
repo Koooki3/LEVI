@@ -302,7 +302,9 @@ def test_a_review_asks_once_per_episode_on_its_last_frames(
     run = wb.plan(context)
     estimate = run["plan"]["estimate"]
     assert "per episode on the frames at its end" in estimate["basis"]
-    assert "gripper" not in estimate["basis"] and estimate["minimum_requests"] == 0
+    assert "gripper" not in estimate["basis"] and estimate["minimum_requests"] == len(
+        run["context"]["episodes"]
+    )
     assert run["plan"]["anchored_spec"]["status"] == "candidate"
     approve(wb, run["id"], 1, "human")
     replies(
