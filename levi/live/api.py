@@ -316,7 +316,10 @@ def _operator(row):
     label = row.get("operator_label")
     if not isinstance(label, dict):
         return None
-    return {k: label.get(k) for k in ("outcome", "by", "source")}
+    out = {k: label.get(k) for k in ("outcome", "by", "source")}
+    if label.get("ended_by"):
+        out["ended_by"] = label["ended_by"]
+    return out
 
 
 @router.get("/datasets/{name}")

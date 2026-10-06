@@ -52,7 +52,7 @@ a value that could not be measured is ``null``.
                sha256{file: hash}}, provider,
                model
     operator_label     the operator label (ground truth) from the rollout's
-                       metadata (``criteria.operator_label``): {outcome, by},
+                       metadata (``criteria.operator_label``): {outcome, by[, ended_by]},
                        outcome success/failure/discarded/unlabeled, by who
                        decided it (``operator``, ``key``...); null when the
                        operator gave none or the record is older. Never part
@@ -802,6 +802,9 @@ def summarize(rows, *, gate=None, session_ends=None) -> dict:
 # --- agent vs operator ---------------------------------------------------------
 
 LABELS = ("success", "failure")
+# How a dual-label episode ended (see ``criteria.ENDED_BY``); a label without
+# it (an older episode, another source) is "unknown".
+ENDED_BY = ("budget", "operator_key")
 AGENT_KINDS = ("success", "failure", "undecided", "none")
 
 
@@ -810,7 +813,10 @@ def operator_brief(label) -> dict | None:
     who decided it."""
     if not isinstance(label, dict) or not label.get("outcome"):
         return None
-    return {k: label.get(k) for k in ("outcome", "by")}
+    brief = {k: label.get(k) for k in ("outcome", "by")}
+    if label.get("ended_by") in ENDED_BY:
+        brief["ended_by"] = label["ended_by"]
+    return brief
 
 
 def operator_of(value) -> str | None:
@@ -868,7 +874,14 @@ def _share(k, n) -> dict:
     return {"n": k, "of": n, "rate": ratio(k, n), "wilson95": wilson(k, n)}
 
 
-def agreement(pairs) -> dict:
+def ended_of(value) -> str:
+    """How the episode ended, from an ``operator_label`` dict: ``budget``,
+    ``operator_key`` or ``unknown``."""
+    ended = value.get("ended_by") if isinstance(value, dict) else None
+    return ended if ended in ENDED_BY else "unknown"
+
+
+def agreement(pairs, _split=True) -> dict:
     """The agent label against the operator label (ground truth).
 
     ``pairs`` is ``[(operator, verdict)]``: the operator's outcome (or its
@@ -881,8 +894,9 @@ def agreement(pairs) -> dict:
     failure; ``missed_success``: the agent said failure or undecided where the
     operator said success; both over the episodes the agent judged or left
     undecided, with a Wilson 95 % interval."""
+    pairs = list(pairs or ())
     matrix = {op: {ag: 0 for ag in AGENT_KINDS} for op in LABELS}
-    for operator, verdict in pairs or ():
+    for operator, verdict in pairs:
         op = operator_of(operator)
         if op is not None:
             matrix[op][agent_of(verdict)] += 1
@@ -891,7 +905,7 @@ def agreement(pairs) -> dict:
     judged = sum(row["success"] + row["failure"] for row in matrix.values())
     seen = judged + s["undecided"] + f["undecided"]
     agree = s["success"] + f["failure"]
-    return {
+    found = {
         "pairs": count,
         "matrix": matrix,
         "judged": judged,
@@ -909,12 +923,27 @@ def agreement(pairs) -> dict:
         "operator_success_rate": ratio(sum(s.values()), count),
         "agent_success_rate": ratio(s["success"] + f["success"], seen),
     }
+    if _split:
+        # An episode the operator's key ended early is shorter than an
+        # unattended one: only ``budget`` episodes carry over to unattended
+        # use. Present only when some label says how its episode ended (so
+        # older data reads exactly as before); an episode without it counts
+        # in the total and in ``unknown``.
+        groups: dict = {}
+        for operator, verdict in pairs:
+            if operator_of(operator) is not None:
+                groups.setdefault(ended_of(operator), []).append((operator, verdict))
+        if set(groups) & set(ENDED_BY):
+            found["by_ended_by"] = {
+                name: agreement(groups[name], _split=False)
+                for name in (*ENDED_BY, "unknown")
+                if name in groups
+            }
+    return found
 
 
 def _pairs_of(rows) -> list:
-    return [
-        (dig(r, "operator_label", "outcome"), dig(r, "result", "verdict")) for r in rows
-    ]
+    return [(r.get("operator_label"), dig(r, "result", "verdict")) for r in rows]
 
 
 def _short(values) -> dict:
@@ -957,6 +986,7 @@ def _episode_row(row, ends) -> dict:
         "review": dig(row, "result", "review"),
         "in_session": during,
         "excluded": row.get("excluded") is True,
+        "ended_by": dig(row, "operator_label", "ended_by"),
         "operator": dig(row, "operator_label", "outcome"),
         "agreement": agree_of(
             dig(row, "operator_label", "outcome"), dig(row, "result", "verdict")

@@ -175,6 +175,10 @@ def abort_reason(directory) -> str | None:
 # Who decided ``eval.outcome`` by a key press in the evaluation client: the
 # operator (``key``) or the operator after a timeout (``timeout-adjudicated``).
 OPERATOR_KEYS = ("key", "timeout-adjudicated")
+# How a dual-label episode ended (``eval.ended_by``): ``operator_key`` (the
+# operator's key press during the run ended it early) or ``budget`` (it ran the
+# whole step budget, as an unattended run does). Anything else is unknown.
+ENDED_BY = ("operator_key", "budget")
 
 
 def operator_label(meta) -> dict | None:
@@ -193,6 +197,10 @@ def operator_label(meta) -> dict | None:
     3. else ``eval.outcome`` unlabeled or discarded, as written (no label, but
        a record that the operator gave none or threw the episode away).
 
+    A known ``eval.ended_by`` is kept in the label as ``ended_by``: an episode
+    the operator's key ended early is shorter than an unattended one, so the
+    agreement is read apart by it. The key is absent when the metadata has none.
+
     Anything else (``aborted``, no ``eval`` block, values of another shape) is
     None. ``success_flag_final`` is never read: it is a placeholder in a
     rollout nobody labelled."""
@@ -203,14 +211,16 @@ def operator_label(meta) -> dict | None:
         return None
     by = ev.get("verdict_by") if isinstance(ev.get("verdict_by"), str) else None
     source = "capture-metadata"
+    ended = ev.get("ended_by")
+    extra = {"ended_by": ended} if ended in ENDED_BY else {}
     operator = ev.get("operator_outcome")
     if isinstance(operator, str) and operator in ("success", "failure", "discarded"):
-        return {"outcome": operator, "by": "operator", "source": source}
+        return {"outcome": operator, "by": "operator", "source": source, **extra}
     outcome = ev.get("outcome")
     if not isinstance(outcome, str):
         return None
     if outcome in ("success", "failure") and by in OPERATOR_KEYS:
-        return {"outcome": outcome, "by": by, "source": source}
+        return {"outcome": outcome, "by": by, "source": source, **extra}
     if outcome in ("unlabeled", "discarded"):
-        return {"outcome": outcome, "by": by, "source": source}
+        return {"outcome": outcome, "by": by, "source": source, **extra}
     return None

@@ -133,6 +133,11 @@ TEXT = {
         "agreement": "Agent vs operator",
         "agreement_note": "The operator label (ground truth) is the operator's own success or failure, given in the evaluation terminal after each episode; the agent label (automatic, unreviewed) is the release review's verdict. Only episodes the operator labelled success or failure count; an episode without an agent verdict yet is missing coverage, never agreement.",
         "operator_labelled": "operator labelled success or failure",
+        "ended_by": "How the episode ended",
+        "ended_by_note": "An episode the operator's key ended early is shorter than an unattended one, so only the budget row carries over to unattended use; read the other rows apart.",
+        "ended_budget": "ran the whole budget (carries over)",
+        "ended_operator_key": "ended early by the operator's key",
+        "ended_unknown": "no record of how it ended",
         "agree": "agree (of the agent's success/failure)",
         "agree_undecided": "agree, reading an undecided verdict as failure",
         "false_success": "false success: agent success, operator failure (n/of, Wilson 95 %)",
@@ -246,6 +251,11 @@ TEXT = {
         "agreement": "agent 与操作员对照",
         "agreement_note": "操作员标签（真值）是操作员在评测终端里对每个片段给出的成功或失败；agent 标签（自动、未审）是释放复核的判定。只统计操作员判为成功或失败的片段；还没有 agent 判定的片段算覆盖缺口，不算一致。",
         "operator_labelled": "操作员判了成功或失败的片段",
+        "ended_by": "片段怎么结束的",
+        "ended_by_note": "操作员按键提前结束的片段比无人值守的短，只有跑满预算那一行的结果能外推到无人值守；其他行单独看。",
+        "ended_budget": "跑满预算（可外推）",
+        "ended_operator_key": "操作员按键提前结束",
+        "ended_unknown": "没有记录怎么结束的",
         "agree": "一致（在 agent 判成功/失败的片段中）",
         "agree_undecided": "一致，把未决按失败计",
         "false_success": "假成功：agent 判成功、操作员判失败（个数/总数，Wilson 95 %）",
@@ -404,6 +414,30 @@ def agreement_block(found, t) -> list:
             for op in ("success", "failure")
         ],
     )
+    split = found.get("by_ended_by")
+    # Only when the episodes ended in two or more ways (a single kind says
+    # nothing the total does not).
+    if isinstance(split, dict) and len(split) > 1:
+        out += [f"### {t['ended_by']}", "", t["ended_by_note"], ""]
+        out += table(
+            [
+                t["ended_by"],
+                t["operator_labelled"],
+                t["agree"],
+                t["false_success"],
+                t["missed_success"],
+            ],
+            [
+                [
+                    t[f"ended_{name}"],
+                    num(part.get("pairs")),
+                    f"{num(part.get('agree'))}/{num(part.get('judged'))} ({pct(part.get('rate'))})",
+                    _share(part.get("false_success")),
+                    _share(part.get("missed_success")),
+                ]
+                for name, part in split.items()
+            ],
+        )
     return out
 
 

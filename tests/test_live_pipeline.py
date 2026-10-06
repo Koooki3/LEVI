@@ -1267,6 +1267,45 @@ def test_a_definite_answer_that_the_object_is_not_there_is_a_certain_failure(env
     assert verdict["basis"]["final_reading"] == "contradicted"
 
 
+def test_how_an_episode_ended_reaches_the_state_and_splits_the_agreement(env):
+    """``eval.ended_by`` (written by the evaluation client) is read into the
+    operator label; an older label without it is "unknown". The model sees
+    none of it."""
+    from levi.live import stats
+
+    e = env()
+    final_only(e)
+    for n, ended in ((0, "operator_key"), (1, "budget"), (2, None)):
+        e.rollouts.write(n)
+        fields = {
+            "outcome": "success",
+            "verdict_by": "operator",
+            "operator_outcome": "success",
+            "label_mode": "dual",
+        }
+        if ended:
+            fields["ended_by"] = ended
+            fields["operator_label_timing"] = (
+                "during_run" if ended == "operator_key" else "after_budget"
+            )
+        label(e, n, **fields)
+    e.run()
+    demos = e.state()["demos"]
+    assert demos["demo_0000"]["operator_label"]["ended_by"] == "operator_key"
+    assert demos["demo_0001"]["operator_label"]["ended_by"] == "budget"
+    assert "ended_by" not in demos["demo_0002"]["operator_label"]
+    found = stats.summarize(stats.read(e.ws / "live"))["agreement"]
+    assert found["pairs"] == 3
+    assert {k: v["pairs"] for k, v in found["by_ended_by"].items()} == {
+        "budget": 1,
+        "operator_key": 1,
+        "unknown": 1,
+    }
+    for payload in e.fake.calls:
+        assert "ended_by" not in json.dumps(payload)
+        assert "operator_key" not in json.dumps(payload)
+
+
 def test_the_default_pipeline_still_makes_a_temporal_run(env):
     from levi.live import generic
 
