@@ -54,10 +54,23 @@ from . import corrections, embodiment, heldout, index, joblog, scanner, settings
 from . import journal as journal_mod
 from . import timing as timing_mod
 from .recipe import NAME, Recipe, find_warnings, select_detailed
+from .reset import build
+from .reset import contract as reset_contract
+from .reset import profile as reset_profile
+from .reset import review as review_mod
+from .reset import run as reset_run
+from .reset import schema as reset_schema
 
 SCHEMA = "levi.pool.export.v1"
 FORMATS = ("lerobot_v21", "recap_value", "raw_capture")
-STAGES = ["Check", "Convert raw captures", "Merge", "Validate", "Publish"]
+STAGES = [
+    "Check",
+    "Convert raw captures",
+    "Merge",
+    "Reverse for reset",
+    "Validate",
+    "Publish",
+]
 BASE_COLUMNS = (
     "timestamp",
     "frame_index",
@@ -107,6 +120,9 @@ class ExportOptions(BaseModel):
     # Episodes that fail to convert are left out and listed; the export stops
     # (resumable) when more than this share of its episodes failed.
     on_error_max_fraction: float = Field(0.1, ge=0, le=1)
+    # Reset episodes derived by reversing the forward ones (docs/RESET_EXPORT.md);
+    # None or direction "forward_only": the export as it always was.
+    reset: reset_schema.ResetOptions | None = None
 
     @field_validator("cameras")
     @classmethod
@@ -126,6 +142,20 @@ class ExportOptions(BaseModel):
             if not key:
                 raise ValueError("camera_map keys must be nonempty")
         return value
+
+    @model_validator(mode="after")
+    def _reset(self):
+        if self.reset and self.reset.enabled:
+            if self.format != "lerobot_v21":
+                raise ValueError(
+                    "Reset episodes are written into a LeRobot v2.1 export "
+                    f"(format lerobot_v21), not {self.format}"
+                )
+            # A static-frame filter would drop the rows in which an object
+            # settles after a release: the evidence a reset is judged on.
+            if self.filter_static is None:
+                self.filter_static = False
+        return self
 
     @model_validator(mode="after")
     def _timing(self):
@@ -160,6 +190,44 @@ class ExportOptions(BaseModel):
 
 
 # ------------------------------------------------------------------ plan
+
+
+PLAN_EPISODE_KEYS = (
+    "key",
+    "source",
+    "source_path",
+    "format",
+    "episode",
+    "episode_index",
+    "task",
+    "task_raw",
+    "task_original",
+    "task_correction",
+    "frames",
+    "fps",
+    "measured_fps",
+    "video_bytes",
+    "state_dim",
+    "action_dim",
+    "category",
+    "robot_flag",
+    "human_label",
+    "outcome",
+    "outcome_source",
+    "policy",
+    "policy_model",
+    "policy_checkpoint",
+    "policy_method",
+    "policy_phase",
+    "policy_label",
+    *embodiment.COLUMNS,
+    "fingerprint",
+    "group",
+    "stat_sig",
+    "sel_stratum",
+    "quality_score",
+    "selection_reason",
+)
 
 
 def _all_source_paths() -> list[str]:
@@ -203,50 +271,23 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
             )
     sources = sorted({r["source_path"] for r in chosen} | set(_all_source_paths()))
     target = settings.check_export_target(options.target(), sources)
-    keep = (
-        "key",
-        "source",
-        "source_path",
-        "format",
-        "episode",
-        "episode_index",
-        "task",
-        "task_raw",
-        "task_original",
-        "task_correction",
-        "frames",
-        "fps",
-        "measured_fps",
-        "video_bytes",
-        "state_dim",
-        "action_dim",
-        "category",
-        "robot_flag",
-        "human_label",
-        "outcome",
-        "outcome_source",
-        "policy",
-        "policy_model",
-        "policy_checkpoint",
-        "policy_method",
-        "policy_phase",
-        "policy_label",
-        *embodiment.COLUMNS,
-        "fingerprint",
-        "group",
-        "stat_sig",
-        "sel_stratum",
-        "quality_score",
-        "selection_reason",
-    )
+    keep = PLAN_EPISODE_KEYS
     episodes = [{k: row.get(k) for k in keep} for row in chosen]
     for ep in episodes:  # the index keeps the evidence as JSON text
         ep["embodiment_evidence"] = embodiment.evidence_of(ep)
+    bridge_records = _plan_reset(options, recipe, chosen, texts)
     # The index's view of copies, checked at plan time too so a dry run
     # cannot pass what the export would refuse.
-    refuse_heldout_groups(episodes)
-    refuse_removed(episodes)
-    check_space({"episodes": episodes, "target": str(target)})
+    refuse_heldout_groups(episodes + bridge_records)
+    refuse_removed(episodes + bridge_records)
+    check_space(
+        {
+            "episodes": episodes,
+            "bridge_records": bridge_records,
+            "options": options.model_dump(),
+            "target": str(target),
+        }
+    )
     return {
         "schema": SCHEMA,
         "recipe": recipe.model_dump(),
@@ -254,6 +295,7 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "target": str(target),
         "sources": sources,
         "episodes": episodes,
+        "bridge_records": bridge_records,
         "selection": list(selection.tasks.values()),
         "excluded": excluded,
         "index": index.summary().get("scanned_at"),
@@ -271,6 +313,51 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
     }
 
 
+def _plan_reset(options, recipe: Recipe, chosen: list[dict], texts: dict) -> list[dict]:
+    """Checks of a reset export at plan time, and the recorded episodes its
+    bridges name (frozen like the selection, so the guards see them too)."""
+    reset = options.reset
+    if not (reset and reset.enabled):
+        return []
+    reset_contract.resolve(reset.action_contract)
+    forward = {texts.get(r["task"], r["task"]) for r in chosen}
+    made: dict[str, str] = {}
+    for text in sorted(forward):
+        derived = reset.reset_text(text)
+        if made.setdefault(derived, text) != text:
+            raise ValueError(
+                f"Tasks {made[derived]!r} and {text!r} would both be reset as {derived!r}"
+            )
+        if reset.writes_forward and derived in forward:
+            raise ValueError(
+                f"The reset instruction {derived!r} is also a forward task text; "
+                "change task_template or the task text"
+            )
+    if not reset.bridges:
+        return []
+    by_key = {r["key"]: r for r in chosen}
+    frame = index.frame()
+    records: dict[str, dict] = {}
+    for link in reset.bridges:
+        if link.source not in by_key:
+            raise ValueError(f"bridge source {link.source} is not in the selection")
+        if link.record in by_key:
+            raise ValueError(
+                f"{link.record} is a selected episode; a bridge record must be a "
+                "separate recording"
+            )
+        found = frame[frame.key == link.record]
+        if found.empty:
+            raise ValueError(f"bridge record {link.record} is not in the pool index")
+        row = found.astype(object).where(found.notna(), None).iloc[0].to_dict()
+        if not row.get("exportable"):
+            raise ValueError(f"bridge record {link.record} is not exportable")
+        record = {k: row.get(k) for k in PLAN_EPISODE_KEYS}
+        record["embodiment_evidence"] = embodiment.evidence_of(record)
+        records[link.record] = record
+    return list(records.values())
+
+
 def _selection_fields(ep: dict) -> dict:
     """Why this episode is in: its stratum, quality score and reasons."""
     return {
@@ -283,8 +370,16 @@ def _selection_fields(ep: dict) -> dict:
 def _selection_record(job: dict, episodes: list[dict]) -> list[dict]:
     """Per task: what was asked for, available and planned, and how many
     episodes the finished export holds."""
-    exported = Counter(e["task"] for e in episodes)
-    return [{**r, "exported": exported[r["task"]]} for r in job.get("selection") or []]
+    exported = Counter(e["task"] for e in episodes if e.get("variant") != "reset")
+    reset = Counter(e["task"] for e in episodes if e.get("variant") == "reset")
+    return [
+        {
+            **r,
+            "exported": exported[r["task"]],
+            **({"exported_reset": reset[r["task"]]} if reset else {}),
+        }
+        for r in job.get("selection") or []
+    ]
 
 
 def _policy_fields(ep: dict) -> dict:
@@ -752,6 +847,10 @@ def check_space(job: dict, staging: Path | None = None) -> dict:
     """Refuse early, with numbers, when the volume cannot hold the export
     (what an unfinished ``.partial`` already holds counts as written)."""
     wanted = estimate_bytes(job["episodes"])
+    reset = (job.get("options") or {}).get("reset") or {}
+    if reset.get("direction") == "forward_and_reset":
+        wanted *= 2  # the reversed videos are written next to the forward ones
+    wanted += estimate_bytes(job.get("bridge_records") or [])
     have = _tree_bytes(staging) if staging is not None and Path(staging).exists() else 0
     volume = _volume(Path(job["target"]).parent)
     free = shutil.disk_usage(volume).free
@@ -930,13 +1029,14 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
         f"{'resuming' if resume else 'starting'} export {options.name} "
         f"({options.format}, {len(episodes)} episodes) -> {target}"
     )
+    guarded = episodes + (job.get("bridge_records") or [])
     refuse_heldout(
-        episodes,
+        guarded,
         [Path(p) for p in job["pool_roots"]],
         [Path(p) for p in job["heldout_lists"]],
     )
-    refuse_heldout_groups(episodes)
-    refuse_removed(episodes)
+    refuse_heldout_groups(guarded)
+    refuse_removed(guarded)
     if job.get("embodiment_check") or any("gripper" in e for e in episodes):
         # A plan from before the gripper fields (no marker, no gripper key
         # on any episode) has nothing to check.
@@ -944,7 +1044,7 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
         refuse_mixed_gripper(episodes, job["recipe"])
     # A correction approved when planned and rejected since stops the export.
     corrections.verify(episodes, job["recipe"])
-    _unchanged(episodes)
+    _unchanged(guarded)
     check_space(job, staging if resume else None)
     check_fps(job, options)
     if resume:
@@ -991,8 +1091,15 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
             "task_corrections": corrections.export_record(
                 _exported(job["episodes"], result["episodes"]), job["recipe"]
             ),
+            "reset": result.get("reset"),
             "counts": {
                 "episodes": len(result["episodes"]),
+                "forward_episodes": sum(
+                    1 for e in result["episodes"] if e.get("variant") != "reset"
+                ),
+                "reset_episodes": sum(
+                    1 for e in result["episodes"] if e.get("variant") == "reset"
+                ),
                 "frames": result["frames"],
                 "excluded": dict(
                     Counter(e["reason"] for e in job["excluded"] + result["dropped"])
@@ -1031,6 +1138,7 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
         "episodes": record["counts"]["episodes"],
         "frames": record["counts"]["frames"],
         "excluded": record["counts"]["excluded"],
+        "reset_episodes": record["counts"]["reset_episodes"],
         "warnings": record["warnings"],
         "errors": len(ctx.failures),
         "resumed": record["resumed"],
@@ -1430,12 +1538,24 @@ def _place_video(src: Path, dst: Path, converted: bool) -> str | None:
     return _copy_hashed(src, dst)
 
 
+def _provenance_positions(part: "Part") -> dict[str, list[int]]:
+    """Source row positions of a conversion part's episodes, by episode id."""
+    path = part.dir / "meta/levi_provenance.jsonl"
+    if not path.is_file():
+        return {}
+    return {r["source_demo"]: r["source_positions"] for r in dataset.read_jsonl(path)}
+
+
 def _lerobot(ctx: RunContext) -> dict:
     job, options, staging, progress = ctx.job, ctx.options, ctx.staging, ctx.progress
     recap = options.format == "recap_value"
+    reset = options.reset if options.reset and options.reset.enabled else None
+    writes_forward = reset is None or reset.writes_forward
     texts = _texts(job)
     planned = job["episodes"]
-    schema = _schema_check(planned, options)
+    records = job.get("bridge_records") or []
+    everyone = planned + records
+    schema = _schema_check(everyone, options)
     conv = options.conversion()
     warnings = []
     if recap and any(e["format"] == "lerobot" for e in planned):
@@ -1443,14 +1563,14 @@ def _lerobot(ctx: RunContext) -> dict:
             "LeRobot sources keep their own frame selection: their rewards are "
             "per stored frame, not necessarily per executed step"
         )
-    pids = {id(e): f"p{i:06d}" for i, e in enumerate(planned)}
-    raw_items = [(pids[id(e)], e) for e in planned if e["format"] == "robot_capture"]
+    pids = {id(e): f"p{i:06d}" for i, e in enumerate(everyone)}
+    raw_items = [(pids[id(e)], e) for e in everyone if e["format"] == "robot_capture"]
     dropped: list[dict] = []
     owner: dict[str, Part] = {}
     if raw_items:
         owner, dropped = _convert_raw(ctx, raw_items, texts, conv)
     lerobot_bad: set[int] = set()
-    for e in planned:
+    for e in everyone:
         if e["format"] != "lerobot":
             continue
         info = schema["infos"][e["source_path"]]
@@ -1462,15 +1582,18 @@ def _lerobot(ctx: RunContext) -> dict:
             dropped.append(ctx.fail(e, exc, "Merge", f"merge|{e['key']}"))
             lerobot_bad.add(id(e))
     ctx.check_budget()
-    kept = [
+    record_ids = {id(e) for e in records}
+    usable = [
         e
-        for e in planned
+        for e in everyone
         if id(e) not in lerobot_bad
         and (e["format"] != "robot_capture" or pids[id(e)] in owner)
     ]
+    kept = [e for e in usable if id(e) not in record_ids]
+    kept_records = {e["key"]: e for e in usable if id(e) in record_ids}
     if not kept:
         raise ValueError("No episode passed the capture checks")
-    task_order = _task_order(kept, job["recipe"])
+    task_order = _task_order(kept, job["recipe"]) if writes_forward else []
     task_index = {t: i for i, t in enumerate(task_order)}
     recap_value = RecapValue()
     recap_settings = RecapOptions(
@@ -1479,40 +1602,81 @@ def _lerobot(ctx: RunContext) -> dict:
         gamma=options.gamma,
     )
     ds_stats: dict[str, dict] = {}
+    source_episodes: dict[str, dict] = {}
+    positions: dict[str, dict] = {}
     features: dict = {}
     names = None
     episodes_meta, epstats, provenance, measured, record_rows = [], [], [], {}, []
     part_info = next(iter(owner.values())).info if owner else None
-    offset = 0
-    progress.stage("Merge", len(kept))
-    for new, ep in enumerate(kept):
+
+    def locate(ep: dict) -> reset_run.Located:
+        """Where an episode's rows and videos are, in LeRobot form."""
         if ep["format"] == "robot_capture":
             pid = pids[id(ep)]
             part = owner[pid]
             root, info = part.dir, part.info
-            source_fps = part.measured.get(pid)
             old = part.rows[pid]["episode_index"]
             mapping = {k: k for k in _video_keys(info)}
             stats = dict(part.stats.get(old, {}))
-            converted = True
-        else:
-            root = Path(ep["source_path"])
-            info = schema["infos"][ep["source_path"]]
-            source_fps = float(info.get("fps") or 0) or None
-            old = int(ep["episode_index"])
-            mapping = _mapping(info, options.camera_map)
-            if ep["source_path"] not in ds_stats:
-                path = root / "meta/episodes_stats.jsonl"
-                ds_stats[ep["source_path"]] = (
-                    {r["episode_index"]: r["stats"] for r in dataset.read_jsonl(path)}
-                    if path.is_file()
-                    else {}
-                )
-            stats = {
-                mapping.get(k, k): v
-                for k, v in ds_stats[ep["source_path"]].get(old, {}).items()
-            }
-            converted = False
+            if part.id not in positions:
+                positions[part.id] = _provenance_positions(part)
+            width = (
+                reset_run.raw_width(Path(ep["key"]), positions[part.id].get(pid, []))
+                if reset
+                else None
+            )
+            return reset_run.Located(
+                build.Source(ep["key"], root, info, old, mapping),
+                True,
+                part.measured.get(pid),
+                stats,
+                width,
+            )
+        root = Path(ep["source_path"])
+        info = schema["infos"][ep["source_path"]]
+        old = int(ep["episode_index"])
+        mapping = _mapping(info, options.camera_map)
+        if ep["source_path"] not in ds_stats:
+            path = root / "meta/episodes_stats.jsonl"
+            ds_stats[ep["source_path"]] = (
+                {r["episode_index"]: r["stats"] for r in dataset.read_jsonl(path)}
+                if path.is_file()
+                else {}
+            )
+            rows = root / "meta/episodes.jsonl"
+            source_episodes[ep["source_path"]] = (
+                {r["episode_index"]: r for r in dataset.read_jsonl(rows)}
+                if rows.is_file()
+                else {}
+            )
+        stats = {
+            mapping.get(k, k): v
+            for k, v in ds_stats[ep["source_path"]].get(old, {}).items()
+        }
+        fps = float(info.get("fps") or 0) or None
+        already = "levi_reset" in source_episodes[ep["source_path"]].get(old, {})
+        return reset_run.Located(
+            build.Source(ep["key"], root, info, old, mapping),
+            False,
+            fps,
+            stats,
+            None,
+            already,
+        )
+
+    offset = 0
+    progress.stage("Merge", len(kept))
+    for ep in kept:
+        located = locate(ep)
+        root, info, old = located.source.root, located.source.info, located.source.old
+        mapping, stats = located.source.mapping, located.stats
+        source_fps, converted = located.source_fps, located.converted
+        if names is None:
+            names = info["features"]["observation.state"].get("names")
+        if not writes_forward:
+            progress.advance(ep["key"])
+            continue
+        new = len(episodes_meta)
         chunk = int(info.get("chunks_size") or 1000)
         table = pq.read_table(
             root
@@ -1523,8 +1687,6 @@ def _lerobot(ctx: RunContext) -> dict:
             np.asarray(table["frame_index"].to_pylist()), np.arange(n)
         ):
             raise ValueError(f"{ep['key']}: frame_index is not 0..{n - 1}")
-        if names is None:
-            names = info["features"]["observation.state"].get("names")
         text = texts.get(ep["task"], ep["task"])
         columns = {
             "timestamp": pa.array(np.arange(n, dtype=np.float32) / options.fps),
@@ -1639,6 +1801,123 @@ def _lerobot(ctx: RunContext) -> dict:
         )
         offset += n
         progress.advance(ep["key"])
+    reset_tasks: list[str] = []
+    reset_requests: list[dict] = []
+    reset_doc: dict | None = None
+    if reset:
+        progress.stage("Reverse for reset", len(kept))
+        shutil.rmtree(staging / ".reset-scratch", ignore_errors=True)
+        plans, reset_requests = reset_run.analyze(
+            kept,
+            locate,
+            {k: locate(e) for k, e in kept_records.items()},
+            reset,
+            texts,
+            reviewer=review_mod.open_reviewer(reset.review_model)
+            if reset.review_model
+            else None,
+            progress=progress,
+        )
+        dropped += [p.excluded for p in plans if p.excluded]
+        todo = reset_run.exported(plans)
+        if not todo and not writes_forward:
+            raise ValueError(
+                "No episode can be reversed: "
+                + "; ".join(
+                    f"{k} x{v}"
+                    for k, v in Counter(
+                        p.excluded["reason"] for p in plans if p.excluded
+                    ).items()
+                )
+            )
+        reset_tasks = list(dict.fromkeys(p.text for p in todo))
+        base = len(task_order)
+        reset_index = {t: base + i for i, t in enumerate(reset_tasks)}
+        written = reset_run.write(
+            ctx,
+            plans,
+            reset,
+            new0=len(episodes_meta),
+            offset0=offset,
+            task_index=reset_index,
+            fps=options.fps,
+            staging=staging,
+            data_path=DATA_PATH,
+            video_path=VIDEO_PATH,
+        )
+        for item in written:
+            plan, built, new = item["plan"], item["built"], item["episode"]
+            episodes_meta.append(item["row"])
+            stats = {
+                k: v
+                for k, v in built["stats"].items()
+                if k in BASE_COLUMNS or k.startswith("observation.images.")
+            }
+            epstats.append({"episode_index": new, "stats": stats})
+            provenance.append(
+                {
+                    "episode_index": new,
+                    "pool_key": plan.ep["key"],
+                    "source_episode": plan.located.source.old,
+                    "variant": "reset",
+                }
+            )
+            for rel, probe in built["probes"].items():
+                measured[rel] = {**probe, "frames": probe["declared_frames"]}
+            for out_key, (src_key, probe) in built["features"].items():
+                feature = dict(plan.located.source.info["features"][src_key])
+                feature["info"] = {**feature.get("info", {}), "video.fps": options.fps}
+                feature["shape"] = [probe["height"], probe["width"], 3]
+                features.setdefault(out_key, feature)
+            ep = plan.ep
+            record_rows.append(
+                {
+                    "episode_index": new,
+                    "variant": "reset",
+                    "source_path": ep["key"],
+                    "source": ep["source"],
+                    "format": ep["format"],
+                    "task": ep["task"],
+                    "reset_task": plan.text,
+                    "group": ep.get("group"),
+                    "fingerprint": ep["fingerprint"],
+                    "outcome": None,
+                    "outcome_source": None,
+                    **_policy_fields(ep),
+                    **_embodiment_fields(ep),
+                    **_selection_fields(ep),
+                    **_correction_fields(ep),
+                    "frames": item["length"],
+                    "generation": plan.generation,
+                    "scope": plan.analysis.scope,
+                    "source_fps": timing_mod.rounded(plan.located.source_fps),
+                    "time_scale": None,
+                }
+            )
+            offset += item["length"]
+        shutil.rmtree(staging / ".reset-scratch", ignore_errors=True)
+        reset_doc = {
+            "schema": reset_schema.SCHEMA,
+            "options": reset.model_dump(),
+            "profile": reset_profile.VERSION,
+            "contract": reset_contract.resolve(reset.action_contract).ref,
+            "exported": len(written),
+            "excluded": Counter(p.excluded["reason"] for p in plans if p.excluded),
+            "episodes": [w["record"] for w in written],
+            "analysis_of_excluded": {
+                p.ep["key"]: p.analysis.record() for p in plans if p.excluded
+            },
+            "capture_requests": reset_requests,
+        }
+        atomic(staging / "meta/levi_reset.json", reset_doc)
+        if reset_requests:
+            atomic(
+                staging / "meta/levi_reset_capture_requests.json",
+                {
+                    "schema": "levi.pool.reset.capture_requests.v1",
+                    "requests": reset_requests,
+                },
+            )
     for key in ("timestamp", "frame_index", "episode_index", "index", "task_index"):
         features[key] = {
             "dtype": "float32" if key == "timestamp" else "int64",
@@ -1660,7 +1939,7 @@ def _lerobot(ctx: RunContext) -> dict:
         "fps": int(options.fps) if float(options.fps).is_integer() else options.fps,
         "total_episodes": len(episodes_meta),
         "total_frames": offset,
-        "total_tasks": len(task_order),
+        "total_tasks": len(task_order) + len(reset_tasks),
         "total_videos": len(episodes_meta) * len(cameras),
         "total_chunks": (len(episodes_meta) + 999) // 1000,
         "chunks_size": 1000,
@@ -1674,7 +1953,11 @@ def _lerobot(ctx: RunContext) -> dict:
     dataset.jsonl(staging / "meta/episodes_stats.jsonl", epstats)
     dataset.jsonl(
         staging / "meta/tasks.jsonl",
-        [{"task_index": i, "task": texts.get(t, t)} for i, t in enumerate(task_order)],
+        [{"task_index": i, "task": texts.get(t, t)} for i, t in enumerate(task_order)]
+        + [
+            {"task_index": len(task_order) + i, "task": t}
+            for i, t in enumerate(reset_tasks)
+        ],
     )
     atomic(staging / "meta/stats.json", dataset.aggregate(epstats))
     dataset.jsonl(staging / "meta/levi_provenance.jsonl", provenance)
@@ -1692,8 +1975,15 @@ def _lerobot(ctx: RunContext) -> dict:
         "episodes": record_rows,
         "frames": offset,
         "dropped": dropped,
-        "task_order": task_order,
+        "task_order": task_order + reset_tasks,
         "warnings": warnings,
+        "reset": None
+        if reset_doc is None
+        else {
+            k: v
+            for k, v in reset_doc.items()
+            if k not in ("episodes", "analysis_of_excluded", "capture_requests")
+        },
         "conversion": conv.model_dump() if raw_items else None,
         "timing": _timing_record(options, record_rows),
     }

@@ -199,6 +199,81 @@ def encode(frames, destination: Path, fps: float, expected: int):
                 temporary.unlink()
 
 
+class FrameStore:
+    """A video decoded once into an uncompressed scratch file, so frames can be
+    read in any order, any number of times, with bounded memory. ``selected_video``
+    cannot do this: it walks the stream once and yields frames in source order,
+    so asking it for ``[5, 4, 3]`` gives 3, 4, 5, and a repeated index appears
+    once. Close it (or use ``with``) to delete the scratch file."""
+
+    def __init__(self, path: Path, scratch: Path):
+        scratch.mkdir(parents=True, exist_ok=True)
+        self.path = Path(path)
+        self.file = (
+            scratch
+            / f".frames-{hashlib.sha256(str(path).encode()).hexdigest()[:16]}-{id(self)}.raw"
+        )
+        self.shape: tuple[int, int, int] | None = None
+        count = 0
+        with self.file.open("wb") as out:
+            for frame in decode(self.path):
+                if self.shape is None:
+                    self.shape = frame.shape
+                elif frame.shape != self.shape:
+                    raise ValueError(f"Video changes dimensions: {self.path.name}")
+                out.write(np.ascontiguousarray(frame).tobytes())
+                count += 1
+        if count == 0 or self.shape is None:
+            self.file.unlink(missing_ok=True)
+            raise ValueError(f"No decodable frames: {self.path.name}")
+        self.count = count
+        self._map = np.memmap(
+            self.file, dtype=np.uint8, mode="r", shape=(count, *self.shape)
+        )
+
+    def __len__(self) -> int:
+        return self.count
+
+    def __getitem__(self, index: int):
+        if not 0 <= index < self.count:
+            raise IndexError(f"frame {index} of {self.count} in {self.path.name}")
+        return np.array(self._map[index])
+
+    def close(self) -> None:
+        self._map = None
+        self.file.unlink(missing_ok=True)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+def ordered_frames(parts):
+    """Frames in the order given: ``parts`` is a list of ``(store, rows)``;
+    every row of every part is yielded in turn, repeats included. The inputs
+    of a reversed or spliced video."""
+    for store, rows in parts:
+        for row in rows:
+            yield store[int(row)]
+
+
+def frames_at(path: Path, rows) -> dict[int, "np.ndarray"]:
+    """The frames at ``rows`` of a video, from one pass over the stream."""
+    wanted = {int(r) for r in rows}
+    if not wanted:
+        return {}
+    last = max(wanted)
+    found = {}
+    for index, frame in enumerate(decode(path)):
+        if index in wanted:
+            found[index] = frame
+        if index >= last:
+            break
+    return found
+
+
 def selected_video(path: Path, positions):
     wanted = set(map(int, positions))
     for index, frame in enumerate(decode(path)):

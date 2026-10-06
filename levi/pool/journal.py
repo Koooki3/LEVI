@@ -34,6 +34,7 @@ PLAN_KEYS = (
     "target",
     "sources",
     "episodes",
+    "bridge_records",
     "excluded",
     "recipe",
     "heldout_lists",
