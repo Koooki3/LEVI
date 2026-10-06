@@ -313,7 +313,8 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "embodiment_rules": index.summary().get("embodiment_rules"),
         "task_corrections": selection.corrections,
         "warnings": [w for w in warnings if not w["blocking"]]
-        + timing_mod.warnings(chosen, options.fps, options.timing),
+        + timing_mod.warnings(chosen, options.fps, options.timing)
+        + _reset_warnings(options),
     }
 
 
@@ -360,6 +361,23 @@ def _plan_reset(options, recipe: Recipe, chosen: list[dict], texts: dict) -> lis
         record["embodiment_evidence"] = embodiment.evidence_of(record)
         records[link.record] = record
     return list(records.values())
+
+
+def _reset_warnings(options) -> list[dict]:
+    reset = options.reset
+    if not (reset and reset.enabled) or reset.review_model:
+        return []
+    return [
+        {
+            "code": "reset_unreviewed",
+            "blocking": False,
+            "level": "warning",
+            "message": "Releases are judged by image measures alone. On real captures "
+            "a local vision model vetoed 45% of the releases they accepted, and the "
+            "vetoes held up on a visual spot-check: set review_model "
+            "(`--reset-review-model`) for any export that will be trained on.",
+        }
+    ]
 
 
 def _selection_fields(ep: dict) -> dict:

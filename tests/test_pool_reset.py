@@ -1012,3 +1012,21 @@ def test_the_filter_for_static_frames_cannot_be_forced_on():
             filter_static=True,
             reset={"direction": "reset_only"},
         )
+
+
+def test_an_unreviewed_reset_plan_says_so(rpool):
+    rec = Recipe(name="r", categories=["rollout"], tasks=[TASKS["in_place"]])
+
+    def codes(**reset):
+        options = export.ExportOptions(
+            format="lerobot_v21",
+            name="w",
+            output_dir=str(rpool["out"]),
+            reset={"direction": "reset_only", **reset},
+        )
+        job = jobs.plan_export(rec, options)
+        jobs.discard(job["id"])
+        return [w["code"] for w in job["warnings"]]
+
+    assert "reset_unreviewed" in codes()
+    assert "reset_unreviewed" not in codes(review_model="local")
