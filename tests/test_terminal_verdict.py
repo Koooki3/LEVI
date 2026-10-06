@@ -19,6 +19,8 @@ from levi.live import generic, judge
 
 FIXTURE = Path(__file__).parent / "fixtures" / "anchored" / "judge-v2-replay.json"
 V1_SHA256 = "b111653582dca15a9c8f652810af8c94ef336eb95ebb5f07d77f9437cd0abc30"
+# Version 2 has been used by the live service: never edited either.
+V2_SHA256 = "53faf19a81727ff6ebfc3baa862eb716aaeae90386378878f78df838f6dd0349"
 
 
 def release(name, task="put the object in the target"):
@@ -27,6 +29,7 @@ def release(name, task="put the object in the target"):
 
 V1 = release("generic-release.v1.json")
 V2 = release("generic-release.v2.json")
+V3 = release("generic-release.v3.json")
 
 
 def event(frame, valid=True, verdict=None):
@@ -101,6 +104,22 @@ def test_the_rule_without_the_place_condition_matches_the_offline_rule_2():
         result, basis = outcome(V2, events_of(row), closes=row["closes"])
         assert result == row["offline"]["R2"], row["id"]
         assert basis["rule"] == "last_valid_not_regrasped"
+
+
+def test_version_3_matches_offline_rule_2_episode_by_episode():
+    """Version 3 is the whole live verdict without time segments: the review's
+    outcome over the closes, no place condition (the worker merges nothing)."""
+    for row in episodes():
+        result, basis = outcome(V3, events_of(row), closes=row["closes"])
+        assert result == row["offline"]["R2"], row["id"]
+        assert basis["rule"] == "last_valid_not_regrasped"
+        assert basis["require_place"] is False and "missing_inputs" not in basis
+        assert anchored.undecided(result, basis) is False
+    # Without the closes a success cannot be decided; a failure stays one.
+    held = [event(18)]
+    result, basis = outcome(V3, held, closes=None)
+    assert result == "success" and basis["missing_inputs"] == ["closes"]
+    assert anchored.undecided(result, basis) is True
 
 
 def test_the_full_rule_matches_the_offline_rule_5_episode_by_episode():
@@ -263,6 +282,47 @@ def test_the_spec_files():
     assert generic.manifest(_config("generic-release.v2.json"))[
         "generic-release.v2.json"
     ]
+
+
+def test_version_3_is_version_2_without_the_place_condition():
+    two, three = (
+        json.loads(generic.text(f"generic-release.v{n}.json")) for n in (2, 3)
+    )
+    same = (
+        "anchor",
+        "views",
+        "question",
+        "fields",
+        "valid_when",
+        "unknown_values",
+        "max_output_tokens",
+    )
+    assert all(two[k] == three[k] for k in same)
+    assert set(two) == set(three)
+    assert three["id"] == two["id"] == "generic-release"
+    assert three["version"] == 3 and three["status"] == "candidate"
+    assert three["episode"] == {
+        "min_valid": 1,
+        "rule": "last_valid_not_regrasped",
+        "require_place": False,
+    }
+    assert three["title"] == {
+        "en": "Generic release review, gripper rule without time segments (candidate v3)",
+        "zh": "通用释放复核，夹爪规则、不需要时间片段（候选 v3）",
+    }
+    assert "pipeline.temporal = false" in three["description"]
+    assert "CANDIDATE, NOT THE DEFAULT" in three["description"]
+    # Its frozen form: the place condition is simply absent.
+    assert anchored.dump(V3)["episode"] == {
+        "label_field": None,
+        "require_labels": [],
+        "min_valid": 1,
+        "rule": "last_valid_not_regrasped",
+    }
+    assert (
+        hashlib.sha256(generic.path("generic-release.v2.json").read_bytes()).hexdigest()
+        == V2_SHA256
+    )
 
 
 def _config(spec):

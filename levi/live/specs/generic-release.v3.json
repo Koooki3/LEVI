@@ -1,0 +1,97 @@
+{
+ "id": "generic-release",
+ "version": 3,
+ "title": {
+  "en": "Generic release review, gripper rule without time segments (candidate v3)",
+  "zh": "通用释放复核，夹爪规则、不需要时间片段（候选 v3）"
+ },
+ "status": "candidate",
+ "description": "Version 3 of the generic release review: the same question, frames and per-opening validity as versions 1 and 2, judged by version 2's gripper rule without its place condition, so it needs no time segments and can run with `pipeline.temporal = false` (release review only). An episode succeeds when at least `min_valid` openings are valid and the gripper does not close again after the last valid opening; an opening the review cannot read (`unclear`) is not valid, and a record without the gripper's close commands leaves a success undecided. General, not limited to tasks that place once: the rule only looks after the LAST valid opening. KNOWN LIMITS: (1) false success is the larger risk, and larger than version 2's: nothing checks that the last placement itself succeeded, and the rule counts neither placements nor objects (an episode that stops half way or places the same object twice can pass); `min_valid` sets a task-level lower bound. (2) false failure when the review misses the last real placement, or the policy closes the gripper again after the final placement. (3) it reads the gripper commands, not the measured aperture. CANDIDATE, NOT THE DEFAULT: checked offline on one task (an object into a plate, one robot, two policies of one model, 92 scored episodes whose truth an agent checked from the video and no person confirmed): 33 of 33 successes kept and 5 false successes in 59 failures (0.085, Wilson 95 % 0.037-0.184), against 32 of 33 and 1 in 59 for version 2 on the same episodes. Its gain is cost: a release-review request is about 2 s of model time per gripper opening, while the time segments took about 80 % of an episode's model time. Meant for runs that also record the operator's label (dual labels), which measure it on new data. Written 2026-10-06. Version 1 stays the default (`pipeline.anchored_spec`). The live page shows its verdict as automatic and unreviewed.",
+ "anchor": {
+  "signal": "gripper",
+  "event": "open"
+ },
+ "views": [
+  {
+   "role": "side",
+   "camera": "observation.images.view1",
+   "offsets_seconds": [
+    -2.5,
+    -1.5,
+    -0.8,
+    -0.3,
+    -0.1,
+    0.4,
+    1.2
+   ]
+  },
+  {
+   "role": "wrist",
+   "camera": "observation.images.hand",
+   "offsets_seconds": [
+    -1.5,
+    -0.6,
+    -0.1,
+    0.4
+   ]
+  }
+ ],
+ "question": "A robot arm with a two-finger gripper is carrying out this instruction: \"{task}\". Work out what the instruction asks the robot to pick up and where it should end up.\nThe gripper receives an OPEN command at t=0; this is one release of the episode. Images 1-7 are the side camera at t=-2.5, -1.5, -0.8, -0.3, -0.1, +0.4, +1.2 s; images 8-11 are the wrist camera (looking down between the fingers) at t=-1.5, -0.6, -0.1, +0.4 s.\nThe gripper holds an object by pinching it, so a held object may hang tilted under the fingers; it counts as held if the whole object is off the surface it lay on and moves together with the gripper across the earlier images. An object that stays on the surface while the fingers close or drag it is NOT held.\nAnswer strictly from what the images show, not from what the robot seems to be trying to do:\n- held_before: just before the open, is an object held off the surface by the fingers?\n- landed: after the open, where is that object relative to what the instruction asks for: at_target if it rests on or in the place the instruction names as its destination; elsewhere if it rests somewhere else (the table, another object, a wrong container); still_in_gripper; nothing_released if no object was held.\n- stays: at t=+1.2 s does it stay where it landed (not sliding, rolling or falling off)?\nUse unclear whenever the images do not show it.",
+ "fields": [
+  {
+   "name": "held_before",
+   "enum": [
+    "yes",
+    "no",
+    "unclear"
+   ]
+  },
+  {
+   "name": "landed",
+   "enum": [
+    "at_target",
+    "elsewhere",
+    "still_in_gripper",
+    "nothing_released",
+    "unclear"
+   ]
+  },
+  {
+   "name": "stays",
+   "enum": [
+    "yes",
+    "no",
+    "unclear"
+   ]
+  }
+ ],
+ "valid_when": [
+  {
+   "field": "held_before",
+   "in": [
+    "yes"
+   ]
+  },
+  {
+   "field": "landed",
+   "in": [
+    "at_target"
+   ]
+  },
+  {
+   "field": "stays",
+   "not_in": [
+    "no"
+   ]
+  }
+ ],
+ "unknown_values": [
+  "unclear"
+ ],
+ "episode": {
+  "min_valid": 1,
+  "rule": "last_valid_not_regrasped",
+  "require_place": false
+ },
+ "max_output_tokens": 100
+}
