@@ -186,3 +186,51 @@ describe("statistics panel render", () => {
     expect(narrowed).toContain("No labelled episode matches this scope.");
   });
 });
+
+describe("agent vs operator in the tables", () => {
+  const sessions = data.sessions ?? [];
+  test("no agreement columns without a session that has both labels", () => {
+    const html = renderToStaticMarkup(
+      createElement(SessionsTable, { rows: sessions }),
+    );
+    expect(html).not.toContain(">Agree<");
+    expect(html).not.toContain(">False success<");
+  });
+  test("the columns, with counts, once a session has them", () => {
+    const html = renderToStaticMarkup(
+      createElement(SessionsTable, {
+        rows: [
+          ...sessions,
+          {
+            dataset: "g__t",
+            session: "run-B",
+            episodes: 4,
+            pairs: 4,
+            agree: 2,
+            judged: 3,
+            false_success: 1,
+          },
+        ],
+      }),
+    );
+    expect(html).toContain(">Agree<");
+    expect(html).toContain(">False success<");
+    expect(html).toContain(">2/3<");
+  });
+  test("the episode table adds Operator and Agree only with a label", () => {
+    const rows = [{ dataset: "g__t", demo: "demo_0001", verdict: "success" }];
+    const render = (extra: object) =>
+      renderToStaticMarkup(
+        createElement(EpisodesTable, {
+          data: { total: 1, rows: [{ ...rows[0], ...extra }] },
+          view: "cost",
+          onView: () => {},
+          onMore: () => {},
+        }),
+      );
+    expect(render({})).not.toContain(">Operator<");
+    const shown = render({ operator: "failure", agreement: "no" });
+    expect(shown).toContain(">Operator<");
+    expect(shown).toContain(">disagrees<");
+  });
+});

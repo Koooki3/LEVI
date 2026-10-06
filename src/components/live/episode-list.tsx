@@ -14,6 +14,7 @@ import {
   shownDemos,
   toggleAll,
   toggleSelection,
+  agreeOf,
   verdictReason,
 } from "./live-logic";
 import type { DatasetDetail, DemoRow } from "./types";
@@ -27,6 +28,43 @@ export const DEMO_STATES: Record<string, string> = {
   skipped_human: "skipped (a person annotated it)",
   stuck: "stuck (never finished)",
 };
+
+const AGREEMENT_TEXT: Record<string, string> = {
+  yes: "agrees",
+  no: "disagrees",
+};
+
+/** The operator label (ground truth) of one episode, before the agent's
+ * automatic verdict and drawn differently (a solid outline, not the dashed
+ * "auto" tag), with whether the agent agrees; nothing without a label. */
+export function OperatorChip({ demo }: { demo: DemoRow }) {
+  const { t } = useLocale();
+  const outcome = demo.operator_label?.outcome;
+  if (!outcome) return null;
+  const agreement =
+    demo.agreement ?? agreeOf(demo.operator_label, demo.verdict);
+  const mark = agreement ? AGREEMENT_TEXT[agreement] : undefined;
+  return (
+    <>
+      <span
+        className="pg-live-optag"
+        title={t("Operator label (ground truth)")}
+      >
+        {t("operator")}
+      </span>{" "}
+      {t(outcome)}
+      {mark && (
+        <span
+          className={`pg-live-agree${agreement === "no" ? " no" : ""}`}
+          data-agreement={agreement}
+        >
+          {t(mark)}
+        </span>
+      )}
+      {" · "}
+    </>
+  );
+}
 
 /** What a removal does and does not do, in the confirmation. */
 export function RemoveDialog({
@@ -158,6 +196,7 @@ function Row({
         {demo.segments != null ? `${demo.segments} ${t("time segments")}` : "—"}
       </span>
       <span className="pg-live-autocell">
+        {!removed && <OperatorChip demo={demo} />}
         {removed ? (
           <span className="pg-pool-muted">
             {demo.excluded?.reason || t("no reason given")}

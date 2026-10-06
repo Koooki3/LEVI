@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  agreeOf,
   datasetFaultKind,
   detectFault,
   explainGate,
@@ -471,5 +472,41 @@ describe("why a terminal-aware verdict is not a plain success", () => {
     expect(why("none")).toBe("no placement time segment");
     expect(why("unknown")).toBe("the last placement is undecided");
     expect(why("missing")).toBe("placement not checked: no time segments");
+  });
+});
+
+describe("agent vs operator", () => {
+  const v = (outcome: string | null, undecided = false): Verdict => ({
+    outcome,
+    undecided,
+  });
+  test("one episode agrees, disagrees, is undecided or has no verdict yet", () => {
+    expect(agreeOf({ outcome: "success" }, v("success"))).toBe("yes");
+    expect(agreeOf("failure", v("failure"))).toBe("yes");
+    expect(agreeOf({ outcome: "failure", by: "operator" }, v("success"))).toBe(
+      "no",
+    );
+    expect(agreeOf("success", v("success", true))).toBe("undecided");
+    expect(agreeOf("success", v(null, true))).toBe("undecided");
+    expect(agreeOf("failure", null)).toBe("no_agent");
+    expect(agreeOf("failure", v(null))).toBe("no_agent");
+  });
+  test("no operator success or failure is no pair at all", () => {
+    for (const op of [
+      null,
+      undefined,
+      "unlabeled",
+      "discarded",
+      { outcome: null },
+    ])
+      expect(agreeOf(op as string | null, v("success"))).toBeNull();
+  });
+  test("the automatic tally ignores the operator label", () => {
+    const labelled = demos.map((d) => ({
+      ...d,
+      operator_label: { outcome: "failure", by: "operator" },
+      agreement: "no" as const,
+    }));
+    expect(verdictTally(labelled)).toEqual(verdictTally(demos));
   });
 });

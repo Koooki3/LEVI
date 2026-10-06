@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import en from "@/i18n/en.json";
@@ -473,5 +475,66 @@ describe("the pool page says why it shows fewer", () => {
       renderToStaticMarkup(createElement(RemovedInLive, { count: 0 })),
     ).toBe("");
     expect(renderToStaticMarkup(createElement(RemovedInLive, {}))).toBe("");
+  });
+});
+
+describe("the operator label beside the automatic verdict", () => {
+  const verdict = { outcome: "success", events: 1, valid_events: 1 };
+  test("a chip of its own, before the auto tag, and whether they agree", () => {
+    const out = html(
+      {},
+      detail({
+        demos: [
+          demo("demo_0002", {
+            verdict,
+            operator_label: { outcome: "failure", by: "operator" },
+            agreement: "no",
+          }),
+          demo("demo_0001", {
+            verdict,
+            operator_label: { outcome: "success", by: "operator" },
+          }),
+        ],
+        excluded_demos: [],
+        excluded_count: 0,
+      }),
+    );
+    expect(out).toContain('class="pg-live-optag"');
+    expect(out.indexOf("pg-live-optag")).toBeLessThan(
+      out.indexOf("pg-live-auto-tag"),
+    );
+    expect(out).toContain('data-agreement="no"');
+    expect(out).toContain(">disagrees<");
+    // Worked out on the page when the service did not say.
+    expect(out).toContain('data-agreement="yes"');
+    expect(out).toContain(">agrees<");
+    expect(out.match(/pg-live-optag/g)?.length).toBe(2);
+  });
+  test("no chip without an operator label", () => {
+    const out = html(
+      {},
+      detail({
+        demos: [
+          demo("demo_0001", { verdict }),
+          demo("demo_0000", { verdict, operator_label: null }),
+        ],
+      }),
+    );
+    expect(out).not.toContain("pg-live-optag");
+    expect(out).not.toContain("data-agreement");
+    expect(out).toContain("pg-live-auto-tag");
+  });
+  test("the two tags look different", () => {
+    const css = readFileSync(
+      join(import.meta.dir, "../../pages-ui/pages.css"),
+      "utf8",
+    );
+    const rule = (name: string) => {
+      const start = css.indexOf(`.${name} {`);
+      return css.slice(start, css.indexOf("}", start));
+    };
+    expect(rule("pg-live-auto-tag")).toContain("dashed");
+    expect(rule("pg-live-optag")).toContain("solid");
+    expect(rule("pg-live-optag")).not.toMatch(/#[0-9a-f]{3,6}/i);
   });
 });

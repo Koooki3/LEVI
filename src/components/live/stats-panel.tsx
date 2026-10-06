@@ -15,6 +15,7 @@ import {
   exportHref,
   factor,
   fill,
+  hasPairs,
   kpis,
   percent,
   seconds,
@@ -46,6 +47,8 @@ export function KeyFigures({ summary }: { summary: StatsResponse["summary"] }) {
 export function SessionsTable({ rows }: { rows: StatsSession[] }) {
   const { t } = useLocale();
   if (rows.length === 0) return null;
+  // Agent vs operator, only when some session has both labels.
+  const pairs = hasPairs(rows);
   return (
     <>
       <h3>{t("Evaluation sessions")}</h3>
@@ -66,6 +69,8 @@ export function SessionsTable({ rows }: { rows: StatsSession[] }) {
               <th className="num">{t("Real-time factor")}</th>
               <th className="num">{t("Labelled during the session")}</th>
               <th className="num">{t("Gate wait")}</th>
+              {pairs && <th className="num">{t("Agree")}</th>}
+              {pairs && <th className="num">{t("False success")}</th>}
               <th>{t("Last label")}</th>
             </tr>
           </thead>
@@ -82,6 +87,16 @@ export function SessionsTable({ rows }: { rows: StatsSession[] }) {
                 <td className="num">{factor(r.realtime_factor)}</td>
                 <td className="num">{percent(r.in_session_ratio)}</td>
                 <td className="num">{seconds(r.closed_wait_s)}</td>
+                {pairs && (
+                  <td className="num">
+                    {r.pairs ? `${count(r.agree)}/${count(r.judged)}` : "—"}
+                  </td>
+                )}
+                {pairs && (
+                  <td className="num">
+                    {r.pairs ? count(r.false_success) : "—"}
+                  </td>
+                )}
                 <td>{clock(r.last_at)}</td>
               </tr>
             ))}
@@ -105,7 +120,7 @@ export function EpisodesTable({
 }) {
   const { t } = useLocale();
   const rows = data.rows ?? [];
-  const cols = columns(view);
+  const cols = columns(view, rows);
   return (
     <>
       <h3>

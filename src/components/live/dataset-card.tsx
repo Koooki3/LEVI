@@ -16,7 +16,13 @@ import { Chip, type Tone } from "./session-panels";
 import { ArrowUpRight, ChevronDown, ChevronUp } from "lucide-react";
 import { Button, Icon, Progress, Skeleton } from "@/components/ds";
 import { Problem, RequestProblem } from "@/components/pages-ui/feedback";
-import type { DatasetDetail, DatasetRow } from "./types";
+import { count, percent } from "./stats-logic";
+import type {
+  AgreementShare,
+  AgreementSummary,
+  DatasetDetail,
+  DatasetRow,
+} from "./types";
 import type { DetailEntry } from "./use-live";
 
 const STATE_LABELS: Record<string, [string, Tone]> = {
@@ -78,6 +84,44 @@ function AutoOutcome({ detail }: { detail: DatasetDetail | undefined }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+const share = (found: AgreementShare | undefined) =>
+  `${count(found?.n)}/${count(found?.of)}`;
+
+/** The agent label (automatic, unreviewed) against the operator label (ground
+ * truth) over every episode of the dataset; nothing until an episode has
+ * both. */
+export function AgentVsOperator({
+  agreement,
+}: {
+  agreement: AgreementSummary | undefined;
+}) {
+  const { t } = useLocale();
+  if (!agreement?.pairs) return null;
+  const a = agreement;
+  const parts = [
+    `${t("both labels")} ${count(a.pairs)}`,
+    `${t("agree")} ${count(a.agree)}/${count(a.judged)} (${percent(a.rate)})`,
+    `${t("false success")} ${share(a.false_success)}`,
+    `${t("missed success")} ${share(a.missed_success)}`,
+    `${t("agent undecided")} ${count(a.undecided)}`,
+    `${t("no agent verdict yet")} ${count(a.no_agent)}`,
+    `${t("success rate: operator / agent")} ${percent(a.operator_success_rate)} / ${percent(a.agent_success_rate)}`,
+  ];
+  return (
+    <div className="pg-live-auto pg-live-dual">
+      <div className="pg-live-auto-head">
+        <span className="pg-live-optag">{t("operator")}</span>
+        <strong>{t("Agent vs operator")}</strong>
+        <span className="pg-pool-muted">
+          {t("Operator label (ground truth)")} ·{" "}
+          {t("agent label (automatic, unreviewed)")}
+        </span>
+      </div>
+      <p className="pg-live-line">{parts.join(" · ")}</p>
     </div>
   );
 }
@@ -299,15 +343,18 @@ export function DatasetCard({
       <p className="pg-live-line">
         <strong>{t("Time segments")}:</strong>{" "}
         {detail
-          ? seg.committed > 0
-            ? `${seg.segments} ${t("segments in")} ${seg.committed} ${t("episodes")}`
-            : t("none committed yet")
+          ? detail.pipeline?.temporal === false
+            ? t("off: release review only")
+            : seg.committed > 0
+              ? `${seg.segments} ${t("segments in")} ${seg.committed} ${t("episodes")}`
+              : t("none committed yet")
           : "—"}
         {detail?.current?.demos?.length
           ? ` · ${t("batch in progress")}: ${detail.current.demos.length} ${t("episodes")}${workerPhase ? ` (${workerPhase})` : ""}`
           : ""}
       </p>
       <AutoOutcome detail={detail} />
+      <AgentVsOperator agreement={detail?.agreement} />
       {row.state === "awaiting_approval" && (
         <p className="pg-live-await">
           {row.awaiting === "changes"

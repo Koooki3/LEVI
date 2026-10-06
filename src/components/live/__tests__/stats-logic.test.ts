@@ -7,6 +7,8 @@ import {
   exportHref,
   factor,
   fill,
+  hasOperatorLabels,
+  hasPairs,
   kpis,
   percent,
   seconds,
@@ -191,6 +193,43 @@ describe("tables", () => {
       "3",
       "failure",
     ]);
+  });
+  test("the agent-vs-operator columns are hidden without operator labels", () => {
+    for (const view of ["latency", "cost"] as const) {
+      const keys = (rows: StatsEpisode[]) =>
+        columns(view, rows).map((c) => c.key);
+      expect(keys([row, { ...row, operator: null }])).toEqual(
+        columns(view).map((c) => c.key),
+      );
+      expect(keys([])).not.toContain("operator");
+      const shown = keys([row, { ...row, operator: "success" }]);
+      expect(shown.slice(-2)).toEqual(["operator", "agreement"]);
+    }
+    expect(hasOperatorLabels(undefined)).toBe(false);
+    const labelled = columns("cost", [{ ...row, operator: "success" }]);
+    const cells = (r: StatsEpisode) => labelled.slice(-2).map((c) => c.cell(r));
+    expect(cells({ ...row, operator: "success", agreement: "no" })).toEqual([
+      "success",
+      "disagrees",
+    ]);
+    expect(cells({ ...row, operator: "failure", agreement: "yes" })).toEqual([
+      "failure",
+      "agrees",
+    ]);
+    expect(
+      cells({ ...row, operator: "success", agreement: "no_agent" }),
+    ).toEqual(["success", "no agent verdict yet"]);
+    expect(cells({ ...row, operator: "unlabeled", agreement: null })).toEqual([
+      "unlabeled",
+      "—",
+    ]);
+  });
+  test("the session columns need a session with both labels", () => {
+    expect(hasPairs([{ session: "s1" }, { session: "s2", pairs: 0 }])).toBe(
+      false,
+    );
+    expect(hasPairs([{ session: "s1", pairs: 3 }])).toBe(true);
+    expect(hasPairs(undefined)).toBe(false);
   });
   test("a row with nothing measured prints dashes", () => {
     for (const view of ["latency", "cost"] as const)

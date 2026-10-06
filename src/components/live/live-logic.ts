@@ -2,12 +2,14 @@
 // how to put the GPU gate in plain words. No React, no fetching, so they can
 // be tested on their own.
 import type {
+  Agreement,
   DatasetDetail,
   DatasetRow,
   DemoRow,
   Fr3Health,
   LiveSession,
   LiveStatusResponse,
+  OperatorLabel,
   ServiceStatus,
   Verdict,
 } from "./types";
@@ -171,6 +173,23 @@ export function verdictTally(demos: DemoRow[] | undefined): Tally {
     else out.undecided += 1;
   }
   return out;
+}
+
+/** One episode: does the agent's automatic, unreviewed verdict agree with the
+ * operator label (ground truth)? `yes`/`no` when the agent judged,
+ * `undecided`, `no_agent` without a verdict yet, null when the operator gave
+ * no success or failure. The same rule as the service's `stats.agree_of`. */
+export function agreeOf(
+  operator: OperatorLabel | string | null | undefined,
+  verdict: Verdict | null | undefined,
+): Agreement | null {
+  const op = typeof operator === "string" ? operator : operator?.outcome;
+  if (op !== "success" && op !== "failure") return null;
+  if (!verdict) return "no_agent";
+  if (verdict.undecided === true) return "undecided";
+  if (verdict.outcome !== "success" && verdict.outcome !== "failure")
+    return "no_agent";
+  return verdict.outcome === op ? "yes" : "no";
 }
 
 /** Why a verdict made under a terminal-aware rule is not a plain success, as

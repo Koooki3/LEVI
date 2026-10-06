@@ -3,6 +3,7 @@
 // scope becomes a URL, the key figures and how a number is written.
 // Every field is optional on purpose: an older service, or a figure that was
 // not measured, arrives as null or not at all and shows as "—".
+import type { Agreement, AgreementSummary } from "./types";
 
 export interface Dist {
   n?: number;
@@ -77,6 +78,8 @@ export interface StatsSummary {
     evaluable?: number;
     ratio?: number | null;
   };
+  /** The agent label against the operator label (ground truth). */
+  agreement?: AgreementSummary;
 }
 
 export interface StatsSession {
@@ -97,6 +100,14 @@ export interface StatsSession {
   closed_wait_s?: number | null;
   success?: number;
   failure?: number;
+  /** Agent vs operator: episodes with an operator success/failure... */
+  pairs?: number;
+  /** ...where the agent agrees, of those it judged success/failure. */
+  agree?: number;
+  judged?: number;
+  false_success?: number;
+  missed_success?: number;
+  operator_success?: number;
 }
 
 export interface StatsEpisode {
@@ -123,6 +134,9 @@ export interface StatsEpisode {
   in_session?: boolean | null;
   /** The episode was removed by a person (shown only when included). */
   excluded?: boolean;
+  /** The operator label (ground truth): success, failure, unlabeled... */
+  operator?: string | null;
+  agreement?: Agreement | null;
 }
 
 export interface StatsResponse {
@@ -310,8 +324,51 @@ export interface Column {
 
 const text = (value: string | null | undefined) => value || "—";
 
-/** The per-episode table's columns for a view. */
-export function columns(view: EpisodeView): Column[] {
+/** The catalog key of one episode's agreement. */
+export const AGREEMENT_LABEL: Record<Agreement, string> = {
+  yes: "agrees",
+  no: "disagrees",
+  undecided: "agent undecided",
+  no_agent: "no agent verdict yet",
+};
+
+/** Whether any episode row carries an operator label: the agent-vs-operator
+ * columns are shown only then. */
+export function hasOperatorLabels(rows: StatsEpisode[] | undefined): boolean {
+  return (rows ?? []).some((r) => !!r.operator);
+}
+
+/** Whether any session has an episode both labels can be compared on. */
+export function hasPairs(rows: StatsSession[] | undefined): boolean {
+  return (rows ?? []).some((r) => (r.pairs ?? 0) > 0);
+}
+
+const OPERATOR_COLUMNS: Column[] = [
+  {
+    key: "operator",
+    label: "Operator",
+    numeric: false,
+    cell: (r) => text(r.operator),
+  },
+  {
+    key: "agreement",
+    label: "Agree",
+    numeric: false,
+    cell: (r) => (r.agreement ? AGREEMENT_LABEL[r.agreement] : "—"),
+  },
+];
+
+/** The per-episode table's columns for a view; the operator label and the
+ * agreement are added only when some row has an operator label. */
+export function columns(
+  view: EpisodeView,
+  rows: StatsEpisode[] = [],
+): Column[] {
+  const extra = hasOperatorLabels(rows) ? OPERATOR_COLUMNS : [];
+  return [...viewColumns(view), ...extra];
+}
+
+function viewColumns(view: EpisodeView): Column[] {
   const demo: Column = {
     key: "demo",
     label: "Episode",

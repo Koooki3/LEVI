@@ -1417,6 +1417,24 @@
   font-family: var(--ds-font-mono);
   color: var(--ds-text-secondary);
 }
+/* The operator label (ground truth): a solid outline, unlike the dashed
+   "auto" tag of the agent's automatic, unreviewed verdict. */
+.pg-live-optag {
+  border: 1px solid var(--ds-text-secondary);
+  border-radius: var(--ds-radius-xs);
+  padding: 0 5px;
+  font-size: var(--ds-text-caption-size);
+  font-family: var(--ds-font-mono);
+  color: var(--ds-text-primary);
+}
+.pg-live-agree {
+  margin-left: 6px;
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+}
+.pg-live-agree.no {
+  color: var(--ds-warning);
+}
 .pg-live-autochip {
   border: 1px dashed var(--ds-border-control);
   border-radius: var(--ds-radius-full);

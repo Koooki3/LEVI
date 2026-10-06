@@ -170,6 +170,9 @@ function ResetWait({ session }: { session: LiveSession }) {
   }, [counting]);
   const wait = session.reset_wait_s;
   const left = resetRemaining(session, now / 1000);
+  // No countdown (a dual-label run): the operator starts each episode.
+  if (wait == null && session.state === "waiting_reset")
+    return <>{t("the operator starts the next episode (Enter)")}</>;
   if (wait == null) return <>—</>;
   if (left == null) return <>{wait} s</>;
   if (left <= 0)
@@ -217,6 +220,15 @@ function SessionCard({ session: s }: { session: LiveSession }) {
           )}
           {s.levi_enabled === true && <Chip>{t("LEVI labelling on")}</Chip>}
           {s.levi_enabled === false && <Chip>{t("Manual labelling")}</Chip>}
+          {s.label_mode === "dual_label" && (
+            <Chip
+              title={t(
+                "Every episode gets the operator label (ground truth) and the agent label (automatic, unreviewed)",
+              )}
+            >
+              {t("Dual labels")}
+            </Chip>
+          )}
         </div>
       </header>
       {s.prompt && <p className="pg-live-prompt">“{s.prompt}”</p>}
@@ -274,6 +286,13 @@ function SessionCard({ session: s }: { session: LiveSession }) {
         <Field label={t("Most recent episode")}>
           {last.outcome || last.steps != null ? (
             <>
+              {s.label_mode === "dual_label" && last.outcome && (
+                <>
+                  <span className="pg-live-optag">
+                    {t("Operator label")}
+                  </span>{" "}
+                </>
+              )}
               {t(outcomeLabel(last.outcome))}
               {last.steps != null && ` · ${last.steps} ${t("steps")}`}
               {last.duration_s != null &&

@@ -64,6 +64,9 @@ export interface LiveSession {
   reset_wait_s?: number | null;
   /** Epoch seconds when it began waiting for the reset (supervisor's view). */
   waiting_reset_since?: number | null;
+  /** How the client labels its episodes (`levi.mode`): `dual_label` (the
+   * operator labels every episode, LEVI labels it too) or `unattended`. */
+  label_mode?: "dual_label" | "unattended" | null;
 }
 
 export interface DatasetRow {
@@ -114,6 +117,12 @@ export interface ServiceStatus {
   ui_url?: string;
   core_port?: number;
   auto_approve?: boolean;
+  /** What each batch runs: time segments (off: the release review alone). */
+  pipeline?: {
+    temporal?: boolean;
+    anchored?: boolean;
+    anchored_spec?: string;
+  };
   watch_roots?: string[];
   gpu?: {
     mode?: string;
@@ -223,6 +232,45 @@ export interface Verdict {
   at?: number | null;
 }
 
+/** The operator label (ground truth) from the rollout's metadata: the
+ * operator's own success or failure (or unlabeled / discarded). Never the
+ * agent's verdict. */
+export interface OperatorLabel {
+  outcome?: string | null;
+  /** Who decided it: `operator` (dual labels), `key`, `timeout-adjudicated`. */
+  by?: string | null;
+  source?: string | null;
+}
+
+/** One episode: the agent agrees with the operator (`yes`/`no`), left it
+ * `undecided`, has no verdict yet (`no_agent`), or null (no operator
+ * success/failure). */
+export type Agreement = "yes" | "no" | "undecided" | "no_agent";
+
+export interface AgreementShare {
+  n?: number;
+  of?: number;
+  rate?: number | null;
+  wilson95?: [number, number] | null;
+}
+
+/** The agent label against the operator label over a set of episodes
+ * (`stats.agreement`); `pairs` 0 when no episode has an operator label. */
+export interface AgreementSummary {
+  pairs?: number;
+  matrix?: Record<string, Record<string, number>>;
+  judged?: number;
+  agree?: number;
+  rate?: number | null;
+  rate_undecided_as_failure?: number | null;
+  false_success?: AgreementShare;
+  missed_success?: AgreementShare;
+  undecided?: number;
+  no_agent?: number;
+  operator_success_rate?: number | null;
+  agent_success_rate?: number | null;
+}
+
 /** Who removed an episode, when and why (`excluded` of a dataset's demo). */
 export interface Removal {
   at?: number | null;
@@ -243,6 +291,8 @@ export interface DemoRow {
   segments?: number | null;
   committed_at?: number | null;
   verdict?: (Verdict & { run_id?: string | null }) | null;
+  operator_label?: OperatorLabel | null;
+  agreement?: Agreement | null;
 }
 
 export interface DatasetDetail {
@@ -268,6 +318,10 @@ export interface DatasetDetail {
   last_batch?: { anchored_run?: string | null; finished_at?: number } | null;
   last_processed_at?: number | null;
   last_error?: string;
+  /** Over every kept episode of the dataset, not only the listed ones. */
+  agreement?: AgreementSummary;
+  /** What the service's batches run (`temporal` false: no time segments). */
+  pipeline?: { temporal?: boolean };
 }
 
 /** The answer of removing or restoring episodes. */
