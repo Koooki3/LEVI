@@ -85,6 +85,10 @@ class Session:
     # client): the wait's true start, which the supervisor cannot see between
     # its polls or before it started.
     waiting_reset_since: float | None = None
+    # How the client labels its episodes (``levi.mode``): ``dual_label`` (the
+    # operator labels every episode and LEVI labels it too) or ``unattended``
+    # (LEVI alone); None for a manual run, an older client or another value.
+    label_mode: str | None = None
 
     def active(self, states=DEFAULT_ACTIVE) -> bool:
         return self.state in states and not self.crashed
@@ -114,7 +118,11 @@ class Session:
             "root": self.root,
             "reset_wait_s": self.reset_wait_s,
             "waiting_reset_since": self.waiting_reset_since,
+            "label_mode": self.label_mode,
         }
+
+
+LABEL_MODES = ("dual_label", "unattended")
 
 
 def read_sessions(roots, now=None) -> dict:
@@ -229,6 +237,7 @@ def _session(path, name, data, now):
         },
         reset_wait_s=_number(levi.get("reset_wait_s")),
         waiting_reset_since=_epoch(data.get("waiting_reset_since"), now),
+        label_mode=levi.get("mode") if levi.get("mode") in LABEL_MODES else None,
     )
 
 

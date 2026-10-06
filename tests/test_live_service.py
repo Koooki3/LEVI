@@ -192,6 +192,29 @@ def test_a_session_tells_the_page_which_model_runs_without_a_path(rollouts):
     assert "/ckpt" not in json.dumps(public)
 
 
+@pytest.mark.parametrize(
+    "mode,expected",
+    [
+        ("dual_label", "dual_label"),
+        ("unattended", "unattended"),
+        (None, None),
+        ("dual", None),
+        (["dual_label"], None),
+        (7, None),
+    ],
+)
+def test_a_session_says_how_its_episodes_are_labelled(rollouts, mode, expected):
+    rollouts.session("waiting_reset")
+    path = rollouts.root / ".eval_sessions" / f"{rollouts.group}__{rollouts.task}.json"
+    data = json.loads(path.read_text())
+    if mode is not None:
+        data["levi"]["mode"] = mode
+    path.write_text(json.dumps(data))
+    (s,) = sessions.read_sessions([rollouts.root], time.time() + 1).values()
+    assert s.label_mode == expected
+    assert s.public()["label_mode"] == expected
+
+
 def test_iso_and_epoch_times_are_both_read():
     assert sessions.parse_time(5.5) == 5.5
     assert sessions.parse_time("2026-10-01T10:00:00") is not None
