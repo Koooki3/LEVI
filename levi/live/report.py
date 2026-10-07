@@ -92,6 +92,16 @@ def settings(config) -> dict:
             for key in keys
             if isinstance(getattr(section, key), (str, int, float, bool))
         }
+    # Stated only when they differ from the defaults, so a report of the
+    # default setup reads as it always did.
+    if not config.pipeline.background:
+        out["pipeline"]["background"] = False
+    if config.online.enabled:
+        out["online"] = {
+            "enabled": True,
+            "spec": config.online.spec,
+            "timeout_s": config.online.timeout_s,
+        }
     return out
 
 

@@ -708,6 +708,12 @@ def format_status(value, alive) -> str:
         f"gpu        mode {gpu.get('mode')}, vLLM {gpu.get('vllm_state')}, policy server "
         f"{'seen' if gpu.get('policy_server_seen') else 'not seen'}; {((gpu.get('decision') or {}).get('reason')) or ''}"
     )
+    judge = value.get("online_judge")
+    if isinstance(judge, dict):
+        lines.append(
+            f"online     {judge.get('url')} ({judge.get('spec')} v{judge.get('spec_version')}): "
+            + ("ready" if judge.get("ready") else "not ready (answers unavailable)")
+        )
     history = (gpu.get("gate") or {}).get("history")
     for row in (history if isinstance(history, list) else [])[-5:]:
         if not isinstance(row, dict):

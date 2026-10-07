@@ -283,6 +283,35 @@ class Pipeline:
     # their frozen input and evidence; older ones are cancelled (their
     # verdicts stay in the dataset state and the anchored records) and cleaned.
     keep_review_runs: int = 10
+    # The background labelling (the worker: time segments, the release or
+    # final-state review). false: no worker is started and no model request
+    # is made for it; finished rollouts are still mirrored into the dataset
+    # state with their operator label and any online judgement the client
+    # relayed (``eval.agent_label``), and the status file, the page and the
+    # statistics work as before. ``temporal``, ``anchored`` and the spec
+    # settings are then not used (and not checked); they stay as they are, so
+    # switching back needs no other edit.
+    background: bool = True
+
+
+@dataclass
+class Online:
+    # The online judgement (docs/LIVE.md "Online judgement", interface C5): a
+    # small HTTP endpoint of the supervisor that judges one episode from the
+    # images the evaluation client sends, with the final-state spec. Off by
+    # default; on, the supervisor loads the answer-checking code at start.
+    enabled: bool = False
+    # Loopback only: anything else is refused.
+    host: str = "127.0.0.1"
+    port: int = 7882
+    # A spec of levi/live/specs whose rule is ``final_state`` (one question
+    # per episode on its last seconds, no gripper channel).
+    spec: str = "generic-final.v1.json"
+    # Upper bound of the model request (seconds); past it the answer is
+    # ``error`` (timeout) and the request is cut.
+    timeout_s: float = 15.0
+    # Largest request body accepted (MiB); a larger one is refused with 413.
+    max_body_mb: float = 8.0
 
 
 @dataclass
@@ -315,6 +344,7 @@ class Config:
     provider: Provider = field(default_factory=Provider)
     pipeline: Pipeline = field(default_factory=Pipeline)
     resources: Resources = field(default_factory=Resources)
+    online: Online = field(default_factory=Online)
     # Where this configuration was read from (None: built-in defaults).
     path: str | None = None
 
@@ -394,9 +424,13 @@ class Config:
             problems.append("watch.backlog must be skip or process")
         if p.refine not in ("always", "auto"):
             problems.append("pipeline.refine must be always or auto")
-        if not p.temporal:
+        # With the background labelling off nothing reads the time-segment
+        # and review settings: they are kept as they are and not checked.
+        if p.background and not p.temporal:
             problems.extend(_review_only_problems(p))
-        problems.extend(_final_state_problems(p))
+        if p.background:
+            problems.extend(_final_state_problems(p))
+        problems.extend(_online_problems(self))
         if s.ui_port == s.core_port:
             problems.append("service.ui_port and service.core_port must differ")
         for name, port in (("ui_port", s.ui_port), ("core_port", s.core_port)):
@@ -501,6 +535,90 @@ def _final_state_problems(p) -> list:
                 "so it cannot have more than one valid event; leave it at 1"
             )
         ]
+    return []
+
+
+RESERVED_PORTS = (5000, 8000, 7860, 7861)
+
+
+def _online_problems(config) -> list:
+    """What is wrong with ``[online]``. The address must be a loopback one
+    whether or not the endpoint is enabled; the port, the limits and the spec
+    are checked when it is (a port nothing listens on cannot clash)."""
+    import ipaddress
+
+    o, out = config.online, []
+    try:
+        loopback = ipaddress.ip_address(o.host).is_loopback
+    except ValueError:
+        loopback = False
+    if not loopback:
+        out.append(
+            f"online.host {o.host!r} must be a loopback address such as "
+            "127.0.0.1 (the online judgement is never served to the network)"
+        )
+    if not 1 <= o.timeout_s <= 120:
+        out.append("online.timeout_s must be 1-120 seconds")
+    if not 0.5 <= o.max_body_mb <= 64:
+        out.append("online.max_body_mb must be 0.5-64")
+    if not o.enabled:
+        return out
+    taken = {
+        config.service.ui_port: "service.ui_port",
+        config.service.core_port: "service.core_port",
+        config.vllm.port: "vllm.port",
+    }
+    if not 1024 <= o.port <= 65535:
+        out.append("online.port must be 1024-65535")
+    elif o.port in RESERVED_PORTS or o.port in {
+        int(p) for p in config.gpu.policy_ports
+    }:
+        out.append(f"online.port {o.port} is reserved (robot servers, product LEVI)")
+    elif o.port in taken:
+        out.append(f"online.port {o.port} is already {taken[o.port]}")
+    out.extend(online_spec_problems(o.spec))
+    return out
+
+
+def online_spec_problems(name) -> list:
+    """Why ``name`` cannot be the online judgement's spec: it must be a file
+    of levi/live/specs whose rule is ``final_state``, ask its one question
+    only (no start check, no vetoes), give its offsets in seconds and quote
+    the task instruction. Standard library only (the full check of the spec
+    runs when the endpoint starts)."""
+    import json
+
+    from levi.live import generic
+
+    try:
+        spec = json.loads(generic.text(name))
+    except (OSError, ValueError) as exc:
+        return [f"online.spec {name!r} cannot be read: {exc}"]
+    if not isinstance(spec, dict):
+        return [f"online.spec {name!r} cannot be read: not a JSON object"]
+    if (spec.get("episode") or {}).get("rule") != "final_state":
+        return [
+            (
+                f"online.spec {name!r} is not a final-state spec (episode.rule "
+                "final_state); use generic-final.v1.json"
+            )
+        ]
+    if spec.get("start") or spec.get("vetoes"):
+        return [
+            (
+                f"online.spec {name!r} has a start check or vetoes: the online "
+                "judgement asks the spec's one question only"
+            )
+        ]
+    views = spec.get("views")
+    if (
+        not isinstance(views, list)
+        or not views
+        or any(not isinstance(v, dict) or not v.get("offsets_seconds") for v in views)
+    ):
+        return [f"online.spec {name!r} must give every view's offsets in seconds"]
+    if "{task}" not in str(spec.get("question") or ""):
+        return [f"online.spec {name!r}: the question has no {{task}} placeholder"]
     return []
 
 
@@ -770,6 +888,7 @@ def render(config: Config | None = None) -> str:
         "provider": "the LEVI model profile created for the live workspace",
         "pipeline": "what runs on each batch; auto_approve is off by default",
         "resources": "keeping the service light",
+        "online": "the online judgement of one episode (interface C5); off by default",
     }
     lines = ["# LEVI live annotation service. docs/LIVE.md describes every setting.\n"]
 

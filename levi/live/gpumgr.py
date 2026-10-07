@@ -944,14 +944,15 @@ class Vllm:
         self.error = "vLLM did not go to sleep"
         return False
 
-    def wake(self) -> bool:
+    def wake(self, timeout=60.0) -> bool:
         """Wake a sleeping server (under a second). The caller has checked
-        that the free VRAM covers it."""
+        that the free VRAM covers it. ``timeout``: how long to wait for the
+        server's answer (the online judgement waits less)."""
         if not self.mine() or self.state != "asleep":
             return self.state == "ready"
         began = time.time()
         if (
-            _post(self.port, "/wake_up", timeout=60.0)
+            _post(self.port, "/wake_up", timeout=timeout)
             and is_sleeping(self.port) is False
         ):
             self.state, self.error = "ready", ""

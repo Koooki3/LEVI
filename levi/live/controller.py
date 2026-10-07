@@ -39,6 +39,7 @@ from . import (
     gpumgr,
     jsonio,
     mirror,
+    online,
     report,
     resources,
     sessions,
@@ -224,6 +225,18 @@ class Controller:
         # Callable returning the page/core state for the status file (set by
         # the CLI when it starts them); None when they are not ours.
         self.frontend = None
+        # The online judgement (``online.py``): its endpoint runs in a thread
+        # of this process while the service runs. ``_gpu_mutex`` keeps its
+        # admission (and a wake it does) and the tick's GPU decisions apart;
+        # ``_online_busy`` is an answer in progress (vLLM is not put to sleep
+        # for idleness meanwhile).
+        self._gpu_mutex = threading.RLock()
+        self._online_busy = False
+        self._online_external_at = 0.0
+        self.online = None
+        self.online_spec = (
+            online.spec_identity(config.online.spec) if config.online.enabled else None
+        )
         self._adopt_orphan()
         self._adopt_vllm()
 
@@ -275,7 +288,10 @@ class Controller:
     # --- the work queue ---------------------------------------------------------------
 
     def _queue(self, now) -> list:
-        """Dataset names with something to label, longest-waiting first."""
+        """Dataset names with something to label, longest-waiting first.
+        Empty while the background labelling is off: nothing is labelled."""
+        if not self.config.pipeline.background:
+            return []
         states = mirror.list_states(self.config)
         scans = {t.name: t for t in self.tasks if t.available}
         p = self.config.pipeline
@@ -670,6 +686,7 @@ class Controller:
         """Put vLLM to sleep (its memory is wanted): pause the worker first."""
         self.event(f"vLLM goes to sleep: {reason}")
         self.decision = gpumgr.Decision(False, reason, code)
+        self._abort_online(f"vllm_sleeping: {reason}")
         self._stop_worker()
         if not self.vllm.sleep():
             # No sleeping (not enabled, or it failed): free the GPU the hard way.
@@ -680,6 +697,7 @@ class Controller:
         """Give the GPU back entirely: stop the worker, then vLLM."""
         self.event(f"giving the GPU back: {reason}")
         self.decision = gpumgr.Decision(False, reason, code)
+        self._abort_online(f"vllm_stopping: {reason}")
         self._stop_worker()
         self._stop_vllm()
         self.idle_since = None
@@ -754,6 +772,227 @@ class Controller:
             self.event("no work: stopping vLLM to free the GPU")
             self._stop_vllm()
         self.idle_since = None
+
+    # --- background labelling off ------------------------------------------------------------
+
+    def _take_in(self, now):
+        """``pipeline.background = false``: mirror what is finished, with its
+        operator label and the online judgement the client relayed, and mark
+        it done (``online.take_in``). No worker, no model request."""
+        c = self.config
+        for task in self.tasks:
+            if not task.available or not task.ready:
+                continue
+            state = mirror.load_state(c, task.name)
+            if state is None or not mirror.is_available(c, task.name, state):
+                continue
+            names = list(task.ready[: c.watch.batch_max_episodes])
+            before = {
+                d: (row or {}).get("state")
+                for d, row in (state.get("demos") or {}).items()
+            }
+            try:
+                results = mirror.mirror_dataset(c, state, names, now=now)
+            except OSError as exc:
+                self.event(f"{task.name}: mirroring failed: {exc}", "error")
+                continue
+            task.ready = [d for d in task.ready if d not in names]
+            fresh = [
+                d
+                for d, r in results.items()
+                if r["status"] in ("mirrored", "exists") and before.get(d) != "mirrored"
+            ]
+            taken = online.take_in(c, task.name, fresh, now) if fresh else []
+            if taken:
+                self.event(
+                    f"{task.name}: {len(taken)} episode(s) taken in "
+                    "(background labelling is off)"
+                )
+
+    # --- the online judgement ----------------------------------------------------------------
+
+    def start_online(self) -> bool:
+        """Start the online judgement's endpoint when ``[online]`` enables it."""
+        if not self.config.online.enabled or self.online is not None:
+            return False
+        try:
+            endpoint = online.Endpoint(self.config, self, log=self.log)
+        except Exception as exc:  # noqa: BLE001 - reported, the service runs on
+            self.event(f"online judgement not started: {exc}", "error")
+            return False
+        if not endpoint.start():
+            self.event(f"online judgement not started: {endpoint.error}", "error")
+            return False
+        self.online = endpoint
+        self.event(f"online judgement listening on {endpoint.url}")
+        return True
+
+    def stop_online(self):
+        if self.online is not None:
+            self.online.stop()
+            self.online = None
+
+    def _abort_online(self, reason):
+        if self.online is not None and self.online.judge.abort(reason):
+            self.event(f"online judgement cut: {reason}")
+
+    def _fresh_gate(self, now):
+        """The gate as the session files say *now* (the tick decides it at
+        most once a second): a client that has just left ``running`` is not
+        kept waiting, and one that has just started is not met."""
+        c = self.config
+        found = sessions.read_sessions(c.watch.roots, now)
+        waiting = {
+            s.path: s.waiting_reset_since or self._waiting_since.get(s.path, now)
+            for s in found.values()
+            if s.state == "waiting_reset"
+        }
+        return gpumgr.gate(
+            c,
+            c.effective_gpu_mode(),
+            found,
+            self.policy_up,
+            self.policy_changed_at or self.started_at,
+            now=now,
+            waiting_since=waiting,
+        )
+
+    def online_admit(self, now):
+        """May an online judgement ask the model now? ``(True, None, None)``,
+        or ``(False, code, reason)`` at once. Never a cold start; a wake only
+        under the rules a batch's wake follows (an open gate, room on the
+        card). On True the caller must call ``online_done``."""
+        c = self.config
+        if not self._gpu_mutex.acquire(timeout=0.5):
+            return (
+                False,
+                "service_busy",
+                (
+                    "the service is changing the model server's state (starting, "
+                    "stopping or putting it to sleep)"
+                ),
+            )
+        try:
+            if not self.running:
+                return False, "shutting_down", "the live service is stopping"
+            if self.attention:
+                return (
+                    False,
+                    "vllm_failed",
+                    "vLLM failed to start repeatedly; `levi live resume` clears it",
+                )
+            mode = c.effective_gpu_mode()
+            gate = self._fresh_gate(now)
+            if (gate.open, gate.code) != (self.gate.open, self.gate.code):
+                # Fresher than the last tick's: written now, so the per-request
+                # check (``gating.request_blocked``) and the worker agree.
+                self.gate = gate
+                self._write_gate(now)
+            if mode != "manual" and not gate.open:
+                return False, "gate_closed", f"{gate.code}: {gate.reason}"
+            if not self.vllm.mine():
+                if (mode == "manual" or c.vllm.adopt_external) and self.vllm.external():
+                    self._online_external_at = now
+                    self._online_busy = True
+                    return True, None, None
+                return (
+                    False,
+                    "cold_start_needed",
+                    (
+                        "vLLM is not running and is never cold-started for an "
+                        "online judgement (start the service with --prewarm "
+                        "before the evaluation)"
+                    ),
+                )
+            state = self.vllm.state
+            if state == "starting":
+                return False, "vllm_starting", "vLLM is still starting"
+            if state not in ("ready", "asleep"):
+                return (
+                    False,
+                    "cold_start_needed",
+                    (
+                        f"vLLM is {state} and is never cold-started for an online "
+                        "judgement (start the service with --prewarm)"
+                    ),
+                )
+            if state == "asleep":
+                woken = self._online_wake(now, mode)
+                if woken is not None:
+                    return woken
+            self._online_busy = True
+            self.idle_since = None
+            return True, None, None
+        finally:
+            self._gpu_mutex.release()
+
+    def _online_wake(self, now, mode):
+        """Wake a sleeping vLLM for an online judgement if the GPU rules allow
+        it now (as ``_resident_step`` does for a batch); None when awake."""
+        c = self.config
+        policy = self.policy_mib(now)
+        blocked = gpumgr.should_sleep(c, mode, free_mib=None, policy_mib=policy)
+        if blocked:
+            return False, "no_room", blocked[1]
+        need = self._need(self.vllm.profile or c.vllm_profile(), now, asleep=True)
+        free = self.free_mib(now)
+        decision = gpumgr.decide(
+            c, mode, free_mib=free, need=need, since_policy_change_s=None
+        )
+        if not decision.allowed:
+            return (
+                False,
+                "no_room",
+                f"vLLM is asleep and cannot wake: {decision.reason}",
+            )
+        earlier = self.vllm.timings.get("vllm_wake_s")
+        if not self.vllm.wake(timeout=5.0):
+            return False, "wake_failed", self.vllm.error or "vLLM did not wake up"
+        # This wake is the online judgement's, not the next batch's: the
+        # statistics hand a wake to the batch it was for.
+        if earlier is None:
+            self.vllm.timings.pop("vllm_wake_s", None)
+        else:
+            self.vllm.timings["vllm_wake_s"] = earlier
+        self.event("vLLM woke up for an online judgement")
+        return None
+
+    def online_check(self, now):
+        """While an online judgement waits for its answer: is the gate still
+        open? ``(True, None, None)`` or ``(False, code, reason)``."""
+        if not self.running:
+            return False, "shutting_down", "the live service is stopping"
+        if self.config.effective_gpu_mode() == "manual":
+            return True, None, None
+        gate = self._fresh_gate(now)
+        if not gate.open:
+            return False, "gate_closed", f"{gate.code}: {gate.reason}"
+        return True, None, None
+
+    def online_done(self):
+        self._online_busy = False
+        self.idle_since = None
+
+    def _online_status(self) -> dict | None:
+        """``online_judge`` of the status file (interface C4): null when the
+        online judgement is off."""
+        c = self.config
+        if not c.online.enabled:
+            return None
+        spec = self.online_spec or {}
+        if self.vllm.mine():
+            model = self.vllm.state in ("ready", "asleep")
+        else:
+            model = (
+                c.effective_gpu_mode() == "manual" or c.vllm.adopt_external
+            ) and time.time() - self._online_external_at < 60.0
+        listening = self.online is not None and self.online.listening
+        return {
+            "url": online.url_of(c),
+            "spec": spec.get("id"),
+            "spec_version": spec.get("version"),
+            "ready": bool(listening and model and not self.attention),
+        }
 
     # --- the worker ----------------------------------------------------------------------
 
@@ -1147,17 +1386,20 @@ class Controller:
         queue = self._queue(now)
         orphan = self._orphan_running()
         want = bool(queue) and not orphan
+        if not c.pipeline.background:
+            self._take_in(now)
         prewarm = (
             self.config.vllm.prewarm and self.worker is None and not self.vllm.mine()
         )
         wanted = want or self.worker is not None or prewarm
-        ready = self._gpu_step(now, wanted)
-        self._update_paused(now, wanted)
-        self._write_gate(now)
-        self._police_worker(now)
-        if self.worker is None and want and ready and not orphan and self.gate.open:
-            self._spawn(queue[0], now)
-        self._release_if_idle(now, bool(queue) or orphan)
+        with self._gpu_mutex:
+            ready = self._gpu_step(now, wanted)
+            self._update_paused(now, wanted)
+            self._write_gate(now)
+            self._police_worker(now)
+            if self.worker is None and want and ready and not orphan and self.gate.open:
+                self._spawn(queue[0], now)
+            self._release_if_idle(now, bool(queue) or orphan or self._online_busy)
         waiting = any(t.waiting for t in self.tasks)
         if self.worker is not None or orphan:
             self.state = "annotating"
@@ -1445,6 +1687,8 @@ class Controller:
             # insufficient_vram, unknown_client). Sessions are still accepted.
             "labelling_paused": dict(self._paused) if self._paused else None,
             "frontend": self.frontend() if self.frontend else None,
+            # The online judgement (interface C5): null when it is off.
+            "online_judge": self._online_status(),
             "events": list(self.events),
             "last_error": self.last_error,
             "resources": {
@@ -1464,6 +1708,8 @@ class Controller:
         started = time.time()
         idle_rounds = 0
         beat = self._start_heartbeat()
+        if not once:
+            self.start_online()
         try:
             return self._loop(once, max_seconds, started, idle_rounds)
         finally:
@@ -1512,6 +1758,7 @@ class Controller:
     def shutdown(self):
         self.running = False
         self.wake.set()
+        self.stop_online()
         self._stop_worker(grace=30.0)
         if self.vllm.mine():
             self._stop_vllm()

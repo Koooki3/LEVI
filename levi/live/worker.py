@@ -980,7 +980,9 @@ class Worker:
                     "valid_events": verdict.get("valid_events"),
                     "undecided": verdict.get("undecided"),
                     **{
-                        k: verdict[k] for k in ("rule", "place_outcome") if k in verdict
+                        k: verdict[k]
+                        for k in ("rule", "place_outcome", "source")
+                        if k in verdict
                     },
                 }
                 if verdict
@@ -1074,6 +1076,10 @@ class Worker:
     # --- the whole batch ------------------------------------------------------------------------
 
     def run(self):
+        if not self.config.pipeline.background:
+            # The supervisor starts no worker then; one started by hand does
+            # nothing either (``pipeline.background = false``).
+            return NOTHING
         state = self.state()
         batch = state.get("current")
         if batch is None:
