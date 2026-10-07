@@ -796,7 +796,7 @@ class Controller:
             }
             try:
                 results = mirror.mirror_dataset(c, state, names, now=now)
-            except OSError as exc:
+            except Exception as exc:  # noqa: BLE001 - one task must not stop the service
                 self.event(f"{task.name}: mirroring failed: {exc}", "error")
                 continue
             task.ready = [d for d in task.ready if d not in names]
@@ -823,7 +823,12 @@ class Controller:
         except Exception as exc:  # noqa: BLE001 - reported, the service runs on
             self.event(f"online judgement not started: {exc}", "error")
             return False
-        if not endpoint.start():
+        try:
+            started = endpoint.start()
+        except Exception as exc:  # noqa: BLE001 - reported, the service runs on
+            self.event(f"online judgement not started: {exc}", "error")
+            return False
+        if not started:
             self.event(f"online judgement not started: {endpoint.error}", "error")
             return False
         self.online = endpoint

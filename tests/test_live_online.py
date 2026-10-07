@@ -962,6 +962,15 @@ def test_the_agent_label_reader_gives_the_worker_s_verdict_shape():
     assert criteria.agent_label({"eval": {}}) is None
 
 
+@pytest.mark.parametrize("bad", ["nan", "inf", "-inf", float("nan"), float("inf"), 1e400])
+def test_a_non_finite_number_in_the_label_never_reaches_the_state_file(bad):
+    # Strict JSON refuses NaN/Infinity: a client's odd number must not stall the mirror.
+    label = relayed(started_at=bad, completed_at=bad, elapsed_s=bad)
+    found = criteria.agent_label({"eval": {"agent_label": label}})
+    blob = json.dumps(found, allow_nan=False)
+    assert "NaN" not in blob and "Infinity" not in blob
+
+
 def background_off(tmp_path):
     c = cfg(tmp_path)
     c.online.enabled = False

@@ -26,6 +26,7 @@ Standard library only.
 
 import csv
 import json
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -237,12 +238,16 @@ def _epoch(value):
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str) and value.strip():
+        seconds = float(value)
+    elif isinstance(value, str) and value.strip():
         from .sessions import parse_time
 
-        return parse_time(value)
-    return None
+        seconds = parse_time(value)
+    else:
+        return None
+    # "nan", Infinity and 1e400 would later fail the state file's strict JSON
+    # write and stall the mirroring of the whole task.
+    return seconds if isinstance(seconds, float) and math.isfinite(seconds) else None
 
 
 def _usage(label) -> dict:
@@ -258,7 +263,9 @@ def _usage(label) -> dict:
         "tokens": whole(label.get("tokens")),
         "prompt_tokens": whole(label.get("prompt_tokens")),
         "elapsed_s": float(elapsed)
-        if isinstance(elapsed, (int, float)) and not isinstance(elapsed, bool)
+        if isinstance(elapsed, (int, float))
+        and not isinstance(elapsed, bool)
+        and math.isfinite(elapsed)
         else None,
         "model": str(model)[:100] if isinstance(model, str) else None,
         "images": len(frames) if isinstance(frames, list) else None,

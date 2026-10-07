@@ -756,7 +756,10 @@ def mirror_dataset(config, state: dict, names, *, now: float | None = None) -> d
                         "attempts": 0,
                         "copied": result.get("copied", 0),
                     }
-                    online = criteria.agent_label(meta)
+                    try:
+                        online = criteria.agent_label(meta)
+                    except Exception:  # noqa: BLE001 - a client's odd label never stops the mirror
+                        online = None
                     if online is not None:
                         # The online judgement the client relayed: kept
                         # whole under ``online`` and, when it answered, the
