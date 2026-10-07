@@ -25,7 +25,7 @@ Frontend text belongs in both locale catalogs; English is the default and Chines
 
 ## Package manager
 
-Always use **bun** (`bun install`, `bun dev`, `bun run build`, `bun test`). Never use npm or yarn.
+Always use **bun** (`bun install`, `bun dev`, `bun run build`, `bun run test`). Never use npm or yarn.
 
 ## Post-process — run after every code change
 
@@ -35,7 +35,7 @@ After making any code changes, always run these commands in order and fix any er
 bun run format        # auto-fix formatting (prettier)
 bun run type-check    # TypeScript: app + test files
 bun run lint          # ESLint
-bun test              # unit tests
+bun run test          # unit tests, one bun process per file (scripts/test-isolated.ts)
 ```
 
 Or run them all at once (format first, then the full validate suite):
@@ -44,13 +44,14 @@ Or run them all at once (format first, then the full validate suite):
 bun run format && bun run validate
 ```
 
-`bun run validate` runs: type-check → lint → format:check → test
+`bun run validate` runs: type-check → lint → format:check → test (each test file in its own process: `mock.module` leaks between files in one process, which made the result depend on file order)
 
 ## Key scripts
 
 ```
 bun dev              # Next.js dev server
-bun test             # Run all unit tests (bun:test)
+bun run test         # all unit tests, one process per file (order-independent)
+bun run test:one-process  # bun test src: one process, fast, but order-dependent
 bun run type-check   # tsc --noEmit (app) + tsc -p tsconfig.test.json --noEmit (tests)
 bun run lint         # eslint src
 bun run validate     # type-check + lint + format:check + tests
