@@ -85,3 +85,6 @@ levi/agent/skills/levi-overview/SKILL.md
 
 # Optional vLLM environment for scripts/vllm/serve.sh (docs/VLLM.md)
 .venv-vllm/
+
+# Maintainer-local folder next to the code: workspaces, experiment harnesses, worktrees, tools (not part of LEVI)
+/lab/

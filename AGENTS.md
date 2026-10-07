@@ -4,7 +4,7 @@ Instructions for any coding agent working in this repository (Claude Code, Codex
 
 Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 
-**In the maintainer's workspace** this checkout is one of several projects. There, first read the workspace manual `../AGENTS.md` (start protocol, standing rules, the driver lock that decides who may restart the running service or merge, pause/resume, roles). Codex loads instructions only from the git root downwards, so it does not pick that file up by itself when started here: read it explicitly. Outside that workspace, ignore this paragraph.
+**In the maintainer's workspace** this checkout is one of several projects, and everything LEVI-derived (the experiment ledger, evaluation harness, gold tools, evaluation and live workspaces, serving tools, worktrees) lives in this checkout's git-ignored `lab/` folder (index: `lab/README.md`). There, first read the workspace manual `../AGENTS.md` (start protocol, standing rules, the driver lock that decides who may restart the running service or merge, pause/resume, roles). Codex loads instructions only from the git root downwards, so it does not pick that file up by itself when started here: read it explicitly. Outside that workspace, ignore this paragraph.
 
 LEVI is a standalone bilingual workbench derived from LeRobot Dataset Visualizer.
 Read README.md (English primary), README.zh-CN.md and docs/CONVERSION.md before changing data workflows.
@@ -15,7 +15,7 @@ Frontend text belongs in both locale catalogs; English is the default and Chines
 
 ## Working rules for agents
 
-- **Branch per change.** Work in a git worktree and branch (`git worktree add ../LEVI-<topic> -b <feat|fix|docs>/<topic> main`); commit small, one topic per commit; do not push and do not force-push. Merging to main is done by whoever currently drives the project (fast-forward), after an independent review.
+- **Branch per change.** Work in a git worktree and branch (`git worktree add lab/worktrees/<topic> -b <feat|fix|docs>/<topic> main`; `lab/` is the maintainer's git-ignored folder inside this checkout, never a new top-level folder); commit small, one topic per commit; do not push and do not force-push. Merging to main is done by whoever currently drives the project (fast-forward), after an independent review.
 - **Commit trailer.** End each commit message with a `Co-Authored-By:` line naming the agent and model that did the work; keep the configured author identity (do not edit git config).
 - **A verified fix needs a regression test**, and a new capability, `levi agent` command or user-facing `LEVI_*` setting needs tests and bilingual docs: run `uv run levi docs check` (or `uv run levi docs sync`) before finishing.
 - **Do not touch the running service.** Never start, stop or rebuild the instance a person is using from your own checkout without being told to; `levi stop` refuses while pool, conversion, RECAP or segmentation jobs run, and `--force` kills them, so never use `--force` without the owner's word. Test frontend changes from a separate worktree, not by building in the served checkout.
