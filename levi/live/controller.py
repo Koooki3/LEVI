@@ -836,12 +836,13 @@ class Controller:
         if self.online is not None and self.online.judge.abort(reason):
             self.event(f"online judgement cut: {reason}")
 
-    def _fresh_gate(self, now):
+    def _fresh_gate(self, now, found=None):
         """The gate as the session files say *now* (the tick decides it at
         most once a second): a client that has just left ``running`` is not
         kept waiting, and one that has just started is not met."""
         c = self.config
-        found = sessions.read_sessions(c.watch.roots, now)
+        if found is None:
+            found = sessions.read_sessions(c.watch.roots, now)
         waiting = {
             s.path: s.waiting_reset_since or self._waiting_since.get(s.path, now)
             for s in found.values()
@@ -882,14 +883,23 @@ class Controller:
                     "vLLM failed to start repeatedly; `levi live resume` clears it",
                 )
             mode = c.effective_gpu_mode()
-            gate = self._fresh_gate(now)
+            found = sessions.read_sessions(c.watch.roots, now)
+            gate = self._fresh_gate(now, found)
             if (gate.open, gate.code) != (self.gate.open, self.gate.code):
                 # Fresher than the last tick's: written now, so the per-request
                 # check (``gating.request_blocked``) and the worker agree.
                 self.gate = gate
                 self._write_gate(now)
             if mode != "manual" and not gate.open:
-                return False, "gate_closed", f"{gate.code}: {gate.reason}"
+                # The policy infers: no. Closed with no session on the robot
+                # (the next episode is due, or a policy server no session
+                # vouches for): the caller may wait a little for it to open.
+                inferring = any(
+                    s.state in c.gpu.busy_states and not s.crashed
+                    for s in found.values()
+                )
+                code = "gate_closed" if inferring else "gate_pending"
+                return False, code, f"{gate.code}: {gate.reason}"
             if not self.vllm.mine():
                 if (mode == "manual" or c.vllm.adopt_external) and self.vllm.external():
                     self._online_external_at = now
@@ -897,7 +907,7 @@ class Controller:
                     return True, None, None
                 return (
                     False,
-                    "cold_start_needed",
+                    "cold_start",
                     (
                         "vLLM is not running and is never cold-started for an "
                         "online judgement (start the service with --prewarm "
@@ -910,7 +920,7 @@ class Controller:
             if state not in ("ready", "asleep"):
                 return (
                     False,
-                    "cold_start_needed",
+                    "cold_start",
                     (
                         f"vLLM is {state} and is never cold-started for an online "
                         "judgement (start the service with --prewarm)"

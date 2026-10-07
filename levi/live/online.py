@@ -95,6 +95,8 @@ _EVAL_WORDS = (
     "judg",
 )
 POLL_S = 0.1  # how often an answer in progress looks at the gate and the clock
+GATE_WAIT_POLL_S = 0.1  # how often a request waiting for the gate asks again
+GATE_WAIT_NOTE_S = 0.05  # a wait shorter than this is not mentioned
 GATE_EVERY_S = 0.25
 
 
@@ -489,19 +491,47 @@ class Judge:
                 reason="busy: another online judgement is in progress (one at a time)",
             )
         try:
-            ok, code, why = self.gpu.online_admit(time.time())
+            ok, code, why, waited = self._admit(began)
             if not ok:
                 return answer(200, "unavailable", reason=f"{code}: {why}")
             try:
                 found = self._run(request, request_id, began)
             finally:
                 self.gpu.online_done()
+            if waited and found.get("status") == "ok":
+                found["reason"] = f"gate_waited: the gate opened after {waited:.1f} s"
             return answer(200, found.pop("status"), len(request.images), **found)
         except Exception as exc:  # noqa: BLE001 - the endpoint answers, always
             self.log(f"online judgement {request_id} failed: {exc!r}")
             return answer(200, "error", reason=f"internal_error: {type(exc).__name__}")
         finally:
             self._busy.release()
+
+    def _admit(self, began):
+        """``(ok, code, reason, seconds waited)``. A gate that is closed while
+        no session is on the robot (``gate_pending``: the next episode is due,
+        or a policy server no session vouches for) is waited for, at most
+        until ``timeout_s`` after the request arrived; it ends at once when a
+        session starts running (``gate_closed``). Everything else answers at
+        once."""
+        deadline = began + self.config.online.timeout_s
+        while True:
+            ok, code, why = self.gpu.online_admit(time.time())
+            waited = time.monotonic() - began
+            if ok:
+                return True, None, None, waited if waited >= GATE_WAIT_NOTE_S else 0.0
+            if code != "gate_pending":
+                if waited >= GATE_WAIT_NOTE_S and code == "gate_closed":
+                    why = f"{why} (after waiting {waited:.1f} s)"
+                return False, code, why, waited
+            if time.monotonic() + GATE_WAIT_POLL_S >= deadline:
+                return (
+                    False,
+                    "gate_closed",
+                    f"{why} (waited {waited:.1f} s for it to open)",
+                    waited,
+                )
+            time.sleep(GATE_WAIT_POLL_S)
 
     def _run(self, request, request_id, began) -> dict:
         from levi.agent import anchored

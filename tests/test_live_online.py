@@ -549,7 +549,7 @@ def test_an_answer_outside_the_spec_is_an_error_not_a_verdict(tmp_path):
 @pytest.mark.parametrize(
     "admit",
     [
-        (False, "cold_start_needed", "vLLM is not running"),
+        (False, "cold_start", "vLLM is not running"),
         (False, "gate_closed", "policy_inferring: the policy is inferring"),
         (False, "no_room", "vLLM is asleep and cannot wake"),
     ],
@@ -789,7 +789,7 @@ def test_the_supervisor_admits_only_with_an_open_gate_and_a_model_it_may_use(
         # No vLLM: never a cold start for an online judgement.
         began = time.monotonic()
         ok, code, _ = ctl.online_admit(now)
-        assert (ok, code) == (False, "cold_start_needed")
+        assert (ok, code) == (False, "cold_start")
         assert time.monotonic() - began < 1.0
         # The policy infers: the gate is closed, read from the session file now.
         rollouts.session("running")
@@ -1138,3 +1138,75 @@ def test_a_report_states_background_off_and_the_online_judgement_only_when_set()
         "spec": "generic-final.v1.json",
         "timeout_s": 15.0,
     }
+
+
+# --- a gate that is about to open is waited for ----------------------------------------------
+
+
+class Pending(Gpu):
+    """Admission that says ``gate_pending`` a few times, then ``then``."""
+
+    def __init__(self, times, then=(True, None, None)):
+        super().__init__()
+        self.times, self.then, self.asked = times, then, 0
+
+    def online_admit(self, now):
+        self.asked += 1
+        if self.asked <= self.times:
+            return False, "gate_pending", "episode_imminent: the next episode starts"
+        return super().online_admit(now) if self.then[0] else self.then
+
+
+def test_a_gate_with_no_session_running_is_waited_for_and_the_wait_is_named(tmp_path):
+    gpu = Pending(3)
+    judge = judge_with(cfg(tmp_path), gpu)
+    code, body = post(judge, request())
+    assert code == 200 and body["status"] == "ok"
+    assert body["reason"].startswith("gate_waited: the gate opened after")
+    assert gpu.asked == 4 and gpu.done == 1
+
+
+def test_the_wait_ends_at_once_when_the_policy_starts_inferring(tmp_path):
+    gpu = Pending(2, then=(False, "gate_closed", "policy_inferring: g/t is running"))
+    judge = judge_with(cfg(tmp_path), gpu)
+    began = time.monotonic()
+    code, body = post(judge, request())
+    assert time.monotonic() - began < 1.0
+    assert code == 200 and body["status"] == "unavailable"
+    assert body["reason"].startswith("gate_closed: policy_inferring")
+    assert gpu.done == 0
+
+
+def test_the_wait_is_bounded_by_timeout_s(tmp_path):
+    gpu = Pending(10**6)
+    ask = Ask()
+    judge = judge_with(cfg(tmp_path, timeout_s=1.0), gpu, ask)
+    began = time.monotonic()
+    code, body = post(judge, request())
+    took = time.monotonic() - began
+    assert 0.8 <= took < 2.0
+    assert code == 200
+    assert body["status"] == "unavailable" and body["reason"].startswith("gate_closed:")
+    assert "waited" in body["reason"] and ask.calls == []
+
+
+def test_the_supervisor_says_pending_only_when_no_session_is_running(
+    tmp_path, rollouts
+):
+    c = cfg(tmp_path)
+    c.gpu.mode = "timeshare"
+    ctl = controller.Controller(c, log=lambda *a: None)
+    try:
+        now = time.time()
+        rollouts.session("waiting_reset")  # reset_wait_s 10
+        (path,) = [
+            str(p) for p in (tmp_path / "rollouts" / ".eval_sessions").glob("*.json")
+        ]
+        ctl._waiting_since = {path: now - 8.5}  # the next episode is due
+        ok, code, why = ctl.online_admit(now)
+        assert (ok, code) == (False, "gate_pending") and "episode_imminent" in why
+        rollouts.session("running")
+        ok, code, why = ctl.online_admit(now)
+        assert (ok, code) == (False, "gate_closed") and "policy_inferring" in why
+    finally:
+        ctl.shutdown()
