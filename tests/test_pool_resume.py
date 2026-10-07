@@ -788,6 +788,9 @@ def test_maintenance_clean_covers_the_pool(tmp_path, monkeypatch):
     from levi import maintenance
 
     monkeypatch.setenv("LEVI_WORKSPACE", str(tmp_path / "ws"))
+    # `maintenance.STATE` is fixed at import: without this the test looks at the checkout's own `.state/server.pid`
+    # and is refused whenever a product LEVI is running from that checkout.
+    monkeypatch.setattr(maintenance, "STATE", tmp_path / "ws")
     monkeypatch.setenv("LEVI_EXPORT_ROOTS", str(tmp_path / "exports"))
     monkeypatch.setenv("LEVI_POOL_JOB_TTL", "1d")
     old = time.time() - 3 * 86400

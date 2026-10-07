@@ -222,6 +222,22 @@ def client(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _ignore_the_developers_dotenv(monkeypatch):
+    """``levi.paths`` loads the checkout's ``.env`` into ``os.environ`` when it is imported, so a test run in
+    a checkout that has one (the maintainer's, with the pool roots, the GPU lock file, the report folder, the
+    linked workspaces of a running product) saw those settings: with the live service running, the segmentation
+    tests were refused by its GPU lock and the links tests found its workspace. CI and a fresh clone have no
+    ``.env``; this makes every checkout behave like them. ``LEVI_WORKSPACE`` stays (the runner may set it)."""
+    from dotenv import dotenv_values
+
+    env_file = Path(__file__).resolve().parents[1] / ".env"
+    if env_file.is_file():
+        for key in dotenv_values(env_file):
+            if key != "LEVI_WORKSPACE":
+                monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _no_droid_sample(monkeypatch, tmp_path):
     """No test downloads the DROID sample a new workspace draws, and none
     reads or resumes the live workspace's sample ledger."""
