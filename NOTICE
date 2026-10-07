@@ -1,4 +1,5 @@
 LEVI — LeRobot Exploration, Validation & Integration
+Copyright 2026 LEVI contributors (https://github.com/Koooki3/LEVI)
 
 This product includes software developed by the contributors to:
 Hugging Face LeRobot Dataset Visualizer
@@ -12,6 +13,8 @@ Chinese/English interface, isolated uv runtime and launcher, local dataset file
 service, durable review manifests, built-in capture conversion, native diagnostics,
 v2 annotation support, export/path protections, tests and documentation.
 Modified upstream files are identified by git history and docs/UPSTREAM.md.
+
+Works LEVI builds on, and how to cite them: CITATION.cff and docs/REFERENCES.md.
 
 Hugging Face, LeRobot and their marks belong to their respective owners.
 LEVI is an independent derivative project and does not imply endorsement.

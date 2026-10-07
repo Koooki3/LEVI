@@ -59,8 +59,10 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at
-zihao030@e.ntu.edu.sg.
+reported to the community leaders responsible for enforcement privately,
+through the contact mechanism the repository maintainer configures on GitHub
+(the same route as in SECURITY.md). Please do not post reports in public
+issues.
 All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the

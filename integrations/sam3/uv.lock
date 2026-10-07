@@ -244,7 +244,7 @@ requires-dist = [
     { name = "psutil", specifier = ">=5.9,<8" },
     { name = "pyarrow", specifier = ">=19,<24" },
     { name = "pycocotools", specifier = ">=2.0,<3" },
-    { name = "sam3", git = "https://github.com/facebookresearch/sam3.git?rev=660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b" },
+    { name = "sam3", git = "https://github.com/facebookresearch/sam3.git?rev=660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b7" },
     { name = "setuptools", specifier = ">=70,<82" },
     { name = "torch", specifier = ">=2.7,<2.11", index = "https://download.pytorch.org/whl/cu128" },
     { name = "torchvision", specifier = ">=0.22,<0.26", index = "https://download.pytorch.org/whl/cu128" },
@@ -709,7 +709,7 @@ wheels = [
 [[package]]
 name = "sam3"
 version = "0.1.0"
-source = { git = "https://github.com/facebookresearch/sam3.git?rev=660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b#660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b7" }
+source = { git = "https://github.com/facebookresearch/sam3.git?rev=660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b7#660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b7" }
 dependencies = [
     { name = "ftfy" },
     { name = "huggingface-hub" },

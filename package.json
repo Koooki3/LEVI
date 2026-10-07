@@ -48,6 +48,7 @@
     "typescript": "^5"
   },
   "license": "Apache-2.0",
+  "author": "LEVI contributors",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Koooki3/LEVI.git"

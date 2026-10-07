@@ -113,7 +113,7 @@ The built-in `levi/conversion/` module reimplements the capture workflow request
 
 integrations/sam3/ is a LEVI-authored adapter boundary, not a vendored copy of
 the SAM3 source. It pins the official Meta repository commit
-660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b as a user-installed Git dependency. The
+660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b7 as a user-installed Git dependency. The
 core package contains only protocol/schema/RLE code and never bundles
 checkpoints.
 

@@ -2,7 +2,7 @@
 
 ## Scope and baseline / 范围与基线
 
-This is the source-release inventory for LEVI v0.3.0, refreshed on 2026-09-13 and again on 2026-10-06 for the frontend icon, animation and test dependencies. The dependency baseline remains the v0.3.0 lock and source commit; this release adds canonical dataset-version handling, task indexing/filtering, and cache-isolation hardening.
+This is the source-release inventory for LEVI v0.3.0, refreshed on 2026-09-13, again on 2026-10-06 for the frontend icon, animation and test dependencies, and on 2026-10-07 for the licence scan below and the scholarly references ([REFERENCES](docs/REFERENCES.md), [CITATION.cff](CITATION.cff)). The dependency baseline remains the v0.3.0 lock and source commit; this release adds canonical dataset-version handling, task indexing/filtering, and cache-isolation hardening.
 
 当前清单覆盖源码来源、随附或使用的素材、直接依赖及构建/运行工具。它不是尚未发布的 Docker、PyPI 或二进制产物的完整传递依赖清单；当前正式发行提供源码，不包含安装后的环境、依赖目录或数据集视频。未来发布这些产物前，必须按下文流程生成并维护实际分发清单与许可证文本。
 
@@ -18,7 +18,7 @@ This is the source-release inventory for LEVI v0.3.0, refreshed on 2026-09-13 an
 | Robot URDFs/meshes | [lerobot/robot-urdfs](https://huggingface.co/buckets/lerobot/robot-urdfs); model-specific source terms | Loaded remotely; not included in the source archive. Record each actual model, revision and license before bundling it. |
 | Studio environment HDRI | [Studio Small 03 by Greg Zaal / Poly Haven](https://polyhaven.com/a/studio_small_03), [CC0](https://polyhaven.com/license); [Drei asset revision](https://github.com/pmndrs/drei-assets/blob/456060a26bbeb8fdf79326f224b6d99b8bcce736/hdri/studio_small_03_1k.hdr) | Loaded remotely by `Environment preset="studio"` in URDF playback; not included in the source archive. |
 | External lerobot-doctor service | External service linked from the workbench; see [UPSTREAM](docs/UPSTREAM.md) | Linked rather than vendored; LEVI's own diagnostics are separate source code. |
-| SAM3 adapter source | [facebookresearch/sam3](https://github.com/facebookresearch/sam3/tree/660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b), pinned Git dependency; [SAM License](https://github.com/facebookresearch/sam3/blob/main/LICENSE) | Installed only in integrations/sam3; adapter code and checkpoints are not bundled. |
+| SAM3 adapter source | [facebookresearch/sam3](https://github.com/facebookresearch/sam3/tree/660a5e9e1b8b4c02c0ad97229b88a09a6e4ff5b7), pinned Git dependency; [SAM License](https://github.com/facebookresearch/sam3/blob/main/LICENSE) | Installed only in integrations/sam3; adapter code and checkpoints are not bundled. |
 | SAM3 checkpoint mirror | [1038lab/sam3](https://huggingface.co/1038lab/sam3), sam3.pt; mirror/model-page terms apply | Downloaded at runtime after the user authenticates; never committed or included in source release. |
 | RLinf RECAP value-model code | [RLinf/RLinf](https://github.com/RLinf/RLinf) commit `807e5fd`, Apache-2.0 | Vendored in `integrations/recap_value/levi_recap_worker/rlinf/` (value model, processing, advantage helpers; changes marked in the files) and `integrations/recap_value/vendor/rlinf/compute_advantages.py` (tests only); each folder keeps the LICENSE. |
 | openpi `transformers_replace` | [Physical-Intelligence/openpi](https://github.com/Physical-Intelligence/openpi) `src/openpi/models_pytorch/transformers_replace` (as shipped in `rlinf-openpi==0.1.1`), Apache-2.0 | Vendored unmodified in `integrations/recap_value/vendor/openpi_transformers_replace/` with its LICENSE; `setup.sh` copies it over `transformers==4.53.2` in the worker environment only. |
@@ -115,6 +115,29 @@ Evidence is in each installed `node_modules/<package>/package.json` and its lice
 | FFmpeg / ffprobe and codecs | System packages; Dockerfile installs `ffmpeg` with apt | [FFmpeg licensing](https://ffmpeg.org/legal.html) depends on the build and enabled components. LEVI requests `libx264` encoding; inspect the actual FFmpeg, codec and OS package licenses rather than assuming a single permissive license. |
 | Hatchling | Isolated build dependency in `pyproject.toml`, not pinned in `uv.lock` | [Hatch license](https://github.com/pypa/hatch/blob/master/LICENSE.txt), MIT. Capture/pin the actual build-environment version and its dependencies before publishing packages. |
 | Playwright browser binaries | Selected/downloaded separately for browser tests | Not included in the source archive. If distributed later, inventory the exact browser build, third-party notices and accompanying native libraries. |
+
+## Licences that need attention / 需要留意的许可证
+
+A scan of the locked environments of `main` on 2026-10-07 (the scan covers the worker environments and Pilot added after v0.3.0; offline: the installed distributions' metadata and licence files). It finds no GPL, AGPL, SSPL, non-commercial or unlicensed package among the direct and transitive packages of the core, agent and development sets, but these items are not plain permissive licences. They are installed or downloaded, not vendored; a Docker image, wheel or bundle that includes them must ship their licence texts (see the next section).
+
+2026-10-07 对锁定环境做了离线扫描（读已安装发行包的元数据和许可证文件）：核心、agent 和开发依赖（含传递依赖）里没有 GPL、AGPL、SSPL、非商用或无许可证的包，但下列项目不是普通的宽松许可证。它们是安装或下载的，不随源码分发；包含它们的 Docker 镜像、wheel 或打包产物必须附带许可证文本（见下一节）。
+
+| Item / 项目 | Terms / 条款 | Where / 位置 |
+| --- | --- | --- |
+| `certifi`, `tqdm` | MPL-2.0 (`tqdm`: MPL-2.0 AND MIT) | Core Python environment; also all worker environments / 核心及各 worker 环境 |
+| `opencv-python-headless` 4.14.0.94 (core; the worker environments carry their own copies: 4.11.0.86 in SAM3, 5.0.0.93 in segmentation) | Apache-2.0 wheel that bundles FFmpeg libraries (LGPL-2.1-or-later), libvpx, libaom, dav1d, OpenSSL and others; see the wheel's `LICENSE-3RD-PARTY.txt` | Core Python environment / 核心环境 |
+| `numpy` (core and worker environments) | The wheels bundle `libgfortran` (GPL-3.0 with the GCC runtime exception) and `libquadmath` (LGPL-2.1-or-later). `uv.lock` locks numpy 2.4.6 and, for Python 3.12 and later, 2.5.3 | Core Python environment / 核心环境 |
+| `@img/sharp-libvips-*` | LGPL-3.0-or-later: prebuilt libvips and its libraries, pulled in by Next.js's optional `sharp` image optimiser (`@img/sharp-*` itself is Apache-2.0). LEVI does not rely on image optimisation, but the Dockerfile copies the whole `node_modules` | Frontend / 前端 |
+| `lightningcss`, `axe-core` | MPL-2.0, development-only; shipped in the image because the Dockerfile copies the whole `node_modules` including development packages | Frontend / 前端 |
+| `caniuse-lite` | CC-BY-4.0 (browser-support data; attribution required on redistribution; its LICENSE stays in `node_modules`) | Frontend / 前端 |
+| `webgl-constants` | `package.json` has no `license` field; its LICENSE file is MIT (Copyright 2019 Tim van Scherpenzeel) | Frontend (via `@react-three/drei`) / 前端 |
+| NVIDIA CUDA runtime wheels (`nvidia-*-cu12`: cuBLAS, cuDNN, cuFFT, cuRAND, cuSOLVER, cuSPARSE, cuSPARSELt, nvJitLink, cuda-runtime, cuda-nvrtc, cuda-cupti, cuFile, nvshmem; and `cuda-bindings`) | NVIDIA's own licences (proprietary; they are not open source). The metadata of the locked wheels gives `nvidia-nccl-cu12` as BSD-3-Clause and `nvidia-nvtx-cu12` as Apache-2.0 | Installed with the CUDA 12.8 Torch wheels in the SAM3, segmentation and RECAP worker environments / 三个 worker 环境 |
+| PyAV 16.1.0 (RECAP worker) and 18.1.0 (segmentation worker), and their wheel contents | PyAV is BSD-3-Clause; its wheels bundle FFmpeg libraries including GPL-2.0-or-later `libx264`/`libx265` and LGPL libraries. The worker only decodes video | RECAP value and segmentation worker environments / RECAP 与分割 worker 环境 |
+| `@anthropic-ai/claude-agent-sdk` (0.3.274), `@openai/codex` (0.154.0) | Transitive packages of the optional Pilot adapters: the first is under Anthropic's terms (proprietary), the second is Apache-2.0. They are installed on the user's machine, not redistributed by LEVI; read each package's terms before bundling Pilot | `integrations/pilot` / Pilot 集成 |
+
+Not covered by an offline scan: 67 optional other-platform binaries in `bun.lock` (for example `@img/sharp-*`, `@next/swc-*`, `lightningcss-*` for other systems) and the Pilot packages' own `node_modules` (not installed in the source checkout). Run the scan again on the real artifact before a bundled release.
+
+离线扫描没有覆盖：`bun.lock` 里 67 个其他平台的可选二进制包，以及 Pilot 包自己的 `node_modules`（源码检出里没装）。发布打包产物前，对真实产物重新扫描。
 
 ## Generate and maintain distribution notices / 生成与维护分发清单
 
