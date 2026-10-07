@@ -315,7 +315,7 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 | `online` | `enabled` | false | 随服务启动这个接口 |
 | | `host`、`port` | `127.0.0.1`、7882 | 回环地址（`127.0.0.1`、`::1`；`localhost` 这样的主机名被拒绝）；端口不能是 5000、8000、7860、7861、策略端口、`service.ui_port`、`service.core_port` 或 `vllm.port`（启用时检查） |
 | | `spec` | `generic-final.v1.json` | `levi/live/specs` 里的文件，`episode.rule` 为 `final_state`，没有起始检查和否决项，每个视图的偏移用秒给出，问题里有 `{task}` 占位符 |
-| | `timeout_s` | 15 | 1–120 秒，从请求到达时算起（包括唤醒） |
+| | `timeout_s` | 15 | 1–120 秒，从请求到达时算起（包括等闸门和唤醒）；客户端可以按自己的截止时间提前放弃 |
 | | `max_body_mb` | 8 | 0.5–64 MiB |
 | `pipeline` | `background` | true | false：不启动 worker，不做后台模型请求（见下） |
 
@@ -353,7 +353,7 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
  "images": [{"role": "side", "offset_s": -3.0, "step": 367, "jpeg_b64": "<base64 编码的 JPEG>"}, ...]}
 ```
 
-- 必填 `schema`、`task`（1–2000 个字符）和 `images`；`episode` 及其中每个键都可省略，只用于日志。图像的 `step` 可省略（整数或 null）。
+- 必填 `schema`、`task`（1–2000 个字符）和 `images`；`episode` 及其中每个键都可省略，只用于日志（`fps` 是客户端实测频率的中位数，不是名义值）。图像的 `step` 可省略（整数或 null），只写进日志：客户端发的是 `frames.csv` 的 `frame_index`，从 1 开始，最后一帧等于 `steps`；它从不当作从 0 开始的视频帧号使用。客户端发质量 90 的 JPEG，role 只有 `side` 和 `wrist`。
 - **严格模式。** 任何一层出现约定里没有的键都以 422 拒绝；键名像操作员或评测数据（`operator...`、`outcome`、`success`、`label`、`eval`、`verdict` 等）时，原因里会专门说明。重复的键、NaN、Infinity 也拒绝。
 - 规格的每个 `(role, offset)` 恰好一张图，偏移在 1 毫秒内算匹配；不管请求里怎么排，模型都按规格的顺序看到它们（先按视图，再按每个视图的偏移）。缺图、同一位置两张图、未知的 role、规格里没有的偏移、不是 base64 的文本、不是 JPEG 的字节，都返回 422，并写明哪里不对。
 - 请求体超过 `max_body_mb` 返回 413（不读取请求体）；没有 `Content-Length` 返回 411；`Content-Type` 不是 JSON 返回 415；`Host` 不是本接口的回环地址或带 `Origin` 头返回 403；请求体不是 JSON 返回 400。
@@ -373,9 +373,9 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 
 - `outcome` 和 `undecided` 按 `final_state` 规则：物体静止地放在目的地且稳定为成功；任何明确的其他答案为失败；有 `unclear` 答案、且没有明确的失败答案压过它时，为失败并且 `undecided: true`。`reading` 是规格的 `valid_when` 对答案的读取结果（`supported`、`contradicted`、`unknown`），`checks` 是逐条条件。`status` 不是 `ok` 时 `outcome` 和 `reading` 为 null。
 - `tokens` 和 `prompt_tokens` 是服务器报告的数（没报告时为 null）；`elapsed_s` 从请求到达算起。
-- `ok` 时 `reason` 为 null，否则为 `<代码>: <说明>`。**`unavailable`**（立即返回，不到 1 秒，什么都没发给模型）：`busy`（已有一个在线判定在进行，一次只做一个）、`gate_closed`（策略正在推理或下一集即将开始：`policy_inferring`、`episode_imminent`、`unknown_client`）、`cold_start_needed`（vLLM 没在运行：在线判定从不冷启动它）、`vllm_starting`、`no_room`（vLLM 在睡眠，按 GPU 规则此刻不能唤醒）、`wake_failed`、`vllm_failed`（服务已放弃启动 vLLM）、`service_busy`（监督进程正在启动、停止 vLLM 或让它睡眠）、`shutting_down`；以及模型工作时被打断的 `gate_closed ... (the request was cut)`、`vllm_sleeping`、`vllm_stopping`。**`error`**：`timeout`（`timeout_s` 内没有答案，请求被切断）、`model_error`（服务器出错或拒绝）、`invalid_answer`（答案不是规格允许的值）、`internal_error`，以及被拒绝的请求的 `invalid_request`。
+- `reason` 的格式是 `<代码>: <说明>`，第一个冒号前的代码是固定的，供程序判断。`ok` 时为 null，只有答案等过闸门时写 `gate_waited: ...`（见下）。**`unavailable`**（什么都没发给模型；除下面说的等待闸门外立即返回，不到 1 秒）：`busy`（已有一个在线判定在进行，一次只做一个）、`gate_closed`（策略正在推理，或等待的闸门没有及时打开：`policy_inferring`、`episode_imminent`、`unknown_client`）、`cold_start`（vLLM 没在运行：在线判定从不冷启动它）、`vllm_starting`、`no_room`（vLLM 在睡眠，按 GPU 规则此刻不能唤醒）、`wake_failed`、`vllm_failed`（服务已放弃启动 vLLM）、`service_busy`（监督进程正在启动、停止 vLLM 或让它睡眠）、`shutting_down`；以及模型工作时被打断的 `gate_closed ... (the request was cut)`、`vllm_sleeping`、`vllm_stopping`。**`error`**：`timeout`（`timeout_s` 内没有答案，请求被切断）、`model_error`（服务器出错或拒绝）、`invalid_answer`（答案不是规格允许的值）、`internal_error`，以及被拒绝的请求的 `invalid_request`。
 
-**模型什么时候可以回答。** 请求到达时，监督进程当场读会话文件（tick 最多每秒决定一次闸门），只有闸门开着才放行：没有会话处于 `running`，`gpu.lead_s` 内没有片段要开始（`episode_imminent`），也没有无会话作证的策略服务器。所以客户端要在离开 `running` 之后再问（回零位、等复位或等操作员打标签时）。醒着的 vLLM 直接回答；睡眠中的 vLLM 只在批次唤醒同样的规则下才会被唤醒（约 0.75 秒，最多等 5 秒）：闸门开着，空闲显存够唤醒（`gpu.wake_margin_mib`），策略服务器没有超过 `gpu.policy_budget_mib`。在线判定从不冷启动 vLLM，所以要在策略服务器之前用 `--prewarm` 启动服务。模型工作期间每 0.25 秒读一次闸门：闸门一关（下一集开始了），请求立即被切断，和 worker 的请求一样。放行时最多等监督进程自己的 GPU 操作 0.5 秒。答案进行中，vLLM 不会因为闲置而被放睡；但显存被需要时仍会被放睡或停止，这会打断答案（`vllm_sleeping`）。后台开着时，worker 可能同时在发请求；vLLM 两边都服务（`max_num_seqs` 2），答案可能因此变慢。
+**模型什么时候可以回答。** 请求到达时，监督进程当场读会话文件（tick 最多每秒决定一次闸门），只有闸门开着才放行：没有会话处于 `running`，`gpu.lead_s` 内没有片段要开始（`episode_imminent`），也没有无会话作证的策略服务器。客户端在写完 `waiting_reset`（或 `homing`）后立即发请求：闸门没有防抖，这时立刻就是开的。如果闸门关着、但没有会话处于 `running`（`episode_imminent` 窗口、无会话作证的策略服务器、会话文件还没改写），请求会等它打开，每 0.1 秒再问一次，最多等到请求到达后 `timeout_s`；等待期间有会话开始 `running` 就立即结束等待（`gate_closed`），等满仍未打开则返回 `gate_closed: ... (waited N s for it to open)`。策略正在推理时，以及上面列的其他原因，都立即回答。客户端用自己的截止时间（从片段结束算起），在截止前可以对 `gate_closed` 和 `busy` 重试。醒着的 vLLM 直接回答；睡眠中的 vLLM 只在批次唤醒同样的规则下才会被唤醒（约 0.75 秒，最多等 5 秒）：闸门开着，空闲显存够唤醒（`gpu.wake_margin_mib`），策略服务器没有超过 `gpu.policy_budget_mib`。在线判定从不冷启动 vLLM，所以要在策略服务器之前用 `--prewarm` 启动服务。模型工作期间每 0.25 秒读一次闸门：闸门一关（下一集开始了），请求立即被切断，和 worker 的请求一样。放行时最多等监督进程自己的 GPU 操作 0.5 秒。答案进行中，vLLM 不会因为闲置而被放睡；但显存被需要时仍会被放睡或停止，这会打断答案（`vllm_sleeping`）。后台开着时，worker 可能同时在发请求；vLLM 两边都服务（`max_num_seqs` 2），答案可能因此变慢。
 
 **客户端写什么**（这一侧由策略仓库的客户端实现）。在 rollout 的 `metadata.json` 里写 `eval.agent_label`，要在 `.complete` 之前写（和操作员标签一样：LEVI 只在镜像时读一次元数据）：
 
