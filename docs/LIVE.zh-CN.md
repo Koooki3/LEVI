@@ -246,7 +246,7 @@ anchored_spec = "generic-final.v1.json"
 
 双标签评测给每个片段两个标签，并且互不混用：**操作员标签（真值）**是操作员自己判定的成功或失败；**agent 标签（自动、未审）**是释放复核的判定。在新片段上比较两者，可以测出自动标签有多可信。
 
-**流程。** 评测客户端（策略仓库 FR3 示例里的 `--levi-mode dual`）默认允许操作员在运行中判定：按 `s` 成功、`f` 失败或 `d` 作废，这一集立即结束（`--no-dual-early-key` 恢复旧行为：每个片段跑满步数预算，和无人值守运行一样，运行中 `s`/`f` 无效；两种情况下 `q` 都结束本轮）。没有被按键结束的片段跑满预算，之后客户端再问操作员打标签。客户端把过程写进 rollout 元数据：`eval.ended_by`（`operator_key` 或 `budget`）、`eval.operator_label_timing`（`during_run` 或 `after_budget`）、`eval.operator_labelled_step`。机械臂回零位，操作员复位场景，按 Enter 开始下一个片段。标签在 rollout 被标为完成之前写进它的 `metadata.json`，所以 LEVI 不会在操作员标签出现之前判定这个片段。之后 LEVI 在后台判定同一个片段。评测终端从不显示 agent 的判定；操作员给一个片段打标签之前，不要先去 `/live` 看它。
+**流程。** 评测客户端（策略仓库 FR3 示例里的 `--levi-mode dual`）默认允许操作员在运行中判定：按 `s` 成功、`f` 失败或 `d` 作废，这一集立即结束（`--no-dual-early-key` 恢复旧行为：每个片段跑满步数预算，和无人值守运行一样，运行中 `s`/`f` 无效；两种情况下 `q` 都结束本轮）。没有被按键结束的片段跑满预算，之后客户端再问操作员打标签。客户端把过程写进 rollout 元数据：`eval.ended_by`（`operator_key` 或 `budget`）、`eval.operator_label_timing`（`during_run` 或 `after_budget`）、`eval.operator_labelled_step`。机械臂回零位，操作员复位场景，按 Enter 开始下一个片段。标签在 rollout 被标为完成之前写进它的 `metadata.json`，所以 LEVI 不会在操作员标签出现之前判定这个片段。之后 LEVI 在后台判定同一个片段。操作员判定之前，评测终端不显示 agent 的判定；启用[在线判定](#在线判定接口-c5)时，客户端在操作员判定之后显示一行结果。操作员给一个片段打标签之前，不要先去 `/live` 看它。
 
 **服务设置**（`live.toml`；改完要重启服务，因为 `live/effective.toml` 在启动时写出）：
 
@@ -331,7 +331,7 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 {"url": "http://127.0.0.1:7882", "spec": "generic-final", "spec_version": 1, "ready": true}
 ```
 
-`ready` 为 true 的条件：接口在监听，并且服务自己的 vLLM 已就绪或在睡眠（不需要冷启动）；`manual` 模式或 `adopt_external` 时，是外部 vLLM 在最近一分钟内回答过。它不反映闸门：`ready` 的接口在策略推理时照样回答 `unavailable`。客户端对状态文件的可用性检查不变。
+`ready` 为 true 的条件：接口在监听，并且服务自己的 vLLM 已就绪或在睡眠（不需要冷启动）；`manual` 模式或 `adopt_external` 时，是 `vllm.port` 上有 vLLM 回答 `/health`（最多每 10 秒查一次，只在接口启用时查）。它不反映闸门：`ready` 的接口在策略推理时照样回答 `unavailable`。客户端对状态文件的可用性检查不变。
 
 **`GET /v1/judge/spec`** 告诉客户端该发什么（从规格文件读出，不写死）：
 
@@ -373,7 +373,7 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 
 - `outcome` 和 `undecided` 按 `final_state` 规则：物体静止地放在目的地且稳定为成功；任何明确的其他答案为失败；有 `unclear` 答案、且没有明确的失败答案压过它时，为失败并且 `undecided: true`。`reading` 是规格的 `valid_when` 对答案的读取结果（`supported`、`contradicted`、`unknown`），`checks` 是逐条条件。`status` 不是 `ok` 时 `outcome` 和 `reading` 为 null。
 - `tokens` 和 `prompt_tokens` 是服务器报告的数（没报告时为 null）；`elapsed_s` 从请求到达算起。
-- `reason` 的格式是 `<代码>: <说明>`，第一个冒号前的代码是固定的，供程序判断。`ok` 时为 null，只有答案等过闸门时写 `gate_waited: ...`（见下）。**`unavailable`**（什么都没发给模型；除下面说的等待闸门外立即返回，不到 1 秒）：`busy`（已有一个在线判定在进行，一次只做一个）、`gate_closed`（策略正在推理，或等待的闸门没有及时打开：`policy_inferring`、`episode_imminent`、`unknown_client`）、`cold_start`（vLLM 没在运行：在线判定从不冷启动它）、`vllm_starting`、`no_room`（vLLM 在睡眠，按 GPU 规则此刻不能唤醒）、`wake_failed`、`vllm_failed`（服务已放弃启动 vLLM）、`service_busy`（监督进程正在启动、停止 vLLM 或让它睡眠）、`shutting_down`；以及模型工作时被打断的 `gate_closed ... (the request was cut)`、`vllm_sleeping`、`vllm_stopping`。**`error`**：`timeout`（`timeout_s` 内没有答案，请求被切断）、`model_error`（服务器出错或拒绝）、`invalid_answer`（答案不是规格允许的值）、`internal_error`，以及被拒绝的请求的 `invalid_request`。
+- `reason` 的格式是 `<代码>: <说明>`，第一个冒号前的代码是固定的，供程序判断。**瞬时**代码（评测客户端在自己的截止时间内重试）：`gate_closed`、`busy`、`service_busy`。其余代码在两集之间的空当里重试也不会消失。`ok` 时为 null，只有答案等过闸门时写 `gate_waited: ...`（见下）。**`unavailable`**（什么都没发给模型；除下面说的等待闸门外立即返回，不到 1 秒）：`busy`（已有一个在线判定在进行，一次只做一个）、`gate_closed`（策略正在推理，或等待的闸门没有及时打开：`policy_inferring`、`episode_imminent`、`unknown_client`）、`cold_start`（vLLM 没在运行：在线判定从不冷启动它）、`vllm_starting`、`no_room`（vLLM 在睡眠，按 GPU 规则此刻不能唤醒）、`wake_failed`、`vllm_failed`（服务已放弃启动 vLLM）、`service_busy`（监督进程正在启动、停止 vLLM 或让它睡眠）、`shutting_down`；以及模型工作时被打断的 `gate_closed ... (the request was cut)`、`vllm_sleeping`、`vllm_stopping`。**`error`**：`timeout`（`timeout_s` 内没有答案，请求被切断）、`model_error`（服务器出错或拒绝）、`invalid_answer`（答案不是规格允许的值）、`internal_error`，以及被拒绝的请求的 `invalid_request`。
 
 **模型什么时候可以回答。** 请求到达时，监督进程当场读会话文件（tick 最多每秒决定一次闸门），只有闸门开着才放行：没有会话处于 `running`，`gpu.lead_s` 内没有片段要开始（`episode_imminent`），也没有无会话作证的策略服务器。客户端在写完 `waiting_reset`（或 `homing`）后立即发请求：闸门没有防抖，这时立刻就是开的。如果闸门关着、但没有会话处于 `running`（`episode_imminent` 窗口、无会话作证的策略服务器、会话文件还没改写），请求会等它打开，每 0.1 秒再问一次，最多等到请求到达后 `timeout_s`；等待期间有会话开始 `running` 就立即结束等待（`gate_closed`），等满仍未打开则返回 `gate_closed: ... (waited N s for it to open)`。策略正在推理时，以及上面列的其他原因，都立即回答。客户端用自己的截止时间（从片段结束算起），在截止前可以对 `gate_closed` 和 `busy` 重试。醒着的 vLLM 直接回答；睡眠中的 vLLM 只在批次唤醒同样的规则下才会被唤醒（约 0.75 秒，最多等 5 秒）：闸门开着，空闲显存够唤醒（`gpu.wake_margin_mib`），策略服务器没有超过 `gpu.policy_budget_mib`。在线判定从不冷启动 vLLM，所以要在策略服务器之前用 `--prewarm` 启动服务。模型工作期间每 0.25 秒读一次闸门：闸门一关（下一集开始了），请求立即被切断，和 worker 的请求一样。放行时最多等监督进程自己的 GPU 操作 0.5 秒。答案进行中，vLLM 不会因为闲置而被放睡；但显存被需要时仍会被放睡或停止，这会打断答案（`vllm_sleeping`）。后台开着时，worker 可能同时在发请求；vLLM 两边都服务（`max_num_seqs` 2），答案可能因此变慢。
 
@@ -388,7 +388,7 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 
 ### 独立性
 
-模型只看到图像和带任务指令的规格问题，别的都看不到：请求里不能带操作员标签或其他评测数据（以 422 拒绝），`episode` 只进日志，测试检查了发给模型服务器的请求里没有任何片段标识。客户端在操作员给出标签之后才显示模型结果，所以操作员标签仍是真值；这个顺序由客户端保证，服务看不到。服务不往 rollout 里写任何东西。
+模型只看到图像和带任务指令的规格问题，别的都看不到：请求里不能带操作员标签或其他评测数据（以 422 拒绝），`episode` 只进日志，测试检查了发给模型服务器的请求里没有任何片段标识。客户端在操作员给出标签之后才显示模型结果，所以操作员标签仍是真值；这个顺序由客户端保证，服务看不到。`live/online.jsonl` 在模型一回答就记下结局，通常早于操作员按键：操作员判定之前不要查看它（LEVI 没有页面或命令读它）。服务不往 rollout 里写任何东西。
 
 ### 风险和局限
 
