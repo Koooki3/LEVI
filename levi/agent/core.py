@@ -129,12 +129,15 @@ def crashed():
 
 
 def orphaned_workers():
-    """Job workers (pool export, RECAP, segmentation, ...) that still run although the core that owns them is
-    gone. A restarted core reclaims, that is terminates, exactly these (``children.reclaim``)."""
-    from levi import children
+    """Job workers (pool export, RECAP, segmentation labelling, ...) that still run although the core that owns
+    them is gone: a restarted core would terminate them (``children.reclaim``). Live sessions (a Pilot, a
+    segmentation overlay) are not jobs: nothing is lost by restarting them."""
+    from levi import activity, children
 
     return [
-        row for row in children.listed() if row["running"] and not row["owner_running"]
+        row
+        for row in children.listed()
+        if row["running"] and not row["owner_running"] and activity._is_job(row["kind"])
     ]
 
 
@@ -180,6 +183,42 @@ def ensure(port=7861):
 JOB_POLL_SECONDS = 15.0
 
 
+def _stop_core(wait):
+    """Ask the running core to stop, or tidy the leftovers of a dead one. Called with ``start.lock`` held, so a
+    core that ``levi serve`` is starting right now is either stopped here or not yet started, never missed."""
+    from levi import children
+
+    result = {"status": "stopped"}
+    if current := status():
+        who = children.identity(current["pid"])
+        mark_stop(current["pid"])
+        # The server, not an unverified PID file, handles its own termination.
+        request("/api/levi/agent/v1/core/stop", {"force": True}, human=True)
+        # It stops answering before it has stopped its workers: wait for the
+        # process itself, so "stopped" is true when it is printed.
+        deadline = time.monotonic() + wait
+        while (
+            who
+            and children.identity(current["pid"]) == who
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.2)
+        if who and children.identity(current["pid"]) == who:
+            result["status"] = "stopping"
+    else:
+        # No core answers. A stale instance.json of a dead core would make `levi serve` restart it later: this
+        # stop says it is meant to stay down.
+        try:
+            dead = int(json.loads((directory() / "instance.json").read_text())["pid"])
+        except (OSError, ValueError, KeyError, TypeError):
+            dead = 0
+        if dead > 0 and children.identity(dead) is None:
+            mark_stop(dead)
+            for name in ("instance.json", "api.sock"):
+                (directory() / name).unlink(missing_ok=True)
+    return result
+
+
 def stop(*, models=False, wait=20.0, force=False, wait_jobs=None):
     """Stop the core and everything it started; ``models`` also stops the
     Ollama service LEVI started itself (never a shared one).
@@ -211,34 +250,9 @@ def stop(*, models=False, wait=20.0, force=False, wait_jobs=None):
                 "`levi stop --wait [minutes]`, or `levi stop --force` (pool exports "
                 "are kept as interrupted and can be resumed).",
             }
-    result = {"status": "stopped"}
-    if current := status():
-        who = children.identity(current["pid"])
-        mark_stop(current["pid"])
-        # The server, not an unverified PID file, handles its own termination.
-        request("/api/levi/agent/v1/core/stop", {"force": True}, human=True)
-        # It stops answering before it has stopped its workers: wait for the
-        # process itself, so "stopped" is true when it is printed.
-        deadline = time.monotonic() + wait
-        while (
-            who
-            and children.identity(current["pid"]) == who
-            and time.monotonic() < deadline
-        ):
-            time.sleep(0.2)
-        if who and children.identity(current["pid"]) == who:
-            result["status"] = "stopping"
-    else:
-        # No core answers. A stale instance.json of a dead core would make `levi serve` restart it later: this
-        # stop says it is meant to stay down.
-        try:
-            dead = int(json.loads((directory() / "instance.json").read_text())["pid"])
-        except (OSError, ValueError, KeyError, TypeError):
-            dead = 0
-        if dead > 0 and children.identity(dead) is None:
-            mark_stop(dead)
-            for name in ("instance.json", "api.sock"):
-                (directory() / name).unlink(missing_ok=True)
+    with (directory() / "start.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        result = _stop_core(wait)
     # A core that was killed rather than stopped leaves its workers behind.
     reclaimed = children.reclaim()
     if reclaimed:
@@ -310,7 +324,6 @@ def serve():
             signal.signal(
                 signal.SIGTERM, clean_exit_handler(root)
             )  # before the file: no window
-            (root / STOP_MARKER).unlink(missing_ok=True)
             (root / "instance.json").write_text(
                 json.dumps(
                     {
@@ -321,6 +334,9 @@ def serve():
                     }
                 )
             )
+            # After the file: a marker of an older core (other pid) never matches this one, and between the two
+            # steps a looking watch must not find "no marker, dead pid".
+            (root / STOP_MARKER).unlink(missing_ok=True)
             uvicorn.Server(uvicorn.Config("levi.service:app", log_level="warning")).run(
                 sockets=sockets
             )

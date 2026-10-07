@@ -6,7 +6,13 @@ import subprocess
 import sys
 
 from levi.agent import core
-from levi.watch import CoreWatch, git_head, runtime_changed, web_exit_status
+from levi.watch import (
+    CoreWatch,
+    git_head,
+    restart_veto,
+    runtime_changed,
+    web_exit_status,
+)
 
 
 class Clock:
@@ -197,14 +203,22 @@ def test_web_exit_status_is_zero_only_for_a_stop_on_purpose():
     assert web_exit_status(0) == 0
     assert web_exit_status(-signal.SIGTERM) == 0
     assert web_exit_status(-signal.SIGINT) == 0
-    assert web_exit_status(-signal.SIGHUP) == 0
+    assert web_exit_status(-signal.SIGHUP) == 1  # a hangup is not a stop request
+    assert web_exit_status(129) == 129
     assert (
         web_exit_status(-signal.SIGKILL) == 1
     )  # killed (OOM): a supervisor must restart it
     assert web_exit_status(1) == 1 and web_exit_status(137) == 137
 
 
-def test_runtime_changed_sees_only_runtime_paths_since_the_start_commit(tmp_path):
+def test_runtime_changed_sees_only_runtime_paths_since_the_start_commit(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        "GIT_CONFIG_GLOBAL", os.devnull
+    )  # nothing of the developer's git setup
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
     def git(*args):
         subprocess.run(
             ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
@@ -243,9 +257,15 @@ def test_orphaned_workers_are_running_workers_whose_owner_is_gone(monkeypatch):
     from levi import children
 
     rows = [
-        {"running": True, "owner_running": False},
-        {"running": True, "owner_running": True},
-        {"running": False, "owner_running": False},
+        {"kind": "pool", "running": True, "owner_running": False},
+        {"kind": "pool", "running": True, "owner_running": True},
+        {"kind": "pool", "running": False, "owner_running": False},
+        {
+            "kind": "pilot",
+            "running": True,
+            "owner_running": False,
+        },  # a session, not a job
+        {"kind": "segmentation-live", "running": True, "owner_running": False},
     ]
     monkeypatch.setattr(children, "listed", lambda: rows)
     assert core.orphaned_workers() == [rows[0]]
@@ -355,3 +375,132 @@ def test_a_real_core_process_stopped_leaves_nothing_and_killed_counts_as_crashed
 def _instance_dir(workspace):
     found = list(workspace.glob("**/agent/core"))
     return found[0] if found else workspace / "agent" / "core"
+
+
+def test_a_failing_look_is_logged_once_and_never_raises():
+    clock = Clock()
+    log = []
+
+    def boom():
+        raise OSError("no /proc")
+
+    w = CoreWatch(boom, lambda: None, log.append, clock=clock)
+    for _ in range(3):
+        assert w.tick() is False
+        clock.now += 6
+    assert len(log) == 1 and "no /proc" in log[0]
+    veto_log = []
+    w = CoreWatch(
+        lambda: True,
+        lambda: None,
+        veto_log.append,
+        veto=lambda: 1 / 0,
+        clock=Clock(),
+    )
+    assert w.tick() is False and "could not check" in veto_log[0]
+
+
+def test_restart_veto_names_workers_first_then_committed_runtime_changes(
+    monkeypatch, tmp_path
+):
+    import levi.watch as watch_module
+
+    monkeypatch.setattr(watch_module, "runtime_changed", lambda *_: ["levi/a.py"])
+    assert "2 job worker(s)" in restart_veto(tmp_path, "x", lambda: [1, 2])
+    assert "levi/a.py" in restart_veto(tmp_path, "x", list)
+    monkeypatch.setattr(watch_module, "runtime_changed", lambda *_: [])
+    assert restart_veto(tmp_path, "x", list) is None
+
+
+def _marker(tmp_path):
+    return tmp_path / core.STOP_MARKER
+
+
+def test_levi_stop_of_a_dead_core_marks_and_clears_it(monkeypatch, tmp_path):
+    from levi import children
+
+    _core_dir(monkeypatch, tmp_path)
+    monkeypatch.setattr(children, "reclaim", list)
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    (tmp_path / "instance.json").write_text(json.dumps({"pid": dead.pid}))
+    (tmp_path / "api.sock").write_text("")
+    assert core.crashed() is True
+    assert core.stop(force=True)["status"] == "stopped"
+    assert (
+        not (tmp_path / "instance.json").exists()
+        and not (tmp_path / "api.sock").exists()
+    )
+    assert _marker(tmp_path).read_text() == str(dead.pid)
+    assert core.crashed() is False  # a stop on purpose is not undone
+
+
+def test_levi_stop_marks_a_running_core_before_asking_it_to_stop(monkeypatch, tmp_path):
+    import signal
+
+    from levi import children
+
+    _core_dir(monkeypatch, tmp_path)
+    monkeypatch.setattr(children, "reclaim", list)
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    seen = []
+    monkeypatch.setattr(core, "status", lambda: {"pid": child.pid})
+    monkeypatch.setattr(
+        core, "request", lambda *a, **k: seen.append(_marker(tmp_path).read_text())
+    )
+    try:
+        assert core.stop(force=True, wait=0.3)["status"] == "stopping"
+    finally:
+        child.send_signal(signal.SIGKILL)
+        child.wait()
+    assert seen == [
+        str(child.pid)
+    ]  # the marker was there when the stop request went out
+
+
+def test_levi_stop_waits_for_a_core_that_is_being_started(monkeypatch, tmp_path):
+    """`ensure()` holds start.lock while it starts a core: a stop must not run in the middle of that."""
+    import fcntl
+    import threading
+    import time
+
+    from levi import children
+
+    _core_dir(monkeypatch, tmp_path)
+    monkeypatch.setattr(children, "reclaim", list)
+    finished = threading.Event()
+    with (tmp_path / "start.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        thread = threading.Thread(
+            target=lambda: (core.stop(force=True), finished.set()), daemon=True
+        )
+        thread.start()
+        time.sleep(0.5)
+        assert not finished.is_set()
+    assert finished.wait(20)
+
+
+def test_the_stop_route_marks_the_core_before_it_signals_itself(monkeypatch, tmp_path):
+    import asyncio
+    import signal
+
+    from levi.agent import pilot_api
+
+    _core_dir(monkeypatch, tmp_path)
+    monkeypatch.setenv("LEVI_CORE_INSTANCE", "test")
+    monkeypatch.setattr(pilot_api, "human", lambda request: None)
+    sent = []
+    monkeypatch.setattr(os, "kill", lambda pid, signum: sent.append((pid, signum)))
+
+    class Request:
+        async def json(self):
+            return {"force": True}
+
+    async def run():
+        answer = await pilot_api.stop_core(Request())
+        assert _marker(tmp_path).read_text() == str(os.getpid())
+        await asyncio.sleep(0.6)
+        return answer
+
+    assert asyncio.run(run()) == {"status": "stopping"}
+    assert sent == [(os.getpid(), signal.SIGTERM)]

@@ -466,20 +466,12 @@ def main():
         watch = None
         if args.command == "serve":
             from .agent import core as agent_core
-            from .watch import CoreWatch, git_head, runtime_changed
+            from .watch import CoreWatch, git_head, restart_veto
 
             started_at = git_head(PROJECT)
 
             def veto():
-                # A restarted core terminates job workers it no longer owns, and would run code that changed
-                # since this `levi serve` started: both wait for a person (`levi stop`, then start again).
-                workers = agent_core.orphaned_workers()
-                if workers:
-                    return f"{len(workers)} job worker(s) still run and a new core would stop them"
-                changed = runtime_changed(PROJECT, started_at)
-                if changed:
-                    return f"{changed[0]} and {len(changed) - 1} more runtime file(s) changed since LEVI started"
-                return None
+                return restart_veto(PROJECT, started_at, agent_core.orphaned_workers)
 
             # A core that crashes (not one that `levi stop` stopped) is restarted here.
             watch = CoreWatch(
@@ -495,12 +487,13 @@ def main():
             (child.returncode for child in children if child.returncode is not None), 0
         )
         if args.command == "serve":
-            # The web page ended by itself. Stopped on purpose (SIGTERM, SIGINT, SIGHUP, status 0): exit 0, so
-            # a supervisor (systemd Restart=on-failure) leaves it. Anything else is a failure and is restarted.
+            # The web page ended by itself. Stopped on purpose (SIGTERM or SIGINT, status 0): exit 0, so a
+            # supervisor (systemd Restart=on-failure) leaves it. Anything else is a failure and is restarted.
             from .watch import web_exit_status
 
             raise SystemExit(web_exit_status(code))
-        raise SystemExit(code or 1)
+        if code:
+            raise SystemExit(code)
     except KeyboardInterrupt:
         pass
     except RuntimeError as exc:

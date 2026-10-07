@@ -16,10 +16,11 @@ import time
 
 
 def web_exit_status(code):
-    """Exit status of ``levi serve`` for the status its web page ended with. ``next start`` answers SIGTERM,
-    SIGINT and SIGHUP with status 0 (or dies by that signal): somebody stopped it on purpose, so 0. Anything else
-    is a failure (never 0), which a supervisor (systemd ``Restart=on-failure``) restarts."""
-    if code in (0, -signal.SIGTERM, -signal.SIGINT, -signal.SIGHUP):
+    """Exit status of ``levi serve`` for the status its web page ended with. ``next start`` answers SIGTERM and
+    SIGINT with status 0 (bun itself dies by the signal): somebody stopped it on purpose, so 0. Anything else
+    (SIGKILL/OOM 137, a hangup 129, an error) is a failure and never 0, which a supervisor (systemd
+    ``Restart=on-failure``) restarts."""
+    if code in (0, -signal.SIGTERM, -signal.SIGINT):
         return 0
     return code if code > 0 else 1
 
@@ -81,6 +82,20 @@ def runtime_changed(project, since):
     return done.stdout.split() if done.returncode == 0 else []
 
 
+def restart_veto(project, started_at, orphaned_workers):
+    """The reason an automatic core restart should wait, or None: job workers (export, RECAP, segmentation) whose
+    core died are still running and a new core would stop them (the watch keeps looking and restarts the core when
+    they have finished); or runtime files were committed since ``levi serve`` started, so a restarted core would
+    run newer code than its web page (restart LEVI as a whole: ``levi stop``, then start it again)."""
+    workers = orphaned_workers()
+    if workers:
+        return f"{len(workers)} job worker(s) still run and a new core would stop them; it restarts when they finish"
+    changed = runtime_changed(project, started_at)
+    if changed:
+        return f"{len(changed)} runtime file(s) were committed since LEVI started ({changed[0]}…); restart LEVI as a whole"
+    return None
+
+
 class CoreWatch:
     def __init__(
         self,
@@ -108,6 +123,7 @@ class CoreWatch:
         self.restarts: list[float] = []
         self.gave_up = False
         self.vetoed = None
+        self.failed = None
 
     def tick(self) -> bool:
         """One look; returns True when it restarted the core. Cheap enough to call every loop turn."""
@@ -115,11 +131,18 @@ class CoreWatch:
         if now < self.next_check:
             return False
         self.next_check = now + self.interval
-        if not self.crashed():
-            self.gave_up = False
-            self.vetoed = None
+        try:
+            if not self.crashed():
+                self.gave_up = False
+                self.vetoed = None
+                return False
+            reason = self.veto()
+        except Exception as exc:  # noqa: BLE001 - a failing look must never end `levi serve`; the next one retries
+            if str(exc) != self.failed:
+                self.failed = str(exc)
+                self.log(f"[LEVI] could not check the core: {exc} / 无法检查核心")
             return False
-        reason = self.veto()
+        self.failed = None
         if reason:
             if reason != self.vetoed:
                 self.vetoed = reason
