@@ -13,6 +13,7 @@ import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
 import { useConfirmAction } from "@/components/shell/confirm";
 import {
+  FINISHED_OK,
   PoolJobProgress,
   RUNNING,
   StatusBadge,
@@ -291,7 +292,7 @@ export function PushDialog({
         >
           <PoolJobProgress job={job} />
           <JobBanner job={job} onJob={setJob} onLog={setLogFor} />
-          {(job.status === "done" || job.status === "done_with_errors") && (
+          {FINISHED_OK.has(job.status) && (
             <p className="pg-pool-hint">
               {job.dry_run ? t("Dry run finished") : t("Sent")}:{" "}
               {bytes(job.result?.bytes)} · {duration(job.result?.seconds)}

@@ -139,7 +139,8 @@ export function jobOutcome(entry: JobEntry): JobOutcome | null {
   if (entry.kind === "pool")
     return entry.status === "done"
       ? "success"
-      : entry.status === "done_with_errors"
+      : entry.status === "done_with_errors" ||
+          entry.status === "done_with_warnings"
         ? "warning"
         : entry.status === "failed"
           ? "failure"

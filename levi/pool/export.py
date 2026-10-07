@@ -613,6 +613,8 @@ class PoolCaptures(InputFormat):
         self.items = episodes
         self.texts = texts
         self.dropped: dict[str, list[str]] = {}
+        # The check codes behind each drop (stale_state, stall_markers, ...).
+        self.dropped_codes: dict[str, list[str]] = {}
         # Slowest measured camera rate per kept episode (id -> fps).
         self.measured: dict[str, float] = {}
 
@@ -630,6 +632,7 @@ class PoolCaptures(InputFormat):
             for pid, found in pool.map(check, self.items):
                 if found["codes"]:
                     self.dropped[pid] = list(found["codes"].values())
+                    self.dropped_codes[pid] = list(found["codes"])
                 if progress:
                     progress.advance(pid)
         report = InputReport(
@@ -1001,7 +1004,9 @@ class RunContext:
             "detail": [f"{type(exc).__name__}: {str(exc)[:300]}"],
         }
 
-    def preflight_drop(self, ep: dict, reasons: list[str]) -> dict:
+    def preflight_drop(
+        self, ep: dict, reasons: list[str], codes: list[str] | None = None
+    ) -> dict:
         """An episode that failed the capture checks: listed, left out."""
         info = {
             "episode": ep["key"],
@@ -1009,6 +1014,7 @@ class RunContext:
             "stage": "Convert raw captures",
             "type": "CaptureCheck",
             "message": "; ".join(reasons)[:2000],
+            "codes": list(codes or []),
             "traceback": "",
         }
         if self.job_path:
@@ -1169,6 +1175,10 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
         "reset_episodes": record["counts"]["reset_episodes"],
         "warnings": record["warnings"],
         "errors": len(ctx.failures),
+        # Apart: episodes left out by a data check (the capture is bad) and
+        # episodes that failed with an exception. Only the second is an error.
+        "left_out": sum(1 for f in ctx.failures if f["type"] == "CaptureCheck"),
+        "failed": sum(1 for f in ctx.failures if f["type"] != "CaptureCheck"),
         "resumed": record["resumed"],
         "interruptions": journal.interruptions,
         "bytes": size,
@@ -1424,7 +1434,8 @@ def _run_part(ctx: RunContext, items: list[tuple[str, dict]], texts, conv):
             raise
         if source.dropped and len(source.dropped) == len(items):
             excluded = [
-                ctx.preflight_drop(by_pid[p], r) for p, r in source.dropped.items()
+                ctx.preflight_drop(by_pid[p], r, source.dropped_codes.get(p))
+                for p, r in source.dropped.items()
             ]
         elif len(items) > 1:
             ctx.log.warning(
@@ -1457,7 +1468,10 @@ def _run_part(ctx: RunContext, items: list[tuple[str, dict]], texts, conv):
     part = Part(part_id, directory, dict(source.measured))
     if abs(float(part.info["fps"]) - ctx.options.fps) > 0.01:
         raise FatalExport(_below_message(float(part.info["fps"]), ctx.options.fps))
-    excluded = [ctx.preflight_drop(by_pid[p], r) for p, r in source.dropped.items()]
+    excluded = [
+        ctx.preflight_drop(by_pid[p], r, source.dropped_codes.get(p))
+        for p, r in source.dropped.items()
+    ]
     files, units = part.files(ctx.staging)
     ctx.journal.record(
         f"part|{part_id}",

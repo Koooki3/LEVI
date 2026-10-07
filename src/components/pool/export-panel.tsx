@@ -18,7 +18,12 @@ import {
   Problem,
   RequestProblem,
 } from "@/components/pages-ui/feedback";
-import { PoolJobProgress, RUNNING, StatusBadge } from "./pool-progress";
+import {
+  FINISHED_OK,
+  PoolJobProgress,
+  RUNNING,
+  StatusBadge,
+} from "./pool-progress";
 import { ResetPanel, resetFormProblem } from "./reset-panel";
 import {
   DEFAULT_RESET_STATE,
@@ -187,10 +192,7 @@ export function ExportPanel({
       setBusy(false);
     }
   }
-  const done =
-    job &&
-    (job.status === "done" || job.status === "done_with_errors") &&
-    job.kind === "export";
+  const done = job && FINISHED_OK.has(job.status) && job.kind === "export";
   return (
     <section className="pg-pool-card" aria-labelledby="pool-export">
       <h2 id="pool-export">{t("Export")}</h2>

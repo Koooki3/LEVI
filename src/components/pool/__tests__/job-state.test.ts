@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import en from "@/i18n/en.json";
 import zh from "@/i18n/zh.json";
-import { ago, pollDelay, statusTone, RUNNING, STOPPED } from "../pool-progress";
+import {
+  ago,
+  FINISHED_OK,
+  pollDelay,
+  statusTone,
+  RUNNING,
+  STOPPED,
+} from "../pool-progress";
 import { jobTarget } from "../job-list";
 import type { PoolJob } from "../types";
 
@@ -16,6 +23,11 @@ describe("job states", () => {
       expect(RUNNING.has(s)).toBe(false);
     expect(STOPPED.has("interrupted")).toBe(true);
     expect(STOPPED.has("done_with_errors")).toBe(false);
+    expect(STOPPED.has("done_with_warnings")).toBe(false);
+    for (const s of ["done", "done_with_warnings", "done_with_errors"])
+      expect(FINISHED_OK.has(s)).toBe(true);
+    for (const s of ["failed", "cancelled", "interrupted", "running"])
+      expect(FINISHED_OK.has(s)).toBe(false);
   });
 
   test("polling is fast while it moves, slower when stalled, never when over", () => {
@@ -32,6 +44,7 @@ describe("job states", () => {
     expect(statusTone("failed")).toBe("fail");
     expect(statusTone("stalled")).toBe("warn");
     expect(statusTone("done_with_errors")).toBe("warn");
+    expect(statusTone("done_with_warnings")).toBe("warn");
     expect(statusTone("running")).toBe("");
   });
 
@@ -54,6 +67,7 @@ describe("job states", () => {
       "interrupted",
       "failed",
       "done",
+      "done_with_warnings",
       "done_with_errors",
     ]) {
       expect((en as Record<string, string>)[s]).toBeTruthy();

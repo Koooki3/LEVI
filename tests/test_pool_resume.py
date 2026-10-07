@@ -437,7 +437,7 @@ def test_service_start_marks_orphans_interrupted_and_can_auto_resume(rp, monkeyp
 # ------------------------------------------------------------------ errors
 
 
-def test_a_corrupt_episode_is_left_out_and_the_export_finishes_with_errors(
+def test_a_corrupt_episode_is_left_out_and_the_export_finishes_with_warnings(
     tmp_path, monkeypatch
 ):
     root = _root(tmp_path, 12)
@@ -449,8 +449,10 @@ def test_a_corrupt_episode_is_left_out_and_the_export_finishes_with_errors(
     job = _plan(rp, "errs")
     assert _run(job) == 0
     got = jobs.get(job["id"])
-    assert got["status"] == "done_with_errors" and got["result"]["errors"] == 1
-    assert got["failures"] == 1
+    # The capture check left it out: a warning, the export is complete.
+    assert got["status"] == "done_with_warnings" and got["result"]["errors"] == 1
+    assert got["result"]["left_out"] == 1 and got["result"]["failed"] == 0
+    assert got["failures"] == 1 and got["left_out"] == 1 and got["failed"] == 0
     failure = joblog.read_failures(jobs._path(job["id"]))[0]
     assert failure["episode"] == str(bad) and failure["stage"]
     assert {"unit", "type", "message", "traceback", "at"} <= set(failure)
@@ -480,7 +482,9 @@ def test_a_conversion_failure_costs_only_its_episode_until_too_many_fail(
     job = _plan(rp, "some", on_error_max_fraction=0.2)
     assert _run(job) == 0
     got = jobs.get(job["id"])
+    # An exception while converting is an error, not a data check.
     assert got["status"] == "done_with_errors" and got["result"]["errors"] == 2
+    assert got["result"]["failed"] == 2 and got["result"]["left_out"] == 0
     record = json.loads((rp["out"] / "some/pool_export.json").read_text())
     assert record["counts"]["episodes"] == 10
     assert record["counts"]["excluded"]["convert_error"] == 2
@@ -922,6 +926,7 @@ def test_every_fixed_sentence_a_job_error_can_carry_is_in_both_catalogs():
         "interrupted",
         "failed",
         "done",
+        "done_with_warnings",
         "done_with_errors",
     ]:
         assert word in en and word in zh, word
@@ -967,3 +972,202 @@ def test_a_unit_whose_line_cannot_be_written_is_not_counted(tmp_path, monkeypatc
     monkeypatch.undo()
     log.record("part-001")
     assert log.has_units() and list(log.units) == ["part-001"]
+
+
+def test_the_outcome_of_a_result_tells_data_checks_from_errors():
+    assert jobs.outcome({"errors": 0, "failed": 0, "left_out": 0}) == "done"
+    assert (
+        jobs.outcome({"errors": 3, "failed": 0, "left_out": 3}) == "done_with_warnings"
+    )
+    assert jobs.outcome({"errors": 3, "failed": 1, "left_out": 2}) == "done_with_errors"
+    # A result without the split (an older worker, another kind of job).
+    assert jobs.outcome({"errors": 2}) == "done_with_errors"
+    assert jobs.outcome({}) == "done"
+
+
+def _old_record(job_id, errors, **result):
+    from levi.catalog import atomic
+
+    path = jobs._path(job_id)
+    atomic(
+        path,
+        {
+            "id": job_id,
+            "kind": "export",
+            "status": "done_with_errors",
+            "planned_at": 1.0,
+            "result": {"ok": True, "errors": len(errors), **result},
+        },
+    )
+    for failure in errors:
+        joblog.append_failure(path, failure)
+    return path
+
+
+def _check(message, episode="/data/task/demo_0001"):
+    return {
+        "episode": episode,
+        "unit": f"preflight|{episode}",
+        "stage": "Convert raw captures",
+        "type": "CaptureCheck",
+        "message": message,
+        "traceback": "",
+    }
+
+
+def test_an_old_record_that_only_left_episodes_out_reads_as_a_warning(rp):
+    path = _old_record(
+        "export-legacy", [_check("Stale state source timestamp run: 61")]
+    )
+    before = path.read_text()
+    assert jobs.get("export-legacy")["status"] == "done_with_warnings"
+    assert path.read_text() == before  # the record itself is never rewritten
+    _old_record(
+        "export-legacy-real",
+        [
+            _check("Capture metadata records camera stall"),
+            {**_check("encoder exploded"), "type": "ValueError"},
+        ],
+    )
+    assert jobs.get("export-legacy-real")["status"] == "done_with_errors"
+    _old_record("export-legacy-nofile", [])
+    assert jobs.get("export-legacy-nofile")["status"] == "done_with_errors"
+
+
+def test_job_details_group_the_left_out_episodes_and_keep_the_warnings(rp, client):
+    _old_record(
+        "export-detail",
+        [
+            _check("Stale state source timestamp run: 61", "/d/a/demo_0001"),
+            _check("Stale state source timestamp run: 7", "/d/a/demo_0002"),
+            _check(
+                "Empty CSV: end_effector_pose.csv; Capture metadata records camera stall",
+                "/d/b/demo_0003",
+            ),
+            _check("Something else entirely", "/d/b/demo_0004"),
+            {
+                **_check("encoder exploded", "/d/c/demo_0005"),
+                "type": "ValueError",
+                "traceback": "Traceback ...\nValueError: encoder exploded",
+            },
+        ],
+        episodes=10,
+        frames=100,
+        warnings=[
+            {
+                "code": "copy_task_conflict",
+                "blocking": False,
+                "count": 30,
+                "episodes": [f"/d/e/demo_{i:04d}" for i in range(30)],
+            },
+            {"code": "reset_unreviewed", "blocking": False, "message": "m"},
+        ],
+    )
+    got = client.get("/api/levi/pool/jobs/export-detail/details").json()
+    assert got["status"] == "done_with_errors"  # one real exception
+    assert got["summary"] == {"episodes": 10, "frames": 100}
+    assert got["left_out"]["total"] == 4 and got["failed"]["total"] == 1
+    groups = {g["code"]: g["count"] for g in got["left_out"]["groups"]}
+    assert groups == {"stale_state": 2, "csv_schema": 1, "stall_markers": 1, "other": 1}
+    assert set(got["left_out"]["items"][2]["reasons"]) == {
+        "csv_schema",
+        "stall_markers",
+    }
+    assert "traceback" in got["failed"]["items"][0]
+    assert "encoder exploded" in got["failed"]["items"][0]["traceback"]
+    first = got["warnings"][0]
+    assert (
+        first["episodes_total"] == 30
+        and len(first["episodes"]) == jobs.WARNING_EPISODES
+    )
+    assert got["warnings"][1]["code"] == "reset_unreviewed"
+    capped = client.get("/api/levi/pool/jobs/export-detail/details?limit=1").json()
+    assert capped["left_out"]["total"] == 4 and len(capped["left_out"]["items"]) == 1
+    assert client.get("/api/levi/pool/jobs/nope-1/details").status_code == 404
+
+
+def test_a_real_export_that_left_a_corrupt_episode_out_opens_with_its_reason(
+    tmp_path, monkeypatch, client
+):
+    root = _root(tmp_path, 6)
+    _env(monkeypatch, root, tmp_path)
+    (root / "rollouts/models/pi/pick_x/demo_0002/side_camera.mp4").write_bytes(b"x")
+    scanner.scan()
+    job = _plan({"out": tmp_path / "exports"}, "reason")
+    assert _run(job) == 0
+    got = client.get(f"/api/levi/pool/jobs/{job['id']}/details").json()
+    assert got["status"] == "done_with_warnings"
+    assert got["left_out"]["total"] == 1 and got["failed"]["total"] == 0
+    assert got["left_out"]["items"][0]["episode"].endswith("demo_0002")
+    assert got["summary"]["episodes"] == 5
+    # The worker records which check left it out; the page groups by that.
+    row = joblog.read_failures(jobs._path(job["id"]))[0]
+    assert row["type"] == "CaptureCheck" and row["codes"]
+    assert [g["code"] for g in got["left_out"]["groups"]] == row["codes"]
+    assert got["left_out"]["items"][0]["reasons"] == row["codes"]
+
+
+def test_a_warning_that_only_counts_its_episodes_does_not_break_the_details(rp, client):
+    _old_record(
+        "export-counts",
+        [_check("Stale state source timestamp run: 9")],
+        warnings=[
+            {"code": "gripper_unknown", "blocking": False, "episodes": 5},
+            {"code": "retime_time_scale", "episodes": 3, "message": "slower"},
+            "a plain sentence",
+            7,
+        ],
+    )
+    got = client.get("/api/levi/pool/jobs/export-counts/details")
+    assert got.status_code == 200
+    warnings = got.json()["warnings"]
+    assert [(w.get("code"), w["episodes_total"], w["episodes"]) for w in warnings] == [
+        ("gripper_unknown", 5, []),
+        ("retime_time_scale", 3, []),
+        (None, 0, []),
+    ]
+    assert warnings[2]["message"] == "a plain sentence"
+
+
+def test_an_episode_written_twice_by_a_resumed_export_counts_once(rp, client):
+    row = _check("Stale state source timestamp run: 9", "/d/a/demo_0001")
+    _old_record(
+        "export-twice", [row, row, _check("Capture contains camera_stalled event")]
+    )
+    got = jobs.get("export-twice")
+    assert got["left_out"] == 2 and got["failures"] == 2
+    detail = client.get("/api/levi/pool/jobs/export-twice/details").json()
+    assert detail["left_out"]["total"] == 2 and len(detail["left_out"]["items"]) == 2
+
+
+def test_a_line_of_errors_jsonl_that_is_no_record_is_skipped(rp, client):
+    path = _old_record("export-junk", [_check("Stale state source timestamp run: 9")])
+    with joblog.paths(path)["errors"].open("a") as handle:
+        handle.write("123\nnull\n[]\nnot json\n")
+    assert [j["id"] for j in jobs.listing() if j["id"] == "export-junk"] == [
+        "export-junk"
+    ]
+    assert jobs.get("export-junk")["status"] == "done_with_warnings"
+    assert client.get("/api/levi/pool/jobs/export-junk/details").status_code == 200
+    assert client.get("/api/levi/pool/jobs").status_code == 200
+
+
+def test_the_reason_comes_from_the_recorded_codes_or_else_from_the_message():
+    assert jobs.reasons({"codes": ["frame_count", "fps"], "message": "x"}) == [
+        "frame_count",
+        "fps",
+    ]
+    assert jobs.reasons({"message": "Capture contains camera_stalled event"}) == [
+        "stall_markers"
+    ]
+    assert jobs.reasons({"message": "Capture metadata records camera stall"}) == [
+        "stall_markers"
+    ]
+    assert jobs.reasons({"message": "Something else entirely"}) == ["other"]
+
+
+def test_the_delete_preview_calls_an_old_leave_out_a_warning_too(rp):
+    from levi.pool import deletion
+
+    _old_record("export-del", [_check("Stale state source timestamp run: 9")])
+    assert deletion.plan("export-del")["status"] == "done_with_warnings"

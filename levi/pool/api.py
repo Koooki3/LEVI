@@ -316,6 +316,16 @@ def job_error_report(job_id: str):
         raise HTTPException(404, "Pool job not found") from None
 
 
+@router.get("/jobs/{job_id}/details")
+def job_details(job_id: str, limit: Annotated[int, Query(ge=1, le=5000)] = 500):
+    """Warnings, left-out episodes (by reason) and failures of one job: what
+    the pool page shows when a job row is opened."""
+    try:
+        return jobs.details(job_id, limit)
+    except KeyError:
+        raise HTTPException(404, "Pool job not found") from None
+
+
 @router.get("/jobs/{job_id}/delete-preview")
 def job_delete_preview(job_id: str, files: bool = True):
     """What clearing (``files=false``) or deleting (``files=true``) this job
@@ -407,7 +417,7 @@ def job_summary(job_id: str):
     folder = (job.get("result") or {}).get("dataset_path")
     if (
         job.get("kind") != "export"
-        or job.get("status") not in ("done", "done_with_errors")
+        or job.get("status") not in jobs.SUCCEEDED
         or not folder
     ):
         raise HTTPException(404, "No finished export for this job")
@@ -639,7 +649,7 @@ def push(payload: Push):
         source = (job.get("result") or {}).get("dataset_path")
         if (
             job.get("kind") != "export"
-            or job.get("status") not in ("done", "done_with_errors")
+            or job.get("status") not in jobs.SUCCEEDED
             or not source
         ):
             raise ValueError("That export has not finished")

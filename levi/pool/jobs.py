@@ -13,8 +13,10 @@ outcome survives the service. States:
 
 - ``planned``, ``running``; ``stalled`` (alive, but nothing moved for
   ``LEVI_POOL_STALL_SECONDS``); ``cancelling``;
-- ``done`` (ok), ``done_with_errors`` (ok, some episodes failed and were left
-  out: see ``errors.jsonl``);
+- ``done`` (ok); ``done_with_warnings`` (ok, some episodes were left out
+  because they failed a data check, e.g. a stale state clock or a camera stall:
+  see ``errors.jsonl``, the export is complete and usable); ``done_with_errors``
+  (ok, some episodes failed to convert with an exception and were left out);
 - ``failed`` (a fatal error: ``error.json`` says what and how to fix it);
 - ``cancelled``: the user asked to stop; the partial output is removed;
 - ``interrupted``: the service stopped, the process was killed, the machine
@@ -53,7 +55,11 @@ GRACE = 30.0  # a launched job whose worker has not registered yet is alive
 ALIASES = {"succeeded": "done", "queued": "running"}
 LIVE = ("running", "stalled", "cancelling")
 STOPPED = ("interrupted", "failed")  # what resume continues
-FINISHED = ("done", "done_with_errors", "failed", "cancelled", "interrupted")
+SUCCEEDED = ("done", "done_with_warnings", "done_with_errors")  # the output exists
+FINISHED = (*SUCCEEDED, "failed", "cancelled", "interrupted")
+# A failure of this type is an episode left out by a data check (the capture
+# is bad, the export is fine); any other type is an exception while converting.
+LEFT_OUT = "CaptureCheck"
 
 
 def jobs_dir() -> Path:
@@ -66,6 +72,35 @@ def _path(job_id: str) -> Path:
 
 def normalize(status: str | None) -> str:
     return ALIASES.get(status or "", status or "planned")
+
+
+def outcome(result: dict) -> str:
+    """The final state of a worker that returned ``result``. An export reports
+    ``failed`` (exceptions) and ``left_out`` (data checks) apart: only the
+    first is an error. A result without them (older workers, other kinds)
+    counts every failure as an error, as before."""
+    if "failed" in result:
+        if result["failed"]:
+            return "done_with_errors"
+        return "done_with_warnings" if result.get("left_out") else "done"
+    return "done_with_errors" if result.get("errors") else "done"
+
+
+def split_failures(failures: list[dict]) -> tuple[int, int]:
+    """(left out by a data check, failed with an exception)."""
+    left = sum(1 for f in failures if f.get("type") == LEFT_OUT)
+    return left, len(failures) - left
+
+
+def settle(job: dict, status: str, failures: list[dict]) -> str:
+    """A record written before ``done_with_warnings`` existed says
+    ``done_with_errors`` for an export that only left episodes out by a data
+    check: read it as the warning it is, without rewriting the record."""
+    result = job.get("result") or {}
+    legacy = status == "done_with_errors" and "failed" not in result
+    if legacy and failures and split_failures(failures)[1] == 0:
+        return "done_with_warnings"
+    return status
 
 
 def plan_scan(rehash: bool = False) -> dict:
@@ -269,7 +304,7 @@ def _run_worker(path: Path) -> int:
             result = execute(job, files["progress"], resume=resume)
             atomic(files["result"], result)
             job.update(
-                status="done_with_errors" if result.get("errors") else "done",
+                status=outcome(result),
                 result=result,
                 exit_code=0,
             )
@@ -532,9 +567,10 @@ def get(job_id: str) -> dict:
     if normalize(job.get("status")) in LIVE and not worker_alive(job):
         _mark_dead(path)
         job = read(path, None) or job
-    status = effective_status(job, path)
-    out = {**_brief(job), "status": status}
     files = joblog.paths(path)
+    failures = failures_of(path) if files["errors"].is_file() else []
+    status = settle(job, effective_status(job, path), failures)
+    out = {**_brief(job), "status": status}
     progress = files["progress"]
     if progress.exists():
         try:
@@ -546,6 +582,7 @@ def get(job_id: str) -> dict:
     out["rerunnable"] = status in (
         *STOPPED,
         "cancelled",
+        "done_with_warnings",
         "done_with_errors",
         "stalled",
     ) and job.get("kind") in ("export", "push", "scan")
@@ -553,8 +590,11 @@ def get(job_id: str) -> dict:
         out["partial"] = str(partial) if partial.exists() else None
     if status in STOPPED and not out.get("error_info"):
         out["error_info"] = joblog.read_error(path)
-    if files["errors"].is_file():
-        out["failures"] = len(joblog.read_failures(path))
+    if failures:
+        out["failures"] = len(failures)
+        out["left_out"], out["failed"] = split_failures(failures)
+    if isinstance(out.get("result"), dict) and out["result"].get("warnings"):
+        out["warning_count"] = len(out["result"]["warnings"])
     if files["log"].is_file():
         out["log_bytes"] = files["log"].stat().st_size
     return out
@@ -581,6 +621,119 @@ def error_report(job_id: str, kilobytes: int = 32) -> dict:
         "log_tail": joblog.tail(path, kilobytes),
         "levi_commit": _commit(),
         "at": joblog.now_iso(),
+    }
+
+
+# What a left-out episode's message says, as a code the page can explain in
+# either language. A message may name several (the checks are joined by ";").
+REASONS = (
+    ("stale_state", ("Stale state source timestamp run",)),
+    ("stall_markers", ("camera stall", "camera_stalled")),
+    ("csv_schema", ("Empty CSV",)),
+)
+WARNING_EPISODES = 20  # episode paths listed per warning; the rest is counted
+
+
+def reasons(item: dict) -> list[str]:
+    """The checks that left an episode out: the codes the worker recorded, or,
+    for a record written before it did, read from the message."""
+    if item.get("codes"):
+        return [str(c) for c in item["codes"]]
+    message = str(item.get("message") or "")
+    found = [c for c, needles in REASONS if any(n in message for n in needles)]
+    return found or ["other"]
+
+
+def unique_failures(failures: list[dict]) -> list[dict]:
+    """errors.jsonl is append-only and a resumed export can write an episode
+    again: one row per (episode, type, message)."""
+    seen: set[tuple] = set()
+    out = []
+    for f in failures:
+        key = (f.get("episode"), f.get("type"), f.get("message"))
+        if key not in seen:
+            seen.add(key)
+            out.append(f)
+    return out
+
+
+def failures_of(path: Path) -> list[dict]:
+    return unique_failures(joblog.read_failures(path))
+
+
+def _count(value) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def details(job_id: str, limit: int = 500) -> dict:
+    """What the pool page opens for a job: the outcome, every warning of the
+    export, the episodes it left out (grouped by reason) and the ones that
+    failed with an exception (with their traceback), and the fatal error of a
+    job that failed. Lists are cut at ``limit`` with the true totals kept."""
+    path = _path(job_id)
+    job = get(job_id)
+    result = (read(path, None) or {}).get("result") or {}
+    failures = failures_of(path)
+    left = [f for f in failures if f.get("type") == LEFT_OUT]
+    failed = [f for f in failures if f.get("type") != LEFT_OUT]
+    groups: dict[str, int] = {}
+    for item in left:
+        for code in reasons(item):
+            groups[code] = groups.get(code, 0) + 1
+    warnings = []
+    for w in result.get("warnings") or []:
+        if isinstance(w, str):
+            w = {"message": w}
+        if not isinstance(w, dict):
+            continue
+        # A warning lists its episodes, or only counts them (an int).
+        episodes = w.get("episodes")
+        listed = [str(e) for e in episodes] if isinstance(episodes, list) else []
+        total = len(listed) if isinstance(episodes, list) else _count(episodes)
+        warnings.append(
+            {**w, "episodes": listed[:WARNING_EPISODES], "episodes_total": total}
+        )
+    return {
+        "id": job_id,
+        "kind": job.get("kind"),
+        "status": job["status"],
+        "summary": {
+            k: result[k]
+            for k in (
+                "episodes",
+                "frames",
+                "bytes",
+                "excluded",
+                "reset_episodes",
+                "resumed",
+                "interruptions",
+            )
+            if k in result
+        },
+        "warnings": warnings,
+        "left_out": {
+            "total": len(left),
+            "groups": [{"code": c, "count": n} for c, n in groups.items()],
+            "items": [
+                {
+                    **{k: f.get(k) for k in ("episode", "stage", "message")},
+                    "reasons": reasons(f),
+                }
+                for f in left[:limit]
+            ],
+        },
+        "failed": {
+            "total": len(failed),
+            "items": [
+                {
+                    **{k: f.get(k) for k in ("episode", "stage", "type", "message")},
+                    "traceback": str(f.get("traceback") or "")[-4000:],
+                }
+                for f in failed[:100]
+            ],
+        },
+        "error": job.get("error"),
+        "error_info": job.get("error_info"),
     }
 
 

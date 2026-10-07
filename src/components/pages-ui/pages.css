@@ -1069,6 +1069,24 @@
 .pg-pool-logdialog {
   width: min(900px, calc(100vw - 32px));
 }
+.pg-pool-details {
+  max-height: 62dvh;
+  overflow: auto;
+  margin: 8px 0;
+}
+.pg-pool-details h3 {
+  font-size: var(--ds-text-callout-size);
+  margin: 14px 0 4px;
+}
+.pg-pool-detail-list {
+  margin: 4px 0;
+  padding-left: 18px;
+  font-size: var(--ds-text-caption-size);
+}
+.pg-pool-detail-list li {
+  margin: 3px 0;
+  word-break: break-all;
+}
 .pg-pool-facts {
   display: grid;
   grid-template-columns: max-content 1fr;

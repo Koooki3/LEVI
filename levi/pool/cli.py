@@ -699,12 +699,13 @@ def _export(args, jobs, recipe) -> int:
         )
     code = jobs.run_worker(jobs._path(job["id"]))
     final = jobs.get(job["id"])
-    if final["status"] in ("done", "done_with_errors"):
+    if final["status"] in jobs.SUCCEEDED:
         _print(final["result"])
-        if final["status"] == "done_with_errors":
+        if final["status"] in ("done_with_warnings", "done_with_errors"):
+            kind = "warnings" if final["status"] == "done_with_warnings" else "errors"
             print(
-                f"finished with {final['result'].get('errors')} episode(s) left out: "
-                f"levi pool jobs --log {job['id']}",
+                f"finished with {kind}: {final['result'].get('errors')} episode(s) left out, "
+                f"see levi pool jobs log {job['id']}",
                 file=sys.stderr,
             )
         return 0

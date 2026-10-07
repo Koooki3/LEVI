@@ -1,13 +1,14 @@
 "use client";
 import { useServerText } from "@/components/pages-ui/messages";
-import { FileText, Play, Send, Trash2 } from "lucide-react";
+import { FileText, ListChecks, Play, Send, Trash2 } from "lucide-react";
 import { Button, Tooltip } from "@/components/ds";
 import { Problem, RequestProblem } from "@/components/pages-ui/feedback";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
 import { ConfirmDialog } from "./confirm-dialog";
-import { ago, bytes, RUNNING, StatusBadge } from "./pool-progress";
+import { JobDetailsDialog } from "./job-details";
+import { ago, bytes, FINISHED_OK, RUNNING, StatusBadge } from "./pool-progress";
 import type {
   BulkDeleteResult,
   DeleteOutput,
@@ -23,6 +24,19 @@ function when(value: number | string | undefined | null): string {
   const date =
     typeof value === "number" ? new Date(value * 1000) : new Date(value);
   return isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+}
+
+/** The counts worth a glance beside a finished job's status: episodes left
+ * out by data checks, failed ones, warnings ("" when there is none). */
+export function jobNotes(j: PoolJob, t: (key: string) => string): string {
+  const parts: string[] = [];
+  const left = j.left_out ?? 0;
+  const failed = j.failed ?? 0;
+  const warnings = j.warning_count ?? 0;
+  if (left) parts.push(`${left} ${t("left out")}`);
+  if (failed) parts.push(`${failed} ${t("failed (count)")}`);
+  if (warnings) parts.push(`${warnings} ${t("warnings (count)")}`);
+  return parts.join(" · ");
 }
 
 /** What a job produced, for the list's path column. */
@@ -102,6 +116,7 @@ export function RecentJobs({
   const [plans, setPlans] = useState<DeletePlan[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [details, setDetails] = useState<PoolJob | null>(null);
   const ids = useMemo(() => new Set(jobs.map((j) => j.id)), [jobs]);
   const live = (j: PoolJob) => RUNNING.has(j.status);
   const failed = jobs.filter((j) => STOPPED.has(j.status));
@@ -301,6 +316,9 @@ export function RecentJobs({
                       {ago(j.age_seconds, t)}
                     </small>
                   )}
+                  {!live(j) && jobNotes(j, t) && (
+                    <small className="pg-pool-muted"> {jobNotes(j, t)}</small>
+                  )}
                 </td>
                 <td className="pg-pool-ellipsis">
                   <code>{jobTarget(j)}</code>
@@ -328,18 +346,26 @@ export function RecentJobs({
                       {t("Resume")}
                     </Button>
                   )}
-                  {j.kind === "export" &&
-                    (j.status === "done" ||
-                      j.status === "done_with_errors") && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        icon={Send}
-                        onClick={() => onPush(j)}
-                      >
-                        {t("Send to remote")}
-                      </Button>
-                    )}
+                  {j.kind === "export" && FINISHED_OK.has(j.status) && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={Send}
+                      onClick={() => onPush(j)}
+                    >
+                      {t("Send to remote")}
+                    </Button>
+                  )}
+                  {!live(j) && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={ListChecks}
+                      onClick={() => setDetails(j)}
+                    >
+                      {t("Details")}
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="ghost"
@@ -392,6 +418,7 @@ export function RecentJobs({
           </tbody>
         </table>
       </div>
+      <JobDetailsDialog job={details} onClose={() => setDetails(null)} />
       <ConfirmDialog
         open={!!pending}
         title={title}

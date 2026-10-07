@@ -304,7 +304,7 @@ def sweep(*, dry_run: bool = False, all_partials: bool = False) -> dict:
             or header.get("updated_at")
             or _mtime(partial)
         )
-        if status in ("done", "done_with_errors", "cancelled"):
+        if status in (*jobs.SUCCEEDED, "cancelled"):
             why = "the job finished or was cancelled"
         elif all_partials:
             why = "all partials requested"
@@ -324,7 +324,7 @@ def sweep(*, dry_run: bool = False, all_partials: bool = False) -> dict:
         if now - _ended(job, path) < ttl_job:
             continue
         size = sum(tree_bytes(p) for p in joblog.companions(path) if p.exists())
-        if status in ("done", "done_with_errors"):
+        if status in jobs.SUCCEEDED:
             if job.get("compacted") and not any(
                 p.exists() for p in joblog.companions(path) if p != path
             ):

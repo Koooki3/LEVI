@@ -142,7 +142,7 @@ def _owner_of_output(target: Path, job: dict) -> str | None:
         j["id"]
         for _p, j in _records()
         if j.get("kind") == "export"
-        and jobs.normalize(j.get("status")) in ("done", "done_with_errors")
+        and jobs.normalize(j.get("status")) in jobs.SUCCEEDED
         and (j.get("result") or {}).get("dataset_path") == str(target)
     ]
     return claimants[0] if len(claimants) == 1 else None
@@ -276,7 +276,7 @@ def plan(job_id: str, files: bool = False) -> dict:
     job = read(path, None)
     if not job:
         raise KeyError(job_id)
-    status = jobs.effective_status(job, path)
+    status = jobs.settle(job, jobs.effective_status(job, path), jobs.failures_of(path))
     companions = [p for p in joblog.companions(path) if p.exists()]
     out = {
         "id": job_id,

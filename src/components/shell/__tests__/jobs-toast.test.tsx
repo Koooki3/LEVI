@@ -81,6 +81,12 @@ describe("job entries", () => {
         poolEntries(pool([{ id: "a", status: "done_with_errors" }])),
       ).map((f) => f.outcome),
     ).toEqual(["warning"]);
+    expect(
+      finishedSince(
+        map,
+        poolEntries(pool([{ id: "a", status: "done_with_warnings" }])),
+      ).map((f) => f.outcome),
+    ).toEqual(["warning"]);
     // Cancelled or interrupted: no toast. Still running: none. Gone: none.
     for (const status of ["cancelled", "interrupted", "running"])
       expect(

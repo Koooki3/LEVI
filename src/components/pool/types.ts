@@ -270,6 +270,7 @@ export type JobStatus =
   | "interrupted"
   | "failed"
   | "done"
+  | "done_with_warnings"
   | "done_with_errors";
 
 /** A fatal error made readable (levi/pool/joblog.py ``describe_*``). */
@@ -301,6 +302,10 @@ export interface PoolJob {
   rerunnable?: boolean;
   partial?: string | null;
   failures?: number;
+  /** Episodes left out by a data check / failed with an exception (errors.jsonl). */
+  left_out?: number;
+  failed?: number;
+  warning_count?: number;
   log_bytes?: number;
   target?: string;
   source?: string;
@@ -327,12 +332,64 @@ export interface PoolJob {
     reset_episodes?: number;
     warnings?: (string | { code: string; message: string })[];
     errors?: number;
+    /** Left out by a data check / failed with an exception (errors = both). */
+    left_out?: number;
+    failed?: number;
     resumed?: boolean;
     bytes?: number;
     destination?: string;
     seconds?: number;
     summary?: ScanSummary;
   };
+}
+
+/** One warning of an export (levi/pool/jobs.py ``details``). */
+export interface JobWarning {
+  code?: string;
+  message?: string;
+  level?: string;
+  blocking?: boolean;
+  count?: number;
+  episodes?: string[];
+  episodes_total?: number;
+}
+
+/** ``GET pool/jobs/{id}/details``: the outcome, warnings, left-out episodes
+ * (by reason) and failures of one job. */
+export interface JobDetails {
+  id: string;
+  kind: string;
+  status: string;
+  summary: {
+    episodes?: number;
+    frames?: number;
+    bytes?: number;
+    excluded?: Record<string, number>;
+    reset_episodes?: number;
+  };
+  warnings: JobWarning[];
+  left_out: {
+    total: number;
+    groups: { code: string; count: number }[];
+    items: {
+      episode: string;
+      stage?: string;
+      message: string;
+      reasons: string[];
+    }[];
+  };
+  failed: {
+    total: number;
+    items: {
+      episode: string;
+      stage?: string;
+      type?: string;
+      message: string;
+      traceback: string;
+    }[];
+  };
+  error?: string | null;
+  error_info?: JobErrorInfo | null;
 }
 
 export interface PoolDisk {

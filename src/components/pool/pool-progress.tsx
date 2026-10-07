@@ -28,6 +28,12 @@ export function bytes(value: number | null | undefined): string {
 
 /** A worker exists (or is being stopped): the job is not over. */
 export const RUNNING = new Set(["running", "queued", "stalled", "cancelling"]);
+/** Finished with an output: clean, with warnings, or with failed episodes. */
+export const FINISHED_OK = new Set([
+  "done",
+  "done_with_warnings",
+  "done_with_errors",
+]);
 /** States that stopped without finishing; a banner says why. */
 export const STOPPED = new Set(["interrupted", "failed"]);
 
@@ -66,6 +72,7 @@ export function statusTone(status: string): "pass" | "warn" | "fail" | "" {
     case "failed":
     case "interrupted":
       return "fail";
+    case "done_with_warnings":
     case "done_with_errors":
     case "stalled":
     case "cancelled":

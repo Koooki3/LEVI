@@ -151,7 +151,11 @@ export function JobsMenu({ pool }: { pool: boolean }) {
             outcome === "success"
               ? `${t(entry.what)}${colon}${t("finished")}`
               : outcome === "warning"
-                ? `${t(entry.what)}${colon}${t("finished with errors")}`
+                ? `${t(entry.what)}${colon}${t(
+                    entry.status === "done_with_warnings"
+                      ? "finished with warnings"
+                      : "finished with errors",
+                  )}`
                 : `${t(entry.what)}${colon}${t("failed")}`,
           description: entry.name || undefined,
           action: {

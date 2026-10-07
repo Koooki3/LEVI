@@ -349,9 +349,11 @@ def read_failures(job_path: Path) -> list[dict]:
     out = []
     for line in path.read_text(encoding="utf-8").splitlines():
         try:
-            out.append(json.loads(line))
+            row = json.loads(line)
         except ValueError:
             continue
+        if isinstance(row, dict):  # a line that is valid JSON but no record is skipped
+            out.append(row)
     return out
 
 

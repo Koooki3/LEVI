@@ -5,6 +5,7 @@ import { leviRequest } from "@/components/levi-api";
 import {
   ClipboardCopy,
   FileText,
+  ListChecks,
   Play,
   RefreshCw,
   RotateCcw,
@@ -13,6 +14,7 @@ import {
 import { Button, IconButton, Tooltip } from "@/components/ds";
 import { Problem, RequestProblem } from "@/components/pages-ui/feedback";
 import { useServerText } from "@/components/pages-ui/messages";
+import { JobDetailsDialog } from "./job-details";
 import { ago, pollDelay } from "./pool-progress";
 import type { PoolJob } from "./types";
 
@@ -154,8 +156,13 @@ const TITLES: Record<string, string> = {
   interrupted: "Interrupted",
   failed: "Failed",
   stalled: "Stalled",
+  done_with_warnings: "Finished with warnings",
   done_with_errors: "Finished with errors",
 };
+
+/** A finished export that has something to read: the buttons that stop or
+ * repeat a job do not apply to it. */
+const SETTLED = new Set(["done_with_warnings", "done_with_errors"]);
 
 /** The prominent note for a job that stopped, failed, went quiet or left
  * episodes out: why, what to do, and the buttons for it. */
@@ -172,20 +179,25 @@ export function JobBanner({
   const { busy, error, setError, call } = useJobActions(onJob);
   const serverText = useServerText();
   const [copied, setCopied] = useState(false);
+  const [details, setDetails] = useState<PoolJob | null>(null);
   const status = job.status;
   const title = TITLES[status];
   if (!title) return null;
   const info = job.error_info;
   const live = status === "stalled";
-  const tone = status === "done_with_errors" || live ? "warn" : "fail";
+  const settled = SETTLED.has(status);
+  const tone = settled || live ? "warn" : "fail";
+  const leftOut = job.result?.left_out ?? job.left_out ?? 0;
   const detail =
-    status === "done_with_errors"
-      ? `${job.result?.errors ?? job.failures ?? 0} ${t("episode(s) were left out; see the log and errors.jsonl.")}`
-      : live
-        ? t(
-            "The worker is alive but nothing has moved. Wait for it, or cancel the job.",
-          )
-        : info?.message || job.error || "";
+    status === "done_with_warnings"
+      ? `${leftOut || (job.result?.errors ?? job.failures ?? 0)} ${t("episode(s) were left out by data checks; the export is complete.")}`
+      : status === "done_with_errors"
+        ? `${job.result?.errors ?? job.failures ?? 0} ${t("episode(s) were left out; see the log and errors.jsonl.")}`
+        : live
+          ? t(
+              "The worker is alive but nothing has moved. Wait for it, or cancel the job.",
+            )
+          : info?.message || job.error || "";
   // The reason beside the title, unless the note below already says it (the
   // worker-gone and signal notes use the same sentence for both).
   const reasonShown =
@@ -205,91 +217,107 @@ export function JobBanner({
     }
   }
   return (
-    <Problem
-      tone={tone === "warn" ? "warning" : "danger"}
-      className="pg-pool-banner"
-      title={
-        <>
-          {t(title)}
-          {reasonShown && <span> · {serverText(job.reason!)}</span>}
-          {job.age_seconds !== undefined && job.age_seconds !== null && (
-            <span className="pg-pool-muted">
-              {" "}
-              · {t("Last update")} {ago(job.age_seconds, t)}
-            </span>
-          )}
-        </>
-      }
-      why={detail ? serverText(detail) : undefined}
-      fix={
-        <div className="pg-pool-banner-body">
-          {info?.hint && status !== "done_with_errors" && (
-            <p className="pg-pool-hint">{serverText(info.hint)}</p>
-          )}
-          {job.partial && job.resumable && (
-            <p className="pg-pool-hint">
-              {t("Unfinished output kept in")} <code>{job.partial}</code>
-            </p>
-          )}
-          {error && (
-            <RequestProblem
-              action="The action did not complete"
-              message={error}
-            />
-          )}
-          <div className="pg-row">
-            {job.resumable && (
+    <>
+      <Problem
+        tone={tone === "warn" ? "warning" : "danger"}
+        className="pg-pool-banner"
+        title={
+          <>
+            {t(title)}
+            {reasonShown && <span> · {serverText(job.reason!)}</span>}
+            {job.age_seconds !== undefined && job.age_seconds !== null && (
+              <span className="pg-pool-muted">
+                {" "}
+                · {t("Last update")} {ago(job.age_seconds, t)}
+              </span>
+            )}
+          </>
+        }
+        why={detail ? serverText(detail) : undefined}
+        fix={
+          <div className="pg-pool-banner-body">
+            {info?.hint && !settled && (
+              <p className="pg-pool-hint">{serverText(info.hint)}</p>
+            )}
+            {job.partial && job.resumable && (
+              <p className="pg-pool-hint">
+                {t("Unfinished output kept in")} <code>{job.partial}</code>
+              </p>
+            )}
+            {error && (
+              <RequestProblem
+                action="The action did not complete"
+                message={error}
+              />
+            )}
+            <div className="pg-row">
+              {job.resumable && (
+                <Button
+                  variant="primary"
+                  icon={Play}
+                  disabled={busy}
+                  onClick={() => void call(job, "resume")}
+                >
+                  {t("Resume")}
+                </Button>
+              )}
+              {job.rerunnable && !settled && (
+                <Tooltip
+                  content={t(
+                    "Plan again from the saved recipe; unfinished output goes",
+                  )}
+                >
+                  <Button
+                    variant={error && !job.resumable ? "primary" : "secondary"}
+                    icon={RotateCcw}
+                    disabled={busy}
+                    onClick={() => void call(job, "rerun")}
+                  >
+                    {t("Re-run")}
+                  </Button>
+                </Tooltip>
+              )}
+              {!settled && (
+                <Tooltip
+                  content={t("Stop for good and remove the unfinished output")}
+                >
+                  <Button
+                    icon={X}
+                    disabled={busy}
+                    onClick={() => void call(job, "cancel")}
+                  >
+                    {t("Cancel")}
+                  </Button>
+                </Tooltip>
+              )}
+              {settled && (
+                <Button
+                  variant="secondary"
+                  icon={ListChecks}
+                  onClick={() => setDetails(job)}
+                >
+                  {t("View details")}
+                </Button>
+              )}
               <Button
-                variant="primary"
-                icon={Play}
-                disabled={busy}
-                onClick={() => void call(job, "resume")}
+                variant="ghost"
+                icon={FileText}
+                onClick={() => onLog(job)}
               >
-                {t("Resume")}
+                {t("View log")}
               </Button>
-            )}
-            {job.rerunnable && status !== "done_with_errors" && (
-              <Tooltip
-                content={t(
-                  "Plan again from the saved recipe; unfinished output goes",
-                )}
+              <Button
+                variant="ghost"
+                icon={ClipboardCopy}
+                onClick={() => void copyReport()}
               >
-                <Button
-                  variant={error && !job.resumable ? "primary" : "secondary"}
-                  icon={RotateCcw}
-                  disabled={busy}
-                  onClick={() => void call(job, "rerun")}
-                >
-                  {t("Re-run")}
-                </Button>
-              </Tooltip>
-            )}
-            {status !== "done_with_errors" && (
-              <Tooltip
-                content={t("Stop for good and remove the unfinished output")}
-              >
-                <Button
-                  icon={X}
-                  disabled={busy}
-                  onClick={() => void call(job, "cancel")}
-                >
-                  {t("Cancel")}
-                </Button>
-              </Tooltip>
-            )}
-            <Button variant="ghost" icon={FileText} onClick={() => onLog(job)}>
-              {t("View log")}
-            </Button>
-            <Button
-              variant="ghost"
-              icon={ClipboardCopy}
-              onClick={() => void copyReport()}
-            >
-              {copied ? t("Copied") : t("Copy error report")}
-            </Button>
+                {copied ? t("Copied") : t("Copy error report")}
+              </Button>
+            </div>
           </div>
-        </div>
-      }
-    />
+        }
+      />
+      <JobDetailsDialog job={details} onClose={() => setDetails(null)} />
+    </>
   );
 }
