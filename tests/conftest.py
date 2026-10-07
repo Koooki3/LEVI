@@ -221,6 +221,32 @@ def client(monkeypatch, tmp_path):
     assert not jobs.wait_idle(scaled(120)), "a job thread outlived its test"
 
 
+def pytest_sessionstart(session):
+    """Refuse to run in a checkout whose ``.state`` belongs to a running LEVI.
+
+    The tests read and write the checkout's default workspace in places (``maintenance.STATE`` and the pool's
+    remembered workspaces are fixed when the modules are imported), so in the maintainer's checkout a run
+    saw the product's own state (18 failures and errors on 2026-10-07) and could touch it. Run the suite
+    from a worktree (``git worktree add lab/worktrees/<topic> -b <branch> main``) or after ``levi stop``;
+    ``LEVI_TESTS_IN_PRODUCT=1`` overrides it for someone who knows better."""
+    if os.environ.get("LEVI_TESTS_IN_PRODUCT"):
+        return
+    from levi import maintenance
+
+    marker = maintenance.STATE / "server.pid"
+    try:
+        pid = int(marker.read_text())
+        os.kill(pid, 0)
+    except (OSError, ValueError):
+        return
+    pytest.exit(
+        f"This checkout's workspace {maintenance.STATE.parent.parent.parent} is in use by a running LEVI "
+        f"(pid {pid}). Run the tests from a git worktree (git worktree add lab/worktrees/<topic> -b <branch> main) "
+        "or stop LEVI first (levi stop); LEVI_TESTS_IN_PRODUCT=1 overrides.",
+        returncode=3,
+    )
+
+
 @pytest.fixture(autouse=True)
 def _ignore_the_developers_dotenv(monkeypatch):
     """``levi.paths`` loads the checkout's ``.env`` into ``os.environ`` when it is imported, so a test run in

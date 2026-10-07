@@ -21,7 +21,7 @@ Frontend text belongs in both locale catalogs; English is the default and Chines
 - **Do not touch the running service.** Never start, stop or rebuild the instance a person is using from your own checkout without being told to; `levi stop` refuses while pool, conversion, RECAP or segmentation jobs run, and `--force` kills them, so never use `--force` without the owner's word. Test frontend changes from a separate worktree, not by building in the served checkout.
 - **Secrets.** Never read, print, copy or commit `.env` values, the UI token, the human key, connection grants, Hugging Face tokens or authentication files. Human-only actions (approve a plan, review a pilot, commit, reset, clean, publish an improvement) stay with a person; do not work around them.
 - **Language.** Replies to the maintainer are in Chinese; code, commands and identifiers stay as they are; documentation is bilingual (English primary).
-- **Full test runs one at a time.** Two concurrent runs sharing a `--basetemp` leave residue that breaks later runs; use `--basetemp=$PWD/.state/tmp/pt` and `TMPDIR=$PWD/.state/tmp/build`.
+- **Full test runs one at a time.** Two concurrent runs sharing a `--basetemp` leave residue that breaks later runs; use `--basetemp=$PWD/.state/tmp/pt` and `TMPDIR=$PWD/.state/tmp/build`. **Run the Python suite from a worktree, not from the checkout a product LEVI runs from**: `tests/conftest.py` refuses to start when this checkout's workspace has a live `server.pid` (`LEVI_TESTS_IN_PRODUCT=1` overrides), and it ignores the checkout's `.env`.
 
 ## Package manager
 
