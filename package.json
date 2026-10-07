@@ -11,8 +11,9 @@
     "format:check": "prettier --check src next.config.ts package.json",
     "type-check": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
     "type-check:watch": "tsc --noEmit --watch",
-    "test": "bun test src",
-    "validate": "bun run type-check && bun run lint && bun run format:check && bun test src"
+    "test": "bun run scripts/test-isolated.ts",
+    "test:one-process": "bun test src",
+    "validate": "bun run type-check && bun run lint && bun run format:check && bun run test"
   },
   "dependencies": {
     "@huggingface/hub": "^2.11.0",
