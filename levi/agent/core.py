@@ -5,6 +5,7 @@ import http.client
 import json
 import os
 import secrets
+import signal
 import socket
 import subprocess
 import sys
@@ -86,6 +87,57 @@ def status():
         return None
 
 
+STOP_MARKER = "stop-requested"
+
+
+def mark_stop(pid):
+    """Record, before it happens, that this core is about to be stopped on purpose (``levi stop``, the stop
+    request of the API). ``crashed()`` then never reads its leftovers as a crash, even if the shutdown hangs
+    and someone finishes it with ``kill -9``."""
+    try:
+        (directory() / STOP_MARKER).write_text(str(pid))
+    except OSError:
+        pass
+
+
+def crashed():
+    """The core died without being stopped: ``instance.json`` is still there, its process is gone and no stop
+    was requested for it. A core stopped on purpose removes the file on SIGTERM (``clean_exit_handler``);
+    ``levi.watch`` restarts only the case that remains (killed, OOM, a crash).
+
+    A core killed while its parent (``levi serve``) lives stays a zombie until reaped, and ``kill(pid, 0)``
+    still succeeds on a zombie: reap it if it is our child, then ask ``children.identity`` (None for a zombie)."""
+    from levi import children
+
+    root = directory()
+    try:
+        pid = int(json.loads((root / "instance.json").read_text())["pid"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    if pid <= 0:  # a damaged file: waitpid(-1) would reap any child
+        return False
+    try:
+        if int((root / STOP_MARKER).read_text()) == pid:
+            return False  # its stop was asked for
+    except (OSError, ValueError):
+        pass
+    try:
+        os.waitpid(pid, os.WNOHANG)  # our own child that already died: collect it
+    except ChildProcessError:
+        pass  # not our child (a core started by another process)
+    return children.identity(pid) is None
+
+
+def orphaned_workers():
+    """Job workers (pool export, RECAP, segmentation, ...) that still run although the core that owns them is
+    gone. A restarted core reclaims, that is terminates, exactly these (``children.reclaim``)."""
+    from levi import children
+
+    return [
+        row for row in children.listed() if row["running"] and not row["owner_running"]
+    ]
+
+
 def ensure(port=7861):
     root = directory()
     with (root / "start.lock").open("a") as lock:
@@ -162,6 +214,7 @@ def stop(*, models=False, wait=20.0, force=False, wait_jobs=None):
     result = {"status": "stopped"}
     if current := status():
         who = children.identity(current["pid"])
+        mark_stop(current["pid"])
         # The server, not an unverified PID file, handles its own termination.
         request("/api/levi/agent/v1/core/stop", {"force": True}, human=True)
         # It stops answering before it has stopped its workers: wait for the
@@ -175,6 +228,17 @@ def stop(*, models=False, wait=20.0, force=False, wait_jobs=None):
             time.sleep(0.2)
         if who and children.identity(current["pid"]) == who:
             result["status"] = "stopping"
+    else:
+        # No core answers. A stale instance.json of a dead core would make `levi serve` restart it later: this
+        # stop says it is meant to stay down.
+        try:
+            dead = int(json.loads((directory() / "instance.json").read_text())["pid"])
+        except (OSError, ValueError, KeyError, TypeError):
+            dead = 0
+        if dead > 0 and children.identity(dead) is None:
+            mark_stop(dead)
+            for name in ("instance.json", "api.sock"):
+                (directory() / name).unlink(missing_ok=True)
     # A core that was killed rather than stopped leaves its workers behind.
     reclaimed = children.reclaim()
     if reclaimed:
@@ -190,6 +254,24 @@ def stop(*, models=False, wait=20.0, force=False, wait_jobs=None):
             "stopped" if owned.stop().get("stop_requested") else "not running"
         )
     return result
+
+
+def clean_exit_handler(root):
+    """SIGTERM handler of the core: remove ``api.sock`` and ``instance.json``, then die by the signal.
+
+    uvicorn re-raises the signal it captured once it has shut down, with the handler that was installed
+    before it ran: with the default one the process is gone before ``serve()``'s ``finally`` can run, so a
+    core stopped on purpose (``levi stop``, the UI, ``kill``) left ``instance.json`` behind exactly like a
+    crashed one. ``crashed()`` could not tell them apart; now a stop leaves no file and only a kill -9 or a
+    crash does."""
+
+    def handler(signum, frame):
+        for name in ("api.sock", "instance.json"):
+            (root / name).unlink(missing_ok=True)
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    return handler
 
 
 def serve():
@@ -225,6 +307,10 @@ def serve():
             sockets.append(uds)
             uds.bind(str(path))
             uds.listen(128)
+            signal.signal(
+                signal.SIGTERM, clean_exit_handler(root)
+            )  # before the file: no window
+            (root / STOP_MARKER).unlink(missing_ok=True)
             (root / "instance.json").write_text(
                 json.dumps(
                     {

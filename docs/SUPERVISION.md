@@ -1,0 +1,78 @@
+# Crash recovery / 崩溃后自动恢复
+
+LEVI recovers from a **crash while it is running normally**. It does **not** start anything at boot, and it does not touch a service you stopped on purpose. / LEVI 只在**正常运行时发生崩溃**的情况下自动恢复；**不做开机自启**，也不会重启你有意停掉的服务。
+
+## What restarts what / 谁重启谁
+
+| What died / 什么崩溃了 | Restarted by / 由谁重启 | Not restarted when / 不会重启的情况 |
+| --- | --- | --- |
+| The core (`levi.agent.core`, port 7861) while `levi serve` runs / `levi serve` 运行时核心崩溃 | `levi serve` itself (`levi/watch.py`): it looks every 5 s; a core that left `agent/core/instance.json` behind with no process, and no stop request, was killed (signal, OOM) or crashed. At most 5 restarts in 10 minutes; after that it waits until the window has passed and says so once in its log | `levi stop`, the UI's stop, or a plain `kill` (SIGTERM): the core removes the file on the way out. Also held back, with the reason logged once: job workers (export, RECAP, segmentation…) still run and a new core would stop them; runtime files changed since `levi serve` started (a restarted core would run newer code than its web page). `levi stop`, then start LEVI again |
+| `levi serve` or its web page / `levi serve` 或网页进程崩溃 | A systemd user unit with `Restart=on-failure` (template below). `levi serve` exits 0 only when the web page was stopped by SIGTERM, SIGINT or SIGHUP (or exited 0 after one); a web page killed by anything else (SIGKILL, OOM) or exiting with an error makes `levi serve` exit non-zero | a stop on purpose: `levi stop`, then `systemctl --user stop levi-product` (or SIGTERM) |
+| The live service supervisor (`levi live start`) / 实时服务的监督进程崩溃 | A systemd user unit with `Restart=on-failure`; the unit's cgroup is cleaned first, so a vLLM left behind by the crash is stopped and the GPU lock is free again | `levi live stop` or `systemctl --user stop levi-live` (both exit with status 0) |
+
+Consequence of `KillMode=control-group` / 后果：when systemd restarts `levi serve`, it stops the whole unit first, **including the core and every job worker** (export, RECAP, segmentation); a job in progress is lost, and the next start reclaims its leftovers. So stop deliberately with `levi stop` (it refuses while jobs run) before `systemctl --user stop`. / systemd 重启 `levi serve` 时会先停掉整个单元，**包括核心和所有作业进程**，进行中的作业会丢；所以有意停止先用 `levi stop`（有作业时它会拒绝）。
+
+Not covered / 不覆盖：a process that is alive but stuck (not answering), boot, power loss, and a full logout of your user: with systemd `Linger=no` the user's units stop at logout (`loginctl enable-linger $USER` keeps them if you want that). / 活着但卡住的进程、开机、断电、用户完全注销（`Linger=no` 时注销会停掉用户服务；想保留用 `loginctl enable-linger $USER`）。
+
+## The units / 服务单元
+
+Two `systemd --user` units, with **no `[Install]` section** so they cannot be enabled at boot. Paths below are examples; use your own checkout. / 两个 `systemd --user` 单元，**没有 `[Install]` 段**，不能设为开机自启。路径只是示例，换成你自己的检出。
+
+```ini
+# ~/.config/systemd/user/levi-product.service
+[Unit]
+Description=LEVI product (UI :7860, core :7861), crash recovery
+StartLimitIntervalSec=900
+StartLimitBurst=5
+[Service]
+Type=simple
+WorkingDirectory=/path/to/LEVI
+ExecStart=/path/to/LEVI/.venv/bin/levi serve
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+KillMode=control-group
+OOMPolicy=continue
+ManagedOOMPreference=avoid
+LimitNOFILE=1048576
+```
+
+```ini
+# ~/.config/systemd/user/levi-live.service
+[Unit]
+Description=LEVI background live-annotation service, crash recovery
+StartLimitIntervalSec=900
+StartLimitBurst=4
+[Service]
+Type=simple
+WorkingDirectory=/path/to/LEVI
+ExecStart=/path/to/LEVI/.venv/bin/levi live start --auto-approve --prewarm --workspace /path/to/live-ws --config /path/to/live-ws/live.toml --root /path/to/rollouts
+ExecStop=-/path/to/LEVI/.venv/bin/levi live stop --workspace /path/to/live-ws
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=180
+KillMode=control-group
+OOMPolicy=continue
+ManagedOOMPreference=avoid
+LimitNOFILE=1048576
+```
+
+`OOMPolicy=continue` keeps one memory-killed process (the web page, the core) from taking the whole unit down; `levi serve` then restarts the core. / `OOMPolicy=continue` 避免单个进程被内存杀掉时整个单元一起停，核心由 `levi serve` 重启。
+
+```bash
+systemctl --user daemon-reload
+systemctl --user start levi-product levi-live      # instead of `levi serve` / `levi live start --daemon`
+systemctl --user status levi-product levi-live
+levi stop && systemctl --user stop levi-product    # stop the product (levi stop refuses while jobs run)
+systemctl --user stop levi-live                    # runs `levi live stop` first
+```
+
+**Migrating from a terminal-started instance / 从终端启动的实例迁移**：`levi stop` first, then `systemctl --user start levi-product`; two instances on the same ports cannot coexist. / 先 `levi stop` 再用 systemd 启动，同一端口不能有两个实例。
+
+After 5 (product) or 4 (live) crashes in 15 minutes systemd stops restarting and the unit stays `failed`: read `journalctl --user -u levi-product` / `-u levi-live` and the service logs, then `systemctl --user reset-failed` and start it again. / 15 分钟内崩溃 5 次（产品）或 4 次（实时服务）后 systemd 不再重启，单元保持 `failed`：看日志，`reset-failed` 后再启动。
+
+**A caveat on this kind of machine / 注意**：if the user's inotify instances are used up (`journalctl --user` shows "Failed to add control inotify watch descriptor"; limit `fs.inotify.max_user_instances`, default 128), systemd cannot see that a unit's cgroup has emptied and waits for the whole `TimeoutStopSec` on every stop and every crash recovery. The timeouts above keep that wait bounded; raising the limit (`sudo sysctl fs.inotify.max_user_instances=512`) removes it. This is a system setting: LEVI does not change it. / 如果用户的 inotify 实例用尽，systemd 看不到单元的 cgroup 已空，每次停止和每次崩溃恢复都要等满 `TimeoutStopSec`；调高上限可以消除等待。这是系统设置，LEVI 不会去改。
+
+## Verified / 已验证
+
+`tests/test_core_watch.py` covers the watch (restart once per look, spacing, the cap and the retry after the window, a failing restart, the vetoes, the exit status of `levi serve`, runtime-file detection, the stop marker, a killed child that is still a zombie) and a real `python -m levi.agent.core` process: SIGTERM leaves no `instance.json`, SIGKILL counts as a crash. With a throw-away workspace on ports 7890/7891 under a transient user unit: `kill -9` of the core brought it back in about 6 s, `levi stop` was not undone, `kill -9` of `levi serve` restarted the whole product, `systemctl stop` stopped everything; with a throw-away live workspace: `kill -9` of the supervisor restarted it (the stale instance lock was taken over) and `levi live stop` was not undone. / 用临时工作区和临时端口在临时用户单元下验证过：杀核心约 6 秒恢复，`levi stop` 不被撤销，杀 `levi serve` 整个产品被拉起，`systemctl stop` 全部停止；实时服务：杀监督进程被拉起（接管了过期的实例锁），`levi live stop` 不被撤销。

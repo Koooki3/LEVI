@@ -42,6 +42,11 @@ async def stop_core(request: Request):
                 + activity.describe(running)
                 + "\nWait for them, or stop with force (pool exports stay resumable).",
             )
+    from levi.agent import core as agent_core
+
+    agent_core.mark_stop(
+        os.getpid()
+    )  # a deliberate stop: levi serve must not read what it leaves as a crash
     asyncio.get_running_loop().call_later(0.3, os.kill, os.getpid(), signal.SIGTERM)
     return {"status": "stopping"}
 
