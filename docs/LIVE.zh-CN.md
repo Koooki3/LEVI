@@ -93,6 +93,7 @@ uv run levi live stop                            # 只停自己的进程
 - `pipeline.coarse_step_seconds` 0.5、`pipeline.refine` `always`：评测过的时间片段设置，长片段会放宽步长使帧数不超过 `max_images`。`pipeline.cleanup` true：丢弃已完成运行的冻结输入和证据。
 - `pipeline.auto_approve` 默认 **false**。`pipeline.keep_review_runs` 10：每个数据集保留冻结输入的开着的释放复核运行数（提交它需要输入），更旧的被取消并清理。`watch.stuck_s` 600：没有完成、也没有变化的片段超过这个时间算 `stuck`。`gpu.lead_s`/`lead_grace_s` 3/5：闸门在下一集开始前提前关闭。`service.gate_poll_s` 0.25。
 - `resources.report_keep` 默认 20：`live/reports/` 里保留的会话报告份数，写入新报告时删除最旧的。
+- `pipeline.background` 默认 true。设为 false 时关掉后台标注（不启动 worker，不做时间片段和复核），rollout 照常连同操作员标签和在线结果一起镜像，统计和页面照常可用。`[online]`（`enabled` false、`host` `127.0.0.1`、`port` 7882、`spec` `generic-final.v1.json`、`timeout_s` 15、`max_body_mb` 8）是在线判定的接口。两者见[在线判定](#在线判定接口-c5)。
 - `gpu.policy_ports` 默认 `[8000]`，只在内核的 socket 表里查，从不连接。`gpu.policy_loaded_min_mib` 6000、`gpu.policy_load_wait_s` 120：监听着的策略端口只有进程占用到这么多显存才算“策略服务器已加载”（用于预算规划）；占得更少说明还在加载，vLLM 等待（`settling`），端口出现 `policy_load_wait_s` 秒后按“只有 vLLM”规划；读不到显存同样按“只有 vLLM”的保守预算。`gpu.standby_min_s` 20：冷启动要等会话在 `standby` 待满这么久（它的第一集几秒内就会开始）；这是缓解，不是保证，评测前用 `--prewarm`。`gpu.wake_margin_mib` 850：唤醒时在预算（减去睡眠中的 vLLM 仍占的部分）之外保留的空闲显存；启动用 `vllm.margin_mib`。**在真 GPU 上测过**（策略服务器 `.22`）：睡眠的 vLLM 旁空闲 22768 MiB，唤醒并做完第一批请求用了约 21758 MiB。原来的 300 会在空闲 21843 MiB 时放行唤醒，唤醒后只剩约 85 MiB，低于 `min_free_mib`（600），vLLM 会立刻又被放睡；800 在放行线上仍只剩约 585；850 时唤醒需要 22393，正好在线上也剩 635 MiB，实测的 22768 放行，富余约 375 MiB（按这些数字算出来的，没有观察到真正的来回抖动）。`gpu.blocked_pause_s` 300：GPU 锁被别的 agent 持有、:8100 上有别人的 vLLM、睡眠的 vLLM 因显存不够唤不醒，持续这么久后写进 `labelling_paused`。`gpu.resume_stable_s` 3（0.5–60 秒）、`gpu.resume_max_bounces` 3：人的运行被实时闸门拦住（`blocked`）后，闸门连续开着这么久就自动继续（避开 `episode_imminent` 窗口；用监督进程写在 `gate.json` 里的 `opened_at`，所以两次采样之间的关上又打开也算），每次打开一次；连续被拦这么多次、中间没有进展（完成片段或结算了 token），就留给人点“继续”；0 表示关闭自动恢复。`gpu.unknown_client_pause_s` 600：没有会话为之作证的策略服务器让闸门一直关着，超过这么久状态里 `labelling_paused` 写 `unknown_client`。
 - `vllm.prewarm` 默认 false（`levi live start --prewarm`）：服务启动后、没有评测在跑时就把 vLLM 拉起来并保持常驻，空闲只睡眠，服务停止才停。这是**评测期间不冷启动**的办法。
 - vLLM 的显存预算和上下文长度在每次启动时按**当时的空闲显存**选择（见下），`gpu_memory_utilization_max/min`、`min_utilization_with_policy/alone`（都是 0.725）、`kv_bytes_per_token`、`min_model_len` 是这个选择的界限（按**热**编译缓存下的实测校准，见下）；`margin_mib` 1100；`max_start_failures` 3、`start_backoff_s` 60、`start_backoff_max_s` 600。
@@ -269,7 +270,7 @@ prewarm = true
 
 | | 操作员标签（真值） | agent 标签（自动、未审） |
 | --- | --- | --- |
-| 谁写 | 评测客户端，在按键时 | 实时 worker，在释放复核之后 |
+| 谁写 | 评测客户端，在按键时 | 实时 worker，在释放复核之后；或者[在线判定](#在线判定接口-c5)，由客户端转写（`eval.agent_label`） |
 | 来源 | rollout 的 `metadata.json`：`eval.operator_outcome`（之后不再改）、`eval.outcome`、`eval.verdict_by = "operator"`、`eval.label_mode = "dual"` | 锚定复核记录（`anchored.get`） |
 | 数据集状态里 | `demos[demo].operator_label` = `{outcome, by, source}`（被拒收的片段也有） | `demos[demo].verdict` |
 | `live/stats.jsonl` 里 | `operator_label` = `{outcome, by}` | `result.verdict` |
@@ -282,6 +283,120 @@ prewarm = true
 **一致性统计。** `stats.agreement` 用每个片段最新的一条记录比较两者。只统计操作员判为成功或失败的片段（`pairs`）。agent 标签是 `success`、`failure`、`undecided`（判定自己说未决）或 `none`（还没有判定）。`agree` 是 agent 判了成功或失败（`judged`）的片段里与操作员一致的比例；`rate_undecided_as_failure` 把未决按失败计。`false_success`（假成功）是操作员判失败、agent 判成功，分母是 agent 判了或未决的操作员失败片段；`missed_success`（漏判成功）是操作员判成功、agent 判失败或未决。两者都带 Wilson 95 % 区间。`none` 是覆盖缺口，不算一致。这些数字出现在统计汇总（`summary.agreement`）、每个会话的行（`pairs`、`agree`、`judged`、`false_success`、`missed_success`、`operator_success`）、逐片段的行和 CSV（`operator`、`agreement`：`yes`、`no`、`undecided`、`no_agent`）、数据集视图（覆盖全部片段，不只是列出的 200 个）、页面，以及报告里的“agent 与操作员对照”一节；只有至少一个片段有操作员标签时才出现。标签里写明片段怎么结束（`ended_by`）时，`agreement.by_ended_by` 把这些数字（`pairs`、`matrix`、`judged`、`agree`、`false_success`、`missed_success` 等）按 `budget` 和 `operator_key` 分开再给一遍；没有 `ended_by` 的标签（旧片段、其他来源）计入总体和第三组 `unknown`，不会报错。没有任何标签带 `ended_by` 时这个键不出现；逐片段的行和 CSV 有 `ended_by` 列；报告只在有两组或更多时才加“片段怎么结束的”一张表。数据集状态、`stats.jsonl` 和数据集视图里的操作员标签同样带 `ended_by`（读自 `eval.ended_by`，不读 `success_flag`，也不给模型看）。
 
 **局限。** 第 3 版是候选，只在一个任务上检查过（把物体放进盘子，一台机器人，同一模型的两个策略，92 个片段，真值由 agent 看视频核对，没有人确认）。它防假成功不如第 2 版：没有检查最后一次放置是否成功。默认的运行中按键会在操作员判定后立刻结束片段，所以片段比无人值守的短，全部片段的一致率不能直接外推到无人值守。只有 `ended_by = "budget"` 的片段（跑满了预算）给 agent 的输入与无人值守相同，它们的一致率才能外推；按键提前结束（`operator_key`）的片段单独看（`summary.agreement.by_ended_by`）。操作员在夹爪还没松开时就判定，释放复核（第 1、2、3 版）没有张开事件可看，会把这个片段判成失败；这种运行请用[最终状态判定](#最终状态判定候选)。操作员不看 `/live` 是对操作员的要求，页面不强制。传 `--allow-candidate-anchored` 时，训练清单仍把候选的锚定标签排在机器人自己的标记之前（见“自动批准主体”）。
+
+## 在线判定（接口 C5）
+
+后台复核在一个片段结束几秒后才给出标签，评测期间常常要等整个会话结束。**在线判定**在评测进行时就回答：片段结束时，评测客户端把侧视和腕部相机最后几秒的图像发给实时服务，服务用最终状态判定规格（`generic-final.v1.json`，见[最终状态判定](#最终状态判定候选)）问本地模型一次，返回结构化结果，客户端把结果写进 rollout 的 `metadata.json`，字段是 `eval.agent_label`。默认关闭。
+
+**在哪个进程里。** 一个小的 HTTP 接口，开在监督进程（`levi live start`）里，也就是管 GPU 闸门和 vLLM 启动、睡眠、唤醒的那个进程；`levi live once` 不启动它。它只监听回环地址（默认 `127.0.0.1:7882`），只做一件事：用配置的规格判定一个片段。它不接受提示词，也不回答别的问题。代码在 `levi/live/online.py`。
+
+**和后台复核同一套逻辑。** 问题就是规格里的问题，任务指令的引用方式和后台复核相同（`generic.anchored_spec`：压成一行，最多 600 个字符）。模型请求走 worker 的同一条 provider 路径（`LocalProvider.ask`、worker 建的那个 provider 配置、按规格答案 schema 的约束解码、规格的 `max_output_tokens`、服务器端的贪心解码）。答案用 `anchored.validate_answer` 校验，用 `anchored.judge`（规格的 `valid_when`）读取，再用 `anchored.outcome` 和 `anchored.undecided` 按 `final_state` 规则得出结局。没有另写一份逻辑。
+
+### 设置
+
+```toml
+[online]
+enabled = true                  # 默认 false
+host = "127.0.0.1"              # 只能是回环地址，其他一律拒绝
+port = 7882
+spec = "generic-final.v1.json"  # levi/live/specs 里 episode.rule 为 final_state 的规格
+timeout_s = 15.0                # 从请求到达算起，这么多秒内必须有答案
+max_body_mb = 8.0               # 请求体超过这个大小就拒绝（413）
+
+[pipeline]
+background = false              # 可选：关掉后台标注（见下）
+
+[vllm]
+prewarm = true                  # 必需：在线判定从不冷启动 vLLM
+```
+
+| 表 | 键 | 默认值 | 含义 |
+| --- | --- | --- | --- |
+| `online` | `enabled` | false | 随服务启动这个接口 |
+| | `host`、`port` | `127.0.0.1`、7882 | 回环地址（`127.0.0.1`、`::1`；`localhost` 这样的主机名被拒绝）；端口不能是 5000、8000、7860、7861、策略端口、`service.ui_port`、`service.core_port` 或 `vllm.port`（启用时检查） |
+| | `spec` | `generic-final.v1.json` | `levi/live/specs` 里的文件，`episode.rule` 为 `final_state`，没有起始检查和否决项，每个视图的偏移用秒给出，问题里有 `{task}` 占位符 |
+| | `timeout_s` | 15 | 1–120 秒，从请求到达时算起（包括唤醒） |
+| | `max_body_mb` | 8 | 0.5–64 MiB |
+| `pipeline` | `background` | true | false：不启动 worker，不做后台模型请求（见下） |
+
+设置在启动时读取：改完 `live.toml` 后 `levi live stop` 再 `levi live start`（重启的是实时服务，不是产品 LEVI）。`enabled = true` 时，监督进程在启动时载入答案校验相关的代码（pydantic、numpy、模型客户端），常驻内存多约 26 MiB（本机实测）。
+
+**关掉后台标注（`pipeline.background = false`）。** 监督进程不启动 worker，自己也不发模型请求：没有时间片段，没有释放复核或最终状态复核。它照常把每个已完成的 rollout 连同操作员标签和客户端转来的在线结果一起镜像进来，写状态文件，响应页面和 API，并给每个片段写一条 `live/stats.jsonl` 记录，所以页面、`stats.agreement`、会话报告和 `levi live report` 都照常可用，在线结果也能和操作员标签对照。镜像进来的片段立刻记为 `done`：`eval.agent_label.status` 为 `ok` 时带在线判定，否则没有判定（`no_agent`，`reason` 写明原因）。`accepts_sessions` 仍为 true。此时 `temporal`、`anchored`、`anchored_spec`、`anchored_min_valid`、`guideline`、`vocabulary` 都不使用，也不校验（后台开着时会被拒绝的组合，例如 `temporal = false` 加 `anchored = false`，这时也接受）；它们保持原样，切回去不用改别的。切换之前已经镜像、还在等标注的片段继续等，直到后台重新打开；后台关着时收进来的片段，之后不会补标。`vllm.prewarm` 照样会启动 vLLM（在线判定需要它）。后台开着（默认）时一切和以前一样，同一片段的后台复核会在 `verdict` 里替换在线判定（在线判定仍保存在数据集状态的 `online.verdict` 里）。
+
+### 接口 C5
+
+状态文件（接口 C4）多一个字段 `online_judge`：接口关闭时为 `null`，开启时为
+
+```json
+{"url": "http://127.0.0.1:7882", "spec": "generic-final", "spec_version": 1, "ready": true}
+```
+
+`ready` 为 true 的条件：接口在监听，并且服务自己的 vLLM 已就绪或在睡眠（不需要冷启动）；`manual` 模式或 `adopt_external` 时，是外部 vLLM 在最近一分钟内回答过。它不反映闸门：`ready` 的接口在策略推理时照样回答 `unavailable`。客户端对状态文件的可用性检查不变。
+
+**`GET /v1/judge/spec`** 告诉客户端该发什么（从规格文件读出，不写死）：
+
+```json
+{"schema": "levi.online.judge.spec.v1", "spec_id": "generic-final", "spec_version": 1,
+ "views": [{"role": "side", "offsets_seconds": [-3.0, -2.0, -1.2, -0.6, -0.2, 0.0]},
+           {"role": "wrist", "offsets_seconds": [-2.0, -1.0, -0.4, 0.0]}],
+ "image": {"format": "jpeg", "max_side": 1280}, "timeout_s": 15.0}
+```
+
+偏移是相对片段最后一帧的秒数。`max_side` 是建议：发相机原始帧的 JPEG（后台复核看的是原始分辨率），只有长边超过它时才缩小。片段比某个偏移短时，那个位置用第一帧，和后台复核一样。
+
+**`POST /v1/judge`**，`Content-Type: application/json`，带 `Content-Length`，不带 `Origin` 头（浏览器页面发来的请求被拒绝）：
+
+```json
+{"schema": "levi.online.judge.request.v1",
+ "task": "<任务指令>",
+ "episode": {"group": "...", "task_folder": "...", "demo": "demo_0003", "run_id": "...", "steps": 412, "fps": 15.0},
+ "images": [{"role": "side", "offset_s": -3.0, "step": 367, "jpeg_b64": "<base64 编码的 JPEG>"}, ...]}
+```
+
+- 必填 `schema`、`task`（1–2000 个字符）和 `images`；`episode` 及其中每个键都可省略，只用于日志。图像的 `step` 可省略（整数或 null）。
+- **严格模式。** 任何一层出现约定里没有的键都以 422 拒绝；键名像操作员或评测数据（`operator...`、`outcome`、`success`、`label`、`eval`、`verdict` 等）时，原因里会专门说明。重复的键、NaN、Infinity 也拒绝。
+- 规格的每个 `(role, offset)` 恰好一张图，偏移在 1 毫秒内算匹配；不管请求里怎么排，模型都按规格的顺序看到它们（先按视图，再按每个视图的偏移）。缺图、同一位置两张图、未知的 role、规格里没有的偏移、不是 base64 的文本、不是 JPEG 的字节，都返回 422，并写明哪里不对。
+- 请求体超过 `max_body_mb` 返回 413（不读取请求体）；没有 `Content-Length` 返回 411；`Content-Type` 不是 JSON 返回 415；`Host` 不是本接口的回环地址或带 `Origin` 头返回 403；请求体不是 JSON 返回 400。
+
+**响应**（`ok`、`unavailable`、`error` 都是 HTTP 200；被拒绝的请求用同样的结构，`status: "error"`，HTTP 状态码为对应的拒绝码）：
+
+```json
+{"schema": "levi.online.judge.result.v1",
+ "status": "ok", "reason": null,
+ "outcome": "success", "undecided": false, "reading": "supported",
+ "answer": {"object_state": "resting_at_destination", "stable": "yes"},
+ "checks": [{"field": "object_state", "value": "resting_at_destination", "result": "supported"},
+            {"field": "stable", "value": "yes", "result": "supported"}],
+ "spec": {"id": "generic-final", "version": 1}, "model": "qwen3.8-27b",
+ "tokens": 4312, "prompt_tokens": 4290, "elapsed_s": 2.41, "request_id": "9f0c3b6a1d2e4f50"}
+```
+
+- `outcome` 和 `undecided` 按 `final_state` 规则：物体静止地放在目的地且稳定为成功；任何明确的其他答案为失败；有 `unclear` 答案、且没有明确的失败答案压过它时，为失败并且 `undecided: true`。`reading` 是规格的 `valid_when` 对答案的读取结果（`supported`、`contradicted`、`unknown`），`checks` 是逐条条件。`status` 不是 `ok` 时 `outcome` 和 `reading` 为 null。
+- `tokens` 和 `prompt_tokens` 是服务器报告的数（没报告时为 null）；`elapsed_s` 从请求到达算起。
+- `ok` 时 `reason` 为 null，否则为 `<代码>: <说明>`。**`unavailable`**（立即返回，不到 1 秒，什么都没发给模型）：`busy`（已有一个在线判定在进行，一次只做一个）、`gate_closed`（策略正在推理或下一集即将开始：`policy_inferring`、`episode_imminent`、`unknown_client`）、`cold_start_needed`（vLLM 没在运行：在线判定从不冷启动它）、`vllm_starting`、`no_room`（vLLM 在睡眠，按 GPU 规则此刻不能唤醒）、`wake_failed`、`vllm_failed`（服务已放弃启动 vLLM）、`service_busy`（监督进程正在启动、停止 vLLM 或让它睡眠）、`shutting_down`；以及模型工作时被打断的 `gate_closed ... (the request was cut)`、`vllm_sleeping`、`vllm_stopping`。**`error`**：`timeout`（`timeout_s` 内没有答案，请求被切断）、`model_error`（服务器出错或拒绝）、`invalid_answer`（答案不是规格允许的值）、`internal_error`，以及被拒绝的请求的 `invalid_request`。
+
+**模型什么时候可以回答。** 请求到达时，监督进程当场读会话文件（tick 最多每秒决定一次闸门），只有闸门开着才放行：没有会话处于 `running`，`gpu.lead_s` 内没有片段要开始（`episode_imminent`），也没有无会话作证的策略服务器。所以客户端要在离开 `running` 之后再问（回零位、等复位或等操作员打标签时）。醒着的 vLLM 直接回答；睡眠中的 vLLM 只在批次唤醒同样的规则下才会被唤醒（约 0.75 秒，最多等 5 秒）：闸门开着，空闲显存够唤醒（`gpu.wake_margin_mib`），策略服务器没有超过 `gpu.policy_budget_mib`。在线判定从不冷启动 vLLM，所以要在策略服务器之前用 `--prewarm` 启动服务。模型工作期间每 0.25 秒读一次闸门：闸门一关（下一集开始了），请求立即被切断，和 worker 的请求一样。放行时最多等监督进程自己的 GPU 操作 0.5 秒。答案进行中，vLLM 不会因为闲置而被放睡；但显存被需要时仍会被放睡或停止，这会打断答案（`vllm_sleeping`）。后台开着时，worker 可能同时在发请求；vLLM 两边都服务（`max_num_seqs` 2），答案可能因此变慢。
+
+**客户端写什么**（这一侧由策略仓库的客户端实现）。在 rollout 的 `metadata.json` 里写 `eval.agent_label`，要在 `.complete` 之前写（和操作员标签一样：LEVI 只在镜像时读一次元数据）：
+
+- 上面的响应，再加 `"source": "online"`、`requested_at` 和 `received_at`（纪元秒；ISO 时间也能读）、`frames: [{role, offset_s, step}]`，以及 `timing`：`during_run` 或 `after_budget`；
+- 或者没有答案时写 `{"source": "online", "status": "unavailable" | "error" | "timeout" | "skipped", "reason": "..."}`。
+
+镜像器（`criteria.agent_label`）把格式正确的 `ok` 变成数据集状态里这个片段的自动判定：`verdict = {outcome, events: 1, valid_events: 1 或 0, undecided, rule: "final_state", min_valid: 1, basis: {final_reading}, spec, spec_version, review: "auto", evaluated: false, at: received_at, source: "online"}`，形状和 worker 的判定一样，所以页面、`stats.agreement` 和报告不用改就能读。其他状态，或者字段对不上的 `ok`（结局不是成功或失败、成功却标了不确定），都不产生判定：这个片段算 `no_agent`。客户端转来的整个标签保存在 `online` 下（`status`、`reason`、`timing`、`request_id`、`usage`、`verdict`）。这种片段的统计记录带 `result.verdict.source: "online"`，把这次判定的成本记为一次 `review` 请求，另有 `result.online`（`status`、`reason`、`timing`）；`timeline.to_verdict_s` 可能是负数，因为答案通常在客户端把 rollout 标为完成之前就到了。API 的片段行带 `verdict.source`。
+
+**日志。** 每个 `POST /v1/judge` 在 `<工作区>/live/online.jsonl` 里加一行（schema `levi.live.online.v1`，和其他日志一样轮转）：`at`、`time`、`request_id`、`http`、`episode`（请求里给的标识）、`status`、`reason`、`outcome`、`undecided`、`reading`、`tokens`、`prompt_tokens`、`elapsed_s`、`images`、`spec`、`model`。不存图像，也不存任务文字。图像只在模型读取期间放在 `<工作区>/live/online-tmp/<request_id>/`。
+
+### 独立性
+
+模型只看到图像和带任务指令的规格问题，别的都看不到：请求里不能带操作员标签或其他评测数据（以 422 拒绝），`episode` 只进日志，测试检查了发给模型服务器的请求里没有任何片段标识。客户端在操作员给出标签之后才显示模型结果，所以操作员标签仍是真值；这个顺序由客户端保证，服务看不到。服务不往 rollout 里写任何东西。
+
+### 风险和局限
+
+- **显存和闸门。** 策略服务器以 `.22` 常驻时，只剩约 1.3–1.5 GB 余量（见“GPU 管理”）。两集之间的唤醒和请求遵循后台标注的同一套规则，但策略服务器常驻时唤醒的显存峰值，以及片段刚结束就发出的请求对策略推理延迟的影响，**都没有**用真实模型和 GPU 测过。闸门关闭时进行中的请求会被切断。
+- **准确率没有评估。** 最终状态规格在任何数据上都没有测过准确率；每个在线判定都要读作“自动、未审”，信任之前先和操作员标签对照（`stats.agreement`，按 `ended_by` 分开看）。
+- **时间。** 唤醒（约 0.75 秒）加一次请求（27B 模型看 10 张图：几秒，这里没测）必须在下一集开始前完成；`reset_wait_s` 太短时会得到 `gate_closed ... (the request was cut)`。
+- 接口除了回环地址、`Host` 检查和拒绝浏览器请求之外没有身份验证：本机任何进程都可以让它判定（它也只能做这件事）。
+- 端口被占用时接口起不来：事件日志和 `last_error` 会写明，`online_judge.ready` 保持 false，客户端会连接被拒。
 
 ## 保持轻量
 
@@ -365,6 +480,7 @@ prewarm = true
 | `<工作区>/live/worker.json`、`gate.json`、`vllm.json`、`service.json` | worker 进度、闸门、本服务启动的 vLLM、首次启动时间 |
 | `<工作区>/live/gate.jsonl` | 闸门的每一次变化（轮转；见“历史与统计”） |
 | `<工作区>/live/stats.jsonl` | 每个已标片段一条记录（轮转；见“历史与统计”） |
+| `<工作区>/live/online.jsonl` | 每个在线判定请求一行，不存图像（轮转；见[在线判定](#在线判定接口-c5)）；`live/online-tmp/` 只在模型读取期间存放请求的图像 |
 | `<工作区>/live/reports/` | 每个结束的评测会话一份报告：`<数据集>__<会话>.md`、`.zh-CN.md`、`.json`（见“统计与报告”） |
 | `<工作区>/live/logs/` | `live.log`、`worker.log`、`ui.log`、`vllm-launch.log`（轮转） |
 | `<工作区>/captures/<名字>/` | LEVI 登记的镜像采集 |
@@ -440,7 +556,7 @@ prewarm = true
 
 ## 状态文件（接口 C4）
 
-`~/.levi-live/status.json`，每 `heartbeat_s`（4 秒，≤ 5 秒）原子重写。评测客户端只有在**全部**满足时才认为服务可用：`schema` 以 `levi.live.status.` 开头；`updated_at`（纪元秒）不到 15 秒；`pid` 存活；`accepts_sessions` 为真；`state` 是 `idle active annotating gpu_wait` 之一；`watch_roots`（绝对路径）中有一个等于或包含客户端的 `--rollout-root`（或被它包含）。否则客户端退回手动标注。`accepts_sessions` 在 `starting` 以及 `stopped`/`error` 时为假；`gpu_wait`（有活在等模型：闸门关闭、vLLM 正在启动或在睡眠）算可用。 `gpu.free_mib` 是最近一次 `nvidia-smi` 的读数，**只在不到 30 秒内才给出**，否则为 `null`（睡眠中的 vLLM 有意不去探测，睡下之前的读数，例如 2254 MiB，不是现在的空闲显存）；`gpu.free_mib_at` 是读数的时间。`gpu.idle_since` 是 vLLM 开始闲置的时间（有活、正在载入或本就该常驻时为 `null`），`gpu.prewarm` 说明它是否以预热方式启动；`levi live doctor` 会读这两个字段。`attention` 在服务放弃启动 vLLM、需要人（`levi live resume`）时设置，此时标注暂停，但不改变 `accepts_sessions` 和 `state`。**`labelling_paused`** 为 `null`，或在“没有标注、且原因不会自己消失”时为 `{code, reason, since}`：`vllm_failed`（放弃启动 vLLM，`levi live resume`）、`vllm_error`（启动失败、正在退避）、`insufficient_vram`（空闲显存连最短上下文也装不下）、`policy_large`（策略服务器占用超过 `gpu.policy_budget_mib`：改用 `.22`；立即报告，按服务器的显存判断，不管闸门或评测在做什么，是一次稳定的暂停）、`unknown_client`（没有会话为之作证的策略服务器让闸门关了 `gpu.unknown_client_pause_s` 以上），以及持续 `gpu.blocked_pause_s` 之后的 `vram`（睡眠的 vLLM 唤不醒，或启动没有足够显存）、`lock`（别的 agent 持有 GPU 锁）、`external_busy`（`vllm.port` 上有别人的 vLLM）和 `gpu_not_free`（vLLM 已停但它的进程仍占着显存，所以锁保留）。策略推理时闸门关闭、策略服务器还在加载，都是正常等待，不设置它；它也不改变 `accepts_sessions`。`loop_at` 是主循环上次 tick 的时间（`updated_at` 来自单独的心跳线程，循环卡住时它仍然新鲜；`levi live doctor` 在 `loop_at` 超过 5 分钟时告警）。`frontend` 说明服务启动的页面/核心 API 是否真的起来（`levi live start --daemon` 失败时打印原因并以退出码 2 返回，标注继续运行）。新增字段：数据集行的 `stuck`、`source_changed`、`review_runs_open`、`awaiting`，会话的 `root`、`reset_wait_s`、`waiting_reset_since`、`label_mode`（`dual_label`、`unattended` 或 null），顶层的 `pipeline`（`temporal`、`anchored`、`anchored_spec`），闸门代码 `episode_imminent`，决策代码 `evaluation_active`、`standby_settling`、`prewarm_waiting_for_policy`、`gpu_not_free`。完整 JSON 形状见 [LIVE.md](LIVE.md#status-file-interface-c4)。
+`~/.levi-live/status.json`，每 `heartbeat_s`（4 秒，≤ 5 秒）原子重写。评测客户端只有在**全部**满足时才认为服务可用：`schema` 以 `levi.live.status.` 开头；`updated_at`（纪元秒）不到 15 秒；`pid` 存活；`accepts_sessions` 为真；`state` 是 `idle active annotating gpu_wait` 之一；`watch_roots`（绝对路径）中有一个等于或包含客户端的 `--rollout-root`（或被它包含）。否则客户端退回手动标注。`accepts_sessions` 在 `starting` 以及 `stopped`/`error` 时为假；`gpu_wait`（有活在等模型：闸门关闭、vLLM 正在启动或在睡眠）算可用。 `gpu.free_mib` 是最近一次 `nvidia-smi` 的读数，**只在不到 30 秒内才给出**，否则为 `null`（睡眠中的 vLLM 有意不去探测，睡下之前的读数，例如 2254 MiB，不是现在的空闲显存）；`gpu.free_mib_at` 是读数的时间。`gpu.idle_since` 是 vLLM 开始闲置的时间（有活、正在载入或本就该常驻时为 `null`），`gpu.prewarm` 说明它是否以预热方式启动；`levi live doctor` 会读这两个字段。`attention` 在服务放弃启动 vLLM、需要人（`levi live resume`）时设置，此时标注暂停，但不改变 `accepts_sessions` 和 `state`。**`labelling_paused`** 为 `null`，或在“没有标注、且原因不会自己消失”时为 `{code, reason, since}`：`vllm_failed`（放弃启动 vLLM，`levi live resume`）、`vllm_error`（启动失败、正在退避）、`insufficient_vram`（空闲显存连最短上下文也装不下）、`policy_large`（策略服务器占用超过 `gpu.policy_budget_mib`：改用 `.22`；立即报告，按服务器的显存判断，不管闸门或评测在做什么，是一次稳定的暂停）、`unknown_client`（没有会话为之作证的策略服务器让闸门关了 `gpu.unknown_client_pause_s` 以上），以及持续 `gpu.blocked_pause_s` 之后的 `vram`（睡眠的 vLLM 唤不醒，或启动没有足够显存）、`lock`（别的 agent 持有 GPU 锁）、`external_busy`（`vllm.port` 上有别人的 vLLM）和 `gpu_not_free`（vLLM 已停但它的进程仍占着显存，所以锁保留）。策略推理时闸门关闭、策略服务器还在加载，都是正常等待，不设置它；它也不改变 `accepts_sessions`。`loop_at` 是主循环上次 tick 的时间（`updated_at` 来自单独的心跳线程，循环卡住时它仍然新鲜；`levi live doctor` 在 `loop_at` 超过 5 分钟时告警）。`frontend` 说明服务启动的页面/核心 API 是否真的起来（`levi live start --daemon` 失败时打印原因并以退出码 2 返回，标注继续运行）。新增字段：数据集行的 `stuck`、`source_changed`、`review_runs_open`、`awaiting`，会话的 `root`、`reset_wait_s`、`waiting_reset_since`、`label_mode`（`dual_label`、`unattended` 或 null），顶层的 `pipeline`（`temporal`、`anchored`、`anchored_spec`），闸门代码 `episode_imminent`，决策代码 `evaluation_active`、`standby_settling`、`prewarm_waiting_for_policy`、`gpu_not_free`，以及顶层的 `online_judge`（`null`，或启用在线判定时的 `{url, spec, spec_version, ready}`，见[在线判定](#在线判定接口-c5)；只是新增，其他字段不变，所以上面客户端的可用性检查不受影响）。完整 JSON 形状见 [LIVE.md](LIVE.md#status-file-interface-c4)。
 
 ## 服务读取的机器人侧接口
 

@@ -132,10 +132,12 @@ A finished demo is hard-linked file by file into `<workspace>/captures/<name>/.p
 | | `max_attempts` | 2 | attempts per episode before it is left alone |
 | | `cleanup` | true | drop finished runs' inputs and evidence |
 | | `keep_review_runs` | 10 | open release-review runs per dataset that keep their frozen input (committing one needs it); older ones are cancelled and cleaned |
+| | `background` | true | false: the background labelling is off (no worker, no time segments, no review); rollouts are still mirrored with their operator label and online result, and the statistics and the page work as before. See [Online judgement](#online-judgement-interface-c5) |
 | `resources` | `nice`, `ionice_class`, `threads`, `view_workers` | 19, 3 (idle), 2, 1 | see "Keeping it light" |
 | | `worker_idle_exit_s` | 5 | accepted in `live.toml` but not read by any code yet: a worker exits when its batch is done, not after an idle wait |
 | | `log_max_mb`, `log_backups`, `cache_max_gib`, `status_max_datasets` | 5, 3, 20, 64 | bounds |
 | | `report_keep` | 20 | session reports kept in `live/reports/`; the oldest are deleted when a new one is written |
+| `online` | `enabled`, `host`, `port`, `spec`, `timeout_s`, `max_body_mb` | false, `127.0.0.1`, 7882, `generic-final.v1.json`, 15, 8 | the online judgement's endpoint (interface C5); see [Online judgement](#online-judgement-interface-c5) |
 
 The service sets `LEVI_DROID_SAMPLE=off` (no sample download), `LEVI_GPU_SHARING=allow` (its own policy replaces LEVI's off-peak guard, see below), `LEVI_SYNC_DISCOVER=off` and `LEVI_SYNC_INTERVAL=30` for the live workspace.
 
@@ -306,7 +308,7 @@ prewarm = true
 
 | | Operator label (ground truth) | Agent label (automatic, unreviewed) |
 | --- | --- | --- |
-| Written by | the evaluation client, at the key press | the live worker, after the release review |
+| Written by | the evaluation client, at the key press | the live worker, after the release review; or the [online judgement](#online-judgement-interface-c5), which the client relays (`eval.agent_label`) |
 | Source | the rollout's `metadata.json`: `eval.operator_outcome` (never changed afterwards), `eval.outcome`, `eval.verdict_by = "operator"`, `eval.label_mode = "dual"` | the anchored review record (`anchored.get`) |
 | In the dataset state | `demos[demo].operator_label` = `{outcome, by, source}` (rejected demos too) | `demos[demo].verdict` |
 | In `live/stats.jsonl` | `operator_label` = `{outcome, by}` | `result.verdict` |
@@ -319,6 +321,120 @@ prewarm = true
 **Agreement.** `stats.agreement` compares the two over the newest record of each episode. Only episodes the operator labelled success or failure count (`pairs`). The agent label is `success`, `failure`, `undecided` (the verdict says so) or `none` (no verdict yet). `agree` is the share of episodes where the agent said success or failure (`judged`) and matched; `rate_undecided_as_failure` counts an undecided verdict as a failure. `false_success` is the agent's success where the operator said failure, over the operator's failures the agent judged or left undecided; `missed_success` is the agent's failure or undecided where the operator said success. Both carry a Wilson 95 % interval. `none` is missing coverage, never agreement. The figures are in the statistics summary (`summary.agreement`), the per-session rows (`pairs`, `agree`, `judged`, `false_success`, `missed_success`, `operator_success`), the per-episode rows and CSV (`operator`, `agreement`: `yes`, `no`, `undecided`, `no_agent`), the dataset view (over every episode, not only the 200 listed), the page, and an "Agent vs operator" block in the reports, which appears only when some episode has an operator label. When the labels say how the episode ended (`ended_by`), `agreement.by_ended_by` repeats these figures (`pairs`, `matrix`, `judged`, `agree`, `false_success`, `missed_success`, ...) for `budget` and `operator_key` apart; labels without `ended_by` (older episodes, other sources) are counted in the total and in a third group `unknown`, never an error. The key is absent when no label has `ended_by`, the per-episode rows and CSV carry `ended_by`, and a report adds a "How the episode ended" table only when two or more groups exist. The operator label in the dataset state, in `stats.jsonl` and in the dataset view gets `ended_by` the same way (read from `eval.ended_by`, never from `success_flag`, and never shown to the model).
 
 **Limits.** Version 3 is a candidate checked on one task (an object into a plate, one robot, one model's two policies, 92 episodes whose truth an agent checked from the video and no person confirmed). It is weaker than version 2 against false successes: nothing checks that the last placement succeeded. With the default early key an episode is ended as soon as the operator judges it, so it is shorter than an unattended one, and the agreement over all episodes does not carry over to unattended use as it stands. Only the episodes with `ended_by = "budget"` (they ran the whole budget) give the agent the same input as an unattended run, so their agreement carries over; read the `operator_key` episodes apart (`summary.agreement.by_ended_by`). An operator who judges before the gripper has opened leaves the release review (v1, v2, v3) no opening to look at, and it calls the episode a failure; for such runs use the [final-state judgement](#final-state-judgement-candidate). The operator's blindness to `/live` is a rule for the operator, not enforced by the page. A training manifest still ranks a candidate anchored label above the robot's own flag when `--allow-candidate-anchored` is given (see "The automatic approver").
+
+## Online judgement (interface C5)
+
+The background review labels an episode some seconds after it ends, and during an evaluation often only after the session ends. The **online judgement** answers while the evaluation runs: at the end of an episode the evaluation client sends the last seconds of its side and wrist cameras to the live service, the service asks the local model once with the final-state spec (`generic-final.v1.json`, see [Final-state judgement](#final-state-judgement-candidate)) and returns a structured result, and the client writes that result into the rollout's `metadata.json` as `eval.agent_label`. Off by default.
+
+**Where it runs.** A small HTTP endpoint in the supervisor (`levi live start`), the process that owns the GPU gate and vLLM's start, sleep and wake; `levi live once` does not start it. It listens on a loopback address only (`127.0.0.1:7882` by default) and does one thing: judge one episode with the configured spec. It takes no prompt and no other question. The code is `levi/live/online.py`.
+
+**The same logic as the background review.** The question is the spec's, with the task instruction quoted the way the background review quotes it (`generic.anchored_spec`: one line, at most 600 characters). The model request goes through the same provider path as the worker's (`LocalProvider.ask`, the provider profile the worker builds, guided decoding against the spec's answer schema, the spec's `max_output_tokens`, the server's greedy decoding). The answer is checked with `anchored.validate_answer`, read with `anchored.judge` (the spec's `valid_when`) and turned into the outcome with `anchored.outcome` and `anchored.undecided` under the rule `final_state`. Nothing is re-implemented.
+
+### Settings
+
+```toml
+[online]
+enabled = true                  # default false
+host = "127.0.0.1"              # loopback only; anything else is refused
+port = 7882
+spec = "generic-final.v1.json"  # a spec of levi/live/specs with episode.rule final_state
+timeout_s = 15.0                # the answer must arrive this many seconds after the request did
+max_body_mb = 8.0               # a larger request body is refused (413)
+
+[pipeline]
+background = false              # optional: no background labelling (below)
+
+[vllm]
+prewarm = true                  # needed: vLLM is never cold-started for a judgement
+```
+
+| Table | Key | Default | Meaning |
+| --- | --- | --- | --- |
+| `online` | `enabled` | false | start the endpoint with the service |
+| | `host`, `port` | `127.0.0.1`, 7882 | a loopback address (`127.0.0.1`, `::1`; a host name such as `localhost` is refused); the port must not be 5000, 8000, 7860, 7861, a policy port, `service.ui_port`, `service.core_port` or `vllm.port` (checked when enabled) |
+| | `spec` | `generic-final.v1.json` | a file of `levi/live/specs` whose `episode.rule` is `final_state`, with no start check or vetoes, every view's offsets in seconds and a `{task}` placeholder |
+| | `timeout_s` | 15 | 1-120 s, counted from the moment the request arrives (a wake included) |
+| | `max_body_mb` | 8 | 0.5-64 MiB |
+| `pipeline` | `background` | true | false: no worker and no background model request (below) |
+
+The settings are read at start: change `live.toml`, then `levi live stop` and `levi live start` (the live service, not the product LEVI). With `enabled = true` the supervisor loads the answer-checking code (pydantic, numpy, the model client) at start: about 26 MiB more resident memory, measured on this machine.
+
+**Background labelling off (`pipeline.background = false`).** The supervisor starts no worker and makes no model request of its own: no time segments, no release or final-state review. It still mirrors every finished rollout with its operator label and the online result the client relayed, writes the status file, answers the page and the API, and writes one `live/stats.jsonl` record per episode, so the page, `stats.agreement`, the session reports and `levi live report` keep working and the online result can be compared with the operator label. A mirrored episode is marked `done` at once: with an online verdict when `eval.agent_label.status` is `ok`, else with none (`no_agent`; its `reason` says why). `accepts_sessions` stays true. `temporal`, `anchored`, `anchored_spec`, `anchored_min_valid`, `guideline` and `vocabulary` are not used and not checked then (a combination that is refused with the background on, such as `temporal = false` with `anchored = false`, is accepted); they stay as they are, so switching back needs no other edit. Episodes mirrored before the switch that still wait for labelling keep waiting until the background is on again; episodes taken in while it was off are not labelled later. `vllm.prewarm` still starts vLLM (the online judgement needs it). With the background on (the default) everything runs as before, and a background review of the same episode replaces the online verdict in `verdict` (the online one stays under `online.verdict` in the dataset state).
+
+### Interface C5
+
+The status file (interface C4) carries `online_judge`: `null` when the endpoint is off, else
+
+```json
+{"url": "http://127.0.0.1:7882", "spec": "generic-final", "spec_version": 1, "ready": true}
+```
+
+`ready` is true when the endpoint listens and the service's vLLM is up or asleep (no cold start needed), or, in `manual` mode or with `adopt_external`, when it answered within the last minute. It says nothing about the gate: a ready endpoint still answers `unavailable` while the policy infers. The client's usability check of the status file is unchanged.
+
+**`GET /v1/judge/spec`** says what to send (from the spec file, nothing hard-coded):
+
+```json
+{"schema": "levi.online.judge.spec.v1", "spec_id": "generic-final", "spec_version": 1,
+ "views": [{"role": "side", "offsets_seconds": [-3.0, -2.0, -1.2, -0.6, -0.2, 0.0]},
+           {"role": "wrist", "offsets_seconds": [-2.0, -1.0, -0.4, 0.0]}],
+ "image": {"format": "jpeg", "max_side": 1280}, "timeout_s": 15.0}
+```
+
+An offset is seconds from the episode's last frame. `max_side` is advice: send the camera's own frames as JPEG (the background review shows native frames), scaled down only when the longer side is above it. An episode shorter than an offset shows its first frame there, as the background review does.
+
+**`POST /v1/judge`**, `Content-Type: application/json`, with a `Content-Length` and no `Origin` header (a browser page is refused):
+
+```json
+{"schema": "levi.online.judge.request.v1",
+ "task": "<the task instruction>",
+ "episode": {"group": "...", "task_folder": "...", "demo": "demo_0003", "run_id": "...", "steps": 412, "fps": 15.0},
+ "images": [{"role": "side", "offset_s": -3.0, "step": 367, "jpeg_b64": "<base64 JPEG>"}, ...]}
+```
+
+- `schema`, `task` (1-2000 characters) and `images` are required; `episode` and each of its keys are optional and are used for the log only. An image's `step` is optional (an integer or null).
+- **Strict.** A key the contract does not define, at any level, is refused with 422, and a key that names operator or evaluation data (`operator...`, `outcome`, `success`, `label`, `eval`, `verdict`...) says so in the reason. A key given twice, NaN or Infinity are refused too.
+- One image per `(role, offset)` of the spec, matched within 1 ms; the model receives them in the spec's order (its views, then each view's offsets), whatever order the request lists them in. A missing image, a second one for the same slot, an unknown role, an offset the spec does not name, text that is not base64 or bytes that are not a JPEG are a 422 that names what is wrong.
+- A body over `max_body_mb` is 413 (it is not read); no `Content-Length` 411, `Content-Type` other than JSON 415, a `Host` that is not a loopback address of the endpoint or an `Origin` header 403, a body that is not JSON 400.
+
+**The answer** (`200` for `ok`, `unavailable` and `error`; the same body with `status: "error"` and the HTTP code for a refused request):
+
+```json
+{"schema": "levi.online.judge.result.v1",
+ "status": "ok", "reason": null,
+ "outcome": "success", "undecided": false, "reading": "supported",
+ "answer": {"object_state": "resting_at_destination", "stable": "yes"},
+ "checks": [{"field": "object_state", "value": "resting_at_destination", "result": "supported"},
+            {"field": "stable", "value": "yes", "result": "supported"}],
+ "spec": {"id": "generic-final", "version": 1}, "model": "qwen3.8-27b",
+ "tokens": 4312, "prompt_tokens": 4290, "elapsed_s": 2.41, "request_id": "9f0c3b6a1d2e4f50"}
+```
+
+- `outcome` and `undecided` follow the rule `final_state`: success when the object rests at the destination and is stable; failure on any definite other answer; an `unclear` answer that no definite failing answer outweighs is a failure with `undecided: true`. `reading` is the spec's `valid_when` read over the answer (`supported`, `contradicted`, `unknown`), `checks` each condition. `outcome` and `reading` are null unless `status` is `ok`.
+- `tokens` and `prompt_tokens` are what the server reported (null when it reported nothing); `elapsed_s` is from the request's arrival.
+- `reason` is null for `ok`, else `<code>: <words>`. **`unavailable`** (answered at once, under 1 s, nothing sent to the model): `busy` (another online judgement is in progress; one at a time), `gate_closed` (the policy infers or the next episode is due: `policy_inferring`, `episode_imminent`, `unknown_client`), `cold_start_needed` (vLLM is not running: it is never cold-started for a judgement), `vllm_starting`, `no_room` (vLLM is asleep and the GPU rules do not let it wake now), `wake_failed`, `vllm_failed` (the service gave up starting vLLM), `service_busy` (the supervisor is starting, stopping or putting vLLM to sleep), `shutting_down`; and, cut while the model worked, `gate_closed ... (the request was cut)`, `vllm_sleeping`, `vllm_stopping`. **`error`**: `timeout` (no answer within `timeout_s`; the request is cut), `model_error` (the server failed or refused), `invalid_answer` (the answer is not one of the spec's values), `internal_error`, and `invalid_request` for a refused request.
+
+**When the model may answer.** The supervisor reads the session files at the moment the request arrives (the tick decides the gate at most once a second) and admits it only when the gate is open: no session is `running`, no episode is due within `gpu.lead_s` (`episode_imminent`), and no policy server is up that no session vouches for. So the client asks after it has left `running` (homing, or waiting for the reset or the operator's label). An awake vLLM answers; a sleeping one is woken (about 0.75 s, waited for at most 5 s) only under the rules a batch's wake follows: an open gate, free VRAM for the wake (`gpu.wake_margin_mib`), no policy server over `gpu.policy_budget_mib`. vLLM is never cold-started for a judgement, so start the service with `--prewarm` before the policy server. While the model works the gate is read every 0.25 s: when it closes (the next episode started) the request is cut at once, as the worker's are. Admission waits at most 0.5 s for the supervisor's own GPU work. vLLM is not put to sleep for idleness while an answer is in progress; it is still put to sleep, or stopped, when its memory is wanted, and that cuts the answer (`vllm_sleeping`). With the background on, the worker may be sending requests at the same time; vLLM serves both (`max_num_seqs` 2), which can slow the answer.
+
+**What the client writes** (the policy repository's client implements this side). `eval.agent_label` in the rollout's `metadata.json`, before `.complete` (like the operator label: LEVI reads the metadata once, when it mirrors the rollout):
+
+- the answer above, plus `"source": "online"`, `requested_at` and `received_at` (epoch seconds; an ISO time is read too), `frames: [{role, offset_s, step}]` and `timing`: `during_run` or `after_budget`;
+- or, without an answer, `{"source": "online", "status": "unavailable" | "error" | "timeout" | "skipped", "reason": "..."}`.
+
+The mirror (`criteria.agent_label`) turns a well-formed `ok` into the episode's automatic verdict in the dataset state: `verdict = {outcome, events: 1, valid_events: 1 or 0, undecided, rule: "final_state", min_valid: 1, basis: {final_reading}, spec, spec_version, review: "auto", evaluated: false, at: received_at, source: "online"}`, the shape of the worker's verdicts, so the page, `stats.agreement` and the reports read it unchanged. Any other status, or an `ok` whose fields do not hold together (an outcome other than success or failure, an undecided success), gives no verdict: the episode counts as `no_agent`. The whole relayed label is kept under `online` (`status`, `reason`, `timing`, `request_id`, `usage`, `verdict`). The statistics record of such an episode carries `result.verdict.source: "online"`, the judgement's cost as one `review` request, and `result.online` (`status`, `reason`, `timing`); `timeline.to_verdict_s` can be negative, since the answer usually arrives before the client marks the rollout finished. The API's episode rows carry `verdict.source`.
+
+**The log.** Every `POST /v1/judge` adds one line to `<workspace>/live/online.jsonl` (schema `levi.live.online.v1`, rotated like the other logs): `at`, `time`, `request_id`, `http`, `episode` (the identifiers the request gave), `status`, `reason`, `outcome`, `undecided`, `reading`, `tokens`, `prompt_tokens`, `elapsed_s`, `images`, `spec`, `model`. No image and no task text. The images live in `<workspace>/live/online-tmp/<request_id>/` only while the model reads them.
+
+### Independence
+
+The model sees the images and the spec's question with the task instruction, nothing else: the request cannot carry an operator label or any other evaluation data (refused with 422), `episode` goes only to the log, and the test suite checks that the request sent to the model server holds no episode identifier. The client shows the model's result only after the operator has given the label, so the operator label stays the ground truth; that order is the client's to keep, the service does not see it. Nothing is written back to the rollout by the service.
+
+### Risks and limits
+
+- **GPU memory and the gate.** Beside a resident policy server at `.22` there are only about 1.3-1.5 GB to spare (see GPU management). A wake and a request in the gap between episodes follow the same rules as the background labelling, but a wake's memory peak beside a resident policy server, and the effect on the policy's inference latency of a request that starts right after an episode, have **not** been measured with the real model and GPU. A request in flight is cut when the gate closes.
+- **Accuracy is not evaluated.** The final-state spec has no measured accuracy on any data; read every online verdict as automatic and unreviewed, and compare it with the operator label (`stats.agreement`, by `ended_by`) before trusting it.
+- **Time.** The wake (about 0.75 s) and one request (a 27B model on 10 images: seconds, not measured here) must fit before the next episode starts; a `reset_wait_s` that is too short ends in `gate_closed ... (the request was cut)`.
+- The endpoint has no authentication beyond the loopback address, the `Host` check and the refusal of browser requests: any process on this machine can ask it to judge (it cannot do anything else).
+- A port already in use keeps the endpoint from starting: the event log and `last_error` say so, `online_judge.ready` stays false, and the client gets a refused connection.
 
 ## Keeping it light
 
@@ -402,6 +518,7 @@ A person can take an episode out of a live dataset from the live page (a mishap,
 | `<workspace>/live/worker.json`, `gate.json`, `vllm.json`, `service.json` | worker progress, the gate, the vLLM this service started, first-start time |
 | `<workspace>/live/gate.jsonl` | every change of the gate (rotates; see "History and statistics") |
 | `<workspace>/live/stats.jsonl` | one record per labelled demo (rotates; see "History and statistics") |
+| `<workspace>/live/online.jsonl` | one line per online judgement request, no images (rotates; see [Online judgement](#online-judgement-interface-c5)); `live/online-tmp/` holds a request's images while the model reads them |
 | `<workspace>/live/reports/` | one report per finished evaluation session: `<dataset>__<session>.md`, `.zh-CN.md`, `.json` (see "Statistics and reports") |
 | `<workspace>/live/logs/` | `live.log`, `worker.log`, `ui.log`, `vllm-launch.log` (rotated) |
 | `<workspace>/captures/<name>/` | the mirrored capture LEVI registers |
@@ -477,7 +594,7 @@ The quantitative record of the labelling: how long each stage takes after an epi
 
 ## Status file (interface C4)
 
-`~/.levi-live/status.json`, rewritten atomically every `heartbeat_s` (4 s; ≤ 5 s). The evaluation client treats the service as usable only when **all** of this holds: `schema` starts with `levi.live.status.`; `updated_at` (epoch seconds) is less than 15 s old; `pid` is alive; `accepts_sessions` is true; `state` is one of `idle active annotating gpu_wait`; and one of `watch_roots` (absolute paths) equals or contains the client's `--rollout-root` (or the root contains it). Otherwise the client falls back to manual labelling. `accepts_sessions` is false while `starting` and after `stopped`/`error`. `attention` is set (and labelling paused) when the service gave up starting vLLM and needs a person (`levi live resume`); it does not change `accepts_sessions` or `state`. **`labelling_paused`** is `null`, or `{code, reason, since}` when nothing is being labelled for a reason that does not pass by itself: `vllm_failed` (gave up starting vLLM; `levi live resume`), `vllm_error` (a start failed and it is backing off), `insufficient_vram` (the free memory does not serve even the shortest context), `policy_large` (the policy server holds more than `gpu.policy_budget_mib`: use `.22`; at once, from the server's memory whatever the gate or the evaluation is doing, as one steady pause), `unknown_client` (a policy server no session vouches for has kept the gate shut for `gpu.unknown_client_pause_s`), and, after `gpu.blocked_pause_s`, `vram` (a sleeping vLLM cannot wake, or a start has no room), `lock` (another agent holds the GPU lock) `external_busy` (somebody else's vLLM is on `vllm.port`) and `gpu_not_free` (vLLM has stopped but its processes still hold GPU memory, so the lock is kept). The gate closing while the policy infers and a settling policy server are ordinary waits and do not set it. It does not change `accepts_sessions`. `loop_at` is when the main loop last ticked (`updated_at` comes from a separate heartbeat thread and stays fresh if the loop is stuck; `levi live doctor` warns when `loop_at` is over 5 minutes old). `frontend` says whether the page / core API the service starts really came up (`levi live start --daemon` prints a failure and exits 2 while labelling keeps running). `gpu_wait` (work waiting for the model: the gate is closed, vLLM is starting or asleep) counts as usable. `gpu.free_mib` is the last `nvidia-smi` reading **only while it is less than 30 s old**, otherwise `null` (a sleeping vLLM is not probed on purpose, and a reading from before it slept, for example 2254 MiB, is not what is free now); `gpu.free_mib_at` is when it was read. `gpu.idle_since` is when vLLM began to be idle (`null` while it works, loads, or is meant to stay), and `gpu.prewarm` says whether it was started prewarmed; `levi live doctor` reads both.
+`~/.levi-live/status.json`, rewritten atomically every `heartbeat_s` (4 s; ≤ 5 s). The evaluation client treats the service as usable only when **all** of this holds: `schema` starts with `levi.live.status.`; `updated_at` (epoch seconds) is less than 15 s old; `pid` is alive; `accepts_sessions` is true; `state` is one of `idle active annotating gpu_wait`; and one of `watch_roots` (absolute paths) equals or contains the client's `--rollout-root` (or the root contains it). Otherwise the client falls back to manual labelling. `accepts_sessions` is false while `starting` and after `stopped`/`error`. `attention` is set (and labelling paused) when the service gave up starting vLLM and needs a person (`levi live resume`); it does not change `accepts_sessions` or `state`. **`labelling_paused`** is `null`, or `{code, reason, since}` when nothing is being labelled for a reason that does not pass by itself: `vllm_failed` (gave up starting vLLM; `levi live resume`), `vllm_error` (a start failed and it is backing off), `insufficient_vram` (the free memory does not serve even the shortest context), `policy_large` (the policy server holds more than `gpu.policy_budget_mib`: use `.22`; at once, from the server's memory whatever the gate or the evaluation is doing, as one steady pause), `unknown_client` (a policy server no session vouches for has kept the gate shut for `gpu.unknown_client_pause_s`), and, after `gpu.blocked_pause_s`, `vram` (a sleeping vLLM cannot wake, or a start has no room), `lock` (another agent holds the GPU lock) `external_busy` (somebody else's vLLM is on `vllm.port`) and `gpu_not_free` (vLLM has stopped but its processes still hold GPU memory, so the lock is kept). The gate closing while the policy infers and a settling policy server are ordinary waits and do not set it. It does not change `accepts_sessions`. `loop_at` is when the main loop last ticked (`updated_at` comes from a separate heartbeat thread and stays fresh if the loop is stuck; `levi live doctor` warns when `loop_at` is over 5 minutes old). `frontend` says whether the page / core API the service starts really came up (`levi live start --daemon` prints a failure and exits 2 while labelling keeps running). `gpu_wait` (work waiting for the model: the gate is closed, vLLM is starting or asleep) counts as usable. `gpu.free_mib` is the last `nvidia-smi` reading **only while it is less than 30 s old**, otherwise `null` (a sleeping vLLM is not probed on purpose, and a reading from before it slept, for example 2254 MiB, is not what is free now); `gpu.free_mib_at` is when it was read. `gpu.idle_since` is when vLLM began to be idle (`null` while it works, loads, or is meant to stay), and `gpu.prewarm` says whether it was started prewarmed; `levi live doctor` reads both. `online_judge` is `null`, or `{url, spec, spec_version, ready}` when the online judgement is enabled ([Online judgement](#online-judgement-interface-c5)); it was added without changing any other field, so the client's usability check above is the same.
 
 ```json
 {
@@ -509,6 +626,7 @@ The quantitative record of the labelling: how long each stage takes after an epi
   "labelling_paused": null,
   "loop_at": 1790000400.0,
   "frontend": {"state": "starting|ok|failed", "error": "", "attempts": 0, "ui": true, "core_port": 7881},
+  "online_judge": null,
   "events": [{"time": 1790000000.0, "level": "info|error", "text": "…"}],
   "last_error": "",
   "resources": {"rss_mb": 27.1, "threads": 1, "cpu_percent": 0.0}
