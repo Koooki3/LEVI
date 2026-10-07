@@ -40,6 +40,9 @@ def cfg(tmp_path, **online_over):
     c.watch.settle_s = 0.0
     c.gpu.mode = "manual"
     c.gpu.lock_file = ""
+    # Never the real model server's port: the status file asks it in manual
+    # mode, and the test guard refuses a connection to it.
+    c.vllm.port = free_port()
     c.online.enabled = True
     c.online.port = free_port()
     for key, value in online_over.items():
@@ -760,7 +763,8 @@ def test_the_status_file_names_the_endpoint_and_the_client_check_still_holds(
             "url": f"http://127.0.0.1:{c.online.port}",
             "spec": "generic-final",
             "spec_version": 1,
-            "ready": False,  # manual mode, no model server seen
+            # Manual mode and nothing answers on vllm.port: not ready.
+            "ready": False,
         }
         assert client_usable(status, tmp_path / "rollouts")
     finally:
@@ -1210,3 +1214,54 @@ def test_the_supervisor_says_pending_only_when_no_session_is_running(
         assert (ok, code) == (False, "gate_closed") and "policy_inferring" in why
     finally:
         ctl.shutdown()
+
+
+def test_an_external_vllm_that_answers_makes_the_endpoint_ready_before_any_judgement(
+    tmp_path,
+):
+    """manual mode (or adopt_external): ``ready`` comes from a health check of
+    vllm.port, not from an earlier judgement (the client looks once, at the
+    start of the run)."""
+    server, _fake, port = fakevlm.serve(0)
+    try:
+        c = cfg(tmp_path)
+        c.vllm.port = port
+        ctl = controller.Controller(c, log=lambda *a: None)
+        try:
+            assert ctl.start_online()
+            assert ctl.status()["online_judge"]["ready"] is True
+            # The check is cached a few seconds, then asked again.
+            server.shutdown()
+            server.server_close()
+            assert ctl.status()["online_judge"]["ready"] is True
+            ctl._online_external_at = 0.0
+            assert ctl.status()["online_judge"]["ready"] is False
+            # Timeshare without adopt_external: a vLLM it did not start is
+            # never this service's model.
+            c.gpu.mode = "timeshare"
+            ctl._online_external_at = 0.0
+            assert ctl.status()["online_judge"]["ready"] is False
+        finally:
+            ctl.shutdown()
+    finally:
+        server.shutdown()
+
+
+def test_a_cut_asked_before_the_request_is_sent_is_not_lost(tmp_path, monkeypatch):
+    """The supervisor may put vLLM to sleep while the images are being
+    written: that cut stops the request before it is sent."""
+    ask = Ask()
+    gpu = Gpu()
+    judge = judge_with(cfg(tmp_path), gpu, ask)
+    real = online.generic.anchored_spec
+
+    def cut_meanwhile(*args, **kwargs):
+        assert judge.abort("vllm_sleeping: free VRAM fell to 300 MiB")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(online.generic, "anchored_spec", cut_meanwhile)
+    code, body = post(judge, request())
+    assert code == 200 and body["status"] == "unavailable"
+    assert body["reason"].startswith("vllm_sleeping")
+    assert ask.calls == [] and gpu.done == 1
+    assert not list((judge.config.live_dir / online.TMP_DIR).glob("*/*.jpg"))

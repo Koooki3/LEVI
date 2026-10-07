@@ -539,6 +539,12 @@ class Judge:
 
         # The spec's own question with the instruction quoted as the
         # background review quotes it (``generic.anchored_spec``).
+        owner = f"live-online:{request_id}"
+        # Registered before anything else: a cut the supervisor asks for from
+        # here on (``abort``) is seen, by the loop below and before the
+        # request is sent.
+        self._stop_reason = None
+        self._owner = owner
         spec = anchored.AnchoredSpec.model_validate(
             generic.anchored_spec(request.task, self.config.online.spec)
         )
@@ -549,22 +555,21 @@ class Judge:
             name = f"{n:02d}-{role}.jpg"
             (folder / name).write_bytes(raw)
             names.append(name)
-        owner = f"live-online:{request_id}"
         box: dict = {}
         done = threading.Event()
 
         def work():
             try:
                 with transport.requests_of(owner):
-                    box["raw"], box["usage"] = self._ask(spec, folder, names)
+                    # ``requests_of`` forgets a cut made before it: look again.
+                    if self._stop_reason is None:
+                        box["raw"], box["usage"] = self._ask(spec, folder, names)
             except BaseException as exc:  # noqa: BLE001 - reported below
                 box["error"] = exc
             finally:
                 shutil.rmtree(folder, ignore_errors=True)
                 done.set()
 
-        self._stop_reason = None
-        self._owner = owner
         thread = threading.Thread(target=work, name="live-online-ask", daemon=True)
         thread.start()
         deadline = began + self.config.online.timeout_s
