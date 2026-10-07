@@ -689,7 +689,9 @@ def details(job_id: str, limit: int = 500) -> dict:
         # A warning lists its episodes, or only counts them (an int).
         episodes = w.get("episodes")
         listed = [str(e) for e in episodes] if isinstance(episodes, list) else []
-        total = len(listed) if isinstance(episodes, list) else _count(episodes)
+        # The exporter may list only the first episodes and say how many in
+        # ``count``: the larger number is the truth.
+        total = max(len(listed), _count(episodes), _count(w.get("count")))
         warnings.append(
             {**w, "episodes": listed[:WARNING_EPISODES], "episodes_total": total}
         )

@@ -1638,6 +1638,7 @@
   "The job details could not be read": "无法读取作业详情",
   "Episodes left out by data checks": "被数据检查剔除的片段",
   "These episodes are not in the export; the export itself is complete.": "这些片段没有进入导出，导出本身是完整的。",
+  "An episode can fail more than one check.": "一个片段可能同时没通过几项检查。",
   "Every episode and its message": "逐个片段及其信息",
   "Episodes that failed to convert": "转换失败的片段",
   "Traceback": "错误回溯",

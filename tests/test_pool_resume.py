@@ -1114,6 +1114,7 @@ def test_a_warning_that_only_counts_its_episodes_does_not_break_the_details(rp, 
         warnings=[
             {"code": "gripper_unknown", "blocking": False, "episodes": 5},
             {"code": "retime_time_scale", "episodes": 3, "message": "slower"},
+            {"code": "copy_task_conflict", "episodes": ["/a/demo_1"], "count": 301},
             "a plain sentence",
             7,
         ],
@@ -1124,9 +1125,14 @@ def test_a_warning_that_only_counts_its_episodes_does_not_break_the_details(rp, 
     assert [(w.get("code"), w["episodes_total"], w["episodes"]) for w in warnings] == [
         ("gripper_unknown", 5, []),
         ("retime_time_scale", 3, []),
+        (
+            "copy_task_conflict",
+            301,
+            ["/a/demo_1"],
+        ),  # the exporter listed fewer than it counted
         (None, 0, []),
     ]
-    assert warnings[2]["message"] == "a plain sentence"
+    assert warnings[3]["message"] == "a plain sentence"
 
 
 def test_an_episode_written_twice_by_a_resumed_export_counts_once(rp, client):

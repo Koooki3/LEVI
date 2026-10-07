@@ -220,7 +220,8 @@ export function JobDetailsDialog({
               <p className="pg-pool-hint">
                 {t(
                   "These episodes are not in the export; the export itself is complete.",
-                )}
+                )}{" "}
+                {t("An episode can fail more than one check.")}
               </p>
               <ul className="pg-pool-detail-list">
                 {left.groups.map((g) => (

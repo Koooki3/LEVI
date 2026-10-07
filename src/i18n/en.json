@@ -1638,6 +1638,7 @@
   "The job details could not be read": "The job details could not be read",
   "Episodes left out by data checks": "Episodes left out by data checks",
   "These episodes are not in the export; the export itself is complete.": "These episodes are not in the export; the export itself is complete.",
+  "An episode can fail more than one check.": "An episode can fail more than one check.",
   "Every episode and its message": "Every episode and its message",
   "Episodes that failed to convert": "Episodes that failed to convert",
   "Traceback": "Traceback",
