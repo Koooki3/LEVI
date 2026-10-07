@@ -55,6 +55,8 @@ REPORT_EVERY_S = 30.0  # how often finished sessions are looked for
 GATE_HISTORY_SHOWN = 5  # gate transitions kept for the status file
 # A VRAM reading older than this is not shown as the free memory of now.
 FREE_FRESH_S = 30.0
+# How long the status file trusts one health check of an external vLLM.
+EXTERNAL_TTL_S = 10.0
 STATES_WITH_WORK = ("mirrored",)
 
 
@@ -233,6 +235,7 @@ class Controller:
         self._gpu_mutex = threading.RLock()
         self._online_busy = False
         self._online_external_at = 0.0
+        self._online_external_ok = False
         self.online = None
         self.online_spec = (
             online.spec_identity(config.online.spec) if config.online.enabled else None
@@ -902,7 +905,8 @@ class Controller:
                 return False, code, f"{gate.code}: {gate.reason}"
             if not self.vllm.mine():
                 if (mode == "manual" or c.vllm.adopt_external) and self.vllm.external():
-                    self._online_external_at = now
+                    self._online_external_at = time.time()
+                    self._online_external_ok = True
                     self._online_busy = True
                     return True, None, None
                 return (
@@ -983,6 +987,17 @@ class Controller:
         self._online_busy = False
         self.idle_since = None
 
+    def _external_ready(self, ttl=EXTERNAL_TTL_S) -> bool:
+        """Does a vLLM this service did not start answer on ``vllm.port``
+        (``manual`` mode, ``adopt_external``)? Asked at most every ``ttl``
+        seconds (a ``/health`` on the loopback port), only while the online
+        judgement is on; an admitted judgement refreshes it."""
+        now = time.time()
+        if now - self._online_external_at >= ttl:
+            self._online_external_ok = bool(self.vllm.external())
+            self._online_external_at = now
+        return self._online_external_ok
+
     def _online_status(self) -> dict | None:
         """``online_judge`` of the status file (interface C4): null when the
         online judgement is off."""
@@ -992,10 +1007,10 @@ class Controller:
         spec = self.online_spec or {}
         if self.vllm.mine():
             model = self.vllm.state in ("ready", "asleep")
+        elif c.effective_gpu_mode() == "manual" or c.vllm.adopt_external:
+            model = self._external_ready()
         else:
-            model = (
-                c.effective_gpu_mode() == "manual" or c.vllm.adopt_external
-            ) and time.time() - self._online_external_at < 60.0
+            model = False
         listening = self.online is not None and self.online.listening
         return {
             "url": online.url_of(c),
