@@ -311,6 +311,9 @@ def _demo_row(name, row):
                 "at",
             )
         }
+        # Where an automatic verdict came from when it is not the background
+        # review: ``online`` (the online judgement the client relayed).
+        | ({"source": verdict["source"]} if verdict.get("source") else {})
         if verdict
         else None,
         # The operator label (ground truth, from the rollout's metadata) and

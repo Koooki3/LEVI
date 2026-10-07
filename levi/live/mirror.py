@@ -756,6 +756,15 @@ def mirror_dataset(config, state: dict, names, *, now: float | None = None) -> d
                         "attempts": 0,
                         "copied": result.get("copied", 0),
                     }
+                    online = criteria.agent_label(meta)
+                    if online is not None:
+                        # The online judgement the client relayed: kept
+                        # whole under ``online`` and, when it answered, the
+                        # episode's automatic verdict (a background review
+                        # of the same episode replaces ``verdict`` later).
+                        value["demos"][demo]["online"] = online
+                        if online["verdict"] is not None:
+                            value["demos"][demo]["verdict"] = online["verdict"]
             elif result["status"] == "changed":
                 value["demos"][demo] = {
                     "state": "rejected",

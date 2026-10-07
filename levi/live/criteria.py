@@ -224,3 +224,124 @@ def operator_label(meta) -> dict | None:
     if outcome in ("unlabeled", "discarded"):
         return {"outcome": outcome, "by": by, "source": source, **extra}
     return None
+
+
+# What the evaluation client may write as ``eval.agent_label.status``: ``ok``
+# (the online judgement answered) or why there is no agent label.
+AGENT_STATUSES = ("ok", "unavailable", "error", "timeout", "skipped")
+READINGS = ("supported", "contradicted", "unknown")
+
+
+def _epoch(value):
+    """Epoch seconds from a number or an ISO time string, else None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str) and value.strip():
+        from .sessions import parse_time
+
+        return parse_time(value)
+    return None
+
+
+def _usage(label) -> dict:
+    """What the online judgement cost, as the client relayed it."""
+
+    def whole(value):
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    elapsed = label.get("elapsed_s")
+    frames = label.get("frames")
+    model = label.get("model")
+    return {
+        "tokens": whole(label.get("tokens")),
+        "prompt_tokens": whole(label.get("prompt_tokens")),
+        "elapsed_s": float(elapsed)
+        if isinstance(elapsed, (int, float)) and not isinstance(elapsed, bool)
+        else None,
+        "model": str(model)[:100] if isinstance(model, str) else None,
+        "images": len(frames) if isinstance(frames, list) else None,
+    }
+
+
+def agent_label(meta) -> dict | None:
+    """The online judgement the evaluation client relayed into the rollout's
+    ``metadata.json`` (``eval.agent_label``, interface C5), or None when there
+    is none.
+
+    Returns ``{"source": "online", "status", "reason", "timing",
+    "request_id", "verdict"}``. ``verdict`` is set only for ``status`` ``ok``
+    with a well-formed result, in the shape the live worker gives its own
+    verdicts (``outcome``, ``events``, ``valid_events``, ``undecided``,
+    ``rule`` ``final_state``, ``basis.final_reading``, ``spec``,
+    ``spec_version``, ``review: auto``, ``evaluated: false``) plus
+    ``source: online``; any other status, or an ``ok`` whose fields do not
+    hold together, gives no verdict (the episode has no automatic label,
+    ``no_agent``). The operator label is never read here and never mixed in.
+    """
+    if not isinstance(meta, dict):
+        return None
+    ev = meta.get("eval")
+    label = ev.get("agent_label") if isinstance(ev, dict) else None
+    if not isinstance(label, dict) or label.get("source") != "online":
+        return None
+    status = label.get("status")
+    reason = label.get("reason")
+    reason = str(reason)[:300] if reason is not None else None
+    request_id = label.get("request_id")
+    out = {
+        "source": "online",
+        "status": status if status in AGENT_STATUSES else "error",
+        "reason": reason
+        if status in AGENT_STATUSES
+        else f"unknown status {str(status)[:40]!r}",
+        "timing": label.get("timing")
+        if label.get("timing") in ("during_run", "after_budget")
+        else None,
+        "request_id": str(request_id)[:64] if request_id else None,
+        "usage": _usage(label),
+        "verdict": None,
+    }
+    if out["status"] != "ok":
+        return out
+    outcome = label.get("outcome")
+    undecided = label.get("undecided")
+    spec = label.get("spec")
+    reading = label.get("reading")
+    if (
+        outcome not in ("success", "failure")
+        or not isinstance(undecided, bool)
+        or not isinstance(spec, dict)
+        or not isinstance(spec.get("id"), str)
+        or (outcome == "success" and undecided)
+    ):
+        out.update(status="error", reason="malformed agent_label (status ok)")
+        return out
+    version = spec.get("version")
+    reading = reading if reading in READINGS else None
+    valid = 1 if outcome == "success" else 0
+    out["verdict"] = {
+        "outcome": outcome,
+        "events": 1,
+        "valid_events": valid,
+        "undecided": undecided,
+        "basis": {
+            "valid_events": valid,
+            "min_valid": 1,
+            "rule": "final_state",
+            "final_reading": reading,
+        },
+        "rule": "final_state",
+        "min_valid": 1,
+        "run_id": None,
+        "spec": spec["id"][:64],
+        "spec_version": version
+        if isinstance(version, int) and not isinstance(version, bool)
+        else None,
+        "at": _epoch(label.get("received_at")),
+        "review": "auto",
+        "evaluated": False,
+        "source": "online",
+    }
+    return out
