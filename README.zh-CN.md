@@ -126,7 +126,7 @@ LEVI 会对照目录检查任务规格，并在运行前等你批准。每个任
 | **数据** | [转换](docs/CONVERSION.md) · [数据质量](docs/QUALITY.md) · [训练池](docs/TRAINING_POOL.md) · [复位导出](docs/RESET_EXPORT.zh-CN.md) · [训练清单](docs/TRAINING_MANIFEST.md) · [RECAP](docs/RECAP.md) · [反事实数据](docs/COUNTERFACTUAL.zh-CN.md) · [English](docs/COUNTERFACTUAL.md) |
 | **Agent 与模型** | [Agents](docs/AGENTS.md) · [本地模型](docs/OLLAMA.zh-CN.md) · [English](docs/OLLAMA.md) · [vLLM](docs/VLLM.zh-CN.md) · [English](docs/VLLM.md) · [Pilot](docs/PILOT.zh-CN.md) · [English](docs/PILOT.md) · [内置知识](docs/KNOWLEDGE.md) |
 | **标注方法** | [实时标注服务](docs/LIVE.zh-CN.md) · [English](docs/LIVE.md) · [锚定复核](docs/ANCHORED_REVIEW.md) · [SAM3](docs/SAM3.md) · [快速分割](docs/SEGMENTATION.md) · [评测记录](docs/EVALUATION.md) |
-| **参考** | [API](docs/API.md) · [验证](docs/VALIDATION.md) · [架构进度](docs/architecture/IMPLEMENTATION_STATUS.md) · [上游](docs/UPSTREAM.md) · [发布](docs/RELEASING.md) · [变更记录](CHANGELOG.md) · [第三方声明](THIRD_PARTY_NOTICES.md) |
+| **参考** | [API](docs/API.md) · [验证](docs/VALIDATION.md) · [架构进度](docs/architecture/IMPLEMENTATION_STATUS.md) · [上游](docs/UPSTREAM.md) · [发布](docs/RELEASING.md) · [变更记录](CHANGELOG.md) · [第三方声明](THIRD_PARTY_NOTICES.md) · [参考文献与引用](docs/REFERENCES.md) |
 
 **报告**页显示一份实时技术报告，目录由 `LEVI_REPORT_DIR` 指定（只读，可以在工作区之外）；见 [API](docs/API.md#technical-report--技术报告)。
 
@@ -179,3 +179,7 @@ uv run levi build
 ```
 
 `levi check` 运行前端验证、Ruff 和 `levi docs check`；文档落后于代码时 `levi docs check` 会失败（`uv run levi docs sync` 重新生成自动生成的部分）。CI 运行同样的检查和生产构建。提交改动前请读 [CONTRIBUTING](CONTRIBUTING.md)；问题请提到 [Issues](https://github.com/Koooki3/LEVI/issues)。LEVI 采用 Apache-2.0 许可证，保留上游的 `LICENSE`、`NOTICE` 和[署名](docs/UPSTREAM.md)；见[第三方声明](THIRD_PARTY_NOTICES.md)。
+
+## 引用 LEVI
+
+LEVI 对你的工作有帮助的话，欢迎引用：GitHub 的“Cite this repository”按钮读取 [`CITATION.cff`](CITATION.cff)；[docs/REFERENCES.md](docs/REFERENCES.md) 给出 BibTeX，以及 LEVI 所基于的工作（LeRobot、SAM 3、RF-DETR、RECAP/π\*0.6、openpi、vLLM、CAST、DROID 等）、它们的许可证和引用方式。请引用你所用的版本（`v0.3.0`；之后的改动见[变更记录](CHANGELOG.md)的 Unreleased）。

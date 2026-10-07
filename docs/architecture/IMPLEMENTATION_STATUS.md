@@ -80,6 +80,9 @@ its measurements and limits.
 - Training manifests: [Training manifests](../TRAINING_MANIFEST.md).
 - Counterfactual action contract and validator (contract only, no generation): [Counterfactual data](../COUNTERFACTUAL.md).
 - Training pool: [Training pool](../TRAINING_POOL.md).
+- Reset data in the pool export (time-reversed episodes, whole-episode only when the release is provable): [Reset export](../RESET_EXPORT.md).
+- Background labelling of robot evaluations (`levi live`), operator and agent labels side by side, the optional online judgement (interface C5, off by default) and read-only links to the live workspace's datasets: [Live annotation](../LIVE.md).
+- Citation file, references and licence notices: [CITATION.cff](../../CITATION.cff), [References](../REFERENCES.md), [Third-party notices](../../THIRD_PARTY_NOTICES.md).
 - Namespaces, the DROID test sample and the report page:
   [Workspace](../WORKSPACE.md), [API](../API.md#technical-report--技术报告).
 

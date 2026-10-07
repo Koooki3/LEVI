@@ -126,7 +126,7 @@ LEVI checks the spec against the catalog and waits for your approval before anyt
 | **Data** | [Conversion](docs/CONVERSION.md) · [Data quality](docs/QUALITY.md) · [Training pool](docs/TRAINING_POOL.md) · [Reset export](docs/RESET_EXPORT.md) · [Training manifests](docs/TRAINING_MANIFEST.md) · [RECAP](docs/RECAP.md) · [Counterfactual data](docs/COUNTERFACTUAL.md) · [中文](docs/COUNTERFACTUAL.zh-CN.md) |
 | **Agents and models** | [Agents](docs/AGENTS.md) · [Local models](docs/OLLAMA.md) · [中文](docs/OLLAMA.zh-CN.md) · [vLLM](docs/VLLM.md) · [中文](docs/VLLM.zh-CN.md) · [Pilot](docs/PILOT.md) · [中文](docs/PILOT.zh-CN.md) · [Built-in knowledge](docs/KNOWLEDGE.md) |
 | **Labelling methods** | [Live annotation service](docs/LIVE.md) · [中文](docs/LIVE.zh-CN.md) · [Anchored review](docs/ANCHORED_REVIEW.md) · [SAM3](docs/SAM3.md) · [Fast segmentation](docs/SEGMENTATION.md) · [Evaluation records](docs/EVALUATION.md) |
-| **Reference** | [API](docs/API.md) · [Validation](docs/VALIDATION.md) · [Architecture status](docs/architecture/IMPLEMENTATION_STATUS.md) · [Upstream](docs/UPSTREAM.md) · [Releasing](docs/RELEASING.md) · [Changelog](CHANGELOG.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) |
+| **Reference** | [API](docs/API.md) · [Validation](docs/VALIDATION.md) · [Architecture status](docs/architecture/IMPLEMENTATION_STATUS.md) · [Upstream](docs/UPSTREAM.md) · [Releasing](docs/RELEASING.md) · [Changelog](CHANGELOG.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [References and citation](docs/REFERENCES.md) |
 
 The **Report** page shows a live technical report from a folder you name with `LEVI_REPORT_DIR` (read-only, may be outside the workspace); see [API](docs/API.md#technical-report--技术报告).
 
@@ -179,3 +179,7 @@ uv run levi build
 ```
 
 `levi check` runs the frontend validation, Ruff and `levi docs check`, which fails when the docs fall behind the code (`uv run levi docs sync` regenerates the generated sections). CI runs the same checks and a production build. Read [CONTRIBUTING](CONTRIBUTING.md) before submitting changes; report problems in [Issues](https://github.com/Koooki3/LEVI/issues). LEVI is licensed under Apache-2.0 and keeps the upstream `LICENSE`, `NOTICE` and [attribution](docs/UPSTREAM.md); see [third-party notices](THIRD_PARTY_NOTICES.md).
+
+## Citing LEVI
+
+If LEVI helps your work, please cite it: GitHub's "Cite this repository" button reads [`CITATION.cff`](CITATION.cff), and [docs/REFERENCES.md](docs/REFERENCES.md) has a BibTeX entry plus the works LEVI builds on (LeRobot, SAM 3, RF-DETR, RECAP/π\*0.6, openpi, vLLM, CAST, DROID and others), their licences and how to cite them. Cite the version you used (`v0.3.0`; later changes are under "Unreleased" in the [changelog](CHANGELOG.md)).

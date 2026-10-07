@@ -25,6 +25,10 @@ README.md 是英文项目首页，README.zh-CN.md 是中文版本，两者同步
 发布前同步更新版本号和锁文件，验证构建和受影响的流程，检查暂存内容和清理预览。CI 通过后再创建版本标签和 Release。不得覆盖已有标签，也不得强制改写公开历史。
 CI 的两组（带与不带 `agent` extra）总会各自跑完。pytest 失败时，运行的摘要页列出失败的测试和每条信息的第一行，不必下载日志；JUnit 文件作为 artifact 附在运行上（`pytest-junit-agent-<true|false>`，保留 14 天）。
 
+Version strings to change together on a release: `pyproject.toml`, `package.json`, `uv.lock` (`uv lock`), `CITATION.cff` (`version`, `date-released`), `docs/references.bib` (`levi2026` `version`) and the "Cite the version you used" sentences in `docs/REFERENCES.md` and both READMEs, the badge and "current release" line in both READMEs, the section name in `CHANGELOG.md`, the baseline line of `THIRD_PARTY_NOTICES.md`, and the two hard-coded `"0.3.0"` strings in `levi/service.py` (FastAPI) and `levi/agent/pilot.py` (client info). The integrations (`integrations/*`) carry their own version (0.1.0) on purpose. Add or change a dependency, model or method: update `docs/REFERENCES.md`, `docs/references.bib`, `CITATION.cff` and `THIRD_PARTY_NOTICES.md` in the same change.
+
+发布时要一起改的版本号：`pyproject.toml`、`package.json`、`uv.lock`（`uv lock`）、`CITATION.cff`（`version`、`date-released`）、`docs/references.bib` 里 `levi2026` 的 `version`、`docs/REFERENCES.md` 和两份 README 里“请引用你所用的版本”那句、两份 README 的徽章和“当前版本”、`CHANGELOG.md` 的节名、`THIRD_PARTY_NOTICES.md` 的基线、以及写死 `"0.3.0"` 的 `levi/service.py`（FastAPI）和 `levi/agent/pilot.py`（客户端信息）。`integrations/*` 有自己的版本号（0.1.0），这是有意的。增加或更换依赖、模型、方法时，在同一次改动里更新 `docs/REFERENCES.md`、`docs/references.bib`、`CITATION.cff` 和 `THIRD_PARTY_NOTICES.md`。标签 `v0.2.0`、`v0.3.0` 于 2026-10-07 补在当年的发布提交上，用 `git push origin v0.2.0 v0.3.0` 推送；GitHub 的 Release 页面要 `gh release create` 之后才有。
+
 Example, from a clean checkout with an authorized GitHub CLI account (replace `X.Y.Z`):
 
 ```bash
@@ -39,6 +43,6 @@ gh release create vX.Y.Z --repo Koooki3/LEVI --verify-tag \
   --title "LEVI vX.Y.Z" --notes-file "$LEVI_WORKSPACE/tmp/release-notes.md"
 ```
 
-Earlier release notes (v0.2.0, v0.3.0) are kept on the GitHub releases page and in `CHANGELOG.md`.
+Release notes are in `CHANGELOG.md` (the section named like the version). The tags `v0.2.0` and `v0.3.0` were created on 2026-10-07 at their release commits (`72489de`, `fa3c9f6`) and are pushed with `git push origin v0.2.0 v0.3.0`; a GitHub release page exists only after `gh release create`.
 
 GitHub provides source archives for the tag. This release is installed from source using uv and Bun; it does not claim a published PyPI package, container image or native installer. Docker, private Hub login and Hub upload require separate deployment validation as documented.
