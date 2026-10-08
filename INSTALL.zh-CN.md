@@ -39,6 +39,7 @@ uv run levi                                           # 启动网页（7860）�
 | --- | --- |
 | `LEVI_WORKSPACE` | 总是，除非检出目录下的 `.state` 正合适 |
 | `LEVI_POOL_ROOTS`、`LEVI_POOL_HELDOUT`、`LEVI_EXPORT_ROOTS` | 训练池：要索引的只读目录、留出清单（不设时拒绝导出；`none` 表示没有留出集，由人决定）、导出可以写到哪里（[训练池](docs/TRAINING_POOL.md)） |
+| `LEVI_POOL_HOLDBACK`、`LEVI_POOL_OUTCOMES` | 训练池的可选清单：暂时搁置的片段（默认不进配方、不能导出，配方明确包含才放行）、独立核实过的结局（优先级在人工标签之下、机器人按键标志之上）；不设就是没有（[训练池](docs/TRAINING_POOL.md#hold-back-lists-and-verified-outcomes--暂留清单与核实结局)） |
 | `LEVI_GPU_LOCK_FILE` | GPU 与其他工具共用，且它们使用同一个 `flock` 文件 |
 | `HF_TOKEN` | 私有或受限的 Hugging Face 仓库、SAM3 权重、上传（也可以在网页里登录） |
 | `LEVI_CPU_ONLY=1` | 没有 GPU，或不允许 LEVI 使用 GPU |

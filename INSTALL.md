@@ -39,6 +39,7 @@ Settings live in `.env` (every variable LEVI reads is listed in `.env.example`, 
 | --- | --- |
 | `LEVI_WORKSPACE` | always, unless the checkout's `.state` suits you |
 | `LEVI_POOL_ROOTS`, `LEVI_POOL_HELDOUT`, `LEVI_EXPORT_ROOTS` | the training pool: read-only folders to index, the held-out lists (exports are refused while unset; `none` says there are none: a person decides), where exports may go ([Training pool](docs/TRAINING_POOL.md)) |
+| `LEVI_POOL_HOLDBACK`, `LEVI_POOL_OUTCOMES` | optional pool lists: episodes set aside for now (left out of recipes and exports unless a recipe includes them), and independently verified outcomes (ranked between a human label and the robot's key press); unset means none ([Training pool](docs/TRAINING_POOL.md#hold-back-lists-and-verified-outcomes--暂留清单与核实结局)) |
 | `LEVI_GPU_LOCK_FILE` | the GPU is shared with other tools that take the same `flock` |
 | `HF_TOKEN` | private or gated Hugging Face repositories, SAM3 weights, uploads (or sign in from the web UI) |
 | `LEVI_CPU_ONLY=1` | a machine without a GPU, or one LEVI must not use |
