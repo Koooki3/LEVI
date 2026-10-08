@@ -709,19 +709,40 @@ def counts(outcome, **kw):
     return view["episodes"], view["outcome_sources"]
 
 
+def picked(outcome, **kw):
+    """The episodes (by folder name) the selection takes for an outcome option."""
+    chosen = recipe.select_detailed(rollout_recipe(outcome=outcome, **kw)).chosen
+    return {Path(r["key"]).name for r in chosen}
+
+
 def test_the_outcome_options_rank_verified_between_the_label_and_the_flag(pool):
     pool()
-    # Not held back: demo_0000 (verified success), 0002 (human failure), 0003
-    # (verified failure), 0005 (flag success).
+    # Not held back: demo_0000 (flag failure, verified success), 0002 (flag
+    # success, human failure), 0003 (flag success, verified failure), 0005
+    # (flag success). Counts alone cannot tell a rule that ignores the verified
+    # outcome from the right one (two episodes either way): name the episodes.
+    assert picked("all") == {"demo_0000", "demo_0002", "demo_0003", "demo_0005"}
     assert counts("all") == (4, {"verified": 2, "human": 1, "robot_flag": 1})
     # A human label, else a verified outcome, else the flag: 0000 and 0005.
+    assert picked("verified_success") == {"demo_0000", "demo_0005"}
     assert counts("verified_success") == (2, {"verified": 1, "robot_flag": 1})
     # A human label or a verified outcome; the flag alone does not count.
+    assert picked("checked_success") == {"demo_0000"}
     assert counts("checked_success") == (1, {"verified": 1})
     # Only a human label: the one in the pool says failure.
+    assert picked("human_verified_success") == set()
     assert counts("human_verified_success") == (0, {})
     # The flag as it is: 0002 (human failure), 0003 and 0005.
-    assert counts("robot_flag_success")[0] == 3
+    assert picked("robot_flag_success") == {"demo_0002", "demo_0003", "demo_0005"}
+    # Who is left out, and what outcome the filter saw.
+    left = {
+        Path(e["key"]).name: e.get("outcome")
+        for e in recipe.select_detailed(
+            rollout_recipe(outcome="verified_success")
+        ).excluded
+        if e["reason"] == "outcome_filter"
+    }
+    assert left == {"demo_0002": "failure", "demo_0003": "failure"}
     # The warning about the key press counts only what rests on it.
     view = recipe.preview(rollout_recipe(outcome="verified_success"))
     note = next(w for w in view["warnings"] if w["code"] == "outcome_from_robot_flag")

@@ -458,6 +458,42 @@ def test_a_bridge_needs_a_separate_recording_in_the_pool(rpool):
         run_export(rpool, ["in_place"], "b3", **reset)
 
 
+def test_a_held_back_recording_cannot_be_a_bridge(rpool, monkeypatch):
+    """A bridge's recording is taken from the index when the export is planned
+    (it is not part of the selection, which skips held-back episodes), so the
+    plan itself must refuse one that is on a hold-back list: a dry run must not
+    pass a plan the run would refuse."""
+    reset = with_record(rpool)
+    record = reset["bridges"][0]["record"]
+    listing = rpool["tmp"] / "parked.json"
+    listing.write_text(json.dumps({"episodes": [{"path": record}]}))
+    monkeypatch.setenv("LEVI_POOL_HOLDBACK", str(listing))
+    scanner.scan()
+
+    def plan(include_holdback):
+        rec = Recipe(
+            name="r",
+            categories=["rollout"],
+            tasks=[TASKS["escaped"]],
+            include_holdback=include_holdback,
+        )
+        options = export.ExportOptions(
+            format="lerobot_v21",
+            name="parked",
+            output_dir=str(rpool["out"]),
+            reset={"direction": "forward_and_reset", **reset},
+        )
+        return jobs.plan_export(rec, options)
+
+    with pytest.raises(PermissionError, match="held-back"):
+        plan(False)
+    assert not (rpool["out"] / "parked").exists()
+    # Included on purpose, the same plan is made and names the recording.
+    job = plan(True)
+    assert [b["key"] for b in job["bridge_records"]] == [record]
+    assert job["bridge_records"][0]["holdback"] is True
+
+
 def test_a_held_out_recording_cannot_complete_a_reset(rpool, monkeypatch):
     import hashlib
 
