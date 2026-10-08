@@ -43,6 +43,11 @@ def _filters(parser) -> None:
     parser.add_argument("--policy", action="append", help="checkpoint name (old)")
     _policy_flags(parser)
     _embodiment_flags(parser)
+    parser.add_argument(
+        "--holdback",
+        choices=["only", "hide"],
+        help="list only the held-back episodes, or none of them (default: both)",
+    )
     parser.add_argument("--show-heldout", action="store_true")
     parser.add_argument("--show-copies", action="store_true")
     parser.add_argument("--show-archive", action="store_true")
@@ -56,6 +61,7 @@ def _filter_args(args) -> dict:
         "search": args.search,
         "formats": args.formats,
         "outcome": args.outcome,
+        "holdback": args.holdback,
         "policies": args.policy,
         "policy_models": args.policy_model,
         "policy_checkpoints": args.policy_checkpoint,
@@ -109,6 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
             "all",
             "robot_flag_success",
             "verified_success",
+            "checked_success",
             "human_verified_success",
         ],
     )
@@ -125,6 +132,11 @@ def build_parser() -> argparse.ArgumentParser:
     save.add_argument("--date-from")
     save.add_argument("--date-to")
     save.add_argument("--include-nonstandard", action="store_true")
+    save.add_argument(
+        "--include-holdback",
+        action="store_true",
+        help="also take episodes on a LEVI_POOL_HOLDBACK list (left out otherwise)",
+    )
     save.add_argument(
         "--allow-unlinked-sources",
         action="store_true",
@@ -394,6 +406,8 @@ def main(argv=None) -> int:
                     "roots": [str(p) for p in settings.pool_roots()],
                     "export_roots": [str(p) for p in settings.export_roots()],
                     "heldout_lists": [str(p) for p in settings.heldout_files()],
+                    "holdback_lists": [str(p) for p in settings.holdback_files()],
+                    "outcome_lists": [str(p) for p in settings.outcome_files()],
                     "last_scan": index.summary() or None,
                 }
             )
@@ -439,6 +453,8 @@ def main(argv=None) -> int:
                     value["task_text"] = dict(t.split("=", 1) for t in args.task_text)
                 if args.include_nonstandard:
                     value["include_nonstandard"] = True
+                if args.include_holdback:
+                    value["include_holdback"] = True
                 if args.allow_unlinked_sources:
                     value["allow_unlinked_sources"] = True
                 if args.allow_mixed_gripper:

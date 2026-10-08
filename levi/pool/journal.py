@@ -39,8 +39,12 @@ PLAN_KEYS = (
     "recipe",
     "heldout_lists",
     "heldout_disabled",
+    "holdback_lists",
     "pool_roots",
 )
+# Keys an older plan does not have: left out of the hash while empty, so an
+# export begun before they existed still resumes.
+OPTIONAL_KEYS = ("bridge_records", "holdback_lists")
 
 
 class ResumeRefused(ValueError):
@@ -48,9 +52,10 @@ class ResumeRefused(ValueError):
 
 
 def plan_hash(job: dict) -> str:
-    # ``bridge_records`` joined the plan with the reset export: a plan without
-    # any hashes as it always did, so an export begun before still resumes.
-    frozen = {k: job.get(k) for k in PLAN_KEYS if k != "bridge_records" or job.get(k)}
+    # ``bridge_records`` joined the plan with the reset export and
+    # ``holdback_lists`` with the hold-back: a plan without any hashes as it
+    # always did, so an export begun before still resumes.
+    frozen = {k: job.get(k) for k in PLAN_KEYS if k not in OPTIONAL_KEYS or job.get(k)}
     text = json.dumps(frozen, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(text.encode()).hexdigest()
 

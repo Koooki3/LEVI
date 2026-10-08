@@ -113,6 +113,8 @@ def plan_scan(rehash: bool = False) -> dict:
         "pool_roots": [str(r) for r in roots],
         "heldout_lists": [str(p) for p in settings.heldout_files()],
         "heldout_disabled": settings.heldout_disabled(),
+        "holdback_lists": [str(p) for p in settings.holdback_files()],
+        "outcome_lists": [str(p) for p in settings.outcome_files()],
         "status": "planned",
         "planned_at": time.time(),
     }
@@ -200,6 +202,9 @@ def _environment(job: dict) -> dict:
     env["LEVI_POOL_HELDOUT"] = ",".join(job.get("heldout_lists") or []) or (
         "none" if job.get("heldout_disabled") else ""
     )
+    # The lists the job was planned with, not whatever the service holds now.
+    env["LEVI_POOL_HOLDBACK"] = ",".join(job.get("holdback_lists") or [])
+    env["LEVI_POOL_OUTCOMES"] = ",".join(job.get("outcome_lists") or [])
     workspace = settings.workspace()
     env["LEVI_WORKSPACE"] = str(workspace)
     # Folders the worker's ``configure`` requires inside its workspace; one
@@ -856,6 +861,12 @@ def verify_resume(job: dict) -> None:
         )
         export.refuse_heldout_groups(episodes)
         export.refuse_removed(episodes)
+        export.guard_holdback(
+            episodes,
+            [Path(p) for p in job["pool_roots"]],
+            [Path(p) for p in job.get("holdback_lists") or []],
+            bool((job.get("recipe") or {}).get("include_holdback")),
+        )
         export._unchanged(episodes)
     except journal.ResumeRefused:
         raise

@@ -50,7 +50,17 @@ from ..conversion.outputs.lerobot_v21 import LeRobotV21
 from ..conversion.outputs.recap_value import RECAP_COLUMNS, RecapOptions, RecapValue
 from ..conversion.progress import Progress
 from ..conversion.report import InputReport, Requirement
-from . import corrections, embodiment, heldout, index, joblog, scanner, settings
+from . import (
+    corrections,
+    embodiment,
+    heldout,
+    holdback,
+    index,
+    joblog,
+    manifest,
+    scanner,
+    settings,
+)
 from . import journal as journal_mod
 from . import timing as timing_mod
 from .recipe import NAME, Recipe, find_warnings, select_detailed
@@ -218,6 +228,12 @@ PLAN_EPISODE_KEYS = (
     "human_label",
     "outcome",
     "outcome_source",
+    "verified_outcome",
+    "verified_by",
+    "verified_basis",
+    "verified_conflict",
+    "holdback",
+    "holdback_set",
     "policy",
     "policy_model",
     "policy_checkpoint",
@@ -284,6 +300,12 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
     # cannot pass what the export would refuse.
     refuse_heldout_groups(episodes + bridge_records)
     refuse_removed(episodes + bridge_records)
+    guard_holdback(
+        episodes + bridge_records,
+        settings.pool_roots(),
+        settings.holdback_files(),
+        recipe.include_holdback,
+    )
     check_space(
         {
             "episodes": episodes,
@@ -306,6 +328,8 @@ def plan(recipe: Recipe, options: ExportOptions) -> dict:
         "pool_roots": [str(p) for p in settings.pool_roots()],
         "heldout_lists": [str(p) for p in settings.heldout_files()],
         "heldout_disabled": settings.heldout_disabled(),
+        "holdback_lists": [str(p) for p in settings.holdback_files()],
+        "outcome_lists": [str(p) for p in settings.outcome_files()],
         "embodiment_check": 1,
         "embodiment_declared": embodiment.declarations(
             scanner.rules_mod.load(settings.pool_dir())
@@ -426,6 +450,34 @@ def _correction_fields(ep: dict) -> dict:
     }
 
 
+def _outcome_fields(ep: dict) -> dict:
+    """Where the outcome came from beyond ``outcome_source``: the verified
+    outcome the pool held (which list, on what basis) and whether the episode
+    is on a hold-back list (an export that includes held-back episodes says
+    which ones)."""
+    return {
+        "verified_outcome": ep.get("verified_outcome"),
+        "verified_by": ep.get("verified_by"),
+        "verified_basis": ep.get("verified_basis"),
+        "holdback": bool(ep.get("holdback")),
+        "holdback_set": ep.get("holdback_set"),
+    }
+
+
+def _holdback_record(job: dict, rows: list[dict]) -> dict:
+    """The ``holdback`` block of ``pool_export.json``: the lists in force, how
+    many episodes the recipe left out for being on one, whether it let them in
+    and how many exported episodes are on one."""
+    return {
+        "lists": list(job.get("holdback_lists") or []),
+        "include": bool((job.get("recipe") or {}).get("include_holdback")),
+        "left_out": sum(
+            1 for e in job.get("excluded") or [] if e.get("reason") == "held_back"
+        ),
+        "exported": sum(1 for r in rows if r.get("holdback")),
+    }
+
+
 def _embodiment_fields(ep: dict) -> dict:
     return {
         **{f: ep.get(f) or embodiment.UNKNOWN for f in embodiment.FIELDS},
@@ -542,6 +594,59 @@ def refuse_heldout_groups(episodes: list[dict]):
             f"Refusing to export {len(hits)} held-out episode(s) (copies of a "
             "frozen test episode): " + ", ".join(hits[:10])
         )
+
+
+def refuse_holdback(
+    episodes: list[dict], roots: list[Path], lists: list[Path], allow: bool = False
+):
+    """Independent of the index: no planned episode may be on a hold-back list
+    by path, unless the recipe includes held-back episodes (``allow``). Refuses
+    the whole export. A list that cannot be read refuses too."""
+    if allow:
+        return
+    held = set()
+    for entry in holdback.load(lists):
+        held |= manifest.candidates(entry["path"], roots)
+    hits = [e["key"] for e in episodes if e["key"] in held]
+    if hits:
+        raise PermissionError(
+            f"Refusing to export {len(hits)} held-back episode(s) (on a "
+            "LEVI_POOL_HOLDBACK list; the recipe does not set include_holdback): "
+            + ", ".join(hits[:10])
+            + (" …" if len(hits) > 10 else "")
+        )
+
+
+def refuse_holdback_groups(episodes: list[dict], allow: bool = False):
+    """The current index's view: no planned episode may share a group (a copy,
+    a filtered variant or a conversion) with a held-back episode, unless the
+    recipe includes them."""
+    if allow:
+        return
+    df = index.holdback_view()
+    if df is None:  # no scan yet, or no hold-back anywhere
+        return
+    held = set(df.loc[df.holdback.astype(bool), "group"])
+    groups = dict(zip(df.key, df.group, strict=True))
+    hits = [
+        e["key"]
+        for e in episodes
+        if groups.get(e["key"], e.get("group")) in held or e.get("group") in held
+    ]
+    if hits:
+        raise PermissionError(
+            f"Refusing to export {len(hits)} held-back episode(s) (copies of an "
+            "episode on a hold-back list; the recipe does not set "
+            "include_holdback): " + ", ".join(hits[:10])
+        )
+
+
+def guard_holdback(
+    episodes: list[dict], roots: list[Path], lists: list[Path], allow: bool = False
+):
+    """Both hold-back checks, at plan, run and resume."""
+    refuse_holdback(episodes, roots, lists, allow)
+    refuse_holdback_groups(episodes, allow)
 
 
 def refuse_removed(episodes: list[dict]):
@@ -671,8 +776,10 @@ class PoolCaptures(InputFormat):
                 camera_fps=rates,
                 metadata={"probe": probes},
             )
-            if ep.get("outcome_source") == "human":
-                episode.metadata["outcome_source"] = "human"
+            if ep.get("outcome_source") in ("human", "verified"):
+                # A verified outcome counts like a human label for success and
+                # failure; the converted dataset keeps the source's name.
+                episode.metadata["outcome_source"] = ep["outcome_source"]
             return episode
 
         todo = [i for i in self.items if i[0] not in self.dropped]
@@ -1071,6 +1178,12 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
     )
     refuse_heldout_groups(guarded)
     refuse_removed(guarded)
+    guard_holdback(
+        guarded,
+        [Path(p) for p in job["pool_roots"]],
+        [Path(p) for p in job.get("holdback_lists") or []],
+        bool(job["recipe"].get("include_holdback")),
+    )
     if job.get("embodiment_check") or any("gripper" in e for e in episodes):
         # A plan from before the gripper fields (no marker, no gripper key
         # on any episode) has nothing to check.
@@ -1114,6 +1227,8 @@ def run(job: dict, progress_path: Path | None = None, *, resume: bool = False) -
             "pool_roots": job["pool_roots"],
             "heldout_lists": job["heldout_lists"],
             "heldout_disabled": bool(job.get("heldout_disabled")),
+            "holdback": _holdback_record(job, result["episodes"]),
+            "outcome_lists": list(job.get("outcome_lists") or []),
             "conversion": result.get("conversion"),
             "timing": result.get("timing"),
             "embodiment": embodiment.record(
@@ -1326,6 +1441,7 @@ def _raw_capture(ctx: RunContext) -> dict:
                 **_embodiment_fields(ep),
                 **_selection_fields(ep),
                 **_correction_fields(ep),
+                **_outcome_fields(ep),
                 "frames": ep["frames"],
             }
         )
@@ -1845,6 +1961,7 @@ def _lerobot(ctx: RunContext) -> dict:
                 **_embodiment_fields(ep),
                 **_selection_fields(ep),
                 **_correction_fields(ep),
+                **_outcome_fields(ep),
                 "frames": n,
                 "source_fps": timing_mod.rounded(source_fps),
                 "time_scale": timing_mod.rounded(
@@ -1953,6 +2070,7 @@ def _lerobot(ctx: RunContext) -> dict:
                     **_embodiment_fields(ep),
                     **_selection_fields(ep),
                     **_correction_fields(ep),
+                    **_outcome_fields(ep),
                     "frames": item["length"],
                     "generation": plan.generation,
                     "scope": plan.analysis.scope,

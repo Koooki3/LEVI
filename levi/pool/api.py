@@ -32,8 +32,11 @@ Outcome = Literal[
     "failure",
     "robot_flag_success",
     "verified_success",
+    "checked_success",
     "human_verified_success",
 ]
+# Which episodes of a hold-back list to list: only those, or none of them.
+Holdback = Literal["only", "hide"]
 
 router = APIRouter(prefix="/api/levi/pool", tags=["Training pool"])
 
@@ -45,6 +48,7 @@ def _filters(
     search=None,
     format=None,
     outcome=None,
+    holdback=None,
     policy=None,
     policy_model=None,
     policy_checkpoint=None,
@@ -66,6 +70,7 @@ def _filters(
         "search": search,
         "formats": format,
         "outcome": outcome,
+        "holdback": holdback,
         "policies": policy,
         "policy_models": policy_model,
         "policy_checkpoints": policy_checkpoint,
@@ -97,6 +102,8 @@ def status():
         "export_roots": [str(p) for p in settings.export_roots()],
         "heldout_lists": [str(p) for p in settings.heldout_files()],
         "heldout_disabled": settings.heldout_disabled(),
+        "holdback_lists": [str(p) for p in settings.holdback_files()],
+        "outcome_lists": [str(p) for p in settings.outcome_files()],
         "warnings": _status_warnings(),
         "disk": cleanup.disk(),
         "last_scan": index.summary() or None,
@@ -116,6 +123,7 @@ def tasks(
     search: str | None = None,
     format: Strings = None,
     outcome: Outcome | None = None,
+    holdback: Holdback | None = None,
     policy: Strings = None,
     policy_model: Strings = None,
     policy_checkpoint: Strings = None,
@@ -136,6 +144,7 @@ def tasks(
                 search=search,
                 format=format,
                 outcome=outcome,
+                holdback=holdback,
                 policy=policy,
                 policy_model=policy_model,
                 policy_checkpoint=policy_checkpoint,
@@ -202,6 +211,7 @@ def episodes(
     search: str | None = None,
     format: Strings = None,
     outcome: Outcome | None = None,
+    holdback: Holdback | None = None,
     policy: Strings = None,
     policy_model: Strings = None,
     policy_checkpoint: Strings = None,
@@ -226,6 +236,7 @@ def episodes(
             search=search,
             format=format,
             outcome=outcome,
+            holdback=holdback,
             policy=policy,
             policy_model=policy_model,
             policy_checkpoint=policy_checkpoint,
