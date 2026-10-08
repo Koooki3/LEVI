@@ -19,9 +19,11 @@ One row per episode (see ``COLUMNS`` and docs/TRAINING_POOL.md#index):
   fingerprint; otherwise the md5 of its state and action arrays. Episodes
   with one fingerprint are copies of one another; the canonical one is the
   original collection or rollout folder.
-- **Held-out** (``heldout.py``), **human outcome labels** (``labels.py``) and
-  the robot's own flag are joined in; a label or a held-out mark on one copy
-  applies to every copy.
+- **Held-out** (``heldout.py``), **held back** (``holdback.py``), **human
+  outcome labels** (``labels.py``), **verified outcomes** (``verified.py``) and
+  the robot's own flag are joined in; a label, a verified outcome, a held-out
+  or a held-back mark on one copy applies to every copy. The outcome is the
+  human label, else the verified outcome, else the robot's flag.
 
 Re-scans reuse every episode whose files did not change (size + mtime).
 """
@@ -40,7 +42,7 @@ import pyarrow.parquet as pq
 
 from ..conversion import raw
 from ..conversion.progress import Progress
-from . import embodiment, heldout, labels, settings
+from . import embodiment, heldout, holdback, labels, manifest, settings, verified
 from . import policy as policy_mod
 from . import rules as rules_mod
 
@@ -82,6 +84,10 @@ COLUMNS = [
     "human_label",
     "human_label_from",
     "label_conflict",
+    "verified_outcome",
+    "verified_by",
+    "verified_basis",
+    "verified_conflict",
     "outcome",
     "outcome_source",
     "nonstandard",
@@ -101,6 +107,8 @@ COLUMNS = [
     "heldout",
     "heldout_set",
     "heldout_id",
+    "holdback",
+    "holdback_set",
     "in_levi_workspace",
     "video_bytes",
     "video_sha256",
@@ -762,16 +770,107 @@ def _labels(rows: list[dict], workspaces: list[Path]) -> dict:
         else:
             row["human_label"] = None
             row["human_label_from"] = None
-        if row["human_label"]:
-            row["outcome"], row["outcome_source"] = row["human_label"], "human"
+    return {
+        "labelled_episodes": len(direct),
+        "workspaces": [str(w) for w in workspaces],
+        "conflicts": conflicts,
+    }
+
+
+LIST_CAP = 200  # unmatched entries named in the scan summary
+
+
+def _matched(entries: list[dict], rows: list[dict], roots: list[Path]):
+    """``(by_group, unmatched)``: the entries by the group of the indexed
+    episode each one names, and the paths that name no indexed episode."""
+    by_key = {r["key"]: r for r in rows}
+    by_group: dict[str, list] = defaultdict(list)
+    unmatched = []
+    for entry in entries:
+        row = manifest.locate(entry["path"], roots, by_key)
+        if row is None:
+            unmatched.append(entry["path"])
+        else:
+            by_group[row["group"]].append(entry)
+    return by_group, unmatched
+
+
+def _outcomes(rows: list[dict], roots: list[Path]) -> dict:
+    """Join the verified outcomes, then settle ``outcome`` and
+    ``outcome_source``: a human label first, then a verified outcome, then the
+    robot's flag. A verified outcome that disagrees with the human label (or
+    with another verified entry of the same recording) sets
+    ``verified_conflict``; the human label stands, and two disagreeing
+    verified entries count as none."""
+    files = settings.outcome_files()
+    entries, skipped = verified.load(files)
+    by_group, unmatched = _matched(entries, rows, roots)
+    verdict: dict[str, dict] = {}
+    for group, items in by_group.items():
+        values = {e["outcome"] for e in items}
+        if len(values) > 1:
+            verdict[group] = {"outcome": None, "conflict": True}
+        else:
+            first = items[0]
+            verdict[group] = {
+                "outcome": first["outcome"],
+                "by": first["set"],
+                "basis": first["basis"],
+                "conflict": False,
+            }
+    against_human = set()
+    for row in rows:
+        mark = verdict.get(row["group"]) or {}
+        row["verified_outcome"] = mark.get("outcome")
+        row["verified_by"] = mark.get("by")
+        row["verified_basis"] = mark.get("basis")
+        row["verified_conflict"] = bool(mark.get("conflict"))
+        label = row["human_label"]
+        if label and row["verified_outcome"] and label != row["verified_outcome"]:
+            row["verified_conflict"] = True
+            against_human.add(row["group"])
+        if label:
+            row["outcome"], row["outcome_source"] = label, "human"
+        elif row["verified_outcome"]:
+            row["outcome"], row["outcome_source"] = row["verified_outcome"], "verified"
         elif row["robot_flag"]:
             row["outcome"], row["outcome_source"] = row["robot_flag"], "robot_flag"
         else:
             row["outcome"], row["outcome_source"] = None, None
     return {
-        "labelled_episodes": len(direct),
-        "workspaces": [str(w) for w in workspaces],
-        "conflicts": conflicts,
+        "lists": manifest.digests(files),
+        "entries": len(entries),
+        "skipped": sum(skipped.values()),
+        "skipped_values": skipped,
+        "matched": len(entries) - len(unmatched),
+        "unmatched": unmatched[:LIST_CAP],
+        "unmatched_count": len(unmatched),
+        "episodes": sum(1 for r in rows if r["verified_outcome"]),
+        "used": sum(1 for r in rows if r["outcome_source"] == "verified"),
+        # Recordings (groups), not copies.
+        "conflicts_with_human": len(against_human),
+        "disagreeing": sum(1 for v in verdict.values() if v["conflict"]),
+    }
+
+
+def _holdback(rows: list[dict], roots: list[Path]) -> dict:
+    """Mark the episodes the hold-back lists name, and every copy of each
+    (``holdback``, ``holdback_set``)."""
+    files = settings.holdback_files()
+    entries = holdback.load(files)
+    by_group, unmatched = _matched(entries, rows, roots)
+    for row in rows:
+        items = by_group.get(row["group"])
+        row["holdback"] = bool(items)
+        row["holdback_set"] = items[0]["set"] if items else None
+    return {
+        "lists": manifest.digests(files),
+        "entries": len(entries),
+        "matched": len(entries) - len(unmatched),
+        "unmatched": unmatched[:LIST_CAP],
+        "unmatched_count": len(unmatched),
+        "episodes": sum(1 for r in rows if r["holdback"]),
+        "groups": len(by_group),
     }
 
 
@@ -1109,7 +1208,9 @@ def scan(progress_path: Path | None = None, rehash: bool = False) -> dict:
     dedup_report = _group(rows)
     progress.stage("Labels", 1)
     label_report = _labels(rows, workspaces)
+    outcome_report = _outcomes(rows, roots)
     heldout_report = _heldout(rows, roots, progress)
+    holdback_report = _holdback(rows, roots)
     progress.stage("Index", 1)
     dataset_paths = {r["source_path"] for r in rows} | set(extra_sources)
     sources = _sources(ctx, rows, extra_sources, found["unsupported"], dataset_paths)
@@ -1148,7 +1249,9 @@ def scan(progress_path: Path | None = None, rehash: bool = False) -> dict:
         "workspaces": sorted(str(w) for w in workspaces),
         "dedup": dedup_report,
         "heldout": heldout_report,
+        "holdback": holdback_report,
         "labels": label_report,
+        "outcomes": outcome_report,
         "unsupported_sources": sum(
             1
             for s in sources

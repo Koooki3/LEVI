@@ -6,7 +6,7 @@ from collections import Counter, defaultdict
 import pandas as pd
 import pyarrow.parquet as pq
 
-from . import embodiment, exclusions, scanner
+from . import embodiment, exclusions, scanner, settings
 
 OLDER = (
     "The pool index is from an older LEVI (no {columns} column): scan again "
@@ -16,12 +16,20 @@ OLDER = (
 )
 
 
+# Added with the hold-back lists and the verified outcomes.
+HOLDBACK_COLUMNS = ("holdback", "verified_outcome")
+
+
 def frame() -> pd.DataFrame:
     path = scanner.index_path()
     if not path.is_file():
         raise ValueError("The pool has not been scanned yet: run `levi pool scan`")
     df = pd.read_parquet(path)
-    missing = [c for c in ("policy_method", *embodiment.COLUMNS) if c not in df.columns]
+    missing = [
+        c
+        for c in ("policy_method", *embodiment.COLUMNS, *HOLDBACK_COLUMNS)
+        if c not in df.columns
+    ]
     if missing:
         raise ValueError(OLDER.format(columns=", ".join(missing)))
     return mark_excluded(df)
@@ -69,6 +77,21 @@ def heldout_view() -> pd.DataFrame | None:
     return pd.read_parquet(path, columns=["key", "group", "heldout"])
 
 
+def holdback_view() -> pd.DataFrame | None:
+    """``key``, ``group`` and ``holdback`` of the index, or ``None`` when no
+    scan has written one (or the index is from a LEVI that had no hold-back
+    and none is configured). With a hold-back list configured, an index
+    without the column raises: the export cannot check its plan against it."""
+    path = scanner.index_path()
+    if not path.is_file():
+        return None
+    if "holdback" not in pq.read_schema(path).names:
+        if settings.holdback_files():
+            raise ValueError(OLDER.format(columns="holdback"))
+        return None
+    return pd.read_parquet(path, columns=["key", "group", "holdback"])
+
+
 def embodiment_view() -> pd.DataFrame | None:
     """``key``, ``source`` and ``gripper`` of the index (``None`` before the
     first scan). An index from an older LEVI lacks ``gripper``: that raises, an
@@ -111,6 +134,7 @@ def _filter(
     search=None,
     formats=None,
     outcome=None,
+    holdback=None,
     policies=None,
     policy_models=None,
     policy_checkpoints=None,
@@ -140,8 +164,13 @@ def _filter(
     if outcome == "robot_flag_success":
         df = df[df.robot_flag == "success"]
     elif outcome == "verified_success":
-        # A human label first, then the robot's flag (as in recipes).
-        df = df[df.human_label.fillna(df.robot_flag) == "success"]
+        # A human label first, then a verified outcome, then the robot's flag
+        # (as in recipes).
+        settled = df.human_label.fillna(df.verified_outcome).fillna(df.robot_flag)
+        df = df[settled == "success"]
+    elif outcome == "checked_success":
+        # A human label or a verified outcome; the robot's flag alone is not.
+        df = df[df.human_label.fillna(df.verified_outcome) == "success"]
     elif outcome == "human_verified_success":
         df = df[df.human_label == "success"]
     elif outcome:
@@ -162,6 +191,10 @@ def _filter(
         df = df[df.date.fillna("") >= date_from]
     if date_to:
         df = df[df.date.fillna("9999") <= date_to]
+    if holdback == "only":
+        df = df[df.holdback.astype(bool)]
+    elif holdback == "hide":
+        df = df[~df.holdback.astype(bool)]
     if not show_heldout:
         df = df[~df.heldout.astype(bool)]
     if not show_excluded and "excluded" in df.columns:
@@ -192,7 +225,7 @@ def facets(**filters) -> dict:
     (``show_heldout``, ``show_copies``, ``show_archive``) and ``categories``
     leave: categories, sources, formats, policies (the old single field: the
     checkpoint), policy_models, policy_checkpoints, policy_methods, robots, grippers, outcomes,
-    dates, plus how
+    dates, how many episodes are held back, plus how
     many held-out episodes and copies the toggles hide."""
     full = frame()
     toggles = {
@@ -225,10 +258,21 @@ def facets(**filters) -> dict:
             "failure": int((scoped.outcome == "failure").sum()),
             "robot_flag_success": int((scoped.robot_flag == "success").sum()),
             "verified_success": int(
-                (scoped.human_label.fillna(scoped.robot_flag) == "success").sum()
+                (
+                    scoped.human_label.fillna(scoped.verified_outcome).fillna(
+                        scoped.robot_flag
+                    )
+                    == "success"
+                ).sum()
+            ),
+            "checked_success": int(
+                (scoped.human_label.fillna(scoped.verified_outcome) == "success").sum()
             ),
             "human_verified_success": int((scoped.human_label == "success").sum()),
         },
+        # Episodes on a hold-back list (listed, but no recipe picks them unless
+        # it says include_holdback).
+        "holdback": int(scoped.holdback.astype(bool).sum()),
         "date_min": dates[0] if dates else None,
         "date_max": dates[-1] if dates else None,
         "hidden_heldout": int(

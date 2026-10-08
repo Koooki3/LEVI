@@ -7,6 +7,13 @@
 - ``LEVI_POOL_HELDOUT``: comma-separated JSON lists of held-out episodes
   (``{"episodes": [{"path", "sha256": {...}}, ...]}``), never exported.
   Unset, exports are refused; ``none`` states that there is no held-out set.
+- ``LEVI_POOL_HOLDBACK``: comma-separated JSON lists of episodes a person set
+  aside for now (``{"episodes": [{"path"}, ...]}``): indexed and listed, but
+  no recipe selects them and no export carries them unless the recipe sets
+  ``include_holdback``. Unset: nothing is held back.
+- ``LEVI_POOL_OUTCOMES``: comma-separated JSON lists of verified outcomes
+  (``{"episodes": [{"path", "outcome", "basis"}, ...]}``) that rank above the
+  robot's key press and below a human label. Unset: none.
 - ``LEVI_POOL_STALL_SECONDS`` (300): a running job that has not moved for this
   long is reported ``stalled``.
 - ``LEVI_POOL_PARTIAL_TTL`` (3 days) and ``LEVI_POOL_JOB_TTL`` (30 days): how
@@ -65,6 +72,17 @@ def heldout_files() -> list[Path]:
     if heldout_disabled():
         return []
     return _paths(os.getenv("LEVI_POOL_HELDOUT"))
+
+
+def holdback_files() -> list[Path]:
+    """The hold-back lists; unset is no hold-back (unlike the held-out
+    setting, an empty value never refuses an export)."""
+    return _paths(os.getenv("LEVI_POOL_HOLDBACK"))
+
+
+def outcome_files() -> list[Path]:
+    """The verified-outcome lists; unset is none."""
+    return _paths(os.getenv("LEVI_POOL_OUTCOMES"))
 
 
 def require_heldout() -> None:

@@ -13,8 +13,8 @@ The quality score of an episode, in 0..1::
 
     score = 0.40 * trust + 0.30 * completeness + 0.30 * fit
 
-* trust: a human label 1.0, a demonstration 0.8, the robot's flag 0.6, no
-  outcome 0.3, conflicting human labels 0.0;
+* trust: a human label 1.0, a verified outcome 0.9, a demonstration 0.8, the
+  robot's flag 0.6, no outcome 0.3, conflicting human labels 0.0;
 * completeness: 1 for a frame count between half and twice the task's median,
   falling to 0 at 0.15x (an aborted recording) and at 4x (a run that never
   ended);
@@ -34,7 +34,7 @@ import statistics
 from collections import Counter, defaultdict, deque
 
 W_TRUST, W_COMPLETE, W_FIT = 0.40, 0.30, 0.30
-TRUST = {"human": 1.0, "sft_demonstration": 0.8, "robot_flag": 0.6}
+TRUST = {"human": 1.0, "verified": 0.9, "sft_demonstration": 0.8, "robot_flag": 0.6}
 TRUST_UNKNOWN = 0.3
 COMPLETE_LOW = (0.15, 0.5)  # ratio to the median: 0 at 0.15, 1 from 0.5
 COMPLETE_HIGH = (2.0, 4.0)  # 1 up to 2x, 0 at 4x

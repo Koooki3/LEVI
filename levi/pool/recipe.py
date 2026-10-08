@@ -7,7 +7,9 @@ the export follows it), date and policy (model, checkpoint, how it was run), the
    person approved (``corrections.py``): a corrected episode, and every copy
    of it, counts under the corrected task from here on;
 
-1. held-out episodes out — always, whatever the recipe says;
+1. held-out episodes out — always, whatever the recipe says; then episodes
+   a person removed on a live page; then held-back episodes (a hold-back list,
+   ``holdback.py``; ``include_holdback`` lets them in, held-out still wins);
 2. episodes the recipe names in ``exclude`` out;
 3. nonstandard folders out (unless ``include_nonstandard``) and episodes of
    formats the pool cannot export out;
@@ -15,7 +17,9 @@ the export follows it), date and policy (model, checkpoint, how it was run), the
    one (or, when the canonical copy is not selected, the best-ranked one)
    stays;
 5. the outcome filter: ``all``, ``robot_flag_success`` (the robot's flag),
-   ``verified_success`` (a human label first, then the robot's flag) or
+   ``verified_success`` (a human label first, then a verified outcome
+   (``verified.py``), then the robot's flag), ``checked_success`` (a human
+   label or a verified outcome; the robot's flag alone does not count) or
    ``human_verified_success`` (a human label only). An episode whose human
    labels disagree (``label_conflict``) is out of every verified outcome and
    of RECAP exports;
@@ -38,7 +42,7 @@ from typing import Literal
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from . import corrections, embodiment, index, recap_signal, settings
+from . import corrections, embodiment, index, manifest, recap_signal, settings
 from . import select as picker
 from . import timing as timing_mod
 from .rules import CATEGORIES, normalize_task
@@ -82,7 +86,11 @@ class Recipe(BaseModel):
     )
     tasks: list[TaskEntry] = Field(default_factory=list, max_length=5000)
     outcome: Literal[
-        "all", "robot_flag_success", "verified_success", "human_verified_success"
+        "all",
+        "robot_flag_success",
+        "verified_success",
+        "checked_success",
+        "human_verified_success",
     ] = "all"
     per_task_cap: int | None = Field(None, ge=1, le=10_000_000)
     seed: int = 0
@@ -104,6 +112,9 @@ class Recipe(BaseModel):
     # different grippers learns what "closed" means from both.
     allow_mixed_gripper: bool = False
     include_nonstandard: bool = False
+    # Episodes on a hold-back list (LEVI_POOL_HOLDBACK) are set aside for now:
+    # left out unless this is set. Held-out episodes stay out either way.
+    include_holdback: bool = False
     # A task taken from raw captures and from a LeRobot source that is not
     # linked to them may be one recording twice: refused unless sources are
     # named or this is set.
@@ -370,6 +381,9 @@ def select_detailed(
             # A person removed this recording on the live page (index.py
             # ``mark_excluded``; every copy of it is out, not only the mirror).
             out(row, "excluded_in_live")
+        elif row.get("holdback") and not recipe.include_holdback:
+            # Set aside for now by a hold-back list (every copy of it is).
+            out(row, "held_back", holdback_set=row.get("holdback_set"))
         elif row["key"] in skip:
             out(row, "excluded_by_recipe")
         elif row["nonstandard"] and not recipe.include_nonstandard:
@@ -390,7 +404,11 @@ def select_detailed(
         for row in members[1:]:
             out(row, "duplicate", kept=members[0]["key"])
     passed = []
-    verified = recipe.outcome in ("verified_success", "human_verified_success")
+    verified = recipe.outcome in (
+        "verified_success",
+        "checked_success",
+        "human_verified_success",
+    )
     for row in unique:
         if (verified or target == "recap_value") and row.get("label_conflict"):
             out(row, "label_conflict")
@@ -398,9 +416,25 @@ def select_detailed(
             out(row, "outcome_filter", outcome=row["robot_flag"])
         elif (
             recipe.outcome == "verified_success"
-            and (row["human_label"] or row["robot_flag"]) != "success"
+            and (row["human_label"] or row.get("verified_outcome") or row["robot_flag"])
+            != "success"
         ):
-            out(row, "outcome_filter", outcome=row["human_label"] or row["robot_flag"])
+            out(
+                row,
+                "outcome_filter",
+                outcome=row["human_label"]
+                or row.get("verified_outcome")
+                or row["robot_flag"],
+            )
+        elif (
+            recipe.outcome == "checked_success"
+            and (row["human_label"] or row.get("verified_outcome")) != "success"
+        ):
+            out(
+                row,
+                "outcome_filter",
+                outcome=row["human_label"] or row.get("verified_outcome"),
+            )
         elif recipe.outcome == "human_verified_success" and (
             row["human_label"] != "success"
         ):
@@ -505,6 +539,31 @@ def find_warnings(recipe: Recipe, chosen: list[dict], df=None) -> list[dict]:
                 "ids": scan["unmatched"][:20],
             }
         )
+    out += list_warnings(
+        "holdback",
+        "hold-back",
+        "LEVI_POOL_HOLDBACK",
+        settings.holdback_files(),
+        (index.summary() or {}).get("holdback") or {},
+    )
+    out += list_warnings(
+        "outcomes",
+        "verified-outcome",
+        "LEVI_POOL_OUTCOMES",
+        settings.outcome_files(),
+        (index.summary() or {}).get("outcomes") or {},
+    )
+    held = sum(1 for r in chosen if r.get("holdback"))
+    if held and recipe.include_holdback:
+        out.append(
+            {
+                "code": "holdback_included",
+                "blocking": False,
+                "message": f"{held} held-back episode(s) are in this selection "
+                "(include_holdback): they were set aside on purpose",
+                "episodes": held,
+            }
+        )
     full = index.frame() if df is None else df
     linked = set(full.loc[full.format == "robot_capture", "group"])
     raw_tasks, loose = defaultdict(set), defaultdict(set)
@@ -546,6 +605,68 @@ def find_warnings(recipe: Recipe, chosen: list[dict], df=None) -> list[dict]:
                 "episodes": fallback,
             }
         )
+    return out
+
+
+def _stamp(lists) -> list[tuple]:
+    return [(d.get("path"), d.get("sha256")) for d in lists or []]
+
+
+def list_warnings(
+    code: str, what: str, setting: str, files: list, scanned: dict
+) -> list[dict]:
+    """The problems of one list setting (hold-back or verified outcomes)
+    against what the last scan read: a list that cannot be read now, a list
+    edited, added or removed since the scan (the index does not show it yet;
+    both block an export) and entries that match no indexed episode."""
+    out = []
+    now = manifest.digests(files)
+    unreadable = [d["path"] for d in now if d["sha256"] is None]
+    if unreadable:
+        out.append(
+            {
+                "code": f"{code}_list_unreadable",
+                "blocking": True,
+                "message": f"A {what} list cannot be read ({setting}): "
+                + ", ".join(unreadable),
+                "lists": unreadable,
+            }
+        )
+    elif index.summary() and _stamp(scanned.get("lists")) != _stamp(now):
+        out.append(
+            {
+                "code": f"{code}_lists_changed",
+                "blocking": True,
+                "message": f"The {what} lists changed since the last scan; "
+                "scan again so the index shows them",
+                "scanned_with": [d.get("path") for d in scanned.get("lists") or []],
+                "now": [d["path"] for d in now],
+            }
+        )
+    if scanned.get("unmatched_count"):
+        out.append(
+            {
+                "code": f"{code}_unmatched",
+                "blocking": False,
+                "message": f"{scanned['unmatched_count']} {what} entries match no "
+                "indexed episode (moved, renamed or not under the pool roots)",
+                "paths": (scanned.get("unmatched") or [])[:20],
+            }
+        )
+    if code == "outcomes":
+        clash = scanned.get("conflicts_with_human", 0) + scanned.get("disagreeing", 0)
+        if clash:
+            out.append(
+                {
+                    "code": "outcomes_conflict",
+                    "blocking": False,
+                    "message": f"{clash} recording(s) have a verified outcome that "
+                    "disagrees with a human label (the label stands) or with "
+                    "another verified entry (counted as none)",
+                    "with_human": scanned.get("conflicts_with_human", 0),
+                    "between_entries": scanned.get("disagreeing", 0),
+                }
+            )
     return out
 
 
@@ -665,6 +786,8 @@ def _task_view(row: dict) -> dict:
             "outcome_source",
             "human_label",
             "robot_flag",
+            "verified_by",
+            "holdback",
             "policy_label",
             "policy_method",
             "gripper",
@@ -783,6 +906,12 @@ def preview(
         "outcomes": dict(Counter(r["outcome"] or "none" for r in chosen)),
         "outcome_sources": dict(Counter(r["outcome_source"] or "none" for r in chosen)),
         "human_as_success": human_as_success,
+        "holdback": {
+            "lists": [str(p) for p in settings.holdback_files()],
+            "include": recipe.include_holdback,
+            "left_out": reasons.get("held_back", 0),
+            "included": sum(1 for r in chosen if r.get("holdback")),
+        },
         "warnings": find_warnings(recipe, chosen, df)
         + (
             timing_mod.warnings(
@@ -795,6 +924,7 @@ def preview(
         "excluded": dict(reasons),
         "excluded_label_conflicts": reasons.get("label_conflict", 0),
         "excluded_heldout": reasons.get("heldout", 0),
+        "excluded_holdback": reasons.get("held_back", 0),
         "excluded_in_live": reasons.get("excluded_in_live", 0),
         "excluded_duplicates": reasons.get("duplicate", 0),
         "excluded_nonstandard": reasons.get("nonstandard", 0),
