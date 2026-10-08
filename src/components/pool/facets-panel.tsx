@@ -10,6 +10,7 @@ import {
   POLICY_METHODS,
   gripperLabel,
   type Facets,
+  type HoldbackFilter,
   type OutcomeFilter,
 } from "./types";
 
@@ -18,6 +19,7 @@ export interface Filters {
   sources: string[];
   search: string;
   outcome: OutcomeFilter;
+  holdback: HoldbackFilter; // episodes on a hold-back list: all, only, none
   policies: string[]; // the old single field (a saved recipe's checkpoints)
   policyModels: string[];
   policyCheckpoints: string[];
@@ -35,6 +37,7 @@ export const EMPTY_FILTERS: Filters = {
   sources: [],
   search: "",
   outcome: "all",
+  holdback: "all",
   policies: [],
   policyModels: [],
   policyCheckpoints: [],
@@ -189,6 +192,7 @@ export function FacetsPanel({
             ["all", "All"],
             ["robot_flag_success", "Robot flag: success"],
             ["verified_success", "Verified success"],
+            ["checked_success", "Human-labelled or verified success"],
             ["human_verified_success", "Human-labelled success"],
           ] as [OutcomeFilter, string][]
         ).map(([value, label]) => (
@@ -208,6 +212,38 @@ export function FacetsPanel({
           </label>
         ))}
       </fieldset>
+      {(!!facets?.holdback || filters.holdback !== "all") && (
+        <fieldset>
+          <legend>{t("Held back")}</legend>
+          {(
+            [
+              ["all", "All"],
+              ["only", "Only held back"],
+              ["hide", "Without held back"],
+            ] as [HoldbackFilter, string][]
+          ).map(([value, label]) => (
+            <label key={value} className="pg-pool-check">
+              <input
+                type="radio"
+                name="pool-holdback"
+                checked={filters.holdback === value}
+                onChange={() => set({ holdback: value })}
+              />
+              <span className="grow">{t(label)}</span>
+              {value === "only" && (
+                <span className="pg-pool-count">
+                  {(facets?.holdback || 0).toLocaleString()}
+                </span>
+              )}
+            </label>
+          ))}
+          <p className="pg-pool-why">
+            {t(
+              "Set aside for now: listed here, but a recipe leaves them out unless it includes held-back episodes.",
+            )}
+          </p>
+        </fieldset>
+      )}
       <fieldset>
         <legend>{t("Source")}</legend>
         <input

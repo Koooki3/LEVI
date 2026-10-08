@@ -9,6 +9,7 @@ import { useLocale } from "@/components/levi-locale";
 import { SelectionFields } from "./selection-fields";
 import {
   METHOD_LABELS,
+  OUTCOME_SOURCE_LABELS,
   gripperLabel,
   PICK_REASONS,
   SELECTION_NOTES,
@@ -191,9 +192,8 @@ export function PickedList({
                 title={
                   row.outcome_source
                     ? t(
-                        row.outcome_source === "human"
-                          ? "human label"
-                          : "robot flag",
+                        OUTCOME_SOURCE_LABELS[row.outcome_source] ||
+                          "robot flag",
                       )
                     : undefined
                 }

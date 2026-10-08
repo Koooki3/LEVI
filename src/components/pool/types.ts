@@ -131,7 +131,10 @@ export type OutcomeFilter =
   | "all"
   | "robot_flag_success"
   | "verified_success"
+  | "checked_success"
   | "human_verified_success";
+/** Which held-back episodes the episode list shows (all of them by default). */
+export type HoldbackFilter = "all" | "only" | "hide";
 export type ExportFormat = "lerobot_v21" | "recap_value" | "raw_capture";
 
 export const FORMAT_LABELS: Record<ExportFormat, string> = {
@@ -404,6 +407,9 @@ export interface PoolStatus {
   roots: string[];
   export_roots: string[];
   heldout_lists: string[];
+  /** LEVI_POOL_HOLDBACK and LEVI_POOL_OUTCOMES (absent from an older server). */
+  holdback_lists?: string[];
+  outcome_lists?: string[];
   last_scan: ScanSummary | null;
   disk?: PoolDisk[];
   jobs: PoolJob[];
@@ -424,6 +430,8 @@ export interface Facets {
   date_min: string | null;
   date_max: string | null;
   hidden_heldout: number;
+  /** Episodes on a hold-back list (listed; left out of recipes by default). */
+  holdback?: number;
   /** Episodes removed on the live page (never listed or exported). */
   removed_in_live?: number;
   hidden_copies: number;
@@ -473,6 +481,13 @@ export interface EpisodeRow {
   date: string | null;
   heldout: boolean;
   heldout_id: string | null;
+  /** On a hold-back list: set aside for now (a recipe leaves it out unless
+   * it includes held-back episodes). */
+  holdback?: boolean;
+  holdback_set?: string | null;
+  /** The check that ranks below a human label and above the robot flag. */
+  verified_outcome?: string | null;
+  verified_by?: string | null;
   canonical: boolean;
   nonstandard: boolean;
   exportable: boolean;
@@ -511,6 +526,8 @@ export interface Recipe {
   grippers?: string[];
   allow_mixed_gripper?: boolean;
   include_nonstandard: boolean;
+  /** Also take episodes on a hold-back list (left out otherwise). */
+  include_holdback?: boolean;
   allow_unlinked_sources?: boolean;
   exclude: string[];
   task_text?: Record<string, string>;
@@ -679,6 +696,7 @@ export interface PickedEpisode {
   frames: number | null;
   outcome: string | null;
   outcome_source: string | null;
+  holdback?: boolean;
   policy_label: string | null;
   date: string | null;
   quality_score: number;
@@ -717,6 +735,14 @@ export interface Preview {
   declared?: Record<string, number>;
   excluded: Record<string, number>;
   excluded_heldout: number;
+  /** Left out because they are on a hold-back list. */
+  excluded_holdback?: number;
+  holdback?: {
+    lists: string[];
+    include: boolean;
+    left_out: number;
+    included: number;
+  };
   excluded_in_live?: number;
   excluded_duplicates: number;
   excluded_nonstandard: number;
@@ -736,6 +762,7 @@ export interface RemoteTarget {
 /** Why an episode was left out (recipe.py), as UI text. */
 export const REASON_LABELS: Record<string, string> = {
   heldout: "Held-out test set",
+  held_back: "Held back (set aside for now)",
   duplicate: "Duplicate of another copy",
   nonstandard: "Non-standard folder",
   unsupported: "Format not exportable",
@@ -793,15 +820,39 @@ export const WARNING_LABELS: Record<string, string> = {
   heldout_lists_changed:
     "The held-out lists changed since the last scan: scan again.",
   heldout_unmatched: "Held-out entries that match no indexed episode",
+  holdback_lists_changed:
+    "The hold-back lists changed since the last scan: scan again.",
+  holdback_list_unreadable:
+    "A hold-back list (LEVI_POOL_HOLDBACK) cannot be read: exports are refused until it can.",
+  holdback_unmatched: "Hold-back entries that match no indexed episode",
+  holdback_included:
+    "Held-back episodes are in this selection (the recipe includes them)",
+  outcomes_lists_changed:
+    "The verified-outcome lists changed since the last scan: scan again.",
+  outcomes_list_unreadable:
+    "A verified-outcome list (LEVI_POOL_OUTCOMES) cannot be read: exports are refused until it can.",
+  outcomes_unmatched: "Verified-outcome entries that match no indexed episode",
+  outcomes_conflict:
+    "Recordings whose verified outcome disagrees with a human label (the label is used) or with another verified entry (ignored)",
   possible_unlinked_conversion:
     "Tasks taken from raw captures and from an unlinked LeRobot dataset may be the same recordings twice. Name the sources, or allow it.",
   outcome_from_robot_flag:
     "Episodes that count as verified only through the operator's key press (no human label)",
 };
 
+/** Where an episode's outcome came from (index ``outcome_source``). */
+export const OUTCOME_SOURCE_LABELS: Record<string, string> = {
+  human: "human label",
+  verified: "verified",
+  robot_flag: "robot flag",
+  sft_demonstration: "demonstration",
+  none: "none",
+};
+
 /** Why the selection took an episode (select.py ``score_rows``), as UI text. */
 export const PICK_REASONS: Record<string, string> = {
   human: "human label",
+  verified: "verified outcome",
   robot_flag: "robot flag",
   sft_demonstration: "demonstration",
   no_outcome: "no outcome",

@@ -67,6 +67,7 @@ const EMPTY_RECIPE: Recipe = {
   grippers: [],
   allow_mixed_gripper: false,
   include_nonstandard: false,
+  include_holdback: false,
   exclude: [],
 };
 
@@ -81,6 +82,7 @@ function query(filters: Filters, extra: Record<string, string> = {}) {
   for (const g of filters.grippers) q.append("gripper", g);
   if (filters.search) q.set("search", filters.search);
   if (filters.outcome !== "all") q.set("outcome", filters.outcome);
+  if (filters.holdback !== "all") q.set("holdback", filters.holdback);
   if (filters.dateFrom) q.set("date_from", filters.dateFrom);
   if (filters.dateTo) q.set("date_to", filters.dateTo);
   if (filters.showHeldout) q.set("show_heldout", "true");
@@ -453,6 +455,12 @@ function TrainingPool() {
               {status?.heldout_lists.length
                 ? ` · ${t("Held-out lists")}${colon}${status.heldout_lists.length}`
                 : ""}
+              {status?.holdback_lists?.length
+                ? ` · ${t("Hold-back lists")}${colon}${status.holdback_lists.length}`
+                : ""}
+              {status?.outcome_lists?.length
+                ? ` · ${t("Verified-outcome lists")}${colon}${status.outcome_lists.length}`
+                : ""}
             </p>
           </div>
           <div className="pg-row">
@@ -592,6 +600,7 @@ function TrainingPool() {
                 offset={offset}
                 pageSize={PAGE}
                 chosenTasks={chosenNames}
+                includeHoldback={!!composition.include_holdback}
                 exclude={composition.exclude}
                 onPage={setOffset}
                 onToggleExclude={(key) =>
@@ -639,6 +648,7 @@ function TrainingPool() {
                       grippers: recipe.grippers || [],
                       allow_mixed_gripper: recipe.allow_mixed_gripper || false,
                       include_nonstandard: recipe.include_nonstandard,
+                      include_holdback: recipe.include_holdback || false,
                       allow_unlinked_sources:
                         recipe.allow_unlinked_sources || false,
                       exclude: recipe.exclude,

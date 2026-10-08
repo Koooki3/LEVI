@@ -23,6 +23,7 @@ import { GripperMix, MixSummary, PickedList, TaskPick } from "./task-pick";
 import {
   CATEGORY_LABELS,
   METHOD_LABELS,
+  OUTCOME_SOURCE_LABELS,
   REASON_LABELS,
   gripperLabel,
   TIMING_WARNING_CODES,
@@ -34,13 +35,6 @@ import {
   type Recipe,
   type TaskEntry,
 } from "./types";
-
-const OUTCOME_SOURCES: Record<string, string> = {
-  human: "human label",
-  robot_flag: "robot flag",
-  sft_demonstration: "demonstration",
-  none: "none",
-};
 
 /** Server warnings; a blocking one stops the export until fixed. */
 export function PoolWarnings({ warnings }: { warnings: PoolWarning[] }) {
@@ -155,7 +149,9 @@ export function CompositionPanel({
               ? "Robot flag: success"
               : recipe.outcome === "human_verified_success"
                 ? "Human-labelled success"
-                : "Verified success",
+                : recipe.outcome === "checked_success"
+                  ? "Human-labelled or verified success"
+                  : "Verified success",
           ),
         ]
       : []),
@@ -287,6 +283,18 @@ export function CompositionPanel({
         />
         <span>{t("Include non-standard folders")}</span>
       </label>
+      {(recipe.include_holdback ||
+        preview?.excluded_holdback ||
+        preview?.holdback?.included) && (
+        <label className="pg-pool-check">
+          <input
+            type="checkbox"
+            checked={!!recipe.include_holdback}
+            onChange={() => set({ include_holdback: !recipe.include_holdback })}
+          />
+          <span>{t("Include held-back episodes")}</span>
+        </label>
+      )}
       <label className="pg-pool-check">
         <input
           type="checkbox"
@@ -414,7 +422,7 @@ export function CompositionPanel({
                 {Object.entries(preview.outcome_sources)
                   .map(
                     ([source, n]) =>
-                      `${t(OUTCOME_SOURCES[source] || source)} ${n.toLocaleString()}`,
+                      `${t(OUTCOME_SOURCE_LABELS[source] || source)} ${n.toLocaleString()}`,
                   )
                   .join(" · ")}
               </p>

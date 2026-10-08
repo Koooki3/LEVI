@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Copy,
   Lock,
+  Pause,
   Plus,
   UserCheck,
 } from "lucide-react";
@@ -19,6 +20,7 @@ import {
   CATEGORIES,
   CATEGORY_LABELS,
   METHOD_LABELS,
+  OUTCOME_SOURCE_LABELS,
   gripperDeclared,
   gripperLabel,
   gripperTitle,
@@ -282,8 +284,9 @@ export function TaskTable({
 function OutcomeCell({ row }: { row: EpisodeRow }) {
   const { t } = useLocale();
   if (!row.outcome) return <span className="pg-pool-muted">—</span>;
-  const source =
-    row.outcome_source === "human" ? t("human label") : t("robot flag");
+  const source = t(
+    OUTCOME_SOURCE_LABELS[row.outcome_source || ""] || "robot flag",
+  );
   return (
     <StatusDot
       tone={
@@ -303,13 +306,15 @@ function OutcomeCell({ row }: { row: EpisodeRow }) {
 }
 
 /** Paged episodes with source, category, task, frames, outcome and
- * held-out / copy badges. Held-out rows can never be included. */
+ * held-out / held-back / copy badges. Held-out rows can never be included;
+ * held-back ones only when the recipe includes held-back episodes. */
 export function EpisodeTable({
   rows,
   total,
   offset,
   pageSize,
   chosenTasks,
+  includeHoldback = false,
   exclude,
   onPage,
   onToggleExclude,
@@ -319,6 +324,8 @@ export function EpisodeTable({
   offset: number;
   pageSize: number;
   chosenTasks: string[];
+  /** The composition takes episodes on a hold-back list too. */
+  includeHoldback?: boolean;
   exclude: string[];
   onPage: (offset: number) => void;
   onToggleExclude: (key: string) => void;
@@ -368,6 +375,18 @@ export function EpisodeTable({
                           </Badge>
                         </span>
                       </Tooltip>
+                    ) : row.holdback && !includeHoldback ? (
+                      <Tooltip
+                        content={t(
+                          "Held back: left out of an export unless the recipe includes held-back episodes",
+                        )}
+                      >
+                        <span tabIndex={0} className="pg-badge-trigger">
+                          <Badge tone="warning" icon={Pause}>
+                            {t("held back")}
+                          </Badge>
+                        </span>
+                      </Tooltip>
                     ) : inComposition ? (
                       <input
                         type="checkbox"
@@ -387,6 +406,11 @@ export function EpisodeTable({
                     {!row.canonical && (
                       <Badge icon={Copy} className="pg-badge-gap">
                         {t("copy")}
+                      </Badge>
+                    )}
+                    {row.holdback && includeHoldback && (
+                      <Badge icon={Pause} className="pg-badge-gap">
+                        {t("held back")}
                       </Badge>
                     )}
                     {row.nonstandard && (
