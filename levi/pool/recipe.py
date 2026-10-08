@@ -608,10 +608,6 @@ def find_warnings(recipe: Recipe, chosen: list[dict], df=None) -> list[dict]:
     return out
 
 
-def _stamp(lists) -> list[tuple]:
-    return [(d.get("path"), d.get("sha256")) for d in lists or []]
-
-
 def list_warnings(
     code: str, what: str, setting: str, files: list, scanned: dict
 ) -> list[dict]:
@@ -632,7 +628,9 @@ def list_warnings(
                 "lists": unreadable,
             }
         )
-    elif index.summary() and _stamp(scanned.get("lists")) != _stamp(now):
+    elif index.summary() and manifest.stamp(scanned.get("lists")) != manifest.stamp(
+        now
+    ):
         out.append(
             {
                 "code": f"{code}_lists_changed",

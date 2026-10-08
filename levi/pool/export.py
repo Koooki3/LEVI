@@ -641,11 +641,30 @@ def refuse_holdback_groups(episodes: list[dict], allow: bool = False):
         )
 
 
+def refuse_stale_holdback(lists: list[Path], allow: bool = False):
+    """The lists must be the ones the last scan read. A list edited since (a copy
+    of a planned episode added, say) is not in the index yet, and neither the
+    path check nor the group check would see it: refuse until the pool is
+    scanned again. Nothing to compare before the first scan."""
+    summary = index.summary()
+    if allow or not lists or not summary:
+        return
+    if not manifest.unchanged((summary.get("holdback") or {}).get("lists"), lists):
+        raise PermissionError(
+            "The hold-back lists changed since the last scan (a list was edited, "
+            "added or removed); scan again so the index shows them: "
+            + ", ".join(str(p) for p in lists)
+        )
+
+
 def guard_holdback(
     episodes: list[dict], roots: list[Path], lists: list[Path], allow: bool = False
 ):
-    """Both hold-back checks, at plan, run and resume."""
+    """The hold-back checks, at plan, run and resume: the planned episodes' paths
+    against the lists, that the index has read these lists, and the planned
+    episodes' groups against the index."""
     refuse_holdback(episodes, roots, lists, allow)
+    refuse_stale_holdback(lists, allow)
     refuse_holdback_groups(episodes, allow)
 
 

@@ -47,6 +47,17 @@ def digests(files: list[Path]) -> list[dict]:
     return out
 
 
+def stamp(lists) -> list[tuple]:
+    """``(path, sha256)`` of each list, as ``digests`` returns them or as the
+    scan summary records them."""
+    return [(d.get("path"), d.get("sha256")) for d in lists or []]
+
+
+def unchanged(scanned, files: list[Path]) -> bool:
+    """The lists now are the ones the scan recorded (same files, same content)."""
+    return stamp(scanned) == stamp(digests(files))
+
+
 def locate(path: str, roots: list[Path], by_key: dict):
     """The index row an entry's ``path`` names: the path itself when absolute,
     else under each pool root; also its resolved form (a symbolic link)."""

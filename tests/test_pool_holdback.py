@@ -375,6 +375,62 @@ def test_a_resume_refuses_an_episode_held_back_since_the_plan(
     assert jobs.prepare_resume(open_job["id"])
 
 
+def test_a_list_edited_after_the_plan_stops_the_run_and_the_resume_until_scanned(
+    pool, monkeypatch, root
+):
+    """A copy of a planned episode is added to the list after the plan was frozen
+    and the export interrupted. The path check cannot see it (the plan names the
+    original) and the index does not know it until a scan: the run and the
+    resume must refuse rather than export the whole group."""
+    from test_pool_resume import _interrupt_after
+
+    from levi.pool import joblog
+
+    built = pool(holdback=False, outcomes=False)
+    monkeypatch.setenv("LEVI_POOL_BATCH_EPISODES", "2")
+    listing = built["lists"] / "parked.json"
+    listing.write_text(json.dumps({"episodes": [{"path": key(root, 4)}]}))
+    monkeypatch.setenv("LEVI_POOL_HOLDBACK", str(listing))
+    scanner.scan()
+    options = export.ExportOptions(
+        format="lerobot_v21",
+        name="cut",
+        output_dir=str(built["out"] / "exports"),
+        timing="retime",
+        filter_static=False,
+        workers=1,
+    )
+    job = jobs.plan_export(rollout_recipe(), options)
+    planned = {Path(e["key"]).name for e in job["episodes"]}
+    assert planned == {f"demo_000{n}" for n in (0, 1, 2, 3, 5)}
+    real = _interrupt_after(monkeypatch, 1)
+    jobs.run_worker(jobs._path(job["id"]))
+    monkeypatch.setattr(export.pipeline, "run", real)
+    joblog.TERMINATING.clear()
+    assert (built["out"] / "exports/.cut.partial").is_dir()
+    # As planned, the unfinished export may continue.
+    assert jobs.prepare_resume(job["id"])
+
+    # demo_0001's copy is now named; nobody scanned.
+    value = json.loads(listing.read_text())
+    value["episodes"].append({"path": "evalws/plates_a/demo_0000"})
+    listing.write_text(json.dumps(value))
+    with pytest.raises(journal.ResumeRefused, match="changed since the last scan"):
+        jobs.prepare_resume(job["id"])
+    with pytest.raises(PermissionError, match="changed since the last scan"):
+        export.run(jobs.read_job(job["id"]), resume=True)
+    # A fresh run of the same plan is refused the same way, not only a resume.
+    with pytest.raises(PermissionError, match="changed since the last scan"):
+        export.guard_holdback(job["episodes"], [root], [listing], allow=False)
+    # Included on purpose, the edit does not matter.
+    export.guard_holdback(job["episodes"], [root], [listing], allow=True)
+
+    # Once scanned, the index knows the group and says so.
+    scanner.scan()
+    with pytest.raises(journal.ResumeRefused, match="held-back"):
+        jobs.prepare_resume(job["id"])
+
+
 def test_the_plan_hash_of_an_older_plan_does_not_change():
     base = {"format": "lerobot_v21", "episodes": [], "heldout_lists": []}
     assert journal.plan_hash(base) == journal.plan_hash({**base, "holdback_lists": []})
