@@ -15,7 +15,17 @@ import pandas as pd
 import pytest
 from test_pool import make_demo
 
-from levi.pool import cli, export, index, jobs, journal, recipe, scanner, select
+from levi.pool import (
+    cli,
+    export,
+    index,
+    jobs,
+    journal,
+    manifest,
+    recipe,
+    scanner,
+    select,
+)
 from levi.pool.recipe import Recipe
 
 ROLLOUTS = "rollouts/models/pi05_test/stack_the_plates"
@@ -539,6 +549,67 @@ def test_a_hold_back_list_that_cannot_be_read_stops_the_scan(
             )
         with pytest.raises(ValueError, match="Cannot read hold-back list"):
             export.refuse_holdback([{"key": "a"}], [], [path])
+
+
+def test_a_list_is_read_as_utf8_whatever_the_locale(pool, monkeypatch):
+    built = pool(holdback=False, outcomes=False)
+    path = built["lists"] / "parked-utf8.json"
+    path.write_text(
+        json.dumps(
+            {"name": "暂留-0610", "episodes": [{"path": key(built["root"], 4)}]},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    real = Path.read_text
+    seen = []
+
+    def spy(self, *args, **kwargs):
+        if self.name == path.name:
+            seen.append(kwargs.get("encoding"))
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", spy)
+    monkeypatch.setenv("LEVI_POOL_HOLDBACK", str(path))
+    scanner.scan()
+    assert seen and set(seen) == {"utf-8"}
+    assert listed()[key(built["root"], 4)]["holdback_set"] == "暂留-0610"
+    # Bytes that are not UTF-8 are an unreadable list, named, not a crash.
+    path.write_bytes(b'{"episodes": [], "name": "\xff\xfe"}')
+    with pytest.raises(ValueError, match="Cannot read hold-back list") as caught:
+        scanner.scan()
+    assert str(path) in str(caught.value)
+
+
+GHOST = "~no_such_user_for_levi_tests"
+
+
+def test_a_home_of_a_user_that_does_not_exist_is_a_missing_file_not_a_crash(
+    pool, monkeypatch
+):
+    built = pool(holdback=False, outcomes=False)
+    # As the place of a list: the file is not there.
+    for env, what in (
+        ("LEVI_POOL_HOLDBACK", "hold-back"),
+        ("LEVI_POOL_OUTCOMES", "verified-outcome"),
+    ):
+        monkeypatch.setenv(env, f"{GHOST}/list.json")
+        with pytest.raises(ValueError, match=f"Cannot read {what} list"):
+            scanner.scan()
+        monkeypatch.delenv(env)
+    # As an entry's path: it names no episode (an unmatched entry), everywhere
+    # a path is resolved.
+    path = built["lists"] / "ghost.json"
+    path.write_text(json.dumps({"episodes": [{"path": f"{GHOST}/demo_0000"}]}))
+    monkeypatch.setenv("LEVI_POOL_HOLDBACK", str(path))
+    block = scanner.scan()["holdback"]
+    assert block["matched"] == 0 and block["unmatched_count"] == 1
+    assert block["unmatched"] == [f"{GHOST}/demo_0000"]
+    assert manifest.locate(f"{GHOST}/x", [built["root"]], {}) is None
+    assert manifest.candidates(f"{GHOST}/demo_0000", [built["root"]]) == {
+        str(built["root"] / GHOST / "demo_0000")
+    }
+    export.refuse_holdback([{"key": key(built["root"], 1)}], [built["root"]], [path])
 
 
 def test_a_verified_outcome_list_with_a_bad_shape_stops_the_scan(pool, monkeypatch):

@@ -5,7 +5,7 @@ The hold-back lists (``holdback.py``) and the verified-outcome lists
 ...}, ...]}`` where ``path`` is absolute or relative to a pool root. Other keys
 are ignored. A file that cannot be read, is not JSON or does not have this shape
 raises ``ValueError`` naming the file (the scan and the export then stop: a
-list that cannot be read must not pass as an empty one).
+list that cannot be read must not pass as an empty one). Lists are UTF-8 JSON.
 
 The scan records each list's path and the sha256 of its content (``digests``),
 so a list edited after the scan is noticed (``recipe.find_warnings``).
@@ -20,7 +20,7 @@ def read(file: Path, what: str) -> tuple[str, list[dict]]:
     """``(name, items)`` of one list file; every item is a dict with a
     ``path``. ``what`` names the kind of list in error messages."""
     try:
-        data = json.loads(Path(file).read_text())
+        data = json.loads(Path(file).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise ValueError(f"Cannot read {what} list {file}: {exc}") from exc
     if not isinstance(data, dict) or not isinstance(data.get("episodes"), list):
@@ -58,10 +58,21 @@ def unchanged(scanned, files: list[Path]) -> bool:
     return stamp(scanned) == stamp(digests(files))
 
 
+def expand(path: str) -> Path:
+    """``path`` with a leading ``~`` expanded. ``~name`` of a user that does not
+    exist (or a ``~`` with no home directory) makes ``expanduser`` raise
+    ``RuntimeError``: the text is kept as it is, so it names no episode (an
+    unmatched entry), the same as any other path that does not exist."""
+    try:
+        return Path(path).expanduser()
+    except RuntimeError:
+        return Path(path)
+
+
 def locate(path: str, roots: list[Path], by_key: dict):
     """The index row an entry's ``path`` names: the path itself when absolute,
     else under each pool root; also its resolved form (a symbolic link)."""
-    given = Path(path).expanduser()
+    given = expand(path)
     for candidate in [given] if given.is_absolute() else [r / given for r in roots]:
         for text in (str(candidate), str(candidate.resolve())):
             if text in by_key:
@@ -71,7 +82,7 @@ def locate(path: str, roots: list[Path], by_key: dict):
 
 def candidates(path: str, roots: list[Path]) -> set[str]:
     """Every folder text an entry's ``path`` can stand for (no index needed)."""
-    given = Path(path).expanduser()
+    given = expand(path)
     out = set()
     for candidate in [given] if given.is_absolute() else [r / given for r in roots]:
         out.update((str(candidate), str(candidate.resolve())))

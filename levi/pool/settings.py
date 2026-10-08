@@ -74,15 +74,24 @@ def heldout_files() -> list[Path]:
     return _paths(os.getenv("LEVI_POOL_HELDOUT"))
 
 
+def _list_paths(value: str | None) -> list[Path]:
+    """List files named by a setting. ``~name`` of a user that does not exist
+    cannot be expanded: it stays as written and names a file that is not there,
+    so reading it fails with the same "cannot read" error as any missing list."""
+    from .manifest import expand
+
+    return [expand(p.strip()).resolve() for p in (value or "").split(",") if p.strip()]
+
+
 def holdback_files() -> list[Path]:
     """The hold-back lists; unset is no hold-back (unlike the held-out
     setting, an empty value never refuses an export)."""
-    return _paths(os.getenv("LEVI_POOL_HOLDBACK"))
+    return _list_paths(os.getenv("LEVI_POOL_HOLDBACK"))
 
 
 def outcome_files() -> list[Path]:
     """The verified-outcome lists; unset is none."""
-    return _paths(os.getenv("LEVI_POOL_OUTCOMES"))
+    return _list_paths(os.getenv("LEVI_POOL_OUTCOMES"))
 
 
 def require_heldout() -> None:
