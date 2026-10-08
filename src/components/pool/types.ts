@@ -432,6 +432,8 @@ export interface Facets {
   hidden_heldout: number;
   /** Episodes on a hold-back list (listed; left out of recipes by default). */
   holdback?: number;
+  /** Hold-back entries that match no indexed episode (they hold nothing back). */
+  holdback_unmatched?: number;
   /** Episodes removed on the live page (never listed or exported). */
   removed_in_live?: number;
   hidden_copies: number;

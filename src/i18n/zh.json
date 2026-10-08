@@ -2650,5 +2650,6 @@
   "Verified-outcome entries that match no indexed episode": "核实结局清单中匹配不到任何已登记片段的条目",
   "Recordings whose verified outcome disagrees with a human label (the label is used) or with another verified entry (ignored)": "核实结局与人工标签不一致的录制（采用人工标签），或同一录制的核实条目互相矛盾的录制（核实结局不采用）",
   "verified": "核实",
-  "verified outcome": "核实结局"
+  "verified outcome": "核实结局",
+  "Nothing is held back for these entries: check the paths in the hold-back list.": "这些条目没有起到暂留作用：请检查暂留清单里的路径。"
 }

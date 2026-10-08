@@ -2650,5 +2650,6 @@
   "Verified-outcome entries that match no indexed episode": "Verified-outcome entries that match no indexed episode",
   "Recordings whose verified outcome disagrees with a human label (the label is used) or with another verified entry (ignored)": "Recordings whose verified outcome disagrees with a human label (the label is used) or with another verified entry (ignored)",
   "verified": "verified",
-  "verified outcome": "verified outcome"
+  "verified outcome": "verified outcome",
+  "Nothing is held back for these entries: check the paths in the hold-back list.": "Nothing is held back for these entries: check the paths in the hold-back list."
 }

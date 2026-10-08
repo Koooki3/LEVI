@@ -212,7 +212,9 @@ export function FacetsPanel({
           </label>
         ))}
       </fieldset>
-      {(!!facets?.holdback || filters.holdback !== "all") && (
+      {(!!facets?.holdback ||
+        !!facets?.holdback_unmatched ||
+        filters.holdback !== "all") && (
         <fieldset>
           <legend>{t("Held back")}</legend>
           {(
@@ -242,6 +244,23 @@ export function FacetsPanel({
               "Set aside for now: listed here, but a recipe leaves them out unless it includes held-back episodes.",
             )}
           </p>
+          {!!facets?.holdback_unmatched && (
+            <div className="pg-pool-removed">
+              <p className="pg-pool-check">
+                <span className="grow">
+                  {t("Hold-back entries that match no indexed episode")}
+                </span>
+                <span className="pg-pool-count">
+                  {facets.holdback_unmatched.toLocaleString()}
+                </span>
+              </p>
+              <p className="pg-pool-why">
+                {t(
+                  "Nothing is held back for these entries: check the paths in the hold-back list.",
+                )}
+              </p>
+            </div>
+          )}
         </fieldset>
       )}
       <fieldset>

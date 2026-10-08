@@ -170,6 +170,53 @@ describe("the held-back filter", () => {
     expect(host.textContent).toContain("Without held back");
   });
 
+  test("counts the entries that match no episode beside the held-back count", async () => {
+    const { host } = await render(
+      <FacetsPanel
+        facets={{ ...FACETS, holdback: 3, holdback_unmatched: 2 }}
+        filters={EMPTY_FILTERS}
+        onChange={() => {}}
+      />,
+    );
+    const note = host.querySelector(".pg-pool-removed")!;
+    expect(note.textContent).toContain(
+      "Hold-back entries that match no indexed episode",
+    );
+    expect(note.querySelector(".pg-pool-count")!.textContent).toBe("2");
+    expect(note.textContent).toContain(
+      "Nothing is held back for these entries",
+    );
+    // In the held-back group, after the filter rows.
+    expect(host.textContent).toContain("Only held back");
+    expect(note.closest("fieldset")!.textContent).toContain("Only held back");
+  });
+
+  test("says so even when every entry is unmatched and nothing is held back", async () => {
+    const { host } = await render(
+      <FacetsPanel
+        facets={{ ...FACETS, holdback: 0, holdback_unmatched: 4 }}
+        filters={EMPTY_FILTERS}
+        onChange={() => {}}
+      />,
+    );
+    expect(host.textContent).toContain("Held back");
+    expect(
+      host.querySelector(".pg-pool-removed .pg-pool-count")!.textContent,
+    ).toBe("4");
+  });
+
+  test("shows no unmatched line when every entry matched", async () => {
+    const { host } = await render(
+      <FacetsPanel
+        facets={{ ...FACETS, holdback: 3, holdback_unmatched: 0 }}
+        filters={EMPTY_FILTERS}
+        onChange={() => {}}
+      />,
+    );
+    expect(host.querySelector(".pg-pool-removed")).toBeNull();
+    expect(host.textContent).not.toContain("match no indexed episode");
+  });
+
   test("the outcome list offers human-labelled or verified success", async () => {
     const { host } = await render(
       <FacetsPanel
@@ -266,6 +313,7 @@ describe("the words are in both languages", () => {
     "Human-labelled or verified success",
     "Hold-back lists",
     "Verified-outcome lists",
+    "Nothing is held back for these entries: check the paths in the hold-back list.",
   ];
   test("every one has a Chinese entry", () => {
     const missing = strings.filter((text) => !(text in zh) || !(text in en));

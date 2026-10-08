@@ -273,6 +273,11 @@ def facets(**filters) -> dict:
         # Episodes on a hold-back list (listed, but no recipe picks them unless
         # it says include_holdback).
         "holdback": int(scoped.holdback.astype(bool).sum()),
+        # Hold-back entries the last scan matched to no episode: they hold
+        # nothing back, so the page says so beside the count above.
+        "holdback_unmatched": int(
+            (summary().get("holdback") or {}).get("unmatched_count") or 0
+        ),
         "date_min": dates[0] if dates else None,
         "date_max": dates[-1] if dates else None,
         "hidden_heldout": int(

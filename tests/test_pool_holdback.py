@@ -194,6 +194,7 @@ def test_holdback_marks_the_whole_group_and_stays_visible(pool):
     assert set(listed(holdback="only")) == held
     assert not set(listed(holdback="hide")) & held
     assert index.facets()["holdback"] == 2  # canonical episodes only
+    assert index.facets()["holdback_unmatched"] == 1  # demo_9999 holds nothing back
 
 
 def test_without_a_setting_nothing_is_held_back(pool):
@@ -201,6 +202,7 @@ def test_without_a_setting_nothing_is_held_back(pool):
     assert built["summary"]["holdback"]["entries"] == 0
     assert not any(r["holdback"] for r in listed().values())
     assert index.facets()["holdback"] == 0
+    assert index.facets()["holdback_unmatched"] == 0
     # No warning, and an export is planned as before.
     view = recipe.preview(rollout_recipe())
     assert not [w for w in view["warnings"] if "holdback" in w["code"]]
@@ -958,7 +960,8 @@ def test_the_api_lists_filters_and_counts_held_back_episodes(pool, client):
         "/api/levi/pool/episodes", params={"outcome": "checked_success"}
     ).json()
     assert [Path(r["key"]).name for r in checked["episodes"]] == ["demo_0000"]
-    assert client.get("/api/levi/pool/facets").json()["holdback"] == 2
+    shown = client.get("/api/levi/pool/facets").json()
+    assert shown["holdback"] == 2 and shown["holdback_unmatched"] == 1
     tasks = client.get("/api/levi/pool/tasks", params={"holdback": "hide"}).json()[
         "tasks"
     ]
