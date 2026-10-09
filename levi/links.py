@@ -169,6 +169,14 @@ def links() -> dict[str, Link]:
         for source, item in sorted(_catalog(workspace).items()):
             if not isinstance(item, dict) or item.get("base"):
                 continue  # a namespace is another experiment of one dataset
+            try:
+                state = json.loads(
+                    (workspace / "live/datasets" / f"{source}.json").read_text()
+                )
+            except (OSError, ValueError):
+                state = {}
+            if state.get("archived"):
+                continue
             name = PREFIX + source
             if name in own:
                 continue

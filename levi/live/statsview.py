@@ -13,7 +13,7 @@ the free-text ``reason`` of a failed demo is not copied into it.
 import time
 from pathlib import Path
 
-from . import exclusion, gating, mirror, stats
+from . import exclusion, gating, management, mirror, stats
 
 SCHEMA = "levi.live.stats.v1"
 MAX_PAGE = 500
@@ -85,7 +85,26 @@ def excluded_demos(config) -> tuple:
 def marked_records(config) -> list:
     """Every record, with ``excluded`` decided by the state files."""
     removed, known = excluded_demos(config)
-    return stats.mark_excluded(records(config.live_dir), removed, known)
+    states = mirror.list_states(config, include_archived=True)
+    tombstones = management.removed_sessions(config)
+    rows = []
+    for row in stats.mark_excluded(records(config.live_dir), removed, known):
+        state = states.get(row.get("dataset")) or {}
+        if state.get("archived"):
+            continue
+        if any(
+            state.get("group") == tombstone.get("group")
+            and state.get("task_folder") == tombstone.get("task_folder")
+            and mirror.same_root(state.get("root"), tombstone.get("root"))
+            and row.get("session")
+            in {tombstone.get("session_id"), tombstone.get("run_id")}
+            and (stats.num(row.get("at")) or 0) <= (stats.num(tombstone.get("at")) or 0)
+            for tombstone in tombstones
+            if isinstance(tombstone, dict)
+        ):
+            continue
+        rows.append(row)
+    return rows
 
 
 def signature(rows) -> dict:
@@ -154,7 +173,12 @@ def _inputs(config) -> tuple:
         states = sorted(mirror.datasets_dir(config).glob("*.json"))
     except OSError:
         states = []
-    return (_stamp(live), _stamps(gate), _stamps(states))
+    return (
+        _stamp(live),
+        _stamps(gate),
+        _stamps(states),
+        _stamps([live / management.FILE]),
+    )
 
 
 _BUILT: dict = {}

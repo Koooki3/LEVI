@@ -332,7 +332,7 @@ def test_the_api_answers_disabled_outside_a_live_workspace(
 
 
 def test_the_api_merges_sessions_health_progress_and_faults(
-    live_api, rollouts, tmp_path, request
+    live_api, rollouts, tmp_path, request, monkeypatch
 ):
     client, c = live_api
     rollouts.write(0)
@@ -355,6 +355,9 @@ def test_the_api_merges_sessions_health_progress_and_faults(
         c, popen=lambda *a, **k: spawned.append(a) or 1 / 0, log=lambda *a: None
     )
     request.addfinalizer(ctl.shutdown)  # after the status was read
+    # CPU catalogue preparation is tested separately; keep the hard refusal
+    # below for any model/annotation subprocess in this status-only fixture.
+    monkeypatch.setattr(ctl, "_catalogue_step", lambda now: None)
     ctl.state = "idle"
     ctl.tick()
     ctl.write_status()
@@ -1006,7 +1009,7 @@ def test_fake_vlm_refuses_the_live_workspace(tmp_path):
 
 
 def test_the_page_gets_the_reset_countdown_and_open_review_count(
-    live_api, rollouts, request
+    live_api, rollouts, request, monkeypatch
 ):
     client, c = live_api
     rollouts.write(0)
@@ -1022,6 +1025,8 @@ def test_the_page_gets_the_reset_countdown_and_open_review_count(
         log=lambda *a: None,
     )
     request.addfinalizer(ctl.shutdown)
+    # This reads status only. Any GPU/model/annotation spawn still fails.
+    monkeypatch.setattr(ctl, "_catalogue_step", lambda now: None)
     ctl.tick()
     ctl.write_status()
     assert spawned == []

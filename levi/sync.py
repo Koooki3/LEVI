@@ -134,7 +134,17 @@ class Synchronizer:
             live = set()
             for name, entry in list(catalog.datasets().items()):
                 live.add(name)
-                self._check_entry(name, entry, now)
+                from .dataset_management import lock_for
+
+                # Reread under the same lock used by human file removal. An
+                # old scan must never restore a deleted entry or old counts.
+                with lock_for(
+                    self.root, entry.get("base") or name, blocking=False
+                ) as acquired:
+                    if acquired:
+                        current = catalog.datasets().get(name)
+                        if current:
+                            self._check_entry(name, current, now)
             if self.discover != "off":
                 self._discover(now)
             # Forget pending state of things that no longer exist.
@@ -242,53 +252,70 @@ class Synchronizer:
             Path(i["view"]) for i in items if i.get("view")
         ]
         for candidate, kind in self._candidates(known):
-            key = str(candidate)
-            try:
-                signature = (
-                    dataset_revision(candidate)
-                    if kind == "lerobot"
-                    else fingerprint(candidate)
+            from .dataset_management import lock_for, read_json
+
+            name = catalog._base_name(candidate)
+            with lock_for(self.root, name, blocking=False) as acquired:
+                if not acquired:
+                    continue
+                if read_json(self.root / "live/datasets" / f"{name}.json", {}).get(
+                    "archived"
+                ):
+                    continue
+                # A deletion or another scan may have registered it after
+                # _candidates yielded the path. Never resurrect an archive.
+                if catalog._entry_for_path(catalog.datasets(), candidate):
+                    continue
+                self._discover_candidate(candidate, kind, now)
+
+    def _discover_candidate(self, candidate, kind, now):
+        key = str(candidate)
+        try:
+            signature = (
+                dataset_revision(candidate)
+                if kind == "lerobot"
+                else fingerprint(candidate)
+            )
+        except OSError:
+            return
+        if self.rejected.get(key) == signature:
+            return  # already reported; unchanged since
+        if not self._stable(key, signature, now):
+            return
+        self.pending.pop(key, None)
+        try:
+            if kind == "lerobot":
+                entry = catalog.register(key)
+                catalog.add_entry(
+                    candidate,
+                    {
+                        "registered_by": "sync",
+                        "revision": dataset_revision(candidate),
+                    },
                 )
-            except OSError:
-                continue
-            if self.rejected.get(key) == signature:
-                continue  # already reported; unchanged since
-            if not self._stable(key, signature, now):
-                continue
-            self.pending.pop(key, None)
-            try:
-                if kind == "lerobot":
-                    entry = catalog.register(key)
-                    catalog.add_entry(
-                        candidate,
-                        {
-                            "registered_by": "sync",
-                            "revision": dataset_revision(candidate),
-                        },
-                    )
-                else:
-                    entry = views.request(candidate)
-                    catalog.add_entry(candidate, {"registered_by": "sync"})
-                self._note("added", entry["name"], f"{kind} found at {candidate}")
-            except ValueError as exc:
-                if kind == "raw":
-                    # Listed with its reason; retried when the capture changes.
-                    fmt = registry.detect(candidate)
-                    entry = catalog.add_entry(
-                        candidate,
-                        {
-                            "kind": "raw",
-                            "input_format": fmt.id if fmt else None,
-                            "view_status": "failed",
-                            "view_error": str(exc),
-                            "view_failed_fingerprint": signature,
-                            "registered_by": "sync",
-                        },
-                    )
-                    self._note("failed", entry["name"], str(exc))
-                else:
-                    self.rejected[key] = signature
-                    self._note("skipped", candidate.name, str(exc))
+            else:
+                entry = views.request(candidate)
+                catalog.add_entry(candidate, {"registered_by": "sync"})
+            self._note("added", entry["name"], f"{kind} found at {candidate}")
+        except ValueError as exc:
+            if kind == "raw":
+                # Listed with its reason; retried when the capture changes.
+                fmt = registry.detect(candidate)
+                entry = catalog.add_entry(
+                    candidate,
+                    {
+                        "kind": "raw",
+                        "input_format": fmt.id if fmt else None,
+                        "view_status": "failed",
+                        "view_error": str(exc),
+                        "view_failed_fingerprint": signature,
+                        "registered_by": "sync",
+                    },
+                )
+                self._note("failed", entry["name"], str(exc))
+            else:
+                self.rejected[key] = signature
+                self._note("skipped", candidate.name, str(exc))
 
     def _candidates(self, known: list[Path]):
         def covered(path: Path) -> bool:

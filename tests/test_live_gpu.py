@@ -403,11 +403,15 @@ class Machine:
 
 
 @pytest.fixture
-def ctl(live):
+def ctl(live, monkeypatch):
     c, rollouts = live
     machine = Machine()
     spawned = []
     ctl = controller.Controller(c, probes=machine.probes(), log=lambda *a: None)
+    # GPU admission is tested independently of CPU preparation, just as the
+    # annotation worker below is simulated. Catalogue/lock interaction has
+    # complete process regressions in test_live_catalogue.py.
+    monkeypatch.setattr(ctl, "_catalogue_step", lambda now: None)
     ctl._spawn = lambda name, now=None: spawned.append(name)
     ctl.machine, ctl.spawned, ctl.rollouts = machine, spawned, rollouts
     yield ctl

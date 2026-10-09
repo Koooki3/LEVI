@@ -35,6 +35,16 @@ def _append_episode(root: Path):
         )
 
 
+def test_discover_all_never_resurrects_archived_live_capture(client, sync, tmp_path):
+    root = capture_fixture(tmp_path / "captures/model__task")
+    archive = tmp_path / "live/datasets/model__task.json"
+    archive.parent.mkdir(parents=True)
+    archive.write_text(json.dumps({"archived": True, "capture": str(root)}))
+    sync.discover = "all"
+    assert sync.scan() == []
+    assert not catalog.datasets()
+
+
 def test_in_place_changes_refresh_catalog_viewer_and_backend(client, dataset, sync):
     repo = client.post("/api/levi/catalog", json={"path": str(dataset)}).json()["id"]
     sync.scan()  # records the first revision silently

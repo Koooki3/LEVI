@@ -236,6 +236,9 @@ def supervisor(c, code=14):
         popen=popen,
         log=lambda *a: messages.append(" ".join(map(str, a))),
     )
+    # made counts model workers for the retry assertions. CPU preparation is
+    # covered separately, and cannot use this stand-in worker's exit code.
+    ctl._catalogue_step = lambda now: None
     ctl.vllm.external = lambda: True
     return ctl, made, messages
 
