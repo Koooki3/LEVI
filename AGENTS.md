@@ -23,6 +23,22 @@ Frontend text belongs in both locale catalogs; English is the default and Chines
 - **Language.** Replies to the maintainer are in Chinese; code, commands and identifiers stay as they are; documentation is bilingual (English primary).
 - **Full test runs one at a time.** Two concurrent runs sharing a `--basetemp` leave residue that breaks later runs; use `--basetemp=$PWD/.state/tmp/pt` and `TMPDIR=$PWD/.state/tmp/build`. **Run the Python suite from a worktree, not from the checkout a product LEVI runs from**: `tests/conftest.py` refuses to start when this checkout's workspace has a live `server.pid` (`LEVI_TESTS_IN_PRODUCT=1` overrides), and it ignores the checkout's `.env`.
 
+## Coding-agent skill maintenance
+
+Use `skill-lifecycle` when the user requests maintenance of coding-agent skills.
+The physical entry is `.claude/skills/skill-lifecycle/`; Codex and other compatible
+hosts discover the same files through `.agents/skills/skill-lifecycle`.
+Read [Skill Loom](docs/SKILL_LOOM.md) or [中文](docs/SKILL_LOOM.zh-CN.md) before using
+the optional CLI. In the maintainer's workspace it has its own environment at
+`lab/tools/skill-loom/.venv`, and private profiles, reports and journals stay in
+`lab/skill-loom/`. A worktree uses the main checkout's tool environment.
+Follow the user's approval requirements and driver ownership for every write,
+including report generation, installation, updates and rollback. Review pinned
+candidates and exact plans; maintain the physical skill root, preserving host
+discovery links. Keep user homes, credentials, sessions, plugin-managed skills,
+datasets and gold outside the maintenance scope. Set up a missing CLI only when
+the user approves installation.
+
 ## Package manager
 
 Always use **bun** (`bun install`, `bun dev`, `bun run build`, `bun run test`). Never use npm or yarn.
