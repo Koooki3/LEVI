@@ -75,6 +75,40 @@ def same_root(a, b) -> bool:
         return str(a) == str(b)
 
 
+def _same_task(state, root, group, task) -> bool:
+    """Match the whole source identity before reusing a dataset name.
+
+    Old states can omit root/group/task fields: a recorded source supplies
+    them. Without a source or generation fields, the legacy candidate name
+    still identifies the task; a successor must carry explicit identity.
+    """
+    if not same_root(state.get("root"), root):
+        return False
+    for key, expected in (("group", group), ("task_folder", task)):
+        if state.get(key) not in (None, "", expected):
+            return False
+    source = state.get("source")
+    if source:
+        if not isinstance(source, str):
+            return False
+        source = Path(source)
+        return (
+            source.name == task
+            and source.parent.name == group
+            and same_root(source.parent.parent, root)
+        )
+    if state.get("generation_base") or "generation" in state:
+        return state.get("group") == group and state.get("task_folder") == task
+    return True
+
+
+def _same_claim(owner, root, group, task) -> bool:
+    if isinstance(owner, tuple) and len(owner) == 3:
+        return same_root(owner[0], root) and owner[1:] == (group, task)
+    # Callers predating task identities supplied only the claimed root.
+    return same_root(owner, root)
+
+
 def generation_name(base: str, generation: int) -> str:
     """A stable successor name, confined to the live API's name length."""
     suffix = f"{GENERATION_MARK}{generation:06d}"
@@ -133,11 +167,12 @@ def resolve_name(config, root, group: str, task: str, claimed=None) -> str:
     and capture. The plain name stays with the root whose state already holds
     it (names already in use are never changed or moved); another root gets
     ``<name>__at__<root mark>``, and ``-<hash of the root>`` after that when two
-    roots share a last folder name. A state that already belongs to this root
-    is always found again, whichever candidate it sits under, so a restart
-    resolves the same way. ``claimed`` (``{name: root}``) is the names taken
-    earlier in one scan by roots that have no state yet. After removal, an
-    active successor wins; otherwise the latest archived name is returned."""
+    roots share a last folder name. A state that already belongs to this
+    root, group and task is found again, whichever candidate it sits under,
+    so a restart resolves the same way. ``claimed`` maps names to task
+    identities for tasks that have no state yet (older callers supplied only
+    roots). After removal, an active successor wins; otherwise the latest
+    archived name is returned."""
 
     base = dataset_name(group, task)
     short = base[: NAME_MAX - len(ROOT_MARK) - MARK_MAX - 8]
@@ -146,13 +181,28 @@ def resolve_name(config, root, group: str, task: str, claimed=None) -> str:
     candidates = [base, mark, f"{mark}-{digest}"]
     states = [(name, load_state(config, name)) for name in candidates]
     for name, state in states:
-        if state is not None and same_root(state.get("root"), root):
+        if state is not None and _same_task(state, root, group, task):
             return _latest_generation(config, name, state, root, group, task)[0]
     for name, state in states:
         owner = (claimed or {}).get(name)
-        if state is None and (owner is None or same_root(owner, root)):
+        if state is None and (owner is None or _same_claim(owner, root, group, task)):
             return name
-    return candidates[-1]
+    # Long task names can share root-marked candidates, and a literal task
+    # name can occupy a generated name. Never fall back to an occupied state.
+    identity = f"{os.path.realpath(str(root))}\0{group}\0{task}"
+    digest = hashlib.sha256(identity.encode()).hexdigest()[:12]
+    fallback = f"{mark[: NAME_MAX - 13]}-{digest}"
+    number = 1
+    while True:
+        suffix = f"-{number}" if number > 1 else ""
+        name = f"{fallback[: NAME_MAX - len(suffix)]}{suffix}"
+        state = load_state(config, name)
+        if state is not None and _same_task(state, root, group, task):
+            return _latest_generation(config, name, state, root, group, task)[0]
+        owner = (claimed or {}).get(name)
+        if state is None and (owner is None or _same_claim(owner, root, group, task)):
+            return name
+        number += 1
 
 
 def _finished_at(demo: Path) -> float | None:
@@ -339,7 +389,7 @@ class Scanner:
         self._mtimes: dict = {}
         self._aborts: dict = {}
         self._names: dict = {}  # (root, group, task) -> current generation's name
-        self._claimed: dict = {}  # name -> root, for roots that have no state yet
+        self._claimed: dict = {}  # name -> task identity, before its state exists
         self.epoch = None
         self.errors: list = []
 
@@ -365,10 +415,13 @@ class Scanner:
             return []
 
     def name_of(self, key) -> str:
-        """The dataset name of ``(root, group, task)``; only removal can move
-        an already chosen name to its independently stored successor."""
+        """Keep a chosen name while its state still belongs to this task;
+        removal can move it to its independently stored successor."""
         name = self._names.get(key)
-        if name is None or (load_state(self.config, name) or {}).get("archived"):
+        state = load_state(self.config, name) if name is not None else None
+        if name is None or (
+            state and (state.get("archived") or not _same_task(state, *key))
+        ):
             root, group, task = key
             name = resolve_name(self.config, root, group, task, self._claimed)
             self._remember_name(key, name)
@@ -379,13 +432,18 @@ class Scanner:
             self._tasks.pop(key, None)
             self._mtimes.pop(key, None)
         self._names[key] = name
-        self._claimed.setdefault(name, key[0])
+        self._claimed[name] = key
 
     def known_name(self, key) -> str:
         """``name_of`` for a reader (status, fault lookups): the chosen name
         if there is one, else what ``resolve_name`` says, without taking it."""
         name = self._names.get(key)
-        if name and not (load_state(self.config, name) or {}).get("archived"):
+        state = load_state(self.config, name) if name is not None else None
+        if (
+            name
+            and not (state or {}).get("archived")
+            and (state is None or _same_task(state, *key))
+        ):
             return name
         return resolve_name(self.config, *key)
 

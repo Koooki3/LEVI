@@ -833,3 +833,126 @@ def test_a_shortened_generation_name_is_found_again_after_restart(live, monkeypa
     assert first.name == expected and first.ready == ["demo_0001"]
     assert mirror.Scanner(cfg).name_of(key) == expected
     assert mirror.resolve_name(cfg, *key) == expected
+
+
+@pytest.mark.parametrize("cached_empty_task", [False, True])
+def test_a_generation_created_first_does_not_claim_a_real_task_with_its_name(
+    live, monkeypatch, cached_empty_task
+):
+    cfg = live["config"]
+    now = time.time()
+    generation = mirror.generation_name(live["name"], 2)
+    literal = {**live, "task": live["task"] + "__generation_000002"}
+    literal["source"] = live["root"] / literal["group"] / literal["task"]
+    assert mirror.dataset_name(literal["group"], literal["task"]) == generation
+    original_key = (str(live["root"]), live["group"], live["task"])
+    literal_key = (str(literal["root"]), literal["group"], literal["task"])
+    scanner = mirror.Scanner(cfg)
+    if cached_empty_task:
+        literal["source"].mkdir(parents=True)
+        assert scanner.name_of(literal_key) == generation
+    archive_pipeline(live, monkeypatch, at=now - 30)
+    completed_demo(live, 1, now - 20, content=b"generated pipeline video")
+    generated_task = next(
+        task for task in scanner.scan(now=now) if task.key == original_key
+    )
+    assert generated_task.name == generation
+    generated_state = mirror.load_state(cfg, generation)
+    mirror.mirror_dataset(cfg, generated_state, generated_task.ready, now=now)
+    completed_demo(literal, 1, now - 10, content=b"literal task video")
+    tasks = {task.key: task for task in scanner.scan(now=now)}
+    literal_task = tasks[literal_key]
+    assert literal_task.name != generation
+    assert literal_task.ready == ["demo_0001"]
+    assert tasks[original_key].name == generation
+    literal_state = mirror.load_state(cfg, literal_task.name)
+    assert literal_state["source"] == str(literal["source"])
+    assert generated_state["source"] == str(live["source"])
+    assert literal_state["capture"] != generated_state["capture"]
+    mirror.mirror_dataset(cfg, literal_state, literal_task.ready, now=now)
+    assert (
+        Path(generated_state["capture"]) / "demo_0001/video.mp4"
+    ).read_bytes() == b"generated pipeline video"
+    assert (
+        Path(literal_state["capture"]) / "demo_0001/video.mp4"
+    ).read_bytes() == b"literal task video"
+    expected = {original_key: generation, literal_key: literal_task.name}
+    assert {
+        task.key: task.name for task in mirror.Scanner(cfg).scan(now=now)
+    } == expected
+    for key, name in expected.items():
+        assert mirror.resolve_name(cfg, *key) == name
+        assert scanner.name_of(key) == scanner.known_name(key) == name
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [("root",), ("root", "group", "task_folder"), ("group", "task_folder", "source")],
+)
+def test_resolve_name_keeps_a_genuine_legacy_tasks_identity(live, missing):
+    cfg = live["config"]
+    state = jsonio.read(mirror.state_path(cfg, live["name"]))
+    for field in missing:
+        state.pop(field)
+    jsonio.write(mirror.state_path(cfg, live["name"]), state)
+    assert (
+        mirror.resolve_name(cfg, live["root"], live["group"], live["task"])
+        == live["name"]
+    )
+
+
+@pytest.mark.parametrize("field", ["group", "task_folder", "source"])
+def test_resolve_name_does_not_reuse_an_explicitly_different_tasks_state(live, field):
+    cfg = live["config"]
+    state = jsonio.read(mirror.state_path(cfg, live["name"]))
+    state[field] = (
+        str(live["source"] / "different-task") if field == "source" else "different"
+    )
+    jsonio.write(mirror.state_path(cfg, live["name"]), state)
+    assert (
+        mirror.resolve_name(cfg, live["root"], live["group"], live["task"])
+        != live["name"]
+    )
+
+
+def test_resolve_name_checks_identity_even_after_all_original_candidates_are_taken(
+    live,
+):
+    from levi.live import api
+
+    cfg = live["config"]
+    key = (str(live["root"]), live["group"], live["task"])
+    occupied = {}
+    for number in range(3):
+        name = mirror.resolve_name(cfg, *key)
+        assert name not in occupied
+        state = mirror.empty_state(
+            cfg, (key[0], key[1], f"different_task_{number}"), 0.0, name
+        )
+        jsonio.write(mirror.state_path(cfg, name), state)
+        occupied[name] = state
+    available = mirror.resolve_name(cfg, *key)
+    assert available not in occupied
+    assert api.NAME.fullmatch(available)
+    jsonio.write(
+        mirror.state_path(cfg, available), mirror.empty_state(cfg, key, 0.0, available)
+    )
+    assert (
+        mirror.resolve_name(cfg, *key) == mirror.Scanner(cfg).name_of(key) == available
+    )
+    assert all(
+        mirror.load_state(cfg, name) == state for name, state in occupied.items()
+    )
+
+
+def test_two_empty_tasks_do_not_claim_one_name_in_the_same_root(live):
+    cfg = live["config"]
+    first_key = (str(live["root"]), "model__sub", "task")
+    second_key = (first_key[0], "model", "sub__task")
+    assert mirror.dataset_name(*first_key[1:]) == mirror.dataset_name(*second_key[1:])
+    scanner = mirror.Scanner(cfg)
+    first = scanner.name_of(first_key)
+    second = scanner.name_of(second_key)
+    assert first != second
+    assert scanner.name_of(first_key) == first
+    assert scanner.name_of(second_key) == second
