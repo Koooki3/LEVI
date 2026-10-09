@@ -1003,6 +1003,7 @@ class Worker:
                         for k in ("rule", "place_outcome", "source")
                         if k in verdict
                     },
+                    **stats.reading_of(verdict),
                 }
                 if verdict
                 else None,

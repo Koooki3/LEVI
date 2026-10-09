@@ -47,7 +47,8 @@ a value that could not be measured is ``null``.
     result:    state, reason, segments, segment_labels{label: count},
                verdict{outcome,events,valid_events,undecided} (plus rule and
                place_outcome when the release review uses a rule beyond "any
-               valid release"; the template does not list them), review,
+               valid release", and final_reading and start_check under the
+               final-state rule; the template does not list them), review,
                spec{guideline,release_review,release_review_version,
                sha256{file: hash}}, provider,
                model
@@ -324,6 +325,18 @@ def after(moment, base):
     if moment is None or base is None:
         return None
     return round(float(moment) - float(base), 2)
+
+
+def reading_of(verdict) -> dict:
+    """``final_reading`` and ``start_check`` from a final-state verdict's basis
+    (only the ones it has): why an episode reads as it does -- the final
+    frames, a start check that voided it or could not be read. With them the
+    statistics can count how often the start check is ``unclear`` or
+    ``voided``. Empty for any other verdict."""
+    basis = (verdict or {}).get("basis")
+    if not isinstance(basis, dict):
+        return {}
+    return {k: basis[k] for k in ("final_reading", "start_check") if k in basis}
 
 
 def stamp(row, now=None) -> dict:

@@ -502,3 +502,54 @@ def test_an_unknown_reading_or_start_check_is_dropped_not_trusted():
     got = criteria.agent_label({"eval": {"agent_label": odd}})["verdict"]
     assert got["basis"]["final_reading"] == "supported"  # the plain reading
     assert "start_check" not in got["basis"] and "task_rewritten" not in got
+
+
+def test_an_online_episode_counts_a_request_for_each_question_asked():
+    """With the background labelling off the statistics record is built from the
+    relayed result: the start check is a second model request, and the reason
+    an episode is undecided is in the record (so its rate can be counted)."""
+    from levi.live import stats
+
+    def record(label, **more):
+        found = criteria.agent_label({"eval": {"agent_label": label}})
+        row = {
+            "state": "done",
+            "completed_at": 1790000000.0,
+            "verdict": found["verdict"],
+            "online": {"status": found["status"], "usage": found["usage"]},
+        }
+        return online.stats_record(live_config.Config(), "ds", "demo_0001", row, 2e9)
+
+    voided = record(relayed_v2())
+    assert voided["model"]["requests"]["review"] == 2
+    assert voided["result"]["verdict"]["final_reading"] == "already_satisfied_at_start"
+    assert voided["result"]["verdict"]["start_check"] == "voided"
+    unclear = record(relayed_v2(start="unclear", final="start_unclear"))
+    assert unclear["model"]["requests"]["review"] == 2
+    assert unclear["result"]["verdict"]["start_check"] == "unclear"
+    passed = record(
+        relayed_v2(
+            start="passed", final="supported", outcome="success", undecided=False
+        )
+    )
+    assert passed["model"]["requests"]["review"] == 2
+    assert passed["result"]["verdict"]["final_reading"] == "supported"
+    # Not asked (a client of revision 1, or a spec with no start check): one.
+    skipped = record(
+        relayed_v2(
+            start="skipped", final="supported", outcome="success", undecided=False
+        )
+    )
+    assert skipped["model"]["requests"]["review"] == 1
+    assert skipped["result"]["verdict"]["start_check"] == "skipped"
+    plain = {
+        k: v
+        for k, v in relayed_v2(final="supported").items()
+        if k not in ("start_check", "final_reading")
+    }
+    plain.update(outcome="success", undecided=False)
+    old = record(plain)
+    assert old["model"]["requests"]["review"] == 1
+    assert "start_check" not in old["result"]["verdict"]
+    # The statistics reader still folds these records.
+    assert stats.summarize([voided, old])["agreement"]["pairs"] == 0

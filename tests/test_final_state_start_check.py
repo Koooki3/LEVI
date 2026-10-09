@@ -425,9 +425,19 @@ def test_the_worker_voids_an_episode_whose_object_started_at_the_destination(env
     (record,) = [r for r in e.records("anchored")]
     assert record["start"]["answer"] == {"start_state": "already_at_destination"}
     assert record["outcome"] == "failure"
-    # The page and the statistics read it as an undecided failure.
+    # The page and the statistics read it as an undecided failure, and say why:
+    # the statistics can count how often the start check voids or cannot read.
     assert stats.agent_of(verdict) == "undecided"
-    assert api._demo_row("demo_0000", row)["verdict"]["undecided"] is True
+    page = api._demo_row("demo_0000", row)["verdict"]
+    assert page["undecided"] is True
+    assert (page["final_reading"], page["start_check"]) == (
+        "already_satisfied_at_start",
+        "voided",
+    )
+    (stat,) = stats.read(e.ws / "live")
+    assert stat["result"]["verdict"]["final_reading"] == "already_satisfied_at_start"
+    assert stat["result"]["verdict"]["start_check"] == "voided"
+    assert stat["model"]["requests"]["review"] == 2  # both questions are counted
     assert not list(e.ws.rglob("outcomes"))  # never a label
 
 

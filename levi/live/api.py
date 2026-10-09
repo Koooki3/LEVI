@@ -314,6 +314,9 @@ def _demo_row(name, row):
         # Where an automatic verdict came from when it is not the background
         # review: ``online`` (the online judgement the client relayed).
         | ({"source": verdict["source"]} if verdict.get("source") else {})
+        # Why a final-state verdict reads as it does (``final_reading``) and
+        # what the start check made of the first frames (``start_check``).
+        | stats.reading_of(verdict)
         if verdict
         else None,
         # The operator label (ground truth, from the rollout's metadata) and

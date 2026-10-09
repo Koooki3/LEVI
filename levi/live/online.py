@@ -1003,8 +1003,9 @@ def url_of(config) -> str:
 def stats_record(config, name, demo, row, now) -> dict:
     """The ``live/stats.jsonl`` record of an episode taken in while the
     background labelling is off (``pipeline.background = false``): its
-    timeline, the online judgement's cost (one request) when the client
-    relayed one, its verdict or none, and the operator label."""
+    timeline, the online judgement's cost (one request, two when the client
+    sent the first frames for a start check) when the client relayed one, its
+    verdict or none, and the operator label."""
     from . import exclusion, stats
 
     online = row.get("online") or {}
@@ -1016,6 +1017,9 @@ def stats_record(config, name, demo, row, now) -> dict:
     base = row.get("completed_at")
     usage = online.get("usage") or {}
     asked = online.get("status") in ("ok", "error", "timeout")
+    asked_start = int(
+        stats.reading_of(verdict).get("start_check") not in (None, "skipped")
+    )
     tokens = usage.get("tokens")
     prompt = usage.get("prompt_tokens")
     completion = (
@@ -1039,7 +1043,9 @@ def stats_record(config, name, demo, row, now) -> dict:
             "completed_at": base,
         },
         "model": {
-            "requests": {"review": 1 if asked else 0},
+            # The final question, and the start check when the client sent the
+            # first frames (``basis.start_check`` other than ``skipped``).
+            "requests": {"review": (1 + asked_start) if asked else 0},
             "model_seconds": {"review": usage.get("elapsed_s") if asked else None},
             "tokens": {"review": tokens},
             "prompt_tokens": prompt,
@@ -1056,6 +1062,7 @@ def stats_record(config, name, demo, row, now) -> dict:
                 for k in ("outcome", "events", "valid_events", "undecided", "rule")
             }
             | {"source": "online"}
+            | stats.reading_of(verdict)
             if verdict
             else None,
             "review": "auto" if verdict else None,
