@@ -4,8 +4,8 @@
 //   * nothing while the tab is hidden, an immediate refresh when it returns;
 //   * after a failure the wait doubles (up to 30 s);
 //   * with no live service to show, once a minute;
-//   * a dataset's detail is fetched only for the few cards that matter or are
-//     open, and again only when its row in the status changed.
+//   * a dataset's detail is fetched only for expanded rows, and again only
+//     when its row in the status changed.
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DETAIL_REFRESH_MS,
@@ -40,10 +40,14 @@ export interface LivePoll {
   lastOk: number | null;
   /** Milliseconds to the next request, for display. */
   delay: number;
+  /** Refresh summary lists immediately after a management action. */
+  refresh: () => void;
 }
 
 export function useLivePoll(): LivePoll {
-  const [state, setState] = useState<LivePoll>({
+  const [revision, setRevision] = useState(0);
+  const refresh = useCallback(() => setRevision((value) => value + 1), []);
+  const [state, setState] = useState<Omit<LivePoll, "refresh">>({
     status: null,
     sessions: null,
     error: "",
@@ -121,8 +125,8 @@ export function useLivePoll(): LivePoll {
       controller?.abort();
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, []);
-  return state;
+  }, [revision]);
+  return { ...state, refresh };
 }
 
 export interface DetailEntry {
@@ -170,6 +174,9 @@ export function useDatasetDetails(
       inflight.current.delete(name);
     }
     setDetails({ ...known.current });
+    // A completion frees one of the three request slots. Re-check wanted
+    // rows so a batch of simultaneously expanded rows cannot be stranded.
+    setBeat((value) => value + 1);
   }, []);
 
   const key = wanted
@@ -177,9 +184,10 @@ export function useDatasetDetails(
     .join(";");
   useEffect(() => {
     if (!enabled) return;
-    let started = 0;
     for (const name of wanted) {
-      if (started >= 3 || inflight.current.has(name) || !rows[name]) continue;
+      if (inflight.current.size >= 3) break;
+      if (!open.has(name) || inflight.current.has(name) || !rows[name])
+        continue;
       const signature = rowSignature(rows[name]);
       const entry = known.current[name];
       const stale =
@@ -189,7 +197,6 @@ export function useDatasetDetails(
           rows[name].state === "annotating" &&
           Date.now() - entry.at > DETAIL_REFRESH_MS);
       if (stale) {
-        started += 1;
         void fetchOne(name, signature);
       }
     }

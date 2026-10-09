@@ -34,7 +34,7 @@ function card(d: DatasetDetail, state?: string) {
       row: { ...row, state, awaiting: state ? "plan" : undefined },
       entry: { data: d, error: "", at: 0, signature: "" },
       fault: null,
-      open: false,
+      open: true,
       onToggle: () => {},
       workerPhase: null,
       filter: "latest",
@@ -155,10 +155,11 @@ describe("the live page in the product LEVI", () => {
     expect(html).toContain('href="/local/live.g__t"');
     expect(html).not.toContain('target="_blank"');
     expect(html).not.toContain("levi live start --ui");
-    expect(html).toContain("Opens read-only in this LEVI");
-    // No link: the hint stays.
+    expect(html).toContain("Open in the viewer");
+    // No view: the action explains that the view is not ready. A separate
+    // live UI is no longer required to register and prepare captures.
     expect(card(detail({ embedded: true, live_ui: null }))).toContain(
-      "levi live start --ui",
+      "The dataset viewer is not ready yet.",
     );
     // With a page of its own, the review link is that page's, outside.
     const both = card(
@@ -176,7 +177,7 @@ describe("the live page in the product LEVI", () => {
     const html = card(detail({ embedded: true, live_ui: null }));
     expect(html).not.toContain('href="/local/g__t"');
     expect(html).not.toContain('href="/workbench"');
-    expect(html).toContain("levi live start --ui");
+    expect(html).toContain("The dataset viewer is not ready yet.");
     const linked = card(
       detail({ embedded: true, live_ui: "http://127.0.0.1:7880" }),
     );

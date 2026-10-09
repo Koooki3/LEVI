@@ -4,6 +4,7 @@ import { useLocale } from "@/components/levi-locale";
 import { ago } from "@/components/pool/pool-progress";
 import {
   clock,
+  datasetOfSession,
   isLost,
   resetRemaining,
   shortDuration,
@@ -22,6 +23,9 @@ import {
   type Tone as DsTone,
 } from "@/components/ds";
 import type { Fr3Health, LiveSession } from "./types";
+import { LiveRow } from "./live-row";
+import { LiveDeleteButton, ViewerAction } from "./management-actions";
+import { sessionIsBusy } from "./live-filters";
 
 export type Tone = "pass" | "warn" | "fail" | "";
 
@@ -207,7 +211,17 @@ function ResetWait({ session }: { session: LiveSession }) {
   );
 }
 
-function SessionCard({ session: s }: { session: LiveSession }) {
+export function SessionCard({
+  session: s,
+  open,
+  onToggle,
+  onChanged,
+}: {
+  session: LiveSession;
+  open: boolean;
+  onToggle: () => void;
+  onChanged?: () => void;
+}) {
   const { t } = useLocale();
   const ep = s.episode ?? {};
   const last = s.last_episode ?? {};
@@ -220,13 +234,59 @@ function SessionCard({ session: s }: { session: LiveSession }) {
     ...(inband.reasons ?? []),
   ].slice(0, 4);
   return (
-    <article className={`pg-live-card${fault ? " fault" : ""}`}>
+    <LiveRow
+      title={`${s.group} / ${s.task_folder}`}
+      subtitle={s.run_id || s.session_id || t("manual session (no run)")}
+      icon={Bot}
+      fault={!!fault}
+      open={open}
+      onToggle={onToggle}
+      summary={
+        <>
+          <SessionState state={s.state} />
+          {ep.no != null && (
+            <span>
+              {t("Episode")} {ep.no}
+              {ep.target ? ` / ${ep.target}` : ""}
+            </span>
+          )}
+          {s.label_mode === "dual_label" && <Chip>{t("Dual labels")}</Chip>}
+          {lost && <Chip tone="warn">{t("Lost contact")}</Chip>}
+        </>
+      }
+      actions={
+        <>
+          <ViewerAction
+            url={s.viewer_url}
+            status={s.view_status}
+            updatedAt={s.updated_at}
+            dataset={datasetOfSession(s)}
+            onChanged={onChanged}
+          />
+          <LiveDeleteButton
+            target={
+              s.root && s.session_id
+                ? {
+                    kind: "session",
+                    root: s.root,
+                    group: s.group,
+                    task_folder: s.task_folder,
+                    session_id: s.session_id,
+                  }
+                : null
+            }
+            title={`${s.group} / ${s.task_folder} · ${s.run_id || s.session_id || ""}`}
+            blocked={
+              sessionIsBusy(s)
+                ? t("A running evaluation session cannot be deleted.")
+                : undefined
+            }
+            onChanged={onChanged}
+          />
+        </>
+      }
+    >
       <header>
-        <h3>
-          <code>
-            {s.group} / {s.task_folder}
-          </code>
-        </h3>
         <div className="pg-live-chips">
           <SessionState state={s.state} />
           {lost && (
@@ -342,30 +402,59 @@ function SessionCard({ session: s }: { session: LiveSession }) {
           )}
         </Field>
       </dl>
-    </article>
+    </LiveRow>
   );
 }
 
-export function SessionsPanel({ sessions }: { sessions: LiveSession[] }) {
+export function SessionsPanel({
+  sessions,
+  total = sessions.length,
+  filtered = false,
+  onChanged,
+}: {
+  sessions: LiveSession[];
+  total?: number;
+  filtered?: boolean;
+  onChanged?: () => void;
+}) {
   const { t } = useLocale();
+  const [open, setOpen] = useState<Set<string>>(new Set());
   sessions = sortSessions(sessions);
   const cardKeys = sessionKeys(sessions);
   return (
     <section className="pg-live-section" aria-labelledby="live-sessions">
       <h2 id="live-sessions">
         {t("Evaluation sessions")}{" "}
-        <span className="pg-pool-muted">({sessions.length})</span>
+        <span className="pg-pool-muted">
+          ({sessions.length}
+          {filtered ? ` / ${total}` : ""})
+        </span>
       </h2>
       {sessions.length === 0 ? (
         <EmptyLine icon={Bot}>
           {t(
-            "No evaluation session is reporting. The evaluation client writes one status file per model and task folder while it runs.",
+            total > 0
+              ? "No evaluation sessions match these filters."
+              : "No evaluation session is reporting. The evaluation client writes one status file per model and task folder while it runs.",
           )}
         </EmptyLine>
       ) : (
         <div className="pg-live-cards">
           {sessions.map((s, i) => (
-            <SessionCard key={cardKeys[i]} session={s} />
+            <SessionCard
+              key={cardKeys[i]}
+              session={s}
+              open={open.has(cardKeys[i])}
+              onToggle={() =>
+                setOpen((previous) => {
+                  const next = new Set(previous);
+                  if (next.has(cardKeys[i])) next.delete(cardKeys[i]);
+                  else next.add(cardKeys[i]);
+                  return next;
+                })
+              }
+              onChanged={onChanged}
+            />
           ))}
         </div>
       )}

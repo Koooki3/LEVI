@@ -1,9 +1,8 @@
 "use client";
 // Live page: evaluation sessions, the FR3 arm, the annotation pipeline and the
 // background service. Data comes from `/api/levi/live/*` (docs/LIVE.md);
-// nothing here starts, stops or approves anything. The one thing a person can
-// change is to remove an episode from a dataset and restore it (a soft
-// delete: no file is deleted).
+// Nothing here starts, stops or approves a robot or model. People can manage
+// finished sessions, pipelines and episodes after a deletion preview.
 import "@/components/pages-ui/pages.css";
 import { useEffect, useMemo, useState } from "react";
 import { Inbox, Radio } from "lucide-react";
@@ -14,6 +13,7 @@ import { ago } from "@/components/pool/pool-progress";
 import { DatasetCard } from "@/components/live/dataset-card";
 import {
   datasetFaultKind,
+  datasetOfSession,
   detectFault,
   isEvaluating,
   needsPerson,
@@ -40,14 +40,22 @@ import { disabledText } from "@/components/live/embedding";
 import { StatsPanel } from "@/components/live/stats-panel";
 import { LiveSummaryBar, liveSummary } from "@/components/live/live-summary";
 import { useDatasetDetails, useLivePoll } from "@/components/live/use-live";
+import { LiveFilterBar } from "@/components/live/filter-bar";
+import {
+  EMPTY_LIVE_FILTERS,
+  filterLiveDatasets,
+  filterLiveSessions,
+  liveFilterOptions,
+  liveFiltersActive,
+  sessionIsBusy,
+  type LiveFilters,
+} from "@/components/live/live-filters";
 import {
   readBrowserStorage,
   writeBrowserStorage,
 } from "@/utils/browserStorage";
 
 const FILTER_KEY = "levi-live-review-filter";
-/** Cards whose details load without being opened. */
-const AUTO_DETAILS = 6;
 
 function loadFilter(): ReviewFilter {
   const value = readBrowserStorage("local", FILTER_KEY);
@@ -93,7 +101,7 @@ function Freshness({
         </span>
       )}
       {" · "}
-      {t("read-only except removing episodes")}
+      {t("Finished sessions, pipelines and episodes can be managed here")}
     </p>
   );
 }
@@ -119,18 +127,30 @@ export default function LivePage() {
   );
 
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [listFilters, setListFilters] = useState<LiveFilters>({
+    ...EMPTY_LIVE_FILTERS,
+  });
   const [filter, setFilter] = useState<ReviewFilter>("latest");
   useEffect(() => setFilter(loadFilter()), []);
   const ranked = useMemo(
     () => rankDatasets(rows, sessions, fault.redLight),
     [rows, sessions, fault.redLight],
   );
+  const filterOptions = useMemo(
+    () => liveFilterOptions(sessions, rows),
+    [sessions, rows],
+  );
+  const shownSessions = useMemo(
+    () => filterLiveSessions(sessions, listFilters),
+    [sessions, listFilters],
+  );
+  const shownDatasets = useMemo(
+    () => filterLiveDatasets(ranked, rows, sessions, listFilters),
+    [ranked, rows, sessions, listFilters],
+  );
   const wanted = useMemo(
-    () => [
-      ...ranked.slice(0, AUTO_DETAILS),
-      ...ranked.slice(AUTO_DETAILS).filter((n) => open.has(n)),
-    ],
-    [ranked, open],
+    () => shownDatasets.filter((name) => open.has(name)),
+    [shownDatasets, open],
   );
   const { details, refresh } = useDatasetDetails(
     wanted,
@@ -165,7 +185,7 @@ export default function LivePage() {
       )}
       <Note tone="info">
         {t(
-          "Watch a robot evaluation while it runs: the evaluation sessions, the FR3 arm, and how far the background LEVI has got with labelling the finished episodes. Nothing here starts, stops or approves anything; the only change you can make is to remove an episode from a dataset (restorable, nothing is deleted). Automatic results are unreviewed and their accuracy has not been evaluated.",
+          "Watch evaluation sessions, the FR3 arm and background annotation. Expand a row for details. Finished sessions and pipelines can be deleted after a preview; manage individual source files in the local dataset viewer. Automatic results are unreviewed and their accuracy has not been evaluated.",
         )}
       </Note>
       {status?.enabled !== false && (
@@ -206,10 +226,24 @@ export default function LivePage() {
               coreError={coreDown ? poll.error : ""}
             />
           )}
+          <LiveFilterBar
+            filters={listFilters}
+            options={filterOptions}
+            onChange={setListFilters}
+            sessions={shownSessions.length}
+            totalSessions={sessions.length}
+            datasets={shownDatasets.length}
+            totalDatasets={ranked.length}
+          />
           <div className="pg-live-grid">
             <div className="pg-live-main">
               <div className="pg-live-slot o1">
-                <SessionsPanel sessions={sessions} />
+                <SessionsPanel
+                  sessions={shownSessions}
+                  total={sessions.length}
+                  filtered={liveFiltersActive(listFilters)}
+                  onChanged={poll.refresh}
+                />
               </div>
               <section
                 className="pg-live-section pg-live-slot o3"
@@ -217,20 +251,26 @@ export default function LivePage() {
               >
                 <h2 id="live-pipeline">
                   {t("Annotation pipeline")}{" "}
-                  <span className="pg-pool-muted">({ranked.length})</span>
+                  <span className="pg-pool-muted">
+                    ({shownDatasets.length} / {ranked.length})
+                  </span>
                 </h2>
                 <p className="pg-pool-hint">
                   {t(
-                    "One card per model and task folder. Finished episodes are linked into LEVI, given time segments and an automatic success or failure; nothing is written as a person's label.",
+                    "One row per model and task folder. Expand it to see annotation progress and episodes. Finished episodes are registered for viewing independently of model annotation.",
                   )}
                 </p>
-                {ranked.length === 0 ? (
+                {shownDatasets.length === 0 ? (
                   <EmptyLine icon={Inbox}>
-                    {t("No dataset has been seen yet.")}
+                    {t(
+                      ranked.length > 0
+                        ? "No annotation pipelines match these filters."
+                        : "No dataset has been seen yet.",
+                    )}
                   </EmptyLine>
                 ) : (
                   <div className="pg-live-cards">
-                    {ranked.map((name) => (
+                    {shownDatasets.map((name) => (
                       <DatasetCard
                         key={name}
                         name={name}
@@ -256,6 +296,12 @@ export default function LivePage() {
                         }}
                         nowSeconds={now / 1000}
                         onChanged={() => refresh(name)}
+                        onDeleted={poll.refresh}
+                        busy={sessions.some(
+                          (session) =>
+                            datasetOfSession(session) === name &&
+                            sessionIsBusy(session),
+                        )}
                       />
                     ))}
                   </div>

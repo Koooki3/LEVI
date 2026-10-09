@@ -1777,3 +1777,39 @@ button.vw-outcome:hover {
 .vw-root {
   position: relative;
 }
+.vw-episode-management {
+  border-top: 1px solid var(--ds-border-control);
+  padding: 0.75rem 0;
+}
+.vw-episode-management-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-block: 0.5rem;
+}
+.vw-episode-management-list {
+  max-height: 12rem;
+  overflow-y: auto;
+  display: grid;
+  gap: 0.3rem;
+  margin-block: 0.5rem;
+}
+.vw-episode-management-list label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.vw-episode-management-note,
+.vw-episode-management-error {
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+.vw-episode-management-error {
+  color: var(--ds-danger);
+}
+.vw-episode-management-paths {
+  max-height: 10rem;
+  overflow: auto;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}

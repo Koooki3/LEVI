@@ -75,7 +75,7 @@ const card = (detail: Partial<DatasetDetail>) =>
         signature: "",
       }}
       fault={null}
-      open={false}
+      open={true}
       onToggle={() => {}}
       workerPhase={null}
       filter="latest"

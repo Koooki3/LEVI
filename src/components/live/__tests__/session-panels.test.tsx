@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { SessionsPanel } from "../session-panels";
+import { SessionCard } from "../session-panels";
 import type { LiveSession } from "../types";
 
 const session = (over: Partial<LiveSession> = {}): LiveSession => ({
@@ -12,7 +12,7 @@ const session = (over: Partial<LiveSession> = {}): LiveSession => ({
   ...over,
 });
 const html = (s: LiveSession) =>
-  renderToStaticMarkup(<SessionsPanel sessions={[s]} />);
+  renderToStaticMarkup(<SessionCard session={s} open onToggle={() => {}} />);
 
 describe("a dual-label session", () => {
   test("is marked, and its last episode's outcome is the operator's", () => {
