@@ -14,9 +14,11 @@ first — annotations carry over"). Failing episodes are left out of the view
 and listed in ``meta/levi_view.json`` instead of blocking the whole capture.
 """
 
+import contextlib
 import json
 import shutil
 import statistics
+import uuid
 from pathlib import Path
 
 from . import catalog, jobs
@@ -151,13 +153,47 @@ def publish(source: Path, output: Path) -> dict:
 
 def _publish(source: Path, output: Path, info: dict) -> dict:
     name = catalog.name_for_path(source)
-    old = catalog.datasets().get(name, {}).get("view") if name else None
+    before = catalog.datasets()
+    old = before.get(name, {}).get("view") if name else None
     final = output.parent / (name or output.name.lstrip("."))
     if old and Path(old) != output and Path(old).is_dir():
-        from .annotations.carryover import rekey_view
+        from .annotations.carryover import rekey_views
 
-        rekey_view(name, Path(old), output)
-        shutil.rmtree(old)
+        names = [name, *[item["name"] for item in catalog.namespaces(name)]]
+        backup = Path(old).with_name(".view-before-" + uuid.uuid4().hex)
+        with rekey_views(names, Path(old), output):
+            Path(old).rename(backup)
+            renamed = False
+            try:
+                if final != output:
+                    output.rename(final)
+                    renamed = True
+                result = catalog.add_entry(
+                    source, {"view": str(final), "view_status": "ready", "info": info}
+                )
+            except Exception as original:
+                failures = []
+                if renamed:
+                    try:
+                        final.rename(output)
+                    except OSError as exc:
+                        failures.append(f"new view: {exc}")
+                try:
+                    backup.rename(old)
+                except OSError as exc:
+                    failures.append(f"old view retained at {backup}: {exc}")
+                try:
+                    catalog.atomic(catalog.STATE / "datasets.json", before)
+                except Exception as exc:  # noqa: BLE001 -- Report incomplete recovery.
+                    failures.append(f"catalog: {exc}")
+                if failures:
+                    raise RuntimeError(
+                        "View recovery incomplete: " + "; ".join(failures)
+                    ) from original
+                raise
+        with contextlib.suppress(OSError):
+            shutil.rmtree(backup)
+        return result
     if final != output:
         if final.exists():
             shutil.rmtree(final)

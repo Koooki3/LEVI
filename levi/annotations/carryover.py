@@ -23,7 +23,10 @@ them and the conflict is reported. Everything dropped is counted in
 ``meta/levi_annotation_carryover.json`` inside the output dataset.
 """
 
+import contextlib
 import json
+import shutil
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -281,3 +284,98 @@ def rekey_view(name: str, old_view: Path, new_view: Path) -> dict:
         transaction(catalog.STATE, name, expected=store.head(name)),
     ):
         return _rekey_view(name, old_view, new_view)
+
+
+@contextlib.contextmanager
+def rekey_views(names: list[str], old_view: Path, new_view: Path):
+    """Rekey every shared-view namespace, restoring labels if publication fails.
+
+    Legacy editors mutate files directly, so snapshot those files. Versioned
+    editors prepare a new immutable bundle; roll their heads back on failure.
+    Hold all writer locks until the caller also commits the browsing view.
+    """
+    from levi.agent.legacy import transaction
+    from levi.agent.store import Store, dataset_lock
+
+    store = Store(catalog.STATE)
+    names = sorted(set(names))
+    scratch = catalog.STATE / (".rekey-" + uuid.uuid4().hex)
+    heads, receipts, legacy = {}, {}, {}
+    changed = set()
+    clean_scratch = False
+    with contextlib.ExitStack() as stack:
+        for name in names:
+            stack.enter_context(dataset_lock(catalog.STATE, name))
+        try:
+            for name in names:
+                heads[name] = store.head(name)
+                if heads[name] == "legacy":
+                    source = catalog.STATE / "annotations" / name
+                    backup = scratch / name
+                    legacy[name] = (source, backup, source.exists())
+                    if source.exists():
+                        shutil.copytree(source, backup)
+            receipts = {name: uuid.uuid4().hex for name in names}
+            catalog.atomic(
+                scratch / "recovery.json",
+                {
+                    "heads": heads,
+                    "receipts": receipts,
+                    "legacy": {
+                        name: {"source": str(source), "existed": existed}
+                        for name, (source, _backup, existed) in legacy.items()
+                    },
+                },
+            )
+            for name in names:
+                changed.add(name)
+                with transaction(
+                    catalog.STATE, name, expected=heads[name], key=receipts[name]
+                ):
+                    _rekey_view(name, old_view, new_view)
+            yield
+            clean_scratch = True
+        except Exception as original:
+            failures = []
+            revisions = {}
+            if any(heads[name] != "legacy" for name in changed):
+                try:
+                    with store.connect() as db:
+                        db.execute("BEGIN IMMEDIATE")
+                        for name in changed:
+                            head = heads[name]
+                            if head != "legacy":
+                                revisions[name] = store.head(name, db)
+                                db.execute(
+                                    "UPDATE heads SET revision=? WHERE dataset=?",
+                                    (head, name),
+                                )
+                        for key in receipts.values():
+                            db.execute("DELETE FROM receipts WHERE key=?", (key,))
+                except Exception as exc:  # noqa: BLE001 -- Continue other recovery steps.
+                    failures.append(f"annotation heads: {exc}")
+                    revisions = {}
+            for name, (source, backup, existed) in legacy.items():
+                if name not in changed:
+                    continue
+                try:
+                    if source.exists():
+                        shutil.rmtree(source)
+                    if existed:
+                        source.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copytree(backup, source)
+                except Exception as exc:  # noqa: BLE001 -- Preserve snapshots on any failure.
+                    failures.append(f"{name}: {exc}")
+            for name, revision in revisions.items():
+                if revision != heads[name]:
+                    shutil.rmtree(store.bundle(name, revision), ignore_errors=True)
+            if failures:
+                raise RuntimeError(
+                    f"View recovery incomplete; backups retained at {scratch}: "
+                    + "; ".join(failures)
+                ) from original
+            clean_scratch = True
+            raise
+        finally:
+            if clean_scratch:
+                shutil.rmtree(scratch, ignore_errors=True)
