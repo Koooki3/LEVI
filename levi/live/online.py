@@ -21,8 +21,10 @@ writes the result into the rollout's ``metadata.json`` as
   alone, ``start_check`` ``skipped``.
 - **Strict request.** A key the contract does not define (``operator``,
   ``outcome``, ``label``... or anything else) is refused with 422, so no
-  operator or evaluation data can reach the model; ``episode`` is kept for
-  the log only. The model sees the images and the question, nothing else.
+  operator or evaluation data can reach the model; ``episode`` goes to the
+  log, and its ``task_folder`` is also looked up in ``[judge.task_text]`` on
+  the server (the model sees the wording that entry gives, never the folder
+  name). The model sees the images and the question, nothing else.
 - **The same rule.** The answer is checked (``anchored.validate_answer``),
   read (``anchored.judge``) and turned into the outcome by the same
   ``anchored.outcome`` / ``anchored.undecided`` the background review uses.
