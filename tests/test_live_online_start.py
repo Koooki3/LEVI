@@ -401,6 +401,40 @@ def test_the_new_spec_is_accepted_and_the_default_stays_version_1(tmp_path):
     )
 
 
+def test_a_custom_online_spec_is_checked_for_its_start_check():
+    """``online_spec_problems`` reads files of levi/live/specs only; the same
+    checks run over a spec dict, so a spec that is not shipped can be tried."""
+    check = live_config.online_spec_dict_problems
+    base = json.loads(generic.text(V2))
+    assert check("v2", base) == []
+
+    def with_start(**changes):
+        return {**base, "start": {**base["start"], **changes}}
+
+    def views_as(role, **extra):
+        return [
+            {**v, "role": role if i == 0 else v["role"], **extra}
+            for i, v in enumerate(base["start"]["views"])
+        ]
+
+    # A start view named like a final view: the client names images by role.
+    (problem,) = check("x", with_start(views=views_as("side")))
+    assert "must not share a role" in problem
+    # A start check that waives labels does not void an episode.
+    waiver = {"label": "a", "when": base["start"]["void_when"]}
+    (problem,) = check("x", with_start(void_when=[], waive=[waiver]))
+    assert "does not void the episode" in problem
+    (problem,) = check("x", with_start(void_when=None))
+    assert "does not void the episode" in problem
+    # The start views are announced to the client as the first frame.
+    (problem,) = check("x", with_start(views=views_as("start_side", at="end")))
+    assert "`at: start`" in problem
+    # Vetoes stay refused; so does a spec that is not a final-state spec.
+    assert "vetoes" in check("x", {**base, "vetoes": [{"id": "v"}]})[0]
+    assert "not a final-state spec" in check("x", {**base, "episode": {}})[0]
+    assert "offsets in seconds" in check("x", with_start(views=[{"role": "s"}]))[0]
+
+
 # --- the relayed result read back -------------------------------------------------------------------------
 
 
@@ -490,9 +524,7 @@ def test_the_constants_the_mirror_reads_are_the_rule_s():
                 "verdict": verdict,
                 "valid": verdict == "supported",
             }
-            _, basis = anchored.outcome(
-                spec, [event], start and {"start_state": start}
-            )
+            _, basis = anchored.outcome(spec, [event], start and {"start_state": start})
             seen.add(basis["start_check"])
     assert seen == set(criteria.START_CHECKS)
 

@@ -6,8 +6,10 @@ undecided); an unreadable start never lets a success stand; no start answer
 spec files stay as they were. No real model: the rule over answers, and one
 review through the real code against the protocol fake."""
 
+import hashlib
 import json
 import re
+from pathlib import Path
 
 import pytest
 from test_live_pipeline import env  # noqa: F401  (fixture)
@@ -60,12 +62,37 @@ def test_the_used_spec_files_are_byte_for_byte_what_they_were():
             "generic-release.v1.json",
             "generic-release.v2.json",
             "generic-release.v3.json",
+            "generic-definitions.v1.json",
+            "generic-guideline.v1.md",
+            "generic-vocabulary.v1.json",
         )
     } == {
         "generic-final.v1.json": "8db7eeb53ce8c47c3f1f16004814b152259daa24c3c3973108290c88d313813d",
         "generic-release.v1.json": "b111653582dca15a9c8f652810af8c94ef336eb95ebb5f07d77f9437cd0abc30",
         "generic-release.v2.json": "53faf19a81727ff6ebfc3baa862eb716aaeae90386378878f78df838f6dd0349",
         "generic-release.v3.json": "5a46e936aa5356295cddfe885e7fb137f01381658939107a835fe0af99ab82fb",
+        "generic-definitions.v1.json": "e846f31f1c19201677e0e324ace425a5dfcd3745eab9caa9559408fe9fce7f66",
+        "generic-guideline.v1.md": "582af9bd27deeb5d59be9c9e212a546ef819f63febbb671672419768ec039fc9",
+        "generic-vocabulary.v1.json": "a47a7d1e315e1dc14f36e9f072231acc58200fd226eb6179b8d91b05fe58e548",
+    }
+    # So are the shipped plates specs, and what a plan freezes of them.
+    shipped = Path(anchored.__file__).parent / "anchored_specs"
+    assert {
+        n: hashlib.sha256((shipped / n).read_bytes()).hexdigest()
+        for n in ("plates-release.json", "plates-release-3.json")
+    } == {
+        "plates-release.json": "fc950413a8b1629430942a19027febe7e01d8975ee57e515835f3a24749f2ee8",
+        "plates-release-3.json": "8077558afc2a7f37369b034c3deeebc9bcb8fd66fb9e1ab31d97a0b499da4898",
+    }
+    frozen = {
+        sid: hashlib.sha256(
+            json.dumps(anchored.dump(anchored.lookup(sid)), sort_keys=True).encode()
+        ).hexdigest()
+        for sid in ("plates-release", "plates-release-3")
+    }
+    assert frozen == {
+        "plates-release": "1f83036b8cc7dcf2947ea561e9ba4954e92ff03ce779fdf54faa5b4d16d283b1",
+        "plates-release-3": "379e6f8351701fc86315e36b78a7a1d1771762eba92c820331e8617f551353a2",
     }
 
 
@@ -281,11 +308,10 @@ def replies(fake, answers):
     fake.reply = reply
 
 
-def test_a_review_asks_the_first_frames_then_the_last_and_voids_a_started_episode(
-    client,
-    dataset,
-    server,  # noqa: F811 - the fixture imported above
-):
+def review(dataset, fake, answers, episodes):
+    """A final-state review with the start check over ``episodes`` of the test
+    dataset, the fake model server ``fake`` answering ``answers`` in turn:
+    (workbench, plan, run)."""
     from levi import catalog, service
     from levi.agent.runtime import Workbench
 
@@ -298,7 +324,7 @@ def test_a_review_asks_the_first_frames_then_the_last_and_voids_a_started_episod
         view["camera"] = camera
     context = TaskContext(
         repo_id=entry["id"],
-        episodes=[0, 1],
+        episodes=episodes,
         instruction="Judge each ending",
         provider="vllm",
         cameras=[camera],
@@ -307,25 +333,38 @@ def test_a_review_asks_the_first_frames_then_the_last_and_voids_a_started_episod
         budget=Budget(max_calls=10, max_tokens=None, max_seconds=600),
     )
     run = wb.plan(context)
-    estimate = run["plan"]["estimate"]
-    assert "plus one start check per episode" in estimate["basis"]
-    # The start check and the final question: two requests an episode.
-    assert estimate["minimum_requests"] == 2 * len(run["context"]["episodes"])
     approve(wb, run["id"], 1, "human")
-    # Episode 0: the object is on the bread at the first frame (and, as the
-    # final frames show, still there). Episode 1: it was not, and now is.
-    replies(
+    replies(fake, answers)
+    assert wb.store.claim(run["id"], "owner")
+    wb.execute(run["id"], "owner", pilot=False)
+    return wb, run, wb.store.get("runs", run["id"])
+
+
+def test_a_review_asks_the_first_frames_then_the_last_and_voids_a_started_episode(
+    client,
+    dataset,
+    server,  # noqa: F811 - the fixture imported above
+):
+    from levi import service
+
+    wb, run, result = review(
+        dataset,
         server,
         [
+            # Episode 0: the object is on the bread at the first frame (and, as
+            # the final frames show, still there). Episode 1: it was not, and
+            # now is.
             {"start_state": "already_at_destination"},
             {"object_state": "resting_at_destination", "stable": "yes"},
             {"start_state": "not_at_destination"},
             {"object_state": "resting_at_destination", "stable": "yes"},
         ],
+        [0, 1],
     )
-    assert wb.store.claim(run["id"], "owner")
-    wb.execute(run["id"], "owner", pilot=False)
-    result = wb.store.get("runs", run["id"])
+    estimate = run["plan"]["estimate"]
+    assert "plus one start check per episode" in estimate["basis"]
+    # The start check and the final question: two requests an episode.
+    assert estimate["minimum_requests"] == 2 * len(run["context"]["episodes"])
     assert result["status"] == "waiting_for_review", result["reason"]
     chats = server.chats()
     assert len(chats) == 4 and result["requests"] == 4
@@ -367,6 +406,41 @@ def test_a_review_asks_the_first_frames_then_the_last_and_voids_a_started_episod
     assert start_evidence <= set(by_episode[0]["evidence_ids"])
     assert by_episode[1]["outcome"] == "success" and not by_episode[1]["uncertainty"]
     assert not list(service.STATE.rglob("outcomes"))
+
+
+def test_a_review_with_an_unreadable_start_says_so_to_the_person_who_reviews_it(
+    client,
+    dataset,
+    server,  # noqa: F811 - the fixture imported above
+):
+    wb, run, result = review(
+        dataset,
+        server,
+        [
+            {"start_state": "unclear"},
+            {"object_state": "resting_at_destination", "stable": "yes"},
+        ],
+        [0],
+    )
+    assert result["status"] == "waiting_for_review", result["reason"]
+    record = wb.store.get("anchored", f"{run['id']}:0")
+    assert record["outcome"] == "failure"
+    assert record["start"]["void"]["reading"] == "unknown"
+    assert record["basis"]["final_reading"] == "start_unclear"
+    assert record["basis"]["start_check"] == "unclear"
+    assert record["basis"]["end_reading"] == "supported"
+    assert anchored.undecided(record["outcome"], record["basis"])
+    (proposal,) = wb.store.get("changes", result["changes"])["proposals"]
+    assert proposal["outcome"] == "failure"
+    # The reviewer is told which input was not read, and is shown it.
+    assert proposal["uncertainty"] == (
+        "the first frames did not show whether the object was already at the "
+        "destination"
+    )
+    assert "not a valid trial" not in proposal["evidence_note"]
+    assert {f["evidence_id"] for f in record["start"]["frames"]} <= set(
+        proposal["evidence_ids"]
+    )
 
 
 # --- the live settings and the background worker --------------------------------------

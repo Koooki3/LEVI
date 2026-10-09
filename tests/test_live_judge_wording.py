@@ -8,7 +8,7 @@ and a protocol stand-in replace the model; no GPU."""
 import json
 
 import pytest
-from test_live_online import Ask, cfg, images, judge_with, request
+from test_live_online import Ask, cfg, judge_with, request
 from test_live_pipeline import env  # noqa: F401  (fixture)
 
 from levi.live import config as live_config
@@ -171,7 +171,6 @@ def test_the_wording_is_not_a_way_to_send_data_to_the_model(tmp_path):
     body["task_text"] = {ORIGINAL: LAB}
     code, answer = judge.handle(json.dumps(body).encode())
     assert code == 422 and "does not define: task_text" in answer["reason"]
-    assert images()  # (the request builder is the contract's own)
 
 
 # --- the background labelling ----------------------------------------------------------------

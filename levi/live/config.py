@@ -639,6 +639,11 @@ def online_spec_problems(name) -> list:
         spec = json.loads(generic.text(name))
     except (OSError, ValueError) as exc:
         return [f"online.spec {name!r} cannot be read: {exc}"]
+    return online_spec_dict_problems(name, spec)
+
+
+def online_spec_dict_problems(name, spec) -> list:
+    """``online_spec_problems`` over a spec already read (a dict)."""
     if not isinstance(spec, dict):
         return [f"online.spec {name!r} cannot be read: not a JSON object"]
     if (spec.get("episode") or {}).get("rule") != "final_state":
@@ -668,6 +673,13 @@ def online_spec_problems(name) -> list:
     views = spec.get("views")
     if not seconds(views) or (start and not seconds(start.get("views"))):
         return [f"online.spec {name!r} must give every view's offsets in seconds"]
+    if start and any(v.get("at") != "start" for v in start["views"]):
+        return [
+            (
+                f"online.spec {name!r}: every view of the start check must be "
+                "`at: start` (the client sends the episode's first frames)"
+            )
+        ]
     if start and {v.get("role") for v in views} & {
         v.get("role") for v in start["views"]
     }:
