@@ -90,6 +90,7 @@ uv run levi live stop                            # 只停自己的进程
 
 - `gpu.mode` 默认 `auto`：等于 `timeshare`（两者常驻 + 闸门）；`coexist` 和 `manual` 是手动选项。`gpu.busy_states` 默认 `["running"]`；`gpu.min_free_mib` 600、`gpu.policy_budget_mib` 8500 决定 vLLM 何时睡眠。
 - `pipeline.temporal` 默认 true（时间片段运行：粗标 + 精修）。设为 false 时不做时间片段，只由释放复核给每个片段判定；这要求 `pipeline.anchored = true`，并且复核规格没有 `episode.require_place`（例如 `generic-release.v3.json` 或 `generic-final.v1.json`），否则配置校验拒绝。见[双标签](#双标签操作员和-agent)。
+- `[judge.task_text]`（默认空表）：给判定的问题换一种指令说法，键是任务文字或任务文件夹名，值是判定用的说法；机器人策略收到的指令不动。见[判定用的任务文字](#判定用的任务文字)。
 - `pipeline.coarse_step_seconds` 0.5、`pipeline.refine` `always`：评测过的时间片段设置，长片段会放宽步长使帧数不超过 `max_images`。`pipeline.cleanup` true：丢弃已完成运行的冻结输入和证据。
 - `pipeline.auto_approve` 默认 **false**。`pipeline.keep_review_runs` 10：每个数据集保留冻结输入的开着的释放复核运行数（提交它需要输入），更旧的被取消并清理。`watch.stuck_s` 600：没有完成、也没有变化的片段超过这个时间算 `stuck`。`gpu.lead_s`/`lead_grace_s` 3/5：闸门在下一集开始前提前关闭。`service.gate_poll_s` 0.25。
 - `resources.report_keep` 默认 20：`live/reports/` 里保留的会话报告份数，写入新报告时删除最旧的。
@@ -169,8 +170,25 @@ uv run levi live stop                            # 只停自己的进程
 - `generic-release.v2.json`：同一个释放复核，判定还会看片段怎么结束（最后一次有效释放之后没有再抓，最后一个放置不是失败）；候选，不是默认；不要求任务只放一次（见其局限）。见[终态感知的判定](#终态感知的判定候选)。
 - `generic-release.v3.json`：去掉放置条件的第 2 版：至少 `min_valid` 次释放有效、并且最后一次有效释放之后夹爪没有再闭合，就判成功。它不读时间片段，所以能和 `pipeline.temporal = false`（只做释放复核）一起用。候选，不是默认；离线（一个任务，92 个片段）保住了 33 个成功中的 33 个，把 59 个失败中的 5 个判成成功（0.085，Wilson 95 % 0.037–0.184），第 2 版在同样的片段上是 59 个中 1 个。见[双标签](#双标签操作员和-agent)。
 - `generic-final.v1.json`：另一种问法，不是释放复核的新版本：每个片段只问一次，看录像最后几秒（指令说的那个物体现在在哪里、是否静止）。它不读夹爪通道和时间片段，所以能和 `pipeline.temporal = false` 一起用。候选，不是默认，**没有在任何数据上评估过**。见[最终状态判定](#最终状态判定候选)。
+- `generic-final.v2.json`：第 1 版的问题和规则，加上本实验室对“pick X in/on/into/onto Y”的读法，以及一个**开头检查**：对片段第一帧再问一个问题，机器人动手之前物体是不是已经在目的地；如果是，这个片段不是有效试验（记为失败并标“不确定”）。候选，不是默认，**没有在任何数据上评估过**。`generic-final.v1.json` 保持原样。见[第 2 版：说法和开头检查](#第-2-版说法和开头检查候选)。
 
 时间片段运行使用评测过的配置（粗步 0.5 s、始终精修、lean 提示、`qwen38-27b-vllm-48k-lean` 配置同时两个请求），只用侧视相机；长片段会放宽步长，使帧数不超过模型的图像上限（LEVI 拒绝悄悄稀疏化）。
+
+## 判定用的任务文字
+
+机器人策略是按指令的原话训练的，所以这条文字从不改动。判定是另一回事：它的问题引用任务指令，让模型自己弄清机器人该拿起什么、最后应该放到哪里，而模型对同一句话的读法可能和实验室不同。在本实验室，“pick the eggplant on the bread”的意思是把茄子拿起来放到面包上；有一晚模型把它读成了拿起面包上的那个茄子。`live.toml` 的 `[judge.task_text]` 给这类指令另一种说法，只给判定用：
+
+```toml
+[judge.task_text]
+"pick the eggplant on the bread" = "put the eggplant onto the bread"
+```
+
+- **键。** 任务文字或任务文件夹的名字，比较时转小写、下划线当空格、多个空格并成一个（和训练池同一条规则）：`Pick_the_eggplant_on_the_bread` 和 `pick the eggplant on the bread` 是同一个键。配置会拒绝：规范化之后相同的两个键、空的键、空的说法、超过 600 个字符或多行的说法。
+- **优先级。** 先试任务文件夹的名字（文件夹更具体：同一条指令在别的部署里可能需要另一种说法），再试指令的文字；第一个匹配的生效。说法不会再被查一次，所以条目不会串联；一个条目写的和指令原文一样时，查找到此为止（不算改写）。没有匹配，或者没有这张表（默认）：照片段记录的指令原样引用。
+- **作用范围。** 实时服务所有引用任务的问题：[在线判定](#在线判定接口-c5)（服务端用请求的 `task`，以及客户端带来的 `episode.task_folder` 去匹配；客户端照旧发策略自己的文字）、后台复核（释放复核或最终状态的问题，包括开头检查的问题）、时间片段标注（引用指令的标注指南）。它不作用于机器人策略、rollout 的文件、数据集的 `task_text`（页面和 API 显示的仍是记录的原指令）和训练池。
+- **记录。** 用了某个说法做出的判定带 `task_rewritten`（`task_text` 或 `task_folder`，哪个键匹配就写哪个；没有则不写）；统计记录里的 `result.task_rewritten`（指令照原样引用时为 `null`）；在线结果及其日志行里也有 `task_rewritten`。具体说法写在 `live/effective.toml`（会话实际使用的配置）和运行冻结下来的问题里；在线日志不存任务文字。
+- **先有通用约定，表只给例外。** `generic-final.v2.json` 在两个问题里都写明了本实验室怎么读“pick X in/on/into/onto Y”（见[下面](#第-2-版说法和开头检查候选)），所以条目只用于这句话解决不了的指令。其他规格没有改动（用过的规格文件从不原地修改）。
+- **局限。** 一个说法是对模型怎么读这几个词的猜测。它是否改善判定，要拿操作员标签去对（`stats.agreement`），这里没有测过。表在服务启动时读取（`live.toml` 在启动时读），数据集状态里已有的判定不会重算。
 
 ## 终态感知的判定（候选）
 
@@ -242,6 +260,42 @@ anchored_spec = "generic-final.v1.json"
 - 结尾时两个相机都看不到目的地，读作 `unclear`，判定为不确定。
 - 录像最后几帧可能是策略在复位或退出；问题问的是物体在哪里，不是手臂在做什么，但退出的手臂可能在侧视里挡住物体。
 
+### 第 2 版：说法和开头检查（候选）
+
+`generic-final.v2.json`（id `generic-final`，版本 2）是在第 1 版上做两处改动。`generic-final.v1.json` 保持原样、仍可使用；不会有任何东西自动切到第 2 版（默认的 `pipeline.anchored_spec` 和 `online.spec` 没变）。它是候选，**没有在任何数据上评估过**。
+
+1. **说法。** 两个问题里都写明本实验室怎么读形如“pick X in/on/into/onto Y”的指令：把 X 拿起来放进/放到 Y 上，Y 是目的地；“pick X from Y”或“pick up X”表示物体最后被拿着或在别处。第 1 版把这件事留给模型。
+2. **开头检查。** 对片段的**第一帧**（侧视和腕部两个相机，两张图）每个片段再问一个问题，只答一个字段 `start_state`：`already_at_destination`（指令说的那个物体在机器人动手之前已经在目的地上或里面）、`not_at_destination`、`unclear`。原因：2026-10-08 晚上五个失败片段里有四个，片段一开始物体就已经在目的地了（场景没复位，机器人几乎没动），而只看最后几秒的判定会把这样的片段判成功。
+
+规则（规格的 `start.void_when`，读开头检查的答案；最终画面的问题、字段和规则就是第 1 版的）：
+
+| `start_state` | 判定 |
+| --- | --- |
+| `not_at_destination` | 按第 1 版的规则读最终画面（`basis.start_check` 为 `passed`） |
+| `already_at_destination` | **不是有效试验**：失败并且不确定，`basis.final_reading` 为 `already_satisfied_at_start`（`start_check` 为 `voided`），不管最终画面怎么说；最终画面自己的读数保存在 `basis.end_reading` |
+| `unclear` | 最终状态判成功的，改记为失败并且不确定（`final_reading` 为 `start_unclear`，`start_check` 为 `unclear`）；明确的失败仍是确定的失败。理由是框架一贯的规则：读不出来的输入绝不当成成功（读不出最终状态时同样记为不确定） |
+| 没问（调用方发不出第一帧） | 第 1 版的规则，`start_check` 为 `skipped` |
+
+开头被判无效或读不出时，`valid_events` 记 0。页面和统计里是“不确定的失败”；审核队列里的提案写“第一帧里物体已经在目的地：不是有效试验”（原文为英文），并引用第一帧。`start.void_when` 是框架功能，不是任务规则：它是对开头检查答案的一组条件，只允许和 `final_state` 规则一起用（见 [Anchored review](ANCHORED_REVIEW.md)）。
+
+后台复核里，worker 自己从镜像进来的视频里取第一帧（开头检查的视图是 `at: start`），不需要客户端：先问开头检查，再问最终问题，每个片段两次请求（计划的估算已经把它们算上）。在线判定则要由客户端发第一帧：见[接口 C5](#接口-c5)。
+
+```toml
+[pipeline]
+temporal = false
+anchored_spec = "generic-final.v2.json"
+
+[online]
+spec = "generic-final.v2.json"   # 可选：在线判定
+```
+
+**已知局限。**
+
+- **没有在任何数据上测过准确率**，模型把第一帧答成 `already_at_destination` 或 `unclear` 的频率也不知道。开头检查做的一切都建立在对一帧（两张图）的这一次读数上；误答 `already_at_destination` 会把真正的成功变成不确定的失败，漏掉则保持第 1 版的行为。
+- 开头只用一帧判断：物体原本在位、被移开又放回去，看不出来；手臂挡住的第一帧读作 `unclear`。
+- 没有目的地的指令（“pick up X”）：开头检查的措辞让它答 `not_at_destination`；最终问题对这类指令的局限和第 1 版相同。
+- 第 1 版对最终画面的局限都还在，每个片段还多一次请求。
+
 ## 双标签：操作员和 agent
 
 双标签评测给每个片段两个标签，并且互不混用：**操作员标签（真值）**是操作员自己判定的成功或失败；**agent 标签（自动、未审）**是释放复核的判定。在新片段上比较两者，可以测出自动标签有多可信。
@@ -290,7 +344,7 @@ prewarm = true
 
 **在哪个进程里。** 一个小的 HTTP 接口，开在监督进程（`levi live start`）里，也就是管 GPU 闸门和 vLLM 启动、睡眠、唤醒的那个进程；`levi live once` 不启动它。它只监听回环地址（默认 `127.0.0.1:7882`），只做一件事：用配置的规格判定一个片段。它不接受提示词，也不回答别的问题。代码在 `levi/live/online.py`。
 
-**和后台复核同一套逻辑。** 问题就是规格里的问题，任务指令的引用方式和后台复核相同（`generic.anchored_spec`：压成一行，最多 600 个字符）。模型请求走 worker 的同一条 provider 路径（`LocalProvider.ask`、worker 建的那个 provider 配置、按规格答案 schema 的约束解码、规格的 `max_output_tokens`、服务器端的贪心解码）。答案用 `anchored.validate_answer` 校验，用 `anchored.judge`（规格的 `valid_when`）读取，再用 `anchored.outcome` 和 `anchored.undecided` 按 `final_state` 规则得出结局。没有另写一份逻辑。
+**和后台复核同一套逻辑。** 问题就是规格里的问题，任务指令的引用方式和后台复核相同（`generic.anchored_spec`：压成一行，最多 600 个字符），`[judge.task_text]` 有对应条目时用实验室的说法（[判定用的任务文字](#判定用的任务文字)）。模型请求走 worker 的同一条 provider 路径（`LocalProvider.ask`、worker 建的那个 provider 配置、按规格答案 schema 的约束解码、规格的 `max_output_tokens`、服务器端的贪心解码）。答案用 `anchored.validate_answer` 校验，用 `anchored.judge`（规格的 `valid_when`）读取，再用 `anchored.outcome` 和 `anchored.undecided` 按 `final_state` 规则得出结局。没有另写一份逻辑。
 
 ### 设置
 
@@ -314,7 +368,7 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 | --- | --- | --- | --- |
 | `online` | `enabled` | false | 随服务启动这个接口 |
 | | `host`、`port` | `127.0.0.1`、7882 | 回环地址（`127.0.0.1`、`::1`；`localhost` 这样的主机名被拒绝）；端口不能是 5000、8000、7860、7861、策略端口、`service.ui_port`、`service.core_port` 或 `vllm.port`（启用时检查） |
-| | `spec` | `generic-final.v1.json` | `levi/live/specs` 里的文件，`episode.rule` 为 `final_state`，没有起始检查和否决项，每个视图的偏移用秒给出，问题里有 `{task}` 占位符 |
+| | `spec` | `generic-final.v1.json` | `levi/live/specs` 里的文件，`episode.rule` 为 `final_state`，没有否决项，每个视图的偏移用秒给出，问题里有 `{task}` 占位符；可以有一个让片段无效的开头检查（`start.void_when`，即 `generic-final.v2.json`），其视图的 role 要和最终画面视图的不同（见[接口 C5](#接口-c5)） |
 | | `timeout_s` | 15 | 1–120 秒，从请求到达时算起（包括等闸门和唤醒）；客户端可以按自己的截止时间提前放弃 |
 | | `max_body_mb` | 8 | 0.5–64 MiB |
 | `pipeline` | `background` | true | false：不启动 worker，不做后台模型请求（见下） |
@@ -324,6 +378,8 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 **关掉后台标注（`pipeline.background = false`）。** 监督进程不启动 worker，自己也不发模型请求：没有时间片段，没有释放复核或最终状态复核。它照常把每个已完成的 rollout 连同操作员标签和客户端转来的在线结果一起镜像进来，写状态文件，响应页面和 API，并给每个片段写一条 `live/stats.jsonl` 记录，所以页面、`stats.agreement`、会话报告和 `levi live report` 都照常可用，在线结果也能和操作员标签对照。镜像进来的片段立刻记为 `done`：`eval.agent_label.status` 为 `ok` 时带在线判定，否则没有判定（`no_agent`，`reason` 写明原因）。`accepts_sessions` 仍为 true。此时 `temporal`、`anchored`、`anchored_spec`、`anchored_min_valid`、`guideline`、`vocabulary` 都不使用，也不校验（后台开着时会被拒绝的组合，例如 `temporal = false` 加 `anchored = false`，这时也接受）；它们保持原样，切回去不用改别的。切换之前已经镜像、还在等标注的片段继续等，直到后台重新打开；后台关着时收进来的片段，之后不会补标。`vllm.prewarm` 照样会启动 vLLM（在线判定需要它）。后台开着（默认）时一切和以前一样，同一片段的后台复核会在 `verdict` 里替换在线判定（在线判定仍保存在数据集状态的 `online.verdict` 里）。
 
 ### 接口 C5
+
+**第 2 版接口（只增不改）。** 接口的第一版只有最终画面。第 2 版为带开头检查的规格（如 `generic-final.v2.json`）加上可选的**开头帧**（片段的第一帧），响应里多四个键。第一版发出和读取的东西都没变：三个 `schema` 字符串仍是 `levi.online.judge.spec.v1`、`.request.v1`、`.result.v1`（第一版的客户端会检查它们），请求的键相同，`views` 列的恰好是最终画面的视图，不发开头帧的客户端只按最终画面判定（`start_check: "skipped"`）。第 2 版的客户端从 `GET /v1/judge/spec` 里的 `revision: 2` 和 `start_views` 列表得知服务认开头帧。
 
 状态文件（接口 C4）多一个字段 `online_judge`：接口关闭时为 `null`，开启时为
 
@@ -336,13 +392,20 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 **`GET /v1/judge/spec`** 告诉客户端该发什么（从规格文件读出，不写死）：
 
 ```json
-{"schema": "levi.online.judge.spec.v1", "spec_id": "generic-final", "spec_version": 1,
+{"schema": "levi.online.judge.spec.v1", "revision": 2, "spec_id": "generic-final", "spec_version": 1,
  "views": [{"role": "side", "offsets_seconds": [-3.0, -2.0, -1.2, -0.6, -0.2, 0.0]},
            {"role": "wrist", "offsets_seconds": [-2.0, -1.0, -0.4, 0.0]}],
  "image": {"format": "jpeg", "max_side": 1280}, "timeout_s": 15.0}
 ```
 
-偏移是相对片段最后一帧的秒数。`max_side` 是建议：发相机原始帧的 JPEG（后台复核看的是原始分辨率），只有长边超过它时才缩小。片段比某个偏移短时，那个位置用第一帧，和后台复核一样。
+`online.spec = "generic-final.v2.json"` 时，响应多一个键 `start_views`（没有开头检查的规格没有它），`spec_version` 为 2：
+
+```json
+ "start_views": [{"role": "start_side", "anchor": "start", "offsets_seconds": [0.0]},
+                 {"role": "start_wrist", "anchor": "start", "offsets_seconds": [0.0]}]
+```
+
+`views` 的偏移是相对片段最后一帧的秒数；`start_views`（`anchor: "start"`）的偏移是相对片段**第一**帧的秒数，所以 `0.0` 就是客户端录到的第一帧。开头帧故意不放进 `views`：第一版的客户端会读 `views` 的每一项，遇到不认识的 role 就拒绝整个规格。`max_side` 是建议：发相机原始帧的 JPEG（后台复核看的是原始分辨率），只有长边超过它时才缩小。片段比某个偏移短时，那个位置用第一帧，和后台复核一样。
 
 **`POST /v1/judge`**，`Content-Type: application/json`，带 `Content-Length`，不带 `Origin` 头（浏览器页面发来的请求被拒绝）：
 
@@ -353,8 +416,16 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
  "images": [{"role": "side", "offset_s": -3.0, "step": 367, "jpeg_b64": "<base64 编码的 JPEG>"}, ...]}
 ```
 
+第 2 版客户端对 `generic-final.v2.json` 发的同一个请求，多两张图（其余十张同上）：
+
+```json
+ "images": [..., {"role": "start_side", "offset_s": 0.0, "step": 1, "jpeg_b64": "<base64 编码的 JPEG>"},
+                 {"role": "start_wrist", "offset_s": 0.0, "step": 1, "jpeg_b64": "<base64 编码的 JPEG>"}]
+```
+
 - 必填 `schema`、`task`（1–2000 个字符）和 `images`；`episode` 及其中每个键都可省略，只用于日志（`fps` 是客户端实测频率的中位数，不是名义值）。图像的 `step` 可省略（整数或 null），只写进日志：客户端发的是 `frames.csv` 的 `frame_index`，从 1 开始，最后一帧等于 `steps`；它从不当作从 0 开始的视频帧号使用。客户端发质量 90 的 JPEG，role 只有 `side` 和 `wrist`。
 - **严格模式。** 任何一层出现约定里没有的键都以 422 拒绝；键名像操作员或评测数据（`operator...`、`outcome`、`success`、`label`、`eval`、`verdict` 等）时，原因里会专门说明。重复的键、NaN、Infinity 也拒绝。
+- **开头帧（第 2 版，可选）。** role 为 `start_views` 里那些（`start_side`、`start_wrist`，偏移 `0.0`）的图像，就是 `images` 里的普通条目：没有新增任何键。要么全发要么不发：不发时不问开头检查（`start_check: "skipped"`，对最终画面按第 1 版的规则）；只发一部分时，422 会写明缺哪些。规格里没有开头检查的服务会拒绝它们（422：role 不是规格的视图），所以客户端只在规格响应里有 `start_views` 时才发。
 - 规格的每个 `(role, offset)` 恰好一张图，偏移在 1 毫秒内算匹配；不管请求里怎么排，模型都按规格的顺序看到它们（先按视图，再按每个视图的偏移）。缺图、同一位置两张图、未知的 role、规格里没有的偏移、不是 base64 的文本、不是 JPEG 的字节，都返回 422，并写明哪里不对。
 - 请求体超过 `max_body_mb` 返回 413（不读取请求体）；没有 `Content-Length` 返回 411；`Content-Type` 不是 JSON 返回 415；`Host` 不是本接口的回环地址或带 `Origin` 头返回 403；请求体不是 JSON 返回 400。
 
@@ -368,10 +439,12 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
  "checks": [{"field": "object_state", "value": "resting_at_destination", "result": "supported"},
             {"field": "stable", "value": "yes", "result": "supported"}],
  "spec": {"id": "generic-final", "version": 1}, "model": "qwen3.8-27b",
- "tokens": 4312, "prompt_tokens": 4290, "elapsed_s": 2.41, "request_id": "9f0c3b6a1d2e4f50"}
+ "tokens": 4312, "prompt_tokens": 4290, "elapsed_s": 2.41, "request_id": "9f0c3b6a1d2e4f50",
+ "final_reading": "supported", "start_check": null, "start_answer": {}, "task_rewritten": null}
 ```
 
 - `outcome` 和 `undecided` 按 `final_state` 规则：物体静止地放在目的地且稳定为成功；任何明确的其他答案为失败；有 `unclear` 答案、且没有明确的失败答案压过它时，为失败并且 `undecided: true`。`reading` 是规格的 `valid_when` 对答案的读取结果（`supported`、`contradicted`、`unknown`），`checks` 是逐条条件。`status` 不是 `ok` 时 `outcome` 和 `reading` 为 null。
+- 最后四个键是第 2 版接口的，总是存在。`final_reading` 是规则对片段的读数：`reading`（`supported`、`contradicted`、`unknown`），或者开头检查做了决定时的 `already_satisfied_at_start`、`start_unclear`（两者都是失败并且 `undecided: true`）。`start_check`：规格没有开头检查时为 `null`，否则是 `skipped`（没发开头帧）、`passed`、`voided`（物体一开始就在目的地）或 `unclear`；`start_answer` 是开头问题的答案（没问时为 `{}`）。`task_rewritten` 为 `null`，或在引用了实验室的说法时为 `task_text` / `task_folder`（[判定用的任务文字](#判定用的任务文字)）。有开头检查时模型被问两次，先问开头检查；`tokens`、`prompt_tokens`、`elapsed_s` 包含两次，`timeout_s` 也是两次合计。开头答案不是规格允许的值时是 `error`（`invalid_answer: start check: ...`），和最终答案不合规时一样。
 - `tokens` 和 `prompt_tokens` 是服务器报告的数（没报告时为 null）；`elapsed_s` 从请求到达算起。
 - `reason` 的格式是 `<代码>: <说明>`，第一个冒号前的代码是固定的，供程序判断。**瞬时**代码（评测客户端在自己的截止时间内重试）：`gate_closed`、`busy`、`service_busy`。其余代码在两集之间的空当里重试也不会消失。`ok` 时为 null，只有答案等过闸门时写 `gate_waited: ...`（见下）。**`unavailable`**（什么都没发给模型；除下面说的等待闸门外立即返回，不到 1 秒）：`busy`（已有一个在线判定在进行，一次只做一个）、`gate_closed`（策略正在推理，或等待的闸门没有及时打开：`policy_inferring`、`episode_imminent`、`unknown_client`）、`cold_start`（vLLM 没在运行：在线判定从不冷启动它）、`vllm_starting`、`no_room`（vLLM 在睡眠，按 GPU 规则此刻不能唤醒）、`wake_failed`、`vllm_failed`（服务已放弃启动 vLLM）、`service_busy`（监督进程正在启动、停止 vLLM 或让它睡眠）、`shutting_down`；以及模型工作时被打断的 `gate_closed ... (the request was cut)`、`vllm_sleeping`、`vllm_stopping`。**`error`**：`timeout`（`timeout_s` 内没有答案，请求被切断）、`model_error`（服务器出错或拒绝）、`invalid_answer`（答案不是规格允许的值）、`internal_error`，以及被拒绝的请求的 `invalid_request`。
 
@@ -382,18 +455,23 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 - 上面的响应，再加 `"source": "online"`、`requested_at` 和 `received_at`（纪元秒；ISO 时间也能读）、`frames: [{role, offset_s, step}]`，以及 `timing`：`during_run` 或 `after_budget`；
 - 或者没有答案时写 `{"source": "online", "status": "unavailable" | "error" | "timeout" | "skipped", "reason": "..."}`。
 
-镜像器（`criteria.agent_label`）把格式正确的 `ok` 变成数据集状态里这个片段的自动判定：`verdict = {outcome, events: 1, valid_events: 1 或 0, undecided, rule: "final_state", min_valid: 1, basis: {final_reading}, spec, spec_version, review: "auto", evaluated: false, at: received_at, source: "online"}`，形状和 worker 的判定一样，所以页面、`stats.agreement` 和报告不用改就能读。其他状态，或者字段对不上的 `ok`（结局不是成功或失败、成功却标了不确定），都不产生判定：这个片段算 `no_agent`。客户端转来的整个标签保存在 `online` 下（`status`、`reason`、`timing`、`request_id`、`usage`、`verdict`）。这种片段的统计记录带 `result.verdict.source: "online"`，把这次判定的成本记为一次 `review` 请求，另有 `result.online`（`status`、`reason`、`timing`）；`timeline.to_verdict_s` 可能是负数，因为答案通常在客户端把 rollout 标为完成之前就到了。API 的片段行带 `verdict.source`。
+镜像器（`criteria.agent_label`）把格式正确的 `ok` 变成数据集状态里这个片段的自动判定：`verdict = {outcome, events: 1, valid_events: 1 或 0, undecided, rule: "final_state", min_valid: 1, basis: {final_reading, start_check}, spec, spec_version, review: "auto", evaluated: false, at: received_at, source: "online", task_rewritten}`（`basis.start_check` 和 `task_rewritten` 只在结果里有时才写；`final_reading` 取结果的 `final_reading`，没有就取它的 `reading`；以开头检查为依据的 `final_reading` 若不是“失败且 `undecided: true`”，算格式错误），形状和 worker 的判定一样，所以页面、`stats.agreement` 和报告不用改就能读。其他状态，或者字段对不上的 `ok`（结局不是成功或失败、成功却标了不确定），都不产生判定：这个片段算 `no_agent`。客户端转来的整个标签保存在 `online` 下（`status`、`reason`、`timing`、`request_id`、`usage`、`verdict`）。这种片段的统计记录带 `result.verdict.source: "online"`，把这次判定的成本记为一次 `review` 请求，另有 `result.online`（`status`、`reason`、`timing`）；`timeline.to_verdict_s` 可能是负数，因为答案通常在客户端把 rollout 标为完成之前就到了。API 的片段行带 `verdict.source`。
 
-**日志。** 每个 `POST /v1/judge` 在 `<工作区>/live/online.jsonl` 里加一行（schema `levi.live.online.v1`，和其他日志一样轮转）：`at`、`time`、`request_id`、`http`、`episode`（请求里给的标识）、`status`、`reason`、`outcome`、`undecided`、`reading`、`tokens`、`prompt_tokens`、`elapsed_s`、`images`、`spec`、`model`。不存图像，也不存任务文字。图像只在模型读取期间放在 `<工作区>/live/online-tmp/<request_id>/`。
+**日志。** 每个 `POST /v1/judge` 在 `<工作区>/live/online.jsonl` 里加一行（schema `levi.live.online.v1`，和其他日志一样轮转）：`at`、`time`、`request_id`、`http`、`episode`（请求里给的标识）、`status`、`reason`、`outcome`、`undecided`、`reading`、`final_reading`、`start_check`、`task_rewritten`、`tokens`、`prompt_tokens`、`elapsed_s`、`images`（最终帧和开头帧合计）、`spec`、`model`。不存图像，也不存任务文字。图像只在模型读取期间放在 `<工作区>/live/online-tmp/<request_id>/`。
 
 ### 独立性
 
-模型只看到图像和带任务指令的规格问题，别的都看不到：请求里不能带操作员标签或其他评测数据（以 422 拒绝），`episode` 只进日志，测试检查了发给模型服务器的请求里没有任何片段标识。客户端在操作员给出标签之后才显示模型结果，所以操作员标签仍是真值；这个顺序由客户端保证，服务看不到。`live/online.jsonl` 在模型一回答就记下结局，通常早于操作员按键：操作员判定之前不要查看它（LEVI 没有页面或命令读它）。服务不往 rollout 里写任何东西。
+模型只看到图像和带任务指令的规格问题，别的都看不到：请求里不能带操作员标签或其他评测数据（以 422 拒绝），`episode` 只进日志，其中的 `task_folder` 还在服务端用来查 `[judge.task_text]`（模型看到的是那个条目给的说法，从不是文件夹名），测试检查了发给模型服务器的请求（包括开头检查的）里没有任何片段标识。客户端在操作员给出标签之后才显示模型结果，所以操作员标签仍是真值；这个顺序由客户端保证，服务看不到。`live/online.jsonl` 在模型一回答就记下结局，通常早于操作员按键：操作员判定之前不要查看它（LEVI 没有页面或命令读它）。服务不往 rollout 里写任何东西。
+
+### 客户端要为第 2 版做什么
+
+策略仓库的客户端（本次没有改它）从规格响应读 `start_views`；有的话，从片段**第一个**录到的帧里取每个相机的图（`start_side` 取侧视相机，`start_wrist` 取腕部相机，偏移 `0.0`；JPEG 编码和 `max_side` 同其他图），在整个片段期间保留它们（只存最后几秒的缓冲里没有它们），并把两张都加进 `images`。`task` 仍发策略自己的指令。没有 `start_views` 时，发的和以前一样。它可以把 `start_check: voided` 在终端那一行显示为“不是有效试验”；结果里的 `undecided: true` 已经让它现有的那一行写成“不确定”。旧客户端不用改：只是不做开头检查。
 
 ### 风险和局限
 
 - **显存和闸门。** 策略服务器以 `.22` 常驻时，只剩约 1.3–1.5 GB 余量（见“GPU 管理”）。两集之间的唤醒和请求遵循后台标注的同一套规则，但策略服务器常驻时唤醒的显存峰值，以及片段刚结束就发出的请求对策略推理延迟的影响，**都没有**用真实模型和 GPU 测过。闸门关闭时进行中的请求会被切断。
 - **准确率没有评估。** 最终状态规格在任何数据上都没有测过准确率；每个在线判定都要读作“自动、未审”，信任之前先和操作员标签对照（`stats.agreement`，按 `ended_by` 分开看）。
+- **开头检查的成本和准确率。** 带开头帧时模型被问两次（先是对两张图的一个短问题，再是最终问题），所以回答比一次请求慢；开头检查的准确率没有测过（见[第 2 版](#第-2-版说法和开头检查候选)）。
 - **时间。** 唤醒（约 0.75 秒）加一次请求（27B 模型看 10 张图：几秒，这里没测）必须在下一集开始前完成；`reset_wait_s` 太短时会得到 `gate_closed ... (the request was cut)`。
 - 接口除了回环地址、`Host` 检查和拒绝浏览器请求之外没有身份验证：本机任何进程都可以让它判定（它也只能做这件事）。
 - 端口被占用时接口起不来：事件日志和 `last_error` 会写明，`online_judge.ready` 保持 false，客户端会连接被拒。
@@ -524,6 +602,7 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 | `result.review` | `auto` 或 `human`（谁提交的时间片段） |
 | `result.spec` | `{guideline, release_review, release_review_version, sha256}`：用到的文件和它们的哈希；判定没有记录复核规格版本时为 null |
 | `result.provider`、`result.model` | 模型配置名和服务的模型 |
+| `result.task_rewritten` | 判定引用的是 rollout 记录的原指令时为 `null`，否则是 `task_text` 或 `task_folder`，即匹配到的 `[judge.task_text]` 的键（[判定用的任务文字](#判定用的任务文字)）；后台标注关闭、只收在线结果的片段，用在线结果自带的 `task_rewritten` |
 | `operator_label` | `{outcome, by}`（元数据写明片段怎么结束时另有 `ended_by`，取值 `budget` 或 `operator_key`）：来自 rollout 元数据的操作员标签（真值）（`success`、`failure`、`discarded` 或 `unlabeled`；`by` 为 `operator`、`key`、`timeout-adjudicated` 等），或 `null`（没有标签，或旧记录）。它从不属于 `result.verdict`；见[双标签](#双标签操作员和-agent) |
 
 这个文件是本服务工作的记录，LEVI 自己从不读取，也不是训练数据。

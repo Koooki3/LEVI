@@ -138,6 +138,7 @@ A finished demo is hard-linked file by file into `<workspace>/captures/<name>/.p
 | | `log_max_mb`, `log_backups`, `cache_max_gib`, `status_max_datasets` | 5, 3, 20, 64 | bounds |
 | | `report_keep` | 20 | session reports kept in `live/reports/`; the oldest are deleted when a new one is written |
 | `online` | `enabled`, `host`, `port`, `spec`, `timeout_s`, `max_body_mb` | false, `127.0.0.1`, 7882, `generic-final.v1.json`, 15, 8 | the online judgement's endpoint (interface C5); see [Online judgement](#online-judgement-interface-c5) |
+| `judge` | `task_text` | empty table | the lab's own wording of an instruction for the judgements' questions (`[judge.task_text]`, keys are task texts or task folder names); the robot policy's instruction is never touched; see [Judge-side task text](#judge-side-task-text) |
 
 The service sets `LEVI_DROID_SAMPLE=off` (no sample download), `LEVI_GPU_SHARING=allow` (its own policy replaces LEVI's off-peak guard, see below), `LEVI_SYNC_DISCOVER=off` and `LEVI_SYNC_INTERVAL=30` for the live workspace.
 
@@ -207,8 +208,25 @@ The evaluated tasks are not the ones LEVI was tuned on, so nothing is task-speci
 - `generic-release.v2.json`: the same review with a verdict that also looks at how the episode ends (no grasp after the last valid release, last placement not a failure); a candidate, never the default; it does not need a task that places once (see its limits). See [Terminal-aware verdict](#terminal-aware-verdict-candidate).
 - `generic-release.v3.json`: version 2 without the place condition: success when at least `min_valid` releases are valid and the gripper does not close again after the last valid one. It reads no time segments, so it can run with `pipeline.temporal = false` (the release review alone). A candidate, never the default; offline (one task, 92 episodes) it kept 33 of 33 successes and called 5 of 59 failures a success (0.085, Wilson 95 % 0.037-0.184), against 1 of 59 for version 2. See [Dual labels](#dual-labels-operator-and-agent).
 - `generic-final.v1.json`: a different question, not a version of the release review: one question per episode on the last seconds of the recording (where is the object the instruction is about, does it stay still). It reads no gripper channel and no time segments, so it runs with `pipeline.temporal = false`. A candidate, never the default, **not evaluated on any data**. See [Final-state judgement](#final-state-judgement-candidate).
+- `generic-final.v2.json`: version 1's question and rule plus the lab's reading of "pick X in/on/into/onto Y" and a **start check**: one more question on the episode's first frame, whether the object was already at its destination before the robot acted; if it was, the episode is no valid trial (a failure that is undecided). A candidate, never the default, **not evaluated on any data**. `generic-final.v1.json` stays as it is. See [Version 2: wording and a start check](#version-2-wording-and-a-start-check-candidate).
 
 The temporal run is the evaluated configuration (coarse 0.5 s, refinement always, lean prompt, profile `qwen38-27b-vllm-48k-lean` with two requests in flight) on the side camera, with the step widened for long episodes so the frames fit the model's image limit (LEVI refuses to thin silently).
+
+## Judge-side task text
+
+The robot policy is trained on the exact words of its instruction, so that text is never changed. The judgements are another matter: their questions quote the instruction and ask the model to work out what the robot should pick up and where it should end up, and a model can read the same words differently from the lab. In this lab "pick the eggplant on the bread" means pick the eggplant up and put it on the bread; one evening the model read it as picking up the eggplant that lies on the bread. `[judge.task_text]` in `live.toml` gives the judgements another wording for such an instruction, and only the judgements:
+
+```toml
+[judge.task_text]
+"pick the eggplant on the bread" = "put the eggplant onto the bread"
+```
+
+- **Key.** A task text or a task folder's name, compared lower case, with underscores as spaces and one space between words (the training pool's rule): `Pick_the_eggplant_on_the_bread` and `pick the eggplant on the bread` are one key. Configuration refuses two keys that are the same once normalized, a wording that is empty, over 600 characters or on more than one line, and a key that is empty.
+- **Priority.** The task folder's name is tried first (the folder is the more specific: the same instruction in another deployment may need another wording), then the instruction's text; the first match wins. A wording is not looked up again, so entries do not chain, and an entry that says what the instruction already says ends the lookup (nothing counts as reworded). No match, or no table (the default): the instruction is quoted as recorded.
+- **Where it reaches.** Every question the live service asks that quotes the task: the [online judgement](#online-judgement-interface-c5) (the request's `task`, and its `episode.task_folder` when the client sends one, are matched on the server; the client keeps sending the policy's own text), the background review (the release or final-state questions, a start check's question included) and the time-segment annotation (the guideline that quotes the instruction). It does not reach the robot policy, the rollout's files, the dataset's `task_text` (the page and the API show the instruction as recorded) or the training pool.
+- **What is recorded.** A verdict made with a wording carries `task_rewritten` (`task_text` or `task_folder`, whichever key matched; absent otherwise), the statistics record has `result.task_rewritten` (`null` when the instruction was quoted as recorded), and the online result and its log line have `task_rewritten`. The wording is in `live/effective.toml` (the configuration a session runs with) and in the run's frozen question; the online log holds no task text.
+- **The convention first, the table for exceptions.** `generic-final.v2.json` says in both of its questions what the lab means by "pick X in/on/into/onto Y" ([below](#version-2-wording-and-a-start-check-candidate)), so an entry is only for an instruction that sentence does not fix. The other specs are not changed (a spec file that has been used is never edited).
+- **Limits.** A wording is a guess about how the model reads words. Whether one improves the verdicts has to be measured against the operator labels (`stats.agreement`); nothing here has been. The table is read when the service starts (`live.toml` is read at start), and a verdict already in a dataset's state is not recomputed.
 
 ## Terminal-aware verdict (candidate)
 
@@ -280,6 +298,42 @@ With `temporal = true` it also runs, but then the time segments cost the model t
 - A destination that neither camera shows at the end reads `unclear`, so the verdict is undecided.
 - The last frames of a recording can be a policy resetting or retreating; the question asks where the object is, not what the arm does, but a retreating arm may hide the object from the side camera.
 
+### Version 2: wording and a start check (candidate)
+
+`generic-final.v2.json` (id `generic-final`, version 2) is version 1 with two changes. `generic-final.v1.json` stays as it is and stays usable; nothing switches to version 2 by itself (the default `pipeline.anchored_spec` and `online.spec` are unchanged). It is a candidate and **not evaluated on any data**.
+
+1. **Wording.** Both questions say what this lab means by an instruction of the form "pick X in/on/into/onto Y": pick X up and put it in/on Y, and Y is the destination; "pick X from Y" or "pick up X" means the object ends up held or elsewhere. Version 1 left that to the model.
+2. **A start check.** One more question per episode on the episode's **first frame** (the side camera and the wrist camera, two images), answered in one field, `start_state`: `already_at_destination` (the object the instruction is about already rests on or in its destination before the robot acts), `not_at_destination`, or `unclear`. The reason: in four of the five failed episodes of one evening (2026-10-08) the object was already on its destination when the episode began (the scene had not been reset and the robot hardly moved), and a judgement that only sees the last seconds calls such an episode a success.
+
+The rule (the spec's `start.void_when`, read over the start answer; the final frames' question, fields and rule are version 1's):
+
+| `start_state` | verdict |
+| --- | --- |
+| `not_at_destination` | version 1's rule on the final frames (`basis.start_check` `passed`) |
+| `already_at_destination` | **no valid trial**: a failure that is undecided, `basis.final_reading` `already_satisfied_at_start` (`start_check` `voided`), whatever the final frames say; their own reading is kept in `basis.end_reading` |
+| `unclear` | a final-state success becomes a failure that is undecided (`final_reading` `start_unclear`, `start_check` `unclear`); a definite failure stays a certain failure. The reason is the framework's rule that an input that could not be read is never taken for a success (an unread final state is undecided in the same way) |
+| not asked (the caller could not send the first frames) | version 1's rule, `start_check` `skipped` |
+
+A voided or unclear start counts `valid_events` 0. The page and the statistics show an undecided failure; the review queue's proposal says "the object was already at the destination in the first frames: not a valid trial" and cites the first frames. `start.void_when` is a framework feature, not a task rule: a list of conditions over the start check's answer, allowed only with the rule `final_state` ([Anchored review](ANCHORED_REVIEW.md)).
+
+In the background review the worker takes the first frame from the mirrored video itself (the start check's views are `at: start`), so no client is involved: the start check is asked first, then the final question, two requests per episode (the plan's estimate counts them). For the online judgement the client has to send the first frames: see [Interface C5](#interface-c5).
+
+```toml
+[pipeline]
+temporal = false
+anchored_spec = "generic-final.v2.json"
+
+[online]
+spec = "generic-final.v2.json"   # optional: the online judgement
+```
+
+**Known limits.**
+
+- **No accuracy has been measured on any data**, and how often the model calls a first frame `already_at_destination` or `unclear` is unknown. Everything the start check does rests on that one reading of one frame (two images); a wrong `already_at_destination` turns a real success into an undecided failure, a missed one leaves version 1's behaviour.
+- The start is judged by one frame: an object that was in place, moved and put back is not visible, and a first frame the arm hides reads `unclear`.
+- An instruction with no destination place ("pick up X") makes the start check answer `not_at_destination` by its wording; the final question has version 1's limits for such an instruction.
+- Version 1's limits on the final frames stay, and one more request per episode is made.
+
 ## Dual labels: operator and agent
 
 A dual-label evaluation gives every episode two labels and keeps them apart: the **operator label (ground truth)**, the operator's own success or failure, and the **agent label (automatic, unreviewed)**, the release review's verdict. Comparing them on new episodes measures how far the automatic label can be trusted.
@@ -328,7 +382,7 @@ The background review labels an episode some seconds after it ends, and during a
 
 **Where it runs.** A small HTTP endpoint in the supervisor (`levi live start`), the process that owns the GPU gate and vLLM's start, sleep and wake; `levi live once` does not start it. It listens on a loopback address only (`127.0.0.1:7882` by default) and does one thing: judge one episode with the configured spec. It takes no prompt and no other question. The code is `levi/live/online.py`.
 
-**The same logic as the background review.** The question is the spec's, with the task instruction quoted the way the background review quotes it (`generic.anchored_spec`: one line, at most 600 characters). The model request goes through the same provider path as the worker's (`LocalProvider.ask`, the provider profile the worker builds, guided decoding against the spec's answer schema, the spec's `max_output_tokens`, the server's greedy decoding). The answer is checked with `anchored.validate_answer`, read with `anchored.judge` (the spec's `valid_when`) and turned into the outcome with `anchored.outcome` and `anchored.undecided` under the rule `final_state`. Nothing is re-implemented.
+**The same logic as the background review.** The question is the spec's, with the task instruction quoted the way the background review quotes it (`generic.anchored_spec`: one line, at most 600 characters), in the lab's wording when `[judge.task_text]` has an entry for it ([Judge-side task text](#judge-side-task-text)). The model request goes through the same provider path as the worker's (`LocalProvider.ask`, the provider profile the worker builds, guided decoding against the spec's answer schema, the spec's `max_output_tokens`, the server's greedy decoding). The answer is checked with `anchored.validate_answer`, read with `anchored.judge` (the spec's `valid_when`) and turned into the outcome with `anchored.outcome` and `anchored.undecided` under the rule `final_state`. Nothing is re-implemented.
 
 ### Settings
 
@@ -337,7 +391,7 @@ The background review labels an episode some seconds after it ends, and during a
 enabled = true                  # default false
 host = "127.0.0.1"              # loopback only; anything else is refused
 port = 7882
-spec = "generic-final.v1.json"  # a spec of levi/live/specs with episode.rule final_state
+spec = "generic-final.v1.json"  # a spec of levi/live/specs with episode.rule final_state; generic-final.v2.json adds the start check
 timeout_s = 15.0                # the answer must arrive this many seconds after the request did
 max_body_mb = 8.0               # a larger request body is refused (413)
 
@@ -352,7 +406,7 @@ prewarm = true                  # needed: vLLM is never cold-started for a judge
 | --- | --- | --- | --- |
 | `online` | `enabled` | false | start the endpoint with the service |
 | | `host`, `port` | `127.0.0.1`, 7882 | a loopback address (`127.0.0.1`, `::1`; a host name such as `localhost` is refused); the port must not be 5000, 8000, 7860, 7861, a policy port, `service.ui_port`, `service.core_port` or `vllm.port` (checked when enabled) |
-| | `spec` | `generic-final.v1.json` | a file of `levi/live/specs` whose `episode.rule` is `final_state`, with no start check or vetoes, every view's offsets in seconds and a `{task}` placeholder |
+| | `spec` | `generic-final.v1.json` | a file of `levi/live/specs` whose `episode.rule` is `final_state`, with no vetoes, every view's offsets in seconds and a `{task}` placeholder; it may have one start check that voids the episode (`start.void_when`, `generic-final.v2.json`) whose views use roles other than the final views' (see [Interface C5](#interface-c5)) |
 | | `timeout_s` | 15 | 1-120 s, counted from the moment the request arrives (a wait for the gate and a wake included); the client may give up earlier on its own deadline |
 | | `max_body_mb` | 8 | 0.5-64 MiB |
 | `pipeline` | `background` | true | false: no worker and no background model request (below) |
@@ -362,6 +416,8 @@ The settings are read at start: change `live.toml`, then `levi live stop` and `l
 **Background labelling off (`pipeline.background = false`).** The supervisor starts no worker and makes no model request of its own: no time segments, no release or final-state review. It still mirrors every finished rollout with its operator label and the online result the client relayed, writes the status file, answers the page and the API, and writes one `live/stats.jsonl` record per episode, so the page, `stats.agreement`, the session reports and `levi live report` keep working and the online result can be compared with the operator label. A mirrored episode is marked `done` at once: with an online verdict when `eval.agent_label.status` is `ok`, else with none (`no_agent`; its `reason` says why). `accepts_sessions` stays true. `temporal`, `anchored`, `anchored_spec`, `anchored_min_valid`, `guideline` and `vocabulary` are not used and not checked then (a combination that is refused with the background on, such as `temporal = false` with `anchored = false`, is accepted); they stay as they are, so switching back needs no other edit. Episodes mirrored before the switch that still wait for labelling keep waiting until the background is on again; episodes taken in while it was off are not labelled later. `vllm.prewarm` still starts vLLM (the online judgement needs it). With the background on (the default) everything runs as before, and a background review of the same episode replaces the online verdict in `verdict` (the online one stays under `online.verdict` in the dataset state).
 
 ### Interface C5
+
+**Revision 2 (additive).** The first revision of this interface had the final frames only. Revision 2 adds optional **start frames** (the episode's first frame) for a spec with a start check such as `generic-final.v2.json`, and four keys in the result. Nothing that revision 1 sent or read changed: the three `schema` strings are still `levi.online.judge.spec.v1`, `.request.v1` and `.result.v1` (a client of revision 1 checks them), the request keys are the same, `views` lists exactly the final views, and a client that sends no start frames is judged by the final frames alone (`start_check: "skipped"`). A client of revision 2 learns that the service understands start frames from `revision: 2` and a `start_views` list in `GET /v1/judge/spec`.
 
 The status file (interface C4) carries `online_judge`: `null` when the endpoint is off, else
 
@@ -374,13 +430,20 @@ The status file (interface C4) carries `online_judge`: `null` when the endpoint 
 **`GET /v1/judge/spec`** says what to send (from the spec file, nothing hard-coded):
 
 ```json
-{"schema": "levi.online.judge.spec.v1", "spec_id": "generic-final", "spec_version": 1,
+{"schema": "levi.online.judge.spec.v1", "revision": 2, "spec_id": "generic-final", "spec_version": 1,
  "views": [{"role": "side", "offsets_seconds": [-3.0, -2.0, -1.2, -0.6, -0.2, 0.0]},
            {"role": "wrist", "offsets_seconds": [-2.0, -1.0, -0.4, 0.0]}],
  "image": {"format": "jpeg", "max_side": 1280}, "timeout_s": 15.0}
 ```
 
-An offset is seconds from the episode's last frame. `max_side` is advice: send the camera's own frames as JPEG (the background review shows native frames), scaled down only when the longer side is above it. An episode shorter than an offset shows its first frame there, as the background review does.
+With `online.spec = "generic-final.v2.json"` the answer has one more key, `start_views` (absent for a spec without a start check), and `spec_version` is 2:
+
+```json
+ "start_views": [{"role": "start_side", "anchor": "start", "offsets_seconds": [0.0]},
+                 {"role": "start_wrist", "anchor": "start", "offsets_seconds": [0.0]}]
+```
+
+An offset of `views` is seconds from the episode's last frame; an offset of `start_views` (`anchor: "start"`) is seconds from its **first** frame, so `0.0` is the first frame the client recorded. The start frames are not listed under `views` on purpose: a client of revision 1 reads every entry of `views` and refuses a role it does not know. `max_side` is advice: send the camera's own frames as JPEG (the background review shows native frames), scaled down only when the longer side is above it. An episode shorter than an offset shows its first frame there, as the background review does.
 
 **`POST /v1/judge`**, `Content-Type: application/json`, with a `Content-Length` and no `Origin` header (a browser page is refused):
 
@@ -391,8 +454,16 @@ An offset is seconds from the episode's last frame. `max_side` is advice: send t
  "images": [{"role": "side", "offset_s": -3.0, "step": 367, "jpeg_b64": "<base64 JPEG>"}, ...]}
 ```
 
+The same request from a client of revision 2 against `generic-final.v2.json` has two more images (its other ten are as above):
+
+```json
+ "images": [..., {"role": "start_side", "offset_s": 0.0, "step": 1, "jpeg_b64": "<base64 JPEG>"},
+                 {"role": "start_wrist", "offset_s": 0.0, "step": 1, "jpeg_b64": "<base64 JPEG>"}]
+```
+
 - `schema`, `task` (1-2000 characters) and `images` are required; `episode` and each of its keys are optional and are used for the log only (`fps` is the client's measured median rate, not the nominal one). An image's `step` is optional (an integer or null) and is logged only: the client sends the `frame_index` of `frames.csv`, counted from 1, the last frame being `steps`; it is never used as a 0-based video frame number. The client sends JPEG at quality 90, roles `side` and `wrist`.
 - **Strict.** A key the contract does not define, at any level, is refused with 422, and a key that names operator or evaluation data (`operator...`, `outcome`, `success`, `label`, `eval`, `verdict`...) says so in the reason. A key given twice, NaN or Infinity are refused too.
+- **Start frames (revision 2, optional).** Images with the roles of `start_views` (`start_side`, `start_wrist`, offset `0.0`) are ordinary entries of `images`: no new key exists. Send all of them or none: with none, the start check is not asked (`start_check: "skipped"`, version 1's rule on the final frames); with some, a 422 names the missing ones. A service whose spec has no start check refuses them (a 422: the role is not one of the spec's views), so a client sends them only when `start_views` is in the spec answer.
 - One image per `(role, offset)` of the spec, matched within 1 ms; the model receives them in the spec's order (its views, then each view's offsets), whatever order the request lists them in. A missing image, a second one for the same slot, an unknown role, an offset the spec does not name, text that is not base64 or bytes that are not a JPEG are a 422 that names what is wrong.
 - A body over `max_body_mb` is 413 (it is not read); no `Content-Length` 411, `Content-Type` other than JSON 415, a `Host` that is not a loopback address of the endpoint or an `Origin` header 403, a body that is not JSON 400.
 
@@ -406,10 +477,12 @@ An offset is seconds from the episode's last frame. `max_side` is advice: send t
  "checks": [{"field": "object_state", "value": "resting_at_destination", "result": "supported"},
             {"field": "stable", "value": "yes", "result": "supported"}],
  "spec": {"id": "generic-final", "version": 1}, "model": "qwen3.8-27b",
- "tokens": 4312, "prompt_tokens": 4290, "elapsed_s": 2.41, "request_id": "9f0c3b6a1d2e4f50"}
+ "tokens": 4312, "prompt_tokens": 4290, "elapsed_s": 2.41, "request_id": "9f0c3b6a1d2e4f50",
+ "final_reading": "supported", "start_check": null, "start_answer": {}, "task_rewritten": null}
 ```
 
 - `outcome` and `undecided` follow the rule `final_state`: success when the object rests at the destination and is stable; failure on any definite other answer; an `unclear` answer that no definite failing answer outweighs is a failure with `undecided: true`. `reading` is the spec's `valid_when` read over the answer (`supported`, `contradicted`, `unknown`), `checks` each condition. `outcome` and `reading` are null unless `status` is `ok`.
+- The last four keys are revision 2's and always present. `final_reading` is the rule's reading of the episode: `reading` (`supported`, `contradicted`, `unknown`) or, when the start check decided, `already_satisfied_at_start` or `start_unclear` (both a failure with `undecided: true`). `start_check` is `null` for a spec without a start check, else `skipped` (no start frames sent), `passed`, `voided` (the object was already at the destination) or `unclear`; `start_answer` is the start question's answer (`{}` when it was not asked). `task_rewritten` is `null`, or `task_text` / `task_folder` when the lab's wording of the instruction was quoted ([Judge-side task text](#judge-side-task-text)). With a start check the model is asked twice, the start check first; `tokens`, `prompt_tokens` and `elapsed_s` cover both, and `timeout_s` counts for both together. A start answer that is not one of the spec's values is `error` (`invalid_answer: start check: ...`), like a final answer that is not.
 - `tokens` and `prompt_tokens` are what the server reported (null when it reported nothing); `elapsed_s` is from the request's arrival.
 - `reason` is `<code>: <words>`; the code before the first colon is stable and meant for programs. **Transient** codes (the evaluation client retries them within its own deadline): `gate_closed`, `busy`, `service_busy`. Every other code will not pass by retrying within an episode's gap. It is null for `ok`, except `gate_waited: ...` when the answer had to wait for the gate (below). **`unavailable`** (nothing sent to the model; at once, under 1 s, except the wait for a gate described below): `busy` (another online judgement is in progress; one at a time), `gate_closed` (the policy infers, or a gate that was waited for did not open in time: `policy_inferring`, `episode_imminent`, `unknown_client`), `cold_start` (vLLM is not running: it is never cold-started for a judgement), `vllm_starting`, `no_room` (vLLM is asleep and the GPU rules do not let it wake now), `wake_failed`, `vllm_failed` (the service gave up starting vLLM), `service_busy` (the supervisor is starting, stopping or putting vLLM to sleep), `shutting_down`; and, cut while the model worked, `gate_closed ... (the request was cut)`, `vllm_sleeping`, `vllm_stopping`. **`error`**: `timeout` (no answer within `timeout_s`; the request is cut), `model_error` (the server failed or refused), `invalid_answer` (the answer is not one of the spec's values), `internal_error`, and `invalid_request` for a refused request.
 
@@ -420,18 +493,23 @@ An offset is seconds from the episode's last frame. `max_side` is advice: send t
 - the answer above, plus `"source": "online"`, `requested_at` and `received_at` (epoch seconds; an ISO time is read too), `frames: [{role, offset_s, step}]` and `timing`: `during_run` or `after_budget`;
 - or, without an answer, `{"source": "online", "status": "unavailable" | "error" | "timeout" | "skipped", "reason": "..."}`.
 
-The mirror (`criteria.agent_label`) turns a well-formed `ok` into the episode's automatic verdict in the dataset state: `verdict = {outcome, events: 1, valid_events: 1 or 0, undecided, rule: "final_state", min_valid: 1, basis: {final_reading}, spec, spec_version, review: "auto", evaluated: false, at: received_at, source: "online"}`, the shape of the worker's verdicts, so the page, `stats.agreement` and the reports read it unchanged. Any other status, or an `ok` whose fields do not hold together (an outcome other than success or failure, an undecided success), gives no verdict: the episode counts as `no_agent`. The whole relayed label is kept under `online` (`status`, `reason`, `timing`, `request_id`, `usage`, `verdict`). The statistics record of such an episode carries `result.verdict.source: "online"`, the judgement's cost as one `review` request, and `result.online` (`status`, `reason`, `timing`); `timeline.to_verdict_s` can be negative, since the answer usually arrives before the client marks the rollout finished. The API's episode rows carry `verdict.source`.
+The mirror (`criteria.agent_label`) turns a well-formed `ok` into the episode's automatic verdict in the dataset state: `verdict = {outcome, events: 1, valid_events: 1 or 0, undecided, rule: "final_state", min_valid: 1, basis: {final_reading, start_check}, spec, spec_version, review: "auto", evaluated: false, at: received_at, source: "online", task_rewritten}` (`basis.start_check` and `task_rewritten` only when the result has them; `final_reading` is the result's `final_reading`, else its `reading`; a start-based `final_reading` that is not a failure with `undecided: true` is malformed), the shape of the worker's verdicts, so the page, `stats.agreement` and the reports read it unchanged. Any other status, or an `ok` whose fields do not hold together (an outcome other than success or failure, an undecided success), gives no verdict: the episode counts as `no_agent`. The whole relayed label is kept under `online` (`status`, `reason`, `timing`, `request_id`, `usage`, `verdict`). The statistics record of such an episode carries `result.verdict.source: "online"`, the judgement's cost as one `review` request, and `result.online` (`status`, `reason`, `timing`); `timeline.to_verdict_s` can be negative, since the answer usually arrives before the client marks the rollout finished. The API's episode rows carry `verdict.source`.
 
-**The log.** Every `POST /v1/judge` adds one line to `<workspace>/live/online.jsonl` (schema `levi.live.online.v1`, rotated like the other logs): `at`, `time`, `request_id`, `http`, `episode` (the identifiers the request gave), `status`, `reason`, `outcome`, `undecided`, `reading`, `tokens`, `prompt_tokens`, `elapsed_s`, `images`, `spec`, `model`. No image and no task text. The images live in `<workspace>/live/online-tmp/<request_id>/` only while the model reads them.
+**The log.** Every `POST /v1/judge` adds one line to `<workspace>/live/online.jsonl` (schema `levi.live.online.v1`, rotated like the other logs): `at`, `time`, `request_id`, `http`, `episode` (the identifiers the request gave), `status`, `reason`, `outcome`, `undecided`, `reading`, `final_reading`, `start_check`, `task_rewritten`, `tokens`, `prompt_tokens`, `elapsed_s`, `images` (final and start frames), `spec`, `model`. No image and no task text. The images live in `<workspace>/live/online-tmp/<request_id>/` only while the model reads them.
 
 ### Independence
 
-The model sees the images and the spec's question with the task instruction, nothing else: the request cannot carry an operator label or any other evaluation data (refused with 422), `episode` goes only to the log, and the test suite checks that the request sent to the model server holds no episode identifier. The client shows the model's result only after the operator has given the label, so the operator label stays the ground truth; that order is the client's to keep, the service does not see it. `live/online.jsonl` records the outcome as soon as the model answers, which is usually before the operator's key press: the operator must not look at it before labelling (no page or command of LEVI reads it). Nothing is written back to the rollout by the service.
+The model sees the images and the spec's question with the task instruction, nothing else: the request cannot carry an operator label or any other evaluation data (refused with 422), `episode` goes only to the log and, for `task_folder`, to a lookup in `[judge.task_text]` on the server (the model sees the wording that entry gives, never the folder name), and the test suite checks that the requests sent to the model server (the start check's included) hold no episode identifier. The client shows the model's result only after the operator has given the label, so the operator label stays the ground truth; that order is the client's to keep, the service does not see it. `live/online.jsonl` records the outcome as soon as the model answers, which is usually before the operator's key press: the operator must not look at it before labelling (no page or command of LEVI reads it). Nothing is written back to the rollout by the service.
+
+### What the client does for revision 2
+
+The policy repository's client (not changed by this) reads `start_views` from the spec answer; when present, it takes the **first** recorded frame of the episode from each camera (`start_side` the side camera, `start_wrist` the wrist camera, offset `0.0`; the same JPEG encoding and `max_side` as the other images), keeps them for the whole episode (the buffer of the last seconds does not hold them), and adds both to `images`. It keeps sending the policy's own instruction as `task`. With no `start_views`, it sends what it sent before. It may show `start_check: voided` as "not a valid trial" in its terminal line; the result's `undecided: true` already makes its existing line say "unsure". An old client needs no change: it is judged without the start check.
 
 ### Risks and limits
 
 - **GPU memory and the gate.** Beside a resident policy server at `.22` there are only about 1.3-1.5 GB to spare (see GPU management). A wake and a request in the gap between episodes follow the same rules as the background labelling, but a wake's memory peak beside a resident policy server, and the effect on the policy's inference latency of a request that starts right after an episode, have **not** been measured with the real model and GPU. A request in flight is cut when the gate closes.
 - **Accuracy is not evaluated.** The final-state spec has no measured accuracy on any data; read every online verdict as automatic and unreviewed, and compare it with the operator label (`stats.agreement`, by `ended_by`) before trusting it.
+- **Start check cost and accuracy.** With start frames the model is asked twice (a short question on two images, then the final one), so the answer takes longer than one request; the accuracy of the start check is not measured (see [Version 2](#version-2-wording-and-a-start-check-candidate)).
 - **Time.** The wake (about 0.75 s) and one request (a 27B model on 10 images: seconds, not measured here) must fit before the next episode starts; a `reset_wait_s` that is too short ends in `gate_closed ... (the request was cut)`.
 - The endpoint has no authentication beyond the loopback address, the `Host` check and the refusal of browser requests: any process on this machine can ask it to judge (it cannot do anything else).
 - A port already in use keeps the endpoint from starting: the event log and `last_error` say so, `online_judge.ready` stays false, and the client gets a refused connection.
@@ -562,6 +640,7 @@ A person can take an episode out of a live dataset from the live page (a mishap,
 | `result.review` | `auto` or `human` (who committed the segments) |
 | `result.spec` | `{guideline, release_review, release_review_version, sha256}`: the files used and their hashes; the review's spec version is null when the verdict did not record it |
 | `result.provider`, `result.model` | the provider profile name and the served model |
+| `result.task_rewritten` | `null` when the judgements quoted the instruction as the rollout recorded it, else `task_text` or `task_folder`: which `[judge.task_text]` key matched ([Judge-side task text](#judge-side-task-text)); for an episode taken in with the background labelling off, the online result's own `task_rewritten` |
 | `operator_label` | `{outcome, by}` (plus `ended_by`, `budget` or `operator_key`, when the metadata says how the episode ended): the operator label (ground truth) from the rollout's metadata (`success`, `failure`, `discarded` or `unlabeled`; `by` `operator`, `key`, `timeout-adjudicated`...), or `null` (no label, or an older record). Never part of `result.verdict`; see [Dual labels](#dual-labels-operator-and-agent) |
 
 The file is a record of this service's work, never read by LEVI itself, and it is not training data.
