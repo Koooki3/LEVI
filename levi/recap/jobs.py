@@ -1032,6 +1032,7 @@ def current(ds: Dataset) -> dict[str, Any] | None:
         "positive_quantile": record["positive_quantile"],
         "lookahead": record["lookahead"],
         "positive_fraction": record["positive_fraction"],
+        "dataset_type": record.get("dataset_type", "rollout"),
         "stale": bool(reasons),
         # Frames labelled / frames in the labelled episodes when the
         # training static filter was applied (else null).
@@ -1068,11 +1069,26 @@ def status(repo_id: str, *, reconcile: bool = True) -> dict[str, Any]:
     }
 
 
-def episode_payload(repo_id: str, episode: int) -> dict[str, Any]:
-    ds = dataset(repo_id)
-    record = store.revision(ds.name)
+def _published(name: str, revision_id: str | None) -> dict[str, Any]:
+    """The revision a read asks for: ``revision_id``, else the current one."""
+    if revision_id is not None and not naming.is_timestamp_id(revision_id):
+        raise RecapError(400, f"{revision_id!r} is not a revision id")
+    record = store.revision(name, revision_id)
     if not record:
-        raise RecapError(404, "No advantage labels for this dataset yet")
+        raise RecapError(
+            404,
+            "No advantage labels for this dataset yet"
+            if revision_id is None
+            else f"No revision {revision_id} for this dataset",
+        )
+    return record
+
+
+def episode_payload(
+    repo_id: str, episode: int, revision_id: str | None = None
+) -> dict[str, Any]:
+    ds = dataset(repo_id)
+    record = _published(ds.name, revision_id)
     table = store.read_episode(ds.name, episode, record["revision_id"])
     if table is None:
         raise RecapError(404, f"No advantage labels for episode {episode}")
@@ -1094,9 +1110,10 @@ def episode_payload(repo_id: str, episode: int) -> dict[str, Any]:
     }
 
 
-def summary_payload(repo_id: str) -> dict[str, Any]:
+def summary_payload(repo_id: str, revision_id: str | None = None) -> dict[str, Any]:
     ds = dataset(repo_id)
-    value = store.summary(ds.name)
+    record = _published(ds.name, revision_id)
+    value = store.summary(ds.name, record["revision_id"])
     if not value:
         raise RecapError(404, "No advantage labels for this dataset yet")
     return value

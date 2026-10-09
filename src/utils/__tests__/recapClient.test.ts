@@ -9,8 +9,10 @@ import {
 } from "bun:test";
 import {
   cancelRecapJob,
+  fetchRecapCompare,
   fetchRecapEpisode,
   fetchRecapJob,
+  fetchRecapRevisions,
   fetchRecapStatus,
   fetchRecapSummary,
   runRecap,
@@ -67,6 +69,66 @@ afterAll(() => {
 });
 
 describe("RECAP client", () => {
+  test("saved revisions are a read-only uncached request with cancellation", async () => {
+    const payload = { current: "20261009-120000", revisions: [] };
+    respond(200, payload);
+    const controller = new AbortController();
+    expect(await fetchRecapRevisions(ident, controller.signal)).toEqual(
+      payload,
+    );
+    expect(new URL(calls[0].url).pathname).toBe(
+      "/api/annotation/recap/revisions",
+    );
+    expect(calls[0].init?.method).toBeUndefined();
+    expect(calls[0].init?.cache).toBe("no-store");
+    expect(calls[0].init?.signal).toBe(controller.signal);
+  });
+
+  test("comparison carries both explicit revisions and surfaces refused pairings", async () => {
+    respond(200, { dataset: "plates", frames: { shared: 5 } });
+    const controller = new AbortController();
+    await fetchRecapCompare(
+      ident,
+      "20261008-120000",
+      "20261009-120000",
+      controller.signal,
+    );
+    const url = new URL(calls[0].url);
+    expect(url.pathname).toBe("/api/annotation/recap/compare");
+    expect(url.searchParams.get("repo_id")).toBe("local/plates");
+    expect(url.searchParams.get("a")).toBe("20261008-120000");
+    expect(url.searchParams.get("b")).toBe("20261009-120000");
+    expect(calls[0].init?.signal).toBe(controller.signal);
+    expect(calls[0].init?.method).toBeUndefined();
+    respond(409, { detail: "Dataset sources differ between revisions" });
+    await expect(fetchRecapCompare(ident, "a", "b")).rejects.toThrow(
+      "Dataset sources differ between revisions",
+    );
+  });
+
+  test("historical summary and episode keep source revision and result revision separate", async () => {
+    respond(200, null);
+    const source = { ...ident, revision: "source-version" };
+    const controller = new AbortController();
+    await fetchRecapSummary(source, controller.signal, "20261008-120000");
+    await fetchRecapEpisode(5, source, controller.signal, "20261008-120000");
+    for (const call of calls) {
+      const url = new URL(call.url);
+      expect(url.searchParams.get("revision_id")).toBe("20261008-120000");
+      expect(url.searchParams.get("revision")).toBe("source-version");
+      expect(url.searchParams.get("optional")).toBe("true");
+      expect(call.init?.signal).toBe(controller.signal);
+    }
+  });
+
+  test("an SFT computation sends its label rule without adding a manual threshold", async () => {
+    respond(200, job);
+    await runRecap(ident, { checkpoint: "value-r2", dataset_type: "sft" });
+    const body = JSON.parse(String(calls[0].init?.body));
+    expect(body.dataset_type).toBe("sft");
+    expect(body.checkpoint).toBe("value-r2");
+    expect(body.threshold).toBeNull();
+  });
   test("status goes through the annotation proxy with repo_id", async () => {
     respond(200, {
       checkpoints: [],

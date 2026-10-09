@@ -138,6 +138,33 @@ G is the export's return (−1 per step, terminal 0 or `failure_reward`); with �
 
 `outputs/LEVI/workbench/recap_values/<catalog name>/revisions/<id>/` holds one `episode-NNNNNN.parquet` per episode (`episode_index, frame_index, timestamp, value, value_next, reward_sum, return, advantage, positive`), `advantages.parquet` with the columns of RLinf's `meta/advantages_{tag}.parquet` (keyed by this dataset's episode and frame indices — map through `source_demo` when a converted dataset renumbers episodes), `revision.json` (checkpoint name, sha256 and manifest, request, threshold and its source, return range, outcomes, view fingerprint, worker provenance, LEVI commit) and `summary.json`; `current.json` names the revision shown. Results are per catalog name — a namespace keeps its own — and outside agent bundles. A revision becomes **stale** when the capture's fingerprint (or a LeRobot dataset's revision) or an outcome label changes after it was computed.
 
+### Historical versions and comparisons / 历史版本与结果对比
+
+In the episode viewer's **VALUE MODEL** section, choose a published result for A and optionally a second result for B. Each choice identifies its checkpoint, training step, computation time and revision, and shows its exact threshold, return range, calculation parameters and episode/frame coverage. Browsing a result does not change `current.json` or the checkpoint selected for the next computation. Choose **Demonstrations (SFT)** for shared demonstration data; this calculation treats every episode as successful and every advantage label as positive. The computation type is separate from the historical result being viewed.
+
+A and B have separate advantage rows and overlaid Value curves (A solid, B dashed). A missing episode or a frame excluded by static filtering stays blank; the viewer never fills it from another revision. Dataset comparison metrics use only common episode and original frame indices with matching timestamps. They include Value/continuous-advantage means, mean absolute differences, correlation, positive fractions, label agreement and the counts of labels that differ. Coverage counts include episodes and frames present in only one result. A constant curve or fewer than two points has no correlation; no common frames produces no numerical comparison. A failed comparison leaves A readable and suspends B's overlay.
+
+Values are normalized using each result's own return range. Inverse-normalized Value metrics are also supplied when both ranges are valid: `V_return = (V + 1) * (return_max - return_min) + return_min`. The interface marks differences in return range, threshold, lookahead, gamma, failure reward, dataset type, static filter, precision and value-bin support. Normalized differences and label disagreement alone do not establish which model is better. Rollout labels use the stored exact threshold with `advantage_continuous >= threshold`; SFT labels remain all positive even when continuous advantages lie below it.
+
+The read-only API is:
+
+```text
+GET /api/recap/revisions?repo_id=local/<name>
+GET /api/recap/summary?repo_id=local/<name>&revision_id=<id>
+GET /api/recap/episodes/<n>?repo_id=local/<name>&revision_id=<id>
+GET /api/recap/compare?repo_id=local/<name>&a=<id>&b=<id>
+```
+
+Omitting `revision_id` preserves the current-result behavior. Invalid revision identifiers return 400 and unknown revisions return 404. Different saved source fingerprints or dataset metadata revisions, inconsistent timestamps, duplicate frame identities or missing published episode files return 409. Historical results can still be browsed when stale, with a warning. A native LeRobot metadata revision covers metadata file statistics, not parquet or video contents; it cannot establish identical inputs. If either historical result has only this metadata revision or lacks a source fingerprint, comparison reports that provenance could not be verified. Outcome separation uses only matching outcome labels saved with both revisions, so editing a label later does not change historical metrics; these are descriptive metrics over the computed subset.
+
+在片段回放页的 **VALUE MODEL** 区选择历史结果 A，也可再选择 B。每份结果显示检查点、训练步数、计算时间、revision、精确阈值、回报范围、计算参数与已计算的片段和帧数。查看历史结果不改写 `current.json`，也不改变下一次计算选用的检查点。共同示范数据应选择 **示范数据（SFT）**：计算时所有片段视为成功，优势布尔标签全部为 `True`。计算类型与正在查看的历史结果各自独立。
+
+两份结果的优势标签分行显示，Value 曲线叠加显示，A 为实线、B 为虚线。未计算的片段和静止过滤排除的帧留空，不借用其他版本补齐。数据集对比只统计相同片段、相同原始帧编号且时间戳一致的共同帧，给出 Value/连续优势的均值、平均绝对差、相关系数、正标签比例、标签一致率和差异计数，同时列出各版本独有的片段与帧。常数曲线或少于两个点时无相关系数；没有共同帧时无数值对比。对比失败时仍可查看 A，B 暂停叠加。
+
+各版本的 Value 使用各自的回报范围归一化；两份范围均有效时，API 也给出按上述公式恢复到原回报单位的 Value 对比。界面明确提示回报范围、阈值、前瞻步数、折扣因子、失败惩罚、数据类型、静止过滤、精度和价值分箱范围的差异。归一化数值变化或标签不一致不能直接说明哪个模型更好。rollout 按保存的精确阈值执行 `advantage_continuous >= threshold`；SFT 即使连续优势低于阈值，布尔标签也全部为正。
+
+上面的 API 只读；省略 `revision_id` 时仍读取当前结果。非法 revision 返回 400，不存在的结果返回 404。保存的来源指纹或数据集元数据版本不同、时间戳不一致、帧编号重复或已发布的片段文件缺失时返回 409。历史结果失效后仍可查看，但会显示提示。原生 LeRobot 的元数据版本只覆盖元数据文件统计，不覆盖 parquet 或视频内容，不能证明输入完全相同；任一历史结果只有元数据版本或缺少来源指纹时，会说明来源无法核实。成功/失败区分统计只使用两份结果保存且一致的结局标签，之后修改标签不会改变历史统计。这些指标只描述实际计算的子集。
+
 ### When a real checkpoint arrives
 
 Import it, then confirm against the training run (its Hydra config and `meta/mixture_config.yaml`): `critic_expert_variant` (compare with the inferred one), the camera mapping `views` (the value dataset's repack keys), `max_token_len`, `return_min` / `return_max` (`data.return_min/max` or the datasets' stats), `unified_threshold` and `positive_quantile` for the tag, `gamma` / `failure_reward` / `lookahead`, the base models (SigLIP2 so400m-patch14-224, Gemma3-270M and its tokenizer — gated on the Hub; import them with `levi recap base import`) and whether the training data was static-filtered. For the FR3 RECAP run, `--preset fr3_recap` covers all of this except the return range and the threshold. The worker then loads the weights strictly and refuses on any missing or unexpected key (an absent `lm_head.weight`, unused by the value, is only reported).

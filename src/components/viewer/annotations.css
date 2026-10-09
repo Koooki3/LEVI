@@ -1690,7 +1690,9 @@
    strength; no text, so no padding. */
 .annotations-skin .tl-seg.adv {
   padding: 0;
+  border: 0;
   border-radius: 1px;
+  cursor: pointer;
 }
 .annotations-skin .tl-seg.adv.pos {
   background: var(--dv-positive);
@@ -1727,6 +1729,156 @@
   stroke: var(--dv-4);
   stroke-width: 1.5;
   stroke-linejoin: round;
+}
+.annotations-skin .recap-line.comparison {
+  stroke: var(--dv-7);
+  stroke-dasharray: 6 4;
+}
+.annotations-skin .recap-dot.side-b {
+  background: var(--dv-7);
+  border-radius: 1px;
+}
+.annotations-skin .recap-version-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+  padding: 8px 11px;
+}
+.annotations-skin .recap-version-controls .ds-field {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+.annotations-skin .recap-version-controls .ds-select {
+  display: block;
+  width: 100%;
+}
+.annotations-skin .recap-version-controls select {
+  text-overflow: ellipsis;
+}
+.annotations-skin .recap-version-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 8px;
+  margin: 4px 11px 8px;
+}
+.annotations-skin .recap-version-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 8px;
+  border: 1px solid var(--ds-separator);
+  border-left: 3px solid var(--dv-4);
+  border-radius: var(--ds-radius-sm);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+  overflow-wrap: anywhere;
+}
+.annotations-skin .recap-version-facts strong,
+.annotations-skin .recap-version-facts code {
+  width: 100%;
+  color: var(--ds-text-primary);
+}
+.annotations-skin .recap-version-facts.side-b {
+  border-left-color: var(--dv-7);
+  border-left-style: dashed;
+}
+.annotations-skin .recap-comparison {
+  margin: 8px 11px;
+  padding: 8px;
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-sm);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.annotations-skin .recap-comparison summary {
+  color: var(--ds-text-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+.annotations-skin .recap-comparison summary:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 3px;
+}
+.annotations-skin .recap-comparison p {
+  margin: 8px 0;
+}
+.annotations-skin .recap-warnings {
+  padding-left: 20px;
+  color: var(--ds-warning);
+}
+.annotations-skin .recap-warnings li {
+  margin: 4px 0;
+}
+.annotations-skin .recap-table-scroll {
+  overflow-x: auto;
+}
+.annotations-skin .recap-table-scroll:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
+.annotations-skin .recap-comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.annotations-skin .recap-comparison-table caption {
+  text-align: left;
+  margin: 6px 0;
+  font-weight: 600;
+}
+.annotations-skin .recap-comparison-table th,
+.annotations-skin .recap-comparison-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--ds-separator);
+  text-align: right;
+  white-space: nowrap;
+}
+.annotations-skin .recap-comparison-table th:first-child {
+  text-align: left;
+}
+.annotations-skin .recap-comparison-labels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 8px 16px;
+  margin: 10px 0;
+}
+.annotations-skin .recap-comparison-labels dd {
+  margin: 3px 0 0;
+  font-family: var(--ds-font-mono);
+  color: var(--ds-text-primary);
+}
+.annotations-skin .recap-track-state {
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+}
+.annotations-skin .recap-frame-readouts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 4px 11px 8px;
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+}
+.annotations-skin .recap-frame-readout {
+  border-left: 3px solid var(--dv-4);
+  padding-left: 5px;
+  font-family: var(--ds-font-mono);
+}
+.annotations-skin .recap-frame-readout.side-b {
+  border-left-color: var(--dv-7);
+  border-left-style: dashed;
+}
+.annotations-skin .recap-compute {
+  flex-wrap: wrap;
+}
+.annotations-skin .recap-compute-rule {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
 }
 .annotations-skin .recap-axis {
   position: absolute;

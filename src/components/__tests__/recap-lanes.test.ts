@@ -4,19 +4,160 @@ import {
   advantageRuns,
   formatSigned,
   framePeriod,
+  labelledFrameAtTime,
   nearestFrame,
   positiveFraction,
   recapApplies,
+  recapComparisonNoteKey,
+  recapComparisonWarnings,
+  recapSelection,
   recapView,
   thresholdSourceKey,
   valuePath,
+  valuePaths,
   valueToY,
   type RecapViewInput,
 } from "@/components/recap-lanes";
+import type { RecapRevision } from "@/types/recap.types";
 
 const ts = (n: number, fps = 10) =>
   Array.from({ length: n }, (_, i) => i / fps);
 const idx = (n: number) => Array.from({ length: n }, (_, i) => i);
+
+const revision = (
+  id: string,
+  extra: Partial<RecapRevision> = {},
+): RecapRevision => ({
+  revision_id: id,
+  checkpoint: "value-" + id,
+  step: 3000,
+  provider: "rlinf",
+  created_at: 1790000000,
+  episodes: 1,
+  frames: 10,
+  threshold: 0.005278945887678077,
+  threshold_source: "checkpoint",
+  positive_quantile: 0.3,
+  lookahead: 10,
+  positive_fraction: 0.3,
+  stale: false,
+  return_min: -799,
+  return_max: 0,
+  current: false,
+  dataset_type: "rollout",
+  gamma: 1,
+  ...extra,
+});
+
+describe("saved result selection", () => {
+  test("opens current and keeps a selected history when a new current run arrives", () => {
+    const results = {
+      current: "r2",
+      revisions: [revision("r2"), revision("r1")],
+    };
+    expect(recapSelection(results, { primary: "", comparison: "" })).toEqual({
+      primary: "r2",
+      comparison: "",
+    });
+    expect(
+      recapSelection(results, { primary: "r1", comparison: "r2" }),
+    ).toEqual({ primary: "r1", comparison: "r2" });
+  });
+  test("empty results, vanished selections and identical sides do not invent versions", () => {
+    expect(
+      recapSelection(
+        { current: null, revisions: [] },
+        { primary: "r1", comparison: "r2" },
+      ),
+    ).toEqual({ primary: "", comparison: "" });
+    const results = { current: "missing", revisions: [revision("new")] };
+    expect(
+      recapSelection(results, { primary: "r1", comparison: "new" }),
+    ).toEqual({ primary: "new", comparison: "" });
+  });
+});
+
+describe("comparison geometry and boundaries", () => {
+  test("polylines and playhead readings never bridge static-filter gaps", () => {
+    expect(
+      valuePaths(
+        [-1, -0.8, -0.4, 0],
+        [0, 0.1, 0.5, 0.6],
+        [0, 1, 5, 6],
+        1,
+        100,
+        100,
+      ),
+    ).toEqual(["0,100 10,80", "50,40 60,0"]);
+    expect(labelledFrameAtTime([0, 0.1, 0.5, 0.6], 10, 0.3)).toBe(-1);
+    expect(labelledFrameAtTime([0, 0.1, 0.5, 0.6], 10, 0.12)).toBe(1);
+  });
+  test("frame-start intervals match advantage labels without borrowing a future retained frame", () => {
+    const frames = [0, 1, 5, 6];
+    const timestamps = [0, 0.1, 0.5, 0.6];
+    const runs = advantageRuns(
+      frames,
+      [true, true, true, true],
+      [1, 1, 1, 1],
+      timestamps,
+      10,
+    );
+    for (const [time, expectedFrame] of [
+      [-0.01, null],
+      [0, 0],
+      [0.1, 1],
+      [0.17, 1],
+      [0.2, null],
+      [0.46, null],
+      [0.5, 5],
+      [0.69, 6],
+      [0.7, null],
+    ] as const) {
+      const index = labelledFrameAtTime(timestamps, 10, time);
+      expect(index < 0 ? null : frames[index]).toBe(expectedFrame);
+      expect(runs.some((run) => time >= run.start && time < run.end)).toBe(
+        expectedFrame != null,
+      );
+    }
+  });
+  test("decimal frame ends remain excluded and unsorted payloads return the saved index", () => {
+    expect(labelledFrameAtTime([0, 0.1, 0.2, 0.5], 10, 0.3)).toBe(-1);
+    expect(labelledFrameAtTime([0, 0.1, 0.2, 0.5], 10, 0.299999)).toBe(2);
+    expect(labelledFrameAtTime([0.5, Number.NaN, 0.1, 0.6], 10, 0.17)).toBe(2);
+    expect(labelledFrameAtTime([0.5, Number.NaN, 0.1, 0.6], 10, 0.46)).toBe(-1);
+    expect(labelledFrameAtTime([0, 0.25, 0.5], 0, 0.37)).toBe(1);
+    expect(labelledFrameAtTime([0, 0.25, 0.5], 0, 0.75)).toBe(-1);
+    expect(labelledFrameAtTime([0], 10, Number.NaN)).toBe(-1);
+  });
+  test("a non-finite sample breaks the plot and sorted timestamps preserve frame identity", () => {
+    expect(
+      valuePaths([-0.2, -1, Number.NaN], [0.2, 0, 0.1], [2, 0, 1], 1, 100, 100),
+    ).toEqual(["0,100", "20,20"]);
+    expect(valuePaths([0], [0], [0], 0, 100, 100)).toEqual([]);
+    expect(labelledFrameAtTime([], 10, 0)).toBe(-1);
+  });
+  test("comparison warns on scale and threshold differences, including missing ranges", () => {
+    const a = revision("r1", { return_min: -1000, threshold: 0.00749 });
+    const b = revision("r2");
+    const warnings = recapComparisonWarnings(a, b);
+    expect(warnings).toContain(
+      "Return ranges differ: normalized Value and advantage are not on the same original-return scale.",
+    );
+    expect(warnings).toContain(
+      "Thresholds differ; label flips can reflect the threshold as well as the model.",
+    );
+    expect(recapComparisonWarnings(b, { ...b, return_min: null })).toContain(
+      "Return normalization is unknown for a version; Value and advantage magnitudes may not be comparable.",
+    );
+    expect(recapComparisonWarnings(b, b)).toEqual([]);
+    expect(recapComparisonNoteKey("fingerprint_unavailable")).toContain(
+      "source fingerprint",
+    );
+    expect(recapComparisonNoteKey("future-note")).toContain(
+      "additional computation differences",
+    );
+  });
+});
 
 describe("advantageRuns", () => {
   test("returns nothing for an empty episode", () => {

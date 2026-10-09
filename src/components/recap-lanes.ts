@@ -12,6 +12,8 @@
  * payload degrades to fewer marks rather than a broken timeline.
  */
 
+import type { RecapRevision, RecapRevisions } from "@/types/recap.types";
+
 export interface AdvantageRun {
   /** Seconds: timestamp of the run's first frame. */
   start: number;
@@ -198,6 +200,40 @@ export function valuePath(
   return points.join(" ");
 }
 
+/** Separate polylines at missing frames: a static-filter gap stays visible. */
+export function valuePaths(
+  values: readonly number[],
+  timestamps: readonly number[],
+  frames: readonly number[],
+  duration: number,
+  width: number,
+  height: number,
+): string[] {
+  if (!(duration > 0) || !(width > 0) || !(height > 0)) return [];
+  const paths: string[] = [];
+  let points: string[] = [];
+  let previous: number | null = null;
+  const close = () => {
+    if (points.length) paths.push(points.join(" "));
+    points = [];
+    previous = null;
+  };
+  for (const i of frameOrder(timestamps, values.length)) {
+    const v = values[i];
+    const frame = finite(frames[i]) ? frames[i] : i;
+    if (!finite(v)) {
+      close();
+      continue;
+    }
+    if (previous != null && frame !== previous + 1) close();
+    const x = Math.max(0, Math.min(width, (timestamps[i] / duration) * width));
+    points.push(`${round(x)},${round(valueToY(v, height))}`);
+    previous = frame;
+  }
+  close();
+  return paths;
+}
+
 /**
  * Index of the frame whose timestamp is closest to `t` (ties go to the
  * earlier frame); -1 when there are no finite timestamps. Binary search on
@@ -235,6 +271,94 @@ export function nearestFrame(timestamps: readonly number[], t: number): number {
     }
   }
   return best;
+}
+
+/** Timestamp is a frame's start, so its value applies on [start, start +
+ * period). Return the saved array index, never a future frame or a dropped
+ * frame's nearest neighbour. */
+export function labelledFrameAtTime(
+  timestamps: readonly number[],
+  fps: number,
+  time: number,
+): number {
+  if (!finite(time)) return -1;
+  const period = framePeriod(fps, timestamps);
+  if (!(period > 0)) return -1;
+  let sorted = true;
+  for (let i = 0; i < timestamps.length; i++) {
+    if (
+      !finite(timestamps[i]) ||
+      (i > 0 && timestamps[i] < timestamps[i - 1])
+    ) {
+      sorted = false;
+      break;
+    }
+  }
+  let index = -1;
+  if (sorted) {
+    // Upper bound: the last saved frame whose start is at or before time.
+    let lo = 0;
+    let hi = timestamps.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (timestamps[mid] <= time) lo = mid + 1;
+      else hi = mid;
+    }
+    index = lo - 1;
+  } else {
+    for (let i = 0; i < timestamps.length; i++) {
+      const start = timestamps[i];
+      if (
+        finite(start) &&
+        start <= time &&
+        (index < 0 || start > timestamps[index])
+      )
+        index = i;
+    }
+  }
+  if (index < 0) return -1;
+  const start = timestamps[index];
+  const end = start + period;
+  // Decimal sums such as 0.2 + 0.1 exceed the exact boundary by one ULP.
+  const epsilon =
+    Number.EPSILON * Math.max(1, Math.abs(start), Math.abs(end)) * 4;
+  return time < end - epsilon ? index : -1;
+}
+
+/** Stable backend warning codes to bilingual catalog keys. Unknown codes
+ * still produce a visible, generic boundary instead of raw English. */
+export function recapComparisonNoteKey(note: string): string {
+  const keys: Record<string, string> = {
+    return_range_differs:
+      "Return ranges differ: normalized Value and advantage are not on the same original-return scale.",
+    threshold_differs:
+      "Thresholds differ; label flips can reflect the threshold as well as the model.",
+    lookahead_differs:
+      "Lookahead differs; continuous advantages use different future horizons.",
+    gamma_differs:
+      "Discount factors differ; continuous advantages use different reward weighting.",
+    failure_reward_differs:
+      "Failure rewards differ; continuous advantages include different reward penalties.",
+    dataset_type_differs:
+      "Dataset label rules differ; SFT labels may be forced positive.",
+    static_filter_differs:
+      "Static-filter coverage differs; metrics use only the frames labelled by both versions.",
+    value_support_differs:
+      "Value supports differ; predictions were discretized differently.",
+    precision_differs: "Inference precision differs between these results.",
+    outcomes_differ:
+      "Outcome labels changed between runs; advantage differences can reflect those labels.",
+    stale_results:
+      "A selected result is stale; its data or outcome labels have changed since computation.",
+    fingerprint_unavailable:
+      "A saved result has no source fingerprint; identical frame IDs cannot confirm identical source data.",
+    coverage_differs:
+      "Frame coverage differs; metrics exclude frames absent from either version.",
+  };
+  return (
+    keys[note] ??
+    "These results have additional computation differences; interpret comparisons with care."
+  );
 }
 
 /** Fixed-precision signed number for readouts, "—" for null/non-finite. */
@@ -319,4 +443,80 @@ export function thresholdSourceKey(source: string | null | undefined): string {
  * labels; the section stays hidden for Hub datasets. */
 export function recapApplies(repoId: string | null | undefined): boolean {
   return !!repoId && repoId.startsWith("local/");
+}
+
+export interface RecapSelection {
+  primary: string;
+  comparison: string;
+}
+
+/** Preserve a person's historical selection when a new run is published;
+ * default only when that selection is absent from this dataset. */
+export function recapSelection(
+  results: RecapRevisions,
+  previous: RecapSelection,
+): RecapSelection {
+  const ids = new Set(results.revisions.map((row) => row.revision_id));
+  const primary = ids.has(previous.primary)
+    ? previous.primary
+    : results.current && ids.has(results.current)
+      ? results.current
+      : (results.revisions[0]?.revision_id ?? "");
+  return {
+    primary,
+    comparison:
+      ids.has(previous.comparison) && previous.comparison !== primary
+        ? previous.comparison
+        : "",
+  };
+}
+
+/** Catalog keys explain boundaries on numerical and label comparisons. */
+export function recapComparisonWarnings(
+  a: RecapRevision,
+  b: RecapRevision,
+): string[] {
+  const warnings: string[] = [];
+  if (
+    !finite(a.return_min) ||
+    !finite(a.return_max) ||
+    !finite(b.return_min) ||
+    !finite(b.return_max)
+  ) {
+    warnings.push(
+      "Return normalization is unknown for a version; Value and advantage magnitudes may not be comparable.",
+    );
+  } else if (a.return_min !== b.return_min || a.return_max !== b.return_max) {
+    warnings.push(
+      "Return ranges differ: normalized Value and advantage are not on the same original-return scale.",
+    );
+  }
+  if (a.threshold !== b.threshold)
+    warnings.push(
+      "Thresholds differ; label flips can reflect the threshold as well as the model.",
+    );
+  if (a.lookahead !== b.lookahead)
+    warnings.push(
+      "Lookahead differs; continuous advantages use different future horizons.",
+    );
+  if (a.gamma !== b.gamma)
+    warnings.push(
+      "Discount factors differ; continuous advantages use different reward weighting.",
+    );
+  if (a.dataset_type !== b.dataset_type)
+    warnings.push(
+      "Dataset label rules differ; SFT labels may be forced positive.",
+    );
+  if (
+    JSON.stringify(a.static_filter ?? null) !==
+    JSON.stringify(b.static_filter ?? null)
+  )
+    warnings.push(
+      "Static-filter coverage differs; metrics use only the frames labelled by both versions.",
+    );
+  if (a.stale || b.stale)
+    warnings.push(
+      "A selected result is stale; its data or outcome labels have changed since computation.",
+    );
+  return warnings;
 }

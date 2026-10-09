@@ -20,8 +20,10 @@ import type {
   Sam3Revision,
 } from "../types/object-annotation.types";
 import type {
+  RecapComparison,
   RecapEpisode,
   RecapJob,
+  RecapRevisions,
   RecapRunRequest,
   RecapStatus,
   RecapSummary,
@@ -766,6 +768,38 @@ export async function fetchRecapStatus(
   return response.json() as Promise<RecapStatus>;
 }
 
+/** Saved results: a read-only list, including historical checkpoints. */
+export async function fetchRecapRevisions(
+  ident: DatasetIdent,
+  signal?: AbortSignal,
+): Promise<RecapRevisions> {
+  const response = await annotationFetch(
+    buildUrl("/api/recap/revisions", ident),
+    {
+      cache: "no-store",
+      signal,
+    },
+  );
+  if (!response.ok)
+    throw new Error(await responseErrorMessage(response, "RECAP revisions"));
+  return response.json() as Promise<RecapRevisions>;
+}
+
+export async function fetchRecapCompare(
+  ident: DatasetIdent,
+  revisionA: string,
+  revisionB: string,
+  signal?: AbortSignal,
+): Promise<RecapComparison> {
+  const url = new URL(buildUrl("/api/recap/compare", ident));
+  url.searchParams.set("a", revisionA);
+  url.searchParams.set("b", revisionB);
+  const response = await annotationFetch(url, { cache: "no-store", signal });
+  if (!response.ok)
+    throw new Error(await responseErrorMessage(response, "RECAP comparison"));
+  return response.json() as Promise<RecapComparison>;
+}
+
 export async function runRecap(
   ident: DatasetIdent,
   request: RecapRunRequest,
@@ -777,6 +811,7 @@ export async function runRecap(
     body: JSON.stringify({
       repo_id: ident.repoId || null,
       checkpoint: request.checkpoint,
+      ...(request.dataset_type ? { dataset_type: request.dataset_type } : {}),
       episodes: request.episodes ?? null,
       lookahead: request.lookahead ?? 10,
       positive_quantile: request.positive_quantile ?? 0.3,
@@ -820,9 +855,14 @@ export async function cancelRecapJob(
 /** `optional=true`: the backend answers "no labels yet" with 200 `null`
  * instead of a 404, which the browser would log as an error on every
  * episode of every dataset. A 404 (an older backend) still means `null`. */
-function optionalUrl(path: string, ident: DatasetIdent): string {
+function optionalUrl(
+  path: string,
+  ident: DatasetIdent,
+  revisionId?: string,
+): string {
   const url = new URL(buildUrl(path, ident));
   url.searchParams.set("optional", "true");
+  if (revisionId) url.searchParams.set("revision_id", revisionId);
   return url.toString();
 }
 
@@ -831,10 +871,11 @@ function optionalUrl(path: string, ident: DatasetIdent): string {
 export async function fetchRecapSummary(
   ident: DatasetIdent,
   signal?: AbortSignal,
+  revisionId?: string,
 ): Promise<RecapSummary | null> {
   if (!ENV_URL) return null;
   const response = await annotationFetch(
-    optionalUrl("/api/recap/summary", ident),
+    optionalUrl("/api/recap/summary", ident, revisionId),
     { cache: "no-store", signal },
   );
   if (response.status === 404) return null;
@@ -849,10 +890,11 @@ export async function fetchRecapEpisode(
   episodeId: number,
   ident: DatasetIdent,
   signal?: AbortSignal,
+  revisionId?: string,
 ): Promise<RecapEpisode | null> {
   if (!ENV_URL) return null;
   const response = await annotationFetch(
-    optionalUrl(`/api/recap/episodes/${episodeId}`, ident),
+    optionalUrl(`/api/recap/episodes/${episodeId}`, ident, revisionId),
     { cache: "no-store", signal },
   );
   if (response.status === 404) return null;
