@@ -627,9 +627,10 @@ def _online_problems(config) -> list:
 def online_spec_problems(name) -> list:
     """Why ``name`` cannot be the online judgement's spec: it must be a file
     of levi/live/specs whose rule is ``final_state``, ask its one question
-    only (no start check, no vetoes), give its offsets in seconds and quote
-    the task instruction. Standard library only (the full check of the spec
-    runs when the endpoint starts)."""
+    (and, optionally, a start check that voids the episode: ``start.void_when``;
+    no vetoes), give its offsets in seconds and quote the task instruction.
+    Standard library only (the full check of the spec runs when the endpoint
+    starts)."""
     import json
 
     from levi.live import generic
@@ -647,20 +648,35 @@ def online_spec_problems(name) -> list:
                 "final_state); use generic-final.v1.json"
             )
         ]
-    if spec.get("start") or spec.get("vetoes"):
+    start = spec.get("start")
+    if spec.get("vetoes") or (start and not (start or {}).get("void_when")):
         return [
             (
-                f"online.spec {name!r} has a start check or vetoes: the online "
-                "judgement asks the spec's one question only"
+                f"online.spec {name!r} has vetoes or a start check that does not "
+                "void the episode (start.void_when): the online judgement asks "
+                "the spec's question, and a start check of that kind, only"
             )
         ]
+
+    def seconds(views):
+        return (
+            isinstance(views, list)
+            and bool(views)
+            and all(isinstance(v, dict) and v.get("offsets_seconds") for v in views)
+        )
+
     views = spec.get("views")
-    if (
-        not isinstance(views, list)
-        or not views
-        or any(not isinstance(v, dict) or not v.get("offsets_seconds") for v in views)
-    ):
+    if not seconds(views) or (start and not seconds(start.get("views"))):
         return [f"online.spec {name!r} must give every view's offsets in seconds"]
+    if start and {v.get("role") for v in views} & {
+        v.get("role") for v in start["views"]
+    }:
+        return [
+            (
+                f"online.spec {name!r}: a start view must not share a role with a "
+                "view of the final frames (the client names each image by role)"
+            )
+        ]
     if "{task}" not in str(spec.get("question") or ""):
         return [f"online.spec {name!r}: the question has no {{task}} placeholder"]
     return []

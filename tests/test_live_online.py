@@ -279,8 +279,11 @@ def test_the_spec_route_says_which_frames_to_send_from_the_spec_file(endpoint):
     code, body = call(endpoint, "GET", "/v1/judge/spec")
     raw = json.loads(generic.text(SPEC))
     assert code == 200
+    # Revision 2 adds `revision` (and `start_views`, only for a spec with a
+    # start check); the schema string and every other key are revision 1's.
     assert body == {
         "schema": "levi.online.judge.spec.v1",
+        "revision": 2,
         "spec_id": raw["id"],
         "spec_version": raw["version"],
         "views": [
@@ -310,13 +313,19 @@ def test_a_judgement_over_http_answers_the_result_contract(endpoint):
         "prompt_tokens",
         "elapsed_s",
         "request_id",
+        # revision 2, additive
+        "final_reading",
+        "start_check",
+        "start_answer",
         "task_rewritten",
     }
     assert body["schema"] == "levi.online.judge.result.v1"
     assert body["status"] == "ok" and body["reason"] is None
     assert body["outcome"] == "success" and body["undecided"] is False
     assert body["reading"] == "supported"
-    assert body["task_rewritten"] is None  # no [judge.task_text] entry
+    # generic-final.v1 has no start check and no rewrite entry.
+    assert body["final_reading"] == "supported" and body["start_check"] is None
+    assert body["start_answer"] == {} and body["task_rewritten"] is None
     assert body["answer"] == {"object_state": "resting_at_destination", "stable": "yes"}
     assert body["spec"] == {"id": "generic-final", "version": 1}
     assert body["model"] == "qwen3.8-27b"

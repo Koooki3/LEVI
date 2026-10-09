@@ -14,6 +14,11 @@ writes the result into the rollout's ``metadata.json`` as
   is the spec's, with the task instruction quoted the way the background
   review quotes it (``generic.anchored_spec``), in the lab's wording when
   ``[judge.task_text]`` has an entry for it (``generic.judge_task``).
+- **Start frames are optional** (revision 2, a spec with a start check such
+  as ``generic-final.v2``): ``GET /v1/judge/spec`` lists them under
+  ``start_views`` (never under ``views``, which a client of revision 1 reads
+  strictly), and a request that sends none is judged by the final frames
+  alone, ``start_check`` ``skipped``.
 - **Strict request.** A key the contract does not define (``operator``,
   ``outcome``, ``label``... or anything else) is refused with 422, so no
   operator or evaluation data can reach the model; ``episode`` is kept for
@@ -59,6 +64,11 @@ REQUEST_SCHEMA = "levi.online.judge.request.v1"
 RESULT_SCHEMA = "levi.online.judge.result.v1"
 SPEC_SCHEMA = "levi.online.judge.spec.v1"
 LOG_SCHEMA = "levi.live.online.v1"
+# The interface revision (docs/LIVE.md "Interface C5"): 1 was the first;
+# 2 adds ``start_views`` to the spec answer and ``start_check``,
+# ``start_answer``, ``final_reading`` and ``task_rewritten`` to the result. The
+# request keys and the three ``schema`` strings are the ones of revision 1.
+REVISION = 2
 LOG_FILE = "online.jsonl"
 TMP_DIR = "online-tmp"
 # What the client is asked for: JPEG, the camera's own frames, the longer
@@ -116,6 +126,9 @@ class Request:
     # (role, offset_s, step, jpeg bytes) in the spec's order: its views, and
     # each view's offsets, as the background review shows them.
     images: list = field(default_factory=list)
+    # The same for the spec's start views (the episode's first frames), in the
+    # spec's order; empty when the client sent none (``start_check: skipped``).
+    start_images: list = field(default_factory=list)
 
 
 # --- the spec ---------------------------------------------------------------------
@@ -146,10 +159,23 @@ def views_of(spec) -> list:
     return [(v.role, [float(x) for x in v.offsets_seconds]) for v in spec.views]
 
 
+def start_views_of(spec) -> list:
+    """The same for the spec's start check (the frames at the episode's
+    start; offsets count from its first frame); empty without a start check
+    that voids an episode."""
+    if spec.start is None or not spec.start.void_when:
+        return []
+    return [(v.role, [float(x) for x in v.offsets_seconds]) for v in spec.start.views]
+
+
 def spec_answer(spec, config) -> dict:
-    """The body of ``GET /v1/judge/spec``."""
-    return {
+    """The body of ``GET /v1/judge/spec``. ``revision`` is the interface
+    revision (2: optional start frames); the ``schema`` strings stay ``.v1``
+    because a client of revision 1 checks them. ``start_views`` is present only
+    for a spec with a start check; its roles are not in ``views``."""
+    body = {
         "schema": SPEC_SCHEMA,
+        "revision": REVISION,
         "spec_id": spec.id,
         "spec_version": spec.version,
         "views": [
@@ -159,6 +185,13 @@ def spec_answer(spec, config) -> dict:
         "image": {"format": "jpeg", "max_side": MAX_SIDE},
         "timeout_s": config.online.timeout_s,
     }
+    start = start_views_of(spec)
+    if start:
+        body["start_views"] = [
+            {"role": role, "anchor": "start", "offsets_seconds": offsets}
+            for role, offsets in start
+        ]
+    return body
 
 
 # --- the request --------------------------------------------------------------------
@@ -246,7 +279,8 @@ def parse(body: bytes, spec) -> Request:
     if not isinstance(images, list) or not images or len(images) > MAX_IMAGES:
         raise Refused(422, f"images must be a list of 1-{MAX_IMAGES} images")
     wanted = views_of(spec)
-    roles = {role: offsets for role, offsets in wanted}
+    starts = start_views_of(spec)
+    roles = {role: offsets for role, offsets in [*wanted, *starts]}
     found: dict = {}
     for n, item in enumerate(images):
         where = f"images[{n}]"
@@ -307,8 +341,31 @@ def parse(body: bytes, spec) -> Request:
     ordered = [
         found[(role, slot)] for role, offsets in wanted for slot in range(len(offsets))
     ]
+    # The start frames are all or none: none is a client that does not send
+    # them (judged without the start check); some is a mistake.
+    got = [
+        (r, i) for r, offsets in starts for i in range(len(offsets)) if (r, i) in found
+    ]
+    lacking = [
+        f"{role} at {offset} s"
+        for role, offsets in starts
+        for slot, offset in enumerate(offsets)
+        if (role, slot) not in found
+    ]
+    if got and lacking:
+        raise Refused(
+            422,
+            "start images missing for " + ", ".join(lacking) + " (send all of the "
+            "spec's start views, or none)",
+        )
+    first = [
+        found[(role, slot)]
+        for role, offsets in starts
+        for slot in range(len(offsets))
+        if got
+    ]
     clean = {k: episode.get(k) for k in EPISODE_KEYS if episode.get(k) is not None}
-    return Request(task=task, episode=clean, images=ordered)
+    return Request(task=task, episode=clean, images=ordered, start_images=first)
 
 
 # --- the answer ---------------------------------------------------------------------
@@ -329,11 +386,18 @@ def result(
     undecided=False,
     tokens=None,
     prompt_tokens=None,
+    final_reading=None,
+    start_check=None,
+    start_answer=None,
     task_rewritten=None,
 ) -> dict:
-    """A ``levi.online.judge.result.v1`` body (every key, always).
-    ``task_rewritten`` is ``null``, ``task_text`` or ``task_folder``: the lab's
-    wording of the instruction was quoted (``[judge.task_text]``)."""
+    """A ``levi.online.judge.result.v1`` body (every key, always). The last
+    four keys are interface revision 2's: ``final_reading`` (the rule's
+    reading of the episode: ``reading``, or the start check's decision over
+    it), ``start_check`` (``null`` for a spec without a start check, else
+    ``skipped``, ``passed``, ``voided`` or ``unclear``), ``start_answer`` and
+    ``task_rewritten`` (``null``, ``task_text`` or ``task_folder``: the lab's
+    wording of the instruction was quoted)."""
     return {
         "schema": RESULT_SCHEMA,
         "status": status,
@@ -349,14 +413,18 @@ def result(
         "prompt_tokens": prompt_tokens,
         "elapsed_s": round(float(elapsed), 3),
         "request_id": request_id,
+        "final_reading": final_reading,
+        "start_check": start_check,
+        "start_answer": start_answer or {},
         "task_rewritten": task_rewritten,
     }
 
 
-def decide(spec, answer) -> dict:
+def decide(spec, answer, start_answer=None) -> dict:
     """The verdict on one validated answer, by the background review's own
     functions: the reading of ``valid_when`` (``anchored.judge``), the rule
-    (``anchored.outcome``, here ``final_state``) and ``anchored.undecided``."""
+    (``anchored.outcome``, here ``final_state``, with the start check's answer
+    when the client sent the first frames) and ``anchored.undecided``."""
     from levi.agent import anchored
 
     checks, reading = anchored.judge(spec, answer)
@@ -366,13 +434,15 @@ def decide(spec, answer) -> dict:
         "verdict": reading,
         "valid": reading == "supported",
     }
-    outcome, basis = anchored.outcome(spec, [event])
+    outcome, basis = anchored.outcome(spec, [event], start_answer)
     return {
         "checks": checks,
         "reading": reading,
         "outcome": outcome,
         "undecided": anchored.undecided(outcome, basis),
         "basis": basis,
+        "final_reading": basis.get("final_reading"),
+        "start_check": basis.get("start_check"),
     }
 
 
@@ -505,7 +575,12 @@ class Judge:
                 self.gpu.online_done()
             if waited and found.get("status") == "ok":
                 found["reason"] = f"gate_waited: the gate opened after {waited:.1f} s"
-            return answer(200, found.pop("status"), len(request.images), **found)
+            return answer(
+                200,
+                found.pop("status"),
+                len(request.images) + len(request.start_images),
+                **found,
+            )
         except Exception as exc:  # noqa: BLE001 - the endpoint answers, always
             self.log(f"online judgement {request_id} failed: {exc!r}")
             return answer(200, "error", reason=f"internal_error: {type(exc).__name__}")
@@ -562,11 +637,15 @@ class Judge:
         )
         folder = self.config.live_dir / TMP_DIR / request_id
         folder.mkdir(parents=True, exist_ok=True)
-        names = []
+        names, start_names = [], []
         for n, (role, _offset, _step, raw) in enumerate(request.images):
             name = f"{n:02d}-{role}.jpg"
             (folder / name).write_bytes(raw)
             names.append(name)
+        for n, (role, _offset, _step, raw) in enumerate(request.start_images):
+            name = f"start-{n:02d}-{role}.jpg"
+            (folder / name).write_bytes(raw)
+            start_names.append(name)
         box: dict = {}
         done = threading.Event()
 
@@ -574,6 +653,12 @@ class Judge:
             try:
                 with transport.requests_of(owner):
                     # ``requests_of`` forgets a cut made before it: look again.
+                    # The start check is asked first (two small images); the
+                    # final frames' question is the one the result rests on.
+                    if self._stop_reason is None and start_names:
+                        box["start_raw"], box["start_usage"] = self._ask(
+                            spec.start, folder, start_names
+                        )
                     if self._stop_reason is None:
                         box["raw"], box["usage"] = self._ask(spec, folder, names)
             except BaseException as exc:  # noqa: BLE001 - reported below
@@ -621,9 +706,31 @@ class Judge:
                 "status": "error",
                 "reason": f"model_error: {type(exc).__name__}: {str(exc)[:200]}",
             }
-        usage = box.get("usage") or {}
-        tokens = usage.get("reported_tokens")
-        prompt = usage.get("prompt_tokens")
+
+        # What the server reported, over both questions when two were asked.
+        def spent(key):
+            seen = [
+                u.get(key)
+                for u in (box.get("start_usage") or {}, box.get("usage") or {})
+                if u.get(key) is not None
+            ]
+            return sum(seen) if seen else None
+
+        tokens, prompt = spent("reported_tokens"), spent("prompt_tokens")
+        start_answer = None
+        if start_names:
+            try:
+                start_answer = anchored.validate_answer(
+                    spec.start, box.get("start_raw") or ""
+                )
+            except ValueError as exc:
+                return {
+                    "status": "error",
+                    "reason": f"invalid_answer: start check: {exc}",
+                    "tokens": tokens,
+                    "prompt_tokens": prompt,
+                    "task_rewritten": reworded,
+                }
         try:
             answer = anchored.validate_answer(spec, box.get("raw") or "")
         except ValueError as exc:
@@ -634,7 +741,7 @@ class Judge:
                 "prompt_tokens": prompt,
                 "task_rewritten": reworded,
             }
-        verdict = decide(spec, answer)
+        verdict = decide(spec, answer, start_answer)
         return {
             "status": "ok",
             "answer": answer,
@@ -642,6 +749,9 @@ class Judge:
             "reading": verdict["reading"],
             "outcome": verdict["outcome"],
             "undecided": verdict["undecided"],
+            "final_reading": verdict["final_reading"],
+            "start_check": verdict["start_check"],
+            "start_answer": start_answer,
             "task_rewritten": reworded,
             "tokens": tokens,
             "prompt_tokens": prompt,
@@ -665,6 +775,8 @@ class Judge:
             "outcome": body["outcome"],
             "undecided": body["undecided"],
             "reading": body["reading"],
+            "final_reading": body["final_reading"],
+            "start_check": body["start_check"],
             "task_rewritten": body["task_rewritten"],
             "tokens": body["tokens"],
             "prompt_tokens": body["prompt_tokens"],

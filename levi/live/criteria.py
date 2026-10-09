@@ -231,7 +231,12 @@ def operator_label(meta) -> dict | None:
 # (the online judgement answered) or why there is no agent label.
 AGENT_STATUSES = ("ok", "unavailable", "error", "timeout", "skipped")
 READINGS = ("supported", "contradicted", "unknown")
-# Which entry of ``[judge.task_text]`` the online judgement's question used.
+# What a final-state judgement with a start check (``generic-final.v2``) may
+# say instead of a reading: the start frames, not the final ones, decided
+# (``anchored.ALREADY_AT_START``, ``anchored.START_UNCLEAR``; a test holds the
+# two lists together). Both are failures that are undecided.
+START_READINGS = ("already_satisfied_at_start", "start_unclear")
+START_CHECKS = ("skipped", "passed", "voided", "unclear")
 REWORDINGS = ("task_text", "task_folder")
 
 
@@ -329,6 +334,16 @@ def agent_label(meta) -> dict | None:
         return out
     version = spec.get("version")
     reading = reading if reading in READINGS else None
+    # The rule's own reading (revision 2 of the interface) is the final
+    # frames' reading, or the start check's decision over it.
+    final = label.get("final_reading")
+    if final in START_READINGS:
+        if outcome != "failure" or not undecided:
+            out.update(status="error", reason="malformed agent_label (status ok)")
+            return out
+        reading = final
+    elif final in READINGS:
+        reading = final
     valid = 1 if outcome == "success" else 0
     out["verdict"] = {
         "outcome": outcome,
@@ -340,6 +355,11 @@ def agent_label(meta) -> dict | None:
             "min_valid": 1,
             "rule": "final_state",
             "final_reading": reading,
+            **(
+                {"start_check": label["start_check"]}
+                if label.get("start_check") in START_CHECKS
+                else {}
+            ),
         },
         "rule": "final_state",
         "min_valid": 1,
