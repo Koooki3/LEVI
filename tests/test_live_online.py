@@ -310,11 +310,13 @@ def test_a_judgement_over_http_answers_the_result_contract(endpoint):
         "prompt_tokens",
         "elapsed_s",
         "request_id",
+        "task_rewritten",
     }
     assert body["schema"] == "levi.online.judge.result.v1"
     assert body["status"] == "ok" and body["reason"] is None
     assert body["outcome"] == "success" and body["undecided"] is False
     assert body["reading"] == "supported"
+    assert body["task_rewritten"] is None  # no [judge.task_text] entry
     assert body["answer"] == {"object_state": "resting_at_destination", "stable": "yes"}
     assert body["spec"] == {"id": "generic-final", "version": 1}
     assert body["model"] == "qwen3.8-27b"

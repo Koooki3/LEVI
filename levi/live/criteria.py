@@ -231,6 +231,8 @@ def operator_label(meta) -> dict | None:
 # (the online judgement answered) or why there is no agent label.
 AGENT_STATUSES = ("ok", "unavailable", "error", "timeout", "skipped")
 READINGS = ("supported", "contradicted", "unknown")
+# Which entry of ``[judge.task_text]`` the online judgement's question used.
+REWORDINGS = ("task_text", "task_folder")
 
 
 def _epoch(value):
@@ -350,5 +352,10 @@ def agent_label(meta) -> dict | None:
         "review": "auto",
         "evaluated": False,
         "source": "online",
+        **(
+            {"task_rewritten": label["task_rewritten"]}
+            if label.get("task_rewritten") in REWORDINGS
+            else {}
+        ),
     }
     return out

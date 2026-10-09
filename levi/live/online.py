@@ -12,7 +12,8 @@ writes the result into the rollout's ``metadata.json`` as
 - **One job only.** ``GET /v1/judge/spec`` says which frames to send;
   ``POST /v1/judge`` judges one episode. No prompt is accepted: the question
   is the spec's, with the task instruction quoted the way the background
-  review quotes it (``generic.anchored_spec``).
+  review quotes it (``generic.anchored_spec``), in the lab's wording when
+  ``[judge.task_text]`` has an entry for it (``generic.judge_task``).
 - **Strict request.** A key the contract does not define (``operator``,
   ``outcome``, ``label``... or anything else) is refused with 422, so no
   operator or evaluation data can reach the model; ``episode`` is kept for
@@ -328,8 +329,11 @@ def result(
     undecided=False,
     tokens=None,
     prompt_tokens=None,
+    task_rewritten=None,
 ) -> dict:
-    """A ``levi.online.judge.result.v1`` body (every key, always)."""
+    """A ``levi.online.judge.result.v1`` body (every key, always).
+    ``task_rewritten`` is ``null``, ``task_text`` or ``task_folder``: the lab's
+    wording of the instruction was quoted (``[judge.task_text]``)."""
     return {
         "schema": RESULT_SCHEMA,
         "status": status,
@@ -345,6 +349,7 @@ def result(
         "prompt_tokens": prompt_tokens,
         "elapsed_s": round(float(elapsed), 3),
         "request_id": request_id,
+        "task_rewritten": task_rewritten,
     }
 
 
@@ -538,15 +543,22 @@ class Judge:
         from levi.inference import transport
 
         # The spec's own question with the instruction quoted as the
-        # background review quotes it (``generic.anchored_spec``).
+        # background review quotes it (``generic.anchored_spec``), in the
+        # lab's wording when ``[judge.task_text]`` has one (the client's
+        # ``task`` is the policy's instruction and is never changed).
         owner = f"live-online:{request_id}"
         # Registered before anything else: a cut the supervisor asks for from
         # here on (``abort``) is seen, by the loop below and before the
         # request is sent.
         self._stop_reason = None
         self._owner = owner
+        task, reworded = generic.judge_task(
+            request.task,
+            self.config.judge.task_text,
+            request.episode.get("task_folder"),
+        )
         spec = anchored.AnchoredSpec.model_validate(
-            generic.anchored_spec(request.task, self.config.online.spec)
+            generic.anchored_spec(task, self.config.online.spec)
         )
         folder = self.config.live_dir / TMP_DIR / request_id
         folder.mkdir(parents=True, exist_ok=True)
@@ -620,6 +632,7 @@ class Judge:
                 "reason": f"invalid_answer: {exc}",
                 "tokens": tokens,
                 "prompt_tokens": prompt,
+                "task_rewritten": reworded,
             }
         verdict = decide(spec, answer)
         return {
@@ -629,6 +642,7 @@ class Judge:
             "reading": verdict["reading"],
             "outcome": verdict["outcome"],
             "undecided": verdict["undecided"],
+            "task_rewritten": reworded,
             "tokens": tokens,
             "prompt_tokens": prompt,
         }
@@ -651,6 +665,7 @@ class Judge:
             "outcome": body["outcome"],
             "undecided": body["undecided"],
             "reading": body["reading"],
+            "task_rewritten": body["task_rewritten"],
             "tokens": body["tokens"],
             "prompt_tokens": body["prompt_tokens"],
             "elapsed_s": body["elapsed_s"],
@@ -938,6 +953,7 @@ def stats_record(config, name, demo, row, now) -> dict:
             },
             "provider": None,
             "model": usage.get("model"),
+            "task_rewritten": (verdict or {}).get("task_rewritten"),
             "online": {
                 "status": online.get("status"),
                 "reason": online.get("reason"),

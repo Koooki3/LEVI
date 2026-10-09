@@ -552,10 +552,22 @@ class Worker:
         need = seconds / (per_camera - 1)
         return max(base, math.ceil(need * 4) / 4)
 
+    def judged_task(self, state=None):
+        """``(text, how)``: the task instruction as the judgements quote it,
+        and ``None`` when that is the rollout's own text, else what the
+        ``[judge.task_text]`` entry matched (``task_folder`` or ``task_text``).
+        The dataset state keeps the original; only the questions and the
+        guideline quote this (``generic.judge_task``)."""
+        state = state or self.state()
+        return generic.judge_task(
+            state.get("task_text") or self.name,
+            self.config.judge.task_text,
+            state.get("task_folder"),
+        )
+
     def temporal(self, batch, index, lengths):
         p = self.config.pipeline
-        state = self.state()
-        task = state.get("task_text") or self.name
+        task, _reworded = self.judged_task()
         cameras = [SIDE]
         todo = [
             d for d in batch["demos"] if d in index and d not in batch.get("done", [])
@@ -691,8 +703,7 @@ class Worker:
         from levi.agent import anchored as anchored_mod
 
         p = self.config.pipeline
-        state = self.state()
-        task = state.get("task_text") or self.name
+        task, reworded = self.judged_task()
         demos = [d for d in batch["demos"] if d in index]
         if not demos:
             return
@@ -761,6 +772,9 @@ class Worker:
                 "review": "auto",
                 "evaluated": False,
             }
+            if reworded:
+                # The question quoted the lab's wording, not the recorded text.
+                results[demo]["task_rewritten"] = reworded
             # What a rule other than "any valid release" decided on, where the
             # page and the statistics read it (absent for the default rule).
             if "rule" in basis:
@@ -1003,6 +1017,9 @@ class Worker:
                 },
                 "provider": self.provider_spec.get("name"),
                 "model": self.provider_spec.get("model"),
+                # null: the judgements quoted the recorded instruction;
+                # else the [judge.task_text] entry they used (folder or text).
+                "task_rewritten": self.judged_task()[1],
             },
             # The operator label (ground truth), apart from the verdict.
             "operator_label": stats.operator_brief(row.get("operator_label")),

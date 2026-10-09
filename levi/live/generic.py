@@ -60,6 +60,37 @@ def vocabulary(name: str = "generic-vocabulary.v1.json") -> list:
     return json.loads(text(name))["subtasks"]
 
 
+def normalize_task(text: str | None) -> str:
+    """A task text or folder name as the rewrite table is keyed: lower case,
+    underscores as spaces, one space between words (the training pool's rule,
+    ``levi.pool.rules.normalize_task``)."""
+    from levi.pool.rules import normalize_task as pool_normalize
+
+    return pool_normalize(text)
+
+
+def judge_task(task: str, table: dict | None, folder: str | None = None):
+    """``(text, how)``: the task instruction as the judgement quotes it, and
+    how it got there. ``table`` is ``[judge.task_text]`` of ``live.toml``:
+    normalized task text (or task folder name) to the wording the judgement
+    uses. The first match wins, **the task folder's name before the
+    instruction's text** (the folder is the more specific: one deployment can
+    need a wording that the same instruction elsewhere does not). The result
+    is never looked up again, so entries do not chain; an entry that says what
+    the instruction already says ends the lookup too. ``how`` is ``None`` when
+    the instruction is quoted as it is (no entry, or such an entry), else
+    ``"task_folder"`` or ``"task_text"``. The robot policy never sees this
+    text: only the judgements' questions quote it."""
+    if table:
+        keys = {normalize_task(k): v for k, v in table.items()}
+        for how, probe in (("task_folder", folder), ("task_text", task)):
+            key = normalize_task(probe) if probe else ""
+            if key in keys:
+                wording = clean_task(keys[key])
+                return (wording, how) if wording != clean_task(task) else (task, None)
+    return task, None
+
+
 def anchored_spec(
     task: str, name: str = "generic-release.v1.json", min_valid=1
 ) -> dict:

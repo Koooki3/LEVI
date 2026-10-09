@@ -315,6 +315,20 @@ class Online:
 
 
 @dataclass
+class Judge:
+    # How the judgements word the task instruction (docs/LIVE.md "Judge-side
+    # task text"). ``task_text`` maps a task text, or a task folder's name, to
+    # the wording the judgement's questions quote instead (keys are compared
+    # lower case, with underscores as spaces and one space between words;
+    # the folder name is tried before the text). It reaches the online
+    # judgement, the background review and the time segments; the policy is
+    # given its own instruction, which is never touched, and the dataset
+    # state keeps the original ``task_text``. Empty: every judgement quotes
+    # the instruction as the rollout recorded it.
+    task_text: dict = field(default_factory=dict)
+
+
+@dataclass
 class Resources:
     nice: int = 19
     # ionice class 3 = idle
@@ -345,6 +359,7 @@ class Config:
     pipeline: Pipeline = field(default_factory=Pipeline)
     resources: Resources = field(default_factory=Resources)
     online: Online = field(default_factory=Online)
+    judge: Judge = field(default_factory=Judge)
     # Where this configuration was read from (None: built-in defaults).
     path: str | None = None
 
@@ -431,6 +446,7 @@ class Config:
         if p.background:
             problems.extend(_final_state_problems(p))
         problems.extend(_online_problems(self))
+        problems.extend(_judge_problems(self))
         if s.ui_port == s.core_port:
             problems.append("service.ui_port and service.core_port must differ")
         for name, port in (("ui_port", s.ui_port), ("core_port", s.core_port)):
@@ -536,6 +552,34 @@ def _final_state_problems(p) -> list:
             )
         ]
     return []
+
+
+def _judge_problems(config) -> list:
+    """What is wrong with ``[judge.task_text]``: every entry maps a non-empty
+    task text or folder name to a one-line wording, and no two keys are the
+    same once normalized (which of them would win is not for a reader to
+    guess)."""
+    import re
+
+    from levi.live import generic
+
+    out, seen = [], {}
+    for key, value in config.judge.task_text.items():
+        where = f"judge.task_text {str(key)[:60]!r}"
+        if not isinstance(key, str) or not isinstance(value, str):
+            out.append(f"{where}: keys and wordings must be text")
+            continue
+        normal = generic.normalize_task(key)
+        if not normal or re.search(r"[\x00-\x1f\x7f]", key):
+            out.append(f"{where}: the key must be a task text or a folder name")
+        elif normal in seen:
+            out.append(f"{where}: the same key as {seen[normal]!r} once normalized")
+        seen.setdefault(normal, key)
+        if not value.strip() or re.search(r"[\x00-\x1f\x7f]", value):
+            out.append(f"{where}: the wording must be one non-empty line")
+        elif len(value.strip()) > generic.MAX_TASK:
+            out.append(f"{where}: the wording is over {generic.MAX_TASK} characters")
+    return out
 
 
 RESERVED_PORTS = (5000, 8000, 7860, 7861)
@@ -823,6 +867,8 @@ def _fill(cls, data: dict, where: str):
             value = float(value) if ok else value
         elif isinstance(default, list):
             ok = isinstance(value, list)
+        elif isinstance(default, dict):
+            ok = isinstance(value, dict)
         else:
             ok = isinstance(value, str)
         if not ok:
@@ -889,15 +935,21 @@ def render(config: Config | None = None) -> str:
         "pipeline": "what runs on each batch; auto_approve is off by default",
         "resources": "keeping the service light",
         "online": "the online judgement of one episode (interface C5); off by default",
+        "judge": "how the judgements word a task instruction (the policy's own is not touched)",
     }
     lines = ["# LEVI live annotation service. docs/LIVE.md describes every setting.\n"]
 
     def table(name, obj):
         lines.append(f"[{name}]  # {notes.get(name, '')}".rstrip(" #"))
+        if isinstance(obj, dict):
+            # A table of free keys (``judge.task_text``): one quoted key each.
+            lines.extend(f"{_toml_value(k)} = {_toml_value(v)}" for k, v in obj.items())
+            lines.append("")
+            return
         nested = []
         for f in dataclasses.fields(obj):
             value = getattr(obj, f.name)
-            if dataclasses.is_dataclass(value):
+            if dataclasses.is_dataclass(value) or isinstance(value, dict):
                 nested.append((f"{name}.{f.name}", value))
             else:
                 lines.append(f"{f.name} = {_toml_value(value)}")
