@@ -205,7 +205,15 @@ def attach(run):
             "minimum_requests": (
                 len(run["context"]["episodes"])
                 # A final-state spec asks exactly once per episode (its one
-                # question on the last frames); a release review may ask none.
+                # question on the last frames), plus its start check when it
+                # has one; a release review may ask none.
+                * (
+                    1
+                    + bool(
+                        flow.anchored.get("start")
+                        and (flow.anchored.get("anchor") or {}).get("event") == "end"
+                    )
+                )
                 if flow.anchored.get("start")
                 or (flow.anchored.get("anchor") or {}).get("event") == "end"
                 else 0

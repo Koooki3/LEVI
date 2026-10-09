@@ -1,0 +1,121 @@
+{
+ "id": "generic-final",
+ "version": 2,
+ "title": {
+  "en": "Generic final-state judgement with a start check (candidate v2)",
+  "zh": "通用最终状态判定，加开头检查（候选 v2）"
+ },
+ "status": "candidate",
+ "description": "Version 2 of the generic final-state judgement. The final question and rule are version 1's (`generic-final.v1`: where is the object the instruction is about at the end, does it stay still), with two changes. (1) Wording: both questions say what this lab means by 'pick X in/on/into/onto Y' (pick X up and put it in/on Y; Y is the destination), because the model read 'pick X on Y' as 'pick up the X that is on Y' (a recorded failure of version 1). (2) A START CHECK: one more question per episode on the FIRST frame (side and wrist cameras): `start_state`, is the object the instruction is about already at its destination before the robot acts. `already_at_destination` makes the episode no valid trial: a failure that is undecided, `final_reading` `already_satisfied_at_start` (a scene that was not reset; the final frames can look like a success while the robot did nothing). `unclear` leaves a would-be success a failure that is undecided (`start_unclear`): an input that could not be read is never taken for a success; a definite failure stays a certain failure. `not_at_destination`: version 1's rule. A caller that cannot send the first frames (an online client of revision 1) gets version 1's rule, `start_check` `skipped`. KNOWN LIMITS: (1) NOT EVALUATED: no accuracy is known on any data, and how often the model calls a first frame already satisfied or unclear is unmeasured. (2) It judges the start by one frame: an object already in place but moved and put back is not visible. (3) Version 1's limits on the final frames stay (it sees only the last seconds; an object still hanging from the fingers reads as a failure; a hidden destination reads unclear). (4) A second model request per episode (two small images). CANDIDATE, NOT THE DEFAULT: set `pipeline.anchored_spec` with `pipeline.temporal = false`, or `online.spec`. Written 2026-10-09. The live page shows its verdict as automatic and unreviewed.",
+ "anchor": {
+  "signal": "gripper",
+  "event": "end"
+ },
+ "views": [
+  {
+   "role": "side",
+   "camera": "observation.images.view1",
+   "offsets_seconds": [
+    -3.0,
+    -2.0,
+    -1.2,
+    -0.6,
+    -0.2,
+    0.0
+   ]
+  },
+  {
+   "role": "wrist",
+   "camera": "observation.images.hand",
+   "offsets_seconds": [
+    -2.0,
+    -1.0,
+    -0.4,
+    0.0
+   ]
+  }
+ ],
+ "question": "A robot arm with a two-finger gripper has just been carrying out this instruction: \"{task}\". Work out what the instruction asks the robot to pick up and where it should end up (the destination).\nIn this lab, an instruction of the form 'pick X in/on/into/onto Y' means pick X up and put it in/on Y; Y is the destination. 'pick X from Y' or 'pick up X' means the object ends up held or elsewhere.\nThese are the LAST seconds of the recording. Images 1-6 are the side camera at 3.0, 2.0, 1.2, 0.6, 0.2 and 0 s before the end (the last image is the final frame); images 7-10 are the wrist camera (looking down between the fingers) at 2.0, 1.0, 0.4 and 0 s before the end. If the recording is shorter than that, the earliest images repeat its first frame.\nJudge the object at the final frame, strictly from what the images show, not from what the robot seems to be trying to do. The gripper holds an object by pinching it, so a held object may hang tilted under the fingers; it counts as held if the whole object is off the surface it lay on and moves together with the gripper across the images. An object that stays on the surface while the fingers touch or drag it is NOT held.\n- object_state: resting_at_destination if the object is down on or in the place the instruction names as its destination and that place supports it (the fingers may still be around it, but it does not hang from them); held_over_destination if it is above the destination but still hanging from the fingers; elsewhere if it rests somewhere else (the table, another object, a wrong container, or it fell); in_gripper if it hangs from the fingers away from the destination; unclear if the images do not show it.\n- stable: across the last images does the object stay where it is (not sliding, rolling, tipping or falling)?\nUse unclear whenever the images do not show it.",
+ "fields": [
+  {
+   "name": "object_state",
+   "enum": [
+    "resting_at_destination",
+    "held_over_destination",
+    "elsewhere",
+    "in_gripper",
+    "unclear"
+   ]
+  },
+  {
+   "name": "stable",
+   "enum": [
+    "yes",
+    "no",
+    "unclear"
+   ]
+  }
+ ],
+ "valid_when": [
+  {
+   "field": "object_state",
+   "in": [
+    "resting_at_destination"
+   ]
+  },
+  {
+   "field": "stable",
+   "in": [
+    "yes"
+   ]
+  }
+ ],
+ "unknown_values": [
+  "unclear"
+ ],
+ "episode": {
+  "min_valid": 1,
+  "rule": "final_state"
+ },
+ "max_output_tokens": 100,
+ "start": {
+  "views": [
+   {
+    "role": "start_side",
+    "camera": "observation.images.view1",
+    "offsets_seconds": [
+     0.0
+    ],
+    "at": "start"
+   },
+   {
+    "role": "start_wrist",
+    "camera": "observation.images.hand",
+    "offsets_seconds": [
+     0.0
+    ],
+    "at": "start"
+   }
+  ],
+  "question": "A robot arm with a two-finger gripper is about to carry out this instruction: \"{task}\". Work out what the instruction asks the robot to pick up and where it should end up (the destination).\nIn this lab, an instruction of the form 'pick X in/on/into/onto Y' means pick X up and put it in/on Y; Y is the destination. 'pick X from Y' or 'pick up X' means the object ends up held or elsewhere.\nImage 1 is the side camera and image 2 the wrist camera (looking down between the fingers) at the FIRST frame of the recording, before the robot has moved anything.\nJudge strictly from what the images show, not from what the robot is going to do:\n- start_state: already_at_destination if the object the instruction is about already rests on or in the place the instruction names as its destination, so the task is already done before the robot acts; not_at_destination if it is anywhere else (on the table, on another object, in another container, held), or if the instruction names no destination place; unclear if the images do not show it.\nUse unclear whenever the images do not show it.",
+  "fields": [
+   {
+    "name": "start_state",
+    "enum": [
+     "already_at_destination",
+     "not_at_destination",
+     "unclear"
+    ]
+   }
+  ],
+  "void_when": [
+   {
+    "field": "start_state",
+    "in": [
+     "already_at_destination"
+    ]
+   }
+  ],
+  "max_output_tokens": 60
+ }
+}

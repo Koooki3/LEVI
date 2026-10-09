@@ -63,11 +63,16 @@ def vocabulary(name: str = "generic-vocabulary.v1.json") -> list:
 def anchored_spec(
     task: str, name: str = "generic-release.v1.json", min_valid=1
 ) -> dict:
-    """The release-review spec with the task instruction in its question."""
+    """The release-review spec with the task instruction in its question (and
+    in its start check's, when that quotes it)."""
     spec = json.loads(text(name))
     if "{task}" not in spec["question"]:
         raise ValueError(f"{name}: the question has no {{task}} placeholder")
     spec["question"] = spec["question"].replace("{task}", clean_task(task))
+    if spec.get("start"):
+        spec["start"]["question"] = spec["start"]["question"].replace(
+            "{task}", clean_task(task)
+        )
     if min_valid != 1:
         spec["episode"] = {**spec.get("episode", {}), "min_valid": int(min_valid)}
     return spec

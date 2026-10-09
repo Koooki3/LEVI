@@ -127,9 +127,32 @@ class Waiver(Contract):
 
 class StartCheck(Probe):
     """Asked once per episode on frames at its start (views ``at`` start or
-    end); its answer can waive required labels."""
+    end); its answer can waive required labels (``waive``, for a spec with
+    ``require_labels``) or void a final-state episode (``void_when``)."""
 
-    waive: list[Waiver] = Field(min_length=1, max_length=16)
+    waive: list[Waiver] = Field(default_factory=list, max_length=16)
+    # Only with the rule ``final_state``: when every condition holds on the
+    # start answer, the episode is not a valid trial (the object was already
+    # where the instruction wants it before the robot did anything): a
+    # failure that is undecided, ``basis.final_reading``
+    # ``already_satisfied_at_start``. Not held and not unknown: the ordinary
+    # final-state verdict. Unknown (an ``unknown_values`` answer, no
+    # definite one): a verdict that would be a success is a failure that is
+    # undecided (``start_unclear``), because an input that could not be read
+    # is never taken for a success. No start answer at all (a caller that
+    # could not supply the first frames): the ordinary verdict, and
+    # ``basis.start_check`` says ``skipped``.
+    void_when: list[Condition] = Field(default_factory=list, max_length=16)
+
+    @model_validator(mode="after")
+    def does_something(self):
+        if not self.waive and not self.void_when:
+            raise ValueError("A start check gives waive or void_when")
+        if self.waive and self.void_when:
+            raise ValueError(
+                "A start check gives waive (labels) or void_when (final state), not both"
+            )
+        return self
 
 
 class Veto(Contract):
@@ -273,6 +296,12 @@ class AnchoredSpec(Contract):
                         "episode.require_labels"
                     )
                 _check(w.when, own, f"start.waive {w.label!r}")
+            if self.start.void_when:
+                if rule.rule != "final_state":
+                    raise ValueError(
+                        "start.void_when goes with episode.rule final_state"
+                    )
+                _check(self.start.void_when, own, "start.void_when")
             if not self.start.views or any(v.at == "anchor" for v in self.start.views):
                 raise ValueError("start views are at the episode's start or end")
             _roles(self.start.views, "start view")
@@ -371,6 +400,9 @@ def dump(spec):
     views(out["views"])
     if "start" in out:
         views(out["start"]["views"])
+        for key in ("waive", "void_when"):
+            if not out["start"].get(key):
+                out["start"].pop(key, None)
     for veto in out.get("vetoes", []):
         views(veto.get("views"))
         if veto.get("question") is None:
@@ -656,6 +688,47 @@ def waivers(spec, start_answer):
     return waived, [x for x in unsure if x not in waived]
 
 
+# What ``basis.final_reading`` says when the start check, not the final
+# frames, decided a final-state episode (``StartCheck.void_when``).
+ALREADY_AT_START = "already_satisfied_at_start"
+START_UNCLEAR = "start_unclear"
+
+
+def start_gate(spec, start_answer, verdict, basis):
+    """The final-state verdict after the start check (``start.void_when``),
+    and ``basis`` with ``start_check`` set: ``skipped`` (no start answer),
+    ``passed`` (the object was not at the destination at the start),
+    ``voided`` (it already was: the episode is no valid trial, a failure) or
+    ``unclear`` (the first frames did not show it: a success is not taken).
+    A voided or unclear start leaves the final frames' own reading in
+    ``basis.end_reading`` and counts no valid event (``basis.valid_events``
+    0: the episode is not a success)."""
+    if spec.start is None or not spec.start.void_when:
+        return verdict
+    if start_answer is None:
+        basis["start_check"] = "skipped"
+        return verdict
+    reading = read(spec.start.void_when, start_answer, spec.unknown_values)[1]
+    if reading == "supported":
+        basis |= {
+            "start_check": "voided",
+            "end_reading": basis["final_reading"],
+            "final_reading": ALREADY_AT_START,
+            "valid_events": 0,
+        }
+        return "failure"
+    if reading == "unknown" and verdict == "success":
+        basis |= {
+            "start_check": "unclear",
+            "end_reading": basis["final_reading"],
+            "final_reading": START_UNCLEAR,
+            "valid_events": 0,
+        }
+        return "failure"
+    basis["start_check"] = "unclear" if reading == "unknown" else "passed"
+    return verdict
+
+
 def outcome(spec, events, start_answer=None, closes=None):
     """The episode's outcome from its judged events (and the start check's
     answer, and the frames where the gripper closes, ``closes``), and what it
@@ -718,6 +791,7 @@ def outcome(spec, events, start_answer=None, closes=None):
             "final_reading": reading,
         }
         verdict = "success" if reading == "supported" else "failure"
+        verdict = start_gate(spec, start_answer, verdict, basis)
     else:
         ok = len(valid) >= rule.min_valid
         basis = {"valid_events": len(valid), "min_valid": rule.min_valid}
@@ -765,14 +839,16 @@ def outcome(spec, events, start_answer=None, closes=None):
 
 def undecided(verdict, basis):
     """Whether an outcome rests on something undecided: a required label (or
-    its waiver), the final state the rule ``final_state`` could not read, or
+    its waiver), the final state the rule ``final_state`` could not read, an
+    episode its start check voided or could not read (``start_gate``), or
     -- for a success -- a veto, a contested waiver or an input its rule needed
     and did not have (``missing_inputs``)."""
     return bool(
         basis.get("undecided_labels")
         or (
             basis.get("rule") == "final_state"
-            and basis.get("final_reading") in (None, "unknown")
+            and basis.get("final_reading")
+            in (None, "unknown", ALREADY_AT_START, START_UNCLEAR)
         )
         or (
             verdict == "success"
@@ -951,6 +1027,9 @@ def review_episode(wb, id, config, context, episode, started):
             "frames": brief(shown),
             "usage": spent(usage),
         }
+        if spec.start.void_when:
+            checks, reading = read(spec.start.void_when, answer, spec.unknown_values)
+            start["void"] = {"checks": checks, "reading": reading}
     events = []
     for n in positions:
         shown = shown_for(spec.views, wanted[n])
@@ -1052,7 +1131,7 @@ def review_episode(wb, id, config, context, episode, started):
             near(e)
     if not events:
         cite([by_frame[(spec.views[0].camera, int(frames[last]))]["id"]])
-    if basis.get("waived_labels"):
+    if basis.get("waived_labels") or basis.get("start_check") in ("voided", "unclear"):
         cite(f["evidence_id"] for f in start["frames"])
     for e in ordered:
         if e["frame_index"] not in vetoing:
@@ -1105,6 +1184,8 @@ def review_episode(wb, id, config, context, episode, started):
         )
     if basis.get("waived_labels"):
         note += "; not required at the start: " + ", ".join(basis["waived_labels"])
+    if basis.get("start_check") == "voided":
+        note += "; not a valid trial: the object was already at the destination at the start"
     if basis.get("vetoes"):
         note += "; vetoed: " + ", ".join(sorted({v["veto"] for v in basis["vetoes"]}))
     doubts = []
@@ -1119,7 +1200,17 @@ def review_episode(wb, id, config, context, episode, started):
         doubts.append(
             "the last-placement condition is not applied here: the live verdict decides"
         )
-    if basis.get("rule") == "final_state" and undecided(verdict, basis):
+    if basis.get("final_reading") == ALREADY_AT_START:
+        doubts.append(
+            "the object was already at the destination in the first frames: "
+            "not a valid trial"
+        )
+    elif basis.get("final_reading") == START_UNCLEAR:
+        doubts.append(
+            "the first frames did not show whether the object was already "
+            "at the destination"
+        )
+    elif basis.get("rule") == "final_state" and undecided(verdict, basis):
         doubts.append("the final state could not be read from the last frames")
     if verdict == "success" and basis.get("undecided_vetoes"):
         doubts.append(

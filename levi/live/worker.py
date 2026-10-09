@@ -61,6 +61,9 @@ RULE_KEYS = (
     "require_place",
     "missing_inputs",
     "final_reading",
+    # The final-state judgement with a start check (generic-final.v2).
+    "start_check",
+    "end_reading",
 )
 
 
@@ -734,7 +737,9 @@ class Worker:
             results[demo] = {
                 "outcome": outcome,
                 "events": len(events),
-                "valid_events": sum(1 for e in events if e.get("valid")),
+                "valid_events": basis["valid_events"]
+                if basis.get("rule") == "final_state"
+                else sum(1 for e in events if e.get("valid")),
                 "undecided": anchored_mod.undecided(outcome, basis) or extra,
                 "basis": {
                     k: basis[k]
