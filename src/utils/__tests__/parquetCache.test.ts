@@ -7,6 +7,7 @@ import {
   fetchParquetFile,
   clearParquetFileCache,
   getParquetFileIndex,
+  parquetCacheStats,
   parquetLimits,
   planParquetRowRange,
   readParquetAsObjects,
@@ -18,6 +19,22 @@ import {
 // (float64, 0.5 * row). Written with pyarrow, snappy.
 const FIXTURE_B64 =
   "UEFSMRUEFaABFWxMFRQVABIAAFAEZAAJAQBlCQcEAGYNCABnDQgAaA0IBGkACQEAagkHBABrDQg8bAAAAAAAAABtAAAAAAAAABUAFSAVJCwVFBUQFQYVBhwYCG0AAAAAAAAAGAhkAAAAAAAAABYAKAhtAAAAAAAAABgIZAAAAAAAAAAREQAAABA8AgAAABQBBAUQMlR2mAAAABUEFaABFV5MFRQVABIAAFAAADIBAATgPwkPAPANCAD4DQgEAEAJGAAEDQgACA0IAAwNCCQQQAAAAAAAABJAFQAVIBUkLBUUFRAVBhUGHBgIAAAAAAAAEkAYCAAAAAAAAACAFgAoCAAAAAAAABJAGAgAAAAAAAAAgBERAAAAEDwCAAAAFAEEBRAyVHaYAAAAFQQVoAEVbEwVFBUAEgAAUARuAAkBAG8JBwQAcA0IAHENCAByDQgAcw0IBHQACQEAdQkHQAB2AAAAAAAAAHcAAAAAAAAAFQAVIBUkLBUUFRAVBhUGHBgIdwAAAAAAAAAYCG4AAAAAAAAAFgAoCHcAAAAAAAAAGAhuAAAAAAAAABERAAAAEDwCAAAAFAEEBRAyVHaYAAAAFQQVoAEVZEwVFBUAEgAAUAAABQEEFEAFBwQAFg0IABgNCAAaDQgAHA0IAB4NCAAgDQgAIQ0IJCJAAAAAAAAAI0AVABUgFSQsFRQVEBUGFQYcGAgAAAAAAAAjQBgIAAAAAAAAFEAWACgIAAAAAAAAI0AYCAAAAAAAABRAEREAAAAQPAIAAAAUAQQFEDJUdpgAAAAVBBWgARVoTBUUFQASAABQBHgACQEAeQkHBAB6DQgAew0IAHwNCAB9DQgAfg0IAH8NCDyAAAAAAAAAAIEAAAAAAAAAFQAVIBUkLBUUFRAVBhUGHBgIgQAAAAAAAAAYCHgAAAAAAAAAFgAoCIEAAAAAAAAAGAh4AAAAAAAAABERAAAAEDwCAAAAFAEEBRAyVHaYAAAAFQQVoAEVZEwVFBUAEgAAUAAABQEEJEAFBwQAJQ0IACYNCAAnDQgAKA0IACkNCAAqDQgAKw0IJCxAAAAAAAAALUAVABUgFSQsFRQVEBUGFQYcGAgAAAAAAAAtQBgIAAAAAAAAJEAWACgIAAAAAAAALUAYCAAAAAAAACRAEREAAAAQPAIAAAAUAQQFEDJUdpgAAAAVBBk8NQAYBnNjaGVtYRUEABUEJQIYBWluZGV4ABUKJQIYBXZhbHVlABY8GTwZLCYAHBUEGTUABhAZGAVpbmRleBUCFhQW3AIWrAImkgEmCBwYCG0AAAAAAAAAGAhkAAAAAAAAABYAKAhtAAAAAAAAABgIZAAAAAAAAAAREQAZLBUEFQAVAgAVABUQFQIAPCkGGSYAFAAAACYAHBUKGTUABhAZGAV2YWx1ZRUCFhQW3AIWngImsAMmtAIcGAgAAAAAAAASQBgIAAAAAAAAAIAWACgIAAAAAAAAEkAYCAAAAAAAAACAEREAGSwVBBUAFQIAFQAVEBUCADwpBhkmABQAAAAWuAUWFCYIFsoEABksJgAcFQQZNQAGEBkYBWluZGV4FQIWFBbcAhasAibcBSbSBBwYCHcAAAAAAAAAGAhuAAAAAAAAABYAKAh3AAAAAAAAABgIbgAAAAAAAAAREQAZLBUEFQAVAgAVABUQFQIAPCkGGSYAFAAAACYAHBUKGTUABhAZGAV2YWx1ZRUCFhQW3AIWpAImgAgm/gYcGAgAAAAAAAAjQBgIAAAAAAAAFEAWACgIAAAAAAAAI0AYCAAAAAAAABRAEREAGSwVBBUAFQIAFQAVEBUCADwpBhkmABQAAAAWuAUWFCbSBBbQBAAZLCYAHBUEGTUABhAZGAVpbmRleBUCFhQW3AIWqAImqAomogkcGAiBAAAAAAAAABgIeAAAAAAAAAAWACgIgQAAAAAAAAAYCHgAAAAAAAAAEREAGSwVBBUAFQIAFQAVEBUCADwpBhkmABQAAAAmABwVChk1AAYQGRgFdmFsdWUVAhYUFtwCFqQCJswMJsoLHBgIAAAAAAAALUAYCAAAAAAAACRAFgAoCAAAAAAAAC1AGAgAAAAAAAAkQBERABksFQQVABUCABUAFRAVAgA8KQYZJgAUAAAAFrgFFhQmogkWzAQAGRwYDEFSUk9XOnNjaGVtYRj4AS8vLy8vN0FBQUFBUUFBQUFBQUFLQUF3QUJnQUZBQWdBQ2dBQUFBQUJCQUFNQUFBQUNBQUlBQUFBQkFBSUFBQUFCQUFBQUFJQUFBQklBQUFBQkFBQUFORC8vLzhBQUFFREVBQUFBQndBQUFBRUFBQUFBQUFBQUFVQUFBQjJZV3gxWlFBR0FBZ0FCZ0FHQUFBQUFBQUNBQkFBRkFBSUFBWUFCd0FNQUFBQUVBQVFBQUFBQUFBQkFoQUFBQUFnQUFBQUJBQUFBQUFBQUFBRkFBQUFhVzVrWlhnQUFBQUlBQXdBQ0FBSEFBZ0FBQUFBQUFBQlFBQUFBQT09ABggcGFycXVldC1jcHAtYXJyb3cgdmVyc2lvbiAyMy4wLjEZLBwAABwAAAAIBAAAUEFSMQ==";
+
+// Two uncompressed files of the same length: 30 rows, index 100..129 and
+// index 200..229 (a file rewritten in place under the same URL).
+const REWRITE_A_B64 =
+  "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";
+const REWRITE_B_B64 =
+  "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";
+
+function bufferOf(b64: string): AsyncBuffer {
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const buffer = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+  return { byteLength: buffer.byteLength, slice: (a, b) => buffer.slice(a, b) };
+}
 
 function fixtureBuffer(): AsyncBuffer & { slices: number } {
   const bytes = Uint8Array.from(atob(FIXTURE_B64), (c) => c.charCodeAt(0));
@@ -218,6 +235,38 @@ describe("ParquetBufferCache byte budget", () => {
   });
 });
 
+describe("a file that outgrows its budget", () => {
+  test("is dropped from the table, so the statistics match what is held", async () => {
+    const cache = new ParquetBufferCache(limits({ dataCacheBytes: 500 * KIB }));
+    let opens = 0;
+    const open = async (hooks: { onHeldBytes: (n: number) => void }) => {
+      opens += 1;
+      hooks.onHeldBytes(400 * KIB); // the server forced a whole body on us
+      return fakeFile(900 * KIB);
+    };
+    const buffer = await cache.get("held", open);
+    expect(cache.stats()).toMatchObject({ entries: 1, dataBytes: 400 * KIB });
+    // Slices push it past the budget: the entry leaves the table entirely
+    // (its held body is no longer ours to count), still readable by the caller.
+    await buffer.slice(0, 80 * KIB);
+    await buffer.slice(100 * KIB, 180 * KIB);
+    expect(cache.stats()).toEqual({ entries: 0, metaBytes: 0, dataBytes: 0 });
+    expect((await buffer.slice(0, 10 * KIB)).byteLength).toBe(10 * KIB);
+    expect(cache.stats().dataBytes).toBe(0);
+    await cache.get("held", open);
+    expect(opens).toBe(2); // reopened, not served from a half-counted entry
+  });
+
+  test("a held body alone above the budget never enters the table", async () => {
+    const cache = new ParquetBufferCache(limits({ dataCacheBytes: 100 * KIB }));
+    await cache.get("held", async (hooks) => {
+      hooks.onHeldBytes(300 * KIB);
+      return fakeFile(900 * KIB);
+    });
+    expect(cache.stats()).toEqual({ entries: 0, metaBytes: 0, dataBytes: 0 });
+  });
+});
+
 describe("row-group index", () => {
   test("indexes row groups and plans a row range", async () => {
     const file = fixtureBuffer();
@@ -288,6 +337,22 @@ describe("row-group index", () => {
     ).toEqual([]);
   });
 
+  test("a file rewritten under the same URL and length is not read through a stale index", async () => {
+    clearParquetFileCache();
+    const before = bufferOf(REWRITE_A_B64);
+    const after = bufferOf(REWRITE_B_B64);
+    expect(after.byteLength).toBe(before.byteLength);
+    const url = "fixture-rewritten";
+    const first = await readParquetRowsByGlobalIndex(url, before, ["index"], 105, 108);
+    expect(first?.map((r) => Number(r.index))).toEqual([105, 106, 107]);
+    // The new file has other frames: the stale index would read local rows
+    // 5-7, whose index values are 205-207, not 105-107.
+    expect(await readParquetRowsByGlobalIndex(url, after, ["index"], 105, 108)).toBeNull();
+    // The index was forgotten, so the next ask is located afresh.
+    const again = await readParquetRowsByGlobalIndex(url, after, ["index"], 205, 208);
+    expect(again?.map((r) => Number(r.index))).toEqual([205, 206, 207]);
+  });
+
   test("returns null when the file has no index column", async () => {
     clearParquetFileCache();
     const file = fixtureBuffer();
@@ -317,12 +382,12 @@ describe("whole-file read cap", () => {
     expect(file.requests).toBe(0);
   });
 
-  test("the error says what happened and how to change it", async () => {
+  test("the error says what was refused and does not point at an environment variable", async () => {
     parquetLimits.fullReadBytes = 1000 * 1024;
     const error = await readParquetAsObjects(fakeFile(2000 * 1024)).catch(
       (e) => e,
     );
-    expect(error.message).toContain("MAX_PARQUET_FULL_READ_MB");
+    expect(error.message).not.toContain("MAX_PARQUET");
     expect(error.message).toContain("about 2 MiB");
   });
 
@@ -357,6 +422,132 @@ describe("whole-file read cap", () => {
         130,
       ),
     ).rejects.toBeInstanceOf(ParquetTooLargeError);
+  });
+
+  function serverIgnoringRange(options: {
+    headLength: string | null;
+    getLength: string | null;
+    head?: number;
+  }) {
+    let cancelled = false;
+    let bodyRequests = 0;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        const headers: Record<string, string> = {};
+        if (options.headLength) headers["Content-Length"] = options.headLength;
+        return new Response(null, { status: options.head ?? 200, headers });
+      }
+      bodyRequests += 1;
+      const headers: Record<string, string> = {};
+      if (options.getLength) headers["Content-Length"] = options.getLength;
+      return new Response(
+        new ReadableStream({
+          pull(controller) {
+            controller.enqueue(new Uint8Array(10));
+            controller.close();
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { status: 200, headers },
+      );
+    }) as unknown as typeof fetch;
+    return {
+      restore: () => (globalThis.fetch = realFetch),
+      cancelled: () => cancelled,
+      bodyRequests: () => bodyRequests,
+    };
+  }
+
+  test("without Content-Length on the 200, the length from HEAD still enforces the cap", async () => {
+    clearParquetFileCache();
+    parquetLimits.fullReadBytes = 100 * 1024;
+    const server = serverIgnoringRange({
+      headLength: "1000000",
+      getLength: null,
+    });
+    try {
+      const file = (await fetchParquetFile(
+        "https://example.test/chunked.parquet",
+      )) as AsyncBuffer;
+      await expect(file.slice(0, 10)).rejects.toBeInstanceOf(
+        ParquetTooLargeError,
+      );
+      expect(server.cancelled()).toBe(true);
+      const stats = parquetCacheStats();
+      expect(stats.metaBytes + stats.dataBytes).toBe(0);
+    } finally {
+      server.restore();
+      clearParquetFileCache();
+    }
+  });
+
+  test("without Content-Length and under the cap, the held body is counted from HEAD", async () => {
+    clearParquetFileCache();
+    parquetLimits.fullReadBytes = 2 * 1024 * 1024;
+    parquetLimits.dataCacheBytes = 4 * 1024 * 1024;
+    const server = serverIgnoringRange({
+      headLength: "1000000",
+      getLength: null,
+    });
+    try {
+      const file = (await fetchParquetFile(
+        "https://example.test/chunked-ok.parquet",
+      )) as AsyncBuffer;
+      await file.slice(0, 10);
+      const stats = parquetCacheStats();
+      expect(stats.metaBytes + stats.dataBytes).toBeGreaterThanOrEqual(1000000);
+    } finally {
+      server.restore();
+      clearParquetFileCache();
+    }
+  });
+
+  test("a 200 whose size is known nowhere is refused", async () => {
+    clearParquetFileCache();
+    // HEAD is forbidden (as with signed URLs): hyparquet falls back to a ranged GET.
+    const server = serverIgnoringRange({
+      headLength: null,
+      getLength: null,
+      head: 403,
+    });
+    try {
+      await expect(
+        fetchParquetFile("https://example.test/unknown.parquet"),
+      ).rejects.toBeInstanceOf(ParquetTooLargeError);
+      expect(server.cancelled()).toBe(true);
+    } finally {
+      server.restore();
+      clearParquetFileCache();
+    }
+  });
+
+  test("concurrent slices of a Range-ignoring server count its body once", async () => {
+    clearParquetFileCache();
+    parquetLimits.fullReadBytes = 2 * 1024 * 1024;
+    parquetLimits.dataCacheBytes = 4 * 1024 * 1024;
+    const server = serverIgnoringRange({
+      headLength: "1000000",
+      getLength: "1000000",
+    });
+    try {
+      const file = (await fetchParquetFile(
+        "https://example.test/concurrent.parquet",
+      )) as AsyncBuffer;
+      await Promise.all([
+        file.slice(0, 10),
+        file.slice(20, 30),
+        file.slice(40, 50),
+      ]);
+      expect(server.bodyRequests()).toBeGreaterThan(0);
+      const stats = parquetCacheStats();
+      expect(stats.metaBytes + stats.dataBytes).toBeLessThan(2 * 1000000);
+    } finally {
+      server.restore();
+      clearParquetFileCache();
+    }
   });
 
   test("a server that ignores Range cannot make us download a huge file", async () => {

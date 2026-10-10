@@ -101,9 +101,12 @@ export class ParquetTooLargeError extends Error {
   readonly limit: number;
   constructor(what: string, bytes: number, limit: number) {
     super(
-      `${what} needs about ${Math.round(bytes / MIB)} MiB, above the ` +
-        `${Math.round(limit / MIB)} MiB limit for reading a Parquet file ` +
-        "into the browser (MAX_PARQUET_FULL_READ_MB); not loaded.",
+      `${what} needs ${
+        Number.isFinite(bytes)
+          ? `about ${Math.round(bytes / MIB)} MiB`
+          : "an unknown size"
+      }, above the ${Math.round(limit / MIB)} MiB limit for reading a ` +
+        "Parquet file into memory; it was not loaded.",
     );
     this.name = "ParquetTooLargeError";
     this.bytes = bytes;
@@ -114,12 +117,13 @@ export class ParquetTooLargeError extends Error {
 type SliceKind = "meta" | "data";
 
 class CacheEntry {
-  constructor(readonly generation: number) {}
+  constructor(
+    readonly url: string,
+    readonly generation: number,
+  ) {}
   readonly slices = new Map<string, Promise<ArrayBuffer>>();
   bytes = 0;
   evicted = false;
-  /** Set when this file alone outgrew its budget: it is read, not cached. */
-  uncached = false;
   /** Bytes reported while the file was still being opened. */
   early = 0;
   registered = false;
@@ -181,7 +185,7 @@ export class ParquetBufferCache {
     const pending = this.inflight.get(url);
     if (pending?.generation === generation) return pending.promise;
 
-    const entry = new CacheEntry(generation);
+    const entry = new CacheEntry(url, generation);
     const promise = (async () => {
       const source = await open({
         onHeldBytes: (bytes) =>
@@ -229,7 +233,7 @@ export class ParquetBufferCache {
 
   private add(entry: CacheEntry, bytes: number): void {
     if (entry.generation !== this.generation) return; // cleared meanwhile
-    if (entry.evicted || entry.uncached || bytes <= 0) return;
+    if (entry.evicted || bytes <= 0) return;
     entry.bytes += bytes;
     this.held[entry.kind] += bytes;
     this.trim(entry);
@@ -247,11 +251,12 @@ export class ParquetBufferCache {
         this.evict(victim[0], victim[1]);
       }
       if (over(kind) && current.kind === kind && !current.evicted) {
-        // This file alone is beyond the budget: keep reading it, stop caching.
-        this.held[kind] -= current.bytes;
-        current.slices.clear();
-        current.bytes = 0;
-        current.uncached = true;
+        // This file alone is beyond the budget: leave the table (the caller
+        // keeps reading through its buffer, uncached; the next get reopens),
+        // so the counts are exactly what the cache holds.
+        if (this.entries.get(current.url) === current) {
+          this.evict(current.url, current);
+        }
       }
     }
     while (this.entries.size > this.limits.maxEntries) {
@@ -270,7 +275,7 @@ export class ParquetBufferCache {
         const [from, to] = whole ? [0, source.byteLength] : [start, end];
         const key = `${from}-${to ?? ""}`;
         const size = (to ?? source.byteLength) - from;
-        if (entry.evicted || entry.uncached || size > this.budget(entry.kind)) {
+        if (entry.evicted || size > this.budget(entry.kind)) {
           return source.slice(start, end);
         }
         let cached = entry.slices.get(key);
@@ -313,25 +318,56 @@ if (typeof window !== "undefined") {
   window.addEventListener("levi:hf-auth-changed", clearParquetFileCache);
 }
 
-/** fetch() that refuses to download a huge body when the server ignores Range. */
+/**
+ * fetch() that refuses to download a huge body when the server ignores Range.
+ * The size comes from the 200's Content-Length or from the HEAD that opened
+ * the file (whichever is larger: a compressed body reports the smaller one);
+ * with neither, the body is refused rather than trusted.
+ */
 function rangeGuardedFetch(hooks: OpenHooks): typeof fetch {
+  let headLength = Number.NaN;
+  let reported = false;
   const guarded = async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ): Promise<Response> => {
     const response = await fetch(input, init);
-    if (response.status === 200 && new Headers(init?.headers).has("Range")) {
-      const length = Number(response.headers.get("Content-Length"));
-      if (length > parquetLimits.fullReadBytes) {
+    const method = (init?.method ?? "GET").toUpperCase();
+    if (method === "HEAD" && response.ok) {
+      const length = Number.parseInt(
+        response.headers.get("Content-Length") ?? "",
+        10,
+      );
+      if (Number.isFinite(length)) headLength = length;
+    } else if (
+      response.status === 200 &&
+      new Headers(init?.headers).has("Range")
+    ) {
+      const own = Number.parseInt(
+        response.headers.get("Content-Length") ?? "",
+        10,
+      );
+      const length = Math.max(
+        Number.isFinite(own) ? own : 0,
+        Number.isFinite(headLength) ? headLength : 0,
+      );
+      const known = Number.isFinite(own) || Number.isFinite(headLength);
+      if (!known || length > parquetLimits.fullReadBytes) {
         void response.body?.cancel();
         throw new ParquetTooLargeError(
-          "This server does not support range requests; the file",
-          length,
+          known
+            ? "This server does not support range requests; the file"
+            : "This server does not support range requests and did not say how large the file is; it",
+          known ? length : Number.POSITIVE_INFINITY,
           parquetLimits.fullReadBytes,
         );
       }
-      // hyparquet now keeps the whole body for the life of the buffer.
-      if (Number.isFinite(length)) hooks.onHeldBytes(length);
+      // hyparquet now keeps the whole body for the life of the buffer; count
+      // it once however many slices were in flight.
+      if (!reported) {
+        reported = true;
+        hooks.onHeldBytes(length);
+      }
     }
     return response;
   };
@@ -506,10 +542,21 @@ export async function readParquetRowsByGlobalIndex(
       parquetLimits.fullReadBytes,
     );
   }
-  return readParquetAsObjects(file, columns, {
+  const rows = await readParquetAsObjects(file, columns, {
     rowStart: plan.rowStart,
     rowEnd: plan.rowEnd,
   });
+  // The index outlives the cached bytes: if the file behind this URL was
+  // rewritten (same length, other frames), the first row will not be the one
+  // asked for. Forget the index and let the caller read without it.
+  if (rows.length > 0 && columns.includes(indexColumn)) {
+    const expected = index.firstIndex + plan.rowStart;
+    if (Number(rows[0][indexColumn]) !== expected) {
+      parquetFileIndexes.delete(url);
+      return null;
+    }
+  }
+  return rows;
 }
 
 // Read specific columns from the Parquet file
