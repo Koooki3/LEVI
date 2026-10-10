@@ -56,7 +56,7 @@ def test_chinese_figures_fall_back_to_english_in_the_pdf():
     # a text with no Latin form shows question marks rather than failing
     only_zh = replace(spec, title={"zh-CN": "成功率"}, summary={"zh-CN": "高"})
     rep = pdfplot.verify_pdf(pdfplot.render_pdf(only_zh, lang="zh-CN"))
-    assert "???" in rep.text and "?" in rep.text
+    assert "[n/a]" in rep.text
 
 
 def test_latin_1_text_and_special_characters_survive():
@@ -212,3 +212,84 @@ def test_pdfinfo_accepts_the_file_and_reports_one_page(tmp_path):
         re.MULTILINE,
     )
     assert re.search(r"^Encrypted:\s+no$", out.stdout, re.MULTILINE)
+
+
+# ---------------------------------------------------------------- the reader looks inside the content stream
+
+
+def _swap_stream(data, old, new):
+    assert old in data
+    return _rebuild_xref_len(data.replace(old, new, 1))
+
+
+def _rebuild_xref_len(data):
+    """Fix /Length and the xref after an edit inside the content stream."""
+    s0 = data.index(b"stream\n") + 7
+    s1 = data.index(b"endstream")
+    data = re.sub(rb"/Length \d+", b"/Length %d" % (s1 - s0), data, count=1)
+    return _rebuild_xref(data)
+
+
+@pytest.mark.parametrize(
+    "edit,msg",
+    [
+        (lambda d: _swap_stream(d, b" l S Q", b" zz S Q"), "unknown operator"),
+        (lambda d: _swap_stream(d, b" Tj ET Q", b" Tj Q"), "ET"),
+        (lambda d: _swap_stream(d, b"q 1 1 1 rg", b"Q 1 1 1 rg"), "Q"),
+        (lambda d: _swap_stream(d, b"BT /F2", b"/F2"), "Tf"),
+        (lambda d: _swap_stream(d, b" re f Q", b" re re f Q"), "operand"),
+        (lambda d: _swap_stream(d, b"/F1 ", b"/F9 "), "font"),
+        (lambda d: _swap_stream(d, b" Tj", b" Tj Tj"), "operand"),
+        (lambda d: d + b"", None),
+    ],
+)
+def test_verify_reads_the_content_stream(edit, msg):
+    bad = edit(_good())
+    if msg is None:
+        assert pdfplot.verify_pdf(bad).objects == 7
+        return
+    with pytest.raises(pdfplot.PdfError, match=msg):
+        pdfplot.verify_pdf(bad)
+
+
+def test_content_stream_must_end_with_every_q_closed():
+    d = _good()
+    bad = _swap_stream(d, b"\nendstream", b" q\nendstream")
+    with pytest.raises(pdfplot.PdfError, match="unbalanced"):
+        pdfplot.verify_pdf(bad)
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        (b"/Root 1 0 R", b"/Root 9 0 R"),
+        (b"/F1 5 0 R", b"/F1 9 0 R"),
+        (b"/Pages 2 0 R", b"/Pages 9 0 R"),
+        (b"/Contents 4 0 R", b"/Contents 9 0 R"),
+    ],
+)
+def test_dangling_references_raise_pdf_error_not_key_error(old, new):
+    with pytest.raises(pdfplot.PdfError):
+        pdfplot.verify_pdf(_good().replace(old, new))
+
+
+def test_page_parent_must_be_the_pages_object():
+    with pytest.raises(pdfplot.PdfError, match="Parent"):
+        pdfplot.verify_pdf(_good().replace(b"/Parent 2 0 R", b"/Parent 5 0 R"))
+
+
+@pytest.mark.skipif(
+    shutil.which("pdftoppm") is None, reason="pdftoppm (poppler) not installed"
+)
+@pytest.mark.parametrize("spec", ALL, ids=lambda s: s.kind)
+def test_poppler_reads_every_figure_without_a_warning(spec, tmp_path):
+    path = tmp_path / "f.pdf"
+    pdfplot.write_pdf(spec, path)
+    for cmd in (
+        ["pdftotext", "-layout", str(path), "-"],
+        ["pdftoppm", "-png", "-r", "20", str(path), str(tmp_path / "img")],
+    ):
+        run = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=60, check=False
+        )
+        assert run.returncode == 0 and run.stderr == "", (cmd[0], run.stderr)

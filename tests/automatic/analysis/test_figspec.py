@@ -113,7 +113,7 @@ def test_text_languages_and_latin_fallback():
     assert t.get("zh-CN", latin_only=True) == "Success"  # the PDF cannot show it
     only_zh = fs.Text.of({"zh-CN": "成功"})
     assert only_zh.get("en") == "成功"  # falls back to what exists
-    assert only_zh.get("en", latin_only=True) == "??"
+    assert only_zh.get("en", latin_only=True) == "[n/a]"
     assert fs.Text.of("plain").get("zh-CN") == "plain"
     assert not fs.Text.of(None)
     with pytest.raises(ValueError):
@@ -139,7 +139,7 @@ def test_from_dict_checks_schema_and_validates():
     with pytest.raises(ValueError, match="schema"):
         fs.FigureSpec.from_dict({**d, "schema": "levi.aeri.figure_spec.v0"})
     d["panels"][0]["series"][0]["points"][0]["lo"] = 0.9  # above y
-    with pytest.raises(ValueError, match="does not contain"):
+    with pytest.raises(ValueError, match="lo must not exceed hi"):
         fs.FigureSpec.from_dict(d)
 
 
@@ -171,7 +171,7 @@ def _pt(d, si=0, pj=0):
         (lambda d: _pt(d).update(x="0"), "finite number"),
         (lambda d: _pt(d).update(y=True), "finite number"),
         (lambda d: _pt(d).pop("hi"), "come together"),
-        (lambda d: _pt(d).update(lo=0.9), "does not contain"),
+        (lambda d: _pt(d).update(lo=0.9), "lo must not exceed hi"),
         (lambda d: d["panels"][0]["series"][0].update(marker="star"), "marker"),
         (lambda d: d["panels"][0]["series"][0].update(dash="wavy"), "dash"),
         (lambda d: d["panels"][0]["series"][0].update(points=[]), "no points"),
@@ -327,32 +327,57 @@ def _nums(rows, col):
 
 
 @pytest.mark.parametrize("spec", fx.all_specs(), ids=lambda s: s.kind)
-def test_table_matches_the_figure_data(spec):
-    headers, rows = fs.table(spec)
+@pytest.mark.parametrize("lang", ["en", "zh-CN"])
+def test_table_matches_the_figure_data(spec, lang):
+    """Every row, in every panel, equals the data it was drawn from."""
+    headers, rows = fs.table(spec, lang)
     assert len(headers) == 7 and all(len(r) == 7 for r in rows)
-    points = [
-        (pi, p)
-        for pi, pn in enumerate(spec.panels)
-        for s in pn.series
-        for p in s.points
-    ]
-    refs = sum(len(pn.reflines) for pn in spec.panels)
-    assert len(rows) == len(points) + refs
-    est = [p.x if spec.kind == "forest" else p.y for _, p in points]
-    got = [float(r[3]) for r in rows[: len(points)]] if len(spec.panels) == 1 else None
-    if got is not None:
-        assert got == pytest.approx(est, rel=1e-5, abs=1e-9)
-        lo = [p.lo for _, p in points if p.lo is not None]
-        hi = [p.hi for _, p in points if p.hi is not None]
-        assert _nums(rows[: len(points)], 4) == pytest.approx(lo, rel=1e-5, abs=1e-9)
-        assert _nums(rows[: len(points)], 5) == pytest.approx(hi, rel=1e-5, abs=1e-9)
-        assert [r[6] for r in rows[: len(points)]] == [p.label for _, p in points]
-    # category names, not indexes, label the rows
-    first = {r[2] for r in rows}
-    for pn in spec.panels:
-        axis = pn.y_axis if spec.kind == "forest" else pn.x_axis
-        for c in axis.categories:
-            assert c.get("en") in first
+    forest = spec.kind == "forest"
+    expected = []
+    for pi, panel in enumerate(spec.panels):
+        ptitle = panel.title.get(lang) or str(pi + 1)
+        for s in panel.series:
+            for p in s.points:
+                if forest:
+                    first = panel.y_axis.categories[int(p.y)].get(lang)
+                    est = p.x
+                elif panel.x_axis.kind == "category":
+                    first = panel.x_axis.categories[int(p.x)].get(lang)
+                    est = p.y
+                else:
+                    first, est = fs.num(p.x), p.y
+                expected.append(
+                    (
+                        ptitle,
+                        s.name.get(lang),
+                        first,
+                        fs.num(est),
+                        "" if p.lo is None else fs.num(p.lo),
+                        "" if p.hi is None else fs.num(p.hi),
+                        p.label,
+                    )
+                )
+        for r in panel.reflines:
+            ref = "reference" if lang == "en" else "参考线"
+            expected.append(
+                (ptitle, ref, r.label.get(lang) or r.axis, fs.num(r.value), "", "", "")
+            )
+    assert rows == expected
+
+
+def test_reference_line_values_are_in_the_table():
+    _, rows = fs.table(fx.forest())
+    ref = [r for r in rows if r[1] == "reference"]
+    assert ref == [("1", "reference", "no difference", "0", "", "", "")]
+    _, rows = fs.table(fx.step_curve())
+    assert [r[3] for r in rows if r[1] == "reference"] == ["300"]
+
+
+def test_table_of_a_multi_panel_figure_holds_every_panels_values():
+    _, rows = fs.table(fx.early_stop())
+    assert [r[3] for r in rows if r[0] == "Steps saved"] == ["40", "65", "22"]
+    assert [r[3] for r in rows if r[0] == "Error rate"] == ["0.05", "0.08", "0"]
+    assert [r[5] for r in rows if r[0] == "Error rate"] == ["0.15", "0.2", "0.1"]
 
 
 def test_table_is_localised_and_exports():
@@ -559,9 +584,10 @@ def test_early_stop_has_one_plot_per_panel_and_a_shared_legend_rule():
     scene = fs.layout(spec)
     assert len(scene.panels) == 2
     assert scene.panels[0].left + scene.panels[0].width < scene.panels[1].left
-    assert not any(i.role == "legend" for i in scene.items), (
-        "a single series needs no legend"
-    )
+    legend = [
+        i.s for i in scene.items if isinstance(i, fs.Label) and i.role == "legend"
+    ]
+    assert legend == ["Saved", "False stop"]  # one legend for all the panels
     texts = [it.s for it in scene.items if isinstance(it, fs.Label)]
     assert "Steps saved" in texts and "Error rate" in texts
 

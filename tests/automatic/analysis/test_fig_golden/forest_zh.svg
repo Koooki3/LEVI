@@ -5,6 +5,7 @@
 <rect x="0" y="0" width="640" height="231" fill="#FFFFFF"/>
 <text x="16" y="30" font-size="14" font-weight="bold">差值 B 减 A</text>
 <text x="16" y="49" font-size="10" fill="#555555">区间跨过零。</text>
+<text x="38" y="121.28" font-size="9" text-anchor="end">总体</text>
 <line x1="44" y1="65" x2="44" y2="171.25" stroke="#E1E1E1" stroke-width="0.6"/>
 <line x1="44" y1="171.25" x2="44" y2="174.25" stroke="#444444" stroke-width="0.8"/>
 <text x="44" y="183.25" font-size="9" text-anchor="middle">-0.1</text>
@@ -23,7 +24,6 @@
 <line x1="585.76" y1="65" x2="585.76" y2="171.25" stroke="#E1E1E1" stroke-width="0.6"/>
 <line x1="585.76" y1="171.25" x2="585.76" y2="174.25" stroke="#444444" stroke-width="0.8"/>
 <text x="585.76" y="183.25" font-size="9" text-anchor="middle">0.4</text>
-<text x="38" y="121.28" font-size="9" text-anchor="end">总体</text>
 <line x1="44" y1="65" x2="44" y2="171.25" stroke="#444444" stroke-width="0.9"/>
 <line x1="44" y1="171.25" x2="585.76" y2="171.25" stroke="#444444" stroke-width="0.9"/>
 <text x="314.88" y="204" font-size="10" text-anchor="middle">差值</text>

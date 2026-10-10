@@ -31,7 +31,7 @@ import io
 import json
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from itertools import pairwise
 from typing import Any
 
@@ -44,6 +44,7 @@ KINDS = (
     "stacked_bar",  # F4: failure modes stacked per arm
     "early_stop",  # F5: bars with intervals, usually two panels
     "drift_lines",  # F6: per-round rate per arm, with intervals
+    "confusion_matrix",  # F7: judge agreement, counts and shares per cell
 )
 # How each kind is drawn.
 STYLE = {
@@ -53,6 +54,7 @@ STYLE = {
     "forest": "forest",
     "step_curve": "step",
     "drift_lines": "lines",
+    "confusion_matrix": "heat",
 }
 MARKERS = ("circle", "square", "triangle", "diamond", "cross", "plus")
 DASHES = ("solid", "dashed", "dotted", "dashdot")
@@ -123,17 +125,39 @@ class Text:
 
     def get(self, lang: str = "en", latin_only: bool = False) -> str:
         """The text in ``lang``; falls back to English, then to any language.
-        With ``latin_only`` a text that Windows-1252 cannot encode is replaced
-        by its English form (or by ``?`` marks) so the PDF can show it."""
+        With ``latin_only`` the text is made printable with the PDF base-14
+        fonts (see ``latin``)."""
+        if latin_only:
+            return self.latin(lang)[0]
         d = dict(self.by_lang)
-        order = [lang, "en"] + [k for k in d if k not in (lang, "en")]
-        for key in order:
-            if key in d and d[key] != "":
-                s = d[key]
-                if not latin_only or _latin(s):
-                    return s
-        s = next((d[k] for k in order if k in d and d[k] != ""), "")
-        return s.encode("cp1252", "replace").decode("cp1252") if latin_only else s
+        for key in [lang, "en", *d]:
+            if d.get(key):
+                return d[key]
+        return ""
+
+    def latin(self, lang: str = "en") -> tuple[str, list[dict]]:
+        """The text as Windows-1252 and what had to change to get there: a
+        form that already fits (the requested language first, then English,
+        then any), else a transliteration (``Δ`` to ``Delta``), else ``?``
+        marks (``[n/a]`` when nothing readable is left). Each change is a
+        ``{"text", "to", "reason"}`` record: nothing is replaced silently."""
+        d = dict(self.by_lang)
+        order = [lang, "en", *[k for k in d if k not in (lang, "en")]]
+        order = [k for k in order if d.get(k)]
+        if not order:
+            return "", []
+        first = order[0]
+        for k in order:
+            if _latin(d[k]):
+                if k == first:
+                    return d[k], []
+                return d[k], [{"text": d[first], "to": d[k], "reason": f"fallback_{k}"}]
+        for k in order:
+            folded, ok = fold_latin(d[k])
+            if ok:
+                reason = "transliterated" if k == first else f"fallback_{k}"
+                return folded, [{"text": d[k], "to": folded, "reason": reason}]
+        return _unencodable(d[first])
 
     def to_json(self) -> Any:
         return {k: v for k, v in self.by_lang}
@@ -148,6 +172,84 @@ def _latin(s: str) -> bool:
         return True
     except UnicodeEncodeError:
         return False
+
+
+# Symbols that Windows-1252 lacks but statistics figures use, with a readable
+# ASCII form (the PDF base-14 fonts cannot show the originals).
+TRANSLITERATE = {
+    "\u2212": "-",  # minus sign
+    "\u2010": "-",
+    "\u2011": "-",
+    "\u2264": "<=",
+    "\u2265": ">=",
+    "\u2260": "!=",
+    "\u2248": "~=",
+    "\u2192": "->",
+    "\u2190": "<-",
+    "\u221e": "inf",
+    "\u221a": "sqrt",
+    "\u2032": "'",
+    "\u2033": '"',
+    "\u0394": "Delta",
+    "\u03b1": "alpha",
+    "\u03b2": "beta",
+    "\u03b3": "gamma",
+    "\u03b4": "delta",
+    "\u03b5": "epsilon",
+    "\u03b7": "eta",
+    "\u03b8": "theta",
+    "\u03ba": "kappa",
+    "\u03bb": "lambda",
+    "\u03bc": "mu",
+    "\u03bd": "nu",
+    "\u03c0": "pi",
+    "\u03c1": "rho",
+    "\u03c3": "sigma",
+    "\u03c4": "tau",
+    "\u03c6": "phi",
+    "\u03c7": "chi",
+    "\u03c9": "omega",
+    "\u0393": "Gamma",
+    "\u0398": "Theta",
+    "\u039b": "Lambda",
+    "\u03a0": "Pi",
+    "\u03a3": "Sigma",
+    "\u03a6": "Phi",
+    "\u03a9": "Omega",
+}
+
+
+def fold_latin(s: str) -> tuple[str, bool]:
+    """``s`` with the symbols of ``TRANSLITERATE`` spelled out. The flag says
+    whether everything could be mapped (otherwise unmapped characters are ``?``)."""
+    out: list[str] = []
+    ok = True
+    for ch in s:
+        if _latin(ch):
+            out.append(ch)
+        elif ch in TRANSLITERATE:
+            out.append(TRANSLITERATE[ch])
+        else:
+            out.append("?")
+            ok = False
+    return "".join(out), ok
+
+
+def _unencodable(s: str) -> tuple[str, list[dict]]:
+    folded, _ = fold_latin(s)
+    if not any(c.isascii() and c.isalnum() for c in folded):
+        folded = "[n/a]"
+    return folded, [{"text": s, "to": folded, "reason": "unencodable"}]
+
+
+def latin_plain(s: str) -> tuple[str, list[dict]]:
+    """The same for a plain string (a point label)."""
+    if _latin(s):
+        return s, []
+    folded, ok = fold_latin(s)
+    if ok:
+        return folded, [{"text": s, "to": folded, "reason": "transliterated"}]
+    return _unencodable(s)
 
 
 # --------------------------------------------------------------------------
@@ -188,6 +290,7 @@ class Point:
     lo: float | None = None
     hi: float | None = None
     label: str = ""
+    value: float | None = None  # confusion_matrix only: the cell's count
 
 
 @dataclass(frozen=True)
@@ -197,6 +300,7 @@ class Series:
     marker: str | None = None  # default: by index
     dash: str | None = None
     emphasis: bool = False  # the reference arm: drawn heavier
+    unavailable: bool = False  # a group with no data: named, drawn as empty
 
     def __post_init__(self):
         object.__setattr__(self, "name", Text.of(self.name))
@@ -333,6 +437,8 @@ def _point_json(p: Point) -> dict:
         d["hi"] = p.hi
     if p.label:
         d["label"] = p.label
+    if p.value is not None:
+        d["value"] = p.value
     return d
 
 
@@ -347,6 +453,8 @@ def _series_json(s: Series) -> dict:
         d["dash"] = s.dash
     if s.emphasis:
         d["emphasis"] = True
+    if s.unavailable:
+        d["unavailable"] = True
     return d
 
 
@@ -375,6 +483,7 @@ def _panel_from(d: Mapping[str, Any]) -> Panel:
                 marker=s.get("marker"),
                 dash=s.get("dash"),
                 emphasis=bool(s.get("emphasis", False)),
+                unavailable=bool(s.get("unavailable", False)),
             )
             for s in d["series"]
         ),
@@ -385,8 +494,34 @@ def _panel_from(d: Mapping[str, Any]) -> Panel:
     )
 
 
+def _all_texts(spec: FigureSpec):
+    """Every string a reader will see, with a path for error messages."""
+    yield "title", spec.title
+    yield "summary", spec.summary
+    for i, n in enumerate(spec.notes):
+        yield f"note {i}", n
+    for pi, panel in enumerate(spec.panels):
+        yield f"panel {pi} title", panel.title
+        for name, ax in (("x_axis", panel.x_axis), ("y_axis", panel.y_axis)):
+            yield f"panel {pi} {name} label", ax.label
+            for ci, c in enumerate(ax.categories):
+                yield f"panel {pi} {name} category {ci}", c
+        for si, s in enumerate(panel.series):
+            yield f"panel {pi} series {si} name", s.name
+            for pj, p in enumerate(s.points):
+                yield f"panel {pi} series {si} point {pj} label", p.label
+        for ri, r in enumerate(panel.reflines):
+            yield f"panel {pi} refline {ri} label", r.label
+
+
+def _is_number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
 def validate(spec: FigureSpec) -> None:
-    """Raise ``ValueError`` (naming the offender) if the spec cannot be drawn."""
+    """Raise ``ValueError`` (naming the offender) if the spec cannot be drawn.
+    Things that are odd but legitimate (an estimate outside its interval, a
+    group with no data) are not errors; ``warnings(spec)`` lists them."""
 
     def bad(msg: str):
         raise ValueError(f"figure {spec.id!r}: {msg}")
@@ -399,9 +534,14 @@ def validate(spec: FigureSpec) -> None:
         bad(f"unknown lang {spec.lang!r}")
     if not spec.title:
         bad("a title is required")
+    for where, t in _all_texts(spec):
+        strings = [v for _, v in t.by_lang] if isinstance(t, Text) else [t]
+        if any(ord(c) < 32 or ord(c) == 127 for v in strings for c in v):
+            bad(f"{where}: a control character in the text")
     if not 1 <= len(spec.panels) <= MAX_PANELS:
         bad(f"1 to {MAX_PANELS} panels required, got {len(spec.panels)}")
     style = STYLE[spec.kind]
+    union: list[Text] = []
     for pi, panel in enumerate(spec.panels):
         where = f"panel {pi}"
         for ax, name in ((panel.x_axis, "x_axis"), (panel.y_axis, "y_axis")):
@@ -418,8 +558,7 @@ def validate(spec: FigureSpec) -> None:
                     bad(f"{where} {name}: min/max must be finite")
             if ax.min is not None and ax.max is not None and ax.min >= ax.max:
                 bad(f"{where} {name}: min must be below max")
-        cat_x = style in ("bars", "stack")
-        if cat_x and panel.x_axis.kind != "category":
+        if style in ("bars", "stack") and panel.x_axis.kind != "category":
             bad(f"{where}: {spec.kind} needs a category x axis")
         if style in ("bars", "stack", "step") and panel.y_axis.kind != "linear":
             bad(f"{where}: {spec.kind} needs a linear y axis")
@@ -427,13 +566,24 @@ def validate(spec: FigureSpec) -> None:
             panel.y_axis.kind != "category" or panel.x_axis.kind != "linear"
         ):
             bad(f"{where}: forest needs a category y axis and a linear x axis")
+        if style == "heat" and (
+            panel.y_axis.kind != "category" or panel.x_axis.kind != "category"
+        ):
+            bad(f"{where}: confusion_matrix needs category x and y axes")
         if style == "step" and panel.x_axis.kind != "linear":
             bad(f"{where}: step_curve needs a linear x axis")
         if style == "lines" and panel.y_axis.kind != "linear":
             bad(f"{where}: drift_lines needs a linear y axis")
         if not 1 <= len(panel.series) <= MAX_SERIES:
             bad(f"{where}: 1 to {MAX_SERIES} series required")
-        index_axis = panel.x_axis if style != "forest" else panel.y_axis
+        if style == "heat" and len(panel.series) != 1:
+            bad(f"{where}: a confusion matrix takes one series per panel")
+        names = [s.name for s in panel.series]
+        if len(set(names)) != len(names):
+            bad(f"{where}: series names must be unique within a panel")
+        for n in names:
+            if n not in union:
+                union.append(n)
         for si, s in enumerate(panel.series):
             sw = f"{where} series {si}"
             if not s.name:
@@ -442,38 +592,57 @@ def validate(spec: FigureSpec) -> None:
                 bad(f"{sw}: marker must be one of {MARKERS}")
             if s.dash is not None and s.dash not in DASHES:
                 bad(f"{sw}: dash must be one of {DASHES}")
-            if not s.points:
-                bad(f"{sw}: no points")
+            if s.unavailable and s.points:
+                bad(f"{sw}: an unavailable series has no points")
+            if not s.points and not s.unavailable:
+                bad(
+                    f"{sw}: no points (mark the series unavailable if there is no data)"
+                )
             prev_x = None
+            seen: set = set()
             for pj, p in enumerate(s.points):
                 pw = f"{sw} point {pj}"
                 for name in ("x", "y"):
-                    v = getattr(p, name)
-                    if (
-                        isinstance(v, bool)
-                        or not isinstance(v, (int, float))
-                        or not math.isfinite(v)
-                    ):
+                    if not _is_number(getattr(p, name)):
                         bad(f"{pw}: {name} must be a finite number")
                 for name in ("lo", "hi"):
                     v = getattr(p, name)
-                    if v is not None and (
-                        isinstance(v, bool)
-                        or not isinstance(v, (int, float))
-                        or not math.isfinite(v)
-                    ):
+                    if v is not None and not _is_number(v):
                         bad(f"{pw}: {name} must be a finite number")
                 if (p.lo is None) != (p.hi is None):
                     bad(f"{pw}: lo and hi come together")
-                value = p.x if style == "forest" else p.y
-                if p.lo is not None and not (p.lo <= value <= p.hi):
-                    bad(f"{pw}: interval [{p.lo}, {p.hi}] does not contain {value}")
-                if index_axis.kind == "category":
-                    idx = p.y if style == "forest" else p.x
-                    if idx != int(idx) or not 0 <= idx < len(index_axis.categories):
+                if p.lo is not None and p.lo > p.hi:
+                    bad(f"{pw}: lo must not exceed hi")
+                if style == "stack" and p.lo is not None:
+                    bad(f"{pw}: stacked_bar does not support intervals")
+                if style == "heat":
+                    if p.lo is not None:
+                        bad(f"{pw}: confusion_matrix does not support intervals")
+                    if p.value is None:
+                        bad(f"{pw}: a confusion matrix cell needs a value")
+                    if not _is_number(p.value):
+                        bad(f"{pw}: value must be a finite number")
+                    if p.value < 0:
+                        bad(f"{pw}: value cannot be negative")
+                elif p.value is not None:
+                    bad(f"{pw}: value is only for confusion_matrix")
+                axes = {
+                    "forest": ((panel.y_axis, p.y),),
+                    "heat": ((panel.x_axis, p.x), (panel.y_axis, p.y)),
+                }.get(
+                    style,
+                    ((panel.x_axis, p.x),) if panel.x_axis.kind == "category" else (),
+                )
+                for ax, idx in axes:
+                    if idx != int(idx) or not 0 <= idx < len(ax.categories):
                         bad(
-                            f"{pw}: category index {idx} is outside 0..{len(index_axis.categories) - 1}"
+                            f"{pw}: category index {idx} is outside 0..{len(ax.categories) - 1}"
                         )
+                if axes:
+                    slot = tuple(int(i) for _, i in axes)
+                    if slot in seen:
+                        bad(f"{pw}: the slot {slot} is given twice in this series")
+                    seen.add(slot)
                 if style == "stack" and p.y < 0:
                     bad(f"{pw}: stacked values cannot be negative")
                 if style in ("step", "lines") and panel.x_axis.kind == "linear":
@@ -488,6 +657,48 @@ def validate(spec: FigureSpec) -> None:
             target = panel.x_axis if r.axis == "x" else panel.y_axis
             if target.kind != "linear":
                 bad(f"{where} refline {ri}: sits on a category axis")
+    if len(union) > MAX_SERIES:
+        bad(f"at most {MAX_SERIES} distinct series names across the panels")
+
+
+def effective_interval(style: str, s: Series, p: Point):
+    """What the figure shows for a point's interval: ``(lo, hi, kind)`` with
+    kind ``given`` (as supplied), ``zero`` (a step curve at x = 0 that has an
+    interval elsewhere: no uncertainty before the first event, so the value
+    is its own interval), ``missing`` (the series has intervals but this point
+    does not) or ``none`` (the series has no intervals at all)."""
+    if p.lo is not None:
+        return p.lo, p.hi, "given"
+    if not any(q.lo is not None for q in s.points):
+        return None, None, "none"
+    if style == "step" and p.x == 0:
+        return p.y, p.y, "zero"
+    return None, None, "missing"
+
+
+def _estimate(style: str, p: Point) -> float:
+    return p.x if style == "forest" else p.y
+
+
+def warnings(spec: FigureSpec) -> list[str]:
+    """Legitimate but notable things, as stable codes with their position:
+    ``estimate_outside_interval`` (a bootstrap interval need not contain the
+    point estimate), ``interval_unavailable`` and ``series_unavailable``."""
+    validate(spec)
+    style = STYLE[spec.kind]
+    out: list[str] = []
+    for pi, panel in enumerate(spec.panels):
+        for si, s in enumerate(panel.series):
+            if s.unavailable:
+                out.append(f"series_unavailable:panel{pi}/series{si}")
+            for pj, p in enumerate(s.points):
+                at = f"panel{pi}/series{si}/point{pj}"
+                lo, hi, kind = effective_interval(style, s, p)
+                if kind == "missing":
+                    out.append(f"interval_unavailable:{at}")
+                elif kind == "given" and not lo <= _estimate(style, p) <= hi:
+                    out.append(f"estimate_outside_interval:{at}")
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -502,8 +713,12 @@ def coord(v: float) -> str:
 
 
 def num(v: float) -> str:
-    """A data value for tables: up to six significant digits, never ``-0``."""
-    s = f"{float(v):.6g}"
+    """A data value for tables: whole numbers exactly, otherwise up to six
+    significant digits; never ``-0``."""
+    v = float(v)
+    if v == int(v) and abs(v) < 1e15:
+        return str(int(v))
+    s = f"{v:.6g}"
     return "0" if s == "-0" else s
 
 
@@ -652,53 +867,150 @@ _HEADERS = {
     "en": {
         "forest": ("Panel", "Series", "Row", "Estimate", "Lower", "Upper", "Note"),
         "default": ("Panel", "Series", "X", "Y", "Lower", "Upper", "Note"),
+        "heat": (
+            "Panel",
+            "Series",
+            "Row",
+            "Column",
+            "Count",
+            "Share of row",
+            "Note",
+        ),
         "reference": "reference",
     },
     "zh-CN": {
         "forest": ("子图", "系列", "行", "估计值", "下限", "上限", "备注"),
         "default": ("子图", "系列", "X", "Y", "下限", "上限", "备注"),
+        "heat": ("子图", "系列", "行", "列", "计数", "行占比", "备注"),
         "reference": "参考线",
     },
 }
+
+# Strings the figure itself adds (table notes, captions, legend marks).
+_WORDS = {
+    "en": {
+        "interval_unavailable": "interval unavailable",
+        "no_uncertainty": "no uncertainty at 0",
+        "outside": "estimate outside interval",
+        "unavailable": "unavailable",
+        "legend_unavailable": "{name} (unavailable)",
+        "cap_interval": {
+            1: "Interval unavailable for 1 point; see the table.",
+            "n": "Interval unavailable for {n} points; see the table.",
+        },
+        "cap_outside": {
+            1: "1 estimate lies outside its interval; see the table.",
+            "n": "{n} estimates lie outside their intervals; see the table.",
+        },
+        "cap_series": {
+            1: "1 series unavailable; see the table.",
+            "n": "{n} series unavailable; see the table.",
+        },
+        "row_total": "n = {n}",
+    },
+    "zh-CN": {
+        "interval_unavailable": "区间不可用",
+        "no_uncertainty": "起点无不确定性",
+        "outside": "估计值在区间之外",
+        "unavailable": "无数据",
+        "legend_unavailable": "{name}（无数据）",
+        "cap_interval": {
+            1: "1 个点的区间不可用，见表格。",
+            "n": "{n} 个点的区间不可用，见表格。",
+        },
+        "cap_outside": {
+            1: "1 个估计值落在其区间之外，见表格。",
+            "n": "{n} 个估计值落在其区间之外，见表格。",
+        },
+        "cap_series": {
+            1: "1 个系列无数据，见表格。",
+            "n": "{n} 个系列无数据，见表格。",
+        },
+        "row_total": "n = {n}",
+    },
+}
+
+
+def _caption(lang: str, key: str, n: int) -> str:
+    forms = _WORDS[lang][key]
+    return forms[1].format(n=n) if n == 1 else forms["n"].format(n=n)
+
+
+def _point_notes(style: str, s: Series, p: Point, lang: str) -> tuple[str, str, str]:
+    """(lower, upper, note) for a table row: the interval as drawn and the
+    flags that explain a missing or odd one."""
+    w = _WORDS[lang]
+    lo, hi, kind = effective_interval(style, s, p)
+    flags = [p.label] if p.label else []
+    if kind == "missing":
+        flags.append(w["interval_unavailable"])
+    elif kind == "zero":
+        flags.append(w["no_uncertainty"])
+    elif kind == "given" and not lo <= _estimate(style, p) <= hi:
+        flags.append(w["outside"])
+    return (
+        "" if lo is None else num(lo),
+        "" if hi is None else num(hi),
+        "; ".join(flags),
+    )
 
 
 def table(
     spec: FigureSpec, lang: str | None = None
 ) -> tuple[tuple[str, ...], list[tuple[str, ...]]]:
     """Every number in the figure as a table: one row per point (and per
-    reference line). This is what a screen reader, a text-only report and the
-    consistency tests read; the figure's marks are drawn from the same data."""
+    reference line, and per unavailable series). This is what a screen reader,
+    a text-only report and the consistency tests read; the figure's marks are
+    drawn from the same data."""
     validate(spec)
     lang = lang or spec.lang
     h = _HEADERS[lang]
     style = STYLE[spec.kind]
-    headers = h["forest"] if style == "forest" else h["default"]
+    headers = (
+        h["forest"]
+        if style == "forest"
+        else h["heat" if style == "heat" else "default"]
+    )
     rows: list[tuple[str, ...]] = []
     for pi, panel in enumerate(spec.panels):
         ptitle = panel.title.get(lang) or str(pi + 1)
         for s in panel.series:
             sname = s.name.get(lang)
+            if s.unavailable:
+                rows.append(
+                    (ptitle, sname, "", "", "", "", _WORDS[lang]["unavailable"])
+                )
+            totals: dict[int, float] = {}
+            if style == "heat":
+                for p in s.points:
+                    totals[int(p.y)] = totals.get(int(p.y), 0.0) + p.value
             for p in s.points:
+                if style == "heat":
+                    total = totals[int(p.y)]
+                    share = p.value / total if total else 0.0
+                    rows.append(
+                        (
+                            ptitle,
+                            sname,
+                            panel.y_axis.categories[int(p.y)].get(lang),
+                            panel.x_axis.categories[int(p.x)].get(lang),
+                            num(p.value),
+                            num(share),
+                            p.label,
+                        )
+                    )
+                    continue
                 if style == "forest":
                     first = panel.y_axis.categories[int(p.y)].get(lang)
-                    est = p.x
                 else:
                     first = (
                         panel.x_axis.categories[int(p.x)].get(lang)
                         if panel.x_axis.kind == "category"
                         else num(p.x)
                     )
-                    est = p.y
+                lo, hi, note = _point_notes(style, s, p, lang)
                 rows.append(
-                    (
-                        ptitle,
-                        sname,
-                        first,
-                        num(est),
-                        "" if p.lo is None else num(p.lo),
-                        "" if p.hi is None else num(p.hi),
-                        p.label,
-                    )
+                    (ptitle, sname, first, num(_estimate(style, p)), lo, hi, note)
                 )
         for r in panel.reflines:
             rows.append(
@@ -855,16 +1167,27 @@ def text_width(s: str, size: float, bold: bool = False) -> float:
 _NO_LINE_START = set("，。、；：！？）》」』”’,.;:!?)]}%")
 
 
-def wrap(
+def _char_w(ch: str, size: float, bold: bool) -> float:
+    return (
+        (1000 if _is_wide(ch) else _W.get(ch, 556))
+        * size
+        / 1000.0
+        * (1.06 if bold else 1.0)
+    )
+
+
+def wrap_ex(
     s: str,
     size: float,
     max_w: float,
     bold: bool = False,
     max_lines: int | None = None,
-) -> list[str]:
-    """Greedy word wrap. Lines break at spaces and between any two CJK
-    characters (but not before closing punctuation). A word wider than the
-    line is broken by character. Too many lines end in ``...``."""
+) -> tuple[list[str], bool]:
+    """Greedy word wrap in one pass (time linear in the text). Lines break at
+    spaces and between any two CJK characters (but not before closing
+    punctuation); a word wider than the line is broken by character. Text
+    beyond ``max_lines`` is dropped and the last line ends in ``...``; the
+    flag says whether that happened."""
     units: list[str] = []
     for ch in s:
         if ch == " ":
@@ -875,37 +1198,66 @@ def wrap(
             units[-1] += ch
         else:
             units.append(ch)
-
-    def w(t: str) -> float:
-        return text_width(t, size, bold)
-
+    space = _char_w(" ", size, bold)
     lines: list[str] = []
     cur = ""
+    cur_w = 0.0
+    full = False
+
+    def flush():
+        nonlocal cur, cur_w, full
+        lines.append(cur.rstrip())
+        cur, cur_w = "", 0.0
+        if max_lines is not None and len(lines) > max_lines:
+            full = True
+
     for u in units:
+        if full:
+            break
         if u == " ":
             if cur and not cur.endswith(" "):
                 cur += " "
+                cur_w += space
             continue
-        if cur.strip() and w(cur + u) > max_w and u[0] not in _NO_LINE_START:
-            lines.append(cur.rstrip())
-            cur = ""
-        cur += u
-        while w(cur) > max_w and len(cur) > 1:  # one unit wider than the line
-            cut = len(cur) - 1
-            while cut > 1 and w(cur[:cut]) > max_w:
-                cut -= 1
-            lines.append(cur[:cut])
-            cur = cur[cut:]
-    if cur.strip() or not lines:
+        uw = sum(_char_w(c, size, bold) for c in u)
+        if cur.strip() and cur_w + uw > max_w and u[0] not in _NO_LINE_START:
+            flush()
+            if full:
+                break
+        if uw <= max_w:
+            cur += u
+            cur_w += uw
+            continue
+        for ch in u:  # one unit wider than a line: break it by character
+            cw = _char_w(ch, size, bold)
+            if cur and cur_w + cw > max_w:
+                flush()
+                if full:
+                    break
+            cur += ch
+            cur_w += cw
+    if not full and (cur.strip() or not lines):
         lines.append(cur.rstrip())
+    truncated = False
     if max_lines is not None and len(lines) > max_lines:
-        kept = lines[:max_lines]
-        last = kept[-1]
-        while last and w(last + "...") > max_w:
+        lines = lines[:max_lines]
+        truncated = True
+    if truncated:
+        last = lines[-1]
+        while last and text_width(last + "...", size, bold) > max_w:
             last = last[:-1]
-        kept[-1] = last.rstrip() + "..."
-        lines = kept
-    return lines
+        lines[-1] = last.rstrip() + "..."
+    return lines, truncated
+
+
+def wrap(
+    s: str,
+    size: float,
+    max_w: float,
+    bold: bool = False,
+    max_lines: int | None = None,
+) -> list[str]:
+    return wrap_ex(s, size, max_w, bold, max_lines)[0]
 
 
 # --------------------------------------------------------------------------
@@ -949,6 +1301,7 @@ class Poly:
     closed: bool = False
     role: str = "poly"
     ref: tuple[int, int, int] | None = None
+    refs: tuple[tuple[int, int, int], ...] = ()  # points a band stands for
 
 
 @dataclass(frozen=True)
@@ -1004,6 +1357,9 @@ class PanelGeometry:
     height: float
     x: AxisMap
     y: AxisMap
+    styles: tuple[
+        Style, ...
+    ] = ()  # one per series of the panel (by name across panels)
 
 
 @dataclass(frozen=True)
@@ -1015,18 +1371,78 @@ class Scene:
     desc: str
     items: tuple[Item, ...]
     panels: tuple[PanelGeometry, ...]
+    substitutions: tuple[
+        dict, ...
+    ] = ()  # Latin-only layout: every text that was changed
+    truncated: tuple[str, ...] = ()  # roles whose text was cut to fit
+    lang_used: str = "en"  # the language the title was written in
+
+
+TEXT_LIMITS = {  # (max characters, max lines); longer text is cut and reported
+    "title": (300, 3),
+    "summary": (600, 4),
+    "note": (400, 6),
+}
+SHORT_LIMITS = {
+    "legend": 60,
+    "panel-title": 80,
+    "refline": 40,
+    "label": 40,
+    "axis": 100,
+}
 
 
 class _Resolver:
+    """Picks the text for one language, makes it Latin for the PDF and keeps
+    the books: what was substituted and what was cut."""
+
     def __init__(self, lang: str, latin_only: bool):
         self.lang = lang
         self.latin_only = latin_only
+        self.subs: list[dict] = []
+        self.cut: list[str] = []
+        self.title_lang = lang
+
+    def _note(self, recs: list[dict]) -> None:
+        for r in recs:
+            if r not in self.subs:
+                self.subs.append(r)
 
     def __call__(self, t: Text) -> str:
-        return t.get(self.lang, self.latin_only)
+        if not self.latin_only:
+            return t.get(self.lang)
+        s, recs = t.latin(self.lang)
+        self._note(recs)
+        return s
 
     def plain(self, s: str) -> str:
-        return s.encode("cp1252", "replace").decode("cp1252") if self.latin_only else s
+        if not self.latin_only or not s:
+            return s
+        out, recs = latin_plain(s)
+        self._note(recs)
+        return out
+
+    def cap(self, s: str, role: str) -> str:
+        """``s`` cut to the short-text limit of ``role`` (marked in ``cut``)."""
+        n = SHORT_LIMITS[role]
+        if len(s) <= n:
+            return s
+        if role not in self.cut:
+            self.cut.append(role)
+        return s[: n - 3].rstrip() + "..."
+
+    def block(
+        self, s: str, role: str, size: float, max_w: float, bold: bool = False
+    ) -> list[str]:
+        """Wrapped lines of a title, summary or note, within its limits."""
+        max_chars, max_lines = TEXT_LIMITS[role]
+        cut = len(s) > max_chars
+        if cut:
+            s = s[: max_chars - 3].rstrip() + "..."
+        lines, more = wrap_ex(s, size, max_w, bold, max_lines)
+        if (cut or more) and role not in self.cut:
+            self.cut.append(role)
+        return lines
 
 
 def _dash(name: str) -> tuple[float, ...]:
@@ -1203,6 +1619,24 @@ def _scale_for(axis: Axis, lo: float, hi: float, target: int) -> Scale:
     return nice_scale(lo, hi, target=target, fixed_lo=axis.min, fixed_hi=axis.max)
 
 
+def _latin_labels(spec: FigureSpec, R: _Resolver) -> FigureSpec:
+    """The spec with every point label made Latin (and the change recorded)."""
+    panels = []
+    for panel in spec.panels:
+        series = tuple(
+            replace(
+                s,
+                points=tuple(
+                    replace(p, label=R.plain(p.label)) if p.label else p
+                    for p in s.points
+                ),
+            )
+            for s in panel.series
+        )
+        panels.append(replace(panel, series=series))
+    return replace(spec, panels=tuple(panels))
+
+
 def layout(
     spec: FigureSpec,
     lang: str | None = None,
@@ -1210,33 +1644,43 @@ def layout(
     width: float = 640.0,
 ) -> Scene:
     """Turn a spec into a scene. ``latin_only`` keeps every string inside
-    Windows-1252 (the PDF base-14 fonts); other text falls back to English."""
+    Windows-1252 (the PDF base-14 fonts): symbols are transliterated, other
+    text falls back to its English form, and every change is listed in
+    ``Scene.substitutions``. Over-long titles, summaries and notes are cut and
+    named in ``Scene.truncated``. A figure that loses one of its intervals in
+    the drawing is an error (``validate_render``), never a silent omission."""
     validate(spec)
     lang = lang or spec.lang
     R = _Resolver(lang, latin_only)
     style = STYLE[spec.kind]
+    if latin_only:
+        spec = _latin_labels(spec, R)
     items: list[Item] = []
     inner_w = width - 2 * PAD
     y = PAD
 
     # ---- title and summary
     title = R(spec.title)
-    for ln in wrap(title, TITLE_SIZE, inner_w, bold=True):
+    for ln in R.block(title, "title", TITLE_SIZE, inner_w, bold=True):
         y += TITLE_SIZE
         items.append(Label(PAD, y, ln, TITLE_SIZE, bold=True, role="title"))
         y += TITLE_SIZE * (LINE_H - 1)
     summary = R(spec.summary)
     if summary:
         y += 3
-        for ln in wrap(summary, SUMMARY_SIZE, inner_w):
+        for ln in R.block(summary, "summary", SUMMARY_SIZE, inner_w):
             y += SUMMARY_SIZE * LINE_H
             items.append(Label(PAD, y, ln, SUMMARY_SIZE, fill=INK_SOFT, role="summary"))
     y += 8
 
-    # ---- legend (series of the first panel; every panel uses the same order)
-    legend_series = spec.panels[0].series
-    if len(legend_series) > 1:
-        y = _legend(items, legend_series, style, R, y, inner_w)
+    # ---- one legend for all panels; a series keeps its colour by name
+    union: dict[Text, list[Series]] = {}
+    for panel in spec.panels:
+        for s in panel.series:
+            union.setdefault(s.name, []).append(s)
+    order = {name: i for i, name in enumerate(union)}
+    if len(union) > 1 and style != "heat":
+        y = _legend(items, union, style, R, y, inner_w)
 
     # ---- panels
     n = len(spec.panels)
@@ -1248,32 +1692,88 @@ def layout(
         panel_h = max(panel_h, _panel_height(panel, style))
     for pi, panel in enumerate(spec.panels):
         left = PAD + pi * (pw + gap)
+        styles = tuple(series_style(order[s.name], s) for s in panel.series)
         geoms.append(
-            _draw_panel(items, spec, panel, pi, style, R, left, y, pw, panel_h)
+            _draw_panel(items, spec, panel, pi, style, R, left, y, pw, panel_h, styles)
         )
     y += panel_h + 8
 
-    # ---- notes
+    # ---- what the figure could not show, then the author's notes
+    codes = warnings(spec)
+    captions = [
+        _caption(lang if lang in _WORDS else "en", key, count)
+        for key, prefix in (
+            ("cap_interval", "interval_unavailable:"),
+            ("cap_outside", "estimate_outside_interval:"),
+            ("cap_series", "series_unavailable:"),
+        )
+        if (count := sum(c.startswith(prefix) for c in codes))
+    ]
+    for cap in captions:
+        cap = R.plain(cap)
+        for ln in wrap(cap, NOTE_SIZE, inner_w):
+            y += NOTE_SIZE * LINE_H
+            items.append(Label(PAD, y, ln, NOTE_SIZE, fill=INK_SOFT, role="note"))
     for note in spec.notes:
-        for ln in wrap(R(note), NOTE_SIZE, inner_w):
+        for ln in R.block(R(note), "note", NOTE_SIZE, inner_w):
             y += NOTE_SIZE * LINE_H
             items.append(Label(PAD, y, ln, NOTE_SIZE, fill=INK_SOFT, role="note"))
     y += PAD
-    desc = summary
-    return Scene(
+
+    used = next(
+        (
+            k
+            for k in (lang, "en", *dict(spec.title.by_lang))
+            if dict(spec.title.by_lang).get(k)
+        ),
+        lang,
+    )
+    if latin_only:
+        for rec in spec.title.latin(lang)[1]:
+            if rec["reason"].startswith("fallback_"):
+                used = rec["reason"][len("fallback_") :]
+    scene = Scene(
         width=width,
         height=math.ceil(y),
         lang=lang,
         title=title,
-        desc=desc,
+        desc=summary,
         items=tuple(items),
         panels=tuple(geoms),
+        substitutions=tuple(R.subs),
+        truncated=tuple(R.cut),
+        lang_used=used,
     )
+    validate_render(spec, scene)
+    return scene
+
+
+def validate_render(spec: FigureSpec, scene: Scene) -> None:
+    """Raise ``ValueError`` if an interval of the spec has no mark in the
+    scene: the figure must not drop what the table still lists."""
+    style = STYLE[spec.kind]
+    drawn: set[tuple[int, int, int]] = set()
+    for it in scene.items:
+        if it.role in ("ci", "band"):
+            ref = getattr(it, "ref", None)
+            drawn.update(getattr(it, "refs", ()) or ([ref] if ref else []))
+    lost = []
+    for pi, panel in enumerate(spec.panels):
+        for si, s in enumerate(panel.series):
+            for pj, p in enumerate(s.points):
+                kind = effective_interval(style, s, p)[2]
+                if kind in ("given", "zero") and (pi, si, pj) not in drawn:
+                    lost.append(f"panel {pi} series {si} point {pj}")
+    if lost:
+        raise ValueError(
+            f"figure {spec.id!r}: the interval of {', '.join(lost[:5])}"
+            f"{' and more' if len(lost) > 5 else ''} was not drawn"
+        )
 
 
 def _legend(
     items: list[Item],
-    series: Sequence[Series],
+    union: Mapping[Text, list[Series]],
     style: str,
     R: _Resolver,
     y: float,
@@ -1283,9 +1783,13 @@ def _legend(
     x = PAD
     y_row = y
     sample_w = 26.0
-    for si, s in enumerate(series):
+    lang = R.lang if R.lang in _WORDS else "en"
+    for si, (sname, group) in enumerate(union.items()):
+        s = group[0]
         st = series_style(si, s)
-        name = R(s.name)
+        name = R.cap(R(sname), "legend")
+        if all(g.unavailable for g in group):
+            name = R.plain(_WORDS[lang]["legend_unavailable"].format(name=name))
         w = sample_w + 6 + text_width(name, TICK_SIZE) + 16
         if x > PAD and x + w > PAD + inner_w:
             x = PAD
@@ -1333,12 +1837,12 @@ def _legend(
 
 
 def replace_role(item: Item, role: str) -> Item:
-    from dataclasses import replace
-
     return replace(item, role=role)
 
 
 def _panel_height(panel: Panel, style: str) -> float:
+    if style == "heat":
+        return max(150.0, 70.0 + len(panel.y_axis.categories) * 34.0)
     if style == "forest":
         rows = len(panel.y_axis.categories)
         per = 18.0 + 9.0 * len(panel.series)
@@ -1357,9 +1861,11 @@ def _draw_panel(
     top: float,
     pw: float,
     ph: float,
+    styles: tuple[Style, ...],
 ) -> PanelGeometry:
     x_lo, x_hi, y_lo, y_hi = _extent(panel, style)
-    ptitle = R(panel.title)
+    ycat = style in ("forest", "heat")
+    ptitle = R.cap(R(panel.title), "panel-title")
     if ptitle:
         items.append(Label(left, top + 10, ptitle, 10.5, bold=True, role="panel-title"))
         top += 18
@@ -1391,9 +1897,9 @@ def _draw_panel(
             )
 
     # --- margins
-    ylabel = R(panel.y_axis.label)
-    xlabel = R(panel.x_axis.label)
-    if style == "forest":
+    ylabel = R.cap(R(panel.y_axis.label), "axis")
+    xlabel = R.cap(R(panel.x_axis.label), "axis")
+    if ycat:
         cat_w = min(
             150.0,
             max(
@@ -1408,8 +1914,13 @@ def _draw_panel(
         left_lab = max(
             text_width(tick_label(t, ys, panel.y_axis.fmt), TICK_SIZE) for t in ys.ticks
         )
-    m_left = (14.0 if ylabel and style != "forest" else 0.0) + left_lab + 8
+    m_left = (14.0 if ylabel and not ycat else 0.0) + left_lab + 8
     annot_w = 0.0
+    if style == "heat":
+        annot_w = (
+            text_width(R.plain(_WORDS["en"]["row_total"].format(n=99999)), NOTE_SIZE)
+            + 8
+        )
     if style == "forest":
         annot_w = max(
             (
@@ -1443,40 +1954,17 @@ def _draw_panel(
     plot_h = plot_b - plot_t
 
     # --- axis maps
-    if style == "forest":
+    if panel.x_axis.kind == "category":
+        xmap = AxisMap("category", plot_l, plot_r, None, len(panel.x_axis.categories))
+    else:
         xmap = AxisMap("linear", plot_l, plot_r, xs)
-        # row 0 at the top: map index to page y
+    if ycat:  # row 0 at the top: map index to page y
         ymap = AxisMap("category", plot_t, plot_b, None, len(panel.y_axis.categories))
     else:
-        if panel.x_axis.kind == "category":
-            xmap = AxisMap(
-                "category", plot_l, plot_r, None, len(panel.x_axis.categories)
-            )
-        else:
-            xmap = AxisMap("linear", plot_l, plot_r, xs)
         ymap = AxisMap("linear", plot_b, plot_t, ys)
 
     # --- grid, axes, ticks
-    if style == "forest":
-        assert xs is not None
-        for t in xs.ticks:
-            px = xmap.px(t)
-            items.append(
-                Line(px, plot_t, px, plot_b, stroke=GRID, width=0.6, role="grid")
-            )
-            items.append(
-                Line(px, plot_b, px, plot_b + 3, stroke=AXIS, width=0.8, role="tick")
-            )
-            items.append(
-                Label(
-                    px,
-                    plot_b + 3 + TICK_SIZE,
-                    tick_label(t, xs, panel.x_axis.fmt),
-                    TICK_SIZE,
-                    "middle",
-                    role="tick-label",
-                )
-            )
+    if ycat:
         for ci, c in enumerate(panel.y_axis.categories):
             cy = ymap.px(ci)
             lines = wrap(R(c), TICK_SIZE, left_lab, max_lines=2)
@@ -1506,39 +1994,37 @@ def _draw_panel(
                     role="tick-label",
                 )
             )
-        if panel.x_axis.kind == "category":
-            for ci, lines in enumerate(xlines):
-                cx = xmap.px(ci)
+    if panel.x_axis.kind == "category":
+        for ci, lines in enumerate(xlines):
+            cx = xmap.px(ci)
+            items.append(
+                Line(cx, plot_b, cx, plot_b + 3, stroke=AXIS, width=0.8, role="tick")
+            )
+            ty = plot_b + 3 + TICK_SIZE
+            for ln in lines:
+                items.append(Label(cx, ty, ln, TICK_SIZE, "middle", role="tick-label"))
+                ty += TICK_SIZE * LINE_H
+    else:
+        assert xs is not None
+        for t in xs.ticks:
+            px = xmap.px(t)
+            if style == "forest":
                 items.append(
-                    Line(
-                        cx, plot_b, cx, plot_b + 3, stroke=AXIS, width=0.8, role="tick"
-                    )
+                    Line(px, plot_t, px, plot_b, stroke=GRID, width=0.6, role="grid")
                 )
-                ty = plot_b + 3 + TICK_SIZE
-                for ln in lines:
-                    items.append(
-                        Label(cx, ty, ln, TICK_SIZE, "middle", role="tick-label")
-                    )
-                    ty += TICK_SIZE * LINE_H
-        else:
-            assert xs is not None
-            for t in xs.ticks:
-                px = xmap.px(t)
-                items.append(
-                    Line(
-                        px, plot_b, px, plot_b + 3, stroke=AXIS, width=0.8, role="tick"
-                    )
+            items.append(
+                Line(px, plot_b, px, plot_b + 3, stroke=AXIS, width=0.8, role="tick")
+            )
+            items.append(
+                Label(
+                    px,
+                    plot_b + 3 + TICK_SIZE,
+                    tick_label(t, xs, panel.x_axis.fmt),
+                    TICK_SIZE,
+                    "middle",
+                    role="tick-label",
                 )
-                items.append(
-                    Label(
-                        px,
-                        plot_b + 3 + TICK_SIZE,
-                        tick_label(t, xs, panel.x_axis.fmt),
-                        TICK_SIZE,
-                        "middle",
-                        role="tick-label",
-                    )
-                )
+            )
     # frame: left and bottom axis lines
     items.append(
         Line(plot_l, plot_t, plot_l, plot_b, stroke=AXIS, width=0.9, role="axis")
@@ -1557,7 +2043,7 @@ def _draw_panel(
                 role="axis-label",
             )
         )
-    if ylabel and style != "forest":
+    if ylabel and not ycat:
         items.append(
             Label(
                 left + 9,
@@ -1569,7 +2055,7 @@ def _draw_panel(
                 role="axis-label",
             )
         )
-    elif ylabel and style == "forest":
+    elif ylabel and ycat:
         items.append(
             Label(
                 plot_l,
@@ -1583,7 +2069,13 @@ def _draw_panel(
         )
 
     geom = PanelGeometry(
-        left=plot_l, top=plot_t, width=plot_w, height=plot_h, x=xmap, y=ymap
+        left=plot_l,
+        top=plot_t,
+        width=plot_w,
+        height=plot_h,
+        x=xmap,
+        y=ymap,
+        styles=styles,
     )
 
     # --- reference lines (under the data)
@@ -1603,7 +2095,7 @@ def _draw_panel(
                     role="refline",
                 )
             )
-            lab = R(r.label)
+            lab = R.cap(R(r.label), "refline")
             if lab:
                 if (
                     px + 3 + text_width(lab, NOTE_SIZE) > plot_r + 8
@@ -1645,7 +2137,7 @@ def _draw_panel(
                     role="refline",
                 )
             )
-            lab = R(r.label)
+            lab = R.cap(R(r.label), "refline")
             if lab:
                 items.append(
                     Label(
@@ -1666,6 +2158,7 @@ def _draw_panel(
         "forest": _forest,
         "step": _step,
         "lines": _lines,
+        "heat": _heat,
     }[style]
     draw(items, panel, pi, geom)
     return geom
@@ -1679,7 +2172,7 @@ def _bars(items: list[Item], panel: Panel, pi: int, g: PanelGeometry) -> None:
     bar_w = group_w / ns
     base = g.y.px(0.0)
     for si, s in enumerate(panel.series):
-        st = series_style(si, s)
+        st = g.styles[si]
         for pj, p in enumerate(s.points):
             ref = (pi, si, pj)
             cx = g.x.px(p.x) - group_w / 2 + bar_w * (si + 0.5)
@@ -1764,7 +2257,7 @@ def _stack(items: list[Item], panel: Panel, pi: int, g: PanelGeometry) -> None:
     bar_w = min(cell * 0.6, 70.0)
     cum = [0.0] * ncat
     for si, s in enumerate(panel.series):
-        st = series_style(si, s)
+        st = g.styles[si]
         for pj, p in enumerate(s.points):
             ci = int(p.x)
             lo_v, hi_v = cum[ci], cum[ci] + p.y
@@ -1836,7 +2329,7 @@ def _forest(items: list[Item], panel: Panel, pi: int, g: PanelGeometry) -> None:
     row_h = g.height / len(panel.y_axis.categories)
     off_step = min(10.0, row_h * 0.6 / max(ns, 1))
     for si, s in enumerate(panel.series):
-        st = series_style(si, s)
+        st = g.styles[si]
         for pj, p in enumerate(s.points):
             ref = (pi, si, pj)
             cy = g.y.px(p.y) + (si - (ns - 1) / 2) * off_step
@@ -1883,26 +2376,65 @@ def _step_path(pts: Sequence[tuple[float, float]]) -> list[tuple[float, float]]:
 
 
 def _step(items: list[Item], panel: Panel, pi: int, g: PanelGeometry) -> None:
+    """Interval bands first (all series), then the curves, markers and labels,
+    so no band ever covers another series' curve. Consecutive points that have
+    an interval share a band; a point with an interval on its own gets an
+    error bar; a point without one breaks the band."""
+    bands: list[Item] = []
+    front: list[Item] = []
     for si, s in enumerate(panel.series):
-        st = series_style(si, s)
+        st = g.styles[si]
         pts = [(g.x.px(p.x), g.y.px(p.y)) for p in s.points]
-        if all(p.lo is not None for p in s.points) and len(pts) > 1:
-            up = _step_path([(g.x.px(p.x), g.y.px(p.hi)) for p in s.points])
-            dn = _step_path([(g.x.px(p.x), g.y.px(p.lo)) for p in s.points])
-            items.append(
+        eff = [effective_interval("step", s, p) for p in s.points]
+        runs: list[list[int]] = []
+        run: list[int] = []
+        for pj, (_lo, _hi, kind) in enumerate(eff):
+            if kind in ("given", "zero"):
+                run.append(pj)
+            elif run:
+                runs.append(run)
+                run = []
+        if run:
+            runs.append(run)
+        for run in runs:
+            if len(run) == 1:
+                pj = run[0]
+                x = pts[pj][0]
+                y1, y2 = g.y.px(eff[pj][0]), g.y.px(eff[pj][1])
+                ref = (pi, si, pj)
+                front.append(
+                    Line(x, y1, x, y2, stroke=st.color, width=1.4, role="ci", ref=ref)
+                )
+                for yy in (y1, y2):
+                    front.append(
+                        Line(
+                            x - 3,
+                            yy,
+                            x + 3,
+                            yy,
+                            stroke=st.color,
+                            width=1.4,
+                            role="ci-cap",
+                            ref=ref,
+                        )
+                    )
+                continue
+            up = _step_path([(pts[j][0], g.y.px(eff[j][1])) for j in run])
+            dn = _step_path([(pts[j][0], g.y.px(eff[j][0])) for j in run])
+            bands.append(
                 Poly(
                     tuple(up + dn[::-1]),
                     stroke=None,
                     fill=blend(st.color),
                     closed=True,
                     role="band",
-                    ref=(pi, si, 0),
+                    ref=(pi, si, run[0]),
+                    refs=tuple((pi, si, j) for j in run),
                 )
             )
-        path = _step_path(pts)
-        items.append(
+        front.append(
             Poly(
-                tuple(path),
+                tuple(_step_path(pts)),
                 stroke=st.color,
                 width=2.6 if st.heavy else 1.6,
                 dash=_dash(st.dash),
@@ -1911,12 +2443,12 @@ def _step(items: list[Item], panel: Panel, pi: int, g: PanelGeometry) -> None:
             )
         )
         last = len(s.points) - 1
-        items += _marker_items(
+        front += _marker_items(
             st.marker, pts[last][0], pts[last][1], 7, st.color, (pi, si, last)
         )
         for pj, p in enumerate(s.points):
             if p.label:
-                items.append(
+                front.append(
                     Label(
                         pts[pj][0] + 5,
                         pts[pj][1] - 4,
@@ -1925,12 +2457,14 @@ def _step(items: list[Item], panel: Panel, pi: int, g: PanelGeometry) -> None:
                         role="point-label",
                     )
                 )
+    items += bands
+    items += front
 
 
 def _lines(items: list[Item], panel: Panel, pi: int, g: PanelGeometry) -> None:
     ns = len(panel.series)
     for si, s in enumerate(panel.series):
-        st = series_style(si, s)
+        st = g.styles[si]
         dx = (si - (ns - 1) / 2) * 3.0
         pts = [(g.x.px(p.x) + dx, g.y.px(p.y)) for p in s.points]
         if len(pts) > 1:
@@ -1979,3 +2513,70 @@ def _lines(items: list[Item], panel: Panel, pi: int, g: PanelGeometry) -> None:
                         role="point-label",
                     )
                 )
+
+
+def _heat(items: list[Item], panel: Panel, pi: int, g: PanelGeometry) -> None:
+    """A confusion matrix: each cell shaded by its share of the row, with the
+    count and the share written in it, and the row total on the right."""
+    s = panel.series[0]
+    ncol = len(panel.x_axis.categories)
+    nrow = len(panel.y_axis.categories)
+    cw, ch = g.width / ncol, g.height / nrow
+    totals: dict[int, float] = {}
+    for p in s.points:
+        totals[int(p.y)] = totals.get(int(p.y), 0.0) + p.value
+    for pj, p in enumerate(s.points):
+        ref = (pi, 0, pj)
+        total = totals[int(p.y)]
+        share = p.value / total if total else 0.0
+        fill = blend(PALETTE[0], PAPER, 0.92 * (1 - share))
+        cx, cy = g.x.px(p.x), g.y.px(p.y)
+        items.append(
+            Rect(
+                cx - cw / 2,
+                cy - ch / 2,
+                cw,
+                ch,
+                fill=fill,
+                stroke=PAPER,
+                stroke_width=2.0,
+                role="cell",
+                ref=ref,
+            )
+        )
+        ink = PAPER if luminance(fill) < 0.3 else INK
+        items.append(
+            Label(
+                cx,
+                cy - 1,
+                num(p.value),
+                11.0,
+                "middle",
+                bold=True,
+                fill=ink,
+                role="cell-count",
+            )
+        )
+        items.append(
+            Label(
+                cx,
+                cy + 10,
+                f"{share * 100:.0f}%",
+                8.5,
+                "middle",
+                fill=ink,
+                role="cell-share",
+            )
+        )
+    for r in range(nrow):
+        if r in totals:
+            items.append(
+                Label(
+                    g.left + g.width + 6,
+                    g.y.px(r) + NOTE_SIZE * 0.35,
+                    _WORDS["en"]["row_total"].format(n=num(totals[r])),
+                    NOTE_SIZE,
+                    fill=INK_SOFT,
+                    role="row-total",
+                )
+            )

@@ -158,7 +158,9 @@ class _Page:
         return ("\n".join(self.ops) + "\n").encode("latin-1")
 
 
-def scene_to_pdf(scene: Scene) -> bytes:
+def scene_to_pdf(
+    scene: Scene, title: str | None = None, subject: str | None = None
+) -> bytes:
     page = _Page(scene.height)
     page.ops.append(f"q 1 1 1 rg 0 0 {coord(scene.width)} {coord(scene.height)} re f Q")
     for it in scene.items:
@@ -166,7 +168,7 @@ def scene_to_pdf(scene: Scene) -> bytes:
     content = page.stream()
     objs: list[bytes] = [
         b"<< /Type /Catalog /Pages 2 0 R /Lang ("
-        + scene.lang.encode("ascii")
+        + scene.lang_used.encode("ascii")
         + b") >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         (
@@ -181,9 +183,9 @@ def scene_to_pdf(scene: Scene) -> bytes:
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
         b"<< /Title "
-        + _hex_utf16(scene.title)
+        + _hex_utf16(scene.title if title is None else title)
         + b" /Subject "
-        + _hex_utf16(scene.desc)
+        + _hex_utf16(scene.desc if subject is None else subject)
         + b" /Producer ("
         + PRODUCER.encode("ascii")
         + b") >>",
@@ -204,21 +206,77 @@ def scene_to_pdf(scene: Scene) -> bytes:
     return bytes(out)
 
 
+class LossyTextError(ValueError):
+    """``strict`` rendering found text the base-14 fonts cannot show as written."""
+
+    def __init__(self, substitutions):
+        self.substitutions = tuple(substitutions)
+        super().__init__(
+            f"{len(self.substitutions)} text(s) are not Latin-1 and would change in the PDF: "
+            + "; ".join(
+                f"{s['text']!r} -> {s['to']!r} ({s['reason']})"
+                for s in self.substitutions[:3]
+            )
+        )
+
+
+@dataclass(frozen=True)
+class PdfRender:
+    """A rendered PDF with the bookkeeping a report manifest needs."""
+
+    data: bytes
+    substitutions: tuple[dict, ...]  # every text that was changed, and why
+    truncated: tuple[str, ...]  # roles whose text was cut to fit
+    lang: str  # the language the title was written in
+
+    def manifest(self) -> dict:
+        """``{"pdf": "ok" | "lossy(n)", "substitutions": [...], "truncated": [...]}``"""
+        n = len(self.substitutions)
+        return {
+            "pdf": f"lossy({n})" if n else "ok",
+            "substitutions": [dict(s) for s in self.substitutions],
+            "truncated": list(self.truncated),
+            "lang": self.lang,
+        }
+
+
+def render_pdf_report(
+    spec: FigureSpec,
+    lang: str | None = None,
+    width: float = 640.0,
+    strict: bool = False,
+) -> PdfRender:
+    """The figure as a one-page PDF plus the list of substitutions made to
+    fit the Latin-only fonts. With ``strict`` any substitution raises
+    ``LossyTextError`` instead."""
+    lang = lang or spec.lang
+    scene = layout(spec, lang=lang, latin_only=True, width=width)
+    if strict and scene.substitutions:
+        raise LossyTextError(scene.substitutions)
+    data = scene_to_pdf(scene, spec.title.get(lang), spec.summary.get(lang))
+    return PdfRender(data, scene.substitutions, scene.truncated, scene.lang_used)
+
+
 def render_pdf(
     spec: FigureSpec, lang: str | None = None, width: float = 640.0
 ) -> bytes:
-    """The figure as a one-page PDF (bytes). Latin text only (see module doc)."""
-    return scene_to_pdf(layout(spec, lang=lang, latin_only=True, width=width))
+    """The figure as a one-page PDF (bytes). Latin text only (see module doc);
+    use ``render_pdf_report`` to learn what was substituted."""
+    return render_pdf_report(spec, lang=lang, width=width).data
 
 
-def write_pdf(spec: FigureSpec, path, lang: str | None = None) -> None:
-    data = render_pdf(spec, lang=lang)
+def write_pdf(
+    spec: FigureSpec, path, lang: str | None = None, strict: bool = False
+) -> tuple[dict, ...]:
+    """Write the PDF atomically; returns the substitutions that were made."""
+    res = render_pdf_report(spec, lang=lang, strict=strict)
     tmp = f"{path}.partial"
     with open(tmp, "wb") as f:
-        f.write(data)
+        f.write(res.data)
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, path)
+    return res.substitutions
 
 
 # --------------------------------------------------------------------------
@@ -268,6 +326,98 @@ def _decode_literal(raw: bytes) -> str:
 
 def _fail(msg: str):
     raise PdfError(msg)
+
+
+# The operators this writer emits, with their operand counts.
+OPERATORS = {
+    "q": 0, "Q": 0, "cm": 6, "rg": 3, "RG": 3, "w": 1, "d": 2, "j": 1, "J": 1,
+    "m": 2, "l": 2, "c": 6, "h": 0, "re": 4, "f": 0, "S": 0, "B": 0,
+    "BT": 0, "ET": 0, "Tf": 2, "Tm": 6, "Tj": 1,
+}  # fmt: skip
+_TEXT_OPS = {"Tf", "Tm", "Tj"}
+_TOKEN = re.compile(
+    rb"\s*(?:(\((?:\\.|[^\\()])*\))|(\[[^\]]*\])|(/[^\s/\[\]()<>]+)"
+    rb"|(-?\d+(?:\.\d+)?|-?\.\d+)|([A-Za-z][A-Za-z*]*))",
+    re.DOTALL,
+)
+
+
+def _check_content(stream: bytes, fonts: set[str]) -> tuple[str, ...]:
+    """Tokenise the page content: only known operators with the right operand
+    count, q/Q and BT/ET balanced, text only inside BT, only declared fonts.
+    Returns every string shown with ``Tj``."""
+    pos = 0
+    operands: list[tuple[str, bytes]] = []
+    depth = 0
+    in_text = False
+    text: list[str] = []
+    while True:
+        while pos < len(stream) and stream[pos : pos + 1].isspace():
+            pos += 1
+        if pos >= len(stream):
+            break
+        m = _TOKEN.match(stream, pos)
+        if not m:
+            _fail(f"bad token in the content stream at byte {pos}")
+        pos = m.end()
+        if m.group(1) is not None:
+            operands.append(("string", m.group(1)[1:-1]))
+        elif m.group(2) is not None:
+            operands.append(("array", m.group(2)))
+        elif m.group(3) is not None:
+            operands.append(("name", m.group(3)))
+        elif m.group(4) is not None:
+            operands.append(("number", m.group(4)))
+        else:
+            op = m.group(5).decode("ascii")
+            if op not in OPERATORS:
+                _fail(f"unknown operator {op!r} in the content stream")
+            if len(operands) != OPERATORS[op]:
+                _fail(
+                    f"operator {op} takes {OPERATORS[op]} operand(s), got {len(operands)}"
+                )
+            if op in _TEXT_OPS and not in_text:
+                _fail(f"{op} outside BT/ET")
+            if (
+                op not in _TEXT_OPS
+                and op not in ("BT", "ET", "q", "Q", "rg", "RG")
+                and in_text
+            ):
+                _fail(f"{op} inside a BT/ET text object")
+            if op == "q":
+                depth += 1
+            elif op == "Q":
+                depth -= 1
+                if depth < 0:
+                    _fail("unbalanced Q without a matching q")
+            elif op == "BT":
+                if in_text:
+                    _fail("BT without the previous ET")
+                in_text = True
+            elif op == "ET":
+                if not in_text:
+                    _fail("ET without BT")
+                in_text = False
+            elif op == "Tf":
+                kind, name = operands[0]
+                if kind != "name" or operands[1][0] != "number":
+                    _fail("Tf takes a font name and a size")
+                if name[1:].decode("ascii", "replace") not in fonts:
+                    _fail(
+                        f"text uses font {name.decode('ascii', 'replace')} that the page does not declare"
+                    )
+            elif op == "Tj":
+                if operands[0][0] != "string":
+                    _fail("Tj takes a string")
+                text.append(_decode_literal(operands[0][1]))
+            operands = []
+    if operands:
+        _fail("operands left over at the end of the content stream")
+    if in_text:
+        _fail("BT without ET at the end of the content stream")
+    if depth != 0:
+        _fail("unbalanced q/Q at the end of the content stream")
+    return tuple(text)
 
 
 def verify_pdf(data: bytes) -> PdfReport:
@@ -322,21 +472,30 @@ def verify_pdf(data: bytes) -> PdfReport:
             _fail(f"object {i} has no endobj")
         bodies[i] = data[off + len(tag) : end]
 
-    cat = bodies[int(root.group(1))]
+    def obj(n: int) -> bytes:
+        if n not in bodies:
+            _fail(f"reference to missing object {n}")
+        return bodies[n]
+
+    cat = obj(int(root.group(1)))
     if b"/Type /Catalog" not in cat:
         _fail("/Root is not a catalog")
     pages_ref = re.search(rb"/Pages\s+(\d+)\s+0\s+R", cat)
     if not pages_ref:
         _fail("catalog has no /Pages")
-    pages = bodies[int(pages_ref.group(1))]
+    pages_no = int(pages_ref.group(1))
+    pages = obj(pages_no)
     if b"/Type /Pages" not in pages or not re.search(rb"/Count\s+1\b", pages):
         _fail("page tree must hold exactly one page")
     kid = re.search(rb"/Kids\s*\[\s*(\d+)\s+0\s+R\s*\]", pages)
     if not kid:
         _fail("page tree has no kid")
-    page = bodies[int(kid.group(1))]
+    page = obj(int(kid.group(1)))
     if b"/Type /Page" not in page:
         _fail("kid is not a page")
+    parent = re.search(rb"/Parent\s+(\d+)\s+0\s+R", page)
+    if not parent or int(parent.group(1)) != pages_no:
+        _fail("page /Parent does not point at the page tree")
     box = re.search(rb"/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]", page)
     if not box:
         _fail("page has no MediaBox")
@@ -344,8 +503,10 @@ def verify_pdf(data: bytes) -> PdfReport:
     if not contents:
         _fail("page has no /Contents")
     fonts = []
-    for ref in re.findall(rb"/F\d+\s+(\d+)\s+0\s+R", page):
-        fb = bodies[int(ref)]
+    declared = set()
+    for fname, ref in re.findall(rb"/(F\d+)\s+(\d+)\s+0\s+R", page):
+        declared.add(fname.decode("ascii"))
+        fb = obj(int(ref))
         name = re.search(rb"/BaseFont\s*/([\w-]+)", fb)
         if not name or b"/Type /Font" not in fb:
             _fail(f"font object {int(ref)} is not a font")
@@ -353,7 +514,7 @@ def verify_pdf(data: bytes) -> PdfReport:
     if not fonts:
         _fail("page declares no font")
 
-    sb = bodies[int(contents.group(1))]
+    sb = obj(int(contents.group(1)))
     length = re.search(rb"/Length\s+(\d+)", sb)
     s0 = sb.find(b"stream\n")
     if not length or s0 < 0:
@@ -361,9 +522,7 @@ def verify_pdf(data: bytes) -> PdfReport:
     stream = sb[s0 + 7 : s0 + 7 + int(length.group(1))]
     if sb[s0 + 7 + int(length.group(1)) :] != b"endstream":
         _fail("stream /Length does not match the data")
-    text = []
-    for lit in re.finditer(rb"\(((?:\\.|[^\\()])*)\)\s*Tj", stream):
-        text.append(_decode_literal(lit.group(1)))
+    text = _check_content(stream, declared)
     return PdfReport(
         objects=count - 1,
         page_width=float(box.group(1)),
