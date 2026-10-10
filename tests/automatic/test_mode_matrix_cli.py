@@ -28,7 +28,7 @@ def test_validate_in_each_mode(job, capsys, reset_mode):
     code, found = as_json(capsys, "validate", "--config", str(job))
     if reset_mode == modes.HUMAN:
         # No scene provider that can answer is configured in this version.
-        assert code == 2 and "scene" in found["error"]
+        assert code == 2 and "scene" in found["error"].lower()
     else:
         assert code == 0 and found["ok"]
 
@@ -42,7 +42,8 @@ def test_doctor_in_each_mode(job, capsys, reset_mode):
     assert not checks["real robot adapter"]["ok"]
     launch = checks.get("launch")
     if reset_mode == modes.HUMAN:
-        assert launch is not None and not launch["ok"] and "scene" in launch["detail"]
+        assert launch is not None and not launch["ok"]
+        assert "scene" in launch["detail"].lower()
     else:
         assert launch is None or launch["ok"]
     assert code == (0 if found["ok"] else 1)

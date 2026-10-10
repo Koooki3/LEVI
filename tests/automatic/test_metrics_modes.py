@@ -461,7 +461,8 @@ def test_both_modes_against_hand_computed_values(tmp_path, reset_mode):
     assert found["autonomous"]["forward_episodes"] == 2
     assert found["early_termination"]["early_stops"] == 2
     assert found["scene_check"] == "provider"
-    assert found["mode_source"]["scene_check"] == "default"
+    # A minor-0 header has no scene_check (the default); minor 1 names it.
+    assert found["mode_source"]["scene_check"] in ("default", "run_header")
     assert found["comparable"] == list(M.COMPARABLE)
     assert found["mode_specific"] == list(M.MODE_SPECIFIC)
     assert found["schema"] == "levi.aeri.metrics.v1"
@@ -474,7 +475,25 @@ def test_both_modes_against_hand_computed_values(tmp_path, reset_mode):
 @pytest.mark.mode_matrix("metrics:reset_mode", "metrics:mode_source")
 def test_the_mode_of_a_run_without_a_header_field_is_inferred(tmp_path, reset_mode):
     r, _ = two_episodes(tmp_path, reset_mode)
-    found = M.report(r.orch.journal.events)  # no mode passed (old callers)
+    events = list(r.orch.journal.events)
+    header = events[0].header
+    if getattr(header, "reset_mode", None) is not None:
+        # Contract minor 1 (T-CL-06): the run says its mode itself.
+        found = M.report(events)
+        assert found["reset_mode"] == reset_mode
+        assert found["mode_source"]["reset_mode"] == "run_header"
+    # The same journal as a minor-0 run would have written it (no mode in
+    # its header), read by an old caller that passes no mode either.
+    old = [
+        SimpleNamespace(
+            record="run_header",
+            header=SimpleNamespace(plan_sha256=header.plan_sha256),
+            mono_ns=events[0].mono_ns,
+            clock_domain=events[0].clock_domain,
+        ),
+        *events[1:],
+    ]
+    found = M.report(old)
     if reset_mode == "single_reset_policy":
         assert found["reset_mode"] == reset_mode
         assert found["mode_source"]["reset_mode"] == "journal"
@@ -483,5 +502,8 @@ def test_the_mode_of_a_run_without_a_header_field_is_inferred(tmp_path, reset_mo
         # No reset episode, no manifest field: unknown, and the person's
         # reset is counted as unplanned (never flatters).
         assert found["reset_mode"] is None
+        assert found["mode_source"]["reset_mode"] == "unknown"
         assert found["automation"]["unplanned"] == 1
         assert found["automation"]["planned"] == 0
+    assert found["scene_check"] == "provider"
+    assert found["mode_source"]["scene_check"] == "default"
