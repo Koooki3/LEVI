@@ -46,8 +46,10 @@ FIDELITY = (
     ),
     (
         "FakeRecorder keeps steps in memory and writes no video; it does not "
-        "produce files that `criteria.check` reads (that is the recorder layer, "
-        "T-C-10)."
+        "produce files that `criteria.check` reads. The recorder layer "
+        "(levi/automatic/recorder.py) writes real rollout folders, but its "
+        "default media sink writes no video: the frame-count and camera-stall "
+        "facts it seals are those of a sink, not of real cameras."
     ),
     "Camera frames are counters; a stall repeats the counter, no pixels.",
     (

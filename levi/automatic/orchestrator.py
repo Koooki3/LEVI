@@ -261,6 +261,7 @@ class Orchestrator:
         clock,
         fence: sm.MotionFence,
         crash_hook: Callable[[str], None] | None = None,
+        listener: Callable[[str, dict], None] | None = None,
     ):
         self.journal = journal
         self.config = config
@@ -273,6 +274,8 @@ class Orchestrator:
         self.clock = clock
         self.fence = fence
         self.crash_hook = crash_hook
+        # Told every committed state (the session files, C2); never decides.
+        self.listener = listener
         self.strategy = config.strategy()
         contract = config.initial_state
         self._specs = {**config.specs, **(contract.spec() if contract else {})}
@@ -313,7 +316,9 @@ class Orchestrator:
             clock=clock,
             clock_domain=clock.domain,
         )
-        return cls(journal, config=config, **parts)
+        orchestrator = cls(journal, config=config, **parts)
+        orchestrator._tell(orchestrator.state)
+        return orchestrator
 
     @classmethod
     def restore(cls, directory, config: RunConfig, **parts) -> "Orchestrator":
@@ -332,7 +337,41 @@ class Orchestrator:
             **orchestrator._crash_result(),
         )
         orchestrator.recovery = found
+        orchestrator._recover_rollouts()
+        orchestrator._tell(orchestrator.state)
         return orchestrator
+
+    def _recover_rollouts(self) -> None:
+        """Rollouts whose seal the journal did not commit become
+        ``incomplete_*`` (a recorder that writes folders has ``recover``)."""
+        recover = getattr(self.recorder, "recover", None)
+        if recover is None or self.journal.corrupt:
+            return
+        from .recorder import sealed_episodes
+
+        try:
+            renamed = recover(sealed_episodes(self.journal.events))
+        except Exception as exc:  # noqa: BLE001 - the run is locked anyway
+            self._note("recorder_error", f"recover: {exc}")
+            return
+        if renamed:
+            self._note("rollouts_recovered", ", ".join(renamed)[:300])
+
+    def _tell(self, state: str, reason: str = "", episode_id=None) -> None:
+        if self.listener is None:
+            return
+        try:
+            self.listener(
+                state,
+                {
+                    "control_epoch": self.journal.control_epoch,
+                    "stopped": state == "COMPLETED" and reason == "operator_stop",
+                    "reason": reason,
+                    "episode_id": episode_id,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - a session file never stops a run
+            self._note("session_write_failed", f"{type(exc).__name__}: {exc}")
 
     def close(self) -> None:
         self.journal.close()
@@ -582,6 +621,7 @@ class Orchestrator:
             if found is not None and ctx is not None:
                 ctx.result_written = True
             self._crash("after_committed")
+            self._tell(to, reason, ctx.episode_id if ctx else None)
             if reason == "operator_stop" and to in ("WAIT_HUMAN", "COMPLETED"):
                 self._consume_stops(auth.get("command_id"))
             if urgent:

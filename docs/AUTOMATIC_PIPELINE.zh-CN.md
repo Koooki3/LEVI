@@ -229,11 +229,27 @@ initial_state:
 
 测试把每个状态都喂给后台实时标注服务自己的门控（`gpumgr.gate`）和冷启动保护：门恰好在策略可能推理时对推理关闭。若把复位策略执行状态写成 `waiting_reset` 或任何新状态名，门就会打开。
 
+## 录制层（`levi/automatic/recorder.py`）
+
+`RolloutRecorder(root, run_id=, run_dir=, group=, texts=, media=)` 把每个片段写成后台实时标注服务已经能读的 rollout 目录（接口 C1）：`<root>/<group>/<task_folder>/demo_NNNN`，`NNNN` 是片段编号，前向和复位片段各在自己的任务目录（`RunConfig.forward_folder`、`reset_folder`）。每次运行请用自己的任务目录：目录里已经用过的编号（`demo_`、`incomplete_` 或 `discarded_`）绝不覆盖，片段打不开，运行锁定（`recorder_failed`）。
+
+**封存**沿用后台实时标注服务的规则（`levi.live.criteria`）：同步步骤文件（`aeri_steps.csv`），媒体写入器收尾，`events.csv` 写入 `episode_end` 行，`metadata.json` 写入 `stopped_at`、`media_storage.video_frames_match_csv` 和 `cameras.stall_detection.stalled`，每个文件整份写入并同步；再读回核对；**最后才创建 `.complete`**（临时文件、fsync、改名、fsync 目录）。标记之前任何一次写失败都会抛出，所以不会在不完整的 rollout 上留下标记；运行锁定（`recorder_failed`），目录改名为 `incomplete_NNNN` 并写 `eval.abort_reason`（安全停止写 `fr3_fault`，后台实时标注服务会把它读成 FR3 故障）。重复封存返回第一次的结果。
+
+**标签。** `eval.outcome` 保持 `unlabeled`，`eval.verdict_by` 为 `aeri`，不写 `eval.agent_label`：自动结论只记在运行日志里，绝不写成操作员标签或 agent 标签。`eval.aeri` 记录运行和片段。
+
+**运行 manifest**（`<run_dir>/manifest.json`，`levi.aeri.manifest.v1`）：本次运行打开过的每个片段、它的目录和状态（`opening`、`open`、`complete`、`incomplete`），复位片段的 `after_forward` 和前向片段的 `after_resets`。条目在目录创建之前写入。它是派生视图，唯一事实来源仍是运行日志。
+
+**重启之后** `Orchestrator.restore` 调用 `recorder.recover(...)`：本次运行中封存事务没有被日志提交的 rollout 一律改名为 `incomplete_*`（`orchestrator_crash`）；如果崩溃发生在写标记和提交之间，先删除标记，保证不会出现“目录说完成、日志说未完成”。其他运行的目录从不触碰。
+
+**会话文件（C2）。** `SessionFiles(root, run_id=, group=, folders=)` 作为编排器的 `listener`：每次提交状态后重写两个角色文件（`<root>/.eval_sessions/<group>__<task_folder>.json`），只用客户端的 7 个状态（见上表）、ISO 时间、`levi.reset_wait_s: null`，前向文件写 `levi.mode: unattended`，复位文件写 `levi.enabled: false`，另有 `episode_role` 和 `aeri{run_id, state, control_epoch}`。会话写失败只记一条 note（`session_write_failed`），不会停止运行。`heartbeat()` 重写最后的状态（后台实时标注服务读端在 10 秒没有更新且进程不在时判定会话崩溃）。请用 `watch.exclude` 把复位目录排除在后台实时标注之外，免得前向规格去标注复位片段。
+
+**媒体。** `MediaSink`（`open`、`frame`、`finish`、`abort`）负责写采集格式（视频、位姿和夹爪 CSV）并报告事实。默认的 `NullMedia` 不写视频。
+
 ## Fake（`integrations/fr3_automatic/fake.py`）
 
 `FakeClock`（只在推进时走）、`FakeRobot`（只凭围栏的令牌运动；可脚本注入：连续三次 503 后闩锁、连续六次状态过期后闩锁、位姿冻结、红灯、闩锁、丢失应答、命令发出后进程崩溃、Home 超出容差、相机停滞）、`FakePolicy`（在 Fake 时钟上固定延迟；超时、服务端错误、NaN、维度或代次错误、过早的 `valid_from`、acquire 或 quiesce 失败、服务端崩溃）和 `FakeRecorder`（带写线程；写失败在下一次 commit 或 seal 时报出，所有写入成功后才写 `.complete`，`abort` 得到 `incomplete_*`）。该模块不 import 任何网络、进程或 LEVI 代码。
 
-**Fake 与真机的差别**（`fake.FIDELITY`）：没有动力学和停止距离；Home 除非脚本指定否则总在容差内（真实的 `_go_home` 不核对到位）；急停对 Fake 可见，而真机 FR3 的软件状态过期联锁看不到急停；闩锁计数只部分模仿 `Fr3Guard`；健康状态与命令同一步读取（真实 C3 文件 2 Hz 写入）；没有 GPU 争用和冷启动；录制器不写 `criteria.check` 能读的文件；相机帧只是计数；没有网络。**这些测试通过只证明状态机逻辑，绝不代表真机行为。**
+**Fake 与真机的差别**（`fake.FIDELITY`）：没有动力学和停止距离；Home 除非脚本指定否则总在容差内（真实的 `_go_home` 不核对到位）；急停对 Fake 可见，而真机 FR3 的软件状态过期联锁看不到急停；闩锁计数只部分模仿 `Fr3Guard`；健康状态与命令同一步读取（真实 C3 文件 2 Hz 写入）；没有 GPU 争用和冷启动；`FakeRecorder` 不写文件（`RolloutRecorder` 写，但它默认的媒体写入器不写视频）；相机帧只是计数；没有网络。**这些测试通过只证明状态机逻辑，绝不代表真机行为。**
 
 **测试**（`tests/automatic/test_aeri_*.py`）：状态表与围栏；各个 Fake；C5 映射表与 C2 门控如实性；裁决器；编排器在设计的故障清单上的行为（错误成功、Unknown、判定超时或离线、事件抖动、复位阶段迟到的前向动作块、策略服务崩溃、相机停滞、没有策略资源、复位到达上限、Home 失败、急停或 FR3 故障、录制器写盘和封存失败、每个事务每个阶段的重启以及 SIGKILL、两次 Resume），以及 150 次带崩溃和恢复的固定种子随机运行。
 

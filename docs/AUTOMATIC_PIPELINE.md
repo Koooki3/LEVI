@@ -546,6 +546,62 @@ cold-start guard: the gate closes for inference exactly while a policy may
 infer. Writing `waiting_reset`, or any new state name, for the reset
 policy's active state would open it.
 
+## Recorder layer (`levi/automatic/recorder.py`)
+
+`RolloutRecorder(root, run_id=, run_dir=, group=, texts=, media=)` writes
+every episode as a rollout folder the live service already reads
+(interface C1): `<root>/<group>/<task_folder>/demo_NNNN`, `NNNN` the
+episode number, forward and reset episodes in their own task folders
+(`RunConfig.forward_folder`, `reset_folder`). Give each run its own task
+folders: a number already used in the folder (`demo_`, `incomplete_` or
+`discarded_`) is never overwritten; the episode cannot open and the run
+locks (`recorder_failed`).
+
+**Sealing** keeps the live service's rule (`levi.live.criteria`): the
+steps file (`aeri_steps.csv`) is synced, the media sink finishes,
+`events.csv` gets its `episode_end` row and `metadata.json` its
+`stopped_at`, `media_storage.video_frames_match_csv` and
+`cameras.stall_detection.stalled`, each written whole and synced; both are
+read back; **`.complete` is created last** (temporary file, fsync, rename,
+fsync of the folder). A failed write anywhere before the marker raises, so
+no marker is left on a rollout that is not whole; the run locks
+(`recorder_failed`) and the folder becomes `incomplete_NNNN` with
+`eval.abort_reason` (`fr3_fault` for a safety stop, which the live service
+reads as an FR3 fault). Sealing twice returns the first result.
+
+**Labels.** `eval.outcome` stays `unlabeled`, `eval.verdict_by` is `aeri`,
+and there is no `eval.agent_label`: the automatic verdict is recorded in
+the run journal only, never as an operator or agent label. `eval.aeri`
+names the run and the episode.
+
+**Run manifest** (`<run_dir>/manifest.json`, `levi.aeri.manifest.v1`):
+every episode the run opened, its folder and state (`opening`, `open`,
+`complete`, `incomplete`), a reset's `after_forward` and a forward
+episode's `after_resets`. An entry is written before its folder exists. It
+is a derived view; the journal stays the source of truth.
+
+**After a restart** `Orchestrator.restore` calls `recorder.recover(...)`:
+every rollout of this run whose seal the journal did not commit becomes
+`incomplete_*` (`orchestrator_crash`), its marker removed if a crash came
+between the marker and the commit, so a folder never says complete while
+the journal says incomplete. Folders of other runs are never touched.
+
+**Session files (C2).** `SessionFiles(root, run_id=, group=, folders=)`
+is the orchestrator's `listener`: after every committed state it rewrites
+both role files (`<root>/.eval_sessions/<group>__<task_folder>.json`)
+with the client's seven states only (table above), ISO times,
+`levi.reset_wait_s: null`, `levi.mode: unattended` on the forward file,
+`levi.enabled: false` on the reset file, `episode_role` and
+`aeri{run_id, state, control_epoch}`. A failed session write is a note
+(`session_write_failed`), never a stop. `heartbeat()` rewrites the last
+state (the live reader calls a session crashed after 10 s without an
+update and with its process gone). Exclude the reset folder from the live
+service (`watch.exclude`) so the forward spec never labels a reset.
+
+**Media.** A `MediaSink` (`open`, `frame`, `finish`, `abort`) writes the
+capture format (videos, pose and gripper CSVs) and reports its facts. The
+default `NullMedia` writes no video.
+
 ## Fakes (`integrations/fr3_automatic/fake.py`)
 
 `FakeClock` (moves only when advanced), `FakeRobot` (moves only under the
@@ -565,8 +621,9 @@ scripted (the real `_go_home` does not check); an e-stop is visible to the
 fake, while on the real FR3 the software staleness interlock does not see
 it; the latch counters imitate `Fr3Guard` only in part; health is read in
 the same step (the real C3 file is written at 2 Hz); no GPU contention or
-cold start; the recorder writes no files that `criteria.check` reads; camera
-frames are counters; there is no network. **Passing these tests proves the
+cold start; `FakeRecorder` writes no files (`RolloutRecorder` does, but its
+default media sink writes no video); camera frames are counters; there is
+no network. **Passing these tests proves the
 state-machine logic only, never behaviour on the robot.**
 
 **Tests** (`tests/automatic/test_aeri_*.py`): the state table and the fence;
