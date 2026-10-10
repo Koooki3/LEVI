@@ -181,3 +181,27 @@ def test_the_benchmark_reports_numbers_and_removes_its_scratch(tmp_path):
     assert list((tmp_path / "s").iterdir()) == []
     with pytest.raises(ValueError):
         bench.run(["nope"])
+
+
+def test_the_bench_command_prints_valid_json(tmp_path, capsys):
+    assert (
+        cli.main(
+            [
+                "bench",
+                "--frames",
+                "20",
+                "--size",
+                "96x64",
+                "--repeat",
+                "1",
+                "--cores",
+                "0",
+                "--scratch",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["schema"] == bench.SCHEMA
+    assert printed["cases"]["pixels"]["within_tolerance"] is True

@@ -155,7 +155,7 @@ PIXEL_TOLERANCE = 1e-9
 def _stats_gap(a, b):
     """Largest absolute difference between two ``inspect`` statistics."""
     return max(
-        abs(x - y)
+        float(abs(x - y))
         for key in ("min", "max", "mean", "std", "count")
         for x, y in zip(
             np.asarray(a[key], dtype=float).ravel(),
