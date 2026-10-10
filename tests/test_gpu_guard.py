@@ -472,3 +472,81 @@ def test_a_recent_free_is_reused_briefly_and_a_busy_gpu_is_not(monkeypatch):
     on_gpu(monkeypatch, [(737719, 8500)], {737719: ACTOR})
     with pytest.raises(gpu.GpuBusy):
         gpu.require_free(config())
+
+
+JUPYTER = "python3 -m jupyter kernel"
+
+
+def counting_smi(monkeypatch):
+    calls = []
+    smi = gpu._smi
+    monkeypatch.setattr(gpu, "_smi", lambda *a: calls.append(a) or smi(*a))
+    return calls
+
+
+def tick(monkeypatch, seconds):
+    clock = gpu.time.monotonic() + seconds
+    monkeypatch.setattr(gpu.time, "monotonic", lambda: clock)
+
+
+def test_a_shared_verdict_is_sampled_every_request_by_default(monkeypatch):
+    """T-B-15: the TTL defaults to 0, so the gate is no looser than before."""
+    monkeypatch.delenv("LEVI_GPU_SHARED_REUSE_SECONDS", raising=False)
+    assert gpu.shared_reuse_seconds() == 0
+    write_policy([{"match": "jupyter", "class": "share"}])
+    on_gpu(monkeypatch, [(9, 2000)], {9: JUPYTER}, util=10)
+    calls = counting_smi(monkeypatch)
+    assert gpu.require_free(config())["state"] == "shared"
+    sampled = len(calls)
+    assert gpu.require_free(config())["state"] == "shared"
+    assert len(calls) == 2 * sampled  # nothing reused
+    # So a load that turns busy is seen by the very next request.
+    on_gpu(monkeypatch, [(9, 2000)], {9: JUPYTER}, util=90)
+    with pytest.raises(gpu.GpuBusy, match="90% busy"):
+        gpu.require_free(config())
+
+
+def test_a_shared_verdict_is_reused_only_within_the_configured_ttl(monkeypatch):
+    monkeypatch.setenv("LEVI_GPU_SHARED_REUSE_SECONDS", "3")
+    write_policy([{"match": "jupyter", "class": "share"}])
+    on_gpu(monkeypatch, [(9, 2000)], {9: JUPYTER}, util=10)
+    calls = counting_smi(monkeypatch)
+    assert gpu.require_free(config())["state"] == "shared"
+    sampled = len(calls)
+    # A new busy load appears; inside the TTL no nvidia-smi call is made.
+    on_gpu(monkeypatch, [(9, 2000), (10, 8000)], {9: JUPYTER, 10: ACTOR}, util=90)
+    calls = counting_smi(monkeypatch)
+    tick(monkeypatch, 2.5)
+    assert gpu.require_free(config())["state"] == "shared"
+    assert calls == []
+    # Past the TTL it is found, at most 3 s after it appeared.
+    tick(monkeypatch, 0.6)  # 3.1 s after the sample
+    with pytest.raises(gpu.GpuBusy, match="guardian .busy"):
+        gpu.require_free(config())
+    assert len(calls) == sampled
+
+
+def test_the_shared_ttl_is_bounded_and_ignores_bad_values(monkeypatch):
+    for text, expected in [
+        ("", 0),
+        ("abc", 0),
+        ("-5", 0),
+        ("nan", 0),
+        ("2.5", 2.5),
+        ("9999", gpu.MAX_SHARED_REUSE_SECONDS),
+    ]:
+        monkeypatch.setenv("LEVI_GPU_SHARED_REUSE_SECONDS", text)
+        assert gpu.shared_reuse_seconds() == expected
+
+
+def test_a_reused_shared_verdict_does_not_outlive_a_free_one(monkeypatch):
+    """A cached entry is judged by its own window: free keeps 10 s, shared 3 s."""
+    monkeypatch.setenv("LEVI_GPU_SHARED_REUSE_SECONDS", "3")
+    on_gpu(monkeypatch, [], {})
+    assert gpu.require_free(config())["state"] == "free"
+    on_gpu(monkeypatch, [(10, 8000)], {10: ACTOR})
+    tick(monkeypatch, 5)
+    assert gpu.require_free(config())["state"] == "free"  # 10 s window still on
+    tick(monkeypatch, 6)  # 11 s after the sample
+    with pytest.raises(gpu.GpuBusy):
+        gpu.require_free(config())

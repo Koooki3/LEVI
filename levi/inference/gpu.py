@@ -559,7 +559,25 @@ def local_endpoint(base_url):
 # How long a request may rely on the guardian's last "free" for the same
 # model servers instead of sampling the GPU again.
 REUSE_FREE_SECONDS = 10.0
+# The same for a "shared" verdict (sharing by policy). Sharing rests on load
+# that moves, so this is off by default: 0 keeps every request sampling, and
+# the gate is no looser than before. ``LEVI_GPU_SHARED_REUSE_SECONDS`` turns
+# it on (a few seconds, capped at MAX_SHARED_REUSE_SECONDS): a busy load that
+# appears is then seen after at most that long.
+MAX_SHARED_REUSE_SECONDS = 30.0
 _RECENT_FREE: dict = {}
+
+
+def shared_reuse_seconds():
+    """The configured reuse window for a "shared" verdict; 0 when unset or
+    unreadable, never negative, never above the cap."""
+    try:
+        value = float(os.getenv("LEVI_GPU_SHARED_REUSE_SECONDS", "0") or 0)
+    except ValueError:
+        return 0.0
+    if not value > 0:  # also NaN
+        return 0.0
+    return min(value, MAX_SHARED_REUSE_SECONDS)
 
 
 def require_free(config=None):
@@ -578,15 +596,19 @@ def require_free(config=None):
     servers = tuple(sorted(server_ports(config)))
     # Back-to-back requests (a run's episodes, an anchored review's events)
     # reuse a recent "go": two nvidia-smi calls per request add up, and a
-    # workload that appears is still seen within REUSE_FREE_SECONDS.
+    # workload that appears is still seen within the entry's window
+    # (REUSE_FREE_SECONDS for free, the configured one for shared).
     seen = _RECENT_FREE.get(servers)
-    if seen and time.monotonic() - seen[0] < REUSE_FREE_SECONDS:
+    if seen and time.monotonic() - seen[0] < seen[2]:
         return seen[1]
     verdict = status(servers=servers)
     _RECENT_FREE.pop(servers, None)
     if verdict["state"] == "free":
-        # Only a GPU nobody else uses; sharing depends on load that moves.
-        _RECENT_FREE[servers] = (time.monotonic(), verdict)
+        _RECENT_FREE[servers] = (time.monotonic(), verdict, REUSE_FREE_SECONDS)
+    elif verdict["state"] == "shared" and (window := shared_reuse_seconds()):
+        # Sharing depends on load that moves: reused only when asked for, and
+        # only for the configured window.
+        _RECENT_FREE[servers] = (time.monotonic(), verdict, window)
     if verdict["state"] in {"free", "shared"}:
         return verdict
     wait = verdict.get("wait_seconds")
