@@ -721,8 +721,10 @@ fake, while on the real FR3 the software staleness interlock does not see
 it; the latch counters imitate `Fr3Guard` only in part; health is read in
 the same step (the real C3 file is written at 2 Hz); no GPU contention or
 cold start; `FakeRecorder` writes no files (`RolloutRecorder` does, but its
-default media sink writes no video); camera frames are counters; there is
-no network. **Passing these tests proves the
+default media sink writes no video); camera frames are counters; the scene
+and goal fakes answer by script (nothing about a real model's accuracy);
+session files change only at state changes, with no 2 s heartbeat during
+a long wait; there is no network. **Passing these tests proves the
 state-machine logic only, never behaviour on the robot.**
 
 **Tests** (`tests/automatic/test_aeri_*.py`): the state table and the fence;

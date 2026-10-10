@@ -53,6 +53,14 @@ FIDELITY = (
     ),
     "Camera frames are counters; a stall repeats the counter, no pixels.",
     (
+        "The scene and goal fakes answer by script: a passing dry run or test "
+        "says nothing about how often a real model is right."
+    ),
+    (
+        "Session files (C2) are rewritten at each state change; nothing drives "
+        "a 2 s heartbeat during a long wait as the real client does."
+    ),
+    (
         "There is no network: 503s, timeouts and dropped replies are scripted, "
         "never produced by an HTTP stack."
     ),
