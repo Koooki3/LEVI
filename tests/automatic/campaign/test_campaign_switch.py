@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from campaign_fixtures import FakePlanner, write_job
+from campaign_guard import aeri_home_fixture, guard_fixture  # noqa: F401
 from campaign_world import FakeLauncher, Person, Session, World
 
 from levi.automatic.campaign import spec

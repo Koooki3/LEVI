@@ -3,6 +3,7 @@ rules its replay enforces, torn and corrupt lines, one writer."""
 
 import pytest
 from campaign_fixtures import FakePlanner, write_job
+from campaign_guard import aeri_home_fixture, guard_fixture  # noqa: F401
 
 from levi.automatic.campaign import spec
 from levi.automatic.campaign.journal import (

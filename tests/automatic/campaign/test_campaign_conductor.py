@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from campaign_fixtures import FakePlanner, write_job
+from campaign_guard import aeri_home_fixture, guard_fixture  # noqa: F401
 from campaign_world import FakeHost, FakeLauncher, Person, Session, World, deps
 
 from levi.automatic.campaign import conductor as cd
@@ -556,4 +557,56 @@ def test_state_json_is_derived_from_the_journal(tmp_path, aeri_home):
     conductor.run()
     found = json.loads((aeri_home / "campaigns" / "c1" / "state.json").read_text())
     assert found["state"] == "ANALYZING" and found["sealed"] == [1, 2, 3, 4]
+    conductor.close()
+
+
+class Raising:
+    def __init__(self, inner, name):
+        self.inner, self.name = inner, name
+
+    def __getattr__(self, attribute):
+        if attribute == self.name:
+
+            def boom(*args, **kwargs):
+                raise RuntimeError("the service manager went away")
+
+            return boom
+        return getattr(self.inner, attribute)
+
+
+@pytest.mark.parametrize("which", ["stop", "start", "launch"])
+def test_a_side_effect_that_raises_is_unknown_and_waits_for_a_person(tmp_path, which):
+    world = World(tmp_path / "world")
+    host, launcher = FakeHost(world), FakeLauncher(world)
+    if which == "launch":
+        launcher = Raising(launcher, "launch")
+    else:
+        host = Raising(host, which)
+    conductor, _, _ = start(
+        tmp_path,
+        world=world,
+        host=host,
+        launcher=launcher,
+        confirmations=Person(auto=False),
+    )
+    if which == "launch":
+        conductor.run()
+        person = conductor.confirmations
+        person.queue.append(
+            lambda r: person.answer(r, "confirm", arm_still=True, layout_ready=True)
+        )
+    conductor.run()
+    assert conductor.state == "WAIT_HUMAN"
+    assert conductor.journal.open_transaction is None
+    acks = [e.ack for e in conductor.journal.events if e.ack]
+    assert acks[-1].executed == "unknown" and acks[-1].detail_code == "raised"
+    conductor.close()
+
+
+def test_an_answered_question_is_withdrawn(tmp_path):
+    person = Person()
+    conductor, _, _ = start(tmp_path, confirmations=person)
+    conductor.run()
+    asked = {r.request_id for r in person.asked if r.kind == "env_confirm"}
+    assert asked <= {r.request_id for r in person.withdrawn}
     conductor.close()

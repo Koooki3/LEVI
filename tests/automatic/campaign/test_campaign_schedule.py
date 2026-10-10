@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from campaign_guard import aeri_home_fixture, guard_fixture  # noqa: F401
 
 from levi.automatic.campaign import schedule as sched
 
@@ -188,3 +189,10 @@ def test_unknown_kinds_and_single_arms_are_refused():
         sched.build("c", "blocked", "A", 4, 2, 1)
     with pytest.raises(sched.ScheduleError):
         sched.round_sizes(0, 2)
+
+
+def test_every_campaign_test_module_installs_the_guards():
+    for path in Path(__file__).parent.glob("test_*.py"):
+        text = path.read_text()
+        assert "import aeri_home_fixture, guard_fixture" in text, path.name
+    assert not (Path(__file__).parent / "conftest.py").exists()

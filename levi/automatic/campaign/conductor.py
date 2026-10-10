@@ -533,7 +533,7 @@ class Conductor:
             segment=segment,
             params={"stop": sorted(self.plan["campaign"]["arms"])},
         )
-        result = self.host.stop(self._all_arms())
+        result = _guarded(lambda: self.host.stop(self._all_arms()), HostResult)
         return self._finish_host(result, "policy_stop_failed", segment)
 
     def _in_policy_start(self) -> Outcome:
@@ -553,7 +553,7 @@ class Conductor:
             segment=segment,
             params={"arm": arm.arm, "unit": arm.unit},
         )
-        result = self.host.start(arm)
+        result = _guarded(lambda: self.host.start(arm), HostResult)
         self._ready_since = None
         return self._finish_host(result, "policy_start_failed", segment)
 
@@ -642,6 +642,7 @@ class Conductor:
             )
             return None
         # One answer per question: the next one needs a new question.
+        self.confirmations.withdraw(request)
         self._request = None
         return found
 
@@ -683,7 +684,10 @@ class Conductor:
             attempt=attempt,
             params={"file": child["file"], "plan_sha256": child["plan_sha256"]},
         )
-        result = self.launcher.launch(self.job_dir / child["file"], run_id)
+        result = _guarded(
+            lambda: self.launcher.launch(self.job_dir / child["file"], run_id),
+            LaunchResult,
+        )
         who = self._auth()
         self.journal.acknowledge(
             result.executed, "run_launcher", result.detail_code, authority=who
@@ -840,6 +844,19 @@ class Conductor:
     _in_wait_human = _waiting_for_person
     _in_fault_locked = _waiting_for_person
     _in_paused = _waiting_for_person
+
+
+def _guarded(call, kind):
+    """A side effect that raised is one whose outcome is unknown: the
+    transaction is acknowledged ``unknown`` and closed, never left open."""
+    try:
+        return call()
+    except Exception as exc:  # noqa: BLE001 - recorded as unknown
+        return kind(
+            "unknown",
+            "raised",
+            **({"detail": str(exc)[:300]} if kind is HostResult else {}),
+        )
 
 
 def _authority(kind: str, principal_id: str) -> dict:

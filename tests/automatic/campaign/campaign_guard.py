@@ -11,6 +11,8 @@ import os
 import socket
 import subprocess
 
+import pytest
+
 ROBOT_PORTS = (5000, 5001, 5100, 7470, 8000)
 UNIT_TOOLS = ("systemctl", "systemd-run", "nvidia-smi")
 
@@ -79,3 +81,34 @@ class Guard:
 
     def robot_connects(self) -> list:
         return [a for a, _ in self.connects if self._port(a) in ROBOT_PORTS]
+
+
+# --- the fixtures (imported by every campaign test module) -------------------------
+#
+# Not a conftest.py: the test folders have no __init__.py, so a second
+# ``conftest`` module would shadow tests/conftest.py for the modules that
+# ``from conftest import ...``.
+
+
+@pytest.fixture(autouse=True, name="aeri_home")
+def aeri_home_fixture(tmp_path, monkeypatch):
+    """A private LEVI_AERI_HOME: no test writes the real ~/.levi-aeri."""
+    home = tmp_path / "aeri-home"
+    monkeypatch.setenv("LEVI_AERI_HOME", str(home))
+    return home
+
+
+@pytest.fixture(autouse=True, name="campaign_guard")
+def guard_fixture():
+    guard = Guard().install()
+    try:
+        yield guard
+    finally:
+        guard.uninstall()
+    if guard.robot_connects():
+        pytest.fail(
+            f"connected to a robot or policy port: {guard.robot_connects()}",
+            pytrace=False,
+        )
+    if guard.commands:
+        pytest.fail(f"started a unit tool: {guard.commands}", pytrace=False)

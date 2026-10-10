@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from campaign_fixtures import FakePlanner, write_job
+from campaign_guard import aeri_home_fixture, guard_fixture  # noqa: F401
 from campaign_world import FakeHost, FakeLauncher, Person, Session, World
 
 from levi.automatic.campaign import spec

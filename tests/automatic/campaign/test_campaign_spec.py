@@ -7,6 +7,7 @@ import threading
 
 import pytest
 from campaign_fixtures import ARM_A, ARM_B, ARM_C, ARM_D, FakePlanner, write_job
+from campaign_guard import aeri_home_fixture, guard_fixture  # noqa: F401
 
 from levi.automatic import scene_assessment as sa
 from levi.automatic.campaign import spec
