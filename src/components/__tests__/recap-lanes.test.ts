@@ -1,7 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import {
+  AXIS_STORAGE_KEY,
+  FIXED_VALUE_DOMAIN,
+  MIN_AXIS_SPAN,
   MIN_STRENGTH,
   advantageRuns,
+  datasetValueRange,
+  diffDomain,
+  formatTick,
+  niceTicks,
+  planValueAxis,
+  readAxisMode,
+  saveAxisMode,
+  toReturnUnits,
+  valueDiff,
+  valueDomain,
+  valueToPercent,
   formatSigned,
   framePeriod,
   labelledFrameAtTime,
@@ -18,7 +32,7 @@ import {
   valueToY,
   type RecapViewInput,
 } from "@/components/recap-lanes";
-import type { RecapRevision } from "@/types/recap.types";
+import type { RecapRevision, RecapSummary } from "@/types/recap.types";
 
 const ts = (n: number, fps = 10) =>
   Array.from({ length: n }, (_, i) => i / fps);
@@ -502,5 +516,450 @@ describe("thresholdSourceKey / recapApplies", () => {
     expect(recapApplies("local/plates--ns")).toBe(true);
     expect(recapApplies("lerobot/pusht")).toBe(false);
     expect(recapApplies(null)).toBe(false);
+  });
+});
+
+describe("valueDomain", () => {
+  test("fixed is always the model's [-1, 0], whatever the data", () => {
+    expect(valueDomain([[-0.2, -0.1]], { mode: "fixed" })).toEqual({
+      lo: -1,
+      hi: 0,
+    });
+  });
+
+  test("adaptive zooms in with headroom around a small spread", () => {
+    const d = valueDomain([[-0.16, -0.05]], { mode: "adaptive" });
+    expect(d.lo).toBeLessThan(-0.16);
+    expect(d.hi).toBeGreaterThan(-0.05);
+    // a span of ~0.11 plus 8 % padding each side, far tighter than [-1, 0]
+    expect(d.hi - d.lo).toBeLessThan(0.15);
+    expect(d.hi - d.lo).toBeGreaterThan(0.11);
+  });
+
+  test("a constant curve gets the minimum span, centred, not a zero range", () => {
+    const d = valueDomain([[-0.5, -0.5, -0.5]], { mode: "adaptive" });
+    expect(d.hi - d.lo).toBeGreaterThanOrEqual(MIN_AXIS_SPAN);
+    expect((d.lo + d.hi) / 2).toBeCloseTo(-0.5, 6);
+    expect(valueToY(-0.5, 100, d)).toBeCloseTo(50, 3);
+  });
+
+  test("a near-constant curve is not stretched into apparent swings", () => {
+    const d = valueDomain([[-0.5, -0.5001, -0.4999]], { mode: "adaptive" });
+    expect(d.hi - d.lo).toBeGreaterThanOrEqual(MIN_AXIS_SPAN);
+  });
+
+  test("never leaves the model's support by more than the margin; slides instead of squeezing", () => {
+    const flatAtZero = valueDomain([[0, 0]], { mode: "adaptive" });
+    expect(flatAtZero.hi).toBeCloseTo(0.02, 9);
+    expect(flatAtZero.hi - flatAtZero.lo).toBeGreaterThanOrEqual(MIN_AXIS_SPAN);
+    const flatAtFloor = valueDomain([[-1, -1]], { mode: "adaptive" });
+    expect(flatAtFloor.lo).toBeCloseTo(-1.02, 9);
+    expect(flatAtFloor.hi - flatAtFloor.lo).toBeGreaterThanOrEqual(
+      MIN_AXIS_SPAN,
+    );
+  });
+
+  test("ignores NaN and infinities; no data falls back to the support", () => {
+    const d = valueDomain([[Number.NaN, -0.3, Infinity, -0.2]], {
+      mode: "adaptive",
+    });
+    expect(d.lo).toBeLessThan(-0.3);
+    expect(d.hi).toBeGreaterThan(-0.2);
+    expect(d.hi - d.lo).toBeLessThan(0.3);
+    expect(
+      valueDomain([[Number.NaN], null, undefined], { mode: "adaptive" }),
+    ).toEqual({ lo: -1.02, hi: 0.02 });
+  });
+
+  test("values outside the support never widen past it", () => {
+    const d = valueDomain([[-3, 2]], { mode: "adaptive" });
+    expect(d).toEqual({ lo: -1.02, hi: 0.02 });
+  });
+
+  test("two results share one axis covering both", () => {
+    const d = valueDomain(
+      [
+        [-0.9, -0.8],
+        [-0.2, -0.1],
+      ],
+      { mode: "adaptive" },
+    );
+    expect(d.lo).toBeLessThan(-0.9);
+    expect(d.hi).toBeGreaterThan(-0.1);
+  });
+
+  test("a model with a narrower support bounds the axis", () => {
+    const d = valueDomain([[-0.5, -0.4]], {
+      mode: "adaptive",
+      support: { lo: -0.5, hi: -0.2 },
+    });
+    expect(d.lo).toBeGreaterThanOrEqual(-0.52 - 1e-9);
+    expect(d.hi).toBeLessThanOrEqual(-0.18 + 1e-9);
+  });
+
+  test("dataset range holds still across episodes and still shows an outlier", () => {
+    const range = { lo: -0.9, hi: -0.1 };
+    const quiet = valueDomain([[-0.5, -0.4]], {
+      mode: "dataset",
+      datasetRange: range,
+    });
+    const other = valueDomain([[-0.7, -0.2]], {
+      mode: "dataset",
+      datasetRange: range,
+    });
+    expect(quiet).toEqual(other);
+    const outlier = valueDomain([[-0.99, -0.4]], {
+      mode: "dataset",
+      datasetRange: range,
+    });
+    expect(outlier.lo).toBeLessThan(-0.99);
+  });
+
+  test("dataset range without a range behaves as adaptive", () => {
+    expect(valueDomain([[-0.5, -0.4]], { mode: "dataset" })).toEqual(
+      valueDomain([[-0.5, -0.4]], { mode: "adaptive" }),
+    );
+  });
+});
+
+describe("valueToY with a domain", () => {
+  test("keeps the old fixed behaviour by default and clamps to the box", () => {
+    expect(valueToY(-0.25, 40)).toBe(10);
+    expect(valueToY(-5, 40, { lo: -0.2, hi: -0.1 })).toBe(40);
+    expect(valueToY(5, 40, { lo: -0.2, hi: -0.1 })).toBe(0);
+  });
+
+  test("a narrow domain magnifies a small swing", () => {
+    const narrow = { lo: -0.2, hi: -0.1 };
+    expect(valueToY(-0.15, 100, narrow)).toBeCloseTo(50, 6);
+    expect(valueToPercent(-0.2, narrow)).toBe(100);
+  });
+
+  test("a degenerate domain draws mid-height instead of dividing by zero", () => {
+    expect(valueToY(-0.5, 40, { lo: -0.5, hi: -0.5 })).toBe(20);
+  });
+
+  test("valuePaths/valuePath take the domain and break at gaps", () => {
+    const d = { lo: -0.2, hi: -0.1 };
+    expect(valuePath([-0.1, -0.2], [0, 10], 10, 100, 20, d)).toBe("0,0 100,20");
+    const paths = valuePaths(
+      [-0.1, -0.15, -0.2],
+      [0, 5, 10],
+      [0, 1, 3],
+      10,
+      100,
+      20,
+      d,
+    );
+    expect(paths).toEqual(["0,0 50,10", "100,20"]);
+    expect(FIXED_VALUE_DOMAIN).toEqual({ lo: -1, hi: 0 });
+  });
+});
+
+describe("niceTicks and formatTick", () => {
+  test("round ticks inside the domain with matching decimals", () => {
+    const { ticks, step } = niceTicks({ lo: -0.17, hi: -0.04 }, 4);
+    expect(ticks.length).toBeGreaterThanOrEqual(2);
+    for (const t of ticks) {
+      expect(t).toBeGreaterThanOrEqual(-0.17);
+      expect(t).toBeLessThanOrEqual(-0.04);
+      expect(Math.abs(t / step - Math.round(t / step))).toBeLessThan(1e-9);
+    }
+    expect(ticks.map((t) => formatTick(t, step))).toEqual(
+      ticks.map((t) => (t === 0 ? "0" : t.toFixed(2).replace("-", "−"))),
+    );
+  });
+
+  test("the fixed range gets 0, -0.5 and -1 style ticks", () => {
+    const { ticks, step } = niceTicks({ lo: -1, hi: 0 }, 3);
+    expect(ticks).toEqual([-1, -0.5, 0]);
+    expect(formatTick(-0.5, step)).toBe("−0.5");
+    expect(formatTick(0, step)).toBe("0");
+    expect(formatTick(-1, step)).toBe("−1.0");
+  });
+
+  test("a domain that fits no coarse tick steps down through 1/2/5 values", () => {
+    // 0.5 would leave one tick inside [-0.964, -0.036]; 0.25 would not be a 1/2/5 step
+    const { ticks, step } = niceTicks({ lo: -0.964, hi: -0.036 }, 3);
+    expect(step).toBeCloseTo(0.2, 9);
+    expect(ticks).toEqual([-0.8, -0.6, -0.4, -0.2]);
+  });
+
+  test("tiny and huge spans stay clean", () => {
+    const tiny = niceTicks({ lo: -0.5025, hi: -0.4975 }, 3);
+    expect(tiny.ticks.length).toBeGreaterThanOrEqual(2);
+    expect(tiny.ticks.every((t) => Number.isFinite(t))).toBe(true);
+    const big = niceTicks({ lo: -799, hi: 12 }, 4);
+    expect(big.ticks.every((t) => Number.isInteger(t))).toBe(true);
+    expect(formatTick(-200, big.step)).toBe("−200");
+  });
+
+  test("degenerate input yields no ticks and a dash for NaN", () => {
+    expect(niceTicks({ lo: 1, hi: 1 }).ticks).toEqual([]);
+    expect(niceTicks({ lo: 0, hi: 1 }, 1).ticks).toEqual([]);
+    expect(formatTick(Number.NaN)).toBe("—");
+    expect(formatTick(-0.00001, 0.05)).toBe("0");
+  });
+});
+
+describe("toReturnUnits", () => {
+  test("is the inverse of the return normalization and keeps NaN", () => {
+    expect(toReturnUnits([-1, 0, -0.5], -800, 0)).toEqual([-800, 0, -400]);
+    expect(toReturnUnits([Number.NaN, 0], -10, 10)[0]).toBeNaN();
+    expect(toReturnUnits([-0.5], null, 0)[0]).toBeNaN();
+  });
+});
+
+describe("planValueAxis", () => {
+  const rev = (min: number | null, max: number | null, bins = true) => ({
+    return_min: min,
+    return_max: max,
+    value_support: bins ? { v_min: -1, v_max: 0 } : null,
+  });
+  const a = [-0.4, -0.3, -0.2];
+  const b = [-0.8, -0.6, -0.4];
+
+  test("one shared axis for both results in normalized units", () => {
+    const plan = planValueAxis({
+      mode: "adaptive",
+      a,
+      b,
+      revA: rev(-799, 0),
+      revB: rev(-1000, 0),
+    });
+    expect(plan.units).toBe("normalized");
+    expect(plan.domain.lo).toBeLessThan(-0.8);
+    expect(plan.domain.hi).toBeGreaterThan(-0.2);
+    expect(plan.refs).toEqual([0, -1]);
+    expect(plan.b).toEqual(b);
+  });
+
+  test("return units puts different return ranges on one scale", () => {
+    const plan = planValueAxis({
+      mode: "return",
+      a: [0, 0],
+      b: [0, 0],
+      revA: rev(-799, 0),
+      revB: rev(-1000, 0),
+    });
+    expect(plan.mode).toBe("return");
+    expect(plan.units).toBe("return");
+    expect(plan.a).toEqual([0, 0]);
+    // V=-1 is -799 on A's scale and -1000 on B's
+    const low = planValueAxis({
+      mode: "return",
+      a: [-1],
+      b: [-1],
+      revA: rev(-799, 0),
+      revB: rev(-1000, 0),
+    });
+    expect(low.a).toEqual([-799]);
+    expect(low.b).toEqual([-1000]);
+    expect(low.domain.lo).toBeLessThan(-1000);
+    expect(low.refs).toEqual([0]);
+  });
+
+  test("return units unavailable without a return range: falls back to adaptive with a reason", () => {
+    const plan = planValueAxis({
+      mode: "return",
+      a,
+      revA: rev(null, null),
+    });
+    expect(plan.mode).toBe("adaptive");
+    expect(plan.unavailable.return).toContain("Return units");
+    const oneSide = planValueAxis({
+      mode: "return",
+      a,
+      b,
+      revA: rev(-799, 0),
+      revB: rev(null, 0),
+    });
+    expect(oneSide.mode).toBe("adaptive");
+    expect(oneSide.unavailable.return).toBeDefined();
+    // equal bounds would divide the axis by nothing
+    expect(
+      planValueAxis({ mode: "return", a, revA: rev(0, 0) }).unavailable.return,
+    ).toBeDefined();
+  });
+
+  test("dataset range needs a range for every shown result", () => {
+    const base = { mode: "dataset" as const, a, revA: rev(-1, 0) };
+    const none = planValueAxis(base);
+    expect(none.mode).toBe("adaptive");
+    expect(none.unavailable.dataset).toContain("Dataset range");
+    const ok = planValueAxis({
+      ...base,
+      datasetA: { lo: -0.9, hi: -0.1 },
+    });
+    expect(ok.mode).toBe("dataset");
+    expect(ok.unavailable.dataset).toBeUndefined();
+    const bMissing = planValueAxis({
+      ...base,
+      b,
+      revB: rev(-1, 0),
+      datasetA: { lo: -0.9, hi: -0.1 },
+    });
+    expect(bMissing.mode).toBe("adaptive");
+  });
+
+  test("a different value support shapes the axis limits", () => {
+    const plan = planValueAxis({
+      mode: "adaptive",
+      a: [-0.5],
+      revA: {
+        return_min: -1,
+        return_max: 0,
+        value_support: { v_min: -0.6, v_max: -0.4 },
+      },
+    });
+    expect(plan.domain.lo).toBeGreaterThanOrEqual(-0.62 - 1e-9);
+    expect(plan.domain.hi).toBeLessThanOrEqual(-0.38 + 1e-9);
+  });
+
+  test("fixed ignores the data; missing episodes draw an empty but valid axis", () => {
+    expect(planValueAxis({ mode: "fixed", a }).domain).toEqual({
+      lo: -1,
+      hi: 0,
+    });
+    const empty = planValueAxis({ mode: "adaptive", a: undefined });
+    expect(empty.a).toEqual([]);
+    expect(empty.domain.hi).toBeGreaterThan(empty.domain.lo);
+  });
+});
+
+describe("datasetValueRange", () => {
+  const summary = (
+    rows: Array<[number | undefined, number | undefined]>,
+  ): RecapSummary =>
+    ({
+      revision_id: "r",
+      threshold: 0,
+      episodes: Object.fromEntries(
+        rows.map(([lo, hi], i) => [
+          String(i),
+          {
+            positive_fraction: 0.5,
+            mean_advantage: 0,
+            mean_value: -0.5,
+            frames: 10,
+            min_value: lo,
+            max_value: hi,
+          },
+        ]),
+      ),
+    }) as unknown as RecapSummary;
+
+  test("null for old results, nothing, or no finite pair", () => {
+    expect(datasetValueRange(null)).toBeNull();
+    expect(datasetValueRange(summary([[undefined, undefined]]))).toBeNull();
+    expect(datasetValueRange(summary([[Number.NaN, -0.1]]))).toBeNull();
+    expect(
+      datasetValueRange({ revision_id: "r", threshold: 0 } as RecapSummary),
+    ).toBeNull();
+  });
+
+  test("a single outlier episode cannot stretch the range (p1 / p99)", () => {
+    const rows: Array<[number, number]> = Array.from({ length: 200 }, () => [
+      -0.6, -0.2,
+    ]);
+    rows[0] = [-1, 0];
+    expect(datasetValueRange(summary(rows))).toEqual({ lo: -0.6, hi: -0.2 });
+  });
+
+  test("small datasets use their extremes", () => {
+    expect(
+      datasetValueRange(
+        summary([
+          [-0.8, -0.3],
+          [-0.5, -0.1],
+        ]),
+      ),
+    ).toEqual({ lo: -0.8, hi: -0.1 });
+  });
+});
+
+describe("valueDiff and diffDomain", () => {
+  test("B minus A on shared frames; frames one result lacks leave a gap", () => {
+    const d = valueDiff(
+      {
+        frame_index: [0, 1, 2, 4],
+        timestamp: [0, 0.1, 0.2, 0.4],
+        value: [-0.5, -0.4, Number.NaN, -0.2],
+      },
+      {
+        frame_index: [0, 1, 2, 3, 4],
+        timestamp: [0, 0.1, 0.2, 0.3, 0.4],
+        value: [-0.4, -0.4, -0.3, -0.3, -0.5],
+      },
+    );
+    expect(d.frame_index).toEqual([0, 1, 4]);
+    expect(d.timestamp).toEqual([0, 0.1, 0.4]);
+    expect(d.value[0]).toBeCloseTo(0.1);
+    expect(d.value[1]).toBeCloseTo(0);
+    expect(d.value[2]).toBeCloseTo(-0.3);
+    // frame 1 -> frame 4 is not consecutive, so the line breaks there
+    expect(
+      valuePaths(d.value, d.timestamp, d.frame_index, 0.4, 100, 20, {
+        lo: -1,
+        hi: 1,
+      }),
+    ).toHaveLength(2);
+  });
+
+  test("disjoint or empty inputs give an empty series", () => {
+    const none = valueDiff(
+      { frame_index: [0], timestamp: [0], value: [1] },
+      { frame_index: [5], timestamp: [0], value: [1] },
+    );
+    expect(none.value).toEqual([]);
+    expect(
+      valueDiff(
+        { frame_index: [], timestamp: [], value: [] },
+        { frame_index: [], timestamp: [], value: [] },
+      ).value,
+    ).toEqual([]);
+  });
+
+  test("the difference axis is symmetric about zero", () => {
+    const d = diffDomain([0.1, -0.3, 0.05], "adaptive");
+    expect(d.lo).toBe(-d.hi);
+    expect(d.hi).toBeGreaterThan(0.3);
+    expect(valueToY(0, 100, d)).toBeCloseTo(50, 9);
+    expect(diffDomain([], "adaptive").hi).toBeGreaterThan(0);
+    expect(diffDomain([0, 0], "adaptive").hi).toBeGreaterThanOrEqual(
+      MIN_AXIS_SPAN / 2,
+    );
+    expect(diffDomain([0.1], "fixed")).toEqual({ lo: -1, hi: 1 });
+  });
+});
+
+describe("remembered axis mode", () => {
+  const store = (initial?: string | null) => {
+    const data = new Map<string, string>();
+    if (initial != null) data.set(AXIS_STORAGE_KEY, initial);
+    return {
+      getItem: (k: string) => data.get(k) ?? null,
+      setItem: (k: string, v: string) => void data.set(k, v),
+    };
+  };
+
+  test("round-trips, ignores junk, and survives a storage that throws", () => {
+    const s = store();
+    expect(readAxisMode(s)).toBe("adaptive");
+    expect(saveAxisMode("fixed", s)).toBe(true);
+    expect(readAxisMode(s)).toBe("fixed");
+    expect(readAxisMode(store("logarithmic"))).toBe("adaptive");
+    expect(readAxisMode(null)).toBe("adaptive");
+    const broken = {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("quota");
+      },
+    };
+    expect(readAxisMode(broken)).toBe("adaptive");
+    expect(saveAxisMode("return", broken)).toBe(false);
+    expect(saveAxisMode("return", null)).toBe(false);
   });
 });

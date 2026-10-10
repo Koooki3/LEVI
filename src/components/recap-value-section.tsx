@@ -3,13 +3,32 @@
 /** Saved RECAP results are browsed independently of the compute checkpoint.
  * Explicit revision reads never change the dataset's current result. */
 import React, { useCallback, useEffect, useId, useMemo, useState } from "react";
-import { Badge, Button, Field, Select, Tooltip } from "@/components/ds";
+import {
+  Badge,
+  Button,
+  Field,
+  Select,
+  SegmentedControl,
+  Tooltip,
+} from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { useAnnotations } from "@/context/annotations-context";
 import { ReadOnlyReason } from "@/components/linked-dataset-notice";
 import {
+  AXIS_MODES,
   advantageRuns,
+  datasetValueRange,
+  diffDomain,
   formatSigned,
+  formatTick,
+  niceTicks,
+  planValueAxis,
+  readAxisMode,
+  saveAxisMode,
+  valueDiff,
+  valueToPercent,
+  type AxisMode,
+  type ValueDomain,
   labelledFrameAtTime,
   positiveFraction,
   recapApplies,
@@ -28,6 +47,7 @@ import {
   fetchRecapJob,
   fetchRecapRevisions,
   fetchRecapStatus,
+  fetchRecapSummary,
   isAnnotateBackendEnabled,
   runRecap,
 } from "@/utils/annotationsClient";
@@ -58,6 +78,16 @@ interface Props {
   showTip: (e: React.MouseEvent, meta: string, text: string) => void;
   moveTip: (e: React.MouseEvent) => void;
   hideTip: () => void;
+}
+
+/** Browser storage can be missing or throw (private windows, blocked site
+ * data); the axis choice is only a per-person convenience. */
+function safeStorage(): Storage | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
 }
 
 const isAbort = (error: unknown) =>
@@ -139,6 +169,36 @@ function useComparison(
     : result.key === key
       ? result
       : { data: undefined, error: null };
+}
+
+/** Dataset-wide value spread of one saved result, for the "dataset range"
+ * axis. Null while loading, when the result stores no per-episode minima and
+ * maxima, or when the summary cannot be read: that mode is then unavailable
+ * rather than guessed. */
+function useDatasetRange(
+  repoId: string,
+  revisionId: string,
+  reloadKey: number,
+): ValueDomain | null {
+  const key = JSON.stringify([repoId, revisionId, reloadKey]);
+  const [result, setResult] = useState<{
+    key: string;
+    range: ValueDomain | null;
+  }>({ key: "", range: null });
+  useEffect(() => {
+    if (!revisionId) return;
+    const controller = new AbortController();
+    fetchRecapSummary({ repoId }, controller.signal, revisionId)
+      .then((summary) => {
+        if (!controller.signal.aborted)
+          setResult({ key, range: datasetValueRange(summary) });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setResult({ key, range: null });
+      });
+    return () => controller.abort();
+  }, [repoId, revisionId, key]);
+  return revisionId && result.key === key ? result.range : null;
 }
 
 function Hint({
@@ -521,46 +581,189 @@ function AdvantageTrack({
   );
 }
 
+const AXIS_LABEL: Record<AxisMode, string> = {
+  adaptive: "Adaptive",
+  dataset: "Dataset range",
+  fixed: "Fixed −1…0",
+  return: "Return units",
+};
+
+/** Small SVG + HTML plot shared by the value and the difference rows: the
+ * curves stretch with the track, the tick labels are HTML so they never
+ * distort. */
+function AxisPlot({
+  domain,
+  step,
+  ticks,
+  refs,
+  children,
+}: {
+  domain: ValueDomain;
+  step: number;
+  ticks: number[];
+  refs: number[];
+  children: React.ReactNode;
+}) {
+  const at = (value: number) => valueToPercent(value, domain);
+  return (
+    <>
+      <svg
+        className="recap-plot"
+        viewBox={"0 0 " + PLOT_W + " " + PLOT_H}
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        {ticks.map((tick) => (
+          <line
+            key={"g" + tick}
+            className="recap-grid"
+            x1={0}
+            x2={PLOT_W}
+            y1={(at(tick) / 100) * PLOT_H}
+            y2={(at(tick) / 100) * PLOT_H}
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+        {refs
+          .filter((value) => value >= domain.lo && value <= domain.hi)
+          .map((value) => (
+            <line
+              key={"r" + value}
+              className="recap-ref"
+              x1={0}
+              x2={PLOT_W}
+              y1={(at(value) / 100) * PLOT_H}
+              y2={(at(value) / 100) * PLOT_H}
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+        {children}
+      </svg>
+      {ticks.map((tick) => {
+        const top = at(tick);
+        return (
+          <span
+            key={"t" + tick}
+            className={
+              "recap-axis" +
+              (top < 12 ? " edge-top" : top > 88 ? " edge-bottom" : "")
+            }
+            style={{ top: top + "%" }}
+          >
+            {formatTick(tick, step)}
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
 function ValueTrack({
   dataA,
   dataB,
   comparing,
   comparisonState,
+  revisionA,
+  revisionB,
+  datasetA,
+  datasetB,
+  axisMode,
+  onAxisMode,
   ...props
 }: Props & {
   dataA: RecapEpisode | null | undefined;
   dataB: RecapEpisode | null | undefined;
   comparing: boolean;
   comparisonState: "loading" | "error" | "ready";
+  revisionA?: RecapRevision;
+  revisionB?: RecapRevision;
+  datasetA: ValueDomain | null;
+  datasetB: ValueDomain | null;
+  axisMode: AxisMode;
+  onAxisMode: (mode: AxisMode) => void;
 }) {
   const { t } = useLocale();
+  const [expanded, setExpanded] = useState(false);
+  const reasonId = useId();
+  const showB = comparing && !!dataB;
+  const plan = useMemo(
+    () =>
+      planValueAxis({
+        mode: axisMode,
+        a: dataA?.value,
+        b: showB ? dataB?.value : null,
+        revA: revisionA,
+        revB: showB ? revisionB : null,
+        datasetA,
+        datasetB: showB ? datasetB : null,
+      }),
+    [axisMode, dataA, dataB, showB, revisionA, revisionB, datasetA, datasetB],
+  );
+  const { domain } = plan;
+  const { ticks, step } = useMemo(
+    () => niceTicks(domain, expanded ? 6 : 3),
+    [domain, expanded],
+  );
   const pathsA = useMemo(
     () =>
       dataA
         ? valuePaths(
-            dataA.value,
+            plan.a,
             dataA.timestamp,
             dataA.frame_index,
             props.duration,
             PLOT_W,
             PLOT_H,
+            domain,
           )
         : [],
-    [dataA, props.duration],
+    [dataA, plan, domain, props.duration],
   );
   const pathsB = useMemo(
     () =>
-      dataB
+      dataB && plan.b
         ? valuePaths(
-            dataB.value,
+            plan.b,
             dataB.timestamp,
             dataB.frame_index,
             props.duration,
             PLOT_W,
             PLOT_H,
+            domain,
           )
         : [],
-    [dataB, props.duration],
+    [dataB, plan, domain, props.duration],
+  );
+  // B − A in the axis units, on the frames both results label.
+  const diff = useMemo(
+    () =>
+      showB && dataA && dataB && plan.b
+        ? valueDiff({ ...dataA, value: plan.a }, { ...dataB, value: plan.b })
+        : null,
+    [showB, dataA, dataB, plan],
+  );
+  const diffAxis = useMemo(
+    () => (diff ? diffDomain(diff.value, plan.mode) : null),
+    [diff, plan.mode],
+  );
+  const diffTicks = useMemo(
+    () => (diffAxis ? niceTicks(diffAxis, 3) : { ticks: [], step: 0 }),
+    [diffAxis],
+  );
+  const diffPaths = useMemo(
+    () =>
+      diff && diffAxis
+        ? valuePaths(
+            diff.value,
+            diff.timestamp,
+            diff.frame_index,
+            props.duration,
+            PLOT_W,
+            PLOT_H,
+            diffAxis,
+          )
+        : [],
+    [diff, diffAxis, props.duration],
   );
   const readout = (data: RecapEpisode | null | undefined, side: "A" | "B") => {
     const frame = data
@@ -591,9 +794,29 @@ function ValueTrack({
       </output>
     );
   };
+  const diffReadout = () => {
+    if (!diff) return null;
+    const i = labelledFrameAtTime(
+      diff.timestamp,
+      dataA?.fps ?? 0,
+      props.currentTime,
+    );
+    return (
+      <output className="recap-frame-readout side-diff" key="diff">
+        B − A ·{" "}
+        {i < 0
+          ? t("No frame labelled by both results at the playhead")
+          : "Δ " + formatSigned(diff.value[i], plan.units === "return" ? 2 : 3)}
+      </output>
+    );
+  };
+  const requestedBlocked = plan.unavailable[axisMode];
+  const unit = plan.units === "return" ? t("original return") : "V";
+  const rangeText =
+    formatTick(domain.lo, step) + "…" + formatTick(domain.hi, step);
   return (
     <>
-      <div className="tl-row recap-value-row">
+      <div className={"tl-row recap-value-row" + (expanded ? " expanded" : "")}>
         <div className="label">
           <span className="style-dot dot-value" />
           {t("value")}
@@ -604,20 +827,7 @@ function ValueTrack({
           onMouseMove={props.onHoverMove}
           onMouseLeave={props.onHoverLeave}
         >
-          <svg
-            className="recap-plot"
-            viewBox={"0 0 " + PLOT_W + " " + PLOT_H}
-            preserveAspectRatio="none"
-            aria-hidden="true"
-          >
-            <line
-              className="recap-grid"
-              x1={0}
-              x2={PLOT_W}
-              y1={PLOT_H / 2}
-              y2={PLOT_H / 2}
-              vectorEffect="non-scaling-stroke"
-            />
+          <AxisPlot domain={domain} step={step} ticks={ticks} refs={plan.refs}>
             {pathsA.map((points, i) => (
               <polyline
                 key={"a-" + i}
@@ -634,22 +844,21 @@ function ValueTrack({
                 vectorEffect="non-scaling-stroke"
               />
             ))}
-          </svg>
-          <span className="recap-axis top">0</span>
-          <span className="recap-axis bottom">−1</span>
+          </AxisPlot>
           {(
             [
-              ["A", dataA],
-              ["B", comparing ? dataB : null],
+              ["A", dataA, plan.a],
+              ["B", comparing ? dataB : null, plan.b],
             ] as const
-          ).map(([side, data]) => {
+          ).map(([side, data, series]) => {
             const frame = data
               ? labelledFrameAtTime(data.timestamp, data.fps, props.currentTime)
               : -1;
             if (
               !data ||
+              !series ||
               frame < 0 ||
-              !Number.isFinite(data.value[frame]) ||
+              !Number.isFinite(series[frame]) ||
               !(props.duration > 0)
             )
               return null;
@@ -670,23 +879,93 @@ function ValueTrack({
                     ) *
                       100 +
                     "%",
-                  top:
-                    -Math.max(-1, Math.min(0, data.value[frame])) * 100 + "%",
+                  top: valueToPercent(series[frame], domain) + "%",
                 }}
               />
             );
           })}
         </div>
       </div>
+      {diff && diffAxis && (
+        <div
+          className={
+            "tl-row recap-value-row recap-diff-row" +
+            (expanded ? " expanded" : "")
+          }
+        >
+          <div className="label">
+            <span className="style-dot dot-value" />
+            {t("B − A")}
+          </div>
+          <div
+            className="track"
+            onClick={props.onBandClick}
+            onMouseMove={props.onHoverMove}
+            onMouseLeave={props.onHoverLeave}
+          >
+            <AxisPlot
+              domain={diffAxis}
+              step={diffTicks.step}
+              ticks={diffTicks.ticks}
+              refs={[0]}
+            >
+              {diffPaths.map((points, i) => (
+                <polyline
+                  key={"d-" + i}
+                  className="recap-diff-line"
+                  points={points}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
+            </AxisPlot>
+          </div>
+        </div>
+      )}
+      <div className="recap-axis-controls">
+        <SegmentedControl
+          label={t("Value axis")}
+          size="sm"
+          value={plan.mode}
+          onChange={(next) => onAxisMode(next as AxisMode)}
+          options={AXIS_MODES.map((mode) => ({
+            value: mode,
+            label: t(AXIS_LABEL[mode]),
+            disabled: !!plan.unavailable[mode],
+          }))}
+        />
+        <Button
+          size="sm"
+          variant="ghost"
+          aria-pressed={expanded}
+          onClick={() => setExpanded((open) => !open)}
+        >
+          {t(expanded ? "Collapse value rows" : "Expand value rows")}
+        </Button>
+        <span className="ds-sr-only" id={reasonId}>
+          {AXIS_MODES.filter((mode) => plan.unavailable[mode])
+            .map(
+              (mode) => t(AXIS_LABEL[mode]) + ": " + t(plan.unavailable[mode]!),
+            )
+            .join(" ")}
+        </span>
+        {requestedBlocked && (
+          <span className="recap-axis-note" role="status">
+            {t(AXIS_LABEL[axisMode])} · {t(requestedBlocked)}{" "}
+            {t("Showing the adaptive axis instead.")}
+          </span>
+        )}
+      </div>
       <div className="recap-frame-readouts">
         {readout(dataA, "A")}
         {comparing && readout(dataB, "B")}
+        {diffReadout()}
         <span>
           {t(
             comparing
-              ? "Value curves: A solid, B dashed. Normalized to −1…0."
-              : "Value curve: A solid. Normalized to −1…0.",
-          )}
+              ? "Value curves: A solid, B dashed."
+              : "Value curve: A solid.",
+          )}{" "}
+          {t("Axis")} {rangeText} {unit} · {t(AXIS_LABEL[plan.mode])}
         </span>
       </div>
     </>
@@ -743,6 +1022,13 @@ function DatasetRecapSection({
   const [showControls, setShowControls] = useState(false);
   const [starting, setStarting] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [axisMode, setAxisMode] = useState<AxisMode>(() =>
+    readAxisMode(safeStorage()),
+  );
+  const chooseAxisMode = useCallback((mode: AxisMode) => {
+    setAxisMode(mode);
+    saveAxisMode(mode, safeStorage());
+  }, []);
   const blockedId = useId();
   const versionsHintId = useId();
 
@@ -833,6 +1119,8 @@ function DatasetRecapSection({
     reloadKey,
   );
   const comparison = useComparison(repoId, selection, reloadKey);
+  const datasetA = useDatasetRange(repoId, selection.primary, reloadKey);
+  const datasetB = useDatasetRange(repoId, selection.comparison, reloadKey);
 
   const readyCheckpoints = useMemo(
     () => (status?.checkpoints ?? []).filter((c) => c.ready),
@@ -1287,6 +1575,12 @@ function DatasetRecapSection({
             dataA={episodeA.data}
             dataB={comparison.data ? episodeB.data : null}
             comparing={!!selection.comparison}
+            revisionA={primary}
+            revisionB={secondary}
+            datasetA={datasetA}
+            datasetB={datasetB}
+            axisMode={axisMode}
+            onAxisMode={chooseAxisMode}
             comparisonState={
               comparison.error
                 ? "error"

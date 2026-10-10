@@ -18,6 +18,7 @@ import type {
   RecapRevisions,
   RecapRunRequest,
   RecapStatus,
+  RecapSummary,
 } from "@/types/recap.types";
 
 setupDom();
@@ -167,6 +168,10 @@ let compareHandler: (
   b: string,
   signal?: AbortSignal,
 ) => Promise<RecapComparison> = async (_ident, a, b) => compare(a, b);
+let summaryHandler: (
+  ident: DatasetIdent,
+  rid?: string,
+) => Promise<RecapSummary | null> = async () => null;
 const fetchEpisode = mock(
   (ep: number, ident: DatasetIdent, signal?: AbortSignal, rid?: string) =>
     episodeHandler(ep, ident, signal, rid),
@@ -190,6 +195,11 @@ mock.module("@/utils/annotationsClient", () => ({
   fetchRecapStatus: (ident: DatasetIdent) => statusHandler(ident),
   fetchRecapRevisions: (ident: DatasetIdent) => revisionsHandler(ident),
   fetchRecapEpisode: fetchEpisode,
+  fetchRecapSummary: (
+    ident: DatasetIdent,
+    _signal?: AbortSignal,
+    rid?: string,
+  ) => summaryHandler(ident, rid),
   fetchRecapCompare: fetchCompare,
   fetchRecapJob: async () => job,
   runRecap: run,
@@ -266,6 +276,7 @@ beforeEach(() => {
   revisionsHandler = async () => ({ current: r2, revisions: rows() });
   episodeHandler = async (ep, _ident, _signal, rid) => episode(rid!, ep);
   compareHandler = async (_ident, a, b) => compare(a, b);
+  summaryHandler = async () => null;
   fetchEpisode.mockClear();
   fetchCompare.mockClear();
   run.mockClear();
@@ -644,5 +655,203 @@ describe("saved Value model results", () => {
     expect(host.textContent).toContain("标签一致率");
     expect(host.textContent).not.toContain("Return ranges differ");
     expect(fetchEpisode.mock.calls.length).toBe(reads);
+  });
+});
+
+const summaryWithRange = (rid: string, lo: number, hi: number): RecapSummary =>
+  ({
+    revision_id: rid,
+    threshold: 0,
+    episodes: {
+      "0": {
+        positive_fraction: 0.5,
+        mean_advantage: 0,
+        mean_value: (lo + hi) / 2,
+        frames: 3,
+        min_value: lo,
+        max_value: hi,
+      },
+    },
+  }) as unknown as RecapSummary;
+const axisLabels = (host: HTMLElement) =>
+  [
+    ...host.querySelectorAll(
+      ".recap-value-row:not(.recap-diff-row) .recap-axis",
+    ),
+  ]
+    .map((node) => node.textContent)
+    .join(" ");
+const radios = (host: HTMLElement) => [
+  ...host.querySelectorAll<HTMLButtonElement>(
+    '[role="radiogroup"][aria-label="Value axis"] [role="radio"]',
+  ),
+];
+const radio = (host: HTMLElement, text: string) =>
+  radios(host).find((node) => node.textContent === text)!;
+
+describe("Value axis", () => {
+  test("defaults to an adaptive axis that zooms in on the curve, with numeric ticks", async () => {
+    const { host } = await render(page());
+    await loaded(host);
+    expect(radio(host, "Adaptive").getAttribute("aria-checked")).toBe("true");
+    // r2 runs -0.4…-0.2, so the labels are around there, not -1…0
+    const labels = axisLabels(host);
+    expect(labels).toContain("−0.4");
+    expect(labels).toContain("−0.2");
+    expect(labels).not.toContain("−1");
+    const hint = host.querySelector(".recap-frame-readouts")!.textContent!;
+    expect(hint).toContain("Axis");
+    expect(hint).toContain("Adaptive");
+    expect(hint).not.toContain("Normalized to");
+    // the curve still draws and the playhead dot sits inside the plot
+    expect(host.querySelector(".recap-line")?.getAttribute("points")).toMatch(
+      /^[\d.,\- ]+$/,
+    );
+    const dot = host.querySelector<HTMLElement>(".recap-dot.side-a")!;
+    const top = parseFloat(dot.style.top);
+    expect(top).toBeGreaterThanOrEqual(0);
+    expect(top).toBeLessThanOrEqual(100);
+    // the zero line is outside this window, so no reference line is drawn
+    expect(host.querySelector(".recap-ref")).toBeNull();
+  });
+
+  test("the fixed mode restores the −1…0 axis with its reference lines, and is remembered", async () => {
+    const { host } = await render(page());
+    await loaded(host);
+    await click(radio(host, "Fixed −1…0"));
+    expect(radio(host, "Fixed −1…0").getAttribute("aria-checked")).toBe("true");
+    expect(axisLabels(host)).toContain("−1.0");
+    expect(axisLabels(host)).toContain("0");
+    expect(host.querySelectorAll(".recap-ref").length).toBe(2);
+    expect(window.localStorage.getItem("levi.recap.valueAxis")).toBe("fixed");
+    const again = await render(page());
+    await loaded(again.host);
+    expect(radio(again.host, "Fixed −1…0").getAttribute("aria-checked")).toBe(
+      "true",
+    );
+  });
+
+  test("a blocked or throwing storage still renders and changes the axis", async () => {
+    const original = Object.getOwnPropertyDescriptor(window, "localStorage");
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("blocked");
+      },
+    });
+    try {
+      const { host } = await render(page());
+      await loaded(host);
+      await click(radio(host, "Fixed −1…0"));
+      expect(radio(host, "Fixed −1…0").getAttribute("aria-checked")).toBe(
+        "true",
+      );
+    } finally {
+      if (original) Object.defineProperty(window, "localStorage", original);
+    }
+  });
+
+  test("dataset range and return units are disabled with a reason until their data exists", async () => {
+    const { host } = await render(page());
+    await loaded(host);
+    expect(radio(host, "Dataset range").disabled).toBe(true);
+    expect(host.querySelector(".ds-sr-only")?.textContent).toContain(
+      "per-episode minima and maxima",
+    );
+    // revisions carry return ranges, so return units are available
+    expect(radio(host, "Return units").disabled).toBe(false);
+  });
+
+  test("dataset range is enabled by a stored spread and keeps the axis still", async () => {
+    summaryHandler = async (_ident, rid) =>
+      summaryWithRange(rid ?? r2, -0.9, -0.1);
+    const { host } = await render(page());
+    await loaded(host);
+    await waitFor(() => !radio(host, "Dataset range").disabled);
+    await click(radio(host, "Dataset range"));
+    expect(radio(host, "Dataset range").getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    const labels = axisLabels(host);
+    expect(labels).toContain("−0.8");
+    expect(labels).toContain("−0.2");
+  });
+
+  test("a remembered mode that the data cannot serve falls back with an explanation", async () => {
+    window.localStorage.setItem("levi.recap.valueAxis", "dataset");
+    const { host } = await render(page());
+    await loaded(host);
+    expect(radio(host, "Adaptive").getAttribute("aria-checked")).toBe("true");
+    const note = host.querySelector(".recap-axis-note")!;
+    expect(note.textContent).toContain("Dataset range");
+    expect(note.textContent).toContain("Showing the adaptive axis instead.");
+  });
+
+  test("return units show the original return scale", async () => {
+    const { host } = await render(page());
+    await loaded(host);
+    await click(radio(host, "Return units"));
+    // r2 return range is -799…0: V in -0.4…-0.2 is about -480…-640+799
+    expect(axisLabels(host)).toMatch(/−?\d{2,3}/);
+    expect(host.querySelector(".recap-frame-readouts")!.textContent).toContain(
+      "original return",
+    );
+  });
+
+  test("a constant curve draws a flat line mid-plot, not a broken one", async () => {
+    episodeHandler = async (_ep, _ident, _signal, rid) =>
+      episode(rid!, 0, -0.5);
+    const { host } = await render(page());
+    await loaded(host);
+    const points = host.querySelector(".recap-line")!.getAttribute("points")!;
+    expect(points).not.toContain("NaN");
+    const ys = points.split(" ").map((p) => parseFloat(p.split(",")[1]));
+    expect(new Set(ys).size).toBe(1);
+    expect(ys[0]).toBeCloseTo(50, 0);
+  });
+
+  test("comparison keeps one shared axis and adds a B − A curve with a zero line", async () => {
+    const { host } = await render(page());
+    await loaded(host);
+    await choose(selectors(host)[1], r1);
+    await waitFor(() => host.querySelector(".recap-diff-line"));
+    expect(host.querySelectorAll(".recap-line")).toHaveLength(2);
+    expect(host.querySelectorAll(".recap-diff-line")).toHaveLength(1);
+    expect(host.querySelector(".recap-diff-row .recap-ref")).not.toBeNull();
+    // both curves (-0.8…-0.2) fit in the one axis
+    expect(axisLabels(host)).toContain("−0.8");
+    const diff = host.querySelector(".recap-frame-readout.side-diff")!;
+    // r1 minus r2 at the first frame: -0.8 - (-0.4)
+    expect(diff.textContent).toContain("Δ -0.400");
+    // single-result view has no difference row
+    await choose(selectors(host)[1], "");
+    expect(host.querySelector(".recap-diff-line")).toBeNull();
+  });
+
+  test("the rows expand and collapse from the keyboard-reachable button", async () => {
+    const { host } = await render(page());
+    await loaded(host);
+    const row = host.querySelector(".recap-value-row")!;
+    expect(row.classList.contains("expanded")).toBe(false);
+    const toggle = button(host, "Expand value rows");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    await click(toggle);
+    expect(row.classList.contains("expanded")).toBe(true);
+    expect(
+      button(host, "Collapse value rows").getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+
+  test("the axis controls are translated", async () => {
+    const { host } = await render(page());
+    await loaded(host);
+    await click(host.querySelector("[data-language=zh]"));
+    await flush();
+    expect(
+      host.querySelector('[role="radiogroup"][aria-label="Value 纵轴"]'),
+    ).not.toBeNull();
+    expect(host.textContent).toContain("自适应");
+    expect(host.textContent).toContain("回报单位");
+    expect(host.textContent).toContain("展开 Value 行");
   });
 });

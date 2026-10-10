@@ -1724,6 +1724,38 @@
   stroke-width: 1;
   stroke-dasharray: 3 3;
 }
+.annotations-skin .recap-ref {
+  stroke: var(--ds-text-secondary);
+  stroke-width: 1;
+  opacity: 0.7;
+}
+.annotations-skin .recap-diff-line {
+  fill: none;
+  stroke: var(--ds-text-primary);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.annotations-skin .recap-value-row.expanded {
+  height: 144px;
+}
+.annotations-skin .recap-value-row.expanded .track {
+  height: 140px;
+}
+.annotations-skin .recap-axis-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 4px 11px 0;
+}
+.annotations-skin .recap-axis-note {
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+}
+.annotations-skin .recap-frame-readout.side-diff {
+  border-left-color: var(--ds-text-primary);
+  border-left-style: dotted;
+}
 .annotations-skin .recap-line {
   fill: none;
   stroke: var(--dv-4);
@@ -1883,17 +1915,21 @@
 .annotations-skin .recap-axis {
   position: absolute;
   left: 3px;
+  transform: translateY(-50%);
+  padding: 0 2px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ds-surface-1) 70%, transparent);
   font-family: var(--ds-font-mono);
   font-size: var(--ds-text-caption-size);
   line-height: 14px;
   color: var(--ds-text-secondary);
   pointer-events: none;
 }
-.annotations-skin .recap-axis.top {
-  top: 1px;
+.annotations-skin .recap-axis.edge-top {
+  transform: none;
 }
-.annotations-skin .recap-axis.bottom {
-  bottom: 1px;
+.annotations-skin .recap-axis.edge-bottom {
+  transform: translateY(-100%);
 }
 .annotations-skin .recap-dot {
   position: absolute;

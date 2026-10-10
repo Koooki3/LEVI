@@ -4,7 +4,9 @@
  *
  * - `advantageRuns` merges consecutive frames with the same positive/negative
  *   label into segments the ADVANTAGE row draws.
- * - `valuePath` maps V(o_t) in [-1, 0] onto an SVG polyline for the VALUE row.
+ * - `valuePath` maps V(o_t) onto an SVG polyline for the VALUE row; the
+ *   vertical range is a `ValueDomain` (`valueDomain` picks it: adaptive,
+ *   dataset range, fixed [-1, 0] or return units; `valueDiff` builds B − A).
  * - `nearestFrame` finds the frame under the playhead for the value readout.
  *
  * The backend returns frames sorted by timestamp; the helpers still tolerate
@@ -12,7 +14,12 @@
  * payload degrades to fewer marks rather than a broken timeline.
  */
 
-import type { RecapRevision, RecapRevisions } from "@/types/recap.types";
+import type {
+  RecapEpisodeSummary,
+  RecapRevision,
+  RecapRevisions,
+  RecapSummary,
+} from "@/types/recap.types";
 
 export interface AdvantageRun {
   /** Seconds: timestamp of the run's first frame. */
@@ -167,11 +174,27 @@ export function positiveFraction(positive: readonly boolean[]): number | null {
   return count / positive.length;
 }
 
-/** Map a value in [-1, 0] to a y coordinate: 0 at the top, -1 at the bottom.
- * Out-of-range values are clamped onto the plot. */
-export function valueToY(value: number, height: number): number {
-  const v = Math.max(-1, Math.min(0, value));
-  return -v * height;
+/** A vertical range of the VALUE row; `lo < hi`. */
+export interface ValueDomain {
+  lo: number;
+  hi: number;
+}
+
+/** What the VALUE row showed before the axis became selectable. */
+export const FIXED_VALUE_DOMAIN: ValueDomain = { lo: -1, hi: 0 };
+
+/** Map a value to a y coordinate: the domain's top at 0, its bottom at
+ * `height`. Out-of-range values are clamped onto the plot. The default domain
+ * is the normalized V range [-1, 0]. */
+export function valueToY(
+  value: number,
+  height: number,
+  domain: ValueDomain = FIXED_VALUE_DOMAIN,
+): number {
+  const span = domain.hi - domain.lo;
+  if (!(span > 0)) return height / 2;
+  const v = Math.max(domain.lo, Math.min(domain.hi, value));
+  return ((domain.hi - v) / span) * height;
 }
 
 const round = (x: number) => Math.round(x * 100) / 100;
@@ -187,6 +210,7 @@ export function valuePath(
   duration: number,
   width: number,
   height: number,
+  domain: ValueDomain = FIXED_VALUE_DOMAIN,
 ): string {
   if (!(duration > 0) || !(width > 0) || !(height > 0)) return "";
   const order = frameOrder(timestamps, values.length);
@@ -195,7 +219,7 @@ export function valuePath(
     const v = values[i];
     if (!finite(v)) continue;
     const x = Math.max(0, Math.min(width, (timestamps[i] / duration) * width));
-    points.push(`${round(x)},${round(valueToY(v, height))}`);
+    points.push(`${round(x)},${round(valueToY(v, height, domain))}`);
   }
   return points.join(" ");
 }
@@ -208,6 +232,7 @@ export function valuePaths(
   duration: number,
   width: number,
   height: number,
+  domain: ValueDomain = FIXED_VALUE_DOMAIN,
 ): string[] {
   if (!(duration > 0) || !(width > 0) || !(height > 0)) return [];
   const paths: string[] = [];
@@ -227,11 +252,407 @@ export function valuePaths(
     }
     if (previous != null && frame !== previous + 1) close();
     const x = Math.max(0, Math.min(width, (timestamps[i] / duration) * width));
-    points.push(`${round(x)},${round(valueToY(v, height))}`);
+    points.push(`${round(x)},${round(valueToY(v, height, domain))}`);
     previous = frame;
   }
   close();
   return paths;
+}
+
+// ---- Vertical axis -----------------------------------------------------
+
+/** `adaptive` zooms to the shown curves, `dataset` to the dataset's spread
+ * (stable while the episode changes), `fixed` is the model's [-1, 0], and
+ * `return` is adaptive in the original return units. */
+export type AxisMode = "adaptive" | "dataset" | "fixed" | "return";
+export const AXIS_MODES: readonly AxisMode[] = [
+  "adaptive",
+  "dataset",
+  "fixed",
+  "return",
+];
+export const DEFAULT_AXIS_MODE: AxisMode = "adaptive";
+export const AXIS_STORAGE_KEY = "levi.recap.valueAxis";
+
+/** Narrowest span the adaptive axis draws: below it a flat curve would turn
+ * quantisation noise into apparent swings. */
+export const MIN_AXIS_SPAN = 0.05;
+/** Headroom around the data, as a share of its span, and its absolute floor. */
+const AXIS_PAD_FRACTION = 0.08;
+const AXIS_PAD_FLOOR = 0.01;
+/** The axis may extend this far past the model's support (v_min, v_max). */
+const SUPPORT_MARGIN = 0.02;
+
+export const isAxisMode = (value: unknown): value is AxisMode =>
+  typeof value === "string" &&
+  (AXIS_MODES as readonly string[]).includes(value);
+
+/** The remembered mode, or the default when storage is empty, blocked or
+ * holds something else. Never throws. */
+export function readAxisMode(
+  storage?: Pick<Storage, "getItem"> | null,
+): AxisMode {
+  try {
+    const raw = storage?.getItem(AXIS_STORAGE_KEY);
+    return isAxisMode(raw) ? raw : DEFAULT_AXIS_MODE;
+  } catch {
+    return DEFAULT_AXIS_MODE;
+  }
+}
+
+/** Remember a mode as a per-person preference; false when storage refused. */
+export function saveAxisMode(
+  mode: AxisMode,
+  storage?: Pick<Storage, "setItem"> | null,
+): boolean {
+  try {
+    if (!storage) return false;
+    storage.setItem(AXIS_STORAGE_KEY, mode);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Finite [min, max] over every series, or null when nothing is finite. */
+export function seriesExtent(
+  series: ReadonlyArray<readonly number[] | null | undefined>,
+): ValueDomain | null {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const values of series)
+    for (const v of values ?? []) {
+      if (!finite(v)) continue;
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+  return lo <= hi ? { lo, hi } : null;
+}
+
+/** Pad a data range, widen it to the minimum span around its centre, and move
+ * it (keeping its span where it can) inside `bounds`. */
+function framed(extent: ValueDomain, bounds: ValueDomain | null): ValueDomain {
+  let { lo, hi } = extent;
+  if (hi - lo < MIN_AXIS_SPAN) {
+    const centre = (lo + hi) / 2;
+    lo = centre - MIN_AXIS_SPAN / 2;
+    hi = centre + MIN_AXIS_SPAN / 2;
+  }
+  const pad = Math.max((hi - lo) * AXIS_PAD_FRACTION, AXIS_PAD_FLOOR);
+  lo -= pad;
+  hi += pad;
+  if (bounds) {
+    if (hi - lo >= bounds.hi - bounds.lo) return { ...bounds };
+    if (lo < bounds.lo) {
+      hi += bounds.lo - lo;
+      lo = bounds.lo;
+    }
+    if (hi > bounds.hi) {
+      lo -= hi - bounds.hi;
+      hi = bounds.hi;
+    }
+  }
+  return { lo, hi };
+}
+
+export interface ValueDomainOptions {
+  mode: AxisMode;
+  /** The model's value support (v_min, v_max); [-1, 0] when unknown. The axis
+   * stays within it plus a small margin. */
+  support?: ValueDomain | null;
+  /** Dataset-wide range for `dataset` mode; without it that mode behaves as
+   * `adaptive`. */
+  datasetRange?: ValueDomain | null;
+}
+
+/** The vertical range for the curves to be drawn (A and, when comparing, B on
+ * one shared axis). `return` mode expects series already in return units and
+ * `support` in the same units; it is the adaptive rule. */
+export function valueDomain(
+  series: ReadonlyArray<readonly number[] | null | undefined>,
+  options: ValueDomainOptions,
+): ValueDomain {
+  const support = options.support ?? FIXED_VALUE_DOMAIN;
+  if (options.mode === "fixed") return { ...FIXED_VALUE_DOMAIN };
+  const bounds: ValueDomain = {
+    lo: support.lo - SUPPORT_MARGIN,
+    hi: support.hi + SUPPORT_MARGIN,
+  };
+  const own = seriesExtent(series);
+  const wide =
+    options.mode === "dataset" && options.datasetRange
+      ? own
+        ? {
+            lo: Math.min(own.lo, options.datasetRange.lo),
+            hi: Math.max(own.hi, options.datasetRange.hi),
+          }
+        : options.datasetRange
+      : own;
+  return wide ? framed(wide, bounds) : { ...bounds };
+}
+
+/** Percentile (0..1, nearest rank) of a list; NaN when empty. */
+function percentile(values: number[], q: number): number {
+  if (!values.length) return Number.NaN;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
+}
+
+/** The spread of a dataset's curves, robust to a few outlier episodes: the 1st
+ * percentile of the episode minima to the 99th of the maxima. Reads the
+ * optional `min_value`/`max_value` a result stores for each episode; null for
+ * results saved without them. */
+export function datasetValueRange(
+  summary: RecapSummary | null | undefined,
+): ValueDomain | null {
+  if (!summary?.episodes) return null;
+  const mins: number[] = [];
+  const maxs: number[] = [];
+  for (const row of Object.values(summary.episodes) as Array<
+    RecapEpisodeSummary & { min_value?: unknown; max_value?: unknown }
+  >) {
+    if (finite(row?.min_value) && finite(row?.max_value)) {
+      mins.push(row.min_value);
+      maxs.push(row.max_value);
+    }
+  }
+  if (!mins.length) return null;
+  const lo = percentile(mins, 0.01);
+  const hi = percentile(maxs, 0.99);
+  return lo <= hi ? { lo, hi } : null;
+}
+
+/** Normalized V -> original return: the inverse of the model's return
+ * normalization, `(V + 1)(max − min) + min` (the form `compare` uses for its
+ * return-unit statistics). Non-finite input stays non-finite. */
+export function toReturnUnits(
+  values: readonly number[],
+  returnMin: number | null | undefined,
+  returnMax: number | null | undefined,
+): number[] {
+  if (!finite(returnMin) || !finite(returnMax)) return values.map(() => NaN);
+  return values.map((v) =>
+    finite(v) ? (v + 1) * (returnMax - returnMin) + returnMin : NaN,
+  );
+}
+
+type AxisRevision = Pick<
+  RecapRevision,
+  "return_min" | "return_max" | "value_support"
+>;
+
+export interface AxisInputs {
+  /** The person's choice. */
+  mode: AxisMode;
+  a: readonly number[] | null | undefined;
+  /** Null unless result B is shown beside A. */
+  b?: readonly number[] | null;
+  revA?: AxisRevision | null;
+  revB?: AxisRevision | null;
+  datasetA?: ValueDomain | null;
+  datasetB?: ValueDomain | null;
+}
+
+export interface AxisPlan {
+  /** The mode in effect: the choice, or `adaptive` when it is unavailable. */
+  mode: AxisMode;
+  /** Catalogue key explaining why a mode cannot be used. */
+  unavailable: Partial<Record<AxisMode, string>>;
+  domain: ValueDomain;
+  /** The curves in the axis' units (normalized V, or original returns). */
+  a: number[];
+  b: number[] | null;
+  units: "normalized" | "return";
+  /** Values that get a solid reference line when inside the domain. */
+  refs: number[];
+}
+
+const returnSpan = (rev: AxisRevision | null | undefined) =>
+  rev &&
+  finite(rev.return_min) &&
+  finite(rev.return_max) &&
+  rev.return_max > rev.return_min
+    ? { min: rev.return_min, max: rev.return_max }
+    : null;
+
+function supportOf(rev: AxisRevision | null | undefined): ValueDomain {
+  const lo = rev?.value_support?.v_min;
+  const hi = rev?.value_support?.v_max;
+  return finite(lo) && finite(hi) && lo < hi
+    ? { lo, hi }
+    : { ...FIXED_VALUE_DOMAIN };
+}
+
+/** One shared vertical axis for A and (when shown) B, with the reason a mode
+ * is unavailable. Two results with different return ranges still share an
+ * axis: only `return` mode puts them in common units. */
+export function planValueAxis(input: AxisInputs): AxisPlan {
+  const comparing = input.b != null;
+  const unavailable: Partial<Record<AxisMode, string>> = {};
+  if (!input.datasetA || (comparing && !input.datasetB))
+    unavailable.dataset =
+      "Dataset range needs per-episode minima and maxima, which this result does not store.";
+  const spanA = returnSpan(input.revA);
+  const spanB = returnSpan(input.revB);
+  if (!spanA || (comparing && !spanB))
+    unavailable.return =
+      "Return units need the return range of every shown result.";
+  const mode = unavailable[input.mode] ? DEFAULT_AXIS_MODE : input.mode;
+
+  const supportA = supportOf(input.revA);
+  const supportB = comparing ? supportOf(input.revB) : null;
+  const union = (x: ValueDomain, y: ValueDomain | null): ValueDomain =>
+    y ? { lo: Math.min(x.lo, y.lo), hi: Math.max(x.hi, y.hi) } : x;
+
+  if (mode === "return" && spanA) {
+    const a = toReturnUnits(input.a ?? [], spanA.min, spanA.max);
+    const b =
+      comparing && spanB
+        ? toReturnUnits(input.b ?? [], spanB.min, spanB.max)
+        : null;
+    const edges = (
+      support: ValueDomain,
+      span: { min: number; max: number },
+    ) => {
+      const [lo, hi] = toReturnUnits(
+        [support.lo, support.hi],
+        span.min,
+        span.max,
+      );
+      return { lo, hi };
+    };
+    const support = union(
+      edges(supportA, spanA),
+      supportB && spanB ? edges(supportB, spanB) : null,
+    );
+    return {
+      mode,
+      unavailable,
+      domain: valueDomain([a, b], { mode, support }),
+      a,
+      b,
+      units: "return",
+      refs: [0],
+    };
+  }
+
+  const a = [...(input.a ?? [])];
+  const b = comparing ? [...(input.b ?? [])] : null;
+  const dataset =
+    mode === "dataset" && input.datasetA
+      ? union(input.datasetA, comparing ? (input.datasetB ?? null) : null)
+      : null;
+  return {
+    mode,
+    unavailable,
+    domain: valueDomain([a, b], {
+      mode,
+      support: union(supportA, supportB),
+      datasetRange: dataset,
+    }),
+    a,
+    b,
+    units: "normalized",
+    refs: [0, -1],
+  };
+}
+
+/** Round, evenly spaced tick values inside the domain (1, 2 or 5 × 10^k
+ * steps), ascending; at most about `maxCount`, at least two when the domain
+ * allows. */
+export function niceTicks(
+  domain: ValueDomain,
+  maxCount = 4,
+): { ticks: number[]; step: number } {
+  const span = domain.hi - domain.lo;
+  if (!(span > 0) || !(maxCount >= 2)) return { ticks: [], step: 0 };
+  const stepFor = (raw: number) => {
+    const magnitude = 10 ** Math.floor(Math.log10(raw));
+    for (const m of [1, 2, 5, 10])
+      if (m * magnitude >= raw) return m * magnitude;
+    return 10 * magnitude;
+  };
+  let step = stepFor(span / (maxCount - 1));
+  const collect = (s: number) => {
+    const out: number[] = [];
+    const first = Math.ceil(domain.lo / s - 1e-9);
+    for (let k = first; k * s <= domain.hi + s * 1e-9; k++)
+      out.push(Number((k * s).toPrecision(12)));
+    return out;
+  };
+  let ticks = collect(step);
+  // Too coarse to place two ticks: take the next smaller 1/2/5 step.
+  for (let tries = 0; tries < 3 && ticks.length < 2; tries++) {
+    const magnitude = 10 ** Math.floor(Math.log10(step * 1.0001));
+    const lead = Math.round(step / magnitude);
+    step = lead === 5 ? 2 * magnitude : lead === 2 ? magnitude : magnitude / 2;
+    ticks = collect(step);
+  }
+  return { ticks, step };
+}
+
+/** A tick or reading with just enough decimals for the step, using a true
+ * minus sign. */
+export function formatTick(value: number, step = 0): string {
+  if (!finite(value)) return "—";
+  const decimals =
+    step > 0
+      ? Math.min(6, Math.max(0, -Math.floor(Math.log10(step) + 1e-9)))
+      : 3;
+  const text =
+    Math.abs(value) < 10 ** -(decimals + 1) ? "0" : value.toFixed(decimals);
+  return text.startsWith("-") ? "−" + text.slice(1) : text;
+}
+
+/** Position of a value within a domain as a percentage from the top (clamped
+ * to 0..100): drives the HTML tick labels and the playhead dot. */
+export function valueToPercent(value: number, domain: ValueDomain): number {
+  return valueToY(value, 100, domain);
+}
+
+// ---- Difference curve ----------------------------------------------------
+
+export interface FrameSeries {
+  frame_index: readonly number[];
+  timestamp: readonly number[];
+  value: readonly number[];
+}
+
+/** B − A on the frames both results label. Frames present in only one result,
+ * or with a non-finite value, are left out, so `valuePaths` breaks the line at
+ * a static-filter gap. Timestamps are A's. */
+export function valueDiff(a: FrameSeries, b: FrameSeries) {
+  const bAt = new Map<number, number>();
+  const n = Math.min(b.frame_index.length, b.value.length);
+  for (let i = 0; i < n; i++)
+    if (finite(b.frame_index[i]) && finite(b.value[i]))
+      bAt.set(b.frame_index[i], b.value[i]);
+  const frames: number[] = [];
+  const timestamps: number[] = [];
+  const values: number[] = [];
+  const m = Math.min(a.frame_index.length, a.value.length, a.timestamp.length);
+  for (let i = 0; i < m; i++) {
+    const frame = a.frame_index[i];
+    const other = bAt.get(frame);
+    if (!finite(frame) || !finite(a.value[i]) || other == null) continue;
+    frames.push(frame);
+    timestamps.push(a.timestamp[i]);
+    values.push(other - a.value[i]);
+  }
+  return { frame_index: frames, timestamp: timestamps, value: values };
+}
+
+/** Axis for a difference curve: symmetric around 0 so the zero line is the
+ * middle. `fixed` uses ±1 (the widest possible difference of normalized V). */
+export function diffDomain(
+  values: readonly number[],
+  mode: AxisMode,
+): ValueDomain {
+  if (mode === "fixed") return { lo: -1, hi: 1 };
+  const extent = seriesExtent([values]);
+  const reach = extent ? Math.max(Math.abs(extent.lo), Math.abs(extent.hi)) : 0;
+  const half = Math.max(reach * (1 + AXIS_PAD_FRACTION), MIN_AXIS_SPAN / 2);
+  return { lo: -half, hi: half };
 }
 
 /**
