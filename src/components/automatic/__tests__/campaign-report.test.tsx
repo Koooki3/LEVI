@@ -1,4 +1,4 @@
-import { render, setupDom, waitFor } from "@/components/ds/__tests__/dom";
+import { click, render, setupDom, waitFor } from "@/components/ds/__tests__/dom";
 import { describe, expect, mock, test } from "bun:test";
 import { act } from "react";
 
@@ -261,6 +261,49 @@ describe("the report page", () => {
       select.dispatchEvent(new Event("change", { bubbles: true }));
     });
     expect(seen).toEqual(["adjudicated_ground_truth"]);
+  });
+
+  test("a basis without a report offers to generate it, then shows it", async () => {
+    let made = false;
+    const base = reportApi();
+    const api = {
+      ...base,
+      getCampaignReport: mock(async (id: string, basis?: string) => {
+        if (!made) throw new ApiError(404, "no_report", "No report");
+        return (base.getCampaignReport as (a: string, b?: string) => unknown)(
+          id,
+          basis,
+        );
+      }),
+      generateCampaignReport: mock(async () => {
+        made = true;
+        return { result: "applied", basis: "autonomous_verdict" };
+      }),
+    } as unknown as Parameters<typeof CampaignReportView>[0]["api"];
+    const { host } = await render(
+      <CampaignReportView
+        campaignId="camp-1"
+        basis="autonomous_verdict"
+        onBasisChange={() => {}}
+        api={api}
+      />,
+    );
+    await waitFor(() =>
+      Array.from(host.querySelectorAll("button")).some(
+        (b) => b.textContent === "Generate the report for this basis",
+      ),
+    );
+    const button = Array.from(host.querySelectorAll("button")).find(
+      (b) => b.textContent === "Generate the report for this basis",
+    )!;
+    await click(button);
+    await waitFor(() => host.querySelectorAll("figure.ac-figure").length === 2);
+    const calls = (api!.generateCampaignReport as ReturnType<typeof mock>).mock
+      .calls;
+    expect(calls.length).toBe(1);
+    expect(calls[0][0]).toBe("camp-1");
+    expect(typeof calls[0][1]).toBe("string");
+    expect(calls[0][2]).toBe("autonomous_verdict");
   });
 
   test("a figure that cannot be read is reported, the others still show", async () => {

@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import { Download } from "lucide-react";
-import { Badge, Field, Select, Skeleton } from "@/components/ds";
+import { Badge, Button, Field, Select, Skeleton } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Note, RequestProblem } from "@/components/pages-ui/feedback";
 import { FigureCard } from "./campaign-charts";
@@ -23,13 +23,14 @@ import {
   wizardApi,
   type WizardApi,
 } from "./wizard-api";
-import { LABEL_BASES } from "./wizard-logic";
+import { IntentKeys, LABEL_BASES } from "./wizard-logic";
 import type { CampaignReport } from "./wizard-types";
 
 type ReportApi = Pick<
   WizardApi,
   "getCampaignReport" | "getReportFileJson" | "getReportFileText"
->;
+> &
+  Partial<Pick<WizardApi, "generateCampaignReport">>;
 
 const GROUP_LABELS: Record<string, string> = {
   tables: "automatic.campaign.report.group.tables",
@@ -41,6 +42,7 @@ const GROUP_LABELS: Record<string, string> = {
 type State =
   | { kind: "loading" }
   | { kind: "blinded" }
+  | { kind: "missing" }
   | { kind: "error"; message: string }
   | {
       kind: "ready";
@@ -64,6 +66,9 @@ export function CampaignReportView({
   const { t, language } = useLocale();
   const [state, setState] = useState<State>({ kind: "loading" });
   const generation = useRef(0);
+  const keys = useState(() => new IntentKeys())[0];
+  const [making, setMaking] = useState(false);
+  const [makeProblem, setMakeProblem] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const mine = ++generation.current;
@@ -114,6 +119,8 @@ export function CampaignReportView({
         (error.status === 409 || error.is("blinded"))
       )
         setState({ kind: "blinded" });
+      else if (error instanceof ApiError && error.is("no_report"))
+        setState({ kind: "missing" });
       else
         setState({
           kind: "error",
@@ -125,6 +132,39 @@ export function CampaignReportView({
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Make the report of the chosen basis (or make it again, after cards were
+  // confirmed): one request id per basis while it runs, then read it back.
+  const generate = async () => {
+    if (!api.generateCampaignReport || making) return;
+    const intent = `report:${basis}`;
+    setMaking(true);
+    setMakeProblem(null);
+    try {
+      await api.generateCampaignReport(campaignId, keys.idFor(intent), basis);
+      keys.release(intent);
+      await load();
+    } catch (error) {
+      setMakeProblem(error instanceof Error ? error.message : String(error));
+      if (error instanceof ApiError && error.status !== 0) keys.release(intent);
+    } finally {
+      setMaking(false);
+    }
+  };
+
+  const generateButton = (label: string, variant: "primary" | "secondary") =>
+    api.generateCampaignReport ? (
+      <div className="pg-row">
+        <Button
+          variant={variant}
+          loading={making}
+          disabled={making}
+          onClick={() => void generate()}
+        >
+          {label}
+        </Button>
+      </div>
+    ) : null;
 
   const analysis =
     state.kind === "ready"
@@ -178,6 +218,22 @@ export function CampaignReportView({
           <strong>{t("automatic.campaign.report.blinded.title")}</strong>{" "}
           {t("automatic.campaign.report.blinded.body")}
         </Note>
+      )}
+      {state.kind === "missing" && (
+        <Note tone="info" role="status">
+          <strong>{t("automatic.campaign.report.missing.title")}</strong>{" "}
+          {t("automatic.campaign.report.missing.body")}
+          {generateButton(
+            t("automatic.campaign.report.generate"),
+            "primary",
+          )}
+        </Note>
+      )}
+      {makeProblem && (
+        <RequestProblem
+          action="automatic.campaign.report.generate_failed"
+          message={makeProblem}
+        />
       )}
       {state.kind === "error" && (
         <RequestProblem
@@ -251,6 +307,11 @@ export function CampaignReportView({
               );
             })}
           </section>
+
+          {generateButton(
+            t("automatic.campaign.report.regenerate"),
+            "secondary",
+          )}
 
           <details className="aw-panel ac-manifest">
             <summary>{t("automatic.campaign.report.manifest")}</summary>

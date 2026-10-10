@@ -248,6 +248,24 @@ function domainOf(axis: SpecAxis): [number | "auto", number | "auto"] {
   return [axis.min ?? "auto", axis.max ?? "auto"];
 }
 
+/** An axis range that covers the data, the interval ends and the reference
+ * lines, with a margin; a bound the spec names stays as named. Recharts' own
+ * "auto" starts a number axis at 0, which put a difference of 0 +- 0.5 on an
+ * axis of 0 to 4. */
+export function dataDomain(
+  axis: SpecAxis,
+  values: number[],
+): [number | "auto", number | "auto"] {
+  const finite = values.filter((v) => Number.isFinite(v));
+  if (finite.length === 0) return domainOf(axis);
+  let lo = Math.min(...finite);
+  let hi = Math.max(...finite);
+  const margin = (hi - lo) * 0.08 || Math.abs(hi) * 0.1 || 0.5;
+  lo -= margin;
+  hi += margin;
+  return [axis.min ?? lo, axis.max ?? hi];
+}
+
 function panelModel(
   kind: string,
   panel: SpecPanel,
@@ -389,8 +407,32 @@ function panelModel(
     yFmt,
     xCategories: xCats,
     yCategories: yCats,
-    xDomain: domainOf(panel.x_axis),
-    yDomain: domainOf(panel.y_axis),
+    xDomain:
+      style === "forest"
+        ? dataDomain(panel.x_axis, [
+            ...series.flatMap((s) =>
+              s.unavailable
+                ? []
+                : s.points.flatMap((p) => [p.x, p.lo ?? p.x, p.hi ?? p.x]),
+            ),
+            ...(panel.reflines ?? [])
+              .filter((r) => r.axis === "x")
+              .map((r) => r.value),
+          ])
+        : domainOf(panel.x_axis),
+    yDomain:
+      style === "lines"
+        ? dataDomain(panel.y_axis, [
+            ...series.flatMap((s) =>
+              s.unavailable
+                ? []
+                : s.points.flatMap((p) => [p.y, p.lo ?? p.y, p.hi ?? p.y]),
+            ),
+            ...(panel.reflines ?? [])
+              .filter((r) => r.axis === "y")
+              .map((r) => r.value),
+          ])
+        : domainOf(panel.y_axis),
     rows,
     series,
     refs: (panel.reflines ?? []).map((r) => ({

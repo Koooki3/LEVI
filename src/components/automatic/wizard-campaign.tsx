@@ -39,13 +39,13 @@ const DEBOUNCE_MS = 400;
 
 type SetForm = (change: Partial<WizardForm>) => void;
 
-const POWER_COLUMNS = new Set([
-  "n",
-  "wilson_width_at_half",
-  "baseline",
-  "unpaired_fisher",
-  "paired_mcnemar",
-]);
+const POWER_COLUMNS: Record<string, string> = {
+  n: "automatic.wizard.power.col.n",
+  wilson_width_at_half: "automatic.wizard.power.col.wilson_width_at_half",
+  baseline: "automatic.wizard.power.col.baseline",
+  unpaired_fisher: "automatic.wizard.power.col.unpaired_fisher",
+  paired_mcnemar: "automatic.wizard.power.col.paired_mcnemar",
+};
 
 /** The name of a power column: a catalogue sentence, never the raw key (a key
  * the table does not know is shown as it is). */
@@ -54,8 +54,9 @@ export function powerColumnLabel(
   t: (k: string) => string,
 ): string {
   const [base, sub] = key.split("@");
-  if (!POWER_COLUMNS.has(base)) return key;
-  const name = t(`automatic.wizard.power.col.${base}`);
+  const catalogueKey = POWER_COLUMNS[base];
+  if (!catalogueKey) return key;
+  const name = t(catalogueKey);
   return sub === undefined ? name : name.replace("{rho}", sub);
 }
 

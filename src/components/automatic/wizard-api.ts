@@ -267,6 +267,19 @@ export const getCampaignReport = (id: string, basis?: string) =>
     }`,
   );
 
+/** Make (or make again) the report of one label basis; the controller
+ * writes it from the ledger. Answers `{result, basis, conclusion_level}`. */
+export const generateCampaignReport = (
+  id: string,
+  commandId: string,
+  basis?: string,
+) =>
+  apiRequest<{ result: string; basis?: string; conclusion_level?: string }>(
+    "POST",
+    `${AUTO}/campaigns/${encodeURIComponent(id)}/report`,
+    basis ? { command_id: commandId, basis } : { command_id: commandId },
+  );
+
 /** The path of one report file under the proxy (a link for downloads). */
 export function reportFileUrl(
   id: string,
@@ -322,6 +335,7 @@ export const wizardApi = {
   confirmCampaignCard,
   campaignCommand,
   getCampaignReport,
+  generateCampaignReport,
   getReportFileJson,
   getReportFileText,
 };

@@ -67,13 +67,25 @@
 .ac-fig-notes {
   padding-left: var(--ds-space-4);
 }
+/* The plot is drawn at the width of its box (see `useWidth`). A grid track
+   or a flex item would otherwise grow to the drawn width (its initial 420 px)
+   and push the page sideways on a phone, so each box may shrink to 0. */
 .ac-plots {
   display: grid;
   gap: var(--ds-space-3);
+  grid-template-columns: minmax(0, 1fr);
+}
+.ac-plot-block {
+  min-width: 0;
 }
 .ac-plot {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
+}
+.ac-plot svg {
+  max-width: 100%;
 }
 .ac-plot-title {
   margin: var(--ds-space-2) 0 0;
@@ -223,4 +235,7 @@
 }
 .ac-summary {
   max-width: 80ch;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-wrap: anywhere;
 }

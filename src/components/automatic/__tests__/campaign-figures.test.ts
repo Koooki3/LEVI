@@ -140,6 +140,35 @@ describe("which marks a figure kind draws", () => {
     ]);
   });
 
+  test("a forest plot's x axis follows the data, the interval ends and the zero line", () => {
+    const spec = base({
+      kind: "forest",
+      panels: [
+        {
+          x_axis: { kind: "linear", fmt: "plain" },
+          y_axis: { kind: "category", categories: ["B - A"] },
+          series: [
+            { name: "Newcombe", points: [{ x: 0, y: 0, lo: -0.49, hi: 0.49 }] },
+            { name: "Bootstrap", points: [{ x: 0, y: 0, lo: -0.4, hi: 0.45 }] },
+          ],
+          reflines: [{ axis: "x", value: 0 }],
+        },
+      ],
+    });
+    const [lo, hi] = figureModel(spec, "en", t).plots[0].xDomain as [
+      number,
+      number,
+    ];
+    // Covers -0.49..0.49 with a margin, and nothing like 0..4.
+    expect(lo).toBeLessThan(-0.49);
+    expect(lo).toBeGreaterThan(-0.7);
+    expect(hi).toBeGreaterThan(0.49);
+    expect(hi).toBeLessThan(0.7);
+    // A bound the spec names is kept.
+    spec.panels[0].x_axis.max = 1;
+    expect(figureModel(spec, "en", t).plots[0].xDomain[1]).toBe(1);
+  });
+
   test("a step curve and a drift plot", () => {
     const step = figureModel(
       base({
