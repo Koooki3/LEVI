@@ -210,22 +210,55 @@ def test_initially_closed_gripper_reads_reversed_current_behavior():
     # 0 = closed: the episode starts holding, opens at 0.3, closes at 0.5.
     values = [0, 0, 0, 1, 1, 0]
     out = summarize(_table([[v] for v in values]), _info(["gripper"]))
-    # signals takes the first level as open, so every event is reversed.
+    # signals takes the first level as open, so every event is reversed: a
+    # channel that starts closed cannot say which end is open (T-A-03 keeps
+    # this; only a declared open level reads it right, see below).
     assert out["lines"] == ["gripper (observation.state.gripper): close 0.3, open 0.5"]
     # anchored reads the declared open level (high) and gets them right.
     assert crossings(np.array(values, float), (0.0, 1.0)) == [(3, "open"), (5, "close")]
 
 
-def test_spike_first_sample_flips_polarity_current_behavior():
-    values = np.array([0.0] + [1.0] * 4 + [0.0] * 4 + [1.0] * 3)
-    times = np.arange(len(values)) / 10
-    # One stray first sample makes the whole episode read upside down.
-    assert gripper_events(times, values) == [
-        {"t": 0.1, "kind": "close"},
-        {"t": 0.5, "kind": "open"},
-        {"t": 0.9, "kind": "close"},
+def test_a_declared_open_level_reads_an_initially_closed_gripper():
+    values = [0, 0, 0, 1, 1, 0]
+    declared = {"observation.state.gripper": "high"}
+    out = summarize(_table([[v] for v in values]), _info(["gripper"]), None, declared)
+    assert out["lines"] == ["gripper (observation.state.gripper): open 0.3, close 0.5"]
+    times = np.arange(6) / 10
+    assert gripper_events(times, np.array(values, float), open_level="high") == [
+        {"t": 0.3, "kind": "open"},
+        {"t": 0.5, "kind": "close"},
     ]
-    assert crossings(values, (0.0, 1.0)) == [(1, "open"), (5, "close"), (9, "open")]
+    # A closure channel (1 = closed) declared low reads the same way.
+    closure = 1 - np.array(values, float)
+    assert gripper_events(times, closure, open_level="low") == [
+        {"t": 0.3, "kind": "open"},
+        {"t": 0.5, "kind": "close"},
+    ]
+
+
+SPIKE = np.array([0.0] + [1.0] * 4 + [0.0] * 4 + [1.0] * 3)
+
+
+def test_a_stray_first_sample_no_longer_flips_the_signal_lines():
+    # T-A-03: the start is the median of the first three samples, so one
+    # stray first sample neither sets the polarity nor makes an event.
+    # (Before: close 0.1, open 0.5, close 0.9 -- upside down.)
+    times = np.arange(len(SPIKE)) / 10
+    assert gripper_events(times, SPIKE) == [
+        {"t": 0.5, "kind": "close"},
+        {"t": 0.9, "kind": "open"},
+    ]
+    # A stray first sample on a declared channel makes no event either.
+    assert gripper_events(times, SPIKE, open_level="high") == [
+        {"t": 0.5, "kind": "close"},
+        {"t": 0.9, "kind": "open"},
+    ]
+
+
+def test_anchored_spike_first_sample_sets_the_initial_state_current_behavior():
+    # anchored.crossings keeps its frozen semantics: the first sample is the
+    # initial state, so a stray closed first sample makes an "open" anchor.
+    assert crossings(SPIKE, (0.0, 1.0)) == [(1, "open"), (5, "close"), (9, "open")]
 
 
 def test_nan_first_sample_is_skipped_current_behavior():
@@ -263,11 +296,35 @@ def _slow_drift_with_a_drop():
     return times, positions
 
 
-def test_still_uses_the_declared_rate_not_timestamps_current_behavior():
+def test_still_reads_dropped_frames_on_their_timestamps():
     times, positions = _slow_drift_with_a_drop()
-    # The 0.6 s gap is read as one frame, so its step looks six times faster
-    # and splits the rest in two.
-    assert still_spans(times, positions, 10) == [(0.0, 0.9), (1.9, 2.9)]
+    # T-A-03: the 0.6 s gap is a 0.6 s step, so the slow creep stays still.
+    # (Before, it was read as one frame, six times too fast, and split the
+    # rest in two: (0.0, 0.9), (1.9, 2.9).)
+    assert still_spans(times, positions, 10) == [(0.0, 2.9)]
+
+
+def test_speed_on_an_even_table_is_the_step_times_the_rate_to_the_bit():
+    from levi.events.motion import speeds
+
+    rng = np.random.default_rng(7)
+    for fps in (10.0, 15.0, 30.0, 29.97):
+        times = np.arange(200) / fps
+        positions = np.cumsum(rng.normal(0, 0.01, (200, 3)), axis=0)
+        expected = np.linalg.norm(np.diff(positions, axis=0), axis=1) * fps
+        assert np.array_equal(speeds(times, positions, fps), expected)
+        # float32 timestamps, as LeRobot stores them, are still "even".
+        t32 = times.astype(np.float32).astype(float)
+        assert np.array_equal(speeds(t32, positions, fps), expected)
+
+
+def test_speed_is_unknown_where_time_does_not_advance():
+    from levi.events.motion import speeds
+
+    times = np.array([0.0, 0.1, 0.1, 0.3])
+    positions = np.array([[0.0], [0.1], [0.2], [0.4]])
+    out = speeds(times, positions, 10.0)
+    assert out[0] == 0.1 * 10 and np.isnan(out[1]) and out[2] == 0.2 / 0.2
 
 
 def test_view_rows_ignore_dropped_frames_current_behavior():

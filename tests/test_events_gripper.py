@@ -115,19 +115,52 @@ def _channel(rng):
     return values, bounds
 
 
+def _robust_start_agrees(values):
+    """Whether the median of the first three finite samples sits on the same
+    side of the episode's mid-range as the first one (then the robust start
+    of T-A-03 reads exactly as the first sample did)."""
+    finite = np.flatnonzero(np.isfinite(values))
+    if len(finite) < 2:
+        return True
+    lo, hi = np.nanmin(values), np.nanmax(values)
+    if not np.isfinite(hi - lo) or hi - lo <= 1e-9:
+        return True
+    u = (values[finite[:3]] - lo) / (hi - lo)
+    return (u[0] >= 0.5) == (np.median(u) >= 0.5)
+
+
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")
 def test_both_readers_match_their_former_copies_on_random_channels():
     rng = np.random.default_rng(20261010)
+    changed = 0
     for _ in range(3000):
         values, bounds = _channel(rng)
         times = np.arange(len(values)) / 10
-        assert gripper_events(times, values.copy(), bounds) == _legacy_gripper_events(
-            times, values.copy(), bounds
+        legacy = _legacy_gripper_events(times, values.copy(), bounds)
+        # The kernel with the first-sample start is the former copy exactly.
+        first = gripper.read(
+            values.copy(),
+            bounds,
+            range_source="episode",
+            open_level="auto",
+            min_travel=0.2,
+            start="first",
         )
+        assert [(e["t"], e["kind"]) for e in legacy] == [
+            (float(times[i]), kind) for i, kind in (first.crossings if first else [])
+        ]
+        # The signal lines (robust start) differ only where the first sample
+        # disagrees with the next two.
+        if _robust_start_agrees(values):
+            assert gripper_events(times, values.copy(), bounds) == legacy
+        else:
+            changed += 1
         for level in ("high", "low"):
             assert crossings(values.copy(), bounds, level) == _legacy_crossings(
                 values.copy(), bounds, level
             )
+    # Random channels jump around from the first sample; recorded ones rarely do.
+    assert 0 < changed < 3000 * 0.3
 
 
 def test_the_range_source_decides_a_wide_grasp():
