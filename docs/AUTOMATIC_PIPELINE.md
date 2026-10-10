@@ -744,7 +744,11 @@ An answer is `{request_id, nonce, frames_sha256, predicates}`
 (`human.answer_for`): the nonce and frame digest echoed, each required
 predicate `true`, `false` or `null` ("cannot tell") and nothing else. An
 answer that was there before its question (request ids are predictable),
-or carries another nonce or frame digest, is never taken. The decision
+or carries another nonce or frame digest, is never taken. The nonce and the
+digest prove that an answer was made after, and for, this question; they cannot
+prove that a person looked at the frames (a program that can write to the
+transport can echo them), so the transport's folder is as private as the run
+directory. The decision
 follows from the answers (a false required predicate: `reset_required`; a
 `null`: `unknown`; all true: `ready`, still checked by the arbitration,
 evidence rule and views included). An answer may not carry a decision or a

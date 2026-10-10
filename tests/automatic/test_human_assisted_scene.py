@@ -278,6 +278,55 @@ def test_a_repeated_or_unrequested_answer_is_dropped(tmp_path):
     assert rig.scene.collect(ticket, timeout_ns=10**9) is None
 
 
+@pytest.mark.parametrize("bad", [["a"], {"a": 1}, 7, None])
+def test_an_answer_with_a_malformed_request_id_is_dropped_not_fatal(tmp_path, bad):
+    transport = human.QueueTransport()
+    rig = person_run(tmp_path, transport)
+    request = {
+        "request_id": f"{RUN}.forward.0001:scene9",
+        "run_id": RUN,
+        "episode_id": f"{RUN}.forward.0001",
+        "target": "initial_state",
+    }
+    ticket = rig.scene.submit(request)
+    transport.put({"request_id": bad, "predicates": {"object_at_source": True}})
+    assert rig.scene.collect(ticket, timeout_ns=10**8) is None
+    found = rig.scene.drain_notes()
+    assert [c for c, _ in found] == ["scene_answer_unsolicited"]
+    # the question is still open: the right answer is taken afterwards
+    transport.answer(
+        request["request_id"], {"object_at_source": True, "gripper_open": True}
+    )
+    assert (
+        json.loads(rig.scene.collect(ticket, timeout_ns=10**9))["decision"] == "ready"
+    )
+
+
+def test_a_nonce_is_not_derivable_from_the_request_id(tmp_path):
+    import hashlib
+
+    seen = set()
+    for i in range(3):
+        transport = human.QueueTransport()
+        (tmp_path / str(i)).mkdir()
+        rig = person_run(tmp_path / str(i), transport)
+        request_id = f"{RUN}.forward.0001:scene9"
+        rig.scene.submit(
+            {
+                "request_id": request_id,
+                "run_id": RUN,
+                "episode_id": f"{RUN}.forward.0001",
+                "target": "initial_state",
+            }
+        )
+        nonce = transport.questions[request_id]["nonce"]
+        seen.add(nonce)
+        for digest in (hashlib.sha256, hashlib.md5, hashlib.sha1):
+            assert nonce != digest(request_id.encode()).hexdigest()[: len(nonce)]
+        assert len(nonce) >= 16
+    assert len(seen) == 3  # a fresh draw for every question
+
+
 # --- in the run ---------------------------------------------------------------------------------
 
 

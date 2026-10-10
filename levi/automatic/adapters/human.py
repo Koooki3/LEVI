@@ -557,7 +557,7 @@ class HumanSceneProvider:
                 ticket = (
                     self._open.get(request_id) if isinstance(request_id, str) else None
                 )
-                taken = request_id in self._answered
+                taken = isinstance(request_id, str) and request_id in self._answered
             if ticket is None or taken or not self._echoes(ticket, answer):
                 # Never asked, answered already, withdrawn, or not an
                 # answer to this question (nonce, frames): dropped.
