@@ -38,6 +38,7 @@ import secrets
 import stat
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 from . import launch
@@ -298,7 +299,8 @@ class CommandPump(threading.Thread):
         self._tick_lock = threading.Lock()
         self._refused: set = set()
         self._sigterm_result: dict | None = None
-        self.processed: list = []
+        # The latest results (bounded: a long run keeps few in memory).
+        self.processed: deque = deque(maxlen=256)
         self._process = process_identity()
 
     # --- the loop ---------------------------------------------------------------------------------
