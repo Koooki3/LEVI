@@ -10,7 +10,7 @@ levi recap base list
 levi recap threshold <repo_id> <repo_id> … [--positive-quantile q] [--set <checkpoint> --provenance-text TEXT]
 levi recap run <repo_id> --checkpoint <n> [--episodes 0,3] [--threshold X] [--dataset-type auto|rollout|sft] [--static-filter auto|on|off]
 levi recap settings <repo_id> [--dataset-type auto|rollout|sft]
-levi recap show <repo_id> [--episode N]
+levi recap show <repo_id> [--model <checkpoint>|--revision <id>] [--episode N]
 """
 
 from __future__ import annotations
@@ -231,6 +231,13 @@ def build_parser() -> argparse.ArgumentParser:
     show = sub.add_parser("show", help="the current labels of a dataset")
     show.add_argument("repo_id")
     show.add_argument("--episode", type=int)
+    show.add_argument(
+        "--model",
+        "--revision",
+        dest="result",
+        help="a value model's result, or an original-layout revision id "
+        "(default: the current result)",
+    )
     return parser
 
 
@@ -322,11 +329,11 @@ def main(argv: list[str] | None = None) -> int:
                 _print(
                     {
                         "status": jobs.status(args.repo_id)["current"],
-                        "summary": jobs.summary_payload(args.repo_id),
+                        "summary": jobs.summary_payload(args.repo_id, args.result),
                     }
                 )
             else:
-                _print(jobs.episode_payload(args.repo_id, args.episode))
+                _print(jobs.episode_payload(args.repo_id, args.episode, args.result))
             return 0
     except Exception as exc:  # a readable line, not a traceback
         from .jobs import RecapError

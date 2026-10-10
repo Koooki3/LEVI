@@ -410,7 +410,10 @@ def _recap(ds, revision_id: str | None):
     record = recap_store.revision(ds.name, revision_id)
     if record is None:
         if revision_id:
-            raise ManifestError(f"No RECAP revision {revision_id!r} on {ds.name}")
+            raise ManifestError(
+                f"No RECAP result {revision_id!r} (value model or revision) on "
+                f"{ds.name}"
+            )
         return None, []
     return record, recap_jobs.stale_reasons(ds, record)
 
@@ -577,7 +580,17 @@ def build(
         if recap is not None:
             from .recap import store as recap_store
 
-            labels = recap_store.read_episode(ds.name, ep, recap["revision_id"])
+            # Every episode from the version resolved once, at the start.
+            labels = recap_store.read_episode(
+                ds.name, ep, recap["revision_id"], recap.get("version")
+            )
+            if labels is None and ep in (recap.get("episode_indices") or ()):
+                # Its version was reclaimed mid-export (recomputed, then
+                # past the grace period): never write it as unlabelled.
+                raise ManifestError(
+                    f"The RECAP result {recap['revision_id']} was recomputed "
+                    "while this manifest was being written; run it again"
+                )
             if labels is not None:
                 where = {int(f): i for i, f in enumerate(frame_index)}
                 cols = labels.to_pydict()
@@ -901,6 +914,12 @@ def _recap_meta(record, stale):
     checkpoint = record.get("checkpoint") or {}
     return {
         "revision_id": record["revision_id"],
+        # A value model's result is replaced when recomputed: the version
+        # and the digest of its advantages table identify what was read.
+        "model": record.get("model"),
+        "version": record.get("version"),
+        "layout": record.get("layout"),
+        "result_digest": _result_digest(record),
         "checkpoint": checkpoint.get("name"),
         "checkpoint_sha256": checkpoint.get("sha256"),
         "provider": record.get("provider"),
@@ -915,6 +934,25 @@ def _recap_meta(record, stale):
         "levi_commit": record.get("levi_commit"),
         "stale_reasons": stale,
     }
+
+
+def _result_digest(record) -> str | None:
+    from .recap import store as recap_store
+
+    if not record.get("dataset"):
+        return None
+    path = recap_store.advantages_path(
+        record["dataset"], record["revision_id"], record.get("version")
+    )
+    if path is None or not path.is_file():
+        return None
+    import hashlib
+
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return "sha256:" + digest.hexdigest()
 
 
 def _target(name: str, operation: str, output) -> Path:
@@ -1039,7 +1077,13 @@ def main(argv=None) -> int:
         action="append",
         help="tasks the anchored verdict is valid for (default: every task it covers)",
     )
-    make.add_argument("--recap-revision", help="RECAP revision (default current)")
+    make.add_argument(
+        "--recap-model",
+        "--recap-revision",
+        dest="recap_revision",
+        help="RECAP result: a value model's name, or an original-layout "
+        "revision id (default: the current result)",
+    )
     make.add_argument("--allow-stale", action="store_true")
     make.add_argument(
         "--prompt-template",
