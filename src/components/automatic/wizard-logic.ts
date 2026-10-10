@@ -412,17 +412,63 @@ export function tokenSecondsLeft(expiresAt: number, now: number): number {
   return Math.max(0, Math.ceil((expiresAt - now) / 1000));
 }
 
-/** Columns and cells of the power table. The rows are whatever the planner
- * returns (design, sample size, power...); numbers are shown to 3 digits. */
-export function powerTable(rows: Record<string, number | string | null>[]): {
+/** One flat power row. The planner nests: a row per sample size holds
+ * `baselines: [{baseline, unpaired_fisher, paired_mcnemar: {"<rho>": d}}]`.
+ * This gives one flat row per (sample size, baseline) with the keys `n`,
+ * `wilson_width_at_half`, `baseline`, `unpaired_fisher` and one
+ * `paired_mcnemar@<rho>` per correlation; any other nested object is
+ * flattened the same way (`key@sub`). Rows without `baselines` stay as they
+ * are. */
+export function flattenPowerRows(
+  rows: unknown[],
+): Record<string, number | string | null>[] {
+  const flat: Record<string, number | string | null>[] = [];
+  const put = (
+    into: Record<string, number | string | null>,
+    key: string,
+    value: unknown,
+  ) => {
+    if (value === null || value === undefined) into[key] = null;
+    else if (typeof value === "number" || typeof value === "string")
+      into[key] = value;
+    else if (Array.isArray(value)) into[key] = value.join(", ");
+    else if (typeof value === "object")
+      for (const [sub, inner] of Object.entries(value))
+        put(into, `${key}@${sub}`, inner);
+    else into[key] = String(value);
+  };
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const { baselines, ...rest } = row as Record<string, unknown>;
+    if (Array.isArray(baselines) && baselines.length > 0) {
+      for (const entry of baselines) {
+        const one: Record<string, number | string | null> = {};
+        for (const [k, v] of Object.entries(rest)) put(one, k, v);
+        if (entry && typeof entry === "object")
+          for (const [k, v] of Object.entries(entry)) put(one, k, v);
+        flat.push(one);
+      }
+    } else {
+      const one: Record<string, number | string | null> = {};
+      for (const [k, v] of Object.entries(rest)) put(one, k, v);
+      flat.push(one);
+    }
+  }
+  return flat;
+}
+
+/** Columns and cells of the power table (keys, to be named by the page);
+ * numbers are shown to 3 digits. */
+export function powerTable(rows: unknown[]): {
   columns: string[];
   cells: string[][];
 } {
+  const flat = flattenPowerRows(rows);
   const columns: string[] = [];
-  for (const row of rows)
+  for (const row of flat)
     for (const key of Object.keys(row))
       if (!columns.includes(key)) columns.push(key);
-  const cells = rows.map((row) =>
+  const cells = flat.map((row) =>
     columns.map((column) => {
       const value = row[column];
       if (value === null || value === undefined) return "—";

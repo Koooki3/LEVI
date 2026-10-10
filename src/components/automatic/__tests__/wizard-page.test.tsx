@@ -119,7 +119,19 @@ function fakeApi(over: Partial<WizardApi> & { reset?: boolean } = {}) {
       switches: 3,
       power: {
         detectable_difference: 0.31,
-        rows: [{ n: 20, power: 0.5 }],
+        rows: [
+          {
+            n: 20,
+            wilson_width_at_half: 0.4,
+            baselines: [
+              {
+                baseline: 0.5,
+                unpaired_fisher: 0.42,
+                paired_mcnemar: { "0.0": 0.44, "0.3": 0.39 },
+              },
+            ],
+          },
+        ],
       },
       refusals: [],
       checks: [],
@@ -396,6 +408,15 @@ describe("the wizard, a multi-model plan", () => {
       label: "the campaign plan",
     });
     expect(host.textContent).toContain("0.31");
+    // The planner's nested rows render as a table with named columns.
+    const heads = Array.from(host.querySelectorAll(".aw-power th")).map(
+      (th) => th.textContent,
+    );
+    expect(heads).toContain("Smallest detectable difference, unpaired (Fisher)");
+    expect(
+      heads.some((h) => h?.includes("paired (McNemar), correlation 0.3")),
+    ).toBe(true);
+    expect(heads.some((h) => h?.includes("paired_mcnemar"))).toBe(false);
     expect(host.textContent).toContain("not measured yet");
     const planned = (api.planCampaign as ReturnType<typeof mock>).mock
       .calls[0][0] as { arms: unknown[]; job_id: string };

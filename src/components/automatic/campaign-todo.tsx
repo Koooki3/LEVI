@@ -3,7 +3,7 @@
 // checklist and one confirmation; the campaign never goes on without it. The
 // robot and the policy server are handled by the person, in the terminal.
 import { useState } from "react";
-import { Button, Checkbox, useConfirm } from "@/components/ds";
+import { Button, Checkbox, Radio, RadioGroup, useConfirm } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Note, RequestProblem } from "@/components/pages-ui/feedback";
 import { ApiError, type WizardApi } from "./wizard-api";
@@ -26,8 +26,9 @@ const CHECKS: Record<string, string[]> = {
   recover_run: ["automatic.campaign.todo.recover.handled"],
 };
 
-/** What a person may add when answering a campaign that waits after a fault
- * or a short segment: none is ticked by default. `when` limits an option to
+/** What a person may choose when answering a campaign that waits after a
+ * fault or a short segment. The options exclude one another, so they are a
+ * radio group whose default is "nothing special". `when` limits an option to
  * the reasons it answers. */
 const RECOVER_OPTIONS: {
   name: string;
@@ -79,7 +80,7 @@ export function CampaignTodoCard({
   const checks = CHECKS[kind] ?? [];
   const waitReason = todo.reason ?? "";
   const options = kind === "recover_run" ? RECOVER_OPTIONS : [];
-  const [chosen, setChosen] = useState<Record<string, boolean>>({});
+  const [chosen, setChosen] = useState<string>("");
   const [ticked, setTicked] = useState<boolean[]>(() =>
     checks.map(() => false),
   );
@@ -109,9 +110,7 @@ export function CampaignTodoCard({
       confirmLabel: t("automatic.campaign.todo.confirm_button"),
     });
     if (!ok) return;
-    const sent = Object.fromEntries(
-      Object.entries(chosen).filter(([, on]) => on),
-    );
+    const sent: Record<string, boolean> = chosen ? { [chosen]: true } : {};
     const intent = `confirm:${requestKind}:${challenge}:${JSON.stringify(sent)}`;
     setBusy(true);
     setProblem(null);
@@ -244,18 +243,27 @@ export function CampaignTodoCard({
           }
         />
       ))}
-      {options
-        .filter((o) => o.when(waitReason))
-        .map((o) => (
-          <Checkbox
-            key={o.name}
-            label={t(o.key)}
-            checked={chosen[o.name] === true}
-            onChange={(event) =>
-              setChosen((prev) => ({ ...prev, [o.name]: event.target.checked }))
-            }
+      {options.length > 0 && (
+        <RadioGroup legend={t("automatic.campaign.todo.recover.choose")}>
+          <Radio
+            name="ac-recover-option"
+            label={t("automatic.campaign.todo.recover.none")}
+            checked={chosen === ""}
+            onChange={() => setChosen("")}
           />
-        ))}
+          {options
+            .filter((o) => o.when(waitReason))
+            .map((o) => (
+              <Radio
+                key={o.name}
+                name="ac-recover-option"
+                label={t(o.key)}
+                checked={chosen === o.name}
+                onChange={() => setChosen(o.name)}
+              />
+            ))}
+        </RadioGroup>
+      )}
       <div className="pg-row">
         <Button
           variant="primary"

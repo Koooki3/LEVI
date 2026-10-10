@@ -223,6 +223,42 @@ describe("requests", () => {
     ).toBe(false);
   });
 
+  test("the power table reads the planner's nested rows (real answer)", () => {
+    // Taken from levi.automatic.analysis.power_table([20], [0.5, 0.3]).
+    const t = powerTable([
+      {
+        n: 20,
+        wilson_width_at_half: 0.4014039836035753,
+        baselines: [
+          {
+            baseline: 0.5,
+            unpaired_fisher: 0.42,
+            paired_mcnemar: { "0.0": 0.44, "0.3": 0.39 },
+          },
+          {
+            baseline: 0.3,
+            unpaired_fisher: 0.48,
+            paired_mcnemar: { "0.0": 0.49, "0.3": 0.42 },
+          },
+        ],
+      },
+    ]);
+    expect(t.columns).toEqual([
+      "n",
+      "wilson_width_at_half",
+      "baseline",
+      "unpaired_fisher",
+      "paired_mcnemar@0.0",
+      "paired_mcnemar@0.3",
+    ]);
+    expect(t.cells).toEqual([
+      ["20", "0.401", "0.5", "0.42", "0.44", "0.39"],
+      ["20", "0.401", "0.3", "0.48", "0.49", "0.42"],
+    ]);
+    // No cell is ever an object (React error 31 once came of that).
+    for (const row of t.cells) for (const c of row) expect(typeof c).toBe("string");
+  });
+
   test("the power table takes whatever columns the planner gives", () => {
     const t = powerTable([
       { n: 20, power: 0.8123456 },

@@ -165,6 +165,19 @@ export function isKnownTodo(
   return todo.kind != null && KNOWN_TODO.has(todo.kind);
 }
 
+/** What identifies a step of the campaign. The server renews the challenge of
+ * the same step about every minute, so the challenge is not part of it: a card
+ * keyed by this keeps the person's ticks while the challenge changes, and
+ * starts afresh only when the step (kind, segment, arm, reason) changes. */
+export function todoStepKey(todo: CampaignTodo): string {
+  return [
+    todo.kind ?? "",
+    todo.segment ?? "",
+    todo.arm_code ?? "",
+    todo.reason ?? "",
+  ].join(":");
+}
+
 /** The kind of confirmation request a todo needs (`/confirm` takes three). */
 export function confirmKindOf(
   todo: CampaignTodo,

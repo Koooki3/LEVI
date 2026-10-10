@@ -39,6 +39,26 @@ const DEBOUNCE_MS = 400;
 
 type SetForm = (change: Partial<WizardForm>) => void;
 
+const POWER_COLUMNS = new Set([
+  "n",
+  "wilson_width_at_half",
+  "baseline",
+  "unpaired_fisher",
+  "paired_mcnemar",
+]);
+
+/** The name of a power column: a catalogue sentence, never the raw key (a key
+ * the table does not know is shown as it is). */
+export function powerColumnLabel(
+  key: string,
+  t: (k: string) => string,
+): string {
+  const [base, sub] = key.split("@");
+  if (!POWER_COLUMNS.has(base)) return key;
+  const name = t(`automatic.wizard.power.col.${base}`);
+  return sub === undefined ? name : name.replace("{rho}", sub);
+}
+
 export function PowerTable({ power }: { power: CampaignPlan["power"] }) {
   const { t } = useLocale();
   const { columns, cells } = useMemo(
@@ -61,7 +81,7 @@ export function PowerTable({ power }: { power: CampaignPlan["power"] }) {
             <tr>
               {columns.map((c) => (
                 <th scope="col" key={c}>
-                  {c}
+                  {powerColumnLabel(c, t)}
                 </th>
               ))}
             </tr>

@@ -128,7 +128,18 @@ export type CampaignPlanRequest = {
   execution_mode?: CampaignExecutionMode;
 };
 
-export type PowerRow = Record<string, number | string | null>;
+/** A power row as the planner returns it: per sample size, with the smallest
+ * detectable differences nested under `baselines` (see `flattenPowerRows`). */
+export type PowerRow = {
+  n?: number;
+  wilson_width_at_half?: number;
+  baselines?: {
+    baseline: number;
+    unpaired_fisher: number | null;
+    paired_mcnemar?: Record<string, number | null>;
+  }[];
+  [key: string]: unknown;
+};
 
 export type CampaignPlan = {
   campaign_sha256: string;

@@ -16,6 +16,7 @@ import {
   formatEta,
   reasonKey,
   stateKey,
+  todoStepKey,
   viewOf,
   type CampaignView,
 } from "./campaign-logic";
@@ -259,8 +260,9 @@ export function CampaignOverview({
 
       {view.todo && (
         <CampaignTodoCard
-          // A new challenge is a new question: start its checklist afresh.
-          key={`${view.todo.kind}:${view.todo.challenge ?? ""}`}
+          // The challenge is renewed about every minute while the person
+          // reads: the ticks stay. Only another step starts afresh.
+          key={todoStepKey(view.todo)}
           campaignId={campaignId}
           todo={view.todo}
           controllerDown={view.controllerDown}

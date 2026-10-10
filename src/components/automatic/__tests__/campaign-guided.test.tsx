@@ -294,15 +294,57 @@ describe("the guided to-do list", () => {
     const boxes = Array.from(
       host.querySelectorAll<HTMLInputElement>(".ac-todo input[type=checkbox]"),
     );
-    // handled + accept short + relaunch
-    expect(boxes.length).toBe(3);
+    // One required tick; the options exclude one another: radios, "just go
+    // on" selected by default, then accept short.
+    expect(boxes.length).toBe(1);
+    const radios = Array.from(
+      host.querySelectorAll<HTMLInputElement>(".ac-todo input[type=radio]"),
+    );
+    expect(radios.length).toBe(3);
+    expect(radios[0].checked).toBe(true);
     await click(boxes[0]);
-    await click(boxes[1]);
+    await click(radios[1]);
+    expect(radios[0].checked).toBe(false);
+    expect(radios[1].checked).toBe(true);
     await click(buttonNamed(host, "Confirm")!);
     await acceptDialog();
     const call = (a!.confirmCampaign as ReturnType<typeof mock>).mock.calls[0];
     expect(call[2]).toBe("env");
     expect(call[4]).toEqual({ accept_short_segment: true });
+  });
+
+  test("the ticks survive a renewed challenge and reset for another step", async () => {
+    let todo: NonNullable<CampaignSnapshot["todo"]> = {
+      kind: "place_cards",
+      challenge: "ch-1",
+      segment: 1,
+      cards: ["c1"],
+    };
+    const { host } = await render(
+      <CampaignOverview
+        campaignId="camp-1"
+        api={api(() => snap({ todo }))}
+        intervalMs={30}
+      />,
+    );
+    await waitFor(() => host.querySelector(".ac-todo"));
+    await tickAll(host);
+    const ticked = () =>
+      Array.from(
+        host.querySelectorAll<HTMLInputElement>(
+          ".ac-todo input[type=checkbox]",
+        ),
+      ).every((b) => b.checked);
+    expect(ticked()).toBe(true);
+    // The same step, a fresh challenge: still ticked.
+    todo = { ...todo, challenge: "ch-2" };
+    await flush(120);
+    expect(ticked()).toBe(true);
+    expect(buttonNamed(host, "Confirm")!.disabled).toBe(false);
+    // Another segment is another question.
+    todo = { ...todo, challenge: "ch-3", segment: 2 };
+    await waitFor(() => !ticked());
+    expect(buttonNamed(host, "Confirm")!.disabled).toBe(true);
   });
 
   test("with the controller down a to-do cannot be confirmed", async () => {
