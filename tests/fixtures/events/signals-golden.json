@@ -1,0 +1,2276 @@
+{
+ "0": {
+  "crossings_dataset": [],
+  "crossings_episode": [],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "1": {
+  "crossings_dataset": [],
+  "crossings_episode": [],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "10": {
+  "crossings_dataset": [
+   [
+    80,
+    "close"
+   ],
+   [
+    87,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    80,
+    "close"
+   ],
+   [
+    87,
+    "open"
+   ],
+   [
+    100,
+    "close"
+   ],
+   [
+    112,
+    "open"
+   ],
+   [
+    116,
+    "close"
+   ],
+   [
+    131,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "low",
+     "t": 0.6
+    },
+    {
+     "kind": "high",
+     "t": 1.1
+    },
+    {
+     "kind": "low",
+     "t": 1.4
+    },
+    {
+     "kind": "high",
+     "t": 2.3666666666666667
+    },
+    {
+     "kind": "close",
+     "t": 2.6666666666666665
+    },
+    {
+     "kind": "low",
+     "t": 2.7666666666666666
+    },
+    {
+     "kind": "open",
+     "t": 2.9
+    },
+    {
+     "kind": "high",
+     "t": 3.033333333333333
+    },
+    {
+     "kind": "close",
+     "t": 3.3333333333333335
+    },
+    {
+     "kind": "open",
+     "t": 3.7333333333333334
+    },
+    {
+     "kind": "close",
+     "t": 3.8666666666666667
+    },
+    {
+     "kind": "low",
+     "t": 4.066666666666666
+    },
+    {
+     "kind": "open",
+     "t": 4.366666666666666
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.finger_width): close 2.7 (to 26%), open 2.9, close 3.3 (to 43%), open 3.7, close 3.9 (to 47%), open 4.4",
+    "height (observation.state.z): start 0.236@0.0, low 0.116@0.6, high 0.182@1.1, low 0.0611@1.4, high 0.379@2.4, low 0.0676@2.8, high 0.156@3.0, low 0.1@4.1, end 0.29@5.1"
+   ]
+  }
+ },
+ "11": {
+  "crossings_dataset": [
+   [
+    38,
+    "close"
+   ],
+   [
+    41,
+    "open"
+   ],
+   [
+    48,
+    "close"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    38,
+    "close"
+   ],
+   [
+    41,
+    "open"
+   ],
+   [
+    48,
+    "close"
+   ]
+  ],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "12": {
+  "crossings_dataset": [],
+  "crossings_episode": [],
+  "summarize": {
+   "events": [
+    {
+     "kind": "low",
+     "t": 2.466666666666667
+    },
+    {
+     "kind": "high",
+     "t": 2.8666666666666667
+    }
+   ],
+   "lines": [
+    "height (observation.state.z): start 0.151@0.0, low 0.0637@2.5, high 0.346@2.9, end 0.214@4.6",
+    "still: 0.0\u20132.4, 3.0\u20134.1"
+   ]
+  }
+ },
+ "13": {
+  "crossings_dataset": [
+   [
+    129,
+    "close"
+   ],
+   [
+    139,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    129,
+    "close"
+   ],
+   [
+    139,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "high",
+     "t": 2.0
+    },
+    {
+     "kind": "low",
+     "t": 3.1333333333333333
+    },
+    {
+     "kind": "high",
+     "t": 3.7
+    },
+    {
+     "kind": "close",
+     "t": 4.3
+    },
+    {
+     "kind": "open",
+     "t": 4.633333333333334
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.gripper): close 4.3 (to 8%), open 4.6",
+    "height (observation.state.z): start 0.13@0.0, high 0.394@2.0, low 0.0513@3.1, high 0.331@3.7, end 0.217@4.7"
+   ]
+  }
+ },
+ "14": {
+  "crossings_dataset": [
+   [
+    51,
+    "close"
+   ],
+   [
+    77,
+    "open"
+   ],
+   [
+    98,
+    "close"
+   ],
+   [
+    118,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    51,
+    "close"
+   ],
+   [
+    77,
+    "open"
+   ],
+   [
+    98,
+    "close"
+   ],
+   [
+    118,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "15": {
+  "crossings_dataset": [
+   [
+    30,
+    "close"
+   ],
+   [
+    35,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    30,
+    "close"
+   ],
+   [
+    35,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "close",
+     "t": 1.0
+    },
+    {
+     "kind": "open",
+     "t": 1.1666666666666667
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.gripper_position): close 1.0, open 1.2"
+   ]
+  }
+ },
+ "16": {
+  "crossings_dataset": [],
+  "crossings_episode": [
+   [
+    14,
+    "close"
+   ],
+   [
+    15,
+    "open"
+   ],
+   [
+    16,
+    "close"
+   ],
+   [
+    22,
+    "open"
+   ],
+   [
+    23,
+    "close"
+   ],
+   [
+    24,
+    "open"
+   ],
+   [
+    25,
+    "close"
+   ],
+   [
+    26,
+    "open"
+   ],
+   [
+    30,
+    "close"
+   ],
+   [
+    33,
+    "open"
+   ],
+   [
+    49,
+    "close"
+   ],
+   [
+    54,
+    "open"
+   ],
+   [
+    55,
+    "close"
+   ],
+   [
+    56,
+    "open"
+   ],
+   [
+    60,
+    "close"
+   ],
+   [
+    68,
+    "open"
+   ],
+   [
+    71,
+    "close"
+   ],
+   [
+    72,
+    "open"
+   ],
+   [
+    75,
+    "close"
+   ],
+   [
+    79,
+    "open"
+   ],
+   [
+    82,
+    "close"
+   ],
+   [
+    83,
+    "open"
+   ],
+   [
+    90,
+    "close"
+   ],
+   [
+    104,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "high",
+     "t": 2.933333333333333
+    },
+    {
+     "kind": "low",
+     "t": 3.1333333333333333
+    }
+   ],
+   "lines": [
+    "height (observation.state.z): start 0.29@0.0, high 0.341@2.9, low 0.155@3.1, end 0.301@7.1",
+    "still: 0.8\u20131.3"
+   ]
+  }
+ },
+ "17": {
+  "crossings_dataset": [
+   [
+    105,
+    "close"
+   ],
+   [
+    117,
+    "open"
+   ],
+   [
+    127,
+    "close"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    105,
+    "close"
+   ],
+   [
+    117,
+    "open"
+   ],
+   [
+    127,
+    "close"
+   ]
+  ],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "18": {
+  "crossings_dataset": [],
+  "crossings_episode": [
+   [
+    35,
+    "close"
+   ],
+   [
+    40,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "close",
+     "t": 1.1666666666666667
+    },
+    {
+     "kind": "open",
+     "t": 1.3333333333333333
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.gripper_position): close 1.2 (to 48%), open 1.3"
+   ]
+  }
+ },
+ "19": {
+  "crossings_dataset": [
+   [
+    74,
+    "close"
+   ],
+   [
+    79,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    74,
+    "close"
+   ],
+   [
+    79,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "low",
+     "t": 2.6666666666666665
+    },
+    {
+     "kind": "high",
+     "t": 3.2666666666666666
+    },
+    {
+     "kind": "close",
+     "t": 4.933333333333334
+    },
+    {
+     "kind": "open",
+     "t": 5.266666666666667
+    },
+    {
+     "kind": "low",
+     "t": 5.266666666666667
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.finger_width): close 4.9, open 5.3",
+    "height (observation.state.z): start 0.296@0.0, low 0.052@2.7, high 0.333@3.3, low 0.109@5.3, end 0.24@5.9",
+    "still: 1.0\u20132.1, 3.4\u20134.2"
+   ]
+  }
+ },
+ "2": {
+  "crossings_dataset": [
+   [
+    36,
+    "close"
+   ],
+   [
+    39,
+    "open"
+   ],
+   [
+    59,
+    "close"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    36,
+    "close"
+   ],
+   [
+    39,
+    "open"
+   ],
+   [
+    59,
+    "close"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "low",
+     "t": 1.1666666666666667
+    },
+    {
+     "kind": "close",
+     "t": 1.2
+    },
+    {
+     "kind": "open",
+     "t": 1.3
+    },
+    {
+     "kind": "close",
+     "t": 1.9666666666666666
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.finger_width): close 1.2 (to 30%), open 1.3, close 2.0 (to 3%)",
+    "height (observation.state.z): start 0.366@0.0, low 0.0226@1.2, end 0.135@2.3"
+   ]
+  }
+ },
+ "20": {
+  "crossings_dataset": [],
+  "crossings_episode": [],
+  "summarize": {
+   "events": [
+    {
+     "kind": "low",
+     "t": 0.43333333333333335
+    },
+    {
+     "kind": "high",
+     "t": 0.5666666666666667
+    },
+    {
+     "kind": "low",
+     "t": 2.033333333333333
+    }
+   ],
+   "lines": [
+    "height (observation.state.z): start 0.211@0.0, low 0.0576@0.4, high 0.284@0.6, low 0.04@2.0, end 0.265@2.4",
+    "still: 0.6\u20131.4"
+   ]
+  }
+ },
+ "21": {
+  "crossings_dataset": [
+   [
+    50,
+    "close"
+   ],
+   [
+    54,
+    "open"
+   ],
+   [
+    126,
+    "close"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    50,
+    "close"
+   ],
+   [
+    54,
+    "open"
+   ],
+   [
+    126,
+    "close"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "high",
+     "t": 2.3
+    },
+    {
+     "kind": "low",
+     "t": 3.5
+    },
+    {
+     "kind": "high",
+     "t": 3.8
+    },
+    {
+     "kind": "close",
+     "t": 5.0
+    },
+    {
+     "kind": "open",
+     "t": 5.4
+    },
+    {
+     "kind": "close",
+     "t": 12.6
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.gripper): close 5.0, open 5.4, close 12.6",
+    "height (observation.state.z): start 0.119@0.0, high 0.377@2.3, low 0.248@3.5, high 0.389@3.8, end 0.0303@13.2"
+   ]
+  }
+ },
+ "22": {
+  "crossings_dataset": [],
+  "crossings_episode": [],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "23": {
+  "crossings_dataset": [],
+  "crossings_episode": [
+   [
+    27,
+    "close"
+   ],
+   [
+    29,
+    "open"
+   ],
+   [
+    35,
+    "close"
+   ],
+   [
+    36,
+    "open"
+   ],
+   [
+    48,
+    "close"
+   ],
+   [
+    53,
+    "open"
+   ],
+   [
+    66,
+    "close"
+   ],
+   [
+    68,
+    "open"
+   ],
+   [
+    70,
+    "close"
+   ],
+   [
+    71,
+    "open"
+   ],
+   [
+    77,
+    "close"
+   ],
+   [
+    80,
+    "open"
+   ],
+   [
+    97,
+    "close"
+   ],
+   [
+    98,
+    "open"
+   ],
+   [
+    107,
+    "close"
+   ],
+   [
+    109,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "low",
+     "t": 2.8
+    },
+    {
+     "kind": "high",
+     "t": 5.6
+    }
+   ],
+   "lines": [
+    "height (observation.state.z): start 0.317@0.0, low 0.0514@2.8, high 0.257@5.6, end 0.132@12.2"
+   ]
+  }
+ },
+ "24": {
+  "crossings_dataset": [
+   [
+    18,
+    "close"
+   ],
+   [
+    33,
+    "open"
+   ],
+   [
+    59,
+    "close"
+   ],
+   [
+    75,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    18,
+    "close"
+   ],
+   [
+    33,
+    "open"
+   ],
+   [
+    59,
+    "close"
+   ],
+   [
+    75,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "close",
+     "t": 1.2
+    },
+    {
+     "kind": "open",
+     "t": 2.2
+    },
+    {
+     "kind": "close",
+     "t": 3.933333333333333
+    },
+    {
+     "kind": "open",
+     "t": 5.0
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.gripper_position): close 1.2 (to 26%), open 2.2, close 3.9 (to 4%), open 5.0"
+   ]
+  }
+ },
+ "25": {
+  "crossings_dataset": [],
+  "crossings_episode": [],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "26": {
+  "crossings_dataset": [],
+  "crossings_episode": [],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "27": {
+  "crossings_dataset": [
+   [
+    21,
+    "open"
+   ],
+   [
+    22,
+    "close"
+   ],
+   [
+    27,
+    "open"
+   ],
+   [
+    30,
+    "close"
+   ],
+   [
+    32,
+    "open"
+   ],
+   [
+    33,
+    "close"
+   ],
+   [
+    42,
+    "open"
+   ],
+   [
+    43,
+    "close"
+   ],
+   [
+    44,
+    "open"
+   ],
+   [
+    54,
+    "close"
+   ],
+   [
+    56,
+    "open"
+   ],
+   [
+    58,
+    "close"
+   ],
+   [
+    60,
+    "open"
+   ],
+   [
+    62,
+    "close"
+   ],
+   [
+    70,
+    "open"
+   ],
+   [
+    74,
+    "close"
+   ],
+   [
+    83,
+    "open"
+   ],
+   [
+    87,
+    "close"
+   ],
+   [
+    89,
+    "open"
+   ],
+   [
+    94,
+    "close"
+   ],
+   [
+    96,
+    "open"
+   ],
+   [
+    98,
+    "close"
+   ],
+   [
+    102,
+    "open"
+   ],
+   [
+    103,
+    "close"
+   ],
+   [
+    108,
+    "open"
+   ],
+   [
+    117,
+    "close"
+   ],
+   [
+    120,
+    "open"
+   ],
+   [
+    121,
+    "close"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    21,
+    "open"
+   ],
+   [
+    22,
+    "close"
+   ],
+   [
+    27,
+    "open"
+   ],
+   [
+    30,
+    "close"
+   ],
+   [
+    32,
+    "open"
+   ],
+   [
+    33,
+    "close"
+   ],
+   [
+    42,
+    "open"
+   ],
+   [
+    43,
+    "close"
+   ],
+   [
+    44,
+    "open"
+   ],
+   [
+    54,
+    "close"
+   ],
+   [
+    56,
+    "open"
+   ],
+   [
+    58,
+    "close"
+   ],
+   [
+    60,
+    "open"
+   ],
+   [
+    62,
+    "close"
+   ],
+   [
+    70,
+    "open"
+   ],
+   [
+    74,
+    "close"
+   ],
+   [
+    83,
+    "open"
+   ],
+   [
+    87,
+    "close"
+   ],
+   [
+    89,
+    "open"
+   ],
+   [
+    94,
+    "close"
+   ],
+   [
+    96,
+    "open"
+   ],
+   [
+    98,
+    "close"
+   ],
+   [
+    102,
+    "open"
+   ],
+   [
+    103,
+    "close"
+   ],
+   [
+    108,
+    "open"
+   ],
+   [
+    117,
+    "close"
+   ],
+   [
+    120,
+    "open"
+   ],
+   [
+    121,
+    "close"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "close",
+     "t": 2.1
+    },
+    {
+     "kind": "open",
+     "t": 2.2
+    },
+    {
+     "kind": "close",
+     "t": 2.7
+    },
+    {
+     "kind": "open",
+     "t": 3.0
+    },
+    {
+     "kind": "close",
+     "t": 3.2
+    },
+    {
+     "kind": "open",
+     "t": 3.3
+    },
+    {
+     "kind": "close",
+     "t": 4.2
+    },
+    {
+     "kind": "open",
+     "t": 4.3
+    },
+    {
+     "kind": "close",
+     "t": 4.4
+    },
+    {
+     "kind": "open",
+     "t": 5.4
+    },
+    {
+     "kind": "close",
+     "t": 5.6
+    },
+    {
+     "kind": "open",
+     "t": 5.8
+    },
+    {
+     "kind": "close",
+     "t": 6.0
+    },
+    {
+     "kind": "open",
+     "t": 6.2
+    },
+    {
+     "kind": "close",
+     "t": 7.0
+    },
+    {
+     "kind": "open",
+     "t": 7.4
+    },
+    {
+     "kind": "close",
+     "t": 8.3
+    },
+    {
+     "kind": "open",
+     "t": 8.7
+    },
+    {
+     "kind": "close",
+     "t": 8.9
+    },
+    {
+     "kind": "open",
+     "t": 9.4
+    },
+    {
+     "kind": "close",
+     "t": 9.6
+    },
+    {
+     "kind": "open",
+     "t": 9.8
+    },
+    {
+     "kind": "close",
+     "t": 10.2
+    },
+    {
+     "kind": "open",
+     "t": 10.3
+    },
+    {
+     "kind": "close",
+     "t": 10.8
+    },
+    {
+     "kind": "open",
+     "t": 11.7
+    },
+    {
+     "kind": "close",
+     "t": 12.0
+    },
+    {
+     "kind": "open",
+     "t": 12.1
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.gripper_position): close 2.1, open 2.2, close 2.7, open 3.0, close 3.2, open 3.3, close 4.2, open 4.3, close 4.4, open 5.4, close 5.6, open 5.8, close 6.0, open 6.2, close 7.0, open 7.4, close 8.3, open 8.7, close 8.9, open 9.4, close 9.6, open 9.8, close 10.2, open 10.3, \u2026 +4 more"
+   ]
+  }
+ },
+ "28": {
+  "crossings_dataset": [
+   [
+    108,
+    "close"
+   ],
+   [
+    110,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    108,
+    "close"
+   ],
+   [
+    110,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "29": {
+  "crossings_dataset": [
+   [
+    28,
+    "close"
+   ],
+   [
+    38,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    28,
+    "close"
+   ],
+   [
+    38,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "close",
+     "t": 0.9333333333333333
+    },
+    {
+     "kind": "open",
+     "t": 1.2666666666666666
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.finger_width): close 0.9, open 1.3"
+   ]
+  }
+ },
+ "3": {
+  "crossings_dataset": [
+   [
+    39,
+    "close"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    39,
+    "close"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "low",
+     "t": 1.1666666666666667
+    },
+    {
+     "kind": "close",
+     "t": 1.3
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.gripper): close 1.3 (to 8%)",
+    "gripper command (action.gripper): close 1.2, open 1.6",
+    "height (observation.state.z): start 0.136@0.0, low 0.0632@1.2, end 0.221@1.6"
+   ]
+  }
+ },
+ "30": {
+  "crossings_dataset": [],
+  "crossings_episode": [
+   [
+    17,
+    "close"
+   ],
+   [
+    32,
+    "open"
+   ],
+   [
+    35,
+    "close"
+   ],
+   [
+    52,
+    "open"
+   ],
+   [
+    54,
+    "close"
+   ],
+   [
+    63,
+    "open"
+   ],
+   [
+    65,
+    "close"
+   ]
+  ],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "31": {
+  "crossings_dataset": [
+   [
+    20,
+    "close"
+   ],
+   [
+    34,
+    "open"
+   ],
+   [
+    42,
+    "close"
+   ],
+   [
+    50,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    20,
+    "close"
+   ],
+   [
+    34,
+    "open"
+   ],
+   [
+    42,
+    "close"
+   ],
+   [
+    50,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "32": {
+  "crossings_dataset": [
+   [
+    21,
+    "close"
+   ],
+   [
+    32,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    21,
+    "close"
+   ],
+   [
+    32,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "close",
+     "t": 0.7
+    },
+    {
+     "kind": "open",
+     "t": 1.0666666666666667
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.gripper_position): close 0.7, open 1.1"
+   ]
+  }
+ },
+ "33": {
+  "crossings_dataset": [
+   [
+    32,
+    "close"
+   ],
+   [
+    41,
+    "open"
+   ],
+   [
+    63,
+    "close"
+   ],
+   [
+    88,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    32,
+    "close"
+   ],
+   [
+    41,
+    "open"
+   ],
+   [
+    62,
+    "close"
+   ],
+   [
+    88,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "34": {
+  "crossings_dataset": [],
+  "crossings_episode": [],
+  "summarize": {
+   "events": [
+    {
+     "kind": "high",
+     "t": 2.2
+    }
+   ],
+   "lines": [
+    "height (observation.state.z): start 0.3@0.0, high 0.386@2.2, end 0.0879@3.9"
+   ]
+  }
+ },
+ "35": {
+  "crossings_dataset": [
+   [
+    26,
+    "close"
+   ],
+   [
+    52,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    26,
+    "close"
+   ],
+   [
+    52,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "close",
+     "t": 2.6
+    },
+    {
+     "kind": "open",
+     "t": 5.2
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.gripper_position): close 2.6, open 5.2",
+    "gripper command (action.gripper_position): close 2.3, open 4.9"
+   ]
+  }
+ },
+ "36": {
+  "crossings_dataset": [
+   [
+    53,
+    "close"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    53,
+    "close"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "low",
+     "t": 0.3333333333333333
+    },
+    {
+     "kind": "high",
+     "t": 1.8666666666666667
+    },
+    {
+     "kind": "close",
+     "t": 3.533333333333333
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.gripper): close 3.5",
+    "height (observation.state.z): start 0.368@0.0, low 0.304@0.3, high 0.356@1.9, end 0.0956@4.0"
+   ]
+  }
+ },
+ "37": {
+  "crossings_dataset": [],
+  "crossings_episode": [
+   [
+    3,
+    "close"
+   ],
+   [
+    8,
+    "open"
+   ],
+   [
+    10,
+    "close"
+   ],
+   [
+    13,
+    "open"
+   ],
+   [
+    15,
+    "close"
+   ],
+   [
+    19,
+    "open"
+   ],
+   [
+    22,
+    "close"
+   ],
+   [
+    25,
+    "open"
+   ],
+   [
+    29,
+    "close"
+   ],
+   [
+    32,
+    "open"
+   ],
+   [
+    34,
+    "close"
+   ],
+   [
+    39,
+    "open"
+   ],
+   [
+    40,
+    "close"
+   ],
+   [
+    41,
+    "open"
+   ],
+   [
+    47,
+    "close"
+   ],
+   [
+    49,
+    "open"
+   ],
+   [
+    50,
+    "close"
+   ],
+   [
+    57,
+    "open"
+   ],
+   [
+    60,
+    "close"
+   ],
+   [
+    64,
+    "open"
+   ],
+   [
+    65,
+    "close"
+   ],
+   [
+    66,
+    "open"
+   ],
+   [
+    71,
+    "close"
+   ],
+   [
+    75,
+    "open"
+   ],
+   [
+    77,
+    "close"
+   ],
+   [
+    99,
+    "open"
+   ],
+   [
+    105,
+    "close"
+   ],
+   [
+    107,
+    "open"
+   ],
+   [
+    109,
+    "close"
+   ],
+   [
+    111,
+    "open"
+   ],
+   [
+    116,
+    "close"
+   ]
+  ],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "38": {
+  "crossings_dataset": [
+   [
+    48,
+    "close"
+   ],
+   [
+    68,
+    "open"
+   ],
+   [
+    74,
+    "close"
+   ],
+   [
+    90,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    48,
+    "close"
+   ],
+   [
+    68,
+    "open"
+   ],
+   [
+    74,
+    "close"
+   ],
+   [
+    90,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "39": {
+  "crossings_dataset": [],
+  "crossings_episode": [],
+  "summarize": {
+   "events": [
+    {
+     "kind": "high",
+     "t": 0.9333333333333333
+    },
+    {
+     "kind": "low",
+     "t": 1.7666666666666666
+    }
+   ],
+   "lines": [
+    "height (observation.state.z): start 0.252@0.0, high 0.377@0.9, low 0.101@1.8, end 0.329@3.3"
+   ]
+  }
+ },
+ "4": {
+  "crossings_dataset": [
+   [
+    143,
+    "close"
+   ],
+   [
+    148,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    143,
+    "close"
+   ],
+   [
+    148,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "low",
+     "t": 1.3666666666666667
+    },
+    {
+     "kind": "high",
+     "t": 2.1
+    },
+    {
+     "kind": "low",
+     "t": 2.9
+    },
+    {
+     "kind": "high",
+     "t": 3.533333333333333
+    },
+    {
+     "kind": "close",
+     "t": 4.766666666666667
+    },
+    {
+     "kind": "open",
+     "t": 4.933333333333334
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.gripper): close 4.8, open 4.9",
+    "height (observation.state.z): start 0.341@0.0, low 0.201@1.4, high 0.32@2.1, low 0.16@2.9, high 0.373@3.5, end 0.259@5.1"
+   ]
+  }
+ },
+ "40": {
+  "crossings_dataset": [
+   [
+    13,
+    "close"
+   ],
+   [
+    16,
+    "open"
+   ],
+   [
+    114,
+    "close"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    11,
+    "close"
+   ],
+   [
+    16,
+    "open"
+   ],
+   [
+    114,
+    "close"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "close",
+     "t": 0.7333333333333333
+    },
+    {
+     "kind": "open",
+     "t": 1.0666666666666667
+    },
+    {
+     "kind": "close",
+     "t": 7.6
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.gripper_position): close 0.7 (to 34%), open 1.1, close 7.6 (to 17%)"
+   ]
+  }
+ },
+ "41": {
+  "crossings_dataset": [],
+  "crossings_episode": [],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "42": {
+  "crossings_dataset": [
+   [
+    19,
+    "close"
+   ],
+   [
+    40,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    19,
+    "close"
+   ],
+   [
+    40,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "43": {
+  "crossings_dataset": [],
+  "crossings_episode": [],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "44": {
+  "crossings_dataset": [
+   [
+    13,
+    "close"
+   ],
+   [
+    40,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    13,
+    "close"
+   ],
+   [
+    40,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "close",
+     "t": 0.43333333333333335
+    },
+    {
+     "kind": "open",
+     "t": 1.3333333333333333
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.finger_width): close 0.4, open 1.3"
+   ]
+  }
+ },
+ "45": {
+  "crossings_dataset": [
+   [
+    75,
+    "close"
+   ],
+   [
+    99,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    75,
+    "close"
+   ],
+   [
+    99,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "low",
+     "t": 1.5333333333333334
+    },
+    {
+     "kind": "high",
+     "t": 2.2333333333333334
+    },
+    {
+     "kind": "close",
+     "t": 2.5
+    },
+    {
+     "kind": "low",
+     "t": 2.6333333333333333
+    },
+    {
+     "kind": "high",
+     "t": 3.1666666666666665
+    },
+    {
+     "kind": "open",
+     "t": 3.3
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.gripper): close 2.5 (to 24%), open 3.3",
+    "height (observation.state.z): start 0.165@0.0, low 0.0611@1.5, high 0.251@2.2, low 0.0745@2.6, high 0.361@3.2, end 0.204@3.6"
+   ]
+  }
+ },
+ "46": {
+  "crossings_dataset": [],
+  "crossings_episode": [
+   [
+    43,
+    "close"
+   ],
+   [
+    61,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "low",
+     "t": 1.2666666666666666
+    },
+    {
+     "kind": "high",
+     "t": 2.1333333333333333
+    },
+    {
+     "kind": "close",
+     "t": 2.8666666666666667
+    },
+    {
+     "kind": "open",
+     "t": 4.066666666666666
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.finger_width): close 2.9 (to 47%), open 4.1",
+    "height (observation.state.z): start 0.285@0.0, low 0.214@1.3, high 0.355@2.1, end 0.144@9.8"
+   ]
+  }
+ },
+ "47": {
+  "crossings_dataset": [],
+  "crossings_episode": [
+   [
+    22,
+    "close"
+   ],
+   [
+    27,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "5": {
+  "crossings_dataset": [
+   [
+    85,
+    "close"
+   ],
+   [
+    95,
+    "open"
+   ],
+   [
+    111,
+    "close"
+   ],
+   [
+    128,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    85,
+    "close"
+   ],
+   [
+    95,
+    "open"
+   ],
+   [
+    111,
+    "close"
+   ],
+   [
+    128,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "low",
+     "t": 2.466666666666667
+    },
+    {
+     "kind": "close",
+     "t": 2.8333333333333335
+    },
+    {
+     "kind": "open",
+     "t": 3.1666666666666665
+    },
+    {
+     "kind": "high",
+     "t": 3.1666666666666665
+    },
+    {
+     "kind": "low",
+     "t": 3.6
+    },
+    {
+     "kind": "close",
+     "t": 3.7
+    },
+    {
+     "kind": "open",
+     "t": 4.266666666666667
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.gripper): close 2.8 (to 11%), open 3.2, close 3.7 (to 10%), open 4.3",
+    "height (observation.state.z): start 0.4@0.0, low 0.169@2.5, high 0.277@3.2, low 0.231@3.6, end 0.357@4.5"
+   ]
+  }
+ },
+ "6": {
+  "crossings_dataset": [],
+  "crossings_episode": [
+   [
+    67,
+    "close"
+   ],
+   [
+    80,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "high",
+     "t": 0.7333333333333333
+    },
+    {
+     "kind": "low",
+     "t": 3.8
+    },
+    {
+     "kind": "close",
+     "t": 4.466666666666667
+    },
+    {
+     "kind": "high",
+     "t": 4.466666666666667
+    },
+    {
+     "kind": "low",
+     "t": 5.0
+    },
+    {
+     "kind": "open",
+     "t": 5.333333333333333
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.finger_width): close 4.5 (to 49%), open 5.3",
+    "height (observation.state.z): start 0.193@0.0, high 0.356@0.7, low 0.0499@3.8, high 0.38@4.5, low 0.282@5.0, end 0.357@6.9"
+   ]
+  }
+ },
+ "7": {
+  "crossings_dataset": [
+   [
+    93,
+    "close"
+   ],
+   [
+    101,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    93,
+    "close"
+   ],
+   [
+    101,
+    "open"
+   ],
+   [
+    108,
+    "close"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "low",
+     "t": 0.6333333333333333
+    },
+    {
+     "kind": "high",
+     "t": 2.466666666666667
+    },
+    {
+     "kind": "close",
+     "t": 3.1
+    },
+    {
+     "kind": "low",
+     "t": 3.2333333333333334
+    },
+    {
+     "kind": "open",
+     "t": 3.3666666666666667
+    },
+    {
+     "kind": "close",
+     "t": 3.6
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.finger_width): close 3.1 (to 21%), open 3.4, close 3.6 (to 43%)",
+    "height (observation.state.z): start 0.235@0.0, low 0.126@0.6, high 0.396@2.5, low 0.0367@3.2, end 0.267@3.8"
+   ]
+  }
+ },
+ "8": {
+  "crossings_dataset": [
+   [
+    49,
+    "close"
+   ],
+   [
+    73,
+    "open"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    49,
+    "close"
+   ],
+   [
+    73,
+    "open"
+   ]
+  ],
+  "summarize": {
+   "events": [],
+   "lines": []
+  }
+ },
+ "9": {
+  "crossings_dataset": [
+   [
+    94,
+    "close"
+   ],
+   [
+    118,
+    "open"
+   ],
+   [
+    132,
+    "close"
+   ]
+  ],
+  "crossings_episode": [
+   [
+    94,
+    "close"
+   ],
+   [
+    118,
+    "open"
+   ],
+   [
+    132,
+    "close"
+   ]
+  ],
+  "summarize": {
+   "events": [
+    {
+     "kind": "low",
+     "t": 3.0
+    },
+    {
+     "kind": "high",
+     "t": 6.0
+    },
+    {
+     "kind": "close",
+     "t": 6.266666666666667
+    },
+    {
+     "kind": "open",
+     "t": 7.866666666666666
+    },
+    {
+     "kind": "close",
+     "t": 8.8
+    },
+    {
+     "kind": "low",
+     "t": 9.2
+    }
+   ],
+   "lines": [
+    "gripper (observation.state.finger_width): close 6.3, open 7.9, close 8.8",
+    "height (observation.state.z): start 0.374@0.0, low 0.204@3.0, high 0.394@6.0, low 0.126@9.2, end 0.23@9.5",
+    "still: 6.9\u20137.6"
+   ]
+  }
+ }
+}
