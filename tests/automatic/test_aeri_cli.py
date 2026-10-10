@@ -272,7 +272,14 @@ def test_every_help_is_bilingual():
     parser = cli.build_parser()
     assert CJK.search(parser.format_help()) and "dry-run" in parser.format_help()
     sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
-    assert set(sub.choices) == {"doctor", "validate", "run", "status", "report"}
+    assert set(sub.choices) == {
+        "doctor",
+        "validate",
+        "run",
+        "status",
+        "report",
+        "label",
+    }
     for name, command in sub.choices.items():
         for action in command._actions:
             if (

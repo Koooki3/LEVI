@@ -214,6 +214,7 @@ MODE_MATRIX: dict = {
     ),
     "cli:status": _both(SAME),
     "cli:report": _both(SAME),
+    "cli:label": _both(SAME),
 }
 
 

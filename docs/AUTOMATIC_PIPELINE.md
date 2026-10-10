@@ -953,6 +953,7 @@ updated and both modes have tests.
 | `arbitration:plan:unavailable` | differs: as unknown: never skips the reset | differs: asks a person (scene_unknown) |
 | `arbitration:plan:unknown` | differs: runs the reset policy, or asks a person with on_unknown wait_human | differs: asks a person (scene_unknown) |
 | `cli:doctor` | same | differs: the launch check fails without a scene provider that can answer |
+| `cli:label` | same | same |
 | `cli:report` | same | same |
 | `cli:run` | same | differs: a dry-run scene that is not ready ends the run in WAIT_HUMAN |
 | `cli:status` | same | same |

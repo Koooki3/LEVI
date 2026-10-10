@@ -761,6 +761,70 @@ def cmd_report(args) -> int:
     return EXIT_OK
 
 
+def _refuse(args, message: str) -> int:
+    _print({"ok": False, "error": message}, args.json, message)
+    return EXIT_REFUSED
+
+
+def cmd_label(args) -> int:
+    """An operator's outcome label for an ended forward episode (T-CL-14),
+    confirmed by typing the value at a terminal. The automatic verdict is
+    never shown here (the operator judges first); only
+    ``labels/operator_label.jsonl`` is written."""
+    run_dir = Path(args.run_dir)
+    if not metrics.PRINCIPAL.fullmatch(args.principal):
+        return _refuse(
+            args,
+            "--principal is an opaque id (no names, no addresses) / 只能是不透明 ID",
+        )
+    try:
+        ended = metrics.ended_forward(Journal.read(run_dir).events)
+        current = metrics.LabelStore(run_dir).latest("operator_label")
+    except metrics.LabelRefused as exc:
+        return _refuse(args, str(exc))
+    if args.episode not in ended:
+        return _refuse(
+            args,
+            f"{args.episode} is not a forward episode of this run that has ended "
+            "/ 不是本运行中已结束的 forward 片段",
+        )
+    if not sys.stdin.isatty():
+        return _refuse(
+            args,
+            "levi automatic label must be confirmed at a terminal; nothing was "
+            "written / 必须在终端里确认，未写入任何内容",
+        )
+    how = metrics.ended_by(ended[args.episode].stop_reason)
+    now = current.get(args.episode)
+    question = (
+        f"Label {args.episode} (ended by: {how}) as {args.value}; "
+        f"current label: {now or 'none yet'} / 当前标签：{now or '未标'}. "
+        f"Type {args.value} to confirm / 输入 {args.value} 确认: "
+    )
+    # The question goes to stderr: stdout stays the result (``--json``).
+    print(question, end="", file=sys.stderr, flush=True)
+    try:
+        answer = input()
+    except (EOFError, KeyboardInterrupt):
+        answer = None
+    if answer is None or answer.strip() != args.value:
+        return _refuse(args, "not confirmed; nothing was written / 未确认，未写入")
+    try:
+        # The write checks again that the episode has ended.
+        record = metrics.label_operator(
+            run_dir, args.episode, args.value, by=args.principal, note=args.note
+        )
+    except metrics.LabelRefused as exc:
+        return _refuse(args, str(exc))
+    text = (
+        f"labelled {args.episode}: {args.value} (by {args.principal}"
+        + (f", replaces {now}" if now else "")
+        + ")"
+    )
+    _print({"ok": True, "record": record}, args.json, text)
+    return EXIT_OK
+
+
 def _rate(value) -> str:
     if not value or value.get("rate") is None:
         return f"- ({value.get('n', 0) if value else 0}/{value.get('of', 0) if value else 0})"
@@ -920,6 +984,41 @@ def build_parser() -> argparse.ArgumentParser:
         help="output format / 输出格式",
     )
     report.set_defaults(func=cmd_report)
+
+    label = sub.add_parser(
+        "label",
+        help="an operator's outcome label for an ended episode / 操作员给已结束片段的成败标签",
+        description="Append an operator's label (success, failure, discarded, "
+        "unclear) for a forward episode of the run that has ended, during the "
+        "run, while it waits for a person, or after it. Confirmed by typing the "
+        "value at a terminal; the automatic verdict is not shown; only "
+        "labels/operator_label.jsonl is written. / 给运行中已结束的 forward 片段"
+        "追加操作员标签（success、failure、discarded、unclear），运行中、等人时、"
+        "结束后都可以；须在终端输入该值确认；不显示自动判定；只写 "
+        "labels/operator_label.jsonl。",
+    )
+    label.add_argument(
+        "--run-dir", required=True, help="<root>/.aeri/runs/<run id> / 运行目录"
+    )
+    label.add_argument(
+        "--episode",
+        required=True,
+        help="forward episode id (<run id>.forward.NNNN) / forward 片段 ID",
+    )
+    label.add_argument(
+        "--value",
+        required=True,
+        choices=metrics.OPERATOR_VALUES,
+        help="the operator's judgement / 操作员的判定",
+    )
+    label.add_argument(
+        "--principal",
+        default="operator",
+        help="opaque id of who labels (no names, no addresses) / 标注者的不透明 ID（不写姓名、邮箱）",
+    )
+    label.add_argument("--note", default="", help="short note / 简短备注")
+    label.add_argument("--json", action="store_true", help=json_help)
+    label.set_defaults(func=cmd_label)
     return parser
 
 

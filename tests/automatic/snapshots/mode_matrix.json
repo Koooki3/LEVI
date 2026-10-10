@@ -48,6 +48,10 @@
    "human_assisted": "differs:the launch check fails without a scene provider that can answer",
    "single_reset_policy": "same"
   },
+  "cli:label": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
   "cli:report": {
    "human_assisted": "same",
    "single_reset_policy": "same"

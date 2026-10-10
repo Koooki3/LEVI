@@ -343,6 +343,7 @@ AERI 改动合并前的独立审查要核对 `MODE_MATRIX` 已更新、两种模
 | `arbitration:plan:unavailable` | 不同：同 unknown：绝不跳过复位 | 不同：转人工（scene_unknown） |
 | `arbitration:plan:unknown` | 不同：运行复位策略；on_unknown 为 wait_human 时转人工 | 不同：转人工（scene_unknown） |
 | `cli:doctor` | 相同 | 不同：没有能作答的场景提供方时，启动检查不通过 |
+| `cli:label` | 相同 | 相同 |
 | `cli:report` | 相同 | 相同 |
 | `cli:run` | 相同 | 不同：试运行中场景不就绪时，运行停在 WAIT_HUMAN |
 | `cli:status` | 相同 | 相同 |
