@@ -878,8 +878,9 @@ subcommand; later an API route or a job key):
 2. mark a test that covers it in each mode where the cell is not `n/a`,
    with the `reset_mode` fixture where the test is the same for both;
 3. regenerate the snapshot (`python -m levi.automatic.modes >
-   tests/automatic/snapshots/mode_matrix.json`) and this table (`python -m
-   levi.automatic.modes --sync-docs`), then run `tests/automatic`.
+   tests/automatic/snapshots/mode_matrix.json`) and this table (`uv run
+   levi docs sync`, which writes both language versions), then run
+   `tests/automatic`.
 
 The independent review of an AERI change checks that `MODE_MATRIX` was
 updated and both modes have tests.

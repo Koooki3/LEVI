@@ -277,11 +277,23 @@ def test_after_a_reset_episode_in_the_reset_policy_mode():
 
 
 def test_the_documentation_tables_are_current():
-    """``docs/AUTOMATIC_PIPELINE*.md``: rewrite with ``python -m
-    levi.automatic.modes --sync-docs`` after changing the matrix."""
-    assert modes.docs_problems() == []
+    """``docs/AUTOMATIC_PIPELINE*.md``: ``levi docs sync`` writes the table
+    from the matrix, ``levi docs check`` compares (levi/docs.py)."""
+    from levi import docs
+
+    targets = {f: m for n, f, m in docs.generated() if n == modes.DOCS_SECTION}
+    assert set(targets) == set(modes.DOCS_FILES.values())
+    for lang, file in modes.DOCS_FILES.items():
+        assert targets[file]() == modes.markdown(lang)
+    assert not [p for p in docs.check() if "AUTOMATIC_PIPELINE" in p]
     for lang in ("en", "zh"):
         table = modes.markdown(lang)
         assert table.count("\n") == len(modes.MODE_MATRIX) + 2
         for capability in modes.MODE_MATRIX:
             assert f"| `{capability}` |" in table
+
+
+def test_every_sentence_has_its_chinese_wording():
+    assert modes.sentences() == set(modes.ZH)
+    zh = modes.markdown("zh")
+    assert not any(sentence in zh for sentence in modes.sentences())

@@ -86,10 +86,34 @@ def _knowledge() -> str:
     return "\n".join(rows)
 
 
+def _reset_modes(lang: str):
+    def make() -> str:
+        from levi.automatic import modes
+
+        return modes.markdown(lang)
+
+    return make
+
+
+# A section name maps to one (file, generator) pair or to a list of them:
+# the same section in several files (an English and a Chinese document).
 GENERATED = {
     "capabilities": ("docs/API.md", _capabilities),
     "knowledge": ("docs/KNOWLEDGE.md", _knowledge),
+    "aeri-reset-modes": [
+        ("docs/AUTOMATIC_PIPELINE.md", _reset_modes("en")),
+        ("docs/AUTOMATIC_PIPELINE.zh-CN.md", _reset_modes("zh")),
+    ],
 }
+
+
+def generated() -> list[tuple[str, str, object]]:
+    """Every ``(name, file, generator)`` of ``GENERATED``."""
+    out = []
+    for name, targets in GENERATED.items():
+        for file, make in [targets] if isinstance(targets, tuple) else targets:
+            out.append((name, file, make))
+    return out
 
 
 # ------------------------------------------------------------- check / sync
@@ -145,7 +169,7 @@ def check() -> list[str]:
                     f"{path.relative_to(PROJECT)} links to missing `{target}`"
                 )
 
-    for name, (file, make) in GENERATED.items():
+    for name, file, make in generated():
         try:
             text = (PROJECT / file).read_text()
         except OSError:
@@ -164,7 +188,7 @@ def check() -> list[str]:
 def sync() -> list[str]:
     """Rewrite the generated sections; returns the files changed."""
     changed = []
-    for name, (file, make) in GENERATED.items():
+    for name, file, make in generated():
         path = PROJECT / file
         text = path.read_text()
         updated = _render(text, name, make())

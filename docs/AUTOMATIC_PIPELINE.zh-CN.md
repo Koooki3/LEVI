@@ -317,30 +317,30 @@ reset:
 
 1. 在 `MODE_MATRIX` 加一行，每种模式写 `same`、`differs:<怎样不同>` 或 `n/a:<原因>`；新的一类能力还要在 `SOURCES` 加一个枚举函数；
 2. 给覆盖它的测试加标记，每个不是 `n/a` 的模式至少一个；两种模式测法相同时用 `reset_mode` 夹具；
-3. 重新生成快照（`python -m levi.automatic.modes > tests/automatic/snapshots/mode_matrix.json`）和下表（`python -m levi.automatic.modes --sync-docs`），再跑 `tests/automatic`。
+3. 重新生成快照（`python -m levi.automatic.modes > tests/automatic/snapshots/mode_matrix.json`）和下表（`uv run levi docs sync`，中英两份一起写），再跑 `tests/automatic`。
 
 AERI 改动合并前的独立审查要核对 `MODE_MATRIX` 已更新、两种模式都有测试。
 
 <!-- levi:generated aeri-reset-modes -->
 | 能力 | `single_reset_policy` | `human_assisted` |
 | --- | --- | --- |
-| `arbitration:after_reset:operator_stop` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
-| `arbitration:after_reset:policy_error` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
-| `arbitration:after_reset:reset_horizon_exhausted` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
-| `arbitration:after_reset:reset_verified` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
-| `arbitration:after_reset:scene_reset_required` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
-| `arbitration:after_reset:scene_unknown` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
-| `arbitration:after_reset:watchdog_timeout` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
+| `arbitration:after_reset:operator_stop` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
+| `arbitration:after_reset:policy_error` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
+| `arbitration:after_reset:reset_horizon_exhausted` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
+| `arbitration:after_reset:reset_verified` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
+| `arbitration:after_reset:scene_reset_required` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
+| `arbitration:after_reset:scene_unknown` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
+| `arbitration:after_reset:watchdog_timeout` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
 | `arbitration:plan:ready` | 相同 | 相同 |
-| `arbitration:plan:reset_required` | 不同：runs the reset policy while attempts remain, then asks a person | 不同：asks a person (scene_reset_required) |
-| `arbitration:plan:unavailable` | 不同：as unknown: never skips the reset | 不同：asks a person (scene_unknown) |
-| `arbitration:plan:unknown` | 不同：runs the reset policy, or asks a person with on_unknown wait_human | 不同：asks a person (scene_unknown) |
-| `cli:doctor` | 相同 | 不同：the launch check fails without a scene provider that can answer |
+| `arbitration:plan:reset_required` | 不同：次数未用尽时运行复位策略，之后转人工 | 不同：转人工（scene_reset_required） |
+| `arbitration:plan:unavailable` | 不同：同 unknown：绝不跳过复位 | 不同：转人工（scene_unknown） |
+| `arbitration:plan:unknown` | 不同：运行复位策略；on_unknown 为 wait_human 时转人工 | 不同：转人工（scene_unknown） |
+| `cli:doctor` | 相同 | 不同：没有能作答的场景提供方时，启动检查不通过 |
 | `cli:report` | 相同 | 相同 |
-| `cli:run` | 相同 | 不同：a dry-run scene that is not ready ends the run in WAIT_HUMAN |
+| `cli:run` | 相同 | 不同：试运行中场景不就绪时，运行停在 WAIT_HUMAN |
 | `cli:status` | 相同 | 相同 |
-| `cli:validate` | 相同 | 不同：a real run is refused without a scene provider that can answer; --dry-run validates |
-| `metrics:automation` | 不同：every intervention is unplanned | 不同：a scene check sending the run to a person is planned |
+| `cli:validate` | 相同 | 不同：没有能作答的场景提供方时拒绝真机运行；--dry-run 可通过校验 |
+| `metrics:automation` | 不同：所有干预都是计划外 | 不同：场景核对把运行交给人，属于计划内干预 |
 | `metrics:autonomous` | 相同 | 相同 |
 | `metrics:comparable` | 相同 | 相同 |
 | `metrics:early_termination` | 相同 | 相同 |
@@ -348,7 +348,7 @@ AERI 改动合并前的独立审查要核对 `MODE_MATRIX` 已更新、两种模
 | `metrics:mode_source` | 相同 | 相同 |
 | `metrics:mode_specific` | 相同 | 相同 |
 | `metrics:note` | 相同 | 相同 |
-| `metrics:reset` | 相同 | 不同：no reset episodes: resets and their durations stay 0; skip decisions count forward starts only |
+| `metrics:reset` | 相同 | 不同：没有复位片段：复位次数和耗时恒为 0；跳过决策只统计前向开始 |
 | `metrics:reset_mode` | 相同 | 相同 |
 | `metrics:scene_check` | 相同 | 相同 |
 | `metrics:scene_decisions_by_human` | 相同 | 相同 |
@@ -356,7 +356,7 @@ AERI 改动合并前的独立审查要核对 `MODE_MATRIX` 已更新、两种模
 | `metrics:time_per_valid_episode_ms` | 相同 | 相同 |
 | `metrics:truth` | 相同 | 相同 |
 | `metrics:truth_labels` | 相同 | 相同 |
-| `metrics:turnaround` | 不同：human_reset_ms only when the reset policy gave up | 不同：reset_policy_ms is always 0 |
+| `metrics:turnaround` | 不同：只有复位策略放弃时才有 human_reset_ms | 不同：reset_policy_ms 恒为 0 |
 | `transition:FAULT_LOCKED->FAULT_LOCKED` | 相同 | 相同 |
 | `transition:FAULT_LOCKED->PREFLIGHT` | 相同 | 相同 |
 | `transition:FORWARD_ACTIVE->FAULT_LOCKED` | 相同 | 相同 |
@@ -368,26 +368,26 @@ AERI 改动合并前的独立审查要核对 `MODE_MATRIX` 已更新、两种模
 | `transition:PREFLIGHT->FAULT_LOCKED` | 相同 | 相同 |
 | `transition:PREFLIGHT->VERIFY_INITIAL` | 相同 | 相同 |
 | `transition:PREFLIGHT->WAIT_HUMAN` | 相同 | 相同 |
-| `transition:RESET_ACTIVE->FAULT_LOCKED` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
-| `transition:RESET_ACTIVE->RESET_VERIFY` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
-| `transition:RESET_FINALIZE->FAULT_LOCKED` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
-| `transition:RESET_FINALIZE->VERIFY_INITIAL` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
-| `transition:RESET_FINALIZE->WAIT_HUMAN` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
-| `transition:RESET_VERIFY->FAULT_LOCKED` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
-| `transition:RESET_VERIFY->RESET_FINALIZE` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
+| `transition:RESET_ACTIVE->FAULT_LOCKED` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
+| `transition:RESET_ACTIVE->RESET_VERIFY` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
+| `transition:RESET_FINALIZE->FAULT_LOCKED` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
+| `transition:RESET_FINALIZE->VERIFY_INITIAL` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
+| `transition:RESET_FINALIZE->WAIT_HUMAN` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
+| `transition:RESET_VERIFY->FAULT_LOCKED` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
+| `transition:RESET_VERIFY->RESET_FINALIZE` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
 | `transition:ROBOT_HOME->FAULT_LOCKED` | 相同 | 相同 |
 | `transition:ROBOT_HOME->SCENE_ASSESS` | 相同 | 相同 |
 | `transition:ROBOT_HOME->WAIT_HUMAN` | 相同 | 相同 |
 | `transition:SCENE_ASSESS->COMPLETED` | 相同 | 相同 |
 | `transition:SCENE_ASSESS->FAULT_LOCKED` | 相同 | 相同 |
 | `transition:SCENE_ASSESS->FORWARD_ACTIVE` | 相同 | 相同 |
-| `transition:SCENE_ASSESS->RESET_ACTIVE` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
-| `transition:SCENE_ASSESS->WAIT_HUMAN` | 不同：only when the reset policy is disabled, out of attempts, or on_unknown is wait_human (an unplanned intervention) | 不同：the normal path of a scene that is not ready: a person resets it (a planned intervention) |
+| `transition:SCENE_ASSESS->RESET_ACTIVE` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
+| `transition:SCENE_ASSESS->WAIT_HUMAN` | 不同：仅在复位策略停用、次数用尽或 on_unknown 为 wait_human 时（计划外干预） | 不同：场景不就绪时的正常路径：由人复位（计划内干预） |
 | `transition:VERIFY_INITIAL->COMPLETED` | 相同 | 相同 |
 | `transition:VERIFY_INITIAL->FAULT_LOCKED` | 相同 | 相同 |
 | `transition:VERIFY_INITIAL->FORWARD_ACTIVE` | 相同 | 相同 |
-| `transition:VERIFY_INITIAL->RESET_ACTIVE` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
-| `transition:VERIFY_INITIAL->WAIT_HUMAN` | 不同：only when the reset policy is disabled, out of attempts, or on_unknown is wait_human (an unplanned intervention) | 不同：the normal path of a scene that is not ready: a person resets it (a planned intervention) |
+| `transition:VERIFY_INITIAL->RESET_ACTIVE` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
+| `transition:VERIFY_INITIAL->WAIT_HUMAN` | 不同：仅在复位策略停用、次数用尽或 on_unknown 为 wait_human 时（计划外干预） | 不同：场景不就绪时的正常路径：由人复位（计划内干预） |
 | `transition:WAIT_HUMAN->COMPLETED` | 相同 | 相同 |
 | `transition:WAIT_HUMAN->FAULT_LOCKED` | 相同 | 相同 |
 | `transition:WAIT_HUMAN->PREFLIGHT` | 相同 | 相同 |

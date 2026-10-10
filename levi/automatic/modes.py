@@ -29,14 +29,14 @@ the ``/api/levi/automatic/*`` routes (T-CL-11) and the job file's keys
 
 ``python -m levi.automatic.modes`` prints the snapshot
 (``tests/automatic/snapshots/mode_matrix.json``); ``--markdown en|zh``
-prints the generated documentation section and ``--sync-docs`` rewrites it
-in ``docs/AUTOMATIC_PIPELINE.md`` and ``docs/AUTOMATIC_PIPELINE.zh-CN.md``.
+prints the generated documentation section, which ``levi docs sync``
+writes into ``docs/AUTOMATIC_PIPELINE.md`` and
+``docs/AUTOMATIC_PIPELINE.zh-CN.md`` (``levi docs check`` compares).
 """
 
 import argparse
 import json
 import sys
-from pathlib import Path
 
 RESET_MODES = ("single_reset_policy", "human_assisted")
 SINGLE, HUMAN = RESET_MODES
@@ -412,6 +412,57 @@ _WORDS = {
     },
     "zh": {"head": "能力", "same": "相同", "differs": "不同：", "n/a": "不适用："},
 }
+# The Chinese documentation's wording of every sentence in MODE_MATRIX (a
+# test requires one for each; a missing one would print the English).
+ZH = {
+    "a dry-run scene that is not ready ends the run in WAIT_HUMAN": (
+        "试运行中场景不就绪时，运行停在 WAIT_HUMAN"
+    ),
+    "a real run is refused without a scene provider that can answer; "
+    "--dry-run validates": "没有能作答的场景提供方时拒绝真机运行；--dry-run 可通过校验",
+    "a scene check sending the run to a person is planned": (
+        "场景核对把运行交给人，属于计划内干预"
+    ),
+    "as unknown: never skips the reset": "同 unknown：绝不跳过复位",
+    "asks a person (scene_reset_required)": "转人工（scene_reset_required）",
+    "asks a person (scene_unknown)": "转人工（scene_unknown）",
+    "every intervention is unplanned": "所有干预都是计划外",
+    "human_reset_ms only when the reset policy gave up": (
+        "只有复位策略放弃时才有 human_reset_ms"
+    ),
+    "no reset episodes: resets and their durations stay 0; skip decisions "
+    "count forward starts only": "没有复位片段：复位次数和耗时恒为 0；跳过决策只统计前向开始",
+    "no reset policy runs: a scene that is not ready waits for a person": (
+        "不运行复位策略：场景不就绪时等人处理"
+    ),
+    "only this mode runs reset episodes": "只有该模式运行复位片段",
+    "only when the reset policy is disabled, out of attempts, or on_unknown is "
+    "wait_human (an unplanned intervention)": (
+        "仅在复位策略停用、次数用尽或 on_unknown 为 wait_human 时（计划外干预）"
+    ),
+    "reset_policy_ms is always 0": "reset_policy_ms 恒为 0",
+    "runs the reset policy while attempts remain, then asks a person": (
+        "次数未用尽时运行复位策略，之后转人工"
+    ),
+    "runs the reset policy, or asks a person with on_unknown wait_human": (
+        "运行复位策略；on_unknown 为 wait_human 时转人工"
+    ),
+    "the launch check fails without a scene provider that can answer": (
+        "没有能作答的场景提供方时，启动检查不通过"
+    ),
+    "the normal path of a scene that is not ready: a person resets it "
+    "(a planned intervention)": "场景不就绪时的正常路径：由人复位（计划内干预）",
+}
+
+
+def sentences() -> set:
+    """Every sentence of a ``differs`` or ``n/a`` cell."""
+    return {
+        cell.split(":", 1)[1].strip()
+        for cells in MODE_MATRIX.values()
+        for cell in cells.values()
+        if kind(cell) in ("differs", "n/a")
+    }
 
 
 def _cell(cell: str, lang: str) -> str:
@@ -419,12 +470,15 @@ def _cell(cell: str, lang: str) -> str:
     found = kind(cell)
     if found == SAME:
         return words["same"]
-    text = cell.split(":", 1)[1].strip().replace("|", "\\|")
-    return words[found] + text
+    text = cell.split(":", 1)[1].strip()
+    if lang == "zh":
+        text = ZH.get(text, text)
+    return words[found] + text.replace("|", "\\|")
 
 
 def markdown(lang: str = "en") -> str:
-    """The body of the ``aeri-reset-modes`` documentation section."""
+    """The body of the ``aeri-reset-modes`` documentation section, which
+    ``levi docs sync`` writes into ``DOCS_FILES`` (``levi/docs.py``)."""
     words = _WORDS[lang]
     rows = [
         f"| {words['head']} | `{SINGLE}` | `{HUMAN}` |",
@@ -438,72 +492,20 @@ def markdown(lang: str = "en") -> str:
     return "\n".join(rows) + "\n"
 
 
-def docs_problems(project=None) -> list:
-    """The generated sections that are missing or out of date."""
-    from levi import docs
-
-    project = Path(project or docs.PROJECT)
-    problems = []
-    for lang, file in DOCS_FILES.items():
-        try:
-            text = (project / file).read_text()
-        except OSError:
-            problems.append(f"{file} is missing")
-            continue
-        found = [m for m in docs.MARKER.finditer(text) if m["name"] == DOCS_SECTION]
-        if not found:
-            problems.append(f"{file} has no generated section `{DOCS_SECTION}`")
-        elif found[0]["body"] != markdown(lang):
-            problems.append(
-                f"{file} section `{DOCS_SECTION}` is out of date: run "
-                "`python -m levi.automatic.modes --sync-docs`"
-            )
-    return problems
-
-
-def sync_docs(project=None) -> list:
-    from levi import docs
-
-    project = Path(project or docs.PROJECT)
-    changed = []
-    for lang, file in DOCS_FILES.items():
-        path = project / file
-        text = path.read_text()
-        updated = docs._render(text, DOCS_SECTION, markdown(lang))
-        if updated != text:
-            path.write_text(updated)
-            changed.append(file)
-    return changed
-
-
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m levi.automatic.modes",
-        description="The AERI reset-mode matrix / AERI 复位模式矩阵",
+        description="The AERI reset-mode matrix: prints its snapshot; "
+        "`levi docs sync` writes its documentation table / AERI 复位模式矩阵："
+        "打印快照；文档表由 `levi docs sync` 生成",
     )
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(
+    parser.add_argument(
         "--markdown",
         choices=sorted(_WORDS),
         help="print the documentation section / 打印文档生成段",
     )
-    group.add_argument(
-        "--sync-docs",
-        action="store_true",
-        help="rewrite the documentation sections / 重写文档生成段",
-    )
     args = parser.parse_args(argv)
-    if args.markdown:
-        sys.stdout.write(markdown(args.markdown))
-        return 0
-    if args.sync_docs:
-        for file in sync_docs():
-            print(f"updated {file}")
-        problems = docs_problems()
-        for line in problems:
-            print(f"- {line}")
-        return 1 if problems else 0
-    sys.stdout.write(snapshot_text())
+    sys.stdout.write(markdown(args.markdown) if args.markdown else snapshot_text())
     return 0
 
 
