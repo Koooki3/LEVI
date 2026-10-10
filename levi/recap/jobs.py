@@ -38,6 +38,11 @@ FINISHED = {"succeeded", "failed", "cancelled"}
 PLAN_SCHEMA = "levi.recap_value.plan.v1"
 WORKER_PROJECT = paths.PROJECT / "integrations" / "recap_value"
 LOG_TAIL_BYTES = 4000
+# Finished job records kept per dataset (newest first); older ones are
+# removed with their files. A succeeded job's plan and worker output are
+# removed as soon as its result is published; a failed or cancelled job keeps
+# them (diagnosis) until its record ages out.
+KEEP_JOB_RECORDS = 20
 PUBLIC_JOB_KEYS = (
     "id",
     "repo_id",
@@ -956,8 +961,78 @@ def collect(job: dict[str, Any]) -> dict[str, Any]:
                 finished_at=time.time(),
             )
         _save(job)
+        # Only after the result is published and the job record says so: a
+        # crash before this line leaves the files for the next pass.
+        prune_job_files(name)
     _forget(_key(job))
     return job
+
+
+def _job_files(name: str, job_id: str) -> list[Path]:
+    """Files a job left in ``plans/``, ``results/`` and ``jobs/``, found by
+    name inside the dataset folder (never through paths in the record)."""
+    base = store.root(name)
+    found = [base / "plans" / f"{job_id}.json"]
+    results = base / "results"
+    if results.is_dir():
+        found += [
+            p
+            for p in results.iterdir()
+            if p.name.startswith((f"{job_id}.", f".{job_id}."))
+        ]
+    jobs_dir = _jobs_dir(name)
+    found += [jobs_dir / f"{job_id}.progress.json", jobs_dir / f"{job_id}.log"]
+    return found
+
+
+def _unlink(path: Path) -> int:
+    """Remove one regular file; the bytes freed (0 if absent). A symbolic
+    link is removed as a link (its target is left alone), nothing is
+    removed through a symlinked folder, and an OS error only skips the file:
+    pruning never fails the job that triggered it."""
+    try:
+        if path.parent.is_symlink():
+            return 0
+        if path.is_symlink():
+            path.unlink()
+            return 0
+        if not path.is_file():
+            return 0
+        size = path.stat().st_size
+        path.unlink()
+        return size
+    except OSError:
+        return 0
+
+
+def prune_job_files(name: str, keep: int | None = None) -> dict[str, Any]:
+    """Bound ``jobs/``, ``plans/`` and ``results/`` of one dataset.
+
+    Succeeded jobs lose their plan, worker output and progress file (the
+    published result holds everything a reader needs); the newest ``keep``
+    finished records stay, older finished ones are removed with all their
+    files (record last, so a crash leaves nothing unreferenced). Active jobs
+    are never touched. Callers hold ``store.locked(name)``: ``start`` writes
+    a plan and its record under the same lock."""
+    keep = KEEP_JOB_RECORDS if keep is None else max(0, int(keep))
+    if store.root(name).is_symlink():
+        return {"removed_records": [], "bytes": 0}
+    finished = [j for j in jobs(name) if j.get("status") in FINISHED]
+    old = finished[: max(0, len(finished) - keep)]
+    removed: list[str] = []
+    freed = 0
+    for job in old:
+        for path in _job_files(name, job["id"]):
+            freed += _unlink(path)
+        freed += _unlink(job_path(name, job["id"]))
+        removed.append(job["id"])
+    for job in finished[len(old) :]:
+        if job.get("status") != "succeeded":
+            continue
+        for path in _job_files(name, job["id"]):
+            if path.suffix != ".log":
+                freed += _unlink(path)
+    return {"removed_records": removed, "bytes": freed}
 
 
 def cancel(job: dict[str, Any]) -> dict[str, Any]:
