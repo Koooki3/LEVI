@@ -387,6 +387,8 @@ def sync(config, dataset=None, *, now=None, stages=STAGES) -> dict:
     "unreadable", "skipped"}``."""
     live_dir = Path(config.live_dir)
     out = {"written": 0, "unchanged": 0, "unreadable": 0, "skipped": 0}
+    if not mirror.datasets_dir(config).is_dir():
+        return out  # not a live workspace (yet): leave no file behind
     newest = {
         s["dataset"] + "\0" + s["demo"]: s
         for s in stats.latest(statsview.records(live_dir))
@@ -541,32 +543,36 @@ def last_completed(record) -> str:
     return done[-1] if done else "none"
 
 
+def landing_tally(failed, records, stages=STAGES) -> dict:
+    """Where the ``failed`` episodes stopped: ``of`` them, ``with_segments``
+    of those have time segments, and ``counts`` of the last completed
+    subtask (``none``: nothing completed). ``records`` fixes the order of
+    the ids (the group's whole vocabulary)."""
+    have = [r for r in failed if _has_segments(r)]
+    counts: dict = {}
+    for record in have:
+        sid = last_completed(record)
+        counts[sid] = counts.get(sid, 0) + 1
+    order = [*order_stages(records, stages), "none"]
+    return {
+        "of": len(failed),
+        "with_segments": len(have),
+        "counts": {s: counts[s] for s in order if s in counts},
+    }
+
+
 def landing(records, stages=STAGES) -> dict:
     """Where failed episodes stopped: the distribution of the last completed
     subtask. Operator failures are the primary count; failures only the
     background called (no operator success/failure) are counted apart and
     marked automatic and unreviewed."""
-
-    def tally(failed):
-        have = [r for r in failed if _has_segments(r)]
-        counts: dict = {}
-        for record in have:
-            sid = last_completed(record)
-            counts[sid] = counts.get(sid, 0) + 1
-        order = [*order_stages(records, stages), "none"]
-        return {
-            "of": len(failed),
-            "with_segments": len(have),
-            "counts": {s: counts[s] for s in order if s in counts},
-        }
-
     primary = [r for r in records if _operator(r) == "failure"]
     auto = [
         r for r in records if _operator(r) is None and _agent_outcome(r) == "failure"
     ]
     return {
-        "operator": tally(primary),
-        "background": {**tally(auto), "review": AUTO},
+        "operator": landing_tally(primary, records, stages),
+        "background": {**landing_tally(auto, records, stages), "review": AUTO},
     }
 
 

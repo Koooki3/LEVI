@@ -26,6 +26,7 @@ import urllib.request
 from pathlib import Path
 
 from . import (
+    analysis,
     auto,
     backfill,
     controller,
@@ -1387,6 +1388,56 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_analysis(args) -> int:
+    """``levi live analysis``: the evaluation-result analysis (success rate,
+    label coverage, subtask funnel and durations, where failures stopped) per
+    checkpoint and task, from ``live/analysis.jsonl``. ``--sync`` first adds
+    the records of episodes finished since the last one (the only thing it
+    writes); the service need not be running."""
+    # ``--since`` here is the analysis window, not the backlog cutoff of
+    # ``add_config_options``: resolve the configuration without it.
+    config = resolve_config(
+        argparse.Namespace(
+            config=args.config,
+            workspace=args.workspace,
+            home=args.home,
+            roots=None,
+            gpu_mode=None,
+            auto_approve=False,
+            process_backlog=False,
+            since=None,
+            ui_port=None,
+            core_port=None,
+        )
+    )
+    names = tuple(x for x in (args.stages or "").split(",") if x) or analysis.STAGES
+    if args.sync:
+        done = analysis.sync(config, stages=names)
+        print(
+            f"analysis records: {done['written']} written, {done['unchanged']} "
+            f"unchanged, {done['unreadable']} waiting for the run store",
+            file=sys.stderr,
+        )
+    found = analysis.build(
+        config, group=args.group, task=args.task, since=args.since, stages=names
+    )
+    text = (
+        analysis.to_json(found)
+        if args.format == "json"
+        else analysis.to_markdown(found, args.lang)
+    )
+    if args.out:
+        target = Path(args.out).expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        partial = target.with_name(target.name + ".partial")
+        partial.write_text(text, encoding="utf-8")
+        os.replace(partial, target)
+        print(f"wrote {target}")
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
 def cmd_stats(args) -> int:
     """``levi live stats backfill``: rebuild the records of demos labelled
     before ``stats.jsonl`` existed, from the ledger and the run journals."""
@@ -1602,6 +1653,33 @@ def build_parser():
         action="store_true",
         help="count the episodes a person removed too (left out by default)",
     )
+    ana = sub.add_parser(
+        "analysis",
+        help="evaluation results next to the subtask labelling, per checkpoint and task",
+    )
+    ana.add_argument("--config", help="live.toml (default: <workspace>/live.toml)")
+    ana.add_argument(
+        "--workspace", help="service workspace (as for the other commands)"
+    )
+    ana.add_argument("--home", help="where status.json lives (default ~/.levi-live)")
+    ana.add_argument("--group", help="only this checkpoint (rollout group)")
+    ana.add_argument("--task", help="only this task folder")
+    ana.add_argument("--since", help="only episodes labelled since this ISO time")
+    ana.add_argument("--format", choices=("md", "json"), default="md")
+    ana.add_argument("--lang", choices=("en", "zh"), default="en")
+    ana.add_argument(
+        "--stages",
+        help="comma-separated subtask ids in order (default approach,grasp,"
+        "transport,place,retreat)",
+    )
+    ana.add_argument(
+        "--sync",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="first write the records of episodes finished since the last one "
+        "(default; --no-sync reads only what is on file)",
+    )
+    ana.add_argument("--out", help="write here instead of the terminal")
     stat = sub.add_parser("stats", help="maintain the per-episode statistics")
     stat_sub = stat.add_subparsers(dest="stats_command", required=True)
     back = stat_sub.add_parser(
@@ -1632,6 +1710,7 @@ def main(argv=None) -> int:
         "init": cmd_init,
         "queue": cmd_queue,
         "report": cmd_report,
+        "analysis": cmd_analysis,
         "stats": cmd_stats,
     }
     try:

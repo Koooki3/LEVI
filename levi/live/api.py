@@ -44,6 +44,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
 from . import (
+    analysis,
     auto,
     catalogue,
     exclusion,
@@ -949,6 +950,39 @@ def stats_view(
         offset=max(0, int(offset)),
         include_excluded=include_excluded,
     )
+
+
+@router.get("/analysis")
+def analysis_view(
+    group: str | None = None,
+    task: str | None = None,
+    since: str | None = None,
+    stages: str | None = None,
+):
+    """The evaluation-result analysis (docs/LIVE.md, "Evaluation analysis"):
+    per checkpoint (``group``) and task, the labelled episodes' success rate
+    (operator labels), the coverage of the labels, the subtask funnel and
+    durations and where failed episodes stopped, read from
+    ``live/analysis.jsonl`` and the dataset state files. Read only: records
+    are written by the live service or ``levi live analysis --sync``, never
+    by this route. Every figure that comes from the background labelling is
+    marked ``review: auto``. No path, token or key."""
+    config = _config()
+    if config is None:
+        return _disabled()
+    for value in (group, task):
+        if value is not None and len(value) > 200:
+            raise HTTPException(400, "Not a group or task name")
+    names = tuple(x for x in (stages or "").split(",") if x) or analysis.STAGES
+    if len(names) > 50 or any(len(x) > 64 for x in names):
+        raise HTTPException(400, "stages is a short comma-separated list")
+    try:
+        found = analysis.build(
+            config, group=group or None, task=task or None, since=since, stages=names
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"enabled": True, **found}
 
 
 @router.get("/stats/export")
