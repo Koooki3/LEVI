@@ -2840,5 +2840,6 @@
   "Success episodes": "Success episodes",
   "Failure episodes": "Failure episodes",
   "Episodes without a shared outcome": "Episodes without a shared outcome",
-  "A result has values only (no success/failure labels): label and advantage metrics are left out.": "A result has values only (no success/failure labels): label and advantage metrics are left out."
+  "A result has values only (no success/failure labels): label and advantage metrics are left out.": "A result has values only (no success/failure labels): label and advantage metrics are left out.",
+  "Results are saved per run: recomputing adds a result, and earlier runs of each model are folded into one row.": "Results are saved per run: recomputing adds a result, and earlier runs of each model are folded into one row."
 }

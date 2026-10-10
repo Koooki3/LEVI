@@ -200,6 +200,10 @@ export interface RecapStatus {
   job: RecapJob | null;
   /** What a run resolves its label rule to; absent from older backends. */
   dataset_type?: RecapDatasetTypeChoice | null;
+  /** The layout a new run publishes in: "models" (recomputing replaces the
+   * model's result) or "revisions" (one result per run); absent from older
+   * backends, null when misconfigured. */
+  layout?: "models" | "revisions" | string | null;
 }
 
 export interface RecapRunRequest {

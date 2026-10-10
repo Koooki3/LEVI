@@ -1326,6 +1326,13 @@ function DatasetRecapSection({
   const secondary = results?.revisions.find(
     (row) => row.revision_id === selection.comparison,
   );
+  // Whether recomputing replaces a model's result: the layout a new run
+  // writes (status), else, from an older backend, whether any row is a model
+  // result.
+  const replaces =
+    status?.layout != null
+      ? status.layout === "models"
+      : !!results?.revisions.some((row) => row.layout === "models");
   const versionsKey = JSON.stringify([primary?.version, secondary?.version]);
   useEffect(() => {
     shownVersions.current = versionsKey;
@@ -1783,7 +1790,9 @@ function DatasetRecapSection({
           </div>
           <p className="recap-note" id={versionsHintId}>
             {t(
-              "One result per value model: recomputing with the same model replaces its result.",
+              replaces
+                ? "One result per value model: recomputing with the same model replaces its result."
+                : "Results are saved per run: recomputing adds a result, and earlier runs of each model are folded into one row.",
             )}{" "}
             {t(
               "Browsing saved results does not change the checkpoint used for computation.",

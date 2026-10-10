@@ -1154,6 +1154,36 @@ describe("one result per value model", () => {
   });
 });
 
+describe("what recomputing does, by storage layout", () => {
+  const hint = (host: HTMLElement) =>
+    host.querySelector(".recap-version-controls + .recap-note")!.textContent!;
+
+  test("the per-run layout never claims that recomputing replaces a result", async () => {
+    statusHandler = async () => ({ ...status(), layout: "revisions" });
+    const { host } = await render(page());
+    await loaded(host);
+    expect(hint(host)).toContain(
+      "Results are saved per run: recomputing adds a result, and earlier runs of each model are folded into one row.",
+    );
+    expect(hint(host)).not.toContain("replaces");
+  });
+
+  test("the model layout says that recomputing replaces the model's result", async () => {
+    statusHandler = async () => ({ ...status(), layout: "models" });
+    const { host } = await render(page());
+    await loaded(host);
+    expect(hint(host)).toContain(
+      "One result per value model: recomputing with the same model replaces its result.",
+    );
+  });
+
+  test("an older backend that names no layout is read from the rows", async () => {
+    const { host } = await render(page()); // per-run rows, no layout field
+    await loaded(host);
+    expect(hint(host)).not.toContain("replaces");
+  });
+});
+
 describe("refusals of pinned reads", () => {
   const pinnedRows = () => ({
     current: "value-r2-step6000",
