@@ -4,7 +4,6 @@ counts; cards a person has not confirmed stay out of the pairs; the five
 label bases; idempotent re-derivation; and an AERI run read from disk."""
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -12,8 +11,6 @@ import test_ledger_fixtures as fx
 from campaign_guard import aeri_home_fixture, guard_fixture  # noqa: F401
 
 from levi.automatic.campaign import ledger as L
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def rows_of(led, arm=None):
@@ -274,12 +271,13 @@ def test_rederiving_gives_the_same_bytes_and_writes_nothing(tmp_path):
 
 @pytest.fixture
 def aeri_run(tmp_path, monkeypatch):
-    import socket
-
-    def refuse(*args, **kwargs):
-        raise AssertionError("a ledger test tried to use the network")
-
-    monkeypatch.setattr(socket.socket, "connect", refuse)
+    # The campaign guard (autouse) already refuses every connect. A second
+    # monkeypatch of socket.socket.connect here would be undone AFTER the
+    # guard's uninstall and leave the guard's connect in place for every later
+    # test (the live-service tests then could not reach their own server).
+    # Only for this test (undone afterwards): a module-level sys.path insert
+    # stays for the whole session and changed which modules later tests import.
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
     from aeri_harness import config
     from test_aeri_recorder import FOLDERS, build_run
 
