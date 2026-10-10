@@ -553,6 +553,7 @@
             "watchdog_timeout",
             "recovery_ambiguous",
             "journal_corrupt",
+            "preflight_passed",
             "preflight_failed",
             "scene_ready",
             "scene_reset_required",

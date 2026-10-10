@@ -189,6 +189,7 @@ TRANSITION_REASONS = (
     "watchdog_timeout",
     "recovery_ambiguous",
     "journal_corrupt",
+    "preflight_passed",
     "preflight_failed",
     "scene_ready",
     "scene_reset_required",
@@ -1324,6 +1325,12 @@ def breaking_changes(old, new, path="$") -> list[str]:
             missing = sorted(set(a) - set(b))
             if missing:
                 changes.append(f"{here}: no longer refuses {', '.join(missing)}")
+        elif key == "enum":
+            added, removed = sorted(set(b) - set(a)), sorted(set(a) - set(b))
+            if added or removed:
+                changes.append(
+                    f"{here}: closed enum changed (added {added}, removed {removed})"
+                )
         elif key == "required":
             if set(a) != set(b):
                 changes.append(f"{here}: {sorted(a)} became {sorted(b)}")
