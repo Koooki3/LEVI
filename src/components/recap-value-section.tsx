@@ -440,7 +440,8 @@ function RevisionFacts({
   );
 }
 
-function ComparisonSummary({
+/** Memoised for playback: its props do not change with the playhead. */
+const ComparisonSummary = React.memo(function ComparisonSummary({
   data,
   episodeId,
 }: {
@@ -618,7 +619,7 @@ function ComparisonSummary({
       )}
     </details>
   );
-}
+});
 
 function AdvantageTrack({
   side,

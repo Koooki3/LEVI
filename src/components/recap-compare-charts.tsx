@@ -6,7 +6,7 @@
  * view with the exact numbers (the chart itself is hidden from assistive
  * technology); colours come from design tokens through CSS classes, and A/B
  * are always named in text, never by colour alone. */
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -141,7 +141,10 @@ const pct = (value: number) => chartNumber(value, 1) + "%";
 const range = (lo: number, hi: number, digits = 3) =>
   chartNumber(lo, digits) + "…" + chartNumber(hi, digits);
 
-export function RecapComparisonCharts({
+/** Memoised: the section re-renders with the playhead (about four times a
+ * second during playback), but the charts depend only on the comparison,
+ * the episode and the language. */
+export const RecapComparisonCharts = React.memo(function RecapComparisonCharts({
   data,
   episodeId,
 }: {
@@ -153,11 +156,19 @@ export function RecapComparisonCharts({
   const nameB = data.b.checkpoint || data.b.revision_id;
   const groupName = (group: string) =>
     group === "all" ? t("All shared frames") : t(outcomeKey(group));
-  const agreement = agreementBars(data);
-  const means = outcomeMeanBars(data);
-  const histogram = valueHistogram(data);
-  const absDiff = absDiffHistogram(data);
-  const episodes = episodeDiffBars(data, episodeId);
+  const { agreement, means, histogram, absDiff } = useMemo(
+    () => ({
+      agreement: agreementBars(data),
+      means: outcomeMeanBars(data),
+      histogram: valueHistogram(data),
+      absDiff: absDiffHistogram(data),
+    }),
+    [data],
+  );
+  const episodes = useMemo(
+    () => episodeDiffBars(data, episodeId),
+    [data, episodeId],
+  );
   const figures: React.ReactNode[] = [];
 
   if (agreement) {
@@ -552,4 +563,4 @@ export function RecapComparisonCharts({
       {figures}
     </section>
   );
-}
+});

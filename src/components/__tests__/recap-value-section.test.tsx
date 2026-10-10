@@ -247,6 +247,19 @@ mock.module("@/utils/annotationsClient", () => ({
   cancelRecapJob: cancel,
 }));
 
+// Counts how often the comparison charts compute their data (memo test).
+import * as chartData from "@/components/recap-compare-data";
+const chartDataCalls = { agreementBars: 0 };
+// Taken before mocking: the module's bindings are replaced in place.
+const realChartData = { ...chartData };
+mock.module("@/components/recap-compare-data", () => ({
+  ...realChartData,
+  agreementBars: (...args: Parameters<typeof chartData.agreementBars>) => {
+    chartDataCalls.agreementBars += 1;
+    return realChartData.agreementBars(...args);
+  },
+}));
+
 import { RecapValueSection } from "@/components/recap-value-section";
 import { LocaleProvider, useLocale } from "@/components/levi-locale";
 
@@ -261,14 +274,14 @@ function LanguageSwitch() {
     </button>
   );
 }
-function page() {
+function page(currentTime = 0) {
   return (
     <LocaleProvider>
       <LanguageSwitch />
       <div className="annotations-skin">
         <RecapValueSection
           duration={1}
-          currentTime={0}
+          currentTime={currentTime}
           onSeek={seek}
           onBandClick={() => undefined}
           onHoverMove={() => undefined}
@@ -1530,6 +1543,23 @@ describe("comparison charts", () => {
     );
     expect(captions).toContain("Value distribution · per episode (mean Value)");
     expect(captions).not.toContain("Per-frame |B − A| distribution");
+  });
+
+  test("playback does not redraw the charts: they depend only on the comparison", async () => {
+    compareHandler = async (_ident, a, b) => charted(a, b);
+    const { host, rerender } = await render(page(0));
+    await loaded(host);
+    await choose(selectors(host)[1], r1);
+    await waitFor(() => host.querySelector(".recap-charts"));
+    await flush();
+    const before = chartDataCalls.agreementBars;
+    expect(before).toBeGreaterThan(0);
+    for (const time of [0.1, 0.2, 0.3, 0.4]) await rerender(page(time));
+    expect(chartDataCalls.agreementBars).toBe(before);
+    // A new comparison does compute again.
+    await click(host.querySelector("[data-language=zh]"));
+    await flush();
+    expect(host.querySelector(".recap-charts")).not.toBeNull();
   });
 
   test("chart text is translated", async () => {
