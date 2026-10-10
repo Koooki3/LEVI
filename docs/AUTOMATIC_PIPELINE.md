@@ -697,6 +697,7 @@ read the interval, not the rate.
 | turnaround | from episode k's home reached (`ROBOT_HOME -> SCENE_ASSESS` committed) to episode k+1's `FORWARD_ACTIVE` committed, split by the state the run was in: `scene_ms` (`SCENE_ASSESS`), `reset_policy_ms` (`RESET_*`), `human_reset_ms` (`WAIT_HUMAN`, `FAULT_LOCKED`), `verify_ms` (`PREFLIGHT`, `VERIFY_INITIAL`); the parts add up to `turnaround_ms`. `with_person` is the share of turnarounds a person was needed in. A window across a clock-domain change is `unmeasured`; the one after the last episode is `no_next_episode`; one the run is still in is `open`. An episode that ended without its home reached (`ROBOT_HOME -> WAIT_HUMAN` after an operator's stop where the arm stands, `ROBOT_HOME -> FAULT_LOCKED` after a failed home) starts no window: `turnaround_unmeasured` counts every left-out turnaround by reason (`clock_domain_changed`, `not_homed:<state>:<reason>`) |
 | per valid episode | `time_per_valid_episode_ms` (the journal's span on the monotonic clock, summed per clock domain, / forward episodes sealed complete; the downtime between a crash and the restart is not in it: `downtime_excluded: true`) and `human_minutes_per_valid_episode` (minutes in `WAIT_HUMAN`/`FAULT_LOCKED` closed by a resume or an operator's stop / the same count; a wait the run is still in is `open_waits`; a fault during a planned wait makes the rest of it unplanned); `value` is null with no valid episode |
 | scene decisions by a person | with `scene_check: operator_attested` a person answered the scene checks: those decisions are listed in `scene_decisions_by_human` and left out of the reset group's skip accuracy, which is a machine provider's |
+| agreement | the automatic verdict against the operator's own label, in total and by how the episode ended (`by_ended_by`: `budget`, `early_stop`, `operator_stop`, `unknown`); see "Operator labels and the dual-label comparison" below |
 
 **Comparable across reset modes** (design X2 §1.2). The report head names
 `reset_mode` (`single_reset_policy`, or `human_assisted`: policy evaluation
@@ -729,7 +730,8 @@ by=)`. Adding a label never touches another kind's file; a second label of
 the same kind, episode and subject is refused unless it says
 `supersede=True`, and then it is appended (the first stays). `by` is an
 opaque principal id (no names, no addresses). Subjects: `task_outcome`
-(`success`/`failure`) and `initial_state` (`ready`/`reset_required`: did
+(`success`/`failure`; an `operator_label` may also say `discarded` or
+`unclear`, never truth) and `initial_state` (`ready`/`reset_required`: did
 the scene need a reset before the episode that started). The truth for the
 rates is the adjudicated label where there is one, else the operator's
 (`truth="adjudicated"` uses adjudicated labels only); episodes without one
@@ -746,6 +748,75 @@ share and the draw, parameters pending the user, HA-23) are recorded in the
 run manifest: each sealed episode has `control` and, for a control
 episode, `would_stop_step` (where the detector would have stopped, or
 `null`).
+
+## Operator labels and the dual-label comparison
+
+The operator gives each ended forward episode their own outcome label,
+kept apart from the run's automatic verdict, and the two are compared
+(T-CL-14). This is the same dual-label check as on the robot's own path
+(`levi live`, `agreement.by_ended_by`), here for AERI runs in both reset
+modes; with `human_assisted` the operator labels the episode that just
+ended while resetting the scene.
+
+**What a label says.** `operator_label`, subject `task_outcome`, takes
+`success`, `failure`, `discarded` (the episode should not count) or
+`unclear` (the operator could not tell). `by` is an opaque principal id
+(no names, no addresses). An episode may be labelled again: each label is
+appended to `<run_dir>/labels/operator_label.jsonl` and the latest one is
+the current value, the earlier ones stay on file. `discarded` and
+`unclear` are never truth: an episode whose current operator label is one
+of them has no operator truth (an adjudicated label still gives it one).
+
+**When.** `metrics.label_operator(run_dir, episode_id, value, by=)` labels
+a forward episode whose result the run journal committed, whatever ended
+it (an early stop, the budget, the operator, a fault), while the run goes
+on, while it waits for a person, or after it ended. An episode that has
+not ended, does not exist, or is a reset episode is refused. The label
+channel reads the journal without its lock and never writes it, the
+manifest, a rollout or a session file: only the label file (and the
+labels' lock file).
+
+**Blind first.** The operator judges before seeing what the run decided.
+The waiting card (`recorder.pending_card`) has an `operator_label` block
+for the forward episode that ended last: its current label (null when not
+labelled yet), how many labels it has, the values allowed, `ended_by`, and
+the automatic verdict only once a label exists; until then
+`automatic_verdict` is null and `automatic_verdict_hidden` is
+`hidden_until_labelled`, and `agrees` is null. `pending_card(run_dir,
+blind=True)` also hides `task_outcome` and `goal_verification` in
+`last_episode` while that episode is unlabelled; the default keeps
+`last_episode` as before, so a page that wants the operator blind passes
+`blind=True`. `ended_by` stays visible: the operator saw how the episode
+ended. `levi automatic label` never prints the automatic verdict.
+
+**How an episode ended** (`ended_by`, from the episode's stop reason in
+the journal): `budget` (`horizon_exhausted`), `early_stop`
+(`goal_verified`), `operator_stop` (`operator_stop`), else `unknown` (a
+fault, the policy, a watchdog, a crash, no reason).
+
+**The comparison** (`metrics.report(...)["agreement"]`). The automatic
+verdict is the episode's final judgement in the journal
+(`goal_verification`: `verified` is success, `contradicted` failure,
+`undecided` undecided, `unavailable` none). Only episodes the operator
+called success or failure are compared; `judged` counts those the run
+decided too. Per stratum (`by_ended_by`: `budget`, `early_stop`,
+`operator_stop`, `unknown`) and in `total`: `episodes`, `unlabelled`,
+`discarded`, `unclear`, `operator_decided`, `matrix` (operator ×
+automatic), `judged`, `agree`, `agreement`, `false_success` (the run said
+success where the operator said failure), `missed_success` (the run said
+failure where the operator said success), and `undecided` and `none`
+apart (never counted as agreement). Every share has its Wilson 95 %
+interval; below 10 decided pairs (`min_n`) a stratum gets the interval and
+no point estimate (`rate` null, `small_sample` true). `agreement` is in
+`comparable`: it means the same in both reset modes.
+
+**Limits.** An episode the detector or the operator ended early is shorter
+than one run to its budget, so only the `budget` stratum's agreement
+carries over to unattended runs; read the other strata on their own. With
+the 20-30 episodes of an exploratory check every stratum is small: read
+the interval. The operator label is one person's judgement, not
+adjudicated truth (`adjudicated_ground_truth` overrides it for the rates).
+The HTTP route (`POST /runs/{id}/labels`) and the page are later tasks.
 
 ## Policy evaluation only mode (human resets)
 
@@ -841,7 +912,10 @@ sequence a resume must name, how long the run has waited and which wait
 this is, the last episode's result with its rollout path and last frames,
 the Initial State Contract (`id@version`, status: a draft is flagged "not
 confirmed by the user, HA-23"), its predicates in words, and the
-assessment that led to the wait.
+assessment that led to the wait. Its `operator_label` block asks for the
+operator's label of the forward episode that ended last and shows the
+automatic verdict only after that label exists (see "Operator labels and
+the dual-label comparison").
 
 **The job file.** Both modes share `levi.aeri.job.v1`
 (`levi/domain/aeri.py`, `JobSpec`, snapshot
@@ -1020,6 +1094,7 @@ levi automatic validate --config F [--json]
 levi automatic run      --config F --dry-run [--episodes N] [--scenes S] [--keep DIR] [--json]
 levi automatic status   --run-dir D [--json]
 levi automatic report   --run-dir D [--config F] [--truth T] [--format md|json]
+levi automatic label    --run-dir D --episode ID --value success|failure|discarded|unclear [--principal P] [--note N] [--json]
 ```
 
 `levi automatic …` runs the same command. Every option's help is in
@@ -1046,6 +1121,13 @@ English and Chinese.
 - `status` reads a run's journal without its lock and without writing
   (a torn tail is reported, not cut; a corrupt journal is `FAULT_LOCKED`).
 - `report` prints the metrics (above) as Markdown or JSON.
+- `label` appends an operator's label for an ended forward episode (see
+  "Operator labels and the dual-label comparison"). It checks the episode
+  first, then asks at a terminal: outside one it is refused (exit 2,
+  nothing written); the operator types the value to confirm. The question
+  goes to stderr and names the current label, never the automatic
+  verdict; the write checks again that the episode has ended.
+  `--principal` (default `operator`) is an opaque id.
 
 **The job file** (`levi.aeri.job.v1`, a draft like the contract, HA-23)
 uses the same strict YAML subset; unknown sections and keys are refused,

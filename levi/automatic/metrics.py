@@ -15,8 +15,12 @@ file per kind (each line synced). Adding a label never touches another
 kind's file; a second label of the same kind for the same episode and
 subject is refused unless it says ``supersede=True``, and then it is
 appended (the first stays on file). Subjects: ``task_outcome``
-(``success``/``failure``) and ``initial_state`` (``ready``/
-``reset_required``: was a reset needed before the episode that started).
+(``success``/``failure``; an ``operator_label`` may also say
+``discarded`` or ``unclear``, never truth) and ``initial_state``
+(``ready``/``reset_required``: was a reset needed before the episode that
+started). ``label_operator`` writes an operator's label for an ended
+forward episode (T-CL-14); ``agreement`` compares it with the automatic
+verdict by how the episode ended (``ENDED_BY``).
 
 **Truth** for the rates is ``adjudicated_ground_truth`` where it exists,
 else ``operator_label`` (``truth="adjudicated_then_operator"``, the

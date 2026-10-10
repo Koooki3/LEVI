@@ -9,6 +9,7 @@ motion authority over anything real.
     levi automatic run      --config F --dry-run [--episodes N] [--scenes S] [--keep DIR] [--json]
     levi automatic status   --run-dir D [--json]
     levi automatic report   --run-dir D [--config F] [--truth T] [--format json|md]
+    levi automatic label    --run-dir D --episode ID --value V [--principal P] [--json]
 
 Until ``levi automatic`` is wired into ``levi.cli``, run it as
 ``python -m levi.automatic.cli``.

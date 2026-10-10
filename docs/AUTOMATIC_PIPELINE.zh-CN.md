@@ -269,14 +269,31 @@ initial_state:
 | 周转 | 从片段 k 回位到达（`ROBOT_HOME -> SCENE_ASSESS` committed）到片段 k+1 的 `FORWARD_ACTIVE` committed，按运行所处状态拆分：`scene_ms`（`SCENE_ASSESS`）、`reset_policy_ms`（`RESET_*`）、`human_reset_ms`（`WAIT_HUMAN`、`FAULT_LOCKED`）、`verify_ms`（`PREFLIGHT`、`VERIFY_INITIAL`），各部分之和等于 `turnaround_ms`。`with_person` 是需要人介入的周转所占比例。跨越时钟域变化的窗口记为 `unmeasured`；最后一个片段之后的窗口记为 `no_next_episode`；运行还停在其中的记为 `open`。片段没有回位到达就结束时（操作员停止后原地等待的 `ROBOT_HOME -> WAIT_HUMAN`、回位失败的 `ROBOT_HOME -> FAULT_LOCKED`）不开始窗口；`turnaround_unmeasured` 按原因统计所有没计入的周转（`clock_domain_changed`、`not_homed:<状态>:<原因>`） |
 | 每个有效片段 | `time_per_valid_episode_ms`（日志在单调时钟上的时间跨度，按时钟域分段求和，除以封存完整的前向片段数；不含崩溃到重启之间的停机时间，`downtime_excluded: true`）和 `human_minutes_per_valid_episode`（在 `WAIT_HUMAN`/`FAULT_LOCKED` 中、以恢复或操作员停止结束的分钟数，除以同一片段数；运行还在等的记为 `open_waits`；计划内等待中途出故障时，故障之后的时间算计划外）；没有有效片段时 `value` 为 null |
 | 由人做的场景决定 | `scene_check: operator_attested` 时由人回答场景核对：这些决定单列在 `scene_decisions_by_human`，不进复位组的跳过准确率（那是机器提供方的指标） |
+| 一致性 | 自动判定与操作员标签的一致性，含合计和按片段结束方式分层（`by_ended_by`：`budget`、`early_stop`、`operator_stop`、`unknown`）；见下文“操作员标签与双标签对比” |
 
 **跨复位模式可比**（设计稿 X2 §1.2）。报告头写明 `reset_mode`（`single_reset_policy`，或 `human_assisted`：仅测评策略，由人复位场景）和 `scene_check`（`provider` 或 `operator_attested`），`mode_source` 说明各自来源：调用方、运行头（契约 minor 1）、manifest（有由人复位场景的前向片段：`episodes[*].preceded_by: human_reset` 或非空的 `after_human_resets`）、日志（出现复位片段即为复位策略模式）、默认值（`provider`）或 `unknown`。`comparable` 列出两种模式含义相同的字段，跨模式只比较这些字段（其余字段列在 `mode_specific`）。在 `human_assisted` 下，场景核对（`VERIFY_INITIAL`/`SCENE_ASSESS`）因 `scene_reset_required`/`scene_unknown` 转入 `WAIT_HUMAN` 属于**计划内**干预：这就是该模式的复位方式。其余全部是**计划外**：`FAULT_LOCKED`、复位策略次数用尽、预检失败、操作员停止。`automation` 原有的键含义不变，新增 `planned`、`unplanned`（按原因，以及计划外占比及其区间）、`longest_run_without_unplanned`（可比）、`longest_run_without_any_human`（计入每次干预，与 `longest_run_without_intervention` 相同）和 `person_ms`。模式未知的运行（没有复位片段的 minor 0 日志，且调用方没给模式）把每次干预都算作计划外，不会美化结果。
 
-**四类标签，互不混用**（流水线文档 §9.4）。`autonomous_verdict` 就是日志里的片段结果：不在别处写，也绝不称为真值（相应比率都叫 `autonomous_*`）。`posthoc_verdict`、`operator_label` 和 `adjudicated_ground_truth` 存在 `<run_dir>/labels/<kind>.jsonl`，每类一个只追加的文件（每行 fsync），用 `LabelStore.add(kind, episode_id, value, subject=, by=)` 写入。写一类标签从不改动别类的文件；同一类、同一片段、同一主题的第二个标签会被拒绝，除非写明 `supersede=True`，此时追加一行（第一行保留）。`by` 是不透明的主体 ID（不写姓名或邮箱）。主题有 `task_outcome`（`success`/`failure`）和 `initial_state`（`ready`/`reset_required`：开始这个片段之前场景是否需要复位）。比率用的真值：有裁定标签就用裁定标签，否则用操作员标签（`truth="adjudicated"` 只用裁定标签）；没有真值的片段计为 `unlabeled`，不进比率。
+**四类标签，互不混用**（流水线文档 §9.4）。`autonomous_verdict` 就是日志里的片段结果：不在别处写，也绝不称为真值（相应比率都叫 `autonomous_*`）。`posthoc_verdict`、`operator_label` 和 `adjudicated_ground_truth` 存在 `<run_dir>/labels/<kind>.jsonl`，每类一个只追加的文件（每行 fsync），用 `LabelStore.add(kind, episode_id, value, subject=, by=)` 写入。写一类标签从不改动别类的文件；同一类、同一片段、同一主题的第二个标签会被拒绝，除非写明 `supersede=True`，此时追加一行（第一行保留）。`by` 是不透明的主体 ID（不写姓名或邮箱）。主题有 `task_outcome`（`success`/`failure`；`operator_label` 还可以是 `discarded` 或 `unclear`，二者都不当真值）和 `initial_state`（`ready`/`reset_required`：开始这个片段之前场景是否需要复位）。比率用的真值：有裁定标签就用裁定标签，否则用操作员标签（`truth="adjudicated"` 只用裁定标签）；没有真值的片段计为 `unlabeled`，不进比率。
 
 标签文件末行写到一半（崩溃）不会吞掉数据：下一条标签之前，撕裂的字节被移到 `labels/torn/`，文件截回到完整行；这一步和“是否已有标签”的检查在同一把锁下完成。不是最后一行的坏行会让文件不可用，直到有人检查（绝不跳过）。
 
 **对照片段**（`termination.control_fraction`、`control_seed`：比例和抽取方式，参数待用户确认，HA-23）记在运行 manifest 里：每个封存的片段有 `control`，对照片段还有 `would_stop_step`（检测器本会停下的步，或 `null`）。
+
+## 操作员标签与双标签对比
+
+操作员给每个已结束的前向片段打自己的成败标签，与运行的自动判定分开存放，再做一致性对比（T-CL-14）。这与真机现有路径（`levi live`，`agreement.by_ended_by`）的双标签对比是同一回事，这里用于两种复位模式的 AERI 运行；`human_assisted` 下，操作员在复位场景的同时给刚结束的片段打标签。
+
+**标签的取值。** `operator_label` 的主题 `task_outcome` 取 `success`、`failure`、`discarded`（这个片段不该计入）或 `unclear`（看不清）。`by` 是不透明的主体 ID（不写姓名或邮箱）。同一片段可以多次标注：每条都追加到 `<run_dir>/labels/operator_label.jsonl`，最新一条是当前值，旧的保留。`discarded` 和 `unclear` 永远不当真值：当前操作员标签是这两个值的片段没有操作员真值（裁定标签仍可给它真值）。
+
+**什么时候能标。** `metrics.label_operator(run_dir, episode_id, value, by=)` 只接受运行日志里已经提交了结果的前向片段，不论它怎样结束（提前终止、用完预算、操作员停止、故障）；运行中、`WAIT_HUMAN` 期间、运行结束后都可以补标。尚未结束、不存在的片段和复位片段一律拒绝。标签通道不拿锁地读日志，从不写日志、manifest、rollout 或会话文件，只写标签文件（和标签的锁文件）。
+
+**先盲标。** 操作员先下判断，再看运行的结论。等人时的待办卡（`recorder.pending_card`）有一个 `operator_label` 区块，针对最近结束的前向片段：当前标签（未标时为 null）、已有几条标签、允许的取值、`ended_by`，以及自动判定，但只在有标签之后才显示；在此之前 `automatic_verdict` 为 null，`automatic_verdict_hidden` 为 `hidden_until_labelled`，`agrees` 为 null。`pending_card(run_dir, blind=True)` 在该片段未标时，把 `last_episode` 里的 `task_outcome` 和 `goal_verification` 也隐藏；默认不改 `last_episode`，所以需要盲标的页面要传 `blind=True`。`ended_by` 照常显示：片段怎样结束，操作员亲眼看到了。`levi automatic label` 从不打印自动判定。
+
+**片段的结束方式**（`ended_by`，取自日志里该片段的停止原因）：`budget`（`horizon_exhausted`）、`early_stop`（`goal_verified`）、`operator_stop`（`operator_stop`），其余都是 `unknown`（故障、策略、看门狗、崩溃、没有原因）。
+
+**对比**（`metrics.report(...)["agreement"]`）。自动判定是日志里该片段的终局判定（`goal_verification`：`verified` 为成功，`contradicted` 为失败，`undecided` 为未决，`unavailable` 为无）。只比较操作员标为 success 或 failure 的片段；`judged` 是其中运行也给出了成败的片段数。每个分层（`by_ended_by`：`budget`、`early_stop`、`operator_stop`、`unknown`）和合计 `total` 都给出：`episodes`、`unlabelled`、`discarded`、`unclear`、`operator_decided`、`matrix`（操作员 × 自动）、`judged`、`agree`、`agreement`、`false_success`（操作员说失败而运行说成功）、`missed_success`（操作员说成功而运行说失败），`undecided` 和 `none` 单列（从不算作一致）。每个比例都带 Wilson 95% 区间；某分层判定成对的样本少于 10 个（`min_n`）时只给区间、不给点估计（`rate` 为 null，`small_sample` 为 true）。`agreement` 列在 `comparable` 中：两种复位模式下含义相同。
+
+**局限。** 被检测器或操作员提前结束的片段比跑满预算的短，所以只有 `budget` 分层的一致性能迁移到无人值守运行；其他分层只能单独看。探索阶段只有 20–30 个片段，每个分层都很小，要看区间。操作员标签是一个人的判断，不是裁定真值（计算比率时 `adjudicated_ground_truth` 优先）。HTTP 路由（`POST /runs/{id}/labels`）和页面是后续任务。
 
 ## 仅测评策略模式（人工复位）
 
@@ -297,7 +314,7 @@ initial_state:
 
 **数据归属。** 人工复位不写 reset rollout、不建 reset 任务目录、不写 reset 会话文件（运行的 `SessionFiles` 只有 forward 角色，实时服务不会多出一个永远 `standby` 的会话）。复位事实都在日志里：`WAIT_HUMAN` 的提交行、操作员的 resume（`authority.principal_kind: operator`、不透明的 `principal_id`、`command_id`）。据此，下一个前向片段在运行清单里得到 `preceded_by` 和 `after_human_resets`（`[{wait_seq, resume_seq, wait_ms, principal_id, reason}]`），在 rollout 元数据里得到 `eval.aeri.preceded_by`（`none`、`reset_policy` 或 `human_reset`，取最近的一次），供训练池区分。只有为复位而等（`WAIT_HUMAN`，原因为 `scene_*`）并由 resume 结束的，才算人工复位；停止、故障或预检失败之后的恢复只留在日志里，不计入。
 
-**证据。** 每次场景评估，无论是否被采纳（超时、过期或被拒的消息也算），都保存为 `<run_dir>/evidence/<assessment_id>.json`（提供方没给编号时用请求编号）：C 的结论和原因、提供方的结论、失败和看不清的谓词、谓词结果、引用，以及人工核对时抓取的画面（`evidence/frames/<sha256>.<扩展名>`，按内容寻址）。文件都整体写入（临时文件、fsync、改名、目录 fsync）；写入中被杀留下的临时文件在下次打开时删除。单帧超过 4 MiB 不保存，画面最多用每次运行 256 MiB 预算的 90 %，记录到预算为止，记录里写明跳过了什么。`recorder.pending_card(run_dir)` 只读不写，给出等人时需要的内容：原因、resume 要带的序号、已等待时长和这是第几次等人、上一片段的结果及其 rollout 路径和末帧、初始状态契约（`id@version`、状态：草稿标为“未经用户确认，HA-23”）、谓词文字，以及导致等待的那次评估。
+**证据。** 每次场景评估，无论是否被采纳（超时、过期或被拒的消息也算），都保存为 `<run_dir>/evidence/<assessment_id>.json`（提供方没给编号时用请求编号）：C 的结论和原因、提供方的结论、失败和看不清的谓词、谓词结果、引用，以及人工核对时抓取的画面（`evidence/frames/<sha256>.<扩展名>`，按内容寻址）。文件都整体写入（临时文件、fsync、改名、目录 fsync）；写入中被杀留下的临时文件在下次打开时删除。单帧超过 4 MiB 不保存，画面最多用每次运行 256 MiB 预算的 90 %，记录到预算为止，记录里写明跳过了什么。`recorder.pending_card(run_dir)` 只读不写，给出等人时需要的内容：原因、resume 要带的序号、已等待时长和这是第几次等人、上一片段的结果及其 rollout 路径和末帧、初始状态契约（`id@version`、状态：草稿标为“未经用户确认，HA-23”）、谓词文字，以及导致等待的那次评估。其中 `operator_label` 区块请操作员给最近结束的前向片段打标签，标签写入之后才显示自动判定（见“操作员标签与双标签对比”）。
 
 **作业文件。** 两种模式共用 `levi.aeri.job.v1`（`levi/domain/aeri.py` 的 `JobSpec`，快照 `docs/architecture/aeri/v1/job.schema.json`）。`human_assisted` 时可以省略 `policies.reset`、`task.reset_instruction`、`recording.reset_folder`、`reset.enabled`、`reset.max_attempts`、`reset.on_unknown`；写了也会在计划旁列为 `ignored`（`validate`），并且不进计划，`plan_sha256` 不随它们变化。`single_reset_policy` 需要 `policies.reset.max_steps`（`reset.enabled: false` 时除外）。计划还包含解析后的 `rollout_root`（realpath，相对作业文件）、契约文件字节的 sha256、`reset_mode` 和 `scene_check`。策略别名（`single_policy`、`scripted_safe`、`atomic_skills`）只在作业文件里有效；计划、日志和契约里只写代码名。以后改用复位策略时，只需改 `strategy` 并补上 `policies.reset`；前向目录、契约、运行目录布局和指标都不变。
 
@@ -410,6 +427,7 @@ levi automatic validate --config F [--json]
 levi automatic run      --config F --dry-run [--episodes N] [--scenes S] [--keep DIR] [--json]
 levi automatic status   --run-dir D [--json]
 levi automatic report   --run-dir D [--config F] [--truth T] [--format md|json]
+levi automatic label    --run-dir D --episode ID --value success|failure|discarded|unclear [--principal P] [--note N] [--json]
 ```
 
 `levi automatic …` 是同一个命令。每个选项的帮助都是中英双语。
@@ -419,6 +437,7 @@ levi automatic report   --run-dir D [--config F] [--truth T] [--format md|json]
 - `run` **没有 `--dry-run` 一律拒绝**（退出码 2）：本版本不能真机运行。试运行只驱动进程内 Fake，在临时目录里运行（结束后删除；`--keep DIR` 保留在一个新的或空的目录里），绝不写作业里的 `rollout_root`，运行期间拒绝任何 socket 连接。没有任何真实对象拥有运动权限：唯一的机器人是 `FakeRobot`。`--scenes reset_required,ready` 设定 Fake 先给出的场景结论。
 - `status` 不拿锁、不写入地读取运行日志（撕裂的末尾只报告、不截掉；损坏的日志显示 `FAULT_LOCKED`）。
 - `report` 以 Markdown 或 JSON 打印指标（见上）。
+- `label` 给已结束的前向片段追加操作员标签（见“操作员标签与双标签对比”）。先核对片段，再在终端里确认：不在终端里一律拒绝（退出码 2，不写任何内容）；操作员输入该值才算确认。提示写到 stderr，列出当前标签，从不显示自动判定；写入前再核对一次片段已结束。`--principal`（默认 `operator`）是不透明 ID。
 
 **作业文件**（`levi.aeri.job.v1`，与契约一样是草案，HA-23）使用同一个严格 YAML 子集；拒绝未知的节和键，v1 只读取下列内容：
 
