@@ -638,9 +638,9 @@ so the live service rejects that rollout, as it does the client's.
 
 ## Metrics (`levi/automatic/metrics.py`)
 
-`metrics.report(events, labels=, manifest=, termination=, max_steps=)`
-reads a run journal (and the run manifest for step counts) and returns
-three groups; every rate is `{"n", "of", "rate", "wilson95"}` with the
+`metrics.report(events, labels=, manifest=, termination=, max_steps=,
+reset_mode=, scene_check=)` reads a run journal (and the run manifest for
+step counts) and returns the groups below; every rate is `{"n", "of", "rate", "wilson95"}` with the
 Wilson 95 % interval of the live service's statistics
 (`levi.live.stats.wilson`). With the 20-30 episodes of an exploratory check
 read the interval, not the rate.
@@ -651,6 +651,29 @@ read the interval, not the rate.
 | early termination | confusion of early stops (`goal_verified`) against the truth; precision (early stops truly successful / early stops), recall (early stops / truly successful episodes the detector could have stopped: an early stop or the horizon, not an episode a person, a fault or the policy ended), **false early stop rate from the control group only** (pipeline §5.5: control episodes, run to their horizon with the stop withheld, in which the detector would have stopped, among those that truly failed, ran to their horizon, were sealed and carry their control record; the others are counted apart in `left_out` (`cut_short`: ended by a person, a fault or the policy; `not_recorded`: no seal or no control record); `available: false` and no number without them), the treatment group's early stops truly failed / truly failed episodes as `treatment_false_early_stop_lower_bound` (the stop hid what came after it), saved steps (`max_steps` minus the steps run, summed over early stops), control episodes apart, agreement of the verdict with the truth and false successes |
 | reset | resets, `autonomous_reset_success_rate`, scene decisions and skips; skip accuracy (a skip on a truly ready scene or a reset on a scene that truly needed one / labelled decisions), wrong-skip rate, unneeded-reset rate, reset durations |
 | automation | interventions (moves into `WAIT_HUMAN` or `FAULT_LOCKED`) by reason, resumes, longest run of forward episodes without one, the time people waited (only when the clock domain did not change) |
+| turnaround | from episode k's home reached (`ROBOT_HOME -> SCENE_ASSESS` committed) to episode k+1's `FORWARD_ACTIVE` committed, split by the state the run was in: `scene_ms` (`SCENE_ASSESS`), `reset_policy_ms` (`RESET_*`), `human_reset_ms` (`WAIT_HUMAN`, `FAULT_LOCKED`), `verify_ms` (`PREFLIGHT`, `VERIFY_INITIAL`); the parts add up to `turnaround_ms`. `with_person` is the share of turnarounds a person was needed in. A window across a clock-domain change is `unmeasured`; the one after the last episode is `no_next_episode`; one the run is still in is `open` |
+| per valid episode | `time_per_valid_episode_ms` (the journal's span, summed per clock domain, / forward episodes sealed complete) and `human_minutes_per_valid_episode` (minutes in `WAIT_HUMAN`/`FAULT_LOCKED` closed by a resume or an operator's stop / the same count; a wait the run is still in is `open_waits`); `value` is null with no valid episode |
+| scene decisions by a person | with `scene_check: operator_attested` a person answered the scene checks: those decisions are listed in `scene_decisions_by_human` and left out of the reset group's skip accuracy, which is a machine provider's |
+
+**Comparable across reset modes** (design X2 §1.2). The report head names
+`reset_mode` (`single_reset_policy`, or `human_assisted`: policy evaluation
+only, a person resets the scene) and `scene_check` (`provider` or
+`operator_attested`), and `mode_source` says where each came from: the
+caller, the run header (contract minor 1), the manifest, the journal (a
+reset episode means the reset policy), a default (`provider`), or
+`unknown`. `comparable` lists the fields that mean the same in both modes;
+compare runs of different modes on those only (`mode_specific` lists the
+rest). In `human_assisted`, a scene check (`VERIFY_INITIAL`/`SCENE_ASSESS`)
+sending the run to `WAIT_HUMAN` for `scene_reset_required`/`scene_unknown`
+is a **planned** intervention: it is how that mode resets. Everything else
+is **unplanned**: `FAULT_LOCKED`, a reset policy out of attempts, a failed
+preflight, an operator's stop. `automation` keeps its earlier keys
+unchanged and adds `planned`, `unplanned` (by reason, and the unplanned
+share with its interval), `longest_run_without_unplanned` (comparable),
+`longest_run_without_any_human` (every intervention, as
+`longest_run_without_intervention`) and `person_ms`. A run whose mode is
+unknown (a minor-0 journal without a reset episode, called without the
+mode) counts every intervention as unplanned, which never flatters it.
 
 **Four kinds of label, never mixed** (pipeline §9.4).
 `autonomous_verdict` is the journal's own episode result: never written
@@ -810,6 +833,128 @@ spaces until the contract format has a text field (HA-23). A person's
 check is as good as the frames the cameras give; the arbitration's view
 and evidence rules apply to it unchanged. Metrics do not yet tell planned
 from unplanned interventions (the mode-matrix work).
+
+## Reset-mode matrix (`levi/automatic/modes.py`)
+
+The "policy evaluation only" mode (`reset.strategy: human_assisted`) is
+the same pipeline as the mode with a reset policy, not a second one, and it
+is kept that way by a registry. `MODE_MATRIX` maps each capability of a run
+to one cell per reset mode: `same`, `differs:<one sentence>` or
+`n/a:<reason>` (the reason is required). The capabilities are enumerated
+from the code by the functions in `modes.SOURCES`: every transition of the
+state machine (`transition:A->B`), the reset arbitration
+(`arbitration:plan:<decision>`, `arbitration:after_reset:<outcome>`), every
+top-level key of `metrics.report` (`metrics:<key>`) and every `levi
+automatic` subcommand (`cli:<name>`). Not enumerated yet, to be appended to
+`SOURCES` by the tasks that create them: the recorder's session roles and
+manifest fields, the `/api/levi/automatic/*` routes and the job file's keys.
+
+`modes.RESET_ONLY_TRANSITIONS` names the transitions `human_assisted` never
+takes (into, within and out of `RESET_*`), written out rather than derived.
+A fake-driven test runs the same scenarios in both modes (ready scenes,
+scenes that are not ready, an exhausted or failing reset, a failed
+preflight, a red light, operator stops, a crash after every prepared line
+and inside resumes) and requires each mode to reach exactly the transitions
+the matrix gives it: `human_assisted` reaches what `single_reset_policy`
+reaches minus those transitions.
+
+**The registration guard** (`tests/automatic/test_mode_matrix_guard.py`)
+collects `tests/automatic` in a child pytest and reads the
+`@pytest.mark.mode_matrix("<capability>", ...)` markers. It fails when a
+capability the code has is not in the matrix (or the matrix names one the
+code no longer has), when a `same` or `differs` cell has no collected test
+in that mode, when a cell lacks its reason, or when a marker is wrong: no
+capability, an unknown one, no mode, a claim on an `n/a` cell. A test's
+mode is its `reset_mode` parameter (the fixture in `tests/conftest.py`
+runs it once per mode) or, for a test written for one mode, `modes=(...)`
+on the marker. Counter-example tests prove each failure.
+
+**Adding a capability** (a transition, a reason path, a metrics key, a
+subcommand; later an API route or a job key):
+
+1. add its row to `MODE_MATRIX`: `same`, `differs:<how>` or
+   `n/a:<why>` for each mode; a new kind of capability also gets a source
+   function in `SOURCES`;
+2. mark a test that covers it in each mode where the cell is not `n/a`,
+   with the `reset_mode` fixture where the test is the same for both;
+3. regenerate the snapshot (`python -m levi.automatic.modes >
+   tests/automatic/snapshots/mode_matrix.json`) and this table (`python -m
+   levi.automatic.modes --sync-docs`), then run `tests/automatic`.
+
+The independent review of an AERI change checks that `MODE_MATRIX` was
+updated and both modes have tests.
+
+<!-- levi:generated aeri-reset-modes -->
+| Capability | `single_reset_policy` | `human_assisted` |
+| --- | --- | --- |
+| `arbitration:after_reset:operator_stop` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `arbitration:after_reset:policy_error` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `arbitration:after_reset:reset_horizon_exhausted` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `arbitration:after_reset:reset_verified` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `arbitration:after_reset:scene_reset_required` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `arbitration:after_reset:scene_unknown` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `arbitration:after_reset:watchdog_timeout` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `arbitration:plan:ready` | same | same |
+| `arbitration:plan:reset_required` | differs: runs the reset policy while attempts remain, then asks a person | differs: asks a person (scene_reset_required) |
+| `arbitration:plan:unavailable` | differs: as unknown: never skips the reset | differs: asks a person (scene_unknown) |
+| `arbitration:plan:unknown` | differs: runs the reset policy, or asks a person with on_unknown wait_human | differs: asks a person (scene_unknown) |
+| `cli:doctor` | same | differs: the launch check fails without a scene provider that can answer |
+| `cli:report` | same | same |
+| `cli:run` | same | differs: a dry-run scene that is not ready ends the run in WAIT_HUMAN |
+| `cli:status` | same | same |
+| `cli:validate` | same | differs: a real run is refused without a scene provider that can answer; --dry-run validates |
+| `metrics:automation` | differs: every intervention is unplanned | differs: a scene check sending the run to a person is planned |
+| `metrics:autonomous` | same | same |
+| `metrics:comparable` | same | same |
+| `metrics:early_termination` | same | same |
+| `metrics:human_minutes_per_valid_episode` | same | same |
+| `metrics:mode_source` | same | same |
+| `metrics:mode_specific` | same | same |
+| `metrics:note` | same | same |
+| `metrics:reset` | same | differs: no reset episodes: resets and their durations stay 0; skip decisions count forward starts only |
+| `metrics:reset_mode` | same | same |
+| `metrics:scene_check` | same | same |
+| `metrics:scene_decisions_by_human` | same | same |
+| `metrics:schema` | same | same |
+| `metrics:time_per_valid_episode_ms` | same | same |
+| `metrics:truth` | same | same |
+| `metrics:truth_labels` | same | same |
+| `metrics:turnaround` | differs: human_reset_ms only when the reset policy gave up | differs: reset_policy_ms is always 0 |
+| `transition:FAULT_LOCKED->FAULT_LOCKED` | same | same |
+| `transition:FAULT_LOCKED->PREFLIGHT` | same | same |
+| `transition:FORWARD_ACTIVE->FAULT_LOCKED` | same | same |
+| `transition:FORWARD_ACTIVE->FORWARD_STOPPING` | same | same |
+| `transition:FORWARD_FINALIZE->FAULT_LOCKED` | same | same |
+| `transition:FORWARD_FINALIZE->ROBOT_HOME` | same | same |
+| `transition:FORWARD_STOPPING->FAULT_LOCKED` | same | same |
+| `transition:FORWARD_STOPPING->FORWARD_FINALIZE` | same | same |
+| `transition:PREFLIGHT->FAULT_LOCKED` | same | same |
+| `transition:PREFLIGHT->VERIFY_INITIAL` | same | same |
+| `transition:PREFLIGHT->WAIT_HUMAN` | same | same |
+| `transition:RESET_ACTIVE->FAULT_LOCKED` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `transition:RESET_ACTIVE->RESET_VERIFY` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `transition:RESET_FINALIZE->FAULT_LOCKED` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `transition:RESET_FINALIZE->VERIFY_INITIAL` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `transition:RESET_FINALIZE->WAIT_HUMAN` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `transition:RESET_VERIFY->FAULT_LOCKED` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `transition:RESET_VERIFY->RESET_FINALIZE` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `transition:ROBOT_HOME->FAULT_LOCKED` | same | same |
+| `transition:ROBOT_HOME->SCENE_ASSESS` | same | same |
+| `transition:ROBOT_HOME->WAIT_HUMAN` | same | same |
+| `transition:SCENE_ASSESS->COMPLETED` | same | same |
+| `transition:SCENE_ASSESS->FAULT_LOCKED` | same | same |
+| `transition:SCENE_ASSESS->FORWARD_ACTIVE` | same | same |
+| `transition:SCENE_ASSESS->RESET_ACTIVE` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `transition:SCENE_ASSESS->WAIT_HUMAN` | differs: only when the reset policy is disabled, out of attempts, or on_unknown is wait_human (an unplanned intervention) | differs: the normal path of a scene that is not ready: a person resets it (a planned intervention) |
+| `transition:VERIFY_INITIAL->COMPLETED` | same | same |
+| `transition:VERIFY_INITIAL->FAULT_LOCKED` | same | same |
+| `transition:VERIFY_INITIAL->FORWARD_ACTIVE` | same | same |
+| `transition:VERIFY_INITIAL->RESET_ACTIVE` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `transition:VERIFY_INITIAL->WAIT_HUMAN` | differs: only when the reset policy is disabled, out of attempts, or on_unknown is wait_human (an unplanned intervention) | differs: the normal path of a scene that is not ready: a person resets it (a planned intervention) |
+| `transition:WAIT_HUMAN->COMPLETED` | same | same |
+| `transition:WAIT_HUMAN->FAULT_LOCKED` | same | same |
+| `transition:WAIT_HUMAN->PREFLIGHT` | same | same |
+<!-- /levi:generated aeri-reset-modes -->
 
 ## Command line (`levi/automatic/cli.py`)
 

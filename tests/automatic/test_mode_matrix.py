@@ -274,3 +274,14 @@ def test_after_a_reset_episode_in_the_reset_policy_mode():
         found = rm.check_after(strategy, outcome, 1, False)
         again = outcome in {"reset_verified"} | rm.RETRYABLE_OUTCOMES
         assert found == ("VERIFY_INITIAL" if again else "WAIT_HUMAN"), outcome
+
+
+def test_the_documentation_tables_are_current():
+    """``docs/AUTOMATIC_PIPELINE*.md``: rewrite with ``python -m
+    levi.automatic.modes --sync-docs`` after changing the matrix."""
+    assert modes.docs_problems() == []
+    for lang in ("en", "zh"):
+        table = modes.markdown(lang)
+        assert table.count("\n") == len(modes.MODE_MATRIX) + 2
+        for capability in modes.MODE_MATRIX:
+            assert f"| `{capability}` |" in table

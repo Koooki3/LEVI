@@ -251,7 +251,7 @@ initial_state:
 
 ## 指标（`levi/automatic/metrics.py`）
 
-`metrics.report(events, labels=, manifest=, termination=, max_steps=)` 读取运行日志（步数取自运行 manifest），给出三组指标；每个比率都是 `{"n", "of", "rate", "wilson95"}`，区间用后台实时标注服务统计模块的 Wilson 95% 区间（`levi.live.stats.wilson`）。探索阶段只有 20–30 个片段时，要看区间，不要只看比率。
+`metrics.report(events, labels=, manifest=, termination=, max_steps=, reset_mode=, scene_check=)` 读取运行日志（步数取自运行 manifest），给出下表各组指标；每个比率都是 `{"n", "of", "rate", "wilson95"}`，区间用后台实时标注服务统计模块的 Wilson 95% 区间（`levi.live.stats.wilson`）。探索阶段只有 20–30 个片段时，要看区间，不要只看比率。
 
 | 组 | 指标 |
 | --- | --- |
@@ -259,6 +259,11 @@ initial_state:
 | 提前终止 | 提前停止（`goal_verified`）对照真值的混淆表；精确率（真成功的提前停止 / 提前停止）、召回率（提前停止 / 检测器本可停下的真成功片段：提前停止或跑满的片段，不含被人、故障或策略结束的片段）、**只用对照组计算的误提前终止率**（流水线文档 §5.5：对照片段不允许提前终止、跑满上限，其中检测器本会停下的、占“真失败、跑满上限、封存成功且带对照记录”的对照片段的比例；其余在 `left_out` 中按原因单独计数：`cut_short` 是被人、故障或策略结束的，`not_recorded` 是没封存或没有对照记录的；没有这类片段时为 `available: false`，不给数字）、实验组的“真失败却提前停止 / 真失败”只作为下界 `treatment_false_early_stop_lower_bound`（停止掩盖了之后的情况）、节省步数（`max_steps` 减去实际步数，对提前停止求和）、对照片段单列、自动结论与真值的一致率和误判成功数 |
 | 复位 | 复位次数、`autonomous_reset_success_rate`、场景决策与跳过次数；跳过准确率（在真就绪的场景上跳过、或在真需要复位的场景上复位 / 有标签的决策）、错误跳过率、多余复位率、复位耗时 |
 | 自动化 | 干预次数（进入 `WAIT_HUMAN` 或 `FAULT_LOCKED`）及原因、恢复次数、最长无干预的连续前向片段数、人工等待时间（仅在时钟域没变时计） |
+| 周转 | 从片段 k 回位到达（`ROBOT_HOME -> SCENE_ASSESS` committed）到片段 k+1 的 `FORWARD_ACTIVE` committed，按运行所处状态拆分：`scene_ms`（`SCENE_ASSESS`）、`reset_policy_ms`（`RESET_*`）、`human_reset_ms`（`WAIT_HUMAN`、`FAULT_LOCKED`）、`verify_ms`（`PREFLIGHT`、`VERIFY_INITIAL`），各部分之和等于 `turnaround_ms`。`with_person` 是需要人介入的周转所占比例。跨越时钟域变化的窗口记为 `unmeasured`；最后一个片段之后的窗口记为 `no_next_episode`；运行还停在其中的记为 `open` |
+| 每个有效片段 | `time_per_valid_episode_ms`（日志的时间跨度，按时钟域分段求和，除以封存完整的前向片段数）和 `human_minutes_per_valid_episode`（在 `WAIT_HUMAN`/`FAULT_LOCKED` 中、以恢复或操作员停止结束的分钟数，除以同一片段数；运行还在等的记为 `open_waits`）；没有有效片段时 `value` 为 null |
+| 由人做的场景决定 | `scene_check: operator_attested` 时由人回答场景核对：这些决定单列在 `scene_decisions_by_human`，不进复位组的跳过准确率（那是机器提供方的指标） |
+
+**跨复位模式可比**（设计稿 X2 §1.2）。报告头写明 `reset_mode`（`single_reset_policy`，或 `human_assisted`：仅测评策略，由人复位场景）和 `scene_check`（`provider` 或 `operator_attested`），`mode_source` 说明各自来源：调用方、运行头（契约 minor 1）、manifest、日志（出现复位片段即为复位策略模式）、默认值（`provider`）或 `unknown`。`comparable` 列出两种模式含义相同的字段，跨模式只比较这些字段（其余字段列在 `mode_specific`）。在 `human_assisted` 下，场景核对（`VERIFY_INITIAL`/`SCENE_ASSESS`）因 `scene_reset_required`/`scene_unknown` 转入 `WAIT_HUMAN` 属于**计划内**干预：这就是该模式的复位方式。其余全部是**计划外**：`FAULT_LOCKED`、复位策略次数用尽、预检失败、操作员停止。`automation` 原有的键含义不变，新增 `planned`、`unplanned`（按原因，以及计划外占比及其区间）、`longest_run_without_unplanned`（可比）、`longest_run_without_any_human`（计入每次干预，与 `longest_run_without_intervention` 相同）和 `person_ms`。模式未知的运行（没有复位片段的 minor 0 日志，且调用方没给模式）把每次干预都算作计划外，不会美化结果。
 
 **四类标签，互不混用**（流水线文档 §9.4）。`autonomous_verdict` 就是日志里的片段结果：不在别处写，也绝不称为真值（相应比率都叫 `autonomous_*`）。`posthoc_verdict`、`operator_label` 和 `adjudicated_ground_truth` 存在 `<run_dir>/labels/<kind>.jsonl`，每类一个只追加的文件（每行 fsync），用 `LabelStore.add(kind, episode_id, value, subject=, by=)` 写入。写一类标签从不改动别类的文件；同一类、同一片段、同一主题的第二个标签会被拒绝，除非写明 `supersede=True`，此时追加一行（第一行保留）。`by` 是不透明的主体 ID（不写姓名或邮箱）。主题有 `task_outcome`（`success`/`failure`）和 `initial_state`（`ready`/`reset_required`：开始这个片段之前场景是否需要复位）。比率用的真值：有裁定标签就用裁定标签，否则用操作员标签（`truth="adjudicated"` 只用裁定标签）；没有真值的片段计为 `unlabeled`，不进比率。
 
@@ -299,6 +304,94 @@ reset:
 **契约版本。** `levi.aeri.run_event.v1` 升到 minor 1：`RunHeader` 新增可选的 `reset_mode` 和 `scene_check`（只写代码名；minor 0 的行带这两个字段会被拒收）。其他契约仍是 minor 0（`aeri.MINORS`）。minor 0 写的日志照常可读；`aeri.header_modes(header, plan)` 优先取 header 的值，没有时从作业计划推断。日志写入方暂时还不填这两个字段。
 
 **已知局限。** 还没有回答场景题的页面（只有协议和 Fake）。契约格式没有文字字段之前，谓词文字就是把名字里的下划线换成空格（HA-23）。人工核对的质量取决于相机给出的画面；仲裁的视角和证据规则同样适用。指标还不区分计划内和计划外的干预（模式矩阵任务）。
+
+## 复位模式矩阵（`levi/automatic/modes.py`）
+
+“仅测评策略”模式（`reset.strategy: human_assisted`）与有复位策略的模式是同一条流水线，不是另一条；靠一张登记表长期保持这一点。`MODE_MATRIX` 给运行的每项能力在每种复位模式下各写一格：`same`、`differs:<一句话>` 或 `n/a:<原因>`（原因必填）。能力由 `modes.SOURCES` 里的函数从代码枚举：状态机的每个转换（`transition:A->B`）、复位仲裁（`arbitration:plan:<决定>`、`arbitration:after_reset:<结果>`）、`metrics.report` 的每个顶层键（`metrics:<键>`）、`levi automatic` 的每个子命令（`cli:<名>`）。尚未枚举、由创建它们的任务追加到 `SOURCES` 的有：录制器的会话角色与 manifest 字段、`/api/levi/automatic/*` 路由、作业文件的键。
+
+`modes.RESET_ONLY_TRANSITIONS` 写明 `human_assisted` 永不经过的转换（进入、处于和离开 `RESET_*` 的），是手写的，不是推导的。一条用 Fake 的测试在两种模式下跑同一组场景（场景就绪、场景不就绪、复位次数用尽或失败、预检失败、红灯、操作员停止、在每个 prepared 行之后和恢复过程中崩溃），要求每种模式恰好到达矩阵给它的转换：`human_assisted` 到达的等于 `single_reset_policy` 到达的减去这些转换。
+
+**登记守卫**（`tests/automatic/test_mode_matrix_guard.py`）用子进程收集 `tests/automatic`，读取 `@pytest.mark.mode_matrix("<能力>", ...)` 标记。以下情形守卫失败：代码里有而矩阵里没有的能力（或矩阵里有而代码已没有的）；某个 `same` 或 `differs` 格在该模式下没有被收集的测试；某格缺原因；标记写错（没写能力、能力不存在、没说模式、声称覆盖 `n/a` 格）。测试的模式取自 `reset_mode` 参数（`tests/conftest.py` 里的夹具让它在每种模式下各跑一次），只为一种模式写的测试在标记上写 `modes=(...)`。每种失败都有反例测试。
+
+**新增能力时怎样登记**（一个转换、一条原因路径、一个指标键、一个子命令；以后的 API 路由或作业键也一样）：
+
+1. 在 `MODE_MATRIX` 加一行，每种模式写 `same`、`differs:<怎样不同>` 或 `n/a:<原因>`；新的一类能力还要在 `SOURCES` 加一个枚举函数；
+2. 给覆盖它的测试加标记，每个不是 `n/a` 的模式至少一个；两种模式测法相同时用 `reset_mode` 夹具；
+3. 重新生成快照（`python -m levi.automatic.modes > tests/automatic/snapshots/mode_matrix.json`）和下表（`python -m levi.automatic.modes --sync-docs`），再跑 `tests/automatic`。
+
+AERI 改动合并前的独立审查要核对 `MODE_MATRIX` 已更新、两种模式都有测试。
+
+<!-- levi:generated aeri-reset-modes -->
+| 能力 | `single_reset_policy` | `human_assisted` |
+| --- | --- | --- |
+| `arbitration:after_reset:operator_stop` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
+| `arbitration:after_reset:policy_error` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
+| `arbitration:after_reset:reset_horizon_exhausted` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
+| `arbitration:after_reset:reset_verified` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
+| `arbitration:after_reset:scene_reset_required` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
+| `arbitration:after_reset:scene_unknown` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
+| `arbitration:after_reset:watchdog_timeout` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
+| `arbitration:plan:ready` | 相同 | 相同 |
+| `arbitration:plan:reset_required` | 不同：runs the reset policy while attempts remain, then asks a person | 不同：asks a person (scene_reset_required) |
+| `arbitration:plan:unavailable` | 不同：as unknown: never skips the reset | 不同：asks a person (scene_unknown) |
+| `arbitration:plan:unknown` | 不同：runs the reset policy, or asks a person with on_unknown wait_human | 不同：asks a person (scene_unknown) |
+| `cli:doctor` | 相同 | 不同：the launch check fails without a scene provider that can answer |
+| `cli:report` | 相同 | 相同 |
+| `cli:run` | 相同 | 不同：a dry-run scene that is not ready ends the run in WAIT_HUMAN |
+| `cli:status` | 相同 | 相同 |
+| `cli:validate` | 相同 | 不同：a real run is refused without a scene provider that can answer; --dry-run validates |
+| `metrics:automation` | 不同：every intervention is unplanned | 不同：a scene check sending the run to a person is planned |
+| `metrics:autonomous` | 相同 | 相同 |
+| `metrics:comparable` | 相同 | 相同 |
+| `metrics:early_termination` | 相同 | 相同 |
+| `metrics:human_minutes_per_valid_episode` | 相同 | 相同 |
+| `metrics:mode_source` | 相同 | 相同 |
+| `metrics:mode_specific` | 相同 | 相同 |
+| `metrics:note` | 相同 | 相同 |
+| `metrics:reset` | 相同 | 不同：no reset episodes: resets and their durations stay 0; skip decisions count forward starts only |
+| `metrics:reset_mode` | 相同 | 相同 |
+| `metrics:scene_check` | 相同 | 相同 |
+| `metrics:scene_decisions_by_human` | 相同 | 相同 |
+| `metrics:schema` | 相同 | 相同 |
+| `metrics:time_per_valid_episode_ms` | 相同 | 相同 |
+| `metrics:truth` | 相同 | 相同 |
+| `metrics:truth_labels` | 相同 | 相同 |
+| `metrics:turnaround` | 不同：human_reset_ms only when the reset policy gave up | 不同：reset_policy_ms is always 0 |
+| `transition:FAULT_LOCKED->FAULT_LOCKED` | 相同 | 相同 |
+| `transition:FAULT_LOCKED->PREFLIGHT` | 相同 | 相同 |
+| `transition:FORWARD_ACTIVE->FAULT_LOCKED` | 相同 | 相同 |
+| `transition:FORWARD_ACTIVE->FORWARD_STOPPING` | 相同 | 相同 |
+| `transition:FORWARD_FINALIZE->FAULT_LOCKED` | 相同 | 相同 |
+| `transition:FORWARD_FINALIZE->ROBOT_HOME` | 相同 | 相同 |
+| `transition:FORWARD_STOPPING->FAULT_LOCKED` | 相同 | 相同 |
+| `transition:FORWARD_STOPPING->FORWARD_FINALIZE` | 相同 | 相同 |
+| `transition:PREFLIGHT->FAULT_LOCKED` | 相同 | 相同 |
+| `transition:PREFLIGHT->VERIFY_INITIAL` | 相同 | 相同 |
+| `transition:PREFLIGHT->WAIT_HUMAN` | 相同 | 相同 |
+| `transition:RESET_ACTIVE->FAULT_LOCKED` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
+| `transition:RESET_ACTIVE->RESET_VERIFY` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
+| `transition:RESET_FINALIZE->FAULT_LOCKED` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
+| `transition:RESET_FINALIZE->VERIFY_INITIAL` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
+| `transition:RESET_FINALIZE->WAIT_HUMAN` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
+| `transition:RESET_VERIFY->FAULT_LOCKED` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
+| `transition:RESET_VERIFY->RESET_FINALIZE` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
+| `transition:ROBOT_HOME->FAULT_LOCKED` | 相同 | 相同 |
+| `transition:ROBOT_HOME->SCENE_ASSESS` | 相同 | 相同 |
+| `transition:ROBOT_HOME->WAIT_HUMAN` | 相同 | 相同 |
+| `transition:SCENE_ASSESS->COMPLETED` | 相同 | 相同 |
+| `transition:SCENE_ASSESS->FAULT_LOCKED` | 相同 | 相同 |
+| `transition:SCENE_ASSESS->FORWARD_ACTIVE` | 相同 | 相同 |
+| `transition:SCENE_ASSESS->RESET_ACTIVE` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
+| `transition:SCENE_ASSESS->WAIT_HUMAN` | 不同：only when the reset policy is disabled, out of attempts, or on_unknown is wait_human (an unplanned intervention) | 不同：the normal path of a scene that is not ready: a person resets it (a planned intervention) |
+| `transition:VERIFY_INITIAL->COMPLETED` | 相同 | 相同 |
+| `transition:VERIFY_INITIAL->FAULT_LOCKED` | 相同 | 相同 |
+| `transition:VERIFY_INITIAL->FORWARD_ACTIVE` | 相同 | 相同 |
+| `transition:VERIFY_INITIAL->RESET_ACTIVE` | 不同：only this mode runs reset episodes | 不适用：no reset policy runs: a scene that is not ready waits for a person |
+| `transition:VERIFY_INITIAL->WAIT_HUMAN` | 不同：only when the reset policy is disabled, out of attempts, or on_unknown is wait_human (an unplanned intervention) | 不同：the normal path of a scene that is not ready: a person resets it (a planned intervention) |
+| `transition:WAIT_HUMAN->COMPLETED` | 相同 | 相同 |
+| `transition:WAIT_HUMAN->FAULT_LOCKED` | 相同 | 相同 |
+| `transition:WAIT_HUMAN->PREFLIGHT` | 相同 | 相同 |
+<!-- /levi:generated aeri-reset-modes -->
 
 ## 命令行（`levi/automatic/cli.py`）
 
