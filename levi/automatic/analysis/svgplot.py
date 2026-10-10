@@ -137,18 +137,3 @@ def render_svg(
     """The figure as an SVG document (a ``str``; write it as UTF-8)."""
     scene = layout(spec, lang=lang, latin_only=False, width=width)
     return scene_to_svg(scene, spec, embed_spec)
-
-
-def write_svg(
-    spec: FigureSpec, path, lang: str | None = None, embed_spec: bool = False
-) -> None:
-    """Write ``render_svg`` to ``path`` atomically (``.partial`` then rename)."""
-    import os
-
-    data = render_svg(spec, lang=lang, embed_spec=embed_spec).encode("utf-8")
-    tmp = f"{path}.partial"
-    with open(tmp, "wb") as f:
-        f.write(data)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)

@@ -90,14 +90,6 @@ def test_title_and_summary_are_in_the_document_info():
     assert b"/Producer (LEVI figspec)" in data
 
 
-def test_write_pdf_is_atomic_and_exact(tmp_path):
-    spec = fx.tiny_forest()
-    target = tmp_path / "f.pdf"
-    pdfplot.write_pdf(spec, target)
-    assert target.read_bytes() == pdfplot.render_pdf(spec)
-    assert [p.name for p in tmp_path.iterdir()] == ["f.pdf"]
-
-
 # ---------------------------------------------------------------- the reader refuses damaged files
 
 
@@ -173,7 +165,7 @@ def test_verify_handles_octal_escapes_and_empty_input():
 @pytest.mark.parametrize("spec", ALL, ids=lambda s: s.kind)
 def test_pdftotext_reads_the_same_words(spec, tmp_path):
     path = tmp_path / "f.pdf"
-    pdfplot.write_pdf(spec, path)
+    path.write_bytes(pdfplot.render_pdf(spec))
     out = subprocess.run(
         ["pdftotext", "-layout", str(path), "-"],
         capture_output=True,
@@ -199,7 +191,7 @@ def test_pdftotext_reads_the_same_words(spec, tmp_path):
 def test_pdfinfo_accepts_the_file_and_reports_one_page(tmp_path):
     spec = fx.grouped_bar()
     path = tmp_path / "f.pdf"
-    pdfplot.write_pdf(spec, path)
+    path.write_bytes(pdfplot.render_pdf(spec))
     out = subprocess.run(
         ["pdfinfo", str(path)], capture_output=True, text=True, check=True, timeout=60
     )
@@ -284,7 +276,7 @@ def test_page_parent_must_be_the_pages_object():
 @pytest.mark.parametrize("spec", ALL, ids=lambda s: s.kind)
 def test_poppler_reads_every_figure_without_a_warning(spec, tmp_path):
     path = tmp_path / "f.pdf"
-    pdfplot.write_pdf(spec, path)
+    path.write_bytes(pdfplot.render_pdf(spec))
     for cmd in (
         ["pdftotext", "-layout", str(path), "-"],
         ["pdftoppm", "-png", "-r", "20", str(path), str(tmp_path / "img")],

@@ -134,13 +134,3 @@ def test_width_option_scales_the_page():
     root = ET.fromstring(narrow.encode("utf-8"))
     assert root.get("width") == "480"
     fs.layout(spec, width=480)  # and the layout is still valid
-
-
-def test_write_svg_is_atomic_and_exact(tmp_path):
-    spec = fx.tiny_bars()
-    target = tmp_path / "f.svg"
-    svgplot.write_svg(spec, target)
-    assert target.read_bytes() == svgplot.render_svg(spec).encode("utf-8")
-    assert [p.name for p in tmp_path.iterdir()] == ["f.svg"]  # no .partial left behind
-    svgplot.write_svg(spec, target, lang="zh-CN")  # overwrites
-    assert "各组成功率" in target.read_text(encoding="utf-8")

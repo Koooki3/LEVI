@@ -19,7 +19,6 @@ so a test can check the structure without a third-party reader.
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass
 
@@ -263,20 +262,6 @@ def render_pdf(
     """The figure as a one-page PDF (bytes). Latin text only (see module doc);
     use ``render_pdf_report`` to learn what was substituted."""
     return render_pdf_report(spec, lang=lang, width=width).data
-
-
-def write_pdf(
-    spec: FigureSpec, path, lang: str | None = None, strict: bool = False
-) -> tuple[dict, ...]:
-    """Write the PDF atomically; returns the substitutions that were made."""
-    res = render_pdf_report(spec, lang=lang, strict=strict)
-    tmp = f"{path}.partial"
-    with open(tmp, "wb") as f:
-        f.write(res.data)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
-    return res.substitutions
 
 
 # --------------------------------------------------------------------------

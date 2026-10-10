@@ -314,11 +314,6 @@ def test_pdf_chinese_fallback_is_recorded_and_the_language_tag_is_true():
     assert "[n/a]" in pdfplot.verify_pdf(res.data).text
 
 
-def test_write_pdf_returns_the_substitutions(tmp_path):
-    subs = pdfplot.write_pdf(stats_spec(), tmp_path / "f.pdf")
-    assert subs and subs[0]["text"]
-
-
 def test_svg_has_no_substitutions_and_keeps_the_symbols():
     text = svgplot.render_svg(stats_spec())
     assert "Δ success rate (B − A), α = 0.05, κ ≥ 0.6" in text
