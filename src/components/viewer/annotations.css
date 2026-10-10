@@ -1748,6 +1748,54 @@
   gap: 8px 12px;
   padding: 4px 11px 0;
 }
+/* Narrow cards: the axis modes wrap onto a second row instead of being
+   squeezed (each segment keeps its text on one line). */
+.annotations-skin .recap-axis-controls .ds-segmented {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+.annotations-skin .recap-axis-controls .ds-segment {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+/* "advantage A" is longer than the label column: such a row is two label
+   lines tall (fixed), so the name wraps inside its own row and never writes
+   over the row above or below. */
+.annotations-skin .recap-section .tl-row.recap-advantage-row {
+  height: 32px;
+}
+.annotations-skin .recap-section .tl-row .label {
+  gap: 4px;
+}
+.annotations-skin .recap-section .tl-row .label .style-dot {
+  flex: none;
+}
+.annotations-skin .recap-section .tl-row .label .recap-label-text {
+  min-width: 0;
+  line-height: 14px;
+  overflow-wrap: anywhere;
+}
+/* Blocks that are not tracks sit above the playhead line, like a section's
+   title, so it does not strike through their text. */
+.annotations-skin .recap-section .recap-version-controls,
+.annotations-skin .recap-section .recap-version-details,
+.annotations-skin .recap-section .recap-comparison,
+.annotations-skin .recap-section .recap-charts,
+.annotations-skin .recap-section .recap-axis-controls,
+.annotations-skin .recap-section .recap-frame-readouts {
+  position: relative;
+  z-index: 6;
+  background: var(--ds-surface-1);
+}
+.annotations-skin .recap-chart .recharts-label-list text.recap-bar-value {
+  text-anchor: middle;
+  /* A label can run over the neighbouring (longer) bar: a halo of the card
+     colour keeps it legible. */
+  paint-order: stroke;
+  stroke: var(--ds-surface-1);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
 .annotations-skin .recap-axis-note {
   font-size: var(--ds-text-caption-size);
   color: var(--ds-text-secondary);
@@ -2042,7 +2090,8 @@
 }
 .annotations-skin .recap-axis {
   position: absolute;
-  left: 3px;
+  /* Clear of the playhead marker at the start of the track. */
+  left: 10px;
   transform: translateY(-50%);
   padding: 0 2px;
   border-radius: 2px;
