@@ -281,11 +281,11 @@ def test_grace_period_then_reclaim_keeps_linked_files(client):
 
 
 def test_original_layout_is_read_beside_model_results(client, monkeypatch):
-    monkeypatch.delenv("LEVI_RECAP_STORE_LAYOUT", raising=False)
+    monkeypatch.setenv("LEVI_RECAP_STORE_LAYOUT", "revisions")
     meta = _meta("r1")
     old = store.publish(
         "ds", {0: _episode(8)}, meta, dataset_name="ds"
-    )  # default: the original layout
+    )  # LEVI_RECAP_STORE_LAYOUT=revisions: the original layout
     rid = old["revision_id"]
     assert (store.root("ds") / "revisions" / rid / "revision.json").is_file()
     assert (
@@ -298,7 +298,8 @@ def test_original_layout_is_read_beside_model_results(client, monkeypatch):
         row.pop("min_value"), row.pop("max_value")
     path.write_text(json.dumps(summary))
     assert "min_value" not in store.summary("ds")["episodes"]["0"]
-    monkeypatch.setenv("LEVI_RECAP_STORE_LAYOUT", "models")
+    monkeypatch.delenv("LEVI_RECAP_STORE_LAYOUT")  # the default: models
+    assert store.layout() == "models"
     new = store.publish("ds", {0: _episode(8, 0.1)}, meta, dataset_name="ds")
     assert new["revision_id"] == "r1" and new["layout"] == "models"
     assert store.current_ref("ds") == "r1"
@@ -474,7 +475,7 @@ def test_clear_is_a_dry_run_until_apply_and_covers_both_layouts(
     ckpt = tmp_path / "ckpt"
     monkeypatch.setenv("LEVI_RECAP_VALUE_CHECKPOINT_DIR", str(ckpt))
     checkpoints.import_checkpoint(None, "keep-me", provider="fake")
-    monkeypatch.delenv("LEVI_RECAP_STORE_LAYOUT", raising=False)
+    monkeypatch.setenv("LEVI_RECAP_STORE_LAYOUT", "revisions")
     rid = store.publish("ds", {0: _episode(8)}, _meta(), dataset_name="ds")[
         "revision_id"
     ]
@@ -566,7 +567,7 @@ def test_clear_refuses_a_symlinked_dataset_folder(client, tmp_path):
 
 def test_clear_logs_each_item_as_it_goes(client, monkeypatch):
     """Review I4: a failure halfway left removed items unrecorded."""
-    monkeypatch.delenv("LEVI_RECAP_STORE_LAYOUT", raising=False)
+    monkeypatch.setenv("LEVI_RECAP_STORE_LAYOUT", "revisions")
     store.publish("ds", {0: _episode(8)}, _meta(), dataset_name="ds")
     _publish({0: (8, 0.1)})
     real = jobs.shutil.rmtree
@@ -613,3 +614,58 @@ def test_layout_is_fixed_when_the_job_starts(recap_models, monkeypatch):
     assert finish(client, repo, started.json()["id"])["status"] == "succeeded"
     assert store.revision(name)["layout"] == "models"
     assert not (store.root(name) / "revisions").exists()
+
+
+def test_default_layout_is_one_result_per_model(client, monkeypatch, tmp_path):
+    """Recomputing replaces without any setting; the original layout stays
+    one revision per run when chosen."""
+    from test_formats import capture_fixture
+    from test_views import register_raw
+
+    monkeypatch.delenv("LEVI_RECAP_STORE_LAYOUT", raising=False)
+    monkeypatch.setenv("LEVI_RECAP_VALUE_CHECKPOINT_DIR", str(tmp_path / "ckpt"))
+    monkeypatch.setenv("LEVI_RECAP_VALUE_WORKER_PYTHON", str(tmp_path / "no-python"))
+    checkpoints.import_checkpoint(None, "fake-a", provider="fake")
+    entry = register_raw(client, capture_fixture(tmp_path / "plates"))
+    repo, name = entry["id"], entry["name"]
+    run(client, repo)
+    run(client, repo)
+    assert store.results(name) == ["fake-a"]
+    assert not (store.root(name) / "revisions").exists()
+    monkeypatch.setenv("LEVI_RECAP_STORE_LAYOUT", "revisions")
+    first = run(client, repo)["revision_id"]
+    second = run(client, repo)["revision_id"]
+    assert first != second and store.revisions(name) == sorted([first, second])
+    # The newest computation is current, whichever layout wrote it; the
+    # model result stays listed and readable by its name.
+    assert store.current_ref(name) == second
+    assert store.results(name) == ["fake-a", *sorted([first, second])]
+    assert store.revision(name, "fake-a")["layout"] == "models"
+    assert not jobs.wait_idle(60)
+
+
+def test_recomputed_answer_carries_a_stable_code(recap_models):
+    """The 409 for a pinned version names itself machine-readably, so a
+    viewer reloads instead of showing an error."""
+    client, entry = recap_models
+    repo = entry["id"]
+    run(client, repo)
+    old = client.get("/annotations/api/recap/summary", params={"repo_id": repo}).json()
+    run(client, repo)
+    for route, params in (
+        ("summary", {"version": old["version"]}),
+        ("episodes/0", {"version": old["version"]}),
+        ("compare", {"a": "fake-a", "b": "fake-a", "version_a": old["version"]}),
+    ):
+        response = client.get(
+            f"/annotations/api/recap/{route}", params={"repo_id": repo, **params}
+        )
+        assert response.status_code == 409, (route, response.text)
+        body = response.json()
+        assert body["code"] == "recomputed" and isinstance(body["detail"], str)
+        assert body["revision_id"] == "fake-a" and body["version"] != old["version"]
+    # Other refusals keep their plain shape.
+    other = client.get(
+        "/annotations/api/recap/summary", params={"repo_id": repo, "version": "../x"}
+    )
+    assert other.status_code == 400 and "code" not in other.json()

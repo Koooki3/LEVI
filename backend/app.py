@@ -3027,12 +3027,29 @@ class RecapRunRequest(BaseModel):
     static_filter: Literal["auto", "on", "off"] = "auto"
 
 
+class _RecapCoded(Exception):
+    """A RECAP refusal with a stable ``code`` (see RecapError)."""
+
+    def __init__(self, error):
+        super().__init__(error.detail)
+        self.error = error
+
+
+@app.exception_handler(_RecapCoded)
+def _recap_coded(_request: Request, exc: _RecapCoded) -> JSONResponse:
+    # {"detail": <text>, "code": "recomputed", "revision_id", "version"}:
+    # detail stays a string for older clients.
+    return JSONResponse(exc.error.body(), status_code=exc.error.status)
+
+
 def _recap_call(call):
     from levi.recap.jobs import RecapError
 
     try:
         return call()
     except RecapError as exc:
+        if exc.code:
+            raise _RecapCoded(exc) from exc
         raise HTTPException(exc.status, exc.detail) from exc
 
 
@@ -3127,6 +3144,8 @@ def _recap_optional(call, optional: bool):
     except RecapError as exc:
         if optional and exc.status == 404:
             return None
+        if exc.code:
+            raise _RecapCoded(exc) from exc
         raise HTTPException(exc.status, exc.detail) from exc
 
 

@@ -56,12 +56,26 @@ _LOCK = threading.RLock()
 
 
 class RecapError(Exception):
-    """A refusal with the HTTP status the backend answers with."""
+    """A refusal with the HTTP status the backend answers with. ``code`` is a
+    stable machine-readable name (``recomputed``: a read pinned to a version
+    that was replaced since) answered beside ``detail`` with ``extra``."""
 
-    def __init__(self, status: int, detail: str):
+    def __init__(
+        self,
+        status: int,
+        detail: str,
+        *,
+        code: str | None = None,
+        extra: dict[str, Any] | None = None,
+    ):
         super().__init__(detail)
         self.status = status
         self.detail = detail
+        self.code = code
+        self.extra = extra or {}
+
+    def body(self) -> dict[str, Any]:
+        return {"detail": self.detail, "code": self.code, **self.extra}
 
 
 # ---------------------------------------------------------------- dataset
@@ -1389,6 +1403,8 @@ def _published(
             409,
             f"The {record['revision_id']} result was recomputed (version "
             f"{record['version']}, not {version}); reload it",
+            code="recomputed",
+            extra={"revision_id": record["revision_id"], "version": record["version"]},
         )
     if not record:
         raise RecapError(

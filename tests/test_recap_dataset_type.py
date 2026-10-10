@@ -318,6 +318,8 @@ def test_value_only_results_are_refused_by_label_exports(repo):  # noqa: F811
 
 
 def test_comparison_with_a_value_only_side_compares_values_only(client, monkeypatch):
+    # Two computations with one checkpoint: original-layout revisions.
+    monkeypatch.setenv("LEVI_RECAP_STORE_LAYOUT", "revisions")
     ds = jobs.Dataset(
         "local/pair",
         "pair",

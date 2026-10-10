@@ -6,6 +6,14 @@ import pytest
 from levi.recap import advantage, compare, jobs, store
 
 
+@pytest.fixture(autouse=True)
+def _original_layout(monkeypatch):
+    """These tests describe the original one-revision-per-run layout
+    (``LEVI_RECAP_STORE_LAYOUT=revisions``, main's behaviour before the
+    per-model default); tests/test_recap_store.py covers the default."""
+    monkeypatch.setenv("LEVI_RECAP_STORE_LAYOUT", "revisions")
+
+
 @pytest.fixture
 def revisions(client, monkeypatch, tmp_path):
     ds = jobs.Dataset(

@@ -25,6 +25,14 @@ PROJECT = Path(__file__).resolve().parents[1]
 VENDORED = PROJECT / "integrations/recap_value/levi_recap_worker/rlinf"
 
 
+@pytest.fixture(autouse=True)
+def _original_layout(monkeypatch):
+    """These tests describe the original one-revision-per-run layout
+    (``LEVI_RECAP_STORE_LAYOUT=revisions``, main's behaviour before the
+    per-model default); tests/test_recap_store.py covers the default."""
+    monkeypatch.setenv("LEVI_RECAP_STORE_LAYOUT", "revisions")
+
+
 # ---------------------------------------------------------------- formula
 
 

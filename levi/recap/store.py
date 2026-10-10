@@ -3,7 +3,8 @@
 ``outputs/LEVI/workbench/recap_values/<catalog name>/`` holds one of two
 layouts (both are read; ``LEVI_RECAP_STORE_LAYOUT`` picks the one written):
 
-``models`` -- one result per (dataset, value model), recomputing replaces it::
+``models`` (the default) -- one result per (dataset, value model),
+recomputing replaces it::
 
     models/<checkpoint>/head.json            {"version": ...}: the live version
     models/<checkpoint>/v/<version>/         episode-NNNNNN.parquet,
@@ -11,7 +12,8 @@ layouts (both are read; ``LEVI_RECAP_STORE_LAYOUT`` picks the one written):
                                              result.json (written last)
     current.json                             {"model": ...}: the result shown
 
-``revisions`` (the original layout, still the default) -- one revision per run::
+``revisions`` (the original layout, ``LEVI_RECAP_STORE_LAYOUT=revisions``)
+-- one revision per run::
 
     revisions/<id>/episode-NNNNNN.parquet   per-frame values and labels
     revisions/<id>/advantages.parquet       RLinf's advantages_{tag}.parquet columns
@@ -115,7 +117,7 @@ def root(name: str) -> Path:
 
 def layout() -> str:
     """The layout new results are written in (``LEVI_RECAP_STORE_LAYOUT``)."""
-    value = os.getenv("LEVI_RECAP_STORE_LAYOUT", LEGACY) or LEGACY
+    value = os.getenv("LEVI_RECAP_STORE_LAYOUT", MODELS) or MODELS
     if value not in LAYOUTS:
         raise ValueError("LEVI_RECAP_STORE_LAYOUT is revisions or models")
     return value
