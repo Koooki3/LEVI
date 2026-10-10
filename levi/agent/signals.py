@@ -25,10 +25,13 @@ from pathlib import Path
 
 import numpy as np
 
+from ..events import gripper
+
+# Hysteresis on the gripper channel's range, shared with the other readers.
+from ..events.gripper import HIGH, LOW  # noqa: F401
+
 GRIPPER = re.compile(r"grip|finger|claw|jaw", re.IGNORECASE)
 AXIS = re.compile(r"^(?:.*[_.\s-])?(?:pos(?:ition)?[_.\s-]?)?([xyz])$", re.IGNORECASE)
-# Hysteresis on the channel's range: a change counts once it crosses both.
-LOW, HIGH = 0.35, 0.65
 # A turn in height counts when the arm comes back by this share of the
 # episode's height range.
 TURN = 0.15
@@ -88,45 +91,37 @@ def gripper_events(times, values, bounds=None):
     the episode starts at is taken as "open" (a robot starts an episode with
     an empty hand). With the dataset's range (``bounds``) a continuous
     channel also says how far it closed, as a share of that range -- a
-    gripper stopped well above fully closed is usually holding something."""
-    finite = np.isfinite(values)
-    if finite.sum() < 2:
-        return []
-    lo, hi = np.nanmin(values), np.nanmax(values)
-    if hi - lo <= 1e-9:
-        return []
-    if bounds and np.isfinite(bounds).all() and bounds[1] - bounds[0] > 1e-9:
+    gripper stopped well above fully closed is usually holding something.
+    The crossings are ``events.gripper``'s, the kernel anchored reviews use
+    too, on the episode's range rather than the dataset's."""
+    channel = gripper.read(
+        values,
+        bounds,
+        range_source="episode",
+        open_level="auto",
         # Jitter of a gripper that never moved is no grasp.
-        if (hi - lo) < 0.2 * (bounds[1] - bounds[0]):
-            return []
-    else:
-        bounds = None
-    u = np.where(finite, (values - lo) / (hi - lo), np.nan)
-    flip = u[np.argmax(finite)] < 0.5
-    if flip:
-        u = 1 - u
+        min_travel=0.2,
+    )
+    if channel is None:
+        return []
+    u, bounds = channel.u, channel.bounds
+    flip = channel.open_level == "low"
+    finite = np.isfinite(values)
     # An open/closed flag (only the dataset's two extremes) has no "how far".
     binary = bounds is None or np.all(
         np.isin(np.round(values[finite], 6), np.round(bounds, 6))
     )
     events = []
-    state = "open"
-    for i, x in enumerate(u):
-        if np.isnan(x):
-            continue
-        if state == "open" and x < LOW:
-            state = "closed"
+    for i, kind in channel.crossings:
+        event = {"t": float(times[i]), "kind": kind}
+        if kind == "close" and bounds and not binary:
+            # How far it closed: the bottom of the fall that crossed.
             j = i
             while j + 1 < len(u) and not np.isnan(u[j + 1]) and u[j + 1] < u[j] - 1e-6:
                 j += 1
-            event = {"t": float(times[i]), "kind": "close"}
-            if bounds and not binary:
-                share = (values[j] - bounds[0]) / (bounds[1] - bounds[0])
-                event["level"] = float(np.clip(1 - share if flip else share, 0, 1))
-            events.append(event)
-        elif state == "closed" and x > HIGH:
-            state = "open"
-            events.append({"t": float(times[i]), "kind": "open"})
+            share = (values[j] - bounds[0]) / (bounds[1] - bounds[0])
+            event["level"] = float(np.clip(1 - share if flip else share, 0, 1))
+        events.append(event)
     return events
 
 

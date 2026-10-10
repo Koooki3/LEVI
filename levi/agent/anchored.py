@@ -40,14 +40,15 @@ import time
 from pathlib import Path
 from typing import Any, Literal
 
-import numpy as np
 from pydantic import Field, model_validator
 
+from ..events import gripper
+
+# Hysteresis on the gripper channel's range, shared with signals.py.
+from ..events.gripper import HIGH, LOW  # noqa: F401
 from .schema import Contract
 
 SPECS_DIR = Path(__file__).parent / "anchored_specs"
-# Hysteresis on the gripper channel's range, as in signals.py.
-LOW, HIGH = 0.35, 0.65
 # Frames an outcome proposal may cite (Proposal.evidence_ids).
 MAX_CITED = 32
 
@@ -516,34 +517,12 @@ def _gripper_channel(table, info, stats, anchor):
 def crossings(values, bounds, open_level="high"):
     """Row positions where the channel opens and closes, with hysteresis on
     its range (the dataset's, else the episode's). The level the episode
-    starts at is its initial state."""
-    values = np.asarray(values, dtype=float)
-    finite = np.isfinite(values)
-    if finite.sum() < 2:
-        return []
-    lo, hi = (
-        bounds
-        if bounds and np.isfinite(bounds).all() and bounds[1] - bounds[0] > 1e-9
-        else (np.nanmin(values), np.nanmax(values))
+    starts at is its initial state. The kernel is ``events.gripper``'s, which
+    the signal lines use too (on the episode's own range)."""
+    channel = gripper.read(
+        values, bounds, range_source="dataset", open_level=open_level
     )
-    if hi - lo <= 1e-9:
-        return []
-    u = (values - lo) / (hi - lo)
-    if open_level == "low":
-        u = 1 - u
-    first = int(np.argmax(finite))
-    state = "open" if u[first] >= 0.5 else "closed"
-    out = []
-    for i in range(first + 1, len(u)):
-        if not finite[i]:
-            continue
-        if state == "closed" and u[i] > HIGH:
-            state = "open"
-            out.append((i, "open"))
-        elif state == "open" and u[i] < LOW:
-            state = "closed"
-            out.append((i, "close"))
-    return out
+    return channel.crossings if channel is not None else []
 
 
 def anchor_rows(table, info, stats, anchor):
