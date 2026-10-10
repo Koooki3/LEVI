@@ -1337,6 +1337,58 @@ core key, robot locks, run index, command audit and launched dry runs.
 `LEVI_AERI_JOB_ROOTS`: folders separated by `:` under which the API may
 pick job files (the command line takes any path).
 
+## HTTP interface (`levi/automatic/api.py`)
+
+The product page reaches the pipeline through routes under
+`/api/levi/automatic` (the front end proxies them with the person's token).
+They only **read** run folders and **call** the layers above: nothing here
+moves a robot. Only `dry_run` launches in this version; every other
+execution mode answers `501 no_robot_adapter`. Errors are
+`{"detail": {"code", "message", ...}}`; request bodies are strict (`"yes"`
+is not `true`, `"3"` is not `3`, unknown fields are refused). Times are epoch
+milliseconds. Ids (run, command, request, evidence) match
+`[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}` before they touch a path; absolute paths
+are scrubbed from every text that leaves.
+
+| Route | Who | What |
+| --- | --- | --- |
+| `GET capabilities` | read | adapters, execution modes (only `dry_run` is available), reset modes, scene checks, defaults |
+| `GET policies` | read | deployable checkpoints from `LEVI_AERI_POLICY_ROOT` (directory listings only; weights are never read or hashed): `id`, `role`, `config`, `sha256_status` (`verified`: a hash list naming the weight files exists on disk, LEVI does not recompute it; `recorded`; `none`), `notes`; `reset_available` is false unless a checkpoint is *stated* to be a reset policy (the page then offers a person's reset only) |
+| `GET jobs` | read | job files under `LEVI_AERI_JOB_ROOTS`: opaque `id` (no path), `name`, `valid`, `reset_mode`, `errors` |
+| `POST jobs` | person | the wizard form becomes a **new** job file in `<first job root>/wizard/` (never overwrites: `409 job_exists`; the same form again is the same file). Checkpoints must come from `GET policies`; `human_assisted` takes no reset policy; `422 job_invalid` lists `errors: [{field, message}]`. The job schema has no policy field, so the chosen checkpoints are kept as comments. A scene check by a person (`operator_attested`) needs an Initial State Contract the form cannot name yet |
+| `POST plan` | read | the launch plan (`launchable`, `refusals`, `checks`, `launch_token`, `token_expires_at`); the mode defaults to `dry_run` |
+| `POST runs` | person | launch the plan that was read (`plan_sha256`, `launch_token`, `confirm: "launch"`, `request_id`): `412 plan_changed`/`token_expired`, `409 run_exists`/`robot_busy`, `501 no_robot_adapter`, `503 systemd_unavailable`. The same `request_id` returns the same run, also after a restart |
+| `GET runs`, `GET runs/{id}` | read | summaries; the snapshot: state, `seq`, episodes, counters, the waiting card, the open scene question, a one-time `challenge` (bound to `seq`, 60 s, memory only), the runner |
+| `GET runs/{id}/events?after=&limit=` | read | journal transitions and notes after a sequence |
+| `GET runs/{id}/metrics` | read | `metrics.report` |
+| `POST runs/{id}/stop` | person | `{command_id, confirm: "stop"}` through the command channel: `result` is `applied`, `repeated` or `refused` (`queued`, 202, when the runner has not answered within three seconds); `409 not_running`; `423` while another operation on the run is in progress |
+| `POST runs/{id}/resume` | person | `{command_id, expected_seq, environment_handled, health_rechecked, challenge}`: `409 not_waiting`/`confirmations_missing`/`stale_sequence` (also for a wrong or expired challenge) |
+| `POST runs/{id}/labels` | person | the operator's blind label of an ended forward episode: `{label, revealed, card}` |
+| `POST runs/{id}/scene-answer` | person | the answer to the open scene question (file protocol of `adapters.human`; request id, nonce and frames must match: `409 unsolicited`) |
+| `POST runs/{id}/attach` | person | `{request_id, confirm: "attach"}`: a runner for a run whose runner is gone (`409 runner_alive`, `409 run_completed`); `arm`/`disarm` answer `501` |
+| `GET runs/{id}/evidence/{eid}`, `GET runs/{id}/frames/{sha256}` | read | a scene assessment record, a captured frame (below `evidence/` only; links are never followed) |
+| `GET setup-guide` | read | the ordered `SetupStep` list from the operator guide's recipes and the read-only probes (`LEVI_SETUP_RECIPES`, `LEVI_SETUP_DOC`); nothing is executed, a recipe marked `execute` is shown as `copy`, and a command is shown only while the guide still hashes as recorded |
+
+**Who may write.** A write route refuses any Bearer credential (an agent can
+never launch, stop, resume, label or answer) and needs the UI token. Every
+write has a `request_id` or `command_id`: the same one again returns the
+first answer, another body under a used id is `409 request_id_used`. One
+operation at a time per run (`423 busy`). Writes are audited in
+`$LEVI_AERI_HOME/control.jsonl` (`api_*` lines).
+
+**Blind labels.** Until the operator labels an episode success or failure
+nothing shows how the automatic system judged it or how it ended: the card's
+`automatic_verdict` is `null` (`hidden_until_labelled`), the events replace
+`goal_verified`, `horizon_exhausted` and `operator_stop` with
+`hidden_until_labelled`, and the metrics withhold `autonomous`,
+`early_termination` and `agreement.by_ended_by` (`null`, listed in
+`withheld`) while any ended episode lacks a label. `discarded` and `unclear`
+reveal nothing.
+
+**Settings.** `LEVI_AERI_POLICY_ROOT`: the folder of policy checkpoints that
+`GET policies` lists and `POST jobs` accepts (unset: no checkpoints, a
+person resets the scene). Tests: `tests/automatic/test_api_*.py`.
+
 ## Fakes (`integrations/fr3_automatic/fake.py`)
 
 `FakeClock` (moves only when advanced), `FakeRobot` (moves only under the

@@ -148,6 +148,12 @@ Fenced blocks with a JSON body become components: `levi-progress` (`{"source": "
 
 技术报告页读取 `LEVI_REPORT_DIR` 指向的目录（只读，可在工作区之外）：`LEVI.md` / `LEVI.zh-CN.md` 为正文，`status.json` 为实时数据，`assets/` 为图片。页面随语言切换选择中文或英文（缺失时回退英文），每 5 秒检测一次变化并无闪烁地更新。
 
+## Automatic evaluation routes / 自动测评路由
+
+`/api/levi/automatic/…` (capabilities, policies, jobs, plan, runs and their snapshot, events, metrics, stop, resume, labels, scene answers, evidence and frames, setup guide) is the HTTP interface of the automatic evaluation pipeline. Write routes are a person's actions (the UI token; an agent's Bearer credential is refused), carry a `request_id`/`command_id` for idempotency and a typed `confirm`; only `dry_run` can be launched in this version. The route table, error codes and the blind-label rule are in [AUTOMATIC_PIPELINE.md](AUTOMATIC_PIPELINE.md#http-interface-leviautomaticapipy).
+
+自动测评流水线的 HTTP 接口在 `/api/levi/automatic/…`（能力、策略检查点、作业、计划、运行及其快照、事件、指标、停止、恢复、标签、场景答复、证据与画面、启动引导）。写路由是人的操作（需要界面令牌，agent 的 Bearer 凭据会被拒绝），带 `request_id`/`command_id` 保证幂等和需要键入的 `confirm`；本版本只能启动 `dry_run`。路由表、错误码和盲标规则见 [AUTOMATIC_PIPELINE.zh-CN.md](AUTOMATIC_PIPELINE.zh-CN.md#http-接口leviautomaticapipy)。
+
 ## Service entry points / 服务入口
 
 The browser workbench is served on `http://127.0.0.1:7860`. Backend port `7861` serves the API: `/` returns a bilingual entry guide, `/favicon.ico` returns the LEVI icon, and `GET /api/levi/health` returns `{"service":"levi-api","status":"ok"}` for startup checks. The launcher supplies the guide with the selected frontend address/port. These entry routes do not expose datasets or credentials.

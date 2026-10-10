@@ -531,13 +531,13 @@ def list_policies():
 
 def checkpoint_ids(role: str) -> dict:
     """``{id: entry}`` of the deployable checkpoints that may serve as the
-    ``role`` policy (forward: stated forward or unstated; reset: stated reset
-    only)."""
+    ``role`` policy: only a checkpoint whose role is *stated or known by
+    convention* (a reset-like name with no statement stays ``unknown`` and
+    serves neither)."""
     report = discover_policies()
     if report is None:
         return {}
-    keep = {"reset"} if role == "reset" else {"forward", "unknown"}
-    return {e.name: e for e in report.entries if e.deployable and e.role in keep}
+    return {e.name: e for e in report.entries if e.deployable and e.role == role}
 
 
 # --- job files -----------------------------------------------------------------------------
@@ -782,6 +782,13 @@ def list_runs():
     return {"runs": rows}
 
 
+def _is_forward(episode_id) -> bool:
+    try:
+        return aeri.episode_parts(episode_id)[1] == "forward"
+    except (AttributeError, ValueError, TypeError):
+        return False
+
+
 def _names(items) -> list:
     return [str(i) for i in items] if isinstance(items, (list, tuple)) else []
 
@@ -956,6 +963,7 @@ def run_events(run_id: str, after: int = -1, limit: int = 200):
         if (
             event.record == "committed"
             and reason in BLIND_REASONS
+            and _is_forward(event.episode_id)
             and event.episode_id not in revealed
         ):
             reason = HIDDEN

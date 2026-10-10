@@ -511,6 +511,35 @@ T-CL-07..09，设计 X2 §3–§5。命令行和以后的 HTTP API 共用一个�
 
 **设置。** `LEVI_AERI_HOME`（默认 `~/.levi-aeri`，以 0700 创建）：核心密钥、机器人锁、运行索引、命令审计和已启动的试运行。`LEVI_AERI_JOB_ROOTS`：用 `:` 分隔的目录，API 只能从这些目录里选作业文件（命令行可以用任意路径）。
 
+## HTTP 接口（`levi/automatic/api.py`）
+
+产品页面通过 `/api/levi/automatic` 下的路由使用本流水线（前端代理，带人类令牌）。这些路由只**读**运行目录并**调用**上面各层：这里的任何东西都不会让机械臂动。本版本只有 `dry_run` 能启动，其他执行模式一律返回 `501 no_robot_adapter`。错误体是 `{"detail": {"code", "message", ...}}`；请求体严格校验（`"yes"` 不是 `true`，`"3"` 不是 `3`，多余字段被拒绝）。时间是毫秒级 epoch。各种 ID（运行、命令、请求、证据）先匹配 `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}` 才会碰路径；返回的文字里所有绝对路径都会打码。
+
+| 路由 | 谁 | 作用 |
+| --- | --- | --- |
+| `GET capabilities` | 读 | 适配器、执行模式（只有 `dry_run` 可用）、复位模式、场景核对方式、默认值 |
+| `GET policies` | 读 | 从 `LEVI_AERI_POLICY_ROOT` 发现可部署的检查点（只读目录列表，从不读取或计算权重哈希）：`id`、`role`、`config`、`sha256_status`（`verified`：磁盘上有点名权重文件的哈希清单，LEVI 不重新计算；`recorded`；`none`）、`notes`；只有明确声明为复位策略的检查点才让 `reset_available` 为真（否则页面只提供人工复位） |
+| `GET jobs` | 读 | `LEVI_AERI_JOB_ROOTS` 下的作业文件：不含路径的不透明 `id`、`name`、`valid`、`reset_mode`、`errors` |
+| `POST jobs` | 人 | 把向导表单写成 `<第一个作业根>/wizard/` 下的**新**作业文件（绝不覆盖：`409 job_exists`；同一表单再提交得到同一文件）。检查点必须来自 `GET policies`；`human_assisted` 不带复位策略；`422 job_invalid` 带逐字段的 `errors: [{field, message}]`。作业格式没有策略字段，所选检查点写成注释。由人核对场景（`operator_attested`）需要初始状态契约，表单目前还不能指定 |
+| `POST plan` | 读 | 启动计划（`launchable`、`refusals`、`checks`、`launch_token`、`token_expires_at`）；模式缺省为 `dry_run` |
+| `POST runs` | 人 | 启动看过的计划（`plan_sha256`、`launch_token`、`confirm: "launch"`、`request_id`）：`412 plan_changed`/`token_expired`、`409 run_exists`/`robot_busy`、`501 no_robot_adapter`、`503 systemd_unavailable`。同一 `request_id` 返回同一运行，重启后也一样 |
+| `GET runs`、`GET runs/{id}` | 读 | 摘要；快照：状态、`seq`、片段、计数、等待卡、打开的场景问题、一次性 `challenge`（绑定 `seq`，60 秒，只在内存里）、运行器 |
+| `GET runs/{id}/events?after=&limit=` | 读 | 某序号之后的日志转移和备注 |
+| `GET runs/{id}/metrics` | 读 | `metrics.report` |
+| `POST runs/{id}/stop` | 人 | `{command_id, confirm: "stop"}`，走命令通道：`result` 为 `applied`、`repeated` 或 `refused`（运行器三秒内没回复时为 `queued`，状态码 202）；`409 not_running`；该运行上另一个操作未结束时 `423` |
+| `POST runs/{id}/resume` | 人 | `{command_id, expected_seq, environment_handled, health_rechecked, challenge}`：`409 not_waiting`/`confirmations_missing`/`stale_sequence`（challenge 错误或过期也是） |
+| `POST runs/{id}/labels` | 人 | 操作员对已结束的前向片段的盲标：`{label, revealed, card}` |
+| `POST runs/{id}/scene-answer` | 人 | 回答打开的场景问题（`adapters.human` 的文件协议；请求 ID、nonce 和画面必须对得上：`409 unsolicited`） |
+| `POST runs/{id}/attach` | 人 | `{request_id, confirm: "attach"}`：为运行器已退出的运行启动新运行器（`409 runner_alive`、`409 run_completed`）；`arm`/`disarm` 返回 `501` |
+| `GET runs/{id}/evidence/{eid}`、`GET runs/{id}/frames/{sha256}` | 读 | 场景评估记录、采集的画面（只在 `evidence/` 之下，不跟随符号链接） |
+| `GET setup-guide` | 读 | 来自操作手册配方和只读探针（`LEVI_SETUP_RECIPES`、`LEVI_SETUP_DOC`）的有序 `SetupStep` 列表；不执行任何东西，标为 `execute` 的配方按 `copy` 显示，手册哈希与记录一致时才显示命令 |
+
+**谁能写。** 写路由拒绝任何 Bearer 凭据（agent 永远不能启动、停止、恢复、打标签或答复），并要求界面令牌。每个写操作带 `request_id` 或 `command_id`：同一个再发返回第一次的回复，已用 ID 换成别的内容是 `409 request_id_used`。每个运行同一时刻只允许一个操作（`423 busy`）。写操作记入 `$LEVI_AERI_HOME/control.jsonl`（`api_*` 行）。
+
+**盲标。** 操作员给一个片段打成功或失败标签之前，任何地方都不显示自动系统怎么判、片段怎么结束：卡片的 `automatic_verdict` 是 `null`（`hidden_until_labelled`），事件里的 `goal_verified`、`horizon_exhausted`、`operator_stop` 换成 `hidden_until_labelled`，只要还有已结束片段没打标签，指标就扣下 `autonomous`、`early_termination` 和 `agreement.by_ended_by`（`null`，列在 `withheld` 里）。`discarded` 和 `unclear` 不揭示任何东西。
+
+**设置。** `LEVI_AERI_POLICY_ROOT`：策略检查点目录，`GET policies` 列出它，`POST jobs` 只接受其中的检查点（未设置：没有检查点，由人复位场景）。测试：`tests/automatic/test_api_*.py`。
+
 ## Fake（`integrations/fr3_automatic/fake.py`）
 
 `FakeClock`（只在推进时走）、`FakeRobot`（只凭围栏的令牌运动；可脚本注入：连续三次 503 后闩锁、连续六次状态过期后闩锁、位姿冻结、红灯、闩锁、丢失应答、命令发出后进程崩溃、Home 超出容差、相机停滞）、`FakePolicy`（在 Fake 时钟上固定延迟；超时、服务端错误、NaN、维度或代次错误、过早的 `valid_from`、acquire 或 quiesce 失败、服务端崩溃）和 `FakeRecorder`（带写线程；写失败在下一次 commit 或 seal 时报出，所有写入成功后才写 `.complete`，`abort` 得到 `incomplete_*`）。该模块不 import 任何网络、进程或 LEVI 代码。

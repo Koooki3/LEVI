@@ -114,6 +114,16 @@ def test_checkpoints_must_come_from_the_discovery(client, roots, checkpoints):
     assert answer.status_code == 422 and fields == ["policy_forward.checkpoint_id"]
 
 
+def test_a_checkpoint_of_unstated_role_serves_neither_role(client, roots, checkpoints):
+    make_checkpoint(checkpoints, "mystery", config="some_other_config")
+    api._POLICY_CACHE.update(key=None, at=0.0, report=None)
+    listed = client.get(f"{BASE}/policies").json()["checkpoints"]
+    assert {c["id"]: c["role"] for c in listed}["mystery"] == "unknown"
+    answer = post(client, form(policy_forward={"checkpoint_id": "mystery"}))
+    assert answer.status_code == 422
+    assert not (roots / "wizard").exists()
+
+
 def test_without_a_policy_root_the_message_names_the_setting(client, roots):
     answer = post(client, form())
     assert answer.status_code == 422
