@@ -61,6 +61,10 @@ class Sha256Record:
     kind: str  # "manifest" (file hashes) | "conversion" (source and norm_stats hashes)
     covers: str  # "files" | "source_weights+norm_stats"
     entries: int  # number of hashes the record holds
+    subject: str = "this_dir"  # "this_dir" or "source:<path>; norm_stats_from:<path>"
+    weights_entries: int = (
+        0  # manifest lines that name weight files (params/, *.pt, *.distcp)
+    )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -90,7 +94,11 @@ class PolicyEntry:
     verified: tuple[str, ...]
     not_verified: tuple[str, ...]
     readme_title: str | None
-    sha256_state: str  # "recorded" | "missing"
+    # "recorded": a hash list for files of this directory exists; "indirect": only hashes of
+    # other files (CONVERSION.json: the PyTorch source, the norm_stats donor); "missing".
+    # Never show "indirect" as "verified"; only params_hashed says the weights have a hash.
+    sha256_state: str
+    params_hashed: bool
     sha256_records: tuple[Sha256Record, ...]
     size_bytes: int
     size_truncated: bool
@@ -184,6 +192,40 @@ def _str_list(value: Any) -> tuple[str, ...]:
     return ()
 
 
+_HINTS = ("reset", "recovery", "recover", "return", "home")
+_ROLE_WORDS = ("forward", "reset")
+
+
+def _norm(value: Any) -> str | None:
+    return value.strip().casefold() if isinstance(value, str) else None
+
+
+def _hint(text: Any) -> str | None:
+    t = _norm(text)
+    return next((h for h in _HINTS if t and h in t), None)
+
+
+def _find_hints(
+    name: str,
+    version: Mapping[str, Any],
+    readme_title: str | None,
+    cfgs: Iterable[str | None],
+) -> list[str]:
+    """Where a reset-like word shows up: directory name, README title, config names,
+    and every short string or key of VERSION.json."""
+    found: list[str] = []
+    if _hint(name):
+        found.append("name")
+    if _hint(readme_title):
+        found.append("readme_title")
+    if any(_hint(c) for c in cfgs):
+        found.append("config")
+    for k, v in version.items():
+        if _hint(k) or (isinstance(v, str) and len(v) <= 200 and _hint(v)):
+            found.append(f"VERSION.json:{k}")
+    return found
+
+
 def _step(value: Any) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return None
@@ -194,7 +236,8 @@ def _step(value: Any) -> int | None:
 
 
 def _tree_size(path: Path, cap: int) -> tuple[int, bool]:
-    """Sum file sizes by ``lstat`` without following links; stop after ``cap`` files."""
+    """Sum file sizes by ``lstat`` without following links; stop after ``cap`` directory
+    entries of any kind (files, directories, links), so floods of either are bounded."""
     total = 0
     seen = 0
     stack = [str(path)]
@@ -203,6 +246,9 @@ def _tree_size(path: Path, cap: int) -> tuple[int, bool]:
         try:
             with os.scandir(cur) as it:
                 for de in it:
+                    seen += 1
+                    if seen > cap:
+                        return total, True
                     try:
                         if de.is_symlink():
                             continue
@@ -210,9 +256,6 @@ def _tree_size(path: Path, cap: int) -> tuple[int, bool]:
                             stack.append(de.path)
                         elif de.is_file(follow_symlinks=False):
                             total += de.stat(follow_symlinks=False).st_size
-                            seen += 1
-                            if seen >= cap:
-                                return total, True
                     except OSError:
                         continue
         except OSError:
@@ -225,6 +268,28 @@ def _is_real_dir(path: Path) -> bool:
         return stat.S_ISDIR(os.lstat(path).st_mode)
     except OSError:
         return False
+
+
+def _norm_stats_ok(d: Path, problems: list[str]) -> bool:
+    """``norm_stats.json`` at the top, or under ``assets/`` (directly or one level down,
+    where openpi's loader looks). Reads one byte; the reason of a refusal is kept."""
+    data, why = _read_small(d / "norm_stats.json", 1)
+    if data is not None:
+        return True
+    if (d / "assets" / "norm_stats.json").exists() and (
+        _read_small(d / "assets" / "norm_stats.json", 1)[0] is not None
+    ):
+        return True
+    try:
+        subs = sorted(os.listdir(d / "assets"))[:50]
+    except OSError:
+        subs = []
+    for sub in subs:
+        sd = d / "assets" / sub
+        if _is_real_dir(sd) and _read_small(sd / "norm_stats.json", 1)[0] is not None:
+            return True
+    problems.append(f"norm_stats.json:{why}")
+    return False
 
 
 def _parse_sha_list(data: bytes) -> tuple[dict[str, str], int]:
@@ -246,6 +311,32 @@ def _parse_sha_list(data: bytes) -> tuple[dict[str, str], int]:
     return out, bad
 
 
+def _safe_rel(rel: str) -> str | None:
+    """A relative path inside the listed tree, or None: absolute paths, ``..`` and
+    hidden first components never name a directory."""
+    parts = [p for p in rel.replace("\\", "/").split("/") if p not in ("", ".")]
+    if not parts or rel.replace("\\", "/").startswith("/") or ".." in parts:
+        return None
+    return "/".join(parts)
+
+
+def _is_weights(rel: str) -> bool:
+    parts = rel.split("/")
+    return "params" in parts[:-1] or rel.endswith((".pt", ".distcp", ".safetensors"))
+
+
+def _count_weights(entries: Mapping[str, str], strip: int) -> int:
+    n = 0
+    for rel in entries:
+        safe = _safe_rel(rel)
+        if safe is None:
+            continue
+        parts = safe.split("/")[strip:]
+        if parts and _is_weights("/".join(parts)):
+            n += 1
+    return n
+
+
 def _sha_manifest(path: Path, label: str, problems: list[str]) -> dict[str, str] | None:
     data, why = _read_small(path, MAX_META_BYTES)
     if data is None:
@@ -261,11 +352,66 @@ def _sha_manifest(path: Path, label: str, problems: list[str]) -> dict[str, str]
     return entries
 
 
+def _safe_listdir(d: Path) -> list[str]:
+    try:
+        return sorted(os.listdir(d))
+    except OSError:
+        return []
+
+
+def _decide_role(
+    name: str,
+    version: Mapping[str, Any],
+    recipe: Mapping[str, Any],
+    cfg: str | None,
+    readme_title: str | None,
+    serve_cfgs: list[str],
+    problems: list[str],
+    warnings: list[str],
+) -> tuple[str, str]:
+    """Role is ``forward``/``reset`` only on an explicit statement (VERSION.json ``policy_role``
+    or ``role`` equal to the word after trimming and case folding, or the caller's recipe) or,
+    for ``forward`` only, because the config belongs to the known forward family. Any
+    reset-like word (name, README title, config, VERSION.json key or short string), an
+    unrecognised ``policy_role`` or contradictory statements give ``unknown``."""
+    declared: list[str] = []
+    for key in ("policy_role", "role"):
+        if key not in version:
+            continue
+        v = _norm(version[key])
+        if v in _ROLE_WORDS:
+            declared.append(v)  # type: ignore[arg-type]
+        elif key == "policy_role":
+            problems.append("VERSION.json:unrecognised_policy_role")
+            return "unknown", "none"
+        # "role" other than forward/reset is a variant such as "best": not a role statement
+    hints = _find_hints(name, version, readme_title, [cfg, *serve_cfgs])
+    if len(set(declared)) > 1:
+        problems.append("role_declarations_conflict")
+        return "unknown", "none"
+    if declared == ["reset"] or (declared and declared[0] == "reset"):
+        return "reset", "VERSION.json"
+    if declared:  # forward
+        if hints:
+            problems.append("role_hint_conflicts_with_declaration")
+            return "unknown", "none"
+        return "forward", "VERSION.json"
+    rr = recipe.get("roles", {}).get(name)
+    if rr in _ROLE_WORDS:
+        return rr, "recipe"
+    if hints:
+        warnings.append("role_withheld:reset_hint:" + ",".join(hints[:4]))
+        return "unknown", "none"
+    if cfg and cfg in recipe.get("forward_configs", ()):
+        return "forward", "convention:config"
+    return "unknown", "none"
+
+
 def _inspect(
     root: Path,
     name: str,
     recipe: Mapping[str, Any],
-    root_lists: Mapping[str, int],
+    root_lists: Mapping[str, tuple[int, int]],
     max_files: int,
 ) -> PolicyEntry:
     d = root / name
@@ -274,12 +420,15 @@ def _inspect(
 
     has_params = _is_real_dir(d / "params")
     has_actor = _is_real_dir(d / "actor")
-    norm_ok = _read_small(d / "norm_stats.json", 1)[0] is not None
     kind = "jax" if has_params else ("pytorch" if has_actor else "unknown")
     is_jax = kind == "jax"
-    deployable = is_jax and norm_ok
-    if is_jax and not norm_ok:
-        problems.append("norm_stats.json:missing")
+    deployable = False
+    if is_jax:
+        norm_ok = _norm_stats_ok(d, problems)
+        assets_ok = _is_real_dir(d / "assets")
+        if not assets_ok:
+            problems.append("assets:missing")
+        deployable = norm_ok and assets_ok
     if kind == "unknown":
         problems.append("layout_not_recognised")
 
@@ -288,14 +437,13 @@ def _inspect(
 
     readme_title = None
     training_name = None
-    serve_cfg = None
+    serve_cfgs: list[str] = []
     rdata, why = _read_small(d / "README_DEPLOY.md", MAX_README_BYTES)
     if rdata is not None:
         text = rdata[:MAX_README_BYTES].decode("utf-8", "replace")
         first = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
         readme_title = first.lstrip("# ").strip()[:200] or None
-        m = _SERVE_CONFIG.search(text)
-        serve_cfg = m.group(1) if m else None
+        serve_cfgs = _SERVE_CONFIG.findall(text)
         m = _TRAIN_CONFIG_ROW.search(text)
         training_name = m.group(1) if m else None
     elif why not in (None, "missing"):
@@ -304,8 +452,14 @@ def _inspect(
     # configuration name, with the source that gave it
     cfg = _str(version.get("config"))
     cfg_src = "VERSION.json" if cfg else "none"
-    if cfg is None and serve_cfg:
-        cfg, cfg_src = serve_cfg, "README_DEPLOY.md"
+    if (
+        serve_cfgs
+        and (cfg is not None or len(set(serve_cfgs)) > 1)
+        and set(serve_cfgs) != {cfg}
+    ):
+        warnings.append("config_sources_disagree")
+    if cfg is None and serve_cfgs:
+        cfg, cfg_src = serve_cfgs[0], "README_DEPLOY.md"
     if cfg is None:
         rc = recipe.get("configs", {}).get(name)
         if isinstance(rc, str) and rc:
@@ -315,30 +469,32 @@ def _inspect(
     if training_name and cfg and training_name != cfg:
         warnings.append("training_config_name_differs_from_serving_config")
 
-    # role: explicit statement first, then the recipe, then the config family
-    role, role_src = "unknown", "none"
-    for key in ("policy_role", "role"):
-        v = version.get(key)
-        if v in ("forward", "reset"):
-            role, role_src = v, "VERSION.json"
-            break
-    if role == "unknown":
-        rr = recipe.get("roles", {}).get(name)
-        if rr in ("forward", "reset"):
-            role, role_src = rr, "recipe"
-    if role == "unknown" and cfg and cfg in recipe.get("forward_configs", ()):
-        role, role_src = "forward", "convention:config"
+    role, role_src = _decide_role(
+        name, version, recipe, cfg, readme_title, serve_cfgs, problems, warnings
+    )
 
     # hashes already on disk
     records: list[Sha256Record] = []
-    for p in _list_sha_files(d):
+    sha_files = _list_sha_files(d)
+    if len([n for n in _safe_listdir(d) if n.endswith(".sha256")]) > len(sha_files):
+        problems.append("sha256_lists_truncated")
+    for p in sha_files:
         ents = _sha_manifest(p, f"{p.name}", problems)
         if ents:
             records.append(
-                Sha256Record(f"{name}/{p.name}", "manifest", "files", len(ents))
+                Sha256Record(
+                    f"{name}/{p.name}",
+                    "manifest",
+                    "files",
+                    len(ents),
+                    "this_dir",
+                    _count_weights(ents, 0),
+                )
             )
-    for src, count in sorted(root_lists.items()):
-        records.append(Sha256Record(src, "manifest", "files", count))
+    for src, (count, wcount) in sorted(root_lists.items()):
+        records.append(
+            Sha256Record(src, "manifest", "files", count, "this_dir", wcount)
+        )
     if conversion:
         n = sum(
             1
@@ -346,14 +502,22 @@ def _inspect(
             if _HEX64.match(str(conversion.get(k, "")))
         )
         if n:
+            subject = "source:{}; norm_stats_from:{}".format(
+                str(conversion.get("source"))[:120],
+                str(conversion.get("norm_stats_from"))[:120],
+            )
             records.append(
                 Sha256Record(
                     f"{name}/CONVERSION.json",
                     "conversion",
                     "source_weights+norm_stats",
                     n,
+                    subject,
                 )
             )
+    direct = [r for r in records if r.kind == "manifest"]
+    sha_state = "recorded" if direct else ("indirect" if records else "missing")
+    params_hashed = any(r.weights_entries > 0 for r in direct)
     size, trunc = _tree_size(d, max_files)
     if trunc:
         warnings.append("size_is_a_lower_bound")
@@ -373,7 +537,7 @@ def _inspect(
         version=_str(version.get("version")),
         model=_str(version.get("model")),
         variant=_str(version.get("role"))
-        if version.get("role") not in ("forward", "reset")
+        if _norm(version.get("role")) not in _ROLE_WORDS
         else None,
         step=_step(version.get("step")),
         version_note=_str(version.get("parallel_to")),
@@ -390,7 +554,8 @@ def _inspect(
         ),
         not_verified=_str_list(version.get("not_verified")),
         readme_title=readme_title,
-        sha256_state="recorded" if records else "missing",
+        sha256_state=sha_state,
+        params_hashed=params_hashed,
         sha256_records=tuple(records),
         size_bytes=size,
         size_truncated=trunc,
@@ -400,10 +565,7 @@ def _inspect(
 
 
 def _list_sha_files(d: Path) -> list[Path]:
-    try:
-        names = sorted(n for n in os.listdir(d) if n.endswith(".sha256"))
-    except OSError:
-        return []
+    names = [n for n in _safe_listdir(d) if n.endswith(".sha256")]
     return [d / n for n in names[:8]]
 
 
@@ -412,11 +574,11 @@ def _list_sha_files(d: Path) -> list[Path]:
 
 def _root_manifests(
     root: Path, names: Iterable[str], problems: list[str]
-) -> dict[str, dict[str, int]]:
-    """``*.sha256`` lists at the root, attributed to a directory by the path prefix of
-    their lines (``<dir>/...``). ``{dir: {source file: entry count}}``."""
+) -> dict[str, dict[str, tuple[int, int]]]:
+    """``*.sha256`` lists at the root, attributed to a directory by the first component of
+    their (safe, relative) paths. ``{dir: {source file: (entries, weight entries)}}``."""
     wanted = set(names)
-    out: dict[str, dict[str, int]] = {}
+    out: dict[str, dict[str, tuple[int, int]]] = {}
     try:
         files = sorted(n for n in os.listdir(root) if n.endswith(".sha256"))
     except OSError:
@@ -428,13 +590,16 @@ def _root_manifests(
         ents = _sha_manifest(root / fn, fn, problems)
         if not ents:
             continue
-        per_dir: dict[str, int] = {}
+        per_dir: dict[str, list[int]] = {}
         for rel in ents:
-            head = rel.replace("\\", "/").lstrip("./").split("/", 1)
+            safe = _safe_rel(rel)
+            head = safe.split("/", 1) if safe else []
             if len(head) == 2 and head[0] in wanted:
-                per_dir[head[0]] = per_dir.get(head[0], 0) + 1
-        for dname, n in per_dir.items():
-            out.setdefault(dname, {})[fn] = n
+                c = per_dir.setdefault(head[0], [0, 0])
+                c[0] += 1
+                c[1] += 1 if _is_weights(head[1]) else 0
+        for dname, (n, w) in per_dir.items():
+            out.setdefault(dname, {})[fn] = (n, w)
     return out
 
 
@@ -477,8 +642,12 @@ def discover_report(
     rcp = {**DEFAULT_RECIPE, **(recipe or {})}
     root_problems: list[str] = []
     try:
+        if os.fspath(policy_root) in ("", b""):
+            raise ValueError("empty root")
         root = Path(os.path.realpath(policy_root))
         st = os.stat(root)
+    except (ValueError, TypeError):
+        return DiscoveryReport("", (), False, (), ("root_invalid",))
     except OSError:
         return DiscoveryReport(str(policy_root), (), False, (), ("root_missing",))
     if not stat.S_ISDIR(st.st_mode):
@@ -528,8 +697,13 @@ def discover(policy_root: str | os.PathLike[str], **kwargs: Any) -> list[PolicyE
 
 
 def select(
-    entries: Iterable[PolicyEntry], role: str | None = None
+    entries: Iterable[PolicyEntry],
+    role: str | None = None,
+    *,
+    include_unknown: bool = False,
 ) -> list[PolicyEntry]:
-    """Deployable entries, optionally only one role. ``select(e, "reset") == []`` means
-    the caller can offer human reset only."""
-    return [e for e in entries if e.deployable and (role is None or e.role == role)]
+    """Deployable entries, optionally only one role. An entry of role ``unknown`` is returned
+    for ``role="forward"`` or ``"reset"`` only with ``include_unknown=True``.
+    ``select(e, "reset") == []`` means the caller can offer human reset only."""
+    keep = {role, "unknown"} if include_unknown else {role}
+    return [e for e in entries if e.deployable and (role is None or e.role in keep)]

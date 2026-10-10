@@ -71,6 +71,7 @@ def test_lists_deployable_and_pytorch_dirs(tmp_path):
 def test_jax_dir_without_norm_stats_is_not_deployable(tmp_path):
     d = _jax(tmp_path, "m")
     (d / "norm_stats.json").unlink()
+    (d / "assets" / "norm_stats.json").unlink()
     (e,) = pol.discover(tmp_path)
     assert e.is_jax and not e.deployable
     assert "norm_stats.json:missing" in e.problems
@@ -383,3 +384,275 @@ def test_import_has_no_openpi_or_heavy_modules():
         check=True,
     ).stdout.strip()
     assert out == "[]"
+
+
+# --- review round: conservative roles ---------------------------------------------------
+
+
+def _role(tmp_path, name="m_jax", version=None, **extra):
+    _jax(tmp_path, name, version, **extra)
+    got = _by_name(pol.discover(tmp_path))
+    return got[name]
+
+
+import pytest
+
+
+@pytest.mark.parametrize(
+    "name,version",
+    [
+        ("pi05_fr3_reset_step5000", {"config": "pi05_fr3_all_state"}),
+        ("RESET_jax", {"config": "pi05_fr3_all_state"}),
+        ("pi05_recovery_jax", {"config": "pi05_fr3_all_state"}),
+        ("pi05_recover_jax", {"config": "pi05_fr3_all_state"}),
+        ("pi05_return_jax", {"config": "pi05_fr3_all_state"}),
+        ("pi05_go_home_jax", {"config": "pi05_fr3_all_state"}),
+        ("m_jax", {"config": "pi05_fr3_all_state", "policy_role": "reset_v2"}),
+        ("m_jax", {"config": "pi05_fr3_all_state", "policy_role": "recovery"}),
+        ("m_jax", {"config": "pi05_fr3_all_state", "policy_role": "best"}),
+        ("m_jax", {"config": "pi05_fr3_all_state", "policy_role": 3}),
+        ("m_jax", {"config": "pi05_fr3_all_state", "role": "reset_best"}),
+        ("m_jax", {"config": "pi05_fr3_all_state", "role": "go_home"}),
+        ("m_jax", {"config": "pi05_fr3_all_state", "model": "arm_reset_policy"}),
+        ("m_jax", {"config": "pi05_fr3_all_state", "note": "to Return the arm"}),
+        ("m_jax", {"config": "pi05_fr3_all_state", "reset_policy": True}),  # key name
+        ("m_jax", {"config": "pi05_fr3_reset_state"}),
+    ],
+)
+def test_reset_hints_never_give_forward_or_reset(tmp_path, name, version):
+    e = _role(tmp_path, name, version)
+    assert e.role == "unknown", (e.role, e.role_source)
+    assert pol.select([e], "forward") == []
+    assert pol.select([e], "reset") == []
+    assert pol.select([e]) == [e]  # still a deployable checkpoint, role unknown
+
+
+def test_hint_in_readme_title_withholds_forward(tmp_path):
+    e = _role(
+        tmp_path,
+        "m_jax",
+        {"config": "pi05_fr3_all_state"},
+        README_DEPLOY__md="# Reset policy, step 9\n",
+    )
+    assert e.role == "unknown"
+
+
+@pytest.mark.parametrize("val", ["Reset", " RESET\t", "reset"])
+def test_declared_reset_is_normalised(tmp_path, val):
+    e = _role(tmp_path, "m_jax", {"policy_role": val})
+    assert (e.role, e.role_source) == ("reset", "VERSION.json")
+    assert [x.name for x in pol.select([e], "reset")] == ["m_jax"]
+
+
+@pytest.mark.parametrize("val", ["Forward", " forward ", "FORWARD"])
+def test_declared_forward_is_normalised(tmp_path, val):
+    e = _role(tmp_path, "m_jax", {"role": val})
+    assert (e.role, e.role_source) == ("forward", "VERSION.json")
+
+
+def test_declared_forward_with_a_reset_hint_is_withheld(tmp_path):
+    e = _role(tmp_path, "reset_jax", {"policy_role": "forward"})
+    assert e.role == "unknown"
+    assert "role_hint_conflicts_with_declaration" in e.problems
+
+
+def test_conflicting_declarations_are_unknown(tmp_path):
+    e = _role(tmp_path, "m_jax", {"policy_role": "forward", "role": "reset"})
+    assert e.role == "unknown" and "role_declarations_conflict" in e.problems
+
+
+def test_variant_roles_like_best_keep_the_config_convention(tmp_path):
+    e = _role(tmp_path, "m_jax", {"role": "best", "config": "pi05_fr3_all_state_cfg"})
+    assert (e.role, e.role_source, e.variant) == (
+        "forward",
+        "convention:config",
+        "best",
+    )
+
+
+def test_select_include_unknown_is_explicit(tmp_path):
+    _jax(tmp_path, "a_jax", {"config": "pi05_fr3_all_state"})
+    _jax(tmp_path, "b_jax", {"config": "other"})
+    _jax(tmp_path, "c_jax", {"policy_role": "reset"})
+    es = pol.discover(tmp_path)
+    assert [e.name for e in pol.select(es, "forward")] == ["a_jax"]
+    assert [e.name for e in pol.select(es, "forward", include_unknown=True)] == [
+        "a_jax",
+        "b_jax",
+    ]
+    assert [e.name for e in pol.select(es, "reset", include_unknown=True)] == [
+        "b_jax",
+        "c_jax",
+    ]
+    assert [e.name for e in pol.select(es, "unknown")] == ["b_jax"]
+
+
+# --- review round: hashes are not "verified" --------------------------------------------
+
+
+def test_conversion_only_hashes_are_indirect(tmp_path):
+    _jax(
+        tmp_path,
+        "c_jax",
+        CONVERSION__json=json.dumps(
+            {
+                "source_sha256": HEX_A,
+                "norm_stats_sha256": HEX_B,
+                "source": "other/dir/full_weights.pt",
+                "norm_stats_from": "checkpoints/sft",
+            }
+        ),
+    )
+    (e,) = pol.discover(tmp_path)
+    assert e.sha256_state == "indirect" and e.params_hashed is False
+    (rec,) = e.sha256_records
+    assert (
+        "other/dir/full_weights.pt" in rec.subject and "checkpoints/sft" in rec.subject
+    )
+    assert rec.covers == "source_weights+norm_stats"
+
+
+def test_manifest_of_params_is_recorded_and_params_hashed(tmp_path):
+    d = _jax(tmp_path, "p_jax")
+    _w(d / "SHA256SUMS.sha256", f"{HEX_A}  params/d/blob\n{HEX_B}  norm_stats.json\n")
+    (e,) = pol.discover(tmp_path)
+    assert (e.sha256_state, e.params_hashed) == ("recorded", True)
+    assert e.sha256_records[0].subject == "this_dir"
+
+
+def test_manifest_without_weights_is_recorded_but_not_params_hashed(tmp_path):
+    d = _jax(tmp_path, "p_jax")
+    _w(d / "x.sha256", f"{HEX_A}  norm_stats.json\n")
+    (e,) = pol.discover(tmp_path)
+    assert (e.sha256_state, e.params_hashed) == ("recorded", False)
+
+
+def test_manifest_plus_conversion_is_recorded(tmp_path):
+    d = _jax(tmp_path, "p_jax", CONVERSION__json=json.dumps({"source_sha256": HEX_A}))
+    _w(d / "x.sha256", f"{HEX_A}  params/d/blob\n")
+    (e,) = pol.discover(tmp_path)
+    assert e.sha256_state == "recorded" and len(e.sha256_records) == 2
+
+
+def test_root_list_marks_weights_by_prefix(tmp_path):
+    _torch(tmp_path, "pt")
+    _w(tmp_path / "l.sha256", f"{HEX_A}  pt/actor/model_state_dict/full_weights.pt\n")
+    (e,) = pol.discover(tmp_path)
+    assert (e.sha256_state, e.params_hashed) == ("recorded", True)
+
+
+def test_hash_list_paths_cannot_claim_other_dirs(tmp_path):
+    _jax(tmp_path, "hidden")  # not listed: hidden names are skipped...
+    _jax(tmp_path, "foo")
+    _w(
+        tmp_path / "l.sha256",
+        f"{HEX_A}  ../foo/params/x\n{HEX_A}  /foo/params/y\n{HEX_A}  .foo/params/z\n{HEX_A}  bar/../foo/params/w\n",
+    )
+    (e,) = [x for x in pol.discover(tmp_path) if x.name == "foo"]
+    assert e.sha256_state == "missing"
+
+
+def test_leading_dot_slash_is_still_attributed(tmp_path):
+    _jax(tmp_path, "foo")
+    _w(tmp_path / "l.sha256", f"{HEX_A}  ./foo/params/x\n")
+    (e,) = [x for x in pol.discover(tmp_path) if x.name == "foo"]
+    assert e.sha256_state == "recorded"
+
+
+def test_extra_sha256_lists_in_a_directory_are_reported(tmp_path):
+    d = _jax(tmp_path, "m")
+    for i in range(10):
+        _w(d / f"l{i}.sha256", f"{HEX_A}  f{i}\n")
+    (e,) = pol.discover(tmp_path)
+    assert "sha256_lists_truncated" in e.problems
+
+
+# --- review round: robustness -----------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad", [None, "a\0b", "", 5])
+def test_bad_root_argument_returns_a_reason(bad):
+    rep = pol.discover_report(bad)
+    assert rep.entries == () and len(rep.problems) == 1
+    assert rep.problems[0] in ("root_invalid", "root_missing")
+    assert pol.discover(bad) == []
+
+
+def test_nul_and_none_report_root_invalid():
+    assert pol.discover_report(None).problems == ("root_invalid",)
+    assert pol.discover_report("a\0b").problems == ("root_invalid",)
+
+
+def test_directories_and_links_count_toward_the_size_cap(tmp_path):
+    d = _jax(tmp_path, "m")
+    for i in range(50):
+        (d / "flood" / f"sub{i}").mkdir(parents=True)
+        os.symlink("params", d / "flood" / f"ln{i}")
+    (e,) = pol.discover(tmp_path, max_files_per_entry=20)
+    assert e.size_truncated and "size_is_a_lower_bound" in e.warnings
+    (e,) = pol.discover(tmp_path)
+    assert not e.size_truncated
+
+
+def test_norm_stats_reason_is_kept(tmp_path):
+    d = _jax(tmp_path, "m")
+    (d / "norm_stats.json").unlink()
+    (d / "assets" / "norm_stats.json").unlink()
+    os.mkfifo(d / "norm_stats.json")
+    (e,) = pol.discover(tmp_path)
+    assert not e.deployable
+    assert "norm_stats.json:not_a_regular_file" in e.problems
+    assert "norm_stats.json:missing" not in e.problems
+
+
+def test_deployable_needs_assets_dir(tmp_path):
+    d = _jax(tmp_path, "m")
+    import shutil
+
+    shutil.rmtree(d / "assets")
+    (e,) = pol.discover(tmp_path)
+    assert e.is_jax and not e.deployable
+    assert "assets:missing" in e.problems
+    assert pol.select([e]) == []
+
+
+def test_standard_openpi_layout_with_norm_stats_only_under_assets(tmp_path):
+    d = _jax(tmp_path, "m")
+    (d / "norm_stats.json").unlink()
+    _w(d / "assets" / "asset_id" / "norm_stats.json", "{}")
+    (d / "assets" / "norm_stats.json").unlink()
+    (e,) = pol.discover(tmp_path)
+    assert e.deployable
+
+
+def test_config_sources_disagreeing_is_warned(tmp_path):
+    _jax(
+        tmp_path,
+        "a",
+        {"config": "pi05_fr3_all_state"},
+        README_DEPLOY__md="# T\n--policy.config pi05_fr3_all_state_cfg\n",
+    )
+    _jax(
+        tmp_path,
+        "b",
+        None,
+        README_DEPLOY__md="# T\n--policy.config c1\n--policy.config c2\n",
+    )
+    _jax(
+        tmp_path,
+        "c",
+        {"config": "same"},
+        README_DEPLOY__md="# T\n--policy.config same\n",
+    )
+    got = _by_name(pol.discover(tmp_path))
+    assert "config_sources_disagree" in got["a"].warnings
+    assert "config_sources_disagree" in got["b"].warnings
+    assert "config_sources_disagree" not in got["c"].warnings
+
+
+def test_dotdot_inside_a_hash_path_is_not_attributed(tmp_path):
+    _jax(tmp_path, "foo")
+    _jax(tmp_path, "bar")
+    _w(tmp_path / "l.sha256", f"{HEX_A}  foo/../bar/params/x\n")
+    got = _by_name(pol.discover(tmp_path))
+    assert got["foo"].sha256_state == "missing" and got["bar"].sha256_state == "missing"

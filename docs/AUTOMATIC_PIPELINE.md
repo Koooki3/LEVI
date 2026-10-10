@@ -814,19 +814,19 @@ deployable entries of one role.
 
 | Field | Where it comes from |
 | --- | --- |
-| `kind`, `deployable`, `is_jax` | `params/` plus `norm_stats.json` means a deployable JAX directory; `actor/` means a PyTorch source (listed, not deployable); anything else is `unknown` with `layout_not_recognised`. |
+| `kind`, `deployable`, `is_jax` | A deployable JAX directory has `params/`, an `assets/` directory (where openpi's loader reads) and `norm_stats.json` (at the top, or in `assets/`, directly or one level down); a missing piece is named in `problems` (`assets:missing`, `norm_stats.json:<reason>`). `actor/` means a PyTorch source (listed, not deployable); anything else is `unknown` with `layout_not_recognised`. |
 | `config`, `config_source` | `VERSION.json` `config`, else the `--policy.config` in `README_DEPLOY.md`, else a recipe (`DEFAULT_RECIPE`, or the `recipe=` argument), else `none`. The README's training-machine config name is kept apart as `training_config_name` and never used to serve. |
-| `role`, `role_source` | `VERSION.json` `policy_role` or `role` when it says `forward` or `reset`; else the recipe; else `forward` by convention when the config belongs to the forward family; else `unknown`. A `reset` role is never guessed. |
+| `role`, `role_source` | Only an explicit statement gives `reset`: `VERSION.json` `policy_role` or `role` equal to `reset` after trimming and case folding, or the recipe. `forward` comes from the same explicit statements or, by convention (`convention:config`), from a config in the known forward family. Anything reset-like (`reset`, `recovery`, `recover`, `return`, `home` in the directory name, README title, config name, or any key or short string of `VERSION.json`), an unrecognised `policy_role`, or contradictory statements gives `unknown` (reason in `problems` or `warnings`). A `role` such as `best` is a variant, not a role statement. `select(entries, "forward")` never returns `unknown` entries unless called with `include_unknown=True`. |
 | `variant`, `version`, `model`, `step`, `version_note`, `siblings`, `verified`, `not_verified` | `VERSION.json`, verbatim (`parallel_to` becomes `version_note`). |
-| `sha256_state`, `sha256_records` | Hashes already on disk: `*.sha256` lists in the directory or at the root (attributed by the directory prefix of their lines), and the hashes in `CONVERSION.json`. `covers` says what a record covers (`files`, or `source_weights+norm_stats`, which is not the converted parameters). `recorded` or `missing`; a claim in `VERSION.json` is not a hash. |
-| `converted`, `size_bytes` | `CONVERSION.json` present and readable; summed `lstat` sizes, capped at `MAX_FILES_PER_ENTRY` files (then `size_truncated`). |
+| `sha256_state`, `params_hashed`, `sha256_records` | Hashes already on disk: `*.sha256` lists in the directory or at the root (attributed by the first component of their relative paths; absolute, `..` and hidden paths are ignored), and the hashes in `CONVERSION.json`. `recorded`: a list of this directory's files exists. `indirect`: only `CONVERSION.json` hashes, which belong to the PyTorch source and to the directory `norm_stats_from` (see each record's `subject`), not to `params/`. `missing`: none. `params_hashed` is true only when a list names weight files. **A page must not show `indirect` (or `recorded` with `params_hashed` false) as "verified"**; a claim in `VERSION.json` is not a hash. `covers` says what a record covers. |
+| `converted`, `size_bytes` | `CONVERSION.json` present and readable; summed `lstat` sizes, capped at `MAX_FILES_PER_ENTRY` directory entries of any kind (then `size_truncated`). |
 
 A bad `VERSION.json` or `CONVERSION.json` (not JSON, too large, not an
 object, a symbolic link, a pipe) is recorded in `problems` and the directory
 is still listed. Two directories with the same name after case and Unicode
 folding, or with the same `(model, version, variant, step)`, are flagged on
 both. Hidden entries, plain files and symbolic links in the root are listed
-in `skipped` and not read. When no entry has role `reset`, `select(entries,
+in `skipped` and not read. A root that is `None`, empty or contains a NUL byte gives an empty result with `root_invalid`. When `VERSION.json` and the README name different configs, `config_sources_disagree` is warned. When no entry has role `reset`, `select(entries,
 "reset")` is empty and the caller offers human reset only. Roles by
 convention and recipe configs are guesses about this machine, not facts about
 the checkpoints; the page should show `role_source`. Tests:
