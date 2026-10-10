@@ -30,6 +30,8 @@ import {
 } from "@/components/recap-compare-data";
 
 const CHART_H = 180;
+const MEANS_Y_W = 44;
+const AGREE_Y_W = 36;
 const FALLBACK_W = 360;
 
 /** The plot's width from its container. Recharts' ResponsiveContainer draws
@@ -137,6 +139,128 @@ const axisProps = {
   tick: { fontSize: 12 },
   tickLine: false,
 } as const;
+
+const TICK_LINE_H = 14;
+const MAX_TICK_LINES = 3;
+
+/** The drawn width of one character at the 12px axis font: a CJK glyph is
+ * about twice a Latin one. An estimate is enough to decide where to break. */
+const glyphWidth = (char: string) =>
+  (char.codePointAt(0) ?? 0) >= 0x2e80 ? 12.5 : 6.6;
+const textWidth = (text: string) =>
+  [...text].reduce((sum, char) => sum + glyphWidth(char), 0);
+
+/** A category name broken into lines no wider than `maxPx`: at spaces when
+ * it has them, inside a word (or a run of CJK) when one word is too wide;
+ * past `MAX_TICK_LINES` the last line ends in "…". */
+export function wrapTickLines(text: string, maxPx: number): string[] {
+  const limit = Math.max(maxPx, glyphWidth("W") * 2);
+  const lines: string[] = [];
+  let line = "";
+  const push = () => {
+    if (line) lines.push(line);
+    line = "";
+  };
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    if (line && textWidth(line + " " + word) <= limit) {
+      line += " " + word;
+      continue;
+    }
+    push();
+    for (const char of word) {
+      if (line && textWidth(line + char) > limit) push();
+      line += char;
+    }
+  }
+  push();
+  if (lines.length <= MAX_TICK_LINES) return lines.length ? lines : [""];
+  const kept = lines.slice(0, MAX_TICK_LINES);
+  kept[MAX_TICK_LINES - 1] = kept[MAX_TICK_LINES - 1].replace(/.$/, "") + "…";
+  return kept;
+}
+
+/** Category axis whose labels wrap to the width of their own band, so
+ * neighbouring names never overlap on a narrow card; the chart grows by the
+ * extra lines. */
+function wrappedCategoryAxis(names: string[], plotWidth: number) {
+  const band = Math.max(plotWidth / Math.max(names.length, 1) - 6, 24);
+  const wrapped = names.map((name) => wrapTickLines(name, band));
+  const lines = Math.max(1, ...wrapped.map((rows) => rows.length));
+  const byName = new Map(names.map((name, i) => [name, wrapped[i]]));
+  return {
+    extra: (lines - 1) * TICK_LINE_H,
+    height: lines * TICK_LINE_H + 6,
+    tick: (props: { x?: number; y?: number; payload?: { value?: string } }) => {
+      const value = String(props.payload?.value ?? "");
+      return (
+        <text
+          x={props.x}
+          y={props.y}
+          textAnchor="middle"
+          className="recharts-cartesian-axis-tick-value"
+        >
+          {(byName.get(value) ?? [value]).map((row, i) => (
+            <tspan
+              key={i}
+              x={props.x}
+              dy={i === 0 ? TICK_LINE_H - 2 : TICK_LINE_H}
+            >
+              {row}
+            </tspan>
+          ))}
+        </text>
+      );
+    },
+  };
+}
+
+const LABEL_H = 14;
+
+/** The value axis of the outcome-mean chart: the data range plus room for
+ * the number printed at the end of the longest bar, so a label is never cut
+ * off by the plot edge. Bars hang from 0 (Values lie below it), so labels sit
+ * below negative bars and above positive ones. */
+export function meanAxisDomain(
+  values: readonly number[],
+  plotHeight: number,
+): [number, number] {
+  const room = (LABEL_H + 2) / Math.max(plotHeight, LABEL_H * 2);
+  const finiteValues = values.filter(Number.isFinite);
+  const lo = Math.min(0, ...finiteValues);
+  const hi = Math.max(0, ...finiteValues);
+  if (lo === hi) return [-1, 0];
+  const span = hi - lo;
+  const pad = (span * room) / (1 - 2 * room);
+  return [lo < 0 ? lo - pad : 0, hi > 0 ? hi + pad : 0];
+}
+
+/** Value label at the free end of a bar (below a negative one). */
+function meanBarLabel(props: {
+  x?: number | string;
+  y?: number | string;
+  width?: number | string;
+  height?: number | string;
+  value?: number | string;
+}) {
+  const x = Number(props.x);
+  const y = Number(props.y);
+  const width = Number(props.width);
+  const height = Number(props.height);
+  const value = Number(props.value);
+  if (![x, y, width, height, value].every(Number.isFinite)) return null;
+  const top = Math.min(y, y + height);
+  const bottom = Math.max(y, y + height);
+  return (
+    <text
+      x={x + width / 2}
+      y={value < 0 ? bottom + LABEL_H - 2 : top - 4}
+      textAnchor="middle"
+      className="recap-bar-value"
+    >
+      {chartNumber(value)}
+    </text>
+  );
+}
 const pct = (value: number) => chartNumber(value, 1) + "%";
 const range = (lo: number, hi: number, digits = 3) =>
   chartNumber(lo, digits) + "…" + chartNumber(hi, digits);
@@ -195,51 +319,58 @@ export const RecapComparisonCharts = React.memo(function RecapComparisonCharts({
             )
             .join(" · ")}
         >
-          {(width) => (
-            <BarChart
-              width={width}
-              height={CHART_H}
-              data={agreement.map((bar) => ({
-                ...bar,
-                name: groupName(bar.group),
-              }))}
-              margin={{ top: 16, right: 8, bottom: 0, left: 0 }}
-              barGap={2}
-            >
-              <CartesianGrid vertical={false} />
-              <XAxis dataKey="name" {...axisProps} interval={0} />
-              <YAxis
-                {...axisProps}
-                domain={[0, 100]}
-                width={36}
-                tickFormatter={(v: number) => v + "%"}
-              />
-              <Bar
-                dataKey="agreement"
-                className="recap-bar-agree"
-                fill="currentColor"
-                isAnimationActive={false}
+          {(width) => {
+            const names = agreement.map((bar) => groupName(bar.group));
+            const axis = wrappedCategoryAxis(names, width - AGREE_Y_W - 8);
+            return (
+              <BarChart
+                width={width}
+                height={CHART_H + axis.extra}
+                data={agreement.map((bar, i) => ({ ...bar, name: names[i] }))}
+                margin={{ top: 16, right: 8, bottom: 0, left: 0 }}
+                barGap={2}
               >
-                <LabelList
-                  dataKey="agreement"
-                  position="top"
-                  formatter={(v: number) => pct(v)}
+                <CartesianGrid vertical={false} />
+                <XAxis
+                  dataKey="name"
+                  {...axisProps}
+                  interval={0}
+                  height={axis.height}
+                  tick={axis.tick}
                 />
-              </Bar>
-              <Bar
-                dataKey="positiveA"
-                className="recap-bar-a"
-                fill="currentColor"
-                isAnimationActive={false}
-              />
-              <Bar
-                dataKey="positiveB"
-                className="recap-bar-b"
-                fill="currentColor"
-                isAnimationActive={false}
-              />
-            </BarChart>
-          )}
+                <YAxis
+                  {...axisProps}
+                  domain={[0, 100]}
+                  width={AGREE_Y_W}
+                  tickFormatter={(v: number) => v + "%"}
+                />
+                <Bar
+                  dataKey="agreement"
+                  className="recap-bar-agree"
+                  fill="currentColor"
+                  isAnimationActive={false}
+                >
+                  <LabelList
+                    dataKey="agreement"
+                    position="top"
+                    formatter={(v: number) => pct(v)}
+                  />
+                </Bar>
+                <Bar
+                  dataKey="positiveA"
+                  className="recap-bar-a"
+                  fill="currentColor"
+                  isAnimationActive={false}
+                />
+                <Bar
+                  dataKey="positiveB"
+                  className="recap-bar-b"
+                  fill="currentColor"
+                  isAnimationActive={false}
+                />
+              </BarChart>
+            );
+          }}
         </Plot>
         <span className="recap-chart-legend">
           <span>
@@ -291,52 +422,55 @@ export const RecapComparisonCharts = React.memo(function RecapComparisonCharts({
             )
             .join(" · ")}
         >
-          {(width) => (
-            <BarChart
-              width={width}
-              height={CHART_H}
-              data={means.map((bar) => ({
-                ...bar,
-                name: t(outcomeKey(bar.outcome)),
-              }))}
-              margin={{ top: 8, right: 8, bottom: 16, left: 0 }}
-              barGap={2}
-            >
-              <CartesianGrid vertical={false} />
-              <XAxis dataKey="name" {...axisProps} interval={0} />
-              <YAxis
-                {...axisProps}
-                width={44}
-                domain={["auto", 0]}
-                tickFormatter={(v: number) => chartNumber(v, 2)}
-              />
-              <ReferenceLine y={0} className="recap-chart-zero" />
-              <Bar
-                dataKey="a"
-                className="recap-bar-a"
-                fill="currentColor"
-                isAnimationActive={false}
+          {(width) => {
+            const names = means.map((bar) => t(outcomeKey(bar.outcome)));
+            const axis = wrappedCategoryAxis(names, width - MEANS_Y_W - 8);
+            const height = CHART_H + axis.extra;
+            return (
+              <BarChart
+                width={width}
+                height={height}
+                data={means.map((bar, i) => ({ ...bar, name: names[i] }))}
+                margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
+                barGap={2}
               >
-                <LabelList
+                <CartesianGrid vertical={false} />
+                <XAxis
+                  dataKey="name"
+                  {...axisProps}
+                  interval={0}
+                  height={axis.height}
+                  tick={axis.tick}
+                />
+                <YAxis
+                  {...axisProps}
+                  width={MEANS_Y_W}
+                  domain={meanAxisDomain(
+                    means.flatMap((bar) => [bar.a, bar.b]),
+                    height - 8 - axis.height,
+                  )}
+                  tickFormatter={(v: number) => chartNumber(v, 2)}
+                />
+                <ReferenceLine y={0} className="recap-chart-zero" />
+                <Bar
                   dataKey="a"
-                  position="bottom"
-                  formatter={(v: number) => chartNumber(v)}
-                />
-              </Bar>
-              <Bar
-                dataKey="b"
-                className="recap-bar-b"
-                fill="currentColor"
-                isAnimationActive={false}
-              >
-                <LabelList
+                  className="recap-bar-a"
+                  fill="currentColor"
+                  isAnimationActive={false}
+                >
+                  <LabelList dataKey="a" content={meanBarLabel} />
+                </Bar>
+                <Bar
                   dataKey="b"
-                  position="bottom"
-                  formatter={(v: number) => chartNumber(v)}
-                />
-              </Bar>
-            </BarChart>
-          )}
+                  className="recap-bar-b"
+                  fill="currentColor"
+                  isAnimationActive={false}
+                >
+                  <LabelList dataKey="b" content={meanBarLabel} />
+                </Bar>
+              </BarChart>
+            );
+          }}
         </Plot>
         <p className="recap-chart-note">
           {t(

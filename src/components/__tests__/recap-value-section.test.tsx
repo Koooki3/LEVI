@@ -1533,6 +1533,103 @@ describe("comparison charts", () => {
     ).toBeNull();
   });
 
+  test("outcome-mean value labels stay inside the plot, below negative bars", async () => {
+    compareHandler = async (_ident, a, b) => {
+      const base = charted(a, b);
+      const group = base.by_outcome![0];
+      return {
+        ...base,
+        by_outcome: [
+          {
+            ...group,
+            outcome: "success",
+            mean_value_a: -0.235,
+            mean_value_b: -0.07,
+          },
+          {
+            ...group,
+            outcome: "failure",
+            mean_value_a: -0.166,
+            mean_value_b: -0.758,
+          },
+        ],
+      };
+    };
+    const { host } = await render(page());
+    await loaded(host);
+    await choose(selectors(host)[1], r1);
+    await waitFor(() => host.querySelector(".recap-charts"));
+    const chart = host.querySelectorAll(".recap-chart")[1];
+    const height = Number(
+      chart.querySelector("svg.recharts-surface")!.getAttribute("height"),
+    );
+    const labels = [...chart.querySelectorAll(".recap-bar-value")];
+    expect(labels.map((node) => node.textContent)).toEqual([
+      "-0.235",
+      "-0.166",
+      "-0.070",
+      "-0.758",
+    ]);
+    for (const label of labels) {
+      const y = Number(label.getAttribute("y"));
+      // Inside the drawing, above the category axis (its labels need room).
+      expect(y).toBeGreaterThan(8);
+      expect(y).toBeLessThan(height - 14);
+    }
+  });
+
+  test("category names wrap instead of overlapping on a narrow card", async () => {
+    compareHandler = async (_ident, a, b) => {
+      const base = charted(a, b);
+      const group = base.by_outcome![0];
+      return {
+        ...base,
+        by_outcome: [
+          { ...group, outcome: "success" },
+          { ...group, outcome: "failure" },
+        ],
+      };
+    };
+    const original = globalThis.ResizeObserver;
+    class Narrow {
+      constructor(private cb: ResizeObserverCallback) {}
+      observe(node: Element) {
+        this.cb(
+          [
+            {
+              target: node,
+              contentRect: { width: 230 },
+            } as ResizeObserverEntry,
+          ],
+          this as unknown as ResizeObserver,
+        );
+      }
+      disconnect() {}
+      unobserve() {}
+    }
+    globalThis.ResizeObserver = Narrow as unknown as typeof ResizeObserver;
+    try {
+      const { host } = await render(page());
+      await loaded(host);
+      await choose(selectors(host)[1], r1);
+      await waitFor(() => host.querySelector(".recap-charts"));
+      for (const index of [0, 1]) {
+        const chart = host.querySelectorAll(".recap-chart")[index];
+        const ticks = [
+          ...chart.querySelectorAll(
+            ".recharts-xAxis .recharts-cartesian-axis-tick-value",
+          ),
+        ];
+        expect(ticks.length).toBeGreaterThan(0);
+        // Every category is drawn on its own lines, none wider than its band.
+        for (const tick of ticks)
+          expect(tick.querySelectorAll("tspan").length).toBeGreaterThan(1);
+      }
+    } finally {
+      globalThis.ResizeObserver = original;
+    }
+  });
+
   test("an older backend without aggregates still gets charts from per-episode rows", async () => {
     const { host } = await render(page());
     await loaded(host);
