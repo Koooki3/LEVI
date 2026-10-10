@@ -624,3 +624,87 @@ unconfirmed, card problems, pairable, planned and missing slots.
 `adjudicated_then_operator`. An undecided or missing verdict and a
 `discarded` or `unclear` operator label give no value. The last two bases
 are what `metrics.LabelStore.truth` reads; its default is unchanged.
+
+## Report artefacts
+
+`levi.automatic.campaign.report` turns the ledger and one label basis into
+a report. `analyse(ledger, info, basis, layout=None, seed=None)` returns
+every number in one JSON document (schema `levi.aeri.campaign_report.v1`);
+`write_report(report_root, ledger, info, basis, ...)` writes it out:
+
+```
+<report_root>/<basis>/
+  summary.en.md  summary.zh-CN.md
+  tables/   success  pairwise  continuous  failure_modes  agreement  power (.csv and .tex); drift.csv
+  figures/  f1-success  f2-differences  f3-time-to-success  f4-failure-modes
+            f5-early-stop  f6-drift  f7-agreement (.svg, .zh-CN.svg, .pdf, .json FigureSpec)
+  data/     trials.parquet  trials.csv  labels.csv  analysis.json
+  manifest.json
+```
+
+Each basis has its own folder, and writing one never changes another. The
+folder is built beside the old one under a per-basis lock
+(`.<basis>.lock`) and swapped in whole: a reader sees the old report or the
+new one, and a failed write leaves the old one as it was. A writer killed
+halfway leaves a `.<basis>.tmp-*` folder that the next write of that basis
+removes. The same ledger, labels, campaign information and seed give the
+same bytes (the manifest's `generated_at` aside; pass `now` to fix it).
+`.tex` tables use `tabular` and `\hline` only; `fmt` formats every printed
+number. A CSV text cell that a spreadsheet would run as a formula starts
+with an apostrophe.
+
+**What is analysed.** Per arm: the success rate with Wilson and
+Clopper–Pearson intervals, and label coverage. Per pair of arms (the
+pre-registered comparison first, B minus A): McNemar's tests, Newcombe's
+paired interval and a paired bootstrap on trials with the same card in
+the same round; Fisher's test and Newcombe's independent interval when a
+reset policy sets the scene (`layout_source: none`). Holm adjusts the
+family; three or more arms add Cochran's Q. Steps on pairs that both
+succeeded (Wilcoxon, Hodges–Lehmann); time to success (Kaplan–Meier,
+log-rank, RMST up to the step cap); failure modes; early termination (the
+detector is judged against people: adjudicated, else operator); drift
+(reference arm trend, arm by time, carryover); the automatic verdict
+against the operator per arm and per way the episode ended, with a test of
+a judge error rate that differs between arms; the power table. A
+sensitivity analysis without deviated trials is added when there are any.
+
+**Label basis and names.** The summary opens with the basis block:
+basis, label coverage per arm (a warning above 10 percentage points
+between arms), operator blinding, layout control and deviated trials,
+reset mode and scene check. Rates are named by basis and the generator
+refuses anything else (`check_naming`):
+
+| Basis | Name of the rate |
+| --- | --- |
+| `autonomous_verdict`, `posthoc_verdict` | automatic-verdict success rate (unreviewed) |
+| `operator_label` | success rate (operator label) |
+| `adjudicated_ground_truth` | ground-truth success rate (the only basis that may say ground truth) |
+| `adjudicated_then_operator` | success rate (adjudicated where available, else operator), with how many labels came from each |
+
+**Conclusion level.** Confirmatory only when every condition holds:
+pre-registered primary analysis, the planned number of labelled trials in
+every arm, no peeks, a basis a person reviewed (operator or adjudicated),
+no drift warning, a schedule other than `blocked` or `interleaved`, and the
+library's planned-power rule (the planned difference detectable at 80 %).
+Otherwise every conclusion sentence is marked exploratory, and the summary
+lists the conditions not met. An interval that holds zero says the data
+cannot tell the arms apart and gives the design's detectable difference;
+it never says the arms are alike. Words that claim more than an interval
+("significantly outperforms", "proves", "state-of-the-art" and their
+Chinese counterparts) are refused outside a confirmatory sentence
+(`check_wording`; a test scans every template branch). The text comes from
+`templates/` (`sentences.json`, `summary.<lang>.md`); no language model is
+called, and every number in it is formatted from `analysis.json` (tested).
+Post-hoc power is never reported. `blinded=True` writes a summary without
+any per-arm value (for a campaign still running); the other files are
+written as usual, and the overview page decides what to show.
+
+**Privacy.** `manifest.json` lists the campaign and settings digests,
+each child run's plan digest, state, LEVI commit and modes, each arm's
+checkpoint name (never its path), configuration, digest status and
+versions, the seed and schedule, peeks, deviated trials, the methods with
+their references, every file's size and SHA-256, PDF text substitutions,
+and `png: skipped(no converter)`. Names and e-mail addresses are never
+written. Camera serial numbers, IP addresses, host names, URLs and local
+paths are dropped (by key, and inside strings) unless
+`include_site_details=True`.

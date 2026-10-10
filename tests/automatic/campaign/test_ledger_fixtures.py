@@ -60,7 +60,7 @@ def fact(run, number, *, source="aeri", status="valid", card=None, **kw):
     episode = (
         f"{run}.forward.{number:04d}"
         if source == "aeri"
-        else f"models/ckpt/task/demo_{number:04d}"
+        else f"models/{run}/task/demo_{number:04d}"
     )
     return EpisodeFact(
         run_id=run,

@@ -295,3 +295,34 @@ campaign 的文件在 `$LEVI_AERI_HOME/campaigns/<id>/`（`LEVI_AERI_HOME` 默�
 作废（操作员按 `d`，或标签为 `discarded`）和不完整的片段留在台账里计数，但不占卡（操作员会重新摆同一张卡），也没有结果。`counts(ledger, layout)` 按组给出：有效、作废、不完整、偏离、补跑行、未确认、卡号问题、可成对、计划卡位和缺失卡位。
 
 **标签口径。** 每个片段的四种标签互不覆盖（自动判定、后台复核、操作员标签、裁定标签）。`label_value(entry, basis)` 按五种口径之一读取：`autonomous_verdict`、`posthoc_verdict`、`operator_label`、`adjudicated_ground_truth`、`adjudicated_then_operator`。未定或缺失的判定、`discarded` 或 `unclear` 的操作员标签都不算值。后两种口径就是 `metrics.LabelStore.truth` 读取的口径，它的默认行为不变。
+
+## 报告产物
+
+`levi.automatic.campaign.report` 把台账和一种标签口径做成报告。`analyse(ledger, info, basis, layout=None, seed=None)` 把所有数字放进一个 JSON 文档（schema `levi.aeri.campaign_report.v1`）；`write_report(report_root, ledger, info, basis, ...)` 把它写出来：
+
+```
+<report_root>/<口径>/
+  summary.en.md  summary.zh-CN.md
+  tables/   success  pairwise  continuous  failure_modes  agreement  power（.csv 和 .tex）；drift.csv
+  figures/  f1-success  f2-differences  f3-time-to-success  f4-failure-modes
+            f5-early-stop  f6-drift  f7-agreement（.svg、.zh-CN.svg、.pdf、.json FigureSpec）
+  data/     trials.parquet  trials.csv  labels.csv  analysis.json
+  manifest.json
+```
+
+每种口径一个目录，写一个从不改动另一个。目录在按口径加锁（`.<口径>.lock`）后先在旧目录旁边建好，再整体换入：读者看到的不是旧报告就是新报告，写入失败时旧报告保持原样。写到一半被杀掉会留下 `.<口径>.tmp-*` 目录，下次写同一口径时删掉。同样的台账、标签、计划信息和种子得到逐字节相同的文件（manifest 的 `generated_at` 除外；传 `now` 可固定）。`.tex` 表只用 `tabular` 和 `\hline`；所有打印的数字都经 `fmt` 格式化。CSV 里会被电子表格当公式执行的文本单元格前加一个撇号。
+
+**分析内容。** 每组：成功率及 Wilson、Clopper–Pearson 区间，标签覆盖率。每对组（预注册的比较排第一，B 减 A）：在同一轮、同一张卡上的试验对上做 McNemar 检验、Newcombe 成对区间和成对 bootstrap；由复位策略摆场景时（`layout_source: none`）改用 Fisher 检验和 Newcombe 独立样本区间。Holm 校正整个比较族；三组及以上另做 Cochran Q。两组都成功的对上比较步数（Wilcoxon、Hodges–Lehmann）；时间到成功（Kaplan–Meier、log-rank、到步数上限的 RMST）；失败模式；提前终止（检测器以人工标签为准：有裁定用裁定，否则用操作员标签）；漂移（参照组趋势、组×时间、残留效应）；每组、按片段结束方式分层的自动判定与操作员标签一致性，以及判定器误判率是否因组而异的检验；功效表。有偏离试验时另做一次剔除它们的敏感性分析。
+
+**标签口径与命名。** 摘要开头是口径块：口径、每组标签覆盖率（组间相差超过 10 个百分点时警告）、操作员盲法、布局控制与偏离试验、复位方式和场景检查。比率按口径命名，生成器拒绝其他写法（`check_naming`）：
+
+| 口径 | 比率名称 |
+| --- | --- |
+| `autonomous_verdict`、`posthoc_verdict` | 自动判定成功率（未经人工核实） |
+| `operator_label` | 成功率（操作员标签） |
+| `adjudicated_ground_truth` | 真值成功率（唯一可以写“真值”的口径） |
+| `adjudicated_then_operator` | 成功率（裁定优先，否则操作员），并写明两种标签各占几条 |
+
+**结论等级。** 全部条件都满足才算确证性：主分析已预注册；每组带标签的试验数达到计划值；没有中途查看；口径经过人工（操作员或裁定）；没有漂移警告；顺序策略不是 `blocked` 或 `interleaved`；分析库按预设功效判定（预设差值在 80% 功效下可检出）。否则每个结论句都标“探索性”，摘要列出未满足的条件。区间含 0 时写“本次数据不足以区分”，并给出本设计的最小可检出差，从不写两组相当。夸大的措辞（“显著优于”“证明”“state-of-the-art”等）在确证性句子之外一律拒绝（`check_wording`；有测试扫描所有模板分支）。文字来自 `templates/`（`sentences.json`、`summary.<语言>.md`），不调用语言模型，其中每个数字都由 `analysis.json` 格式化而来（有测试）。从不报告事后功效。`blinded=True` 写出不含任何分组数值的摘要（用于仍在进行的计划）；其他文件照常写出，由总览页决定显示什么。
+
+**隐私。** `manifest.json` 记录计划和共享设置的摘要、各子运行的计划摘要、状态、LEVI 提交号和模式、各组的检查点名称（从不写路径）、配置、哈希状态和版本、种子与时间表、中途查看次数、偏离试验数、方法及其文献、每个文件的大小和 SHA-256、PDF 文字替换记录，以及 `png: skipped(no converter)`。从不写姓名和邮箱。相机序列号、IP 地址、主机名、URL 和本机路径一律去掉（按键名，也查字符串内容），除非 `include_site_details=True`。
