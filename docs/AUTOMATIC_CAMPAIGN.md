@@ -193,16 +193,52 @@ same spec gives the same bytes and two campaign reports can be compared with
 | `stacked_bar` | Failure modes stacked per arm | category x, linear y |
 | `early_stop` | Early-stop saving and error rate; one to four panels | category x, linear y |
 | `drift_lines` | Per-round rate per arm with intervals; the reference arm is heavier | linear or category x, linear y |
+| `confusion_matrix` | Judge agreement: one matrix per panel, each cell shaded by its share of the row and labelled with count and share | category x and y |
 
 A `Point` is `x`, `y`, an optional interval `lo`/`hi` on the value axis (`y`;
 `x` in a forest plot) and an optional short `label` such as `8/20`. Titles,
 summaries, axis labels, series names and notes can be given in English and
 Chinese (`{"en": ..., "zh-CN": ...}`); a missing language falls back to
 English. `validate()` refuses what cannot be drawn truthfully: unknown kinds,
-non-finite numbers, an interval that does not contain its value, a category
-index out of range, a series that goes backwards in x, negative stacked
-values, and **data outside a fixed axis range** (a value is never clipped
-silently).
+non-finite numbers, `lo` above `hi`, a category index out of range, a slot
+given twice, a series that goes backwards in x, negative stacked values,
+control characters in text, duplicate series names in one panel, and
+intervals on a stacked bar (it does not support them). Drawing refuses
+**data outside a fixed axis range**: a value is never clipped silently.
+A matrix cell carries its count in `Point.value`; `value` is for
+`confusion_matrix` only.
+
+### Intervals are never lost quietly
+
+* A step curve draws an interval band for each run of consecutive points
+  that have one; a point with an interval on its own (including a one-point
+  curve) gets an error bar; a point without one breaks the band. All bands
+  are drawn first, then all curves, so a band never hides another arm's curve.
+* A point that lacks an interval in a series that has intervals elsewhere is
+  marked `interval unavailable` in the table, and the figure says how many
+  points that is.
+* **At x = 0 a step curve with no interval means no uncertainty** (the
+  Kaplan-Meier output has none before the first event): the value is its own
+  interval, the table says `no uncertainty at 0`, and nothing is reported as
+  missing.
+* After drawing, `validate_render(spec, scene)` checks that every interval
+  of the spec has a mark in the scene and raises `ValueError` otherwise;
+  `layout()` calls it, so a drawing function that skips intervals cannot
+  produce a figure.
+* An estimate outside its interval (legitimate for a bootstrap percentile or
+  BCa interval, or a median) is kept, flagged `estimate outside interval` in
+  the table and counted under the figure. `warnings(spec)` lists these and
+  the unavailable items as codes such as
+  `estimate_outside_interval:panel0/series1/point0`.
+* A group with no data is a series with `unavailable=True` and no points: it
+  keeps its legend entry (`Arm D (unavailable)`), gets a table row and a count
+  under the figure, and draws nothing.
+
+### Several panels
+
+All panels share one legend, built from the union of their series; a series
+keeps its colour, marker, line and hatch by **name**, whatever its position in
+a panel.
 
 ### Reading a figure without colour
 
@@ -214,7 +250,13 @@ silently).
   (`emphasis=True`) is drawn heavier.
 * Arm names are always printed (legend, tick labels), never left to colour.
 * Axis ticks use 1, 2 or 5 times a power of ten; a constant series gets a
-  readable window, and an interval is always drawn.
+  readable window.
+* Colour is guaranteed apart for every pair, and grayscale only for
+  neighbouring colours in the palette order; the hatch, marker and line style
+  carry the rest.
+* In `drift_lines` the arms are shifted by up to 3 pt sideways so their
+  intervals do not overprint; on a numeric x axis that is a drawing offset,
+  not a change of the data.
 * The SVG carries `<title>` and `<desc>` (the title and the one-sentence
   summary) and, with `embed_spec=True`, the spec itself in `<metadata>`.
   Put `table_html(spec)` next to the figure in a page so that screen-reader
@@ -224,9 +266,23 @@ silently).
 
 SVG text is live text in a generic font family (a CJK family is added when the
 text needs one). The PDF uses the standard Helvetica and Helvetica-Bold fonts
-(nothing is embedded; every reader has them), so it is **Latin only**: a string
-that Windows-1252 cannot encode is replaced by its English form, and by `?` if
-there is none. Write Chinese figures as SVG, or give every text an English form.
+(nothing is embedded; every reader has them), so it is **Latin only**, and
+nothing is replaced silently. For each text that Windows-1252 cannot show, the
+PDF uses, in this order: a form in another language that fits (English); a
+transliteration of statistics symbols (`Δ` to `Delta`, `−` to `-`, `α` to
+`alpha`, `≥` to `>=`, ...); `?` marks, or `[n/a]` when nothing readable is
+left. `pdfplot.render_pdf_report(spec, lang, strict=False)` returns the bytes
+and `substitutions`, a list of `{"text", "to", "reason"}` records
+(`transliterated`, `fallback_en`, `unencodable`), plus the language the title
+is really in (also written to the PDF `/Lang`); its `manifest()` gives
+`{"pdf": "ok" | "lossy(n)", ...}` for a report manifest. `strict=True` raises
+`LossyTextError` instead. `write_pdf` returns the same list. Write Chinese
+figures as SVG, or give every text an English form.
+
+Titles, summaries and notes are cut to 300, 600 and 400 characters (3, 4 and 6
+lines each), and legend names, panel titles, axis labels, reference-line and
+point labels to short limits; `Scene.truncated` names what was cut. Layout time
+is linear in the text length.
 There is no PNG writer; PNG export stays in the web page (the browser draws the
 SVG), and a command-line PNG is made only if a converter such as
 `rsvg-convert` is on the PATH.
@@ -236,9 +292,31 @@ SVG), and a command-line PNG is made only if a converter such as
 `pdfplot.verify_pdf(data)` re-reads a file with its own small parser: header,
 cross-reference offsets, trailer, page tree, stream length, fonts and end
 marker, and returns the page size and every string shown. The tests also run
-`pdftotext` and `pdfinfo` (poppler) when they are installed. A human should open
-one generated PDF in a normal viewer once per release to check how it looks:
-the tests prove the structure and the text, not the visual layout.
+`pdftotext` and `pdfinfo` (poppler) when they are installed. The reader also tokenises the page
+content: only the operators this writer emits, with the right operand counts,
+`q`/`Q` and `BT`/`ET` balanced, text only inside `BT`/`ET` and only declared
+fonts; a dangling object reference is a `PdfError`. A human should open one
+generated PDF in a normal viewer once per release to check how it looks: the
+tests prove the structure and the text, not the visual layout.
 
 Golden SVG files live in `tests/automatic/analysis/test_fig_golden/`; after an
 intended change, regenerate them with `LEVI_UPDATE_GOLDEN=1` and read the diff.
+
+### Interface with the analysis library
+
+The figure side only needs plain numbers. The report generator (T-CP-06)
+writes the adapter from the analysis results to `FigureSpec`; this is the
+agreement it must follow (`tests/automatic/analysis/test_figadapter.py` has a
+runnable minimal example; the input shape there, `estimate`/`low`/`high` with
+`None` when unavailable, is **assumed** from the analysis task and must be
+checked against the library's real output):
+
+* A group with no data becomes a series with `unavailable=True`; it is never
+  dropped.
+* Kaplan-Meier intervals are on S(t); the time-to-success figure shows
+  1 - S(t), so the adapter plots `1 - S` with the interval `[1 - high, 1 - low]`.
+  The library has no interval at t = 0; leave `lo`/`hi` empty there (see above).
+* Pass a bootstrap interval as it is. If it excludes the point estimate the
+  figure warns and keeps it; do not clip or re-centre it.
+* Rates are fractions in 0..1 (use `fmt="percent"`); counts go in the point
+  `label` (`8/20`) or, for a matrix, in `value`.
