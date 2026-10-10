@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 
 from levi.agent import anchored
-from levi.agent.anchored import ViewSpec, crossings, view_rows
+from levi.agent.anchored import ViewSpec, crossings, uneven_times, view_rows
 from levi.agent.signals import gripper_events, still_spans, summarize
 
 FIXTURE = Path(__file__).parent / "fixtures" / "events" / "signals-golden.json"
@@ -329,12 +329,61 @@ def test_speed_is_unknown_where_time_does_not_advance():
 
 def test_view_rows_ignore_dropped_frames_current_behavior():
     # 10 fps, frames 10-14 missing: the row 1.0 s before the anchor (row 15,
-    # t = 2.0 s) is 10 rows back, which is t = 0.5 s.
+    # t = 2.0 s) is 10 rows back, which is t = 0.5 s. Still so without the
+    # table's timestamps; a review passes them on an uneven table (T-A-05,
+    # next test).
     times = np.round(np.array([*range(10), *range(15, 30)]) / 10, 6)
     view = ViewSpec(role="side", camera="cam", offsets_seconds=[-1.0, 0.0])
     rows = view_rows(view, 10.0, 15, len(times) - 1)
     assert rows == [5, 15]
     assert times[rows[0]] == 0.5  # 1.5 s back, not 1.0 s
+
+
+DROPPED = np.round(np.array([*range(10), *range(15, 30)]) / 10, 6)
+
+
+def test_view_rows_on_dropped_frames_look_up_timestamps():
+    # T-A-05: on an uneven table, an offset in seconds is the row nearest
+    # that time: 1.0 s before t = 2.0 s is t = 1.0 s, nearest row 9 (0.9 s).
+    times = uneven_times(DROPPED, 10.0)
+    assert times is not None
+    view = ViewSpec(role="side", camera="cam", offsets_seconds=[-1.0, 0.0, 0.25])
+    assert view_rows(view, 10.0, 15, len(DROPPED) - 1, times) == [9, 15, 17]
+    # Clamped to the episode at both ends.
+    far = ViewSpec(role="side", camera="cam", offsets_seconds=[-9.0, 9.0])
+    assert view_rows(far, 10.0, 15, len(DROPPED) - 1, times) == [0, 24]
+    # From the episode's start or end.
+    start = ViewSpec(role="s", camera="cam", offsets_seconds=[0.0, 1.2], at="start")
+    assert view_rows(start, 10.0, 15, len(DROPPED) - 1, times) == [0, 9]
+    end = ViewSpec(role="e", camera="cam", offsets_seconds=[-1.0, 0.0], at="end")
+    assert view_rows(end, 10.0, 15, len(DROPPED) - 1, times) == [14, 24]
+    # Offsets in frames stay frames.
+    frames = ViewSpec(role="f", camera="cam", offsets=[-10, 0])
+    assert view_rows(frames, 10.0, 15, len(DROPPED) - 1, times) == [5, 15]
+
+
+def test_a_tie_between_two_rows_takes_the_earlier():
+    times = np.array([0.0, 0.1, 0.3])
+    view = ViewSpec(role="side", camera="cam", offsets_seconds=[-0.1])
+    assert view_rows(view, 10.0, 2, 2, times) == [1]
+
+
+def test_only_an_uneven_table_is_read_by_timestamp():
+    for fps in (10.0, 15.0, 30.0, 29.97):
+        even = np.arange(3000) / fps
+        assert uneven_times(even, fps) is None
+        # float32, as LeRobot stores timestamps, and a late start: still even.
+        assert uneven_times((even + 4.2).astype(np.float32), fps) is None
+    jitter = np.arange(50) / 10 + np.r_[0, 0.004, np.zeros(48)]
+    assert uneven_times(jitter, 10.0) is not None
+    assert uneven_times(DROPPED, 10.0) is not None
+    # Declared at another rate than recorded: read by timestamp.
+    assert uneven_times(np.arange(50) / 10, 15.0) is not None
+    # Nothing to go by: as before.
+    assert uneven_times(np.array([0.0]), 10.0) is None
+    assert uneven_times(np.array([0.0, np.nan, 0.2]), 10.0) is None
+    assert uneven_times(np.array([0.0, 0.2, 0.1]), 10.0) is None
+    assert uneven_times(np.arange(5) / 10, 0.0) is None
 
 
 def test_two_grippers_each_get_a_line_and_mixed_events_current_behavior():

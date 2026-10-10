@@ -40,6 +40,7 @@ import time
 from pathlib import Path
 from typing import Any, Literal
 
+import numpy as np
 from pydantic import Field, model_validator
 
 from ..events import gripper
@@ -549,9 +550,32 @@ def anchors(table, info, stats, anchor):
 
 
 def view_offsets(view, fps):
+    """A view's offsets in frames (seconds converted with the dataset's
+    fps): the rows it shows on an evenly sampled table, and the ``offset``
+    a record names a shown frame by."""
     if view.offsets is not None:
         return list(view.offsets)
     return [round(s * fps) for s in view.offsets_seconds]
+
+
+# A table is evenly sampled when every row is within this share of a frame
+# of ``timestamp[0] + row / fps``.
+EVEN = 0.01
+
+
+def uneven_times(times, fps):
+    """The table's timestamps when they are not evenly sampled at ``fps``
+    (dropped frames, a jittery clock), else None. Only then do views given
+    in seconds look up rows by timestamp; LEVI's own conversions are always
+    even (``timestamp = frame_index / fps``), and so read as they always
+    did."""
+    times = np.asarray(times, dtype=float)
+    if len(times) < 2 or not fps or fps <= 0 or not np.isfinite(times).all():
+        return None
+    if np.any(np.diff(times) < 0):
+        return None
+    drift = times - times[0] - np.arange(len(times)) / fps
+    return None if np.all(np.abs(drift) <= EVEN / fps) else times
 
 
 # --- judging ---------------------------------------------------------------
@@ -789,11 +813,26 @@ def validate_answer(spec, raw):
 # --- one episode -----------------------------------------------------------
 
 
-def view_rows(view, fps, n, last):
+def view_rows(view, fps, n, last, times=None):
     """Row positions a view shows: its offsets from the anchor row ``n``, the
-    first row or the last, clamped to the episode."""
+    first row or the last, clamped to the episode. With ``times`` (the
+    table's timestamps, from ``uneven_times``) an offset in seconds is the
+    row whose timestamp is nearest that many seconds from the base row's
+    (the earlier row on a tie), not that many frames at the declared fps."""
     base = n if view.at == "anchor" else 0 if view.at == "start" else last
-    return [min(last, max(0, base + d)) for d in view_offsets(view, fps)]
+    if times is None or view.offsets_seconds is None:
+        return [min(last, max(0, base + d)) for d in view_offsets(view, fps)]
+    times = np.asarray(times, dtype=float)[: last + 1]
+    rows = []
+    for s in view.offsets_seconds:
+        target = times[base] + s
+        i = int(np.searchsorted(times, target))
+        if i > last:
+            i = last
+        elif i > 0 and target - times[i - 1] <= times[i] - target:
+            i -= 1
+        rows.append(i)
+    return rows
 
 
 def review_episode(wb, id, config, context, episode, started):
@@ -821,12 +860,15 @@ def review_episode(wb, id, config, context, episode, started):
     last = len(table) - 1
     frames = table.frame_index.to_numpy(dtype=int)
     times = table.timestamp.to_numpy(dtype=float)
+    # Seconds become rows by timestamp only on an unevenly sampled table.
+    uneven = uneven_times(times, fps)
     adapter = DATASETS[context.dataset_adapter]
     asked_vetoes = [v for v in spec.vetoes if v.question is not None]
 
     def shows(views, n):
         return {
-            v.role: [int(frames[r]) for r in view_rows(v, fps, n, last)] for v in views
+            v.role: [int(frames[r]) for r in view_rows(v, fps, n, last, uneven)]
+            for v in views
         }
 
     # Frames per camera: every offset of every view the questions show, at
@@ -988,6 +1030,17 @@ def review_episode(wb, id, config, context, episode, started):
     }
     if start is not None:
         record["start"] = start
+    if uneven is not None and any(
+        v.offsets_seconds is not None
+        for v in [
+            *spec.views,
+            *(spec.start.views if spec.start else []),
+            *(view for veto in spec.vetoes for view in veto.views or []),
+        ]
+    ):
+        # Offsets in seconds were looked up by timestamp (an even table's
+        # record leaves this out, as before).
+        record["offset_timing"] = "timestamps"
     if spec.episode.rule == "last_valid_not_regrasped":
         # Frames where the gripper closes, for the rule that reads them. A
         # spec with the default rule leaves them out, so its records stay as
