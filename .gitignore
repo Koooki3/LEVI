@@ -88,3 +88,5 @@ levi/agent/skills/levi-overview/SKILL.md
 
 # Maintainer-local folder next to the code: workspaces, experiment harnesses, worktrees, tools (not part of LEVI)
 /lab/
+LEVI_Data_Harness_Research_Plan_20260924.md
+levi.md
