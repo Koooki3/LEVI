@@ -574,3 +574,53 @@ exactly once.
 **Not yet:** commands and pages (T-CP-08, T-CP-09), the trial ledger and
 reruns `<id>__<arm>__s<NN>r2` (T-CP-05), the real launch recipes (T-SU),
 the report (T-CP-06).
+
+## Trial ledger
+
+`levi.automatic.campaign.ledger` lists every forward episode a campaign ran,
+one row per episode, in `ledger.jsonl` (schema
+`levi.aeri.campaign_trial.v1`). The campaign stores no truth of its own:
+the ledger is derived again from the child runs each time, and the same
+inputs give the same bytes (`write_ledger` writes nothing when the file
+already holds them, and otherwise writes through a temporary file, `fsync`
+and rename).
+
+**Inputs.** A `CampaignLayout` (campaign id, segments in campaign order,
+each with its arm, round, layout cards in slot order and the run ids that
+ran it: the first run, then reruns) and the episodes of each run:
+
+| Source | Function | Reads |
+| --- | --- | --- |
+| AERI child run | `read_aeri_run(run_dir, max_steps=None)` | `manifest.json`, the run journal (each episode's committed result) and `labels/`, without a lock and without writing; a corrupt journal is refused |
+| Legacy evaluation client | `guided.legacy_fact(...)` (see [Guided legacy-client campaign](#guided-legacy-client-campaign)) | the rollout's `metadata.json` |
+
+**Rows.** `trial_id = <campaign>:<round>:<card>:<arm>`, `slot` (the card's
+position in its segment), `segment`, `run_id`, `episode_id`, `order_index`,
+`started_at`/`ended_at`, `layout_fidelity` (`attested`, `verified`,
+`deviated` with its reason), `preceded_by_arm` (the arm of the segment
+before), `rerun_of` (the segment's first run, for rows of a rerun), plus
+steps, stop reason, how the episode ended (`budget`, `early_stop`,
+`operator_stop`) and the early-stop control fields.
+
+**Which card an episode had.**
+
+| Case | Card | Paired? |
+| --- | --- | --- |
+| The run manifest names it (`episodes[*].campaign.card`) or a person confirmed it | as given | yes |
+| An AERI episode without one | the segment's next unfinished card (the run asked for it) | yes |
+| A legacy-client episode not yet confirmed | none; `candidate_card` is the next unfinished card | **no** |
+| A card outside the segment, a card already held, an episode beyond the last card | flagged in `card_problem` | no |
+
+Discarded (the operator's `d`, or a `discarded` label) and incomplete
+episodes stay in the ledger and are counted, hold no card (the operator
+places the same card again) and have no outcome. `counts(ledger, layout)`
+gives per arm: valid, discarded, incomplete, deviated, rows from reruns,
+unconfirmed, card problems, pairable, planned and missing slots.
+
+**Label bases.** The four kinds of label stay apart per episode
+(autonomous verdict, post-hoc verdict, operator label, adjudicated label).
+`label_value(entry, basis)` reads one of five bases: `autonomous_verdict`,
+`posthoc_verdict`, `operator_label`, `adjudicated_ground_truth`,
+`adjudicated_then_operator`. An undecided or missing verdict and a
+`discarded` or `unclear` operator label give no value. The last two bases
+are what `metrics.LabelStore.truth` reads; its default is unchanged.

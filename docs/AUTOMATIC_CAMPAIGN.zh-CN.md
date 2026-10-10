@@ -269,3 +269,29 @@ campaign 的文件在 `$LEVI_AERI_HOME/campaigns/<id>/`（`LEVI_AERI_HOME` 默�
 **集成用的接口：** `PolicyHost`（`stop`、`start`、`passive_ready`）、`RunLauncher`（`launch`、`status`、`robot_busy`）、`Confirmations`（`ask`、`take`、`withdraw`、`pause_requested`）、`SessionWriter`（`waiting_reset`、`release`）和 `ChildPlanner`（`plan`）。
 
 **还没有做：** 命令和页面（T-CP-08、T-CP-09），试验台账和补跑 `<id>__<arm>__s<NN>r2`（T-CP-05），真实的启动配方（T-SU），报告（T-CP-06）。
+
+## 试验台账
+
+`levi.automatic.campaign.ledger` 把评测计划跑过的每个前向片段列成一行，写在 `ledger.jsonl`（schema `levi.aeri.campaign_trial.v1`）。评测计划本身不另存真值：台账每次都从子运行重新推导，同样的输入得到逐字节相同的文件（文件内容已经相同时 `write_ledger` 什么也不写；否则经临时文件、`fsync`、改名写入）。
+
+**输入。** 一个 `CampaignLayout`（计划 ID；按计划顺序排列的各段，每段有组、轮次、按卡位顺序的布局卡、跑这一段的运行 ID：先是第一次运行，再是补跑），以及各次运行的片段：
+
+| 来源 | 函数 | 读取 |
+| --- | --- | --- |
+| AERI 子运行 | `read_aeri_run(run_dir, max_steps=None)` | `manifest.json`、运行日志（各片段已提交的结果）和 `labels/`；不加锁、不写任何文件；日志损坏时拒绝 |
+| 旧评测客户端 | `guided.legacy_fact(...)`（见[引导式旧客户端](#引导式旧客户端)） | rollout 的 `metadata.json` |
+
+**行。** `trial_id = <计划>:<轮次>:<卡>:<组>`，`slot`（卡在本段中的位置）、`segment`、`run_id`、`episode_id`、`order_index`、`started_at`/`ended_at`、`layout_fidelity`（`attested`、`verified`，或带原因的 `deviated`）、`preceded_by_arm`（上一段的组）、`rerun_of`（补跑的行记本段第一次运行），以及步数、停止原因、片段怎样结束（`budget`、`early_stop`、`operator_stop`）和早停对照字段。
+
+**片段用的是哪张卡。**
+
+| 情形 | 卡 | 是否成对 |
+| --- | --- | --- |
+| 运行 manifest 写明（`episodes[*].campaign.card`），或有人确认过 | 照用 | 是 |
+| AERI 片段没写明 | 本段下一张没完成的卡（运行就是让操作员摆这张） | 是 |
+| 旧客户端片段还没人确认 | 没有卡；`candidate_card` 是下一张没完成的卡 | **否** |
+| 卡不属于本段、卡已被占用、片段超出最后一张卡 | 记在 `card_problem` | 否 |
+
+作废（操作员按 `d`，或标签为 `discarded`）和不完整的片段留在台账里计数，但不占卡（操作员会重新摆同一张卡），也没有结果。`counts(ledger, layout)` 按组给出：有效、作废、不完整、偏离、补跑行、未确认、卡号问题、可成对、计划卡位和缺失卡位。
+
+**标签口径。** 每个片段的四种标签互不覆盖（自动判定、后台复核、操作员标签、裁定标签）。`label_value(entry, basis)` 按五种口径之一读取：`autonomous_verdict`、`posthoc_verdict`、`operator_label`、`adjudicated_ground_truth`、`adjudicated_then_operator`。未定或缺失的判定、`discarded` 或 `unclear` 的操作员标签都不算值。后两种口径就是 `metrics.LabelStore.truth` 读取的口径，它的默认行为不变。
