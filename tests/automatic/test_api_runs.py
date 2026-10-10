@@ -220,6 +220,7 @@ def waiting(client, roots, tmp_path, fake_systemd):
     )
     yield client, "r-wait", snap, served, Path(entry["run_dir"])
     # Whatever a test did, end the run so the thread finishes.
+    client.headers.update(REQ)
     client.post(
         f"{BASE}/runs/r-wait/stop",
         json={"command_id": "stop-cleanup", "confirm": "stop"},

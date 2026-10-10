@@ -9,6 +9,7 @@ import pytest
 from test_api_common import (
     REQ,
     client,
+    finished_run,
     home,
     job_id_of,
     make_checkpoint,
@@ -24,27 +25,6 @@ RUN_KEYS = {
     "episodes", "counters", "pending_card", "scene_question", "challenge",
     "runner", "updated_at",
 }  # fmt: skip
-
-
-def finished_run(
-    client, tmp_path, roots, name="r-read", strategy="single_reset_policy"
-):
-    """A dry run that ran to its end (in this thread): returns the run id."""
-    path = write_job(roots, tmp_path, name=name, strategy=strategy)
-    request = launch.LaunchRequest(
-        job_path=str(path),
-        execution_mode="dry_run",
-        entry="api",
-        backend="inprocess",
-    )
-    found = launch.plan(request)
-    launch.launch(
-        request,
-        plan_sha256=found.plan_sha256,
-        launch_token=found.launch_token,
-        deadline_s=20,
-    )
-    return name
 
 
 def test_capabilities_say_only_a_dry_run_launches(client):
@@ -247,7 +227,12 @@ def test_blind_metrics_withhold_the_run_s_own_verdict_rates(client, tmp_path, ro
     name = finished_run(client, tmp_path, roots, name="r-metrics")
     report = client.get(f"{BASE}/runs/{name}/metrics").json()
     assert report["autonomous"] is None and report["early_termination"] is None
-    assert report["withheld"] == ["autonomous", "early_termination"]
+    assert report["agreement"]["by_ended_by"] is None
+    assert report["withheld"] == [
+        "autonomous",
+        "early_termination",
+        "agreement.by_ended_by",
+    ]
 
 
 def _evidence_run(client, tmp_path, roots):

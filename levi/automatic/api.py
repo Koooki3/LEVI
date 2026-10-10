@@ -95,7 +95,8 @@ _PATH = re.compile(r"(?<![\w/.:-])/(?:[A-Za-z0-9_.~+@%=,-]+/)*[A-Za-z0-9_.~+@%=,
 
 
 class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # strict: "yes" is not true, 1 is not true, "3" is not 3.
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 # --- errors, the person, scrubbing -----------------------------------------------------
@@ -973,14 +974,15 @@ def run_events(run_id: str, after: int = -1, limit: int = 200):
     return {"events": rows, "next": rows[-1]["seq"] if rows else max(after, -1)}
 
 
-WITHHELD = ("autonomous", "early_termination")
+WITHHELD = ("autonomous", "early_termination", "agreement.by_ended_by")
 
 
 @router.get("/runs/{run_id}/metrics")
 def run_metrics(run_id: str):
     """``metrics.report`` of the run. While an ended episode has no
-    operator label, the run's own verdict rates are withheld (``null``,
-    listed in ``withheld``): the operator judges first."""
+    operator label, the run's own verdict rates and how its episodes ended
+    (``agreement.by_ended_by``) are withheld (``null``, listed in
+    ``withheld``): the operator judges first."""
     run = _locate(run_id)
     steps = (run.plan.get("run") or {}).get("forward_max_steps")
     try:
@@ -1003,7 +1005,12 @@ def run_metrics(run_id: str):
     found["withheld"] = []
     if pending:
         for name in WITHHELD:
-            found[name] = None
+            head, _, tail = name.partition(".")
+            if tail:
+                if isinstance(found.get(head), dict):
+                    found[head][tail] = None
+            else:
+                found[head] = None
         found["withheld"] = list(WITHHELD)
     return found
 
@@ -1323,4 +1330,137 @@ def resume_run(run_id: str, body: ResumeBody, request: Request):
     answer = _answer_of(result, queued, body.command_id)
     if result is not None:
         _MEMO.put(f"resume:{run_id}", body.command_id, payload, answer)
+    return answer
+
+
+# --- the operator's label ---------------------------------------------------------------------
+
+
+class LabelBody(_Strict):
+    episode_id: str = Field(min_length=1, max_length=200)
+    value: Literal["success", "failure", "discarded", "unclear"]
+    request_id: str | None = Field(None, pattern=ID.pattern)
+
+
+@router.post("/runs/{run_id}/labels")
+def label_episode(run_id: str, body: LabelBody, request: Request):
+    """The operator's outcome label of a forward episode that has ended.
+    The first success/failure label reveals the automatic verdict of that
+    episode (and only then); ``discarded`` and ``unclear`` reveal nothing.
+    A later label for the same episode is a correction."""
+    _person(request)
+    run = _locate(run_id)
+    payload = body.model_dump()
+    if body.request_id:
+        again = _MEMO.get(f"label:{run_id}", body.request_id, payload)
+        if again is not None:
+            return again
+    try:
+        role = aeri.episode_parts(body.episode_id)[1]
+    except (AttributeError, ValueError):
+        raise _fail(422, "label_invalid", "Not an episode id") from None
+    if role != "forward":
+        raise _fail(422, "label_invalid", "Only forward episodes are labelled")
+    if body.episode_id not in metrics.ended_forward(run.events):
+        raise _fail(
+            409,
+            "episode_not_ended",
+            "This episode has no result in the run yet: label it after it ended",
+        )
+    with _operation(f"label:{run_id}"):
+        try:
+            record = metrics.label_operator(
+                run.run_dir, body.episode_id, body.value, by=PRINCIPAL
+            )
+        except metrics.LabelRefused as exc:
+            raise _fail(422, "label_invalid", scrub(str(exc))[:300]) from None
+        except OSError as exc:
+            raise _fail(
+                503, "labels_unwritable", scrub(exc.strerror or str(exc))
+            ) from None
+    answer = {
+        "label": record,
+        "revealed": body.episode_id in run.revealed(),
+        "card": card_of(run, force=True),
+    }
+    if body.request_id:
+        _MEMO.put(f"label:{run_id}", body.request_id, payload, answer)
+    _audit(
+        "api_label",
+        run_id=run_id,
+        episode_id=body.episode_id,
+        value=body.value,
+    )
+    return answer
+
+
+# --- the person's answer to a scene question ----------------------------------------------------
+
+
+class SceneAnswerBody(_Strict):
+    request_id: str = Field(pattern=ID.pattern)
+    nonce: str = Field(min_length=1, max_length=200)
+    frames_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    predicates: dict[str, bool | None] = Field(min_length=1, max_length=64)
+
+
+@router.post("/runs/{run_id}/scene-answer", status_code=202)
+def scene_answer(run_id: str, body: SceneAnswerBody, request: Request):
+    """Answer the open scene question of a person-attested run: each
+    required predicate true, false or null (cannot tell), on the frames the
+    system captured. The answer is written for the provider (the file
+    protocol of ``adapters.human``); whether it is taken is the provider's
+    decision (request id, nonce and frames must match the open question)."""
+    from .adapters import human
+
+    _person(request)
+    run = _locate(run_id)
+    payload = body.model_dump()
+    again = _MEMO.get(f"scene:{run_id}", body.request_id, payload)
+    if again is not None:
+        return again
+    question = _json_below(
+        run.run_dir, ("scene", "questions", f"{body.request_id}.json")
+    )
+    if (
+        not isinstance(question, dict)
+        or question.get("request_id") != body.request_id
+        or not secrets.compare_digest(str(question.get("nonce", "")), body.nonce)
+        or question.get("frames_sha256") != body.frames_sha256
+    ):
+        raise _fail(
+            409,
+            "unsolicited",
+            "No open question has this request id, nonce and frames",
+        )
+    _require_runner(run)
+    known = {
+        p["name"]: bool(p.get("required"))
+        for p in question.get("predicates", [])
+        if isinstance(p, dict) and isinstance(p.get("name"), str)
+    }
+    errors = [
+        {"field": f"predicates.{name}", "message": "not a predicate of the question"}
+        for name in body.predicates
+        if name not in known
+    ] + [
+        {"field": f"predicates.{name}", "message": "a required predicate is missing"}
+        for name, required in known.items()
+        if required and name not in body.predicates
+    ]
+    if errors:
+        raise _fail(
+            422,
+            "predicates_invalid",
+            "The answer does not fit the question",
+            errors=errors,
+        )
+    with _operation(f"scene:{run_id}"):
+        try:
+            human.write_answer(run.run_dir / "scene", question, dict(body.predicates))
+        except (OSError, ValueError) as exc:
+            raise _fail(503, "answer_unwritable", scrub(str(exc))[:300]) from None
+    answer = {"request_id": body.request_id, "accepted": True}
+    _MEMO.put(f"scene:{run_id}", body.request_id, payload, answer)
+    _audit("api_scene_answer", run_id=run_id, request_id=body.request_id)
     return answer

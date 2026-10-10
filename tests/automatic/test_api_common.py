@@ -86,6 +86,27 @@ def make_checkpoint(root, name, *, role=None, config="pi05_fr3_all_state"):
     return folder
 
 
+def finished_run(
+    client, tmp_path, roots, name="r-read", strategy="single_reset_policy"
+):
+    """A dry run that ran to its end (in this thread): returns the run id."""
+    path = write_job(roots, tmp_path, name=name, strategy=strategy)
+    request = launch.LaunchRequest(
+        job_path=str(path),
+        execution_mode="dry_run",
+        entry="api",
+        backend="inprocess",
+    )
+    found = launch.plan(request)
+    launch.launch(
+        request,
+        plan_sha256=found.plan_sha256,
+        launch_token=found.launch_token,
+        deadline_s=20,
+    )
+    return name
+
+
 def job_id_of(client, name: str) -> str:
     rows = client.get("/api/levi/automatic/jobs").json()["jobs"]
     return next(r["id"] for r in rows if r["name"] == f"{name}.yaml")
@@ -143,6 +164,7 @@ __all__ = [
     "REQ",
     "background_launch",
     "client",
+    "finished_run",
     "home",
     "job_id_of",
     "make_checkpoint",
