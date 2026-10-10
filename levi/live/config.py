@@ -1311,5 +1311,7 @@ def render(config: Config | None = None) -> str:
     for f in dataclasses.fields(config):
         if f.name == "path":
             continue
+        if f.name == "judge" and not config.judge.task_text:
+            continue  # a table older readers do not know: written only once it says something
         table(f.name, getattr(config, f.name))
     return "\n".join(lines)

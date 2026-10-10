@@ -191,6 +191,7 @@ uv run levi live stop                            # 只停自己的进程
 - **记录。** 用了某个说法做出的判定带 `task_rewritten`（`task_text` 或 `task_folder`，哪个键匹配就写哪个；没有则不写）；统计记录里的 `result.task_rewritten`（指令照原样引用时为 `null`）；在线结果及其日志行里也有 `task_rewritten`。具体说法写在 `live/effective.toml`（会话实际使用的配置）和运行冻结下来的问题里；在线日志不存任务文字。
 - **先有通用约定，表只给例外。** `generic-final.v2.json` 在两个问题里都写明了本实验室怎么读“pick X in/on/into/onto Y”（见[下面](#第-2-版说法和开头检查候选)），所以条目只用于这句话解决不了的指令。其他规格没有改动（用过的规格文件从不原地修改）。
 - **局限。** 一个说法是对模型怎么读这几个词的猜测。它是否改善判定，要拿操作员标签去对（`stats.agreement`），这里没有测过。表在服务启动时读取（`live.toml` 在启动时读），数据集状态里已有的判定不会重算。`task_rewritten` 是写判定时按当时的表算出来的：如果某批的复核运行是在重启前计划的、重启时表又改过，模型读到的是运行里冻结的那个问题，而 `task_rewritten` 可能描述的是新表。
+- **有内容才写出。** 表为空时 `levi live init` 和 `live/effective.toml` 不写 `[judge]` 表，默认文件与旧版本逐字节相同（旧版本读到不认识的表会拒绝整个文件）；需要时手写 `[judge.task_text]`。
 
 ## 终态感知的判定（候选）
 
