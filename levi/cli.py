@@ -229,6 +229,11 @@ def main():
         from .doctor import main as doctor
 
         return doctor(sys.argv[2:])
+    if sys.argv[1:3] == ["setup", "recipes"]:
+        # Read only: no configure() (it would create the workspace).
+        from .setup.recipes import main as setup_recipes
+
+        return setup_recipes(sys.argv[3:])
     if len(sys.argv) > 1 and sys.argv[1] == "install":
         from .install import main as install
 
@@ -349,7 +354,7 @@ def main():
             "model: checkpoints and advantage labels), export (training manifests: which "
             "frames enter a learner's loss, with what weight), sample (DROID test "
             "samples: `levi sample fetch droid` downloads one), namespace (isolated experiments over one dataset), pool (training pool: "
-            "scan read-only pool roots, recipes, merged exports), live (background annotation service for robot rollouts), automatic (automatic evaluation pipeline: checks, dry runs on fakes, status, report), docs (check or regenerate the documentation). Each takes its own "
+            "scan read-only pool roots, recipes, merged exports), live (background annotation service for robot rollouts), automatic (automatic evaluation pipeline: checks, dry runs on fakes, status, report), setup recipes (check the setup recipe file against the operator guide, read-only), docs (check or regenerate the documentation). Each takes its own "
             "--help."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
