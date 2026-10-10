@@ -93,11 +93,11 @@ v1 未发布期间 `aeri.RELEASED` 为 `False`：此时与基线相比的破坏�
 
 解除 `FAULT_LOCKED` 需要操作员命令：日志只接受带 `command_id` 的操作员发起、只转到 `PREFLIGHT`、动作为 `none` 的事务离开它（恢复只能重新进入 `FAULT_LOCKED`）。提交必须保持它准备时的原因、片段和策略代次。测试在每个崩溃点（`before_prepared`、`after_prepared`、`after_execute`、`after_acknowledged`、`after_committed`）用 SIGKILL 杀掉子进程，并在每个字节位置截断文件；所有情况下恢复结果一致，替代机器人命令的那一步从不重复执行。
 
-**运行头和计划。** `Journal.create(..., reset_mode=, scene_check=, plan=)` 只在给了值时才把这两个模式（代码名）写进运行头；每行都按运行头的 minor 写：新运行写 `aeri.MINORS["run_event"]`（1），运行头的 `contracts` 列表按各契约自己的 minor 填写。编排器总是传入配置里的 `reset_strategy` 和 `scene_check`；dry run 还会传入作业的计划。计划的摘要必须等于 `plan_sha256`（`journal.plan_digest`，与 `load_job` 的规则相同）；运行目录里已有的 `plan.json` 必须是同一个 `plan_sha256`，创建和每次打开时都核对，从不覆盖。`journal.read_plan(run_dir)` 读回它（不是 JSON、或计划的摘要对不上时拒绝，`E_PLAN`）。
+**运行头和计划。** `Journal.create(..., reset_mode=, scene_check=, plan=)` 只在给了值时才把这两个模式（代码名）写进运行头；每行都按运行头的 minor 写：新运行写 `aeri.MINORS["run_event"]`（1），运行头的 `contracts` 列表按各契约自己的 minor 填写。编排器总是传入配置里的 `reset_strategy` 和 `scene_check`；dry run 还会传入作业的计划。计划的摘要必须等于 `plan_sha256`（`journal.plan_digest`，与 `load_job` 的规则相同）；运行目录里已有的 `plan.json` 必须是同一个 `plan_sha256`，创建和每次打开时都核对，从不覆盖。`journal.read_plan(run_dir)` 读回它（不是 JSON、或计划的摘要对不上时拒绝，`E_PLAN`）。从 JSON 读回后摘要会变的计划（键不是字符串）在写任何东西之前就被拒绝。`plan.json` 损坏时每次打开都被拒，运行在处理之前无法恢复：以运行头为准，把 `plan.json` 移走后重新打开（带 `plan=` 的打开会按运行头的 `plan_sha256` 核对后重写它）。
 
-重新打开（`Journal.open(..., reset_mode=, scene_check=, authority=, plan=)`，`Orchestrator.restore` 用自己的配置调用它）时，配置里的模式与运行头不一致就拒绝：`E_PLAN`；给了 authority 时写一条 `run_header_mismatch` 备注；运行头从不改写。运行头没有这两个字段（run_event minor 0 的日志）或调用方一个都没给时不核对。minor 0 的日志照常打开、追加和恢复，追加的每一行都保持 minor 0：同一个日志里不混写不同的 minor。重新打开时给 `plan=`，会给没有 `plan.json` 的旧运行补上。写运行头途中进程被杀，不会留下运行（目录已加锁、空文件、撕裂的运行头、或只有 `plan.json`）：`open` 报 `E_EMPTY`，可以重新创建；运行头写完后被杀，运行已存在，恢复到 `FAULT_LOCKED`。
+重新打开（`Journal.open(..., reset_mode=, scene_check=, authority=, plan=)`，`Orchestrator.restore` 用自己的配置调用它）时，配置里的模式与运行头不一致就拒绝：`E_PLAN`；给了 authority 时写一条 `run_header_mismatch` 备注（同一种不一致只记一次：监管进程反复重启也不会让日志变大）；运行头从不改写。运行头没有这两个字段（run_event minor 0 的日志）或调用方一个都没给时不核对。minor 0 的日志照常打开、追加和恢复，追加的每一行都保持 minor 0：同一个日志里不混写不同的 minor。重新打开时给 `plan=`，会给没有 `plan.json` 的旧运行补上。写运行头途中进程被杀，不会留下运行（目录已加锁、空文件、撕裂的运行头、或只有 `plan.json`）：`open` 报 `E_EMPTY`，可以重新创建；运行头写完后被杀，运行已存在，恢复到 `FAULT_LOCKED`。
 
-读者拒收比自己新的 minor 写的日志（`E_SCHEMA_TOO_NEW`）：日志算作损坏，运行进入 `FAULT_LOCKED`。run_event minor 1 之前的代码读新运行写的日志就是这样（失败即关闭），所以不要用旧代码重新打开运行。
+读者拒收比自己新的 minor 写的日志（`E_SCHEMA_TOO_NEW`）：日志算作损坏，运行进入 `FAULT_LOCKED`。run_event minor 1 之前（提交 `acbb56c` 之前）的代码读新运行写的日志就是这样（失败即关闭：只读，不写）。`acbb56c` 到 `c8c9836` 之间的代码能读 minor 1，但早于这个写入方：它会接管新日志、追加 minor 0 的行，既不核对模式也不核对 `plan.json`。读者不强制“同一日志同一 minor”（那样会把回滚后的运行判为损坏），所以不要用旧代码重新打开运行。
 
 **限制。** 创建时只对运行目录及其父目录 fsync，不对所有上级目录；运行期间日志不轮转（每次状态转换写几行，不是每个控制步写一行）。
 
@@ -308,7 +308,7 @@ reset:
   human_scene_timeout_s: 600
 ```
 
-**契约版本。** `levi.aeri.run_event.v1` 升到 minor 1：`RunHeader` 新增可选的 `reset_mode` 和 `scene_check`（只写代码名；minor 0 的行带这两个字段会被拒收）。其他契约仍是 minor 0（`aeri.MINORS`）。minor 0 写的日志照常可读；`aeri.header_modes(header, plan)` 优先取 header 的值，没有时从作业计划推断（运行目录里的 `plan.json`，`journal.read_plan`）。新运行会写这两个字段（见运行日志一节的“运行头和计划”）。
+**契约版本。** `levi.aeri.run_event.v1` 升到 minor 1：`RunHeader` 新增可选的 `reset_mode` 和 `scene_check`（只写代码名；minor 0 的行带这两个字段会被拒收）。其他契约仍是 minor 0（`aeri.MINORS`）。minor 0 写的日志照常可读；`aeri.header_modes(header, plan)` 优先取 header 的值，没有时从作业计划推断；调用方可以用 `journal.read_plan` 从运行目录取得这份计划。新运行会写这两个字段（见运行日志一节的“运行头和计划”）。指标和 `cli report` 目前还不读 `plan.json`：遇到 minor 0 的日志仍按原来的办法推断模式（后续任务）。
 
 **已知局限。** 还没有回答场景题的页面（只有协议和 Fake）。契约格式没有文字字段之前，谓词文字就是把名字里的下划线换成空格（HA-23）。人工核对的质量取决于相机给出的画面；仲裁的视角和证据规则同样适用。指标还不区分计划内和计划外的干预（模式矩阵任务）。
 

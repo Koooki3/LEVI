@@ -240,12 +240,19 @@ plan. The plan must hash to `plan_sha256` (`journal.plan_digest`, the rule
 of `load_job`); a `plan.json` already in the folder must hold the same
 `plan_sha256`, on create and on every open, and is never overwritten.
 `journal.read_plan(run_dir)` reads it back (refused, `E_PLAN`, when it is
-not JSON or its plan does not hash to its digest).
+not JSON or its plan does not hash to its digest). A plan whose digest
+would change once read back from JSON (keys that are not text) is refused
+before anything is written. A damaged `plan.json` refuses every open, so
+the run cannot be recovered until it is dealt with: the run header is the
+authority, so move `plan.json` aside and reopen (an open with `plan=`
+writes it again, checked against the header's `plan_sha256`).
 
 Reopening (`Journal.open(..., reset_mode=, scene_check=, authority=,
 plan=)`, which `Orchestrator.restore` calls with its config) refuses a
 mode the header names differently: `E_PLAN`, a `run_header_mismatch` note
-when an authority is given, and the header is never rewritten. A header
+when an authority is given (one per distinct mismatch: a supervisor that
+restarts the run again and again does not grow the journal), and the
+header is never rewritten. A header
 without the modes (a run_event minor-0 log) and a caller that gives none
 are not checked. A minor-0 log opens, takes appends and recovers as before,
 and every line appended to it stays at minor 0: one log never mixes
@@ -257,8 +264,13 @@ header, the run exists and recovers to `FAULT_LOCKED`.
 
 A reader refuses a log of a minor newer than its own
 (`E_SCHEMA_TOO_NEW`): the journal counts as corrupt and the run is
-`FAULT_LOCKED`. Code from before run_event minor 1 reads the logs new runs
-write that way (fail closed), so do not reopen a run with older code.
+`FAULT_LOCKED`. Code from before run_event minor 1 (before commit
+`acbb56c`) reads the logs new runs write that way (fail closed: read only,
+nothing written). Code from `acbb56c` up to `c8c9836` reads minor 1 but
+predates this writer: it takes a new log over, appends minor-0 lines to it
+and checks neither the modes nor `plan.json`. The reader does not enforce
+one minor per log (that would turn a rolled-back run corrupt), so do not
+reopen a run with older code.
 
 **Limits.** Only the run folder and its parent are synced at creation, not
 every ancestor; the journal is never rotated while a run lasts (a run
@@ -860,9 +872,11 @@ reset:
 only; a minor-0 line carrying them is refused). The other contracts stay
 at minor 0 (`aeri.MINORS`). A log written at minor 0 reads as before;
 `aeri.header_modes(header, plan)` takes the modes from the header or,
-when it has none, from the job's plan (`plan.json` in the run folder,
-`journal.read_plan`). New runs write both fields (see the run journal's
-"Run header and plan").
+when it has none, from the job's plan; a caller can get that plan from
+the run folder with `journal.read_plan`. New runs write both fields (see
+the run journal's "Run header and plan"). The metrics and `cli report`
+do not read `plan.json` yet: for a minor-0 log they still infer the modes
+(a follow-up task).
 
 **Known limits.** No page answers the scene question yet (the protocol
 and its fakes only). The predicates' readable text is the name with
