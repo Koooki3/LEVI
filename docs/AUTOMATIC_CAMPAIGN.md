@@ -19,29 +19,55 @@ report generator decides how to word them.
 - Standard library and numpy only; no file is read and no other LEVI module
   is imported, except `levi.live.stats.wilson`, so the live page and the
   reports print the same Wilson interval.
-- Every random draw takes an explicit `seed` and its own generator; there is
-  no cache or module state. The same input gives the same output, bit for
-  bit, in any process and from any number of threads (tested).
-- Every function returns a JSON-ready dict with `schema_version`
+- Every random draw takes an explicit `seed` and its own generator (PCG64);
+  there is no cache or module state. With the **same numpy version** the
+  same input gives the same output, bit for bit, in any process and from any
+  number of threads (tested). Across numpy versions the random streams of
+  `Generator` methods may change (numpy does not promise them stable; this
+  project's `uv.lock` resolves numpy 2.4.6 for Python below 3.12 and 2.5.3
+  above), so bootstrap and permutation results then agree only within Monte
+  Carlo error (tested with different streams). Every result records
+  `numpy_version`, `bit_generator` and `algorithm_version`.
+- Every result function returns a JSON-ready dict with `schema_version`
   (`levi.aeri.analysis.v1`), `method`, `implementation`
   (`levi.automatic.analysis.<module>@<version>`), `references` (keys of the
   citation table `levi/automatic/analysis/references.py`), `exploratory`
-  and `caveats` (each with a stable `code`).
+  and `caveats` (each with a stable `code`). The exceptions are the numeric
+  helpers `power_paired`, `power_unpaired` and `min_detectable_difference`,
+  which return a bare number for planning code.
 - Missing values (`None`, NaN) are dropped and counted in the result.
   Infinite values, impossible counts and bad options raise
-  `AnalysisInputError`. An empty arm gives `available: false` and no numbers.
+  `AnalysisInputError`. An empty arm gives `available: false` and no numbers
+  (no p-value either).
 - Work is bounded: at most 10^5 bootstrap resamples or permutations; large
   samples are resampled in chunks, or through category counts when the data
   take few values (100 000 pairs take well under a second).
 
-**Exploratory or not.** A comparison of success rates is confirmatory
-(`exploratory: false`) only when the caller passes the difference the
-study was designed to detect (`design_difference`, fixed before the first
-trial) and the exact power at that difference is at least 80 % with the
-observed number of trials. Every such result also carries the smallest
-difference its sample size can detect (`detectable_difference` caveat).
+**Exploratory or not.** The decision uses planned values only, never the
+outcomes. A comparison of success rates is confirmatory (`exploratory:
+false`) only when the caller passes the difference the study was designed
+to detect (`design_difference`) and, optionally, the planned baseline
+success rate (`design_baseline`), both fixed before the first trial, and
+the exact power at that difference reaches 80 % with the number of trials
+used. Without a planned baseline the least favourable baseline on a 0.05
+grid decides. Each result returns `power_basis` (`basis: "planned"`, the
+planned values and the smallest power found) and the smallest difference
+its sample size can detect at the planned baseline, or at 0.5 (the design
+table's baseline) when none was planned.
+
+Why not the observed success rate: power computed from the observed data
+(post-hoc power) is a function of the observed p-value and adds nothing to
+it, and it would let one pre-registered design turn confirmatory just
+because the results came out extreme. The same planned values and the same
+number of trials therefore always give the same `exploratory`, whatever
+the outcomes (tested).
+
 Results with no power model (continuous metrics, survival, omnibus tests,
-diagnostics) are always exploratory. Report conclusions also depend on
+diagnostics) are always exploratory. Multiplicity adjustments (`holm`,
+`bonferroni`) are confirmatory only when every test in the family was
+(pass each test's flag as `exploratory=[...]`); Benjamini–Hochberg is a
+screen and always exploratory. A single test's `exploratory: false` does
+not account for multiplicity. Report conclusions also depend on
 pre-registration, label basis and drift checks, which the report generator
 applies.
 
@@ -55,7 +81,7 @@ the full discrete distribution, not from a normal approximation.
 | One arm's success rate | `proportion` | Wilson score interval (primary) and Clopper–Pearson exact interval | Always | Clopper–Pearson is conservative (coverage at least 95 %, often more) |
 | Two arms on the same layout cards | `mcnemar` | McNemar exact conditional test, its mid-p version and the asymptotic statistic | Paired trials (same card, same round) | Uses only discordant pairs; the asymptotic value is unreliable below 10 of them; above 2000 discordant pairs the exact sums run in log space |
 | | `newcombe_paired` | Newcombe's paired score interval (method 10) for p_B − p_A | Paired trials | Built from Wilson intervals; not an exact interval |
-| | `paired_bootstrap` | Bootstrap of the mean (or median) difference, resampling pairs; percentile, or BCa on request | Paired binary or continuous outcomes | Liberal below about 30 pairs; BCa needs a jackknife |
+| | `paired_bootstrap` | Bootstrap of the mean (or median) difference, resampling pairs; percentile, or BCa on request | Paired binary or continuous outcomes | Liberal in small samples (see below); a sample whose differences all take one value gives a zero-width interval, flagged `degenerate_bootstrap`: use McNemar and Newcombe instead; BCa needs a jackknife |
 | Two independent arms | `fisher_exact` | Fisher's exact test (two-sided by summing tables no more likely than the observed one) | Unpaired trials (reset-policy mode, deviated cards) | Conditional on both margins; conservative; above 4000 trials the sums run in log space |
 | | `boschloo_exact` | Boschloo's unconditional test (Fisher's p-value as statistic, maximised over the common rate on a grid with local refinement) | Unpaired trials, more power than Fisher | The maximum is numerical; refused above 300 trials per arm |
 | | `newcombe_independent`, `agresti_caffo` | Newcombe's hybrid score interval (method 10); Agresti–Caffo add-two interval for comparison | Unpaired trials | Approximate intervals |
@@ -69,12 +95,20 @@ the full discrete distribution, not from a normal approximation.
 | | `hodges_lehmann` | Hodges–Lehmann shift (median of Walsh averages or of cross differences) with a percentile bootstrap interval | Effect size of a shift | Interval skipped above 400 values; estimate refused above about 4.5 million averages |
 | | `cliffs_delta`, `improvement_share` | Cliff's delta (unpaired); share of pairs in which B is better (paired) | Ordinal effect sizes | Ignore magnitude |
 | | `smoothness` | SPARC (spectral arc length of the speed) and velocity-based log dimensionless jerk | Movement smoothness from end-effector positions | Depend on the sampling rate and on where the movement is cut: compare only like with like |
-| Time to success | `kaplan_meier`, `logrank`, `rmst` | Kaplan–Meier curve (Greenwood variance, log(−log) interval); log-rank test for k arms; restricted mean survival time up to a common horizon with a bootstrap interval for the difference | Episodes that fail or stop are right-censored | Fault and operator stops are competing events, treated here as censoring |
+| Time to success | `kaplan_meier`, `logrank`, `rmst` | Kaplan–Meier curve (Greenwood variance, log(−log) interval); log-rank test for k arms; restricted mean survival time up to a common horizon with a bootstrap interval for the difference | Episodes that fail or stop are right-censored | Fault and operator stops are competing events, treated here as censoring; a horizon beyond an arm's last observation carries its curve flat and is flagged `tau_beyond_follow_up`. Greenwood's variance and the tie-corrected Mann–Kendall variance are standard formulas without a separate citation |
 | Failure modes | `failure_modes` | Counts by `stop_reason` and post-hoc failure class, each with a Wilson interval | Every report | Descriptive; no test |
-| Early termination | `early_stop` | False early stop rate from failed, complete control episodes (Wilson); paired across arms by layout slot with McNemar | Arms with early stop enabled | `unavailable` without such control episodes; treated episodes give only a lower bound |
+| Early termination | `early_stop` | False early stop rate from failed, complete control episodes (Wilson); paired across arms by layout slot with McNemar | Arms with early stop enabled | Pairs by (slot, round); controls without a match are counted in `unpaired`, and two controls of one arm with the same key are refused. `unavailable` without such control episodes; treated episodes give only a lower bound |
 | Verdict versus person | `agreement`, `cohen_kappa`, `misjudgement_by_arm`, `rogan_gladen` | Confusion matrix, agreement rate (Wilson), false and missed success rates (live-page definitions), Cohen's kappa; permutation test of a different error rate between arms; Rogan–Gladen correction | Every report with human labels | Kappa depends on the success rate (read it beside the agreement rate); Rogan–Gladen is a sensitivity analysis |
-| Sample size | `power_table`, `min_detectable_difference` | Exact power by enumeration: Fisher (unpaired) and McNemar with within-pair correlation (paired); smallest detectable difference on a 0.01 grid for n = 10…100 | Planning, and the caveat on every comparison | Above 200 trials per arm a normal approximation (Connor's formula for pairs) replaces enumeration |
+| Sample size | `power_table`, `min_detectable_difference` | Exact power by enumeration: Fisher (unpaired) and McNemar with within-pair correlation (paired); smallest detectable difference on a 0.01 grid for n = 10…100 | Planning, and the caveat on every comparison | Above 200 trials per arm a normal approximation (Connor's formula for pairs) replaces enumeration; it can understate the detectable difference by about 0.01 (optimistic) and says so in `power_approximate` |
 | Drift and order | `reference_drift`, `arm_time_interaction`, `carryover`, `drift_warning` | Mann's trend test on the reference arm's per-round rate plus first- versus second-half difference; permutation test of the B − A difference between halves; success by the previous arm; one flag when any p < 0.05 | Campaigns with a reference arm and several rounds | Diagnostics: they find problems and never adjust results |
+
+**Bootstrap coverage.** Measured with this library: 1000 simulated data
+sets of 30 pairs each, 2000 resamples per data set, seed 20261010 (Monte
+Carlo standard error about 0.007). The nominal 95 % percentile interval
+covered the true mean difference in 0.93 of data sets for normal
+differences, 0.91 for exponential (skewed) differences and 0.95 for binary
+pairs; BCa covered 0.94, 0.92 and 0.94. Each bootstrap result repeats this
+in `coverage_note`; below 30 pairs it adds the `small_sample` caveat.
 
 **Planning numbers.** With 80 % power at two-sided alpha 0.05 and a
 baseline success rate of 0.5, the smallest detectable difference is 0.42
@@ -117,7 +151,6 @@ All entries were checked against their DOI or arXiv record (2026-10-10).
 - Newcombe 1998b, "Improved confidence intervals for the difference between binomial proportions based on paired data", Statistics in Medicine 17(22), doi:10.1002/(SICI)1097-0258(19981130)17:22<2635::AID-SIM954>3.0.CO;2-C.
 - Rogan and Gladen 1978, "Estimating prevalence from the results of a screening test", American Journal of Epidemiology 107(1), doi:10.1093/oxfordjournals.aje.a112510.
 - Royston and Parmar 2013, "Restricted mean survival time: an alternative to the hazard ratio for the design and analysis of randomized trials with a time-to-event outcome", BMC Medical Research Methodology 13:152, doi:10.1186/1471-2288-13-152.
-- TRI LBM Team et al. 2025, "A Careful Examination of Large Behavior Models for Multitask Dexterous Manipulation", arXiv:2507.05331.
 - Wilcoxon 1945, "Individual Comparisons by Ranking Methods", Biometrics Bulletin 1(6), doi:10.2307/3001968.
 - Williams 1949, "Experimental Designs Balanced for the Estimation of Residual Effects of Treatments", Australian Journal of Scientific Research A 2(2), doi:10.1071/CH9490149.
 - Wilson 1927, "Probable Inference, the Law of Succession, and Statistical Inference", JASA 22(158), doi:10.1080/01621459.1927.10502953.
