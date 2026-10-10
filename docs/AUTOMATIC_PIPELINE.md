@@ -152,7 +152,8 @@ the live service does not scan):
 
 | File | What it is |
 | --- | --- |
-| `state_journal.jsonl` | the only source of truth: append-only `levi.aeri.run_event.v1` lines, line 0 the run header (plan sha256, contract versions, LEVI commit), each line chained to the previous one by `prev_sha256` |
+| `state_journal.jsonl` | the only source of truth: append-only `levi.aeri.run_event.v1` lines, line 0 the run header (plan sha256, contract versions, LEVI commit, reset mode and scene check), each line chained to the previous one by `prev_sha256` |
+| `plan.json` | the normalised plan the run started with and its `plan_sha256` (the header's), written once before the header (temporary file, fsync, replace, fsync of the folder) |
 | `journal.lock` | the process identity of the single writer, which holds an `flock` on the run folder itself; a second writer is refused (`JournalBusy`), even if this file was removed, and the kernel releases the lock when the holder dies |
 | `state.json` | a snapshot derived after each commit (temporary file, fsync, replace, fsync of the folder); never read to decide anything |
 | `torn/` | bytes of a torn last line, kept before the file is cut back to whole lines |
@@ -228,6 +229,36 @@ prepared. Tests kill a child process with SIGKILL at each crash point
 `after_acknowledged`, `after_committed`) and cut the file at every byte;
 recovery is consistent in every case and the stand-in robot command is
 never repeated.
+
+**Run header and plan.** `Journal.create(..., reset_mode=, scene_check=,
+plan=)` writes the two modes (code names) into the header only when they
+are given, and every line at the header's minor: a new run is written at
+`aeri.MINORS["run_event"]` (1), and the header's `contracts` list names each
+contract at its own minor. The orchestrator always passes its config's
+`reset_strategy` and `scene_check`; the dry run also passes the job's
+plan. The plan must hash to `plan_sha256` (`journal.plan_digest`, the rule
+of `load_job`); a `plan.json` already in the folder must hold the same
+`plan_sha256`, on create and on every open, and is never overwritten.
+`journal.read_plan(run_dir)` reads it back (refused, `E_PLAN`, when it is
+not JSON or its plan does not hash to its digest).
+
+Reopening (`Journal.open(..., reset_mode=, scene_check=, authority=,
+plan=)`, which `Orchestrator.restore` calls with its config) refuses a
+mode the header names differently: `E_PLAN`, a `run_header_mismatch` note
+when an authority is given, and the header is never rewritten. A header
+without the modes (a run_event minor-0 log) and a caller that gives none
+are not checked. A minor-0 log opens, takes appends and recovers as before,
+and every line appended to it stays at minor 0: one log never mixes
+minors. `plan=` on reopening keeps `plan.json` for a run that started
+without one. A process killed while the header is written leaves no run
+(the folder locked, an empty file, a torn header, or `plan.json` alone):
+`open` says `E_EMPTY` and the run is created again; killed after the
+header, the run exists and recovers to `FAULT_LOCKED`.
+
+A reader refuses a log of a minor newer than its own
+(`E_SCHEMA_TOO_NEW`): the journal counts as corrupt and the run is
+`FAULT_LOCKED`. Code from before run_event minor 1 reads the logs new runs
+write that way (fail closed), so do not reopen a run with older code.
 
 **Limits.** Only the run folder and its parent are synced at creation, not
 every ancestor; the journal is never rotated while a run lasts (a run
@@ -829,8 +860,9 @@ reset:
 only; a minor-0 line carrying them is refused). The other contracts stay
 at minor 0 (`aeri.MINORS`). A log written at minor 0 reads as before;
 `aeri.header_modes(header, plan)` takes the modes from the header or,
-when it has none, from the job's plan. The journal writer does not fill
-the two fields yet.
+when it has none, from the job's plan (`plan.json` in the run folder,
+`journal.read_plan`). New runs write both fields (see the run journal's
+"Run header and plan").
 
 **Known limits.** No page answers the scene question yet (the protocol
 and its fakes only). The predicates' readable text is the name with

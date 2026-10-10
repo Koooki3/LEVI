@@ -5,8 +5,10 @@ Files in the run's directory (``<rollout_root>/.aeri/runs/<run_id>/``):
 - ``state_journal.jsonl``: append-only ``levi.aeri.run_event.v1`` lines.
   Each line is one ``write`` followed by ``fsync``; the directory is synced
   when the file is created. Line 0 is the run header (plan hash, contract
-  versions, LEVI commit); every line carries the sha256 of the previous
+  versions at their own minors, LEVI commit); every line carries the sha256 of the previous
   line's bytes (``prev_sha256``), so a torn or edited line is found.
+  The header also names the reset mode and the scene check when the
+  caller gives them; every line has the header's minor.
 - ``journal.lock``: who writes. The writer holds an ``flock`` on the run
   directory itself; a second writer (another process, or a second open in
   this one) is refused (``JournalBusy``), even when ``journal.lock`` was
