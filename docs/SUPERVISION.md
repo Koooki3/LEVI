@@ -69,6 +69,8 @@ levi stop && systemctl --user stop levi-product    # stop the product (levi stop
 systemctl --user stop levi-live                    # runs `levi live stop` first
 ```
 
+**Reaching the page / 访问页面**：the unit serves the web page on `127.0.0.1:7860`, and the web bridge answers only that page's own host names and same-origin writes ([API → Trust boundary of the web bridge](API.md#trust-boundary-of-the-web-bridge--网页桥接的信任边界)). From another machine use `ssh -L 7860:127.0.0.1:7860`; for another local port, a LAN name or a reverse proxy put `LEVI_UI_ALLOWED_HOSTS` in the checkout's `.env` (the unit's `levi serve` reads it) and restart the unit. Scripts write through the `levi` CLI, not through :7860. / 单元在 `127.0.0.1:7860` 提供网页，网页桥接只认本页自己的主机名、只收同源写请求。从别的机器访问用 `ssh -L 7860:127.0.0.1:7860`；用本机其他端口、局域网名字或反向代理时，把 `LEVI_UI_ALLOWED_HOSTS` 写进检出的 `.env`（单元里的 `levi serve` 会读取）并重启单元。脚本经 `levi` 命令行写入，不经 :7860。
+
 **Migrating from a terminal-started instance / 从终端启动的实例迁移**：`levi stop` first, then `systemctl --user start levi-product`; for the live service `levi live stop` first (a unit cannot start while a `levi live start --daemon` runs). Two instances on the same ports cannot coexist. / 先 `levi stop` 再用 systemd 启动，同一端口不能有两个实例。
 
 After 5 (product) or 4 (live) crashes in 15 minutes systemd stops restarting and the unit stays `failed`: read `journalctl --user -u levi-product` / `-u levi-live` and the service logs, then `systemctl --user reset-failed` and start it again. / 15 分钟内崩溃 5 次（产品）或 4 次（实时服务）后 systemd 不再重启，单元保持 `failed`：看日志，`reset-failed` 后再启动。

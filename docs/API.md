@@ -1,6 +1,6 @@
 # LEVI API
 
-Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge forwards local operations to the loopback FastAPI service; byte Range and HEAD are supported. This is a single-user service, not a public multi-tenant API.
+Use the frontend origin, normally `http://127.0.0.1:7860`. The runtime bridge forwards local operations to the loopback FastAPI service; byte Range and HEAD are supported. This is a single-user service, not a public multi-tenant API. The bridge acts as the person at the keyboard, so it answers only LEVI's own host names and takes writes only from the LEVI page itself; scripts use the `levi` CLI or a scoped agent token ([Trust boundary of the web bridge](#trust-boundary-of-the-web-bridge--网页桥接的信任边界)).
 
 | Method | Route | Purpose |
 | --- | --- | --- |
@@ -115,10 +115,11 @@ The upstream VQA answer JSON and `tool_calls` structures are preserved; use the 
 
 - `400`: invalid source, stage, check name or workspace boundary.
 - `401`: the Hugging Face session is missing or cannot read the configured SAM3 model.
-- `403`: disallowed asset or browser cross-origin write.
+- `403`: disallowed asset, or a write through the frontend bridge that does not come from the LEVI page itself (no same-origin `Sec-Fetch-Site`/`Origin`; see [Trust boundary](#trust-boundary-of-the-web-bridge--网页桥接的信任边界)).
 - `404`: unknown plan, missing file or dataset metadata.
 - `409`: output already exists, or export would overlap the source.
 - `413`: frontend bridge request body exceeds 16 MiB.
+- `421`: the frontend bridge was reached under a host name it does not answer to (set `LEVI_UI_ALLOWED_HOSTS` for a name of your own).
 - `422`: typed request validation failed.
 - `502`: local backend is unavailable; start both services with the uv launcher.
 - `503`: SAM3 is disabled or its worker configuration is unavailable.
@@ -151,13 +152,45 @@ Fenced blocks with a JSON body become components: `levi-progress` (`{"source": "
 
 The browser workbench is served on `http://127.0.0.1:7860`. Backend port `7861` serves the API: `/` returns a bilingual entry guide, `/favicon.ico` returns the LEVI icon, and `GET /api/levi/health` returns `{"service":"levi-api","status":"ok"}` for startup checks. The launcher supplies the guide with the selected frontend address/port. These entry routes do not expose datasets or credentials.
 
-网页入口为 7860；7861 是内部 API。完整启动使用 `uv run levi` 或 `uv run levi serve`。远程访问时，应把本机网页端口转发到服务器的网页端口。
+网页入口为 7860；7861 是内部 API。完整启动使用 `uv run levi` 或 `uv run levi serve`。远程访问时，应把本机网页端口转发到服务器的网页端口；本机用别的端口或别的名字访问时，见[网页桥接的信任边界](#trust-boundary-of-the-web-bridge--网页桥接的信任边界)里的 `LEVI_UI_ALLOWED_HOSTS`。/ For remote access forward the same port (`ssh -L 7860:127.0.0.1:7860`); another local port or name needs `LEVI_UI_ALLOWED_HOSTS` (see the trust boundary below).
 
 ### SAM3 object annotation
 
 Object annotations are stored outside the source dataset. A plan uses `episode_indices`, `camera_keys`, `prompts`, optional `start_frame`/`max_frames`, review thresholds and `provider` (`fake` or `sam3`). The fake provider is deterministic and CPU-only. Real provider requests return `202` with a `job_id`; poll it until `succeeded`, then use the returned `revision_id`. The UI sends the `plan_id` returned by `/plan` to `/run`, so execution is bound to the exact preflighted plan; changing any plan field requires a new preflight.
 
 Read rows with `annotation_revision=<id>`; the dataset `revision` query parameter remains reserved for the source dataset revision. Send `base_revision` in edits so a stale browser cannot overwrite a newer review. See [SAM3.md](SAM3.md) for the sidecar schema, global environment and ordered deployment sequence.
+
+## Trust boundary of the web bridge / 网页桥接的信任边界
+
+The frontend bridge (`/api/levi/…`, `/api/annotation/…`, `src/utils/backendProxy.ts`) adds the operator's UI token to every request it forwards to the core, so a request it accepts acts as the person at the keyboard. It therefore checks two things before forwarding:
+
+| Check | Applies to | Passes when | Otherwise |
+| --- | --- | --- | --- |
+| Host | every method, reads included | the `Host` header is `127.0.0.1`, `localhost` or `[::1]` on the page's own port (the port `next start` listens on, and the port of the launcher's address; 7860 by default), the address `levi serve --host` was given, a Hugging Face Space's own `SPACE_HOST`, or an entry of `LEVI_UI_ALLOWED_HOSTS` | `421` |
+| Same origin | `POST`, `PUT`, `PATCH`, `DELETE` | `Sec-Fetch-Site` is `same-origin` and any `Origin` is one of the names above; or, from a browser without Fetch Metadata, `Origin` is one of them | `403`; `cross-site`, `same-site` and `none` are refused, and so is a request that carries neither header |
+
+It forwards only the headers the core needs: no `Authorization`, no `X-Forwarded-*`, no `X-LEVI-UI-Token` of the caller's own, and of the cookies only the Hugging Face session (`hf_access_token`, which the core uses for private Hub datasets). The browser's `Origin` is not forwarded: the bridge has already checked it.
+
+What this protects against: another web site, another local web application (a notebook on `localhost:8888`, the live viewer on :7880) and a DNS-rebinding page cannot read through the bridge or write through it, and a plain local script (`curl -X POST http://127.0.0.1:7860/api/levi/…`) can no longer write as the person without the key. What it does not: a program running as the same operating-system user can set any header it likes, and can read the key file anyway. The operating-system account remains the real boundary; agents follow the rule that they do not act as the person, and nothing in this check enforces that rule against a determined local process.
+
+**Scripts and agents** do not write through the bridge. Use the `levi` CLI (it talks to the core over its own socket with the right credential), `levi agent …` or the MCP bridge with a scoped connection (`levi agent connect`), or, for an HTTP client, a scoped agent token sent to the core's agent routes on its own port (`http://127.0.0.1:7861/api/levi/agent/v1/…`): the bridge drops `Authorization`, so through it a request does not carry the agent's identity. Reads through the bridge from loopback still work, for checks such as `curl http://127.0.0.1:7860/api/levi/health`.
+
+**Remote access and other names.** `ssh -L 7860:127.0.0.1:7860 <server>` keeps working: the browser sends `Host: localhost:7860` or `127.0.0.1:7860`. Forwarding to another local port (`ssh -L 9000:127.0.0.1:7860`), a LAN address, a name in `/etc/hosts` or a reverse proxy needs that name in `LEVI_UI_ALLOWED_HOSTS` (default empty): names separated by commas or spaces, `name:port` for one port, a bare name for any port, e.g. `LEVI_UI_ALLOWED_HOSTS=localhost:9000` or `LEVI_UI_ALLOWED_HOSTS=levi.lab.example`. Put it in `.env` and restart LEVI; it is read on each request, by the web page's process. A reverse proxy that rewrites `Host` to `127.0.0.1:7860` still needs its public name listed, because the browser's `Origin` carries it. Behind a shared deployment, keep the authenticated reverse proxy README asks for: listing a name only tells the bridge it is yours.
+
+网页前端的桥接（`/api/levi/…`、`/api/annotation/…`，代码在 `src/utils/backendProxy.ts`）会给转发到核心的每个请求补上操作者的界面令牌，所以它放行的请求就等于“坐在键盘前的人”。因此转发前做两项检查：
+
+| 检查 | 适用 | 通过条件 | 否则 |
+| --- | --- | --- | --- |
+| Host | 所有方法，读请求也查 | `Host` 是本页端口上的 `127.0.0.1`、`localhost` 或 `[::1]`（`next start` 监听的端口和启动器地址的端口，默认 7860），或 `levi serve --host` 指定的地址、Hugging Face Space 自己的 `SPACE_HOST`、`LEVI_UI_ALLOWED_HOSTS` 里的条目 | `421` |
+| 同源 | `POST`、`PUT`、`PATCH`、`DELETE` | `Sec-Fetch-Site` 为 `same-origin`，且如果带 `Origin`，它也在上述名单里；不支持 Fetch Metadata 的浏览器只带 `Origin` 时，`Origin` 在名单里即可 | `403`；`cross-site`、`same-site`、`none` 一律拒绝，两个头都没有的请求也拒绝 |
+
+只转发核心需要的头：不转发 `Authorization`、`X-Forwarded-*`、调用方自带的 `X-LEVI-UI-Token`；Cookie 只转发 Hugging Face 会话（`hf_access_token`，核心读取私有 Hub 数据集时用）。浏览器的 `Origin` 不转发，桥接已经检查过了。
+
+能防住的：其他网站、本机其他网页应用（`localhost:8888` 上的 notebook、:7880 的实时查看器）、DNS 重绑定的网页，都不能经桥接读或写；本机的普通脚本（`curl -X POST http://127.0.0.1:7860/api/levi/…`）不再能不拿令牌就以人的身份写入。防不住的：同一操作系统用户下的程序可以随意伪造请求头，本来也能读到令牌文件。真正的边界仍是操作系统账户；“agent 不以人的身份操作”是规则，这项检查挡不住有意为之的本机进程。
+
+**脚本和 agent** 不经桥接写入：用 `levi` 命令行（它经核心自己的套接字、用正确的凭据访问），用 `levi agent …` 或带范围授权的 MCP 连接（`levi agent connect`），HTTP 客户端则把带范围的 agent 令牌直接发给核心端口上的 agent 路由（`http://127.0.0.1:7861/api/levi/agent/v1/…`）：桥接会去掉 `Authorization`，经桥接的请求不带 agent 身份。本机经桥接的读请求照常可用，例如 `curl http://127.0.0.1:7860/api/levi/health`。
+
+**远程访问和其他名字。** `ssh -L 7860:127.0.0.1:7860 <服务器>` 照常可用，浏览器发出的 Host 是 `localhost:7860` 或 `127.0.0.1:7860`。转发到本机其他端口（`ssh -L 9000:127.0.0.1:7860`）、局域网地址、`/etc/hosts` 里的别名或反向代理，需要把这个名字加入 `LEVI_UI_ALLOWED_HOSTS`（默认空）：逗号或空格分隔，`名字:端口` 只放行该端口，只写名字则放行任意端口，例如 `LEVI_UI_ALLOWED_HOSTS=localhost:9000`、`LEVI_UI_ALLOWED_HOSTS=levi.lab.example`。写进 `.env` 后重启 LEVI；网页进程每个请求都会读取它。反向代理即使把 `Host` 改写成 `127.0.0.1:7860`，也要列出它的公开名字，因为浏览器的 `Origin` 里是那个名字。共享部署仍要放在 README 要求的带鉴权反向代理后面：把名字列入名单只表示“这是你的名字”，不做鉴权。
 
 ## SAM3 runtime status
 
@@ -179,7 +212,7 @@ See SAM3.md for the ordered setup sequence and sidecar schema.
 
 All agent routes live under `/api/levi/agent/v1`. `GET /capabilities` lists every capability with its input schema, permission and side effects; `POST /tools` runs one: `{ "name": "runs.list", "arguments": {…}, "idempotency_key": "…" }`. The same registry backs the web UI, the stdio MCP bridge (tool names use `__` for `.`) and the `levi agent` CLI, so authorization and audit are identical on every channel.
 
-An external agent authenticates with its scoped connection credential (`Authorization: Bearer …`; see `levi agent connect`) or the legacy `LEVI_AGENT_TOKEN` / `LEVI_AGENT_DATASETS` pair. It may read and draft on its datasets only; plan approval, pilot review, commit, reset, clean, model management and publishing improvements require the operator session. After agent revisions are active, legacy annotation/review writes must send the `X-LEVI-Annotation-Revision` returned by their read.
+An external agent authenticates with its scoped connection credential (`Authorization: Bearer …`, sent to the core's own port or socket, since the web bridge drops it; see `levi agent connect` and [Trust boundary](#trust-boundary-of-the-web-bridge--网页桥接的信任边界)) or the legacy `LEVI_AGENT_TOKEN` / `LEVI_AGENT_DATASETS` pair. It may read and draft on its datasets only; plan approval, pilot review, commit, reset, clean, model management and publishing improvements require the operator session. After agent revisions are active, legacy annotation/review writes must send the `X-LEVI-Annotation-Revision` returned by their read.
 
 Capability groups — orientation, quality, planning, execution, evidence, annotations, objects, natural-language tasks, harness (memory, cost, improvements), supervision, workspace — and who may call each are listed in [Agents → Capability reference](AGENTS.md#capability-reference). Live activity streams as Server-Sent Events at `/activity/stream` (operator only).
 
