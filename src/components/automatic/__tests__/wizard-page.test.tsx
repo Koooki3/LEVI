@@ -197,6 +197,110 @@ describe("the wizard, one run", () => {
     expect(go).toEqual(["/automatic/runs/run-1"]);
   });
 
+  test("the scene is not attested by default and the switch says why it is off (P1)", async () => {
+    const api = fakeApi();
+    const { host } = await render(<WizardPage api={api} navigate={() => {}} />);
+    await flush(10);
+    await toSettings(host);
+    const attest = host.querySelector<HTMLInputElement>(
+      '[role="switch"], input[type="checkbox"]',
+    )!;
+    expect(attest.checked).toBe(false);
+    expect(attest.disabled).toBe(true);
+    expect(host.textContent).toContain("needs an initial-state contract");
+    await click(host.querySelectorAll('input[name="aw-policy"]')[0]!);
+    await click(buttonNamed(host, "Next")!);
+    await type(host.querySelector("textarea")!, "go");
+    await click(buttonNamed(host, "Next")!);
+    await waitFor(() => host.textContent?.includes("Plan digest"));
+    const created = (api.createJob as ReturnType<typeof mock>).mock
+      .calls[0][0] as { reset: { scene_check: string } };
+    expect(created.reset.scene_check).toBe("provider");
+  });
+
+  test("the server's refusal of an attested scene is put in words (P1)", async () => {
+    const api = fakeApi({
+      planLaunch: mock(async () => {
+        throw new ApiError(422, "job_invalid", "The job cannot be planned", [
+          {
+            message:
+              "$: reset.scene_check operator_attested needs task.initial_state_spec",
+          },
+        ]);
+      }) as unknown as WizardApi["planLaunch"],
+    });
+    const { host } = await render(<WizardPage api={api} navigate={() => {}} />);
+    await flush(10);
+    await toSettings(host);
+    await click(host.querySelectorAll('input[name="aw-policy"]')[0]!);
+    await click(buttonNamed(host, "Next")!);
+    await type(host.querySelector("textarea")!, "go");
+    await click(buttonNamed(host, "Next")!);
+    await waitFor(() =>
+      host.textContent?.includes("The plan could not be made"),
+    );
+    expect(host.textContent).toContain("needs an initial-state contract");
+    expect(host.textContent).not.toContain("operator_attested");
+    expect(host.textContent).not.toContain("task.initial_state_spec");
+    expect(host.textContent).not.toContain("$:");
+  });
+
+  test("the plan card names its checks and values in words, with no codes or paths (P2)", async () => {
+    const api = fakeApi({
+      planLaunch: mock(async () =>
+        plan({
+          execution_mode: "dry_run",
+          reset_mode: "human_assisted",
+          scene_check: "provider",
+          roles: ["forward"],
+          checks: [
+            {
+              code: "E_JOB_INVALID",
+              ok: true,
+              severity: "info",
+              detail: "job file /srv/jobs/wizard/aeri-1.yaml",
+            },
+            {
+              code: "E_JOB_OUTSIDE_ROOTS",
+              ok: true,
+              severity: "info",
+              detail: "inside LEVI_AERI_JOB_ROOTS",
+            },
+            {
+              code: "E_NO_ROBOT_ADAPTER",
+              ok: true,
+              severity: "info",
+              detail: "dry run: no adapter needed",
+            },
+          ],
+        }),
+      ) as unknown as WizardApi["planLaunch"],
+    });
+    const { host } = await render(<WizardPage api={api} navigate={() => {}} />);
+    await flush(10);
+    await toSettings(host);
+    await click(host.querySelectorAll('input[name="aw-policy"]')[0]!);
+    await click(buttonNamed(host, "Next")!);
+    await type(host.querySelector("textarea")!, "go");
+    await click(buttonNamed(host, "Next")!);
+    await waitFor(() => host.textContent?.includes("Plan digest"));
+    const card = host.querySelector(".aw-plan")!.textContent ?? "";
+    expect(card).toContain("The job file is valid.");
+    expect(card).toContain("No robot adapter is needed for a dry run.");
+    expect(card).toContain("Dry run");
+    expect(card).toContain("Manual reset (evaluated policy only)");
+    expect(card).toContain("Evaluated policy");
+    for (const raw of [
+      "E_JOB_INVALID",
+      "E_NO_ROBOT_ADAPTER",
+      "/srv/jobs",
+      "LEVI_AERI_JOB_ROOTS",
+      "dry_run",
+      "human_assisted",
+    ])
+      expect(card).not.toContain(raw);
+  });
+
   test("a plan the server refuses cannot be started, and says why", async () => {
     const api = fakeApi({
       planLaunch: mock(async () =>
@@ -252,7 +356,10 @@ describe("the wizard, one run", () => {
     await type(host.querySelector("textarea")!, "go");
     await click(buttonNamed(host, "Next")!);
     await waitFor(() => host.textContent?.includes("must be positive"));
-    expect(host.textContent).toContain("run.max_steps");
+    // The field is named as the form names it, not by its file path.
+    expect(host.textContent).toContain("Maximum steps per episode");
+    expect(host.textContent).not.toContain("run.max_steps");
+    expect(host.textContent).not.toContain("job_invalid");
     expect(host.querySelector(".aw-phrase")).toBeNull();
   });
 });

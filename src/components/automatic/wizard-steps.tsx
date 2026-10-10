@@ -14,9 +14,12 @@ import {
 } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Note } from "@/components/pages-ui/feedback";
+import { EXECUTION_MODE_LABEL } from "./run-logic";
+import type { ExecutionMode } from "./types";
 import {
   HUMAN_RESET,
   INSTRUCTION_MAX,
+  attestAvailable,
   MAX_ARMS,
   forwardCheckpoints,
   resetOptions,
@@ -208,14 +211,22 @@ export function StepChoose({
       </RadioGroup>
 
       {form.resetChoice === HUMAN_RESET && (
-        <Switch
-          label={t("automatic.wizard.reset.attested")}
-          description={t("automatic.wizard.reset.attested_note")}
-          checked={form.operatorAttested}
-          onChange={(event) =>
-            setForm({ operatorAttested: event.target.checked })
-          }
-        />
+        <div>
+          <Switch
+            label={t("automatic.wizard.reset.attested")}
+            description={t("automatic.wizard.reset.attested_note")}
+            checked={attestAvailable() && form.operatorAttested}
+            disabled={!attestAvailable()}
+            onChange={(event) =>
+              setForm({ operatorAttested: event.target.checked })
+            }
+          />
+          {!attestAvailable() && (
+            <p className="pg-pool-hint" role="note">
+              {t("automatic.wizard.reset.attested_unavailable")}
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
@@ -304,7 +315,9 @@ export function StepSettings({
                   label={
                     name === "dry_run"
                       ? t("automatic.wizard.settings.mode_dry_run")
-                      : name
+                      : EXECUTION_MODE_LABEL[name as ExecutionMode]
+                        ? t(EXECUTION_MODE_LABEL[name as ExecutionMode])
+                        : name
                   }
                   checked={form.executionMode === name}
                   disabled={!available}

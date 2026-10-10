@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   STATE_LANES,
+  currentEpisodeText,
+  eventReason,
+  localDuration,
+  metricGroups,
+  metricName,
+  metricValue,
   isBlind,
   maskEvent,
   mergeCard,
@@ -193,5 +199,84 @@ describe("the scene question", () => {
   test("seconds left never go below zero", () => {
     expect(sceneSecondsLeft(1000, 60, 1000)).toBe(60);
     expect(sceneSecondsLeft(1000, 60, 1000 + 61_000)).toBe(0);
+  });
+});
+
+describe("the metrics in words (P5)", () => {
+  const t = (key: string) =>
+    ({
+      "automatic.metric.seg.automation": "Automation",
+      "automatic.metric.seg.unplanned_share":
+        "Share of unplanned interventions",
+      "automatic.metric.seg.scene_ms": "Scene check time",
+      "automatic.metric.seg.mean": "average",
+      "automatic.metric.no_data": "No data yet",
+      "automatic.duration.ms": "{ms} ms",
+      "automatic.duration.s": "{s} s",
+      "automatic.duration.min": "{m} min {s} s",
+    })[key] ?? key;
+  const report = {
+    reset_mode: "human_assisted",
+    comparable: ["automation.unplanned"],
+    truth_labels: { task_outcome: 1 },
+    automation: {
+      unplanned: 0,
+      unplanned_share: { n: 0, of: 0, rate: null, wilson95: null },
+      person_ms: { total: 90000, open_waits: 0 },
+    },
+    turnaround: { scene_ms: { mean: 450, n: 2 } },
+    reset: { resets: 0 },
+  };
+  test("sorts rows into the named groups and drops the empty ones", () => {
+    const groups = metricGroups(metricRows(report, false));
+    expect(groups.map((g) => g.id)).toEqual([
+      "overview",
+      "intervention",
+      "reset",
+    ]);
+    expect(groups[1].rows.map((r) => r.path)).toContain(
+      "turnaround.scene_ms.mean",
+    );
+  });
+  test("names a metric by its words, without the group key", () => {
+    expect(metricName("turnaround.scene_ms.mean", t)).toBe(
+      "Scene check time · average",
+    );
+    // A segment the catalogue lacks keeps its own words, not an underscore.
+    expect(metricName("automation.some_new_count", t)).toBe("some new count");
+  });
+  test("times become durations, counts stay counts, and 0 of 0 says no data", () => {
+    const rows = metricRows(report, false);
+    const row = (path: string) => rows.find((r) => r.path === path)!;
+    expect(metricValue(row("turnaround.scene_ms.mean"), t)).toBe("450 ms");
+    expect(metricValue(row("automation.person_ms.total"), t)).toBe(
+      "1 min 30 s",
+    );
+    expect(metricValue(row("automation.person_ms.open_waits"), t)).toBe("0");
+    expect(metricValue(row("automation.unplanned"), t)).toBe("0");
+    expect(metricValue(row("automation.unplanned_share"), t)).toBe(
+      "No data yet",
+    );
+  });
+  test("durations use the catalogue's words", () => {
+    expect(localDuration(5000, t)).toBe("5 s");
+    expect(localDuration(352000, t)).toBe("5 min 52 s");
+  });
+});
+
+describe("events and the current episode in words (P4)", () => {
+  test("a code the page knows is translated, an unknown one is kept", () => {
+    const t = (key: string) =>
+      key === "automatic.event.reason.scene_ready" ? "The scene is ready" : key;
+    expect(eventReason("scene_ready", t)).toBe("The scene is ready");
+    expect(eventReason("brand_new_code", t)).toBe("brand_new_code");
+  });
+  test("the episode is the id the service sends, or the number of an object", () => {
+    expect(currentEpisodeText("cli-lab2.forward.0001")).toBe(
+      "cli-lab2.forward.0001",
+    );
+    expect(currentEpisodeText({ no: 7, step: 12 })).toBe("7");
+    expect(currentEpisodeText(null, "ep-prev")).toBe("ep-prev");
+    expect(currentEpisodeText(null)).toBeNull();
   });
 });

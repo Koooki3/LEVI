@@ -15,7 +15,8 @@ import { errorText } from "./launch-panel";
 import {
   LABELS,
   LABEL_KEY,
-  durationText,
+  decisionText,
+  localDuration,
   isBlind,
   resultDone,
   resultKey,
@@ -243,7 +244,7 @@ export function PendingCard({
         {reasonKey ? t(reasonKey) : <code>{card.reason}</code>}{" "}
         <span className="ar-muted">
           {t("automatic.run.needed.waited")
-            .replace("{time}", durationText(card.waited_ms))
+            .replace("{time}", localDuration(card.waited_ms, t))
             .replace("{n}", String(card.nth_wait))}
         </span>
       </p>
@@ -355,7 +356,7 @@ export function PendingCard({
           <h3 id="ar-assess-title">{t("automatic.run.assess.title")}</h3>
           <dl className="ar-dl">
             <dt>{t("automatic.run.assess.decision")}</dt>
-            <dd>{card.assessment.decision}</dd>
+            <dd>{decisionText(card.assessment.decision, t)}</dd>
             {card.assessment.failed.length > 0 && (
               <>
                 <dt>{t("automatic.run.assess.failed")}</dt>

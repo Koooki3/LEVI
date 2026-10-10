@@ -12,7 +12,13 @@ import { useLocale } from "@/components/levi-locale";
 import { automaticApi, newRequestId } from "./api";
 import { errorText } from "./launch-panel";
 import { PendingCard } from "./pending-card";
-import { isBlind, mergeCard, resultDone, resultKey } from "./run-logic";
+import {
+  currentEpisodeText,
+  isBlind,
+  mergeCard,
+  resultDone,
+  resultKey,
+} from "./run-logic";
 import { ModeChips, Note, StateGraph, stateName } from "./run-parts";
 import { useRunEvents, useRunMetrics, useRunSnapshot } from "./run-poll";
 import { RunMetrics } from "./run-metrics";
@@ -69,6 +75,11 @@ export function RunWindow({ runId }: { runId: string }) {
   // The run has not written its first file yet (404): it is starting.
   const starting = !snapshot && poll.status === 404;
   const finished = snapshot?.state === "COMPLETED";
+  const current = snapshot?.episodes.current;
+  const episodeNow = currentEpisodeText(
+    current,
+    card?.last_episode?.episode_id ?? null,
+  );
 
   return (
     <main className="ds-root pg-workbench ar-page">
@@ -155,17 +166,16 @@ export function RunWindow({ runId }: { runId: string }) {
                 .replace("{total}", String(snapshot.episodes.total))}
             />
             <dl className="ar-dl">
-              {snapshot.episodes.current && (
+              {episodeNow && (
                 <>
                   <dt>{t("automatic.run.now.episode")}</dt>
                   <dd>
-                    {snapshot.episodes.current.no ??
-                      snapshot.episodes.current.episode_id ??
-                      "—"}
-                    {snapshot.episodes.current.step != null &&
-                      ` · ${t("automatic.run.now.step")} ${snapshot.episodes.current.step}${
-                        snapshot.episodes.current.max_steps != null
-                          ? ` / ${snapshot.episodes.current.max_steps}`
+                    {episodeNow}
+                    {typeof current === "object" &&
+                      current?.step != null &&
+                      ` · ${t("automatic.run.now.step")} ${current.step}${
+                        current.max_steps != null
+                          ? ` / ${current.max_steps}`
                           : ""
                       }`}
                   </dd>

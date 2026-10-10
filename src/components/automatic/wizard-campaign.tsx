@@ -15,6 +15,7 @@ import {
 } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Note, RequestProblem } from "@/components/pages-ui/feedback";
+import { failureText } from "./wizard-errors";
 import { ApiError, wizardApi, type WizardApi } from "./wizard-api";
 import { PhraseConfirm } from "./wizard-confirm";
 import { JobAttempts } from "./wizard-job";
@@ -145,17 +146,11 @@ export function WizardCampaignConfirm({
       setPlan(next);
     } catch (error) {
       if (alive.current && key === planned.current)
-        setFailure(
-          error instanceof ApiError
-            ? [error.message, ...error.errors.map((e) => e.message)].join(" · ")
-            : error instanceof Error
-              ? error.message
-              : String(error),
-        );
+        setFailure(failureText(error, t));
     } finally {
       if (alive.current && key === planned.current) setBusy(null);
     }
-  }, [api, form, policies, requestKey]);
+  }, [api, form, policies, requestKey, t]);
 
   useEffect(() => {
     planned.current = requestKey;
@@ -186,7 +181,7 @@ export function WizardCampaignConfirm({
       if (alive.current) onStarted(campaign_id);
     } catch (error) {
       if (alive.current) {
-        setStartFailure(error instanceof Error ? error.message : String(error));
+        setStartFailure(failureText(error, t));
         if (error instanceof ApiError && error.status !== 0)
           keys.current.release(intent);
       }

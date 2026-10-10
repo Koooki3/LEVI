@@ -10,6 +10,7 @@ import { JobAttempts } from "../wizard-job";
 import {
   HUMAN_RESET,
   IntentKeys,
+  attestAvailable,
   buildCampaignRequest,
   buildJobDraft,
   defaultForm,
@@ -73,13 +74,15 @@ describe("reset choices", () => {
     expect(draft.policy_reset).toEqual({ checkpoint_id: "r" });
   });
 
-  test("operator_attested exists only with a human reset", () => {
-    const human = { ...defaultForm(), operatorAttested: true };
-    expect(human.resetChoice).toBe(HUMAN_RESET);
-    expect(sceneCheckOf(human)).toBe("operator_attested");
-    expect(sceneCheckOf({ ...human, operatorAttested: false })).toBe(
-      "provider",
-    );
+  test("the scene is not attested by default, and cannot be while the job has no contract (P1)", () => {
+    const form = defaultForm();
+    expect(form.resetChoice).toBe(HUMAN_RESET);
+    expect(form.operatorAttested).toBe(false);
+    expect(attestAvailable()).toBe(false);
+    expect(sceneCheckOf(form)).toBe("provider");
+    // Even a form that somehow says yes cannot write an attested job: the
+    // server refuses operator_attested without task.initial_state_spec.
+    expect(sceneCheckOf({ ...form, operatorAttested: true })).toBe("provider");
   });
 });
 
@@ -155,7 +158,7 @@ describe("requests", () => {
     expect(buildJobDraft(form, policies(false))).toEqual({
       task: { instruction: "Put the cup in the box" },
       policy_forward: { checkpoint_id: "a" },
-      reset: { strategy: "human_assisted", scene_check: "operator_attested" },
+      reset: { strategy: "human_assisted", scene_check: "provider" },
       run: { episodes: 3, max_steps: 250 },
       termination: { allow_early_stop: true },
       recording: { group: "name-a" },

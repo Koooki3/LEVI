@@ -3,7 +3,7 @@
 // While the last episode is not labelled, events that would tell how it ended
 // are shown as hidden.
 import { useLocale } from "@/components/levi-locale";
-import { maskEvent } from "./run-logic";
+import { eventKind, eventReason, maskEvent } from "./run-logic";
 import { stateName } from "./run-parts";
 import type { RunEvent } from "./types";
 
@@ -33,13 +33,13 @@ export function RunTimeline({
               <span>{t("automatic.run.timeline.hidden")}</span>
             ) : (
               <>
-                <span>{event.kind}</span>
+                <span>{eventKind(event.kind, t)}</span>
                 {event.from && event.to && (
                   <span>
                     {stateName(event.from, t)} → {stateName(event.to, t)}
                   </span>
                 )}
-                {event.reason && <code>{event.reason}</code>}
+                {event.reason && <span>{eventReason(event.reason, t)}</span>}
               </>
             )}
           </li>

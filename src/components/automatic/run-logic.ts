@@ -255,6 +255,23 @@ export function snapshotBlind(snapshot: RunSnapshot | null): boolean {
 
 // ── Durations ─────────────────────────────────────────────────────────────
 
+/** A duration in the page language: `t` is the catalogue lookup. */
+export function localDuration(ms: number, t: (key: string) => string): string {
+  if (ms < 1000)
+    return t("automatic.duration.ms").replace("{ms}", String(Math.round(ms)));
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60)
+    return t("automatic.duration.s").replace("{s}", String(seconds));
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60)
+    return t("automatic.duration.min")
+      .replace("{m}", String(minutes))
+      .replace("{s}", String(seconds % 60));
+  return t("automatic.duration.h")
+    .replace("{h}", String(Math.floor(minutes / 60)))
+    .replace("{m}", String(minutes % 60));
+}
+
 export function durationText(ms: number): string {
   const seconds = Math.max(0, Math.round(ms / 1000));
   if (seconds < 60) return `${seconds} s`;
@@ -267,6 +284,10 @@ export function durationText(ms: number): string {
 
 export interface MetricRow {
   path: string;
+  /** A ratio over nothing (`0 / 0`): no data, which is not a rate of zero. */
+  noData?: boolean;
+  /** A time in milliseconds (shown as a duration). */
+  ms?: boolean;
   /** The top-level group (`agreement`, `turnaround`, ...). */
   group: string;
   value: string;
@@ -326,6 +347,7 @@ export function metricRows(report: MetricsReport, blind: boolean): MetricRow[] {
         value: text,
         interval: value.wilson95 ?? undefined,
         comparable: kind(path),
+        noData: value.of === 0,
       });
       return;
     }
@@ -337,8 +359,137 @@ export function metricRows(report: MetricsReport, blind: boolean): MetricRow[] {
           walk(inner, path ? `${path}.${key}` : key, depth + 1);
       return;
     }
-    rows.push({ path, group, value: String(value), comparable: kind(path) });
+    rows.push({
+      path,
+      group,
+      value: String(value),
+      comparable: kind(path),
+      ms: typeof value === "number" && isMs(path),
+    });
   };
   walk(report, "", 0);
   return rows;
+}
+
+// ── Metrics in words ──────────────────────────────────────────────────────
+
+/** Last path segments that count things even under a `*_ms` parent. */
+const COUNT_LAST = new Set(["n", "open_waits", "unmeasured", "count"]);
+/** Whether a numeric metric is a time in milliseconds. */
+export function isMs(path: string): boolean {
+  const parts = path.split(".");
+  const last = parts[parts.length - 1];
+  if (COUNT_LAST.has(last)) return false;
+  return parts.some((part) => part.endsWith("_ms"));
+}
+
+/** The groups of the metrics section, in reading order: the top-level key of
+ * the report decides the group (anything unlisted goes to the overview). */
+export const METRIC_GROUPS: { id: string; paths: string[] }[] = [
+  {
+    id: "overview",
+    paths: [
+      "truth_labels",
+      "time_per_valid_episode_ms",
+      "human_minutes_per_valid_episode",
+      "scene_decisions_by_human",
+    ],
+  },
+  { id: "intervention", paths: ["automation", "turnaround"] },
+  { id: "early", paths: ["early_termination", "autonomous"] },
+  { id: "reset", paths: ["reset"] },
+  { id: "agreement", paths: ["agreement"] },
+];
+
+export interface MetricGroup {
+  id: string;
+  rows: MetricRow[];
+}
+
+/** Rows sorted into their groups; an empty group is not returned. */
+export function metricGroups(rows: MetricRow[]): MetricGroup[] {
+  const out = METRIC_GROUPS.map((g) => ({ id: g.id, rows: [] as MetricRow[] }));
+  for (const row of rows) {
+    const top = row.path.split(".")[0];
+    const at = METRIC_GROUPS.findIndex((g) => g.paths.includes(top));
+    out[at === -1 ? 0 : at].rows.push(row);
+  }
+  return out.filter((g) => g.rows.length > 0);
+}
+
+/** The heading of a metrics group. */
+export function groupName(id: string, t: (key: string) => string): string {
+  return known(`automatic.metric.group.${id}`, id, t);
+}
+
+/** A path segment in plain words when the catalogue knows it, else its own
+ * words (underscores to spaces). */
+function segmentText(segment: string, t: (key: string) => string): string {
+  const key = `automatic.metric.seg.${segment}`;
+  const text = t(key);
+  return text === key ? segment.replace(/_/g, " ") : text;
+}
+
+/** The name of a metric: its path without the group's own key, each segment
+ * in words. */
+export function metricName(path: string, t: (key: string) => string): string {
+  const parts = path.split(".");
+  const shown = parts.length > 1 ? parts.slice(1) : parts;
+  return shown.map((part) => segmentText(part, t)).join(" · ");
+}
+
+/** The value cell of a metric in words. */
+export function metricValue(
+  row: MetricRow,
+  t: (key: string) => string,
+): string {
+  if (row.noData) return t("automatic.metric.no_data");
+  if (row.ms) return localDuration(Number(row.value), t);
+  if (row.value === "true") return t("automatic.metric.yes");
+  if (row.value === "false") return t("automatic.metric.no");
+  if (row.value in RESET_MODE_LABEL)
+    return t(RESET_MODE_LABEL[row.value as ResetMode]);
+  return row.value;
+}
+
+// ── Events and cards in words ─────────────────────────────────────────────
+
+function known(key: string, fallback: string, t: (key: string) => string) {
+  const text = t(key);
+  return text === key ? fallback : text;
+}
+
+/** What kind of journal line this is (`committed`, `note`). */
+export function eventKind(kind: string, t: (key: string) => string): string {
+  return known(`automatic.event.kind.${kind}`, kind, t);
+}
+/** Why a state moved or what a note says, in words when the page knows the
+ * code, else the code as the server sent it. */
+export function eventReason(
+  reason: string,
+  t: (key: string) => string,
+): string {
+  return known(`automatic.event.reason.${reason}`, reason, t);
+}
+/** The scene check's decision (`ready`, `reset_required`, `unknown`). */
+export function decisionText(
+  decision: string,
+  t: (key: string) => string,
+): string {
+  return known(`automatic.assess.decision.${decision}`, decision, t);
+}
+/** The episode the run is on: the server sends its id (older fixtures sent an
+ * object with `no` or `episode_id`). */
+export function currentEpisodeText(
+  current: unknown,
+  previous: string | null = null,
+): string | null {
+  if (typeof current === "string" && current) return current;
+  if (current && typeof current === "object") {
+    const c = current as { no?: number | string; episode_id?: string };
+    const named = c.no ?? c.episode_id;
+    if (named !== undefined && named !== null && named !== "")
+      return String(named);
+  }
+  return previous;
 }

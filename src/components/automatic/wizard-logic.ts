@@ -109,7 +109,9 @@ export function defaultForm(capabilities?: Capabilities | null): WizardForm {
     armIds: [],
     referenceId: "",
     resetChoice: HUMAN_RESET,
-    operatorAttested: true,
+    // Off by default: attesting the scene needs an initial-state contract in
+    // the job, and the wizard has no way to give one yet (see attestAvailable).
+    operatorAttested: false,
     instruction: "",
     maxSteps: String(d?.max_steps ?? 400),
     episodes: String(d?.episodes ?? 5),
@@ -175,10 +177,21 @@ export function resetStrategyOf(form: WizardForm): ResetStrategy {
     : "single_reset_policy";
 }
 
+/** Whether the person may attest the scene. The server accepts
+ * `operator_attested` only for a job with `task.initial_state_spec` (an
+ * initial-state contract), and the jobs this wizard writes have none, so the
+ * option is not offered; the scene is then judged by the provider. */
+export function attestAvailable(): boolean {
+  return false;
+}
+
 /** The scene check: a reset policy's scene is always judged by the provider;
- * with a human reset the person may attest the scene instead. */
+ * with a human reset the person may attest the scene instead, when the job
+ * has a contract to attest against. */
 export function sceneCheckOf(form: WizardForm): SceneCheck {
-  return form.resetChoice === HUMAN_RESET && form.operatorAttested
+  return attestAvailable() &&
+    form.resetChoice === HUMAN_RESET &&
+    form.operatorAttested
     ? "operator_attested"
     : "provider";
 }

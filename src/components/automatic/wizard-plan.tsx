@@ -35,6 +35,31 @@ export function Refusals({ codes }: { codes: string[] }) {
   );
 }
 
+/** Checks the server names by code: a sentence for passing and one for
+ * failing. A code not listed gets the general sentence (and, when it failed,
+ * the server's detail), so the code itself never shows. */
+const CHECK_CODES = new Set([
+  "E_JOB_INVALID",
+  "E_JOB_OUTSIDE_ROOTS",
+  "E_NO_ROBOT_ADAPTER",
+  "E_RUN_EXISTS",
+  "E_ROBOT_BUSY",
+  "E_NO_CONTRACT",
+  "E_SCENE_PROVIDER_MISSING",
+  "E_REQUEST",
+]);
+
+/** One check row as words: no code, no file path. */
+export function checkText(check: PlanCheck, t: (key: string) => string) {
+  const known = CHECK_CODES.has(check.code);
+  const key = `automatic.wizard.check.${known ? check.code : "generic"}.${
+    check.ok ? "ok" : "fail"
+  }`;
+  // A failing check's own detail helps only when the page has no sentence.
+  const detail = !check.ok && !known && check.detail ? check.detail : "";
+  return detail ? `${t(key)} ${detail}` : t(key);
+}
+
 export function ChecksList({ checks }: { checks: PlanCheck[] }) {
   const { t } = useLocale();
   if (!checks.length) return null;
@@ -55,15 +80,24 @@ export function ChecksList({ checks }: { checks: PlanCheck[] }) {
             data-severity={check.severity}
           >
             <Icon icon={icon} />
-            <span>
-              <code>{check.code}</code>
-              {check.detail ? ` · ${check.detail}` : ""}
-            </span>
+            <span>{checkText(check, t)}</span>
           </li>
         );
       })}
     </ul>
   );
+}
+
+/** An enum of the plan as a name; a value the page does not know shows as
+ * the server wrote it. */
+export function planValue(
+  kind: "mode" | "reset" | "scene" | "role",
+  value: string,
+  t: (key: string) => string,
+): string {
+  const key = `automatic.wizard.plan.val.${kind}.${value}`;
+  const text = t(key);
+  return text === key ? value : text;
 }
 
 export function PlanCard({ plan, now }: { plan: LaunchPlan; now: number }) {
@@ -80,19 +114,20 @@ export function PlanCard({ plan, now }: { plan: LaunchPlan; now: number }) {
         </div>
         <div>
           <dt>{t("automatic.wizard.plan.mode")}</dt>
-          <dd>
-            <code>{plan.execution_mode}</code>
-          </dd>
+          <dd>{planValue("mode", plan.execution_mode, t)}</dd>
         </div>
         <div>
           <dt>{t("automatic.wizard.plan.reset")}</dt>
           <dd>
-            <code>{plan.reset_mode}</code> · <code>{plan.scene_check}</code>
+            {planValue("reset", plan.reset_mode, t)} ·{" "}
+            {planValue("scene", plan.scene_check, t)}
           </dd>
         </div>
         <div>
           <dt>{t("automatic.wizard.plan.policies")}</dt>
-          <dd>{plan.roles.join(" + ")}</dd>
+          <dd>
+            {plan.roles.map((role) => planValue("role", role, t)).join(" + ")}
+          </dd>
         </div>
         <div>
           <dt>{t("automatic.wizard.plan.episodes")}</dt>

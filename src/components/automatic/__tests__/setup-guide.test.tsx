@@ -137,3 +137,27 @@ describe("the setup guide", () => {
     expect(attempts).toBe(2);
   });
 });
+
+describe("the wording of a step (P6)", () => {
+  test("a step with no command does not tell the person to copy one", async () => {
+    const { host } = await render(
+      <SetupGuide steps={[step({ command: undefined })]} />,
+    );
+    const text = host.textContent ?? "";
+    expect(text).toContain("No command is given for this step.");
+    expect(text).not.toContain("Copy the command");
+  });
+  test("a step with a command still says to copy it", async () => {
+    const { host } = await render(<SetupGuide steps={[step({})]} />);
+    expect(host.textContent).toContain("Copy the command and run it yourself");
+  });
+  test("a status LEVI reads itself does not claim there is nothing to do", async () => {
+    const { host } = await render(
+      <SetupGuide
+        steps={[step({ mode: "native", command: undefined, status: "warn" })]}
+      />,
+    );
+    expect(host.textContent).toContain("there is no command for it");
+    expect(host.textContent).not.toContain("nothing to run");
+  });
+});

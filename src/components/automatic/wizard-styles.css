@@ -266,3 +266,23 @@
   font-size: var(--ds-text-callout-size);
   margin: 0;
 }
+
+/* The mode switch of the wizard (one run / multi-model plan): on a narrow
+   screen the two options share the row and may wrap inside their own box
+   instead of pressing against its edge. */
+@media (max-width: 640px) {
+  .aw-modeseg {
+    display: flex;
+    width: 100%;
+  }
+  .aw-modeseg .ds-segment {
+    flex: 1 1 0;
+    min-width: 0;
+    height: auto;
+    min-height: calc(var(--ds-control-md) - 6px);
+    padding: var(--ds-space-1) var(--ds-space-2);
+    line-height: 1.25;
+    text-align: center;
+    white-space: normal;
+  }
+}

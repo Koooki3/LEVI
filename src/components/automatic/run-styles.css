@@ -300,3 +300,32 @@
     margin-top: var(--ds-space-2);
   }
 }
+
+/* Metrics in groups; the report's own keys sit in a fold. */
+.ar-metric-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  margin-top: var(--ds-space-3);
+  min-width: 0;
+}
+.ar-metric-group h3 {
+  margin: 0;
+}
+.ar-metric-group .ds-table-wrap,
+.ar-raw .ds-table-wrap {
+  max-width: 56rem;
+}
+.ar-raw {
+  margin-top: var(--ds-space-4);
+}
+.ar-raw > summary {
+  cursor: pointer;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+  padding: var(--ds-space-1) 0;
+}
+.ar-raw > summary:focus-visible {
+  outline: 2px solid var(--ds-focus-ring, currentColor);
+  outline-offset: 2px;
+}

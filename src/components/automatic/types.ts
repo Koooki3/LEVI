@@ -108,12 +108,17 @@ export interface RunSnapshot {
   episodes: {
     done: number;
     total: number;
-    current?: {
-      episode_id?: string;
-      no?: number;
-      step?: number;
-      max_steps?: number;
-    } | null;
+    /** The episode the run is on: its id (what the service sends), or an
+     * object with its number and step progress. */
+    current?:
+      | string
+      | {
+          episode_id?: string;
+          no?: number;
+          step?: number;
+          max_steps?: number;
+        }
+      | null;
   };
   counters: {
     planned_interventions: number;

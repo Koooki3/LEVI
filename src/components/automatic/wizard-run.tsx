@@ -8,6 +8,7 @@ import { Button, Skeleton } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Note, RequestProblem } from "@/components/pages-ui/feedback";
 import { ApiError, wizardApi, type WizardApi } from "./wizard-api";
+import { failureOf, type Failure } from "./wizard-errors";
 import { JobAttempts } from "./wizard-job";
 import { PhraseConfirm } from "./wizard-confirm";
 import {
@@ -18,24 +19,6 @@ import {
 } from "./wizard-logic";
 import { PlanCard } from "./wizard-plan";
 import type { LaunchPlan, PoliciesResponse } from "./wizard-types";
-
-type Failure = { message: string; fields: string[]; code: string };
-
-function failureOf(error: unknown): Failure {
-  if (error instanceof ApiError)
-    return {
-      message: error.message,
-      code: error.code,
-      fields: error.errors.map((e) =>
-        e.field ? `${e.field}: ${e.message}` : e.message,
-      ),
-    };
-  return {
-    message: error instanceof Error ? error.message : String(error),
-    code: "",
-    fields: [],
-  };
-}
 
 export function WizardRunConfirm({
   form,
@@ -88,11 +71,12 @@ export function WizardRunConfirm({
       setPlan(next);
       setNow(clock());
     } catch (error) {
-      if (alive.current) setFailure({ what: "plan", detail: failureOf(error) });
+      if (alive.current)
+        setFailure({ what: "plan", detail: failureOf(error, t) });
     } finally {
       if (alive.current) setBusy(null);
     }
-  }, [api, form, policies, clock]);
+  }, [api, form, policies, clock, t]);
 
   useEffect(() => {
     void prepare();
@@ -115,7 +99,7 @@ export function WizardRunConfirm({
       if (alive.current) onLaunched(run_id);
     } catch (error) {
       if (alive.current) {
-        const detail = failureOf(error);
+        const detail = failureOf(error, t);
         setFailure({ what: "launch", detail });
         // A refusal is final for this request; a network failure keeps its
         // request id so that pressing again is the same request.

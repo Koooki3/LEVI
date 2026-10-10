@@ -104,6 +104,7 @@ export function WizardPage({
       <p className="pg-pool-hint">{t("automatic.wizard.intro")}</p>
       <SegmentedControl
         label={t("automatic.wizard.mode.label")}
+        className="aw-modeseg"
         value={form.mode}
         onChange={(mode) => {
           setForm({ mode: mode as WizardMode });

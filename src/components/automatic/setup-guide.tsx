@@ -208,11 +208,13 @@ export function SetupGuide({
                 )}
                 {mode === "copy" && (
                   <>
-                    <p className="aw-step__mode">
-                      {step.mode === "execute"
-                        ? t("automatic.setup.mode.copy_fallback")
-                        : t("automatic.setup.mode.copy")}
-                    </p>
+                    {step.command && (
+                      <p className="aw-step__mode">
+                        {step.mode === "execute"
+                          ? t("automatic.setup.mode.copy_fallback")
+                          : t("automatic.setup.mode.copy")}
+                      </p>
+                    )}
                     {blocked ? (
                       <p className="aw-step__blocked" role="note">
                         <Icon icon={OctagonAlert} /> {t(blocked)}
