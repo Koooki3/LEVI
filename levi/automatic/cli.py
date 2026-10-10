@@ -278,15 +278,19 @@ def scene_provider_problems(config, scene_provider) -> list:
     )
     if config.scene_check == "operator_attested" and kind != "human":
         return [SCENE_NOT_HUMAN.format(kind=kind)]
+    if isinstance(scene_provider, str):
+        return []  # a name, checked before a provider exists (dry runs)
     probe = getattr(scene_provider, "reachable", None)
-    if probe is not None:
-        try:
-            found = probe()
-        except Exception as exc:  # noqa: BLE001 - any failure is "no"
-            found = f"{type(exc).__name__}: {exc}"
-        if found is not True:
-            detail = found if isinstance(found, str) and found else "not reachable"
-            return [SCENE_UNREACHABLE.format(detail=detail[:200])]
+    if not callable(probe):
+        # A provider that cannot say it answers counts as one that does not.
+        return [SCENE_UNREACHABLE.format(detail="it has no reachable() check")]
+    try:
+        found = probe()
+    except Exception as exc:  # noqa: BLE001 - any failure is "no"
+        found = f"{type(exc).__name__}: {exc}"
+    if found is not True:
+        detail = found if isinstance(found, str) and found else "not reachable"
+        return [SCENE_UNREACHABLE.format(detail=detail[:200])]
     return []
 
 

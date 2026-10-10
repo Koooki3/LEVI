@@ -420,12 +420,21 @@ def test_the_file_transport_round_trip(tmp_path):
         json.loads((root / "questions" / "q-1.json").read_text())["request_id"] == "q-1"
     )
     assert oct((root / "questions").stat().st_mode & 0o777) == "0o700"
-    human.write_answer(root, "q-1", {"a": True})
+    human.write_answer(
+        root,
+        {"request_id": "q-1", "nonce": "n", "frames_sha256": "f"},
+        {"a": True},
+    )
     # A writer killed half-way leaves only its hidden temporary file.
     (root / "answers" / ".q-1.json.123.tmp").write_text('{"request_id": "q-1", "pre')
     (root / "answers" / "bad.json").write_text('{"request_id": "x", "request_id": "y"}')
     found = transport.take_answers()
-    assert {"request_id": "q-1", "predicates": {"a": True}} in found
+    assert {
+        "request_id": "q-1",
+        "nonce": "n",
+        "frames_sha256": "f",
+        "predicates": {"a": True},
+    } in found
     assert any("_refused" in a for a in found)
     assert transport.take_answers() == []  # taken once
     assert len(list((root / "answers" / "taken").iterdir())) == 1
@@ -499,6 +508,10 @@ def test_a_dry_run_with_a_scripted_person(tmp_path, capsys):
 @pytest.mark.parametrize("request_id", ["../escape", "a/b", ".hidden", ""])
 def test_an_answer_file_is_never_written_outside_its_folder(tmp_path, request_id):
     with pytest.raises(ValueError):
-        human.write_answer(tmp_path / "scene", request_id, {"a": True})
+        human.write_answer(
+            tmp_path / "scene",
+            {"request_id": request_id, "nonce": "n", "frames_sha256": "f"},
+            {"a": True},
+        )
     assert not (tmp_path / "escape").exists()
     assert list(tmp_path.rglob("*.json")) == []

@@ -13,16 +13,27 @@ that provider:
    once), the contract, each predicate with readable text, and the frames;
 2. the person answers each required predicate ``true``, ``false`` or
    ``null`` (cannot tell) and nothing else: an answer is
-   ``{"request_id", "predicates": {name: true|false|null}}``. There is no
+   ``{"request_id", "nonce", "frames_sha256", "predicates": {name:
+   true|false|null}}`` (``answer_for``). ``nonce`` is drawn with
+   ``secrets`` for each question and ``frames_sha256`` binds the answer to
+   the frames the question showed, so an answer written before the
+   question (its request id is predictable) or for other frames is never
+   taken. There is no
    way to say "the scene is ready": the decision follows from the answers
    (a false required predicate: ``reset_required``; one not read:
    ``unknown``, never a pass; all true: ``ready``, which the arbitration
    still checks against the contract, the evidence rule included);
 3. ``collect`` turns the answer into the assessment, its evidence the
-   frames just captured (``provider: human``). An answer to a request that
-   is not open (never asked, answered already, withdrawn after a timeout or
-   a stop) is dropped as ``E_UNSOLICITED`` and noted; a malformed answer is
-   refused and noted, and the question stays open.
+   frames just captured (``provider: human``). The frames are kept in the
+   run's evidence store before the question is asked, and the question
+   names their files (``evidence/frames/<sha256>.<ext>``): the person
+   answers on what the system captured. A frame that could not be kept is
+   no evidence, and an assessment with such a frame is never ``ready``.
+   An answer to a request that is not open (never asked, answered already,
+   withdrawn after a timeout or a stop), with another nonce or other
+   frames, or that was there before the question, is dropped as
+   ``E_UNSOLICITED`` and noted; a malformed answer is refused and noted,
+   and the question stays open. A request id is asked once.
 
 A check nobody answers within ``reset.human_scene_timeout_s`` is withdrawn
 by the orchestrator: the scene counts as unavailable and the run waits for
@@ -34,9 +45,12 @@ is a later task. Nothing here moves anything or opens a connection.
 """
 
 import hashlib
+import hmac
 import json
 import os
 import queue
+import secrets
+import stat
 import threading
 import time
 from collections.abc import Callable
@@ -64,6 +78,30 @@ readable = sa.predicate_text
 def _frame_ref(view: str, data: bytes) -> tuple[str, str]:
     digest = hashlib.sha256(data).hexdigest()
     return f"{view}:{digest[:16]}", digest
+
+
+def frames_digest(frames) -> str:
+    """sha256 over the frames of a question (their sha256, in order)."""
+    text = "\n".join(f"{f['ref']} {f['sha256']}" for f in frames)
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def answer_for(question: dict, predicates: dict) -> dict:
+    """The answer to ``question`` (what the answering side sends): its
+    request id, nonce and frame digest echoed, and the predicates."""
+    return {
+        "request_id": question["request_id"],
+        "nonce": question["nonce"],
+        "frames_sha256": question["frames_sha256"],
+        "predicates": predicates,
+    }
+
+
+def _request_id(value) -> str:
+    if not isinstance(value, str) or not sa.LABEL.match(value):
+        # A request id names a file in the file protocol: never a path.
+        raise ValueError(f"not a request id: {str(value)[:60]!r}")
+    return value
 
 
 # --- transports ---------------------------------------------------------------------------------
@@ -102,7 +140,21 @@ class QueueTransport:
                 self.withdrawn.append((request_id, reason))
 
     def answer(self, request_id, predicates, **extra) -> None:
-        self._answers.put({"request_id": request_id, "predicates": predicates, **extra})
+        """Answer the question ``request_id`` as a page would: echoing the
+        nonce and frame digest of the question it shows. With no such
+        question (never asked, or withdrawn) the answer has none."""
+        with self._lock:
+            question = self.questions.get(request_id)
+        echo = (
+            {"nonce": question["nonce"], "frames_sha256": question["frames_sha256"]}
+            if question
+            else {}
+        )
+        self.put({"request_id": request_id, **echo, "predicates": predicates, **extra})
+
+    def put(self, answer: dict) -> None:
+        """Any answer as it arrives (tests: forged ones too)."""
+        self._answers.put(answer)
 
     def take_answers(self) -> list:
         out = []
@@ -190,14 +242,15 @@ class FileTransport:
                 path.unlink(missing_ok=True)
 
     def ask(self, question: dict) -> None:
+        name = _request_id(question.get("request_id"))
         self._folders()
         write_whole(
-            self.questions / f"{question['request_id']}.json",
+            self.questions / f"{name}.json",
             json.dumps(question, sort_keys=True).encode(),
         )
 
     def withdraw(self, request_id: str, reason: str) -> None:
-        (self.questions / f"{request_id}.json").unlink(missing_ok=True)
+        (self.questions / f"{_request_id(request_id)}.json").unlink(missing_ok=True)
 
     def _move(self, path: Path, folder: str) -> None:
         target = self.answers / folder
@@ -213,9 +266,7 @@ class FileTransport:
             if path.name.startswith("."):
                 continue
             try:
-                raw = path.read_bytes()
-                if len(raw) > MAX_ANSWER_BYTES:
-                    raise ValueError(f"over {MAX_ANSWER_BYTES} bytes")
+                raw = _read_regular(path)
                 found = json.loads(raw, object_pairs_hook=_no_duplicates)
             except (OSError, ValueError) as exc:
                 out.append({"_refused": f"{path.name}: {exc}"[:300]})
@@ -224,6 +275,22 @@ class FileTransport:
             self._move(path, "taken")
             out.append(found)
         return out
+
+
+def _read_regular(path: Path) -> bytes:
+    """A regular file's bytes, at most ``MAX_ANSWER_BYTES``: never through
+    a symbolic link, never blocking on a FIFO."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError("not a regular file")
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            raw = handle.read(MAX_ANSWER_BYTES + 1)
+    finally:
+        os.close(fd)
+    if len(raw) > MAX_ANSWER_BYTES:
+        raise ValueError(f"over {MAX_ANSWER_BYTES} bytes")
+    return raw
 
 
 def _no_duplicates(pairs):
@@ -253,19 +320,15 @@ def write_whole(path: Path, data: bytes) -> None:
         raise
 
 
-def write_answer(root, request_id: str, predicates: dict) -> Path:
+def write_answer(root, question: dict, predicates: dict) -> Path:
     """The answering side of ``FileTransport`` (what the page or a test
-    writes): one answer, written whole."""
-    if not isinstance(request_id, str) or not sa.LABEL.match(request_id):
-        # A request id names a file here: never a path.
-        raise ValueError(f"not a request id: {str(request_id)[:60]!r}")
+    writes): the answer to ``question`` (as read from ``questions/``),
+    written whole."""
+    request_id = _request_id(question.get("request_id"))
     folder = Path(root) / "answers"
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
     path = folder / f"{request_id}.{time.time_ns()}.json"
-    write_whole(
-        path,
-        json.dumps({"request_id": request_id, "predicates": predicates}).encode(),
-    )
+    write_whole(path, json.dumps(answer_for(question, predicates)).encode())
     return path
 
 
@@ -299,7 +362,7 @@ class HumanSceneProvider:
         *,
         wait: Callable[[int], object] | None = None,
         validity_ms: int = VALIDITY_MS,
-        max_frame_bytes: int = 8 * 1024 * 1024,
+        store=None,
     ):
         if contract is None:
             raise ValueError("a person answers the predicates of a contract")
@@ -312,8 +375,11 @@ class HumanSceneProvider:
         self.run_id = run_id
         self.wait = wait or (lambda ns: time.sleep(ns / 1e9))
         self.validity_ms = validity_ms
-        self.max_frame_bytes = max_frame_bytes
+        # The run's ``recorder.EvidenceStore`` (the orchestrator hands it
+        # over, ``use_evidence``): frames are kept there before the question.
+        self.store = store
         self._lock = threading.Lock()
+        self._used: set = set()  # request ids asked once
         self._open: dict[str, Ticket] = {}
         self._answered: dict[str, tuple] = {}  # request id -> (answer, received)
         self._frames: dict[str, dict] = {}  # request id -> {ref: bytes}
@@ -327,6 +393,9 @@ class HumanSceneProvider:
 
     def reachable(self):
         return self.transport.reachable()
+
+    def use_evidence(self, store) -> None:
+        self.store = store
 
     def submit(self, request: dict) -> Ticket | bytes:
         """The question, asked once the frames are captured. A capture or a
@@ -359,30 +428,44 @@ class HumanSceneProvider:
         return aeri.dump(aeri.validate(message, "scene"))
 
     def _submit(self, request: dict) -> Ticket:
+        request_id = _request_id(request["request_id"])
+        with self._lock:
+            if request_id in self._used:
+                raise ValueError(f"{request_id} was asked before (one question each)")
+            self._used.add(request_id)
+        # Whatever arrived before the question is not an answer to it.
+        self._take()
         frames = self.capture()
         if not isinstance(frames, dict) or not frames:
             raise ValueError("capture() returned no frames")
         observed = self.clock.now()
-        refs, kept = [], {}
+        shown, kept, unsaved = [], {}, []
         for view, data in sorted(frames.items()):
             data = data if isinstance(data, bytes) else str(data).encode()
             ref, digest = _frame_ref(str(view), data)
-            refs.append(
+            saved = self._keep(ref, data)
+            shown.append(
                 {
                     "kind": "frame",
                     "ref": ref,
+                    "view": str(view),
                     "sha256": digest,
-                    "step": None,
                     "bytes": len(data),
+                    # Relative to the run directory; None when not kept.
+                    "file": saved["file"],
+                    "skipped": saved["skipped"],
                 }
             )
-            if len(data) <= self.max_frame_bytes:
+            if saved["file"] is None:
+                unsaved.append(ref)
+            else:
                 kept[ref] = data
         names = [(n, True) for n in self.contract.required] + [
             (n, False) for n in self.contract.optional
         ]
         question = {
-            "request_id": request["request_id"],
+            "request_id": request_id,
+            "nonce": secrets.token_urlsafe(16),
             "run_id": self.run_id,
             "episode_id": request["episode_id"],
             "target": request["target"],
@@ -394,24 +477,45 @@ class HumanSceneProvider:
             "predicates": [
                 {"name": n, "text": readable(n), "required": r} for n, r in names
             ],
-            "frames": refs,
+            "frames": shown,
+            "frames_sha256": frames_digest(shown),
             "asked_ns": observed,
             "answers": ["true", "false", "null (cannot tell)"],
         }
         self._asked += 1
         ticket = Ticket(
-            request_id=request["request_id"],
+            request_id=request_id,
             number=self._asked,
             submitted_ns=observed,
             ready_ns=observed,
             request=dict(request),
-            response={"observed_ns": observed, "refs": refs},
+            response={
+                "observed_ns": observed,
+                "refs": [f for f in shown if f["file"] is not None],
+                "unsaved": unsaved,
+                "nonce": question["nonce"],
+                "frames_sha256": question["frames_sha256"],
+            },
         )
         with self._lock:
-            self._open[ticket.request_id] = ticket
-            self._frames[ticket.request_id] = kept
+            self._open[request_id] = ticket
+            self._frames[request_id] = (kept, unsaved)
         self.transport.ask(question)
         return ticket
+
+    def _keep(self, ref: str, data: bytes) -> dict:
+        """The frame in the evidence store (``{"file", "skipped"}``); never
+        raises: a frame that cannot be kept is no evidence."""
+        if self.store is None:
+            return {"file": None, "skipped": "no_evidence_store"}
+        try:
+            found = self.store.keep_frame(ref, data)
+        except Exception as exc:  # noqa: BLE001 - the frame is no evidence
+            self._note("evidence_write_failed", f"{ref}: {exc}")
+            return {"file": None, "skipped": "write_failed"}
+        if found["file"] is None:
+            return {"file": None, "skipped": found["skipped"]}
+        return {"file": f"{self.store.folder.name}/{found['file']}", "skipped": None}
 
     def cancel(self, ticket: Ticket, reason: str) -> None:
         with self._lock:
@@ -441,6 +545,8 @@ class HumanSceneProvider:
     # ------------------------------------------------------------ answers
 
     def _take(self) -> None:
+        """Route the answers that arrived. Notes are written after the lock
+        is released (the lock is never taken twice)."""
         for answer in self.transport.take_answers():
             if not isinstance(answer, dict) or "_refused" in answer:
                 detail = answer.get("_refused") if isinstance(answer, dict) else ""
@@ -452,8 +558,9 @@ class HumanSceneProvider:
                     self._open.get(request_id) if isinstance(request_id, str) else None
                 )
                 taken = request_id in self._answered
-            if ticket is None or taken:
-                # Never asked, answered already, or withdrawn: dropped.
+            if ticket is None or taken or not self._echoes(ticket, answer):
+                # Never asked, answered already, withdrawn, or not an
+                # answer to this question (nonce, frames): dropped.
                 self._note(
                     "scene_answer_unsolicited",
                     f"{UNSOLICITED}: {str(request_id)[:120]}",
@@ -465,18 +572,28 @@ class HumanSceneProvider:
                 self._note("scene_answer_refused", f"{request_id}: {exc}")
                 continue
             with self._lock:
-                if request_id in self._open and request_id not in self._answered:
+                fresh = request_id in self._open and request_id not in self._answered
+                if fresh:
                     self._answered[request_id] = (values, self.clock.now())
-                else:
-                    self._note(
-                        "scene_answer_unsolicited", f"{UNSOLICITED}: {request_id}"
-                    )
+            if not fresh:
+                self._note("scene_answer_unsolicited", f"{UNSOLICITED}: {request_id}")
+
+    @staticmethod
+    def _echoes(ticket: Ticket, answer: dict) -> bool:
+        nonce, digest = answer.get("nonce"), answer.get("frames_sha256")
+        if not isinstance(nonce, str) or not isinstance(digest, str):
+            return False
+        return hmac.compare_digest(
+            nonce, ticket.response["nonce"]
+        ) and hmac.compare_digest(digest, ticket.response["frames_sha256"])
 
     def _check(self, answer: dict) -> dict:
         """The person's values, or ``AnswerRefused``: only the predicates
         (every required one answered, no other name), only true, false or
         null. No decision, no "ready": a person answers predicates."""
-        extra = sorted(set(answer) - {"request_id", "predicates"})
+        extra = sorted(
+            set(answer) - {"request_id", "nonce", "frames_sha256", "predicates"}
+        )
         if extra:
             raise AnswerRefused(f"only predicates are answered, not {extra[:4]}")
         values = answer.get("predicates")
@@ -496,8 +613,9 @@ class HumanSceneProvider:
 
     def _assessment(self, ticket: Ticket, values: dict, received: int) -> bytes:
         request = ticket.request
+        # Only frames that were kept are evidence.
         refs = [
-            {key: r[key] for key in ("kind", "ref", "sha256", "step")}
+            {"kind": "frame", "ref": r["ref"], "sha256": r["sha256"], "step": None}
             for r in ticket.response["refs"]
         ]
         results = [
@@ -515,7 +633,9 @@ class HumanSceneProvider:
         unread = [r["name"] for r in required if r["value"] is None]
         if failed:
             decision = "reset_required"
-        elif unread:
+        elif unread or ticket.response["unsaved"]:
+            # A frame the person was asked about could not be kept: the
+            # answer is not on evidence anyone can look at again.
             decision = "unknown"
         else:
             decision = "ready"
@@ -560,10 +680,15 @@ class HumanSceneProvider:
     # ------------------------------------------------------------ for the orchestrator
 
     def frames(self, request_id: str) -> dict:
-        """``{ref: bytes}`` captured for a request (the evidence store keeps
-        them); forgotten once read."""
+        """``{ref: bytes}`` of the frames kept for a request; forgotten
+        once read (``unsaved`` first)."""
         with self._lock:
-            return self._frames.pop(request_id, {})
+            return self._frames.pop(request_id, ({}, []))[0]
+
+    def unsaved(self, request_id: str) -> list:
+        """Refs of the frames shown for a request that could not be kept."""
+        with self._lock:
+            return list(self._frames.get(request_id, ({}, []))[1])
 
     def _note(self, code: str, detail: str) -> None:
         with self._lock:

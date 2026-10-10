@@ -202,13 +202,17 @@ class RunConfig:
             raise ConfigError(str(exc)) from None
         if self.scene_check not in aeri.SCENE_CHECKS:
             raise ConfigError(f"scene_check is one of {', '.join(aeri.SCENE_CHECKS)}")
-        if (
-            self.scene_check == "operator_attested"
-            and self.reset_strategy != "human_assisted"
-        ):
-            raise ConfigError(
-                "scene_check operator_attested belongs to the human_assisted strategy"
-            )
+        if self.scene_check == "operator_attested":
+            if self.reset_strategy != "human_assisted":
+                raise ConfigError(
+                    "scene_check operator_attested belongs to the human_assisted "
+                    "strategy"
+                )
+            if self.initial_state is None:
+                raise ConfigError(
+                    "scene_check operator_attested needs an Initial State "
+                    "Contract: the person answers its predicates"
+                )
 
     @property
     def scene_wait_ns(self) -> int:
@@ -363,6 +367,10 @@ class Orchestrator:
                 self._note("evidence_write_failed", f"open: {exc}")
         elif evidence:
             self.evidence = evidence
+        attach = getattr(scene, "use_evidence", None)
+        if self.evidence is not None and callable(attach):
+            # A person's check keeps its frames before it asks (T-CL-03).
+            attach(self.evidence)
         if self.evidence is not None and contract is not None:
             try:
                 self.evidence.keep_contract(contract.describe())
@@ -1084,7 +1092,12 @@ class Orchestrator:
             if isinstance(got, bytes | bytearray):
                 raw = bytes(got)
             else:
-                raw, why = self._collect_scene(got)
+                try:
+                    raw, why = self._collect_scene(got)
+                except BaseException:
+                    # Never leave a question open behind an exception.
+                    self.scene.cancel(got, "error")
+                    raise
                 if raw is None:
                     self.scene.cancel(got, why)
                     self._note(f"scene_{why}", request_id)
@@ -1132,7 +1145,13 @@ class Orchestrator:
         person's check). Never decides and never stops the run: a failure
         is a note."""
         take = getattr(self.scene, "frames", None)
+        lost = getattr(self.scene, "unsaved", None)
         try:
+            if callable(lost):
+                unsaved = lost(record["request_id"])
+                if unsaved:
+                    # Shown to the person but not kept: no evidence.
+                    record["frame_unsaved"] = unsaved
             frames = take(record["request_id"]) if callable(take) else {}
         except Exception as exc:  # noqa: BLE001 - evidence only
             self._note("evidence_write_failed", f"frames: {exc}")
@@ -1248,9 +1267,10 @@ class Orchestrator:
     def _preceding(self) -> dict:
         """What put the scene back since the previous forward episode
         started, from the journal (design X2 §1.2, "data ownership"): the
-        reset policy (a reset episode), a person (every wait for a person
-        that an operator's resume ended; the resume confirmed the
-        environment), or nothing. The most recent of the two wins. A wait
+        reset policy (a reset episode), a person (a wait for a reset,
+        ``WAIT_HUMAN`` with a ``scene_*`` reason, that an operator's resume
+        ended; a resume after a stop, a fault or a failed preflight is not
+        a human reset: those stay in the journal only), or nothing. The most recent of the two wins. A wait
         and its resume in different clock domains (a restart in between)
         have no ``wait_ms``."""
         events = self.journal.events
@@ -1265,7 +1285,9 @@ class Orchestrator:
             if event.to_state == "RESET_ACTIVE":
                 last_reset = event.sequence_no
             elif event.to_state in sm.HUMAN_STATES:
-                waiting = event
+                # Only a wait for a reset (``scene_*``) is a human reset; a
+                # resume after a stop, a fault or a failed preflight is not.
+                waiting = event if event.reason.startswith("scene_") else None
             elif event.reason == "human_resumed" and waiting is not None:
                 same = waiting.clock_domain == event.clock_domain
                 human.append(

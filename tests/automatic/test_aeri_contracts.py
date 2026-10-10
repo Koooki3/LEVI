@@ -741,7 +741,13 @@ def test_compatible_or_new_snapshots_pass_against_the_base(tmp_path, monkeypatch
     empty = _repo(tmp_path / "x", {"README": "no contracts yet\n"})
     problems, notes = aeri.check_against_base(empty, "main")
     assert problems == [] and all("new" in n for n in notes)
-    assert len(notes) == len(aeri.schema_documents())  # the five contracts, the job
+    # Pinned: the five contracts and the job file, one note each.
+    expected = {"event", "judgement", "scene", "runtime", "run_event", "job"}
+    assert set(aeri.schema_documents()) == expected
+    named = {
+        n.split(":")[0].rsplit("/", 1)[-1].removesuffix(".schema.json") for n in notes
+    }
+    assert named == expected and len(notes) == 6
 
 
 def test_an_unreadable_base_fails_instead_of_passing(tmp_path):

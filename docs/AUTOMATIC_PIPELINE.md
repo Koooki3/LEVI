@@ -706,14 +706,21 @@ back to `WAIT_HUMAN`. There is no way around the second check.
 
 | `scene_check` | Who | Notes |
 | --- | --- | --- |
-| `provider` (default) | the machine scene provider | a human-assisted launch is refused without a reachable provider (`E_SCENE_PROVIDER_MISSING`, `cli.scene_provider_problems`), so the run can never loop between `WAIT_HUMAN` and `VERIFY_INITIAL` with nobody able to answer |
+| `provider` (default) | the machine scene provider | a human-assisted launch is refused without a provider whose `reachable()` answers `True` (no such check counts as unreachable; `E_SCENE_PROVIDER_MISSING`, `cli.scene_provider_problems`), so the run can never loop between `WAIT_HUMAN` and `VERIFY_INITIAL` with nobody able to answer |
 | `operator_attested` | a person (`adapters/human.py`, `HumanSceneProvider`, `provider: human`) | `human_assisted` only, with an Initial State Contract |
 
 With `operator_attested` the check captures the current camera frames
-first (after the resume and its preflight), then asks one question: the
-request id (answered once), the contract `id@version` and status, every
-predicate in words, the frames. The person answers each required predicate
-`true`, `false` or `null` ("cannot tell") and nothing else. The decision
+first (after the resume and its preflight), keeps them in the run's
+evidence store, then asks one question: the request id (asked once), a
+random `nonce` (`secrets`), the contract `id@version` and status, every
+predicate in words, and the frames with their files
+(`evidence/frames/<sha256>.<ext>`, relative to the run directory) and
+`frames_sha256`, so the person answers on the frames the system captured.
+An answer is `{request_id, nonce, frames_sha256, predicates}`
+(`human.answer_for`): the nonce and frame digest echoed, each required
+predicate `true`, `false` or `null` ("cannot tell") and nothing else. An
+answer that was there before its question (request ids are predictable),
+or carries another nonce or frame digest, is never taken. The decision
 follows from the answers (a false required predicate: `reset_required`; a
 `null`: `unknown`; all true: `ready`, still checked by the arbitration,
 evidence rule and views included). An answer may not carry a decision or a
@@ -724,7 +731,10 @@ never asked, already answered or withdrawn is dropped
 answers within `reset.human_scene_timeout_s` (default 600) is withdrawn
 and counts as unavailable: the run waits for a person again. An operator's
 stop ends a pending check at once. A failing camera or transport is
-unavailable, never a pass. The transports in this version are
+unavailable, never a pass. A frame that could not be kept (over the frame
+limit, budget spent, no evidence store) is no evidence: the record lists
+it under `frame_unsaved`, and the assessment is `unknown`, never `ready`.
+The transports in this version are
 `QueueTransport`, `ScriptedTransport` (dry runs) and the file protocol
 `FileTransport` (`questions/<request_id>.json`, `answers/*.json`, each
 written whole); the page that shows the question is a later task.
@@ -739,7 +749,10 @@ gets, in the run manifest, `preceded_by` and `after_human_resets`
 (`[{wait_seq, resume_seq, wait_ms, principal_id, reason}]`), and in its
 rollout metadata `eval.aeri.preceded_by` (`none`, `reset_policy` or
 `human_reset`: the most recent of the two), so a training pool can tell
-the episodes apart.
+the episodes apart. Only a wait for a reset (`WAIT_HUMAN` with a
+`scene_*` reason) ended by a resume is a human reset; a resume after a
+stop, a fault or a failed preflight stays in the journal and is not
+counted.
 
 **Evidence.** Every scene assessment, accepted or not (a timeout, a stale
 or refused message included), is kept as

@@ -836,7 +836,10 @@ class EvidenceStore:
     def _whole(self, path: Path, data: bytes) -> None:
         if self.io_hook is not None:
             self.io_hook("write", path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.parent.is_dir():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # A new folder's own entry is durable too.
+            fsync_dir(path.parent.parent)
         temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
         try:
             with temporary.open("wb") as handle:
@@ -851,6 +854,11 @@ class EvidenceStore:
             temporary.unlink(missing_ok=True)
             raise
         self.used += len(data)
+
+    def keep_frame(self, ref: str, data: bytes) -> dict:
+        """One frame (``{"ref", "view", "sha256", "bytes", "file",
+        "skipped"}``, ``file`` relative to ``evidence/``)."""
+        return self._frame(ref, data)
 
     def _frame(self, ref: str, data: bytes) -> dict:
         digest = hashlib.sha256(data).hexdigest()
