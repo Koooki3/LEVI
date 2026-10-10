@@ -779,6 +779,13 @@ def markdown(found: dict) -> str:
             f"# AERI run report ({found['state']})",
             "",
             (
+                f"Reset mode: {found.get('reset_mode') or 'unknown'}"
+                f" (from {(found.get('mode_source') or {}).get('reset_mode', 'unknown')}); "
+                f"scene check: {found.get('scene_check') or 'unknown'}. "
+                "Only the fields in `comparable` compare across reset modes."
+            ),
+            "",
+            (
                 f"Truth: {found['truth']} ({found['truth_labels']['task_outcome']} "
                 f"outcome labels, {found['truth_labels']['initial_state']} scene "
                 "labels). autonomous_* rates are the run's own verdicts, not "

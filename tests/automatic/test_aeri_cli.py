@@ -211,6 +211,9 @@ def test_a_kept_dry_run_can_be_inspected_and_reported(job, capsys, tmp_path):
     code, out = call(capsys, "report", "--run-dir", str(run_dir), "--config", str(job))
     assert code == 0 and "# AERI run report (COMPLETED)" in out
     assert "not ground truth" in out and "| resets | 1 |" in out
+    # The header names the reset mode and the scene check, and where they came from.
+    assert "Reset mode: single_reset_policy (from " in out
+    assert "scene check: " in out and "`comparable`" in out
     code, out = call(capsys, "report", "--run-dir", str(run_dir), "--format", "json")
     assert json.loads(out)["automation"]["interventions"] == 0
     assert journal.read_bytes() == before
