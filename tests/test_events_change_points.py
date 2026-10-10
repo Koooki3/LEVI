@@ -412,3 +412,35 @@ def test_choice_prefers_the_larger_of_near_equal_penalties():
 
     sweep = {"0.2": {"f1@0.5": 0.581}, "0.5": {"f1@0.5": 0.574}, "1": {"f1@0.5": 0.56}}
     assert choose(sweep, [0.2, 0.5, 1.0]) == 0.5
+
+
+def test_a_long_table_is_bounded():
+    import time
+
+    # 30 Hz for 10 minutes of pure noise: without a bound the search is
+    # quadratic (about 11 s measured by the review).
+    n = 18000
+    x = np.random.default_rng(5).normal(0, 1, (n, 3))
+    scaled = np.stack([cp.scale(x[:, i]) for i in range(3)], axis=1)
+    start = time.perf_counter()
+    result = cp.detect(np.arange(n) / 30, scaled)
+    elapsed = time.perf_counter() - start
+    assert elapsed < 2.0, elapsed
+    assert result.bin_rows == math.ceil(n / cp.MAX_ROWS)
+    assert len(result.rows) <= 2
+
+
+def test_binning_still_finds_steps_at_their_rows():
+    n = 18000
+    times = np.arange(n) / 30
+    x = np.zeros(n)
+    x[6000:] = 1.0
+    x[12000:] = 2.0
+    x += np.random.default_rng(6).normal(0, 0.05, n)
+    result = cp.detect(times, cp.scale(x)[:, None])
+    assert result.bin_rows > 1
+    for row, step in zip(result.rows, (6000, 12000), strict=True):
+        assert abs(row - step) <= result.bin_rows
+    assert all(r % result.bin_rows == 0 for r in result.rows)
+    # A short table is not binned.
+    assert cp.detect(np.arange(300) / 10, cp.scale(x[:300])[:, None]).bin_rows == 1

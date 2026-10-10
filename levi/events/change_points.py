@@ -20,7 +20,10 @@ Guards against over-cutting, each tested:
 - the penalty per change is ``penalty * (d + 1) * log(n)`` for ``d``
   features and ``n`` rows (more features or a longer episode need more
   evidence per change);
-- no segment is shorter than ``min_seconds``;
+- no segment is shorter than ``min_seconds`` (in rows, from the median
+  sampling step);
+- a series longer than ``MAX_ROWS`` is searched in blocks, so the time is
+  bounded (the search is quadratic in the worst case);
 - at most ``max_per_minute`` change points per minute of episode: past it the
   penalty is raised until the result fits, keeping exactly the strongest
   ``limit`` when equally strong changes would all vanish at once; the result
@@ -42,6 +45,9 @@ from . import motion
 PENALTY = 0.5
 MIN_SECONDS = 0.5
 MAX_PER_MINUTE = 30.0
+# A longer series is averaged over blocks of rows to at most this many
+# before the search (which is quadratic in the worst case).
+MAX_ROWS = 3000
 # Raise the penalty by this factor, at most this many times, to meet the cap.
 RAISE, MAX_RAISES = 1.5, 30
 
@@ -58,6 +64,9 @@ class Result:
     min_size: int
     features: list[str] = field(default_factory=list)
     capped: bool = False
+    # Rows per block the search ran on (1: every row); change points then
+    # fall on block starts and gains are in block units.
+    bin_rows: int = 1
 
 
 def _fill(x):
@@ -160,6 +169,19 @@ def gains(x, rows):
     return out
 
 
+def binned(x, rows):
+    """``x`` averaged over blocks of ``rows`` rows (the last may be shorter),
+    each block mean times the square root of its length, so that a block's
+    squared error weighs as its rows did and the penalty keeps its meaning."""
+    if rows <= 1:
+        return x
+    n = len(x)
+    edges = np.arange(0, n, rows)
+    sums = np.add.reduceat(x, edges, axis=0)
+    counts = np.diff(np.append(edges, n)).astype(float)[:, None]
+    return sums / counts * np.sqrt(counts)
+
+
 def detect(
     times,
     x,
@@ -168,9 +190,11 @@ def detect(
     penalty=PENALTY,
     min_seconds=MIN_SECONDS,
     max_per_minute=MAX_PER_MINUTE,
+    _span=None,
 ):
     """Change points of a series ``x`` (rows x features, already on
-    comparable scales) recorded at ``times`` (seconds)."""
+    comparable scales) recorded at ``times`` (seconds). A series longer than
+    ``MAX_ROWS`` is searched in blocks (``binned``); ``bin_rows`` says so."""
     times = np.asarray(times, dtype=float)
     x = np.asarray(x, dtype=float)
     if x.ndim == 1:
@@ -185,8 +209,25 @@ def detect(
     empty = Result([], [], penalty, 0.0, min_size, names)
     if n < 2 * min_size or d == 0 or len(finite_t) < 2:
         return empty
-    # The episode lasts from its first sample to one step past its last.
-    minutes = max(float(finite_t[-1] - finite_t[0]) + dt, dt) / 60
+    bin_rows = max(1, math.ceil(n / MAX_ROWS))
+    if bin_rows > 1:
+        full = detect(
+            times[::bin_rows],
+            binned(x, bin_rows),
+            names=names,
+            penalty=penalty,
+            min_seconds=min_seconds,
+            max_per_minute=max_per_minute,
+            _span=(finite_t, dt),
+        )
+        full.rows = [r * bin_rows for r in full.rows]
+        full.min_size *= bin_rows
+        full.bin_rows = bin_rows
+        return full
+    # The episode lasts from its first sample to one step past its last
+    # (of the unbinned table when searching in blocks).
+    span_t, span_dt = _span or (finite_t, dt)
+    minutes = max(float(span_t[-1] - span_t[0]) + span_dt, span_dt) / 60
     limit = max(1, math.floor(max_per_minute * minutes + 1e-9))
     beta = penalty * (d + 1) * math.log(n)
     rows = segment(x, beta, min_size)
