@@ -121,6 +121,9 @@ def layout() -> str:
     return value
 
 
+_configured_layout = layout  # ``publish`` takes a ``layout`` argument
+
+
 def is_model_name(value: str | None) -> bool:
     return bool(value) and bool(re.fullmatch(MODEL_PATTERN, value))
 
@@ -461,15 +464,20 @@ def publish(
     *,
     dataset_name: str,
     subset: bool = False,
+    layout: str | None = None,
 ) -> dict[str, Any]:
-    """Publish one computation in the configured layout and make it current.
+    """Publish one computation and make it current, in ``layout`` (the one
+    the job's plan recorded) or else the configured one.
 
     ``episodes`` maps episode index to per-frame arrays (frame_index,
     timestamp, value, value_next, reward_sum, reward_sum_raw, return,
     advantage, num_valid_rewards, positive -- ``None`` for values only).
     ``subset``: the run named its episodes, so a model result merges them
     into the stored one instead of replacing it."""
-    if layout() == MODELS:
+    chosen = layout or _configured_layout()
+    if chosen not in LAYOUTS:
+        raise ValueError(f"Unknown RECAP store layout {chosen!r}")
+    if chosen == MODELS:
         return publish_model(
             name, episodes, meta, dataset_name=dataset_name, subset=subset
         )

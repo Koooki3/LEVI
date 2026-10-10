@@ -507,7 +507,9 @@ def test_clear_is_a_dry_run_until_apply_and_covers_both_layouts(
     log = [
         json.loads(line) for line in (folder / "cleared.jsonl").read_text().splitlines()
     ]
-    assert {i["ref"] for i in log[0]["items"]} == {"r1", rid, None}
+    # One line per removed item, written as it goes.
+    assert {i["ref"] for i in log} == {"r1", rid, None}
+    assert all(i["cleared_at"] and i["path"] for i in log)
     assert (ckpt / "keep-me" / "manifest.json").is_file()  # checkpoints untouched
     report = jobs.clear(["ds"], include_jobs=True, apply=True)
     assert [i["kind"] for i in report["datasets"][0]["items"]] == ["jobs"]
@@ -517,3 +519,97 @@ def test_clear_is_a_dry_run_until_apply_and_covers_both_layouts(
     assert missing.value.status == 404
     with pytest.raises(jobs.RecapError):
         jobs.clear(["../outside"])
+
+
+def _symlinked(tmp_path, where):
+    """The review's reproduction: part of a results folder is a symbolic
+    link to data elsewhere."""
+    _publish({0: (8, 0.0)})
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "precious.txt").write_text("not RECAP results")
+    folder = store.root("ds")
+    target = folder / where
+    import shutil
+
+    shutil.move(str(target), str(elsewhere / "moved"))
+    target.symlink_to(elsewhere / "moved", target_is_directory=True)
+    return elsewhere
+
+
+@pytest.mark.parametrize("where", ["models", "models/r1"])
+def test_clear_refuses_symbolic_links(client, tmp_path, where):
+    """Review I4: clear followed a symlinked folder and deleted data outside
+    recap_values."""
+    elsewhere = _symlinked(tmp_path, where)
+    before = sorted(p.relative_to(elsewhere) for p in elsewhere.rglob("*"))
+    dry = jobs.clear(["ds"])
+    assert dry["datasets"][0]["symlinks"] == [where]
+    with pytest.raises(jobs.RecapError) as refused:
+        jobs.clear(["ds"], apply=True)
+    assert refused.value.status == 409 and where in refused.value.detail
+    assert sorted(p.relative_to(elsewhere) for p in elsewhere.rglob("*")) == before
+    assert (store.root("ds") / "current.json").is_file()  # nothing removed
+
+
+def test_clear_refuses_a_symlinked_dataset_folder(client, tmp_path):
+    elsewhere = tmp_path / "elsewhere-ds"
+    (elsewhere / "models").mkdir(parents=True)
+    (elsewhere / "current.json").write_text("{}")
+    store.root("linked").parent.mkdir(parents=True, exist_ok=True)
+    store.root("linked").symlink_to(elsewhere, target_is_directory=True)
+    with pytest.raises(jobs.RecapError) as refused:
+        jobs.clear(["linked"], apply=True)
+    assert refused.value.status == 409
+    assert (elsewhere / "current.json").is_file()
+
+
+def test_clear_logs_each_item_as_it_goes(client, monkeypatch):
+    """Review I4: a failure halfway left removed items unrecorded."""
+    monkeypatch.delenv("LEVI_RECAP_STORE_LAYOUT", raising=False)
+    store.publish("ds", {0: _episode(8)}, _meta(), dataset_name="ds")
+    _publish({0: (8, 0.1)})
+    real = jobs.shutil.rmtree
+    calls = []
+
+    def flaky(path, *a, **k):
+        calls.append(path)
+        if len(calls) == 2:
+            raise OSError("disk went away")
+        return real(path, *a, **k)
+
+    monkeypatch.setattr(jobs.shutil, "rmtree", flaky)
+    with pytest.raises(jobs.RecapError, match="partly cleared"):
+        jobs.clear(["ds"], apply=True)
+    lines = [
+        json.loads(line)
+        for line in (store.root("ds") / "cleared.jsonl").read_text().splitlines()
+    ]
+    assert len(lines) == 2
+    assert lines[0]["cleared_at"] and not Path(calls[0]).exists()
+    assert lines[1]["failed_at"] and "disk went away" in lines[1]["error"]
+
+
+def test_clear_dry_run_writes_nothing(client):
+    """Review S1: a dry run took the dataset lock and created .lock."""
+    folder = store.root("fresh")
+    (folder / "revisions").mkdir(parents=True)
+    before = sorted(p.name for p in folder.iterdir())
+    jobs.clear(["fresh"])
+    assert sorted(p.name for p in folder.iterdir()) == before
+
+
+def test_layout_is_fixed_when_the_job_starts(recap_models, monkeypatch):
+    """Review S6: a job started under one layout publishes in it even if the
+    setting changed before it finished."""
+    client, entry = recap_models
+    repo, name = entry["id"], entry["name"]
+    monkeypatch.setenv("LEVI_RECAP_VALUE_FAKE_DELAY_SECONDS", "1")
+    started = client.post("/annotations/api/recap/run", json={**BODY, "repo_id": repo})
+    assert started.status_code == 202
+    monkeypatch.setenv("LEVI_RECAP_STORE_LAYOUT", "revisions")
+    from test_recap_value import finish
+
+    assert finish(client, repo, started.json()["id"])["status"] == "succeeded"
+    assert store.revision(name)["layout"] == "models"
+    assert not (store.root(name) / "revisions").exists()

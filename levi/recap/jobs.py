@@ -673,6 +673,9 @@ def start(
             "static_filter": filtering,
             "batch_size": _batch_size(),
             "device": _device() if manifest.provider == "rlinf" else "cpu",
+            # The storage layout is fixed when the job starts: a restart with
+            # another LEVI_RECAP_STORE_LAYOUT must not move its result.
+            "layout": writing,
         }
         catalog.atomic(plan_path, plan)
         job = {
@@ -1207,6 +1210,7 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         meta,
         dataset_name=plan["dataset"]["name"],
         subset=request["episodes"] is not None,
+        layout=plan.get("layout"),
     )
 
 
@@ -1230,6 +1234,7 @@ def _publish_values_only(job, plan, manifest, result, per_episode):
         meta,
         dataset_name=plan["dataset"]["name"],
         subset=request["episodes"] is not None,
+        layout=plan.get("layout"),
     )
 
 
@@ -1628,6 +1633,27 @@ def _clear_items(name: str, include_jobs: bool) -> list[dict[str, Any]]:
     return items
 
 
+def _symlinks(name: str, items: list[dict[str, Any]]) -> list[str]:
+    """Symbolic links on the way to anything ``clear`` would remove (the
+    dataset folder itself, ``models``/``revisions``, an item): deleting
+    through one would reach data outside ``recap_values``."""
+    folder = store.root(name)
+    found: list[str] = []
+    if folder.is_symlink():
+        return ["."]
+    for item in items:
+        path = item["path"]
+        relative = path.relative_to(folder)
+        step = folder
+        for part in relative.parts:
+            step = step / part
+            label = str(step.relative_to(folder))
+            if step.is_symlink() and label not in found:
+                found.append(label)
+                break
+    return found
+
+
 def clear(
     names: list[str] | None = None,
     *,
@@ -1637,17 +1663,19 @@ def clear(
     """Remove RECAP results (both layouts) and ``current.json``; with
     ``include_jobs`` also the job records, plans and worker outputs.
 
-    A dry run (the default) only lists what would go and its size. ``names``
-    are ``local/<name>`` ids or folder names under ``recap_values`` (results
-    of a dataset no longer registered can be cleared too); ``None`` means
-    every folder. A dataset with a live job is refused. Checkpoints,
-    datasets and the dataset setting (``dataset.json``) are never touched.
-    Each applied clearing appends what it removed to the folder's
-    ``cleared.jsonl``."""
+    A dry run (the default) only lists what would go and its size, and
+    writes nothing (no lock is taken). ``names`` are ``local/<name>`` ids or
+    folder names under ``recap_values`` (results of a dataset no longer
+    registered can be cleared too); ``None`` means every folder. Refused
+    while a job of the dataset runs, and when a symbolic link lies on the
+    way to anything it would remove. Checkpoints, datasets and the dataset
+    setting (``dataset.json``) are never touched. Each removed item is
+    appended to the folder's ``cleared.jsonl`` as soon as it is gone (a
+    failure is logged too)."""
     base = catalog.STATE / "recap_values"
     if names is None:
         names = (
-            sorted(p.name for p in base.iterdir() if p.is_dir())
+            sorted(p.name for p in base.iterdir() if p.is_dir() and not p.is_symlink())
             if base.is_dir()
             else []
         )
@@ -1673,47 +1701,42 @@ def clear(
             + "; ".join(f"{n}: {', '.join(i)}" for n, i in busy.items())
             + "); wait for them or cancel them first",
         )
+    plans = {}
+    for name in resolved:
+        links = _symlinks(name, [])
+        items = [] if links else _clear_items(name, include_jobs)
+        plans[name] = (items, links or _symlinks(name, items))
+    if apply:
+        linked = {n: links for n, (_, links) in plans.items() if links}
+        if linked:
+            raise RecapError(
+                409,
+                "Symbolic links in the RECAP results folders ("
+                + "; ".join(f"{n}: {', '.join(links)}" for n, links in linked.items())
+                + "); nothing was removed — move the data back or remove the "
+                "links by hand",
+            )
     report: dict[str, Any] = {"applied": apply, "datasets": [], "bytes": 0}
     for name in resolved:
-        with store.locked(name):
-            if apply and _running(name):
-                raise RecapError(409, f"A RECAP value job started on {name}")
-            items = _clear_items(name, include_jobs)
-            if apply and items:
-                for item in items:
-                    path = item["path"]
-                    if path.is_dir():
-                        shutil.rmtree(path)
-                    else:
-                        path.unlink(missing_ok=True)
-                for empty in (store.MODELS, store.LEGACY):
-                    with contextlib.suppress(OSError):
-                        (store.root(name) / empty).rmdir()
-                with (store.root(name) / "cleared.jsonl").open("a") as log:
-                    log.write(
-                        json.dumps(
-                            {
-                                "cleared_at": time.time(),
-                                "items": [
-                                    {k: v for k, v in i.items() if k != "path"}
-                                    | {
-                                        "path": str(
-                                            i["path"].relative_to(store.root(name))
-                                        )
-                                    }
-                                    for i in items
-                                ],
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
+        items, links = plans[name]
+        if apply:
+            with store.locked(name):
+                if _running(name):
+                    raise RecapError(409, f"A RECAP value job started on {name}")
+                items = _clear_items(name, include_jobs)
+                links = _symlinks(name, items)
+                if links:
+                    raise RecapError(
+                        409, f"Symbolic links appeared in {name}: {', '.join(links)}"
                     )
+                _remove(name, items)
         size = sum(i["bytes"] for i in items)
         report["bytes"] += size
         report["datasets"].append(
             {
                 "name": name,
                 "bytes": size,
+                "symlinks": links,
                 "items": [
                     {
                         **{k: v for k, v in i.items() if k != "path"},
@@ -1724,3 +1747,37 @@ def clear(
             }
         )
     return report
+
+
+def _remove(name: str, items: list[dict[str, Any]]) -> None:
+    """Delete one item after another, logging each as soon as it is gone."""
+    folder = store.root(name)
+    with (folder / "cleared.jsonl").open("a") as log:
+
+        def note(entry: dict[str, Any]) -> None:
+            log.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            log.flush()
+            os.fsync(log.fileno())
+
+        for item in items:
+            path = item["path"]
+            entry = {k: v for k, v in item.items() if k != "path"}
+            entry["path"] = str(path.relative_to(folder))
+            try:
+                if path.is_symlink():
+                    raise OSError(f"{entry['path']} became a symbolic link")
+                if path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink(missing_ok=True)
+            except OSError as exc:
+                note({**entry, "failed_at": time.time(), "error": str(exc)})
+                raise RecapError(
+                    500,
+                    f"{name} was partly cleared: {entry['path']} failed ({exc}); "
+                    "see cleared.jsonl",
+                ) from exc
+            note({**entry, "cleared_at": time.time()})
+    for empty in (store.MODELS, store.LEGACY):
+        with contextlib.suppress(OSError):
+            (folder / empty).rmdir()
