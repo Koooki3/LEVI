@@ -3,7 +3,6 @@ noise and smooth motion are not over-cut, the result is the exact optimum,
 and odd tables (NaN, constants, very short, uneven timestamps) do not break
 it."""
 
-import math
 from itertools import pairwise
 
 import numpy as np
@@ -15,30 +14,21 @@ from levi.events.contracts import EventCandidate
 
 
 def _optimum(x, beta, min_size):
-    """Optimal partitioning without pruning (the reference)."""
+    """Optimal partitioning without pruning (the reference): the least total
+    cost, every start considered for every end."""
     x = np.asarray(x, dtype=float)[:, None] if np.ndim(x) == 1 else np.asarray(x)
     n = len(x)
-
-    def cost(a, b):
-        seg = x[a:b]
-        return float(((seg - seg.mean(axis=0)) ** 2).sum())
-
-    best = [math.inf] * (n + 1)
+    s1 = np.vstack([np.zeros(x.shape[1]), np.cumsum(x, axis=0)])
+    s2 = np.concatenate([[0.0], np.cumsum((x * x).sum(axis=1))])
+    best = np.full(n + 1, np.inf)
     best[0] = -beta
-    last = [0] * (n + 1)
     for t in range(min_size, n + 1):
-        for s in [0, *range(min_size, t - min_size + 1)]:
-            if t - s < min_size:
-                continue
-            v = best[s] + cost(s, t) + beta
-            if v < best[t] - 1e-12:
-                best[t], last[t] = v, s
-    rows, t = [], n
-    while t > 0:
-        t = last[t]
-        if t > 0:
-            rows.append(t)
-    return sorted(rows), best[n]
+        starts = np.array([0, *range(min_size, t - min_size + 1)])
+        m = (t - starts).astype(float)
+        diff = s1[t] - s1[starts]
+        cost = s2[t] - s2[starts] - (diff * diff).sum(axis=1) / m
+        best[t] = np.min(best[starts] + cost + beta)
+    return best[n]
 
 
 def _total(x, rows, beta):
@@ -49,21 +39,48 @@ def _total(x, rows, beta):
     ) + beta * len(rows)
 
 
+def _series(rng, kind, n):
+    if kind == "noise":
+        return rng.normal(0, 1, n)
+    if kind == "steps":
+        cuts = np.sort(rng.integers(1, n, size=int(rng.integers(0, 6))))
+        levels = rng.normal(0, 2, size=len(cuts) + 1)
+        return np.repeat(levels, np.diff([0, *cuts, n])) + rng.normal(0, 0.5, n)
+    return np.cumsum(rng.normal(0, 1, n))  # random walk
+
+
 def test_pruned_search_finds_the_optimum():
+    # Every minimum segment length from 1 to 8 (the default is 5 rows at
+    # 10 Hz): pruning must never drop the optimal start.
     rng = np.random.default_rng(0)
-    for _ in range(60):
-        n = int(rng.integers(4, 40))
-        levels = rng.choice([0.0, 1.0, 3.0], size=n // 5 + 1)
-        x = np.repeat(levels, 5)[:n] + rng.normal(0, 0.4, n)
-        if rng.random() < 0.5:
-            x = np.stack([x, rng.normal(0, 1, n)], axis=1)
-        beta = float(rng.uniform(0.5, 6))
-        min_size = int(rng.integers(1, 4))
-        rows = cp.segment(x, beta, min_size)
-        _, optimum = _optimum(x, beta, min_size)
-        assert _total(x, rows, beta) == pytest.approx(optimum, abs=1e-7)
-        edges = [0, *rows, len(x)]
-        assert all(b - a >= min_size for a, b in pairwise(edges))
+    cases = 0
+    for kind in ("noise", "steps", "walk"):
+        for _ in range(360):
+            min_size = int(rng.integers(1, 9))
+            n = int(rng.integers(2 * min_size, 121))
+            x = _series(rng, kind, n)
+            if rng.random() < 0.3:
+                x = np.stack([x, rng.normal(0, 1, n)], axis=1)
+            beta = float(rng.uniform(0.5, 12))
+            rows = cp.segment(x, beta, min_size)
+            assert _total(x, rows, beta) == pytest.approx(
+                _optimum(x, beta, min_size), abs=1e-6
+            ), (kind, n, min_size, beta)
+            edges = [0, *rows, len(x)]
+            assert all(b - a >= min_size for a, b in pairwise(edges))
+            cases += 1
+    assert cases >= 1000
+
+
+def test_the_smallest_known_counterexample_to_eager_pruning():
+    # Found by the review of 2026-10-10: n=11, min_size=3; eager pruning
+    # returned [5, 8] although no change point is optimal.
+    rng = np.random.default_rng(0)
+    for _ in range(4000):
+        x = _series(rng, "steps", 11)
+        beta = float(rng.uniform(0.5, 12))
+        rows = cp.segment(x, beta, 3)
+        assert _total(x, rows, beta) == pytest.approx(_optimum(x, beta, 3), abs=1e-6)
 
 
 def test_steps_are_found_where_they_are():

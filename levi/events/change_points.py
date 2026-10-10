@@ -8,7 +8,9 @@ evidence, never a subtask boundary by itself.
 
 Method: exact penalised segmentation with a piecewise-constant mean (squared
 error cost) found by optimal partitioning with pruning, the PELT family that
-``ruptures`` implements (Truong, Oudre and Vayatis 2020, "Selective review of
+``ruptures`` implements. With a minimum segment length the pruning is
+delayed by that length (``segment``), so the result is the exact optimum;
+the tests compare it with unpruned optimal partitioning (Truong, Oudre and Vayatis 2020, "Selective review of
 offline change point detection methods", arXiv:1801.00718; BSD-2-Clause).
 LEVI does not depend on ``ruptures``: this is an independent numpy
 implementation of the idea (see ``third_party.json``).
@@ -110,18 +112,26 @@ def segment(x, beta, min_size):
     best = np.full(n + 1, np.inf)
     best[0] = -beta
     last = np.zeros(n + 1, dtype=int)
-    admissible = [0]
+    # Candidate starts, and the end at which each first failed the pruning
+    # test (-1: not yet).
+    starts = np.array([0])
+    failed = np.array([-1])
     for t in range(min_size, n + 1):
         new = t - min_size
         if new >= min_size:
-            admissible.append(new)
-        starts = np.asarray(admissible)
+            starts = np.append(starts, new)
+            failed = np.append(failed, -1)
         total = best[starts] + _cost(s1, s2, starts, t) + beta
         k = int(np.argmin(total))
         best[t], last[t] = total[k], starts[k]
-        # Pruning: a start that cannot beat the optimum now never will (the
-        # squared error cost only grows by splitting less).
-        admissible = list(starts[total - beta <= best[t] + 1e-9])
+        # Delayed pruning. A start s with F(s) + C(s, t) > F(t) can never be
+        # the best start for an end t' with t' - t >= min_size (then t is an
+        # admissible start for t', and the squared error does not grow by
+        # splitting). For t < t' < t + min_size it still can, so it is kept
+        # until then; pruning it at once loses the optimum when min_size > 2.
+        failed = np.where((failed < 0) & (total - beta > best[t] + 1e-9), t, failed)
+        keep = (failed < 0) | (t + 1 - failed < min_size)
+        starts, failed = starts[keep], failed[keep]
     rows, t = [], n
     while t > 0:
         t = int(last[t])
