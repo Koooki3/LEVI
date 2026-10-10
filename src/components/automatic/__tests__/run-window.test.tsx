@@ -6,7 +6,7 @@ import {
   waitFor,
 } from "@/components/ds/__tests__/dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { card, mockFetch, snapshot } from "./fixtures";
+import { card, mockFetch, question, snapshot } from "./fixtures";
 import type { PendingCard, RunSnapshot } from "../types";
 
 mock.module("next/link", () => ({
@@ -259,5 +259,64 @@ describe("the resume dialog", () => {
     await waitFor(() =>
       dialog.textContent?.includes("Both confirmations are needed"),
     );
+  });
+});
+
+describe("the scene question", () => {
+  async function asked(over = {}) {
+    const m = open(
+      snapshot({ state: "VERIFY_INITIAL", scene_question: question(over) }),
+      {
+        "POST runs/run-1/scene-answer": () => ({}),
+      },
+    );
+    const view = await render(<RunWindow runId="run-1" />);
+    await waitFor(() =>
+      view.host.textContent?.includes("Check the initial scene"),
+    );
+    return { ...view, m };
+  }
+  const radio = (host: HTMLElement, legend: string, label: string) => {
+    const set = Array.from(host.querySelectorAll("fieldset")).find((f) =>
+      f.textContent?.includes(legend),
+    )!;
+    return Array.from(set.querySelectorAll("label"))
+      .find((l) => l.textContent?.trim() === label)!
+      .querySelector("input")!;
+  };
+
+  test("shows the frames and every predicate; sending needs the required ones", async () => {
+    const { host } = await asked();
+    expect(host.querySelectorAll(".ar-card img").length).toBe(1);
+    expect(host.textContent).toContain("the lid is off");
+    expect(host.textContent).toContain("optional");
+    expect(button(host, "Send answers")!.disabled).toBe(true);
+  });
+  test("sends the answers with the question's own ids and nothing else, then locks", async () => {
+    const { host, m } = await asked();
+    await click(radio(host, "the plate is on the rack", "True"));
+    await click(radio(host, "the cup is upright", "Cannot tell"));
+    await click(button(host, "Send answers")!);
+    await waitFor(() => host.textContent?.includes("Answers sent"));
+    const post = m.calls.find((c) => c.path === "runs/run-1/scene-answer")!;
+    expect(post.body).toEqual({
+      request_id: "q-1",
+      nonce: "n-1",
+      frames_sha256: "f".repeat(64),
+      predicates: { plate_on_rack: true, cup_upright: null, lid_off: null },
+    });
+    expect(button(host, "Send answers")!.disabled).toBe(true);
+    await click(button(host, "Send answers")!);
+    expect(
+      m.calls.filter((c) => c.path === "runs/run-1/scene-answer").length,
+    ).toBe(1);
+  });
+  test("a timed-out question cannot be answered and says it is withdrawn", async () => {
+    const { host } = await asked({
+      asked_at: Date.now() - 700_000,
+      timeout_s: 600,
+    });
+    expect(host.textContent).toContain("Timed out");
+    expect(button(host, "Send answers")!.disabled).toBe(true);
   });
 });

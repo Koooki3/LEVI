@@ -17,6 +17,7 @@ import { ModeChips, Note, StateGraph, stateName } from "./run-parts";
 import { useRunEvents, useRunMetrics, useRunSnapshot } from "./run-poll";
 import { RunMetrics } from "./run-metrics";
 import { RunTimeline } from "./run-timeline";
+import { SceneCheck } from "./scene-check";
 import type { PendingCard as PendingCardData } from "./types";
 
 export function RunWindow({ runId }: { runId: string }) {
@@ -179,6 +180,13 @@ export function RunWindow({ runId }: { runId: string }) {
             </dl>
           </section>
 
+          {snapshot.scene_question && (
+            <SceneCheck
+              runId={runId}
+              question={snapshot.scene_question}
+              onAnswered={poll.refresh}
+            />
+          )}
           {card && (
             <PendingCard
               runId={runId}

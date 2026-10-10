@@ -24,6 +24,7 @@
   align-items: center;
 }
 .ar-link {
+  text-decoration: none;
   display: inline-flex;
   align-items: center;
   gap: var(--ds-space-2);
@@ -285,25 +286,6 @@
 }
 .ar-timeline li:last-child {
   border-bottom: 0;
-}
-.ar-table-wrap {
-  overflow-x: auto;
-}
-.ar-metrics {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--ds-text-caption-size);
-}
-.ar-metrics th,
-.ar-metrics td {
-  text-align: left;
-  padding: var(--ds-space-1) var(--ds-space-3);
-  border-bottom: 1px solid var(--ds-separator);
-  vertical-align: top;
-}
-.ar-metrics th {
-  color: var(--ds-text-tertiary);
-  font-weight: var(--ds-weight-medium);
 }
 .ar-dialog-body {
   display: flex;
