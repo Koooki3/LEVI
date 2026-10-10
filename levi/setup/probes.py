@@ -20,7 +20,7 @@ with query options (NVML; it creates no CUDA context):
 - ROS control alarms: counts in the newest ``ros2_control_node_*.log`` files,
   with the categories of the lab's FR3 diagnostics recorder (communication
   constraints violation, reflexes, overruns, other errors);
-- the FR3 health file: ``levi.live.sessions.read_fr3``;
+- the FR3 health file, summarised as ``levi.live.sessions.read_fr3`` does;
 - free disk space: ``shutil.disk_usage``;
 - the diagnostics recorder: its ``recorder.pid`` (checked against the
   process start time) and ``status.json``;
@@ -29,12 +29,25 @@ with query options (NVML; it creates no CUDA context):
   avg10 and swap thresholds), implemented here on ``/proc`` alone, plus the
   live service's gate and the product's own running jobs.
 
+**Nothing can hang a request.** Every file is read through ``read_regular``:
+``lstat`` first, then ``O_NONBLOCK | O_NOFOLLOW``, ``fstat`` again, a size
+cap; a FIFO, device, socket or symbolic link is ``unknown`` ("not a regular
+file") and is never opened for reading. Each probe runs in its own daemon
+thread with a deadline (``PROBE_TIMEOUT_S``, ``GPU_TIMEOUT_S`` for
+``nvidia-smi``); one that misses it is ``unknown`` ("timed out"), and while
+it is still stuck (a dead network mount) later samples answer ``unknown``
+for it at once instead of starting another. Building the context has its
+own deadline too.
+
 **Sampling is lazy and bounded.** Nothing samples in the background: a
 sample is taken when a request arrives, and a request within ``ttl_s`` of
-the last sample gets that sample again (one sampler at a time; concurrent
-requests wait for it and share it). The expensive parts have their own
-longer intervals (a full scan for socket owners, the robot process scan, the
-ROS logs, the disks), and every scan has a cap. A probe that fails reports
+the last sample gets that sample again. One request samples at a time; the
+others wait for it, never longer than ``WAIT_S``, and then get the last
+sample (``stale``) or ``{"state": "sampling"}``. No lock is held while
+sampling. The expensive parts have their own longer intervals (a full scan
+for socket owners, the robot process scan, the ROS logs, the disks, the GPU
+while the arm controller is active), and every scan has a cap; a cap that
+cut a scan short says ``truncated``. A probe that fails reports
 ``"state": "unknown"`` and never fails the others. The response holds no
 command line, no environment, no token and no path.
 """
@@ -46,6 +59,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import threading
@@ -64,7 +78,12 @@ MAX_PIDS = 4096
 MAX_FDS = 4096
 MAX_STATUS_BYTES = 1 << 20
 MAX_GPU_APPS = 16
-NVIDIA_TIMEOUT_S = 4.0
+PROBE_TIMEOUT_S = 1.5  # each probe's deadline
+GPU_TIMEOUT_S = 2.5  # the GPU probe's (two nvidia-smi queries)
+NVIDIA_TIMEOUT_S = 2.0  # one nvidia-smi query (it is killed after this)
+WAIT_S = GPU_TIMEOUT_S + 1.0  # how long a request waits for another's sample
+CONTEXT_TIMEOUT_S = 1.5
+GPU_ACTIVE_S = 10.0  # the GPU interval while the arm controller is active
 ROS_FILES = 12
 ROS_TAIL_BYTES = 256 << 10
 ROS_WINDOW_S = 3600.0
@@ -131,14 +150,65 @@ class Context:
     disks: tuple = ()  # (label, path)
     quiet_states: tuple = ()
     pressure_avg10_max: float = 0.0
+    # Why the configuration could not be read (empty: it was).
+    context_detail: str = ""
+
+
+class NotRegular(OSError):
+    """Not a regular file (a FIFO, device, socket, directory or link)."""
+
+
+def read_regular(path, limit=1 << 16, tail=False):
+    """``(bytes, truncated, stat)`` of a regular file, at most ``limit``
+    bytes (the last ones with ``tail``). Never blocks on what is not a
+    regular file: ``lstat`` decides before anything is opened, the open is
+    ``O_NONBLOCK | O_NOFOLLOW`` and ``fstat`` checks it is still the same
+    file. Raises NotRegular, or OSError when it cannot be read."""
+    before = os.lstat(path)
+    if not stat.S_ISREG(before.st_mode):
+        raise NotRegular(f"{path}: not a regular file")
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or (st.st_dev, st.st_ino) != (
+            before.st_dev,
+            before.st_ino,
+        ):
+            raise NotRegular(f"{path}: replaced while opened")
+        truncated = False
+        if tail and st.st_size > limit:
+            os.lseek(fd, st.st_size - limit, os.SEEK_SET)
+            truncated = True
+        chunks, left = [], limit
+        while left > 0:
+            chunk = os.read(fd, min(left, 1 << 16))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            left -= len(chunk)
+        if left <= 0 and not tail and os.read(fd, 1):
+            truncated = True
+        return b"".join(chunks), truncated, st
+    finally:
+        os.close(fd)
+
+
+def _read_why(path, limit=1 << 16):
+    """``(text or None, why)``; ``why`` is ``missing``, ``not a regular
+    file`` or ``unreadable`` when there is no text."""
+    try:
+        data, _, _ = read_regular(path, limit)
+    except NotRegular:
+        return None, "not a regular file"
+    except FileNotFoundError:
+        return None, "missing"
+    except OSError:
+        return None, "unreadable"
+    return data.decode("utf-8", "replace"), ""
 
 
 def _read(path, limit=1 << 16) -> str | None:
-    try:
-        with open(path, "rb") as handle:
-            return handle.read(limit).decode("utf-8", "replace")
-    except OSError:
-        return None
+    return _read_why(path, limit)[0]
 
 
 def _stat_fields(proc, pid) -> list | None:
@@ -164,17 +234,29 @@ def _parent(proc, pid) -> int | None:
         return None
 
 
+def _ancestors(proc, pid, depth=6) -> list:
+    """``pid`` and its parents, nearest first, at most ``depth``."""
+    out = []
+    while pid and pid > 1 and len(out) < depth:
+        out.append(pid)
+        pid = _parent(proc, pid)
+    return out
+
+
 def _comm(proc, pid) -> str | None:
     text = _read(f"{proc}/{pid}/comm", 256)
     return text.strip()[:64] if text else None
 
 
-def _pids(proc) -> list:
+def _pids(proc) -> tuple:
+    """``(pids, truncated)``: at most ``MAX_PIDS``, lowest first; a cut is
+    reported, never silent."""
     try:
         names = os.listdir(proc)
     except OSError:
-        return []
-    return sorted(int(n) for n in names if n.isdigit())[:MAX_PIDS]
+        return [], False
+    pids = sorted(int(n) for n in names if n.isdigit())
+    return pids[:MAX_PIDS], len(pids) > MAX_PIDS
 
 
 # ------------------------------------------------------------------ ports
@@ -261,6 +343,22 @@ class _Every:
     key: object = None
 
 
+class _Task:
+    """One probe running in its own daemon thread."""
+
+    __slots__ = ("done", "value")
+
+    def __init__(self):
+        self.done = threading.Event()
+        self.value = None
+
+
+STILL_BLOCKED = (
+    "an earlier read has not finished (a slow or blocked file system?); "
+    "not started again"
+)
+
+
 @dataclass
 class Probes:
     runner: object = None  # None: subprocess.run, looked up at each call
@@ -269,41 +367,69 @@ class Probes:
     ttl_s: float = DEFAULT_TTL_S
     jobs: object = None  # callable -> running product jobs (levi.activity)
     samples: int = 0
-    _lock: threading.Lock = field(default_factory=threading.Lock)
+    _cond: threading.Condition = field(default_factory=threading.Condition)
+    _sampling: bool = False
     _cached: tuple | None = None
+    _inflight: dict = field(default_factory=dict)  # probe name -> _Task
     _cpu_prev: tuple | None = None
     _owners: dict = field(default_factory=dict)  # inode -> pid
     _owner_scan_at: float = -1e18
-    _owner_unresolved: set = field(
-        default_factory=set
-    )  # missing after the last full scan
+    _owner_unresolved: set = field(default_factory=set)
+    _owner_truncated: bool = False
     _owner_proc: str = ""
     _every: dict = field(default_factory=dict)
-    _ros_files: dict = field(default_factory=dict)  # path -> ((size, mtime), events)
+    _ros_files: dict = field(default_factory=dict)  # path -> (key, events, truncated)
+    _controller_active: bool = False
+    _gpu_last: tuple | None = None  # (clock, value)
 
     def status(self, context: Context) -> dict:
         """The cached sample when it is younger than ``ttl_s``, else a new one.
-        One sampler at a time: a request arriving while another samples
-        waits for that sample instead of taking a second one."""
+        One request samples at a time and no lock is held while it does; a
+        request arriving meanwhile waits at most ``WAIT_S`` for that sample,
+        then gets the previous one (``stale``) or ``{"state": "sampling"}``."""
         ttl = max(MIN_TTL_S, float(self.ttl_s))
-        with self._lock:
-            now = self.clock()
-            if (
-                self._cached
-                and self._cached[0] == context
-                and now - self._cached[1] < ttl
-            ):
-                return {
-                    **self._cached[2],
-                    "cached": True,
-                    "age_s": round(now - self._cached[1], 3),
-                }
-            started = self.clock()
+        give_up = time.monotonic() + WAIT_S
+        with self._cond:
+            while True:
+                now = self.clock()
+                cached = self._cached
+                if cached and cached[0] == context and now - cached[1] < ttl:
+                    return {
+                        **cached[2],
+                        "cached": True,
+                        "age_s": round(now - cached[1], 3),
+                    }
+                if not self._sampling:
+                    self._sampling = True
+                    break
+                left = give_up - time.monotonic()
+                if left <= 0:
+                    if cached:
+                        return {
+                            **cached[2],
+                            "cached": True,
+                            "stale": True,
+                            "age_s": round(now - cached[1], 3),
+                        }
+                    return {
+                        "state": "sampling",
+                        "detail": "another request is sampling; ask again shortly",
+                        "cached": False,
+                    }
+                self._cond.wait(left)
+        value = None
+        try:
+            started = time.monotonic()
             value = self._sample(context)
-            value["sample_ms"] = round((self.clock() - started) * 1000, 1)
-            self.samples += 1
-            self._cached = (context, self.clock(), value)
-            return {**value, "cached": False, "age_s": 0.0}
+            value["sample_ms"] = round((time.monotonic() - started) * 1000, 1)
+        finally:
+            with self._cond:
+                self._sampling = False
+                if value is not None:
+                    self.samples += 1
+                    self._cached = (context, self.clock(), value)
+                self._cond.notify_all()
+        return {**value, "cached": False, "age_s": 0.0}
 
     # -- helpers
     def _periodic(self, name, seconds, key, fn):
@@ -319,25 +445,81 @@ class Probes:
         except Exception as exc:  # noqa: BLE001 - one failing probe never fails the others
             return {"state": "unknown", "detail": f"probe failed: {type(exc).__name__}"}
 
+    def _start(self, name, fn, *args) -> _Task | None:
+        """Run one probe in a daemon thread; None while the same probe from
+        an earlier sample is still stuck (it is not started twice)."""
+        old = self._inflight.get(name)
+        if old is not None and not old.done.is_set():
+            return None
+        task = _Task()
+
+        def run():
+            try:
+                task.value = self._safe(fn, *args)
+            finally:
+                task.done.set()
+
+        self._inflight[name] = task
+        threading.Thread(target=run, name=f"levi-setup-{name}", daemon=True).start()
+        return task
+
     def _sample(self, c: Context) -> dict:
         now = self.wall()
-        ports = self._safe(self._ports, c)
-        gpu = self._safe(self._gpu, c, ports)
-        host = self._safe(self._host, c)
-        health = self._safe(self._health, c)
-        live = self._safe(self._live, c, now)
+        plan = {
+            "ports": (self._ports, (c,), PROBE_TIMEOUT_S),
+            "gpu_locks": (self._locks, (c,), PROBE_TIMEOUT_S),
+            "live": (self._live, (c, now), PROBE_TIMEOUT_S),
+            "host": (self._host, (c,), PROBE_TIMEOUT_S),
+            "ros": (self._ros, (c, now), PROBE_TIMEOUT_S),
+            "fr3_health": (self._health, (c, now), PROBE_TIMEOUT_S),
+            "disks": (self._disks, (c,), PROBE_TIMEOUT_S),
+            "recorder": (self._recorder, (c, now), PROBE_TIMEOUT_S),
+            "robot": (self._robot, (c,), PROBE_TIMEOUT_S),
+            "jobs": (self._jobs, (), PROBE_TIMEOUT_S),
+        }
+        gpu_reused = None
+        if (
+            self._controller_active
+            and self._gpu_last
+            and self.clock() - self._gpu_last[0] < GPU_ACTIVE_S
+        ):
+            # The arm controller is active: nvidia-smi every GPU_ACTIVE_S only.
+            gpu_reused = {**self._gpu_last[1], "reused": True}
+        else:
+            plan["gpu"] = (self._gpu, (c,), GPU_TIMEOUT_S)
+        began = time.monotonic()
+        tasks = {
+            name: self._start(name, fn, *args) for name, (fn, args, _) in plan.items()
+        }
+        out = {}
+        for name, task in tasks.items():
+            limit = plan[name][2]
+            if task is None:
+                out[name] = {"state": "unknown", "detail": STILL_BLOCKED}
+            elif task.done.wait(max(0.0, began + limit - time.monotonic())):
+                out[name] = task.value
+            else:
+                out[name] = {
+                    "state": "unknown",
+                    "detail": f"timed out after {limit:g} s",
+                }
+        if gpu_reused is not None:
+            out["gpu"] = gpu_reused
+        elif out["gpu"].get("state") == "ok":
+            self._gpu_last = (self.clock(), out["gpu"])
+        out["gpu"] = self._name_gpu_processes(out["gpu"], out["ports"])
+        robot = out.pop("robot")
+        jobs = out.pop("jobs")
+        out["guard"] = self._safe(
+            self._guard, c, out["host"], out["fr3_health"], out["live"], robot, jobs
+        )
+        self._controller_active = bool(out["guard"].get("controller_active"))
         return {
             "sampled_at": now,
-            "ports": ports,
-            "gpu": gpu,
-            "gpu_locks": self._safe(self._locks, c),
-            "live": live,
-            "host": host,
-            "ros": self._safe(self._ros, c, now),
-            "fr3_health": health,
-            "disks": self._safe(self._disks, c),
-            "recorder": self._safe(self._recorder, c, now),
-            "guard": self._safe(self._guard, c, host, health, live),
+            "context": {"state": "unknown", "detail": c.context_detail}
+            if c.context_detail
+            else {"state": "ok"},
+            **out,
         }
 
     # -- ports
@@ -351,7 +533,7 @@ class Probes:
             self._owner_unresolved = set()
             self._owner_scan_at = -1e18
             self._owner_proc = proc
-        for inode, pid in list(self._owners.items()):
+        for inode in list(self._owners):
             if inode not in inodes:
                 del self._owners[inode]
         checked: dict = {}
@@ -368,8 +550,8 @@ class Probes:
         if not missing or (not new and now - self._owner_scan_at < OWNER_RESCAN_S):
             return
         self._owner_scan_at = now
-        self._owner_unresolved = set(missing)
-        for pid in _pids(proc):
+        pids, self._owner_truncated = _pids(proc)
+        for pid in pids:
             held = _socket_inodes(proc, pid)
             if not held:
                 continue
@@ -402,7 +584,7 @@ class Probes:
                     "owner_known": pid is not None or not sockets,
                 }
             )
-        return {"state": "ok", "ports": rows}
+        return {"state": "ok", "ports": rows, "truncated": self._owner_truncated}
 
     # -- GPU
     def _nvidia(self, query: str) -> list | None:
@@ -422,7 +604,7 @@ class Probes:
             if line.strip()
         ]
 
-    def _gpu(self, c: Context, ports: dict) -> dict:
+    def _gpu(self, c: Context) -> dict:
         rows = self._nvidia(
             "--query-gpu=index,name,memory.total,memory.used,utilization.gpu"
         )
@@ -449,11 +631,6 @@ class Probes:
             for r in rows
             if len(r) >= 5
         ]
-        roles = {
-            row["pid"]: row["role"]
-            for row in (ports or {}).get("ports", [])
-            if row.get("pid")
-        }
         apps = []
         for r in (
             self._nvidia("--query-compute-apps=pid,process_name,used_memory") or []
@@ -466,20 +643,30 @@ class Probes:
                     "pid": pid,
                     "name": os.path.basename(r[1])[:60],
                     "memory_mib": num(r[2]),
-                    "role": self._role_of(c.proc, pid, roles),
+                    "_chain": _ancestors(c.proc, pid),
                 }
             )
         return {"state": "ok", "gpus": gpus, "processes": apps}
 
     @staticmethod
-    def _role_of(proc, pid, roles) -> str:
-        for _ in range(6):
-            if not pid or pid <= 1:
-                break
-            if pid in roles:
-                return roles[pid]
-            pid = _parent(proc, pid)
-        return "other"
+    def _name_gpu_processes(gpu: dict, ports: dict) -> dict:
+        """Each GPU process named by the port it or a parent listens on
+        (from this sample's port table; nothing is read here)."""
+        if gpu.get("state") != "ok":
+            return gpu
+        roles = {
+            row["pid"]: row["role"]
+            for row in (ports or {}).get("ports", [])
+            if row.get("pid")
+        }
+        named = []
+        for app in gpu.get("processes", []):
+            chain = app.get("_chain") or [app["pid"]]
+            role = next((roles[p] for p in chain if p in roles), "other")
+            named.append(
+                {k: v for k, v in app.items() if k != "_chain"} | {"role": role}
+            )
+        return {**gpu, "processes": named}
 
     # -- GPU locks
     def _locks(self, c: Context) -> dict:
@@ -538,9 +725,13 @@ class Probes:
     def _live(self, c: Context, now: float) -> dict:
         if not c.live_status_file:
             return {"state": "unknown", "detail": "no live workspace found"}
-        text = _read(c.live_status_file, MAX_STATUS_BYTES)
+        text, why = _read_why(c.live_status_file, MAX_STATUS_BYTES)
         if text is None:
-            return {"state": "unknown", "detail": "the live service has no status file"}
+            detail = {
+                "missing": "the live service has no status file",
+                "not a regular file": "the live status file is not a regular file",
+            }.get(why, "the live status file cannot be read")
+            return {"state": "unknown", "detail": detail}
         try:
             value = json.loads(text)
         except ValueError:
@@ -578,6 +769,7 @@ class Probes:
             "gate": {
                 "open": gate.get("open"),
                 "code": gate.get("code"),
+                # Free text the live service wrote (at most 200 characters).
                 "reason": str(gate.get("reason") or "")[:200],
             },
             "decision": {
@@ -651,34 +843,28 @@ class Probes:
         return out
 
     # -- ROS control logs
-    def _ros_events(self, path, now) -> list:
-        try:
-            st = os.stat(path)
-        except OSError:
-            self._ros_files.pop(path, None)
-            return []
-        key = (st.st_size, st.st_mtime_ns)
+    def _ros_events(self, path):
+        """``(events, truncated)`` of one log, re-read only when it changed;
+        raises OSError (NotRegular for a FIFO and the like)."""
+        st = os.lstat(path)
+        key = (st.st_size, st.st_mtime_ns, st.st_ino)
         cached = self._ros_files.get(path)
         if cached and cached[0] == key:
-            return cached[1]
+            return cached[1], cached[2]
+        data, truncated, _ = read_regular(path, ROS_TAIL_BYTES, tail=True)
+        text = data.decode("utf-8", "replace")
+        if truncated:
+            text = text.partition("\n")[2]  # a partial first line
         events = []
-        try:
-            with open(path, "rb") as handle:
-                if st.st_size > ROS_TAIL_BYTES:
-                    handle.seek(st.st_size - ROS_TAIL_BYTES)
-                    handle.readline()  # a partial first line
-                text = handle.read(ROS_TAIL_BYTES).decode("utf-8", "replace")
-        except OSError:
-            return []
-        for line in text.splitlines():
-            m = ROS_LINE.match(line)
+        for line in text.split("\n"):
+            m = ROS_LINE.match(line.rstrip("\r"))
             if not m:
                 continue
             category = _ros_category(m["lvl"], m["msg"])
             if category:
                 events.append((float(m["ts"]), category))
-        self._ros_files[path] = (key, events)
-        return events
+        self._ros_files[path] = (key, events, truncated)
+        return events, truncated
 
     def _ros(self, c: Context, now: float) -> dict:
         def scan():
@@ -695,16 +881,24 @@ class Probes:
             names.sort(key=lambda n: int(ROS_NAME.match(n)[1]), reverse=True)
             counts: dict = {}
             latest: dict = {}
-            used = []
+            used, skipped, truncated = [], {}, False
             for name in names[:ROS_FILES]:
                 path = os.path.join(folder, name)
                 try:
-                    if os.stat(path).st_mtime < now - ROS_WINDOW_S:
+                    if os.lstat(path).st_mtime < now - ROS_WINDOW_S:
                         continue
+                    events, cut = self._ros_events(path)
+                except NotRegular:
+                    skipped["not a regular file"] = (
+                        skipped.get("not a regular file", 0) + 1
+                    )
+                    continue
                 except OSError:
+                    skipped["unreadable"] = skipped.get("unreadable", 0) + 1
                     continue
                 used.append(path)
-                for t, category in self._ros_events(path, now):
+                truncated = truncated or cut
+                for t, category in events:
                     if t < now - ROS_WINDOW_S:
                         continue
                     counts[category] = counts.get(category, 0) + 1
@@ -712,10 +906,20 @@ class Probes:
             for path in list(self._ros_files):
                 if path not in used:
                     del self._ros_files[path]
+            if skipped and not used:
+                return {
+                    "state": "unknown",
+                    "detail": "no ROS log could be read: "
+                    + ", ".join(f"{n} {why}" for why, n in skipped.items()),
+                }
             return {
                 "state": "ok",
                 "window_s": ROS_WINDOW_S,
                 "files": len(used),
+                "skipped": sum(skipped.values()),
+                # Only the last ROS_TAIL_BYTES of a file are read: counts of a
+                # log that grew faster than that in the window are a floor.
+                "truncated": truncated,
                 "counts": counts,
                 "latest": {k: round(v, 3) for k, v in latest.items()},
             }
@@ -723,16 +927,60 @@ class Probes:
         return self._periodic("ros", ROS_SCAN_S, c.ros_log_dir, scan)
 
     # -- FR3 health file
-    def _health(self, c: Context) -> dict:
+    def _health(self, c: Context, now: float) -> dict:
+        """The health file summarised as ``levi.live.sessions.read_fr3``
+        does (ok, red, offline, missing), read with ``read_regular``."""
         if not c.health_file:
             return {
                 "state": "unknown",
                 "detail": "no health file configured (fr3.health_file)",
             }
-        from levi.live.sessions import read_fr3
+        from levi.live.sessions import parse_time
 
-        found = read_fr3(c.health_file, stale_s=c.health_stale_s, now=self.wall())
-        return {k: v for k, v in found.items() if k != "path"}
+        try:
+            data, _, st = read_regular(c.health_file, MAX_STATUS_BYTES)
+        except NotRegular:
+            return {
+                "state": "unknown",
+                "detail": "the health file is not a regular file",
+            }
+        except FileNotFoundError:
+            return {
+                "state": "missing",
+                "detail": "no health file: the monitor is not running",
+            }
+        except OSError:
+            return {"state": "offline", "detail": "health file unreadable"}
+        try:
+            value = json.loads(data.decode("utf-8", "replace"))
+        except ValueError:
+            value = None
+        if not isinstance(value, dict):
+            return {"state": "offline", "detail": "health file unreadable"}
+        updated = (
+            parse_time(value.get("updated_at_epoch"))
+            or parse_time(value.get("updated_at"))
+            or st.st_mtime
+        )
+        age = max(0.0, now - updated)
+        summary = {
+            "age_s": round(age, 1),
+            "robot_mode": value.get("robot_mode"),
+            "robot_mode_name": value.get("robot_mode_name"),
+            "current_errors": list(value.get("current_errors") or [])[:10],
+            "last_motion_errors": list(value.get("last_motion_errors") or [])[:10],
+            "hardware_active": value.get("hardware_active"),
+            "controller_active": value.get("controller_active"),
+            "command_success_rate": value.get("command_success_rate"),
+            "reasons": [str(r)[:200] for r in (value.get("reasons") or [])[:10]],
+        }
+        if age > c.health_stale_s:
+            return {
+                "state": "offline",
+                "detail": "the monitor stopped updating",
+                **summary,
+            }
+        return {"state": "red" if value.get("red_light") else "ok", **summary}
 
     # -- disks
     def _disks(self, c: Context) -> dict:
@@ -764,10 +1012,14 @@ class Probes:
         if not c.recorder_dir:
             return {"state": "unknown", "detail": "no recorder folder configured"}
         base = Path(c.recorder_dir).expanduser()
-        if not (base / "recorder.pid").exists() and not (base / "status.json").exists():
+        if not os.path.lexists(base / "recorder.pid") and not os.path.lexists(
+            base / "status.json"
+        ):
             base = base / "data"
         running, pid = False, None
-        text = _read(base / "recorder.pid", 4096)
+        text, why = _read_why(base / "recorder.pid", 4096)
+        if why == "not a regular file":
+            return {"state": "unknown", "detail": "recorder.pid is not a regular file"}
         if text:
             try:
                 record = json.loads(text)
@@ -778,7 +1030,9 @@ class Probes:
             except (ValueError, KeyError, TypeError):
                 pid = None
         status = {}
-        text = _read(base / "status.json", 1 << 16)
+        text, why = _read_why(base / "status.json", 1 << 16)
+        if why == "not a regular file":
+            return {"state": "unknown", "detail": "status.json is not a regular file"}
         if text:
             try:
                 status = json.loads(text)
@@ -810,7 +1064,10 @@ class Probes:
         }
 
     # -- the real-robot quiet guard
-    def _robot_processes(self, proc) -> list | None:
+    def _robot_processes(self, proc) -> dict:
+        """``{"found": [...] or None, "truncated": bool}``; None means it
+        cannot be told (``hidepid``, unreadable processes, or the scan cap
+        cut the list and nothing was found in what was read)."""
         mount = _read(f"{proc}/self/mountinfo", 1 << 20)
         for line in (mount or "").splitlines():
             parts = line.split()
@@ -821,22 +1078,17 @@ class Probes:
                 and hidden
                 and hidden[1] not in ("0", "off")
             ):
-                return None
-        pids = _pids(proc)
+                return {"found": None, "truncated": False}
+        pids, truncated = _pids(proc)
         if not pids:
-            return None
-        mine = set()
-        pid = os.getpid() if proc == "/proc" else None
-        while pid and pid > 1 and len(mine) < 64:
-            mine.add(pid)
-            pid = _parent(proc, pid)
+            return {"found": None, "truncated": truncated}
+        mine = set(_ancestors(proc, os.getpid(), 64)) if proc == "/proc" else set()
         found, unreadable = [], 0
         for pid in pids:
             if pid in mine:
                 continue
             try:
-                with open(f"{proc}/{pid}/cmdline", "rb") as handle:
-                    raw = handle.read(4096)
+                raw, _, _ = read_regular(f"{proc}/{pid}/cmdline", 4096)
             except (FileNotFoundError, ProcessLookupError):
                 continue
             except OSError:
@@ -847,14 +1099,34 @@ class Probes:
                 if any(pattern in name for pattern in ROBOT_PROCESSES):
                     found.append({"pid": pid, "name": name[:64]})
                     break
-        if unreadable and not found:
-            return None
-        return found[:12]
+        if (unreadable or truncated) and not found:
+            return {"found": None, "truncated": truncated}
+        return {"found": found[:12], "truncated": truncated}
 
-    def _guard(self, c: Context, host: dict, health: dict, live: dict) -> dict:
-        robot = self._periodic(
+    def _robot(self, c: Context) -> dict:
+        return self._periodic(
             "robot", ROBOT_SCAN_S, c.proc, lambda: self._robot_processes(c.proc)
         )
+
+    def _jobs(self) -> dict:
+        if self.jobs is None:
+            return {"state": "unknown", "jobs": []}
+        return {
+            "state": "ok",
+            "jobs": [
+                {"kind": j.get("kind"), "id": j.get("id")} for j in (self.jobs() or [])
+            ][:12],
+        }
+
+    def _guard(
+        self, c: Context, host: dict, health: dict, live: dict, robot: dict, jobs: dict
+    ) -> dict:
+        robot = (
+            robot
+            if isinstance(robot, dict) and "found" in robot
+            else {"found": None, "truncated": False}
+        )
+        found = robot["found"]
         strained, readings = [], {}
         pressure = (host or {}).get("pressure") or {}
         for kind, limit in PSI_LIMITS.items():
@@ -867,33 +1139,25 @@ class Probes:
         readings["swap_pct"] = swap_pct
         if swap_pct is not None and swap_pct > SWAP_PCT:
             strained.append(f"swap {swap_pct:.0f}% used > {SWAP_PCT:g}%")
-        unknown = robot is None or all(readings.get(k) is None for k in PSI_LIMITS)
+        unknown = found is None or all(readings.get(k) is None for k in PSI_LIMITS)
         # A robot process or a strained host is a definite "not quiet" (the
         # lab guard would say "cannot tell" when /proc is only partly
         # readable even then); anything unreadable otherwise is unknown.
-        if robot or strained:
+        if found or strained:
             quiet = False
         else:
             quiet = None if unknown else True
-        jobs = []
-        if self.jobs is not None:
-            try:
-                jobs = [
-                    {"kind": j.get("kind"), "id": j.get("id")}
-                    for j in (self.jobs() or [])
-                ][:12]
-            except Exception:  # noqa: BLE001 - the job list is optional
-                jobs = []
+        running = list((jobs or {}).get("jobs") or [])
         gate = (live or {}).get("gate") or {}
         controller = (health or {}).get("controller_active")
         if (health or {}).get("state") not in ("ok", "red"):
             controller = None  # a stale or missing file says nothing about now
         reasons = []
         if controller:
-            if jobs:
+            if running:
                 reasons.append(
                     "product jobs run while the arm controller is active: "
-                    + ", ".join(str(j["kind"]) for j in jobs)
+                    + ", ".join(str(j["kind"]) for j in running)
                 )
             if memory.get("swap_used_mib"):
                 reasons.append(
@@ -905,11 +1169,12 @@ class Probes:
         return {
             "state": "ok",
             "quiet": quiet,
-            "robot": robot or [],
+            "robot": found or [],
+            "truncated": bool(robot.get("truncated")),
             "strained": strained,
             "readings": readings,
             "controller_active": controller,
-            "product_jobs": jobs,
+            "product_jobs": running,
             "live_gate": {
                 "code": gate.get("code"),
                 "robot_quiet": gate.get("code") == "robot_quiet",
@@ -978,7 +1243,7 @@ def command_names(argv) -> list:
 # ------------------------------------------------------------------ the service's view
 
 
-_CONTEXT: list = [None, -1e18]
+_CONTEXT: list = [None, -1e18, None]  # context, when built, the build in flight
 _CONTEXT_LOCK = threading.Lock()
 PROBES: Probes | None = None
 _PROBES_LOCK = threading.Lock()
@@ -989,14 +1254,50 @@ def context_from_environment() -> Context:
     remembered anywhere: this route writes nothing), its configuration in
     force, ``LEVI_GPU_LOCK_FILE``, ``LEVI_ROS_LOG_DIR`` (else ``ROS_LOG_DIR``,
     else ``~/.ros/log``) and ``LEVI_FR3_RECORDER_DIR``. Kept for
-    ``CONTEXT_TTL_S``."""
+    ``CONTEXT_TTL_S``. Built in a daemon thread with a deadline: a
+    configuration on a stuck file system, or one that cannot be read, gives
+    the previous context or a minimal one that says why (``context``)."""
     with _CONTEXT_LOCK:
-        now = time.monotonic()
-        if _CONTEXT[0] is not None and now - _CONTEXT[1] < CONTEXT_TTL_S:
-            return _CONTEXT[0]
-        context = _build_context()
-        _CONTEXT[:] = [context, now]
-        return context
+        context, built, task = _CONTEXT
+        if context is not None and time.monotonic() - built < CONTEXT_TTL_S:
+            return context
+        if task is None:
+            task = _Task()
+
+            def run():
+                try:
+                    task.value = _guarded_build()
+                finally:
+                    task.done.set()
+
+            _CONTEXT[2] = task
+            threading.Thread(target=run, name="levi-setup-context", daemon=True).start()
+    if task.done.wait(CONTEXT_TIMEOUT_S):
+        with _CONTEXT_LOCK:
+            if _CONTEXT[2] is task:
+                _CONTEXT[:] = [task.value, time.monotonic(), None]
+        return task.value
+    return context or _minimal_context(
+        f"the configuration could not be read within {CONTEXT_TIMEOUT_S:g} s"
+    )
+
+
+def _minimal_context(detail: str) -> Context:
+    return Context(disks=(("tmp", _tmp_dir()),), context_detail=detail)
+
+
+def _tmp_dir() -> str:
+    # Not tempfile.gettempdir(): its first call creates and deletes a file.
+    return os.environ.get("TMPDIR") or tempfile.tempdir or "/tmp"
+
+
+def _guarded_build() -> Context:
+    try:
+        return _build_context()
+    except Exception as exc:  # noqa: BLE001 - a bad configuration must not fail the route
+        return _minimal_context(
+            f"the configuration could not be read ({type(exc).__name__})"
+        )
 
 
 def _build_context() -> Context:
@@ -1044,7 +1345,7 @@ def _build_context() -> Context:
             ports.setdefault(int(port), "policy_server")
         ports.setdefault(int(config.vllm.port), "vllm")
         ports.setdefault(int(config.online.port), "online_judge")
-    disks.append(("tmp", tempfile.gettempdir()))
+    disks.append(("tmp", _tmp_dir()))
     ros = (
         os.environ.get(ENV_ROS_LOG_DIR, "").strip()
         or os.environ.get("ROS_LOG_DIR", "").strip()

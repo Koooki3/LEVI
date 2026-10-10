@@ -35,6 +35,7 @@ pick = [4, 6]       # optional line range inside the block
 lines = [58, 60]    # where it was when recorded (reference only)
 sha256 = "<64 hex digits of the normalised excerpt>"
 # text = "..."      # optional: the recorded excerpt, to show a difference on drift
+# context_sha256 = "..."  # optional: the whole section body, so changed prose around the block (a new warning) is drift too
 
 [recipe.touches]
 robot = false
@@ -51,14 +52,22 @@ out):**
 - Class 3 and class 4 recipes are never `execute` and never `native`: they
   are only offered as `copy` or `link`.
 - The one exception is a class 3 policy server (`kind = "policy_server"`) that
-  only loads a model: it may be `execute` if `touches.robot`, `moves` and
-  `commands_robot` are all false and it carries
+  only loads a model: it may be `execute` if it carries
   `confirm = { required = true, decision = "<who allowed it, when>" }`.
   Nothing in LEVI runs it yet.
+- Every policy server, whatever its `ui`, must write `touches.robot`,
+  `moves` and `commands_robot` as `false` itself (left out counts as not
+  declared and is refused), connect to nothing and listen on none of 5000,
+  5001, 5100 and 7470.
+- Any `execute` recipe has `touches.robot = false` and listens on no
+  robot-side port (8000 only for the policy server).
 - `moves = true` requires class 4; `commands_robot = true` requires class 3
   or 4.
 - A recipe that connects to a robot-side port (5000, 5001, 5100, 7470, 8000)
   is only `copy` or `link`: LEVI never connects there.
+- A recipe whose `requires` names an unknown or refused recipe, or one left
+  out for this reason, is left out too, and so is every recipe on a
+  `requires` cycle; the check names each one.
 
 **Drift.** The hash covers the excerpt after Unicode NFC, trailing spaces
 removed and leading and trailing blank lines removed; any other change, one
@@ -73,6 +82,13 @@ and block index, never by line number:
 | `missing` | the section, the block or the picked lines are gone |
 | `ambiguous` | the section number appears more than once |
 | `doc_error` | the guide cannot be read reliably (a code fence left open) |
+
+The guide is read as UTF-8 (a byte order mark is ignored) and split at
+newlines only, so line numbers match an editor's. A section number is the
+heading's leading number with at most three digits per part (`2.2`, `10`;
+`## 2026 notes` is a title). Only code fences indented by at most three
+spaces are blocks: a fence indented further (inside a list, for instance)
+is prose and cannot be named by `block`.
 
 ```bash
 levi setup recipes check --recipes site/setup-recipes.toml --doc setup.md    # exit 0 / 1 (problems or drift) / 2 (unreadable)
@@ -98,7 +114,7 @@ be read says `unknown` (with a `detail`) and never fails the rest.
 | `live` | the live service's `status.json`: alive, vLLM asleep/awake, the GPU gate, the admission decision, `labelling_paused` | sends a request to vLLM or the live core |
 | `host` | `/proc/loadavg`, `/proc/stat` (busy % between two samples), `/proc/meminfo` (memory, swap), `/proc/pressure/{cpu,memory,io}` | |
 | `ros` | counts over the last hour in the newest 12 `ros2_control_node_*.log` (the last 256 KiB of each): `comm_violation`, `cartesian_reflex`, `motion_generator`, `reflex_other`, `overrun`, `overrun_warn`, `error` | runs ROS |
-| `fr3_health` | the live service's `fr3.health_file`, read as the live page does (`ok`, `red`, `offline`, `missing`); `unknown` when none is configured | |
+| `fr3_health` | the live service's `fr3.health_file`, read as the live page does (`ok`, `red`, `offline`, `missing`); `unknown` when none is configured or it is not a regular file | |
 | `disks` | free space of the product workspace, the live workspace, its rollout roots and the temporary folder, by label | returns a path |
 | `recorder` | the diagnostics recorder's `recorder.pid` (checked against the process start time) and `status.json` in `LEVI_FR3_RECORDER_DIR` (or its `data/`): `running`, `stopped`, `unknown` | starts or stops it |
 | `guard` | the real-robot quiet guard: robot-side processes (`ros2_control_node`, `franka_server`, `run_robotiq_client`, `policy_server`, `serve_policy`, found by command name, the command line itself is never returned), pressure avg10 above 25 % CPU, 5 % memory, 50 % I/O or swap above 50 %, the live gate (`robot_quiet`), `gpu.quiet_states`, `online.pressure_avg10_max` and the product's running jobs. `quiet` is `true`, `false` or `null` (cannot tell). While the FR3 health file says the arm controller is active, product jobs, swap in use or a strained host raise a `banner` | |
@@ -107,12 +123,33 @@ The ROS log folder is `LEVI_ROS_LOG_DIR`, else `ROS_LOG_DIR`, else
 `~/.ros/log`. The recorder folder is `LEVI_FR3_RECORDER_DIR` (unset: the
 recorder is `unknown`).
 
+`context` says whether the configuration (the live workspace and its
+`live.toml`) could be read; when it could not, the rest still answers from
+`/proc` and the settings.
+
+**Nothing can hang a request.** Every file is read only if `lstat` says it
+is a regular file, opened with `O_NONBLOCK | O_NOFOLLOW` and checked again
+with `fstat`, up to a size cap: a FIFO, device, socket or symbolic link is
+`unknown` ("not a regular file") and never read. Each probe runs in its own
+thread with a deadline (1.5 s; 2.5 s for the GPU, each `nvidia-smi` query is
+killed after 2 s); one that misses it is `unknown` ("timed out"), and while
+it is still stuck (a dead network mount, say) later samples answer
+`unknown` for it at once instead of starting it again. Reading the
+configuration has its own 1.5 s deadline.
+
 **Sampling.** Nothing samples in the background. A request takes a sample;
-another request within 2 seconds gets the same one (`cached: true`, `age_s`),
-and concurrent requests wait for one sampler instead of starting their own.
-The costly parts have longer intervals and caps: a full scan for socket
-owners at most every 30 s (owners already known are rechecked cheaply), the
-robot process scan every 5 s, the ROS logs every 5 s (a file is re-read only
-when it changed), the disks every 10 s; at most 4096 processes and 4096 file
-descriptors per process are scanned, and `nvidia-smi` has a 4 s timeout. The
-response holds no command line, environment, token or path.
+another request within 2 seconds gets the same one (`cached: true`,
+`age_s`). One request samples at a time and no lock is held meanwhile: a
+request arriving during a sample waits for it at most 3.5 s, then gets the
+previous sample (`stale: true`) or `{"state": "sampling"}`. The costly parts
+have longer intervals and caps: a full scan for socket owners at most every
+30 s (owners already known are rechecked cheaply, a new listener is looked
+up at once), the robot process scan every 5 s, the ROS logs every 5 s (a file
+is re-read only when it changed), the disks every 10 s, `nvidia-smi` every
+10 s while the arm controller is active (`reused: true`). At most 4096
+processes and 4096 file descriptors per process are scanned; a cut scan says
+`truncated: true` (ports; and the guard, whose `quiet` is then `null` unless
+a robot process was found). Only the last 256 KiB of a ROS log are read
+(`truncated: true`: the counts are a floor). The response holds no command
+line, environment, token or path; `live.gate.reason` is the live service's
+own text, passed on (at most 200 characters).

@@ -8,6 +8,7 @@ import json
 import os
 import socket
 import subprocess
+import sys
 import threading
 import time
 from types import SimpleNamespace
@@ -639,36 +640,109 @@ def test_a_crashing_probe_does_not_fail_the_rest(proc, monkeypatch):
 
 ROBOT_PORTS = (5000, 5001, 5100, 7470, 8000)
 
+# The guard is an audit hook (PEP 578): it sees every connect, at the C
+# ``_socket`` layer too, and every way of starting a process, whoever calls
+# it (a probe's worker thread included). A hook cannot be removed, so it is
+# installed once and switched on by the ``no_network`` fixture.
+FORBIDDEN = {
+    "socket.connect",
+    "socket.sendto",
+    "socket.sendmsg",
+    "subprocess.Popen",
+    "os.exec",
+    "os.posix_spawn",
+    "os.spawn",
+    "os.system",
+    "os.fork",
+    "os.forkpty",
+    "os.startfile",
+}
+AUDIT = {"on": False, "violations": [], "allowed": []}
+
+
+def _nvidia_query(argv) -> bool:
+    argv = [os.fsdecode(a) for a in (argv or [])]
+    return (
+        bool(argv)
+        and os.path.basename(argv[0]) == "nvidia-smi"
+        and len(argv) > 1
+        and all(a.startswith(("--query-", "--format=")) for a in argv[1:])
+    )
+
+
+def _audit(event, args):
+    if not AUDIT["on"] or event not in FORBIDDEN:
+        return
+    if event == "subprocess.Popen" and _nvidia_query(args[1]):
+        AUDIT["allowed"].append(list(map(os.fsdecode, args[1])))
+        return
+    AUDIT["violations"].append((event, repr(args)[:300]))
+    raise RuntimeError(f"forbidden while probing: {event}")
+
+
+sys.addaudithook(_audit)
+
+FAKE_NVIDIA = """#!/bin/sh
+case "$1" in
+  --query-gpu=*) echo "0, Fake GPU, 32607, 1000, 5" ;;
+  --query-compute-apps=*) echo "42, /usr/bin/python3, 900" ;;
+esac
+"""
+
 
 @pytest.fixture
-def no_network(monkeypatch):
-    """Every way out is closed: a connect or a subprocess other than
-    nvidia-smi --query-* fails the test."""
-    attempts = []
+def no_network(tmp_path, monkeypatch):
+    """Every connect and every process start other than a
+    ``nvidia-smi --query-*`` is recorded and refused. ``nvidia-smi`` is a
+    fake on PATH, so no test touches the real GPU."""
+    bin_dir = tmp_path / "fake-bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "nvidia-smi"
+    fake.write_text(FAKE_NVIDIA)
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    AUDIT["violations"].clear()
+    AUDIT["allowed"].clear()
+    AUDIT["on"] = True
+    try:
+        yield SimpleNamespace(attempts=AUDIT["violations"], spawned=AUDIT["allowed"])
+    finally:
+        AUDIT["on"] = False
 
-    def refuse(*args, **kwargs):
-        attempts.append(args)
-        raise AssertionError(f"a probe tried to connect: {args[1:]}")
 
-    monkeypatch.setattr(socket.socket, "connect", refuse)
-    monkeypatch.setattr(socket.socket, "connect_ex", refuse)
-    monkeypatch.setattr(socket, "create_connection", refuse)
-    spawned = []
+@pytest.mark.parametrize(
+    "attempt",
+    [
+        "socket",
+        "c_socket",
+        "connect_ex",
+        "posix_spawn",
+        "system",
+        "popen",
+        "execv",
+        "fork",
+    ],
+)
+def test_the_guard_catches_every_way_out(attempt, tmp_path, no_network):
+    """The guard itself: each of these is refused before it happens (an
+    AF_UNIX path that does not exist, so nothing could be reached anyway)."""
+    import _socket
 
-    def guarded_run(cmd, *args, **kwargs):
-        spawned.append(list(cmd))
-        assert cmd[0] == "nvidia-smi" and all(
-            a.startswith(("--query-", "--format=")) for a in cmd[1:]
-        ), cmd
-        return SimpleNamespace(stdout="", returncode=0)
-
-    def no_popen(*args, **kwargs):
-        raise AssertionError(f"a probe started a process: {args}")
-
-    monkeypatch.setattr(subprocess, "run", guarded_run)
-    monkeypatch.setattr(subprocess, "Popen", no_popen)
-    monkeypatch.setattr(os, "system", no_popen)
-    return SimpleNamespace(attempts=attempts, spawned=spawned)
+    where = "/nonexistent-levi-test/x.sock"  # short: AF_UNIX paths are limited
+    actions = {
+        "socket": lambda: socket.socket(socket.AF_UNIX).connect(where),
+        "c_socket": lambda: _socket.socket(socket.AF_UNIX).connect(where),
+        "connect_ex": lambda: socket.socket(socket.AF_UNIX).connect_ex(where),
+        "posix_spawn": lambda: os.posix_spawn("/bin/true", ["true"], {}),
+        "system": lambda: os.system("true"),
+        "popen": lambda: subprocess.run(["true"], check=False),
+        "execv": lambda: os.execv("/bin/true", ["true"]),
+        "fork": os.fork,
+    }
+    with pytest.raises(RuntimeError, match="forbidden while probing"):
+        actions[attempt]()
+    assert len(no_network.attempts) == 1
+    no_network.attempts.clear()
 
 
 def full_context(proc, tmp_path):
@@ -699,7 +773,7 @@ def test_no_probe_connects_or_spawns(proc, tmp_path, no_network):
     """The whole sampling path, every probe, with the robot ports listening:
     nothing connects; the only process is nvidia-smi --query-*."""
     ctx = full_context(proc, tmp_path)
-    p = P.Probes()  # the real subprocess.run, which the guard replaced
+    p = P.Probes()  # the real subprocess.run, watched by the audit hook
     out = p.status(ctx)
     assert {r["port"] for r in out["ports"]["ports"] if r["listening"]} >= set(
         ROBOT_PORTS
@@ -805,3 +879,267 @@ def test_the_service_serves_the_route_behind_the_ui_token(
     )
     assert ok.status_code == 200 and ok.json()["ports"]["state"] == "ok"
     assert no_network.attempts == []
+
+
+def fake_live_workspace(tmp_path, monkeypatch, proc_dir=None):
+    """A live workspace found the real way (``LEVI_LIVE_WORKSPACE``), with
+    every file the probes read."""
+    from levi.live import auto, locate
+
+    ws = tmp_path / "live-ws"
+    (ws / "live").mkdir(parents=True)
+    (ws / "live" / auto.MARKER).write_text("{}")
+    home = tmp_path / "live-home"
+    home.mkdir()
+    (home / "status.json").write_text(
+        json.dumps({"pid": os.getpid(), "updated_at": time.time(), "gpu": {}})
+    )
+    health = tmp_path / "fr3_health.json"
+    health.write_text(json.dumps({"updated_at_epoch": time.time()}))
+    lock = tmp_path / "gpu.lock"
+    lock.write_text("")
+    rollouts = tmp_path / "rollouts"
+    rollouts.mkdir()
+    (ws / "live.toml").write_text(
+        f"[fr3]\nhealth_file = '{health}'\n"
+        f"[gpu]\nlock_file = '{lock}'\n"
+        f"[watch]\nroots = ['{rollouts}']\n"
+    )
+    ros = tmp_path / "ros"
+    ros.mkdir()
+    (ros / "ros2_control_node_1_1999999000000.log").write_text(
+        f"[ERROR] [{time.time():.3f}] [fr3]: communication_constraints_violation\n"
+    )
+    monkeypatch.setenv(locate.ENV_WORKSPACE, str(ws))
+    # The product workspace elsewhere (the test's folders lie under the
+    # checkout's own .state, which locate rightly refuses as a live one).
+    import levi.paths
+
+    product = tmp_path / "product-ws"
+    product.mkdir()
+    monkeypatch.setattr(levi.paths, "ROOT", product)
+    monkeypatch.setenv(locate.ENV_HOME, str(home))
+    monkeypatch.setenv(P.ENV_ROS_LOG_DIR, str(ros))
+    monkeypatch.setenv(P.ENV_RECORDER_DIR, str(tmp_path))
+    monkeypatch.setattr(P, "_CONTEXT", [None, -1e18, None])
+    monkeypatch.setattr(P, "PROBES", None)
+    return ws
+
+
+def test_the_real_path_from_the_environment_never_connects(
+    tmp_path, no_network, monkeypatch
+):
+    """``probes.status()`` exactly as the route calls it: the real
+    ``_build_context`` (live workspace lookup, live.toml), every probe on the
+    real /proc, under the audit hook."""
+    fake_live_workspace(tmp_path, monkeypatch)
+    out = P.status()
+    assert out["context"]["state"] == "ok", out["context"]
+    assert out["live"]["state"] == "ok", out["live"]
+    assert out["live"]["state"] == "ok" and out["ros"]["counts"] == {
+        "comm_violation": 1
+    }
+    assert out["gpu_locks"]["locks"][0]["state"] == "free"
+    assert out["gpu"]["gpus"][0]["name"] == "Fake GPU"
+    assert no_network.attempts == []
+    assert no_network.spawned
+
+
+def test_the_real_path_through_the_service(tmp_path, no_network, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from levi.service import app
+
+    fake_live_workspace(tmp_path, monkeypatch)
+    monkeypatch.setenv("LEVI_UI_TOKEN", "test-ui-token")
+    ok = TestClient(app).get(
+        "/api/levi/setup/status", headers={"x-levi-ui-token": "test-ui-token"}
+    )
+    assert ok.status_code == 200 and ok.json()["live"]["state"] == "ok"
+    assert no_network.attempts == []
+
+
+def test_a_broken_context_is_reported_not_raised(monkeypatch):
+    from levi.live import locate
+
+    def boom(own):
+        raise ValueError("bad live configuration")
+
+    monkeypatch.setattr(locate, "find", boom)
+    monkeypatch.setattr(P, "_CONTEXT", [None, -1e18, None])
+    monkeypatch.setattr(P, "PROBES", P.Probes(runner=no_nvidia, jobs=list))
+    out = P.status()
+    assert out["context"]["state"] == "unknown"
+    assert out["host"]["state"] == "ok"  # the rest still answers
+
+
+# ------------------------------------------------------------------ blocking files
+
+
+def call(fn, seconds):
+    """``fn()`` in a daemon thread: (result, finished in time)."""
+    box = {}
+    worker = threading.Thread(target=lambda: box.setdefault("v", fn()), daemon=True)
+    worker.start()
+    worker.join(seconds)
+    return box.get("v"), not worker.is_alive()
+
+
+@pytest.fixture
+def fifos():
+    """FIFOs made by a test; at the end each gets a writer so a reader that
+    blocked on it (before the fix) ends."""
+    made = []
+
+    def make(path):
+        os.mkfifo(path)
+        made.append(path)
+        return path
+
+    yield make
+    for path in made:
+        for _ in range(50):
+            try:
+                fd = os.open(path, os.O_WRONLY | os.O_NONBLOCK)
+            except OSError:
+                break
+            os.close(fd)
+
+
+BOUND_S = getattr(P, "PROBE_TIMEOUT_S", 1.5) + getattr(P, "GPU_TIMEOUT_S", 2.5) + 2.0
+
+
+@pytest.mark.parametrize("where", ["ros", "recorder_pid", "live_status", "health"])
+def test_a_fifo_is_unknown_in_bounded_time(where, proc, tmp_path, fifos):
+    ros = tmp_path / "ros"
+    ros.mkdir()
+    rec = tmp_path / "rec"
+    rec.mkdir()
+    fields = {"proc": str(proc.root), "ros_log_dir": str(ros), "recorder_dir": str(rec)}
+    if where == "ros":
+        fifos(ros / "ros2_control_node_1_1999999000000.log")
+        os.utime(ros / "ros2_control_node_1_1999999000000.log", (2e9, 2e9))
+    elif where == "recorder_pid":
+        fifos(rec / "recorder.pid")
+    elif where == "live_status":
+        fields["live_status_file"] = str(fifos(tmp_path / "status.json"))
+    else:
+        fields["health_file"] = str(fifos(tmp_path / "h.json"))
+    clock = Clock()
+    p = probe(clock=clock)
+    ctx = P.Context(**fields)
+    out, done = call(lambda: p.status(ctx), BOUND_S)
+    assert done, f"a FIFO at {where} blocked the sample"
+    section = {
+        "ros": "ros",
+        "recorder_pid": "recorder",
+        "live_status": "live",
+        "health": "fr3_health",
+    }[where]
+    assert out[section]["state"] == "unknown"
+    assert "regular file" in out[section].get("detail", "")
+    clock.t += P.DEFAULT_TTL_S + 1
+    again, done = call(lambda: p.status(ctx), BOUND_S)
+    assert done and again["cached"] is False
+
+
+@pytest.fixture
+def slow_disk(monkeypatch):
+    """``statvfs`` (what ``shutil.disk_usage`` calls) hangs like a dead NFS
+    mount until the test ends."""
+    release = threading.Event()
+    real = os.statvfs
+
+    def hang(path):
+        release.wait(60)
+        return real(path)
+
+    monkeypatch.setattr(os, "statvfs", hang)
+    yield
+    release.set()
+
+
+def test_a_hung_disk_is_unknown_and_does_not_block_later_requests(
+    proc, tmp_path, slow_disk
+):
+    clock = Clock()
+    p = probe(clock=clock)
+    ctx = P.Context(proc=str(proc.root), disks=(("rollouts", str(tmp_path)),))
+    started = time.monotonic()
+    out, done = call(lambda: p.status(ctx), BOUND_S)
+    assert done and time.monotonic() - started < BOUND_S
+    assert out["disks"]["state"] == "unknown" and "timed out" in out["disks"]["detail"]
+    assert out["host"]["state"] == "ok"
+    clock.t += P.DISK_SCAN_S + P.DEFAULT_TTL_S
+    started = time.monotonic()
+    again, done = call(lambda: p.status(ctx), BOUND_S)
+    assert (
+        done and time.monotonic() - started < 1.0
+    )  # the stuck read is not waited for again
+    assert again["disks"]["state"] == "unknown"
+    assert "earlier read" in again["disks"]["detail"]
+
+
+def test_a_stuck_sampler_never_blocks_another_request(proc):
+    """Two requests at once while ``nvidia-smi`` hangs: both answer in
+    bounded time; the second never waits on a lock without end."""
+    release = threading.Event()
+
+    def hang(cmd, **kwargs):
+        release.wait(60)
+        raise subprocess.TimeoutExpired(cmd, 1)
+
+    p = P.Probes(runner=hang)
+    ctx = P.Context(proc=str(proc.root))
+    results = []
+    workers = [
+        threading.Thread(target=lambda: results.append(p.status(ctx)), daemon=True)
+        for _ in range(2)
+    ]
+    started = time.monotonic()
+    try:
+        for w in workers:
+            w.start()
+            time.sleep(0.05)
+        for w in workers:
+            w.join(BOUND_S)
+        assert len(results) == 2, "a request is still waiting"
+        assert time.monotonic() - started < BOUND_S
+        assert all(r["gpu"]["state"] == "unknown" for r in results)
+        assert p.samples == 1
+    finally:
+        release.set()
+
+
+def test_the_process_scan_cap_is_reported(proc, monkeypatch):
+    for pid in range(200, 206):
+        proc.process(pid, "x")
+    proc.listen(8000, "777")
+    monkeypatch.setattr(P, "MAX_PIDS", 3)
+    out = probe().status(P.Context(proc=str(proc.root)))
+    assert out["guard"]["quiet"] is None  # cannot tell: not every process was seen
+    assert out["guard"]["truncated"] is True
+    assert out["ports"]["truncated"] is True
+
+
+def test_a_truncated_ros_log_is_reported(proc, tmp_path):
+    logs = tmp_path / "ros"
+    logs.mkdir()
+    now = 2_000_000_000.0
+    line = f"[WARN] [{now - 1:.3f}] [cm]: Overrun detected! padding\n"
+    path = logs / "ros2_control_node_1_1999999000000.log"
+    path.write_text(line * 20000)
+    os.utime(path, (now, now))
+    out = probe(wall=lambda: now).status(
+        P.Context(proc=str(proc.root), ros_log_dir=str(logs))
+    )
+    assert out["ros"]["truncated"] is True
+
+
+def test_a_symlinked_file_is_not_followed(proc, tmp_path):
+    target = tmp_path / "real.json"
+    target.write_text(json.dumps({"pid": 1, "updated_at": 0}))
+    link = tmp_path / "status.json"
+    link.symlink_to(target)
+    out = probe().status(P.Context(proc=str(proc.root), live_status_file=str(link)))
+    assert out["live"]["state"] == "unknown"
