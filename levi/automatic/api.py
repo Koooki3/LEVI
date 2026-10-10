@@ -1464,3 +1464,16 @@ def scene_answer(run_id: str, body: SceneAnswerBody, request: Request):
     _MEMO.put(f"scene:{run_id}", body.request_id, payload, answer)
     _audit("api_scene_answer", run_id=run_id, request_id=body.request_id)
     return answer
+
+
+# --- the launch guide -----------------------------------------------------------------------------
+
+
+@router.get("/setup-guide")
+def setup_guide_view():
+    """Ordered steps to prepare a session, from the operator guide's recipes
+    and the read-only probes. Nothing is executed; a command is shown only
+    while the guide still reads as it did when the recipe was recorded."""
+    from . import setup_guide
+
+    return {"steps": setup_guide.steps()}
