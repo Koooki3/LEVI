@@ -44,3 +44,30 @@ afterwards) and times, on at most four CPU cores at low priority:
 The result (`levi.performance.bench.v1`) holds the parameters, the machine, the
 library versions and per case the median, 95th percentile and minimum seconds.
 Compare two runs on the same machine; the absolute figures do not travel.
+
+## Presentation-timestamp scan (`LEVI_PTS_SCAN`)
+
+Evidence frames are found by a video's presentation times, not by frame number
+divided by fps. LEVI lists those times once per video and caches the list next
+to the evidence (`*--video-index.json`, keyed by the file's SHA-256).
+
+| `LEVI_PTS_SCAN` | Meaning |
+| --- | --- |
+| `frame` (default) | The original scan: `ffprobe` decodes every frame and reports its best-effort timestamp. |
+| `packet` | Read the container's packet timestamps instead (no decoding): 4 to 80 times faster on measured synthetic video, the same list. If a packet has no timestamp, the packets are missing or their times are not strictly increasing, the frame scan runs instead. The cache file then also records `"scan": "packet"`, and a cache written by the other scan is not used. |
+
+Any other value is refused. In both modes a video's list is kept in memory by
+content hash (16 videos), so a v3 file shared by many episodes is scanned once
+per process, and the file is hashed once per camera per episode (the hash is
+passed to the scan instead of being computed again). Nothing about the checks
+changes: every cache is still tied to the source hash and the later time
+mismatch tolerance still applies.
+
+`packet` becomes the default only after the two scans have been compared on the
+real development videos:
+
+```
+python -m levi.performance pts-compare <video or folder> [...]
+```
+
+prints one row per file and exits 1 if any list differs or a file cannot be scanned.

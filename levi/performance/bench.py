@@ -117,36 +117,18 @@ def case_hash(video, repeat):
     return {"bytes": Path(video).stat().st_size, **timed(run, repeat)}
 
 
-def _ffprobe(path, entries, fmt):
-    return subprocess.run(
-        [
-            "ffprobe", "-v", "error", "-select_streams", "v:0",
-            "-show_entries", entries, "-of", fmt, str(path),
-        ],
-        capture_output=True, text=True, timeout=120, check=True,
-    ).stdout  # fmt: skip
-
-
-def _pts_times(path, mode):
-    """Presentation times as the two scans list them (reference copies of the
-    ffprobe calls; the production code is ``levi.agent.video_evidence``)."""
-    if mode == "frame":
-        data = json.loads(_ffprobe(path, "frame=best_effort_timestamp_time", "json"))[
-            "frames"
-        ]
-        return [float(f["best_effort_timestamp_time"]) for f in data]
-    out = _ffprobe(path, "packet=pts_time", "csv=p=0").split()
-    return sorted(float(x) for x in out if x not in ("", "N/A"))
-
-
 def case_pts(video, repeat):
-    """Both ways of listing presentation times, and whether they agree."""
-    modes = {
-        m: timed(lambda m=m: _pts_times(video, m), repeat) for m in ("frame", "packet")
+    """Both ways of listing presentation times (``levi.agent.video_evidence``),
+    and whether they agree."""
+    from levi.agent import video_evidence as ve
+
+    scans = {
+        "frame": timed(lambda: ve.scan_frames(video), repeat),
+        "packet": timed(lambda: ve.scan_packets(video), repeat),
     }
     return {
-        "scans": modes,
-        "identical": _pts_times(video, "frame") == _pts_times(video, "packet"),
+        "scans": scans,
+        "identical": ve.scan_frames(video) == ve.scan_packets(video),
     }
 
 
@@ -154,6 +136,33 @@ def case_pixels(video, repeat):
     from levi.conversion import media
 
     return timed(lambda: media.inspect(Path(video), pixels=True), repeat)
+
+
+def compare_scans(paths) -> dict:
+    """Read-only: for each video, whether the packet scan returns exactly the
+    frame scan's list (PRF-04: required on the real videos before ``packet`` may
+    become the default). A file that cannot be scanned is reported, not raised."""
+    from levi.agent import video_evidence as ve
+
+    files = []
+    for entry in map(Path, paths):
+        files += sorted(entry.rglob("*.mp4")) if entry.is_dir() else [entry]
+    rows = []
+    for path in files:
+        row = {"file": path.name, "identical": False, "frames": None, "error": None}
+        try:
+            frames = ve.scan_frames(path)
+            row.update(frames=len(frames), identical=ve.scan_packets(path) == frames)
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            row["error"] = type(error).__name__
+        rows.append(row)
+    return {
+        "schema": "levi.performance.pts_compare.v1",
+        "files": len(rows),
+        "all_identical": bool(rows) and all(r["identical"] for r in rows),
+        "different": [r["file"] for r in rows if not r["identical"]],
+        "rows": rows,
+    }
 
 
 CASES = {"hash": case_hash, "pts": case_pts, "pixels": case_pixels}

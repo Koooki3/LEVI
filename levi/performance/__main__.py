@@ -31,7 +31,16 @@ def main(argv=None) -> int:
     b.add_argument(
         "--scratch", help="folder for the synthetic video (removed afterwards)"
     )
+    c = sub.add_parser(
+        "pts-compare",
+        help="check that the packet scan equals the frame scan on given videos",
+    )
+    c.add_argument("paths", nargs="+", help="video files, or folders searched for .mp4")
     args = parser.parse_args(argv)
+    if args.command == "pts-compare":
+        result = bench.compare_scans(args.paths)
+        print(bench.dumps(result))
+        return 0 if result["all_identical"] else 1
     if args.command == "trace":
         if args.live_dir is None and args.workspace is None:
             parser.error("give --live-dir and/or --workspace")
