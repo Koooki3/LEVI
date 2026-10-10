@@ -60,6 +60,7 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from .. import catalog, naming
+from . import signature as _signature
 
 SCHEMA = "levi.recap_value.revision.v1"
 RESULT_SCHEMA = "levi.recap_value.result.v1"
@@ -428,6 +429,8 @@ def _tables(ep: int, cols: dict[str, Any], dataset_name: str):
         "min_value": float(np.min(cols["value"])) if n else None,
         "max_value": float(np.max(cols["value"])) if n else None,
         "frames": n,
+        # The episode's length before the static filter (= frames without it).
+        "episode_frames": int(cols.get("episode_frames", n)),
     }
     return table, rlinf, row
 
@@ -517,44 +520,14 @@ def _publish_revision(
     return record
 
 
-def signature(record: dict[str, Any]) -> dict[str, Any]:
-    """The parameters that decide a result's numbers. Two computations with
-    the same signature give the same values, advantages and labels for an
-    episode, so their episodes can be combined into one result."""
-    checkpoint = record.get("checkpoint") or {}
-    manifest = checkpoint.get("manifest") or {}
-    filtering = record.get("static_filter") or {}
-    fingerprint = record.get("fingerprint") or {}
-    return {
-        "provider": record.get("provider"),
-        "checkpoint_sha256": checkpoint.get("sha256"),
-        "precision": manifest.get("precision"),
-        "value_support": [
-            manifest.get("num_bins"),
-            manifest.get("v_min"),
-            manifest.get("v_max"),
-        ],
-        "dataset_type": record.get("dataset_type"),
-        "lookahead": record.get("lookahead"),
-        "gamma": record.get("gamma"),
-        "failure_reward": record.get("failure_reward"),
-        "return_min": record.get("return_min"),
-        "return_max": record.get("return_max"),
-        "threshold": record.get("threshold"),
-        "threshold_source": record.get("threshold_source"),
-        "static_filter": {
-            k: filtering.get(k) for k in ("mode", "applied", "rule", "params")
-        },
-        "fingerprint": {
-            "source_fingerprint": fingerprint.get("source_fingerprint"),
-            "dataset_revision": fingerprint.get("dataset_revision"),
-        },
-    }
+def signature(record: dict[str, Any]) -> str:
+    """The digest of the settings that decide a result's numbers
+    (``levi/recap/signature.py``)."""
+    return _signature.digest(record)
 
 
 def signature_differences(old: dict[str, Any], new: dict[str, Any]) -> list[str]:
-    a, b = signature(old), signature(new)
-    return [key for key in a if a[key] != b[key]]
+    return _signature.differences(old, new)
 
 
 def _link(source: Path, target: Path) -> None:
@@ -595,10 +568,14 @@ def publish_model(
                     f"parameters ({', '.join(differs)}); recompute the whole "
                     "dataset instead of a subset"
                 )
+            # An episode this run was asked for but skipped (e.g. by the
+            # static filter) leaves the result with its reason; it is not
+            # kept with values the request meant to replace.
+            dropped = {int(k) for k in meta.get("skipped_episodes") or {}}
             carried = [
                 int(e)
                 for e in old_record.get("episode_indices") or []
-                if int(e) not in episodes
+                if int(e) not in episodes and int(e) not in dropped
             ]
         version = naming.timestamp_id(slot / "v", create_dir=True)
         target = slot / "v" / version
@@ -613,7 +590,12 @@ def publish_model(
             table, rlinf, row = _tables(ep, episodes[ep], dataset_name)
             _durable_table(target / f"episode-{ep:06d}.parquet", table)
             parts.append(rlinf)
-            per_episode[str(ep)] = {**row, "computed_at": now}
+            per_episode[str(ep)] = {
+                **row,
+                "computed_at": now,
+                "job_id": meta.get("job_id"),
+                "version": version,
+            }
         if carried:
             for ep in carried:
                 _link(
@@ -622,6 +604,8 @@ def publish_model(
                 )
                 per_episode[str(ep)] = {
                     "computed_at": old_record.get("created_at"),
+                    "job_id": old_record.get("job_id"),
+                    "version": old.version,
                     **old_rows.get(str(ep), {}),
                 }
             previous = pq.read_table(old.folder / "advantages.parquet")
@@ -656,10 +640,20 @@ def publish_model(
             if int(k) not in indices
         }
         ordered = {str(ep): per_episode[str(ep)] for ep in indices}
+        sources: dict[tuple, list[int]] = {}
+        for ep in indices:
+            row = ordered[str(ep)]
+            sources.setdefault((row.get("version"), row.get("job_id")), []).append(ep)
         record = {
             "schema": RESULT_SCHEMA,
             "dataset": name,
             **meta,
+            "static_filter": _merged_filter(meta.get("static_filter"), ordered),
+            # Which computation each episode comes from.
+            "merged_from": [
+                {"version": v, "job_id": j, "episodes": eps}
+                for (v, j), eps in sorted(sources.items(), key=lambda i: str(i[0][0]))
+            ],
             "outcomes": outcomes,
             "skipped_episodes": skipped,
             "model": model,
@@ -672,6 +666,9 @@ def publish_model(
             "positive_fraction": _positive_fraction(ordered),
             "created_at": now,
         }
+        if carried:
+            # The request describes only this run's episodes.
+            record["last_request"] = record.pop("request", None)
         _durable_json(
             target / "summary.json",
             {
@@ -698,6 +695,25 @@ def publish_model(
         if old:
             _retire(old.folder)
         return _annotate(record, Located(model, MODELS, version, target))
+
+
+def _merged_filter(
+    filtering: dict[str, Any] | None, rows: dict[str, dict[str, Any]]
+) -> dict[str, Any] | None:
+    """The static filter record with its frame counts over every episode of
+    the result (a merge would otherwise show the last subset's counts)."""
+    if not filtering or not filtering.get("applied"):
+        return filtering
+    out = dict(filtering)
+    lengths = [r.get("episode_frames") for r in rows.values()]
+    kept = sum(int(r["frames"]) for r in rows.values())
+    total = sum(lengths) if all(isinstance(n, int) for n in lengths) else None
+    out.update(
+        frames=total,
+        kept_frames=kept,
+        dropped_fraction=(1 - kept / total) if total else (0.0 if total == 0 else None),
+    )
+    return out
 
 
 def _retire(folder: Path) -> None:

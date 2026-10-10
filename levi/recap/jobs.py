@@ -31,7 +31,7 @@ import pyarrow.parquet as pq
 from .. import catalog, children, naming, paths
 from ..revision import dataset_revision
 from ..versions import is_dataset_v2
-from . import advantage, checkpoints, store
+from . import advantage, checkpoints, signature, store
 
 ACTIVE = {"queued", "running"}
 FINISHED = {"succeeded", "failed", "cancelled"}
@@ -599,7 +599,7 @@ def start(
                 f"A RECAP value job ({running['id']}) is already running for this dataset",
             )
         if writing == store.MODELS and episodes is not None:
-            _refuse_unmergeable(ds, manifest, request, filtering)
+            _refuse_unmergeable(ds, manifest, request, filtering, folder)
         base = store.root(ds.name)
         job_id = naming.timestamp_id(_jobs_dir(ds.name), ".json")
         plan_path = base / "plans" / f"{job_id}.json"
@@ -942,58 +942,82 @@ def _refuse_unmergeable(
     manifest: checkpoints.Manifest,
     request: dict[str, Any],
     filtering: dict[str, Any],
+    folder: Path | None = None,
 ) -> None:
     """Before a subset run starts (and spends GPU time), refuse it when its
-    episodes could not be merged into the model's stored result: a parameter
-    known now differs, or the threshold or return range would come from this
-    subset's own statistics. ``store.publish_model`` checks the full
-    signature again when the values arrive."""
-    old = (
-        store.revision(ds.name, manifest.name)
-        if store.head(ds.name, manifest.name)
-        else None
-    )
+    episodes could not be merged into the model's stored result. The meta
+    this run will publish is assembled from what is known now and compared
+    with the same ``signature`` the publication checks; only the worker's
+    software versions are left to the publication (they are known once the
+    worker reports them). A threshold or return range that would come from
+    this subset's own statistics never matches."""
+    if not store.head(ds.name, manifest.name):
+        return
+    old = store.revision(ds.name, manifest.name)
     if not old or old.get("layout") != store.MODELS:
         return
-    expected: dict[str, Any] = {
-        "provider": manifest.provider,
-        "checkpoint_sha256": manifest.sha256,
-        "precision": manifest.precision,
-        "value_support": [manifest.num_bins, manifest.v_min, manifest.v_max],
-        "dataset_type": request["dataset_type"],
-        "lookahead": request["lookahead"],
-        "gamma": float(manifest.gamma),
-        "failure_reward": float(manifest.failure_reward),
-        "static_filter": {
-            k: filtering.get(k) for k in ("mode", "applied", "rule", "params")
-        },
-    }
-    if request["dataset_type"] != "value_only":
+    value_only = request["dataset_type"] == "value_only"
+    if value_only:
+        threshold = source = ret_min = ret_max = range_source = None
+    else:
         if request["threshold"] is not None:
-            expected["threshold"] = float(request["threshold"])
+            threshold, source = float(request["threshold"]), "manual"
         elif manifest.unified_threshold is not None:
-            expected["threshold"] = float(manifest.unified_threshold)
+            threshold, source = float(manifest.unified_threshold), "checkpoint"
         else:
-            expected["threshold"] = "a quantile of this subset's advantages"
+            threshold = "a quantile of this subset's advantages"
+            source = "dataset_quantile"
         if manifest.return_min is not None and manifest.return_max is not None:
-            expected["return_min"] = float(manifest.return_min)
-            expected["return_max"] = float(manifest.return_max)
+            ret_min, ret_max = float(manifest.return_min), float(manifest.return_max)
+            range_source = "checkpoint"
         else:
-            expected["return_min"] = "this subset's returns"
-    stored = store.signature(old)
+            ret_min = ret_max = "this subset's returns"
+            range_source = "dataset"
     fingerprint = ds.fingerprint()
-    expected["fingerprint"] = {
-        "source_fingerprint": fingerprint.get("source_fingerprint"),
-        "dataset_revision": fingerprint.get("dataset_revision"),
+    expected = {
+        "provider": manifest.provider,
+        "checkpoint": {
+            "name": manifest.name,
+            "sha256": manifest.sha256,
+            "manifest": manifest.public(),
+        },
+        "dataset_type": request["dataset_type"],
+        "labels": not value_only,
+        "fingerprint": {
+            "source_fingerprint": fingerprint.get("source_fingerprint"),
+            "dataset_revision": fingerprint.get("dataset_revision"),
+        },
+        "static_filter": {k: v for k, v in filtering.items() if k != "skipped"},
+        "base_models": checkpoints.base_models_status(folder, manifest)
+        if manifest.provider == "rlinf" and folder is not None
+        else None,
+        "fps": float(ds.fps),
+        **_run_parameters(manifest, request, threshold, source),
+        "return_min": ret_min,
+        "return_max": ret_max,
+        "return_range_source": range_source,
     }
-    differs = [key for key, value in expected.items() if stored.get(key) != value]
+    differs = signature.differences(old, expected, worker=False)
     if differs:
         raise RecapError(
             409,
             f"The stored {manifest.name} result on this dataset was computed with "
-            f"different parameters ({', '.join(differs)}); recompute the whole "
+            f"different settings ({', '.join(differs)}); recompute the whole "
             "dataset instead of a subset",
         )
+
+
+def _run_parameters(manifest, request, threshold, source) -> dict[str, Any]:
+    """The run parameters a result records (shared by the publication and
+    the subset pre-check, so both see the same values)."""
+    return {
+        "threshold": threshold,
+        "threshold_source": source,
+        "positive_quantile": request["positive_quantile"],
+        "lookahead": int(request["lookahead"]),
+        "gamma": float(manifest.gamma),
+        "failure_reward": float(manifest.failure_reward),
+    }
 
 
 # ---------------------------------------------------------------- publish
@@ -1080,6 +1104,7 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
                 "advantage": blank,
                 "num_valid_rewards": np.zeros(len(frames), dtype=np.int64),
                 "positive": None,
+                "episode_frames": n,
             }
             continue
         returns, rewards = advantage.episode_rewards(
@@ -1091,6 +1116,7 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
             "value": values,
             "return": returns,
             "reward": rewards,
+            "episode_frames": n,
         }
     if value_only:
         return _publish_values_only(job, plan, manifest, result, per_episode)
@@ -1132,12 +1158,7 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     _set_stage(job, "saving", 0, total)
     meta = {
         **_common_meta(job, plan, manifest, result),
-        "threshold": threshold,
-        "threshold_source": source,
-        "positive_quantile": request["positive_quantile"],
-        "lookahead": lookahead,
-        "gamma": gamma,
-        "failure_reward": float(manifest.failure_reward),
+        **_run_parameters(manifest, request, threshold, source),
         "return_min": float(ret_min),
         "return_max": float(ret_max),
         "return_range_source": range_source,
@@ -1165,12 +1186,7 @@ def _publish_values_only(job, plan, manifest, result, per_episode):
     _set_stage(job, "saving", 0, sum(len(c["value"]) for c in per_episode.values()))
     meta = {
         **_common_meta(job, plan, manifest, result),
-        "threshold": None,
-        "threshold_source": None,
-        "positive_quantile": request["positive_quantile"],
-        "lookahead": int(request["lookahead"]),
-        "gamma": float(manifest.gamma),
-        "failure_reward": float(manifest.failure_reward),
+        **_run_parameters(manifest, request, None, None),
         "return_min": None,
         "return_max": None,
         "return_range_source": None,
