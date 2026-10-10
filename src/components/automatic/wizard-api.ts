@@ -36,6 +36,14 @@ export class ApiError extends Error {
     this.code = code;
     this.errors = errors;
   }
+  /** Whether the contract's code is `name`, with or without the `E_` prefix
+   * and in any case (the contract writes both `E_…` and `job_exists`). */
+  is(name: string): boolean {
+    return (
+      this.code.toLowerCase().replace(/^e_/, "") ===
+      name.toLowerCase().replace(/^e_/, "")
+    );
+  }
 }
 
 function fieldErrors(raw: unknown): FieldError[] {
@@ -61,8 +69,10 @@ function fieldErrors(raw: unknown): FieldError[] {
   return out;
 }
 
-/** Reads the contract's `{"error": {"code", "message"}}` (and, from a proxy
- * or framework, `{"detail": ...}`) into an ApiError. */
+/** Reads an error body into an ApiError. The contract's body is
+ * `{"detail": {"code", "message", "errors"?}}` (as the live service answers);
+ * `{"error": {...}}` is read the same way, and a plain `{"detail": "text"}`
+ * from a proxy or framework gives the text. */
 export async function errorOf(response: Response): Promise<ApiError> {
   let body: unknown = null;
   try {
@@ -74,22 +84,32 @@ export async function errorOf(response: Response): Promise<ApiError> {
     string,
     unknown
   >;
-  const error = (
-    record.error && typeof record.error === "object" ? record.error : {}
-  ) as Record<string, unknown>;
-  const detail =
+  const asRecord = (value: unknown): Record<string, unknown> =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const inner =
+    Object.keys(asRecord(record.detail)).length > 0
+      ? asRecord(record.detail)
+      : asRecord(record.error);
+  const text =
     typeof record.detail === "string"
       ? record.detail
-      : record.detail
+      : Array.isArray(record.detail)
         ? JSON.stringify(record.detail)
         : "";
   const code =
-    typeof error.code === "string" ? error.code : `HTTP_${response.status}`;
+    typeof inner.code === "string" ? inner.code : `HTTP_${response.status}`;
   const message =
-    typeof error.message === "string" && error.message
-      ? error.message
-      : detail || `HTTP ${response.status}`;
-  const errors = fieldErrors(error.errors ?? record.errors ?? error.details);
+    typeof inner.message === "string" && inner.message
+      ? inner.message
+      : text || `HTTP ${response.status}`;
+  const errors = fieldErrors(
+    inner.errors ??
+      inner.details ??
+      record.errors ??
+      (Array.isArray(record.detail) ? record.detail : undefined),
+  );
   return new ApiError(response.status, code, message, errors);
 }
 
@@ -248,3 +268,24 @@ export async function getReportFileText(
   if (!response.ok) throw await errorOf(response);
   return response.text();
 }
+
+/** The calls the wizard and campaign pages make, as one object: a page takes
+ * it as a prop (default: the real calls), so a test hands in its own. */
+export const wizardApi = {
+  getCapabilities,
+  getPolicies,
+  getSetupGuide,
+  createJob,
+  planLaunch,
+  launchRun,
+  planCampaign,
+  startCampaign,
+  getCampaign,
+  listCampaigns,
+  confirmCampaign,
+  campaignCommand,
+  getCampaignReport,
+  getReportFileJson,
+  getReportFileText,
+};
+export type WizardApi = typeof wizardApi;

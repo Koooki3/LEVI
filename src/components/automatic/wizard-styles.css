@@ -160,3 +160,109 @@
   font-size: var(--ds-text-callout-size);
   color: var(--ds-text-primary);
 }
+
+/* ── Forms, choices, plan card ──────────────────────────────────────── */
+.aw-form {
+  display: grid;
+  gap: var(--ds-space-4);
+  max-width: 720px;
+}
+.aw-grid {
+  display: grid;
+  gap: var(--ds-space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+}
+.aw-choices {
+  display: grid;
+  gap: var(--ds-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.aw-choice {
+  display: grid;
+  gap: var(--ds-space-1);
+  padding: var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-1);
+}
+.aw-choice[data-selected="true"] {
+  border-color: var(--ds-selected-indicator);
+  background: var(--ds-surface-selected);
+}
+.aw-choice__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.aw-choice__notes {
+  margin: 0;
+  padding-left: var(--ds-space-4);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+}
+.aw-modes {
+  display: grid;
+  gap: var(--ds-space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.aw-mode__reason {
+  margin: 0 0 0 var(--ds-space-6);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+}
+.aw-plan {
+  display: grid;
+  gap: var(--ds-space-3);
+}
+.aw-plan__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+  margin: 0;
+}
+.aw-checks {
+  display: grid;
+  gap: var(--ds-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.aw-checks li {
+  display: flex;
+  gap: var(--ds-space-2);
+  align-items: baseline;
+  font-size: var(--ds-text-callout-size);
+}
+.aw-checks li[data-ok="true"] .ds-icon {
+  color: var(--ds-success);
+}
+.aw-checks li[data-ok="false"][data-severity="warn"] .ds-icon {
+  color: var(--ds-warning);
+}
+.aw-checks li[data-ok="false"][data-severity="error"] .ds-icon {
+  color: var(--ds-danger);
+}
+.aw-list {
+  margin: var(--ds-space-1) 0 0;
+  padding-left: var(--ds-space-4);
+}
+.aw-phrase {
+  display: grid;
+  gap: var(--ds-space-2);
+  max-width: 360px;
+}
+.aw-power {
+  overflow-x: auto;
+}
+.aw-warning {
+  color: var(--ds-warning);
+  font-size: var(--ds-text-callout-size);
+  margin: 0;
+}
