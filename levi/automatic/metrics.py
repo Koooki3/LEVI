@@ -98,12 +98,12 @@ class LabelStore:
         return self.folder / f"{kind}.jsonl"
 
     def lines(self, kind: str) -> list:
-        if kind not in STORED_KINDS:
-            raise LabelRefused(f"{kind} is not a stored label kind")
         """The whole lines of a kind's file. A last line without its newline
         (a write cut short) is no label and is ignored; any whole line that
         cannot be read makes the file unusable (``LabelRefused``): skipping
         it would hide a person's label."""
+        if kind not in STORED_KINDS:
+            raise LabelRefused(f"{kind} is not a stored label kind")
         try:
             data = self.path(kind).read_bytes()
         except FileNotFoundError:
@@ -243,6 +243,9 @@ class EpisodeRecord:
     control: bool = False
     # Control episodes: the step at which the detector would have stopped.
     would_stop_step: int | None = None
+    # The run manifest holds the episode's control record (written at a
+    # successful seal); without it ``would_stop_step`` says nothing.
+    control_recorded: bool = True
 
     @property
     def early_stop(self) -> bool:
@@ -287,6 +290,7 @@ def episodes(events, *, manifest: dict | None = None, termination=None) -> list:
                 steps=entry.get("steps"),
                 control=control,
                 would_stop_step=entry.get("would_stop_step") if control else None,
+                control_recorded="control" in entry,
             )
         )
     return out
@@ -352,13 +356,28 @@ def early_termination(records, truth: dict, *, max_steps: int | None = None) -> 
     ]
     control = [r for r in forward if r.control]
     control_labelled = [r for r in control if r.episode_id in truth]
-    failed = [r for r in control_labelled if truth[r.episode_id] == "failure"]
+    # The denominator: control episodes that truly failed, ran to their
+    # end (the detector had the whole episode), were sealed and carry their
+    # control record. The rest are counted apart by reason (review C3
+    # fixes, I-c): counting them as "would not have stopped" flatters.
+    left_out = {"cut_short": 0, "not_recorded": 0}
+    failed = []
+    for r in control_labelled:
+        if truth[r.episode_id] != "failure":
+            continue
+        if not r.could_stop:
+            left_out["cut_short"] += 1
+        elif r.sealed != "complete" or not r.control_recorded:
+            left_out["not_recorded"] += 1
+        else:
+            failed.append(r)
     would = [r for r in control_labelled if r.would_stop_step is not None]
     if failed:
         rate = {
             "available": True,
             "source": "control",
             **share(sum(r.would_stop_step is not None for r in failed), len(failed)),
+            "left_out": left_out,
         }
     else:
         rate = {
@@ -370,6 +389,7 @@ def early_termination(records, truth: dict, *, max_steps: int | None = None) -> 
                 else "no labelled control episodes (termination.control_fraction)"
             ),
             **share(0, 0),
+            "left_out": left_out,
         }
     agree = [
         r

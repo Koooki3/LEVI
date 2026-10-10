@@ -296,9 +296,6 @@ class Orchestrator:
         self._violation_hold = False
         self._scene_violations = 0
         self._reset_attempts = 0
-        # The first scene check after an operator's resume: the person
-        # confirmed the environment (human-assisted reset strategy).
-        self._human_confirmed = False
         self._last_forward: str | None = None
         self.halted: str | None = None
         self.ctx: Episode | None = None
@@ -821,7 +818,6 @@ class Orchestrator:
             self._violation_hold = False
             self._scene_violations = 0
             self._reset_attempts = 0
-            self._human_confirmed = True
             return CommandResult(
                 True, "resumed", self.state, False, found.prepared.sequence_no
             )
@@ -950,19 +946,17 @@ class Orchestrator:
         if self._scene_violations >= self.config.scene_violation_limit:
             self._to_human("contract_violation_limit")
             return
+        if self.config.initial_state is None:
+            # Without a contract no scene can ever be ready, and no reset
+            # could make it so: a person decides (review C3 fixes, I-b).
+            self._to_human(rm.scene_reason(decision))
+            return
         # Only a ready scene skips a reset; the strategy decides the rest.
-        confirmed = self._human_confirmed and self.state == "VERIFY_INITIAL"
-        self._human_confirmed = False
         try:
-            plan = rm.check_plan(
-                self.strategy, decision, self._reset_attempts, human_confirmed=confirmed
-            )
+            plan = rm.check_plan(self.strategy, decision, self._reset_attempts)
         except rm.StrategyError as exc:
             self._note("strategy_refused", str(exc))
-            plan = rm.ResetPlan(rm.WAIT_HUMAN, rm._scene_reason(decision))
-        if plan.reason == "operator_confirmed_scene":
-            # Recorded as it is: the scene was not verified, a person said so.
-            self._note("scene_unverified_operator_confirmed", f"scene {decision}")
+            plan = rm.ResetPlan(rm.WAIT_HUMAN, rm.scene_reason(decision))
         if plan.action == rm.FORWARD:
             self._reset_attempts = 0
             self._start("forward", plan.reason)

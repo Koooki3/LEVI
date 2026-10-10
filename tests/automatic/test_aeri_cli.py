@@ -298,22 +298,36 @@ def test_a_bad_episode_override_is_refused_not_raised(job, capsys):
     assert code == 2 and "episodes" in found["error"]
 
 
-def test_a_single_policy_job_without_a_contract_is_flagged(job, capsys):
+def test_a_single_policy_job_without_a_contract_is_refused_for_a_real_run(job, capsys):
+    """Fix review I-b: refused at validation, with the fix; a dry run still runs."""
     job.write_text(
         job.read_text().replace("  initial_state_spec: initial-state.yaml\n", "")
     )
     code, found = as_json(capsys, "validate", "--config", str(job))
-    assert code == 0 and found["warnings"] and "contract" in found["warnings"][0]
-    code, text = call(capsys, "validate", "--config", str(job))
-    assert "warning:" in text
+    assert code == 2 and "initial_state_spec" in found["error"]
+    assert "no forward episode" in found["error"]
+    code, found = as_json(capsys, "validate", "--config", str(job), "--dry-run")
+    assert code == 0 and found["warnings"]
+    assert "no forward episode" in found["warnings"][0]
     code, found = as_json(capsys, "doctor", "--config", str(job))
-    checks = [c for c in found["checks"] if c["check"] == "initial state contract"]
+    checks = [c for c in found["checks"] if c["check"] == "launch"]
     assert checks and not checks[0]["ok"]
-    # On the fakes: no scene is ready, so a reset runs before every episode.
     code, found = as_json(
         capsys, "run", "--config", str(job), "--dry-run", "--episodes", "1"
     )
-    assert found["warnings"] and found["metrics"]["reset"]["resets"] >= 1
+    assert code == 0 and found["state"] == "WAIT_HUMAN"
+    # No reset runs that could never make the scene ready.
+    assert found["metrics"]["reset"]["resets"] == 0 and found["robot"]["motions"] == 0
+
+
+def test_launch_refuses_the_human_assisted_mode_without_a_scene_provider(job):
+    """Reserved check (X2 G6): an eval-only run whose scene check cannot
+    answer would cycle between WAIT_HUMAN and VERIFY_INITIAL."""
+    job.write_text(job.read_text().replace("single_reset_policy", "human_assisted"))
+    found = cli.load_job(job)
+    assert cli.launch_problems(found, dry_run=True, scene_provider="fake") == []
+    problems = cli.launch_problems(found, dry_run=False, scene_provider=None)
+    assert problems and "scene" in problems[0]
 
 
 @pytest.mark.parametrize("episodes", ["0"])

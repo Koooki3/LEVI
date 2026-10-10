@@ -458,9 +458,11 @@ against the task's **Initial State Contract** (`RunConfig.initial_state`):
 | `reset_required`, `unknown`, unavailable | as they are |
 
 **Without a contract no scene is ready** (`initial_state = None`, the
-default): a `ready` needs a contract and its evidence, so
-`single_reset_policy` runs the reset policy (or asks a person) before every
-forward episode, and `levi automatic validate`/`doctor` say so. **The
+default): a `ready` needs a contract and its evidence, so no forward
+episode can start, and no reset runs either (none could make the scene
+ready): the run waits for a person at every scene check. `levi automatic
+validate` refuses such a job for a real run (`validate --dry-run` and
+`run --dry-run` still run it, with a warning). **The
 contract file is a draft (HA-23):** its format below is the smallest one
 that carries pipeline §6.1 and waits for the user's confirmation, and so
 does the **view rule**: a reference names its camera view by the text
@@ -500,14 +502,22 @@ registers `(id, version)` with exactly these names for `aeri.parse`.
 | Strategy | Not ready |
 | --- | --- |
 | `single_reset_policy` (default) | `reset_required` runs the reset policy; `unknown`/`unavailable` too with `on_scene_unknown = "reset"`, else a person; at most `max_reset_attempts` resets between two forward episodes, then a person |
-| `human_assisted` | always a person (no reset policy runs); the first scene check after the operator's resume that is only `unknown` or `unavailable` (no contract, no evidence) starts the episode on the person's word, recorded as `operator_confirmed_scene` with a `scene_unverified_operator_confirmed` note; a scene that says `reset_required` never does |
+| `human_assisted` | always a person (no reset policy runs) |
 
 `human_assisted` is the "policy evaluation only" mode (reset by hand,
-AUT-22); the arbitration takes `human_confirmed` and does not depend on
-`single_reset_policy`. `atomic_skill_sequence` and `scripted_safe_reset`
+AUT-22); the arbitration does not depend on `single_reset_policy`. After
+the person's resume the system checks the scene again (the second
+confirmation, design X2 §1.2) and **only `ready` starts the forward
+episode**: `unknown`, unavailable, a contradicting or mismatched answer,
+evidence observed before the request or too thin, an answer about another
+episode all wait for the person again, with the cause in a note. A scene
+check that can never answer would make the run go back and forth between
+`WAIT_HUMAN` and `VERIFY_INITIAL`; launching that mode without a scene
+provider is refused (`cli.launch_problems`; a person attesting the scene,
+`operator_attested` of design X2, is a later task). `atomic_skill_sequence` and `scripted_safe_reset`
 (pipeline §6.4) are refused in v1. `reset_manager.check_plan` refuses a
-strategy that would start a forward episode on any scene but `ready`
-(except a person's confirmation as above), and `check_after` one that
+strategy that would start a forward episode on any scene but `ready`, and
+`check_after` one that
 would go on after a reset that reached its horizon, was stopped or lost
 its policy, or retry after a stop. A verified reset always goes on to the
 next scene check, where a stop that arrived late (during the quiesce or the
@@ -638,7 +648,7 @@ read the interval, not the rate.
 | Group | Metrics |
 | --- | --- |
 | autonomous | forward episodes, outcomes, `autonomous_success_rate` (unknown stays in the denominator), stop reasons |
-| early termination | confusion of early stops (`goal_verified`) against the truth; precision (early stops truly successful / early stops), recall (early stops / truly successful episodes the detector could have stopped: an early stop or the horizon, not an episode a person, a fault or the policy ended), **false early stop rate from the control group only** (pipeline §5.5: control episodes, run to their horizon with the stop withheld, in which the detector would have stopped, among those that truly failed; `available: false` and no number without them), the treatment group's early stops truly failed / truly failed episodes as `treatment_false_early_stop_lower_bound` (the stop hid what came after it), saved steps (`max_steps` minus the steps run, summed over early stops), control episodes apart, agreement of the verdict with the truth and false successes |
+| early termination | confusion of early stops (`goal_verified`) against the truth; precision (early stops truly successful / early stops), recall (early stops / truly successful episodes the detector could have stopped: an early stop or the horizon, not an episode a person, a fault or the policy ended), **false early stop rate from the control group only** (pipeline §5.5: control episodes, run to their horizon with the stop withheld, in which the detector would have stopped, among those that truly failed, ran to their horizon, were sealed and carry their control record; the others are counted apart in `left_out` (`cut_short`: ended by a person, a fault or the policy; `not_recorded`: no seal or no control record); `available: false` and no number without them), the treatment group's early stops truly failed / truly failed episodes as `treatment_false_early_stop_lower_bound` (the stop hid what came after it), saved steps (`max_steps` minus the steps run, summed over early stops), control episodes apart, agreement of the verdict with the truth and false successes |
 | reset | resets, `autonomous_reset_success_rate`, scene decisions and skips; skip accuracy (a skip on a truly ready scene or a reset on a scene that truly needed one / labelled decisions), wrong-skip rate, unneeded-reset rate, reset durations |
 | automation | interventions (moves into `WAIT_HUMAN` or `FAULT_LOCKED`) by reason, resumes, longest run of forward episodes without one, the time people waited (only when the clock domain did not change) |
 
@@ -687,10 +697,13 @@ English and Chinese.
   whether the rollout root is writable. It says that a real robot adapter
   is not in this version (not required, so the exit code stays 0).
 - `validate` reads the job file and prints the plan and its `plan_sha256`
-  (the journal's plan hash); exit 2 with the reason when it is refused. A
-  job without `task.initial_state_spec` gets a warning (`doctor` too): no
-  scene can be ready, so `single_reset_policy` resets before every forward
-  episode, and `human_assisted` starts each one on a person's word.
+  (the journal's plan hash); exit 2 with the reason when it is refused. It
+  checks a real run unless `--dry-run` is given: a job without
+  `task.initial_state_spec` is refused (no scene is ever ready, so no
+  forward episode could start; the error says how to fix it), and so is the
+  human-assisted mode without a scene provider (none can be configured for
+  a real run yet). With `--dry-run` the same job passes with a warning;
+  `doctor` reports the same as its `launch` check.
 - `run` **refuses without `--dry-run`** (exit 2): there is no real run in
   this version. A dry run drives the in-process fakes only, in a temporary
   folder (deleted afterwards; `--keep DIR` keeps it in a new or empty

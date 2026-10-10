@@ -224,9 +224,6 @@ TRANSITION_REASONS = (
     "scene_ready",
     "scene_reset_required",
     "scene_unknown",
-    # The human-assisted reset strategy: a person confirmed a scene the
-    # assessment could not verify (no contract or no evidence).
-    "operator_confirmed_scene",
     "reset_horizon_exhausted",
     "reset_verified",
     "home_failed",

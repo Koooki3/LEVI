@@ -169,7 +169,7 @@ VERIFY_INITIAL / SCENE_ASSESS -> RESET_ACTIVE -> RESET_VERIFY -> RESET_FINALIZE
 | 评估的是另一份契约 | `unavailable`（记 `scene_contract_mismatch`） |
 | `reset_required`、`unknown`、unavailable | 原样 |
 
-**没有契约时没有任何场景算 ready**（`initial_state = None`，默认）：ready 需要契约和证据，所以 `single_reset_policy` 在每个前向片段前都运行复位策略（或转人工），`levi automatic validate`/`doctor` 会明确提示。**契约文件格式是草案（HA-23）：** 下面是能承载流水线文档 §6.1 的最小格式，等用户确认；**视角规则**同样待确认：证据引用用第一个 `:` 之前的文字表示相机视角（`<视角>:<帧>`），视角名取自契约的 `observations.preferred`，代码里不写死任何相机名。
+**没有契约时没有任何场景算 ready**（`initial_state = None`，默认）：ready 需要契约和证据，所以任何前向片段都开不了，也不运行复位（复位不可能让场景变成 ready）：每次场景核对都转人工。`levi automatic validate` 对这样的作业按真机运行直接拒绝（`validate --dry-run` 和 `run --dry-run` 仍可运行，并给出警告）。**契约文件格式是草案（HA-23）：** 下面是能承载流水线文档 §6.1 的最小格式，等用户确认；**视角规则**同样待确认：证据引用用第一个 `:` 之前的文字表示相机视角（`<视角>:<帧>`），视角名取自契约的 `observations.preferred`，代码里不写死任何相机名。
 
 ```yaml
 initial_state:
@@ -196,9 +196,9 @@ initial_state:
 | 策略 | 场景不是 ready |
 | --- | --- |
 | `single_reset_policy`（默认） | `reset_required` 运行复位策略；`on_scene_unknown = "reset"` 时 `unknown`/`unavailable` 也运行，否则转人工；两个前向片段之间最多 `max_reset_attempts` 次复位，之后转人工 |
-| `human_assisted` | 一律转人工（不运行复位策略）；操作员恢复后的第一次场景核对若只是 `unknown` 或 `unavailable`（没有契约或证据），凭人的确认开始片段，如实记为 `operator_confirmed_scene`，并记 `scene_unverified_operator_confirmed`；场景说 `reset_required` 时绝不开始 |
+| `human_assisted` | 一律转人工（不运行复位策略） |
 
-`human_assisted` 就是“仅测评 policy”模式（人工复位，AUT-22）；仲裁接口带 `human_confirmed` 参数，不依赖 `single_reset_policy`。`atomic_skill_sequence` 和 `scripted_safe_reset`（流水线文档 §6.4）在 v1 中被拒绝。`reset_manager.check_plan` 拒绝在 `ready` 以外的场景上开始前向片段的策略（上面的人工确认除外），`check_after` 拒绝在复位到达上限、被停止或失去策略之后还继续、或在停止之后重试的策略。验证成功的复位总是进入下一次场景核对，晚到的停止（quiesce 或复位后场景评估期间到达）在那里生效：运行转人工，复位结果保持原样；除非 `home_after_operator_stop` 为 false，否则先 Home。违反规则的策略交给人处理（记 `strategy_refused`），不会锁住运行。复位到达上限时先封存（保留失败的 rollout，结果为 `failure` / `horizon_exhausted`），再 Home，然后转人工；Home 失败则锁定运行（`home_failed`），在操作员恢复之前什么都不再动；恢复要经过 `PREFLIGHT` 和一次新的初始状态检查。同一个命令 ID 重复恢复只恢复一次。
+`human_assisted` 就是“仅测评 policy”模式（人工复位，AUT-22）；仲裁接口不依赖 `single_reset_policy`。人恢复之后系统会再核对一次场景（第二道确认，设计稿 X2 §1.2），**只有 `ready` 才开始前向片段**：`unknown`、unavailable、矛盾或契约对不上的回答、观测早于请求或证据不足、答的是别的片段，都会再次转人工，原因写在 note 里。永远答不出的场景核对会让运行在 `WAIT_HUMAN` 与 `VERIFY_INITIAL` 之间反复，所以没有场景提供方时拒绝启动该模式（`cli.launch_problems`；由人作为提供方的 `operator_attested`，即设计稿 X2 的方案，留给后续任务）。`atomic_skill_sequence` 和 `scripted_safe_reset`（流水线文档 §6.4）在 v1 中被拒绝。`reset_manager.check_plan` 拒绝在 `ready` 以外的场景上开始前向片段的策略，`check_after` 拒绝在复位到达上限、被停止或失去策略之后还继续、或在停止之后重试的策略。验证成功的复位总是进入下一次场景核对，晚到的停止（quiesce 或复位后场景评估期间到达）在那里生效：运行转人工，复位结果保持原样；除非 `home_after_operator_stop` 为 false，否则先 Home。违反规则的策略交给人处理（记 `strategy_refused`），不会锁住运行。复位到达上限时先封存（保留失败的 rollout，结果为 `failure` / `horizon_exhausted`），再 Home，然后转人工；Home 失败则锁定运行（`home_failed`），在操作员恢复之前什么都不再动；恢复要经过 `PREFLIGHT` 和一次新的初始状态检查。同一个命令 ID 重复恢复只恢复一次。
 
 ## 提供方适配层（`levi/automatic/adapters/`）
 
@@ -256,7 +256,7 @@ initial_state:
 | 组 | 指标 |
 | --- | --- |
 | 自动结论 | 前向片段数、结局计数、`autonomous_success_rate`（unknown 留在分母里）、停止原因 |
-| 提前终止 | 提前停止（`goal_verified`）对照真值的混淆表；精确率（真成功的提前停止 / 提前停止）、召回率（提前停止 / 检测器本可停下的真成功片段：提前停止或跑满的片段，不含被人、故障或策略结束的片段）、**只用对照组计算的误提前终止率**（流水线文档 §5.5：对照片段不允许提前终止、跑满上限，其中检测器本会停下的、占真失败对照片段的比例；没有这类片段时为 `available: false`，不给数字）、实验组的“真失败却提前停止 / 真失败”只作为下界 `treatment_false_early_stop_lower_bound`（停止掩盖了之后的情况）、节省步数（`max_steps` 减去实际步数，对提前停止求和）、对照片段单列、自动结论与真值的一致率和误判成功数 |
+| 提前终止 | 提前停止（`goal_verified`）对照真值的混淆表；精确率（真成功的提前停止 / 提前停止）、召回率（提前停止 / 检测器本可停下的真成功片段：提前停止或跑满的片段，不含被人、故障或策略结束的片段）、**只用对照组计算的误提前终止率**（流水线文档 §5.5：对照片段不允许提前终止、跑满上限，其中检测器本会停下的、占“真失败、跑满上限、封存成功且带对照记录”的对照片段的比例；其余在 `left_out` 中按原因单独计数：`cut_short` 是被人、故障或策略结束的，`not_recorded` 是没封存或没有对照记录的；没有这类片段时为 `available: false`，不给数字）、实验组的“真失败却提前停止 / 真失败”只作为下界 `treatment_false_early_stop_lower_bound`（停止掩盖了之后的情况）、节省步数（`max_steps` 减去实际步数，对提前停止求和）、对照片段单列、自动结论与真值的一致率和误判成功数 |
 | 复位 | 复位次数、`autonomous_reset_success_rate`、场景决策与跳过次数；跳过准确率（在真就绪的场景上跳过、或在真需要复位的场景上复位 / 有标签的决策）、错误跳过率、多余复位率、复位耗时 |
 | 自动化 | 干预次数（进入 `WAIT_HUMAN` 或 `FAULT_LOCKED`）及原因、恢复次数、最长无干预的连续前向片段数、人工等待时间（仅在时钟域没变时计） |
 
@@ -279,7 +279,7 @@ levi automatic report   --run-dir D [--config F] [--truth T] [--format md|json]
 `levi automatic …` 是同一个命令。每个选项的帮助都是中英双语。
 
 - `doctor` 只读：检查契约快照、Fake、作业文件、rollout 根目录是否可写；并说明本版本没有真机适配层（非必需项，退出码仍为 0）。
-- `validate` 读取作业文件，打印计划及其 `plan_sha256`（即日志里的计划哈希）；被拒时退出码 2 并给出原因。没有 `task.initial_state_spec` 的作业会得到警告（`doctor` 也会提示）：没有场景能算 ready，所以 `single_reset_policy` 每个前向片段前都复位，`human_assisted` 每个片段都要人确认才开始。
+- `validate` 读取作业文件，打印计划及其 `plan_sha256`（即日志里的计划哈希）；被拒时退出码 2 并给出原因。不加 `--dry-run` 时按真机运行校验：没有 `task.initial_state_spec` 的作业被拒绝（没有场景能算 ready，前向片段永远开不了；错误信息给出修法），没有场景提供方的人工复位模式也被拒绝（目前真机运行还配不了提供方）。加 `--dry-run` 时同样的作业可以通过，但给出警告；`doctor` 的 `launch` 检查报告同样的结论。
 - `run` **没有 `--dry-run` 一律拒绝**（退出码 2）：本版本不能真机运行。试运行只驱动进程内 Fake，在临时目录里运行（结束后删除；`--keep DIR` 保留在一个新的或空的目录里），绝不写作业里的 `rollout_root`，运行期间拒绝任何 socket 连接。没有任何真实对象拥有运动权限：唯一的机器人是 `FakeRobot`。`--scenes reset_required,ready` 设定 Fake 先给出的场景结论。
 - `status` 不拿锁、不写入地读取运行日志（撕裂的末尾只报告、不截掉；损坏的日志显示 `FAULT_LOCKED`）。
 - `report` 以 Markdown 或 JSON 打印指标（见上）。

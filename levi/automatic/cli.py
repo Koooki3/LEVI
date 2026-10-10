@@ -218,24 +218,38 @@ def load_job(path) -> dict:
     }
 
 
+NO_CONTRACT = (
+    "no task.initial_state_spec: without an Initial State Contract no scene "
+    "is ever ready, so no forward episode can start (no reset runs either: "
+    "the run waits for a person at every scene check). Fix: write an Initial "
+    "State Contract and set task.initial_state_spec to its file"
+)
+NO_SCENE_CHECK = (
+    "the human-assisted (policy evaluation only) mode needs a scene check that "
+    "can answer: without one the run goes back and forth between WAIT_HUMAN "
+    "and VERIFY_INITIAL after every resume. Configure a scene provider (a "
+    "person attesting the scene, operator_attested of design X2, is planned) "
+    "or use --dry-run"
+)
+
+
 def _warnings(config, contract) -> list:
-    """What the operator must know before a real run (review C3, I3)."""
-    if contract is not None:
-        return []
-    if config.reset_strategy == "single_reset_policy":
-        text = (
-            "no task.initial_state_spec: without an Initial State Contract no "
-            "scene counts as ready, so the reset policy runs before every "
-            "forward episode (or the run waits for a person); a real run "
-            "needs a contract to skip resets"
-        )
-    else:
-        text = (
-            "no task.initial_state_spec: scene checks are recorded as unknown; "
-            "each forward episode starts only on an operator's confirmation "
-            "(operator_confirmed_scene)"
-        )
-    return [text]
+    """What the operator must know (review C3 fixes, I-b)."""
+    return [NO_CONTRACT] if contract is None else []
+
+
+def launch_problems(job: dict, *, dry_run: bool, scene_provider) -> list:
+    """Why a job may not be launched; empty when it may. A real run (not a
+    dry run) needs an Initial State Contract; the human-assisted mode needs
+    a scene provider that can answer (``scene_provider`` None: none is
+    configured; this version configures none for a real run, so the check
+    is reserved for the launch entry of design X2)."""
+    problems = []
+    if not dry_run and job["contract"] is None:
+        problems.append(NO_CONTRACT)
+    if job["config"].reset_strategy == "human_assisted" and scene_provider is None:
+        problems.append(NO_SCENE_CHECK)
+    return problems
 
 
 def _fields(config) -> dict:
@@ -445,8 +459,13 @@ def cmd_doctor(args) -> int:
         try:
             job = load_job(args.config)
             check("job file", True, f"plan {job['plan_sha256'][:12]}")
-            for warning in job["warnings"]:
-                check("initial state contract", False, warning, required=False)
+            problems = launch_problems(job, dry_run=False, scene_provider=None)
+            check(
+                "launch",
+                not problems,
+                "; ".join(problems) or "a real run could be launched",
+                required=False,
+            )
             root = job["rollout_root"]
             if root is None:
                 check(
@@ -481,11 +500,18 @@ def cmd_validate(args) -> int:
     except JobError as exc:
         _print({"ok": False, "error": str(exc)}, args.json, f"invalid: {exc}")
         return EXIT_REFUSED
+    problems = launch_problems(
+        job, dry_run=args.dry_run, scene_provider="fake" if args.dry_run else None
+    )
+    if problems:
+        message = "; ".join(problems)
+        _print({"ok": False, "error": message}, args.json, f"refused: {message}")
+        return EXIT_REFUSED
     plan = {**job["plan"], "plan_sha256": job["plan_sha256"]}
     text = (
         f"valid: run {job['config'].run_id}, {job['config'].episodes} episodes, "
         f"reset strategy {job['config'].reset_strategy}, contract "
-        f"{job['contract'].key if job['contract'] else 'none (no scene is ready)'}, "
+        f"{job['contract'].key if job['contract'] else 'none (no scene is ever ready)'}, "
         f"plan {job['plan_sha256'][:12]}"
     ) + "".join(f"\nwarning: {w}" for w in job["warnings"])
     _print({"ok": True, "plan": plan, "warnings": job["warnings"]}, args.json, text)
@@ -706,6 +732,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="check a job file and print its plan / 校验作业文件并打印计划",
     )
     validate.add_argument("--config", required=True, help=config_help)
+    validate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="check for a dry run on the fakes, not a real run / 按 Fake 试运行校验，而不是真机运行",
+    )
     validate.add_argument("--json", action="store_true", help=json_help)
     validate.set_defaults(func=cmd_validate)
 

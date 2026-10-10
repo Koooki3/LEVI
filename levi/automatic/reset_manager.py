@@ -54,14 +54,12 @@ class ResetPlan:
 class ResetStrategy(Protocol):
     name: str
 
-    def plan(
-        self, decision: str, attempts: int, *, human_confirmed: bool = False
-    ) -> ResetPlan:
+    def plan(self, decision: str, attempts: int) -> ResetPlan:
         """``decision``: the verdict (``ready``, ``reset_required``,
         ``unknown``, ``unavailable``); ``attempts``: resets already run
-        since the last forward episode; ``human_confirmed``: this is the
-        first scene check after an operator's resume (the person confirmed
-        the environment)."""
+        since the last forward episode. Only ``ready`` may start a forward
+        episode, also right after an operator's resume (design X2 §1.2:
+        the system's own check is the second confirmation)."""
         ...
 
     def after_reset(self, outcome: str, attempts: int, stop_pending: bool) -> str:
@@ -72,6 +70,10 @@ class ResetStrategy(Protocol):
 
 def _scene_reason(decision: str) -> str:
     return "scene_reset_required" if decision == "reset_required" else "scene_unknown"
+
+
+# The journal reason of a scene that does not start a forward episode.
+scene_reason = _scene_reason
 
 
 @dataclass(frozen=True)
@@ -93,9 +95,7 @@ class SingleResetPolicy:
         if self.on_unknown not in ("reset", "wait_human"):
             raise StrategyError("on_unknown is reset or wait_human")
 
-    def plan(
-        self, decision: str, attempts: int, *, human_confirmed: bool = False
-    ) -> ResetPlan:
+    def plan(self, decision: str, attempts: int) -> ResetPlan:
         if decision == "ready":
             return ResetPlan(FORWARD, "scene_ready")
         reason = _scene_reason(decision)
@@ -124,21 +124,16 @@ class SingleResetPolicy:
 class HumanAssistedReset:
     """No reset policy: a person puts the scene back whenever it is not
     ready (pipeline §6.4 ``HumanAssistedReset``; the "policy evaluation
-    only" mode, AUT-22). Right after an operator's resume, a scene that is
-    only ``unknown`` or ``unavailable`` (no contract, no evidence) may
-    start the forward episode on the person's word, recorded as
-    ``operator_confirmed_scene``; a scene that says it needs a reset never
-    does."""
+    only" mode, AUT-22). After the person's resume the system checks the
+    scene again, and only ``ready`` starts the forward episode; anything
+    else waits for the person again (a person attesting the scene,
+    ``operator_attested`` of design X2, is a later task)."""
 
     name: str = "human_assisted"
 
-    def plan(
-        self, decision: str, attempts: int, *, human_confirmed: bool = False
-    ) -> ResetPlan:
+    def plan(self, decision: str, attempts: int) -> ResetPlan:
         if decision == "ready":
             return ResetPlan(FORWARD, "scene_ready")
-        if human_confirmed and decision in ("unknown", "unavailable"):
-            return ResetPlan(FORWARD, "operator_confirmed_scene")
         return ResetPlan(WAIT_HUMAN, _scene_reason(decision))
 
     def after_reset(self, outcome: str, attempts: int, stop_pending: bool) -> str:
@@ -160,30 +155,18 @@ def strategy_for(name: str, *, enabled=True, max_attempts=1, on_unknown="reset")
 DECISIONS = ("ready", "reset_required", "unknown", "unavailable")
 
 
-def check_plan(
-    strategy, decision: str, attempts: int, *, human_confirmed: bool = False
-) -> ResetPlan:
+def check_plan(strategy, decision: str, attempts: int) -> ResetPlan:
     """The strategy's plan, refused when it breaks the rules above."""
     if decision not in DECISIONS:
         raise StrategyError(f"unknown scene decision {decision!r}")
-    found = strategy.plan(decision, attempts, human_confirmed=human_confirmed)
+    found = strategy.plan(decision, attempts)
     if found.action not in (FORWARD, RESET, WAIT_HUMAN):
         raise StrategyError(f"{strategy.name}: unknown action {found.action!r}")
-    confirmed_start = (
-        found.action == FORWARD
-        and found.reason == "operator_confirmed_scene"
-        and human_confirmed
-        and decision in ("unknown", "unavailable")
-    )
-    if found.action == FORWARD and decision != "ready" and not confirmed_start:
+    if found.action == FORWARD and decision != "ready":
         raise StrategyError(
             f"{strategy.name} would skip the reset on a {decision} scene"
         )
-    if (
-        found.action == FORWARD
-        and not confirmed_start
-        and found.reason != "scene_ready"
-    ):
+    if found.action == FORWARD and found.reason != "scene_ready":
         raise StrategyError(f"{strategy.name}: a forward start is scene_ready")
     if found.action != FORWARD and found.reason != _scene_reason(decision):
         raise StrategyError(f"{strategy.name}: reason {found.reason!r}")

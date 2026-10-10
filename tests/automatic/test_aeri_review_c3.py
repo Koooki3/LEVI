@@ -173,7 +173,18 @@ def test_evidence_counts_distinct_references_from_every_view(refs, decision):
 # --- I3: no contract ------------------------------------------------------------------------------
 
 
-def test_without_a_contract_single_policy_never_skips_a_reset(tmp_path):
+def resume(r, command="c-1"):
+    return r.orch.resume(
+        command,
+        expected_seq=r.orch.journal.next_seq,
+        environment_handled=True,
+        health_rechecked=True,
+    )
+
+
+def test_without_a_contract_single_policy_never_runs_a_useless_reset(tmp_path):
+    """Fix review I-b: without a contract no reset can make a scene ready,
+    so none runs: the run waits for a person, with the reason, every time."""
     clock = fake.FakeClock()
     r = build(
         tmp_path,
@@ -182,69 +193,84 @@ def test_without_a_contract_single_policy_never_skips_a_reset(tmp_path):
         scene=ev.FakeSceneAssessor([], clock, RUN, default={"decision": "ready"}),
         events=both_roles(clock),
     )
-    r.orch.run()
-    path = committed(r.orch)
-    assert path[1] == ("VERIFY_INITIAL", "RESET_ACTIVE", "scene_unknown")
-    assert ("VERIFY_INITIAL", "FORWARD_ACTIVE", "scene_ready") not in path
-    assert r.orch.note_counts["scene_no_contract"] >= 1
+    for n in range(3):
+        assert r.orch.run() == "WAIT_HUMAN"
+        assert committed(r.orch)[-1] == (
+            "VERIFY_INITIAL",
+            "WAIT_HUMAN",
+            "scene_unknown",
+        )
+        assert resume(r, f"c-{n}").ok
+    assert r.robot.motions == [] and r.policy.acquired == []
+    assert r.orch.note_counts["scene_no_contract"] == 3
 
 
-def test_human_assisted_without_a_contract_starts_only_on_a_person_s_word(tmp_path):
+# Fix review N1: after an operator's resume, only a ready scene starts the
+# forward episode in the human-assisted mode; each of these is held.
+SECOND = {
+    "unknown": {"decision": "unknown"},
+    "contradicting": {"decision": "ready", "contradict": True},
+    "other_contract": {"decision": "ready", "contract_id": "another-contract"},
+    "observed_before": {"decision": "ready", "observed_before_ns": 1},
+    "no_evidence": {"decision": "ready", "evidence": 0},
+    "unavailable": {"unavailable": "model_error"},
+    "other_episode": {"decision": "ready", "episode_id": f"{RUN}.forward.0009"},
+}
+CAUSE = {
+    "unknown": None,
+    "contradicting": "contract_violation",
+    "other_contract": "contract_violation",
+    "observed_before": "scene_dropped_stale",
+    "no_evidence": "scene_insufficient_evidence",
+    "unavailable": "scene_unavailable",
+    "other_episode": "scene_dropped_stale",
+}
+
+
+@pytest.mark.parametrize("second", sorted(SECOND))
+def test_after_a_resume_only_a_ready_scene_starts_an_episode(tmp_path, second):
     clock = fake.FakeClock()
-    scene = ev.FakeSceneAssessor([], clock, RUN, default={"decision": "ready"})
+    scene = ev.FakeSceneAssessor(
+        [{"decision": "reset_required"}, SECOND[second]],
+        clock,
+        RUN,
+        default={"decision": "ready"},
+    )
     r = build(
         tmp_path,
-        cfg=config(episodes=1, initial_state=None, reset_strategy="human_assisted"),
+        cfg=config(episodes=1, reset_strategy="human_assisted"),
         clock=clock,
         scene=scene,
     )
     assert r.orch.run() == "WAIT_HUMAN"
-    assert committed(r.orch)[-1] == ("VERIFY_INITIAL", "WAIT_HUMAN", "scene_unknown")
-    assert r.robot.motions == []
-    assert r.orch.resume(
-        "c-1",
-        expected_seq=r.orch.journal.next_seq,
-        environment_handled=True,
-        health_rechecked=True,
-    ).ok
+    assert resume(r).ok
+    assert r.orch.run() == "WAIT_HUMAN"
+    last = committed(r.orch)[-1]
+    assert last == ("VERIFY_INITIAL", "WAIT_HUMAN", "scene_unknown"), last
+    assert r.robot.motions == [] and r.policy.acquired == []
+    if CAUSE[second]:
+        assert r.orch.note_counts[CAUSE[second]] >= 1, r.orch.note_counts
+    reasons = {e.reason for e in r.orch.journal.events if e.reason}
+    assert "operator_confirmed_scene" not in reasons
+    # A third check that is ready starts it.
+    assert resume(r, "c-2").ok
     assert r.orch.run() == "COMPLETED"
-    path = committed(r.orch)
-    # Recorded as it is: the scene was not verified, a person confirmed it.
-    assert ("VERIFY_INITIAL", "FORWARD_ACTIVE", "operator_confirmed_scene") in path
-    assert ("VERIFY_INITIAL", "FORWARD_ACTIVE", "scene_ready") not in path
-    assert r.policy.acquired and all(h["role"] == "forward" for h in r.policy.acquired)
     check_invariants(r)
-
-
-def test_a_person_s_word_never_overrides_a_scene_that_needs_a_reset(tmp_path):
-    clock = fake.FakeClock()
-    scene = ev.FakeSceneAssessor([], clock, RUN, default={"decision": "reset_required"})
-    r = build(
-        tmp_path,
-        cfg=config(episodes=1, initial_state=None, reset_strategy="human_assisted"),
-        clock=clock,
-        scene=scene,
-    )
-    r.orch.run()
-    assert r.orch.resume(
-        "c-1",
-        expected_seq=r.orch.journal.next_seq,
-        environment_handled=True,
-        health_rechecked=True,
-    ).ok
-    assert r.orch.run() == "WAIT_HUMAN" and r.robot.motions == []
 
 
 def test_the_reset_interface_does_not_depend_on_single_policy():
     for strategy in (rm.SingleResetPolicy(), rm.HumanAssistedReset()):
-        plan = rm.check_plan(strategy, "ready", 0, human_confirmed=False)
-        assert plan.action == "forward"
-    human = rm.HumanAssistedReset()
-    assert rm.check_plan(human, "unknown", 0, human_confirmed=True) == rm.ResetPlan(
-        "forward", "operator_confirmed_scene"
-    )
-    single = rm.SingleResetPolicy()
-    assert rm.check_plan(single, "unknown", 0, human_confirmed=True).action == "reset"
+        assert rm.check_plan(strategy, "ready", 0).action == "forward"
+        for decision in ("unknown", "unavailable", "reset_required"):
+            assert rm.check_plan(rm.HumanAssistedReset(), decision, 0).action == (
+                "wait_human"
+            )
+
+
+def test_operator_confirmed_scene_is_not_a_transition_reason():
+    from levi.domain import aeri
+
+    assert "operator_confirmed_scene" not in aeri.TRANSITION_REASONS
 
 
 # --- I4: a torn label file -----------------------------------------------------------------------
@@ -319,6 +345,7 @@ def test_the_false_early_stop_rate_comes_from_the_control_group():
         "of": 4,
         "rate": 0.5,
         "wilson95": [0.15, 0.85],
+        "left_out": {"cut_short": 0, "not_recorded": 0},
     }
     # Of 3 stops the detector would have made, 2 were false: 2/3.
     assert found["control"]["would_stop_false"]["n"] == 2
@@ -433,3 +460,49 @@ def test_a_failure_between_metadata_and_marker_leaves_no_marker(tmp_path):
     assert r.orch.run() == "FAULT_LOCKED"
     (result,) = results(r.orch)
     assert result.rollout.sealed == "incomplete"
+
+
+def test_control_failures_count_only_episodes_the_detector_could_have_stopped():
+    """Fix review I-c: the denominator holds control episodes that ran to
+    their end, were sealed and carry the control record; the rest are
+    counted apart by reason."""
+    records = [
+        ctl(1, would_stop=True, outcome="failure"),  # counts: a false stop
+        ctl(2, would_stop=False, outcome="failure"),  # counts
+        M.EpisodeRecord(  # stopped by the operator: no chance to stop
+            f"{RUN}.forward.0003",
+            "forward",
+            "unknown",
+            "operator_stop",
+            "unavailable",
+            "unknown",
+            "complete",
+            control=True,
+        ),
+        M.EpisodeRecord(  # a fault, never sealed
+            f"{RUN}.forward.0004",
+            "forward",
+            "unknown",
+            "policy_error",
+            "unavailable",
+            "unknown",
+            "incomplete",
+            control=True,
+        ),
+        M.EpisodeRecord(  # ran out, but its seal (and control record) failed
+            f"{RUN}.forward.0005",
+            "forward",
+            "unknown",
+            "horizon_exhausted",
+            "unavailable",
+            "unknown",
+            "incomplete",
+            control=True,
+            control_recorded=False,
+        ),
+    ]
+    truth = {r.episode_id: "failure" for r in records}
+    found = M.early_termination(records, truth)
+    rate = found["false_early_stop_rate"]
+    assert (rate["n"], rate["of"], rate["rate"]) == (1, 2, 0.5)
+    assert rate["left_out"] == {"cut_short": 2, "not_recorded": 1}
