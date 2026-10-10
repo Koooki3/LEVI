@@ -302,7 +302,15 @@ def test_stops_and_resumes_from_many_threads_keep_the_table(tmp_path):
         thread.join(timeout=60)
     assert errors == []
     assert sm.check_journal(r.orch.journal.events) == []
+    # The driver may end on a resume (its 60 rounds ran out while the
+    # stoppers kept interrupting): a resume leaves the run in PREFLIGHT until
+    # someone calls run(), which is the documented meaning of a resume, not a
+    # lost stop. Then one more run() must reach a person or the end.
+    if r.orch.state == "PREFLIGHT":
+        assert committed(r.orch)[-1][2] == "human_resumed"
+        assert r.orch.run() in ("WAIT_HUMAN", "COMPLETED")
     assert r.orch.state in ("WAIT_HUMAN", "COMPLETED")
+    assert sm.check_journal(r.orch.journal.events) == []
 
 
 def test_a_command_id_used_by_a_stop_is_not_a_resume(tmp_path):

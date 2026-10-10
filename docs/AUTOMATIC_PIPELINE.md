@@ -380,7 +380,8 @@ automatically.
   the journal.
 - **Operator commands.** `resume(command_id, expected_seq=,
   environment_handled=True, health_rechecked=True)` moves `WAIT_HUMAN` or
-  `FAULT_LOCKED` to `PREFLIGHT`; repeating a command returns its first
+  `FAULT_LOCKED` to `PREFLIGHT`, where the run stays until `run()` is called
+  again (a resume moves nothing by itself); repeating a command returns its first
   result (a command id another command used is refused), a stale
   `expected_seq` is refused. `stop(command_id)`: the same stop again, while
   pending (`stop_requested`, repeated) or after it took effect and before
