@@ -48,10 +48,13 @@ outcomes. A comparison of success rates is confirmatory (`exploratory:
 false`) only when the caller passes the difference the study was designed
 to detect (`design_difference`) and, optionally, the planned baseline
 success rate (`design_baseline`), both fixed before the first trial, and
-the exact power at that difference reaches 80 % with the number of trials
-used. Without a planned baseline the least favourable baseline on a 0.05
+the power at that difference reaches 80 % with the number of trials
+used: exact power by enumeration up to 200 trials per arm, a normal
+approximation above that (slightly optimistic, see the sample-size row
+below). Without a planned baseline the least favourable baseline on a 0.05
 grid decides. Each result returns `power_basis` (`basis: "planned"`, the
-planned values and the smallest power found) and the smallest difference
+planned values, the smallest power found and the baseline that gave it,
+`least_favourable_baseline`) and the smallest difference
 its sample size can detect at the planned baseline, or at 0.5 (the design
 table's baseline) when none was planned.
 
@@ -106,9 +109,13 @@ the full discrete distribution, not from a normal approximation.
 sets of 30 pairs each, 2000 resamples per data set, seed 20261010 (Monte
 Carlo standard error about 0.007). The nominal 95 % percentile interval
 covered the true mean difference in 0.93 of data sets for normal
-differences, 0.91 for exponential (skewed) differences and 0.95 for binary
-pairs; BCa covered 0.94, 0.92 and 0.94. Each bootstrap result repeats this
-in `coverage_note`; below 30 pairs it adds the `small_sample` caveat.
+differences N(0.4, 1), 0.91 for exponential differences Exp(1), and 0.95
+for binary pairs with independent outcomes A ~ Bernoulli(0.5),
+B ~ Bernoulli(0.65); BCa covered 0.94, 0.92 and 0.94. For binary pairs the
+coverage depends on the success rates: an independent re-check over other
+rates (0.5/0.5, 0.2/0.4, 0.7/0.9, 0.5/0.6) found 0.93 to 0.95. Each
+bootstrap result repeats this in `coverage_note`; below 30 pairs it adds
+the `small_sample` caveat.
 
 **Planning numbers.** With 80 % power at two-sided alpha 0.05 and a
 baseline success rate of 0.5, the smallest detectable difference is 0.42

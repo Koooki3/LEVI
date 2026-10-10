@@ -337,6 +337,8 @@ def assess(
         if design_baseline is None
         else float(design_baseline),
         "min_power": None,
+        # The baseline whose power decided (the planned one when given).
+        "least_favourable_baseline": None,
     }
     if n < 1:
         return True, [caveat("empty", "no usable trials")], None, basis
@@ -386,23 +388,20 @@ def assess(
     baselines = (
         [float(design_baseline)] if design_baseline is not None else list(BASELINE_GRID)
     )
-    powers = [
-        p
-        for b in baselines
-        if (
-            p := _planned_power(
-                n,
-                b,
-                target,
-                design=design,
-                rho=rho,
-                alpha=alpha,
-                reject=reject,
-                region=region,
-            )
+    powers = []
+    for b in baselines:
+        p = _planned_power(
+            n,
+            b,
+            target,
+            design=design,
+            rho=rho,
+            alpha=alpha,
+            reject=reject,
+            region=region,
         )
-        is not None
-    ]
+        if p is not None:
+            powers.append((p, b))
     if not powers:
         caveats.append(
             caveat(
@@ -411,7 +410,9 @@ def assess(
             )
         )
         return True, caveats, mdd, basis
-    basis["min_power"] = min(powers)
+    worst_power, worst_baseline = min(powers)
+    basis["least_favourable_baseline"] = worst_baseline
+    basis["min_power"] = worst_power
     if design_baseline is None:
         caveats.append(
             caveat(
@@ -419,11 +420,11 @@ def assess(
                 "no planned baseline: the least favourable baseline on a 0.05 grid decides",
             )
         )
-    if min(powers) < 0.8:
+    if worst_power < 0.8:
         caveats.append(
             caveat(
                 "underpowered",
-                f"n={n} has {min(powers):.2f} power for the design difference {target:.2f}",
+                f"n={n} has {worst_power:.2f} power for the design difference {target:.2f}",
                 design_difference=target,
             )
         )

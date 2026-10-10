@@ -297,3 +297,29 @@ def test_unused_permutation_helpers_are_gone():
     assert not hasattr(resampling, "sign_flip_pvalue")
     assert not hasattr(resampling, "label_permutation_pvalue")
     assert math.isfinite(1.0)
+
+
+def test_power_basis_names_the_least_favourable_baseline():
+    out = proportions.fisher_exact(10, 30, 20, 30, design_difference=0.37)
+    basis = out["power_basis"]
+    worst = basis["least_favourable_baseline"]
+    assert worst in power.BASELINE_GRID
+    assert basis["min_power"] == pytest.approx(
+        power.power_unpaired(30, worst, worst + 0.37)
+    )
+    assert basis["min_power"] < 0.8 and out["exploratory"] is True
+    planned = proportions.fisher_exact(
+        10, 30, 20, 30, design_difference=0.37, design_baseline=0.5
+    )
+    assert planned["power_basis"]["least_favourable_baseline"] == 0.5
+    assert (
+        proportions.fisher_exact(10, 30, 20, 30)["power_basis"][
+            "least_favourable_baseline"
+        ]
+        is None
+    )
+
+
+def test_coverage_note_states_the_binary_generating_model():
+    note = paired.paired_bootstrap(pairs_of(10, 6, 9, 4), seed=0)["coverage_note"]
+    assert "0.93-0.95" in note and "Bernoulli(0.5)" in note

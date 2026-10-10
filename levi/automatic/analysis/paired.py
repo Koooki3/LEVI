@@ -28,12 +28,15 @@ EXACT_INTEGER_MAX = 2000
 SMALL_SAMPLE = 30
 # Measured with this library (levi2 review fixes, 2026-10-10): 1000 data
 # sets of 30 pairs each, 2000 resamples, seed 20261010; Monte Carlo SE about
-# 0.007.
+# 0.007. The independent re-review measured 0.93-0.95 for binary pairs over
+# other success rates.
 COVERAGE_NOTE = (
     "simulated coverage of the nominal 95% interval with 30 pairs (1000 data "
-    "sets, 2000 resamples): percentile 0.93 for normal differences, 0.91 for "
-    "exponential (skewed) differences, 0.95 for binary pairs; BCa 0.94, 0.92 "
-    "and 0.94"
+    "sets, 2000 resamples): percentile 0.93 for normal differences N(0.4, 1), "
+    "0.91 for exponential differences Exp(1), 0.95 for binary pairs with "
+    "independent A ~ Bernoulli(0.5) and B ~ Bernoulli(0.65); for binary pairs "
+    "it varies with the success rates, 0.93-0.95 over the rates tried; BCa "
+    "0.94, 0.92 and 0.94 in the three settings"
 )
 
 
