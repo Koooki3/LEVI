@@ -1,0 +1,162 @@
+/* Styles of the evaluation wizard (/automatic/new): environment guide, form
+ * and plan card. Classes start with `aw-`; colours come from the `--ds-*`
+ * tokens only, so both themes work. Buttons, inputs and badges are the
+ * design-system classes. */
+
+/* ── Steps bar ──────────────────────────────────────────────────────── */
+.aw-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+  margin: var(--ds-space-4) 0;
+  padding: 0;
+  list-style: none;
+}
+.aw-stepper li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-1) var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-full);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+}
+.aw-stepper li[aria-current="step"] {
+  color: var(--ds-on-accent);
+  background: var(--ds-accent);
+  border-color: var(--ds-selected-indicator);
+}
+.aw-stepper li[data-done="true"] {
+  color: var(--ds-text-primary);
+  border-color: var(--ds-separator-strong);
+}
+
+.aw-panel {
+  background: var(--ds-surface-1);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  padding: var(--ds-space-5);
+  margin: var(--ds-space-4) 0;
+  display: grid;
+  gap: var(--ds-space-4);
+}
+.aw-panel > h2 {
+  margin: 0;
+}
+.aw-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-3);
+  align-items: center;
+  justify-content: space-between;
+}
+.aw-actions__group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+}
+
+/* ── Setup guide ────────────────────────────────────────────────────── */
+.aw-setup {
+  display: grid;
+  gap: var(--ds-space-4);
+}
+.aw-setup__summary {
+  margin: 0;
+  color: var(--ds-text-secondary);
+}
+.aw-safety {
+  display: grid;
+  gap: var(--ds-space-2);
+  margin: 0;
+  padding: var(--ds-space-4);
+  border: 1px solid var(--ds-warning);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-warning-bg);
+}
+.aw-safety legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  padding: 0 var(--ds-space-2);
+  font-weight: var(--ds-weight-semibold);
+  color: var(--ds-warning);
+}
+.aw-safety__warn {
+  margin: 0;
+  font-weight: var(--ds-weight-semibold);
+  color: var(--ds-text-primary);
+}
+.aw-steps {
+  display: grid;
+  gap: var(--ds-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.aw-step {
+  display: grid;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-3) var(--ds-space-4);
+  border: 1px solid var(--ds-separator);
+  border-left-width: 4px;
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-1);
+}
+.aw-step[data-status="ok"] {
+  border-left-color: var(--ds-success);
+}
+.aw-step[data-status="warn"] {
+  border-left-color: var(--ds-warning);
+}
+.aw-step[data-status="todo"] {
+  border-left-color: var(--ds-info);
+}
+.aw-step[data-status="unknown"] {
+  border-left-color: var(--ds-border-control);
+}
+.aw-step__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2) var(--ds-space-3);
+}
+.aw-step__level {
+  margin-left: auto;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.aw-step__why,
+.aw-step__detail,
+.aw-step__mode {
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+}
+.aw-step__blocked {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  margin: 0;
+  color: var(--ds-warning);
+  font-size: var(--ds-text-callout-size);
+}
+.aw-command {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+  align-items: center;
+}
+.aw-command__text {
+  flex: 1 1 280px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  background: var(--ds-surface-sunken);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-xs);
+  padding: var(--ds-space-2) var(--ds-space-3);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-callout-size);
+  color: var(--ds-text-primary);
+}
