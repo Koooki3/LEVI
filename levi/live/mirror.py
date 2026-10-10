@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import criteria, jsonio
+from . import queue as labelling_queue
 
 SCHEMA = "levi.live.dataset.v1"
 PARTIAL = ".partial-"
@@ -387,6 +388,9 @@ class Scanner:
         self.config = config
         self._tasks: dict = {}
         self._mtimes: dict = {}
+        # Per task: was its history being labelled when it was last listed
+        # (a change of the labelling mode relists it, see ``queue.py``).
+        self._history: dict = {}
         self._aborts: dict = {}
         self._names: dict = {}  # (root, group, task) -> current generation's name
         self._claimed: dict = {}  # name -> task identity, before its state exists
@@ -581,8 +585,10 @@ class Scanner:
         known = (state or {}).get("demos") or {}
         stamp = os.stat(path).st_mtime_ns
         previous = self._tasks.get(key)
+        history = labelling_queue.labels_history(self.config, name)
         if (
             previous is not None
+            and self._history.get(key, False) == history
             and self._mtimes.get(key) == stamp
             and not previous.waiting
             and previous.available
@@ -596,6 +602,9 @@ class Scanner:
             # A state keeps the cutoff it was created with, but asking for the
             # backlog later reaches back to the beginning.
             cutoff = self._cutoff(session)
+        # A dataset registered as ``history`` labels the episodes finished
+        # before the service began too (the stored cutoff is not changed).
+        scan_cutoff = 0.0 if history else cutoff
         archive_cutoff = _timestamp((state or {}).get("archive_cutoff"))
         w = self.config.watch
         try:
@@ -651,7 +660,7 @@ class Scanner:
                 continue
             if archive_cutoff is not None and finished_at is not None:
                 mtime = finished_at
-            if mtime < cutoff:
+            if mtime < scan_cutoff:
                 scan.backlog += 1
                 continue
             done = criteria.check(
@@ -690,6 +699,8 @@ class Scanner:
                     scan.waiting.append(entry.name)
                     scan.waiting_reasons[entry.name] = done.reason
         scan.rejected = len(rejected)
+        if history and self.config.queue.order == "newest_first":
+            scan.ready.reverse()
         if (
             state is not None
             or scan.ready
@@ -703,6 +714,7 @@ class Scanner:
         # Remembered either way, so an unchanged folder is not listed again.
         self._tasks[key] = scan
         self._mtimes[key] = stamp
+        self._history[key] = history
         return scan
 
     def _record(self, key, name, cutoff, scan, rejected, state, stuck=()):

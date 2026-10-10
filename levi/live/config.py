@@ -64,6 +64,16 @@ OMIT_AT_DEFAULT = frozenset(
         ("online", "aeri_specs"),
     }
 )
+# Whole tables newer than the readers of older checkouts (which refuse an
+# unknown table or key): ``render`` writes them only when they differ from
+# their defaults or when it is asked for the full file (``levi live init``).
+OMIT_TABLES_AT_DEFAULT = frozenset({"queue", "gpu.yield"})
+# What a dataset's labelling registration (``queue.json``) may say, and the
+# global defaults in ``[queue]``.
+LABELLING_MODES = ("auto", "history", "paused", "off")
+QUEUE_DEFAULT_MODES = ("auto", "paused", "off")
+QUEUE_HISTORY = ("registered_only", "off")
+QUEUE_ORDERS = ("newest_first", "oldest_first")
 CHECKOUT = Path(__file__).resolve().parents[2]
 
 
@@ -116,6 +126,44 @@ class Fr3:
     health_file: str = ""
     # A health file older than this is "monitor offline", not a red light.
     stale_s: float = 3.0
+
+
+@dataclass
+class GpuYield:
+    """``[gpu.yield]``: when the background labelling gives the GPU way
+    (docs/LIVE.md, "Background labelling queue and yield rules"). It yields
+    while a policy deployment is on (a policy port listens, or an evaluation
+    session has not ended), while ``gpu.quiet_states`` hold, while a process
+    other than this service uses the GPU, or when the GPU cannot be read; it
+    carries on only after every reason has been gone for ``resume_after_s``."""
+
+    enabled: bool = True
+    # Every reason must stay gone this long (seconds) before labelling resumes.
+    resume_after_s: float = 60.0
+    # Compute memory (MiB) used by processes that are not this service's vLLM
+    # above which the service yields; 0 switches this check off.
+    foreign_gpu_mib: int = 2000
+    # Yield while somebody else holds ``gpu.lock_file``.
+    foreign_lock: bool = True
+
+
+@dataclass
+class Queue:
+    """``[queue]``: the background labelling queue (docs/LIVE.md). Each live
+    dataset has a labelling mode in ``<workspace>/live/queue.json``
+    (``auto``, ``history``, ``paused``, ``off``); a dataset nobody registered
+    gets ``default_mode``."""
+
+    # The mode a new dataset is registered with.
+    default_mode: str = "auto"
+    # "registered_only": the history before the service began (``watch.backlog =
+    # "skip"``) is labelled only for datasets registered as ``history``; "off":
+    # no dataset's history is ever labelled (``history`` then acts as ``auto``).
+    history: str = "registered_only"
+    # The order a ``history`` dataset's episodes are taken in.
+    order: str = "newest_first"
+    # Episodes per batch; 0: ``watch.batch_max_episodes``.
+    batch_max: int = 0
 
 
 @dataclass
@@ -215,6 +263,8 @@ class Gpu:
     # resume; 0 switches the automatic resume off (``levi/live/resumer.py``).
     resume_stable_s: float = 3.0
     resume_max_bounces: int = 3
+    # The background labelling's yield rules (``[gpu.yield]``).
+    yield_: GpuYield = field(default_factory=GpuYield)
 
 
 @dataclass
@@ -433,6 +483,7 @@ class Config:
     resources: Resources = field(default_factory=Resources)
     online: Online = field(default_factory=Online)
     judge: Judge = field(default_factory=Judge)
+    queue: Queue = field(default_factory=Queue)
     # Where this configuration was read from (None: built-in defaults).
     path: str | None = None
 
@@ -474,6 +525,10 @@ class Config:
     @property
     def vllm_pid_dir(self) -> Path:
         return resolve_path(self.vllm.pid_dir)
+
+    def batch_limit(self) -> int:
+        """Episodes per batch: ``queue.batch_max``, else ``watch.batch_max_episodes``."""
+        return self.queue.batch_max or self.watch.batch_max_episodes
 
     def effective_gpu_mode(self) -> str:
         """``auto`` resolved: timeshare."""
@@ -557,6 +612,7 @@ class Config:
             )
         if w.batch_max_episodes < 1:
             problems.append("watch.batch_max_episodes must be >= 1")
+        problems.extend(_queue_problems(self))
         if p.max_attempts < 1:
             problems.append("pipeline.max_attempts must be >= 1")
         if r.report_keep < 1:
@@ -568,6 +624,27 @@ class Config:
         if problems:
             raise ValueError("Invalid live configuration: " + "; ".join(problems))
         return self
+
+
+def _queue_problems(config) -> list:
+    q, y = config.queue, config.gpu.yield_
+    out = []
+    if q.default_mode not in QUEUE_DEFAULT_MODES:
+        out.append(
+            f"queue.default_mode must be one of {', '.join(QUEUE_DEFAULT_MODES)} "
+            "(history is chosen for one dataset at a time)"
+        )
+    if q.history not in QUEUE_HISTORY:
+        out.append(f"queue.history must be one of {', '.join(QUEUE_HISTORY)}")
+    if q.order not in QUEUE_ORDERS:
+        out.append(f"queue.order must be one of {', '.join(QUEUE_ORDERS)}")
+    if q.batch_max < 0:
+        out.append("queue.batch_max must be >= 0 (0: watch.batch_max_episodes)")
+    if not 0 <= y.resume_after_s <= 86400:
+        out.append("gpu.yield.resume_after_s must be 0-86400 seconds")
+    if y.foreign_gpu_mib < 0:
+        out.append("gpu.yield.foreign_gpu_mib must be >= 0 (0: not checked)")
+    return out
 
 
 def _state_list_problems(key, states) -> list:
@@ -1216,17 +1293,20 @@ def preflight(config: "Config", *, watching: bool = True) -> list:
 
 def _fill(cls, data: dict, where: str):
     """A dataclass from a TOML table; unknown keys and wrong types are errors."""
-    known = {f.name: f for f in dataclasses.fields(cls)}
-    unknown = sorted(set(data) - set(known))
+    # A key that is a Python keyword (``yield``) is stored under another
+    # attribute name (``yield_``); the TOML key is the keyword.
+    attrs = {f.name.rstrip("_"): f.name for f in dataclasses.fields(cls)}
+    unknown = sorted(set(data) - set(attrs))
     if unknown:
         raise ValueError(f"Unknown key(s) in [{where}]: {', '.join(unknown)}")
     kwargs = {}
-    for name, value in data.items():
+    for key, value in data.items():
+        name = attrs[key]
         default = getattr(cls(), name)
         if dataclasses.is_dataclass(default):
             if not isinstance(value, dict):
-                raise ValueError(f"[{where}.{name}] must be a table")
-            kwargs[name] = _fill(type(default), value, f"{where}.{name}")
+                raise ValueError(f"[{where}.{key}] must be a table")
+            kwargs[name] = _fill(type(default), value, f"{where}.{key}")
             continue
         if isinstance(default, bool):
             ok = isinstance(value, bool)
@@ -1243,7 +1323,7 @@ def _fill(cls, data: dict, where: str):
             ok = isinstance(value, str)
         if not ok:
             raise ValueError(
-                f"{where}.{name} must be {type(default).__name__}, got {value!r}"
+                f"{where}.{key} must be {type(default).__name__}, got {value!r}"
             )
         kwargs[name] = value
     return cls(**kwargs)
@@ -1292,8 +1372,11 @@ def _toml_value(value) -> str:
     return f'"{text}"'
 
 
-def render(config: Config | None = None) -> str:
-    """The configuration as a TOML file with a comment per table."""
+def render(config: Config | None = None, full: bool = False) -> str:
+    """The configuration as a TOML file with a comment per table. The tables
+    in ``OMIT_TABLES_AT_DEFAULT`` (newer than older readers) are written when
+    they differ from their defaults, or always with ``full`` (``levi live
+    init``)."""
     config = config or Config()
     notes = {
         "service": "ports, polling and where the service keeps its state",
@@ -1306,6 +1389,8 @@ def render(config: Config | None = None) -> str:
         "resources": "keeping the service light",
         "online": "the online judgement of one episode (interface C5); off by default",
         "judge": "how the judgements word a task instruction (the policy's own is not touched)",
+        "gpu.yield": "when the background labelling gives the GPU way (deployment, other GPU users)",
+        "queue": "the background labelling queue: modes per dataset are in live/queue.json",
     }
     lines = ["# LEVI live annotation service. docs/LIVE.md describes every setting.\n"]
 
@@ -1320,7 +1405,14 @@ def render(config: Config | None = None) -> str:
         for f in dataclasses.fields(obj):
             value = getattr(obj, f.name)
             if dataclasses.is_dataclass(value) or isinstance(value, dict):
-                nested.append((f"{name}.{f.name}", value))
+                child = f"{name}.{f.name.rstrip('_')}"
+                if (
+                    child in OMIT_TABLES_AT_DEFAULT
+                    and not full
+                    and value == type(value)()
+                ):
+                    continue
+                nested.append((child, value))
             elif (name, f.name) in OMIT_AT_DEFAULT and value == getattr(
                 type(obj)(), f.name
             ):
@@ -1336,5 +1428,11 @@ def render(config: Config | None = None) -> str:
             continue
         if f.name == "judge" and not config.judge.task_text:
             continue  # a table older readers do not know: written only once it says something
+        if (
+            f.name in OMIT_TABLES_AT_DEFAULT
+            and not full
+            and getattr(config, f.name) == type(getattr(config, f.name))()
+        ):
+            continue
         table(f.name, getattr(config, f.name))
     return "\n".join(lines)

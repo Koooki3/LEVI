@@ -42,6 +42,7 @@ from pathlib import Path
 from . import auto as approver_log
 from . import catalogue, exclusion, generic, gpumgr, jsonio, judge, mirror, stats
 from . import config as live_config
+from . import queue as labelling_queue
 
 OK, NEED_MODEL, AWAIT_HUMAN, ERROR, PREEMPTED, NOTHING, DATASET_BUSY = (
     0,
@@ -332,22 +333,24 @@ class Worker:
 
     def start_batch(self):
         """Mirror what is finished and choose this batch's demos."""
-        w, p = self.config.watch, self.config.pipeline
+        p = self.config.pipeline
         mirror.verify_sources(self.config, self.name)
         mirror.refresh_changed(self.config, self.name)
         scanner = mirror.Scanner(self.config)
         scan = next((t for t in scanner.scan() if t.name == self.name), None)
         state = self.state()
         pending = mirror.waiting_demos(state, p.max_attempts)
-        room = max(0, w.batch_max_episodes - len(pending))
+        limit = self.config.batch_limit()
+        room = max(0, limit - len(pending))
         ready = list(scan.ready[:room]) if scan else []
         if ready:
             self.progress("mirror", ready=len(ready))
             mirror.mirror_dataset(self.config, state, ready)
         state = self.state()
-        demos = sorted(mirror.waiting_demos(state, p.max_attempts))[
-            : w.batch_max_episodes
-        ]
+        # Newest first for a dataset registered as ``history`` (queue.py).
+        demos = labelling_queue.order_demos(
+            self.config, self.name, mirror.waiting_demos(state, p.max_attempts)
+        )[:limit]
         return demos
 
     # --- runs ---------------------------------------------------------------------------

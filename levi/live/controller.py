@@ -46,6 +46,7 @@ from . import (
     sessions,
 )
 from . import config as live_config
+from . import queue as labelling_queue
 
 SCHEMA = "levi.live.status.v1"
 WORKER_STALL_S = 600.0
@@ -200,6 +201,11 @@ class Controller:
         self._waiting_since: dict = {}
         self._standby_since: dict = {}
         self._status_at = 0.0
+        # Dataset names already offered to ``queue.register`` (it is asked
+        # again only when a new one appears) and the last registry problem
+        # announced.
+        self._registered: set = set()
+        self._queue_said = ""
         self.loop_at: float | None = None  # the last tick (the thread beats on)
         self.start_failures = 0
         self.next_start_at = 0.0
@@ -324,8 +330,73 @@ class Controller:
                 continue
             if name in self.awaiting and not self._human_acted(name, state, now):
                 continue
-            names.append((state.get("last_processed_at") or 0.0, name))
-        return [n for _, n in sorted(names)]
+            # The registered labelling mode (queue.json): paused and off
+            # datasets keep their episodes but are not labelled; datasets
+            # that arrive now (auto) go before the back catalogue (history).
+            if not labelling_queue.processes(self.config, name):
+                continue
+            names.append(
+                (
+                    labelling_queue.rank(self.config, name),
+                    state.get("last_processed_at") or 0.0,
+                    name,
+                )
+            )
+        return [n for *_, n in sorted(names)]
+
+    def _register_datasets(self, now):
+        """Every live dataset has a labelling mode in ``queue.json``: register
+        the ones that have none with ``[queue] default_mode``. A file that
+        cannot be read is not touched; it is said once, and the datasets are
+        treated as paused until a person repairs it."""
+        known = set(mirror.list_states(self.config)) | {t.name for t in self.tasks}
+        new = known - self._registered
+        problem = ""
+        if new:
+            try:
+                added = labelling_queue.register(self.config, sorted(new), now=now)
+                self._registered |= new
+                if added:
+                    self.event(
+                        f"registered for labelling ({self.config.queue.default_mode}): "
+                        + ", ".join(added[:5])
+                        + (" ..." if len(added) > 5 else "")
+                    )
+            except labelling_queue.Unreadable as exc:
+                problem = str(exc)
+            except OSError as exc:
+                problem = f"cannot write queue.json: {exc}"
+        else:
+            problem = labelling_queue.load(self.config)[1] or ""
+        if problem != self._queue_said:
+            self._queue_said = problem
+            if problem:
+                self.event(
+                    f"labelling queue: {problem}; nothing is labelled until it is repaired",
+                    "error",
+                )
+
+    def queue_status(self, now, rows) -> list:
+        """``queue`` of the status file: one row per live dataset."""
+        c = self.config
+        waiting = {n: r["pending"] for n, r in rows.items()}
+        failed = {
+            n: f"retry in {max(0, self.backoff[n] - now):.0f} s"
+            for n in rows
+            if self.failures.get(n) and self.backoff.get(n, 0) > now
+        }
+        yielding = getattr(self, "yield_text", None)
+        return labelling_queue.status_rows(
+            c,
+            names=list(rows),
+            waiting=waiting,
+            running=self.worker_dataset,
+            failed=failed,
+            yielding=yielding() if callable(yielding) else None,
+            attention="vLLM failed to start repeatedly; `levi live resume`"
+            if self.attention
+            else None,
+        )
 
     def _human_acted(self, name, state, now=None) -> bool:
         """Has the person done what the worker waited for? A plan: approved (or
@@ -812,7 +883,7 @@ class Controller:
                     d
                     for d in task.ready
                     if not ((state.get("demos") or {}).get(d) or {}).get("deleted")
-                ][: c.watch.batch_max_episodes]
+                ][: c.batch_limit()]
                 if not names:
                     continue
                 before = {
@@ -1520,6 +1591,7 @@ class Controller:
         interval = c.service.poll_active_s if busy else c.service.poll_idle_s
         full = now - self._scan_at >= interval or not self.tasks
         self._refresh(now, full)
+        self._register_datasets(now)
         self._poll_worker(now)
         self._take_in(now)
         self._catalogue_step(now)
@@ -1818,6 +1890,10 @@ class Controller:
             },
             "datasets": rows,
             "queue_depth": sum(1 for r in rows.values() if r["pending"]),
+            # One row per live dataset (queue.py): its labelling mode, how
+            # many episodes wait, and whether it is queued, running,
+            # yielding the GPU, paused, done or failing.
+            "queue": self.queue_status(now, rows),
             "worker": worker,
             "sessions": session_rows,
             "fr3": {
