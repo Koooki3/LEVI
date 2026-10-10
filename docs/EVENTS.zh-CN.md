@@ -2,7 +2,7 @@
 
 [English](EVENTS.md)
 
-`levi.events` 读取机器人记录的信号说明了什么时候发生了什么。**目前它只是一个库**：计划、运行、界面、API 和命令行都还没有调用它；agent 读到的信号行（`levi.agent.signals`）和锚定复核（`levi.agent.anchored`）的行为不变。各模块都是作用在 numpy 数组和 pydantic 记录上的纯函数：不调模型，不导入 Torch，不写文件。
+`levi.events` 读取机器人记录的信号说明了什么时候发生了什么。**只有开启了它的时间片段标注计划才用它**（[见下文](#计划中的事件智能)）：事件候选在那里为边界精修挑选额外的帧。其他地方都不调用它：没开启的计划、界面和命令行行为不变，agent 读到的信号行（`levi.agent.signals`）和锚定复核（`levi.agent.anchored`）也不变。各模块都是作用在 numpy 数组和 pydantic 记录上的纯函数：不调模型，不导入 Torch，不写文件。
 
 | 模块 | 内容 |
 | --- | --- |
@@ -15,6 +15,9 @@
 | `calibrate` | 在开发集金标准上选定变点惩罚系数的脚本。 |
 | `third_party.json`、`third_party` | 本包所用外部来源的结构化登记，以及它必须遵守的规则。 |
 | `boundary_metrics` | 多个容差下的边界召回率、每分钟误报候选数、边界 MAE/P90、多个 IoU 阈值下的时间片段 F1。 |
+| `candidates` | 一个片段各来源的事件候选，合并后按取证优先级排序。 |
+| `sampling` | 证据规划器：按层级贪心地把一次精修的帧预算分给各个窗口。 |
+| `ablation` | 同预算下有无事件候选的对照（脚手架，不调模型）。 |
 
 ## 记录
 
@@ -92,6 +95,51 @@ python -m levi.events.calibrate --root <工作区> \
 
 结论：约一半参考边界在 0.5 s 内有变点，五分之一到四分之一在 0.2 s 内。报告集上误报多了一半，所以单靠变点切分边界很弱：它的用途是和其他来源一起排定取证先后，不是用来分段。样本小，0.01–0.02 的差异在噪声之内。
 
+## 计划中的事件智能
+
+时间片段标注计划可以设置 `workflow.event_intelligence`，其他类型的计划会拒绝它。省略、`null` 和 `{"mode": "off"}` 都表示关闭，存储时都是没有这个键，所以没开启的计划冻结的内容、缓存键和估计与这个配置块出现之前完全一样（有测试把六个有代表性的计划与在 main 上取的快照逐字节比较）。`{"mode": "candidates"}` 表示开启，计划会把每个设置连同取值一起冻结：
+
+| 设置 | 默认值 | 作用 |
+| --- | --- | --- |
+| `sources` | `gripper`、`height`、`still`、`change_point` | 哪些读取器提供候选。 |
+| `max_windows` | 4（1–16） | 一个片段的精修最多加多少个候选窗口。未校准的启发式取值。 |
+| `merge_seconds` | 0.5 | 与更强候选相距不超过这个值的候选并入它。未校准的启发式取值。 |
+| `change_point_penalty` | 0.75 | 变点惩罚系数（上文在开发集金标准上校准所得）。 |
+| `planner` | `greedy` | 唯一的规划方式：按优先级取整个窗口，放不下的窗口跳过。 |
+| `active_evidence` | `false` | 模型自行要求更多证据：不提供，`true` 会被拒绝。 |
+
+改动其中任何一项，或者开启、关闭这个配置块，都会改变计划摘要，计划必须重新批准。候选算法也在批准范围内：开启的计划存一份 `event_algorithm`——规划器版本（`levi.events.sampling.PLANNER_VERSION`）和各读取器的常数（来源优先级、合并距离、变点惩罚、最短长度和上限、夹爪滞回、静止判定、高度转折），以及它们规范化 JSON 的 SHA-256（`levi.events.candidates.algorithm`）。它计入计划摘要；启动或续跑时，如果计划里的算法与当前代码不一致，运行会拒绝（“The event candidate algorithm changed”）。凡是常数体现不出的改动（候选怎么找、怎么合并、怎么排序，窗口怎么选），都要提高 `PLANNER_VERSION`。关闭的计划没有这份记录。模型缓存的指纹包含计划的上下文，所以一次运行不会复用在其他设置下得到的回答。计划估计的请求数不变，另外加上 `estimate.event_intelligence`（`extra_requests: 0`、一个窗口增加的帧数、每个片段最多增加的帧数、帧上限），并在估计依据里加一句（精修请求的图像变多，token 也会增加，仍以 `max_tokens` 为上限）；`plan.event_intelligence` 把设置再列一遍。审批面板只读显示这些设置（模式、来源、窗口数、合并距离、惩罚系数、规划方式、模型自行要求证据固定关闭、每个片段最多增加的帧数与帧上限、不加请求）；没有这个配置块的计划，界面与以前相同。
+
+**LEVI 自己执行的运行。** 粗看请求之后，LEVI 从运行快照读取该片段的候选（每个片段读一次，运行事件 `event_candidates` 记下数量），再规划精修要读的帧（`levi.events.sampling`），预算是计划的帧上限减去粗看已用的帧，同时受模型的图像上限约束：
+
+1. 草稿自己的边界（及其边界候选）：从不丢弃；只放这些都放不下时，精修照旧放宽采样间隔或分批；
+2. 候选窗口，显著度高的在前，最多 `max_windows` 个；
+3. 已发布的画面变化窗口（`evidence.refine_top_k`），用同一条规则：放不下就跳过，再试下一个。没开启事件智能时，它们是从变化最小的开始删，直到剩下的放得下；所以预算紧时两者选法不同：开启但片段没有候选，并不等于关闭。
+
+窗口要么整个放进来，要么跳过（从不抽稀）；帧已经全部选过的窗口不占预算，记为已覆盖。窗口的帧按 `observations.frame_scope` 的同一套算法计算（有测试），所以规划时算出的帧数就是运行时受约束的帧数。每次精修的规划都有记录：运行事件 `event_evidence_plan`（每一层加了多少帧、哪些被跳过以及原因）、片段 shard 里的 `event_plan`（候选读取情况和每批的完整规划）；变更集的来源记录（`event_intelligence`）写明设置、算法、每个片段的候选读取情况和每批接受的窗口，以及汇总。草稿太长、分批精修时不加候选窗口，和不加画面变化窗口的规则一样。
+
+**续跑。** 精修帧已经写入、但请求没完成（provider 出错、GPU 闸门、暂停）的片段，续跑时会按当时的图像上限重新规划；本地模型的图像上限是拟合值，每次请求后都会变。贪心规划在两个上限下得到的窗口不嵌套，所以每次规划都把该片段证据账本里已有的帧当作不占预算，新帧计入整个片段的帧上限：账本永远不会超过 `max_evidence_frames`（5000 组合成续跑场景，越限 0 次；不加这条时，运行时测试能复现越限），第一次精修的规划与不看账本时完全一样（有测试）。读哪些窗口取决于图像上限：重复或续跑的运行只有在图像上限相同时才读同一批帧（`event_evidence_plan` 记下了 `budget_images`，对照时按它分组）。
+
+不变的部分：粗看、请求数（候选只给精修请求加帧，不加请求；`Budget.max_calls` 照样会让运行停下）、提示词（模型请求里的 workflow 去掉了 `event_intelligence`，候选也从不作为结论给模型看）、校验以及之后的所有环节。
+
+**信号读不出东西时。** 候选读取失败或什么都没找到，运行只靠画面继续，并用原因码写明：`unreadable`（快照里的文件读不了）、`invalid_signals`（数据表、`meta` 或信号声明不满足读取器的要求）、`internal_error`（其他情况，包括 LEVI 自身的缺陷）、`no_candidates`（读取成功但没有候选）。原因码写进 `event_candidates` 事件、shard 和来源记录；来源记录的 `summary` 统计有候选的片段数和按原因分的无候选片段数，所以“开启了但实际没有候选”的结果能看出来。错误信息不含本机路径；来源记录只写原因码和异常类型。
+
+**外部 agent。** `runs.prepare` 返回 `events_first`（每个片段中，按 `evidence.refine` 的采样间隔、窗口放得进剩余帧上限的候选时刻）和 `events_policy`。`events.candidates`（参数 `run_id`、`episode`；该片段须已准备证据）列出保留的候选（`id`、`event_type`、`actor_id`、`at`、`window`、`salience`）、被合并的数量、同样的 `suggested_around_seconds`、剩余帧数，读取失败或没有候选时还有 `error_code`（以及异常类型）。它是只读能力：只返回文字，没有帧、路径或哈希（有测试固定其字段）。候选来自记录的状态和动作列，不来自相机，所以不需要媒体外传授权；而所有帧仍然需要（没有授权时 `evidence.refine` 和 `evidence.read` 会被拒绝）。没开启事件智能的计划会拒绝这个调用。
+
+### 候选
+
+`candidates.read(table, info, profile, stats, episode_index, sources, merge_seconds, change_point_penalty)` 把各读取器的输出变成 `EventCandidate`：夹爪穿越（`gripper_open`、`gripper_close`）、高度转折（`height_low`、`height_high`）、每段静止的起点和终点（`still_start`、`still_end`），以及变点。每个来源有固定的优先级——夹爪 0.9，变点 0.7 乘以它自己的显著度，高度 0.5，静止 0.3。**这些优先级、`max_windows` 和 `merge_seconds` 都是未校准的启发式取值**，人为设定，没有在任何金标准上调过；只有变点惩罚系数经过校准。校准计划：只用开发集金标准（screws 开发集金标准、plates 诊断集；不用任何冻结集或留出集），先用 `ablation plan` 做不调模型的覆盖对照，再做下文的标注对照；新取值就是新的 `event_algorithm`，需要重新批准。与更强候选相距不超过 `merge_seconds` 的候选并入它：更强的保留自己的时间，加上它们的来源，窗口扩大到覆盖它们；被并入的候选仍留在列表里，状态为 `merged`。优先级相同时，来源种类多的在前，再按时间先后，再按编号。结果先是保留的候选（按优先级），后是被合并的候选；顺序与输入顺序无关（有测试）。
+
+### 待 GPU 窗口
+
+同样的帧预算下事件候选能否让标注更好，要用本地模型才能测，所以还没有测。GPU 空闲时（持 GPU 锁）只在开发集片段上做（不用任何冻结集或留出集，不在测试集上调任何参数）：
+
+1. 对同一批片段做两次时间片段标注运行，模型、解码、预算和帧上限都相同，一次带 `event_intelligence: {"mode": "candidates"}`，一次不带（可再加一次 `max_windows` 为 2 的），另配常规的不经 LEVI 的对照组。
+2. `python -m levi.events.ablation plan --spec <spec.json>`：不调模型，看每组的精修会看哪里、覆盖多少参考边界（spec 格式见该模块的文档字符串）。
+3. `python -m levi.events.ablation score --reference <ref.json> --durations <durations.json> --arm off=<a.json> --arm candidates=<b.json>`：每组在 0.1/0.2/0.5 s 下的边界得分和时间片段 F1，以及每组相对 `off` 的差值。
+
+命令行拒绝任何路径里带冻结集或留出集字样的输入，只写到标准输出或 `--out`。同样待测的还有每组请求的 token 成本（每次精修请求的图像更多）和墙钟时间。
+
 ## 第三方来源
 
-`levi/events/third_party.json`（`levi.third_party_registry.v1`）登记本包依赖或借鉴的每个外部来源：来源 `source`、版本 `version`、许可 `licenses`（代码、权重、数据）、采用方式 `use`（`dependency`、`adopt-idea`、`adapt-code`、`vendored`）、是否随 LEVI 分发（`shipped`）或拷贝了代码（`code_copied`）、能否再分发（`redistributable`）、带核实过的 `reference_key` 的引用 `citation`，以及用在哪里（`where`）。测试用 `levi.events.third_party.problems` 强制这些规则：代码许可为非商业、缺失或未核实的来源只能借鉴思路（不拷贝、不分发）；有引用就必须对应已核实的参考条目；依赖必须在 `pyproject.toml` 里声明；`levi/events` 模块里出现的每个 arXiv 编号都必须属于某个已登记来源。目前登记了 `ruptures`（只借鉴思路，BSD-2-Clause，未安装）和现有核心依赖 NumPy、pydantic：本包没有新增依赖。发布用的清单仍是 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
+`levi/events/third_party.json`（`levi.third_party_registry.v1`）登记本包依赖或借鉴的每个外部来源：来源 `source`、版本 `version`、许可 `licenses`（代码、权重、数据）、采用方式 `use`（`dependency`、`adopt-idea`、`adapt-code`、`vendored`）、是否随 LEVI 分发（`shipped`）或拷贝了代码（`code_copied`）、能否再分发（`redistributable`）、带核实过的 `reference_key` 的引用 `citation`，以及用在哪里（`where`）。测试用 `levi.events.third_party.problems` 强制这些规则：代码许可为非商业、缺失或未核实的来源只能借鉴思路（不拷贝、不分发）；有引用就必须对应已核实的参考条目；依赖必须在 `pyproject.toml` 里声明；`levi/events` 模块里出现的每个 arXiv 编号都必须属于某个已登记来源。目前登记了 `ruptures`（只借鉴思路，BSD-2-Clause，未安装）、VideoSeek（只借鉴思路：证据规划器的分层名称来自它的 overview、skim、focus 三个工具；Lin 等 2026，arXiv:2603.20185，代码 MIT，未拷贝任何代码）和现有核心依赖 NumPy、pydantic：本包没有新增依赖。发布用的清单仍是 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。

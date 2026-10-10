@@ -127,7 +127,7 @@ LEVI 会对照目录检查任务规格，并在运行前等你批准。每个任
 | **Agent 与模型** | [Agents](docs/AGENTS.md) · [本地模型](docs/OLLAMA.zh-CN.md) · [English](docs/OLLAMA.md) · [vLLM](docs/VLLM.zh-CN.md) · [English](docs/VLLM.md) · [崩溃恢复](docs/SUPERVISION.md) · [Pilot](docs/PILOT.zh-CN.md) · [English](docs/PILOT.md) · [内置知识](docs/KNOWLEDGE.md) |
 | **开发用技能** | [Codex 与 Claude Code 使用 Skill Loom](docs/SKILL_LOOM.zh-CN.md) · [English](docs/SKILL_LOOM.md) |
 | **标注方法** | [实时标注服务](docs/LIVE.zh-CN.md) · [English](docs/LIVE.md) · [锚定复核](docs/ANCHORED_REVIEW.md) · [SAM3](docs/SAM3.md) · [快速分割](docs/SEGMENTATION.md) · [评测记录](docs/EVALUATION.md) |
-| **参考** | [API](docs/API.md) · [验证](docs/VALIDATION.md) · [架构进度](docs/architecture/IMPLEMENTATION_STATUS.md) · [自动测评契约与运行日志](docs/AUTOMATIC_PIPELINE.zh-CN.md) · [English](docs/AUTOMATIC_PIPELINE.md) · [上游](docs/UPSTREAM.md) · [发布](docs/RELEASING.md) · [变更记录](CHANGELOG.md) · [第三方声明](THIRD_PARTY_NOTICES.md) · [参考文献与引用](docs/REFERENCES.md) |
+| **参考** | [API](docs/API.md) · [验证](docs/VALIDATION.md) · [架构进度](docs/architecture/IMPLEMENTATION_STATUS.md) · [自动测评流水线（AERI）](docs/AUTOMATIC_PIPELINE.zh-CN.md) · [English](docs/AUTOMATIC_PIPELINE.md) · [事件智能](docs/EVENTS.zh-CN.md) · [English](docs/EVENTS.md) · [性能基线与缓存配额](docs/PERFORMANCE.zh-CN.md) · [English](docs/PERFORMANCE.md) · [上游](docs/UPSTREAM.md) · [发布](docs/RELEASING.md) · [变更记录](CHANGELOG.md) · [第三方声明](THIRD_PARTY_NOTICES.md) · [参考文献与引用](docs/REFERENCES.md) |
 
 **报告**页显示一份实时技术报告，目录由 `LEVI_REPORT_DIR` 指定（只读，可以在工作区之外）；见 [API](docs/API.md#technical-report--技术报告)。
 
@@ -137,14 +137,14 @@ LEVI 会对照目录检查任务规格，并在运行前等你批准。每个任
 
 DROID 原始文件夹只是“浏览并标注”的输入，不是受支持的训练转换；见[转换](docs/CONVERSION.md#droid-raw-browsing-view)，可选的测试样本见[工作区](docs/WORKSPACE.md#droid-test-sample)（`uv run levi sample fetch droid` 会下载 500 个片段，约 11.6 GiB，浏览它们需要 `--extra droid`；除非你要求或设置 `LEVI_DROID_SAMPLE=on`，否则不会下载）。
 
-LEVI 是单用户、能访问本地文件的工作台。Hugging Face 登录只控制 Hub 访问，不是 LEVI 的权限。不要提交凭据或 `.env`；任何共享部署都应放在带认证的反向代理后面，并为 HTTPS 或 Space 嵌入设置 `LEVI_SECURE_COOKIES=1`。上传到 Hub 是明确的 API 动作；转换和保存从不上传。
+LEVI 是单用户、能访问本地文件的工作台。Hugging Face 登录只控制 Hub 访问，不是 LEVI 的权限。不要提交凭据或 `.env`；任何共享部署都应放在带认证的反向代理后面，并为 HTTPS 或 Space 嵌入设置 `LEVI_SECURE_COOKIES=1`。网页接受任意端口上的 `127.0.0.1`、`localhost`、`[::1]`；反向代理、局域网地址或主机名必须列入 `LEVI_UI_ALLOWED_HOSTS`（例如 `LEVI_UI_ALLOWED_HOSTS=levi.example.org`），并且只接受来自 LEVI 自己页面的修改，脚本请用 `levi` 命令行。这防的是其他网页，不防本机程序（[网页桥接的信任边界](docs/API.md#trust-boundary-of-the-web-bridge--网页桥接的信任边界)）。上传到 Hub 是明确的 API 动作；转换和保存从不上传。
 
 ```bash
 docker build -t levi:local .
 docker run --rm -p 127.0.0.1:7860:7860 -v "$HOME/levi-data:/workspace" levi:local
 ```
 
-镜像只安装核心；见下面的状态。
+映射到本机其他端口（`-p 127.0.0.1:8080:7860`）可以直接用；发布到局域网地址或名字时需要 `-e LEVI_UI_ALLOWED_HOSTS=<名字>`。镜像只安装核心；见下面的状态。
 
 ## 状态与限制
 

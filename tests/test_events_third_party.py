@@ -21,6 +21,17 @@ def test_ruptures_is_an_idea_not_a_dependency():
     assert "ruptures" not in (ROOT / "pyproject.toml").read_text()
 
 
+def test_videoseek_is_an_idea_cited_where_it_is_used():
+    registry = third_party.load()
+    seek = next(c for c in registry["components"] if c["key"] == "videoseek")
+    assert seek["use"] == "adopt-idea"
+    assert not seek["shipped"] and not seek["code_copied"]
+    assert seek["reference_key"] == "lin2026videoseek"
+    assert seek["reference_status"] == "VERIFIED"
+    assert seek["citation"]["arxiv"] == "2603.20185"
+    assert "arXiv:2603.20185" in (ROOT / "levi/events/sampling.py").read_text()
+
+
 def _broken(edit):
     registry = copy.deepcopy(third_party.load())
     edit(registry)

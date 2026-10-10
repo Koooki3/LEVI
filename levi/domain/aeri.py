@@ -198,6 +198,16 @@ AERI_STATES = (
     "FAULT_LOCKED",
     "COMPLETED",
 )
+# States inside an episode (its result is not committed yet): an episode
+# that faults from one of them still gets a result (task_outcome unknown).
+EPISODE_STATES = (
+    "FORWARD_ACTIVE",
+    "FORWARD_STOPPING",
+    "FORWARD_FINALIZE",
+    "RESET_ACTIVE",
+    "RESET_VERIFY",
+    "RESET_FINALIZE",
+)
 RECORDS = ("run_header", "prepared", "acknowledged", "committed", "aborted", "note")
 TRANSITION_REASONS = (
     "goal_verified",
@@ -210,6 +220,7 @@ TRANSITION_REASONS = (
     "journal_corrupt",
     "preflight_passed",
     "preflight_failed",
+    "robot_home_reached",
     "scene_ready",
     "scene_reset_required",
     "scene_unknown",
@@ -229,6 +240,9 @@ STOP_REASONS = (
     "policy_error",
     "watchdog_timeout",
     "orchestrator_crash",
+    # An episode that ended in FAULT_LOCKED (its result is still written).
+    "recorder_failed",
+    "home_failed",
 )
 # Actions that move the robot: never idempotent, always with a step.
 PHYSICAL_KINDS = ("policy_steps", "home")
@@ -615,7 +629,13 @@ def _check_legacy(message):
         if message.decision != "unknown" or message.unknown_reason != "model_undecided":
             _bad("an undecided online judgement maps to unknown (model_undecided)")
     elif c5.outcome == "success" and message.decision != "confirmed":
-        _bad("a decided online success maps to confirmed")
+        # A decided success whose answer fields do not both support it is
+        # kept as unknown (conflicting_predicates), never confirmed.
+        if not (
+            message.decision == "unknown"
+            and message.unknown_reason == "conflicting_predicates"
+        ):
+            _bad("a decided online success maps to confirmed")
     elif c5.outcome == "failure" and message.decision != "rejected":
         _bad("a decided online failure maps to rejected")
 
@@ -1081,14 +1101,22 @@ class RunEvent(Envelope):
         _same_run(self, self.episode_id, self.episode_role)
         if self.episode_result is not None:
             transition = (self.from_state, self.to_state)
+            faulted = (
+                self.to_state == "FAULT_LOCKED"
+                and self.from_state in EPISODE_STATES
+                and self.episode_id is not None
+            )
             if record != "committed" or not (
                 transition == ("FORWARD_FINALIZE", "ROBOT_HOME")
                 or self.from_state == "RESET_FINALIZE"
+                or faulted
             ):
                 _bad(
-                    "episode_result only on a committed FORWARD_FINALIZE->ROBOT_HOME "
-                    "or RESET_FINALIZE->* record"
+                    "episode_result only on a committed FORWARD_FINALIZE->ROBOT_HOME, "
+                    "RESET_FINALIZE->* or episode->FAULT_LOCKED record"
                 )
+            if faulted and self.episode_result.task_outcome != "unknown":
+                _bad("an episode that ended in FAULT_LOCKED has task_outcome unknown")
         return self
 
 

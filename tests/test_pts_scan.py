@@ -77,10 +77,30 @@ def test_packet_scan_matches_the_frame_scan_value_for_value(bframes, vfr):
         assert ve.scan_times(path, "packet") == ve.scan_times(path, "frame") == frames
 
 
-def test_the_default_scan_and_cache_layout_are_the_original(
+def test_the_default_scan_is_the_packet_scan_and_the_cache_records_it(
     bframes, tmp_path, monkeypatch
 ):
     monkeypatch.delenv("LEVI_PTS_SCAN", raising=False)
+    ve._MEMO.clear()
+    assert ve.scan_mode() == "packet"
+    calls = []
+    real = ve.scan_frames
+    monkeypatch.setattr(ve, "scan_frames", lambda p: calls.append(p) or real(p))
+    cache = tmp_path / "idx.json"
+    times = ve.frame_index(bframes, cache)
+    assert calls == []  # the frame scan did not run
+    assert json.loads(cache.read_text()) == {
+        "source_sha256": file_hash(bframes),
+        "timestamps": times,
+        "scan": "packet",
+    }
+
+
+def test_the_frame_scan_is_still_selectable_with_the_original_cache_layout(
+    bframes, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("LEVI_PTS_SCAN", "frame")
+    ve._MEMO.clear()
     assert ve.scan_mode() == "frame"
     cache = tmp_path / "idx.json"
     times = ve.frame_index(bframes, cache)
@@ -88,6 +108,12 @@ def test_the_default_scan_and_cache_layout_are_the_original(
         "source_sha256": file_hash(bframes),
         "timestamps": times,
     }
+    # A cache written before the switch (no "scan" key) is a frame-scan cache:
+    # the default now rescans once, then keeps the packet layout.
+    monkeypatch.delenv("LEVI_PTS_SCAN")
+    ve._MEMO.clear()
+    assert ve.frame_index(bframes, cache) == times
+    assert json.loads(cache.read_text())["scan"] == "packet"
 
 
 def test_packet_mode_records_itself_and_a_cache_is_used_for_its_own_scan(

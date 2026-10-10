@@ -12,6 +12,8 @@ LEVI recovers from a **crash while it is running normally**. It does **not** sta
 
 Consequence of `KillMode=control-group` / 后果：when systemd restarts `levi serve`, it stops the whole unit first, **including the core and every job worker** (export, RECAP, segmentation); a job in progress is lost, and the next start reclaims its leftovers. So stop deliberately with `levi stop` (it refuses while jobs run) before `systemctl --user stop`. / systemd 重启 `levi serve` 时会先停掉整个单元，**包括核心和所有作业进程**，进行中的作业会丢；所以有意停止先用 `levi stop`（有作业时它会拒绝）。
 
+The same rule decides how the page starts the live service / 同一条规则决定页面怎样启动实时服务：anything the product core starts lives in `levi-product.service`'s cgroup (`start_new_session` changes the session, not the cgroup) and is killed at the product's next restart. So the product LEVI starts the live service only with `systemctl --user start levi-live` (`LEVI_LIVE_UNIT`), never with `levi live start --daemon`, and stops it with `systemctl --user stop levi-live` or, for one started from a terminal, the SIGTERM `levi live stop` sends. Off unless `LEVI_LIVE_SERVICE_CONTROL=1`, and to stay off until the web UI's proxy checks `Host` and `Origin`; see [Starting and stopping the service from the page](LIVE.md#starting-and-stopping-the-service-from-the-page). / 产品核心启动的任何进程都在 `levi-product.service` 的 cgroup 里（`start_new_session` 只换会话，不换 cgroup），产品下次重启时会被杀掉。所以产品 LEVI 只用 `systemctl --user start levi-live`（`LEVI_LIVE_UNIT`）启动实时服务，从不用 `levi live start --daemon`；停止用 `systemctl --user stop levi-live`，终端启动的服务则发 `levi live stop` 发的 SIGTERM。默认关闭，设置 `LEVI_LIVE_SERVICE_CONTROL=1` 才打开；界面代理检查 `Host` 和 `Origin` 之前保持关闭，见[在页面上启动和停止实时服务](LIVE.zh-CN.md#在页面上启动和停止实时服务)。
+
 Not covered / 不覆盖：a process that is alive but stuck (not answering), boot, power loss, and a full logout of your user: with systemd `Linger=no` the user's units stop at logout (`loginctl enable-linger $USER` keeps them if you want that). / 活着但卡住的进程、开机、断电、用户完全注销（`Linger=no` 时注销会停掉用户服务；想保留用 `loginctl enable-linger $USER`）。
 
 ## The units / 服务单元
@@ -66,6 +68,8 @@ systemctl --user status levi-product levi-live
 levi stop && systemctl --user stop levi-product    # stop the product (levi stop refuses while jobs run)
 systemctl --user stop levi-live                    # runs `levi live stop` first
 ```
+
+**Reaching the page / 访问页面**：the unit serves the web page on `127.0.0.1:7860`, and the web bridge answers loopback names on any port plus the names you list, and takes writes only from the page itself ([API → Trust boundary of the web bridge](API.md#trust-boundary-of-the-web-bridge--网页桥接的信任边界)). From another machine use `ssh -L <any local port>:127.0.0.1:7860`; for a LAN name or a reverse proxy put `LEVI_UI_ALLOWED_HOSTS` in the checkout's `.env` (the unit's `levi serve` reads it) and restart the unit. Scripts write through the `levi` CLI, not through :7860. / 单元在 `127.0.0.1:7860` 提供网页，网页桥接接受任意端口上的 loopback 名字和你列出的名字，只收来自页面本身的写请求。从别的机器访问用 `ssh -L <本机任意端口>:127.0.0.1:7860`；用局域网名字或反向代理时，把 `LEVI_UI_ALLOWED_HOSTS` 写进检出的 `.env`（单元里的 `levi serve` 会读取）并重启单元。脚本经 `levi` 命令行写入，不经 :7860。
 
 **Migrating from a terminal-started instance / 从终端启动的实例迁移**：`levi stop` first, then `systemctl --user start levi-product`; for the live service `levi live stop` first (a unit cannot start while a `levi live start --daemon` runs). Two instances on the same ports cannot coexist. / 先 `levi stop` 再用 systemd 启动，同一端口不能有两个实例。
 

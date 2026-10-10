@@ -1,8 +1,8 @@
-# 自动测评流水线（AERI）：契约与事务日志
+# 自动测评流水线（AERI）
 
 [English](AUTOMATIC_PIPELINE.md)
 
-**状态：只有地基。** 本页只写已经存在的两部分：集成契约（`levi/domain/aeri.py`）和持久化事务日志原语（`levi/automatic/journal.py`）。编排器、状态机、机器人适配层和命令都还没有；这里的代码不会让机器人动、不会启动模型、不会开端口，全部只用 Fake 测试。
+**状态：只在 Fake 上运行。** 本页写集成契约（`levi/domain/aeri.py`）、持久化事务日志（`levi/automatic/journal.py`）、状态机与编排器（`levi/automatic/state_machine.py`、`orchestrator.py`）、终止裁决器（`termination.py`）、复位仲裁（`scene_assessment.py`、`reset_manager.py`）、录制层（`recorder.py`）、指标（`metrics.py`）、命令行（`cli.py`）、提供方适配层（`levi/automatic/adapters/`）和进程内 Fake（`integrations/fr3_automatic/fake.py`）。真实机器人适配层和页面都还没有，命令行只能在 Fake 上试运行；这里的代码不会让机器人动、不会启动模型、不会开端口，在这里通过的测试都不算真机验证。
 
 流水线由三部分组成，彼此只通过带版本的消息交互：
 
@@ -93,3 +93,254 @@ v1 未发布期间 `aeri.RELEASED` 为 `False`：此时与基线相比的破坏�
 解除 `FAULT_LOCKED` 需要操作员命令：日志只接受带 `command_id` 的操作员发起、只转到 `PREFLIGHT`、动作为 `none` 的事务离开它（恢复只能重新进入 `FAULT_LOCKED`）。提交必须保持它准备时的原因、片段和策略代次。测试在每个崩溃点（`before_prepared`、`after_prepared`、`after_execute`、`after_acknowledged`、`after_committed`）用 SIGKILL 杀掉子进程，并在每个字节位置截断文件；所有情况下恢复结果一致，替代机器人命令的那一步从不重复执行。
 
 **限制。** 创建时只对运行目录及其父目录 fsync，不对所有上级目录；运行期间日志不轮转（每次状态转换写几行，不是每个控制步写一行）。
+
+## 状态机（`levi/automatic/state_machine.py`）
+
+正常路径：
+
+```
+PREFLIGHT -> VERIFY_INITIAL -> FORWARD_ACTIVE -> FORWARD_STOPPING -> FORWARD_FINALIZE
+  -> ROBOT_HOME -> SCENE_ASSESS -> FORWARD_ACTIVE（下一片段）... -> COMPLETED
+VERIFY_INITIAL / SCENE_ASSESS -> RESET_ACTIVE -> RESET_VERIFY -> RESET_FINALIZE
+  -> VERIFY_INITIAL（先 Home，再重新检查初始状态）
+```
+
+`TRANSITIONS` 为每个允许的 `(from, to)` 列出原因、权限主体（`orchestrator`、`operator`、`safety_guard`、`recovery`）和该转换能带的唯一动作类型；`check_transition` 拒绝其余一切（`E_ILLEGAL`、`E_REASON`、`E_AUTHORITY`、`E_ACTION`、`E_STEP`、`E_EPISODE`、`E_RESULT`），`check_journal` 按同一张表重读整份日志。最要紧的规则：
+
+- 运动状态（`FORWARD_ACTIVE`、`RESET_ACTIVE`）只能从场景判断（`VERIFY_INITIAL`、`SCENE_ASSESS`）由编排器以 `policy_steps` 动作进入；
+- `policy_steps` 和 `home` 是物理动作、不幂等：必须标 `non_idempotent` 并带 `step`（`step=None` 被拒）。编排器给每个片段的物理动作编号（0：策略步，1：Home），片段号永不复用，所以日志的幂等键在任何代次、任何恢复之后都拒绝第二次尝试；
+- 每个仍在运行的状态都可以转到 `FAULT_LOCKED`（编排器、安全守卫或恢复）。`WAIT_HUMAN` 和 `FAULT_LOCKED` 只能由带 `command_id` 的操作员命令转到 `PREFLIGHT`，不能直接回到运动；
+- 操作员主体在任何规则上都必须带命令编号；
+- 前向片段之后的 Home 是 `ROBOT_HOME -> SCENE_ASSESS`，原因为 `robot_home_reached`；操作员停止之后也可以改走 `ROBOT_HOME -> WAIT_HUMAN`（`operator_stop`，带操作员命令，不运动）；
+- 片段结果写在 `FORWARD_FINALIZE -> ROBOT_HOME`、`RESET_FINALIZE -> VERIFY_INITIAL | WAIT_HUMAN` 的提交行上，以及从片段内状态转到 `FAULT_LOCKED` 的提交行上（以故障结束的片段：`task_outcome: unknown`，`stop_reason` 为故障原因。这里按流水线文档 §4.3 执行，X1 设计稿 §2.5 原本不给这类片段结果；停止原因为此增加了 `recorder_failed` 和 `home_failed`）。一步都没执行的片段丢弃录制（`recorder_abort`）。
+
+**运动围栏。** `MotionFence` 只持有一个当前 `MotionToken`（`run_id`、`transaction_id`、`control_epoch`、`kind`、`episode_id`、`policy_epoch`，以及按编排器时钟计的到期时间）。机器人适配层每发一条命令前调用 `fence.check(token, kind, now)`。策略步令牌在提交进入运动状态之后签发；Home 令牌在 Home 事务的 prepared 行和 acknowledged 行之间签发。编排器在检查或准备任何其他事务之前先吊销令牌，所以迟到的线程、迟到的动作块或被拒的转换都不会留下运动授权。
+
+## 编排器（`levi/automatic/orchestrator.py`）
+
+`Orchestrator.create(run_dir, RunConfig, robot=, policy=, recorder=, events=, verifier=, scene=, clock=, fence=)` 开始一次运行；`run()` 一直驱动到需要人（`WAIT_HUMAN`、`FAULT_LOCKED`）或结束（`COMPLETED`）。每次状态变化都是 `prepare`（已 fsync）-> 动作 -> `acknowledge` -> `commit`；`executed: no` 中止并转 `WAIT_HUMAN` 或 `FAULT_LOCKED`，`executed: unknown` 一律转 `FAULT_LOCKED`。不做任何自动重试。
+
+- **线程。** `run()` 只属于一个线程；`stop()` 和 `resume()` 可以来自任意线程。一把可重入的状态锁把每次“读状态、检查、prepare、commit”串行化，所以不会有事务从检查时以外的状态准备出来。`stop()` 从不等这把锁：它立刻把停止登记进一个登记表（有自己的小锁，控制循环每一步、每个片段开始前都会读）并返回 `stop_requested`，即使事务里的适配器调用很慢或挂死也一样；只有在 `WAIT_HUMAN` 中、并且 50 毫秒内拿到锁时，它才自己结束运行（`completed`）。`stop()` 只登记，不自己让机器人 hold（由循环的下一个安全点执行；适配器挂死时只能靠机器人侧看门狗和令牌过期）。停止一直保留到运行转到人工（无论因何原因进入 `WAIT_HUMAN`），届时所有已登记的停止一起被消费（第一个之外的编号记为 `stop_commands_merged`）：残留的停止不会挡住操作员下一次结束运行的停止。每次登记带代次：resume 只清除在它开始之前登记的停止（写成 `stop_command_lost` 备注）；resume 进行中到达的停止保留下来，在下一个决策点生效。
+- **异常。** 任何从循环里逃出的异常（适配器或日志）都先吊销运动令牌，再让机器人 hold，把未结束的事务记为 `executed: unknown` 并关闭，把运行转到 `FAULT_LOCKED`（`watchdog_timeout`），然后才继续抛出。连这些都写不进去时，编排器在内存里停机（`halted`）：拒绝再运行或恢复，重启（`restore`）后从日志恢复。
+- **备注。** 循环里产生的审计备注（被丢弃的动作块或判定、坏事件）只在内存里计数，到下一个事务边界按代码各汇总写一行；每个片段最多 `note_lines_per_episode` 行（超出后再写一行 `notes_suppressed`）。循环里不为单条备注做 fsync；`run()` 结束时再补写一次此后被压掉的计数。解释锁定或判定分歧的备注（`orchestrator_exception`、`hold_failed`、`motion_unacknowledged`、`recorder_error`、`early_stop_disputed`、`stop_command_lost`）不受预算限制。hold、quiesce 和转 `FAULT_LOCKED` 的事务先执行动作，积压的备注在其后写盘。
+
+- **片段内**控制循环从不等判定：请求提交后以零超时收取，超过 `judge_request_timeout_ns` 撤回。动作块最多等到它的硬截止时间，并且只接受当前策略代次、当前请求和当前片段、按 C 自己的时钟准时、维度正确、`valid_from_action_index >= action_start_index` 的应答；其余丢弃并在日志里记一条备注（`chunk_dropped_*`）。连续 `chunk_failure_limit` 次失败则停止片段（`policy_error`）。
+- **安全。** 守卫闩锁或红灯立即转 `FAULT_LOCKED`（`safety_stop`，由 `safety_guard` 发起）；机器人没有确认的命令（`unknown`）记为 `watchdog_timeout`；录制器失败记为 `recorder_failed`，rollout 改名为 `incomplete_*`，不写 `.complete`；Home 失败记为 `home_failed`。每次 Home 之前都先过安全检查（没有闩锁、没有红灯），否则记 `safety_stop`。
+- **场景。** unknown 或 unavailable 从不跳过复位：`on_scene_unknown = "reset"`（默认）时运行复位策略，否则等人；`max_reset_attempts` 限制两次前向片段之间的复位次数。复位到达步数上限后封存、Home，然后等人（`reset_horizon_exhausted`）。
+- **结果。** 前向结果在 Home 之前提交（此时 `robot_home: not_attempted`、`scene_reset: unknown`）；`task_outcome` 严格跟随 `goal_verification`，unknown 和 unavailable 永远不是成功。策略 quiesce 之后总会再请求一次终局判定；提前停止（`goal_verified`）只有在终局判定也确认时才记成功，否则记 `undecided`（或 `unavailable`），并写一条 `early_stop_disputed` 备注。终局判定必须覆盖片段的结尾：证据从第 0 步到最后一步，观测时间不早于请求（即 quiesce 之后）；否则丢弃（`judgement_dropped_stale`），目标核实记为 `unavailable`。相机帧连续 `camera_stall_limit` 次不变，或判定方因违约被停用时，终局判定为 `unavailable`。只有 rollout 封存为 complete 的片段才计入 `episodes`。
+- **停止。** 停止在场景评估之前、之后、打开片段的事务里以及每一步都会检查：停止永远不会开出新片段。第一步之前就被停止截住的片段丢弃（`incomplete`、`unknown`），不计数、不 Home，运行等人。打断了执行的停止之后，按配置先 Home（`home_after_operator_stop = true`，设计稿的路径）或原地不动（`false`），然后等人。两条规则对前向和复位片段都适用（不 Home 的出口是 `ROBOT_HOME -> WAIT_HUMAN` 和 `RESET_FINALIZE -> WAIT_HUMAN`），也适用于执行结束后才到达的停止（quiesce、终局判定或封存期间）。
+- **重启。** `Orchestrator.restore(run_dir, config, ...)` 打开日志并执行它的恢复：所有未完成的运行转到 `FAULT_LOCKED`（`recovery_ambiguous`），不重放任何东西。崩溃截断了某个片段时（最后提交的状态在片段内且该片段还没有结果），这次转换带上该片段的结果：`task_outcome: unknown`，`stop_reason: orchestrator_crash`；只有封存已提交时 rollout 才是 `complete`；Home 已准备但未提交时记 `robot_home: failed`（它可能执行过）。计数（片段号、策略代次、已完成片段数）从日志读回。
+- **操作员命令。** `resume(command_id, expected_seq=, environment_handled=True, health_rechecked=True)` 把 `WAIT_HUMAN` 或 `FAULT_LOCKED` 转到 `PREFLIGHT`，运行停在那里直到再次调用 `run()`（resume 本身不推进任何东西）；重复的命令返回第一次的结果（被其他命令用过的编号被拒），过时的 `expected_seq` 被拒。`stop(command_id)`：同一个停止再发一次，在待生效时（`stop_requested`，标为重复）或已生效且下一次 resume 之前（`repeated`），都不改变任何东西，所以不会结束一个已在等人的运行；被 resume 用过的编号、或上一次 resume 之前用过的停止编号被拒（`command_used`），要换新编号重发。`stop(command_id)` 受控停止当前片段，在下一个决策点等人；在 `WAIT_HUMAN` 中则结束运行（`COMPLETED`）。
+
+`RunConfig` 包含全部参数（片段数、步数上限、各种超时与上限、`termination`）。序号、step 和片段号都来自日志，所以 Fake 上固定种子的运行可以逐行重放。
+
+## 终止裁决器（`levi/automatic/termination.py`）
+
+四段，不跳过：**候选**（优先级为 `goal_candidate` 或类型在 `goal_event_types` 中的事件）-> **取证**（同一时刻只有一个请求，覆盖候选及其后 `settle_steps` 步）-> **确认**（属于本运行、本片段、本目标、本请求且未过期的 `confirmed` 判定，没有被撤回事件推翻；连续 `confirmations` 次）-> **停止请求**（`goal_verified`）。
+
+永远不会导致停止的：`unknown`、`unavailable`、超时、属于其他运行或片段的判定、未请求或重复的应答、已过期的、来自其他时钟域或生成时间在未来的、证据没覆盖到稳定窗口的、违反契约的。这些一律丢弃并记备注，片段继续执行到步数上限（`on_unknown: continue_to_horizon`，v1 唯一的策略）。被丢弃的应答会撤回对应请求，裁决器不会无限等待；同一片段判定方违反契约达到 `violation_limit` 次后，本片段不再理会判定（也不做终局判定）；事件提供方违约同样次数后，本片段不再读它的事件；两种情况下运行都在下一个决策点等人（`contract_violation_limit`），优先于结束运行。迟到的旧事件不会把候选往前挪，确认必须覆盖候选（`observed_from_step` 不晚于候选）。
+
+| `TerminationConfig` | 默认 | 含义 |
+| --- | --- | --- |
+| `allow_early_stop` | `true` | 为 `false` 时只记录确认，不据此停止 |
+| `min_steps` | 10 | 此步之前不请求 |
+| `settle_steps` | 8 | 证据要覆盖到候选之后这么多步 |
+| `cooldown_steps` | 15 | 两次请求之间的步数 |
+| `max_requests` | 6 | 每个片段的请求上限 |
+| `confirmations` | 1 | 停止所需的连续确认次数 |
+| `control_fraction` | 0.0 | 不提前终止的片段比例（按片段 ID 和 `control_seed` 确定），用来测量误提前终止 |
+| `goal_event_types` | `object_settled` | 能成为候选的事件类型 |
+| `violation_limit` | 3 | 违反契约多少次后不再理会判定 |
+
+默认值没有在任何数据上标定过。
+
+## 复位仲裁（`scene_assessment.py`、`reset_manager.py`）
+
+**只有证据足够的 `ready` 场景才能跳过复位。** 场景评估只是提供方的说法；`scene_assessment.arbitrate` 按任务的**初始状态契约**（Initial State Contract，`RunConfig.initial_state`）读它：
+
+| 评估 | 结论 |
+| --- | --- |
+| `ready`，契约的每个必需谓词都读为真，且（`require_visible_evidence` 时）至少有 `min_evidence_refs` 个**不同的**帧或片段证据引用（同一引用写两次只算一次），并覆盖**每个**首选视角（`require_all_views`） | `ready`：开始下一个前向片段 |
+| `ready`，但漏了或没读出某个必需谓词 | `unknown`（记 `scene_missing_predicate`） |
+| `ready`，但缺少某个首选视角的证据 | `unknown`（记 `scene_missing_view`） |
+| `ready`，但不同的证据引用不够 | `unknown`（记 `scene_insufficient_evidence`） |
+| 任何观测时刻早于请求时刻（早于 Home 完成或复位结束）的评估 | `unavailable`（记 `scene_dropped_stale`） |
+| 没有契约时的 `ready` | `unknown`（记 `scene_no_contract`） |
+| 评估的是另一份契约 | `unavailable`（记 `scene_contract_mismatch`） |
+| `reset_required`、`unknown`、unavailable | 原样 |
+
+**没有契约时没有任何场景算 ready**（`initial_state = None`，默认）：ready 需要契约和证据，所以任何前向片段都开不了，也不运行复位（复位不可能让场景变成 ready）：每次场景核对都转人工。`levi automatic validate` 对这样的作业按真机运行直接拒绝（`validate --dry-run` 和 `run --dry-run` 仍可运行，并给出警告）。**契约文件格式是草案（HA-23）：** 下面是能承载流水线文档 §6.1 的最小格式，等用户确认；**视角规则**同样待确认：证据引用用第一个 `:` 之前的文字表示相机视角（`<视角>:<帧>`），视角名取自契约的 `observations.preferred`，代码里不写死任何相机名。
+
+```yaml
+initial_state:
+  id: stack-plates-initial
+  version: "1"
+  status: draft            # 用户确认前为 draft（HA-23）
+  robot:
+    home_pose: fr3_safe_home
+    gripper: open
+  predicates:
+    required: [object_at_source, gripper_open]
+    optional: []
+  observations:
+    preferred: [side, wrist]
+    require_visible_evidence: true
+    min_evidence_refs: 1
+    require_all_views: true   # 证据须覆盖每个首选视角（HA-23）
+```
+
+用 `scene_assessment.load_contract(text)` 读取。读取器只接受严格的 YAML 子集（不新增依赖）：用空格缩进的块映射、标量列表（`- a` 或 `[a, b]`）、带引号或不带引号的标量、`true`/`false`/`null`、有限数字和 `#` 注释；拒绝制表符、锚点、别名、标签、块标量、流式映射、多文档、重复键以及未知键。以 `{` 开头的文档按 JSON 读。谓词名用场景提供方的名字：契约把 `(id, version)` 和这些名字登记给 `aeri.parse`。
+
+**场景不是 ready 时怎么办**由复位策略决定（`RunConfig.reset_strategy`，`reset_manager.py`）：
+
+| 策略 | 场景不是 ready |
+| --- | --- |
+| `single_reset_policy`（默认） | `reset_required` 运行复位策略；`on_scene_unknown = "reset"` 时 `unknown`/`unavailable` 也运行，否则转人工；两个前向片段之间最多 `max_reset_attempts` 次复位，之后转人工 |
+| `human_assisted` | 一律转人工（不运行复位策略） |
+
+`human_assisted` 就是“仅测评 policy”模式（人工复位，AUT-22）；仲裁接口不依赖 `single_reset_policy`。人恢复之后系统会再核对一次场景（第二道确认，设计稿 X2 §1.2），**只有 `ready` 才开始前向片段**：`unknown`、unavailable、矛盾或契约对不上的回答、观测早于请求或证据不足、答的是别的片段，都会再次转人工，原因写在 note 里。永远答不出的场景核对会让运行在 `WAIT_HUMAN` 与 `VERIFY_INITIAL` 之间反复，所以没有场景提供方时拒绝启动该模式（`cli.launch_problems`；由人作为提供方的 `operator_attested`，即设计稿 X2 的方案，留给后续任务）。`atomic_skill_sequence` 和 `scripted_safe_reset`（流水线文档 §6.4）在 v1 中被拒绝。`reset_manager.check_plan` 拒绝在 `ready` 以外的场景上开始前向片段的策略，`check_after` 拒绝在复位到达上限、被停止或失去策略之后还继续、或在停止之后重试的策略。验证成功的复位总是进入下一次场景核对，晚到的停止（quiesce 或复位后场景评估期间到达）在那里生效：运行转人工，复位结果保持原样；除非 `home_after_operator_stop` 为 false，否则先 Home。违反规则的策略交给人处理（记 `strategy_refused`），不会锁住运行。复位到达上限时先封存（保留失败的 rollout，结果为 `failure` / `horizon_exhausted`），再 Home，然后转人工；Home 失败则锁定运行（`home_failed`），在操作员恢复之前什么都不再动；恢复要经过 `PREFLIGHT` 和一次新的初始状态检查。同一个命令 ID 重复恢复只恢复一次。
+
+## 提供方适配层（`levi/automatic/adapters/`）
+
+**Fake 提供方（`events.py`）。** `FakeEventStream`、`FakeGoalVerifier` 和 `FakeSceneAssessor` 交出契约字节，由 `aeri.parse` 读取；脚本可设定结论（`confirmed`、`rejected`、`unknown`、`ready`、`reset_required`）、提交或收取时的 unavailable 码、延迟、已过期/未来/其他时钟域的有效期、更新的 minor、控制键、互相矛盾的谓词、未登记的谓词、其他片段或请求。`make_request` 拒绝任何带操作员或评测字段、或机器人命令的请求。
+
+**在线判定（C5）-> 判定（`legacy_live.py` 的 `from_c5`）。** 只读取 `levi.live.online` 的公开名字，不改动它。
+
+| C5 `status` | 条件 | 结果 |
+| --- | --- | --- |
+| `ok` | `undecided`（包括未决的成功） | `unknown` / `model_undecided` |
+| `ok` | `outcome=success` | `confirmed`；两个答案字段不都支持时为 `unknown` / `conflicting_predicates` |
+| `ok` | `outcome=failure` | `rejected`（两个字段都正常时附一个 confirmed 的 `c5-rule` 否决项） |
+| `unavailable` | `gate_closed`、`gate_pending`、`busy`、`service_busy` | `Unavailable`，可重试：属于降级，不是错误 |
+| `unavailable` | `cold_start`、`vllm_starting`、`no_room`、`wake_failed`、`vllm_failed`、`shutting_down` | `Unavailable`，不可重试 |
+| `error` | `timeout:` | `Unavailable(timeout)`：超时永远不是 `unknown` |
+| `error` | `invalid_answer:`、`model_error:`、`internal_error:`、`invalid_request:` | `Unavailable(invalid_answer / model_error / provider_error / contract_violation)` |
+| 其他 | | `Unavailable(contract_violation)` |
+
+映射出的判定总是保留 C5 原值（`legacy_c5`），契约按原值复核映射：映射错误时返回 `Unavailable(contract_violation)`（原值写在 `detail` 里），绝不去掉原值把错误的判定放过去。
+
+**AERI 状态 -> 客户端会话状态（C2）。** 只写客户端的 7 个状态；凡是策略可能在推理的状态一律写 `running`：
+
+| AERI 状态 | 活动角色文件的 C2 状态 |
+| --- | --- |
+| `PREFLIGHT` | `standby` |
+| `VERIFY_INITIAL`、`SCENE_ASSESS`、`WAIT_HUMAN`、`FORWARD_FINALIZE`、`RESET_VERIFY` | `waiting_reset` |
+| `FORWARD_ACTIVE`、`FORWARD_STOPPING` | `running`（前向文件） |
+| `RESET_ACTIVE` | `running`（复位文件；前向文件写 `standby`） |
+| `ROBOT_HOME`、`RESET_FINALIZE` | `homing` |
+| `FAULT_LOCKED` | `fault` |
+| `COMPLETED` | `finished`（操作员停止后为 `stopped`） |
+
+测试把每个状态都喂给后台实时标注服务自己的门控（`gpumgr.gate`）和冷启动保护：门恰好在策略可能推理时对推理关闭。若把复位策略执行状态写成 `waiting_reset` 或任何新状态名，门就会打开。
+
+## 录制层（`levi/automatic/recorder.py`）
+
+`RolloutRecorder(root, run_id=, run_dir=, group=, texts=, media=)` 把每个片段写成后台实时标注服务已经能读的 rollout 目录（接口 C1）：`<root>/<group>/<task_folder>/demo_NNNN`，`NNNN` 是片段编号，前向和复位片段各在自己的任务目录（`RunConfig.forward_folder`、`reset_folder`）。每次运行请用自己的任务目录：目录里已经用过的编号（`demo_`、`incomplete_` 或 `discarded_`）绝不覆盖，片段打不开，运行锁定（`recorder_failed`）。
+
+**封存**沿用后台实时标注服务的规则（`levi.live.criteria`）：同步步骤文件（`aeri_steps.csv`），媒体写入器收尾，`events.csv` 写入 `episode_end` 行，`metadata.json` 写入 `stopped_at`、`media_storage.video_frames_match_csv` 和 `cameras.stall_detection.stalled`，每个文件整份写入并同步；再读回核对；**最后才创建 `.complete`**（临时文件、fsync、改名、fsync 目录）。标记之前任何一次写失败都会抛出，所以不会在不完整的 rollout 上留下标记；运行锁定（`recorder_failed`），目录改名为 `incomplete_NNNN` 并写 `eval.abort_reason`（安全停止写 `fr3_fault`，后台实时标注服务会把它读成 FR3 故障）。重复封存返回第一次的结果。
+
+**标签。** `eval.outcome` 保持 `unlabeled`，`eval.verdict_by` 为 `aeri`，不写 `eval.agent_label`：自动结论只记在运行日志里，绝不写成操作员标签或 agent 标签。`eval.aeri` 记录运行和片段。
+
+**运行 manifest**（`<run_dir>/manifest.json`，`levi.aeri.manifest.v1`）：本次运行打开过的每个片段、它的目录和状态（`opening`、`open`、`complete`、`incomplete`），复位片段的 `after_forward` 和前向片段的 `after_resets`。条目在目录创建之前写入。它是派生视图，唯一事实来源仍是运行日志。
+
+**重启之后** `Orchestrator.restore` 调用 `recorder.recover(...)`：本次运行中封存事务没有被日志提交的 rollout 一律改名为 `incomplete_*`（`orchestrator_crash`）；如果崩溃发生在写标记和提交之间，先删除标记，保证不会出现“目录说完成、日志说未完成”。其他运行的目录从不触碰。
+
+**会话文件（C2）。** `SessionFiles(root, run_id=, group=, folders=)` 作为编排器的 `listener`：每次提交状态后重写两个角色文件（`<root>/.eval_sessions/<group>__<task_folder>.json`），只用客户端的 7 个状态（见上表）、ISO 时间、`levi.reset_wait_s: null`，前向文件写 `levi.mode: unattended`，复位文件写 `levi.enabled: false`，另有 `episode_role` 和 `aeri{run_id, state, control_epoch}`。会话写失败只记一条 note（`session_write_failed`），不会停止运行。`heartbeat()` 重写最后的状态（后台实时标注服务读端在 10 秒没有更新且进程不在时判定会话崩溃）。请用 `watch.exclude` 把复位目录排除在后台实时标注之外，免得前向规格去标注复位片段。
+
+**媒体。** `MediaSink`（`open`、`frame`、`finish`、`abort`）负责写采集格式（视频、位姿和夹爪 CSV）并报告事实。默认的 `NullMedia` 不写视频。某个相机的帧连续 `stall_limit`（10）次观测没有变化时，录制层自己把它封存为停滞，后台实时标注服务因此会拒收该 rollout，与客户端的 rollout 一样。
+
+## 指标（`levi/automatic/metrics.py`）
+
+`metrics.report(events, labels=, manifest=, termination=, max_steps=)` 读取运行日志（步数取自运行 manifest），给出三组指标；每个比率都是 `{"n", "of", "rate", "wilson95"}`，区间用后台实时标注服务统计模块的 Wilson 95% 区间（`levi.live.stats.wilson`）。探索阶段只有 20–30 个片段时，要看区间，不要只看比率。
+
+| 组 | 指标 |
+| --- | --- |
+| 自动结论 | 前向片段数、结局计数、`autonomous_success_rate`（unknown 留在分母里）、停止原因 |
+| 提前终止 | 提前停止（`goal_verified`）对照真值的混淆表；精确率（真成功的提前停止 / 提前停止）、召回率（提前停止 / 检测器本可停下的真成功片段：提前停止或跑满的片段，不含被人、故障或策略结束的片段）、**只用对照组计算的误提前终止率**（流水线文档 §5.5：对照片段不允许提前终止、跑满上限，其中检测器本会停下的、占“真失败、跑满上限、封存成功且带对照记录”的对照片段的比例；其余在 `left_out` 中按原因单独计数：`cut_short` 是被人、故障或策略结束的，`not_recorded` 是没封存或没有对照记录的；没有这类片段时为 `available: false`，不给数字）、实验组的“真失败却提前停止 / 真失败”只作为下界 `treatment_false_early_stop_lower_bound`（停止掩盖了之后的情况）、节省步数（`max_steps` 减去实际步数，对提前停止求和）、对照片段单列、自动结论与真值的一致率和误判成功数 |
+| 复位 | 复位次数、`autonomous_reset_success_rate`、场景决策与跳过次数；跳过准确率（在真就绪的场景上跳过、或在真需要复位的场景上复位 / 有标签的决策）、错误跳过率、多余复位率、复位耗时 |
+| 自动化 | 干预次数（进入 `WAIT_HUMAN` 或 `FAULT_LOCKED`）及原因、恢复次数、最长无干预的连续前向片段数、人工等待时间（仅在时钟域没变时计） |
+
+**四类标签，互不混用**（流水线文档 §9.4）。`autonomous_verdict` 就是日志里的片段结果：不在别处写，也绝不称为真值（相应比率都叫 `autonomous_*`）。`posthoc_verdict`、`operator_label` 和 `adjudicated_ground_truth` 存在 `<run_dir>/labels/<kind>.jsonl`，每类一个只追加的文件（每行 fsync），用 `LabelStore.add(kind, episode_id, value, subject=, by=)` 写入。写一类标签从不改动别类的文件；同一类、同一片段、同一主题的第二个标签会被拒绝，除非写明 `supersede=True`，此时追加一行（第一行保留）。`by` 是不透明的主体 ID（不写姓名或邮箱）。主题有 `task_outcome`（`success`/`failure`）和 `initial_state`（`ready`/`reset_required`：开始这个片段之前场景是否需要复位）。比率用的真值：有裁定标签就用裁定标签，否则用操作员标签（`truth="adjudicated"` 只用裁定标签）；没有真值的片段计为 `unlabeled`，不进比率。
+
+标签文件末行写到一半（崩溃）不会吞掉数据：下一条标签之前，撕裂的字节被移到 `labels/torn/`，文件截回到完整行；这一步和“是否已有标签”的检查在同一把锁下完成。不是最后一行的坏行会让文件不可用，直到有人检查（绝不跳过）。
+
+**对照片段**（`termination.control_fraction`、`control_seed`：比例和抽取方式，参数待用户确认，HA-23）记在运行 manifest 里：每个封存的片段有 `control`，对照片段还有 `would_stop_step`（检测器本会停下的步，或 `null`）。
+
+## 命令行（`levi/automatic/cli.py`）
+
+```
+levi automatic doctor   [--config F] [--json]
+levi automatic validate --config F [--json]
+levi automatic run      --config F --dry-run [--episodes N] [--scenes S] [--keep DIR] [--json]
+levi automatic status   --run-dir D [--json]
+levi automatic report   --run-dir D [--config F] [--truth T] [--format md|json]
+```
+
+`levi automatic …` 是同一个命令。每个选项的帮助都是中英双语。
+
+- `doctor` 只读：检查契约快照、Fake、作业文件、rollout 根目录是否可写；并说明本版本没有真机适配层（非必需项，退出码仍为 0）。
+- `validate` 读取作业文件，打印计划及其 `plan_sha256`（即日志里的计划哈希）；被拒时退出码 2 并给出原因。不加 `--dry-run` 时按真机运行校验：没有 `task.initial_state_spec` 的作业被拒绝（没有场景能算 ready，前向片段永远开不了；错误信息给出修法），没有场景提供方的人工复位模式也被拒绝（目前真机运行还配不了提供方）。加 `--dry-run` 时同样的作业可以通过，但给出警告；`doctor` 的 `launch` 检查报告同样的结论。
+- `run` **没有 `--dry-run` 一律拒绝**（退出码 2）：本版本不能真机运行。试运行只驱动进程内 Fake，在临时目录里运行（结束后删除；`--keep DIR` 保留在一个新的或空的目录里），绝不写作业里的 `rollout_root`，运行期间拒绝任何 socket 连接。没有任何真实对象拥有运动权限：唯一的机器人是 `FakeRobot`。`--scenes reset_required,ready` 设定 Fake 先给出的场景结论。
+- `status` 不拿锁、不写入地读取运行日志（撕裂的末尾只报告、不截掉；损坏的日志显示 `FAULT_LOCKED`）。
+- `report` 以 Markdown 或 JSON 打印指标（见上）。
+
+**作业文件**（`levi.aeri.job.v1`，与契约一样是草案，HA-23）使用同一个严格 YAML 子集；拒绝未知的节和键，v1 只读取下列内容：
+
+```yaml
+schema_version: levi.aeri.job.v1
+experiment:
+  name: r20261010-a           # 运行 ID（不含点）
+  episodes: 30
+  random_seed: 42
+  execution_mode: shadow      # shadow | assisted | autonomous（只校验）
+policies:
+  forward:
+    max_steps: 120
+  reset:
+    max_steps: 80
+task:
+  instruction: stack the plates
+  reset_instruction: "Reset: stack the plates"
+  initial_state_spec: initial-state.yaml   # 相对本文件
+termination:                  # TerminationConfig 的字段
+  min_steps: 10
+reset:
+  strategy: single_reset_policy   # 也接受 single_policy；或 human_assisted
+  max_attempts: 1
+  on_unknown: reset               # 或 wait_human
+recording:
+  rollout_root: /data/rollouts
+  group: aeri
+  forward_folder: stack_plates__r20261010-a
+  reset_folder: reset_stack_plates__r20261010-a
+```
+
+## Fake（`integrations/fr3_automatic/fake.py`）
+
+`FakeClock`（只在推进时走）、`FakeRobot`（只凭围栏的令牌运动；可脚本注入：连续三次 503 后闩锁、连续六次状态过期后闩锁、位姿冻结、红灯、闩锁、丢失应答、命令发出后进程崩溃、Home 超出容差、相机停滞）、`FakePolicy`（在 Fake 时钟上固定延迟；超时、服务端错误、NaN、维度或代次错误、过早的 `valid_from`、acquire 或 quiesce 失败、服务端崩溃）和 `FakeRecorder`（带写线程；写失败在下一次 commit 或 seal 时报出，所有写入成功后才写 `.complete`，`abort` 得到 `incomplete_*`）。该模块不 import 任何网络、进程或 LEVI 代码。
+
+**Fake 与真机的差别**（`fake.FIDELITY`）：没有动力学和停止距离；Home 除非脚本指定否则总在容差内（真实的 `_go_home` 不核对到位）；急停对 Fake 可见，而真机 FR3 的软件状态过期联锁看不到急停；闩锁计数只部分模仿 `Fr3Guard`；健康状态与命令同一步读取（真实 C3 文件 2 Hz 写入）；没有 GPU 争用和冷启动；`FakeRecorder` 不写文件（`RolloutRecorder` 写，但它默认的媒体写入器不写视频）；相机帧只是计数；场景和目标 Fake 按脚本作答（不能说明真实模型的准确率）；会话文件只在状态变化时重写，长时间等待期间没有 2 秒心跳；没有网络。**这些测试通过只证明状态机逻辑，绝不代表真机行为。**
+
+**测试**（`tests/automatic/test_aeri_*.py`）：状态表与围栏；各个 Fake；C5 映射表与 C2 门控如实性；裁决器；编排器在设计的故障清单上的行为（错误成功、Unknown、判定超时或离线、事件抖动、复位阶段迟到的前向动作块、策略服务崩溃、相机停滞、没有策略资源、复位到达上限、Home 失败、急停或 FR3 故障、录制器写盘和封存失败、每个事务每个阶段的重启以及 SIGKILL、两次 Resume），以及 150 次带崩溃和恢复的固定种子随机运行。
+
+**端到端**（`test_aeri_e2e.py`，用 `aeri_world.py` 的完整 Fake 环境：编排器、录制层、manifest、会话文件、初始状态契约）：N 轮“前向 -> Home -> 场景 -> 复位 -> 下一轮”，每个 rollout 都用 `levi.live.criteria` 读回；固定种子的运行两次写出相同字节（日志、rollout、manifest、会话文件，去掉墙钟时间和进程身份），换种子则不同；两轮运行里每个事务的每个阶段都让编排器崩溃一次（崩溃点逐一计数），再由新进程接管：结果总是 `FAULT_LOCKED`（或 `COMPLETED`），不重放任何动作，每次 Home 只发一次，磁盘与日志一致，两个会话文件都是 `fault`；每第九个崩溃点由操作员恢复并跑完，不复用任何目录；另有子进程在封存事务的每个阶段以及 `.complete` 前后被 SIGKILL。故障清单（Fake 能测的 12 行：错误成功、Unknown、判定超时、事件抖动、复位中迟到的前向动作块、策略服务崩溃、相机停滞、没有策略资源、复位到达上限、磁盘写满、重启、两次 Resume）对每一行断言最终状态、记录的降级原因，以及没有任何动作在无令牌时执行或尝试。
+
+**后台实时标注兼容**（`test_aeri_live_compat.py`）：Fake AERI 运行写出的 rollout 和会话文件被真实的后台实时标注服务接收（它的控制器和 worker 以 `once` 模式运行，对接假模型服务）：前向片段被标注；用 `watch.exclude` 排除的复位目录不被标注（不排除时它会成为一个单独的数据集，所以应当排除）。`levi/live` 及其测试都没有改动。
+
+**尚未实现：** 真实 FR3 适配层、真机运行命令、`/automatic` 页面；`atomic_skill_sequence` 和 `scripted_safe_reset`。
+
+
+## 测评 policy 发现（`levi/automatic/policies.py`）
+
+`discover(policy_root)` 列出策略根目录（本机是 `openpi/checkpoints`）下的检查点目录，供启动页回答“部署哪个策略”“有没有复位策略、用哪个”。它只读：只列目录、读几个小的元数据文件，不 import openpi、不加载权重、不重算哈希、不打开端口、不跟随符号链接。`discover_report` 还返回被跳过的条目、条目数是否被上限截断、根目录一级的问题；`select(entries, role)` 取某个角色的可部署条目。
+
+| 字段 | 来源 |
+| --- | --- |
+| `kind`、`deployable`、`is_jax` | 可部署的 JAX 目录要有 `params/`、`assets/` 目录（openpi 加载器读它）和 `norm_stats.json`（在顶层，或在 `assets/` 下，直接放或再深一层）；缺哪项就在 `problems` 里写明（`assets:missing`、`norm_stats.json:<原因>`）。有 `actor/` 是 PyTorch 源目录（列出但不可部署）；其余为 `unknown`，原因 `layout_not_recognised`。 |
+| `config`、`config_source` | 先取 `VERSION.json` 的 `config`，再取 `README_DEPLOY.md` 里的 `--policy.config`，再取配方（`DEFAULT_RECIPE` 或 `recipe=` 参数），都没有则为 `none`。README 里训练机的配置名单独放在 `training_config_name`，从不用于部署。 |
+| `role`、`role_source` | 只有明确声明才得到 `reset`：`VERSION.json` 的 `policy_role` 或 `role` 去空白、忽略大小写后等于 `reset`，或配方。`forward` 来自同样的明确声明，或按约定（`convention:config`）配置属于已知前向系列。目录名、README 标题、配置名、`VERSION.json` 的任何键或短字符串含 reset 类词（`reset`、`recovery`、`recover`、`return`、`home`）、`policy_role` 无法识别、声明互相矛盾，一律 `unknown`（原因在 `problems` 或 `warnings`）。`role: best` 这类是版本变体，不算角色声明。`select(entries, "forward")` 不返回 `unknown`，除非传 `include_unknown=True`。 |
+| `variant`、`version`、`model`、`step`、`version_note`、`siblings`、`verified`、`not_verified` | `VERSION.json` 原文（`parallel_to` 对应 `version_note`）。 |
+| `sha256_state`、`params_hashed`、`sha256_records` | 磁盘上已有的哈希：目录内或根目录的 `*.sha256` 清单（按相对路径的第一段归属，绝对路径、含 `..`、隐藏开头的路径不参与）和 `CONVERSION.json` 里的哈希。`recorded`：有本目录文件的清单；`indirect`：只有 `CONVERSION.json` 的哈希，它们属于 PyTorch 源文件和 `norm_stats_from` 指向的目录（见各记录的 `subject`），不是 `params/` 的；`missing`：没有。`params_hashed` 只在清单里有权重文件时为真。**页面不得把 `indirect`（或 `params_hashed` 为假的 `recorded`）显示为“已校验”**；`VERSION.json` 里“已核对”的说法不算哈希。`covers` 写明记录覆盖什么。 |
+| `converted`、`size_bytes` | `CONVERSION.json` 存在且可读；按 `lstat` 累加的体积，最多数 `MAX_FILES_PER_ENTRY` 个目录项（文件、目录、链接都计，超过记 `size_truncated`）。 |
+
+`VERSION.json` 或 `CONVERSION.json` 有问题（不是 JSON、太大、不是对象、符号链接、管道）时记入 `problems`，目录照常列出。大小写和 Unicode 折叠后同名、或 `(model, version, variant, step)` 相同的目录，两边都会被标记。根目录里的隐藏项、普通文件和符号链接列在 `skipped` 中，不读取。根参数为 `None`、空串或含 NUL 时返回空结果和 `root_invalid`。`VERSION.json` 与 README 的配置名不一致时给出 `config_sources_disagree` 警告。没有任何条目的角色是 `reset` 时，`select(entries, "reset")` 为空，调用方只给“人工复位”。按约定归类的角色和配方里的配置名是对本机的推断，不是检查点自己的声明，页面应显示 `role_source`。测试见 `tests/automatic/test_policies.py`。

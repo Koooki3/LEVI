@@ -1,12 +1,19 @@
-# Automatic evaluation pipeline (AERI): contracts and journal
+# Automatic evaluation pipeline (AERI)
 
 [中文](AUTOMATIC_PIPELINE.zh-CN.md)
 
-**Status: foundation only.** This page documents the two pieces that exist:
-the integration contracts (`levi/domain/aeri.py`) and the durable journal
-primitive (`levi/automatic/journal.py`). There is no orchestrator, no state
-machine, no robot adapter and no command yet; nothing here moves a robot,
-starts a model or opens a port. Everything is tested with fakes only.
+**Status: runs on fakes only.** This page documents the integration
+contracts (`levi/domain/aeri.py`), the durable journal
+(`levi/automatic/journal.py`), the state machine and orchestrator
+(`levi/automatic/state_machine.py`, `orchestrator.py`), the termination
+arbiter (`termination.py`), the reset arbitration (`scene_assessment.py`,
+`reset_manager.py`), the recorder layer (`recorder.py`), the metrics
+(`metrics.py`), the command line (`cli.py`), the provider adapters
+(`levi/automatic/adapters/`) and the in-process fakes
+(`integrations/fr3_automatic/fake.py`). There is no real robot adapter and no
+page yet, and the command line only dry-runs on the fakes; nothing here
+moves a robot, starts a model or opens a port, and nothing tested here
+counts as verified on the robot.
 
 The pipeline joins three parts through versioned messages:
 
@@ -225,3 +232,615 @@ never repeated.
 **Limits.** Only the run folder and its parent are synced at creation, not
 every ancestor; the journal is never rotated while a run lasts (a run
 writes a few lines per transition, not per control step).
+
+## The state machine (`levi/automatic/state_machine.py`)
+
+The normal path of a run:
+
+```
+PREFLIGHT -> VERIFY_INITIAL -> FORWARD_ACTIVE -> FORWARD_STOPPING -> FORWARD_FINALIZE
+  -> ROBOT_HOME -> SCENE_ASSESS -> FORWARD_ACTIVE (next episode) ... -> COMPLETED
+VERIFY_INITIAL / SCENE_ASSESS -> RESET_ACTIVE -> RESET_VERIFY -> RESET_FINALIZE
+  -> VERIFY_INITIAL (home first, then a fresh initial-state check)
+```
+
+`TRANSITIONS` lists, for each allowed `(from, to)`, the reasons, the
+principals (`orchestrator`, `operator`, `safety_guard`, `recovery`) and the
+one action kind a transition may name; `check_transition` refuses anything
+else (`E_ILLEGAL`, `E_REASON`, `E_AUTHORITY`, `E_ACTION`, `E_STEP`,
+`E_EPISODE`, `E_RESULT`), and `check_journal` re-reads a whole journal
+against the same table. The rules that matter most:
+
+- motion states (`FORWARD_ACTIVE`, `RESET_ACTIVE`) are entered only from a
+  scene decision (`VERIFY_INITIAL`, `SCENE_ASSESS`), by the orchestrator,
+  with a `policy_steps` action;
+- `policy_steps` and `home` are physical and not idempotent: the action must
+  say `non_idempotent` and carry a `step` (`step=None` is refused). The
+  orchestrator numbers the physical actions of an episode (0: its steps,
+  1: its home) and never reuses an episode number, so the journal's
+  idempotency key refuses a second attempt in any epoch, after any recovery;
+- every live state may move to `FAULT_LOCKED` (orchestrator, safety guard or
+  recovery). `WAIT_HUMAN` and `FAULT_LOCKED` are left only by an operator's
+  command (`command_id`) to `PREFLIGHT`, never straight back to motion. An
+  operator principal always names its command, on every rule;
+- the home after a forward episode is `ROBOT_HOME -> SCENE_ASSESS` with the
+  reason `robot_home_reached`; after an operator's stop the run may instead
+  go `ROBOT_HOME -> WAIT_HUMAN` (`operator_stop`, the operator's command, no
+  motion);
+- the episode result is committed on `FORWARD_FINALIZE -> ROBOT_HOME`,
+  `RESET_FINALIZE -> VERIFY_INITIAL | WAIT_HUMAN`, and on a move from an
+  episode state to `FAULT_LOCKED` (an episode ended by a fault: its result
+  says `task_outcome: unknown` and the fault as `stop_reason`, following
+  pipeline §4.3 where the design X1 §2.5 had no result; the stop reasons
+  gained `recorder_failed` and `home_failed` for this). An episode that ran
+  no step discards its recording (`recorder_abort`).
+
+**Motion fence.** `MotionFence` holds the one current `MotionToken`
+(`run_id`, `transaction_id`, `control_epoch`, `kind`, `episode_id`,
+`policy_epoch`, expiry on the orchestrator's clock). A robot adapter calls
+`fence.check(token, kind, now)` before every command. Policy-step tokens are
+issued after the commit into an active state; a home token between the home
+transaction's prepared and acknowledged lines. The orchestrator revokes the
+token before it checks or prepares any other transaction, so a late thread,
+a late chunk or a refused transition cannot leave motion authorised.
+
+## The orchestrator (`levi/automatic/orchestrator.py`)
+
+`Orchestrator.create(run_dir, RunConfig, robot=, policy=, recorder=, events=,
+verifier=, scene=, clock=, fence=)` starts a run; `run()` drives it until it
+needs a person (`WAIT_HUMAN`, `FAULT_LOCKED`) or ends (`COMPLETED`). Every
+state change is `prepare` (synced) -> act -> `acknowledge` -> `commit`;
+`executed: no` aborts and moves to `WAIT_HUMAN` or `FAULT_LOCKED`,
+`executed: unknown` always to `FAULT_LOCKED`. Nothing is retried
+automatically.
+
+- **Threads.** `run()` belongs to one thread; `stop()` and `resume()` may
+  come from any thread. One re-entrant state lock serialises every "read the
+  state, check, prepare, commit", so no transaction is prepared from a state
+  other than the one it was checked against. `stop()` never waits for it:
+  it registers the stop at once (in a registry the loop reads at every step
+  and before every episode, under its own small lock) and returns
+  `stop_requested`, even while an adapter call inside a transaction is slow
+  or hung; only in `WAIT_HUMAN`, with the lock free within 50 ms, does it end
+  the run itself (`completed`). `stop()` only registers: it does not hold
+  the robot itself (that is the next safe point of the loop, or, when an
+  adapter hangs, the robot side's watchdog and the token's expiry). A stop
+  stays registered until the run reaches a person, whatever brought it
+  there (`WAIT_HUMAN` by any reason), where every registered stop is
+  consumed (ids beyond the first are noted as `stop_commands_merged`): a
+  stop left behind never blocks the operator's next stop, which ends the
+  run. Each registration has a generation: a resume
+  clears only the stops registered before it began (written as a
+  `stop_command_lost` note); a stop that arrives during a resume survives
+  it and takes effect at the next decision point.
+- **Exceptions.** Any exception escaping the loop (an adapter, the journal)
+  revokes the motion token first, then holds the robot, closes an open
+  transaction as `executed: unknown`, moves the run to `FAULT_LOCKED`
+  (`watchdog_timeout`) and only then propagates. When even that cannot be
+  written, the orchestrator halts in memory (`halted`): it refuses to run or
+  resume, and a restart (`restore`) recovers from the journal.
+- **Notes.** Audit notes from the loop (dropped chunks or judgements, bad
+  events) are counted in memory and written as one summary line per code at
+  the next transaction boundary, at most `note_lines_per_episode` lines per
+  episode (then one `notes_suppressed` line, and another at the end of
+  `run()` for anything suppressed since); nothing is fsync'd per note inside
+  the loop. Notes that explain a lock or a disputed verdict
+  (`orchestrator_exception`, `hold_failed`, `motion_unacknowledged`,
+  `recorder_error`, `early_stop_disputed`, `stop_command_lost`) are written
+  beyond the budget. A hold, a quiesce or a move to `FAULT_LOCKED` acts
+  first; the backlog of notes is written after it.
+- **Inside an episode** the loop never waits for a judgement: requests are
+  submitted and collected with a zero timeout, and withdrawn after
+  `judge_request_timeout_ns`. A chunk is waited for at most its hard
+  deadline and accepted only for the current policy epoch, request and
+  episode, on time by C's own clock, with the right dimensions and
+  `valid_from_action_index >= action_start_index`; anything else is dropped
+  with a journal note (`chunk_dropped_*`). `chunk_failure_limit` failures in
+  a row stop the episode (`policy_error`).
+- **Safety.** A latched guard or a red light stops at once into
+  `FAULT_LOCKED` (`safety_stop`, by `safety_guard`); a command the robot did
+  not acknowledge (`unknown`) is `watchdog_timeout`; a recorder failure is
+  `recorder_failed` and the rollout becomes `incomplete_*` with no
+  `.complete` marker; a failed home is `home_failed`. Every home first
+  passes the safety check (no latch, no red light), else `safety_stop`.
+- **Scene.** Unknown or unavailable never skips a reset: with
+  `on_scene_unknown = "reset"` (default) the reset policy runs, otherwise the
+  run waits for a person; `max_reset_attempts` bounds the resets between
+  two forward episodes. A reset that reaches its horizon is sealed, homed
+  and waits for a person (`reset_horizon_exhausted`).
+- **Results.** The forward result is committed before the home
+  (`robot_home: not_attempted`, `scene_reset: unknown` at that moment);
+  `task_outcome` follows `goal_verification` exactly, so unknown and
+  unavailable are never a success. A final judgement is always asked once
+  the policy is quiesced; an early stop (`goal_verified`) is a success only
+  when that final judgement confirms it too, otherwise it is `undecided`
+  (or `unavailable`) with an `early_stop_disputed` note. The final judgement
+  must cover the end of the episode: its evidence from step 0 through the
+  last step, observed no earlier than the request (after the quiesce);
+  otherwise it is dropped (`judgement_dropped_stale`) and the goal is
+  `unavailable`. Camera frames
+  unchanged for `camera_stall_limit` observations, or a judge ignored for
+  contract violations, make the final judgement `unavailable`. An episode
+  counts towards `episodes` only once its rollout is sealed complete.
+- **Stops.** A stop is checked before the scene assessment, after it,
+  inside the transaction that opens the episode and at every step: a stop
+  never opens a new episode. An episode the stop caught before its first
+  step is discarded (`incomplete`, `unknown`), not counted and not homed;
+  the run waits for a person. After a stop that interrupted steps, the arm
+  is homed first (`home_after_operator_stop = true`, the design's path) or
+  left where it stands (`false`) before the run waits for a person. Both
+  rules hold for forward and reset episodes (`ROBOT_HOME -> WAIT_HUMAN`,
+  `RESET_FINALIZE -> WAIT_HUMAN` without a home), and for a stop that
+  arrives after the steps ended (during the quiesce, the final judgement or
+  the seal).
+- **Restart.** `Orchestrator.restore(run_dir, config, ...)` opens the
+  journal and runs its recovery: every run that had not completed is
+  `FAULT_LOCKED` (`recovery_ambiguous`); nothing is replayed. When the crash
+  cut an episode short (the last committed state is inside an episode with
+  no result), that move carries the episode's result: `task_outcome:
+  unknown`, `stop_reason: orchestrator_crash`, the rollout `complete` only if
+  its seal was committed, and `robot_home: failed` when a home was prepared
+  and never committed (it may have run). Counters
+  (episode numbers, policy epoch, completed episodes) are read back from
+  the journal.
+- **Operator commands.** `resume(command_id, expected_seq=,
+  environment_handled=True, health_rechecked=True)` moves `WAIT_HUMAN` or
+  `FAULT_LOCKED` to `PREFLIGHT`, where the run stays until `run()` is called
+  again (a resume moves nothing by itself); repeating a command returns its first
+  result (a command id another command used is refused), a stale
+  `expected_seq` is refused. `stop(command_id)`: the same stop again, while
+  pending (`stop_requested`, repeated) or after it took effect and before
+  the next resume (`repeated`), changes nothing, so it never ends a run that
+  is already waiting for a person; an id a resume used, or a stop id used
+  before the last resume, is refused (`command_used`), and the stop must be
+  sent again with a new id. `stop(command_id)` stops the
+  current episode in a controlled way and waits at the next decision point;
+  in `WAIT_HUMAN` it ends the run (`COMPLETED`).
+- **AERI state on the client's session file (C2).** See
+  `adapters/legacy_live.py` below.
+
+`RunConfig` holds every parameter (episodes, horizons, timeouts, limits,
+`termination`). The run's sequence numbers, steps and episode numbers come
+from the journal, so a seeded run on fakes replays identically.
+
+## The termination arbiter (`levi/automatic/termination.py`)
+
+Four stages, never skipped: a **candidate** (an event of priority
+`goal_candidate` or of a type in `goal_event_types`) -> **evidence** (one
+request at a time, covering the candidate and `settle_steps` after it) ->
+**confirmation** (a fresh `confirmed` judgement for this run, episode,
+target and request, not overtaken by a retraction; `confirmations` in a
+row) -> a **stop request** (`goal_verified`).
+
+Never a stop: `unknown`, `unavailable`, a timeout, a judgement for another
+run or episode, an unsolicited or repeated answer, an expired one, one from
+another clock domain or produced in the future, one whose evidence ends
+before the settling window, a contract violation. Each is dropped with a
+note and the episode goes on to its horizon (`on_unknown:
+continue_to_horizon`, the only v1 policy). A dropped answer withdraws its
+request so the arbiter never waits for ever; after `violation_limit`
+contract violations the judge is ignored for the episode (and gives no
+final judgement), and after as many event contract violations the event
+provider is cut off for the episode; either way the run waits for a person
+at the next decision point (`contract_violation_limit`), before the end of
+the run. A late event never moves the candidate back, and a confirmation
+must cover the candidate (`observed_from_step` at or before it).
+
+| `TerminationConfig` | Default | Meaning |
+| --- | --- | --- |
+| `allow_early_stop` | `true` | `false`: confirmations are recorded, never acted on |
+| `min_steps` | 10 | no request before this step |
+| `settle_steps` | 8 | the evidence reaches this many steps past the candidate |
+| `cooldown_steps` | 15 | steps between two requests |
+| `max_requests` | 6 | requests per episode |
+| `confirmations` | 1 | confirmed judgements in a row for a stop |
+| `control_fraction` | 0.0 | share of episodes without early stops (chosen from the episode id with `control_seed`), to measure false early stops |
+| `goal_event_types` | `object_settled` | event types that make a candidate |
+| `violation_limit` | 3 | contract violations before the judge is ignored |
+
+The defaults are not calibrated on any data.
+
+## Reset arbitration (`scene_assessment.py`, `reset_manager.py`)
+
+**Only a `ready` scene with enough evidence skips a reset.** A scene
+assessment is the provider's claim; `scene_assessment.arbitrate` reads it
+against the task's **Initial State Contract** (`RunConfig.initial_state`):
+
+| Assessment | Verdict |
+| --- | --- |
+| `ready`, every required predicate of the contract read true, at least `min_evidence_refs` **distinct** frame or clip references (the same reference twice counts once), from **every** preferred view (`require_all_views`, when `require_visible_evidence`) | `ready`: the next forward episode starts |
+| `ready` that leaves out or does not read a required predicate | `unknown` (`scene_missing_predicate` note) |
+| `ready` without a reference from every preferred view | `unknown` (`scene_missing_view` note) |
+| `ready` with too few distinct references | `unknown` (`scene_insufficient_evidence` note) |
+| any assessment observed before it was asked for (before the home or the reset's end) | `unavailable` (`scene_dropped_stale` note) |
+| `ready` without a contract | `unknown` (`scene_no_contract` note) |
+| an assessment of another contract | `unavailable` (`scene_contract_mismatch` note) |
+| `reset_required`, `unknown`, unavailable | as they are |
+
+**Without a contract no scene is ready** (`initial_state = None`, the
+default): a `ready` needs a contract and its evidence, so no forward
+episode can start, and no reset runs either (none could make the scene
+ready): the run waits for a person at every scene check. `levi automatic
+validate` refuses such a job for a real run (`validate --dry-run` and
+`run --dry-run` still run it, with a warning). **The
+contract file is a draft (HA-23):** its format below is the smallest one
+that carries pipeline §6.1 and waits for the user's confirmation, and so
+does the **view rule**: a reference names its camera view by the text
+before its first `:` (`<view>:<frame>`); the view names come from the
+contract's `observations.preferred`, never from the code.
+
+```yaml
+initial_state:
+  id: stack-plates-initial
+  version: "1"
+  status: draft            # draft until the user confirms (HA-23)
+  robot:
+    home_pose: fr3_safe_home
+    gripper: open
+  predicates:
+    required: [object_at_source, gripper_open]
+    optional: []
+  observations:
+    preferred: [side, wrist]
+    require_visible_evidence: true
+    min_evidence_refs: 1
+    require_all_views: true   # every preferred view in the evidence (HA-23)
+```
+
+`scene_assessment.load_contract(text)` reads it. The reader takes a strict
+YAML subset (no new dependency): block mappings indented by spaces, lists
+of scalars (`- a` or `[a, b]`), quoted or plain scalars, `true`/`false`/
+`null`, finite numbers and `#` comments; tabs, anchors, aliases, tags,
+block scalars, flow mappings, several documents and duplicate keys are
+refused, and unknown keys too. A document that starts with `{` is read as
+JSON. The predicate names are the scene provider's: the contract
+registers `(id, version)` with exactly these names for `aeri.parse`.
+
+**What happens when the scene is not ready** is the reset strategy's choice
+(`RunConfig.reset_strategy`, `reset_manager.py`):
+
+| Strategy | Not ready |
+| --- | --- |
+| `single_reset_policy` (default) | `reset_required` runs the reset policy; `unknown`/`unavailable` too with `on_scene_unknown = "reset"`, else a person; at most `max_reset_attempts` resets between two forward episodes, then a person |
+| `human_assisted` | always a person (no reset policy runs) |
+
+`human_assisted` is the "policy evaluation only" mode (reset by hand,
+AUT-22); the arbitration does not depend on `single_reset_policy`. After
+the person's resume the system checks the scene again (the second
+confirmation, design X2 §1.2) and **only `ready` starts the forward
+episode**: `unknown`, unavailable, a contradicting or mismatched answer,
+evidence observed before the request or too thin, an answer about another
+episode all wait for the person again, with the cause in a note. A scene
+check that can never answer would make the run go back and forth between
+`WAIT_HUMAN` and `VERIFY_INITIAL`; launching that mode without a scene
+provider is refused (`cli.launch_problems`; a person attesting the scene,
+`operator_attested` of design X2, is a later task). `atomic_skill_sequence` and `scripted_safe_reset`
+(pipeline §6.4) are refused in v1. `reset_manager.check_plan` refuses a
+strategy that would start a forward episode on any scene but `ready`, and
+`check_after` one that
+would go on after a reset that reached its horizon, was stopped or lost
+its policy, or retry after a stop. A verified reset always goes on to the
+next scene check, where a stop that arrived late (during the quiesce or the
+reset's scene check) takes effect: the run waits for a person with the
+reset's result as it was, homed first unless `home_after_operator_stop` is
+false. A strategy that breaks a rule hands over to a person
+(`strategy_refused` note), it never locks the run. A reset at its horizon is sealed (the failed rollout is kept, its
+result `failure` / `horizon_exhausted`), homed, and waits for a person; a
+failed home locks the run (`home_failed`) and nothing moves again until an
+operator's resume, which leads through `PREFLIGHT` and a fresh
+initial-state check. A repeated resume (same command id) resumes once.
+
+## Provider adapters (`levi/automatic/adapters/`)
+
+**Fake providers (`events.py`).** `FakeEventStream`, `FakeGoalVerifier` and
+`FakeSceneAssessor` hand over bytes of the contracts and are read with
+`aeri.parse`; scripts set the decision (`confirmed`, `rejected`, `unknown`,
+`ready`, `reset_required`), an unavailable code at submit or collect, a
+delay, an expired, future or other-domain validity, a newer minor, a
+control key, contradicting predicates, an unregistered predicate, another
+episode or request. `make_request` refuses any request carrying operator or
+evaluation keys or a robot command.
+
+**Online judgement (C5) -> judgement (`legacy_live.py`, `from_c5`).** Only
+public names of `levi.live.online` are read; nothing there is changed.
+
+| C5 `status` | Condition | Result |
+| --- | --- | --- |
+| `ok` | `undecided` (also an undecided success) | `unknown` / `model_undecided` |
+| `ok` | `outcome=success` | `confirmed`; when the answer fields do not both support it, `unknown` / `conflicting_predicates` |
+| `ok` | `outcome=failure` | `rejected` (with a confirmed `c5-rule` veto when both fields look fine) |
+| `unavailable` | `gate_closed`, `gate_pending`, `busy`, `service_busy` | `Unavailable`, retryable: a degradation, not an error |
+| `unavailable` | `cold_start`, `vllm_starting`, `no_room`, `wake_failed`, `vllm_failed`, `shutting_down` | `Unavailable`, not retryable |
+| `error` | `timeout:` | `Unavailable(timeout)`: a timeout is never `unknown` |
+| `error` | `invalid_answer:`, `model_error:`, `internal_error:`, `invalid_request:` | `Unavailable(invalid_answer / model_error / provider_error / contract_violation)` |
+| other | | `Unavailable(contract_violation)` |
+
+The mapped judgement always keeps C5's own values (`legacy_c5`), and the
+contract re-checks the mapping against them: a wrong mapping is returned as
+`Unavailable(contract_violation)` (with the values in `detail`), never let
+through without its audit copy.
+
+**AERI state -> client session state (C2).** Only the client's seven states
+are written; every state in which a policy may infer is `running`:
+
+| AERI state | C2 state of the active role's file |
+| --- | --- |
+| `PREFLIGHT` | `standby` |
+| `VERIFY_INITIAL`, `SCENE_ASSESS`, `WAIT_HUMAN`, `FORWARD_FINALIZE`, `RESET_VERIFY` | `waiting_reset` |
+| `FORWARD_ACTIVE`, `FORWARD_STOPPING` | `running` (forward file) |
+| `RESET_ACTIVE` | `running` (reset file; the forward file says `standby`) |
+| `ROBOT_HOME`, `RESET_FINALIZE` | `homing` |
+| `FAULT_LOCKED` | `fault` |
+| `COMPLETED` | `finished` (`stopped` after an operator's stop) |
+
+Tests feed every state to the live service's own gate (`gpumgr.gate`) and
+cold-start guard: the gate closes for inference exactly while a policy may
+infer. Writing `waiting_reset`, or any new state name, for the reset
+policy's active state would open it.
+
+## Recorder layer (`levi/automatic/recorder.py`)
+
+`RolloutRecorder(root, run_id=, run_dir=, group=, texts=, media=)` writes
+every episode as a rollout folder the live service already reads
+(interface C1): `<root>/<group>/<task_folder>/demo_NNNN`, `NNNN` the
+episode number, forward and reset episodes in their own task folders
+(`RunConfig.forward_folder`, `reset_folder`). Give each run its own task
+folders: a number already used in the folder (`demo_`, `incomplete_` or
+`discarded_`) is never overwritten; the episode cannot open and the run
+locks (`recorder_failed`).
+
+**Sealing** keeps the live service's rule (`levi.live.criteria`): the
+steps file (`aeri_steps.csv`) is synced, the media sink finishes,
+`events.csv` gets its `episode_end` row and `metadata.json` its
+`stopped_at`, `media_storage.video_frames_match_csv` and
+`cameras.stall_detection.stalled`, each written whole and synced; both are
+read back; **`.complete` is created last** (temporary file, fsync, rename,
+fsync of the folder). A failed write anywhere before the marker raises, so
+no marker is left on a rollout that is not whole; the run locks
+(`recorder_failed`) and the folder becomes `incomplete_NNNN` with
+`eval.abort_reason` (`fr3_fault` for a safety stop, which the live service
+reads as an FR3 fault). Sealing twice returns the first result.
+
+**Labels.** `eval.outcome` stays `unlabeled`, `eval.verdict_by` is `aeri`,
+and there is no `eval.agent_label`: the automatic verdict is recorded in
+the run journal only, never as an operator or agent label. `eval.aeri`
+names the run and the episode.
+
+**Run manifest** (`<run_dir>/manifest.json`, `levi.aeri.manifest.v1`):
+every episode the run opened, its folder and state (`opening`, `open`,
+`complete`, `incomplete`), a reset's `after_forward` and a forward
+episode's `after_resets`. An entry is written before its folder exists. It
+is a derived view; the journal stays the source of truth.
+
+**After a restart** `Orchestrator.restore` calls `recorder.recover(...)`:
+every rollout of this run whose seal the journal did not commit becomes
+`incomplete_*` (`orchestrator_crash`), its marker removed if a crash came
+between the marker and the commit, so a folder never says complete while
+the journal says incomplete. Folders of other runs are never touched.
+
+**Session files (C2).** `SessionFiles(root, run_id=, group=, folders=)`
+is the orchestrator's `listener`: after every committed state it rewrites
+both role files (`<root>/.eval_sessions/<group>__<task_folder>.json`)
+with the client's seven states only (table above), ISO times,
+`levi.reset_wait_s: null`, `levi.mode: unattended` on the forward file,
+`levi.enabled: false` on the reset file, `episode_role` and
+`aeri{run_id, state, control_epoch}`. A failed session write is a note
+(`session_write_failed`), never a stop. `heartbeat()` rewrites the last
+state (the live reader calls a session crashed after 10 s without an
+update and with its process gone). Exclude the reset folder from the live
+service (`watch.exclude`) so the forward spec never labels a reset.
+
+**Media.** A `MediaSink` (`open`, `frame`, `finish`, `abort`) writes the
+capture format (videos, pose and gripper CSVs) and reports its facts. The
+default `NullMedia` writes no video. The recorder itself seals a camera
+whose frame did not change for `stall_limit` (10) observations as stalled,
+so the live service rejects that rollout, as it does the client's.
+
+## Metrics (`levi/automatic/metrics.py`)
+
+`metrics.report(events, labels=, manifest=, termination=, max_steps=)`
+reads a run journal (and the run manifest for step counts) and returns
+three groups; every rate is `{"n", "of", "rate", "wilson95"}` with the
+Wilson 95 % interval of the live service's statistics
+(`levi.live.stats.wilson`). With the 20-30 episodes of an exploratory check
+read the interval, not the rate.
+
+| Group | Metrics |
+| --- | --- |
+| autonomous | forward episodes, outcomes, `autonomous_success_rate` (unknown stays in the denominator), stop reasons |
+| early termination | confusion of early stops (`goal_verified`) against the truth; precision (early stops truly successful / early stops), recall (early stops / truly successful episodes the detector could have stopped: an early stop or the horizon, not an episode a person, a fault or the policy ended), **false early stop rate from the control group only** (pipeline §5.5: control episodes, run to their horizon with the stop withheld, in which the detector would have stopped, among those that truly failed, ran to their horizon, were sealed and carry their control record; the others are counted apart in `left_out` (`cut_short`: ended by a person, a fault or the policy; `not_recorded`: no seal or no control record); `available: false` and no number without them), the treatment group's early stops truly failed / truly failed episodes as `treatment_false_early_stop_lower_bound` (the stop hid what came after it), saved steps (`max_steps` minus the steps run, summed over early stops), control episodes apart, agreement of the verdict with the truth and false successes |
+| reset | resets, `autonomous_reset_success_rate`, scene decisions and skips; skip accuracy (a skip on a truly ready scene or a reset on a scene that truly needed one / labelled decisions), wrong-skip rate, unneeded-reset rate, reset durations |
+| automation | interventions (moves into `WAIT_HUMAN` or `FAULT_LOCKED`) by reason, resumes, longest run of forward episodes without one, the time people waited (only when the clock domain did not change) |
+
+**Four kinds of label, never mixed** (pipeline §9.4).
+`autonomous_verdict` is the journal's own episode result: never written
+anywhere else, never called ground truth (its rates are `autonomous_*`).
+`posthoc_verdict`, `operator_label` and `adjudicated_ground_truth` live in
+`<run_dir>/labels/<kind>.jsonl`, one append-only file per kind (each line
+synced), written with `LabelStore.add(kind, episode_id, value, subject=,
+by=)`. Adding a label never touches another kind's file; a second label of
+the same kind, episode and subject is refused unless it says
+`supersede=True`, and then it is appended (the first stays). `by` is an
+opaque principal id (no names, no addresses). Subjects: `task_outcome`
+(`success`/`failure`) and `initial_state` (`ready`/`reset_required`: did
+the scene need a reset before the episode that started). The truth for the
+rates is the adjudicated label where there is one, else the operator's
+(`truth="adjudicated"` uses adjudicated labels only); episodes without one
+are counted as `unlabeled` and left out.
+
+A label file whose last line was cut short (a crash mid-write) is not lost
+data: before the next label the torn bytes are moved to `labels/torn/` and
+the file is cut back to whole lines, under a lock that also covers the
+check for an earlier label. A whole line that cannot be read makes the
+file unusable until a person looks at it (never skipped).
+
+**Control episodes** (`termination.control_fraction`, `control_seed`: the
+share and the draw, parameters pending the user, HA-23) are recorded in the
+run manifest: each sealed episode has `control` and, for a control
+episode, `would_stop_step` (where the detector would have stopped, or
+`null`).
+
+## Command line (`levi/automatic/cli.py`)
+
+```
+levi automatic doctor   [--config F] [--json]
+levi automatic validate --config F [--json]
+levi automatic run      --config F --dry-run [--episodes N] [--scenes S] [--keep DIR] [--json]
+levi automatic status   --run-dir D [--json]
+levi automatic report   --run-dir D [--config F] [--truth T] [--format md|json]
+```
+
+`levi automatic …` runs the same command. Every option's help is in
+English and Chinese.
+
+- `doctor` is read-only: the contract snapshots, the fakes, the job file,
+  whether the rollout root is writable. It says that a real robot adapter
+  is not in this version (not required, so the exit code stays 0).
+- `validate` reads the job file and prints the plan and its `plan_sha256`
+  (the journal's plan hash); exit 2 with the reason when it is refused. It
+  checks a real run unless `--dry-run` is given: a job without
+  `task.initial_state_spec` is refused (no scene is ever ready, so no
+  forward episode could start; the error says how to fix it), and so is the
+  human-assisted mode without a scene provider (none can be configured for
+  a real run yet). With `--dry-run` the same job passes with a warning;
+  `doctor` reports the same as its `launch` check.
+- `run` **refuses without `--dry-run`** (exit 2): there is no real run in
+  this version. A dry run drives the in-process fakes only, in a temporary
+  folder (deleted afterwards; `--keep DIR` keeps it in a new or empty
+  folder), never in the job's `rollout_root`, with every socket connection
+  refused while it lasts. Nothing real has motion authority: the only
+  robot is `FakeRobot`. `--scenes reset_required,ready` sets the first scene
+  decisions of the fake.
+- `status` reads a run's journal without its lock and without writing
+  (a torn tail is reported, not cut; a corrupt journal is `FAULT_LOCKED`).
+- `report` prints the metrics (above) as Markdown or JSON.
+
+**The job file** (`levi.aeri.job.v1`, a draft like the contract, HA-23)
+uses the same strict YAML subset; unknown sections and keys are refused,
+and only these are read in v1:
+
+```yaml
+schema_version: levi.aeri.job.v1
+experiment:
+  name: r20261010-a           # the run id (no dots)
+  episodes: 30
+  random_seed: 42
+  execution_mode: shadow      # shadow | assisted | autonomous (checked only)
+policies:
+  forward:
+    max_steps: 120
+  reset:
+    max_steps: 80
+task:
+  instruction: stack the plates
+  reset_instruction: "Reset: stack the plates"
+  initial_state_spec: initial-state.yaml   # relative to this file
+termination:                  # TerminationConfig fields
+  min_steps: 10
+reset:
+  strategy: single_reset_policy   # single_policy is accepted too; human_assisted
+  max_attempts: 1
+  on_unknown: reset               # or wait_human
+recording:
+  rollout_root: /data/rollouts
+  group: aeri
+  forward_folder: stack_plates__r20261010-a
+  reset_folder: reset_stack_plates__r20261010-a
+```
+
+## Fakes (`integrations/fr3_automatic/fake.py`)
+
+`FakeClock` (moves only when advanced), `FakeRobot` (moves only under the
+fence's token; scripted 503s that latch after three, stale states that
+latch after six, frozen poses, red lights, latches, lost replies, a crash
+after a command was sent, a home outside its tolerance, camera stalls),
+`FakePolicy` (fixed latency on the fake clock; timeouts, server errors,
+NaN, wrong dimensions or epoch, early `valid_from`, failing acquire or
+quiesce, a crashed server) and `FakeRecorder` (a writer thread; a failed
+write surfaces at the next commit or at the seal, `.complete` only after
+every write, `abort` gives `incomplete_*`). The module imports no network,
+process or LEVI code.
+
+**How the fakes differ from the real robot** (`fake.FIDELITY`): no
+dynamics or stopping distance; the home always ends in tolerance unless
+scripted (the real `_go_home` does not check); an e-stop is visible to the
+fake, while on the real FR3 the software staleness interlock does not see
+it; the latch counters imitate `Fr3Guard` only in part; health is read in
+the same step (the real C3 file is written at 2 Hz); no GPU contention or
+cold start; `FakeRecorder` writes no files (`RolloutRecorder` does, but its
+default media sink writes no video); camera frames are counters; the scene
+and goal fakes answer by script (nothing about a real model's accuracy);
+session files change only at state changes, with no 2 s heartbeat during
+a long wait; there is no network. **Passing these tests proves the
+state-machine logic only, never behaviour on the robot.**
+
+**Tests** (`tests/automatic/test_aeri_*.py`): the state table and the fence;
+the fakes; the C5 mapping table and the C2 gate truthfulness; the arbiter;
+the orchestrator on the fault list of the design (wrong success, unknown,
+judge timeout or offline, flapping events, a late forward chunk in the reset
+phase, a crashed policy server, camera stalls, no policy resources, a reset
+at its horizon, a failed home, e-stop or FR3 fault, recorder write and seal
+failures, restarts at every stage of every transaction and under SIGKILL,
+a double resume), and 150 seeded random runs with crashes and resumes.
+
+**End to end** (`test_aeri_e2e.py`, the whole fake world of
+`aeri_world.py`: orchestrator, recorder layer, manifest, session files, an
+Initial State Contract): N rounds of forward -> home -> scene -> reset ->
+next, every rollout read back with `levi.live.criteria`; a seeded run
+writes the same bytes twice (journal, rollouts, manifest, session files,
+with the wall clock and the process identity taken out) and another seed
+other bytes; the orchestrator dies at every stage of every transaction of
+a two-round run (every site counted) and a new one takes over: always
+`FAULT_LOCKED` (or `COMPLETED`), nothing replayed, every home sent once,
+the disk agreeing with the journal, both session files `fault`, and on
+every ninth site an operator's resume finishes the run without reusing a
+folder; a child process is SIGKILLed at each stage of the seal and just
+before and after `.complete`. The fault list (the 12 rows a fake can
+test: wrong success, unknown, judge timeout, flapping events, a late
+forward chunk in a reset, a crashed policy server, camera stall, no policy
+resources, a reset at its horizon, a full disk, a restart, a double
+resume) asserts for each row the final state, the recorded degradation and
+that no motion ran or was even tried without a token.
+
+**Live compatibility** (`test_aeri_live_compat.py`): the rollouts and
+session files of a fake AERI run are taken in by the real live service (its
+controller and worker in `once` mode, against the fake model server): the
+forward episodes are labelled, the reset folder excluded with
+`watch.exclude` is not (without the exclusion it becomes a dataset of its
+own, which is why it should be excluded). Nothing in `levi/live` or its
+tests is changed.
+
+**Not yet:** the real FR3 adapter, a real run command, the
+`/automatic` page; `atomic_skill_sequence` and `scripted_safe_reset`.
+
+
+## Evaluation policy discovery (`levi/automatic/policies.py`)
+
+`discover(policy_root)` lists the checkpoint directories under a policy root
+(on the maintainer's machine `openpi/checkpoints`) so a launch page can offer
+"which policy to deploy" and "which reset policy, if any". It is read only: it
+lists directories and reads a few small metadata files, and it never imports
+openpi, loads weights, recomputes a hash, opens a port or follows a symbolic
+link. `discover_report` also returns what was skipped, whether the entry cap
+cut the list, and root-level problems; `select(entries, role)` keeps the
+deployable entries of one role.
+
+| Field | Where it comes from |
+| --- | --- |
+| `kind`, `deployable`, `is_jax` | A deployable JAX directory has `params/`, an `assets/` directory (where openpi's loader reads) and `norm_stats.json` (at the top, or in `assets/`, directly or one level down); a missing piece is named in `problems` (`assets:missing`, `norm_stats.json:<reason>`). `actor/` means a PyTorch source (listed, not deployable); anything else is `unknown` with `layout_not_recognised`. |
+| `config`, `config_source` | `VERSION.json` `config`, else the `--policy.config` in `README_DEPLOY.md`, else a recipe (`DEFAULT_RECIPE`, or the `recipe=` argument), else `none`. The README's training-machine config name is kept apart as `training_config_name` and never used to serve. |
+| `role`, `role_source` | Only an explicit statement gives `reset`: `VERSION.json` `policy_role` or `role` equal to `reset` after trimming and case folding, or the recipe. `forward` comes from the same explicit statements or, by convention (`convention:config`), from a config in the known forward family. Anything reset-like (`reset`, `recovery`, `recover`, `return`, `home` in the directory name, README title, config name, or any key or short string of `VERSION.json`), an unrecognised `policy_role`, or contradictory statements gives `unknown` (reason in `problems` or `warnings`). A `role` such as `best` is a variant, not a role statement. `select(entries, "forward")` never returns `unknown` entries unless called with `include_unknown=True`. |
+| `variant`, `version`, `model`, `step`, `version_note`, `siblings`, `verified`, `not_verified` | `VERSION.json`, verbatim (`parallel_to` becomes `version_note`). |
+| `sha256_state`, `params_hashed`, `sha256_records` | Hashes already on disk: `*.sha256` lists in the directory or at the root (attributed by the first component of their relative paths; absolute, `..` and hidden paths are ignored), and the hashes in `CONVERSION.json`. `recorded`: a list of this directory's files exists. `indirect`: only `CONVERSION.json` hashes, which belong to the PyTorch source and to the directory `norm_stats_from` (see each record's `subject`), not to `params/`. `missing`: none. `params_hashed` is true only when a list names weight files. **A page must not show `indirect` (or `recorded` with `params_hashed` false) as "verified"**; a claim in `VERSION.json` is not a hash. `covers` says what a record covers. |
+| `converted`, `size_bytes` | `CONVERSION.json` present and readable; summed `lstat` sizes, capped at `MAX_FILES_PER_ENTRY` directory entries of any kind (then `size_truncated`). |
+
+A bad `VERSION.json` or `CONVERSION.json` (not JSON, too large, not an
+object, a symbolic link, a pipe) is recorded in `problems` and the directory
+is still listed. Two directories with the same name after case and Unicode
+folding, or with the same `(model, version, variant, step)`, are flagged on
+both. Hidden entries, plain files and symbolic links in the root are listed
+in `skipped` and not read. A root that is `None`, empty or contains a NUL byte gives an empty result with `root_invalid`. When `VERSION.json` and the README name different configs, `config_sources_disagree` is warned. When no entry has role `reset`, `select(entries,
+"reset")` is empty and the caller offers human reset only. Roles by
+convention and recipe configs are guesses about this machine, not facts about
+the checkpoints; the page should show `role_source`. Tests:
+`tests/automatic/test_policies.py`.

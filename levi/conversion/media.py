@@ -86,9 +86,10 @@ EXACT_HIST_PIXELS = 1 << 24
 
 
 def stats_method(value=None) -> str:
-    """``float`` (default: the original per-frame float64 accumulation) or
-    ``histogram`` (integer counts, exact sums). Anything else is refused."""
-    method = (value or os.environ.get(STATS_SETTING) or "float").strip().lower()
+    """``histogram`` (default: integer counts, exact sums, about 20 times
+    faster) or ``float`` (the original per-frame float64 accumulation, kept as
+    the switch back). Anything else is refused."""
+    method = (value or os.environ.get(STATS_SETTING) or "histogram").strip().lower()
     if method not in STATS_METHODS:
         raise ValueError(
             f"{STATS_SETTING} must be one of {', '.join(STATS_METHODS)}: {method!r}"

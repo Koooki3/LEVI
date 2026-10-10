@@ -111,6 +111,34 @@ describe("known service sentences", () => {
     );
     expect(down.fix).toContain("uv run levi serve");
   });
+  test("a request the web bridge blocked says so, in both languages", () => {
+    const host = [
+      "Request blocked: this LEVI page does not answer to the address it was opened under. Open it as http://127.0.0.1:7860 (or localhost), or add the name to LEVI_UI_ALLOWED_HOSTS.",
+      "Cannot read the local dataset lvsec: the LEVI file service answered 421.",
+      "Failed to fetch JSON /api/levi/catalog: 421 Misdirected Request",
+      "HTTP 421",
+    ];
+    for (const raw of host) {
+      const zhText = describeMessage(raw, tzh, "zh");
+      expect(zhText.text).toMatch(/请求被拦截/);
+      expect(zhText.text).not.toMatch(/Hugging Face|登录/);
+      expect(zhText.fix).toContain("LEVI_UI_ALLOWED_HOSTS");
+      expect(zhText.fix).toContain("http://127.0.0.1:7860");
+      expect(zhText.fix).toMatch(CJK);
+      const enText = describeMessage(raw, ten, "en");
+      expect(enText.text).toStartWith("Request blocked");
+      expect(enText.fix).toContain("LEVI_UI_ALLOWED_HOSTS");
+    }
+    const write = describeMessage(
+      "Request blocked: writes through the web UI must come from the LEVI page itself. Scripts use the levi CLI or a scoped agent token.",
+      tzh,
+      "zh",
+    );
+    expect(write.text).toMatch(/请求被拦截/);
+    expect(write.fix).toContain("levi");
+    expect(write.fix).toMatch(CJK);
+    expect(write.details).toBeUndefined();
+  });
   test("English gets the plain wording, with the names and paths kept", () => {
     const described = describeMessage(
       "Export directory /x/e is outside LEVI_EXPORT_ROOTS (/x)",

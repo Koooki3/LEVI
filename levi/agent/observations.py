@@ -201,23 +201,27 @@ def refine_spacings(context):
     return [tolerance / 2, tolerance, tolerance * 2]
 
 
-def fit_refinement(wb, run, episode, proposals, limit, cap=None):
+def fit_refinement(wb, run, episode, proposals, limit, cap=None, *, events=None):
     """(boundaries, windows, spacing) for a refinement the model can read.
 
     At each spacing, finest first, change windows are trimmed (least changed
     first) to fit the plan's frame cap and the model's context; the model's
     own boundaries are never dropped, and a coarser spacing is logged. When even the
     coarsest spacing does not fit, the run stops with the numbers.
+    ``events``: see ``harness_windows`` (its ``"plan"`` is the one of the
+    spacing returned).
     """
     from .schema import TaskContext
 
     context = TaskContext.model_validate(run["context"])
     root = wb.store.run_dir(run["id"]) / "input"
     for spacing in refine_spacings(context):
-        boundaries, windows = harness_windows(
-            wb, run, episode, proposals, spacing, limit, cap
-        )
         try:
+            # With event intelligence the windows' own planning may already
+            # say the draft does not fit (see ``event_windows``).
+            boundaries, windows = harness_windows(
+                wb, run, episode, proposals, spacing, limit, cap, events=events
+            )
             frame_scope(context, root, episode, boundaries, spacing, limit, cap)
         except Overflow:
             continue
@@ -242,9 +246,12 @@ class Batch:
         self.spacing = spacing
         self.start = start
         self.end = end
+        # With event intelligence: the summary of how this batch's frames
+        # were shared (``levi.events.sampling``); None otherwise.
+        self.plan = None
 
 
-def plan_refinement(wb, run, episode, proposals, limit, observed):
+def plan_refinement(wb, run, episode, proposals, limit, observed, *, candidates=None):
     """The requests that refine a draft within the model's context and the
     plan's frame cap (less the ``observed`` coarse frames already spent).
 
@@ -253,13 +260,23 @@ def plan_refinement(wb, run, episode, proposals, limit, observed):
     spacing whose frames fit the cap in total, proposals are grouped in time
     order while a group's frames fit the context. Each batch costs the prompt
     text again, so batches are as large as the context allows.
+
+    With ``workflow.event_intelligence`` the single request also reads the
+    windows of the most salient event ``candidates`` (computed from the
+    snapshot when None), and the batch's ``plan`` says how its frames were
+    shared; batches of a long draft carry no extra windows, as before.
     """
     from .schema import TaskContext
 
     cap = Workflow.model_validate(run["context"]["workflow"]).max_evidence_frames
     cap = max(0, cap - observed)
+    events = {"candidates": candidates}
     try:
-        return [Batch(*fit_refinement(wb, run, episode, proposals, limit, cap))]
+        batch = Batch(
+            *fit_refinement(wb, run, episode, proposals, limit, cap, events=events)
+        )
+        batch.plan = events.get("plan")
+        return [batch]
     except ContextOverflow:
         if limit is None:
             raise
@@ -816,16 +833,332 @@ def rank_intervals(folder, rows, step):
     ]
 
 
-def harness_windows(wb, run, episode, proposals, spacing=None, limit=None, cap=None):
+def model_workflow(workflow):
+    """The workflow as the model's request states it: the plan's own, less
+    ``event_intelligence`` -- LEVI's evidence policy, not something the
+    model acts on (the candidates choose frames, they are never shown as
+    findings). A workflow without it is returned as it is."""
+    if "event_intelligence" not in workflow:
+        return workflow
+    return {k: v for k, v in workflow.items() if k != "event_intelligence"}
+
+
+def event_settings(run):
+    """The plan's ``workflow.event_intelligence`` block, or None when the
+    plan does not turn it on (a key that is absent, as in every plan made
+    before it existed)."""
+    return (run["context"].get("workflow") or {}).get("event_intelligence") or None
+
+
+def event_candidates(wb, run, episode):
+    """Event candidates of one episode of a run, read from its snapshot with
+    the plan's settings: ``{"candidates": [EventCandidate as dict], "error":
+    None}`` in evidence priority (kept ones first, then merged ones), or no
+    candidates and the reason when the signals cannot be read -- a dataset
+    whose signals say nothing is still annotated from its pictures. Nothing
+    is written: candidates are rebuilt from the snapshot whenever needed."""
+    from .schema import TaskContext
+
+    settings = event_settings(run)
+    if settings is None:
+        raise ValueError("This plan did not approve event intelligence")
+    if episode not in run["context"]["episodes"]:
+        raise ValueError("Episode outside approved scope")
+    context = TaskContext.model_validate(run["context"])
+    root = wb.store.run_dir(run["id"]) / "input"
+    try:
+        from levi.events import candidates, signal_profiles
+
+        info = json.loads((root / "meta" / "info.json").read_text())
+        stats = None
+        if (root / "meta" / "stats.json").is_file():
+            try:
+                stats = json.loads((root / "meta" / "stats.json").read_text())
+            except ValueError:
+                stats = None
+        table, _ = episode_times(context, root, episode)
+        found = candidates.read(
+            table,
+            info,
+            signal_profiles.for_dataset(root, info),
+            stats,
+            episode,
+            sources=settings["sources"],
+            merge_seconds=settings["merge_seconds"],
+            change_point_penalty=settings["change_point_penalty"],
+        )
+    except Exception as exc:  # noqa: BLE001 - signals are an addition to the evidence
+        # The run goes on from its pictures, but says why it had no
+        # candidates: a reason code everywhere the result is recorded, and
+        # the message without this machine's paths.
+        if isinstance(exc, OSError) and exc.filename:
+            message = f"{exc.strerror or 'unreadable'}: {Path(exc.filename).name}"
+        else:
+            message = str(exc).replace(str(wb.store.run_dir(run["id"])), "<run>")
+            message = message.replace(str(wb.store.root), "<workspace>")
+        return {
+            "candidates": [],
+            "error_code": candidate_error_code(exc),
+            "error": f"{type(exc).__name__}: {message[:200]}",
+            "error_type": type(exc).__name__,
+        }
+    kept = [c for c in found if c.status == "proposed"]
+    return {
+        "candidates": [c.model_dump() for c in found],
+        "error_code": None if kept else "no_candidates",
+        "error": None,
+        "error_type": None,
+    }
+
+
+def candidate_error_code(exc):
+    """Why an episode's candidates could not be read: ``unreadable`` (a
+    file of the snapshot), ``invalid_signals`` (the table, ``meta`` or a
+    signal declaration does not hold what the readers need) or
+    ``internal_error`` (anything else, a defect in LEVI included). A read
+    that worked but found nothing is ``no_candidates``."""
+    if isinstance(exc, OSError):
+        return "unreadable"
+    if isinstance(exc, ValueError | KeyError | IndexError):
+        return "invalid_signals"
+    return "internal_error"
+
+
+def candidate_counts(found):
+    """What a run records of one episode's candidate read."""
+    return {
+        "proposed": sum(1 for c in found["candidates"] if c["status"] == "proposed"),
+        "merged": sum(1 for c in found["candidates"] if c["status"] == "merged"),
+        "error_code": found["error_code"],
+        "error_type": found["error_type"],
+        # Run events and shards only: provenance travels with the result.
+        "error": found["error"],
+    }
+
+
+def event_focus(wb, run, episode):
+    """An external agent's view of one episode's event candidates
+    (``events.candidates``): the candidates, and the instants whose windows
+    fit what is left of the plan's frame cap at the spacing
+    ``evidence.refine`` samples (the boundary tolerance), most salient first,
+    at most ``max_windows``. Text only: no frame is read or sampled here."""
+    from levi.events import sampling
+
+    from .schema import TaskContext
+
+    settings = event_settings(run)
+    if settings is None:
+        raise ValueError("This plan did not approve event intelligence")
+    if episode not in run["context"]["episodes"]:
+        raise ValueError("Episode outside approved scope")
+    if episode not in (run.get("prepared") or []) + run.get("completed", []):
+        raise ValueError(
+            "Prepare this episode (runs.prepare or evidence.read) before reading "
+            "its event candidates"
+        )
+    context = TaskContext.model_validate(run["context"])
+    flow = Workflow.model_validate(context.workflow)
+    found = event_candidates(wb, run, episode)
+    kept = [c for c in found["candidates"] if c["status"] == "proposed"]
+    try:
+        held = len(wb.store.get("evidence", f"{run['id']}:{episode}")["items"])
+    except KeyError:
+        held = 0
+    root = wb.store.run_dir(run["id"]) / "input"
+    _, times = episode_times(context, root, episode)
+    left = max(0, flow.max_evidence_frames - held)
+    try:
+        suggested = sampling.plan(
+            times,
+            required=[],
+            tiers=[
+                (
+                    sampling.CANDIDATES,
+                    [(c["center_time_s"], c["id"], {}) for c in kept],
+                )
+            ],
+            window=flow.boundary_window_seconds,
+            spacing=flow.boundary_tolerance_seconds,
+            cameras=len(context.cameras),
+            # What the frame cap has left for this episode. A window frame the
+            # ledger already holds is counted as new here (it would not be in
+            # evidence.refine), so the suggestion errs on the side of fitting.
+            cap=left,
+            max_windows={sampling.CANDIDATES: settings["max_windows"]},
+        ).windows()
+    except Overflow:
+        # Not one window fits what is left of the cap.
+        suggested = []
+    value = {
+        "episode": episode,
+        "candidates": [
+            {
+                "id": c["id"],
+                "event_type": c["event_type"],
+                "actor_id": c["actor_id"],
+                "at": round(c["center_time_s"], 3),
+                "window": [round(t, 3) for t in c["time_window_s"]],
+                "salience": round(c["salience"], 3),
+            }
+            for c in kept
+        ],
+        "merged": len(found["candidates"]) - len(kept),
+        "suggested_around_seconds": [round(t, 3) for t in suggested],
+        "frames_left": left,
+        "reading": (
+            "Places where the robot's recorded signals changed, most salient "
+            "first; salience orders where to look and is not a probability. "
+            "A candidate is not a subtask boundary: refine around the "
+            "suggested instants (evidence.refine) and place boundaries from "
+            "what the frames show."
+        ),
+    }
+    if found["error_code"]:
+        value["error_code"] = found["error_code"]
+    if found["error_type"]:
+        # The type only: the message may name this machine's paths.
+        value["error"] = found["error_type"]
+    return value
+
+
+def event_windows(
+    wb, run, episode, proposals, spacing=None, limit=None, cap=None, candidates=None
+):
+    """Refinement targets of a plan with event intelligence on: the model's
+    own boundaries (never dropped), then the windows around the most salient
+    event candidates (at most ``max_windows``), then the published change
+    windows, each whole or skipped, within the frame cap and the image limit
+    (``levi.events.sampling.plan``).
+
+    Returns (boundaries, window_seconds, plan summary). Raises
+    ``Overflow`` when the model's own boundaries alone do not fit -- the
+    refinement's cap, the image limit, or what the episode's evidence ledger
+    may still take -- so ``fit_refinement`` tries a coarser spacing and, past
+    the coarsest, stops with the numbers as before.
+
+    The ledger: a refinement whose frames were persisted but whose request
+    never finished (a provider error, the GPU gate, a pause) is planned again
+    when the run resumes, under the image limit of that moment. The frames
+    the ledger already holds are free; new ones count against the plan's
+    frame cap, so the episode never passes it (``sampling.plan``,
+    ``ledger_cap``). Which windows are read depends on the image limit: a
+    resumed or repeated run reads the same frames only under the same limit.
+    """
+    from levi.events import sampling
+
+    from .schema import TaskContext
+
+    settings = event_settings(run)
+    context = TaskContext.model_validate(run["context"])
+    flow = Workflow.model_validate(context.workflow)
+    root = wb.store.run_dir(run["id"]) / "input"
+    table, times = episode_times(context, root, episode)
+    spacing = spacing or flow.boundary_tolerance_seconds / 2
+    try:
+        ledger = wb.store.get("evidence", f"{run['id']}:{episode}")["items"]
+    except KeyError:
+        ledger = []
+    cameras = context.cameras or [None]
+    have = {(row.get("camera_key"), row["frame_index"]) for row in ledger}
+    held = frozenset(
+        position
+        for position, frame in enumerate(table.frame_index.to_numpy())
+        if all((camera, int(frame)) in have for camera in cameras)
+    )
+    cap = flow.max_evidence_frames if cap is None else cap
+    if candidates is None:
+        candidates = event_candidates(wb, run, episode)["candidates"]
+    top_k = (
+        (run.get("harness") or {}).get("parameters", {}).get("evidence.refine_top_k", 0)
+    )
+    ranked = (
+        changes(wb, run, episode, top_k)["suggested_around_seconds"] if top_k else []
+    )
+    required = [
+        boundary
+        for p in proposals
+        for boundary in [p.start, p.end, *p.boundary_candidates]
+        if boundary is not None
+    ]
+    tiers = [
+        (
+            sampling.CANDIDATES,
+            [
+                (
+                    c["center_time_s"],
+                    c["id"],
+                    {
+                        "event_type": c["event_type"],
+                        "salience": round(c["salience"], 3),
+                    },
+                )
+                for c in candidates
+                if c.get("status", "proposed") == "proposed"
+            ],
+        ),
+        (
+            sampling.UNCERTAIN,
+            [
+                (t, f"change_{i}", {"source": "visual_change"})
+                for i, t in enumerate(ranked)
+            ],
+        ),
+    ]
+    plan = sampling.plan(
+        times,
+        required=required,
+        tiers=tiers,
+        window=flow.boundary_window_seconds,
+        spacing=spacing,
+        cameras=len(context.cameras),
+        cap=cap,
+        limit=limit,
+        max_windows={sampling.CANDIDATES: settings["max_windows"]},
+        held=held,
+        held_images=len(ledger),
+        ledger_cap=flow.max_evidence_frames,
+    )
+    windows = plan.windows()
+    summary = {"spacing_seconds": spacing, **plan.summary()}
+    return list(proposals) + [Candidate(t) for t in windows], windows, summary
+
+
+def harness_windows(
+    wb, run, episode, proposals, spacing=None, limit=None, cap=None, *, events=None
+):
     """Refinement targets for the in-process runtime: the model's proposals
     plus the published top-k change windows, trimmed to the frame cap.
 
     Returns (boundaries, window_seconds). Windows are dropped from the least
     changed first until the plan's frame cap holds; the model's own boundaries
     are never dropped. A run with no published value gets its proposals back.
+
+    A plan with ``workflow.event_intelligence`` takes its windows from
+    ``event_windows`` instead (event candidates first, then the change
+    windows). ``events`` (a dict) passes that path its ``candidates`` and
+    receives the plan's summary under ``"plan"``.
     """
     from .schema import TaskContext
 
+    if event_settings(run) is not None:
+        events = {} if events is None else events
+        if events.get("candidates") is None:
+            # Once per refinement, whatever spacings it then tries.
+            found = event_candidates(wb, run, episode)
+            events["candidates"] = found["candidates"]
+            events["error"] = found["error"]
+        boundaries, windows, summary = event_windows(
+            wb,
+            run,
+            episode,
+            proposals,
+            spacing,
+            limit,
+            cap,
+            events.get("candidates"),
+        )
+        events["plan"] = summary
+        return boundaries, windows
     top_k = (
         (run.get("harness") or {}).get("parameters", {}).get("evidence.refine_top_k", 0)
     )

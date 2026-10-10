@@ -143,6 +143,77 @@ describe("AgentPlan", () => {
   });
 });
 
+describe("AgentPlan: event intelligence is shown, read-only", () => {
+  const ON: HarnessPlan = {
+    ...PLAN,
+    estimate: {
+      ...PLAN.estimate,
+      event_intelligence: {
+        extra_requests: 0,
+        max_windows_per_episode: 3,
+        frames_per_window: 21,
+        max_extra_frames_per_episode: 63,
+        frames_cap: 96,
+      },
+    },
+    event_intelligence: {
+      mode: "candidates",
+      sources: ["gripper", "change_point"],
+      max_windows: 3,
+      merge_seconds: 0.5,
+      change_point_penalty: 0.75,
+      planner: "greedy",
+      active_evidence: false,
+    },
+  };
+  const plan = (value: HarnessPlan) => (
+    <AgentPlan
+      plan={value}
+      busy={false}
+      completed={[]}
+      onApprove={() => undefined}
+      onPilot={() => undefined}
+    />
+  );
+
+  test("an off plan renders exactly as before", async () => {
+    const before = (await render(plan(PLAN))).host.innerHTML;
+    const nulled = (await render(plan({ ...PLAN, event_intelligence: null })))
+      .host.innerHTML;
+    expect(nulled).toBe(before);
+    expect(before).not.toContain("Event intelligence");
+  });
+
+  test("an on plan lists every setting and the frame budget it adds", async () => {
+    const { host } = await render(plan(ON));
+    const group = host.querySelector('[aria-label="Event intelligence"]')!;
+    expect(group).not.toBeNull();
+    const text = group.textContent!;
+    for (const part of [
+      "candidates",
+      "gripper, change_point",
+      "Candidate windows per episode, at most: 3",
+      "0.5",
+      "0.75",
+      "greedy",
+      "Evidence a model asks for itself: off (fixed)",
+      "Extra frames per episode, at most: 63 (frame cap 96)",
+      "Extra model requests: 0",
+      "not probabilities",
+    ])
+      expect(text).toContain(part);
+    // Read-only: nothing in it can be changed or pressed.
+    expect(
+      group.querySelectorAll("button, input, select, textarea").length,
+    ).toBe(0);
+    // Approval itself is unchanged.
+    const approve = Array.from(host.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Approve execution plan"),
+    )!;
+    expect(approve.disabled).toBe(false);
+  });
+});
+
 describe("AgentReviewQueue", () => {
   const proposals = [
     {

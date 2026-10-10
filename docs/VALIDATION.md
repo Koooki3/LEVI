@@ -202,7 +202,7 @@ uv run python scripts/verify_browser.py --local-repo local/YOUR_REGISTERED_ID
 uv run python scripts/verify_conversion.py
 ```
 
-The browser script reads public datasets and writes screenshots/results to `outputs/LEVI/validation/` inside the resolved workspace. The conversion script creates synthetic inputs and new conversion outputs. Logs, actual paths, review sidecars and converted data are not bundled into Git.
+The browser script reads public datasets and writes screenshots/results to `outputs/LEVI/validation/` inside the resolved workspace. The conversion script creates synthetic inputs and new conversion outputs. It talks to the running core over the core's own socket with the person's credential, as the `levi` CLI does, not through the web page on :7860 (the web bridge takes writes only from the LEVI page itself; see [API → Trust boundary of the web bridge](API.md#trust-boundary-of-the-web-bridge--网页桥接的信任边界)), so run it with the same `LEVI_WORKSPACE` as the service. / 转换脚本经核心自己的套接字、用人的凭据访问正在运行的核心（与 `levi` 命令行相同），不经 :7860 的网页（网页桥接只接受来自 LEVI 页面本身的写请求），所以运行时的 `LEVI_WORKSPACE` 要与服务相同。 Logs, actual paths, review sidecars and converted data are not bundled into Git.
 
 ## 未执行项 / Not exercised
 
