@@ -54,6 +54,22 @@ interface Known {
   fix?: string;
 }
 
+// src/utils/backendProxy.ts refused the request: the page was opened under
+// a host name the bridge does not answer to (421; the proxy's own sentence,
+// or a status a file read reports), or a write did not come from the page.
+const BLOCKED_HOST =
+  /^(?:Request blocked: this LEVI page does not answer to the address|Cannot read the local dataset .+: the LEVI file service answered 421\.$|Failed to fetch JSON .+: 421\b|HTTP 421$)/;
+const BLOCKED_WRITE =
+  /^Request blocked: writes through the web UI must come from the LEVI page itself/;
+
+/** Whether `raw` says the web bridge refused the request (wrong address,
+ * or a write from outside the page): `describeMessage` then has the reason
+ * and the fix, and a page should show those, not its general guess. */
+export function isBlockedRequest(raw: string): boolean {
+  const cleaned = cleanMessage(raw);
+  return BLOCKED_HOST.test(cleaned) || BLOCKED_WRITE.test(cleaned);
+}
+
 const KNOWN: Known[] = [
   {
     // src/utils/backendProxy.ts: the page's own proxy could not reach the API.
@@ -65,13 +81,13 @@ const KNOWN: Known[] = [
     // src/utils/backendProxy.ts: the page was opened under a host name the
     // bridge does not answer to (421), seen as the proxy's own sentence or
     // as a status a file read reports.
-    re: /^(?:Request blocked: this LEVI page does not answer to the address|Cannot read the local dataset .+: the LEVI file service answered 421\.$|Failed to fetch JSON .+: 421\b|HTTP 421$)/,
+    re: BLOCKED_HOST,
     why: "Request blocked: LEVI was opened under an address that is not on its list of allowed host names.",
     fix: "Open LEVI as http://127.0.0.1:7860 (or localhost, on any port), or add this address to LEVI_UI_ALLOWED_HOSTS in .env and restart LEVI.",
   },
   {
     // src/utils/backendProxy.ts: a write that did not come from the page (403).
-    re: /^Request blocked: writes through the web UI must come from the LEVI page itself/,
+    re: BLOCKED_WRITE,
     why: "Request blocked: LEVI accepts changes only from its own page.",
     fix: "Reload this LEVI page and try again. Scripts make changes through the levi command line, not through the web page.",
   },
