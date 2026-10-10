@@ -256,6 +256,9 @@ def write_whole(path: Path, data: bytes) -> None:
 def write_answer(root, request_id: str, predicates: dict) -> Path:
     """The answering side of ``FileTransport`` (what the page or a test
     writes): one answer, written whole."""
+    if not isinstance(request_id, str) or not sa.LABEL.match(request_id):
+        # A request id names a file here: never a path.
+        raise ValueError(f"not a request id: {str(request_id)[:60]!r}")
     folder = Path(root) / "answers"
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
     path = folder / f"{request_id}.{time.time_ns()}.json"

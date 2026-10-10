@@ -277,3 +277,22 @@ def test_validate_refuses_a_real_human_assisted_run_with_the_code(tmp_path, caps
     assert code == 2 and "E_SCENE_PROVIDER_MISSING" in found["error"]
     code = cli.main(["validate", "--config", str(path), "--json", "--dry-run"])
     assert code == 0
+
+
+def test_a_double_click_resumes_once_and_counts_one_human_reset(tmp_path):
+    rig = human_run(tmp_path, [READY, RESET, READY])
+    assert rig.orch.run() == "WAIT_HUMAN"
+    seq = rig.orch.journal.next_seq
+    first = resume(rig)
+    again = rig.orch.resume(
+        "op-1", expected_seq=seq, environment_handled=True, health_rechecked=True
+    )
+    assert again.ok and again.code == "repeated" and again.repeated
+    late = rig.orch.resume(
+        "op-2", expected_seq=seq, environment_handled=True, health_rechecked=True
+    )
+    assert not late.ok and late.code in ("stale_sequence", "not_waiting")
+    assert first.code == "resumed"
+    assert rig.orch.run() == "COMPLETED"
+    second = manifest(tmp_path)["episodes"][1]
+    assert len(second["after_human_resets"]) == 1

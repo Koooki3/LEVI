@@ -494,3 +494,11 @@ def test_a_dry_run_with_a_scripted_person(tmp_path, capsys):
     )
     found = json.loads(capsys.readouterr().out)
     assert found["state"] == "WAIT_HUMAN" and found["robot"]["motions"] == 0
+
+
+@pytest.mark.parametrize("request_id", ["../escape", "a/b", ".hidden", ""])
+def test_an_answer_file_is_never_written_outside_its_folder(tmp_path, request_id):
+    with pytest.raises(ValueError):
+        human.write_answer(tmp_path / "scene", request_id, {"a": True})
+    assert not (tmp_path / "escape").exists()
+    assert list(tmp_path.rglob("*.json")) == []
