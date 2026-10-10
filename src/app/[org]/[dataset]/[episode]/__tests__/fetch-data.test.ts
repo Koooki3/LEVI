@@ -1,5 +1,5 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
-import { describe, expect, test, spyOn } from "bun:test";
+import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import {
   computeColumnMinMax,
   loadAllEpisodeLengthsV3,
@@ -8,10 +8,16 @@ import {
   loadEpisodeOutcomes,
   buildTaskDefinitions,
   extractLanguageAtoms,
+  loadEpisodeDataV3,
   CROSS_EPISODE_DEFAULTS,
 } from "@/app/[org]/[dataset]/[episode]/fetch-data";
 import type { ChartRow } from "@/app/[org]/[dataset]/[episode]/fetch-data";
-import type { DatasetMetadata } from "@/utils/parquetUtils";
+import {
+  clearParquetFileCache,
+  parquetLimits,
+  type DatasetMetadata,
+} from "@/utils/parquetUtils";
+import { FIXTURE_B64 } from "@/utils/__tests__/parquetFixture";
 
 // ---------------------------------------------------------------------------
 // computeColumnMinMax
@@ -682,5 +688,71 @@ describe("loadCrossEpisodeActionVariance scoping", () => {
     expect(CROSS_EPISODE_DEFAULTS.sampleSize).toBeLessThan(
       CROSS_EPISODE_DEFAULTS.ceiling,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A v3 episode whose data cannot be read within the memory limit says so
+// ---------------------------------------------------------------------------
+describe("loadEpisodeDataV3 — oversized data file", () => {
+  const savedLimits = { ...parquetLimits };
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    Object.assign(parquetLimits, savedLimits);
+    globalThis.fetch = realFetch;
+    clearParquetFileCache();
+  });
+
+  function serveFixture() {
+    const bytes = Uint8Array.from(atob(FIXTURE_B64), (c) => c.charCodeAt(0));
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      if (init?.method === "HEAD") {
+        return new Response(null, {
+          status: 200,
+          headers: { "Content-Length": String(bytes.length) },
+        });
+      }
+      const match = /bytes=(\d+)-(\d*)/.exec(headers.get("Range") ?? "");
+      const start = match ? Number(match[1]) : 0;
+      const end = match?.[2] ? Number(match[2]) + 1 : bytes.length;
+      return new Response(bytes.slice(start, end), { status: 206 });
+    }) as unknown as typeof fetch;
+  }
+
+  const info = {
+    fps: 10,
+    features: {
+      value: { dtype: "float64", shape: [1], names: null },
+    },
+  } as unknown as DatasetMetadata;
+  const episode = {
+    episode_index: 0,
+    data_chunk_index: 0,
+    data_file_index: 0,
+    dataset_from_index: 100,
+    dataset_to_index: 130,
+  } as never;
+
+  test("reads the episode when the limit allows it", async () => {
+    clearParquetFileCache();
+    serveFixture();
+    const result = await loadEpisodeDataV3("o/ok", "v3.0", info, episode);
+    expect(result.chartDataGroups.length).toBeGreaterThan(0);
+    expect(result.dataNotice).toBeUndefined();
+  });
+
+  test("returns a notice, not a silent empty chart, above the limit", async () => {
+    clearParquetFileCache();
+    serveFixture();
+    parquetLimits.fullReadBytes = 10; // smaller than any row group
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = await loadEpisodeDataV3("o/big", "v3.0", info, episode);
+      expect(result.chartDataGroups).toEqual([]);
+      expect(result.dataNotice).toContain("limit");
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

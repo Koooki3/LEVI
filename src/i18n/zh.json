@@ -2797,6 +2797,7 @@
   "Dataset metadata was updated, but some staged files still need cleanup.": "数据集元数据已更新，部分暂存文件尚需清理。",
   "Reload remaining episodes": "重新加载剩余片段",
   "Pipeline removed, but some files still need cleanup.": "标注管线已删除，部分文件尚需清理。",
+<<<<<<< HEAD
   "Result version": "结果版本",
   "Per-run result": "按次保存的旧结果",
   "Label rule": "标签规则",
@@ -2846,4 +2847,10 @@
   "Automatic (recommended)": "自动判定（推荐）",
   "Save label rule": "保存标签规则",
   "Of {total} episodes: B higher in {b}, A higher in {a}, equal in {same}.": "共 {total} 个片段：B 更高 {b} 个，A 更高 {a} 个，相同 {same} 个。"
+=======
+  "This episode's data is too large to chart": "这个片段的数据太大，无法绘制图表",
+  "The data file behind this episode is larger than LEVI reads into memory at once, so the charts are empty. The videos and annotations still work.": "这个片段背后的数据文件超过了 LEVI 一次读入内存的上限，所以图表是空的。视频和标注仍然可用。",
+  "Some episodes were left out of this analysis": "部分片段没有计入这次分析",
+  "Episodes left out because their data file is too large:": "因数据文件太大而未计入的片段数："
+>>>>>>> 3d477fc (fix(viewer): say so when v3 data is too large to read, instead of empty charts (review B2 I4, S2, S4))
 }

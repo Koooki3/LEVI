@@ -16,6 +16,7 @@ import {
 import { IconButton, Kbd, Tabs } from "@/components/ds";
 import { AnalysisTab } from "@/components/viewer/analysis-tab";
 import { EpisodeLoadError } from "@/components/viewer/load-error";
+import { DataLoadNotice } from "@/components/viewer/data-notice";
 import { InspectorLayout } from "@/components/viewer/inspector";
 import {
   useViewerTabs,
@@ -1296,6 +1297,10 @@ function EpisodeViewerInner({
                         ))}
                     </div>
                   </section>
+                )}
+
+                {data.dataNotice && (
+                  <DataLoadNotice message={data.dataNotice} />
                 )}
 
                 {/* Graph */}

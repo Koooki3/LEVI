@@ -785,6 +785,12 @@ button.vw-outcome:hover {
   color: var(--ds-info);
   flex-shrink: 0;
 }
+.vw-note--warning {
+  border-left-color: var(--ds-warning);
+}
+.vw-note--warning > .vw-note-head > .ds-icon {
+  color: var(--ds-warning);
+}
 .vw-note--compact {
   display: flex;
   align-items: center;

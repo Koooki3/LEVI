@@ -124,6 +124,12 @@ export type EpisodeData = {
    * events compatible with the writer in lerobot#3471.
    */
   frameTimestamps?: number[];
+  /**
+   * Set when the episode's data file could not be read within the memory
+   * limit (ParquetTooLargeError): the charts are empty for that reason, not
+   * because the dataset has no numeric columns. The viewer shows it.
+   */
+  dataNotice?: string;
 };
 
 type EpisodeMetadataV3 = {
@@ -874,6 +880,7 @@ async function getEpisodeDataV3(
     task,
     languageAtoms,
     frameTimestamps,
+    dataNotice,
   } = await loadEpisodeDataV3(repoId, version, info, episodeMetadata);
 
   const duration = episodeMetadata.length
@@ -892,11 +899,12 @@ async function getEpisodeDataV3(
     task,
     languageAtoms,
     frameTimestamps,
+    dataNotice,
   };
 }
 
 // Load episode data for v3.0 charts
-async function loadEpisodeDataV3(
+export async function loadEpisodeDataV3(
   repoId: string,
   version: string,
   info: DatasetMetadata,
@@ -908,6 +916,7 @@ async function loadEpisodeDataV3(
   task?: string;
   languageAtoms?: import("@/types/language.types").LanguageAtom[];
   frameTimestamps?: number[];
+  dataNotice?: string;
 }> {
   // Build data file path using chunk and file indices
   const dataChunkIndex = bigIntToNumber(episodeMetadata.data_chunk_index, 0);
@@ -1053,6 +1062,13 @@ async function loadEpisodeDataV3(
   } catch (error) {
     if (error instanceof ParquetTooLargeError) {
       console.warn(error.message);
+      return {
+        chartDataGroups: [],
+        flatChartData: [],
+        ignoredColumns: [],
+        task: undefined,
+        dataNotice: error.message,
+      };
     }
     return {
       chartDataGroups: [],
@@ -2560,6 +2576,11 @@ export type CrossEpisodeVarianceData = {
   requestedEpisodes: number;
   /** True when the cap forced an even subsample of the scope. */
   sampled: boolean;
+  /**
+   * Sampled episodes left out because their data file is above the memory
+   * limit for reading (ParquetTooLargeError); `message` names the limit.
+   */
+  skippedTooLarge?: { episodes: number; message: string };
 };
 
 export async function loadCrossEpisodeActionVariance(
@@ -2720,6 +2741,7 @@ export async function loadCrossEpisodeActionVariance(
   const episodeActions: { index: number; actions: number[][] }[] = [];
   const episodeStates: (number[][] | null)[] = [];
 
+  const tooLarge = { episodes: 0, message: "" };
   if (isDatasetV3(normalizedVersion)) {
     const byFile = new Map<string, EpMeta[]>();
     for (const ep of sampled) {
@@ -2792,8 +2814,11 @@ export async function loadCrossEpisodeActionVariance(
           }
         } catch (error) {
           // Skip the file; say so when it was skipped for being too large.
-          if (error instanceof ParquetTooLargeError)
+          if (error instanceof ParquetTooLargeError) {
             console.warn(error.message);
+            tooLarge.episodes += eps.length;
+            tooLarge.message ||= error.message;
+          }
         }
         reportProgress(eps.length);
         return { fileEpActions, fileEpStates };
@@ -2858,8 +2883,12 @@ export async function loadCrossEpisodeActionVariance(
               states: sampledStates,
             };
           }
-        } catch {
-          /* skip */
+        } catch (error) {
+          if (error instanceof ParquetTooLargeError) {
+            console.warn(error.message);
+            tooLarge.episodes += 1;
+            tooLarge.message ||= error.message;
+          }
         } finally {
           reportProgress(1);
         }
@@ -3329,6 +3358,7 @@ export async function loadCrossEpisodeActionVariance(
     scopeEpisodes: inScope.length,
     requestedEpisodes: sampled.length,
     sampled: sampled.length < inScope.length,
+    ...(tooLarge.episodes > 0 ? { skippedTooLarge: tooLarge } : {}),
   };
 }
 

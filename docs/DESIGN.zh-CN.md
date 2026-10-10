@@ -186,7 +186,8 @@
 **反馈**：加载遮罩 300 ms 后才出现（加载快就不显示），减少动态效果时转圈停止；其他地方的转圈都换成 Lucide 的转圈；页面错误说明发生了什么、原因（技术细节）和怎么办（重试、返回探索数据）；“数据集已变化”卡片放在左下角，不挡住 Toast。
 
 ESLint 的颜色规则和 `src` 里所有文件一样覆盖查看器的文件；例外只有 `data-palette.ts`（canvas、WebGL 和机器人模型材质的数值）和测试。
-**Parquet 读取与内存**（`src/utils/parquetUtils.ts`）。查看器通过 HTTP 范围请求读取 Parquet 文件并缓存已取到的内容，用三道限制避免长时间使用后内存无限增长。（1）按字节预算的 LRU：小的元数据文件（4 MiB 以内：片段表、任务表、进度）与大的数据文件各用一份预算（默认 32 MiB 和 192 MiB），同时持有的文件超过 64 个也会丢弃；最久未用的先丢，单个文件比它那份预算还大时只读取、不缓存。（2）v3 数据文件用页脚构建的 row group 索引（`getParquetFileIndex`）定位某个片段的帧（`readParquetRowsByGlobalIndex`），只取包含这些帧的 row group；文件第一行的 `index` 值会被记住，同一文件里的后续片段不再多读一次预览。（3）会把整个文件读进内存的读取（没有行范围，或所选 row group 加起来）超过 128 MiB 时，直接抛出 `ParquetTooLargeError`（控制台警告写明大小和上限），不再解码；服务器忽略 `Range`、要整体返回更大文件时也一样。上限从代码运行处的环境变量读取（`MAX_PARQUET_META_CACHE_MB`、`MAX_PARQUET_CACHE_MB`、`MAX_PARQUET_CACHE_ENTRIES`、`MAX_PARQUET_FULL_READ_MB`）；浏览器端的打包代码用默认值。解析暂时没有放进 Web Worker。
+
+**Parquet 读取与内存**（`src/utils/parquetUtils.ts`）。查看器通过 HTTP 范围请求读取 Parquet 文件并缓存已取到的内容，用三道限制避免长时间使用后内存无限增长。（1）按字节预算的 LRU：小的元数据文件（4 MiB 以内：片段表、任务表、进度）与大的数据文件各用一份预算（默认 32 MiB 和 192 MiB），同时持有的文件超过 64 个也会丢弃；最久未用的先丢，单个文件比它那份预算还大时只读取、不留在缓存里（统计数就是实际持有量）。（2）v3 数据文件用页脚构建的 row group 索引（`getParquetFileIndex`）定位某个片段的帧（`readParquetRowsByGlobalIndex`），只取包含这些帧的 row group；文件第一行的 `index` 值会被记住，若读出的首行对不上（文件在原地被重写），索引随即作废。（3）会把整个文件读进内存、且超过 128 MiB 的读取，直接抛出 `ParquetTooLargeError`，不再解码：没有行范围的读取按整个文件大小判断（保守做法，不按所选列），带行范围的读取按所涉 row group 中所选列的压缩字节判断。服务器忽略 `Range` 时，按 `HEAD` 或响应给出的文件长度判断；两者都没有就拒绝这个响应体。被拒绝的读取会明确提示，而不是悄悄变空：片段页在图表上方给出提示（视频和标注仍可用），Action Insights 说明有多少片段没有计入；带大小的技术信息放在“技术详情”里。上限从代码运行处的环境变量读取（`MAX_PARQUET_META_CACHE_MB`、`MAX_PARQUET_CACHE_MB`、`MAX_PARQUET_CACHE_ENTRIES`、`MAX_PARQUET_FULL_READ_MB`），也就是 Next 服务进程；浏览器端的打包代码用默认值。解析暂时没有放进 Web Worker。
 
 ## 页面（第 4 阶段）
 
