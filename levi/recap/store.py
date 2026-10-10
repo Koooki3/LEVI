@@ -437,7 +437,8 @@ def _positive_fraction(per_episode: dict[str, dict[str, Any]]) -> float | None:
     if not labelled:
         return None
     frames = sum(r["frames"] for r in labelled)
-    positives = sum(r["positive_fraction"] * r["frames"] for r in labelled)
+    # Whole frame counts, as before (a fraction times a count is exact once rounded).
+    positives = sum(round(r["positive_fraction"] * r["frames"]) for r in labelled)
     return positives / frames if frames else 0.0
 
 
@@ -681,7 +682,10 @@ def publish_model(
             },
         )
         _durable_json(target / "result.json", record)
-        _fsync_dir(target)
+        # The new directory entries must reach the disk before the head can
+        # name them (power loss after the switch must not lose the version).
+        for folder in (target, slot / "v", slot, slot.parent):
+            _fsync_dir(folder)
         # The switch: one atomic rename. Before it the old version is live,
         # after it the new one; nothing in between is ever served.
         _durable_json(
