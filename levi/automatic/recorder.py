@@ -57,6 +57,7 @@ and marks a camera stalled when its frame did not change for
 """
 
 import csv
+import hashlib
 import io
 import json
 import os
@@ -72,6 +73,7 @@ from typing import Protocol
 
 from levi.domain import aeri
 
+from . import scene_assessment as sa
 from .adapters import legacy_live
 from .journal import fsync_dir
 
@@ -524,6 +526,7 @@ class RolloutRecorder:
             rollout.episode_id,
             state="complete",
             steps=rollout.steps,
+            last_frames=_last_frames(rollout),
             # The control group (pipeline §5.5): no early stop was allowed;
             # where the detector would have stopped, if it would have.
             control=bool(meta.get("control", False)),
@@ -552,7 +555,12 @@ class RolloutRecorder:
         rollout.state = "incomplete"
         rollout.demo = renamed.name
         rollout.path = renamed
-        self._set(rollout.episode_id, state="incomplete", abort_reason=reason)
+        self._set(
+            rollout.episode_id,
+            state="incomplete",
+            abort_reason=reason,
+            last_frames=_last_frames(rollout),
+        )
         return {"sealed": "incomplete", "demo": rollout.demo}
 
     def _abandon(self, path: Path, number: int, reason: str, rollout=None) -> Path:
@@ -624,6 +632,12 @@ class RolloutRecorder:
             entry["abort_reason"] = "orchestrator_crash"
         self._save_manifest()
         return renamed
+
+
+def _last_frames(rollout: Rollout) -> dict:
+    """The last frame each camera gave (as the observation named it), for
+    the waiting card."""
+    return {str(c): str(v)[:200] for c, (v, _) in sorted(rollout.frames.items())}
 
 
 def _abort_reason(reason: str) -> str:
@@ -760,3 +774,285 @@ class SessionFiles:
                     "",
                     None,
                 )
+
+
+# --- scene evidence (T-CL-04) ------------------------------------------------------------------
+
+EVIDENCE = "evidence"
+EVIDENCE_SCHEMA = "levi.aeri.evidence.v1"
+FRAMES = "frames"
+# The Initial State Contract the run checks against (for the waiting card).
+INITIAL_STATE = "initial_state.json"
+MAX_FRAME_BYTES = 4 * 1024 * 1024
+MAX_EVIDENCE_BYTES = 256 * 1024 * 1024
+# Frames may use this share of the budget; the rest is kept for the
+# assessment records (a refused assessment is kept too).
+FRAME_SHARE = 0.9
+_MAGIC = ((b"\xff\xd8\xff", ".jpg"), (b"\x89PNG\r\n\x1a\n", ".png"))
+
+
+def _frame_suffix(data: bytes) -> str:
+    return next((suffix for magic, suffix in _MAGIC if data.startswith(magic)), ".bin")
+
+
+class EvidenceStore:
+    """``<run_dir>/evidence/``: one record per scene assessment (accepted
+    or not; ``<assessment_id>.json``, or the request id when the provider
+    gave none) and the frames it was decided on (``frames/<sha256>.<ext>``,
+    content-addressed, written once).
+
+    Every file is written whole (temporary file, fsync, rename, fsync of
+    the folder): a writer killed half-way leaves only a hidden temporary
+    file, removed when the next store opens the folder (one writer per run:
+    the journal's lock holder). Frames over ``max_frame_bytes`` are not
+    kept, and frames stop being kept at ``FRAME_SHARE`` of
+    ``max_total_bytes`` (both say so in the record); records stop at the
+    total. Nothing here ever decides anything: the journal stays the
+    source of truth."""
+
+    def __init__(
+        self,
+        run_dir,
+        *,
+        max_frame_bytes: int = MAX_FRAME_BYTES,
+        max_total_bytes: int = MAX_EVIDENCE_BYTES,
+        io_hook: Callable[[str, Path], None] | None = None,
+    ):
+        self.folder = Path(run_dir) / EVIDENCE
+        self.frames = self.folder / FRAMES
+        self.max_frame_bytes = max_frame_bytes
+        self.max_total_bytes = max_total_bytes
+        self.io_hook = io_hook
+        self.used = 0
+        for folder in (self.folder, self.frames):
+            if not folder.is_dir():
+                continue
+            for path in folder.iterdir():
+                if path.name.startswith(".") and path.name.endswith(".tmp"):
+                    path.unlink(missing_ok=True)  # cut short by a crash
+                elif path.is_file():
+                    self.used += path.stat().st_size
+
+    def _whole(self, path: Path, data: bytes) -> None:
+        if self.io_hook is not None:
+            self.io_hook("write", path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        try:
+            with temporary.open("wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if self.io_hook is not None:
+                self.io_hook("rename", path)
+            os.replace(temporary, path)
+            fsync_dir(path.parent)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
+        self.used += len(data)
+
+    def _frame(self, ref: str, data: bytes) -> dict:
+        digest = hashlib.sha256(data).hexdigest()
+        name = f"{digest}{_frame_suffix(data)}"
+        found = {
+            "ref": ref,
+            "view": ref.partition(":")[0] if ":" in ref else None,
+            "sha256": digest,
+            "bytes": len(data),
+            "file": None,
+            "skipped": None,
+        }
+        path = self.frames / name
+        if path.is_file():
+            found["file"] = f"{FRAMES}/{name}"  # the same frame, kept once
+        elif len(data) > self.max_frame_bytes:
+            found["skipped"] = "frame_too_large"
+        elif self.used + len(data) > self.max_total_bytes * FRAME_SHARE:
+            found["skipped"] = "evidence_budget_exhausted"
+        else:
+            self._whole(path, data)
+            found["file"] = f"{FRAMES}/{name}"
+        return found
+
+    def write(self, record: dict, frames: dict | None = None) -> dict | None:
+        """Keep one assessment record (and its frames, ``{ref: bytes}``);
+        returns what was written, None when the budget is spent. A record
+        is never overwritten: a second one under the same id gets a
+        numbered name."""
+        kept = [self._frame(ref, data) for ref, data in sorted((frames or {}).items())]
+        body = {"schema": EVIDENCE_SCHEMA, **record, "frames": kept}
+        data = (json.dumps(body, sort_keys=True, indent=1) + "\n").encode()
+        if self.used + len(data) > self.max_total_bytes:
+            return None
+        name = str(record.get("assessment_id") or record["request_id"])
+        if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$", name):
+            raise RecorderError(f"bad evidence id {name[:60]!r}")
+        path = self.folder / f"{name}.json"
+        number = 1
+        while path.exists():
+            number += 1
+            path = self.folder / f"{name}.{number}.json"
+        self._whole(path, data)
+        return body
+
+    def keep_contract(self, described: dict) -> None:
+        """The run's Initial State Contract (``describe()``), for the
+        waiting card; rewritten only when it changed."""
+        path = self.folder / INITIAL_STATE
+        data = (json.dumps(described, sort_keys=True, indent=1) + "\n").encode()
+        try:
+            if path.read_bytes() == data:
+                return
+        except OSError:
+            pass
+        self._whole(path, data)
+
+
+def _read_json(path: Path):
+    try:
+        return json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def evidence_records(run_dir) -> list:
+    """Every whole evidence record of a run, in journal order."""
+    folder = Path(run_dir) / EVIDENCE
+    if not folder.is_dir():
+        return []
+    out = []
+    for path in folder.glob("*.json"):
+        if path.name.startswith(".") or path.name == INITIAL_STATE:
+            continue
+        found = _read_json(path)
+        if isinstance(found, dict) and found.get("schema") == EVIDENCE_SCHEMA:
+            out.append(found)
+    return sorted(out, key=lambda r: (r.get("journal_seq", 0), r.get("request_id", "")))
+
+
+DRAFT_NOTICE = "not confirmed by the user (HA-23) / 未经用户确认，HA-23"
+
+
+def pending_card(run_dir, *, now_wall_ns: int | None = None) -> dict:
+    """What a person needs when the run waits for them (design X2 §1.2,
+    "to-do card"), read only from the run's folder (journal, manifest,
+    evidence); nothing is written. ``waiting`` is False when no person is
+    waited for (the other fields still describe the last episode)."""
+    from .journal import Journal
+
+    run_dir = Path(run_dir)
+    scan = Journal.read(run_dir)
+    events = scan.events
+    state = scan.effective_state
+    committed = [e for e in events if e.record == "committed"]
+    waiting = state in ("WAIT_HUMAN", "FAULT_LOCKED")
+    wait = next(
+        (e for e in reversed(committed) if waiting and e.to_state == state), None
+    )
+    last_forward = max(
+        (e.sequence_no for e in committed if e.to_state == "FORWARD_ACTIVE"),
+        default=-1,
+    )
+    upto = wait.sequence_no if wait is not None else len(events)
+    waits = [
+        e for e in committed if e.to_state == "WAIT_HUMAN" and e.sequence_no <= upto
+    ]
+    now = time.time_ns() if now_wall_ns is None else now_wall_ns
+    card = {
+        "run_id": events[0].run_id if events else None,
+        "state": state,
+        "corrupt": scan.corrupt,
+        "waiting": waiting,
+        "reason": wait.reason if wait is not None else None,
+        "since_sequence_no": wait.sequence_no if wait is not None else None,
+        # The sequence a resume must name (``expected_seq``).
+        "expected_seq": len(events),
+        "waited_ms": max(0, (now - wait.emitted_wall_ns) // 1_000_000)
+        if wait is not None
+        else None,
+        "human_wait_number": len(waits) if waiting and state == "WAIT_HUMAN" else None,
+        "human_waits_since_forward": sum(
+            1 for e in waits if e.sequence_no > last_forward
+        ),
+    }
+    result = next((e for e in reversed(committed) if e.episode_result), None)
+    manifest = _read_json(run_dir / MANIFEST) or {}
+    episode = None
+    if result is not None:
+        found = result.episode_result
+        entry = next(
+            (
+                e
+                for e in manifest.get("episodes", [])
+                if e.get("episode_id") == result.episode_id
+            ),
+            {},
+        )
+        root = manifest.get("rollout_root")
+        path = None
+        if root and entry.get("task_folder") and entry.get("demo"):
+            path = str(
+                Path(root)
+                / manifest.get("group", "")
+                / entry["task_folder"]
+                / entry["demo"]
+            )
+        episode = {
+            "episode_id": result.episode_id,
+            "role": result.episode_role,
+            "task_outcome": found.task_outcome,
+            "stop_reason": found.stop_reason,
+            "goal_verification": found.goal_verification,
+            "robot_home": found.robot_home,
+            "scene_reset": found.scene_reset,
+            "rollout": found.rollout.model_dump(),
+            "rollout_path": path,
+            "last_frames": entry.get("last_frames"),
+        }
+    card["last_episode"] = episode
+    described = _read_json(run_dir / EVIDENCE / INITIAL_STATE)
+    contract = None
+    if isinstance(described, dict) and described.get("id"):
+        draft = described.get("status") != "confirmed"
+        contract = {
+            "key": f"{described['id']}@{described.get('version')}",
+            "status": described.get("status"),
+            "unconfirmed": draft,
+            "notice": DRAFT_NOTICE if draft else None,
+            "predicates": [
+                {"name": n, "text": _predicate_text(n), "required": True}
+                for n in described.get("required", [])
+            ]
+            + [
+                {"name": n, "text": _predicate_text(n), "required": False}
+                for n in described.get("optional", [])
+            ],
+        }
+    card["contract"] = contract
+    records = [r for r in evidence_records(run_dir) if r.get("journal_seq", 0) <= upto]
+    last = records[-1] if records else None
+    card["evidence"] = (
+        {
+            key: last.get(key)
+            for key in (
+                "assessment_id",
+                "request_id",
+                "target",
+                "provider",
+                "provider_decision",
+                "decision",
+                "reason",
+                "failed_predicates",
+                "unknown_predicates",
+                "frames",
+            )
+        }
+        if last
+        else None
+    )
+    return card
+
+
+def _predicate_text(name) -> str:
+    return sa.predicate_text(str(name))

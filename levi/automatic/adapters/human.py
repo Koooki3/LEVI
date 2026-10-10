@@ -45,6 +45,7 @@ from typing import Protocol
 
 from levi.domain import aeri
 
+from .. import scene_assessment as sa
 from ..journal import fsync_dir
 from .events import Ticket
 
@@ -57,10 +58,7 @@ MAX_ANSWER_BYTES = 64 * 1024
 UNSOLICITED = "E_UNSOLICITED"
 
 
-def readable(name: str) -> str:
-    """``object_at_source`` -> ``object at source`` (the contract format has
-    no text field yet, HA-23)."""
-    return name.replace("_", " ")
+readable = sa.predicate_text
 
 
 def _frame_ref(view: str, data: bytes) -> tuple[str, str]:

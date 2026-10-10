@@ -68,6 +68,7 @@ from . import scene_assessment as sa
 from . import state_machine as sm
 from .adapters import events as ev
 from .journal import Journal, JournalRefused, process_identity
+from .recorder import EvidenceStore
 from .termination import TerminationArbiter, TerminationConfig, verification_of
 
 HOLD_STATES = ("WAIT_HUMAN", "FAULT_LOCKED", "COMPLETED")
@@ -264,6 +265,31 @@ class CommandResult:
     sequence_no: int | None = None
 
 
+def _scene_facts(message) -> dict:
+    """What an evidence record keeps of a parsed scene message."""
+    if message.kind != "scene":
+        return {"provider_decision": "unavailable", "provider_code": message.code}
+    return {
+        "assessment_id": message.assessment_id,
+        "provider": message.provider,
+        "provider_decision": message.decision,
+        "contract": {"id": message.contract_id, "version": message.contract_version},
+        "failed_predicates": list(message.failed_predicates),
+        "unknown_predicates": list(message.unknown_predicates),
+        "unknown_reason": message.unknown_reason,
+        "predicate_results": [
+            {"name": p.name, "value": p.value, "required": p.required}
+            for p in message.predicate_results
+        ],
+        "evidence_refs": [
+            {"kind": r.kind, "ref": r.ref, "sha256": r.sha256}
+            for r in message.evidence_refs
+        ],
+        "observed_ns": message.observed_ns,
+        "produced_ns": message.produced_ns,
+    }
+
+
 def _code(text: str) -> str:
     cleaned = "".join(c if c.isalnum() or c == "_" else "_" for c in str(text).lower())
     cleaned = cleaned.strip("_") or "unspecified"
@@ -288,6 +314,7 @@ class Orchestrator:
         fence: sm.MotionFence,
         crash_hook: Callable[[str], None] | None = None,
         listener: Callable[[str, dict], None] | None = None,
+        evidence=True,
     ):
         self.journal = journal
         self.config = config
@@ -326,6 +353,21 @@ class Orchestrator:
         self.halted: str | None = None
         self.ctx: Episode | None = None
         self.recovery = None
+        # Scene evidence (T-CL-04): ``True`` keeps it in the run's folder,
+        # an ``EvidenceStore`` there, ``None``/``False`` nowhere.
+        self.evidence = None
+        if evidence is True:
+            try:
+                self.evidence = EvidenceStore(journal.directory)
+            except OSError as exc:
+                self._note("evidence_write_failed", f"open: {exc}")
+        elif evidence:
+            self.evidence = evidence
+        if self.evidence is not None and contract is not None:
+            try:
+                self.evidence.keep_contract(contract.describe())
+            except Exception as exc:  # noqa: BLE001 - evidence only
+                self._note("evidence_write_failed", f"contract: {exc}")
         self._read_back()
 
     # --- construction --------------------------------------------------------------
@@ -1003,12 +1045,34 @@ class Orchestrator:
 
     def _assess(self, target: str, episode_id: str) -> str:
         """ready | reset_required | unknown | unavailable (never ready
-        without a fresh, fenced assessment that says so)."""
+        without a fresh, fenced assessment that says so). Every assessment
+        is kept in ``evidence/`` (T-CL-04), the refused ones too."""
         # Unique across restarts: the journal's next line number.
         request_id = f"{episode_id}:scene{self.journal.next_seq}"
-        # After the home or the reset's end: evidence older than this request
-        # shows a scene that may have changed since (review C3, I1).
-        asked_ns = self._now()
+        record = {
+            "request_id": request_id,
+            "episode_id": episode_id,
+            "target": target,
+            "journal_seq": self.journal.next_seq,
+            # After the home or the reset's end: evidence older than this
+            # request shows a scene that may have changed since (review C3, I1).
+            "asked_ns": self._now(),
+        }
+        decision = "unavailable"
+        try:
+            decision, reason, message = self._assess_once(record)
+            record["decision"], record["reason"] = decision, reason
+            if message is not None:
+                record.update(_scene_facts(message))
+        finally:
+            self._keep_evidence(record)
+        return decision
+
+    def _assess_once(self, record: dict) -> tuple:
+        """``(decision, reason, parsed message or None)``."""
+        request_id = record["request_id"]
+        episode_id, target = record["episode_id"], record["target"]
+        asked_ns = record["asked_ns"]
         request = ev.make_request(
             request_id=request_id,
             run_id=self.config.run_id,
@@ -1024,7 +1088,7 @@ class Orchestrator:
                 if raw is None:
                     self.scene.cancel(got, why)
                     self._note(f"scene_{why}", request_id)
-                    return "unavailable"
+                    return "unavailable", why, None
         finally:
             self._scene_notes()
         try:
@@ -1032,28 +1096,28 @@ class Orchestrator:
         except aeri.AeriError as exc:
             self._scene_violations += 1
             self._note("contract_violation", f"scene: {exc}")
-            return "unavailable"
+            return "unavailable", f"contract_violation:{exc.code}", None
         if message.run_id != self.config.run_id or message.request_id != request_id:
             self._note("scene_dropped_unsolicited", message.request_id)
-            return "unavailable"
+            return "unavailable", "unsolicited", None
         if message.kind == "unavailable":
             self._note("scene_unavailable", f"{request_id}: {message.code}")
-            return "unavailable"
+            return "unavailable", f"unavailable:{message.code}", message
         if message.episode_id != episode_id or message.target != target:
             self._note("scene_dropped_stale", f"{request_id}: {message.episode_id}")
-            return "unavailable"
+            return "unavailable", "stale:other_episode", message
         try:
             aeri.check_fresh(message, now_ns=self._now(), local=self.clock.domain)
         except aeri.AeriError as exc:
             self._note("scene_dropped_stale", f"{request_id}: {exc.code}")
-            return "unavailable"
+            return "unavailable", f"stale:{exc.code}", message
         if message.kind == "scene" and message.observed_ns < asked_ns:
             self._note(
                 "scene_dropped_stale",
                 f"{request_id}: observed {asked_ns - message.observed_ns} ns "
                 "before the request",
             )
-            return "unavailable"
+            return "unavailable", "stale:observed_before_request", message
         verdict = sa.arbitrate(message, self.config.initial_state)
         if verdict.reason != "provider":
             # A ready claim that does not meet the contract: never a skip.
@@ -1061,7 +1125,27 @@ class Orchestrator:
                 f"scene_{verdict.reason}",
                 f"{request_id}: {message.decision} -> {verdict.decision}",
             )
-        return verdict.decision
+        return verdict.decision, verdict.reason, message
+
+    def _keep_evidence(self, record: dict) -> None:
+        """Write the record and the frames the provider captured for it (a
+        person's check). Never decides and never stops the run: a failure
+        is a note."""
+        take = getattr(self.scene, "frames", None)
+        try:
+            frames = take(record["request_id"]) if callable(take) else {}
+        except Exception as exc:  # noqa: BLE001 - evidence only
+            self._note("evidence_write_failed", f"frames: {exc}")
+            frames = {}
+        if self.evidence is None:
+            return
+        record.setdefault("decision", "unavailable")
+        record.setdefault("reason", "provider_error")
+        try:
+            if self.evidence.write(record, frames) is None:
+                self._note("evidence_budget_exhausted", record["request_id"])
+        except Exception as exc:  # noqa: BLE001 - evidence only
+            self._note("evidence_write_failed", f"{type(exc).__name__}: {exc}")
 
     def _collect_scene(self, ticket) -> tuple:
         """``(raw, None)``, or ``(None, why)`` (``timeout``, or

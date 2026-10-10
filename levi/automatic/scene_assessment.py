@@ -435,6 +435,12 @@ def load_contract(text: str) -> InitialStateContract:
     return contract_from(parse_document(text))
 
 
+def predicate_text(name: str) -> str:
+    """A predicate name a person can read (``object_at_source`` -> ``object
+    at source``): the contract format has no text field yet (HA-23)."""
+    return name.replace("_", " ")
+
+
 # --- the arbitration -----------------------------------------------------------------------------
 
 
