@@ -16,7 +16,9 @@ import {
   fetchRecapStatus,
   fetchRecapSummary,
   RecapRecomputedError,
+  fetchRecapSettings,
   runRecap,
+  saveRecapSettings,
 } from "@/utils/annotationsClient";
 
 const globals = globalThis as unknown as {
@@ -176,6 +178,36 @@ describe("RECAP client", () => {
       ).catch((e: unknown) => e);
       expect(episode).not.toBeInstanceOf(RecapRecomputedError);
     }
+  });
+
+  test("the dataset label rule is read and stored through /recap/settings", async () => {
+    const choice = {
+      setting: "sft",
+      dataset_type: "sft",
+      source: "user",
+      reason: "the dataset setting",
+    };
+    respond(200, choice);
+    expect(await fetchRecapSettings(ident)).toEqual(choice);
+    const read = new URL(calls[0].url);
+    expect(read.pathname).toBe("/api/annotation/recap/settings");
+    expect(read.searchParams.get("repo_id")).toBe("local/plates");
+    expect(calls[0].init?.method).toBeUndefined();
+    await saveRecapSettings(ident, "auto");
+    expect(new URL(calls[1].url).pathname).toBe(
+      "/api/annotation/recap/settings",
+    );
+    expect(calls[1].init?.method).toBe("POST");
+    expect(JSON.parse(String(calls[1].init?.body))).toEqual({
+      repo_id: "local/plates",
+      dataset_type: "auto",
+    });
+    respond(400, {
+      detail: "dataset_type is auto, rollout, sft or value_only",
+    });
+    await expect(saveRecapSettings(ident, "sft")).rejects.toThrow(
+      "dataset_type is auto",
+    );
   });
 
   test("a computation without a label rule sends none: the backend decides", async () => {

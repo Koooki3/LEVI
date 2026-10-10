@@ -2841,5 +2841,11 @@
   "Failure episodes": "失败片段",
   "Episodes without a shared outcome": "无共同结局的片段",
   "A result has values only (no success/failure labels): label and advantage metrics are left out.": "有一方是仅价值结果（无成败标签）：不计算标签和优势指标。",
-  "Results are saved per run: recomputing adds a result, and earlier runs of each model are folded into one row.": "结果按次保存：重新计算会新增一条结果，同一模型的旧结果折叠为一行显示。"
+  "Results are saved per run: recomputing adds a result, and earlier runs of each model are folded into one row.": "结果按次保存：重新计算会新增一条结果，同一模型的旧结果折叠为一行显示。",
+  "Label rule (advanced)": "标签规则（高级）",
+  "Recomputing no longer asks for this: the rule only affects advantages and the threshold, not the Value itself, and it belongs to the dataset rather than to a model. Set it here when the automatic decision cannot recognise demonstration data (for example an SFT dataset without metadata).": "重算不再询问：该规则只影响优势与阈值，不影响价值本身，属于数据集而不是模型；自动判定无法识别示范数据（例如没有元数据的 SFT 数据集）时请在此指定。",
+  "Label rule now": "当前标签规则",
+  "Label rule for this dataset": "该数据集的标签规则",
+  "Automatic (recommended)": "自动判定（推荐）",
+  "Save label rule": "保存标签规则"
 }

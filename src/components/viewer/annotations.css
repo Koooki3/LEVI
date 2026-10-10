@@ -1905,6 +1905,28 @@
 .annotations-skin .recap-compute {
   flex-wrap: wrap;
 }
+.annotations-skin .recap-label-settings summary {
+  color: var(--ds-text-primary);
+  cursor: pointer;
+}
+.annotations-skin .recap-label-settings summary:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
+.annotations-skin .recap-label-settings p {
+  margin: 6px 0;
+}
+.annotations-skin .recap-label-settings-controls {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.annotations-skin .recap-label-settings-error {
+  display: block;
+  margin-top: 6px;
+  color: var(--ds-danger);
+}
 .annotations-skin .recap-earlier {
   display: inline-flex;
   align-items: center;

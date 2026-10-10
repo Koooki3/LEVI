@@ -21,6 +21,8 @@ import type {
 } from "../types/object-annotation.types";
 import type {
   RecapComparison,
+  RecapDatasetType,
+  RecapDatasetTypeChoice,
   RecapEpisode,
   RecapJob,
   RecapRevisions,
@@ -855,6 +857,41 @@ export async function fetchRecapCompare(
       !!(versions.a || versions.b),
     );
   return response.json() as Promise<RecapComparison>;
+}
+
+/** The dataset-level label rule (`setting`, "auto" when none is stored) and
+ * what a run resolves it to now (`dataset_type`, `source`, `reason`). */
+export async function fetchRecapSettings(
+  ident: DatasetIdent,
+  signal?: AbortSignal,
+): Promise<RecapDatasetTypeChoice> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const response = await annotationFetch(
+    buildUrl("/api/recap/settings", ident),
+    { cache: "no-store", signal },
+  );
+  if (!response.ok)
+    throw new Error(await responseErrorMessage(response, "RECAP settings"));
+  return response.json() as Promise<RecapDatasetTypeChoice>;
+}
+
+/** Store the dataset's label rule; "auto" removes the setting. */
+export async function saveRecapSettings(
+  ident: DatasetIdent,
+  datasetType: "auto" | RecapDatasetType,
+): Promise<RecapDatasetTypeChoice> {
+  if (!ENV_URL) throw new Error("Annotate backend not configured");
+  const response = await annotationFetch(endpoint("/api/recap/settings"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      repo_id: ident.repoId || null,
+      dataset_type: datasetType,
+    }),
+  });
+  if (!response.ok)
+    throw new Error(await responseErrorMessage(response, "RECAP settings"));
+  return response.json() as Promise<RecapDatasetTypeChoice>;
 }
 
 export async function runRecap(

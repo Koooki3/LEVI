@@ -62,8 +62,10 @@ import {
   fetchRecapEpisode,
   fetchRecapJob,
   fetchRecapRevisions,
+  fetchRecapSettings,
   fetchRecapStatus,
   fetchRecapSummary,
+  saveRecapSettings,
   isAnnotateBackendEnabled,
   runRecap,
 } from "@/utils/annotationsClient";
@@ -73,6 +75,8 @@ import {
   isRecapJobActive,
   type RecapComparison,
   type RecapComparisonMetric,
+  type RecapDatasetType,
+  type RecapDatasetTypeChoice,
   type RecapEpisode,
   type RecapJob,
   type RecapRevision,
@@ -1164,6 +1168,119 @@ function ValueTrack({
   );
 }
 
+const LABEL_RULE_CHOICES: readonly ("auto" | RecapDatasetType)[] = [
+  "auto",
+  "rollout",
+  "sft",
+  "value_only",
+];
+
+/** The dataset-level label rule ("advanced"): recomputing no longer asks for
+ * it, so this is where a person corrects the automatic decision, for example
+ * for demonstrations without metadata. Reads and writes
+ * `/api/recap/settings`; the decision and its source are always shown. */
+function LabelRuleSettings({
+  repoId,
+  choice,
+  readOnly,
+  onSaved,
+}: {
+  repoId: string;
+  choice: RecapDatasetTypeChoice;
+  readOnly: boolean;
+  onSaved: (next: RecapDatasetTypeChoice) => void;
+}) {
+  const { t } = useLocale();
+  const [current, setCurrent] = useState(choice);
+  const [draft, setDraft] = useState<string>(choice.setting || "auto");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const explanationId = useId();
+  useEffect(() => {
+    setCurrent(choice);
+  }, [choice]);
+  const stored = current.setting || "auto";
+  const refresh = (open: boolean) => {
+    if (!open) return;
+    fetchRecapSettings({ repoId })
+      .then((next) => {
+        setCurrent(next);
+        setDraft(next.setting || "auto");
+      })
+      .catch((reason) => setError(message(reason)));
+  };
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const next = await saveRecapSettings(
+        { repoId },
+        draft as "auto" | RecapDatasetType,
+      );
+      setCurrent(next);
+      setDraft(next.setting || "auto");
+      onSaved(next);
+    } catch (reason) {
+      setError(message(reason));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <details
+      className="recap-note recap-label-settings"
+      onToggle={(e) => refresh((e.currentTarget as HTMLDetailsElement).open)}
+    >
+      <summary>{t("Label rule (advanced)")}</summary>
+      <p id={explanationId}>
+        {t(
+          "Recomputing no longer asks for this: the rule only affects advantages and the threshold, not the Value itself, and it belongs to the dataset rather than to a model. Set it here when the automatic decision cannot recognise demonstration data (for example an SFT dataset without metadata).",
+        )}
+      </p>
+      <p>
+        {t("Label rule now")}:{" "}
+        <strong>
+          {t(datasetTypeKey(current.dataset_type)) +
+            " · " +
+            t(datasetTypeSourceKey(current.source))}
+        </strong>
+      </p>
+      {!readOnly && (
+        <span className="recap-label-settings-controls">
+          <Select
+            aria-label={t("Label rule for this dataset")}
+            aria-describedby={explanationId}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            disabled={saving}
+          >
+            {LABEL_RULE_CHOICES.map((kind) => (
+              <option key={kind} value={kind}>
+                {kind === "auto"
+                  ? t("Automatic (recommended)")
+                  : t(datasetTypeKey(kind))}
+              </option>
+            ))}
+          </Select>
+          <Button
+            size="sm"
+            loading={saving}
+            disabled={saving || draft === stored}
+            onClick={save}
+          >
+            {t("Save label rule")}
+          </Button>
+        </span>
+      )}
+      {error && (
+        <span className="recap-label-settings-error" role="alert">
+          {error}
+        </span>
+      )}
+    </details>
+  );
+}
+
 /** A dataset key owns status, result selection and jobs. Switching datasets
  * discards all of them, while changing episodes preserves the selected run. */
 export const RecapValueSection: React.FC<Props> = (props) => {
@@ -1716,6 +1833,18 @@ function DatasetRecapSection({
                 "Only the Value curve is computed: no advantages or positive/negative labels.",
               )}
         </div>
+      )}
+      {status?.dataset_type && (
+        <LabelRuleSettings
+          repoId={repoId}
+          choice={status.dataset_type}
+          readOnly={readOnly}
+          onSaved={(next) =>
+            setStatus((previous) =>
+              previous ? { ...previous, dataset_type: next } : previous,
+            )
+          }
+        />
       )}
       {notReady.map((c) => (
         <div className="recap-note" key={c.name}>

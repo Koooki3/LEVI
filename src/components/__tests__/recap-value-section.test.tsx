@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { act } from "react";
 import type { DatasetIdent } from "@/utils/annotationsClient";
 import type {
+  RecapDatasetTypeChoice,
   RecapComparison,
   RecapEpisode,
   RecapJob,
@@ -193,6 +194,30 @@ const fetchCompare = mock(
   ) => compareHandler(ident, a, b, signal, versions),
 );
 class RecapRecomputedError extends Error {}
+let settingsChoice: RecapDatasetTypeChoice = {
+  setting: "auto",
+  dataset_type: "rollout",
+  source: "outcomes",
+  reason: "episodes have success/failure labels",
+};
+const fetchSettings = mock(async () => settingsChoice);
+const saveSettings = mock(async (_ident: DatasetIdent, kind: string) => {
+  settingsChoice =
+    kind === "auto"
+      ? {
+          ...settingsChoice,
+          setting: "auto",
+          dataset_type: "rollout",
+          source: "outcomes",
+        }
+      : {
+          setting: kind,
+          dataset_type: kind,
+          source: "user",
+          reason: "the dataset setting",
+        };
+  return settingsChoice;
+});
 const run = mock(async (ident: DatasetIdent, request: RecapRunRequest) => {
   void ident;
   void request;
@@ -205,6 +230,8 @@ mock.module("@/context/annotations-context", () => ({
 }));
 mock.module("@/utils/annotationsClient", () => ({
   RecapRecomputedError,
+  fetchRecapSettings: fetchSettings,
+  saveRecapSettings: saveSettings,
   isAnnotateBackendEnabled: () => true,
   fetchRecapStatus: (ident: DatasetIdent) => statusHandler(ident),
   fetchRecapRevisions: (ident: DatasetIdent) => revisionsHandler(ident),
@@ -295,6 +322,14 @@ beforeEach(() => {
   fetchCompare.mockClear();
   run.mockClear();
   cancel.mockClear();
+  fetchSettings.mockClear();
+  saveSettings.mockClear();
+  settingsChoice = {
+    setting: "auto",
+    dataset_type: "rollout",
+    source: "outcomes",
+    reason: "episodes have success/failure labels",
+  };
   seek.mockClear();
   window.localStorage.clear();
 });
@@ -1151,6 +1186,104 @@ describe("one result per value model", () => {
     await flush();
     expect(lists).toBe(2);
     expect(host.textContent).not.toContain("A selected result was recomputed");
+  });
+});
+
+describe("dataset label rule (advanced)", () => {
+  const panel = (host: HTMLElement) =>
+    host.querySelector<HTMLDetailsElement>(".recap-label-settings")!;
+
+  test("explains why recomputing does not ask, and stores the dataset's rule", async () => {
+    statusHandler = async () => ({ ...status(), dataset_type: settingsChoice });
+    const { host } = await render(page());
+    await loaded(host);
+    const box = panel(host);
+    expect(box.querySelector("summary")!.textContent).toBe(
+      "Label rule (advanced)",
+    );
+    expect(box.textContent).toContain(
+      "Recomputing no longer asks for this: the rule only affects advantages and the threshold, not the Value itself, and it belongs to the dataset rather than to a model.",
+    );
+    expect(box.textContent).toContain(
+      "for example an SFT dataset without metadata",
+    );
+    expect(box.textContent).toContain("Policy rollouts");
+    expect(box.textContent).toContain("episodes have success/failure labels");
+    // Opening it reads the stored setting again.
+    box.open = true;
+    await fire(box, new Event("toggle"));
+    await waitFor(() => fetchSettings.mock.calls.length >= 1, {
+      label: "settings read on opening",
+      timeoutMs: 2000,
+    });
+    const picker = box.querySelector<HTMLSelectElement>("select")!;
+    expect(picker.getAttribute("aria-label")).toBe(
+      "Label rule for this dataset",
+    );
+    expect(picker.value).toBe("auto");
+    const save = [...box.querySelectorAll("button")].find(
+      (node) => node.textContent === "Save label rule",
+    )!;
+    expect(save.disabled).toBe(true);
+    await choose(picker, "sft");
+    expect(save.disabled).toBe(false);
+    await click(save);
+    await waitFor(() => saveSettings.mock.calls.length === 1);
+    expect(saveSettings.mock.calls[0][1]).toBe("sft");
+    await waitFor(() =>
+      box.textContent?.includes("Demonstrations (SFT) · set for this dataset"),
+    );
+    // The compute controls show the new decision without a reload.
+    await click(button(host, "Recompute"));
+    const rule = host.querySelector(".recap-label-rule")!.textContent!;
+    expect(rule).toContain("Demonstrations (SFT)");
+    expect(rule).toContain("set for this dataset");
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  test("a failed save keeps the choice and says why", async () => {
+    statusHandler = async () => ({ ...status(), dataset_type: settingsChoice });
+    saveSettings.mockImplementationOnce(async () => {
+      throw new Error("The dataset is read-only");
+    });
+    const { host } = await render(page());
+    await loaded(host);
+    const box = panel(host);
+    const picker = box.querySelector<HTMLSelectElement>("select")!;
+    await choose(picker, "value_only");
+    await click(
+      [...box.querySelectorAll("button")].find(
+        (node) => node.textContent === "Save label rule",
+      )!,
+    );
+    await waitFor(() => box.querySelector('[role="alert"]'));
+    expect(box.querySelector('[role="alert"]')!.textContent).toContain(
+      "The dataset is read-only",
+    );
+    expect(picker.value).toBe("value_only");
+  });
+
+  test("read-only viewers see the rule and the explanation but cannot change it", async () => {
+    context = { ...context, readOnly: true };
+    statusHandler = async () => ({ ...status(), dataset_type: settingsChoice });
+    const { host } = await render(page());
+    await loaded(host);
+    const box = panel(host);
+    expect(box.textContent).toContain("Recomputing no longer asks for this");
+    expect(box.querySelector("select")).toBeNull();
+  });
+
+  test("the label rule is translated", async () => {
+    statusHandler = async () => ({ ...status(), dataset_type: settingsChoice });
+    const { host } = await render(page());
+    await loaded(host);
+    await click(host.querySelector("[data-language=zh]"));
+    await flush();
+    const box = panel(host);
+    expect(box.querySelector("summary")!.textContent).toBe("标签规则（高级）");
+    expect(box.textContent).toContain(
+      "重算不再询问：该规则只影响优势与阈值，不影响价值本身，属于数据集而不是模型",
+    );
   });
 });
 
