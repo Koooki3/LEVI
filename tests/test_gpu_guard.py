@@ -533,6 +533,7 @@ def test_the_shared_ttl_is_bounded_and_ignores_bad_values(monkeypatch):
         ("-5", 0),
         ("nan", 0),
         ("2.5", 2.5),
+        ("30", 3),
         ("9999", gpu.MAX_SHARED_REUSE_SECONDS),
     ]:
         monkeypatch.setenv("LEVI_GPU_SHARED_REUSE_SECONDS", text)
@@ -550,3 +551,34 @@ def test_a_reused_shared_verdict_does_not_outlive_a_free_one(monkeypatch):
     tick(monkeypatch, 6)  # 11 s after the sample
     with pytest.raises(gpu.GpuBusy):
         gpu.require_free(config())
+
+
+def test_a_shared_window_above_the_cap_is_cut_to_it_with_a_warning(
+    monkeypatch, caplog
+):
+    """T-B-15 review: a shared verdict is the riskier state, so it never lives
+    longer than 3 s, however the variable is set."""
+    assert gpu.MAX_SHARED_REUSE_SECONDS <= 3.0
+    monkeypatch.setenv("LEVI_GPU_SHARED_REUSE_SECONDS", "30")
+    with caplog.at_level("WARNING", logger="levi"):
+        assert gpu.shared_reuse_seconds() == gpu.MAX_SHARED_REUSE_SECONDS
+    assert "LEVI_GPU_SHARED_REUSE_SECONDS" in caplog.text
+
+
+@pytest.mark.parametrize("cached_as", ["free", "shared"])
+def test_the_guardians_own_busy_sighting_voids_a_reused_go(monkeypatch, cached_as):
+    """A watcher tick that sees busy work ends every reuse window at once."""
+    monkeypatch.setenv("LEVI_GPU_SHARED_REUSE_SECONDS", "3")
+    write_policy([{"match": "jupyter", "class": "share"}])
+    if cached_as == "free":
+        on_gpu(monkeypatch, [], {})
+    else:
+        on_gpu(monkeypatch, [(9, 2000)], {9: JUPYTER}, util=10)
+    assert gpu.require_free(config())["state"] == cached_as
+    on_gpu(monkeypatch, [(9, 2000), (10, 8000)], {9: JUPYTER, 10: ACTOR}, util=90)
+    monkeypatch.setattr(gpu, "unload_all", lambda c: [])
+    gpu.Watch(Store([])).tick()  # the guardian samples and sees the actor
+    calls = counting_smi(monkeypatch)
+    with pytest.raises(gpu.GpuBusy):
+        gpu.require_free(config())  # no waiting for the window to run out
+    assert calls  # it sampled again

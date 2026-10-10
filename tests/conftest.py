@@ -297,6 +297,8 @@ def _gpu_is_not_this_machines(monkeypatch):
     """The off-peak GPU guard reads the real nvidia-smi; a test must not pass
     or fail depending on who is training on this machine right now."""
     monkeypatch.setenv("LEVI_GPU_SHARING", "allow")
+    # A reuse window exported in the shell would change the guard's own tests.
+    monkeypatch.delenv("LEVI_GPU_SHARED_REUSE_SECONDS", raising=False)
 
 
 @pytest.fixture(autouse=True)

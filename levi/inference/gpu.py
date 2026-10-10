@@ -524,6 +524,10 @@ def status(need_mib=None, servers=()):
         else _read(_history_path(), {})
     )
     verdict = decide(now, history, policy(), need_mib)
+    if verdict["state"] in {"busy", "cooling", "unknown"}:
+        # Whoever sees trouble first ends every reuse window: the next
+        # request samples for itself.
+        _RECENT_FREE.clear()
     verdict["sampled_at"] = now["at"]
     verdict["processes"] = now.get("processes", [])
     verdict["ours"] = now.get("ours", [])
@@ -562,9 +566,11 @@ REUSE_FREE_SECONDS = 10.0
 # The same for a "shared" verdict (sharing by policy). Sharing rests on load
 # that moves, so this is off by default: 0 keeps every request sampling, and
 # the gate is no looser than before. ``LEVI_GPU_SHARED_REUSE_SECONDS`` turns
-# it on (a few seconds, capped at MAX_SHARED_REUSE_SECONDS): a busy load that
-# appears is then seen after at most that long.
-MAX_SHARED_REUSE_SECONDS = 30.0
+# it on, capped at MAX_SHARED_REUSE_SECONDS (3 s, shorter than the free
+# window: sharing is the riskier state): a busy load that appears is then seen
+# after at most that long, and any busy/cooling/unknown sighting by the
+# guardian ends every window at once (status()).
+MAX_SHARED_REUSE_SECONDS = 3.0
 _RECENT_FREE: dict = {}
 
 
@@ -577,7 +583,14 @@ def shared_reuse_seconds():
         return 0.0
     if not value > 0:  # also NaN
         return 0.0
-    return min(value, MAX_SHARED_REUSE_SECONDS)
+    if value > MAX_SHARED_REUSE_SECONDS:
+        LOG.warning(
+            "LEVI_GPU_SHARED_REUSE_SECONDS=%s is above the cap; using %s s",
+            value,
+            MAX_SHARED_REUSE_SECONDS,
+        )
+        return MAX_SHARED_REUSE_SECONDS
+    return value
 
 
 def require_free(config=None):
