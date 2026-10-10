@@ -714,6 +714,18 @@ def _group(pgid) -> list:
     return members or [pgid]
 
 
+def _last_line(path, tail=4096) -> str:
+    """The last non-empty line of a log file ("" when unreadable)."""
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - tail))
+            lines = handle.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return ""
+    return next((x.strip() for x in reversed(lines) if x.strip()), "")
+
+
 STOP_CONFIRM_S = 60.0  # how long a stop waits for the GPU to be really free
 
 
@@ -770,6 +782,9 @@ class Vllm:
         # finished (``clear_timings``).
         self.timings: dict = {}
         self._cold_pending = False
+        # Why the last launch through ``vllm.cpus``/``vllm.nice`` failed before
+        # vLLM ran: vLLM's own log then holds only older starts' errors.
+        self._launch_error = ""
         self._adopt()
 
     # --- bookkeeping ---------------------------------------------------------
@@ -847,6 +862,7 @@ class Vllm:
         if self.state in ("starting", "ready") and self.mine():
             return True
         self._leaving, self._confirm_pending = set(), False
+        self._launch_error = ""
         env = script_env(self.config)
         env.update(
             PORT=str(self.port),
@@ -888,9 +904,18 @@ class Vllm:
                 f"{self.config.vllm_script}{through} (vllm.script; docs/VLLM.md, "
                 "`levi live doctor`)"
             )
+            if prefix:
+                self._launch_error = self.error
             return False
         pid = self._pid()
         ident = identity(pid) if pid else None  # read once: this is what is stored
+        if code != 0 and prefix:
+            self.state = "error"
+            self.error = self._launch_error = (
+                f"the launch through {' '.join(prefix)} (vllm.cpus, vllm.nice) "
+                f"exited {code}: {_last_line(log)}"
+            )[:300]
+            return False
         if code != 0 or not pid or ident is None:
             self.state, self.error = (
                 "error",
@@ -919,7 +944,11 @@ class Vllm:
 
     def failure_reason(self) -> str:
         """Why the last start failed: the last error line of vLLM's own log
-        (``ValueError: ... KV cache ...``), else what the service knows."""
+        (``ValueError: ... KV cache ...``), else what the service knows. A
+        launch through ``vllm.cpus``/``vllm.nice`` that failed before vLLM ran
+        says that instead (vLLM's log holds only older errors then)."""
+        if self._launch_error:
+            return self._launch_error[:300]
         try:
             with self.log_path().open("rb") as handle:
                 handle.seek(0, os.SEEK_END)

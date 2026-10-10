@@ -43,6 +43,26 @@ SESSION_STATES = (
 PRESSURE_KINDS = ("cpu", "memory", "io")
 # A CPU number larger than this in ``vllm.cpus`` is a typo, not a machine.
 MAX_CPU = 8191
+# Session states that end a session: never judged crashed, never deleted, so
+# a quiet one would keep the gate closed for good.
+TERMINAL_STATES = ("stopped", "finished")
+# States a session stays in for minutes while its client is alive: quiet,
+# they keep the gate closed that long (``running`` is ``busy_states``' job).
+LONG_STATES = ("standby", "fault", "running")
+# Settings added after live.toml readers of older checkouts, which refuse an
+# unknown key and then fall back to the built-in defaults for the whole
+# file: written by ``render`` only when they differ from their default, so a
+# default configuration renders exactly as before.
+OMIT_AT_DEFAULT = frozenset(
+    {
+        ("gpu", "quiet_states"),
+        ("gpu", "quiet_pause_s"),
+        ("vllm", "nice"),
+        ("vllm", "cpus"),
+        ("online", "pressure_avg10_max"),
+        ("online", "pressure_kinds"),
+    }
+)
 CHECKOUT = Path(__file__).resolve().parents[2]
 
 
@@ -131,6 +151,11 @@ class Gpu:
     # mode never closes the gate. The states are only ever read from the
     # session files, never inferred.
     quiet_states: list = field(default_factory=list)
+    # A gate kept closed by ``quiet_states`` for this long (seconds) is
+    # reported in ``labelling_paused`` (code ``robot_quiet``) and logged once:
+    # homing takes seconds, so this means a client stuck in that state or a
+    # state that is not the one meant.
+    quiet_pause_s: float = 600.0
     # The next episode follows a ``waiting_reset`` by the client's
     # ``reset_wait_s``: the gate closes this many seconds before it (the
     # policy's first inference must not meet a model request), and stays
@@ -542,7 +567,17 @@ def _state_list_problems(key, states) -> list:
 
 
 def _quiet_problems(g) -> list:
-    return _state_list_problems("gpu.quiet_states", g.quiet_states)
+    out = _state_list_problems("gpu.quiet_states", g.quiet_states)
+    terminal = [x for x in TERMINAL_STATES if x in g.quiet_states]
+    if not out and terminal:
+        out.append(
+            f"gpu.quiet_states must not list {', '.join(terminal)}: a session "
+            "that ended never ends being in that state (its file is kept and "
+            "it is never judged crashed), so the gate would stay closed for good"
+        )
+    if not g.quiet_pause_s > 0:
+        out.append("gpu.quiet_pause_s must be > 0 seconds")
+    return out
 
 
 def parse_cpus(text) -> list:
@@ -852,6 +887,7 @@ def checks(config: "Config", *, watching: bool = True) -> list:
                     "writes vllm_<port>.pid there",
                 )
             )
+    out.extend(_quiet_checks(c))
     out.extend(_launch_prefix_checks(c))
     out.extend(_pressure_checks(c))
     # The shared GPU lock.
@@ -920,6 +956,37 @@ def allowed_cpus() -> set | None:
         return set(os.sched_getaffinity(0))
     except (AttributeError, OSError):
         return None
+
+
+def _quiet_checks(c) -> list:
+    """``gpu.quiet_states`` that keep the gate closed for minutes."""
+    states = c.gpu.quiet_states
+    if not states:
+        return []
+    long = [x for x in LONG_STATES if x in states]
+    if long:
+        return [
+            _check(
+                "warn",
+                "gpu.quiet_states",
+                f"gpu.quiet_states lists {', '.join(long)}: a session stays in "
+                "that state for minutes, and the gate stays closed (no labelling, "
+                "no online judgement) all that time"
+                + (
+                    "; running is already closed by gpu.busy_states"
+                    if "running" in long
+                    else ""
+                ),
+                'list the states in which the robot moves, e.g. ["homing"]',
+            )
+        ]
+    return [
+        _check(
+            "ok",
+            "gpu.quiet_states",
+            f"the gate also closes while a session is {', '.join(states)}",
+        )
+    ]
 
 
 def _launch_prefix_checks(c) -> list:
@@ -1151,6 +1218,10 @@ def render(config: Config | None = None) -> str:
             value = getattr(obj, f.name)
             if dataclasses.is_dataclass(value):
                 nested.append((f"{name}.{f.name}", value))
+            elif (name, f.name) in OMIT_AT_DEFAULT and value == getattr(
+                type(obj)(), f.name
+            ):
+                continue  # a default newer readers assume and older ones refuse
             else:
                 lines.append(f"{f.name} = {_toml_value(value)}")
         lines.append("")

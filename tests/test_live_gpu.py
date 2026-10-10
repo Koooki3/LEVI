@@ -2392,6 +2392,7 @@ def test_the_protection_settings_are_documented(doc):
     text = (PROJECT / doc).read_text(encoding="utf-8")
     for key in (
         "gpu.quiet_states",
+        "gpu.quiet_pause_s",
         "robot_quiet",
         "vllm.nice",
         "vllm.cpus",
@@ -2400,3 +2401,173 @@ def test_the_protection_settings_are_documented(doc):
         "host_pressure",
     ):
         assert f"`{key}" in text, f"{doc} does not name {key}"
+
+
+# --- review fixes: an effective.toml older readers accept; no gate shut for good -----------
+
+# The main commit this branch started from: its live.toml reader rejects unknown keys.
+BASE_COMMIT = "d68f656"
+NEW_KEYS = (
+    ("gpu", "quiet_states"),
+    ("gpu", "quiet_pause_s"),
+    ("vllm", "nice"),
+    ("vllm", "cpus"),
+    ("online", "pressure_avg10_max"),
+    ("online", "pressure_kinds"),
+)
+
+
+@pytest.fixture(scope="module")
+def old_config(tmp_path_factory):
+    """``levi/live/config.py`` as it was before these settings (git show of
+    the base commit), loaded as a module of its own; skipped where the
+    history is not available (a shallow clone)."""
+    import importlib.util
+
+    try:
+        text = subprocess.run(
+            ["git", "-C", str(PROJECT), "show", f"{BASE_COMMIT}:levi/live/config.py"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        pytest.skip(f"commit {BASE_COMMIT} is not available here")
+    folder = tmp_path_factory.mktemp("old-config") / "levi" / "live"
+    folder.mkdir(parents=True)
+    path = folder / "config.py"
+    path.write_text(text)
+    spec = importlib.util.spec_from_file_location("old_live_config", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_default_rendering_is_byte_for_byte_the_old_one(old_config):
+    assert live_config.render(live_config.Config()) == old_config.render(
+        old_config.Config()
+    )
+
+
+def test_an_older_reader_reads_the_default_effective_toml(old_config, tmp_path):
+    path = tmp_path / "effective.toml"
+    path.write_text(live_config.render(live_config.Config()))
+    old = old_config.load(path)
+    assert old.gpu.busy_states == ["running"] and old.vllm.port == 8100
+    # A file with a setting changed elsewhere still reads too.
+    c = live_config.Config()
+    c.watch.roots = ["/data/rollouts"]
+    path.write_text(live_config.render(c))
+    assert old_config.load(path).watch.roots == ["/data/rollouts"]
+
+
+def test_a_new_setting_is_written_only_when_set(old_config, tmp_path):
+    import tomllib
+
+    data = tomllib.loads(live_config.render(live_config.Config()))
+    for table, key in NEW_KEYS:
+        assert key not in data[table], (table, key)
+    c = live_config.Config()
+    c.gpu.quiet_states = ["homing"]
+    c.gpu.quiet_pause_s = 120.0
+    c.vllm.nice = 19
+    c.vllm.cpus = "2-3"
+    c.online.pressure_avg10_max = 20.0
+    c.online.pressure_kinds = ["cpu"]
+    text = live_config.render(c)
+    data = tomllib.loads(text)
+    for table, key in NEW_KEYS:
+        assert key in data[table], (table, key)
+    path = tmp_path / "effective.toml"
+    path.write_text(text)
+    back = live_config.load(path)
+    assert back.gpu.quiet_states == ["homing"] and back.gpu.quiet_pause_s == 120.0
+    # Known limit (docs/LIVE.md, deployment order): an older reader refuses a
+    # file that sets one of them.
+    with pytest.raises(ValueError, match="Unknown key"):
+        old_config.load(path)
+
+
+@pytest.mark.parametrize("state", ["stopped", "finished"])
+def test_a_terminal_state_cannot_be_quiet(state):
+    c = live_config.Config()
+    c.gpu.quiet_states = ["homing", state]
+    with pytest.raises(ValueError, match="never ends"):
+        c.validate()
+
+
+@pytest.mark.parametrize("state", ["standby", "fault", "running"])
+def test_a_long_lived_quiet_state_is_a_warning(live, state):
+    c, _ = live
+    c.gpu.quiet_states = [state]
+    found = _checks(c, "gpu.quiet_states")
+    assert [x["level"] for x in found] == ["warn"], found
+    c.gpu.quiet_states = ["homing"]
+    assert [x["level"] for x in _checks(c, "gpu.quiet_states")] == ["ok"]
+
+
+def test_a_quiet_gate_that_lasts_is_reported_and_logged(ctl):
+    ctl.config.gpu.quiet_states = ["homing"]
+    pause = ctl.config.gpu.quiet_pause_s
+    assert pause == 600.0
+    ctl.rollouts.write(0)
+    t = time.time()
+    ctl.rollouts.session("homing")
+    ctl.tick(t)
+    assert ctl.gate.code == "robot_quiet" and paused(ctl, t) is None
+    ctl.tick(t + pause - 5)
+    assert paused(ctl, t + pause - 5) is None
+    ctl.tick(t + pause + 5)
+    p = paused(ctl, t + pause + 5)
+    assert p["code"] == "robot_quiet" and "homing" in p["reason"]
+    assert "gpu.quiet_states" in p["reason"]
+    assert p["since"] == pytest.approx(t, abs=1)
+    warned = [e for e in ctl.events if "robot_quiet" in e["text"]]
+    assert len(warned) == 1 and warned[0]["level"] == "error"
+    ctl.tick(t + pause + 6)
+    assert len([e for e in ctl.events if "robot_quiet" in e["text"]]) == 1
+    # Homing over: the pause is gone.
+    ctl.rollouts.session("waiting_reset")
+    ctl.tick(t + pause + 10)
+    assert paused(ctl, t + pause + 10) is None
+
+
+def test_quiet_pause_s_must_be_positive():
+    c = live_config.Config()
+    c.gpu.quiet_pause_s = 0.0
+    with pytest.raises(ValueError, match="quiet_pause_s"):
+        c.validate()
+
+
+def test_a_failed_launch_through_taskset_names_it_not_a_stale_vllm_error(live):
+    c, _ = live
+    c.vllm.cpus = "0"
+    c.validate()
+    # vLLM's own log still holds the error of an earlier start.
+    log = c.vllm_pid_dir / f"vllm_{c.vllm.port}.log"
+    log.write_text("ValueError: an old failure of an earlier start\n")
+
+    class Exits1(FakePopen):
+        def __call__(self, argv, **kwargs):
+            kwargs["stderr"].write(
+                b"taskset: failed to set pid 0's affinity: Invalid argument\n"
+            )
+            super().__call__(argv, **kwargs)
+
+            class Done:
+                def wait(self, timeout=None):
+                    return 1
+
+            return Done()
+
+    vllm = gpumgr.Vllm(c, popen=Exits1())
+    assert not vllm.start(c.vllm_profile())
+    for why in (vllm.error, vllm.failure_reason()):
+        assert "taskset -c 0" in why and "Invalid argument" in why, why
+        assert "old failure" not in why
+    # Without a prefix the old reading of vLLM's own log is unchanged.
+    c.vllm.cpus = ""
+    plain = gpumgr.Vllm(c, popen=Exits1())
+    assert not plain.start(c.vllm_profile())
+    assert "old failure" in plain.failure_reason()

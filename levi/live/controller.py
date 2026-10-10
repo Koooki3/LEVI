@@ -981,14 +981,11 @@ class Controller:
                 )
                 code = "gate_closed" if inferring else "gate_pending"
                 return False, code, f"{gate.code}: {gate.reason}"
-            # Optional (``online.pressure_avg10_max``, off by default): a host
-            # already under CPU/memory/IO pressure gets no model request on
-            # top; transient, the client retries within its deadline.
-            pressed = gpumgr.pressure_over(c.online)
-            if pressed:
-                return False, "gate_closed", f"host_pressure: {pressed}"
             if not self.vllm.mine():
                 if (mode == "manual" or c.vllm.adopt_external) and self.vllm.external():
+                    pressed = self._pressed()
+                    if pressed:
+                        return pressed
                     self._online_external_at = time.time()
                     self._online_external_ok = True
                     self._online_busy = True
@@ -1014,6 +1011,11 @@ class Controller:
                         "judgement (start the service with --prewarm)"
                     ),
                 )
+            # After the answers that will not pass by retrying (cold_start,
+            # vllm_starting), before a wake (heavy work too).
+            pressed = self._pressed()
+            if pressed:
+                return pressed
             if state == "asleep":
                 woken = self._online_wake(now, mode)
                 if woken is not None:
@@ -1023,6 +1025,16 @@ class Controller:
             return True, None, None
         finally:
             self._gpu_mutex.release()
+
+    def _pressed(self):
+        """Optional (``online.pressure_avg10_max``, off by default): a host
+        already under CPU/memory/IO pressure gets no model request on top.
+        ``(False, "gate_closed", ...)``, transient: the client retries within
+        its deadline; None when admission may go on."""
+        pressed = gpumgr.pressure_over(self.config.online)
+        if pressed:
+            return False, "gate_closed", f"host_pressure: {pressed}"
+        return None
 
     def _online_wake(self, now, mode):
         """Wake a sleeping vLLM for an online judgement if the GPU rules allow
@@ -1353,11 +1365,24 @@ class Controller:
                 f"service vouches for: {self.gate.reason}"
             )
             since = self._gate_code_since[1]
+        elif (
+            code_now == "robot_quiet"
+            and now - self._gate_code_since[1] >= c.gpu.quiet_pause_s
+        ):
+            code = "robot_quiet"
+            reason = (
+                f"the gate has been closed for {now - self._gate_code_since[1]:.0f} s "
+                f"by gpu.quiet_states: {self.gate.reason} (a client stuck in that "
+                "state, or a state that should not be quiet?)"
+            )
+            since = self._gate_code_since[1]
         if code is None:
             self._paused = None
             return
         if self._paused is None or self._paused["code"] != code:
             self._paused = {"code": code, "since": since or now}
+            if code == "robot_quiet":
+                self.event(f"labelling paused (robot_quiet): {reason}", "error")
         self._paused["reason"] = str(reason)[:300]
 
     LONG_BLOCKS = ("vram", "lock", "lock_unavailable", "external_busy", "gpu_not_free")

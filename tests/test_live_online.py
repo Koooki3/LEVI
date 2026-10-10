@@ -1438,3 +1438,59 @@ def test_the_doctor_says_when_pressure_cannot_be_read(tmp_path, monkeypatch):
         if x["key"] == "online.pressure_avg10_max"
     ]
     assert [x["level"] for x in found] == ["warn"] and "PSI" in found[0]["message"]
+
+
+def test_a_judgement_is_cut_end_to_end_when_the_robot_starts_homing(tmp_path, rollouts):
+    c = cfg(tmp_path)
+    c.gpu.mode = "timeshare"
+    c.gpu.quiet_states = ["homing"]
+    ctl = controller.Controller(c, log=lambda *a: None)
+
+    class HomingAsk(Ask):
+        def __call__(self, spec, folder, names):
+            rollouts.session("homing")  # the robot starts homing meanwhile
+            return super().__call__(spec, folder, names)
+
+    ask = HomingAsk(hold=scaled(10))
+    try:
+        ctl.vllm.mine = lambda: True
+        ctl.vllm.state = "ready"
+        rollouts.session("waiting_reset")
+        judge = judge_with(c, ctl, ask)
+        began = time.monotonic()
+        code, body = post(judge, request())
+        ask.release.set()
+        assert code == 200 and time.monotonic() - began < 1.5
+        assert body["status"] == "unavailable"
+        assert body["reason"].startswith("gate_closed: robot_quiet")
+        assert body["reason"].endswith("(the request was cut)")
+        assert len(ask.calls) == 1 and not ctl._online_busy
+    finally:
+        ctl.vllm.mine = lambda: False
+        ctl.shutdown()
+
+
+def test_a_stopped_vllm_is_cold_start_even_under_host_pressure(
+    tmp_path, rollouts, monkeypatch
+):
+    monkeypatch.setattr(gpumgr, "host_pressure", lambda kinds: {"cpu": 90.0})
+    c = cfg(tmp_path, pressure_avg10_max=20.0)
+    c.gpu.mode = "timeshare"
+    ctl = controller.Controller(c, log=lambda *a: None)
+    try:
+        rollouts.session("waiting_reset")
+        ok, code, _ = ctl.online_admit(time.time())
+        assert (ok, code) == (False, "cold_start")
+        ctl.vllm.mine = lambda: True
+        ctl.vllm.state = "starting"
+        assert ctl.online_admit(time.time())[1] == "vllm_starting"
+        # Asleep: pressure stops the wake (a wake is heavy work too).
+        ctl.vllm.state = "asleep"
+        woke = []
+        ctl.vllm.wake = lambda timeout=60.0: woke.append(timeout) or True
+        ok, code, why = ctl.online_admit(time.time())
+        assert (ok, code) == (False, "gate_closed") and why.startswith("host_pressure")
+        assert woke == []
+    finally:
+        ctl.vllm.mine = lambda: False
+        ctl.shutdown()
