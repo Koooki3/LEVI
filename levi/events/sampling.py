@@ -122,6 +122,9 @@ def plan(
     cap,
     limit=None,
     max_windows=None,
+    held=frozenset(),
+    held_images=0,
+    ledger_cap=None,
 ):
     """The windows a refinement reads.
 
@@ -131,6 +134,17 @@ def plan(
     windows (that add frames) a tier may take. ``cap``: the frame cap left
     for this refinement, in images (frames x cameras); ``limit``: the
     model's image limit, or None.
+
+    ``ledger_cap``: the plan's frame cap for the whole episode, checked
+    against what the episode's evidence ledger will hold afterwards:
+    ``held_images`` (its rows now) plus every camera's frame at each chosen
+    position not in ``held`` (positions every camera already holds). A
+    refinement whose frames were persisted but whose request never finished
+    is planned again on resume, under the image limit of that moment; greedy
+    plans under two limits are not nested, so without this the two together
+    could pass the cap. On a first refinement the ledger holds only the
+    coarse frames, which ``cap`` already leaves out, and the plan is the one
+    made without it (tested).
     """
     from levi.agent.observations import ContextOverflow, Overflow
 
@@ -140,9 +154,15 @@ def plan(
     for at in required:
         chosen |= window_positions(times, at, window, spacing)
 
+    def ledger_ok(positions):
+        return (
+            ledger_cap is None
+            or held_images + _images(set(positions) - set(held), cameras) <= ledger_cap
+        )
+
     def check(positions):
         images = _images(positions, cameras)
-        if images > cap:
+        if images > cap or not ledger_ok(positions):
             raise Overflow(
                 "Observation coverage exceeds approved frame cap; revise the "
                 "plan, do not silently undersample"
@@ -181,7 +201,7 @@ def plan(
             if most is not None and taken.get(tier, 0) >= most:
                 result.skipped.append((w, "max_windows"))
                 continue
-            if _images(chosen | new, cameras) > budget:
+            if _images(chosen | new, cameras) > budget or not ledger_ok(chosen | new):
                 result.skipped.append((w, "budget"))
                 continue
             chosen |= new

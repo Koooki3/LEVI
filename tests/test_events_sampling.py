@@ -312,3 +312,115 @@ def test_the_command_line_reads_only_what_it_is_given_and_refuses_test_sets(
         blind.write_text(json.dumps(spec()))
         with pytest.raises(SystemExit, match="never reads a test set"):
             ablation.main(["plan", "--spec", str(blind)])
+
+
+# ------------------------------------------------------------ resumed refinements
+
+
+def _resume_case(rng):
+    """One synthetic episode and two refinement plans of it, the second as a
+    resumed run makes it: the same draft and candidates, a different image
+    limit (the fitted one drifts between requests), the frames the first
+    left in the ledger already held."""
+    n = int(rng.integers(30, 160))
+    steps = rng.choice([0.1, 0.1, 0.1, 0.2, 0.3], size=n - 1)
+    times = np.concatenate([[0.0], np.cumsum(steps)])
+    cameras = int(rng.integers(1, 4))
+    grid = sorted(
+        {int(np.abs(times - t).argmin()) for t in np.arange(0, times[-1], 2.0)}
+        | {n - 1}
+    )
+    most = int(rng.integers(len(grid) * cameras + 5, len(grid) * cameras + 120))
+    draft = list(rng.uniform(0, times[-1], size=rng.integers(0, 3)))
+    found = [
+        (t, f"c{i}", {}) for i, t in enumerate(rng.uniform(0, times[-1], size=8))
+    ]
+    settings = {
+        "required": draft,
+        "tiers": [(sampling.CANDIDATES, found)],
+        "window": float(rng.choice([0.3, 0.6, 1.0])),
+        "spacing": float(rng.choice([0.1, 0.2])),
+        "cameras": cameras,
+        "cap": most - len(grid) * cameras,
+        "max_windows": {sampling.CANDIDATES: int(rng.integers(1, 6))},
+    }
+    first_limit = int(rng.integers(5, 80))
+    return times, grid, cameras, most, settings, first_limit
+
+
+def test_a_resumed_refinement_never_takes_the_ledger_past_the_frame_cap():
+    """A refinement whose frames were persisted but whose request did not
+    finish is planned again on resume, under the image limit of that moment.
+    Greedy plans under two limits are not nested, so without the ledger the
+    two together passed the cap (review A3, I-1: 96 of 5000; here the
+    naive count is asserted to be non-zero). Planned against the ledger:
+    0 over."""
+    rng = np.random.default_rng(20261010)
+    over_naive = over = planned = 0
+    for _ in range(5000):
+        times, grid, cameras, most, settings, first_limit = _resume_case(rng)
+        try:
+            first = sampling.plan(times, limit=first_limit, **settings)
+            naive = sampling.plan(times, limit=None, **settings)
+        except Overflow:
+            continue
+        ledger = set(grid) | first.positions
+        over_naive += len(ledger | naive.positions) * cameras > most
+        coarse = set(grid)
+        try:
+            first = sampling.plan(
+                times,
+                limit=first_limit,
+                held=frozenset(coarse),
+                held_images=len(coarse) * cameras,
+                ledger_cap=most,
+                **settings,
+            )
+            ledger = coarse | first.positions
+            second = sampling.plan(
+                times,
+                limit=None,
+                held=frozenset(ledger),
+                held_images=len(ledger) * cameras,
+                ledger_cap=most,
+                **settings,
+            )
+        except Overflow:
+            continue
+        planned += 1
+        over += len(ledger | second.positions) * cameras > most
+        assert second.images <= second.budget
+    assert over_naive > 0, "the scenario no longer reproduces the review's case"
+    assert planned > 3500, planned
+    assert over == 0, (over, over_naive, planned)
+
+
+def test_the_ledger_changes_nothing_on_a_first_refinement():
+    """On a fresh run the ledger holds only the coarse frames, which the cap
+    already left out: the plan is the one made without it."""
+    rng = np.random.default_rng(5)
+    for _ in range(2000):
+        times, grid, cameras, most, settings, first_limit = _resume_case(rng)
+        try:
+            without = sampling.plan(times, limit=first_limit, **settings)
+        except Overflow:
+            with pytest.raises(Overflow):
+                sampling.plan(
+                    times,
+                    limit=first_limit,
+                    held=frozenset(grid),
+                    held_images=len(grid) * cameras,
+                    ledger_cap=most,
+                    **settings,
+                )
+            continue
+        within = sampling.plan(
+            times,
+            limit=first_limit,
+            held=frozenset(grid),
+            held_images=len(grid) * cameras,
+            ledger_cap=most,
+            **settings,
+        )
+        assert within.positions == without.positions
+        assert within.windows() == without.windows()

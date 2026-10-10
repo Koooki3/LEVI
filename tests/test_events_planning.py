@@ -401,9 +401,10 @@ def test_the_model_cache_key_carries_the_block_only_when_it_is_on(lab, monkeypat
 
 
 def test_the_same_episode_gets_the_same_plan_again(lab):
-    """Candidates and the plan are rebuilt from the snapshot, so a resumed
-    or repeated run reads the same frames (and its cached answers stay
-    valid)."""
+    """Candidates and the plan are rebuilt from the snapshot, so a repeated
+    run reads the same frames -- under the same image limit (here none). The
+    plan depends on the limit, which a local model's fitted request cost
+    moves between requests: see the resumed-refinement test above."""
 
     def plans(run):
         return [
@@ -415,6 +416,63 @@ def test_the_same_episode_gets_the_same_plan_again(lab):
     first = run_once(wb, temporal(repo, event_intelligence=ON))
     second = run_once(wb, temporal(repo, event_intelligence=ON))
     assert plans(first) and plans(first) == plans(second)
+
+
+class FailsFirstRefinement(Segmenter):
+    """The first refinement request fails (a provider error after its frames
+    were persisted); everything else answers."""
+
+    def __init__(self):
+        super().__init__()
+        self.failed = False
+
+    def generate(self, config, instruction, summary, evidence, artifacts, budget):
+        if summary.get("phase") == "boundary_refinement" and not self.failed:
+            self.failed = True
+            raise RuntimeError("provider went away")
+        return super().generate(
+            config, instruction, summary, evidence, artifacts, budget
+        )
+
+
+def test_a_resumed_refinement_under_another_image_limit_stays_within_the_cap(
+    lab, monkeypatch
+):
+    """Review A3, I-1. Draft windows take 22 frames; the gripper windows add
+    20 (2.0 s) and 14 (4.5 s); cap 50, 4 coarse frames. Under an image limit
+    of 40 only the 4.5 s window fits; resumed without a limit, the planner
+    alone would take the 2.0 s one instead: 22 + 20 + 14 = 56 frames in the
+    ledger, past the cap, and the episode would fail on every resume. Planned
+    against the ledger it keeps what it holds and the run completes."""
+    from levi.agent import observations
+
+    wb, repo, _ = lab
+    provider = FailsFirstRefinement()
+    wb.provider = provider
+    limits = iter([40])
+    monkeypatch.setattr(observations, "image_limit", lambda *a, **k: next(limits, None))
+    ctx = temporal(repo, event_intelligence=ON, max_evidence_frames=50)
+    run = run_once(wb, ctx)
+    assert run["status"] == "blocked" and provider.failed
+    first = {r["id"] for r in wb.store.get("evidence", f"{run['id']}:0")["items"]}
+    # 36 refinement frames; three of the four coarse ones are among them.
+    assert len(first) == 37
+    assert wb.store.claim(run["id"], "test-owner")
+    wb.execute(run["id"], "test-owner", pilot=True)
+    run = wb.store.get("runs", run["id"])
+    assert run["status"] == "waiting_for_review", run.get("reason")
+    ledger = wb.store.get("evidence", f"{run['id']}:0")["items"]
+    assert len(ledger) <= 50
+    plans = events_of(wb, run, "event_evidence_plan")
+    assert [p["images"] for p in plans] == [36, 36]
+    # The frames depend on the image limit: a fresh run without one reads
+    # the 2.0 s window, not the 4.5 s one (the same frames only under the
+    # same limit).
+    wb.provider = Segmenter()
+    fresh = run_once(wb, ctx)
+    (plan,) = events_of(wb, fresh, "event_evidence_plan")
+    taken = {row["at"] for row in plan["accepted"]}
+    assert 2.0 in taken and 4.5 not in taken
 
 
 def test_an_off_run_reads_no_candidates_and_records_nothing_new(lab):

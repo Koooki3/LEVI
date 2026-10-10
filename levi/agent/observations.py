@@ -216,10 +216,12 @@ def fit_refinement(wb, run, episode, proposals, limit, cap=None, *, events=None)
     context = TaskContext.model_validate(run["context"])
     root = wb.store.run_dir(run["id"]) / "input"
     for spacing in refine_spacings(context):
-        boundaries, windows = harness_windows(
-            wb, run, episode, proposals, spacing, limit, cap, events=events
-        )
         try:
+            # With event intelligence the windows' own planning may already
+            # say the draft does not fit (see ``event_windows``).
+            boundaries, windows = harness_windows(
+                wb, run, episode, proposals, spacing, limit, cap, events=events
+            )
             frame_scope(context, root, episode, boundaries, spacing, limit, cap)
         except Overflow:
             continue
@@ -984,9 +986,19 @@ def event_windows(
     windows, each whole or skipped, within the frame cap and the image limit
     (``levi.events.sampling.plan``).
 
-    Returns (boundaries, window_seconds, plan summary). When the model's
-    own boundaries alone do not fit, returns them with no windows, as
-    ``harness_windows`` does: the caller's ``frame_scope`` then says why.
+    Returns (boundaries, window_seconds, plan summary). Raises
+    ``Overflow`` when the model's own boundaries alone do not fit -- the
+    refinement's cap, the image limit, or what the episode's evidence ledger
+    may still take -- so ``fit_refinement`` tries a coarser spacing and, past
+    the coarsest, stops with the numbers as before.
+
+    The ledger: a refinement whose frames were persisted but whose request
+    never finished (a provider error, the GPU gate, a pause) is planned again
+    when the run resumes, under the image limit of that moment. The frames
+    the ledger already holds are free; new ones count against the plan's
+    frame cap, so the episode never passes it (``sampling.plan``,
+    ``ledger_cap``). Which windows are read depends on the image limit: a
+    resumed or repeated run reads the same frames only under the same limit.
     """
     from levi.events import sampling
 
@@ -996,8 +1008,19 @@ def event_windows(
     context = TaskContext.model_validate(run["context"])
     flow = Workflow.model_validate(context.workflow)
     root = wb.store.run_dir(run["id"]) / "input"
-    _, times = episode_times(context, root, episode)
+    table, times = episode_times(context, root, episode)
     spacing = spacing or flow.boundary_tolerance_seconds / 2
+    try:
+        ledger = wb.store.get("evidence", f"{run['id']}:{episode}")["items"]
+    except KeyError:
+        ledger = []
+    cameras = context.cameras or [None]
+    have = {(row.get("camera_key"), row["frame_index"]) for row in ledger}
+    held = frozenset(
+        position
+        for position, frame in enumerate(table.frame_index.to_numpy())
+        if all((camera, int(frame)) in have for camera in cameras)
+    )
     cap = flow.max_evidence_frames if cap is None else cap
     if candidates is None:
         candidates = event_candidates(wb, run, episode)["candidates"]
@@ -1037,20 +1060,20 @@ def event_windows(
             ],
         ),
     ]
-    try:
-        plan = sampling.plan(
-            times,
-            required=required,
-            tiers=tiers,
-            window=flow.boundary_window_seconds,
-            spacing=spacing,
-            cameras=len(context.cameras),
-            cap=cap,
-            limit=limit,
-            max_windows={sampling.CANDIDATES: settings["max_windows"]},
-        )
-    except Overflow:
-        return list(proposals), [], None
+    plan = sampling.plan(
+        times,
+        required=required,
+        tiers=tiers,
+        window=flow.boundary_window_seconds,
+        spacing=spacing,
+        cameras=len(context.cameras),
+        cap=cap,
+        limit=limit,
+        max_windows={sampling.CANDIDATES: settings["max_windows"]},
+        held=held,
+        held_images=len(ledger),
+        ledger_cap=flow.max_evidence_frames,
+    )
     windows = plan.windows()
     summary = {"spacing_seconds": spacing, **plan.summary()}
     return list(proposals) + [Candidate(t) for t in windows], windows, summary
