@@ -59,6 +59,7 @@ from pathlib import Path
 
 from levi.automatic import metrics
 from levi.automatic.figure_files import write_durable
+from levi.domain import aeri
 
 SCHEMA = "levi.aeri.campaign_trial.v1"
 LEDGER_FILE = "ledger.jsonl"
@@ -204,6 +205,11 @@ class EpisodeFact:
     failure_mode: str | None = None
     # the operator changed a decided label after the verdict was revealed
     revised_after_reveal: bool = False
+    # The operator's first success/failure label, written before the
+    # automatic verdict was revealed (CL14, ``metrics.operator_view``). The
+    # judge agreement uses it; None here means "the current label", which
+    # holds when nothing was revised after the reveal.
+    operator_blind: str | None = None
 
     def __post_init__(self):
         if self.source not in SOURCES:
@@ -228,6 +234,16 @@ class EpisodeFact:
             )
             if value not in allowed:
                 raise LedgerError(f"{kind}={value!r}")
+        if self.operator_blind not in (None, *DECIDED):
+            raise LedgerError(f"operator_blind {self.operator_blind!r}")
+        current = self.labels.get("operator_label")
+        if self.operator_blind is None and current in DECIDED:
+            if self.revised_after_reveal:
+                raise LedgerError(
+                    f"{self.episode_id}: a label revised after the reveal needs "
+                    "its first (blind) value"
+                )
+            object.__setattr__(self, "operator_blind", current)
 
 
 # ----------------------------------------------------------------------- rows
@@ -290,7 +306,8 @@ class Ledger:
     campaign_id: str
     layout_source: str
     rows: list
-    # {episode key: {"labels": {...}, "failure_mode", "revised_after_reveal"}}
+    # {episode key: {"labels": {...}, "failure_mode", "revised_after_reveal",
+    #  "operator_blind"}}
     labels: dict
     # run ids the facts came from that no segment names (left out)
     unplanned_runs: list
@@ -315,8 +332,12 @@ def derive(layout: CampaignLayout, facts_by_run: dict) -> Ledger:
     seen_episodes: set = set()
     previous_arm = None
     order = 0
+    # Cards held per (arm, round): two segments of one arm in one round
+    # may not hold the same card (a trial id is unique).
+    held_by: dict = {}
+    paired = layout.layout_source == "card_set"
     for seg in sorted(layout.segments, key=lambda s: s.segment):
-        held: set = set()
+        held: set = held_by.setdefault((seg.arm, seg.round), set())
         for index, run in enumerate(seg.run_ids):
             facts = sorted(facts_by_run.get(run, ()), key=lambda f: f.number)
             for fact in facts:
@@ -328,7 +349,10 @@ def derive(layout: CampaignLayout, facts_by_run: dict) -> Ledger:
                 seen_episodes.add(key)
                 card, problem, candidate = None, None, None
                 source = fact.card_source
-                if fact.status == "valid":
+                if fact.status == "valid" and not paired:
+                    # A reset policy sets the scene: no card to hold.
+                    source = "unconfirmed"
+                elif fact.status == "valid":
                     remaining = [c for c in seg.cards if c not in held]
                     if fact.card is not None:
                         if fact.card not in seg.cards:
@@ -399,6 +423,7 @@ def derive(layout: CampaignLayout, facts_by_run: dict) -> Ledger:
                     "labels": dict(sorted(fact.labels.items())),
                     "failure_mode": fact.failure_mode,
                     "revised_after_reveal": fact.revised_after_reveal,
+                    "operator_blind": fact.operator_blind,
                 }
                 order += 1
         previous_arm = seg.arm
@@ -429,7 +454,11 @@ def counts(ledger: Ledger, layout: CampaignLayout | None = None) -> dict:
         entry[row.status] += 1
         if row.status == "valid":
             entry["deviated"] += row.layout_fidelity == "deviated"
-            entry["unconfirmed"] += not row.card_confirmed and row.card_problem is None
+            entry["unconfirmed"] += (
+                ledger.layout_source == "card_set"
+                and not row.card_confirmed
+                and row.card_problem is None
+            )
             entry["card_problems"] += row.card_problem is not None
             entry["pairable"] += row.pairable
         entry["from_reruns"] += row.rerun_of is not None
@@ -560,8 +589,13 @@ def read_aeri_run(run_dir, *, max_steps: int | None = None) -> tuple[list, dict]
     for entry in manifest.get("episodes", []):
         if entry.get("role") != "forward":
             continue
-        episode_id = entry["episode_id"]
-        number = int(episode_id.rsplit(".", 1)[1])
+        episode_id = entry.get("episode_id")
+        try:
+            _, _, number = aeri.episode_parts(episode_id)
+        except (AttributeError, TypeError, ValueError):
+            raise LedgerError(
+                f"{run_dir.name}: {episode_id!r} is not an episode id"
+            ) from None
         record = records.get(episode_id)
         op = operator.get(episode_id, {})
         current = op.get("current")
@@ -617,6 +651,7 @@ def read_aeri_run(run_dir, *, max_steps: int | None = None) -> tuple[list, dict]
                 labels=labels,
                 failure_mode=failure_modes.get(episode_id),
                 revised_after_reveal=bool(op.get("revised_after_reveal")),
+                operator_blind=op.get("blind"),
             )
         )
     run = {

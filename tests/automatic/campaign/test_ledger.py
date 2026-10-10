@@ -313,6 +313,10 @@ def test_an_aeri_run_is_read_from_its_manifest_journal_and_labels(aeri_run):
     metrics.LabelStore(run_dir).add(
         "adjudicated_ground_truth", second, "failure", by="rev-1"
     )
+    # CL14: the first decided label is written blind; a change after the
+    # verdict was revealed is a revision, and the blind value is kept.
+    metrics.label_operator(run_dir, second, "failure", by="op-1")
+    metrics.label_operator(run_dir, second, "success", by="op-1")
     facts, run = L.read_aeri_run(run_dir, max_steps=40)
     assert run["run_id"] == aeri_run.config.run_id
     assert run["state"] == "COMPLETED" and run["plan_sha256"] == "ab" * 32
@@ -323,6 +327,9 @@ def test_an_aeri_run_is_read_from_its_manifest_journal_and_labels(aeri_run):
     assert a.card is None and b.card == "r01c2" and b.card_source == "run_manifest"
     assert b.layout_fidelity == "deviated" and b.layout_reason == "plate rotated"
     assert b.labels["adjudicated_ground_truth"] == "failure"
+    assert b.labels["operator_label"] == "success"
+    assert (b.operator_blind, b.revised_after_reveal) == ("failure", True)
+    assert (a.operator_blind, a.revised_after_reveal) == ("success", False)
     assert c.labels["operator_label"] == "discarded"
     assert a.steps is not None and a.max_steps == 40 and a.ended_at.endswith("Z")
     assert a.stop_reason in ("goal_verified", "horizon_exhausted")
@@ -355,4 +362,65 @@ def test_a_corrupt_journal_is_refused(aeri_run):
     lines[1] = json.dumps(edited).encode()
     journal.write_bytes(b"\n".join(lines))
     with pytest.raises(L.LedgerError, match="corrupt"):
+        L.read_aeri_run(aeri_run.directory)
+
+
+def test_the_blind_label_is_kept_apart_from_the_current_one():
+    f = fx.fact("run-1", 1, labels={"operator_label": "success"})
+    assert f.operator_blind == "success"  # nothing revised: the same value
+    revised = fx.fact(
+        "run-1",
+        2,
+        labels={"operator_label": "success"},
+        revised_after_reveal=True,
+        operator_blind="failure",
+    )
+    lay = L.CampaignLayout("c1", (L.SegmentPlan(1, "A", 1, ("c1", "c2"), ("run-1",)),))
+    led = L.derive(lay, {"run-1": [f, revised]})
+    entry = led.labels[revised.episode_id]
+    assert entry["operator_blind"] == "failure" and entry["revised_after_reveal"]
+    assert L.label_value(entry, "operator_label") == ("success", "operator_label")
+    with pytest.raises(L.LedgerError, match="blind"):
+        fx.fact(
+            "run-1", 3, labels={"operator_label": "success"}, revised_after_reveal=True
+        )
+
+
+def test_one_arm_cannot_hold_a_card_twice_in_a_round_across_segments():
+    segs = (
+        L.SegmentPlan(1, "A", 1, ("c1", "c2"), ("r1",)),
+        L.SegmentPlan(2, "A", 1, ("c1", "c2"), ("r2",)),
+    )
+    lay = L.CampaignLayout("c1", segs)
+    led = L.derive(
+        lay,
+        {
+            "r1": [fx.fact("r1", 1, card="c1"), fx.fact("r1", 2, card="c2")],
+            "r2": [fx.fact("r2", 1, card="c1"), fx.fact("r2", 2)],
+        },
+    )
+    assert [(r.card, r.card_problem) for r in led.rows] == [
+        ("c1", None),
+        ("c2", None),
+        ("c1", "duplicate"),
+        (None, "no_card_left"),
+    ]
+    ids = [r.trial_id for r in led.rows if r.trial_id]
+    assert len(ids) == len(set(ids)) == 2
+
+
+def test_a_reset_policy_campaign_assigns_no_cards():
+    lay = fx.layout(per_arm=5, segment_trials=5, layout_source="none")
+    led = L.derive(lay, fx.synthetic_facts(lay))
+    assert all(r.card is None and r.card_problem is None for r in led.rows)
+    c = L.counts(led)
+    assert c["A"]["card_problems"] == 0 and c["A"]["unconfirmed"] == 0
+
+
+def test_a_bad_episode_id_in_a_run_manifest_is_a_ledger_error(aeri_run):
+    manifest_path = aeri_run.directory / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    next(e for e in manifest["episodes"] if e["role"] == "forward")["episode_id"] = "x"
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(L.LedgerError, match="not an episode id"):
         L.read_aeri_run(aeri_run.directory)
