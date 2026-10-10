@@ -2448,6 +2448,8 @@ def _step(items: list[Item], panel: Panel, pi: int, g: PanelGeometry) -> None:
     bands: list[Item] = []
     front: list[Item] = []
     for si, s in enumerate(panel.series):
+        if not s.points:  # an unavailable series draws nothing
+            continue
         st = g.styles[si]
         pts = [(g.x.px(p.x), g.y.px(p.y)) for p in s.points]
         eff = [effective_interval("step", s, p) for p in s.points]

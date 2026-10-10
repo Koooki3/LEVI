@@ -220,3 +220,23 @@ def test_a_degenerate_interval_needs_no_extent():
     spec = step_spec(fs.Series("A", (P(0, 0), P(40, 0.5, 0.2, 0.7), P(80, 1, 1, 1))))
     fs.layout(spec)
     assert_every_interval_visible(spec)
+
+
+@pytest.mark.parametrize("spec_fn", [fx.step_curve, fx.drift_lines, fx.grouped_bar])
+def test_an_unavailable_series_draws_nothing_and_does_not_break_the_figure(spec_fn):
+    # regression: a step curve with an unavailable series used to raise
+    # IndexError (an empty point list reached the path builder)
+    spec = spec_fn()
+    panel = spec.panels[0]
+    gone = fs.Series("Arm Z", (), unavailable=True)
+    spec = replace(spec, panels=(replace(panel, series=panel.series + (gone,)),))
+    scene = fs.layout(spec)
+    assert "Arm Z (unavailable)" in [
+        i.s for i in scene.items if isinstance(i, fs.Label) and i.role == "legend"
+    ]
+    assert not [
+        i
+        for i in scene.items
+        if getattr(i, "ref", None) and i.ref[1] == len(panel.series)
+    ]
+    svgplot.render_svg(spec)
