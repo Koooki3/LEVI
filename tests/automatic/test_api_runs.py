@@ -1,4 +1,4 @@
-# ruff: noqa: F401, F811
+# ruff: noqa: F401, F811, RUF059
 """Starting, stopping and resuming runs through the HTTP interface
 (T-API-1). The launch goes through a fake ``systemd-run`` (it only records
 its arguments: no unit is ever started); the runner is then served in a
