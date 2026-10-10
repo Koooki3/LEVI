@@ -37,6 +37,10 @@ class Env:
         c.watch.backlog = "process"
         c.watch.settle_s = 0.0
         c.gpu.mode = "manual"
+        # These tests label beside evaluation sessions and a policy server
+        # (the timeshare gate, the reports); the yield rules, which pause the
+        # labelling for a whole deployment, are tested in test_live_yield.py.
+        c.gpu.yield_.enabled = False
         c.gpu.lock_file = ""
         c.vllm.port = self.port
         c.pipeline.auto_approve = True

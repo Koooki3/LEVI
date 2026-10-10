@@ -1198,6 +1198,8 @@ def _once(args, scratch: list) -> int:
 
         server, fake, port = fakevlm.serve(0)
         config.gpu.mode = "manual"
+        # A stand-in model uses no GPU: there is nothing to yield to.
+        config.gpu.yield_.enabled = False
         config.vllm.port = port
         print(f"fake vLLM on 127.0.0.1:{port}")
     try:
