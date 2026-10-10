@@ -1335,7 +1335,8 @@ fakes again from their scripts.
 **Settings.** `LEVI_AERI_HOME` (default `~/.levi-aeri`, created 0700): the
 core key, robot locks, run index, command audit and launched dry runs.
 `LEVI_AERI_JOB_ROOTS`: folders separated by `:` under which the API may
-pick job files (the command line takes any path).
+pick job files (the command line takes any path). Unset, it is the one
+folder `<LEVI_AERI_HOME>/jobs`, created when the launch wizard writes its first job.
 
 ## HTTP interface (`levi/automatic/api.py`)
 

@@ -222,11 +222,14 @@ def test_only_a_person_writes_a_job(client, roots, checkpoints):
     assert not (roots / "wizard").exists()
 
 
-def test_no_job_root_is_503(client, checkpoints, monkeypatch):
+def test_without_a_job_root_setting_jobs_go_under_the_aeri_home(
+    client, checkpoints, monkeypatch
+):
     monkeypatch.delenv(launch.JOB_ROOTS_ENV)
+    assert launch.job_roots() == [launch.home().resolve() / "jobs"]
     answer = post(client, form())
-    assert answer.status_code == 503
-    assert answer.json()["detail"]["code"] == "no_job_root"
+    assert answer.status_code == 201, answer.text
+    assert (launch.home() / "jobs" / "wizard").is_dir()
 
 
 def test_a_read_only_root_is_reported(client, roots, checkpoints):

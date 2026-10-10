@@ -244,7 +244,7 @@ def write_job(root: Path, form: JobForm, forward: dict, reset: dict | None) -> s
     folder = root / FOLDER
     try:
         with contextlib.suppress(FileExistsError):
-            folder.mkdir(mode=0o700)
+            folder.mkdir(mode=0o700, parents=True)
         if folder.is_symlink() or not folder.is_dir():
             raise FormError(
                 503, "job_write_failed", f"{FOLDER}/ is not a folder in the job root"

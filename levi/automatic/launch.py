@@ -158,9 +158,12 @@ def ensure_home(path=None) -> Path:
 
 def job_roots() -> list[Path]:
     """``LEVI_AERI_JOB_ROOTS``: where the API may pick job files (real
-    paths); empty when unset."""
+    paths). Unset: the one folder ``<LEVI_AERI_HOME>/jobs``, so the launch
+    wizard works without any setting (it is created when the wizard writes
+    its first job)."""
     value = os.environ.get(JOB_ROOTS_ENV) or ""
-    return [Path(os.path.realpath(p)) for p in value.split(os.pathsep) if p.strip()]
+    found = [Path(os.path.realpath(p)) for p in value.split(os.pathsep) if p.strip()]
+    return found or [Path(os.path.realpath(home() / "jobs"))]
 
 
 def jobs(roots=None, limit: int = 500) -> list[dict]:

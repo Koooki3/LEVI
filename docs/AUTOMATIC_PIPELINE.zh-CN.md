@@ -509,7 +509,7 @@ T-CL-07..09，设计 X2 §3–§5。命令行和以后的 HTTP API 共用一个�
 
 **接管。** `levi automatic attach --run R --detach|--foreground` 为运行器已退出的运行启动新运行器：`Orchestrator.restore` 先执行日志恢复，所以运行处于 `FAULT_LOCKED`（`recovery_ambiguous`），不重放任何动作，在操作员 `resume` 让它重新经过 `PREFLIGHT` 和初始状态核对之前，没有任何运动授权。运行器还活着时拒绝（`E_RUNNER_ALIVE`），运行已完成时也拒绝（`E_RUN_COMPLETED`）。这样恢复的试运行，Fake 会从脚本开头重新开始。
 
-**设置。** `LEVI_AERI_HOME`（默认 `~/.levi-aeri`，以 0700 创建）：核心密钥、机器人锁、运行索引、命令审计和已启动的试运行。`LEVI_AERI_JOB_ROOTS`：用 `:` 分隔的目录，API 只能从这些目录里选作业文件（命令行可以用任意路径）。
+**设置。** `LEVI_AERI_HOME`（默认 `~/.levi-aeri`，以 0700 创建）：核心密钥、机器人锁、运行索引、命令审计和已启动的试运行。`LEVI_AERI_JOB_ROOTS`：用 `:` 分隔的目录，API 只能从这些目录里选作业文件（命令行可以用任意路径）。没设置时就是 `<LEVI_AERI_HOME>/jobs` 这一个目录，启动向导写第一份作业时创建。
 
 ## HTTP 接口（`levi/automatic/api.py`）
 
