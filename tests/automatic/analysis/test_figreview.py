@@ -568,3 +568,55 @@ def test_json_round_trip_keeps_new_fields():
     ):
         assert fs.FigureSpec.from_json(spec.to_json()) == spec
         json.loads(spec.to_json())
+
+
+# ------------------------------------------------------------------ review-CP7-fixes S-b, S-c
+
+
+def test_point_labels_are_cut_to_their_short_limit_and_reported():
+    spec = fx.tiny_bars()
+    panel = spec.panels[0]
+    s0 = panel.series[0]
+    long = "x" * 400
+    s0 = replace(s0, points=(replace(s0.points[0], label=long),) + s0.points[1:])
+    spec = replace(spec, panels=(replace(panel, series=(s0,) + panel.series[1:]),))
+    for latin in (False, True):
+        scene = fs.layout(spec, latin_only=latin)
+        labels = [
+            i.s
+            for i in scene.items
+            if isinstance(i, fs.Label) and i.role == "point-label"
+        ]
+        assert max(len(s) for s in labels) <= fs.SHORT_LIMITS["label"]
+        assert any(s.endswith("...") for s in labels)
+        assert "label" in scene.truncated
+        for i in scene.items:
+            if isinstance(i, fs.Label) and i.role == "point-label":
+                half = fs.text_width(i.s, i.size) / 2
+                assert 0 <= i.x - half and i.x + half <= scene.width
+    _, rows = fs.table(spec)
+    assert long in [c for r in rows for c in r]  # the table keeps the full label
+
+
+def test_chinese_only_series_names_are_numbered_in_the_pdf():
+    spec = fx.tiny_bars()
+    panel = spec.panels[0]
+    named = tuple(
+        replace(s, name={"zh-CN": zh})
+        for s, zh in zip(panel.series, ("甲组", "乙组", "丙组"), strict=False)
+    )
+    spec = replace(spec, panels=(replace(panel, series=named),))
+    res = pdfplot.render_pdf_report(spec, lang="zh-CN")
+    numbered = [s for s in res.substitutions if s["reason"] == "numbered"]
+    assert [s["to"] for s in numbered] == [f"Series {k + 1}" for k in range(len(named))]
+    assert [s["text"] for s in numbered] == ["甲组", "乙组", "丙组"][: len(named)]
+    assert res.manifest()["pdf"].startswith("lossy(")
+    text = pdfplot.verify_pdf(res.data).text
+    assert all(f"Series {k + 1}" in text for k in range(len(named)))
+    assert "[n/a]" not in [
+        i.s
+        for i in fs.layout(spec, lang="zh-CN", latin_only=True).items
+        if isinstance(i, fs.Label) and i.role == "legend"
+    ]
+    # the SVG keeps the Chinese names
+    assert "甲组" in svgplot.render_svg(spec, lang="zh-CN")

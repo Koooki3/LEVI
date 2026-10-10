@@ -241,8 +241,9 @@ def _lin(c):
     return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
 
-# Machado, Oliveira and Fernandes (2009) matrices for full dichromacy, applied
-# in linear RGB: a sanity check for the palette, not a clinical model.
+# Published simulation matrices for full dichromacy, applied in linear RGB: a
+# sanity check for the palette, not a clinical model. (The source is not in
+# the project's verified reference register, so it is not cited here.)
 CVD = {
     "protan": (
         (0.152286, 1.052583, -0.204868),

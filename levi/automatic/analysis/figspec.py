@@ -1418,6 +1418,19 @@ class _Resolver:
         self._note(recs)
         return s
 
+    def series_name(self, t: Text, index: int) -> str:
+        """A series name; in a Latin-only figure a name with nothing readable
+        left (``[n/a]``) becomes ``Series <n>`` (its legend position, from 1)
+        so the arms stay apart, and the record says so (``numbered``)."""
+        if not self.latin_only:
+            return t.get(self.lang)
+        s, recs = t.latin(self.lang)
+        if s == "[n/a]" and recs:
+            s = f"Series {index + 1}"
+            recs = [{**recs[-1], "to": s, "reason": "numbered"}]
+        self._note(recs)
+        return s
+
     def plain(self, s: str) -> str:
         if not self.latin_only or not s:
             return s
@@ -1622,15 +1635,16 @@ def _scale_for(axis: Axis, lo: float, hi: float, target: int) -> Scale:
     return nice_scale(lo, hi, target=target, fixed_lo=axis.min, fixed_hi=axis.max)
 
 
-def _latin_labels(spec: FigureSpec, R: _Resolver) -> FigureSpec:
-    """The spec with every point label made Latin (and the change recorded)."""
+def _point_labels(spec: FigureSpec, R: _Resolver) -> FigureSpec:
+    """The spec with every point label cut to its short limit and, for a
+    Latin-only figure, made Latin (each change recorded)."""
     panels = []
     for panel in spec.panels:
         series = tuple(
             replace(
                 s,
                 points=tuple(
-                    replace(p, label=R.plain(p.label)) if p.label else p
+                    replace(p, label=R.cap(R.plain(p.label), "label")) if p.label else p
                     for p in s.points
                 ),
             )
@@ -1656,8 +1670,7 @@ def layout(
     lang = lang or spec.lang
     R = _Resolver(lang, latin_only)
     style = STYLE[spec.kind]
-    if latin_only:
-        spec = _latin_labels(spec, R)
+    spec = _point_labels(spec, R)
     items: list[Item] = []
     inner_w = width - 2 * PAD
     y = PAD
@@ -1837,7 +1850,7 @@ def _legend(
     for si, (sname, group) in enumerate(union.items()):
         s = group[0]
         st = series_style(si, s)
-        name = R.cap(R(sname), "legend")
+        name = R.cap(R.series_name(sname, si), "legend")
         if all(g.unavailable for g in group):
             name = R.plain(_WORDS[lang]["legend_unavailable"].format(name=name))
         w = sample_w + 6 + text_width(name, TICK_SIZE) + 16
