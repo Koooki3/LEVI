@@ -184,23 +184,28 @@ def read_plan(directory) -> dict | None:
     ``None`` when there is none. One that cannot be read, or whose plan does
     not hash to its ``plan_sha256``, is refused (``E_PLAN``)."""
     path = Path(directory) / PLAN_FILE
+    # The run header is the authority: a damaged copy is moved aside, and
+    # an open with ``plan=`` writes it again.
+    advice = "the run header is the authority: move it aside and reopen"
     try:
         data = path.read_bytes()
     except FileNotFoundError:
         return None
     except OSError as exc:
-        raise JournalRefused("E_PLAN", f"{path}: {exc}") from None
+        raise JournalRefused("E_PLAN", f"{path}: {exc}; {advice}") from None
     try:
         kept = json.loads(data)
     except (ValueError, RecursionError):
-        raise JournalRefused("E_PLAN", f"{path} is not JSON") from None
+        raise JournalRefused("E_PLAN", f"{path} is not JSON; {advice}") from None
     if (
         not isinstance(kept, dict)
         or not isinstance(kept.get("plan_sha256"), str)
         or not isinstance(kept.get("plan"), dict)
         or plan_digest(kept["plan"]) != kept["plan_sha256"]
     ):
-        raise JournalRefused("E_PLAN", f"{path} does not hold a plan and its sha256")
+        raise JournalRefused(
+            "E_PLAN", f"{path} does not hold a plan and its sha256; {advice}"
+        )
     return kept
 
 
@@ -219,6 +224,13 @@ def keep_plan(directory, plan: dict, plan_sha256: str) -> bool:
         return False
     value = {"plan_sha256": plan_sha256, "plan": plan}
     text = json.dumps(value, sort_keys=True, indent=1, default=str) + "\n"
+    # What a reader gets back must hash the same (keys that are not text
+    # come back as text and sort another way): else the run, once started,
+    # would never open again.
+    if plan_digest(json.loads(text)["plan"]) != plan_sha256:
+        raise JournalRefused(
+            "E_PLAN", "the plan does not read back as itself from JSON (non-text keys?)"
+        )
     write_durable(Path(directory) / PLAN_FILE, text.encode())
     return True
 
@@ -726,11 +738,20 @@ class Journal:
         if not problems:
             return
         detail = "; ".join(problems)
-        if authority is not None:
-            # On record for whoever looks at the run; a refused note (a
-            # broken writer, a clock that went back) does not hide the refusal.
+        noted = detail[:300]
+        seen = any(
+            e.record == "note"
+            and e.note.code == "run_header_mismatch"
+            and e.note.detail == noted
+            for e in self._events
+        )
+        if authority is not None and not seen:
+            # On record once for whoever looks at the run (a supervisor
+            # restarting it again and again does not grow the journal); a
+            # refused note (a broken writer, a clock that went back) does not
+            # hide the refusal.
             with contextlib.suppress(JournalError):
-                self.note("run_header_mismatch", detail[:300], authority=authority)
+                self.note("run_header_mismatch", noted, authority=authority)
         raise JournalRefused(
             "E_PLAN", f"the configuration does not match the run header: {detail}"
         )

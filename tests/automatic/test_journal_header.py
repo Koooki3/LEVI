@@ -219,7 +219,7 @@ def test_an_old_minor_0_log_opens_appends_and_recovers_at_minor_0(
 ):
     run = _old_log(tmp_path / "run", without_fields=without_fields)
     scan = J.Journal.read(run)
-    first = (run / J.JOURNAL).read_bytes().splitlines()[0]
+    before = (run / J.JOURNAL).read_bytes()
     assert scan.corrupt is None and {e.minor for e in scan.events} == {0}
     header = scan.events[0].header
     assert (header.reset_mode, header.scene_check) == (None, None)
@@ -241,8 +241,9 @@ def test_an_old_minor_0_log_opens_appends_and_recovers_at_minor_0(
     # One log, one minor: every appended line kept the old one.
     assert {e.minor for e in after.events} == {0}
     assert len(after.events) > len(scan.events)
-    # Its old header is untouched and has still no modes.
-    assert (run / J.JOURNAL).read_bytes().splitlines()[0] == first
+    # Every old line is kept byte for byte (the header too, still without
+    # modes); the new lines only follow them.
+    assert (run / J.JOURNAL).read_bytes().startswith(before)
     assert after.events[0].header.reset_mode is None
     # A second restart reads and appends it again.
     with reopen(run) as journal:
@@ -468,7 +469,10 @@ def test_killed_after_the_plan_before_the_header_the_run_starts_again(tmp_path):
     run = tmp_path / "run"
     assert _child(run, "after_plan").returncode == -signal.SIGKILL
     kept = J.read_plan(run)
-    assert kept is not None and J.Journal.read(run).events == []
+    assert kept is not None and not (run / J.JOURNAL).exists()
+    with pytest.raises(J.JournalRefused) as caught:
+        J.Journal.open(run, plan_sha256=kept["plan_sha256"])
+    assert caught.value.code == "E_EMPTY"
     J.Journal.create(
         run,
         run_id="r-header-crash",
@@ -478,3 +482,78 @@ def test_killed_after_the_plan_before_the_header_the_run_starts_again(tmp_path):
         **CHILD_MODES,
     ).close()
     assert J.Journal.read(run).events[0].header.plan_sha256 == kept["plan_sha256"]
+
+
+# --- review JNL1 -------------------------------------------------------------------------
+
+
+def test_a_plan_whose_digest_changes_on_disk_is_refused_before_the_header(tmp_path):
+    """Keys that are not text come back from JSON as text and sort another
+    way: the digest of the plan read back differs, so the run would never
+    open again. It is refused before anything is written (review F1)."""
+    plan = {"steps": {2: "b", 10: "a"}}
+    with pytest.raises(J.JournalRefused) as caught:
+        J.Journal.create(
+            tmp_path,
+            run_id=RUN,
+            plan_sha256=J.plan_digest(plan),
+            authority=who(),
+            plan=plan,
+        )
+    assert caught.value.code == "E_PLAN"
+    assert not (tmp_path / J.PLAN_FILE).exists()
+    assert not (tmp_path / J.JOURNAL).exists()
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_the_same_mismatch_is_noted_once_however_often_it_is_refused(tmp_path):
+    """A supervisor that restarts a misconfigured run again and again does
+    not grow its journal (review F2); another mismatch is noted too."""
+    new(tmp_path, **MODES).close()
+    wrong = {**MODES, "reset_mode": "human_assisted"}
+    for _ in range(5):
+        with pytest.raises(J.JournalRefused):
+            reopen(tmp_path, **wrong, authority=who("recovery"))
+    other = {**MODES, "scene_check": "operator_attested"}
+    for _ in range(3):
+        with pytest.raises(J.JournalRefused):
+            reopen(tmp_path, **other, authority=who("recovery"))
+    # A good restart in between does not make the old mismatch new again.
+    with reopen(tmp_path, **MODES) as journal:
+        journal.note("restarted", authority=who())
+    with pytest.raises(J.JournalRefused):
+        reopen(tmp_path, **wrong, authority=who("recovery"))
+    notes = [
+        e.note.detail
+        for e in J.Journal.read(tmp_path).events
+        if e.record == "note" and e.note.code == "run_header_mismatch"
+    ]
+    assert len(notes) == 2 and len(set(notes)) == 2
+    assert "reset_mode" in notes[0] and "scene_check" in notes[1]
+
+
+def test_a_damaged_plan_file_says_how_to_go_on(tmp_path):
+    planned(tmp_path).close()
+    (tmp_path / J.PLAN_FILE).write_bytes(b"not json")
+    with pytest.raises(J.JournalRefused) as caught:
+        J.Journal.open(tmp_path, plan_sha256=BODY_SHA)
+    assert "move" in caught.value.detail and "run header" in caught.value.detail
+    # Moved aside, the run reopens and gets its plan.json back.
+    (tmp_path / J.PLAN_FILE).rename(tmp_path / "plan.json.damaged")
+    J.Journal.open(tmp_path, plan_sha256=BODY_SHA, plan=PLAN_BODY).close()
+    assert J.read_plan(tmp_path)["plan_sha256"] == BODY_SHA
+
+
+def test_the_plan_file_is_written_durably(tmp_path, monkeypatch):
+    """plan.json goes through write_durable (temporary file, fsync, replace,
+    fsync of the folder), never a plain write (review F6)."""
+    written = []
+    real = J.write_durable
+
+    def spy(path, data):
+        written.append(Path(path).name)
+        return real(path, data)
+
+    monkeypatch.setattr(J, "write_durable", spy)
+    planned(tmp_path).close()
+    assert J.PLAN_FILE in written

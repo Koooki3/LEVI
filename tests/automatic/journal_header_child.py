@@ -6,7 +6,7 @@ both modes and SIGKILL itself at ``<point>``:
 - ``after_lock``: the run folder exists and is locked, no journal file;
 - ``empty_file``: the journal file exists, nothing written;
 - ``torn_header``: half the header's bytes are on disk (synced);
-- ``after_plan``: ``plan.json`` is on disk, no header yet;
+- ``after_plan``: ``plan.json`` is on disk, no journal file yet;
 - ``after_header``: the whole header is on disk.
 """
 
@@ -45,7 +45,16 @@ def main(directory, point):
 
         J.Journal._write = half
     elif point == "after_plan":
-        J.Journal.append = lambda self, *a, **k: die()
+        # Killed as the journal file is about to be created (O_EXCL):
+        # plan.json is on disk, the journal file is not.
+        real_open = os.open
+
+        def open_or_die(path, flags, *args):
+            if flags & os.O_EXCL and str(path).endswith(J.JOURNAL):
+                die()
+            return real_open(path, flags, *args)
+
+        J.os.open = open_or_die
     who = {
         "principal_kind": "orchestrator",
         "principal_id": "orch-test",
