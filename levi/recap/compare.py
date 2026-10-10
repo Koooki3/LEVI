@@ -283,11 +283,15 @@ def compare_payload(
                 "advantage": None,
                 "value_return_units": None,
                 "outcome_separation": None,
+                "by_outcome": [],
+                "distribution": None,
             }
         )
         return result
     value_a, value_b = (np.concatenate(p) for p in pooled["value"])
     result["value"] = _metrics(value_a, value_b)
+    result["by_outcome"] = _by_outcome(rows)
+    result["distribution"] = _distribution(value_a, value_b)
     if labelled:
         _label_metrics(result, pooled)
     else:
@@ -313,6 +317,66 @@ def compare_payload(
         }
     )
     return result
+
+
+OUTCOME_GROUPS = ("success", "failure", "unknown")
+HISTOGRAM_BINS = 20
+
+
+def _by_outcome(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Shared episodes grouped by their saved outcome (``unknown`` when the
+    two runs saved none or different ones). Mean V is the mean of episode
+    means (the quantity the AUC ranks); label rates are frame-weighted."""
+    groups = []
+    for name in OUTCOME_GROUPS:
+        members = [r for r in rows if (r["outcome"] or "unknown") == name]
+        if not members:
+            continue
+        frames = sum(r["frames"] for r in members)
+
+        def weighted(key, members=members, frames=frames):
+            if any(r[key] is None for r in members) or not frames:
+                return None
+            return float(sum(r[key] * r["frames"] for r in members) / frames)
+
+        groups.append(
+            {
+                "outcome": name,
+                "episodes": len(members),
+                "frames": frames,
+                "mean_value_a": float(np.mean([r["mean_value_a"] for r in members])),
+                "mean_value_b": float(np.mean([r["mean_value_b"] for r in members])),
+                "label_agreement": weighted("label_agreement"),
+                "positive_fraction_a": weighted("positive_fraction_a"),
+                "positive_fraction_b": weighted("positive_fraction_b"),
+            }
+        )
+    return groups
+
+
+def _histogram(values: np.ndarray, lo: float, hi: float) -> tuple[list, list]:
+    counts, edges = np.histogram(values, bins=HISTOGRAM_BINS, range=(lo, hi))
+    return [float(e) for e in edges], [int(c) for c in counts]
+
+
+def _distribution(value_a: np.ndarray, value_b: np.ndarray) -> dict[str, Any]:
+    """Binned counts of the shared frames, so a viewer can draw histograms
+    without receiving every frame: V of A and of B on common bin edges, and
+    the per-frame absolute difference |B - A|."""
+    lo = float(min(value_a.min(), value_b.min()))
+    hi = float(max(value_a.max(), value_b.max()))
+    if hi - lo < 1e-6:  # a constant curve still gets a visible bin
+        lo, hi = lo - 0.005, hi + 0.005
+    edges, counts_a = _histogram(value_a, lo, hi)
+    _, counts_b = _histogram(value_b, lo, hi)
+    diff = np.abs(value_b - value_a)
+    top = float(diff.max())
+    diff_edges, diff_counts = _histogram(diff, 0.0, top if top > 1e-6 else 0.01)
+    return {
+        "bins": HISTOGRAM_BINS,
+        "value": {"edges": edges, "a": counts_a, "b": counts_b},
+        "abs_diff": {"edges": diff_edges, "counts": diff_counts},
+    }
 
 
 def _label_metrics(result: dict[str, Any], pooled) -> None:

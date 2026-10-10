@@ -270,3 +270,89 @@ def test_exact_r2_threshold_is_inclusive_and_sft_is_all_positive():
     )
     assert advantage.label(scores, threshold).tolist() == [False, True, True]
     assert advantage.label(scores, threshold, sft=True).all()
+
+
+def test_comparison_groups_by_outcome_and_bins_values(revisions):
+    """The viewer's charts read these aggregates instead of every frame."""
+    client, ds, publish = revisions
+    a = publish(
+        "r1",
+        [
+            (0, [0, 1], [-0.5, -0.3], [False, True]),
+            (1, [0, 1], [-0.9, -0.7], [False, False]),
+            (2, [0, 1], [-0.2, -0.1], [True, True]),
+        ],
+    )
+    b = publish(
+        "r2",
+        [
+            (0, [0, 1], [-0.4, -0.2], [True, True]),
+            (1, [0, 1], [-0.8, -0.8], [False, True]),
+            (2, [0, 1], [-0.2, -0.2], [True, True]),
+        ],
+        outcomes={"0": "success", "1": "failure", "2": "failure"},
+    )
+    response = client.get(
+        "/annotations/api/recap/compare", params={"repo_id": ds.repo_id, "a": a, "b": b}
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    groups = {g["outcome"]: g for g in result["by_outcome"]}
+    # Episode 2's saved outcome differs between the runs: it is "unknown".
+    assert set(groups) == {"success", "failure", "unknown"}
+    assert groups["success"]["episodes"] == 1
+    assert groups["success"]["mean_value_a"] == pytest.approx(-0.4)
+    assert groups["success"]["mean_value_b"] == pytest.approx(-0.3)
+    assert groups["success"]["label_agreement"] == pytest.approx(0.5)
+    assert groups["failure"]["positive_fraction_b"] == pytest.approx(0.5)
+    assert groups["unknown"]["frames"] == 2
+    dist = result["distribution"]
+    assert dist["bins"] == compare.HISTOGRAM_BINS
+    value = dist["value"]
+    assert len(value["edges"]) == compare.HISTOGRAM_BINS + 1
+    assert sum(value["a"]) == sum(value["b"]) == result["frames"]["shared"] == 6
+    assert value["edges"][0] == pytest.approx(-0.9)
+    assert value["edges"][-1] == pytest.approx(-0.1)
+    diff = dist["abs_diff"]
+    assert sum(diff["counts"]) == 6
+    assert diff["edges"][0] == 0.0
+    assert diff["edges"][-1] == pytest.approx(0.1)
+
+
+def test_constant_values_still_get_bins_and_no_overlap_gives_empty_aggregates(
+    revisions,
+):
+    _, ds, publish = revisions
+    a = publish("r1", [(0, [0, 1], [-0.5, -0.5], [True, True])])
+    b = publish("r2", [(0, [0, 1], [-0.5, -0.5], [True, True])])
+    result = compare.compare_payload(ds.repo_id, a, b)
+    value = result["distribution"]["value"]
+    assert value["edges"][-1] > value["edges"][0]
+    assert sum(value["a"]) == 2
+    assert sum(result["distribution"]["abs_diff"]["counts"]) == 2
+    c = publish("r3", [(1, [0], [-0.2], [True])])
+    empty = compare.compare_payload(ds.repo_id, a, c)
+    assert empty["by_outcome"] == [] and empty["distribution"] is None
+
+
+def test_value_only_side_keeps_value_aggregates_without_label_rates(revisions):
+    _, ds, publish = revisions
+    a = publish("r1", [(0, [0, 1], [-0.5, -0.4], [True, False])])
+    b = publish(
+        "r2",
+        [(0, [0, 1], [-0.3, -0.2], [True, True])],
+        dataset_type="value_only",
+        labels=False,
+        threshold=None,
+        threshold_source=None,
+        return_min=None,
+        return_max=None,
+        outcomes={},
+    )
+    result = compare.compare_payload(ds.repo_id, a, b)
+    assert result["labels"] is None
+    (group,) = result["by_outcome"]
+    assert group["outcome"] == "unknown"
+    assert group["label_agreement"] is None
+    assert group["positive_fraction_a"] is None
+    assert sum(result["distribution"]["value"]["b"]) == 2
