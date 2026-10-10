@@ -1115,3 +1115,91 @@ def test_a_contested_waiver_is_in_the_proposals_uncertainty(
     (proposal,) = wb.store.get("changes", result["changes"])["proposals"]
     assert "not valid: blue" in proposal["uncertainty"]
     assert record["start"]["frames"][0]["evidence_id"] in proposal["evidence_ids"]
+
+
+def test_on_a_table_with_dropped_frames_views_in_seconds_follow_timestamps(
+    client,
+    dataset,
+    server,  # noqa: F811 - the fixture imported above
+):
+    """T-A-05 through review_episode: episode 0 lost frames 9-11 (rows gone,
+    video intact), so its table is uneven and every view given in seconds --
+    the spec's, the start check's, a veto's -- shows the frame nearest the
+    asked time, and the record says so. Episode 1 is even: as before, and
+    its record has no new key."""
+    from levi import catalog, service
+    from levi.agent.runtime import Workbench
+
+    camera = camera_dataset(dataset)
+    gripper_dataset(dataset)
+    path = dataset / "data/chunk-000/episode_000000.parquet"
+    frame = pd.read_parquet(path)
+    frame = frame[~frame.frame_index.isin([9, 10, 11])].reset_index(drop=True)
+    frame.to_parquet(path)
+    seconds = vetoed_spec(camera)
+    seconds["views"] = [
+        {"role": "front", "camera": camera, "offsets_seconds": [-0.2, 0.0, 0.4]}
+    ]
+    seconds["start"]["views"] = [
+        {"role": "start", "camera": camera, "offsets_seconds": [0.0, -0.8], "at": "end"}
+    ]
+    seconds["vetoes"][0]["views"] = [
+        {"role": "after", "camera": camera, "offsets_seconds": [0.5]}
+    ]
+    entry = catalog.register(str(dataset))
+    wb = Workbench(service.STATE)
+    wb.store.put("providers", "vllm", config().model_dump())
+    context = TaskContext(
+        repo_id=entry["id"],
+        episodes=[0, 1],
+        instruction="Judge each release",
+        provider="vllm",
+        cameras=[camera],
+        allow_media_egress=True,
+        workflow={"kind": "review", "anchored": seconds, "require_human_pilot": False},
+        budget=Budget(max_calls=20, max_tokens=None, max_seconds=600),
+    )
+    run = wb.plan(context)
+    approve(wb, run["id"], 1, "human")
+    replies(
+        server,
+        [
+            {"red": "present", "blue": "absent"},
+            {"held": "yes", "colour": "red", "in_box": "yes"},
+            {"full_box": "no"},
+            {"held": "no", "colour": "none", "in_box": "no"},
+            {"red": "absent", "blue": "absent"},
+        ],
+    )
+    assert wb.store.claim(run["id"], "owner")
+    wb.execute(run["id"], "owner", pilot=False)
+    result = wb.store.get("runs", run["id"])
+    assert result["status"] == "waiting_for_review", result["reason"]
+
+    def shown(frames):
+        return [f["frame_index"] for f in frames]
+
+    record = wb.store.get("anchored", f"{run['id']}:0")
+    assert record["offset_timing"] == "timestamps"
+    assert [e["frame_index"] for e in record["events"]] == [7, 13]
+    first, second = record["events"]
+    # Rows 0-8 are frames 0-8, rows 9-16 frames 12-19 (t = frame / 10).
+    # At 0.7 s: 0.5 s, 0.7 s, 1.1 s -> frame 12 (by rows it was frame 14).
+    assert shown(first["frames"]) == [5, 7, 12]
+    # At 1.3 s: 1.1 s -> 12 (by rows: 8), 1.3 s, 1.7 s.
+    assert shown(second["frames"]) == [12, 13, 17]
+    # The start check from the last frame: 1.9 s and 1.1 s -> 12 (by rows: 8).
+    assert shown(record["start"]["frames"]) == [19, 12]
+    # The veto's own view, 0.5 s after 0.7 s: frame 12 (by rows: 15).
+    assert shown(first["vetoes"][0]["frames"]) == [12]
+    assert second["vetoes"][0]["verdict"] == "not_asked"
+    # What was sampled: every view at every anchor (the veto's too, asked or
+    # not: 1.8 s after the second anchor is frame 18), by timestamp.
+    items = wb.store.get("evidence", f"{run['id']}:0")["items"]
+    assert sorted(r["frame_index"] for r in items) == [5, 7, 12, 13, 17, 18, 19]
+    # The offsets a record names frames by stay the nominal frame offsets.
+    assert [f["offset"] for f in first["frames"]] == [-2, 0, 4]
+
+    even = wb.store.get("anchored", f"{run['id']}:1")
+    assert "offset_timing" not in even
+    assert shown(even["start"]["frames"]) == [19, 11]
