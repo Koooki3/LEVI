@@ -553,9 +553,7 @@ def test_a_reused_shared_verdict_does_not_outlive_a_free_one(monkeypatch):
         gpu.require_free(config())
 
 
-def test_a_shared_window_above_the_cap_is_cut_to_it_with_a_warning(
-    monkeypatch, caplog
-):
+def test_a_shared_window_above_the_cap_is_cut_to_it_with_a_warning(monkeypatch, caplog):
     """T-B-15 review: a shared verdict is the riskier state, so it never lives
     longer than 3 s, however the variable is set."""
     assert gpu.MAX_SHARED_REUSE_SECONDS <= 3.0
