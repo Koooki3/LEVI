@@ -41,7 +41,16 @@ def main(argv=None) -> int:
         help="check that LEVI_PIXEL_STATS=histogram equals the float method on given videos",
     )
     d.add_argument("paths", nargs="+", help="video files, or folders searched for .mp4")
+    for compare in (c, d):
+        compare.add_argument(
+            "--cores",
+            type=int,
+            default=bench.MAX_CORES,
+            help=f"CPUs to use, at most {bench.MAX_CORES} (0: leave the process alone)",
+        )
     args = parser.parse_args(argv)
+    if args.command in ("pts-compare", "pixel-compare") and args.cores:
+        bench.limit_cores(args.cores)
     if args.command == "pixel-compare":
         result = bench.compare_pixels(args.paths)
         print(bench.dumps(result))

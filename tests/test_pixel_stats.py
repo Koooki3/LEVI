@@ -2,6 +2,7 @@
 integer counts: the same numbers as the float method, far faster."""
 
 import json
+import os
 import shutil
 import subprocess
 import time
@@ -69,6 +70,8 @@ def test_histogram_statistics_equal_the_float_ones_element_by_element(
         a = np.array(old["stats"][key], dtype=float)
         b = np.array(new["stats"][key], dtype=float)
         assert a.shape == b.shape == ((1,) if key == "count" else (3, 1, 1))
+        if key == "std":  # compared as variance: see test_a_constant_channel...
+            a, b = a * a, b * b
         assert np.abs(a - b).max() <= TOLERANCE, key
 
 
@@ -171,7 +174,10 @@ def test_the_comparison_command_reports_each_file(videos, tmp_path, capsys):
     assert cli.main(["pixel-compare", str(folder)]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["files"] == 2 and out["all_within_tolerance"] and out["different"] == []
-    assert all(row["max_abs_diff"] <= TOLERANCE for row in out["rows"])
+    assert all(
+        row["max_abs_diff"] <= TOLERANCE and row["max_variance_diff"] <= TOLERANCE
+        for row in out["rows"]
+    )
     broken = tmp_path / "broken.mp4"
     broken.write_bytes(b"nope")
     assert cli.main(["pixel-compare", str(broken)]) == 1
@@ -187,3 +193,52 @@ def test_the_benchmark_reports_both_pixel_methods(tmp_path, monkeypatch):
     import os
 
     assert "LEVI_PIXEL_STATS" not in os.environ  # the override is undone
+
+
+def test_a_constant_channel_differs_in_std_only_by_the_float_methods_cancellation(
+    monkeypatch,
+):
+    # 720p of one colour, 60 frames: the true standard deviation is 0. The float
+    # method computes mean(x^2) - mean(x)^2, which does not cancel exactly, so
+    # its std is a tiny noise value (about 1e-6 here); the integer counts give 0.
+    frames = [np.full((720, 1280, 3), (77, 200, 3), dtype=np.uint8)] * 60
+    monkeypatch.setattr(
+        media,
+        "probe",
+        lambda p: {"width": 1280, "height": 720, "declared_frames": None},
+    )
+    monkeypatch.setattr(media, "decode", lambda p: iter(frames))
+    got = {}
+    for method in ("float", "histogram"):
+        monkeypatch.setenv("LEVI_PIXEL_STATS", method)
+        got[method] = media.inspect(media.Path("x.mp4"), pixels=True)["stats"]
+    for key in ("min", "max", "mean", "count"):
+        gap = np.abs(np.array(got["float"][key]) - np.array(got["histogram"][key]))
+        assert gap.max() <= TOLERANCE, key
+    assert np.array(got["histogram"]["std"]).max() == 0.0  # exact
+    old_std = np.array(got["float"]["std"])
+    assert old_std.max() <= 1e-5  # the float method's error bound, not the new one's
+    assert np.abs(old_std**2).max() <= TOLERANCE  # as a variance it is within 1e-9
+    assert bench._within(bench._stats_gap(got["float"], got["histogram"]))
+
+
+def test_the_comparison_commands_limit_the_cores(videos, monkeypatch, capsys):
+    seen = []
+    monkeypatch.setattr(bench, "limit_cores", lambda n: seen.append(n) or [])
+    for command in ("pixel-compare", "pts-compare"):
+        cli.main([command, str(videos["flat"])])
+        cli.main([command, str(videos["flat"]), "--cores", "2"])
+        cli.main([command, str(videos["flat"]), "--cores", "0"])
+    capsys.readouterr()
+    assert seen == [bench.MAX_CORES, 2, bench.MAX_CORES, 2]
+
+
+def test_limit_cores_never_exceeds_four_and_lowers_priority(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(range(16)))
+    monkeypatch.setattr(
+        os, "sched_setaffinity", lambda pid, cpus: calls.update(cpus=cpus)
+    )
+    monkeypatch.setattr(os, "nice", lambda n: calls.update(nice=n))
+    assert len(bench.limit_cores(32)) == bench.MAX_CORES == len(calls["cpus"])
+    assert calls["nice"] == 15

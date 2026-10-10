@@ -34,11 +34,15 @@ def limit_cores(cores=MAX_CORES) -> list:
     try:
         allowed = sorted(os.sched_getaffinity(0))
         chosen = allowed[-cores:]
-        os.sched_setaffinity(0, chosen)
+        os.sched_setaffinity(0, chosen)  # child processes inherit it
     except (AttributeError, OSError):
         chosen = []
     with contextlib.suppress(OSError):
         os.nice(15)
+    with contextlib.suppress(ImportError):
+        import cv2
+
+        cv2.setNumThreads(max(1, len(chosen) or cores))
     return chosen
 
 
@@ -153,15 +157,38 @@ PIXEL_TOLERANCE = 1e-9
 
 
 def _stats_gap(a, b):
-    """Largest absolute difference between two ``inspect`` statistics."""
-    return max(
-        float(abs(x - y))
-        for key in ("min", "max", "mean", "std", "count")
-        for x, y in zip(
+    """How far two ``inspect`` statistics are apart.
+
+    ``max_abs_diff``: largest absolute difference of min, max, mean and count.
+    ``max_variance_diff``: largest difference of the *variances* (std squared).
+    The float method gets a variance as ``mean(x^2) - mean(x)^2``, which cancels
+    badly when a channel is constant or nearly so; its std (a square root of
+    that) can then be off by up to about 1e-6. The histogram method's variance
+    is exact. So std is compared as a variance, and ``max_std_diff`` is only
+    reported."""
+
+    def pairs(key):
+        return zip(
             np.asarray(a[key], dtype=float).ravel(),
             np.asarray(b[key], dtype=float).ravel(),
             strict=True,
         )
+
+    return {
+        "max_abs_diff": max(
+            float(abs(x - y))
+            for key in ("min", "max", "mean", "count")
+            for x, y in pairs(key)
+        ),
+        "max_variance_diff": max(float(abs(x * x - y * y)) for x, y in pairs("std")),
+        "max_std_diff": max(float(abs(x - y)) for x, y in pairs("std")),
+    }
+
+
+def _within(gap) -> bool:
+    return (
+        gap["max_abs_diff"] <= PIXEL_TOLERANCE
+        and gap["max_variance_diff"] <= PIXEL_TOLERANCE
     )
 
 
@@ -181,8 +208,8 @@ def case_pixels(video, repeat):
         "speedup": round(
             times["float"]["median_s"] / times["histogram"]["median_s"], 2
         ),
-        "max_abs_diff": gap,
-        "within_tolerance": gap <= PIXEL_TOLERANCE,
+        **gap,
+        "within_tolerance": _within(gap),
     }
 
 
@@ -209,11 +236,7 @@ def compare_pixels(paths) -> dict:
                 found["float"][k] == found["histogram"][k]
                 for k in ("frames", "span", "first_hash")
             )
-            row.update(
-                max_abs_diff=gap,
-                seconds=took,
-                within_tolerance=gap <= PIXEL_TOLERANCE and same,
-            )
+            row.update(**gap, seconds=took, within_tolerance=_within(gap) and same)
         except (OSError, ValueError, subprocess.SubprocessError) as error:
             row["error"] = type(error).__name__
         rows.append(row)
@@ -241,7 +264,12 @@ def compare_scans(paths) -> dict:
         row = {"file": path.name, "identical": False, "frames": None, "error": None}
         try:
             frames = ve.scan_frames(path)
-            row.update(frames=len(frames), identical=ve.scan_packets(path) == frames)
+            times, reason = ve.packet_times(path)
+            row.update(
+                frames=len(frames),
+                identical=times == frames,
+                packets_unusable=reason,
+            )
         except (OSError, ValueError, subprocess.SubprocessError) as error:
             row["error"] = type(error).__name__
         rows.append(row)

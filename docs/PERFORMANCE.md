@@ -15,6 +15,11 @@ GPU, talks to a model or touches a robot.
 python -m levi.performance trace --live-dir <workspace>/live --workspace <workspace> [--since EPOCH] [--limit N] [--summary-only]
 ```
 
+`--workspace` is the LEVI workspace (the `LEVI_WORKSPACE` folder); the usage
+samples are read from `outputs/LEVI/workbench/agent/workbench.sqlite3` in it and
+the cost records from `outputs/LEVI/datasets/*/tasks/*/ledger.json`. The
+workbench folder itself is accepted too.
+
 Prints one JSON document (`levi.performance.trace.v1`) merged from
 `live/stats.jsonl`, `live/gate.jsonl`, the agent usage samples and the closed-run
 cost records. Each source is optional. Per labelled episode it gives a
@@ -54,7 +59,7 @@ to the evidence (`*--video-index.json`, keyed by the file's SHA-256).
 | `LEVI_PTS_SCAN` | Meaning |
 | --- | --- |
 | `frame` (default) | The original scan: `ffprobe` decodes every frame and reports its best-effort timestamp. |
-| `packet` | Read the container's packet timestamps instead (no decoding): 4 to 80 times faster on measured synthetic video, the same list. If a packet has no timestamp, the packets are missing or their times are not strictly increasing, the frame scan runs instead. The cache file then also records `"scan": "packet"`, and a cache written by the other scan is not used. |
+| `packet` | Read the container's packet timestamps instead (no decoding): 4 to 80 times faster on measured synthetic video, the same list for ordinary files (B-frames, variable frame rate). It trusts the container, so it steps aside whenever the container's packets are not one-to-one with the frames shown: a packet flagged discard (`D`) or corrupt (`C`), which an MP4 edit list or a start before zero produces; a negative timestamp; anything ffprobe reports on stderr (truncated or damaged files); a packet without a timestamp; no packets; times that are not strictly increasing. Then the frame scan runs, and a warning with the file name and the reason is logged. The cache file then also records `"scan": "packet"`, and a cache written by the other scan is not used. |
 
 Any other value is refused. In both modes a video's list is kept in memory by
 content hash (16 videos), so a v3 file shared by many episodes is scanned once
@@ -67,8 +72,10 @@ mismatch tolerance still applies.
 real development videos:
 
 ```
-python -m levi.performance pts-compare <video or folder> [...]
+python -m levi.performance pts-compare <video or folder> [...] [--cores 4]
 ```
+
+Both compare commands pin themselves to at most 4 CPUs at low priority (`--cores`, 0 leaves the process alone). `pts-compare` also lists, for each file, why the packets could not be used.
 
 prints one row per file and exits 1 if any list differs or a file cannot be scanned.
 
@@ -93,16 +100,17 @@ up in `meta/stats.json` and the training normalisation.
 | `LEVI_PIXEL_STATS` | Meaning |
 | --- | --- |
 | `float` (default) | The original method: each frame is converted to float64 and summed. |
-| `histogram` | Count how often each 8-bit value occurs per channel (3 x 256 integers), then compute the four statistics once from the counts. The sums are exact integers and the variance has no cancellation. About 11 to 17 times faster per frame; the results differ from the float method by about 1e-12 (the float method's own rounding). Frames that are not 8-bit use the float method. |
+| `histogram` | Count how often each 8-bit value occurs per channel (3 x 256 integers), then compute the four statistics once from the counts. The sums are exact integers and the variance has no cancellation. About 11 to 17 times faster per frame; min, max, mean and count equal the float method's to about 1e-11 or better. The standard deviation is compared as a variance: the float method computes it as `mean(x^2) - mean(x)^2`, which cancels when a channel is constant or nearly so, and its square root then turns a 1e-12 error into noise up to about 1e-6 (a constant 720p channel gives 2e-6 instead of 0). The histogram result is exact. Frames that are not 8-bit use the float method. |
 
 Any other value is refused. The default stays `float` because the last digits
 of `meta/stats.json` change with the method. Before `histogram` becomes the
 default, compare the two on the real videos (the command exits 1 if any file is
-off by more than 1e-9 in min, max, mean, std or count, or differs in frame
-count, span or first-frame hash):
+off by more than 1e-9 in min, max, mean or count, or in the variance (std
+squared), or differs in frame count, span or first-frame hash; the std difference
+itself is reported but not judged):
 
 ```
-python -m levi.performance pixel-compare <video or folder> [...]
+python -m levi.performance pixel-compare <video or folder> [...] [--cores 4]
 ```
 
 `bench --case pixels` times both methods on a synthetic video and reports the
