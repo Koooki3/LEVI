@@ -19,7 +19,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def encode(path, *extra_in, params="bframes=3", frames=60, vf=None):
-    command = ["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i"]
+    command = ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i"]
     command += [f"testsrc2=size=64x48:rate=10:duration={frames / 10}"]
     command += ["-frames:v", str(frames)]
     if vf:
@@ -37,6 +37,13 @@ def packet_order(path):
         capture_output=True, text=True, check=True,
     ).stdout.split()  # fmt: skip
     return [float(x) for x in out]
+
+
+@pytest.fixture(autouse=True)
+def fresh_memo():
+    ve._MEMO.clear()
+    yield
+    ve._MEMO.clear()
 
 
 @pytest.fixture(scope="module")
@@ -120,27 +127,33 @@ def test_a_changed_video_is_never_served_from_a_cache(bframes, tmp_path):
     assert json.loads(cache.read_text())["source_sha256"] == file_hash(bframes)
 
 
-def test_packets_that_cannot_stand_in_fall_back_to_the_frame_scan(bframes, monkeypatch):
+@pytest.mark.parametrize(
+    "packets, stderr, why",
+    [
+        ("0.0,K__\nN/A,___\n0.2,___\n", "", "no presentation timestamp"),
+        ("0.1,K__\n0.1,___\n0.2,___\n", "", "not strictly increasing"),
+        ("", "", "no packets"),
+        ("0.0,K__\n0.1,__C\n", "", "discard or corrupt"),
+        ("0.0,KD_\n0.1,___\n", "", "discard or corrupt"),
+        ("-0.1,K__\n0.1,___\n", "", "negative"),
+        ("0.0,K__\n0.1,___\n", "Invalid NAL unit size\n", "ffprobe reported"),
+    ],
+)
+def test_packets_that_cannot_stand_in_fall_back_to_the_frame_scan(
+    bframes, monkeypatch, caplog, packets, stderr, why
+):
     real = ve._ffprobe
 
     def fake(path, entries, fmt):
         if entries.startswith("packet"):
-            return "0.0\nN/A\n0.2\n"
+            return packets, stderr
         return real(path, entries, fmt)
 
     monkeypatch.setattr(ve, "_ffprobe", fake)
-    assert ve.scan_packets(bframes) is None
-    assert ve.scan_times(bframes, "packet") == ve.scan_frames(bframes)
-    monkeypatch.setattr(
-        ve,
-        "_ffprobe",
-        lambda p, e, f: "0.1\n0.1\n0.2\n" if e.startswith("packet") else real(p, e, f),
-    )
-    assert ve.scan_packets(bframes) is None  # duplicate timestamps
-    monkeypatch.setattr(
-        ve, "_ffprobe", lambda p, e, f: "" if e.startswith("packet") else real(p, e, f)
-    )
-    assert ve.scan_packets(bframes) is None  # no packets
+    with caplog.at_level("WARNING", logger=ve.log.name):
+        assert ve.scan_packets(bframes) is None
+        assert ve.scan_times(bframes, "packet") == ve.scan_frames(bframes)
+    assert why in caplog.text and bframes.name in caplog.text
 
 
 def test_an_unknown_scan_is_refused(monkeypatch):
@@ -253,3 +266,102 @@ def test_the_comparison_command_reports_each_file(bframes, vfr, tmp_path, capsys
     assert cli.main(["pts-compare", str(bframes), str(broken)]) == 1
     out = json.loads(capsys.readouterr().out)
     assert out["different"] == ["broken.mp4"] and out["rows"][1]["error"]
+
+
+# --- containers where packets and shown frames differ --------------------------
+
+
+def outcome(path, mode):
+    """What a scan gives: its list, or the kind of error it ends in."""
+    try:
+        return "ok", ve.scan_times(path, mode)
+    except (ValueError, subprocess.SubprocessError) as error:
+        return "error", type(error).__name__
+
+
+@pytest.fixture(scope="module")
+def odd(tmp_path_factory):
+    """The four cases a review found: an edit list, a negative start, a
+    truncated file and a damaged one."""
+    folder = tmp_path_factory.mktemp("odd")
+    src = encode(
+        folder / "src.mp4",
+        "-movflags",
+        "+faststart",
+        params="bframes=3:keyint=25",
+        frames=100,
+    )
+
+    def run(*command):
+        subprocess.run(
+            ["ffmpeg", "-nostdin", "-v", "error", "-y", *command], check=True
+        )
+
+    run("-ss", "1.35", "-i", str(src), "-c", "copy", str(folder / "cut.mp4"))
+    run(
+        "-i",
+        str(src),
+        "-c",
+        "copy",
+        "-output_ts_offset",
+        "-0.5",
+        str(folder / "neg.mp4"),
+    )
+    data = src.read_bytes()
+    (folder / "trunc.mp4").write_bytes(data[:9000])
+    damaged = bytearray(data)
+    middle = len(damaged) // 2
+    for i in range(middle, middle + 4000):
+        damaged[i] ^= 0xA5
+    (folder / "corrupt.mp4").write_bytes(bytes(damaged))
+    return {p.stem: p for p in folder.glob("*.mp4")}
+
+
+def decoded_frames(path):
+    import cv2
+
+    cap = cv2.VideoCapture(str(path))
+    count = 0
+    while cap.grab():
+        count += 1
+    cap.release()
+    return count
+
+
+@pytest.mark.parametrize("name", ["cut", "neg", "trunc", "corrupt"])
+def test_packet_mode_gives_the_frame_modes_answer_on_odd_containers(odd, name):
+    path = odd[name]
+    assert ve.packet_times(path)[0] is None  # none of them may use the packets
+    assert outcome(path, "packet") == outcome(path, "frame")
+
+
+@pytest.mark.parametrize("name", ["cut", "neg"])
+def test_the_index_has_one_entry_per_decoded_frame(odd, name):
+    times = ve.scan_times(odd[name], "packet")
+    assert len(times) == decoded_frames(odd[name]) and times[0] >= 0
+
+
+@pytest.mark.parametrize("name", ["cut", "neg", "trunc", "corrupt"])
+def test_a_requested_time_gets_the_same_frame_or_the_same_refusal(odd, tmp_path, name):
+    def pick(mode):
+        try:
+            times = ve.frame_index(
+                odd[name], tmp_path / f"{name}-{mode}.json", mode=mode
+            )
+            return ve.locate(times, 0.5, 0.05)
+        except ValueError as error:
+            return type(error).__name__
+
+    ve._MEMO.clear()
+    frame = pick("frame")
+    ve._MEMO.clear()
+    assert pick("packet") == frame
+
+
+def test_a_rewritten_file_is_scanned_again_in_the_same_mode(tmp_path):
+    path = tmp_path / "v.mp4"
+    encode(path, frames=20)
+    first = ve.frame_index(path, tmp_path / "a.json", mode="packet")
+    encode(path, frames=30)
+    second = ve.frame_index(path, tmp_path / "b.json", mode="packet")
+    assert len(first) == 20 and len(second) == 30

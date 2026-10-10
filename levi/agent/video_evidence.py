@@ -2,14 +2,17 @@
 
 import bisect
 import json
+import logging
 import os
 import subprocess
 import threading
 from collections import OrderedDict
 from itertools import pairwise
+from pathlib import Path
 
 from .store import file_hash
 
+log = logging.getLogger(__name__)
 SCAN_SETTING = "LEVI_PTS_SCAN"
 SCANS = ("frame", "packet")
 # Content-hash keyed, so one shared video (a v3 file holds many episodes) is
@@ -29,7 +32,8 @@ def scan_mode(value=None):
 
 
 def _ffprobe(path, entries, fmt):
-    return subprocess.run(
+    """``(stdout, stderr)`` of a one-stream ffprobe query."""
+    run = subprocess.run(
         [
             "ffprobe",
             "-v",
@@ -46,15 +50,15 @@ def _ffprobe(path, entries, fmt):
         text=True,
         timeout=120,
         check=True,
-    ).stdout
+    )
+    return run.stdout, run.stderr
 
 
 def scan_frames(path):
     """Presentation times in decode-output order, strictly increasing."""
     # Frame presentation order is authoritative for VFR and reordered codecs.
-    frames = json.loads(_ffprobe(path, "frame=best_effort_timestamp_time", "json"))[
-        "frames"
-    ]
+    out, _ = _ffprobe(path, "frame=best_effort_timestamp_time", "json")
+    frames = json.loads(out)["frames"]
     if any("best_effort_timestamp_time" not in f for f in frames):
         raise ValueError("Video has frames without presentation timestamps")
     times = [float(f["best_effort_timestamp_time"]) for f in frames]
@@ -63,20 +67,51 @@ def scan_frames(path):
     return times
 
 
-def scan_packets(path):
-    """Presentation times from the container's packets, sorted; ``None`` when
-    they cannot stand in for the frame scan (a packet without a timestamp, no
-    packets, or timestamps that are not strictly increasing). The caller then
-    runs the frame scan, which decides and reports."""
-    words = _ffprobe(path, "packet=pts_time", "csv=p=0").split()
-    if not words or "N/A" in words:
-        return None
-    try:
-        times = sorted(float(word) for word in words)
-    except ValueError:
-        return None
+def packet_times(path):
+    """``(times, reason)``: the container's packet timestamps, sorted, or
+    ``(None, why)`` when they cannot stand in for the frame scan.
+
+    Packet timestamps are the frames' only when every packet becomes exactly one
+    shown frame. Not so with an edit list or a negative start (the container
+    marks leading packets ``D``, discard: the decoder drops them, the packet
+    list still counts them), a truncated or damaged file (a ``C`` packet, or
+    ffprobe complaining on stderr while still exiting 0), a packet without a
+    timestamp, or times that are not strictly increasing. Each of those means
+    the frame scan must decide."""
+    out, err = _ffprobe(path, "packet=pts_time,flags", "csv=p=0")
+    if err.strip():
+        return None, "ffprobe reported problems"
+    rows = [line.split(",") for line in out.split() if line]
+    if not rows:
+        return None, "no packets"
+    times = []
+    for row in rows:
+        if len(row) != 2 or row[0] in ("", "N/A"):
+            return None, "a packet has no presentation timestamp"
+        if "D" in row[1] or "C" in row[1]:
+            return None, f"a packet is flagged {row[1]!r} (discard or corrupt)"
+        try:
+            value = float(row[0])
+        except ValueError:
+            return None, "unreadable packet timestamp"
+        if value < 0:
+            return None, "negative presentation timestamp"
+        times.append(value)
+    times.sort()
     if any(b <= a for a, b in pairwise(times)):
-        return None
+        return None, "timestamps are not strictly increasing"
+    return times, None
+
+
+def scan_packets(path):
+    """The packet times, or ``None`` (logged) when the frame scan must decide."""
+    times, reason = packet_times(path)
+    if times is None:
+        log.warning(
+            "LEVI_PTS_SCAN=packet: using the frame scan for %s: %s",
+            Path(path).name,
+            reason,
+        )
     return times
 
 

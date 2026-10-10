@@ -1,7 +1,6 @@
 """``levi.performance``: the read-only trace view and the CPU benchmark."""
 
 import json
-import sqlite3
 
 import pytest
 
@@ -105,53 +104,43 @@ def test_gate_history_drops_session_names_and_bad_lines(live):
     assert "secret" not in json.dumps(trace.build(live_dir=live))
 
 
-def test_usage_and_cost_come_from_the_workspace_read_only(tmp_path):
+def real_layout(tmp_path):
+    """A workspace laid out as LEVI does: the workbench store under
+    ``outputs/LEVI/workbench`` and the ledgers beside it, written through the
+    real ``Store`` and ``layout.task_dir``."""
+    from levi.agent.store import Store
+    from levi.harness import layout
+
     workspace = tmp_path / "ws"
-    (workspace / "agent").mkdir(parents=True)
-    path = workspace / "agent/workbench.sqlite3"
-    db = sqlite3.connect(path)
-    db.execute(
-        "CREATE TABLE records(kind TEXT, id TEXT, body TEXT NOT NULL, PRIMARY KEY(kind,id))"
-    )
+    state = workspace / "outputs/LEVI/workbench"
+    state.mkdir(parents=True)
+    store = Store(state)
     sample = {"run_id": "r1", "agent_key": "model:x", "workflow": "temporal",
               "episodes": 3, "evidence_frames": 30, "tokens": 9000, "at": 5.0,
               "source": "measured"}  # fmt: skip
-    db.execute(
-        "INSERT INTO records VALUES('usage_samples','r1:measured',?)",
-        (json.dumps(sample),),
-    )
-    db.execute("INSERT INTO records VALUES('runs','r1','{}')")
-    db.commit()
-    db.close()
-    ledger = workspace / "datasets/d/tasks/r1"
-    ledger.mkdir(parents=True)
-    (ledger / "ledger.json").write_text(
-        json.dumps(
-            {
-                "cost": {
-                    "run_id": "r1",
-                    "agent_key": "model:x",
-                    "provider_kind": "api",
-                    "tokens": {"value": 9000, "source": "metered"},
-                }
-            }
-        )
-    )
-    before = sorted(
-        (p, p.stat().st_mtime_ns, p.stat().st_size) for p in workspace.rglob("*")
-    )
-    out = trace.build(workspace=workspace)
-    assert out["usage"][0]["tokens"] == 9000 and out["usage"][0]["run_id"] == "r1"
-    assert (
-        out["cost"][0]["tokens"] == 9000 and out["cost"][0]["token_source"] == "metered"
-    )
-    assert (
-        sorted(
-            (p, p.stat().st_mtime_ns, p.stat().st_size) for p in workspace.rglob("*")
-        )
-        == before
-    )
-    assert trace.build(workspace=tmp_path / "none")["usage"] == []
+    store.put("usage_samples", "r1:measured", sample)
+    store.put("runs", "r1", {"id": "r1"})
+    folder = layout.task_dir(state, "d", "r1")
+    folder.mkdir(parents=True)
+    cost = {"run_id": "r1", "agent_key": "model:x", "provider_kind": "api",
+            "tokens": {"value": 9000, "source": "metered"}}  # fmt: skip
+    (folder / "ledger.json").write_text(json.dumps({"cost": cost}))
+    return workspace, state, folder / "ledger.json"
+
+
+def test_usage_and_cost_are_read_from_the_real_workspace_layout(tmp_path):
+    workspace, state, ledger = real_layout(tmp_path)
+    watched = [state / "agent/workbench.sqlite3", ledger]
+    before = [(p.stat().st_mtime_ns, p.stat().st_size) for p in watched]
+    for given in (workspace, state):  # the workspace, or the workbench itself
+        out = trace.build(workspace=given)
+        assert out["usage"][0]["tokens"] == 9000 and out["usage"][0]["run_id"] == "r1"
+        assert out["cost"][0]["tokens"] == 9000
+        assert out["cost"][0]["token_source"] == "metered"
+        assert out["sources"]["workspace"] == {"usage_samples": 1, "cost_records": 1}
+    assert [(p.stat().st_mtime_ns, p.stat().st_size) for p in watched] == before
+    empty = trace.build(workspace=tmp_path / "none")
+    assert empty["usage"] == [] and empty["cost"] == []
 
 
 def test_the_trace_command_prints_json_and_stores_nothing(live, tmp_path, capsys):

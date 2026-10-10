@@ -7,9 +7,13 @@ Read-only and standard library only. It adds no store: the inputs are
 - ``live/gate.jsonl`` (``levi.live.gating``): when the GPU gate was closed,
   used to say how much of an episode's wall time labelling was not allowed;
 - the agent usage samples (``levi.agent.usage``, table ``usage_samples`` of
-  ``<workspace>/agent/workbench.sqlite3``, opened read-only);
+  ``<state>/agent/workbench.sqlite3``, opened read-only; plain SQL because
+  ``Store()`` creates directories and sets WAL, which a reader must not do);
 - the harness cost records (``levi.harness.cost``, the ``cost`` key of
-  ``<workspace>/datasets/*/tasks/*/ledger.json``).
+  ``layout.outputs(<state>)/datasets/*/tasks/*/ledger.json``).
+
+``<state>`` is the workbench directory ``<workspace>/outputs/LEVI/workbench``
+(``levi.paths.STATE``); the ledgers sit beside it, in ``outputs/LEVI/datasets``.
 
 Paths are passed in; this module never imports ``levi.paths`` (that reads the
 checkout's ``.env``). Stage figures LEVI does not record today (frame decode,
@@ -22,6 +26,7 @@ import json
 import sqlite3
 from pathlib import Path
 
+from levi.harness import layout
 from levi.live import stats
 
 SCHEMA = "levi.performance.trace.v1"
@@ -160,10 +165,20 @@ def summarize(traces) -> dict:
     }
 
 
+def workbench_state(workspace) -> Path:
+    """The workbench directory of a LEVI workspace. A path that already is one
+    (it holds ``agent/``) is taken as it is."""
+    root = Path(workspace)
+    state = root / "outputs" / "LEVI" / "workbench"
+    if not state.is_dir() and (root / "agent").is_dir():
+        return root
+    return state
+
+
 def read_usage_samples(workspace, limit=200) -> list:
     """Agent usage samples (``levi.agent.usage``), newest last; [] when the
     workspace has no store. The database is opened read-only."""
-    path = Path(workspace) / "agent" / "workbench.sqlite3"
+    path = workbench_state(workspace) / "agent" / "workbench.sqlite3"
     if not path.is_file():
         return []
     try:
@@ -191,7 +206,8 @@ def read_usage_samples(workspace, limit=200) -> list:
 def read_costs(workspace, limit=200) -> list:
     """Closed-run cost records (``levi.harness.cost``) from the task ledgers."""
     rows = []
-    for path in Path(workspace).glob("datasets/*/tasks/*/ledger.json"):
+    datasets = layout.outputs(workbench_state(workspace)) / "datasets"
+    for path in datasets.glob("*/tasks/*/ledger.json"):
         try:
             cost = json.loads(path.read_text()).get("cost")
         except (OSError, ValueError, AttributeError):
