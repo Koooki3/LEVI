@@ -343,7 +343,8 @@ def _event_estimate(flow, cameras):
         "basis": (
             f"; event intelligence adds up to {events.max_windows} signal "
             "candidate windows per episode to that refinement (more frames in "
-            "the same request, within max_evidence_frames; no extra request)"
+            "the same request, within max_evidence_frames; no extra request; "
+            "more images cost more tokens, within max_tokens)"
         ),
         "extra_requests": 0,
         "max_windows_per_episode": events.max_windows,
