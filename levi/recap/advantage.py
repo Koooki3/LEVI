@@ -23,7 +23,15 @@ import numpy as np
 
 from ..conversion.outputs.recap_value import episode_rewards
 
+# The version of the computation LEVI itself does after the worker: returns,
+# return-range normalisation, advantages, thresholds and labels (this module
+# and jobs._publish). Every change to that logic MUST increment it: results
+# of different versions are never merged (levi/recap/signature.py), while a
+# plain LEVI upgrade that leaves it alone keeps subset merges possible.
+RECAP_COMPUTE_VERSION = 1
+
 __all__ = [
+    "RECAP_COMPUTE_VERSION",
     "episode_advantages",
     "episode_rewards",
     "label",

@@ -1025,6 +1025,7 @@ def _refuse_unmergeable(
         if manifest.provider == "rlinf" and folder is not None
         else None,
         "fps": float(ds.fps),
+        "compute_version": advantage.RECAP_COMPUTE_VERSION,
         **_run_parameters(manifest, request, threshold, source),
         "return_min": ret_min,
         "return_max": ret_max,
@@ -1270,6 +1271,7 @@ def _common_meta(job, plan, manifest, result) -> dict[str, Any]:
         "base_models": plan["checkpoint"].get("base_models"),
         "dev_only_base_models": plan["checkpoint"].get("dev_only_base_models", []),
         "fps": float(plan["dataset"]["fps"]),
+        "compute_version": advantage.RECAP_COMPUTE_VERSION,
         "levi_commit": _levi_commit(),
     }
 

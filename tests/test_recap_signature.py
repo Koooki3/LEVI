@@ -316,3 +316,54 @@ def test_merged_static_filter_counts_cover_every_episode(raw_capture, monkeypatc
     demos = sorted(p for p in source.rglob("demo_*") if p.is_dir())
     kept = sum(len(static_filter.kept_positions(d, PARAMS)["keep"]) for d in demos)
     assert info["kept_frames"] == kept
+
+
+# ---------------------------------------------------------------- compute version
+
+
+def test_compute_version_is_classified_and_recorded(recap_models):  # noqa: F811
+    """Advantages, thresholds and returns are computed in LEVI itself; their
+    logic is versioned by RECAP_COMPUTE_VERSION (not the LEVI commit, which
+    would end every merge at each upgrade)."""
+    from levi.recap import advantage
+
+    assert isinstance(advantage.RECAP_COMPUTE_VERSION, int)
+    assert "compute_version" in signature.RESULT_AFFECTING
+    assert "levi_commit" in signature.RESULT_IGNORED
+    client, entry = recap_models
+    run(client, entry["id"])
+    record = store.revision(entry["name"])
+    assert record["compute_version"] == advantage.RECAP_COMPUTE_VERSION
+
+
+def test_a_new_compute_version_refuses_a_subset(client):
+    _publish({0: (6, 0.0), 1: (6, 0.0)}, compute_version=1)
+    assert _publish({0: (6, 0.1)}, subset=True, compute_version=1)["merged"]
+    with pytest.raises(store.MergeRefused, match="compute_version"):
+        _publish({0: (6, 0.2)}, subset=True, compute_version=2)
+    # A whole-dataset run replaces the result.
+    full = _publish({0: (6, 0.2), 1: (6, 0.2)}, compute_version=2)
+    assert not full["merged"] and full["compute_version"] == 2
+
+
+def test_bumping_the_compute_version_refuses_a_subset_run(recap_models, monkeypatch):  # noqa: F811
+    from levi.recap import advantage
+
+    client, entry = recap_models
+    repo, name = entry["id"], entry["name"]
+    checkpoints.update(
+        "fake-a", {"unified_threshold": 0.01, "return_min": -64.0, "return_max": 0.0}
+    )
+    run(client, repo)
+    monkeypatch.setattr(
+        advantage, "RECAP_COMPUTE_VERSION", advantage.RECAP_COMPUTE_VERSION + 1
+    )
+    refused = client.post(
+        "/annotations/api/recap/run", json={**BODY, "repo_id": repo, "episodes": [1]}
+    )
+    assert refused.status_code == 409 and "compute_version" in refused.json()["detail"]
+    replaced = run(client, repo)
+    assert replaced["status"] == "succeeded"
+    assert store.revision(name)["compute_version"] == advantage.RECAP_COMPUTE_VERSION
+    assert run(client, repo, episodes=[1])["status"] == "succeeded"
+    assert store.revision(name)["merged"]

@@ -87,6 +87,7 @@ RESULT_AFFECTING = frozenset(
         "return_min",
         "return_max",
         "return_range_source",
+        "compute_version",  # advantage.RECAP_COMPUTE_VERSION
     }
 )
 RESULT_IGNORED = frozenset(
@@ -101,8 +102,8 @@ RESULT_IGNORED = frozenset(
         "dataset_type_reason",
         "skipped_episodes",
         "dev_only_base_models",  # derived from base_models
-        # LEVI's own code: the advantage formula is pinned by tests against
-        # RLinf's loop; a deploy must not block every merge.
+        # LEVI's own code: what of it decides the numbers is versioned by
+        # compute_version; a plain deploy must not block every merge.
         "levi_commit",
         "outcomes",  # per episode, carried with each episode
         "threshold_provenance",  # text
