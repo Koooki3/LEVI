@@ -16,6 +16,11 @@ from levi.automatic.campaign import guided as G
 from levi.automatic.campaign import ledger as L
 from levi.automatic.campaign import report as R
 
+
+def write_report(*args, **kwargs):
+    return R.write_report(*args, campaign_state="REPORTED", **kwargs)
+
+
 # A guide shaped like setup.md §6.2-6.4, with made-up machine values.
 GUIDE = """# Operator guide
 
@@ -98,11 +103,22 @@ def test_render_replaces_only_the_allowed_parameters():
         ),
     ]
     assert "--levi-mode dual" in out and "--new" in out
-    with_prompt = G.render(
-        b, eval_num=5, rollout_group="g", eval_note=note, prompt="stack the cups"
-    )
+    # The task instruction is no per-segment parameter: it is the
+    # campaign's shared setting, frozen into the base command once.
+    with pytest.raises(TypeError):
+        G.render(b, eval_num=5, rollout_group="g", eval_note=note, prompt="x")
+    frozen = G.base_command(GUIDE, prompt="stack the cups")
+    assert G.BaseCommand.from_dict(frozen.to_dict()) == frozen
+    with_prompt = G.render(frozen, eval_num=5, rollout_group="g", eval_note=note)
     assert '--prompt "stack the cups"' in with_prompt
     assert len(changed_lines(b.text, with_prompt)) == 4
+    lay = fx.layout(per_arm=10, segment_trials=5)
+    cmds = G.segment_commands(frozen, lay, {"A": "a1", "B": "b1"})
+    assert all('--prompt "stack the cups"' in c["command"] for c in cmds)
+    with pytest.raises(TypeError):
+        G.segment_commands(frozen, lay, {"A": "a1", "B": "b1"}, prompt="other")
+    with pytest.raises(G.GuidedError, match="no single --prompt"):
+        G.base_command(GUIDE, section="6.2", prompt="x")
 
 
 @pytest.mark.parametrize(
@@ -117,7 +133,6 @@ def test_render_replaces_only_the_allowed_parameters():
         ("rollout_group", "../../etc"),
         ("rollout_group", "two words"),
         ("rollout_group", "a;b"),
-        ("prompt", 'pick "it"'),
     ],
 )
 def test_values_that_would_change_the_command_are_refused(field, value):
@@ -125,6 +140,15 @@ def test_values_that_would_change_the_command_are_refused(field, value):
     values[field] = value
     with pytest.raises(G.GuidedError):
         G.render(base(), **values)
+
+
+def test_an_unsafe_shared_prompt_is_refused():
+    for bad in ('pick "it"', "pick $(id)", "two\nlines"):
+        with pytest.raises(G.GuidedError):
+            G.base_command(GUIDE, prompt=bad)
+    saved = G.base_command(GUIDE, prompt="ok").to_dict()
+    with pytest.raises(G.GuidedError):
+        G.BaseCommand.from_dict({**saved, "prompt": "x `id`"})
 
 
 def test_the_trial_count_must_be_a_positive_whole_number():
@@ -339,12 +363,14 @@ def test_rollouts_of_one_segment_are_collected_and_wait_for_cards(tmp_path):
     )
     write_rollout(root, group, task, 7, note="pi05 正式双标签评测", run_id="run4")
     write_rollout(root, group, task, 8, note=note, run_id="run5", label_mode=None)
+    write_rollout(root, group, task, 9, note=f"{fx.CAMPAIGN} s1 X1", run_id="run6")
     records = G.scan_rollouts(root, group, task)
-    assert len(records) == 8 and records[0].key == f"{group}/{task}/demo_0001"
+    assert len(records) == 9 and records[0].key == f"{group}/{task}/demo_0001"
     got = G.collect_segment(records, lay, 1)
     assert got["runs"] == ["run1", "run2"]
     assert got["ignored"] == [
-        {"key": f"{group}/{task}/demo_0008", "reason": "not a dual-label run"}
+        {"key": f"{group}/{task}/demo_0008", "reason": "not a dual-label run"},
+        {"key": f"{group}/{task}/demo_0009", "reason": "unreadable note"},
     ]
     statuses = [(r.number, r.status) for r in got["rows"]]
     assert statuses == [
@@ -545,7 +571,7 @@ def test_a_guided_campaign_reaches_a_report(tmp_path):
         trials_per_arm=10,
         comparison=("B", "A"),
     )
-    manifest = R.write_report(
+    manifest = write_report(
         tmp_path / "report", led, info, "operator_label", layout=bound, now=0
     )
     analysis = json.loads(

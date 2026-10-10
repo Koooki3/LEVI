@@ -8,8 +8,10 @@ and the campaign collects what the client wrote.
 the operator guide (``setup.md`` §6.3, its first code block), read with the
 same parser as the setup recipes (``levi.setup.recipes``). ``render``
 replaces only the allowed parameters (``--eval-num``, ``--rollout-group``,
-``--eval-note`` and, optionally, ``--prompt``) and checks that everything
-else is character for character the guide's text; ``--levi-mode dual`` must
+``--eval-note``) and checks that everything else is character for character
+the guide's text; the task instruction (``--prompt``) is a shared setting of
+the campaign (``task.prompt``, part of ``settings_sha256``), frozen into the
+``BaseCommand`` when the campaign is planned and the same in every segment; ``--levi-mode dual`` must
 already be there. A campaign keeps the excerpt it was planned with
 (``BaseCommand.to_dict``); ``check_drift`` compares it with the guide as it
 is now and ``render_checked`` refuses, with a unified diff, when the guide
@@ -97,6 +99,9 @@ class BaseCommand:
     block: int
     text: str
     first_line: int
+    # The campaign's shared task instruction (frozen with the plan); None
+    # keeps the guide's own ``--prompt``.
+    prompt: str | None = None
 
     @property
     def sha256(self) -> str:
@@ -109,23 +114,45 @@ class BaseCommand:
             "text": self.text,
             "first_line": self.first_line,
             "sha256": self.sha256,
+            "prompt": self.prompt,
         }
 
     @staticmethod
     def from_dict(data: dict) -> BaseCommand:
-        base = BaseCommand(
-            data["section"], int(data["block"]), data["text"], int(data["first_line"])
-        )
-        if data.get("sha256") not in (None, base.sha256):
+        if data.get("sha256") != recipes.digest(data["text"]):
             raise GuidedError("the saved command does not match its digest")
+        return _with_prompt(
+            BaseCommand(
+                data["section"],
+                int(data["block"]),
+                data["text"],
+                int(data["first_line"]),
+            ),
+            data.get("prompt"),
+        )
+
+
+def _with_prompt(base: BaseCommand, prompt: str | None) -> BaseCommand:
+    if prompt is None:
         return base
+    _check_value("prompt", prompt)
+    if len(FLAGS["prompt"].findall(base.text)) != 1:
+        raise GuidedError("the guide's command gives no single --prompt to replace")
+    return BaseCommand(base.section, base.block, base.text, base.first_line, prompt)
 
 
 def base_command(
-    guide_text: str, section: str = SECTION, block: int = BLOCK
+    guide_text: str,
+    section: str = SECTION,
+    block: int = BLOCK,
+    *,
+    prompt: str | None = None,
 ) -> BaseCommand:
     """The guide's code block ``block`` of section ``section``, which must
-    be a dual-label evaluation command with each allowed parameter once."""
+    be a dual-label evaluation command with each allowed parameter once.
+    ``prompt``: the campaign's shared task instruction (``task.prompt`` of
+    its frozen shared settings), used by every segment; None keeps the
+    guide's."""
     guide = recipes.parse_guide(guide_text)
     if guide.problems:
         raise GuidedError("; ".join(guide.problems))
@@ -148,7 +175,9 @@ def base_command(
             raise GuidedError(
                 f"section {section} block {block} must give --{name.replace('_', '-')} once"
             )
-    return BaseCommand(section, block, excerpt.text, excerpt.first)
+    return _with_prompt(
+        BaseCommand(section, block, excerpt.text, excerpt.first), prompt
+    )
 
 
 def _masked(text: str) -> str:
@@ -206,9 +235,9 @@ def render(
     eval_num: int,
     rollout_group: str,
     eval_note: str,
-    prompt: str | None = None,
 ) -> str:
-    """The guide's command with only the allowed parameters replaced."""
+    """The guide's command with only the allowed parameters replaced, and
+    the task instruction the campaign froze into ``base`` (if any)."""
     if isinstance(eval_num, bool) or not isinstance(eval_num, int) or eval_num < 1:
         raise GuidedError("eval_num must be a positive whole number")
     values = {
@@ -216,10 +245,8 @@ def render(
         "rollout_group": _check_value("rollout_group", rollout_group),
         "eval_note": _check_value("eval_note", eval_note),
     }
-    if prompt is not None:
-        if len(FLAGS["prompt"].findall(base.text)) != 1:
-            raise GuidedError("the guide's command gives no single --prompt to replace")
-        values["prompt"] = _check_value("prompt", prompt)
+    if base.prompt is not None:
+        values["prompt"] = _check_value("prompt", base.prompt)
     text = base.text
     for name, value in values.items():
         quoted = value if name in ("eval_num", "rollout_group") else f'"{value}"'
@@ -267,7 +294,6 @@ def segment_commands(
     groups: dict,
     *,
     codes: dict | None = None,
-    prompt: str | None = None,
 ) -> list:
     """One command per segment, in campaign order: ``--eval-num`` its card
     count, ``--rollout-group`` its arm's checkpoint full name (``groups``),
@@ -295,7 +321,6 @@ def segment_commands(
                     eval_num=len(seg.cards),
                     rollout_group=groups[seg.arm],
                     eval_note=note,
-                    prompt=prompt,
                 ),
             }
         )
@@ -452,8 +477,15 @@ def collect_segment(
     codes = set()
     for record in records:
         ev = record.metadata.get("eval")
-        parsed = parse_note(ev.get("eval_note") if isinstance(ev, dict) else None)
-        if parsed is None or parsed[0] != layout.campaign_id or parsed[1] != segment:
+        note = ev.get("eval_note") if isinstance(ev, dict) else None
+        parsed = parse_note(note)
+        if parsed is None:
+            # A note that names this campaign but is not ours to parse (a
+            # typo) is listed, never dropped in silence.
+            if isinstance(note, str) and layout.campaign_id in note:
+                ignored.append({"key": record.key, "reason": "unreadable note"})
+            continue
+        if parsed[0] != layout.campaign_id or parsed[1] != segment:
             continue
         if ev.get("label_mode") != "dual":
             ignored.append({"key": record.key, "reason": "not a dual-label run"})
