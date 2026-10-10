@@ -385,3 +385,16 @@ def test_no_torch_and_no_import_cycle():
         subprocess.run(
             [sys.executable, "-c", f"import {first}\n" + code], check=True, timeout=120
         )
+
+
+def test_facts_skip_rows_without_a_timestamp():
+    rows = starts_closed()
+    times = np.arange(len(rows)) / 10
+    times[50] = np.nan  # the close at 5.0 s has no timestamp
+    meta = info(FR3)
+    p = resolve(meta, from_action_contract(FR3_ROBOTIQ, feature="observation.state"))
+    del meta["fps"]  # the rate comes from the finite steps
+    found = facts.read(table(rows, times), meta, p)
+    kinds = [(o.kind, round(o.time_s, 1)) for o in found if "gripper" in o.kind]
+    assert kinds == [("gripper_open", 2.0)]
+    assert all(np.isfinite(o.time_s) for o in found)

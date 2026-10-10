@@ -39,8 +39,10 @@ def _bounds(channel, stats):
 
 def _row(times, t):
     """The first row recorded at time ``t`` (a time the readers took from
-    ``times``; not a search, so unsorted timestamps do not mislead it)."""
-    return int(np.flatnonzero(times == t)[0])
+    ``times``; not a search, so unsorted timestamps do not mislead it);
+    None when no row has it."""
+    rows = np.flatnonzero(times == t)
+    return int(rows[0]) if len(rows) else None
 
 
 def read(table, info, profile=None, stats=None, episode_index=0, source_sha256=None):
@@ -51,7 +53,9 @@ def read(table, info, profile=None, stats=None, episode_index=0, source_sha256=N
     times = table["timestamp"].to_numpy(dtype=float)
     fps = float(info.get("fps") or 0) or None
     if not fps and len(times) > 1:
-        fps = 1 / np.median(np.diff(times))
+        steps = np.diff(times)
+        steps = steps[np.isfinite(steps) & (steps > 0)]
+        fps = 1 / float(np.median(steps)) if len(steps) else None
     matrices = {}
 
     def column(feature):
@@ -64,13 +68,20 @@ def read(table, info, profile=None, stats=None, episode_index=0, source_sha256=N
     out = []
 
     def add(kind, actor, row, sources, *, value=None, window=None, time=None):
+        if row is None:
+            return
+        time = float(times[row]) if time is None else time
+        window = window or window_at(times, row)
+        if not np.isfinite([time, *window]).all():
+            # A fact at a row without a usable timestamp has no place in time.
+            return
         out.append(
             SignalObservation(
                 episode_index=episode_index,
                 actor_id=actor,
                 kind=kind,
-                time_s=float(times[row]) if time is None else time,
-                time_window_s=window or window_at(times, row),
+                time_s=time,
+                time_window_s=window,
                 source_frame_index=row,
                 sources=sources,
                 value=value,
