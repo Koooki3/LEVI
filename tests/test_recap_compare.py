@@ -356,3 +356,52 @@ def test_value_only_side_keeps_value_aggregates_without_label_rates(revisions):
     assert group["label_agreement"] is None
     assert group["positive_fraction_a"] is None
     assert sum(result["distribution"]["value"]["b"]) == 2
+
+
+def test_only_a_recomputed_result_answers_with_the_recomputed_code(revisions):
+    """A viewer reloads on ``code: recomputed`` only; every other 409 (a
+    changed source, a missing episode, ...) is an error to show as it is."""
+    client, ds, publish = revisions
+    a = publish("r1", [(0, [0, 2], [-0.5, -0.4], [False, True])])
+    b = publish("r2", [(0, [0, 2], [-0.3, -0.2], [True, True])])
+    stale = client.get(
+        "/annotations/api/recap/compare",
+        params={
+            "repo_id": ds.repo_id,
+            "a": a,
+            "b": b,
+            "version_a": "20200101-0000",
+            "version_b": b,
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.json()["code"] == "recomputed"
+    assert "recomputed" in stale.json()["detail"]
+    for route in ("summary", "episodes/0"):
+        pinned = client.get(
+            f"/annotations/api/recap/{route}",
+            params={
+                "repo_id": ds.repo_id,
+                "revision_id": a,
+                "version": "20200101-0000",
+            },
+        )
+        assert pinned.status_code == 409 and pinned.json()["code"] == "recomputed"
+    c = publish(
+        "r3",
+        [(0, [0, 2], [-0.3, -0.2], [True, True])],
+        fingerprint={"dataset_revision": "other-data"},
+    )
+    changed = client.get(
+        "/annotations/api/recap/compare",
+        params={
+            "repo_id": ds.repo_id,
+            "a": a,
+            "b": c,
+            "version_a": a,
+            "version_b": c,
+        },
+    )
+    assert changed.status_code == 409
+    assert "code" not in changed.json()
+    assert "dataset changed" in changed.json()["detail"]

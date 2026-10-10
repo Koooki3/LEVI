@@ -1018,7 +1018,10 @@ def prune_job_files(name: str, keep: int | None = None) -> dict[str, Any]:
     if store.root(name).is_symlink():
         return {"removed_records": [], "bytes": 0}
     finished = [j for j in jobs(name) if j.get("status") in FINISHED]
-    old = finished[: max(0, len(finished) - keep)]
+    # A finished record whose worker still runs (cancelled from a process
+    # that had no handle on it) keeps its record: removing it would let the
+    # next job reuse the id while the old worker still writes its output.
+    old = [j for j in finished[: max(0, len(finished) - keep)] if not _alive(j)]
     removed: list[str] = []
     freed = 0
     for job in old:
@@ -1026,8 +1029,9 @@ def prune_job_files(name: str, keep: int | None = None) -> dict[str, Any]:
             freed += _unlink(path)
         freed += _unlink(job_path(name, job["id"]))
         removed.append(job["id"])
-    for job in finished[len(old) :]:
-        if job.get("status") != "succeeded":
+    gone = {j["id"] for j in old}
+    for job in finished:
+        if job["id"] in gone or job.get("status") != "succeeded":
             continue
         for path in _job_files(name, job["id"]):
             if path.suffix != ".log":
@@ -1457,7 +1461,17 @@ def status(repo_id: str, *, reconcile: bool = True) -> dict[str, Any]:
             "setting": setting["dataset_type"] if setting else "auto",
             **resolve_dataset_type(ds, "auto"),
         },
+        # The layout a run started now publishes in (models: recomputing
+        # replaces the model's result; revisions: it adds one per run).
+        "layout": _write_layout(),
     }
+
+
+def _write_layout() -> str | None:
+    try:
+        return store.layout()
+    except ValueError:
+        return None  # a misconfigured LEVI_RECAP_STORE_LAYOUT: runs refuse
 
 
 def _published(

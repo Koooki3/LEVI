@@ -374,6 +374,8 @@ def test_same_model_twice_is_one_result_and_pins_answer_409(recap_models):
             params={"repo_id": repo, "revision_id": "fake-a", "version": v1["version"]},
         )
         assert stale.status_code == 409 and "recomputed" in stale.json()["detail"]
+        # Machine-readable: a viewer reloads on this code only.
+        assert stale.json()["code"] == "recomputed"
         fresh = client.get(
             f"/annotations/api/recap/{route}",
             params={"repo_id": repo, "version": rows[0]["version"]},
@@ -389,6 +391,8 @@ def test_same_model_twice_is_one_result_and_pins_answer_409(recap_models):
     status = client.get("/annotations/api/recap/status", params={"repo_id": repo})
     current = status.json()["current"]
     assert current["revision_id"] == "fake-a" and current["layout"] == "models"
+    # Which layout a new run writes, so the viewer says "replaces" truthfully.
+    assert status.json()["layout"] == "models"
 
 
 def test_subset_runs_merge_or_are_refused_before_the_worker(recap_models):
@@ -669,3 +673,18 @@ def test_recomputed_answer_carries_a_stable_code(recap_models):
         "/annotations/api/recap/summary", params={"repo_id": repo, "version": "../x"}
     )
     assert other.status_code == 400 and "code" not in other.json()
+
+
+def test_status_names_the_layout_a_new_run_writes(recap_models, monkeypatch):
+    client, entry = recap_models
+    params = {"repo_id": entry["id"]}
+    monkeypatch.setenv("LEVI_RECAP_STORE_LAYOUT", "revisions")
+    assert (
+        client.get("/annotations/api/recap/status", params=params).json()["layout"]
+        == "revisions"
+    )
+    monkeypatch.setenv("LEVI_RECAP_STORE_LAYOUT", "bogus")
+    assert (
+        client.get("/annotations/api/recap/status", params=params).json()["layout"]
+        is None
+    )
