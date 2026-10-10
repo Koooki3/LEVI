@@ -447,6 +447,12 @@ describe("saved Value model results", () => {
     await choose(selectors(host)[1], r1);
     await waitFor(() => host.querySelector(".recap-comparison"));
     expect(host.querySelectorAll(".recap-advantage-row")).toHaveLength(2);
+    // Each row label is one text element (kept on a single line by CSS).
+    expect(
+      [...host.querySelectorAll(".recap-advantage-row .recap-label-text")].map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(["advantage A", "advantage B"]);
     expect(host.querySelectorAll(".recap-line")).toHaveLength(2);
     expect(host.querySelector(".recap-line.comparison")).not.toBeNull();
     const text = host.textContent!;
@@ -1621,6 +1627,13 @@ describe("comparison charts", () => {
           ),
         ];
         expect(ticks.length).toBeGreaterThan(0);
+        if (index === 1)
+          // Narrow bars: two decimals, so a label stays within its bar.
+          expect(
+            [...chart.querySelectorAll(".recap-bar-value")].every((node) =>
+              /^-?\d\.\d\d$/.test(node.textContent ?? ""),
+            ),
+          ).toBe(true);
         // Every category is drawn on its own lines, none wider than its band.
         for (const tick of ticks)
           expect(tick.querySelectorAll("tspan").length).toBeGreaterThan(1);

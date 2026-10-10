@@ -674,7 +674,9 @@ function AdvantageTrack({
     <div className={"tl-row recap-advantage-row side-" + side.toLowerCase()}>
       <div className="label">
         <span className="style-dot dot-advantage" />
-        {t("advantage")} {side}
+        <span className="recap-label-text">
+          {t("advantage")} {side}
+        </span>
       </div>
       <div
         className="track"
