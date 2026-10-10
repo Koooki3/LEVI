@@ -11,6 +11,7 @@
 | `contracts` | `SignalObservation` and `EventCandidate`, the records the readers produce. |
 | `signal_profiles` | What each recorded channel means: role, actor, units, frame, which end of a gripper is open. |
 | `facts` | The signal facts of one episode as `SignalObservation`s, per channel and actor. |
+| `boundary_metrics` | Boundary Recall at several tolerances, false candidates per minute, boundary MAE/P90, Segment F1 at several IoU thresholds. |
 
 ## Records
 
@@ -30,3 +31,13 @@ A profile (`levi.signal_profile.v1`) lists channels with a `role` (`gripper`, `p
 - `open_levels(profile)` gives the declared ends in the form `levi.agent.signals.summarize(open_levels=...)` takes.
 
 `facts.read(table, info, profile)` reads every gripper of every actor (not only the first that moved, as the signal lines do), height turns and still spans, each with its source channel; with a declared `open_level` the gripper facts are right side up whatever the episode starts with.
+
+## Boundary and segment metrics
+
+`boundary_metrics` judges candidates against reference boundaries (per episode, in seconds):
+
+- `boundary_scores(reference, candidates, durations, tolerances=(0.1, 0.2))`: per tolerance, Boundary Recall (the share of reference boundaries with a candidate within the tolerance; one candidate counts for one boundary, maximum one-to-one matching), precision, F1, false candidates (matching none) and false candidates per minute of episode, and the MAE/P90 of matched errors. Across tolerances: candidates per minute and how far each reference boundary is from its nearest candidate (`nearest_mae`, `nearest_p90`; a missed boundary counts at that distance; `no_candidate` counts boundaries in episodes with no candidate at all).
+- `segment_f1(reference, candidates, ious=(0.3, 0.5, 0.7))`: Segment F1 per IoU threshold with the matching rule of `levi.harness.grading` (same subtask, best IoU at or above the threshold, each candidate once); `mean` averages per-episode F1 as `grading.grade` does (at IoU 0.3 it equals grading's `segment_f1`), `pooled` pools all matches.
+- `boundaries(segments)` turns contiguous segments into their inner boundaries.
+
+`levi.agent.evaluation.temporal` (one tolerance, identity-matched rows) and `levi.harness.grading` (one IoU) are unchanged.
