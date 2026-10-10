@@ -113,6 +113,299 @@ def gpu_holders(runner=subprocess.run) -> list:
     return rows[:16]
 
 
+# --- yielding the GPU (``[gpu.yield]``) -------------------------------------------
+#
+# Everything here only reads: the kernel's socket table, /proc/locks and
+# ``nvidia-smi --query-compute-apps``. Nothing connects to a port, takes a
+# lock for good or starts a process. A reading that fails is a reason to
+# yield (fail closed): what cannot be seen is assumed to be in use.
+
+
+def listening_ports_strict(tables=("/proc/net/tcp", "/proc/net/tcp6")) -> set:
+    """Like ``listening_ports`` but ``OSError`` when the IPv4 table cannot be
+    read (the IPv6 table may be absent on a machine without IPv6)."""
+    Path(tables[0]).read_text()
+    return listening_ports(tables)
+
+
+def compute_apps(runner=subprocess.run) -> list:
+    """Compute processes on the GPU as ``gpu_holders`` lists them, but every
+    failure raises (``OSError`` or ``subprocess.SubprocessError``), and a row
+    whose memory is not a number keeps ``memory_mib`` None."""
+    done = runner(
+        [
+            "nvidia-smi",
+            "--query-compute-apps=pid,process_name,used_memory",
+            "--format=csv,noheader,nounits",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    )
+    rows = []
+    for line in done.stdout.strip().splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 3 or not parts[0].isdigit():
+            continue
+        try:
+            mib = int(float(parts[2]))
+        except ValueError:
+            mib = None
+        rows.append(
+            {
+                "pid": int(parts[0]),
+                "name": os.path.basename(parts[1])[:60],
+                "memory_mib": mib,
+            }
+        )
+    return rows
+
+
+def flock_holders(path, locks="/proc/locks", stat=os.stat) -> list | None:
+    """Pids that hold a ``flock`` on the file ``path`` according to
+    ``/proc/locks`` (no lock is taken, nothing is opened for writing); an empty
+    list for a file that does not exist; None when it cannot be told from the
+    table (unreadable, or an entry matches the inode but not the device)."""
+    try:
+        st = stat(Path(path).expanduser())
+    except FileNotFoundError:
+        return []
+    except OSError:
+        return None
+    try:
+        lines = Path(locks).read_text().splitlines()
+    except OSError:
+        return None
+    found, loose = [], False
+    for line in lines:
+        fields = line.split()
+        if len(fields) < 6 or fields[1] != "FLOCK":
+            continue
+        try:
+            major, minor, inode = fields[5].split(":")
+            if int(inode) != st.st_ino:
+                continue
+            same = (int(major, 16), int(minor, 16)) == (
+                os.major(st.st_dev),
+                os.minor(st.st_dev),
+            )
+            if not same:
+                loose = True
+                continue
+            found.append(int(fields[4]))
+        except ValueError:
+            continue
+    if not found and loose:
+        return None
+    return found
+
+
+def flock_busy(path) -> bool:
+    """Does somebody hold the lock on ``path``? A non-blocking shared lock is
+    tried and let go at once (the table in ``flock_holders`` is preferred:
+    it does not touch the lock at all). A file that does not exist or cannot
+    be opened is not busy."""
+    try:
+        fd = os.open(Path(path).expanduser(), os.O_RDONLY)
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except OSError:
+        return True
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
+
+
+@dataclass
+class Reason:
+    """One reason the background labelling gives the GPU way."""
+
+    code: str
+    # deployment | robot_quiet | foreign_gpu | foreign_lock | probe_error
+    text: str
+
+    def public(self) -> dict:
+        return {"code": self.code, "text": self.text[:300]}
+
+
+def yield_reasons(
+    config,
+    *,
+    ports: set | None,
+    ports_error: str = "",
+    sessions: dict,
+    apps: list | None,
+    apps_error: str = "",
+    ours: set = frozenset(),
+    lock_pids: list | None = None,
+    lock_error: bool = False,
+    check_gpu: bool = True,
+) -> list:
+    """Why the labelling must yield now (an empty list: no reason). Pure.
+
+    ``ports``/``apps`` are None when they could not be read (then
+    ``probe_error``); ``check_gpu`` False leaves the two GPU reasons out (the
+    caller did not look: nothing is queued, no model is wanted).
+    ``lock_pids`` are the holders of ``gpu.lock_file`` other than this
+    service (None with ``lock_error``: the table could not be read)."""
+    y = config.gpu.yield_
+    out: list = []
+    if ports is None:
+        out.append(
+            Reason(
+                "probe_error",
+                f"the socket table cannot be read ({ports_error or 'error'}): "
+                "assuming a policy server may be listening",
+            )
+        )
+    else:
+        up = sorted(int(p) for p in config.gpu.policy_ports if int(p) in ports)
+        if up:
+            out.append(
+                Reason(
+                    "deployment",
+                    "a policy server is listening on port "
+                    + ", ".join(str(p) for p in up)
+                    + ": the policy is deployed",
+                )
+            )
+    live = [
+        s
+        for s in sessions.values()
+        if s.state not in ("stopped", "finished", "crashed") and not s.crashed
+    ]
+    if live:
+        s = live[0]
+        out.append(
+            Reason(
+                "deployment",
+                f"evaluation session {s.group}/{s.task_folder} is {s.state}"
+                + (f" (and {len(live) - 1} more)" if len(live) > 1 else ""),
+            )
+        )
+    quiet = [
+        s
+        for s in sessions.values()
+        if s.state in config.gpu.quiet_states and not s.crashed
+    ]
+    if quiet:
+        s = quiet[0]
+        out.append(
+            Reason(
+                "robot_quiet",
+                f"{s.group}/{s.task_folder} is {s.state}: the robot moves "
+                "(gpu.quiet_states)",
+            )
+        )
+    if not check_gpu:
+        return out
+    if y.foreign_gpu_mib > 0:
+        if apps is None:
+            out.append(
+                Reason(
+                    "probe_error",
+                    f"the GPU's processes cannot be read ({apps_error or 'nvidia-smi'}): "
+                    "assuming someone else is using it",
+                )
+            )
+        else:
+            others = [a for a in apps if a["pid"] not in ours]
+            unknown = [a for a in others if a["memory_mib"] is None]
+            used = sum(a["memory_mib"] or 0 for a in others)
+            if used > y.foreign_gpu_mib or unknown:
+                names = ", ".join(f"{a['name']}({a['pid']})" for a in others[:3]) + (
+                    " ..." if len(others) > 3 else ""
+                )
+                out.append(
+                    Reason(
+                        "foreign_gpu",
+                        f"other processes use {used} MiB of the GPU"
+                        + (" (some amount unknown)" if unknown else "")
+                        + f", over gpu.yield.foreign_gpu_mib ({y.foreign_gpu_mib}): "
+                        + names,
+                    )
+                )
+    if y.foreign_lock and config.gpu.lock_file:
+        if lock_error:
+            out.append(
+                Reason(
+                    "probe_error",
+                    "the GPU lock's holders cannot be read: assuming it is held",
+                )
+            )
+        elif lock_pids:
+            out.append(
+                Reason(
+                    "foreign_lock",
+                    "another process holds the GPU lock "
+                    f"(pid {', '.join(str(p) for p in lock_pids[:3])})",
+                )
+            )
+    return out
+
+
+class YieldState:
+    """The yield decision over time. It yields at once when a reason appears
+    and carries on only after every reason has stayed gone for
+    ``gpu.yield.resume_after_s`` (a deployment that restarts, a job that
+    finishes and another begins, must not make the service flap)."""
+
+    def __init__(self, resume_after_s: float):
+        self.resume_after_s = resume_after_s
+        self.active = False
+        self.since: float | None = None
+        self.reasons: list = []
+        self.clear_since: float | None = None
+
+    def update(self, now: float, reasons: list) -> bool:
+        """Feed the reasons of this moment; True when ``active`` changed."""
+        before = self.active
+        if reasons:
+            if not self.active:
+                self.active, self.since = True, now
+            self.clear_since = None
+            self.reasons = list(reasons)
+        elif self.active:
+            if self.clear_since is None:
+                self.clear_since = now
+            waited = now - self.clear_since
+            if waited >= self.resume_after_s:
+                self.active, self.since = False, None
+                self.reasons, self.clear_since = [], None
+            else:
+                self.reasons = [
+                    Reason(
+                        "resuming",
+                        f"every reason has gone; resuming in "
+                        f"{self.resume_after_s - waited:.0f} s",
+                    )
+                ]
+        return before != self.active
+
+    def public(self) -> dict:
+        return {
+            "active": self.active,
+            "reasons": [r.public() for r in self.reasons],
+            "since": self.since,
+            "resume_at": (
+                self.clear_since + self.resume_after_s
+                if self.active and self.clear_since is not None
+                else None
+            ),
+        }
+
+    def text(self) -> str | None:
+        """The reasons in one sentence (None when not yielding)."""
+        if not self.active:
+            return None
+        return "; ".join(r.text for r in self.reasons)[:300]
+
+
 # --- the decision ---------------------------------------------------------------
 
 

@@ -60,6 +60,15 @@ FREE_FRESH_S = 30.0
 # How long the status file trusts one health check of an external vLLM.
 EXTERNAL_TTL_S = 10.0
 STATES_WITH_WORK = ("mirrored",)
+# A worker that has not stood down this long after the labelling began to
+# yield the GPU is stopped (its runs pause and resume from the last finished
+# episode later); the first seconds let it cancel its request itself.
+YIELD_STOP_GRACE_S = 2.0
+# How long one reading of the GPU's processes is trusted (nvidia-smi is not
+# asked more often).
+APPS_TTL_S = 5.0
+# Yield reasons that need a person's eyes when they last (the rest pass).
+YIELD_LONG = ("foreign_gpu", "foreign_lock", "probe_error")
 
 
 def project_root() -> Path:
@@ -140,11 +149,24 @@ class Probes:
         ports=gpumgr.listening_ports,
         holders=gpumgr.gpu_holders,
         policy_vram=gpumgr.policy_vram_mib,
+        apps=None,
+        ports_strict=None,
     ):
         self.vram = vram
         self.ports = ports
         self.holders = holders
         self.policy_vram = policy_vram
+        # The yield rules read the machine strictly: a failure raises (and
+        # is a reason to yield). A replaced ``ports``/``holders`` (a test's
+        # fake machine) answers for them too.
+        self.apps = apps or (
+            holders if holders is not gpumgr.gpu_holders else gpumgr.compute_apps
+        )
+        self.ports_strict = ports_strict or (
+            ports
+            if ports is not gpumgr.listening_ports
+            else gpumgr.listening_ports_strict
+        )
 
 
 class Controller:
@@ -206,6 +228,13 @@ class Controller:
         # announced.
         self._registered: set = set()
         self._queue_said = ""
+        # The yield rules (gpumgr.yield_reasons): the decision over time,
+        # the last readings and the problem announced last.
+        self.yield_state = gpumgr.YieldState(config.gpu.yield_.resume_after_s)
+        self._ports_error = ""
+        self._ports_now: set | None = None
+        self._apps = (0.0, None, "")
+        self._yield_said = ""
         self.loop_at: float | None = None  # the last tick (the thread beats on)
         self.start_failures = 0
         self.next_start_at = 0.0
@@ -287,7 +316,13 @@ class Controller:
         # Since when each session has been in standby (a cold start waits).
         standing = {s.path for s in self.sessions.values() if s.state == "standby"}
         self._standby_since = {p: self._standby_since.get(p, now) for p in standing}
-        ports = self.probes.ports()
+        try:
+            ports = self.probes.ports_strict()
+            self._ports_error = ""
+        except Exception as exc:  # noqa: BLE001 - an unreadable table is a reason to yield
+            ports = set()
+            self._ports_error = f"{type(exc).__name__}: {exc}"[:200]
+        self._ports_now = None if self._ports_error else ports
         up = any(int(p) in ports for p in c.gpu.policy_ports)
         if up != self.policy_up and self.state != "starting":
             self.policy_changed_at = now
@@ -385,14 +420,13 @@ class Controller:
             for n in rows
             if self.failures.get(n) and self.backoff.get(n, 0) > now
         }
-        yielding = getattr(self, "yield_text", None)
         return labelling_queue.status_rows(
             c,
             names=list(rows),
             waiting=waiting,
             running=self.worker_dataset,
             failed=failed,
-            yielding=yielding() if callable(yielding) else None,
+            yielding=self.yield_text(),
             attention="vLLM failed to start repeatedly; `levi live resume`"
             if self.attention
             else None,
@@ -440,6 +474,118 @@ class Controller:
             )
         run = peek_run(ws, info.get("run_id")) if info.get("run_id") else None
         return bool(run and (run["plan"].get("approval") or run["status"] != "planned"))
+
+    # --- yielding the GPU ---------------------------------------------------------------
+
+    def _our_gpu_pids(self) -> set:
+        """Processes whose GPU use is this service's own: itself and the
+        process group of the vLLM it started."""
+        pids = {os.getpid()}
+        if self.vllm.mine():
+            leader = self.vllm._pid()
+            if leader:
+                pids |= {leader, *gpumgr._group_alive(leader)}
+        return pids
+
+    def _read_apps(self, now):
+        """``(apps, error)``: the GPU's compute processes, read at most every
+        ``APPS_TTL_S``; ``(None, why)`` when they cannot be read."""
+        at, apps, error = self._apps
+        if now - at >= APPS_TTL_S or (apps is None and not error):
+            try:
+                apps, error = self.probes.apps(), ""
+            except Exception as exc:  # noqa: BLE001 - fail closed
+                apps, error = None, f"{type(exc).__name__}: {exc}"[:200]
+            self._apps = (now, apps, error)
+        return apps, error
+
+    def _yield_reasons(self, now, looking: bool) -> list:
+        c = self.config
+        ours = self._our_gpu_pids()
+        apps, apps_error = (None, "")
+        lock_pids, lock_error = None, False
+        y = c.gpu.yield_
+        if looking and y.foreign_gpu_mib > 0:
+            apps, apps_error = self._read_apps(now)
+        if looking and y.foreign_lock and c.gpu.lock_file:
+            if self.lock.held or self.vllm.holds_lock(c.gpu.lock_file):
+                lock_pids = []
+            else:
+                found = gpumgr.flock_holders(c.gpu.lock_file)
+                if found is None:
+                    # The table could not say: ask the lock itself.
+                    lock_pids = [0] if gpumgr.flock_busy(c.gpu.lock_file) else []
+                else:
+                    lock_pids = [p for p in found if p not in ours]
+        return gpumgr.yield_reasons(
+            c,
+            ports=self._ports_now,
+            ports_error=self._ports_error,
+            sessions=self.sessions,
+            apps=apps,
+            apps_error=apps_error,
+            ours=ours,
+            lock_pids=lock_pids,
+            lock_error=lock_error,
+            check_gpu=looking,
+        )
+
+    def _yield_step(self, now, looking: bool) -> bool:
+        """Decide whether the labelling yields the GPU (``[gpu.yield]``).
+        ``looking``: there is work or a yield in progress, so the GPU's
+        processes are read too (an idle service never calls nvidia-smi). A
+        check that fails is a reason (fail closed). Returns True while
+        yielding."""
+        if not self.config.gpu.yield_.enabled:
+            return False
+        try:
+            reasons = self._yield_reasons(now, looking or self.yield_state.active)
+        except Exception as exc:  # noqa: BLE001 - fail closed
+            reasons = [
+                gpumgr.Reason(
+                    "probe_error",
+                    f"the yield check failed ({type(exc).__name__}): assuming the GPU is in use",
+                )
+            ]
+        if self.yield_state.update(now, reasons):
+            if self.yield_state.active:
+                self.event(f"labelling yields the GPU: {self.yield_state.text()}")
+            else:
+                self.event("every yield reason has gone: labelling resumes")
+        elif self.yield_state.active:
+            said = self.yield_state.text() or ""
+            codes = ",".join(r.code for r in self.yield_state.reasons)
+            if codes != self._yield_said:
+                self._yield_said = codes
+                if "resuming" not in codes:
+                    self.event(f"yield reasons now: {said}")
+        if not self.yield_state.active:
+            self._yield_said = ""
+        return self.yield_state.active
+
+    def yield_text(self) -> str | None:
+        return self.yield_state.text()
+
+    def _yield_long(self, now) -> bool:
+        """A yield for a reason that does not pass by itself (somebody else's
+        job on the GPU, an unreadable probe) that has lasted
+        ``gpu.blocked_pause_s``."""
+        ys = self.yield_state
+        return bool(
+            ys.active
+            and ys.since is not None
+            and now - ys.since >= self.config.gpu.blocked_pause_s
+            and any(r.code in YIELD_LONG for r in ys.reasons)
+        )
+
+    def _effective_gate(self):
+        """The gate the worker and the core read: the timeshare gate, closed
+        (code ``yield``) while the labelling yields the GPU."""
+        if self.yield_state.active:
+            return gpumgr.Gate(
+                False, "yield", "labelling yields the GPU: " + (self.yield_text() or "")
+            )
+        return self.gate
 
     # --- GPU ---------------------------------------------------------------------------
 
@@ -520,6 +666,15 @@ class Controller:
                 f"vLLM failed to start {self.start_failures} times: "
                 f"{self.attention['reason']}; `levi live resume` clears it",
                 "needs_attention",
+            )
+            return False
+        if self.yield_state.active:
+            # Never start or wake the model while yielding. One that is awake
+            # still follows the ordinary sleep rules (its memory may be wanted).
+            if mine and state == "ready":
+                self._resident_step(now, want, state, mode, profile)
+            self.decision = gpumgr.Decision(
+                False, "labelling yields the GPU: " + (self.yield_text() or ""), "yield"
             )
             return False
         if mine:
@@ -1111,6 +1266,11 @@ class Controller:
         """Wake a sleeping vLLM for an online judgement if the GPU rules allow
         it now (as ``_resident_step`` does for a batch); None when awake."""
         c = self.config
+        if any(r.code in YIELD_LONG for r in self.yield_state.reasons):
+            # Somebody else is on the GPU (or it cannot be read): an online
+            # judgement is no reason to wake the model on top of them. (A
+            # deployment is what it is for, and its own gate decides.)
+            return False, "no_room", "yield: " + (self.yield_text() or "")
         policy = self.policy_mib(now)
         blocked = gpumgr.should_sleep(c, mode, free_mib=None, policy_mib=policy)
         if blocked:
@@ -1423,6 +1583,9 @@ class Controller:
         elif wanted and self._blocked_for(now) >= c.gpu.blocked_pause_s:
             code, reason = self.decision.code, self._blocked_reason()
             since = self._decision_since[1]
+        elif wanted and self._yield_long(now):
+            code, reason = "gpu_in_use", self.yield_text()
+            since = self.yield_state.since
         elif wanted and self.decision.code in ("backoff", "error"):
             code = "vllm_error"
             reason = self.vllm.error or self.decision.reason
@@ -1490,9 +1653,8 @@ class Controller:
         code differs from the last one written: when, from and to, the reason,
         and what it was about (sessions, policy server). No tokens or paths of
         the person's data: only states the status file shows anyway."""
-        state = (
-            (None, "service_stopped") if stopped else (self.gate.open, self.gate.code)
-        )
+        gate = self._effective_gate()
+        state = (None, "service_stopped") if stopped else (gate.open, gate.code)
         with self._gate_lock:
             before = self._gate_logged
             if state == before:
@@ -1504,7 +1666,7 @@ class Controller:
                 if before is None
                 else {"open": before[0], "code": before[1]},
                 "to": {"open": state[0], "code": state[1]},
-                "reason": "service stopping" if stopped else self.gate.reason[:200],
+                "reason": "service stopping" if stopped else gate.reason[:200],
                 "idle": idle,
                 "policy_up": self.policy_up,
                 "policy_ports": [int(p) for p in self.config.gpu.policy_ports],
@@ -1530,9 +1692,10 @@ class Controller:
         # Nothing to protect: no policy server listening, no evaluation. A gate
         # file that goes stale in that state does not hold people back.
         idle = not self.policy_up and not self._evaluating()
-        key = (self.gate.open, self.gate.code, idle)
+        gate = self._effective_gate()
+        key = (gate.open, gate.code, idle)
         if key == self._gate_written[0] and now - self._gate_written[1] < 4.0:
-            if self._gate_logged != (self.gate.open, self.gate.code):
+            if self._gate_logged != (gate.open, gate.code):
                 # A history line that failed to write is tried again.
                 with contextlib.suppress(Exception):
                     self._note_gate(now, idle)
@@ -1540,16 +1703,20 @@ class Controller:
         self._gate_written = (key, now)
         # When the gate last went from closed to open, on this clock: a reader
         # that samples cannot see a close and a reopen between two samples.
-        if not self.gate.open:
+        if not gate.open:
             self._gate_opened_at = None
         elif self._gate_opened_at is None:
             self._gate_opened_at = now
         jsonio.write(
             self.config.live_dir / "gate.json",
             {
-                "open": self.gate.open,
-                "code": self.gate.code,
-                "reason": self.gate.reason,
+                "open": gate.open,
+                "code": gate.code,
+                "reason": gate.reason,
+                # The labelling's yield rules (gpumgr.YieldState); null when off.
+                "yield": self.yield_state.public()
+                if self.config.gpu.yield_.enabled
+                else None,
                 "idle": idle,
                 "opened_at": self._gate_opened_at,
                 "policy_ports": [int(p) for p in self.config.gpu.policy_ports],
@@ -1606,10 +1773,20 @@ class Controller:
         )
         wanted = want or self.worker is not None or prewarm
         with self._gpu_mutex:
+            yielding = self._yield_step(now, wanted)
             ready = self._gpu_step(now, wanted)
             self._update_paused(now, wanted)
             self._write_gate(now)
             self._police_worker(now)
+            if (
+                yielding
+                and self.worker is not None
+                and now - (self.yield_state.since or now) >= YIELD_STOP_GRACE_S
+            ):
+                # The gate file already told it to cancel its request; now it
+                # leaves, and its runs resume from the last finished episode.
+                self.event("labelling yields the GPU: stopping the batch")
+                self._stop_worker(now=now)
             if (
                 self.worker is None
                 and want
@@ -1617,11 +1794,14 @@ class Controller:
                 and not orphan
                 and not preparing
                 and self.gate.open
+                and not yielding
             ):
                 runnable = self._queue(now)
                 if runnable:
                     self._spawn(runnable[0], now)
-            self._release_if_idle(now, bool(queue) or orphan or self._online_busy)
+            self._release_if_idle(
+                now, (bool(queue) and not yielding) or orphan or self._online_busy
+            )
         waiting = any(t.waiting for t in self.tasks)
         if self.worker is not None or orphan:
             self.state = "annotating"
@@ -1646,7 +1826,10 @@ class Controller:
         if now - self._status_at >= min(1.0, c.service.heartbeat_s):
             self._status_at = now
             self.write_status(now)
-        if self.worker is not None and self.sessions:
+        if self.worker is not None and (self.sessions or c.gpu.yield_.enabled):
+            # (With the yield rules on, a policy server or another GPU user
+            # may appear with no session at all: look again within a quarter
+            # of a second, so a request in flight is cut inside a second.)
             return c.service.gate_poll_s
         if self._evaluation_unfinished():
             # The gate's lead (episode_imminent) is a few seconds: look at least
@@ -1890,6 +2073,13 @@ class Controller:
             },
             "datasets": rows,
             "queue_depth": sum(1 for r in rows.values() if r["pending"]),
+            # The labelling's yield rules: {enabled, active, reasons[{code,
+            # text}], since, resume_at}. While active nothing is started,
+            # woken or labelled.
+            "yield": {
+                "enabled": c.gpu.yield_.enabled,
+                **self.yield_state.public(),
+            },
             # One row per live dataset (queue.py): its labelling mode, how
             # many episodes wait, and whether it is queued, running,
             # yielding the GPU, paused, done or failing.
