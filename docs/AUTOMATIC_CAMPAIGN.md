@@ -708,3 +708,65 @@ and `png: skipped(no converter)`. Names and e-mail addresses are never
 written. Camera serial numbers, IP addresses, host names, URLs and local
 paths are dropped (by key, and inside strings) unless
 `include_site_details=True`.
+
+## Guided legacy-client campaign
+
+Until a real AERI robot adapter exists, a campaign can run on the legacy
+evaluation client: for each segment a person copies a command, runs it, and
+the campaign collects what the client wrote. `levi.automatic.campaign.guided`
+is the data side of this (no command, page or API calls it yet).
+
+**Commands.** `base_command(guide_text)` takes the dual-label evaluation
+command from the operator guide (`setup.md` §6.3, first code block), read
+with the parser of the setup recipes. It must carry `--levi-mode dual` and
+each of `--eval-num`, `--rollout-group` and `--eval-note` once.
+`render(base, eval_num=, rollout_group=, eval_note=, prompt=None)` replaces
+only those values (and `--prompt` when given) and checks that every other
+character is the guide's own. `segment_commands(base, layout, groups)`
+gives one command per segment: `--eval-num` its card count,
+`--rollout-group` the arm's checkpoint full name, `--eval-note
+"<campaign id> s<NN> <code>"` with the arm's code (`X1`, `X2`, ...; the
+arm's own name never appears in the note). Values that would end the
+quotes, expand or escape (`"`, `\`, `$`, `` ` ``, `!`, control
+characters) are refused.
+
+**Drift.** The guide holds machine-specific values (camera serials, the
+home pose), so the repository keeps no copy of it. A campaign saves the
+command it was planned with (`BaseCommand.to_dict()`, with its SHA-256);
+`check_drift(saved, guide_text)` returns a unified diff when the guide's
+command changed (a section or block that is gone counts as drift), and
+`render_checked` refuses with that diff (`GuideDrift`): every segment of a
+campaign runs the same command. A test renders the maintainer's own guide
+when it is found above the checkout and fails with the difference when it
+no longer fits.
+
+**Collecting.** `scan_rollouts(root, group, task_folder)` lists a task
+folder's rollouts, read only (`metadata.json` and whether `.complete`
+exists). `collect_segment(records, layout, segment, confirmations=,
+posthoc=)` keeps the dual-label rollouts whose `eval.eval_note` names this
+campaign and segment, groups them by the client's `run_id` (first run
+first, then reruns, by start time) and returns `runs`, the episodes,
+`pending` (valid episodes without a confirmed card, each with its candidate
+card), `ignored` (this segment's rollouts that are not dual-label runs) and
+the segment's ledger rows and counts. A segment whose rollouts name two arm
+codes is refused. `bind_runs(layout, collected)` puts the run ids into the
+layout for the ledger. Per episode (`legacy_fact`): the operator label
+(`eval.operator_outcome`), the online judgement as the autonomous verdict
+(`eval.agent_label`: success, failure, undecided, or none when it timed
+out or failed), the background review's verdict when the caller passes it,
+how the episode ended (`eval.ended_by`: `budget` or the operator's key),
+steps and the step cap. Discarded and aborted rollouts, and a rollout
+without `.complete`, are kept and counted, never paired.
+
+**Cards need a person.** Matching episodes to cards by their order is
+error-prone, so an episode holds a card only once a person confirmed it:
+`CardConfirmations(path).add(episode_key, card, by=<opaque id>)` appends a
+line (`levi.aeri.campaign_card.v1`, synced, under a lock); the last line
+per episode wins, `card=None` withdraws one, and the earlier lines stay on
+file. An unconfirmed episode never enters a paired analysis.
+
+**Agreement.** `segment_agreement(facts)` compares the automatic label with
+the operator's over all valid episodes and apart for those that ran the
+full step budget (`budget`) and those the operator's key ended
+(`operator_stop`). Only the full-budget agreement carries over to
+unattended runs; the report keeps the strata apart as well.

@@ -326,3 +326,17 @@ campaign 的文件在 `$LEVI_AERI_HOME/campaigns/<id>/`（`LEVI_AERI_HOME` 默�
 **结论等级。** 全部条件都满足才算确证性：主分析已预注册；每组带标签的试验数达到计划值；没有中途查看；口径经过人工（操作员或裁定）；没有漂移警告；顺序策略不是 `blocked` 或 `interleaved`；分析库按预设功效判定（预设差值在 80% 功效下可检出）。否则每个结论句都标“探索性”，摘要列出未满足的条件。区间含 0 时写“本次数据不足以区分”，并给出本设计的最小可检出差，从不写两组相当。夸大的措辞（“显著优于”“证明”“state-of-the-art”等）在确证性句子之外一律拒绝（`check_wording`；有测试扫描所有模板分支）。文字来自 `templates/`（`sentences.json`、`summary.<语言>.md`），不调用语言模型，其中每个数字都由 `analysis.json` 格式化而来（有测试）。从不报告事后功效。`blinded=True` 写出不含任何分组数值的摘要（用于仍在进行的计划）；其他文件照常写出，由总览页决定显示什么。
 
 **隐私。** `manifest.json` 记录计划和共享设置的摘要、各子运行的计划摘要、状态、LEVI 提交号和模式、各组的检查点名称（从不写路径）、配置、哈希状态和版本、种子与时间表、中途查看次数、偏离试验数、方法及其文献、每个文件的大小和 SHA-256、PDF 文字替换记录，以及 `png: skipped(no converter)`。从不写姓名和邮箱。相机序列号、IP 地址、主机名、URL 和本机路径一律去掉（按键名，也查字符串内容），除非 `include_site_details=True`。
+
+## 引导式旧客户端
+
+在真正的 AERI 机器人适配器出现之前，评测计划可以用旧评测客户端来跑：每一段由人复制一条命令执行，计划再收集客户端写下的数据。`levi.automatic.campaign.guided` 是其中的数据部分（目前还没有命令、页面或 API 调用它）。
+
+**命令。** `base_command(guide_text)` 从操作手册（`setup.md` §6.3 的第一个代码块）取出双标签评测命令，用的是 setup 配方同一套解析器。命令必须带 `--levi-mode dual`，且 `--eval-num`、`--rollout-group`、`--eval-note` 各出现一次。`render(base, eval_num=, rollout_group=, eval_note=, prompt=None)` 只替换这几个值（给了 `--prompt` 时也替换它），并核对其余每个字符都和手册一致。`segment_commands(base, layout, groups)` 为每一段生成一条命令：`--eval-num` 为本段卡数，`--rollout-group` 为该组检查点全名，`--eval-note "<计划 ID> s<NN> <组码>"` 只写组码（`X1`、`X2`……，备注里从不出现组的真名）。会结束引号、触发展开或转义的值（`"`、`\`、`$`、`` ` ``、`!`、控制字符）一律拒绝。
+
+**漂移。** 手册里有本机专属的值（相机序列号、回位姿态），所以仓库不存它的副本。评测计划保存规划时用的命令（`BaseCommand.to_dict()`，带 SHA-256）；手册里的命令变了时，`check_drift(saved, guide_text)` 返回 unified diff（章节或代码块不见了也算漂移），`render_checked` 带着这份差异拒绝渲染（`GuideDrift`）：同一个计划的每一段都必须运行同一条命令。有一个测试会在检出目录上方找到维护者自己的手册时实际渲染它，不再匹配时失败并打印差异。
+
+**收集。** `scan_rollouts(root, group, task_folder)` 只读地列出一个任务目录下的 rollout（`metadata.json` 以及有没有 `.complete`）。`collect_segment(records, layout, segment, confirmations=, posthoc=)` 保留 `eval.eval_note` 指向本计划本段的双标签 rollout，按客户端的 `run_id` 分组（按开始时间，先第一次运行，再补跑），返回 `runs`、各片段、`pending`（还没确认卡号的有效片段，各带候选卡）、`ignored`（本段中不是双标签运行的 rollout），以及本段的台账行和计数。同一段的 rollout 出现两个组码时拒绝。`bind_runs(layout, collected)` 把运行 ID 填进布局，供台账使用。每个片段（`legacy_fact`）读取：操作员标签（`eval.operator_outcome`）、作为自动判定的在线判定（`eval.agent_label`：成功、失败、未定，超时或出错时为 none）、调用方传入的后台复核结果、片段怎样结束（`eval.ended_by`：`budget` 或操作员按键）、步数和步数上限。作废、中止和没有 `.complete` 的 rollout 保留并计数，但从不成对。
+
+**卡号要人确认。** 按顺序把片段对到卡上容易出错，所以片段只有在人确认后才占卡：`CardConfirmations(path).add(episode_key, card, by=<不透明 ID>)` 追加一行（`levi.aeri.campaign_card.v1`，加锁、同步落盘）；同一片段以最后一行为准，`card=None` 撤回确认，之前的行保留在文件里。未确认的片段从不进入成对分析。
+
+**一致率。** `segment_agreement(facts)` 在全部有效片段上比较自动标签和操作员标签，并把跑满步数（`budget`）和操作员按键提前结束（`operator_stop`）的片段分开统计。只有完整步数组的一致率可以外推到无人值守运行；报告里也分层给出。
