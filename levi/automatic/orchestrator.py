@@ -1085,6 +1085,9 @@ class Orchestrator:
                 problem["what"] = "policy"
                 return "no", "policy_adapter", "policy_unavailable"
             try:
+                tell = getattr(self.recorder, "before_forward", None)
+                if role == "forward" and tell is not None:
+                    tell(ctx.episode_id, **self._preceding())
                 ctx.rollout = self.recorder.open(
                     task_folder=folder, episode_id=ctx.episode_id, number=number
                 )
@@ -1123,6 +1126,49 @@ class Orchestrator:
             )
         )
         self._drive(ctx)
+
+    def _preceding(self) -> dict:
+        """What put the scene back since the previous forward episode
+        started, from the journal (design X2 §1.2, "data ownership"): the
+        reset policy (a reset episode), a person (every wait for a person
+        that an operator's resume ended; the resume confirmed the
+        environment), or nothing. The most recent of the two wins. A wait
+        and its resume in different clock domains (a restart in between)
+        have no ``wait_ms``."""
+        events = self.journal.events
+        start = 0
+        for index, event in enumerate(events):
+            if event.record == "committed" and event.to_state == "FORWARD_ACTIVE":
+                start = index + 1
+        waiting, last_reset, human = None, -1, []
+        for event in events[start:]:
+            if event.record != "committed":
+                continue
+            if event.to_state == "RESET_ACTIVE":
+                last_reset = event.sequence_no
+            elif event.to_state in sm.HUMAN_STATES:
+                waiting = event
+            elif event.reason == "human_resumed" and waiting is not None:
+                same = waiting.clock_domain == event.clock_domain
+                human.append(
+                    {
+                        "wait_seq": waiting.sequence_no,
+                        "resume_seq": event.sequence_no,
+                        "wait_ms": (event.mono_ns - waiting.mono_ns) // 1_000_000
+                        if same
+                        else None,
+                        "principal_id": event.authority.principal_id,
+                        "reason": waiting.reason,
+                    }
+                )
+                waiting = None
+        if human and human[-1]["resume_seq"] > last_reset:
+            found = "human_reset"
+        elif last_reset >= 0:
+            found = "reset_policy"
+        else:
+            found = "none"
+        return {"preceded_by": found, "human_resets": human}
 
     def _max_steps(self, role: str) -> int:
         return (

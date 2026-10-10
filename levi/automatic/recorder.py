@@ -75,6 +75,11 @@ from levi.domain import aeri
 from .adapters import legacy_live
 from .journal import fsync_dir
 
+# What put the scene back before a forward episode (``eval.aeri.preceded_by``
+# in its metadata, ``preceded_by`` in the manifest; design X2 §1.2):
+# nothing since the previous forward episode, the reset policy, or a person
+# (a resume after the run waited for one; the most recent of the two wins).
+PRECEDED_BY = ("none", "reset_policy", "human_reset")
 MANIFEST = "manifest.json"
 MANIFEST_SCHEMA = "levi.aeri.manifest.v1"
 SESSION_SCHEMA = "levi.eval.session.v1"
@@ -139,6 +144,8 @@ class Rollout:
     sealed: dict | None = None
     errors: list = field(default_factory=list)
     started_wall: float = 0.0
+    # Forward episodes: what put the scene back before it (PRECEDED_BY).
+    preceded_by: str | None = None
     handle: object = field(default=None, repr=False)
     # Per camera: (last frame value, observations it has not changed).
     frames: dict = field(default_factory=dict, repr=False)
@@ -194,6 +201,8 @@ class RolloutRecorder:
         self.wall = wall
         self.io_hook = io_hook
         self.rollouts: dict[str, Rollout] = {}
+        # Forward episode id -> what preceded it (``before_forward``).
+        self._preceding: dict[str, dict] = {}
         self.manifest = self._load_manifest()
 
     def close(self) -> None:
@@ -268,6 +277,21 @@ class RolloutRecorder:
 
     # ---------------------------------------------------------- the episode
 
+    def before_forward(
+        self, episode_id: str, *, preceded_by: str, human_resets: list
+    ) -> None:
+        """What put the scene back before the forward episode about to open
+        (the orchestrator derives it from the journal, the source of truth;
+        ``human_resets``: ``[{wait_seq, resume_seq, wait_ms, principal_id,
+        reason}]``). Kept until ``open`` writes it into the manifest
+        (``after_human_resets``) and the rollout's metadata."""
+        if preceded_by not in PRECEDED_BY:
+            raise RecorderError(f"preceded_by {preceded_by!r}")
+        self._preceding[episode_id] = {
+            "preceded_by": preceded_by,
+            "after_human_resets": [dict(item) for item in human_resets][-64:],
+        }
+
     def open(self, *, task_folder: str, episode_id: str, number: int) -> Rollout:
         # Only what this call created is cleaned up after a failure.
         fresh = self._entry(episode_id) is None
@@ -327,10 +351,16 @@ class RolloutRecorder:
             "steps": 0,
             "opened_at": iso(now),
         }
+        preceding = None
         if role == "reset":
             entry["after_forward"] = self.manifest.get("last_forward")
         else:
             entry["after_resets"] = list(self.manifest.get("pending_resets", []))
+            preceding = self._preceding.pop(episode_id, None) or {
+                "preceded_by": "reset_policy" if entry["after_resets"] else "none",
+                "after_human_resets": [],
+            }
+            entry.update(preceding)
         # The manifest knows the folder before it exists.
         self.manifest["episodes"].append(entry)
         if role == "reset":
@@ -350,7 +380,14 @@ class RolloutRecorder:
         path.mkdir()
         fsync_dir(folder)
         rollout = Rollout(
-            task_folder, demo, episode_id, role, number, path, started_wall=now
+            task_folder,
+            demo,
+            episode_id,
+            role,
+            number,
+            path,
+            started_wall=now,
+            preceded_by=preceding["preceded_by"] if preceding else None,
         )
         self._json(path / "metadata.json", self._metadata(rollout, finished=False))
         self._durable(
@@ -386,6 +423,8 @@ class RolloutRecorder:
                 },
             },
         }
+        if rollout.preceded_by is not None:
+            meta["eval"]["aeri"]["preceded_by"] = rollout.preceded_by
         if reason:
             meta["eval"]["abort_reason"] = reason
         if finished:
@@ -597,9 +636,15 @@ def _abort_reason(reason: str) -> str:
 
 
 class SessionFiles:
-    """The two session files (forward and reset role) of one run, written on
-    every state change through ``legacy_live.legacy_sessions``. Use it as the
-    orchestrator's ``listener``."""
+    """The session files of one run, one per role in ``folders``, written
+    on every state change through ``legacy_live.legacy_sessions``. Use it as
+    the orchestrator's ``listener``.
+
+    A run with a reset policy has two (``forward`` and ``reset``); a
+    human-assisted run ("policy evaluation only") runs no reset policy and
+    passes ``forward`` alone: no reset session file is ever written, so the
+    live service never lists a reset session that stays ``standby`` (design
+    X2 G2)."""
 
     def __init__(
         self,
@@ -618,6 +663,8 @@ class SessionFiles:
         self.run_id = run_id
         self.group = group
         self.folders = dict(folders)
+        if "forward" not in self.folders or set(self.folders) - {"forward", "reset"}:
+            raise ValueError("folders: forward, and reset when a reset policy runs")
         self.texts = dict(texts or {})
         self.policies = dict(policies or {})
         self.reset_levi_enabled = reset_levi_enabled
@@ -653,6 +700,8 @@ class SessionFiles:
         now = self.wall()
         written = {}
         for role, value in files.items():
+            if role not in self.folders:
+                continue  # no reset policy: no reset session file
             if value == "waiting_reset":
                 self._waiting.setdefault(role, round(now, 3))
             else:

@@ -230,12 +230,24 @@ NO_CONTRACT = (
     "the run waits for a person at every scene check). Fix: write an Initial "
     "State Contract and set task.initial_state_spec to its file"
 )
+SCENE_PROVIDER_MISSING = "E_SCENE_PROVIDER_MISSING"
 NO_SCENE_CHECK = (
-    "the human-assisted (policy evaluation only) mode needs a scene check that "
-    "can answer: without one the run goes back and forth between WAIT_HUMAN "
-    "and VERIFY_INITIAL after every resume. Configure a scene provider (a "
-    "person attesting the scene, operator_attested of design X2, is planned) "
-    "or use --dry-run"
+    f"{SCENE_PROVIDER_MISSING}: the human-assisted (policy evaluation only) "
+    "mode needs a scene check that can answer: without one the run goes back "
+    "and forth between WAIT_HUMAN and VERIFY_INITIAL after every resume. "
+    "Configure a scene provider that is reachable (scene_check: provider), set "
+    "reset.scene_check: operator_attested (a person answers each required "
+    "predicate on a frame the system captures), or use --dry-run"
+)
+SCENE_UNREACHABLE = (
+    f"{SCENE_PROVIDER_MISSING}: the scene provider does not answer its "
+    "reachability check ({detail}); a human-assisted run would wait for a "
+    "person after every resume"
+)
+SCENE_NOT_HUMAN = (
+    f"{SCENE_PROVIDER_MISSING}: reset.scene_check operator_attested needs the "
+    "person's scene check (provider human, levi/automatic/adapters/human.py), "
+    "not {kind}"
 )
 
 
@@ -244,17 +256,46 @@ def _warnings(config, contract) -> list:
     return [NO_CONTRACT] if contract is None else []
 
 
+def scene_provider_problems(config, scene_provider) -> list:
+    """``E_SCENE_PROVIDER_MISSING`` problems of a human-assisted run (design
+    X2 G6): no provider, one whose ``reachable()`` says no (or raises), or,
+    with ``scene_check: operator_attested``, a provider that is not the
+    person's (``provider`` attribute ``human``). ``scene_provider`` is the
+    provider object, or a name (``"fake"``, ``"human"``) for checks made
+    before one exists; None: none is configured."""
+    if config.reset_strategy != "human_assisted":
+        return []
+    if scene_provider is None:
+        return [NO_SCENE_CHECK]
+    kind = (
+        scene_provider
+        if isinstance(scene_provider, str)
+        else getattr(scene_provider, "provider", type(scene_provider).__name__)
+    )
+    if config.scene_check == "operator_attested" and kind != "human":
+        return [SCENE_NOT_HUMAN.format(kind=kind)]
+    probe = getattr(scene_provider, "reachable", None)
+    if probe is not None:
+        try:
+            found = probe()
+        except Exception as exc:  # noqa: BLE001 - any failure is "no"
+            found = f"{type(exc).__name__}: {exc}"
+        if found is not True:
+            detail = found if isinstance(found, str) and found else "not reachable"
+            return [SCENE_UNREACHABLE.format(detail=detail[:200])]
+    return []
+
+
 def launch_problems(job: dict, *, dry_run: bool, scene_provider) -> list:
     """Why a job may not be launched; empty when it may. A real run (not a
     dry run) needs an Initial State Contract; the human-assisted mode needs
-    a scene provider that can answer (``scene_provider`` None: none is
-    configured; this version configures none for a real run, so the check
-    is reserved for the launch entry of design X2)."""
+    a scene check that can answer (``scene_provider_problems``; this
+    version configures no provider for a real run, so a real human-assisted
+    run is refused here until the launch entry of design X2 brings one)."""
     problems = []
     if not dry_run and job["contract"] is None:
         problems.append(NO_CONTRACT)
-    if job["config"].reset_strategy == "human_assisted" and scene_provider is None:
-        problems.append(NO_SCENE_CHECK)
+    problems += scene_provider_problems(job["config"], scene_provider)
     return problems
 
 
@@ -276,6 +317,21 @@ def _plain(config) -> dict:
 
 
 # --- the fakes ----------------------------------------------------------------------------------
+
+
+def session_folders(config) -> dict:
+    """The C2 session file of each role that runs: no reset role in the
+    human-assisted mode (design X2 G2)."""
+    folders = {"forward": config.forward_folder}
+    if config.reset_strategy != "human_assisted":
+        folders["reset"] = config.reset_folder
+    return folders
+
+
+def dry_run_provider(config) -> str:
+    """The scene provider a dry run uses: a scripted person when a person
+    attests the scene, the fake machine provider otherwise."""
+    return "human" if config.scene_check == "operator_attested" else "fake"
 
 
 def load_fakes():
@@ -336,7 +392,7 @@ class DryRun:
             self.folder,
             run_id=cfg.run_id,
             group=job["group"],
-            folders={"forward": cfg.forward_folder, "reset": cfg.reset_folder},
+            folders=session_folders(cfg),
             texts=job["texts"],
         )
         self.orch = Orchestrator.create(
@@ -507,7 +563,9 @@ def cmd_validate(args) -> int:
         _print({"ok": False, "error": str(exc)}, args.json, f"invalid: {exc}")
         return EXIT_REFUSED
     problems = launch_problems(
-        job, dry_run=args.dry_run, scene_provider="fake" if args.dry_run else None
+        job,
+        dry_run=args.dry_run,
+        scene_provider=dry_run_provider(job["config"]) if args.dry_run else None,
     )
     if problems:
         message = "; ".join(problems)
