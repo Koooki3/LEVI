@@ -332,9 +332,7 @@ def _resume_case(rng):
     )
     most = int(rng.integers(len(grid) * cameras + 5, len(grid) * cameras + 120))
     draft = list(rng.uniform(0, times[-1], size=rng.integers(0, 3)))
-    found = [
-        (t, f"c{i}", {}) for i, t in enumerate(rng.uniform(0, times[-1], size=8))
-    ]
+    found = [(t, f"c{i}", {}) for i, t in enumerate(rng.uniform(0, times[-1], size=8))]
     settings = {
         "required": draft,
         "tiers": [(sampling.CANDIDATES, found)],

@@ -888,11 +888,52 @@ def event_candidates(wb, run, episode):
             change_point_penalty=settings["change_point_penalty"],
         )
     except Exception as exc:  # noqa: BLE001 - signals are an addition to the evidence
+        # The run goes on from its pictures, but says why it had no
+        # candidates: a reason code everywhere the result is recorded, and
+        # the message without this machine's paths.
+        if isinstance(exc, OSError) and exc.filename:
+            message = f"{exc.strerror or 'unreadable'}: {Path(exc.filename).name}"
+        else:
+            message = str(exc).replace(str(wb.store.run_dir(run["id"])), "<run>")
+            message = message.replace(str(wb.store.root), "<workspace>")
         return {
             "candidates": [],
-            "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+            "error_code": candidate_error_code(exc),
+            "error": f"{type(exc).__name__}: {message[:200]}",
+            "error_type": type(exc).__name__,
         }
-    return {"candidates": [c.model_dump() for c in found], "error": None}
+    kept = [c for c in found if c.status == "proposed"]
+    return {
+        "candidates": [c.model_dump() for c in found],
+        "error_code": None if kept else "no_candidates",
+        "error": None,
+        "error_type": None,
+    }
+
+
+def candidate_error_code(exc):
+    """Why an episode's candidates could not be read: ``unreadable`` (a
+    file of the snapshot), ``invalid_signals`` (the table, ``meta`` or a
+    signal declaration does not hold what the readers need) or
+    ``internal_error`` (anything else, a defect in LEVI included). A read
+    that worked but found nothing is ``no_candidates``."""
+    if isinstance(exc, OSError):
+        return "unreadable"
+    if isinstance(exc, ValueError | KeyError | IndexError):
+        return "invalid_signals"
+    return "internal_error"
+
+
+def candidate_counts(found):
+    """What a run records of one episode's candidate read."""
+    return {
+        "proposed": sum(1 for c in found["candidates"] if c["status"] == "proposed"),
+        "merged": sum(1 for c in found["candidates"] if c["status"] == "merged"),
+        "error_code": found["error_code"],
+        "error_type": found["error_type"],
+        # Run events and shards only: provenance travels with the result.
+        "error": found["error"],
+    }
 
 
 def event_focus(wb, run, episode):
@@ -972,8 +1013,11 @@ def event_focus(wb, run, episode):
             "what the frames show."
         ),
     }
-    if found["error"]:
-        value["error"] = found["error"]
+    if found["error_code"]:
+        value["error_code"] = found["error_code"]
+    if found["error_type"]:
+        # The type only: the message may name this machine's paths.
+        value["error"] = found["error_type"]
     return value
 
 

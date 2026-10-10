@@ -361,7 +361,11 @@ def test_an_on_run_refines_around_the_signal_events_with_the_same_requests(lab):
     change = wb.store.get("changes", run["changes"])
     provenance = change["provenance"]["event_intelligence"]
     assert provenance["settings"] == run["context"]["workflow"]["event_intelligence"]
-    assert provenance["episodes"]["0"][0]["plan"]["accepted"]
+    episode = provenance["episodes"]["0"]
+    assert episode["candidates"]["proposed"] >= 2
+    assert episode["candidates"]["error_code"] is None
+    assert episode["batches"][0]["accepted"]
+    assert provenance["summary"]["with_candidates"] == 1
 
 
 def test_the_model_cache_key_carries_the_block_only_when_it_is_on(lab, monkeypatch):
@@ -564,18 +568,68 @@ def test_a_stored_plan_from_before_the_block_still_runs(lab):
     assert not events_of(wb, run, "event_candidates")
 
 
-def test_signals_that_cannot_be_read_leave_the_run_to_its_pictures(lab, monkeypatch):
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (FileNotFoundError("/home/someone/runs/x/input/meta/info.json"), "unreadable"),
+        (ValueError("no such column"), "invalid_signals"),
+        (RuntimeError("a bug"), "internal_error"),
+    ],
+)
+def test_signals_that_cannot_be_read_are_said_so_in_shard_and_provenance(
+    lab, monkeypatch, error, code
+):
+    """The run goes on from its pictures, but an 'on' result whose
+    candidates were never read is named as such (review A3, I-2): in the
+    run event, the shard and the change set's provenance, with a reason
+    code; an external agent gets the code and the error's type, no path."""
     from levi.events import candidates
 
     def broken(*args, **kwargs):
-        raise RuntimeError("unreadable")
+        raise error
 
     monkeypatch.setattr(candidates, "read", broken)
     wb, repo, _ = lab
     run = run_once(wb, temporal(repo, event_intelligence=ON))
     assert run["status"] == "waiting_for_review"
     (found,) = events_of(wb, run, "event_candidates")
-    assert found["proposed"] == 0 and "unreadable" in found["error"]
+    assert found["proposed"] == 0 and found["error_code"] == code
+    shard = wb.store.get("shards", f"{run['id']}:0")
+    assert shard["event_plan"]["candidates"]["error_code"] == code
+    assert shard["event_plan"]["candidates"]["proposed"] == 0
+    provenance = wb.store.get("changes", run["changes"])["provenance"]
+    summary = provenance["event_intelligence"]["summary"]
+    assert summary == {
+        "episodes": 1,
+        "with_candidates": 0,
+        "candidates_unavailable": 1,
+        "reasons": {code: 1},
+    }
+    assert (
+        provenance["event_intelligence"]["episodes"]["0"]["candidates"]["error_code"]
+        == code
+    )
+    assert "/home/" not in json.dumps(provenance)
+    agent, external = external_run(wb, repo, event_intelligence=ON)
+    invoke(wb, agent, "runs.prepare", {"run_id": external["id"]})
+    value = invoke(
+        wb, agent, "events.candidates", {"run_id": external["id"], "episode": 0}
+    )
+    assert value["error_code"] == code
+    assert value["error"] == type(error).__name__
+
+
+def test_an_episode_whose_signals_say_nothing_is_counted_too(lab, monkeypatch):
+    from levi.events import candidates
+
+    monkeypatch.setattr(candidates, "read", lambda *a, **k: [])
+    wb, repo, _ = lab
+    run = run_once(wb, temporal(repo, event_intelligence=ON))
+    provenance = wb.store.get("changes", run["changes"])["provenance"]
+    assert provenance["event_intelligence"]["summary"]["reasons"] == {
+        "no_candidates": 1
+    }
+    assert provenance["event_intelligence"]["summary"]["with_candidates"] == 0
 
 
 def test_planned_windows_are_the_frames_frame_scope_reads(lab):

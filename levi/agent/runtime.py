@@ -642,22 +642,10 @@ class Workbench:
                             found = observations.event_candidates(
                                 self, self.store.get("runs", id), episode
                             )
-                            event_plans = []
+                            counts = observations.candidate_counts(found)
+                            event_plans = {"candidates": counts, "batches": []}
                             self.store.event(
-                                id,
-                                "event_candidates",
-                                episode=episode,
-                                proposed=sum(
-                                    1
-                                    for c in found["candidates"]
-                                    if c["status"] == "proposed"
-                                ),
-                                merged=sum(
-                                    1
-                                    for c in found["candidates"]
-                                    if c["status"] == "merged"
-                                ),
-                                error=found["error"],
+                                id, "event_candidates", episode=episode, **counts
                             )
                         try:
                             batches = observations.plan_refinement(
@@ -693,7 +681,7 @@ class Workbench:
                                     around=batch.windows,
                                 )
                             if event_plans is not None:
-                                event_plans.append(
+                                event_plans["batches"].append(
                                     {"batch": number, "plan": batch.plan}
                                 )
                                 if batch.plan:
@@ -1585,24 +1573,71 @@ class Workbench:
 
 def _event_provenance(store, run):
     """``{"event_intelligence": ...}`` for a change set's provenance: the
-    settings the plan approved and, per completed episode, how its
-    refinement's frames were shared. Empty for a plan without it, so that
-    provenance is what it was before the block existed."""
+    settings the plan approved, the candidate algorithm it froze, and per
+    completed episode what its candidate read found (or why it found
+    nothing: a reason code) and which windows each refinement took; the
+    full per-batch plans stay in the episode's shard. ``summary`` counts the
+    episodes that had candidates and those that did not, by reason, so an
+    'on' result that ran without candidates says so. Empty for a plan
+    without it, so that provenance is what it was before the block existed."""
     settings = (run["context"].get("workflow") or {}).get("event_intelligence")
     if not settings:
         return {}
-    episodes = {}
+    episodes, reasons = {}, {}
     for ep in run["completed"]:
         try:
             shard = store.get("shards", f"{run['id']}:{ep}")
         except KeyError:
             continue
-        if "event_plan" in shard:
-            episodes[str(ep)] = shard["event_plan"]
+        record = shard.get("event_plan")
+        if not record:
+            continue
+        code = record["candidates"]["error_code"]
+        if code:
+            reasons[code] = reasons.get(code, 0) + 1
+        episodes[str(ep)] = {
+            # The reason code and the error's type; its message (which may
+            # name a file) stays in the shard and the run's events.
+            "candidates": {
+                k: v for k, v in record["candidates"].items() if k != "error"
+            },
+            "batches": [
+                {
+                    "batch": b["batch"],
+                    **(
+                        {
+                            "images": b["plan"]["images"],
+                            "budget_images": b["plan"]["budget_images"],
+                            "accepted": [row["key"] for row in b["plan"]["accepted"]],
+                            "skipped": b["plan"]["counts"]["skipped"],
+                        }
+                        if b["plan"]
+                        else {"plan": None}
+                    ),
+                }
+                for b in record["batches"]
+            ],
+        }
+    with_candidates = sum(
+        1 for e in episodes.values() if e["candidates"]["error_code"] is None
+    )
     return {
         "event_intelligence": {
             "schema": "levi.event_evidence.v1",
             "settings": settings,
+            **(
+                {"algorithm": run["event_algorithm"]}
+                if run.get("event_algorithm")
+                else {}
+            ),
+            "summary": {
+                "episodes": len(episodes),
+                "with_candidates": with_candidates,
+                "candidates_unavailable": sum(
+                    n for code, n in reasons.items() if code != "no_candidates"
+                ),
+                "reasons": reasons,
+            },
             "episodes": episodes,
         }
     }
