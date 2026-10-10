@@ -1,9 +1,12 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
+import type { AsyncBuffer } from "hyparquet";
 import {
   DatasetMetadata,
   fetchParquetFile,
   formatStringWithVars,
+  ParquetTooLargeError,
   readParquetAsObjects,
+  readParquetRowsByGlobalIndex,
 } from "@/utils/parquetUtils";
 import { pick } from "@/utils/pick";
 import { authHeaders } from "@/utils/auth";
@@ -956,32 +959,24 @@ async function loadEpisodeDataV3(
       toIndex = fromIndex + 1;
     }
 
-    let episodeRows: Record<string, unknown>[] = [];
-    let usedRowRange = false;
-
+    // Locate the episode's rows through the file's row-group index and read
+    // only that range. A file that cannot be located this way is read whole,
+    // which fails with ParquetTooLargeError above the read cap rather than
+    // loading a huge file into memory.
+    let episodeRows: Record<string, unknown>[] | null = null;
     try {
-      const indexPreview = await readParquetAsObjects(parquetFile, ["index"], {
-        rowStart: 0,
-        rowEnd: 1,
-      });
-      const startIndexValue = indexPreview[0]?.index;
-      if (startIndexValue !== undefined && startIndexValue !== null) {
-        const fileStartIndex = toFiniteNumber(startIndexValue) ?? 0;
-        const localFromIndex = Math.max(0, fromIndex - fileStartIndex);
-        const localToIndex = Math.max(localFromIndex, toIndex - fileStartIndex);
-        episodeRows = await readParquetAsObjects(parquetFile, v3DataColumns, {
-          rowStart: localFromIndex,
-          rowEnd: localToIndex,
-        });
-        usedRowRange = true;
-      }
-    } catch {
-      // Fall back to full reads if row-range selection fails.
+      episodeRows = await readParquetRowsByGlobalIndex(
+        dataUrl,
+        parquetFile as AsyncBuffer,
+        v3DataColumns,
+        fromIndex,
+        toIndex,
+      );
+    } catch (error) {
+      if (error instanceof ParquetTooLargeError) throw error;
+      // Fall back to a full read if row-range selection fails.
     }
-
-    if (!usedRowRange) {
-      episodeRows = await readParquetAsObjects(parquetFile, v3DataColumns);
-    }
+    episodeRows ??= await readParquetAsObjects(parquetFile, v3DataColumns);
 
     // Extract frame timestamps from the *full* (non-sampled) row set so the
     // annotations editor can snap to the exact frame the user is on.
@@ -1055,7 +1050,10 @@ async function loadEpisodeDataV3(
       languageAtoms: extractLanguageAtoms(episodeRows),
       frameTimestamps,
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof ParquetTooLargeError) {
+      console.warn(error.message);
+    }
     return {
       chartDataGroups: [],
       flatChartData: [],
@@ -2742,10 +2740,22 @@ export async function loadCrossEpisodeActionVariance(
           const buf = await fetchParquetFile(
             buildVersionedUrl(repoId, normalizedVersion, dataPath),
           );
-          const rows = await readParquetAsObjects(
-            buf,
-            stateKey ? ["index", actionKey, stateKey] : ["index", actionKey],
-          );
+          const crossColumns = stateKey
+            ? ["index", actionKey, stateKey]
+            : ["index", actionKey];
+          // Only the frames of the sampled episodes, located through the
+          // row-group index; a whole-file read is the capped fallback.
+          const rows =
+            (await readParquetRowsByGlobalIndex(
+              buildVersionedUrl(repoId, normalizedVersion, dataPath),
+              buf as AsyncBuffer,
+              crossColumns,
+              Math.min(...eps.map((ep) => ep.from)),
+              Math.max(...eps.map((ep) => ep.to)),
+            ).catch((error) => {
+              if (error instanceof ParquetTooLargeError) throw error;
+              return null;
+            })) ?? (await readParquetAsObjects(buf, crossColumns));
           const fileStart =
             rows.length > 0 && rows[0].index !== undefined
               ? (toFiniteNumber(rows[0].index) ?? 0)
@@ -2780,8 +2790,10 @@ export async function loadCrossEpisodeActionVariance(
               fileEpStates.push(stateKey ? sampledStates : null);
             }
           }
-        } catch {
-          /* skip file */
+        } catch (error) {
+          // Skip the file; say so when it was skipped for being too large.
+          if (error instanceof ParquetTooLargeError)
+            console.warn(error.message);
         }
         reportProgress(eps.length);
         return { fileEpActions, fileEpStates };
