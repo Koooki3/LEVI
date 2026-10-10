@@ -1,10 +1,10 @@
+# ruff: noqa: F401, F811
 """``POST /campaigns/plan`` and ``POST /campaigns`` (T-API-2): the plan's
 shape (interface contract §4), its refusals and the start's checks."""
 
 import os
 
-import pytest
-from test_api_campaign_common import (  # noqa: F401
+from test_api_campaign_common import (
     URL,
     aeri_home_fixture,
     guard_fixture,
@@ -84,24 +84,24 @@ def test_a_plan_with_a_bad_request_is_refused(world):
     job = world.make_job()
     body = world.plan_body(job)
     cases = {
-        "unknown checkpoint": dict(
-            arms=[
+        "unknown checkpoint": {
+            "arms": [
                 {"id": "A", "checkpoint_id": "nope", "role": "reference"},
                 {"id": "B", "checkpoint_id": "recap_b", "role": "candidate"},
             ]
-        ),
-        "same checkpoint twice": dict(
-            arms=[
+        },
+        "same checkpoint twice": {
+            "arms": [
                 {"id": "A", "checkpoint_id": "recap_b", "role": "reference"},
                 {"id": "B", "checkpoint_id": "recap_b", "role": "candidate"},
             ]
-        ),
-        "two references": dict(
-            arms=[
+        },
+        "two references": {
+            "arms": [
                 {"id": "A", "checkpoint_id": "pi05_a", "role": "reference"},
                 {"id": "B", "checkpoint_id": "recap_b", "role": "reference"},
             ]
-        ),
+        },
     }
     for name, over in cases.items():
         response = world.client.post(f"{URL}/plan", json={**body, **over})

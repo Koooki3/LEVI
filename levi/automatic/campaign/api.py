@@ -38,15 +38,17 @@ report is served only when not blind.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import os
 import re
+import shutil
 import stat
 import threading
 import time
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import Field
 
 from levi.automatic import api as base
@@ -231,6 +233,9 @@ def start_campaign(body: StartBody, request: Request):
         known = C.read_host(folder)
         if known is not None or (folder / JOURNAL).exists():
             if known is not None and known.get("request_id") == body.request_id:
+                if not (folder / JOURNAL).exists() and not C.controller_alive(folder):
+                    # The first start never got its controller going.
+                    _spawn(preview.campaign_id)
                 answer = {"campaign_id": preview.campaign_id}
                 _MEMO.put("start", body.request_id, payload, answer)
                 return answer
@@ -261,14 +266,23 @@ def start_campaign(body: StartBody, request: Request):
         if final.base_command is not None:
             A.write_json(A.ctl_dir(folder) / C.GUIDED_FILE, final.base_command)
         try:
-            C.spawn(final.campaign_id, home=aeri_home())
-        except launch.LaunchRefused as exc:
-            raise base._refused(exc) from None
+            _spawn(final.campaign_id)
+        except HTTPException:
+            # Nothing is running for it: the campaign never started.
+            shutil.rmtree(folder, ignore_errors=True)
+            raise
         _wait_for(final.campaign_id, lambda c: bool(c.events), START_WAIT_S)
     answer = {"campaign_id": final.campaign_id}
     _MEMO.put("start", body.request_id, payload, answer)
     base._audit("api_campaign_started", campaign_id=final.campaign_id)
     return answer
+
+
+def _spawn(campaign_id: str) -> None:
+    try:
+        C.spawn(campaign_id, home=aeri_home())
+    except launch.LaunchRefused as exc:
+        raise base._refused(exc) from None
 
 
 # --- one campaign, as the routes see it ----------------------------------------------------------
@@ -306,8 +320,22 @@ class _Campaign:
         return C.controller_alive(self.folder)
 
     @property
+    def committed(self) -> int:
+        """The sequence number of the last commit (-1: none yet)."""
+        return max(
+            (e.sequence_no for e in self.events if e.record == "committed"), default=-1
+        )
+
+    @property
     def seq(self) -> int:
-        return len(self.events)
+        """The step the campaign is at, as a number a challenge is bound
+        to: it moves when the campaign changes state (a commit) or asks
+        another question, not when a note (a pause request, a peek) is
+        journaled."""
+        committed = self.committed
+        question = A.read_question(self.folder) or {}
+        step = f"{self.state}:{self.replay.segment}:{committed}:{question.get('request_id')}"
+        return int(hashlib.sha256(step.encode()).hexdigest()[:12], 16)
 
     def arm_of(self, segment) -> str | None:
         if not self.plan or not segment:
@@ -361,7 +389,7 @@ def _counts(c: _Campaign) -> dict:
     only and cached for a moment."""
     if not c.plan:
         return {}
-    key = (c.id, c.seq)
+    key = (c.id, c.committed)
     now = time.monotonic()
     with _COUNTS_LOCK:
         found = _COUNTS.get(key)
@@ -632,6 +660,8 @@ def confirm(campaign_id: str, body: ConfirmBody, request: Request):
         c = _locate(campaign_id)
         if _repeated(c, body.command_id):
             return {"result": "repeated", "command_id": body.command_id}
+        if c.state not in ENDED and c.state != "DRAFT":
+            _require_controller(c)
         if body.kind == "switch_policy":
             if c.host != "guided" or c.state != "POLICY_READY":
                 raise _fail(409, "not_waiting", "No policy switch is waited for")
@@ -640,7 +670,6 @@ def confirm(campaign_id: str, body: ConfirmBody, request: Request):
                 raise _fail(409, "not_waiting", "No segment is running")
         else:
             decision, checks = _decide(c, body)
-        _require_controller(c)
         if not _CHALLENGES.take(f"campaign:{c.id}", body.challenge, c.seq):
             return {"result": "refused", "code": "stale_sequence"}
         principal = base.PRINCIPAL
@@ -762,12 +791,46 @@ def attach_campaign(campaign_id: str, body: AttachBody, request: Request):
         robot = c.plan["robot"] if c.plan else "main"
         if not C.robot_free(aeri_home(), robot, c.id):
             raise _fail(409, "robot_busy", "Another campaign holds this robot")
-        try:
-            C.spawn(c.id, home=aeri_home())
-        except launch.LaunchRefused as exc:
-            raise base._refused(exc) from None
+        _spawn(c.id)
         base._audit("api_campaign_attach", campaign_id=c.id)
     return {"campaign_id": campaign_id}
+
+
+def _pending_cards(c: _Campaign) -> list:
+    """Valid legacy-client episodes whose card nobody confirmed yet, with
+    the card the schedule expects next (a suggestion, never taken as
+    given)."""
+    root = c.host_record.get("rollout_root")
+    out = []
+    if c.host != "guided" or not c.plan or not root:
+        return out
+    for seg in c.plan["schedule"]["segments"]:
+        try:
+            found = A.collect(c.plan, c.folder, root, seg["index"])
+        except (G.GuidedError, OSError, ValueError):
+            continue
+        out += [
+            {
+                "key": p["key"],
+                "segment": seg["index"],
+                "run_id": p["run_id"],
+                "number": p["number"],
+                "candidate_card": p["candidate_card"],
+            }
+            for p in found["pending"]
+        ]
+    return out[:500]
+
+
+@router.get("/{campaign_id}/cards")
+def pending_cards(campaign_id: str):
+    """Guided campaigns: the episodes that wait for a person to say which
+    layout card they had (``POST .../cards``). An episode without a
+    confirmed card never enters the paired analysis."""
+    c = _locate(campaign_id)
+    if c.host != "guided":
+        raise _fail(409, "not_guided", "Only a guided campaign has card answers")
+    return {"pending": _pending_cards(c)}
 
 
 @router.post("/{campaign_id}/cards")

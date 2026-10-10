@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 import pytest
-from campaign_guard import aeri_home_fixture, guard_fixture  # noqa: F401
+from campaign_guard import aeri_home_fixture, guard_fixture
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -125,14 +125,42 @@ class World:
         )
         return self.client.post(URL, json=body), plan.json()
 
+    def dump(self, campaign_id):
+        """The journal's last lines and the ``ctl/`` files (failure text)."""
+        folder = Path(self.tmp) / "aeri-home" / "campaigns" / campaign_id
+        lines = []
+        try:
+            for line in (folder / "journal.jsonl").read_text().splitlines()[-12:]:
+                j = json.loads(line)
+                lines.append(
+                    (
+                        j["sequence_no"],
+                        j["record"],
+                        j.get("to_state"),
+                        j.get("reason"),
+                        j.get("note"),
+                    )
+                )
+        except OSError:
+            pass
+        ctl = {
+            p.name: sorted(q.name for q in p.iterdir())
+            for p in (folder / "ctl").iterdir()
+            if p.is_dir()
+        }
+        return f"journal={lines} ctl={ctl}"
+
     def snapshot(self, campaign_id):
-        return self.client.get(f"{URL}/{campaign_id}").json()
+        answer = self.client.get(f"{URL}/{campaign_id}")
+        assert answer.status_code == 200, (answer.status_code, answer.text)
+        return answer.json()
 
     def wait_state(self, campaign_id, states, timeout=30.0):
         wanted = (states,) if isinstance(states, str) else tuple(states)
         return wait_for(
             lambda: (s := self.snapshot(campaign_id))["state"] in wanted and s,
             timeout,
+            describe=lambda: self.dump(campaign_id),
         )
 
     def wait_todo(self, campaign_id, kind, timeout=30.0):
@@ -213,14 +241,15 @@ def write_rollout(
     return path
 
 
-def wait_for(predicate, timeout=30.0, step=0.05):
+def wait_for(predicate, timeout=30.0, step=0.05, describe=None):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         found = predicate()
         if found:
             return found
         time.sleep(step)
-    raise AssertionError("timed out waiting")
+    detail = describe() if describe else ""
+    raise AssertionError(f"timed out waiting {detail}")
 
 
 @pytest.fixture
@@ -259,9 +288,9 @@ def world(tmp_path, aeri_home, monkeypatch):
 
 
 __all__ = [
-    "A",
     "REQ",
     "URL",
+    "A",
     "World",
     "aeri_home_fixture",
     "guard_fixture",

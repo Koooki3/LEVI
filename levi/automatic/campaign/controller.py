@@ -85,7 +85,9 @@ POLICY_PORT = 8000  # recorded in the plan; the backend never connects to it
 MAX_GUIDE_BYTES = 2 << 20
 GUIDED_READY_TIMEOUT_S = 7 * 24 * 3600.0
 DRY_READY_TIMEOUT_S = 600.0
-POLL_S = 0.25
+# How often the loop looks again while the campaign waits. A guided campaign
+# reads rollout folders at each look, so it looks less often.
+POLL_S = {"dry_run": 0.25, "guided": 1.0}
 HEARTBEAT_S = 2.0
 # How a controller is hosted. Tests replace it (``inprocess`` runs the
 # controller in a thread of the calling process).
@@ -730,7 +732,7 @@ def serve(
     *,
     home=None,
     stop=None,
-    poll_s: float = POLL_S,
+    poll_s: float | None = None,
     max_steps: int | None = None,
 ) -> int:
     """Drive one campaign until it ends (exit 0), the journal or the world
@@ -743,6 +745,7 @@ def serve(
     if host_record is None or host_record.get("host") not in A.HOSTS:
         return _fail(folder, "E_HOST", "the campaign has no host record")
     host = host_record["host"]
+    poll_s = POLL_S[host] if poll_s is None else poll_s
     job_dir = job_folder(campaign_id, home)
     try:
         plan = spec.read_plan(job_dir / spec.PLAN_FILE)
