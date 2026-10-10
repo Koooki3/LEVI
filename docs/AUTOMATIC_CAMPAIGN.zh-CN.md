@@ -139,3 +139,133 @@ SVG 黄金文件在 `tests/automatic/analysis/test_fig_golden/`；有意修改�
 * Kaplan-Meier 的区间在 S(t) 上；到成功所需时间的图画的是 1 - S(t)，所以区间换成 `[1 - high, 1 - low]`。0 < S < 1 时总有区间；S 降到 0 之后区间是 [0, 0]，图上显示为单个值 [1, 1]。分析库没有 t = 0 这一行：适配层补上不带区间的 (0, 0)（见上）。
 * bootstrap 区间原样传入。区间若不含点估计，图会告警并保留，不要裁剪或重新居中。
 * 比率用 0..1 的小数（`fmt="percent"`）；计数放进点的 `label`（`8/20`），矩阵则放进 `value`。
+
+## 计划与时间表
+
+**状态：只有库**（`levi/automatic/campaign/spec.py`、`schedule.py`）。还没有命令、API 或页面调用它，命令在 T-CP-08 做。
+
+多模型评测计划（campaign）的作业文件就是一份普通的 `levi.aeri.job.v1` 作业文件（共享设置：任务、终止、复位、记录），再加一个 `campaign` 块。它和作业文件用同一个严格的 YAML 子集读取，这个子集不支持“映射组成的列表”，所以各组写成以组号（`A` 到 `H`，最多 8 组）为键的映射：
+
+```yaml
+campaign:
+  id: c20261010-eggplant        # 字母、数字、_ 和 -；用于文件名和运行编号
+  robot: fr3                    # 一台机器人同一时刻只跑一个 campaign
+  trials_per_arm: 30
+  schedule:
+    kind: counterbalanced_segments
+    segment_trials: 5
+    seed: 7
+  layouts:
+    source: card_set            # 或 none（复位策略模式）
+    file: layouts.yaml          # 相对作业文件
+  pairing:                      # 检查点目录名模式 -> 配置名
+    recap_cfg_*: pi05_fr3_all_state_cfg
+    pi05_fr3_all_step*: pi05_fr3_all_state
+  stop_rules:
+    consecutive_faults: 2
+    unplanned_interventions_per_arm: 5
+  arms:
+    A:
+      role: reference           # 至多一个
+      policy_forward:
+        checkpoint_dir: /abs/path/checkpoints/pi05_fr3_all_step49999
+        config: pi05_fr3_all_state
+        port: 8000
+      checkpoint:
+        sha256_status: recorded # verified | recorded | none
+        manifest_sha256: <64 位十六进制>
+    B:
+      policy_forward:
+        checkpoint_dir: /abs/path/checkpoints/recap_cfg_r2_best_step14300_jax
+        config: pi05_fr3_all_state_cfg
+        cfg_scale: 1.0
+        port: 8000
+```
+
+其他可选键：`primary`（`comparison: [B, A]`、`alpha`、`label_basis`、`preregistered`；`sequential: step` 是预留项，会被拒绝）、`control`、`blinding`（`operator: arm_codes` 时操作员看到 X1、X2… 而不是组号）、`treatment_includes_reset`；每组还可以写 `policy_reset`、`versions` 和 `group`（rollout 分组，默认取检查点目录名）。
+
+**会被拒绝的计划**（各带错误码）：
+
+| 错误码 | 情形 |
+| --- | --- |
+| `E_CAMPAIGN_SCHEMA` | 未知键、类型不对、不足两组、组号不在 A–H |
+| `E_CAMPAIGN_JOB` | 共享设置不是合法的作业文件 |
+| `E_CAMPAIGN_ARMS` | 两个参照组；两组写进同一个 rollout 分组；`primary.comparison` 不是本 campaign 的两个组；某组单独写了 `policy_reset` 却没写 `treatment_includes_reset: true`（或者是 `human_assisted`） |
+| `E_CAMPAIGN_PAIRING` | 没有 `pairing` 表；检查点目录名一个模式都不匹配，或匹配到配置不同的几个模式；配置名不是它的模式要求的那个（CFG 检查点不配 CFG 配置会悄悄退化成普通采样） |
+| `E_CAMPAIGN_CHECKPOINT` | `sha256_status` 为 `verified` 或 `recorded` 却没有 `manifest_sha256`，或为 `none` 却写了 |
+| `E_CAMPAIGN_SCHEDULE` | `randomized_blocks` 的段长于 1 次试验；`sequential: step` |
+| `E_CAMPAIGN_LAYOUTS` | 复位策略模式用了卡片（初始场景由复位策略决定，应写 `source: none`）；`human_assisted` 没有卡片；卡片数少于一轮需要的数量；卡片文件有误；`per_round` 不等于段长 |
+| `E_CAMPAIGN_SETTINGS_DIFFER` | 两份子作业的共享设置不同（见下） |
+| `E_CAMPAIGN_EXISTS` | 本 campaign 的某个文件已经存在且内容不同：改过的 campaign 请换一个 id 再规划 |
+
+配对表放在配置里，不写在代码里：它把检查点目录名（shell 通配模式）对应到配置名，新的策略系列只需加一行，不用改代码。
+
+**布局卡**（`layouts.yaml`，以卡号为键的映射）：
+
+```yaml
+schema_version: levi.aeri.layouts.v1
+cards:
+  c01:
+    description: 盘子在左，杯子在右
+    reference_image: refs/c01.jpg   # 作为叠图显示；后端从不打开
+    predicates:
+      object_at_source: true
+    params:
+      x_cm: 10
+```
+
+**展开。** `spec.plan_campaign(job, job_root=...)` 为每段写一份普通作业文件 `<job_root>/campaigns/<id>/<id>__<arm>__s<NN>.yaml`，最后写 `campaign.plan.json`。每份子作业就是共享设置，加上它自己的运行编号、试验次数、本组的 rollout 分组、各组共用的 forward（和 reset）任务目录，路径都改成绝对路径。文件只写一次（临时文件、fsync、`link`、目录 fsync）：同一份文件再规划一次不改变任何东西；同一 id 下内容变了就拒绝。然后用启动核心的规划函数（`launch.plan` 完成之前用 `levi.automatic.cli.load_job`）算出每份子作业的 `plan_sha256`。
+
+- `settings_sha256`：把子作业里允许随组变化的键去掉以后算的 sha256。去掉的是 `experiment.name`（运行编号）、`experiment.episodes`（由时间表推出）、`policies` 和 `recording.group`。初始状态契约文件用它字节的 sha256 表示，每份子作业各读一次。所有子作业的摘要必须相同，否则以 `E_CAMPAIGN_SETTINGS_DIFFER` 拒绝，并指出第一个不同的键。
+- `campaign_sha256` 覆盖规范化的 campaign 块、卡片和卡片文件的 sha256、整张时间表、每份子作业文件的 sha256 和 `plan_sha256`，以及 `settings_sha256`。`spec.read_plan` 按它核对计划文件；`spec.verify_children` 核对子作业文件（给了规划函数时，连同它读的文件）在规划之后没有变。
+
+**时间表**（`schedule.build`）。每轮摆出一组卡位（卡片；没有卡片时是 `slot01`、`slot02`…），每个组在一段里按同样的顺序跑完它们：
+
+| `kind` | 每轮的组顺序 | 默认段长 | 结论等级 |
+| --- | --- | --- | --- |
+| `counterbalanced_segments`（默认） | Williams 设计的一行：在一个完整的行周期里，每个组紧跟在其他每个组之后的次数相同（两组时为 AB、BA） | 5 | 可作确证性 |
+| `randomized_blocks` | 按种子随机；一个区组就是一张卡 | 1（固定） | 可作确证性 |
+| `latin_square` | 循环拉丁方的一行：每个周期里每个组在每个位置各出现一次 | 5 | 可作确证性 |
+| `interleaved` | 总是 A、B、… | 1 | 只能探索性 |
+| `blocked` | 先跑完 A 的所有段，再跑 B，… | 5 | 只能探索性 |
+
+“可作确证性”是必要条件，不是充分条件：报告生成器还要核对其他条件（预注册、漂移检查）。卡片从按种子洗过的牌堆里发，同一轮内不重复，各卡使用次数大致相同。相邻两段是同一组时，正在运行的策略继续使用，所以时间表的 `switches` 是真正需要启动策略的次数。所有随机选择都是按 `sha256(种子, 用途, 项)` 排序：同一个种子在任何进程、任何机器上得到同一张时间表（用不同的哈希种子测过）。
+
+## 状态机与恢复
+
+**状态：只有库**（`levi/automatic/campaign/journal.py`、`conductor.py`、`switch.py`）。启动核心（`launch.py`）、命令通道和会话写入器通过下面的接口接入。
+
+```
+DRAFT -> PLANNED -> { SEGMENT_PREPARE -> POLICY_STOP -> POLICY_START -> POLICY_READY
+      -> ENV_CONFIRM（人） -> ARM_RUNNING（子运行） -> SEGMENT_SEALED } x 段数
+      -> ANALYZING -> REPORTED
+旁路：PAUSED（只在段边界）、WAIT_HUMAN、FAULT_LOCKED、ABORTED（只能由操作员）
+```
+
+campaign 的文件在 `$LEVI_AERI_HOME/campaigns/<id>/`（`LEVI_AERI_HOME` 默认 `~/.levi-aeri`）：`journal.jsonl`、`plan.json`（计划，每次打开都按日志头的 `campaign_sha256` 核对）、`state.json`（派生，从不读回）和 `torn/`。
+
+**日志。** 每行是一条 `levi.aeri.campaign_event.v1` 消息，沿用运行日志的事务协议（prepared，在任何副作用之前落盘 -> acknowledged -> committed 或 aborted），哈希链，只有一个写入者（对目录加 `flock`）。这个契约放在单独的登记表里（`aeri.CAMPAIGN_SCHEMAS`，minor 0），所以运行日志头和五种消息都不变；快照是 `docs/architecture/aeri/v1/campaign_event.schema.json`，`aeri.check_campaign_against_base` 把它和基线分支比较（`levi dev check-contracts` 暂时还没调用它）。事务的幂等键是 `<id>:s<NN>:<进入的状态>`（不属于某段时是 `<id>:<状态>`）。回放会拒绝：表里不允许的转移；没有操作员命令就离开 `WAIT_HUMAN`/`FAULT_LOCKED`/`PAUSED` 或进入 `ABORTED`；恢复做等待以外的事；还有段没封存就进入 `ANALYZING`；在段边界以外暂停。
+
+| 步骤 | 做什么 | 断电后 |
+| --- | --- | --- |
+| `SEGMENT_PREPARE` | 等机器人空闲（没有运行持有它，也没有别的活会话） | 等人 |
+| `POLICY_STOP` | 给 C2 会话写 `waiting_reset`，停掉本 campaign 的所有策略单元，等到策略端口没有监听者；同一组继续服务时跳过 | `FAULT_LOCKED`（停没停不确定） |
+| `POLICY_START` | 按启动配方 `systemd-run --user --unit=levi-policy-<id>-<arm>` | `FAULT_LOCKED` |
+| `POLICY_READY` | 只做被动检查（见下）；600 秒内没就绪就 `WAIT_HUMAN` | 等人 |
+| `ENV_CONFIRM` | 问操作员：机械臂静止、卡片已摆好 | 重新问（新的问题） |
+| `ARM_RUNNING` | 启动子运行（唯一的非幂等动作），然后观察它 | 启动事务悬空则 `FAULT_LOCKED`，否则 `WAIT_HUMAN`；绝不自动再启动 |
+| `SEGMENT_SEALED` | 记下子运行报告的计数；检查停止规则和待生效的暂停 | 等人 |
+
+**人的答复**（`Confirmations`）：每道题带一个随机 nonce，只有针对这道题、nonce 一致、命令号没用过的答复才算数（其余丢弃并记一条备注）。确认场景需要 `arm_still` 和 `layout_ready` 两项。在等待状态下，`resume` 走到下一个安全的位置：下一个要准备的段；子运行已经启动（或可能已经启动）时观察它；所有段都封存后进入 `ANALYZING`。`relaunch` 只在启动从未得到确认、而且这个运行确实不存在时，才重新准备这一段；已确认启动过的运行绝不再次启动。`abort` 结束 campaign。由停止规则引起的等待，恢复时必须带 `override_stop_rule: true`。
+
+**停止规则**（`campaign.stop_rules`）：连续 `consecutive_faults` 段的子运行故障或崩溃，或某组的非计划介入超过 `unplanned_interventions_per_arm`，campaign 就停下等人，从不跳过一个组。子运行自己的计划内等待（比如等人复位场景）不算故障。
+
+**一台机器人只跑一个 campaign。** 指挥进程在存活期间持有 `$LEVI_AERI_HOME/campaign-<robot>.lock`（`flock`）；同一台机器人上的第二个 campaign 会以 `E_BUSY` 被拒，并给出持有者。
+
+**策略切换**（`switch.SystemdPolicyHost`）。就绪靠读，不靠问：单元处于 active，而且策略端口上的每个监听进程都属于这个单元的 cgroup，命令行里有本组的配置名（整词匹配：普通配置名是 CFG 配置名的前缀）和检查点，这些都从 `/proc/net/tcp{,6}`、`/proc/<pid>/fd`、`cgroup` 和 `cmdline` 读取。后端从不连接策略端口，真正的握手在子运行的 PREFLIGHT 里做。监听者不属于本 campaign（例如在终端里手动起的策略服务）、读不到属主、或者跑的是别的配置，campaign 都会锁定（`FAULT_LOCKED`）。没有启动配方时什么都不启动。
+
+**恢复。** `Conductor.attach(id, job_dir)` 先拿机器人锁，再打开日志（损坏的日志以 `E_CORRUPT` 拒绝，什么也不写），核对子作业文件，中止悬空的事务，然后进入 `FAULT_LOCKED`（悬空事务有副作用时）或 `WAIT_HUMAN`。原本就在等人、在问人（`ENV_CONFIRM`）或在分析的 campaign 留在原处。人答复之前什么都不动。测试在一个完整 campaign 的每一行日志写入之前和之后各杀一次指挥进程，核对每次恢复都停在等人的位置，而且每个子运行恰好启动一次。
+
+**集成用的接口：** `PolicyHost`（`stop`、`start`、`passive_ready`）、`RunLauncher`（`launch`、`status`、`robot_busy`）、`Confirmations`（`ask`、`take`、`withdraw`、`pause_requested`）、`SessionWriter`（`waiting_reset`、`release`）和 `ChildPlanner`（`plan`）。
+
+**还没有做：** 命令和页面（T-CP-08、T-CP-09），试验台账和补跑 `<id>__<arm>__s<NN>r2`（T-CP-05），真实的启动配方（T-SU），报告（T-CP-06）。

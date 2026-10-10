@@ -351,3 +351,226 @@ calls the library and maps its real output. The keys differ by function:
   figure warns and keeps it; do not clip or re-centre it.
 * Rates are fractions in 0..1 (use `fmt="percent"`); counts go in the point
   `label` (`8/20`) or, for a matrix, in `value`.
+
+## Plan and schedule
+
+**Status: library only** (`levi/automatic/campaign/spec.py`,
+`schedule.py`). No command, API or page calls it yet; the commands come with
+T-CP-08.
+
+A campaign job file is an ordinary `levi.aeri.job.v1` file (the shared
+settings: task, termination, reset, recording) plus a `campaign` block. It
+is read with the same strict YAML subset as the job file, which has no lists
+of mappings, so the arms are a mapping keyed by arm id (`A` to `H`, at most
+eight):
+
+```yaml
+campaign:
+  id: c20261010-eggplant        # letters, digits, _ and -; names files and runs
+  robot: fr3                    # one campaign per robot at a time
+  trials_per_arm: 30
+  schedule:
+    kind: counterbalanced_segments
+    segment_trials: 5
+    seed: 7
+  layouts:
+    source: card_set            # or none (reset policy mode)
+    file: layouts.yaml          # relative to the job file
+  pairing:                      # checkpoint folder name pattern -> config
+    recap_cfg_*: pi05_fr3_all_state_cfg
+    pi05_fr3_all_step*: pi05_fr3_all_state
+  stop_rules:
+    consecutive_faults: 2
+    unplanned_interventions_per_arm: 5
+  arms:
+    A:
+      role: reference           # at most one
+      policy_forward:
+        checkpoint_dir: /abs/path/checkpoints/pi05_fr3_all_step49999
+        config: pi05_fr3_all_state
+        port: 8000
+      checkpoint:
+        sha256_status: recorded # verified | recorded | none
+        manifest_sha256: <64 hex>
+    B:
+      policy_forward:
+        checkpoint_dir: /abs/path/checkpoints/recap_cfg_r2_best_step14300_jax
+        config: pi05_fr3_all_state_cfg
+        cfg_scale: 1.0
+        port: 8000
+```
+
+Other optional keys: `primary` (`comparison: [B, A]`, `alpha`,
+`label_basis`, `preregistered`; `sequential: step` is reserved and refused),
+`control`, `blinding` (`operator: arm_codes` shows X1, X2... instead of arm
+letters), `treatment_includes_reset`, and per arm `policy_reset`,
+`versions` and `group` (the rollout group; default: the checkpoint folder
+name).
+
+**Refused plans** (each with its code):
+
+| Code | When |
+| --- | --- |
+| `E_CAMPAIGN_SCHEMA` | unknown key, wrong type, fewer than two arms, an arm id outside A–H |
+| `E_CAMPAIGN_JOB` | the shared settings are not a valid job file |
+| `E_CAMPAIGN_ARMS` | two reference arms; two arms in one rollout group; `primary.comparison` not two arms of the campaign; a per-arm `policy_reset` without `treatment_includes_reset: true` (or with `human_assisted`) |
+| `E_CAMPAIGN_PAIRING` | no `pairing` table; a checkpoint folder that matches no pattern, or patterns of different configs; a config other than the one its pattern names (a CFG checkpoint served without its CFG config samples without CFG and does not say so) |
+| `E_CAMPAIGN_CHECKPOINT` | `sha256_status` `verified` or `recorded` without `manifest_sha256`, or `none` with one |
+| `E_CAMPAIGN_SCHEDULE` | `randomized_blocks` with segments longer than one trial; `sequential: step` |
+| `E_CAMPAIGN_LAYOUTS` | cards with a reset policy (it sets the scene; write `source: none`), no cards with `human_assisted`, fewer cards than a round needs, a bad card file, `per_round` other than the segment size |
+| `E_CAMPAIGN_SETTINGS_DIFFER` | two child jobs differ in a shared setting (below) |
+| `E_CAMPAIGN_EXISTS` | a file of the campaign already exists with other content: plan a changed campaign under a new id |
+
+The pairing table lives in the configuration, not in the code: it maps
+checkpoint folder names (shell patterns) to configs, so a new policy family
+needs a new line, not a release.
+
+**Layout cards** (`layouts.yaml`, mapping keyed by card id):
+
+```yaml
+schema_version: levi.aeri.layouts.v1
+cards:
+  c01:
+    description: plate left, cup right
+    reference_image: refs/c01.jpg   # shown as an overlay; never opened by the backend
+    predicates:
+      object_at_source: true
+    params:
+      x_cm: 10
+```
+
+**Expansion.** `spec.plan_campaign(job, job_root=...)` writes one ordinary
+job file per segment, `<job_root>/campaigns/<id>/<id>__<arm>__s<NN>.yaml`,
+and then `campaign.plan.json`. Each child is the shared settings with its
+run id, its trial count, its arm's recording group, the shared forward
+(and reset) folder and absolute paths. Files are written once (temporary
+file, fsync, `link`, directory fsync): planning the same file again is a
+no-op, a changed file under the same id is refused. Each child is then
+planned by the launch core's planner (until `launch.plan` exists:
+`levi.automatic.cli.load_job`) for its `plan_sha256`.
+
+- `settings_sha256` is the sha256 of a child job with the keys that may
+  differ between arms left out: `experiment.name` (the run id),
+  `experiment.episodes` (derived from the schedule), `policies` and
+  `recording.group`. The Initial State Contract file is named by the
+  sha256 of its bytes, read for each child. Every child must give the same
+  digest; otherwise `E_CAMPAIGN_SETTINGS_DIFFER` names the first differing
+  key.
+- `campaign_sha256` covers the normalised campaign block, the cards and the
+  card file's sha256, the whole schedule, each child's file sha256 and
+  `plan_sha256`, and `settings_sha256`. `spec.read_plan` checks a plan
+  against it; `spec.verify_children` checks that no child file (or, with a
+  planner, no file it reads) changed since.
+
+**Schedules** (`schedule.build`). A round lays out a set of slots (cards,
+or `slot01`, `slot02`... without cards) and every arm runs them in one
+segment, in the same order:
+
+| `kind` | Arm order per round | Default segment | Conclusion level |
+| --- | --- | --- | --- |
+| `counterbalanced_segments` (default) | a row of a Williams design: over a full cycle of rows each arm directly follows each other arm equally often (two arms: AB, BA) | 5 | confirmatory eligible |
+| `randomized_blocks` | seeded random order; a block is one card | 1 (fixed) | confirmatory eligible |
+| `latin_square` | a row of a cyclic Latin square: each arm in each position once per cycle | 5 | confirmatory eligible |
+| `interleaved` | always A, B, ... | 1 | exploratory only |
+| `blocked` | all segments of A, then all of B, ... | 5 | exploratory only |
+
+"Confirmatory eligible" is necessary, not sufficient: the report generator
+adds the other conditions (preregistration, drift checks). Cards are dealt
+from a seeded deck, distinct within a round and used about equally often.
+Consecutive segments of the same arm keep the running policy, so the
+schedule's `switches` counts real policy starts. Every random choice is a
+sort by `sha256(seed, purpose, item)`: the same seed gives the same schedule
+in any process and on any machine (tested with different hash seeds).
+
+## State machine and recovery
+
+**Status: library only** (`levi/automatic/campaign/journal.py`,
+`conductor.py`, `switch.py`). The launch core (`launch.py`), the command
+channel and the session writer plug in through the interfaces below.
+
+```
+DRAFT -> PLANNED -> { SEGMENT_PREPARE -> POLICY_STOP -> POLICY_START -> POLICY_READY
+      -> ENV_CONFIRM (a person) -> ARM_RUNNING (child run) -> SEGMENT_SEALED } x segments
+      -> ANALYZING -> REPORTED
+aside: PAUSED (segment boundary only), WAIT_HUMAN, FAULT_LOCKED, ABORTED (operator only)
+```
+
+The campaign's files are in `$LEVI_AERI_HOME/campaigns/<id>/`
+(`LEVI_AERI_HOME` defaults to `~/.levi-aeri`): `journal.jsonl`, `plan.json`
+(the plan, checked against the header's `campaign_sha256` on every open),
+`state.json` (derived, never read back) and `torn/`.
+
+**The journal.** Each line is a `levi.aeri.campaign_event.v1` message with
+the run journal's transaction protocol (prepared, synced before any side
+effect -> acknowledged -> committed or aborted), hash-chained, one writer
+(`flock` on the folder). The contract sits in its own registry
+(`aeri.CAMPAIGN_SCHEMAS`, minor 0) so the run header and the five messages
+are unchanged; its snapshot is
+`docs/architecture/aeri/v1/campaign_event.schema.json`, and
+`aeri.check_campaign_against_base` compares it with the base branch
+(`levi dev check-contracts` does not call it yet). The idempotency key of a
+transaction is `<id>:s<NN>:<state entered>` (`<id>:<state>` outside a
+segment). The replay refuses a move the table does not allow, a leave of
+`WAIT_HUMAN`/`FAULT_LOCKED`/`PAUSED` or an `ABORTED` without an operator's
+command, a recovery that does anything but wait, `ANALYZING` before every
+segment is sealed, and a pause anywhere but at a boundary.
+
+| Step | What it does | After a crash |
+| --- | --- | --- |
+| `SEGMENT_PREPARE` | waits until the robot is free (no run holds it, no other live session) | waits for a person |
+| `POLICY_STOP` | writes `waiting_reset` to the C2 session, stops every policy unit of the campaign, waits until nobody listens on the policy port; skipped when the same arm keeps serving | `FAULT_LOCKED` (the stop may or may not have happened) |
+| `POLICY_START` | `systemd-run --user --unit=levi-policy-<id>-<arm>` from the launch recipe | `FAULT_LOCKED` |
+| `POLICY_READY` | passive check only (below); not ready within 600 s: `WAIT_HUMAN` | waits for a person |
+| `ENV_CONFIRM` | asks the operator: arm still, cards laid out | asks again (new question) |
+| `ARM_RUNNING` | launches the child run (the one non-idempotent action), then watches it | `FAULT_LOCKED` if the launch was dangling, otherwise `WAIT_HUMAN`; never launched again by itself |
+| `SEGMENT_SEALED` | records the child's counts; applies the stop rules and a pending pause | waits for a person |
+
+**A person's answers** (`Confirmations`): each question carries a random
+nonce, and an answer counts only for that question with that nonce and an
+unused command id (others are dropped and noted). A scene confirmation
+needs `arm_still` and `layout_ready`. From a wait, `resume` goes to the
+next safe place: the next segment to prepare; the child run to watch when
+it was started (or may have been); `ANALYZING` when every segment is
+sealed. `relaunch` prepares the segment again only when the launch was
+never acknowledged and the run is not there; a run acknowledged as started
+is never started again. `abort` ends the campaign. A wait caused by a stop
+rule needs `override_stop_rule: true`.
+
+**Stop rules** (`campaign.stop_rules`): child runs that faulted or crashed
+in `consecutive_faults` segments in a row, or an arm whose unplanned
+interventions pass `unplanned_interventions_per_arm`, make the campaign
+wait for a person. It never skips an arm. A child run's own planned wait
+(for example a person resetting the scene) is not a fault.
+
+**One campaign per robot.** The conductor holds
+`$LEVI_AERI_HOME/campaign-<robot>.lock` (`flock`) while it lives; a second
+campaign on the same robot is refused with `E_BUSY` and the holder.
+
+**Policy switch** (`switch.SystemdPolicyHost`). Readiness is read, never
+asked: the unit is active and every process listening on the arm's port
+belongs to the unit's cgroup and runs the arm's config (as a whole word: the
+plain config is a prefix of the CFG one) and checkpoint, read from
+`/proc/net/tcp{,6}`, `/proc/<pid>/fd`, `cgroup` and `cmdline`. The backend
+never connects to the policy port; the real handshake is the child run's
+PREFLIGHT. A listener that is not the campaign's (a policy server started
+by hand), whose owner cannot be read, or that runs another config locks the
+campaign (`FAULT_LOCKED`). Without a launch recipe nothing is started.
+
+**Recovery.** `Conductor.attach(id, job_dir)` takes the robot lock, opens
+the journal (a corrupt one is refused, `E_CORRUPT`, and nothing is
+written), checks the child files, aborts a dangling transaction and moves
+to `FAULT_LOCKED` (it had a side effect) or `WAIT_HUMAN`. A campaign that
+was waiting for a person, asking one (`ENV_CONFIRM`) or analysing stays
+there. Nothing moves until a person answers. The tests kill a conductor
+just before and just after every journal line of a whole campaign and check
+that each recovery stops at a person and that every child run is started
+exactly once.
+
+**Interfaces for the integration:** `PolicyHost` (`stop`, `start`,
+`passive_ready`), `RunLauncher` (`launch`, `status`, `robot_busy`),
+`Confirmations` (`ask`, `take`, `withdraw`, `pause_requested`),
+`SessionWriter` (`waiting_reset`, `release`) and `ChildPlanner` (`plan`).
+
+**Not yet:** commands and pages (T-CP-08, T-CP-09), the trial ledger and
+reruns `<id>__<arm>__s<NN>r2` (T-CP-05), the real launch recipes (T-SU),
+the report (T-CP-06).
