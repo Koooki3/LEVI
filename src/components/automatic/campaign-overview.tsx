@@ -45,51 +45,68 @@ function ArmsTable({
 }) {
   const { t } = useLocale();
   return (
-    <Table caption={t("automatic.campaign.arms.title")} density="compact">
-      <thead>
-        <tr>
-          <th scope="col">{t("automatic.campaign.arms.arm")}</th>
-          <th scope="col">{t("automatic.campaign.arms.progress")}</th>
-          <th scope="col">{t("automatic.campaign.arms.done")}</th>
-          <th scope="col">{t("automatic.campaign.arms.remaining")}</th>
-          <th scope="col">{t("automatic.campaign.arms.deviated")}</th>
-          <th scope="col">{t("automatic.campaign.arms.discarded")}</th>
-          {showCards && (
-            <th scope="col">{t("automatic.campaign.arms.unconfirmed")}</th>
-          )}
-        </tr>
-      </thead>
-      <tbody>
-        {view.arms.map((arm) => (
-          <tr key={arm.code} data-current={arm.code === view.segment.armCode}>
-            <th scope="row">
-              {arm.code}
-              {arm.id ? ` · ${arm.id}` : ""}
-              {arm.code === view.segment.armCode && (
-                <>
-                  {" "}
-                  <Badge tone="info">
-                    {t("automatic.campaign.arms.current")}
-                  </Badge>
-                </>
-              )}
+    <div
+      className="ac-table-scroll"
+      tabIndex={0}
+      role="region"
+      aria-label={t("automatic.campaign.arms.title")}
+    >
+      <Table caption={t("automatic.campaign.arms.title")} density="compact">
+        <thead>
+          <tr>
+            <th scope="col">{t("automatic.campaign.arms.arm")}</th>
+            <th scope="col">{t("automatic.campaign.arms.progress")}</th>
+            <th scope="col" className="ds-num">
+              {t("automatic.campaign.arms.done")}
             </th>
-            <td>
-              <Progress
-                value={arm.total ? arm.done : 0}
-                max={Math.max(arm.total, 1)}
-                label={`${arm.code} ${arm.done} / ${arm.total}`}
-              />
-            </td>
-            <td className="ds-num">{arm.done}</td>
-            <td className="ds-num">{arm.remaining}</td>
-            <td className="ds-num">{arm.deviated}</td>
-            <td className="ds-num">{arm.discarded}</td>
-            {showCards && <td className="ds-num">{arm.unconfirmed}</td>}
+            <th scope="col" className="ds-num">
+              {t("automatic.campaign.arms.remaining")}
+            </th>
+            <th scope="col" className="ds-num">
+              {t("automatic.campaign.arms.deviated")}
+            </th>
+            <th scope="col" className="ds-num">
+              {t("automatic.campaign.arms.discarded")}
+            </th>
+            {showCards && (
+              <th scope="col" className="ds-num">
+                {t("automatic.campaign.arms.unconfirmed")}
+              </th>
+            )}
           </tr>
-        ))}
-      </tbody>
-    </Table>
+        </thead>
+        <tbody>
+          {view.arms.map((arm) => (
+            <tr key={arm.code} data-current={arm.code === view.segment.armCode}>
+              <th scope="row">
+                {arm.code}
+                {arm.id ? ` · ${arm.id}` : ""}
+                {arm.code === view.segment.armCode && (
+                  <>
+                    {" "}
+                    <Badge tone="info">
+                      {t("automatic.campaign.arms.current")}
+                    </Badge>
+                  </>
+                )}
+              </th>
+              <td>
+                <Progress
+                  value={arm.total ? arm.done : 0}
+                  max={Math.max(arm.total, 1)}
+                  label={`${arm.code} ${arm.done} / ${arm.total}`}
+                />
+              </td>
+              <td className="ds-num">{arm.done}</td>
+              <td className="ds-num">{arm.remaining}</td>
+              <td className="ds-num">{arm.deviated}</td>
+              <td className="ds-num">{arm.discarded}</td>
+              {showCards && <td className="ds-num">{arm.unconfirmed}</td>}
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+    </div>
   );
 }
 
@@ -283,10 +300,15 @@ export function CampaignOverview({
       <section className="aw-panel" aria-labelledby="ac-progress">
         <h2 id="ac-progress">{t("automatic.campaign.progress.title")}</h2>
         <p>
-          {t("automatic.campaign.progress.segment")
-            .replace("{no}", String(view.segment.no))
-            .replace("{total}", String(view.segment.total))
-            .replace("{arm}", view.segment.armCode || "—")}
+          {view.finished
+            ? t("automatic.campaign.progress.finished").replace(
+                "{total}",
+                String(view.segment.total),
+              )
+            : t("automatic.campaign.progress.segment")
+                .replace("{no}", String(view.segment.no))
+                .replace("{total}", String(view.segment.total))
+                .replace("{arm}", view.segment.armCode || "—")}
           {view.etaSeconds !== null && (
             <>
               {" · "}
@@ -331,7 +353,7 @@ export function CampaignOverview({
             >
               {t("automatic.campaign.resume")}
             </Button>
-          ) : (
+          ) : view.finished ? null : (
             <Button
               icon={Pause}
               loading={busy === "pause"}

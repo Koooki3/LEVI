@@ -47,6 +47,19 @@ const CHECK_CODES = new Set([
   "E_NO_CONTRACT",
   "E_SCENE_PROVIDER_MISSING",
   "E_REQUEST",
+  // The campaign plan's checks (levi/automatic/campaign/controller.py).
+  "rollout_root",
+  "rollout_root_missing",
+  "guide_command",
+  "guide_unavailable",
+  "command_unsafe",
+  "pairing",
+  "schedule",
+  "unbalanced_cycles",
+  "exploratory_schedule",
+  "no_reference_arm",
+  "not_preregistered",
+  "dry_run_needs_person",
 ]);
 
 /** One check row as words: no code, no file path. */

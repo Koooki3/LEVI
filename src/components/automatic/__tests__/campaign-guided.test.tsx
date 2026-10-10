@@ -412,6 +412,26 @@ describe("the controller and the peeks", () => {
     expect(buttonNamed(host, "Attach the controller")).toBeUndefined();
   });
 
+  test("a finished campaign says so: no running segment, no pause button", async () => {
+    const { host } = await render(
+      <CampaignOverview
+        campaignId="camp-1"
+        api={api(() =>
+          snap({
+            state: "REPORTED",
+            blinded: false,
+            segment: { no: 4, total: 4, arm_code: "X1" },
+          }),
+        )}
+        intervalMs={50}
+      />,
+    );
+    await waitFor(() => host.textContent?.includes("Report ready"));
+    expect(host.textContent).toContain("All 4 segments are finished.");
+    expect(host.textContent).not.toContain("now arm");
+    expect(buttonNamed(host, "Pause at the segment end")).toBeUndefined();
+  });
+
   test("peeks are marked and the conclusion is called exploratory", async () => {
     const { host } = await render(
       <CampaignOverview

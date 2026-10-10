@@ -5,7 +5,7 @@
 import "@/components/pages-ui/pages.css";
 import "@/components/automatic/run-styles.css";
 import Link from "next/link";
-import { WandSparkles } from "lucide-react";
+import { GitCompareArrows, WandSparkles } from "lucide-react";
 import { Icon } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { LaunchPanel } from "@/components/automatic/launch-panel";
@@ -23,6 +23,13 @@ export default function AutomaticPage() {
         >
           <Icon icon={WandSparkles} />
           {t("automatic.run.page.wizard")}
+        </Link>
+        <Link
+          href="/automatic/campaigns"
+          className="ds-btn ds-btn--secondary ds-btn--md ds-focus ar-link"
+        >
+          <Icon icon={GitCompareArrows} />
+          {t("automatic.campaign.list.title")}
         </Link>
       </div>
       <p>{t("automatic.run.page.intro")}</p>

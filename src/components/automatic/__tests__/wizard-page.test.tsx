@@ -412,7 +412,9 @@ describe("the wizard, a multi-model plan", () => {
     const heads = Array.from(host.querySelectorAll(".aw-power th")).map(
       (th) => th.textContent,
     );
-    expect(heads).toContain("Smallest detectable difference, unpaired (Fisher)");
+    expect(heads).toContain(
+      "Smallest detectable difference, unpaired (Fisher)",
+    );
     expect(
       heads.some((h) => h?.includes("paired (McNemar), correlation 0.3")),
     ).toBe(true);

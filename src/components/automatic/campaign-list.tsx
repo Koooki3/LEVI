@@ -4,7 +4,7 @@ import { Plus } from "lucide-react";
 import { Badge, EmptyState, Table } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { RequestProblem } from "@/components/pages-ui/feedback";
-import { STATE_TONE, viewOf } from "./campaign-logic";
+import { STATE_TONE, stateKey, viewOf } from "./campaign-logic";
 import { usePolled } from "./campaign-poll";
 import { wizardApi, type WizardApi } from "./wizard-api";
 
@@ -62,7 +62,7 @@ export function CampaignList({
                 </th>
                 <td>
                   <Badge tone={STATE_TONE[row.state] ?? "neutral"}>
-                    {row.state}
+                    {t(stateKey(row.state))}
                   </Badge>
                 </td>
                 <td className="ds-num">

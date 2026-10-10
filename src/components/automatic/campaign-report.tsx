@@ -223,10 +223,7 @@ export function CampaignReportView({
         <Note tone="info" role="status">
           <strong>{t("automatic.campaign.report.missing.title")}</strong>{" "}
           {t("automatic.campaign.report.missing.body")}
-          {generateButton(
-            t("automatic.campaign.report.generate"),
-            "primary",
-          )}
+          {generateButton(t("automatic.campaign.report.generate"), "primary")}
         </Note>
       )}
       {makeProblem && (

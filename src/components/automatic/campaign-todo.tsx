@@ -3,7 +3,13 @@
 // checklist and one confirmation; the campaign never goes on without it. The
 // robot and the policy server are handled by the person, in the terminal.
 import { useState } from "react";
-import { Button, Checkbox, Radio, RadioGroup, useConfirm } from "@/components/ds";
+import {
+  Button,
+  Checkbox,
+  Radio,
+  RadioGroup,
+  useConfirm,
+} from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Note, RequestProblem } from "@/components/pages-ui/feedback";
 import { ApiError, type WizardApi } from "./wizard-api";

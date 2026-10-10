@@ -86,10 +86,11 @@ export function CampaignCards({
       {unconfirmed > 0 && (
         <p role="status">
           <Badge tone="warning">
-            {t("automatic.campaign.cards.unconfirmed").replace(
-              "{n}",
-              String(unconfirmed),
-            )}
+            {t(
+              unconfirmed === 1
+                ? "automatic.campaign.cards.unconfirmed_one"
+                : "automatic.campaign.cards.unconfirmed",
+            ).replace("{n}", String(unconfirmed))}
           </Badge>{" "}
           {t("automatic.campaign.cards.not_paired")}
         </p>

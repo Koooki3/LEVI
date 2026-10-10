@@ -256,7 +256,8 @@ describe("requests", () => {
       ["20", "0.401", "0.3", "0.48", "0.49", "0.42"],
     ]);
     // No cell is ever an object (React error 31 once came of that).
-    for (const row of t.cells) for (const c of row) expect(typeof c).toBe("string");
+    for (const row of t.cells)
+      for (const c of row) expect(typeof c).toBe("string");
   });
 
   test("the power table takes whatever columns the planner gives", () => {

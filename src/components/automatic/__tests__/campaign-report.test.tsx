@@ -1,4 +1,9 @@
-import { click, render, setupDom, waitFor } from "@/components/ds/__tests__/dom";
+import {
+  click,
+  render,
+  setupDom,
+  waitFor,
+} from "@/components/ds/__tests__/dom";
 import { describe, expect, mock, test } from "bun:test";
 import { act } from "react";
 
