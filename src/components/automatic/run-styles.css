@@ -1,0 +1,320 @@
+/* Styles of the /automatic pages (run list, launch panel, run window).
+ * Classes start with `ar-`; colours come from the `--ds-*` tokens only, so the
+ * light and dark themes both work. State is always told in words and by shape
+ * (icon, border style), never by colour alone. */
+.ar-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-5);
+}
+.ar-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-3);
+}
+.ar-head h1 {
+  margin: 0;
+}
+.ar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+  align-items: center;
+}
+.ar-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+.ar-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  min-width: 0;
+}
+.ar-section > h2 {
+  margin: 0;
+}
+.ar-muted {
+  color: var(--ds-text-tertiary);
+  font-size: var(--ds-text-caption-size);
+}
+.ar-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+  align-items: center;
+}
+.ar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: var(--ds-space-4);
+  align-items: start;
+}
+.ar-code {
+  font-family: var(--ds-font-mono);
+  overflow-wrap: anywhere;
+}
+.ar-dl {
+  display: grid;
+  grid-template-columns: minmax(96px, max-content) minmax(0, 1fr);
+  gap: var(--ds-space-1) var(--ds-space-3);
+  margin: 0;
+  font-size: var(--ds-text-caption-size);
+}
+.ar-dl dt {
+  color: var(--ds-text-tertiary);
+}
+.ar-dl dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ar-note {
+  margin: 0;
+  padding: var(--ds-space-3);
+  border-radius: var(--ds-radius-md);
+  border: 1px solid var(--ds-separator);
+  background: var(--ds-surface-sunken);
+  font-size: var(--ds-text-caption-size);
+  line-height: var(--ds-text-caption-line);
+}
+.ar-note--warning {
+  border-color: var(--ds-warning);
+  background: var(--ds-warning-bg);
+}
+.ar-note--danger {
+  border-color: var(--ds-danger);
+  background: var(--ds-danger-bg);
+}
+.ar-note--info {
+  border-color: var(--ds-info);
+  background: var(--ds-info-bg);
+}
+.ar-note > strong {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  margin-bottom: var(--ds-space-1);
+}
+
+/* Run list */
+.ar-runs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+.ar-run {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2) var(--ds-space-4);
+  align-items: center;
+  padding: var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+}
+.ar-run > a {
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  overflow-wrap: anywhere;
+}
+.ar-run__progress {
+  min-width: 120px;
+  flex: 1 1 120px;
+}
+
+/* Plan card */
+.ar-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  font-size: var(--ds-text-caption-size);
+}
+.ar-checks li {
+  display: flex;
+  gap: var(--ds-space-2);
+  align-items: flex-start;
+}
+
+/* State graph */
+.ar-graph {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+.ar-lane h3 {
+  margin: 0 0 var(--ds-space-1);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-tertiary);
+  font-weight: var(--ds-weight-medium);
+}
+.ar-lane ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+}
+.ar-node {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border: 1px solid var(--ds-border-control);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+  font-size: var(--ds-text-caption-size);
+  min-width: 0;
+}
+.ar-node__name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+.ar-node__note {
+  color: var(--ds-text-tertiary);
+}
+.ar-node--current {
+  border: 3px solid var(--ds-accent);
+  background: var(--ds-surface-selected);
+  font-weight: var(--ds-weight-semibold);
+}
+.ar-node--disabled {
+  border-style: dashed;
+  background: var(--ds-surface-sunken);
+  color: var(--ds-text-tertiary);
+}
+.ar-node--danger.ar-node--current {
+  border-color: var(--ds-danger);
+}
+.ar-node--warning.ar-node--current {
+  border-color: var(--ds-warning);
+}
+
+/* Pending card */
+.ar-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-4);
+  border: 2px solid var(--ds-warning);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-surface-1);
+}
+.ar-card h2 {
+  margin: 0;
+  display: flex;
+  gap: var(--ds-space-2);
+  align-items: center;
+}
+.ar-predicates {
+  margin: 0;
+  padding-left: var(--ds-space-5);
+  font-size: var(--ds-text-caption-size);
+}
+.ar-label-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+}
+.ar-label-buttons [aria-pressed="true"] {
+  outline: 3px solid var(--ds-accent);
+  outline-offset: 1px;
+}
+.ar-frames {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+}
+.ar-frames img {
+  max-width: min(100%, 320px);
+  height: auto;
+  border-radius: var(--ds-radius-sm);
+  border: 1px solid var(--ds-separator);
+  background: var(--ds-media-bg);
+}
+.ar-scene-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2) var(--ds-space-4);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ds-space-2) 0;
+  border-top: 1px solid var(--ds-separator);
+}
+.ar-scene-row fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-3);
+}
+.ar-scene-row legend {
+  padding: 0;
+  margin-bottom: var(--ds-space-1);
+}
+
+/* Timeline and metrics */
+.ar-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow: auto;
+  font-size: var(--ds-text-caption-size);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+}
+.ar-timeline li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-1) var(--ds-space-3);
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border-bottom: 1px solid var(--ds-separator);
+}
+.ar-timeline li:last-child {
+  border-bottom: 0;
+}
+.ar-table-wrap {
+  overflow-x: auto;
+}
+.ar-metrics {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--ds-text-caption-size);
+}
+.ar-metrics th,
+.ar-metrics td {
+  text-align: left;
+  padding: var(--ds-space-1) var(--ds-space-3);
+  border-bottom: 1px solid var(--ds-separator);
+  vertical-align: top;
+}
+.ar-metrics th {
+  color: var(--ds-text-tertiary);
+  font-weight: var(--ds-weight-medium);
+}
+.ar-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+@media (max-width: 640px) {
+  .ar-dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ar-dl dt {
+    margin-top: var(--ds-space-2);
+  }
+}
