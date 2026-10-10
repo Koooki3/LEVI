@@ -24,9 +24,12 @@ state change) or ``aborted``. A ``none`` action needs no acknowledgement; a
 real action is committed only after ``executed: yes``. One transaction is
 open at a time.
 
-Reading back: a torn last line (no newline, bad JSON, broken hash chain) is
-ignored; any bad line before the last makes the journal corrupt, and a
-corrupt journal is never written to again.
+Reading back: only a last line that has no newline, cannot be decoded as
+JSON or does not chain to the line before is torn (a crash): it is ignored.
+A whole, chained line that fails the contract (a newer minor, an unknown
+field, a broken rule) is kept and makes the journal corrupt, like any bad
+line before the last; a corrupt journal is never written to or cut again,
+and its ``effective_state`` is FAULT_LOCKED.
 
 Recovery after a crash never replays anything: unless the run had reached
 ``COMPLETED``, it aborts the dangling transaction (with a
@@ -37,10 +40,15 @@ the crash is valid. A corrupt journal reports ``FAULT_LOCKED``
 operator's command, not this module's.
 
 Idempotency: transaction ids are unique; a non-idempotent action whose
-``idempotency_key`` was ever prepared is refused (the FR3 server cannot
-deduplicate, so it is never sent twice); ``by_command`` finds what an
-operator command already did; ``expected_seq`` is a compare-and-set on the
-next line number.
+``idempotency_key`` (run, episode, kind, step: no control epoch) was ever
+prepared is refused, in every later epoch and after any recovery (the FR3
+server cannot deduplicate, so it is never sent twice); ``by_command`` finds
+what an operator command already did; ``expected_seq`` is a compare-and-set
+on the next line number.
+
+Leaving FAULT_LOCKED: only an operator's command (``command_id`` set) to
+PREFLIGHT, or a recovery to FAULT_LOCKED, with a ``none`` action. A commit
+keeps the reason, episode and policy epoch it prepared.
 """
 
 import contextlib
@@ -104,10 +112,12 @@ def line_sha(line: bytes) -> str:
     return hashlib.sha256(line).hexdigest()
 
 
-def action_key(run_id, episode_id, control_epoch, kind, step) -> str:
-    """``idempotency_key`` of an action: one value per (run, episode,
-    control epoch, kind, step)."""
-    text = json.dumps([run_id, episode_id, control_epoch, kind, step])
+def action_key(run_id, episode_id, kind, step) -> str:
+    """``idempotency_key`` of an action: one value per (run, episode, kind,
+    step). The control epoch is deliberately left out: recovery always
+    raises it, and a non-idempotent action prepared before a crash must stay
+    refused after it."""
+    text = json.dumps([run_id, episode_id, kind, step])
     return hashlib.sha256(text.encode()).hexdigest()
 
 
@@ -203,6 +213,8 @@ class Replay:
                 refuse(f"{tx} was used before")
             if event.from_state != self.state:
                 refuse(f"from_state {event.from_state} but the state is {self.state}")
+            if self.state == "FAULT_LOCKED":
+                self._check_leaving_fault(event)
             action = event.action
             if action.non_idempotent and action.idempotency_key in self.attempted:
                 refuse(
@@ -225,6 +237,9 @@ class Replay:
                 prepared.to_state,
             ):
                 refuse("a commit moves between the states it prepared")
+            for name in ("reason", "episode_id", "episode_role", "policy_epoch"):
+                if getattr(event, name) != getattr(prepared, name):
+                    refuse(f"a commit keeps the {name} it prepared")
             if prepared.action.kind != "none":
                 if self.open_ack is None:
                     refuse(f"{tx} acts and is not acknowledged")
@@ -232,6 +247,22 @@ class Replay:
                     refuse(
                         f"{tx} was not executed ({self.open_ack.ack.executed}): abort it"
                     )
+
+    @staticmethod
+    def _check_leaving_fault(event: aeri.RunEvent) -> None:
+        """Out of FAULT_LOCKED only by an operator's command, and only to
+        PREFLIGHT (or a recovery's FAULT_LOCKED -> FAULT_LOCKED); no action."""
+        who = event.authority
+        if who.principal_kind == "recovery":
+            allowed = ("FAULT_LOCKED",)
+        elif who.principal_kind == "operator" and who.command_id is not None:
+            allowed = ("PREFLIGHT", "FAULT_LOCKED")
+        else:
+            refuse("only an operator's command or a recovery leaves FAULT_LOCKED")
+        if event.to_state not in allowed:
+            refuse(f"FAULT_LOCKED leads only to {', '.join(allowed)}")
+        if event.action.kind != "none":
+            refuse("nothing acts on the way out of FAULT_LOCKED")
 
     def apply(self, event: aeri.RunEvent) -> None:
         self.check(event)
@@ -270,7 +301,14 @@ class Scan:
     good_bytes: int = 0
     torn: bytes = b""
     corrupt: str | None = None
+    corrupt_code: str | None = None
     replay: Replay = field(default_factory=Replay)
+
+    @property
+    def effective_state(self) -> str:
+        """The state to act on: a corrupt journal is FAULT_LOCKED, whatever
+        its readable lines say."""
+        return "FAULT_LOCKED" if self.corrupt else self.replay.state
 
 
 def scan(path: Path) -> Scan:
@@ -286,31 +324,41 @@ def scan(path: Path) -> Scan:
     offset = 0
     for index, line in enumerate(whole):
         last = index == len(whole) - 1 and not tail
-        problem = None
+        # Torn means a crash: the line cannot be decoded, or it does not
+        # chain to the line before. Only the very last line may be torn.
+        try:
+            raw = json.loads(line)
+            torn = None if isinstance(raw, dict) else "not a JSON object"
+        except (ValueError, RecursionError):
+            torn = "not JSON"
+        if torn is None and raw.get("prev_sha256") != previous:
+            torn = "the hash chain is broken"
+        if torn is not None:
+            if last:
+                result.torn = data[offset:]
+            else:
+                result.corrupt = f"line {index}: {torn}"
+                result.corrupt_code = "E_CHAIN"
+            return result
+        # A whole, chained line that fails the contract or the rules was
+        # written that way (a newer writer, an edit): it is kept, and the
+        # journal is corrupt, never cut back.
         try:
             event = aeri.parse(line, "run_event")
         except aeri.AeriError as exc:
-            problem = f"line {index}: {exc}"
+            result.corrupt = f"line {index}: {exc}"
+            result.corrupt_code = exc.code
+            return result
+        problem = None
+        if event.sequence_no != index:
+            problem = f"line {index} says sequence_no {event.sequence_no}"
         else:
-            if event.sequence_no != index:
-                problem = f"line {index} says sequence_no {event.sequence_no}"
-            elif event.prev_sha256 != previous:
-                problem = f"line {index}: the hash chain is broken"
-        if problem is None:
             try:
                 result.replay.apply(event)
             except JournalRefused as exc:
-                # A whole, chained line that breaks the transaction rules
-                # was not torn by a crash: the journal was edited.
-                result.corrupt = f"line {index}: {exc.detail}"
-                return result
+                problem = f"line {index}: {exc.detail}"
         if problem is not None:
-            if last:
-                # The very last line: torn by a crash before its newline
-                # reached the disk, or half-written. Ignored.
-                result.torn = data[offset:]
-                return result
-            result.corrupt = problem
+            result.corrupt, result.corrupt_code = problem, "E_PROTOCOL"
             return result
         result.events.append(event)
         result.lines.append(line)
@@ -401,7 +449,9 @@ class Journal:
         if not result.torn:
             return
         folder = directory / TORN
-        folder.mkdir(exist_ok=True)
+        if not folder.exists():
+            folder.mkdir()
+            fsync_dir(directory)
         write_durable(
             folder / f"{len(result.events):06d}-{time.time_ns()}.bin", result.torn
         )
@@ -685,9 +735,7 @@ class Journal:
             evidence_ids=list(evidence_ids),
             action={
                 "kind": kind,
-                "idempotency_key": action_key(
-                    self.run_id, episode_id, control_epoch, kind, step
-                ),
+                "idempotency_key": action_key(self.run_id, episode_id, kind, step),
                 "non_idempotent": non_idempotent,
                 "params_sha256": params_sha(params),
             },
@@ -723,6 +771,7 @@ class Journal:
             control_epoch=self.control_epoch,
             episode_id=tx.episode_id,
             episode_role=tx.episode_role,
+            policy_epoch=tx.policy_epoch,
             episode_result=episode_result,
         )
 

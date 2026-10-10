@@ -451,13 +451,34 @@ def test_killed_at_every_crash_point_recovers_to_fault_locked(
         assert journal.control_epoch == before.replay.control_epoch + 1
         # Recovery acts on nothing: only ``none`` actions were prepared.
         assert all(e.action.kind == "none" for e in result.written if e.action)
-        motion = next(
-            (e for e in journal.events if e.action and e.action.kind == "policy_steps"),
-            None,
+        # An operator resumes and the run comes back to where the motion
+        # was prepared. Once prepared, the motion is never prepared again,
+        # in any later control epoch; never prepared, it may be.
+        operator = who("operator", command_id="cmd-resume")
+        journal.prepare(
+            "PREFLIGHT",
+            "human_resumed",
+            kind="none",
+            authority=operator,
+            control_epoch=journal.control_epoch + 1,
         )
-        if motion is not None:
-            # The motion is known as tried: it can never be sent again.
-            assert journal.attempted(motion.action.idempotency_key)
+        journal.commit(authority=operator)
+        step(journal, "VERIFY_INITIAL", "preflight_passed", epoch=journal.control_epoch)
+        again = {
+            "kind": "policy_steps",
+            "non_idempotent": True,
+            "step": 0,
+            "authority": who(),
+            "control_epoch": journal.control_epoch,
+            "episode_id": "r-crash.forward.0001",
+            "episode_role": "forward",
+        }
+        if point == "before_prepared":
+            journal.prepare("FORWARD_ACTIVE", "scene_ready", **again)
+        else:
+            _refused(
+                "E_PROTOCOL", journal.prepare, "FORWARD_ACTIVE", "scene_ready", **again
+            )
     assert counter.read_bytes().count(b"x") == executed
     assert_sound(run)
 
@@ -628,9 +649,9 @@ def test_a_failed_write_stops_the_writer_and_reopening_heals(tmp_path, monkeypat
 
 
 def test_action_keys_are_stable():
-    key = J.action_key(RUN, EPISODE, 3, "policy_steps", 12)
-    assert key == J.action_key(RUN, EPISODE, 3, "policy_steps", 12)
-    assert key != J.action_key(RUN, EPISODE, 4, "policy_steps", 12)
+    key = J.action_key(RUN, EPISODE, "policy_steps", 12)
+    assert key == J.action_key(RUN, EPISODE, "policy_steps", 12)
+    assert key != J.action_key(RUN, EPISODE, "policy_steps", 13)
     assert len(key) == 64
 
 
@@ -648,3 +669,155 @@ def test_a_refused_header_leaves_no_writer_behind(tmp_path):
         J.Journal.create(tmp_path, run_id="bad id!", plan_sha256=PLAN, authority=who())
     # The lock was released: a proper run can start here.
     new(tmp_path).close()
+
+
+def test_a_non_idempotent_action_is_never_resent_after_recovery(tmp_path):
+    # The review's replay: a home is prepared, the orchestrator dies, the
+    # recovery moves to a new control epoch, an operator resumes, and the
+    # same home comes up again. It must be refused.
+    journal = new(tmp_path)
+    step(journal, "VERIFY_INITIAL", "preflight_passed")
+    home = {
+        "kind": "home",
+        "non_idempotent": True,
+        "step": 0,
+        "episode_id": EPISODE,
+        "episode_role": "forward",
+    }
+    journal.prepare(
+        "ROBOT_HOME", "goal_verified", authority=who(), control_epoch=2, **home
+    )
+    journal.close()
+    with J.Journal.open(tmp_path, plan_sha256=PLAN) as journal:
+        journal.recover(authority=who("recovery"))
+        operator = who("operator", command_id="cmd-1")
+        journal.prepare(
+            "PREFLIGHT",
+            "human_resumed",
+            kind="none",
+            authority=operator,
+            control_epoch=journal.control_epoch + 1,
+        )
+        journal.commit(authority=operator)
+        step(journal, "VERIFY_INITIAL", "preflight_passed", epoch=journal.control_epoch)
+        _refused(
+            "E_PROTOCOL",
+            journal.prepare,
+            "ROBOT_HOME",
+            "goal_verified",
+            authority=who(),
+            control_epoch=journal.control_epoch,
+            **home,
+        )
+        # The key does not depend on the control epoch.
+        prepared = journal.events[3]
+        assert prepared.action.kind == "home"
+        assert J.action_key(RUN, EPISODE, "home", 0) == prepared.action.idempotency_key
+
+
+def test_only_an_operator_command_leaves_fault_locked(tmp_path):
+    sample(tmp_path, complete=False)
+    with J.Journal.open(tmp_path, plan_sha256=PLAN) as journal:
+        journal.recover(authority=who("recovery"))
+        epoch = journal.control_epoch + 1
+        motion = {"kind": "policy_steps", "control_epoch": epoch}
+        _refused(
+            "E_PROTOCOL",
+            journal.prepare,
+            "FORWARD_ACTIVE",
+            "human_resumed",
+            authority=who(),
+            **motion,
+        )
+        _refused(
+            "E_PROTOCOL",
+            journal.prepare,
+            "PREFLIGHT",
+            "human_resumed",
+            kind="none",
+            authority=who("operator"),
+            control_epoch=epoch,
+        )
+        operator = who("operator", command_id="cmd-2")
+        _refused(
+            "E_PROTOCOL",
+            journal.prepare,
+            "FORWARD_ACTIVE",
+            "human_resumed",
+            authority=operator,
+            **motion,
+        )
+        journal.prepare(
+            "PREFLIGHT",
+            "human_resumed",
+            kind="none",
+            authority=operator,
+            control_epoch=epoch,
+        )
+        journal.commit(authority=operator)
+        assert journal.state == "PREFLIGHT"
+
+
+def test_a_commit_must_match_what_was_prepared(tmp_path):
+    journal = new(tmp_path)
+    tx = journal.prepare(
+        "VERIFY_INITIAL",
+        "preflight_passed",
+        kind="none",
+        authority=who(),
+        control_epoch=1,
+    )
+    common = {
+        "transaction_id": tx.transaction_id,
+        "from_state": "PREFLIGHT",
+        "to_state": "VERIFY_INITIAL",
+        "authority": who(),
+        "control_epoch": 1,
+    }
+    _refused("E_PROTOCOL", journal.append, "committed", reason="safety_stop", **common)
+    _refused(
+        "E_PROTOCOL",
+        journal.append,
+        "committed",
+        reason="preflight_passed",
+        episode_id=f"{RUN}.reset.0009",
+        episode_role="reset",
+        **common,
+    )
+    journal.append("committed", reason="preflight_passed", **common)
+    journal.close()
+
+
+@pytest.mark.parametrize("edit", ["minor", "unknown_field", "inconsistent"])
+def test_a_whole_chained_last_line_failing_the_contract_is_corrupt_not_torn(
+    tmp_path, edit
+):
+    raw = sample(tmp_path)
+    lines = raw.split(b"\n")[:-1]
+    event = json.loads(lines[-1])
+    if edit == "minor":
+        event["minor"] = 1  # a newer writer
+    elif edit == "unknown_field":
+        event["added_in_a_later_minor"] = 1
+    else:
+        event["reason"] = None  # a commit without a reason
+    lines[-1] = json.dumps(event, sort_keys=True, separators=(",", ":")).encode()
+    damaged = b"\n".join(lines) + b"\n"
+    (tmp_path / J.JOURNAL).write_bytes(damaged)
+    found = J.Journal.read(tmp_path)
+    assert found.corrupt and found.torn == b""
+    assert found.effective_state == "FAULT_LOCKED"
+    if edit == "minor":
+        assert "E_SCHEMA_TOO_NEW" in found.corrupt
+    with J.Journal.open(tmp_path, plan_sha256=PLAN) as journal:
+        assert journal.corrupt
+        result = journal.recover(authority=who("recovery"))
+        assert (result.state, result.reason) == ("FAULT_LOCKED", "journal_corrupt")
+    # The committed line stays where it was: nothing is cut or moved.
+    assert (tmp_path / J.JOURNAL).read_bytes() == damaged
+    assert not (tmp_path / J.TORN).exists()
+
+
+def test_effective_state_of_a_sound_journal_is_its_state(tmp_path):
+    sample(tmp_path, complete=False)
+    assert J.Journal.read(tmp_path).effective_state == "FORWARD_ACTIVE"
