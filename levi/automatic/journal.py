@@ -469,6 +469,11 @@ class Journal:
         self._replay = result.replay
         self.corrupt = result.corrupt
         self._last_sha = line_sha(result.lines[-1]) if result.lines else ZEROS
+        # Every line of one journal has the minor of its header: a new run
+        # writes this code's run_event minor, an older run keeps its own.
+        self.minor = (
+            result.events[0].minor if result.events else aeri.MINORS["run_event"]
+        )
         self._clock = clock
         self.clock_domain = domain
         self._mutex = threading.Lock()
@@ -514,8 +519,13 @@ class Journal:
         contracts: dict | None = None,
         clock: Callable[[], int] = time.monotonic_ns,
         clock_domain: str | None = None,
+        reset_mode: str | None = None,
+        scene_check: str | None = None,
     ) -> "Journal":
-        """Start the journal of a new run (refused when one exists)."""
+        """Start the journal of a new run (refused when one exists).
+        ``reset_mode`` and ``scene_check`` (code names) go into the header
+        only when given; a caller that gives neither writes the header an
+        older caller wrote, at this code's minor."""
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         fsync_dir(directory.parent)
@@ -540,20 +550,24 @@ class Journal:
                 run_id=run_id,
             )
             versions = contracts or {
-                schema: aeri.MINOR for schema in aeri.SCHEMAS.values()
+                schema: aeri.MINORS[name] for name, schema in aeri.SCHEMAS.items()
             }
+            header = {
+                "plan_sha256": plan_sha256,
+                "contracts": [
+                    {"schema": schema, "minor": minor}
+                    for schema, minor in sorted(versions.items())
+                ],
+                "levi_commit": levi_commit,
+            }
+            for name, value in (
+                ("reset_mode", reset_mode),
+                ("scene_check", scene_check),
+            ):
+                if value is not None:
+                    header[name] = value
             journal.append(
-                "run_header",
-                authority=authority,
-                control_epoch=0,
-                header={
-                    "plan_sha256": plan_sha256,
-                    "contracts": [
-                        {"schema": schema, "minor": minor}
-                        for schema, minor in sorted(versions.items())
-                    ],
-                    "levi_commit": levi_commit,
-                },
+                "run_header", authority=authority, control_epoch=0, header=header
             )
             return journal
         except BaseException:
@@ -680,7 +694,7 @@ class Journal:
                 )
             value = {
                 "schema": SCHEMA,
-                "minor": aeri.MINOR,
+                "minor": self.minor,
                 "run_id": self.run_id,
                 "emitted_wall_ns": time.time_ns(),
                 "sequence_no": sequence,

@@ -149,9 +149,9 @@ def test_the_header_carries_code_names_only(header):
     assert caught.value.code == "E_SCHEMA"
 
 
-def test_a_journal_written_today_is_minor_0_and_reads_back(tmp_path):
-    """The journal writer (journal.py, not part of this change) still writes
-    minor-0 lines: every one of them stays readable by a minor-1 reader."""
+def test_a_journal_written_today_is_at_the_run_event_minor_and_reads_back(tmp_path):
+    """The journal writer writes the run event's own minor (T-JNL-1; minor 0
+    before it); a header without modes still takes them from the plan."""
     journal = Journal.create(
         tmp_path,
         run_id="r-old",
@@ -168,7 +168,7 @@ def test_a_journal_written_today_is_minor_0_and_reads_back(tmp_path):
     )
     journal.close()
     scan = Journal.read(tmp_path)
-    assert scan.corrupt is None and scan.events[0].minor == 0
+    assert scan.corrupt is None and scan.events[0].minor == aeri.MINORS["run_event"]
     header = scan.events[0].header
     assert aeri.header_modes(header, {"reset_mode": "single_reset_policy"}) == {
         "reset_mode": "single_reset_policy",
