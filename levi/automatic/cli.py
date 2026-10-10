@@ -433,6 +433,7 @@ class DryRun:
         self.orch = Orchestrator.create(
             self.directory,
             cfg,
+            plan=job["plan"],
             robot=self.robot,
             policy=fake.FakePolicy(clock, rng=random.Random(job["seed"])),
             recorder=self.recorder,

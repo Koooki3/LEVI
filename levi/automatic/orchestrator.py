@@ -381,7 +381,12 @@ class Orchestrator:
     # --- construction --------------------------------------------------------------
 
     @classmethod
-    def create(cls, directory, config: RunConfig, **parts) -> "Orchestrator":
+    def create(
+        cls, directory, config: RunConfig, *, plan: dict | None = None, **parts
+    ) -> "Orchestrator":
+        """Start a run: its header names the reset mode and the scene check;
+        ``plan`` (the job's normalised plan, hashing to the config's
+        ``plan_sha256``) is kept as the run folder's ``plan.json``."""
         clock = parts["clock"]
         process = process_identity()
         journal = Journal.create(
@@ -391,21 +396,32 @@ class Orchestrator:
             authority=cls._authority_of(config, process, "orchestrator"),
             clock=clock,
             clock_domain=clock.domain,
+            reset_mode=config.reset_strategy,
+            scene_check=config.scene_check,
+            plan=plan,
         )
         orchestrator = cls(journal, config=config, **parts)
         orchestrator._tell(orchestrator.state)
         return orchestrator
 
     @classmethod
-    def restore(cls, directory, config: RunConfig, **parts) -> "Orchestrator":
+    def restore(
+        cls, directory, config: RunConfig, *, plan: dict | None = None, **parts
+    ) -> "Orchestrator":
         """Take over a run after a restart: the journal's recovery runs
-        first (never replays anything)."""
+        first (never replays anything). A config whose reset mode or scene
+        check differs from the run header's is refused (``E_PLAN``, with a
+        ``run_header_mismatch`` note)."""
         clock = parts["clock"]
         journal = Journal.open(
             directory,
             plan_sha256=config.plan_sha256,
             clock=clock,
             clock_domain=clock.domain,
+            reset_mode=config.reset_strategy,
+            scene_check=config.scene_check,
+            authority=cls._authority_of(config, process_identity(), "recovery"),
+            plan=plan,
         )
         orchestrator = cls(journal, config=config, **parts)
         found = journal.recover(
